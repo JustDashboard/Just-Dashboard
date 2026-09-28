@@ -187,6 +187,61 @@ func TestStreamPreviewReturnsItsWarnings(t *testing.T) {
 	}
 }
 
+// The preview asks the question the save would refuse on, while the port is
+// being typed: who holds it and the next port free. An edit is not in its
+// own way.
+func TestStreamPreviewNamesWhatHoldsThePort(t *testing.T) {
+	c, _ := streamServer(t, true)
+	if w := c.do(http.MethodPost, "/api/v1/proxy/streams/", streamBody(testStream("replica", 47913), "", false), nil); w.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	preview := func(spec proxysvc.StreamSpec, previous string) map[string]any {
+		t.Helper()
+		w := c.do(http.MethodPost, "/api/v1/proxy/streams/preview", streamBody(spec, previous, false), nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("preview: %d %s", w.Code, w.Body.String())
+		}
+		var res map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	conflict, ok := preview(testStream("copy", 47913), "")["conflict"].(map[string]any)
+	if !ok || conflict["kind"] != "stream" || conflict["name"] != "replica" || conflict["port"] != float64(47913) ||
+		conflict["suggest"] != float64(47914) || conflict["message"] != "port 47913/tcp is already in use by the stream replica — 47914 is free" {
+		t.Fatalf("conflict = %v", conflict)
+	}
+	if res := preview(testStream("replica", 47913), "replica"); res["conflict"] != nil {
+		t.Fatalf("an edit refused on its own port: %v", res["conflict"])
+	}
+}
+
+// Every stream in the listing carries what nginx does with it and why.
+func TestStreamListSaysWhatNginxDoesWithEachStream(t *testing.T) {
+	for _, included := range []bool{false, true} {
+		t.Run(fmt.Sprintf("included=%v", included), func(t *testing.T) {
+			c, dir := streamServer(t, included)
+			if err := os.WriteFile(filepath.Join(dir, "stream.d", "replica.conf"),
+				[]byte("server { listen 47913; proxy_pass 10.0.0.5:5432; }\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			w := c.do(http.MethodGet, "/api/v1/proxy/streams/", "", nil)
+			var status proxysvc.StreamStatus
+			if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil || len(status.Streams) != 1 {
+				t.Fatalf("%v: %s", err, w.Body.String())
+			}
+			entry := status.Streams[0]
+			// This nginx shim was built with nothing: the missing module is
+			// the first thing between the file and a forward, as it is the
+			// page's first step, whether or not the directory is included.
+			if entry.State != proxysvc.StreamNotRead || !strings.Contains(entry.StateReason, "This nginx has no stream module") {
+				t.Fatalf("state %s %q", entry.State, entry.StateReason)
+			}
+		})
+	}
+}
+
 func TestStreamListCarriesTheIncludeAndEachStreamsAccess(t *testing.T) {
 	c, dir := streamServer(t, true)
 	if err := os.WriteFile(filepath.Join(dir, "stream.d", "open.conf"),

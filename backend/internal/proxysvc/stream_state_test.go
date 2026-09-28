@@ -145,7 +145,7 @@ func TestApplyStreamRefusesAPortAnotherStreamHolds(t *testing.T) {
 	if _, err := svc.ApplyStream(context.Background(), tcpStream(), "", false); !errors.As(err, &inUse) {
 		t.Fatalf("got %v, want PortInUseError", err)
 	}
-	if inUse.Owner != "the stream bastion" || inUse.Port != 5432 || inUse.Suggest != 5434 {
+	if inUse.Kind != OwnerStream || inUse.Name != "bastion" || inUse.Port != 5432 || inUse.Suggest != 5434 {
 		t.Fatalf("got %+v", inUse)
 	}
 	if _, err := os.Stat(filepath.Join(svc.streamDir(), "postgres-replica.conf")); !os.IsNotExist(err) {
@@ -186,7 +186,7 @@ func TestApplyStreamRefusesAPortAnotherProgramHolds(t *testing.T) {
 	if _, err := svc.ApplyStream(context.Background(), tcpStream(), "", false); !errors.As(err, &inUse) {
 		t.Fatalf("got %v", err)
 	}
-	if inUse.Owner != "postgres" || inUse.PID != 900 || inUse.Suggest != 5434 {
+	if inUse.Name != "postgres" || inUse.PID != 900 || inUse.Suggest != 5434 {
 		t.Fatalf("got %+v", inUse)
 	}
 	if !strings.Contains(inUse.Error(), "postgres (pid 900)") || !strings.Contains(inUse.Error(), "5434 is free") {
@@ -197,7 +197,7 @@ func TestApplyStreamRefusesAPortAnotherProgramHolds(t *testing.T) {
 	// is dual-stack cannot be seen from outside.
 	v4 := tcpStream()
 	v4.Name, v4.Listen, v4.Address = "v4", 5433, "127.0.0.1"
-	if _, err := svc.ApplyStream(context.Background(), v4, "", false); !errors.As(err, &inUse) || inUse.Owner != "node" {
+	if _, err := svc.ApplyStream(context.Background(), v4, "", false); !errors.As(err, &inUse) || inUse.Name != "node" {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -229,7 +229,7 @@ func TestApplyStreamIsNotInItsOwnWay(t *testing.T) {
 	site := tcpStream()
 	site.Name, site.Listen = "web", 8080
 	var inUse *PortInUseError
-	if _, err := svc.ApplyStream(context.Background(), site, "", false); !errors.As(err, &inUse) || inUse.Owner != "nginx" {
+	if _, err := svc.ApplyStream(context.Background(), site, "", false); !errors.As(err, &inUse) || inUse.Name != "nginx" {
 		t.Fatalf("a port nginx holds for a site: %v", err)
 	}
 }
@@ -252,7 +252,7 @@ func TestApplyStreamFindsARealListener(t *testing.T) {
 		t.Fatalf("got %v, want the test's own socket found", err)
 	}
 	if inUse.PID != int32(os.Getpid()) {
-		t.Fatalf("owner %q pid %d, want this process (%d)", inUse.Owner, inUse.PID, os.Getpid())
+		t.Fatalf("owner %q pid %d, want this process (%d)", inUse.Name, inUse.PID, os.Getpid())
 	}
 }
 
@@ -284,11 +284,11 @@ func TestApplyStreamChecksBothProtocols(t *testing.T) {
 	if _, err := svc.ApplyStream(context.Background(), both, "", false); !errors.As(err, &inUse) {
 		t.Fatalf("got %v, want the UDP side refused", err)
 	}
-	if inUse.Proto != "udp" || inUse.Owner != "the stream syslog" || !strings.Contains(inUse.Error(), "514/udp") {
+	if inUse.Proto != "udp" || inUse.Kind != OwnerStream || inUse.Name != "syslog" || !strings.Contains(inUse.Error(), "514/udp") {
 		t.Fatalf("got %+v", inUse)
 	}
 	both.Listen = 853
-	if _, err := svc.ApplyStream(context.Background(), both, "", false); !errors.As(err, &inUse) || inUse.Proto != "tcp" || inUse.Owner != "unbound" {
+	if _, err := svc.ApplyStream(context.Background(), both, "", false); !errors.As(err, &inUse) || inUse.Proto != "tcp" || inUse.Name != "unbound" {
 		t.Fatalf("got %v, want the TCP side refused", err)
 	}
 	both.Listen = 5353

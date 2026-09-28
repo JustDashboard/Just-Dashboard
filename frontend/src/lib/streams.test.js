@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
+  STREAM_STATES,
+  blocksReloads,
   byUrgency,
   carries,
   connectChange,
@@ -13,9 +15,14 @@ import {
   moduleMissing,
   moduleRemedy,
   parseDuration,
+  portOwnerName,
   protocolLabel,
   runningInstall,
   saveBlocked,
+  saveOutcome,
+  stateCounts,
+  stateStatus,
+  stateTitle,
   streamBody,
   streamOutage,
   streamSpecOf,
@@ -33,6 +40,7 @@ const entry = (overrides) => ({
   managed: true,
   open: true,
   unsupported: [],
+  state: "live",
   ...overrides,
 })
 
@@ -416,5 +424,177 @@ describe("byUrgency", () => {
       "game",
       "restricted",
     ])
+  })
+
+  // A stream nginx cannot bind stops every reload on the host; one that
+  // forwards nothing, or that another shadows, comes before any live one.
+  test("a stream stopping every reload, then not listening, then shadowed, then the rest", () => {
+    const held = { port: 7000, proto: "tcp", kind: "program", name: "postgres", pid: 900 }
+    const streams = [
+      entry({ name: "open-db", listen: 5432 }),
+      entry({ name: "shadowed", listen: 6000, state: "shadowed", open: false }),
+      entry({ name: "quiet", listen: 7100, state: "not-listening", open: false }),
+      entry({ name: "held", listen: 7000, state: "not-listening", blocker: held, open: false }),
+      entry({ name: "fine", listen: 1000, open: false }),
+    ]
+    expect(streams.sort(byUrgency).map((s) => s.name)).toEqual([
+      "held",
+      "quiet",
+      "shadowed",
+      "open-db",
+      "fine",
+    ])
+  })
+})
+
+describe("stream states", () => {
+  test("each state reads as a verdict on the card, and an unreadable file as unreadable", () => {
+    expect(stateStatus(entry({}))).toEqual({ verdict: "ok", label: "live" })
+    expect(stateStatus(entry({ state: "not-listening" }))).toEqual({
+      verdict: "critical",
+      label: "not listening",
+    })
+    expect(stateStatus(entry({ state: "shadowed" }))).toEqual({
+      verdict: "warning",
+      label: "shadowed",
+    })
+    expect(stateStatus(entry({ state: "not-read" }))).toEqual({
+      verdict: "warning",
+      label: "not read",
+    })
+    // Never checked is not a verdict either way.
+    expect(stateStatus(entry({ state: "unknown" }))).toEqual({ tone: "unknown", label: "unknown" })
+    expect(stateStatus(entry({ state: "unknown", error: "permission denied" }))).toEqual({
+      verdict: "critical",
+      label: "unreadable",
+    })
+    expect(STREAM_STATES.map(stateTitle)).toEqual([
+      "Live",
+      "Not listening",
+      "Shadowed",
+      "Not read",
+      "Unknown",
+    ])
+  })
+
+  test("counts every stream once, under its state", () => {
+    const counts = stateCounts([
+      entry({}),
+      entry({ name: "b" }),
+      entry({ name: "c", state: "shadowed" }),
+      entry({ name: "d", state: "unknown", error: "gone" }),
+    ])
+    expect(counts).toEqual({
+      all: 4,
+      live: 2,
+      "not-listening": 0,
+      shadowed: 1,
+      "not-read": 0,
+      unknown: 1,
+    })
+  })
+
+  test("only a stream something else holds the port of stops every reload", () => {
+    const site = { port: 80, proto: "tcp", kind: "site", name: "example.com", site: "example.com" }
+    expect(blocksReloads(entry({ state: "not-listening", blocker: site }))).toBe(true)
+    // Not taken up yet, or its last bind failed and the port is free now.
+    expect(blocksReloads(entry({ state: "not-listening" }))).toBe(false)
+    expect(blocksReloads(entry({ state: "shadowed", blocker: { ...site, kind: "stream" } }))).toBe(
+      false,
+    )
+  })
+
+  test("what holds a port is named as the backend's sentences name it", () => {
+    const at = { port: 5432, proto: "tcp" }
+    expect(portOwnerName({ ...at, kind: "stream", name: "replica" })).toBe("the stream replica")
+    expect(portOwnerName({ ...at, kind: "stream", file: "/etc/nginx/nginx.conf" })).toBe(
+      "a stream server in /etc/nginx/nginx.conf",
+    )
+    expect(portOwnerName({ ...at, kind: "site", name: "app.example.com" })).toBe(
+      "the site app.example.com",
+    )
+    expect(portOwnerName({ ...at, kind: "site", file: "/etc/nginx/nginx.conf" })).toBe(
+      "an http server in /etc/nginx/nginx.conf",
+    )
+    expect(portOwnerName({ ...at, kind: "program", name: "postgres", pid: 900 })).toBe(
+      "postgres (pid 900)",
+    )
+    expect(portOwnerName({ ...at, kind: "program" })).toBe("another program")
+  })
+})
+
+describe("saveOutcome", () => {
+  const res = (overrides) => ({
+    name: "replica",
+    path: "/etc/nginx/stream.d/replica.conf",
+    content: "",
+    warnings: [],
+    reloaded: true,
+    ...overrides,
+  })
+
+  test("listening is said only when nginx was watched holding the port", () => {
+    expect(saveOutcome(res({ listening: true }), true)).toEqual({
+      tone: "success",
+      title: "replica saved and listening",
+      description: undefined,
+    })
+  })
+
+  // "Forwarding" was what the page said while nginx had failed to bind.
+  test("a reload nginx had not taken up is a warning with a way to ask again", () => {
+    expect(
+      saveOutcome(
+        res({
+          listening: false,
+          listenNote: "nginx had not taken the reload up 3s after it was sent.",
+        }),
+        true,
+      ),
+    ).toEqual({
+      tone: "warning",
+      title: "replica saved, not listening yet",
+      description: "nginx had not taken the reload up 3s after it was sent.",
+      recheck: true,
+    })
+  })
+
+  test("a reload nobody could watch says so, and is not called listening", () => {
+    const outcome = saveOutcome(
+      res({
+        listenNote:
+          "Whether nginx took it up could not be checked: no running nginx reads /etc/nginx/nginx.conf.",
+      }),
+      true,
+    )
+    expect(outcome.tone).toBe("success")
+    expect(outcome.title).toBe("replica saved and reloaded")
+    expect(outcome.description).toContain("could not be checked")
+  })
+
+  test("a failed reload, a rename and a directory nginx does not read keep their own words", () => {
+    expect(
+      saveOutcome(
+        res({
+          reloaded: false,
+          reloadError:
+            "nginx did not take the reload up: bind() to 0.0.0.0:9999 failed (98: Address in use)",
+        }),
+        true,
+      ),
+    ).toEqual({
+      tone: "warning",
+      title: "replica saved, reload failed",
+      description:
+        "The file passed nginx's test and is on disk, but nginx did not reload, so it is not forwarding yet: nginx did not take the reload up: bind() to 0.0.0.0:9999 failed (98: Address in use)",
+    })
+    expect(
+      saveOutcome(res({ renamed: "old", listening: true, warnings: ["No authentication."] }), true),
+    ).toEqual({
+      tone: "success",
+      title: "old renamed to replica saved and listening",
+      description: "No authentication. old.conf is kept as old.conf.bak.",
+    })
+    expect(saveOutcome(res({ reloaded: false }), false).title).toBe("replica saved, not yet live")
   })
 })

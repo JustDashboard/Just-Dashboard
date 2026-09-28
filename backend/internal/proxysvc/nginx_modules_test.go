@@ -43,9 +43,17 @@ func TestParseNginxBuild(t *testing.T) {
 	if alpine := parseNginxBuild(alpineNginxV); alpine.modules["stream"] != "static" {
 		t.Fatalf("alpine modules = %v", alpine.modules)
 	}
+	if host.confPath != "/etc/nginx/nginx.conf" || host.errorLog != "stderr" || host.pidPath != "/run/nginx.pid" {
+		t.Fatalf("host paths = %q %q %q", host.confPath, host.errorLog, host.pidPath)
+	}
 	bare := parseNginxBuild("nginx version: nginx/1.25.0\nconfigure arguments: --with-http_ssl_module\n")
 	if _, ok := bare.modules["stream"]; ok || bare.modulesPath != "/usr/local/nginx/modules" {
 		t.Fatalf("bare build: %+v", bare)
+	}
+	// configure's defaults sit under the prefix.
+	if bare.confPath != "/usr/local/nginx/conf/nginx.conf" || bare.errorLog != "/usr/local/nginx/logs/error.log" ||
+		bare.pidPath != "/usr/local/nginx/logs/nginx.pid" {
+		t.Fatalf("bare paths = %q %q %q", bare.confPath, bare.errorLog, bare.pidPath)
 	}
 }
 

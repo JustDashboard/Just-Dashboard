@@ -16,6 +16,20 @@ func init() {
 	// — this machine runs Postgres on 5432 — would make them pass or fail by
 	// whatever else happens to be running.
 	streamListeners = func(context.Context) ([]Listener, error) { return nil, nil }
+	// Nor do they find a running nginx: the host's own, or another test's,
+	// would answer for their configuration. A test that wants one says so.
+	readNginx = func(context.Context, *Service, []ConfigFile, int32) *socketView {
+		return listenerView("no nginx runs for unit tests")
+	}
+}
+
+// withNginx makes the running nginx look like views returns, asked afresh
+// each time (master 0) or of a master found before.
+func withNginx(t *testing.T, views func(master int32) *socketView) {
+	t.Helper()
+	previous := readNginx
+	readNginx = func(_ context.Context, _ *Service, _ []ConfigFile, master int32) *socketView { return views(master) }
+	t.Cleanup(func() { readNginx = previous })
 }
 
 // withListeners makes the host look like it holds exactly these sockets.

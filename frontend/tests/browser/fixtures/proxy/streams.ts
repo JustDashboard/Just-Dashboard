@@ -23,7 +23,7 @@ type StreamFixture = {
   [key: string]: unknown
 }
 
-/** A listed stream as the backend sends it: a file the dashboard wrote. */
+/** A listed stream as the backend sends it: a file the dashboard wrote, and nginx holds its port. */
 export function streamEntry(stream: StreamFixture) {
   const allowFrom = stream.allowFrom ?? []
   return {
@@ -32,9 +32,21 @@ export function streamEntry(stream: StreamFixture) {
     managed: true,
     open: allowFrom.length === 0,
     unsupported: [],
+    state: "live",
     ...stream,
     allowFrom,
   }
+}
+
+/** A stream nginx reads and cannot bind: another program holds its port. */
+export function heldStream(stream: StreamFixture) {
+  return streamEntry({
+    state: "not-listening",
+    stateReason: `Port ${stream.listen}/tcp is held by postgres (pid 900), so nginx cannot bind it, and every reload fails until it is free.`,
+    blocker: { port: stream.listen, proto: "tcp", kind: "program", name: "postgres", pid: 900 },
+    bindError: `2026/09/28 03:29:05 bind() to 0.0.0.0:${stream.listen} failed (98: Address already in use)`,
+    ...stream,
+  })
 }
 
 /** The listing, readable by nginx unless the options say otherwise. */
@@ -121,7 +133,7 @@ export const showcase: ProxyRoutes = {
             allowFrom: ["10.0.0.0/8"],
             timeout: 600,
           }),
-          streamEntry({
+          heldStream({
             name: "minecraft",
             listen: 25565,
             protocol: "tcp",

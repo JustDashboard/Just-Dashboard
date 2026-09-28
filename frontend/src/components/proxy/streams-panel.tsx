@@ -3,18 +3,32 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
-import { Code, Connection, Pencil, Plus, Slash, Trash, Warning } from "@/components/icons"
+import {
+  Code,
+  Connection,
+  Pencil,
+  Plus,
+  RefreshClockwise,
+  Slash,
+  Trash,
+  Warning,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, del, errorMessage, get, post } from "@/lib/api"
 import type {
+  PortConflict,
   StreamDeleteResult,
   StreamEntry,
   StreamIncludeResult,
+  StreamPreview,
   StreamResult,
   StreamSpec,
+  StreamState,
   StreamStatus,
 } from "@/lib/types"
 import {
+  STREAM_STATES,
+  blocksReloads,
   byUrgency,
   carries,
   disconnectChange,
@@ -28,6 +42,11 @@ import {
   parseDuration,
   protocolLabel,
   saveBlocked,
+  saveOutcome,
+  stateCounts,
+  stateLabel,
+  stateStatus,
+  stateTitle,
   streamBody,
   streamOutage,
   streamSpecOf,
@@ -41,7 +60,8 @@ import { CodeEditor } from "@/components/code-editor"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { ChoiceRow } from "@/components/flow"
 import { Page, PageContext } from "@/components/page"
-import { Pane, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { Pane, Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { ProductLogo, ProductLogos, portProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -80,10 +100,20 @@ export function StreamsPage() {
   const [editing, setEditing] = useSessionState<StreamEntry | null>("proxy.streams.editing", null)
   const [form, setForm] = useSessionState("proxy.streams.form", { open: false, session: 0 })
   const [raw, setRaw] = useState<StreamEntry | null>(null)
+  const [chip, setChip] = useSessionState<StreamState | "all">("proxy.streams.state", "all")
   const { data, error, loading, refresh } = usePoll<StreamStatus>(
     (signal) => get("/proxy/streams/", undefined, signal),
     60_000,
   )
+  // A re-check reads the listing again; it is over when the reading it was
+  // asked from is replaced — by the next one, or by a failure.
+  const reading: unknown = error ?? data
+  const [checkingFrom, setCheckingFrom] = useState<unknown>(undefined)
+  const checking = checkingFrom !== undefined && checkingFrom === reading
+  const recheck = () => {
+    setCheckingFrom(reading)
+    refresh()
+  }
   const admin = can("system.admin")
   const noNginx = !proxy.loading && !proxy.hasNginx
 
@@ -100,8 +130,17 @@ export function StreamsPage() {
       tcp: streams.filter((s) => carries(s, "tcp")).length,
       udp: streams.filter((s) => carries(s, "udp")).length,
       open: streams.filter((s) => s.open).length,
+      stopping: streams.filter(blocksReloads).length,
     }
   }, [data])
+  const states = useMemo(() => stateCounts(data?.streams ?? []), [data])
+  const shown = useMemo(
+    () =>
+      [...(data?.streams ?? [])]
+        .filter((stream) => chip === "all" || stream.state === chip)
+        .sort(byUrgency),
+    [data, chip],
+  )
 
   const live = data ? streamsLive(data) : false
   const blocked = data ? saveBlocked(data) : null
@@ -207,30 +246,50 @@ export function StreamsPage() {
     ? [{ key: "disconnect", label: "Disconnect", icon: Slash, danger: true, run: disconnect }]
     : []
 
-  const verbsFor = (stream: StreamEntry): Verb[] => [
-    {
-      key: "edit",
-      label: "Edit",
-      icon: Pencil,
-      inline: true,
-      disabled: Boolean(stream.error),
-      run: () => open(stream),
-    },
-    {
-      key: "raw",
-      label: "Raw file",
-      icon: Code,
-      disabled: Boolean(stream.error),
-      run: () => setRaw(stream),
-    },
-    {
-      key: "delete",
-      label: "Delete",
-      icon: Trash,
-      danger: true,
-      run: () => remove(stream),
-    },
-  ]
+  // A stream that is not live can be asked about again at once, rather than
+  // at the next minute's poll — after freeing its port, say. Reading is no
+  // change, so every account has it.
+  const recheckVerb = (stream: StreamEntry): Verb[] =>
+    stream.state === "live" || stream.state === "not-read"
+      ? []
+      : [
+          {
+            key: "recheck",
+            label: checking ? "Checking…" : "Re-check",
+            icon: RefreshClockwise,
+            inline: true,
+            disabled: checking,
+            run: recheck,
+          },
+        ]
+  const verbsFor = (stream: StreamEntry): Verb[] =>
+    admin
+      ? [
+          {
+            key: "edit",
+            label: "Edit",
+            icon: Pencil,
+            inline: true,
+            disabled: Boolean(stream.error),
+            run: () => open(stream),
+          },
+          ...recheckVerb(stream),
+          {
+            key: "raw",
+            label: "Raw file",
+            icon: Code,
+            disabled: Boolean(stream.error),
+            run: () => setRaw(stream),
+          },
+          {
+            key: "delete",
+            label: "Delete",
+            icon: Trash,
+            danger: true,
+            run: () => remove(stream),
+          },
+        ]
+      : recheckVerb(stream)
 
   const header = <PageContext eyebrow="Proxy" title="Streams" />
 
@@ -258,18 +317,30 @@ export function StreamsPage() {
 
       <StatGrid columns={4} dense>
         <StatTile
-          label="Streams"
-          value={counts.all}
+          label="Live"
+          value={states.live}
           hint={
             counts.all === 0
               ? "nothing forwarded"
               : outage
                 ? "every reload refused"
-                : live
-                  ? "read by nginx"
-                  : "not read by nginx"
+                : !live
+                  ? "not read by nginx"
+                  : counts.stopping > 0
+                    ? `${counts.stopping} stop${counts.stopping === 1 ? "s" : ""} every reload`
+                    : states.live === counts.all
+                      ? `all ${counts.all} listening`
+                      : `of ${counts.all} streams`
           }
-          tone={counts.all === 0 ? "default" : outage ? "danger" : live ? "default" : "warning"}
+          tone={
+            counts.all === 0
+              ? "default"
+              : outage || counts.stopping > 0
+                ? "danger"
+                : states.live < counts.all
+                  ? "warning"
+                  : "default"
+          }
         />
         <StatTile label="TCP" value={counts.tcp} hint="connection-oriented forwards" />
         <StatTile label="UDP" value={counts.udp} hint="datagram forwards" />
@@ -334,6 +405,22 @@ export function StreamsPage() {
             )
           }
         />
+        {(data.streams.length > 1 || chip !== "all") && (
+          // A state no stream is in has no chip, except the one chosen: it
+          // stays to say why the list is empty, and All is beside it.
+          <PanelToolbar>
+            <ChipStrip aria-label="Filter streams by state">
+              <FilterChip selected={chip === "all"} onClick={() => setChip("all")}>
+                All <ChipCount>{states.all}</ChipCount>
+              </FilterChip>
+              {STREAM_STATES.filter((state) => states[state] > 0 || chip === state).map((state) => (
+                <FilterChip key={state} selected={chip === state} onClick={() => setChip(state)}>
+                  {stateTitle(state)} <ChipCount>{states[state]}</ChipCount>
+                </FilterChip>
+              ))}
+            </ChipStrip>
+          </PanelToolbar>
+        )}
         <PanelBody flush>
           {data.streams.length === 0 ? (
             <EmptyState
@@ -342,13 +429,15 @@ export function StreamsPage() {
               description="Point a port on this host at a service somewhere else — a database replica, a bastion, a game server. Anything TCP or UDP."
               className="mt-2"
             />
+          ) : chip !== "all" && shown.length === 0 ? (
+            <EmptyNote className="py-6">No stream is {stateLabel(chip)} now.</EmptyNote>
           ) : (
             // Every row opens the stream's form, so it is a choice and carries
             // the edge (§16). Each is drawn as the service its port is — a
             // forward on 5432 as Postgres — where the port says so, and as a
             // bare connection where it does not.
             <ProxyGrid aria-label="Streams">
-              {[...data.streams].sort(byUrgency).map((stream, index) => (
+              {shown.map((stream, index) => (
                 <ChoiceRow
                   key={stream.name}
                   verb={admin ? `Edit ${stream.name}` : stream.name}
@@ -361,41 +450,39 @@ export function StreamsPage() {
                   }
                   title={<span className="text-title">{stream.name}</span>}
                   description={describe(stream)}
-                  trailing={
-                    stream.error ? (
-                      <Status verdict="critical" label="unreadable" />
-                    ) : (
-                      <Status
-                        verdict={live ? "ok" : "warning"}
-                        label={live ? "configured" : "not live"}
-                      />
-                    )
-                  }
+                  trailing={<Status {...stateStatus(stream)} />}
                 >
                   {stream.error ? (
                     <p className="text-hint break-all text-muted-foreground">{stream.error}</p>
                   ) : (
-                    <RoutePath
-                      sourceLabel={
-                        listenFamily(stream.address)
-                          ? `Listen on every ${listenFamily(stream.address)} address`
-                          : "Listen on this host"
+                    <>
+                      <RoutePath
+                        sourceLabel={
+                          listenFamily(stream.address)
+                            ? `Listen on every ${listenFamily(stream.address)} address`
+                            : "Listen on this host"
+                        }
+                        source={
+                          <span className="numeric text-2xl font-semibold">
+                            {listenLabel(stream)}
+                          </span>
+                        }
+                        destinationLabel="Forward to"
+                        destination={stream.upstream}
+                      />
+                      {
+                        // While nginx reads none of the directory, every card
+                        // would repeat what the steps above already say.
+                        (live || stream.state !== "not-read") && <StateReason stream={stream} />
                       }
-                      source={
-                        <span className="numeric text-2xl font-semibold">
-                          {listenLabel(stream)}
-                        </span>
-                      }
-                      destinationLabel="Forward to"
-                      destination={stream.upstream}
-                    />
+                    </>
                   )}
                   <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0 space-y-1">
                       <span className="block text-hint text-muted-foreground">Allowed sources</span>
                       <Restriction stream={stream} />
                     </div>
-                    {admin && (
+                    {verbsFor(stream).length > 0 && (
                       <VerbBar
                         verbs={verbsFor(stream)}
                         menuLabel={`More actions for ${stream.name}`}
@@ -453,6 +540,86 @@ function describe(stream: StreamEntry): string {
   ]
     .filter(Boolean)
     .join(" · ")
+}
+
+/**
+ * Why a stream is not simply live, as the line under its route: the
+ * backend's sentence, nginx's own words for a bind it logged as failed, and
+ * where to go about what holds the port — a site's page, or the list of
+ * listening ports. The sentence already names a stream that shadows it,
+ * whose card is on this page.
+ */
+function StateReason({ stream }: { stream: StreamEntry }) {
+  if (!stream.stateReason) return null
+  const { blocker } = stream
+  return (
+    <div className="min-w-0 space-y-1">
+      <p className="text-hint leading-relaxed break-words text-muted-foreground">
+        {stream.stateReason}{" "}
+        {blocker?.kind === "site" && blocker.site ? (
+          <Link
+            href={`/proxy/sites?site=${encodeURIComponent(blocker.site)}`}
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            Open the site
+          </Link>
+        ) : blocker?.kind === "program" ? (
+          <Link href="/proxy/ports" className="underline underline-offset-2 hover:text-foreground">
+            See who holds it
+          </Link>
+        ) : null}
+      </p>
+      {stream.bindError && (
+        <p className="font-mono text-hint break-all text-muted-foreground">{stream.bindError}</p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A port a save is refused for, on the Listen field: the refusal, where to
+ * see what holds it — the site, or the list of listening ports; a stream's
+ * card is on this page — and the next port free as one press.
+ */
+function PortTaken({
+  message,
+  conflict,
+  onUse,
+}: {
+  message: string
+  conflict?: PortConflict
+  onUse: (port: number) => void
+}) {
+  const suggest = conflict?.suggest
+  return (
+    <>
+      {message}.{" "}
+      {conflict?.kind === "site" && conflict.site ? (
+        <Link
+          href={`/proxy/sites?site=${encodeURIComponent(conflict.site)}`}
+          className="underline underline-offset-2"
+        >
+          Open the site
+        </Link>
+      ) : conflict?.kind === "stream" ? null : (
+        <Link href="/proxy/ports" className="underline underline-offset-2">
+          See who holds it
+        </Link>
+      )}
+      {suggest ? (
+        <>
+          {" "}
+          <button
+            type="button"
+            onClick={() => onUse(suggest)}
+            className="rounded-sm underline underline-offset-2 focus-ring"
+          >
+            Use {suggest}
+          </button>
+        </>
+      ) : null}
+    </>
+  )
 }
 
 /** Who may reach the port, as a reading: a list of sources, or the fact that there is none. */
@@ -544,8 +711,6 @@ const BLANK: StreamSpec = {
   allowFrom: [],
 }
 
-type Preview = { content: string; warnings: string[] }
-
 function StreamForm({
   open,
   stream,
@@ -576,7 +741,7 @@ function StreamForm({
     `${key}.connect`,
     formatDuration(stream?.connectTimeout),
   )
-  const [preview, setPreview] = useState<Preview | null>(null)
+  const [preview, setPreview] = useState<StreamPreview | null>(null)
   const [previewError, setPreviewError] = useState("")
   const [refused, setRefused] = useState<{ field: string; message: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -601,6 +766,11 @@ function StreamForm({
     setSpec((s) => ({ ...s, ...change }))
     if (field && refused?.field === field) setRefused(null)
   }
+  // The preview asks what the save would: a port something holds is said on
+  // the field before the save is pressed, with the next one free. It is the
+  // preview of this very spec only while nothing has been typed since.
+  const conflict = preview?.conflict?.port === spec.listen ? preview.conflict : undefined
+  const takePort = (port: number) => edit({ listen: port }, "spec.listen")
 
   useEffect(() => {
     if (!open || readOnly) return
@@ -613,7 +783,13 @@ function StreamForm({
           setPreviewError("")
           return
         }
-        post<Preview>("/proxy/streams/preview", { spec: body }, { signal: controller.signal })
+        // previous is the stream this form opened on, whose own port is no
+        // conflict.
+        post<StreamPreview>(
+          "/proxy/streams/preview",
+          { spec: body, previous: stream?.name ?? "" },
+          { signal: controller.signal },
+        )
           .then((r) => {
             setPreview(r)
             setPreviewError("")
@@ -646,21 +822,14 @@ function StreamForm({
         previous: stream?.name ?? "",
         reload: live,
       })
-      const title = res.renamed ? `${res.renamed} renamed to ${res.name}` : res.name
-      const kept = res.renamed ? ` ${res.renamed}.conf is kept as ${res.renamed}.conf.bak.` : ""
-      if (res.reloadError) {
-        notify.warning(`${title} saved, reload failed`, {
-          description: `The file passed nginx's test and is on disk, but nginx did not reload, so it is not forwarding yet: ${res.reloadError}`,
-        })
-      } else if (live) {
-        notify.success(`${title} saved and reloaded`, {
-          description: [...res.warnings, kept.trim()].filter(Boolean).join(" ") || undefined,
-        })
-      } else {
-        notify.warning(`${title} saved, not yet live`, {
-          description: `nginx does not read the stream directory yet, so its test could not check this file.${kept}`,
-        })
-      }
+      // The save watched nginx take the reload up: "saved and listening" only
+      // when nginx holds the port, and a warning with a way to ask again
+      // when it did not within the wait.
+      const outcome = saveOutcome(res, live)
+      notify[outcome.tone](outcome.title, {
+        description: outcome.description,
+        action: outcome.recheck ? { label: "Re-check", onClick: onSaved } : undefined,
+      })
       onSaved()
       onOpenChange(false)
     } catch (err) {
@@ -772,13 +941,12 @@ function StreamForm({
                       : "The port on this host."
               }
               error={
-                refused?.field === "spec.listen" && (
-                  <>
-                    {refused.message}.{" "}
-                    <Link href="/proxy/ports" className="underline underline-offset-2">
-                      See who holds it
-                    </Link>
-                  </>
+                refused?.field === "spec.listen" ? (
+                  <PortTaken message={refused.message} conflict={conflict} onUse={takePort} />
+                ) : (
+                  conflict && (
+                    <PortTaken message={conflict.message} conflict={conflict} onUse={takePort} />
+                  )
                 )
               }
             >

@@ -436,9 +436,24 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     read and written back, so a loopback forward is never saved onto every interface. A hand-written file
     the form rewrites is kept as `.bak`.
   - **A save** (`ApplyStream(spec, previous, reload)`) refuses a new name, or a rename, onto a taken one
-    (409 `stream_exists`) and a port another stream or another program holds (`PortInUseError`, 409
-    `port_in_use` on `spec.listen` with the next free port): `nginx -t` passes both, and the reload then
-    fails inside the master while `nginx -s reload` exits 0. A rename moves the old file to `.bak` before
+    (409 `stream_exists`) and a port another stream, a site or another program holds (`PortInUseError`,
+    409 `port_in_use` on `spec.listen` with the next free port): `nginx -t` passes all three, and the
+    reload then fails inside the master while `nginx -s reload` exits 0. What holds a port
+    (`portClaims`) is read from the stream directory's files, the stream and http servers of the
+    configuration nginx reads (`configClaims`: a site by its first server name, else its Sites-page name;
+    an http `quic` listen is UDP, a listen-less server is `*:80`), and the running nginx's sockets; nginx's
+    own sockets are no conflict (its configuration names what it asks for, and one it holds for a server
+    that is gone is let go at the reload). `POST /proxy/streams/preview {spec, previous}` answers the same
+    refusal as `conflict` (`PortOwner` plus `suggest` and `message`), so the form says it while the port is
+    typed. A reload is then **watched** (`stream_probe.go`, `awaitListening`, up to 3 s, only when nginx
+    reads the file as a stream): done when a worker that was not there before runs and nginx holds every
+    socket (`listening: true`); a `bind()` failure nginx logs for the stream's own address puts the stream
+    back as it was (new file removed, edit restored, rename undone) and is the same 409 with nginx's words
+    in `BindError` — a stream nginx cannot bind makes every later reload on the host fail, so it is never
+    left behind — audited `result: rolled-back`; any other `[emerg]` is `reloaded: false` with
+    `reloadError` ("nginx did not take the reload up: …") and the valid file stays; a wait that runs out is
+    `listening: false` with `listenNote`; a running nginx that cannot be read is `listenNote` alone. A
+    rename moves the old file to `.bak` before
     one test and puts both back if it fails. It reloads only when asked ("Save for later" does not), and a
     reload that fails after a clean test is a 200 with `reloadError`, not "not applied". The upstream block
     is `NginxIdent(name)_backend`, so `a-b` and `a_b` no longer declare one upstream; UDP writes
@@ -450,6 +465,26 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     Delete reloads only when nginx read the directory, and returns a failed reload as `reloadError`. A
     stream directory that cannot be read is a retryable 500 `stream_dir_unreadable` ("Could not read the
     stream directory"), never an empty list.
+  - **Each stream's state** (`fillStreamStates`, `state` / `stateReason` / `blocker` / `bindError` on
+    every listed stream): `not-read` where the file is not in a top-level stream block of the tree (no
+    module first, then the include missing or misplaced, a file that does not parse — every reload refused
+    — or an include that does not take it), `shadowed` where a stream read before it has one of its exact
+    addresses (nginx warns "conflicting server name" and gives the first every connection; a wildcard and
+    one address on a port are not a shadow), `not-listening` where a site nginx reads has its port (nginx
+    fails every reload on the second bind, verified on 1.27) or where the running nginx holds no socket
+    for a bind — named with the program holding it, nginx's last logged `bind()` failure for that address,
+    or "it last loaded its configuration before this file changed" (newest worker's start against the
+    file's mtime), `live` where nginx holds a socket taking every bind (its wildcard serves one address;
+    a live file changed since it was loaded says so), and `unknown` with why where the running nginx could
+    not be read. **The running nginx** (`stream_probe.go`) is the master process whose title names this
+    `nginx.conf` (`-c`, `-p`, else the build's `--conf-path`; two that do are told apart by the pid file,
+    read on the host where the dashboard runs in a container), its sockets are its network namespace's
+    `/proc/<pid>/net/{tcp,tcp6,udp,udp6}` — readable by any user, which is what lets a dashboard see an
+    nginx in another namespace — held by the master's descriptors, or, where those cannot be read (the
+    dashboard runs as another user), owned by nginx's uid; the host's listener list names another
+    program only in nginx's own namespace. The error log is the configuration's first top-level
+    `error_log` file, else the build's, read only under `/var/log` or `JD_NGINX_DIR` — the states are
+    shown to every account and the dashboard runs as root. `nginx -V` is kept a minute per service.
   - **Links and unreadable files.** The listing names a symbolic link (`link`, and "a symbolic link" in
     `unsupported`, so the form opens read-only; a save over one is `stream_handwritten`) and says a link to
     nothing links to nothing. Delete (`StreamDeletion`) removes a link as a link, leaving its target, and

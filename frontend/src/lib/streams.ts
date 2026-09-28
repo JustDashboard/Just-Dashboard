@@ -1,13 +1,17 @@
 import type {
   Job,
+  PortOwner,
   StreamAppendReason,
   StreamEntry,
   StreamIncludeMode,
   StreamIncludePlan,
   StreamModule,
+  StreamResult,
   StreamSpec,
+  StreamState,
   StreamStatus,
 } from "@/lib/types"
+import type { DotTone, Verdict } from "@/components/status-dot"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 
 /**
@@ -282,14 +286,152 @@ export function listenLabel(stream: Pick<StreamSpec, "address" | "listen">): str
     : `${stream.address}:${stream.listen}`
 }
 
-/** A file that cannot be read first, then streams open to anyone — a database port first among those. */
+/**
+ * A stream nginx cannot bind while something else holds its port: every
+ * reload on the host fails on it until one of them moves, so it outranks
+ * every other state.
+ */
+export function blocksReloads(stream: Pick<StreamEntry, "state" | "blocker">): boolean {
+  return stream.state === "not-listening" && stream.blocker !== undefined
+}
+
+/**
+ * A file that cannot be read first, then a stream stopping every reload, one
+ * that forwards nothing, one another stream shadows, then streams open to
+ * anyone — a database port first among those.
+ */
 function rank(stream: StreamEntry): number {
   if (stream.error) return 0
-  if (!stream.open) return 3
-  return DANGEROUS_PORTS[stream.listen] ? 1 : 2
+  if (blocksReloads(stream)) return 1
+  if (stream.state === "not-listening") return 2
+  if (stream.state === "shadowed") return 3
+  if (!stream.open) return 6
+  return DANGEROUS_PORTS[stream.listen] ? 4 : 5
 }
 
 /** Worst first, then by port. The order is the page's answer to "which of these needs me". */
 export function byUrgency(a: StreamEntry, b: StreamEntry): number {
   return rank(a) - rank(b) || a.listen - b.listen || a.name.localeCompare(b.name)
+}
+
+/** The states the page filters by, in the order its chips run. */
+export const STREAM_STATES: StreamState[] = [
+  "live",
+  "not-listening",
+  "shadowed",
+  "not-read",
+  "unknown",
+]
+
+/** A state in the words its chip and its card use. */
+export function stateLabel(state: StreamState): string {
+  switch (state) {
+    case "live":
+      return "live"
+    case "not-listening":
+      return "not listening"
+    case "shadowed":
+      return "shadowed"
+    case "not-read":
+      return "not read"
+  }
+  return "unknown"
+}
+
+/** A state as a chip names it. */
+export function stateTitle(state: StreamState): string {
+  const label = stateLabel(state)
+  return label[0].toUpperCase() + label.slice(1)
+}
+
+/** A stream's state as its card's Status reads it: a verdict, or a plain dot for one never checked. */
+export function stateStatus(stream: Pick<StreamEntry, "state" | "error">): {
+  verdict?: Verdict
+  tone?: DotTone
+  label: string
+} {
+  if (stream.error) return { verdict: "critical", label: "unreadable" }
+  switch (stream.state) {
+    case "live":
+      return { verdict: "ok", label: "live" }
+    case "not-listening":
+      return { verdict: "critical", label: "not listening" }
+    case "shadowed":
+    case "not-read":
+      return { verdict: "warning", label: stateLabel(stream.state) }
+  }
+  return { tone: "unknown", label: "unknown" }
+}
+
+/** How many streams are in each state, and in all. */
+export function stateCounts(streams: StreamEntry[]): Record<StreamState | "all", number> {
+  const counts = {
+    all: streams.length,
+    live: 0,
+    "not-listening": 0,
+    shadowed: 0,
+    "not-read": 0,
+    unknown: 0,
+  }
+  for (const stream of streams) counts[stream.state]++
+  return counts
+}
+
+/** What holds a port, named the way a sentence names it. */
+export function portOwnerName(owner: PortOwner): string {
+  switch (owner.kind) {
+    case "stream":
+      return owner.name ? `the stream ${owner.name}` : `a stream server in ${owner.file}`
+    case "site":
+      return owner.name ? `the site ${owner.name}` : `an http server in ${owner.file}`
+  }
+  if (!owner.name) return "another program"
+  return owner.pid ? `${owner.name} (pid ${owner.pid})` : owner.name
+}
+
+/** The toast a save ends with: how far it got, in the words that are true of it. */
+export function saveOutcome(
+  res: StreamResult,
+  live: boolean,
+): { tone: "success" | "warning"; title: string; description?: string; recheck?: boolean } {
+  const title = res.renamed ? `${res.renamed} renamed to ${res.name}` : res.name
+  const kept = res.renamed ? `${res.renamed}.conf is kept as ${res.renamed}.conf.bak.` : ""
+  const join = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ") || undefined
+  if (res.reloadError) {
+    return {
+      tone: "warning",
+      title: `${title} saved, reload failed`,
+      description: `The file passed nginx's test and is on disk, but nginx did not reload, so it is not forwarding yet: ${res.reloadError}`,
+    }
+  }
+  if (!live) {
+    return {
+      tone: "warning",
+      title: `${title} saved, not yet live`,
+      description: join(
+        "nginx does not read the stream directory yet, so its test could not check this file.",
+        kept,
+      ),
+    }
+  }
+  if (res.listening === false) {
+    return {
+      tone: "warning",
+      title: `${title} saved, not listening yet`,
+      description: join(res.listenNote, kept),
+      recheck: true,
+    }
+  }
+  if (res.listening) {
+    return {
+      tone: "success",
+      title: `${title} saved and listening`,
+      description: join(...res.warnings, kept),
+    }
+  }
+  return {
+    tone: "success",
+    title: `${title} saved and reloaded`,
+    description: join(res.listenNote, ...res.warnings, kept),
+  }
 }

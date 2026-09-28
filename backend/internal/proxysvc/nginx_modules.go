@@ -62,8 +62,13 @@ type nginxBuild struct {
 	order       []string
 	prefix      string
 	modulesPath string
-	version     string
-	openssl     string
+	// confPath, errorLog and pidPath are where the build reads its
+	// configuration and writes its log and pid when nothing says otherwise.
+	confPath string
+	errorLog string
+	pidPath  string
+	version  string
+	openssl  string
 }
 
 // parseNginxBuild reads the configure arguments `nginx -V` prints. The
@@ -91,6 +96,12 @@ func parseNginxBuild(out string) nginxBuild {
 			build.prefix = strings.TrimPrefix(arg, "--prefix=")
 		case strings.HasPrefix(arg, "--modules-path="):
 			build.modulesPath = strings.TrimPrefix(arg, "--modules-path=")
+		case strings.HasPrefix(arg, "--conf-path="):
+			build.confPath = strings.TrimPrefix(arg, "--conf-path=")
+		case strings.HasPrefix(arg, "--error-log-path="):
+			build.errorLog = strings.TrimPrefix(arg, "--error-log-path=")
+		case strings.HasPrefix(arg, "--pid-path="):
+			build.pidPath = strings.TrimPrefix(arg, "--pid-path=")
 		case strings.HasPrefix(arg, "--with-"):
 			name, kind, dynamic := strings.Cut(strings.TrimPrefix(arg, "--with-"), "=")
 			switch {
@@ -104,8 +115,20 @@ func parseNginxBuild(out string) nginxBuild {
 			build.order = append(build.order, name)
 		}
 	}
-	if build.modulesPath == "" {
-		build.modulesPath = path.Join(build.prefix, "modules")
+	// configure's own defaults, which are relative to the prefix.
+	for _, p := range []struct {
+		value    *string
+		fallback string
+	}{
+		{&build.modulesPath, "modules"}, {&build.confPath, "conf/nginx.conf"},
+		{&build.errorLog, "logs/error.log"}, {&build.pidPath, "logs/nginx.pid"},
+	} {
+		if *p.value == "" {
+			*p.value = p.fallback
+		}
+		if !path.IsAbs(*p.value) && *p.value != "stderr" {
+			*p.value = path.Join(build.prefix, *p.value)
+		}
 	}
 	return build
 }

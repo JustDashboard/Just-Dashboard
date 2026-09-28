@@ -1,9 +1,11 @@
 import { ApiError, errorMessage } from "@/lib/api"
 import type { StreamStatus } from "@/lib/types"
 import {
+  blocksReloads,
   includedPlace,
   moduleMissing,
   moduleRemedy,
+  portOwnerName,
   protocolLabel,
   streamOutage,
 } from "@/lib/streams"
@@ -13,7 +15,8 @@ export type StreamFindingInput = { streams?: StreamStatus; streamsError?: Error 
 
 /**
  * A stream directory that stops nginx reloading, streams nginx is not
- * reading, and a forward open to anyone.
+ * reading, a stream that stops it reloading or forwards nothing, and a
+ * forward open to anyone.
  *
  * The include advice waits for the module: on a host where nginx has no
  * stream module, "add the stream block" is advice that stops nginx reloading
@@ -103,6 +106,65 @@ export function streamFindings({ streams, streamsError }: StreamFindingInput): P
       meta: "streams",
       href: "/proxy/streams",
     })
+  }
+  // What each stream's own state says, once nginx reads the directory: a
+  // port nginx cannot bind stops every reload on the host, and a file that
+  // does not parse fails its test; a stream shadowed or not listening
+  // forwards nothing.
+  for (const stream of streams.included && !missing ? streams.streams : []) {
+    if (stream.error) continue
+    const reason = [stream.stateReason, stream.bindError && `nginx logged: ${stream.bindError}`]
+      .filter(Boolean)
+      .join(" ")
+    if (blocksReloads(stream) && stream.blocker) {
+      const port = `${stream.blocker.port}/${stream.blocker.proto}`
+      out.push({
+        id: `stream.unbindable.${stream.name}`,
+        level: "critical",
+        title: `nginx refuses every reload: stream ${stream.name} asks for port ${port}, which ${portOwnerName(stream.blocker)} holds`,
+        detail: reason,
+        advice:
+          stream.blocker.kind === "site"
+            ? "Move the stream or the site to another port, or delete one of them; until then no change to any site takes effect."
+            : "Free the port, or move the stream to another one; until then no change to any site takes effect.",
+        meta: "stream",
+        href: "/proxy/streams",
+      })
+    } else if (
+      stream.state === "not-read" &&
+      stream.unsupported.some((what) => what.startsWith("a syntax error"))
+    ) {
+      out.push({
+        id: `stream.unparsable.${stream.name}`,
+        level: "critical",
+        title: `nginx refuses every reload: stream ${stream.name} does not parse`,
+        detail: reason,
+        advice: "Fix the file in its raw editor on the Streams page, or delete it.",
+        meta: "stream",
+        href: "/proxy/streams",
+      })
+    } else if (stream.state === "not-listening") {
+      out.push({
+        id: `stream.not-listening.${stream.name}`,
+        level: "warning",
+        title: `Stream ${stream.name} is not listening`,
+        detail: reason,
+        advice:
+          "It forwards nothing until nginx holds its port. Re-check it on the Streams page once nginx has reloaded.",
+        meta: "stream",
+        href: "/proxy/streams",
+      })
+    } else if (stream.state === "shadowed" && stream.blocker) {
+      out.push({
+        id: `stream.shadowed.${stream.name}`,
+        level: "warning",
+        title: `Stream ${stream.name} gets no connection: ${portOwnerName(stream.blocker)} has its port`,
+        detail: reason,
+        advice: "Move one of them to another port, or delete the one that is not needed.",
+        meta: "stream",
+        href: "/proxy/streams",
+      })
+    }
   }
   for (const stream of streams.streams) {
     if (!stream.open || stream.error) continue

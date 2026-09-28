@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test"
 import { json, mockProxy, user } from "./proxy-fixtures"
 import {
   dropInPath,
+  heldStream,
   includePlan,
   moduleNotInstalled,
   streamEntry,
@@ -91,12 +92,22 @@ test("a stream block nginx cannot read is an outage, said as one", async ({ page
   await listing(page, {
     included: true,
     module: moduleNotInstalled,
-    streams: [bastion],
+    streams: [
+      {
+        ...bastion,
+        state: "not-read",
+        stateReason: "This nginx has no stream module, so it cannot read a stream.",
+      },
+    ],
   })
   await page.goto("/proxy/streams")
   await expect(page.getByText("nginx.conf has a stream block this nginx cannot read")).toBeVisible()
   await expect(page.getByText(/every reload is refused/)).toBeVisible()
-  await expect(page.locator("[data-slot='choice-row']").getByText("not live")).toBeVisible()
+  await expect(page.locator("[data-slot='choice-row']").getByText("not read")).toBeVisible()
+  // The steps above say why; the card does not say it again.
+  await expect(
+    page.getByText("This nginx has no stream module, so it cannot read a stream."),
+  ).toHaveCount(0)
   // nginx's test fails on the stream block for every file, so no save can
   // pass: nothing offers to make one.
   await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
@@ -1188,7 +1199,7 @@ test("connect shows the new file, posts the plan it showed, and the notice goes"
           streamStatus({
             included: connected,
             connection: connected ? { mode: "dropin", path: dropInPath } : undefined,
-            streams: [bastion],
+            streams: [{ ...bastion, state: connected ? "live" : "not-read" }],
           }),
         )
       : route.fallback(),
@@ -1233,7 +1244,9 @@ test("connect shows the new file, posts the plan it showed, and the notice goes"
   await expect(sheet).toHaveCount(0)
   await expect(page.getByText("nginx is not reading these yet")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "New stream" })).toBeVisible()
-  await expect(page.locator("[data-slot='choice-row']").getByText("configured")).toBeVisible()
+  await expect(
+    page.locator("[data-slot='choice-row']").getByText("live", { exact: true }),
+  ).toBeVisible()
 })
 
 test("an edit to nginx.conf shows before and after, and can wait for the next reload", async ({
@@ -1522,4 +1535,300 @@ test("the steps and the connect sheet fit a phone", async ({ page }) => {
   )
   await page.keyboard.press("Escape")
   await expect(sheet).toHaveCount(0)
+})
+
+// Every card said "configured" while nginx had failed to bind half of them.
+// Each now says what nginx does with it, and why where it is not live.
+const restricted = { protocol: "tcp" as const, allowFrom: ["10.0.0.0/8"] }
+const stateShowcase = [
+  streamEntry({ ...restricted, name: "db", listen: 5432, upstream: "10.0.0.5:5432" }),
+  heldStream({ ...restricted, name: "cache", listen: 6379, upstream: "10.0.0.9:6379" }),
+  streamEntry({
+    ...restricted,
+    name: "web",
+    listen: 8080,
+    upstream: "10.0.0.7:80",
+    state: "not-listening",
+    stateReason:
+      "Port 8080/tcp is also where the site app.example.com listens. nginx cannot bind it for both, so every reload fails until one of them moves.",
+    blocker: {
+      port: 8080,
+      proto: "tcp",
+      kind: "site",
+      name: "app.example.com",
+      site: "app.example.com",
+    },
+  }),
+  streamEntry({
+    ...restricted,
+    name: "zz-copy",
+    listen: 5432,
+    upstream: "10.0.0.6:5432",
+    state: "shadowed",
+    stateReason:
+      "Port 5432/tcp is taken first by the stream db, so nginx gives that stream every connection there and ignores this one's listen.",
+    blocker: { port: 5432, proto: "tcp", kind: "stream", name: "db" },
+  }),
+  streamEntry({
+    ...restricted,
+    name: "quiet",
+    listen: 7100,
+    upstream: "10.0.0.8:7100",
+    state: "not-listening",
+    stateReason:
+      "nginx holds no socket for port 7100/tcp: it last loaded its configuration before this file changed.",
+  }),
+]
+
+test("each stream says what nginx does with it, worst first, with where to look", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await listing(page, { streams: stateShowcase })
+  await page.goto("/proxy/streams")
+
+  const cards = page.getByRole("list", { name: "Streams" }).locator("[data-slot='choice-row']")
+  // Two stop every reload on the host, then one that forwards nothing, one
+  // another stream shadows, and the one that is fine.
+  await expect(cards).toHaveCount(5)
+  const names = await cards.evaluateAll((rows) =>
+    rows.map((row) => row.querySelector("button")?.textContent?.trim()),
+  )
+  expect(names).toEqual(["cache", "web", "quiet", "zz-copy", "db"])
+
+  const tile = page.locator("[data-slot='stat-tile']").filter({ hasText: /^Live/ })
+  await expect(tile).toContainText("1")
+  await expect(tile).toContainText("2 stop every reload")
+
+  const cache = cards.filter({ hasText: "cache" })
+  await expect(cache.getByText("not listening", { exact: true })).toBeVisible()
+  await expect(
+    cache.getByText(/is held by postgres \(pid 900\), so nginx cannot bind it/),
+  ).toBeVisible()
+  await expect(
+    cache.getByText(
+      "2026/09/28 03:29:05 bind() to 0.0.0.0:6379 failed (98: Address already in use)",
+    ),
+  ).toBeVisible()
+  await expect(cache.getByRole("link", { name: "See who holds it" })).toHaveAttribute(
+    "href",
+    "/proxy/ports",
+  )
+  const web = cards.filter({ hasText: "web" })
+  await expect(web.getByRole("link", { name: "Open the site" })).toHaveAttribute(
+    "href",
+    "/proxy/sites?site=app.example.com",
+  )
+  const copy = cards.filter({ hasText: "zz-copy" })
+  await expect(copy.getByText("shadowed", { exact: true })).toBeVisible()
+  await expect(copy.getByText(/taken first by the stream db/)).toBeVisible()
+  await expect(copy.getByRole("link")).toHaveCount(0)
+  const db = cards.filter({ hasText: /^db/ })
+  await expect(db.getByText("live", { exact: true })).toBeVisible()
+  await expect(db.getByRole("button", { name: "Re-check" })).toHaveCount(0)
+})
+
+test("the state chips filter the list and keep the one chosen", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await listing(page, { streams: stateShowcase })
+  await page.goto("/proxy/streams")
+
+  // A state no stream is in has no chip.
+  const strip = page.locator("[data-slot='panel-toolbar']")
+  await expect(strip.getByRole("button")).toHaveText([
+    "All 5",
+    "Live 1",
+    "Not listening 3",
+    "Shadowed 1",
+  ])
+  await strip.getByRole("button", { name: /^Shadowed/ }).click()
+  const cards = page.getByRole("list", { name: "Streams" }).locator("[data-slot='choice-row']")
+  await expect(cards).toHaveCount(1)
+  await expect(cards.first()).toContainText("zz-copy")
+  await page.reload()
+  await expect(cards).toHaveCount(1)
+
+  // The copy moved: nothing is shadowed now, and the chosen chip stays to
+  // say why the list is empty, beside All.
+  await page.route("**/api/v1/proxy/streams/", (route) =>
+    route.request().method() === "GET"
+      ? json(route, streamStatus({ streams: stateShowcase.slice(0, 3) }))
+      : route.fallback(),
+  )
+  await page.reload()
+  await expect(page.getByText("No stream is shadowed now.")).toBeVisible()
+  await expect(strip.getByRole("button", { name: /^Shadowed/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await strip.getByRole("button", { name: /^All/ }).click()
+  await expect(cards).toHaveCount(3)
+})
+
+test("re-check reads the list again, for any account", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let reads = 0
+  let release: () => void = () => {}
+  await page.route("**/api/v1/proxy/streams/", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    reads++
+    if (reads === 2) await new Promise<void>((resolve) => (release = resolve))
+    return json(route, streamStatus({ streams: stateShowcase }))
+  })
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.goto("/proxy/streams")
+  const quiet = page.locator("[data-slot='choice-row']").filter({ hasText: "quiet" })
+  // A read-only account edits nothing, and may still ask again.
+  await expect(quiet.getByRole("button", { name: "Edit" })).toHaveCount(0)
+  await quiet.getByRole("button", { name: "Re-check" }).click()
+  await expect(quiet.getByRole("button", { name: "Checking…" })).toBeDisabled()
+  await expect.poll(() => reads).toBe(2)
+  release()
+  await expect(quiet.getByRole("button", { name: "Re-check" })).toBeEnabled()
+})
+
+test("the form says a port is taken while it is typed, with the next one free", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const previews: Record<string, unknown>[] = []
+  await page.route("**/api/v1/proxy/streams/preview", (route) => {
+    const body = route.request().postDataJSON()
+    previews.push(body)
+    const listen = body.spec.listen
+    const conflict =
+      listen === 6432
+        ? {
+            port: 6432,
+            proto: "tcp",
+            kind: "program",
+            name: "postgres",
+            pid: 900,
+            suggest: 6433,
+            message: "port 6432/tcp is already in use by postgres (pid 900) — 6433 is free",
+          }
+        : listen === 8080
+          ? {
+              port: 8080,
+              proto: "tcp",
+              kind: "site",
+              name: "app.example.com",
+              site: "app.example.com",
+              suggest: 8081,
+              message: "port 8080/tcp is already in use by the site app.example.com — 8081 is free",
+            }
+          : undefined
+    return json(route, { content: "# Managed by Just Dashboard.\n", warnings: [], conflict })
+  })
+  await page.goto("/proxy/streams")
+  await page.getByRole("button", { name: "New stream" }).click()
+  const sheet = await fillNew(page)
+  await sheet.getByLabel("Listen on").fill("6432")
+
+  const refusal = sheet.getByRole("alert")
+  await expect(refusal).toContainText("already in use by postgres (pid 900) — 6433 is free")
+  await expect(refusal.getByRole("link", { name: "See who holds it" })).toHaveAttribute(
+    "href",
+    "/proxy/ports",
+  )
+  expect(previews.at(-1)?.previous).toBe("")
+  await refusal.getByRole("button", { name: "Use 6433" }).click()
+  await expect(sheet.getByLabel("Listen on")).toHaveValue("6433")
+  await expect(sheet.getByRole("alert")).toHaveCount(0)
+
+  await sheet.getByLabel("Listen on").fill("8080")
+  await expect(
+    sheet.getByRole("alert").getByRole("link", { name: "Open the site" }),
+  ).toHaveAttribute("href", "/proxy/sites?site=app.example.com")
+})
+
+test("a save nginx could not bind is refused on the field and changes nothing", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const message =
+    "nginx could not bind port 6432/tcp when it reloaded: bind() to 0.0.0.0:6432 failed (98: Address in use) — it is held by postgres (pid 900); the stream was put back as it was — 6433 is free"
+  await onSave(page, (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "port_in_use", message, field: "spec.listen" } }),
+    }),
+  )
+  await page.goto("/proxy/streams")
+  await page.getByRole("button", { name: "New stream" }).click()
+  const sheet = await fillNew(page)
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(sheet.getByRole("alert")).toContainText("the stream was put back as it was")
+  await expect(page.getByText("Not saved", { exact: true })).toBeVisible()
+  await expect(sheet).toBeVisible()
+})
+
+test("a save says listening only when nginx held the port, and offers to ask again when not", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let answer = saved({ name: "replica", listening: true })
+  await onSave(page, (route) => json(route, answer))
+  let reads = 0
+  await page.route("**/api/v1/proxy/streams/", (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    reads++
+    return json(route, streamStatus())
+  })
+  await page.goto("/proxy/streams")
+  await page.getByRole("button", { name: "New stream" }).click()
+  await (await fillNew(page)).getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("replica saved and listening")).toBeVisible()
+
+  answer = saved({
+    name: "replica",
+    listening: false,
+    listenNote: "nginx had not taken the reload up 3s after it was sent.",
+  })
+  await page.getByRole("button", { name: "New stream" }).click()
+  await (await fillNew(page)).getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("replica saved, not listening yet")).toBeVisible()
+  await expect(
+    page.getByText("nginx had not taken the reload up 3s after it was sent."),
+  ).toBeVisible()
+  const before = reads
+  await page.getByRole("button", { name: "Re-check" }).click()
+  await expect.poll(() => reads).toBeGreaterThan(before)
+
+  // Nobody could watch: saved and reloaded, and why it could not be told.
+  answer = saved({
+    name: "replica",
+    listenNote:
+      "Whether nginx took it up could not be checked: no running nginx reads /etc/nginx/nginx.conf.",
+  })
+  await page.getByRole("button", { name: "New stream" }).click()
+  await (await fillNew(page)).getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("replica saved and reloaded")).toBeVisible()
+  await expect(page.getByText(/could not be checked: no running nginx reads/)).toBeVisible()
+})
+
+test("the overview names a stream that stops every reload", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await listing(page, { streams: [stateShowcase[1]] })
+  await page.goto("/proxy")
+  const finding = page.getByRole("button", {
+    name: /^nginx refuses every reload: stream cache asks for port 6379\/tcp, which postgres \(pid 900\) holds/,
+  })
+  await expect(finding).toBeVisible()
+})
+
+test("the states fit a phone, bind errors and all", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await listing(page, { streams: stateShowcase })
+  await page.goto("/proxy/streams")
+  await expect(page.getByText(/bind\(\) to 0\.0\.0\.0:6379 failed/)).toBeVisible()
+  expect(
+    await page
+      .locator("[data-slot='page']")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
 })

@@ -203,4 +203,98 @@ describe("streamFindings", () => {
       ])
     })
   })
+
+  // Each stream's own state, once nginx reads the directory: a port it
+  // cannot bind stops every reload on the host, and a stream shadowed or not
+  // listening forwards nothing — where the page said "configured".
+  describe("each stream's state", () => {
+    const restricted = { open: false, allowFrom: ["10.0.0.0/8"] }
+    const held = {
+      ...restricted,
+      name: "held",
+      listen: 7000,
+      state: "not-listening",
+      stateReason:
+        "Port 7000/tcp is held by postgres (pid 900), so nginx cannot bind it, and every reload fails until it is free.",
+      blocker: { port: 7000, proto: "tcp", kind: "program", name: "postgres", pid: 900 },
+      bindError: "2026/09/28 03:29:05 bind() to 0.0.0.0:7000 failed (98: Address in use)",
+    }
+
+    test("a port nginx cannot bind is critical, named with what holds it", () => {
+      const findings = streamFindings({
+        streams: status({ included: true, streams: [stream(held)] }),
+      })
+      expect(ids(findings)).toEqual(["critical stream.unbindable.held"])
+      expect(findings[0]).toMatchObject({
+        title:
+          "nginx refuses every reload: stream held asks for port 7000/tcp, which postgres (pid 900) holds",
+        detail: `${held.stateReason} nginx logged: ${held.bindError}`,
+        href: "/proxy/streams",
+      })
+      const site = stream({
+        ...held,
+        name: "web",
+        blocker: { port: 80, proto: "tcp", kind: "site", name: "app.example.com", site: "app" },
+        bindError: undefined,
+      })
+      expect(
+        streamFindings({ streams: status({ included: true, streams: [site] }) })[0].title,
+      ).toBe(
+        "nginx refuses every reload: stream web asks for port 80/tcp, which the site app.example.com holds",
+      )
+    })
+
+    test("a stream file that does not parse is critical", () => {
+      const broken = stream({
+        ...restricted,
+        name: "broken",
+        state: "not-read",
+        unsupported: ["a syntax error (unexpected end of file)"],
+      })
+      expect(
+        ids(streamFindings({ streams: status({ included: true, streams: [broken] }) })),
+      ).toEqual(["critical stream.unparsable.broken"])
+    })
+
+    test("not listening and shadowed are warnings", () => {
+      const findings = streamFindings({
+        streams: status({
+          included: true,
+          streams: [
+            stream({
+              ...restricted,
+              name: "quiet",
+              state: "not-listening",
+              stateReason: "nginx holds no socket for port 7100/tcp.",
+            }),
+            stream({
+              ...restricted,
+              name: "copy",
+              state: "shadowed",
+              blocker: { port: 5432, proto: "tcp", kind: "stream", name: "db" },
+            }),
+            stream({ ...restricted, name: "fine", state: "live" }),
+          ],
+        }),
+      })
+      expect(ids(findings)).toEqual([
+        "warning stream.not-listening.quiet",
+        "warning stream.shadowed.copy",
+      ])
+      expect(findings[1].title).toBe("Stream copy gets no connection: the stream db has its port")
+    })
+
+    // While nginx reads none of the directory, or cannot, the directory's own
+    // finding says so, once.
+    test("say nothing of their own while the directory is not read", () => {
+      for (const streams of [
+        status({ included: false, streams: [stream(held)] }),
+        status({ included: true, module: notInstalled, streams: [stream(held)] }),
+      ]) {
+        expect(
+          ids(streamFindings({ streams })).some((id) => id.includes("stream.unbindable")),
+        ).toBe(false)
+      }
+    })
+  })
 })

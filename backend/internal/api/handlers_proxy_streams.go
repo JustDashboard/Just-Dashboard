@@ -148,6 +148,17 @@ type streamRequest struct {
 	Reload   bool   `json:"reload"`
 }
 
+// portConflict is a port refusal as the form reads it: who holds the port,
+// the next one free, and the sentence the save would refuse with.
+type portConflict struct {
+	proxysvc.PortOwner
+	Suggest int    `json:"suggest,omitempty"`
+	Message string `json:"message"`
+}
+
+// handleStreamPreview renders the stream and says, before the save, whether
+// its port is taken — the refusal the save would meet, while the port is
+// still being typed.
 func (s *Server) handleStreamPreview(w http.ResponseWriter, r *http.Request) error {
 	var req streamRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -157,7 +168,13 @@ func (s *Server) handleStreamPreview(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"content": content, "warnings": proxysvc.StreamWarnings(&req.Spec)})
+	out := map[string]any{"content": content, "warnings": proxysvc.StreamWarnings(&req.Spec)}
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	if refused := s.modules.proxy.StreamConflict(ctx, &req.Spec, req.Previous); refused != nil {
+		out["conflict"] = portConflict{PortOwner: refused.PortOwner, Suggest: refused.Suggest, Message: refused.Error()}
+	}
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
@@ -176,6 +193,11 @@ func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error
 		httpx.SetAudit(r, "proxy.stream.apply", req.Spec.Name, map[string]any{"result": "rejected"})
 		return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
 	case errors.As(err, &inUse):
+		if inUse.BindError != "" {
+			// Written, tested and reloaded before nginx refused the port, then
+			// put back: an attempt the audit should show.
+			httpx.SetAudit(r, "proxy.stream.apply", req.Spec.Name, map[string]any{"result": "rolled-back", "bindError": inUse.BindError})
+		}
 		out := httpx.Err(http.StatusConflict, "port_in_use", err.Error())
 		out.Field = "spec.listen"
 		return out
@@ -199,6 +221,9 @@ func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error
 	}
 	if res.ReloadError != "" {
 		detail["reloadError"] = res.ReloadError
+	}
+	if res.Listening != nil {
+		detail["listening"] = *res.Listening
 	}
 	httpx.SetAudit(r, "proxy.stream.apply", req.Spec.Name, detail)
 	httpx.JSON(w, http.StatusOK, res)

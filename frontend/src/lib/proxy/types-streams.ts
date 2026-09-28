@@ -23,6 +23,28 @@ export type StreamSpec = {
   allowFrom: string[]
 }
 
+/**
+ * What nginx does with a stream now: holds its port (`live`), reads it and
+ * holds no socket for it (`not-listening`), gives its port to a stream read
+ * first (`shadowed`), does not read it as a stream (`not-read`), or could not
+ * be asked (`unknown`).
+ */
+export type StreamState = "live" | "not-listening" | "shadowed" | "not-read" | "unknown"
+
+/** What holds a port a stream asks for. */
+export type PortOwner = {
+  port: number
+  proto: "tcp" | "udp"
+  kind: "stream" | "site" | "program"
+  /** The stream's name, the site's server name, or the program's; absent when nothing names it. */
+  name?: string
+  /** The site's name on the Sites page, for a link. */
+  site?: string
+  /** The file of a stream or a site written into another file. */
+  file?: string
+  pid?: number
+}
+
 /** A file in the stream directory, as the page lists it. */
 export type StreamEntry = StreamSpec & {
   path: string
@@ -36,6 +58,21 @@ export type StreamEntry = StreamSpec & {
   error?: string
   /** Where the file points when it is a symbolic link; a delete removes the link, not that. */
   link?: string
+  state: StreamState
+  /** Why, in a sentence, for every state but a plain live one. */
+  stateReason?: string
+  /** What has the stream's port: the stream read first, a site, or the program holding it. */
+  blocker?: PortOwner
+  /** The last bind() failure nginx logged for one of its sockets, with its time. */
+  bindError?: string
+}
+
+/** A port a save would be refused for, as the preview reports it. */
+export type PortConflict = PortOwner & {
+  /** The next port up that nothing holds. */
+  suggest?: number
+  /** The refusal the save would give, as a sentence. */
+  message: string
 }
 
 /**
@@ -93,9 +130,27 @@ export type StreamResult = {
   /** The name the stream had before this save renamed it; its file is kept as <old>.conf.bak. */
   renamed?: string
   reloaded: boolean
-  /** Why nginx did not reload after the file passed its test. The file stays. */
+  /**
+   * Why nginx did not reload after the file passed its test — the command
+   * failing, or nginx refusing the reload for another stream's or a site's
+   * port. The file stays.
+   */
   reloadError?: string
   output?: string
+  /**
+   * Whether nginx held every socket the stream asks for once it took the
+   * reload up, watched for three seconds. Absent when nothing was watched.
+   */
+  listening?: boolean
+  /** Why `listening` is absent, or what nginx had not done when the wait ran out. */
+  listenNote?: string
+}
+
+/** The preview of a stream: its nginx, its warnings, and a port a save would be refused for. */
+export type StreamPreview = {
+  content: string
+  warnings: string[]
+  conflict?: PortConflict
 }
 
 /** What a delete did: nginx reloads only for a stream it was reading. */

@@ -92,6 +92,18 @@ type StreamEntry struct {
 	// over one — it would put a file of its own in the link's place — and a
 	// delete removes the link, never what it points to.
 	Link string `json:"link,omitempty"`
+	// State is what nginx does with the stream now: live, not-listening,
+	// shadowed, not-read or unknown (stream_state.go).
+	State string `json:"state"`
+	// StateReason says why, in a sentence, for every state but a plain live
+	// one; a live stream changed since nginx loaded it says that.
+	StateReason string `json:"stateReason,omitempty"`
+	// Blocker is what has the stream's port: the stream nginx reads first on
+	// it, a site on it, or the program holding it.
+	Blocker *PortOwner `json:"blocker,omitempty"`
+	// BindError is the last bind() failure nginx logged for one of the
+	// stream's sockets, with its time, in nginx's words.
+	BindError string `json:"bindError,omitempty"`
 }
 
 // StreamStatus reports whether nginx is set up to read these at all.
@@ -132,10 +144,19 @@ type StreamResult struct {
 	Renamed  string `json:"renamed,omitempty"`
 	Reloaded bool   `json:"reloaded"`
 	// ReloadError is why nginx did not reload after the file passed its
-	// test. The file stays: it is valid, and it takes effect at the next
-	// reload that succeeds.
+	// test — the command failing, or the master refusing the configuration
+	// for another stream's or a site's port after the command succeeded. The
+	// file stays: it is valid, and it takes effect at the next reload that
+	// succeeds.
 	ReloadError string `json:"reloadError,omitempty"`
 	Output      string `json:"output,omitempty"`
+	// Listening is whether nginx held every socket the stream asks for once
+	// it had taken the reload up, watched for up to three seconds. Absent
+	// when there was no reload to watch or it could not be watched.
+	Listening *bool `json:"listening,omitempty"`
+	// ListenNote says why Listening is absent, or what nginx had not done
+	// when the wait ran out.
+	ListenNote string `json:"listenNote,omitempty"`
 }
 
 var (
@@ -766,6 +787,7 @@ func (s *Service) Streams(ctx context.Context) (*StreamStatus, error) {
 	sort.SliceStable(status.Streams, func(i, j int) bool {
 		return status.Streams[i].Listen < status.Streams[j].Listen
 	})
+	s.fillStreamStates(ctx, status, include)
 	return status, nil
 }
 
@@ -846,20 +868,26 @@ func (s *Service) streamFile(name string) (path string, linked bool, err error) 
 // claim one port, and puts both back if the test fails.
 //
 // A file doing more than the form can say is refused (HandwrittenStreamError),
-// and so is a port another stream or another program already holds
-// (PortInUseError): nginx -t passes both, and nginx then ignores the stream
-// or fails the reload in a way the reload command does not report.
+// and so is a port another stream, a site or another program already holds
+// (PortInUseError): nginx -t passes all three, and nginx then ignores the
+// stream or fails the reload in a way the reload command does not report.
 //
-// A reload that fails after the test passed is reported in the result, not as
-// an error: the file is written and valid, and "not applied" was untrue.
+// A reload is watched until nginx has taken it up (stream_probe.go). One
+// nginx refuses on the stream's own port all the same — a program that took
+// it since the check — puts the stream back as it was and is the same
+// refusal, with nginx's own words: a stream nginx cannot bind makes every
+// later reload on the host fail, so it is not left behind. A reload that fails
+// for any other reason is reported in the result, not as an error: the file
+// is written and valid, and "not applied" was untrue.
 func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous string, reload bool) (*StreamResult, error) {
 	content, err := RenderStream(spec)
 	if err != nil {
 		return nil, err
 	}
-	// Read before the lock: walking /proc takes a while, and the lock holds
-	// up every other save on the host.
-	listeners, listenErr := readListeners(ctx)
+	// Read before the lock: finding the running nginx walks /proc, and the
+	// lock holds up every other save on the host.
+	files, _ := readConfigFiles(s.nginxDir)
+	view := readNginx(ctx, s, files, 0)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -896,13 +924,16 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous st
 			return nil, fmt.Errorf("%w: %s", ErrStreamExists, spec.Name)
 		}
 	}
-	if err := streamPortConflict(dir, spec, oldPath, oldBinds, listeners); err != nil {
-		return nil, err
+	// The configuration is read again under the lock: it is what the
+	// reload will load.
+	files, _ = readConfigFiles(s.nginxDir)
+	if refused := s.portClaims(oldPath, files, view).conflict(ctx, spec, oldBinds); refused != nil {
+		return nil, refused
 	}
 
 	res := &StreamResult{Name: spec.Name, Path: path, Content: content, Warnings: StreamWarnings(spec)}
-	if listenErr != nil {
-		res.Warnings = append(res.Warnings, "The host's listening sockets could not be read ("+listenErr.Error()+
+	if view.nginx == nil && view.listenErr != nil {
+		res.Warnings = append(res.Warnings, "The host's listening sockets could not be read ("+view.listenErr.Error()+
 			"), so a port another program holds was not checked for.")
 	}
 	if err := writeAtomic(path, content); err != nil {
@@ -918,10 +949,7 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous st
 			return nil, err
 		}
 	}
-
-	res.Validation = runValidator(ctx, "nginx", "-t")
-	res.Validation.Note = s.includeNote(path)
-	if !res.Validation.Valid {
+	undo := func() {
 		if renamed {
 			os.Remove(path)
 			os.Rename(backup, oldPath)
@@ -929,7 +957,19 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous st
 		} else {
 			restoreConfig(path, before, oldPath != "")
 		}
+	}
+
+	res.Validation = runValidator(ctx, "nginx", "-t")
+	res.Validation.Note = s.includeNote(path)
+	if !res.Validation.Valid {
+		undo()
 		return res, ErrInvalidConf
+	}
+	if reload {
+		if refused := s.reloadAndWatch(ctx, res, spec, oldBinds); refused != nil {
+			undo()
+			return nil, refused
+		}
 	}
 	if !renamed && oldPath != "" && !oldManaged {
 		// The form rewrites a hand-written file in its own layout, comments
@@ -946,10 +986,89 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous st
 		s.recordChange(ctx, Change{Path: path, Action: ChangeWrite,
 			Before: []byte(before), BeforeExisted: oldPath != "", After: []byte(content)})
 	}
-	if reload {
-		res.Reloaded, res.Output, res.ReloadError = reloadNginx(ctx)
-	}
 	return res, nil
+}
+
+// reloadAndWatch reloads nginx and, where nginx reads the stream, watches it
+// take the stream up. It returns the refusal for a reload nginx failed on the
+// stream's own port, for the caller to put the stream back; nginx kept the
+// configuration it had, so the host is then where it was.
+func (s *Service) reloadAndWatch(ctx context.Context, res *StreamResult, spec *StreamSpec, own []bind) *PortInUseError {
+	files, err := readConfigFiles(s.nginxDir)
+	read := false
+	if err == nil {
+		if tree, err := NginxTree(files); err == nil {
+			read = streamBlockFiles(tree)[filepath.Clean(res.Path)]
+		}
+	}
+	var mark reloadMark
+	if read {
+		mark = s.markReload(ctx, files)
+	}
+	res.Reloaded, res.Output, res.ReloadError = reloadNginx(ctx)
+	if !res.Reloaded {
+		return nil
+	}
+	if !read {
+		res.ListenNote = "nginx does not read this file as a stream, so there was no listen to watch it take up."
+		return nil
+	}
+	check := s.awaitListening(ctx, mark, streamBinds(spec))
+	switch {
+	case check.bindError != "":
+		return s.bindRefusal(ctx, spec, own, res.Path, files, check.bindError)
+	case check.failure != "":
+		res.Reloaded = false
+		res.ReloadError = "nginx did not take the reload up: " + check.failure
+	case check.checked:
+		res.Listening = &check.listening
+		res.ListenNote = check.note
+	default:
+		res.ListenNote = check.note
+	}
+	return nil
+}
+
+// bindRefusal is the refusal for a stream nginx could not bind when it
+// reloaded, naming what holds the port now where something can be named.
+// self is the stream's new file, which the port check must not count.
+func (s *Service) bindRefusal(ctx context.Context, spec *StreamSpec, own []bind, self string, files []ConfigFile, text string) *PortInUseError {
+	binds := streamBinds(spec)
+	failed := binds[0]
+	if failure, ok := parseBindFailure(text); ok {
+		for _, b := range binds {
+			if b.address() == failure.address {
+				failed = b
+			}
+		}
+	}
+	claims := s.portClaims(self, files, readNginx(ctx, s, files, 0))
+	refused := claims.holder(ctx, failed, own)
+	if refused == nil {
+		refused = &PortInUseError{PortOwner: PortOwner{Port: failed.port, Proto: failed.proto()}}
+	}
+	refused.BindError = text
+	refused.Suggest = claims.freePort(ctx, spec, own)
+	return refused
+}
+
+// StreamConflict is the refusal a save of spec would meet for its port, so
+// the form can say so while it is filled in; nil when nothing holds the port.
+// previous is the stream the form opened on. spec has been through
+// RenderStream.
+func (s *Service) StreamConflict(ctx context.Context, spec *StreamSpec, previous string) *PortInUseError {
+	var skip string
+	var own []bind
+	if previous != "" {
+		if path, _, err := s.streamFile(previous); err == nil {
+			skip = path
+			if b, err := os.ReadFile(path); err == nil {
+				own = parseStreamFile(previous+".conf", string(b)).binds
+			}
+		}
+	}
+	files, _ := readConfigFiles(s.nginxDir)
+	return s.portClaims(skip, files, readNginx(ctx, s, files, 0)).conflict(ctx, spec, own)
 }
 
 // StreamWarnings are the choices that are legal and probably not intended.
