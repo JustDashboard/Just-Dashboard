@@ -242,8 +242,8 @@ func TestAServiceThatIsNotAWebsiteIsNotGradedOnHeaders(t *testing.T) {
 	defer plain.Close()
 
 	result := scanHTTP(context.Background(), "https://"+addr+"/", plain.URL+"/", tlsOffer("", 0, 0))
-	if result.HTTPSError == "" {
-		t.Fatalf("the non-HTTP answer should be the error: %+v", result)
+	if result.Service != "other" || result.Banner != "* OK IMAP4rev1 ready" || result.HTTPSError != "" {
+		t.Fatalf("the IMAP greeting should say the service is not a website: %+v", result)
 	}
 	if plainHits.Load() != 0 {
 		t.Error("port 80 belongs to another service and should not be graded for this one")
@@ -252,13 +252,29 @@ func TestAServiceThatIsNotAWebsiteIsNotGradedOnHeaders(t *testing.T) {
 	scan := goodScan()
 	scan.HTTP = result
 	grade(scan)
-	for _, id := range []string{"tls.no-hsts", "tls.no-redirect", "http.header."} {
+	// A mail server has nothing to fix on the HTTP side, so nothing is said
+	// there at all.
+	for _, id := range []string{"tls.no-hsts", "tls.no-redirect", "http.header.", "http.https-error"} {
 		if hasFinding(scan, id) {
-			t.Errorf("%s reported for a response that never came: %+v", id, scan.Findings)
+			t.Errorf("%s reported for a service that is not a website: %+v", id, scan.Findings)
 		}
 	}
-	if !hasFinding(scan, "http.https-error") {
-		t.Errorf("the failed request should be said: %+v", scan.Findings)
+}
+
+// A request that got no answer at all could be a failing website or a quiet
+// service, so that is said, and still nothing is graded on headers.
+func TestAnHTTPSRequestWithNoAnswerIsSaidAndNotGraded(t *testing.T) {
+	cert, _ := scanTestCert(t, 11, nil)
+	addr := tlsListener(t, &tls.Config{Certificates: []tls.Certificate{cert}}, func(*tls.Conn) {})
+	result := scanHTTP(context.Background(), "https://"+addr+"/", "http://127.0.0.1:1/", tlsOffer("", 0, 0))
+	if result.Service != "unknown" || result.Banner != "" || result.HTTPSError == "" {
+		t.Fatalf("got %+v", result)
+	}
+	scan := goodScan()
+	scan.HTTP = result
+	grade(scan)
+	if !hasFinding(scan, "http.https-error") || hasFinding(scan, "tls.no-hsts") {
+		t.Fatalf("findings %+v", scan.Findings)
 	}
 }
 
@@ -272,7 +288,7 @@ func TestScanTLSOfANonHTTPService(t *testing.T) {
 	port, _ := strconv.Atoi(portText)
 
 	scan := ScanTLS(context.Background(), host, port)
-	if !scan.Reachable || scan.HTTP == nil || scan.HTTP.HTTPSError == "" {
+	if !scan.Reachable || scan.HTTP == nil || scan.HTTP.Service != "other" || scan.HTTP.Banner != "* OK ready" {
 		t.Fatalf("got %+v", scan)
 	}
 	if protocolStatus(scan.Protocols, "TLS 1.0") != "refused" {
@@ -324,40 +340,47 @@ func TestThePlainHTTPRedirectIsFollowedToHTTPS(t *testing.T) {
 		to        func(base string) map[string]string
 		redirects bool
 		hops      int
+		verdict   string
 		detail    string
 	}{
-		{"straight to HTTPS", func(string) map[string]string {
+		{"straight to HTTPS on the same host", func(string) map[string]string {
+			return map[string]string{"/": "https://127.0.0.1/"}
+		}, true, 1, "same-host", ""},
+		{"straight to HTTPS on another host", func(string) map[string]string {
 			return map[string]string{"/": "https://example.test/"}
-		}, true, 1, ""},
+		}, true, 1, "other-host", ""},
 		{"through another host first", func(base string) map[string]string {
 			return map[string]string{"/": base + "/www", "/www": "https://www.example.test/"}
-		}, true, 2, ""},
+		}, true, 2, "other-host", ""},
 		{"a relative hop first", func(string) map[string]string {
-			return map[string]string{"/": "/login", "/login": "https://example.test/login"}
-		}, true, 2, ""},
+			return map[string]string{"/": "/login", "/login": "https://127.0.0.1/login"}
+		}, true, 2, "same-host", ""},
 		{"no redirect", func(string) map[string]string { return map[string]string{} },
-			false, 1, "answered 200"},
+			false, 1, "stays-http", "answered 200"},
 		{"to a page that stays on HTTP", func(base string) map[string]string {
 			return map[string]string{"/": base + "/home"}
-		}, false, 2, "which answered 200"},
+		}, false, 2, "stays-http", "which answered 200"},
 		{"a loop", func(string) map[string]string {
 			return map[string]string{"/": "/a", "/a": "/"}
-		}, false, 2, "loop back to"},
+		}, false, 2, "loop", "loop back to"},
 		{"more hops than it follows", func(string) map[string]string {
 			return map[string]string{"/": "/1", "/1": "/2", "/2": "/3", "/3": "/4", "/4": "/5", "/5": "/6"}
-		}, false, maxRedirectHops, "without reaching HTTPS"},
+		}, false, maxRedirectHops, "too-many", "without reaching HTTPS"},
 		{"a hop that does not answer", func(string) map[string]string {
 			return map[string]string{"/": "/drop"}
-		}, false, 2, "did not answer"},
+		}, false, 2, "dead-end", "did not answer"},
+		{"a redirect to another scheme", func(string) map[string]string {
+			return map[string]string{"/": "ftp://example.test/"}
+		}, false, 1, "dead-end", "without reaching HTTPS"},
 	}
 	httpsURL := httpsWithHeaders(t)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			plain := redirects(t, c.to)
 			result := scanHTTP(context.Background(), httpsURL, plain+"/", tlsOffer("", 0, 0))
-			if result.PlainRedirects != c.redirects || len(result.RedirectChain) != c.hops {
-				t.Fatalf("redirects=%v with %d hops, want %v with %d: %+v",
-					result.PlainRedirects, len(result.RedirectChain), c.redirects, c.hops, result.RedirectChain)
+			if result.PlainRedirects != c.redirects || len(result.RedirectChain) != c.hops || result.RedirectVerdict != c.verdict {
+				t.Fatalf("redirects=%v (%s) with %d hops, want %v (%s) with %d: %+v",
+					result.PlainRedirects, result.RedirectVerdict, len(result.RedirectChain), c.redirects, c.verdict, c.hops, result.RedirectChain)
 			}
 			if result.RedirectChain[0].URL != plain+"/" || result.PlainStatus != result.RedirectChain[0].Status {
 				t.Errorf("the first hop is not the plain request: %+v", result.RedirectChain[0])
@@ -484,8 +507,9 @@ func TestARedirectIsNotFollowedIntoThisMachine(t *testing.T) {
 		}
 		chain := result.RedirectChain
 		if len(chain) != 2 || chain[0].Location != target || chain[1].URL != target ||
-			!chain[1].Internal || chain[1].Status != 0 || chain[1].Error != "" || result.PlainRedirects {
-			t.Fatalf("chain = %+v", chain)
+			!chain[1].Internal || chain[1].Status != 0 || chain[1].Error != "" || result.PlainRedirects ||
+			result.RedirectVerdict != "internal" {
+			t.Fatalf("chain = %+v (%s)", chain, result.RedirectVerdict)
 		}
 		scan := goodScan()
 		scan.HTTP = result
@@ -558,8 +582,8 @@ func TestScanTLSReachesAServerThatTakesOnlyRSAKeyExchange(t *testing.T) {
 	if strings.Contains(scan.Summary, "Nothing answered") || !strings.Contains(scan.Summary, "current client") {
 		t.Errorf("summary %q", scan.Summary)
 	}
-	if scan.HTTP == nil || !strings.Contains(scan.HTTP.HTTPSError, "malformed HTTP") {
-		t.Errorf("the HTTPS request should have reached the service: %+v", scan.HTTP)
+	if scan.HTTP == nil || scan.HTTP.Service != "other" || scan.HTTP.Banner != "* OK ready" {
+		t.Errorf("the HTTPS request should have reached the service and heard its greeting: %+v", scan.HTTP)
 	}
 }
 
@@ -588,8 +612,12 @@ func TestScanTLSSaysARefusedHandshakeWasRefused(t *testing.T) {
 		t.Errorf("summary %q", scan.Summary)
 	}
 
+	if scan.Failure == nil || scan.Failure.Stage != "handshake" || scan.Failure.Reason != "alert" || scan.Failure.Alert != "internal error" {
+		t.Errorf("failure %+v", scan.Failure)
+	}
+
 	closed := ScanTLS(context.Background(), "127.0.0.1", 1)
-	if !hasFinding(closed, "tls.unreachable") || !strings.HasPrefix(closed.Summary, "Nothing answered") {
+	if !hasFinding(closed, "tcp.refused") || closed.Summary != "127.0.0.1:1 refused the connection." {
 		t.Fatalf("a closed port: %q %+v", closed.Summary, closed.Findings)
 	}
 }

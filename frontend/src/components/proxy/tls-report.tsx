@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { CheckCircle, CrossCircle, Inspect } from "@/components/icons"
+import { CheckCircle, CrossCircle, External, Inspect } from "@/components/icons"
 import { get } from "@/lib/api"
 import { duration, relativeTime, timestamp } from "@/lib/format"
 import {
@@ -14,9 +15,17 @@ import {
   withRecent,
   type ScanTarget,
 } from "@/lib/scan-target"
+import {
+  certificateLeft,
+  diagnosisLinks,
+  failureSteps,
+  plainVerdict,
+  termLeft,
+  termText,
+} from "@/lib/tls-report"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
-import type { Certificate, HTTPScan, TLSScan, VHost } from "@/lib/types"
+import type { Certificate, HTTPScan, PreloadCheck, TLSScan, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Detail, DetailList, Page, PageContext } from "@/components/page"
@@ -26,10 +35,11 @@ import { RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { FindingList } from "@/components/finding-list"
 import { EmptyState, ErrorState, Notice, Spinner } from "@/components/state"
-import { Status, type Verdict } from "@/components/status-dot"
+import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import type { Tone } from "@/components/tone"
 import { useNow } from "@/components/deploy/vocabulary"
+import { expiryTone } from "@/components/proxy/expiry-status"
 import { Button } from "@/components/ui/button"
 import { Field } from "@/components/form"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
@@ -125,6 +135,12 @@ export function TLSReportPage() {
     setRescanOver({ key: targetKey, data: report.data, error: report.error })
     report.refresh()
   }
+  // Asked again from the report itself, a cancelled scan is asked again too:
+  // the cancel holds only until the next ask.
+  const scanAgain = () => {
+    setCancelled(undefined)
+    rescan()
+  }
   const cancel = (after: number) => {
     setCancelled({ key: targetKey, after, over: report.data !== undefined })
     setRescanOver(undefined)
@@ -210,15 +226,14 @@ export function TLSReportPage() {
               scan.certificate
                 ? scan.certificate.expired
                   ? "expired"
-                  : `${scan.certificate.daysLeft}d`
+                  : certificateLeft(scan.certificate, Date.parse(scan.checkedAt))
                 : "none"
             }
-            tone={
-              !scan.certificate || scan.certificate.expired
-                ? "danger"
-                : scan.certificate.daysLeft <= 14
-                  ? "warning"
-                  : "default"
+            // Amber inside the renewal window, the Certificates page's own
+            // rule: the backend judges both against the certificate's term.
+            tone={scan.certificate ? expiryTone(scan.certificate) : "danger"}
+            meter={
+              scan.certificate ? termLeft(scan.certificate, Date.parse(scan.checkedAt)) : undefined
             }
             hint={
               scan.certificate ? (
@@ -250,6 +265,22 @@ export function TLSReportPage() {
             }
           />
         </StatGrid>
+      ) : scan?.failure ? (
+        // A failed scan is graded and read like any other: the letter, then
+        // the three steps a connection takes, the one that failed in red and
+        // the ones after it not reached.
+        <StatGrid columns={4} dense>
+          <StatTile label={scanned} value={scan.grade} tone="danger" hint={scan.summary} />
+          {failureSteps(scan).map((step) => (
+            <StatTile
+              key={step.label}
+              label={step.label}
+              value={step.value}
+              tone={step.tone}
+              hint={step.hint}
+            />
+          ))}
+        </StatGrid>
       ) : (
         <StatGrid columns={4} dense>
           <StatTile label="Grade" value="—" hint="Run a live handshake" />
@@ -270,11 +301,7 @@ export function TLSReportPage() {
             <h2 className="text-base font-semibold tracking-tight break-all">
               {scanned || targetKey || "Live TLS report"}
             </h2>
-            {scan && (
-              <p className="text-hint text-muted-foreground">
-                Checked {relativeTime(scan.checkedAt)}
-              </p>
-            )}
+            {scan && <CheckedAgo at={scan.checkedAt} />}
           </div>
         </div>
         {/* As wide as the field's row: a long name in the hint or the error
@@ -377,16 +404,35 @@ export function TLSReportPage() {
               : `The scan was cancelled after ${duration(cancelled.after)}. Scan to run it again.`}
           </p>
         )}
-        {report.error && !busy && <ErrorState error={report.error} onRetry={rescan} />}
-        {/* Why no handshake completed is the report's one finding: nothing
-            listening, or a server that answered and refused, which need
-            different advice. */}
+        {report.error && !busy && <ErrorState error={report.error} onRetry={scanAgain} />}
+        {/* Why no handshake completed is the report's one finding, with
+            advice for the step that failed and the pages where it is fixed
+            when the fault can be on this server. */}
         {scan &&
           !scan.reachable &&
           scan.findings.map((finding) => (
             <Notice key={finding.id} tone="danger" icon={CrossCircle} title={finding.title}>
               <p className="break-words">{finding.detail}</p>
-              {finding.advice && <p>{finding.advice}</p>}
+              {finding.advice && <p className="break-words">{finding.advice}</p>}
+              {admin && (
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={scanAgain}
+                    disabled={busy}
+                    pending={rescanning}
+                  >
+                    Scan again
+                  </Button>
+                  {diagnosisLinks(scan).map((link) => (
+                    <Button key={link.href} variant="outline" size="xs" asChild>
+                      <Link href={link.href}>{link.label}</Link>
+                    </Button>
+                  ))}
+                </div>
+              )}
             </Notice>
           ))}
       </div>
@@ -400,7 +446,12 @@ export function TLSReportPage() {
                 <PanelBody>
                   <FindingList
                     findings={scan.findings}
-                    emptyLabel="Trusted chain, current protocols, and the headers that matter are in place"
+                    // Headers are only vouched for where an HTTP answer was read.
+                    emptyLabel={
+                      scan.http?.service === "http"
+                        ? "Trusted chain, current protocols, and the headers that matter are in place"
+                        : "Trusted chain and current protocols"
+                    }
                   />
                 </PanelBody>
               </Panel>
@@ -441,7 +492,33 @@ export function TLSReportPage() {
                   </PanelBody>
                 </Panel>
               </div>
-              {scan.http && (
+              {scan.http?.service === "other" && (
+                <Panel plain>
+                  <PanelHeader title="HTTP behaviour" />
+                  <PanelBody flush>
+                    <RowList>
+                      <ReportRow
+                        title="HTTPS"
+                        subtitle={
+                          scan.http.serviceName
+                            ? `Port ${scan.port} is registered to ${scan.http.serviceName}, so no web request was sent.`
+                            : scan.http.banner
+                              ? `Answered: ${scan.http.banner}`
+                              : "It answered the web request in a protocol other than HTTP."
+                        }
+                        mono={!scan.http.serviceName && Boolean(scan.http.banner)}
+                        trailing={<Status verdict="notice" label="not an HTTP service" />}
+                        className="py-2"
+                      />
+                    </RowList>
+                    <p className="pt-3 text-hint leading-relaxed text-muted-foreground">
+                      Only TLS was checked. HSTS, the security headers and the plain-HTTP redirect
+                      are for websites, and this service is something else.
+                    </p>
+                  </PanelBody>
+                </Panel>
+              )}
+              {scan.http && scan.http.service !== "other" && (
                 <Panel plain>
                   <PanelHeader title="HTTP behaviour" />
                   <PanelBody flush>
@@ -450,7 +527,13 @@ export function TLSReportPage() {
                         title="HTTPS"
                         subtitle={
                           scan.http.httpsError ??
-                          (scan.http.server ? `Server: ${scan.http.server}` : undefined)
+                          ([
+                            scan.http.server && `Server: ${scan.http.server}`,
+                            scan.http.location && `redirects to ${scan.http.location}`,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") ||
+                            undefined)
                         }
                         mono
                         trailing={
@@ -535,6 +618,7 @@ export function TLSReportPage() {
                   </PanelBody>
                 </Panel>
               )}
+              {scan.preload && <PreloadPanel preload={scan.preload} domain={scan.domain} />}
             </div>
             <div className="min-w-0 space-y-8">
               <Panel plain>
@@ -546,9 +630,13 @@ export function TLSReportPage() {
                     <Detail label="Issuer">
                       {scan.certificate ? <IssuerFact issuer={scan.certificate.issuer} /> : "—"}
                     </Detail>
+                    <Detail label="Valid from">
+                      {scan.certificate ? timestamp(scan.certificate.notBefore) : "—"}
+                    </Detail>
                     <Detail label="Valid until">
                       {scan.certificate ? timestamp(scan.certificate.notAfter) : "—"}
                     </Detail>
+                    <Detail label="Lifetime">{termText(scan) ?? "—"}</Detail>
                     <Detail label="Key">
                       {scan.keyType}
                       {scan.keyBits ? ` ${scan.keyBits} bits` : ""}
@@ -564,8 +652,21 @@ export function TLSReportPage() {
                           ? "no"
                           : "not applicable, the certificate names no OCSP responder"}
                     </Detail>
+                    {scan.ocspServers?.length ? (
+                      <Detail label="OCSP" className="font-mono text-micro break-all">
+                        {scan.ocspServers.join(" ")}
+                      </Detail>
+                    ) : null}
+                    {scan.crlUrls?.length ? (
+                      <Detail label="CRL" className="font-mono text-micro break-all">
+                        {scan.crlUrls.join(" ")}
+                      </Detail>
+                    ) : null}
                     <Detail label="SHA-256" className="font-mono text-micro break-all">
                       {scan.fingerprint}
+                    </Detail>
+                    <Detail label="SPKI pin" className="font-mono text-micro break-all">
+                      {scan.spkiPin ?? "—"}
                     </Detail>
                   </DetailList>
                 </PanelBody>
@@ -745,36 +846,80 @@ function PlainChain({ http }: { http: HTTPScan }) {
   )
 }
 
-const PLAIN_ERRORS: Record<NonNullable<HTTPScan["plainErrorKind"]>, string> = {
-  refused: "port 80 refused the connection",
-  timeout: "port 80 did not answer in time",
-  dns: "the name did not resolve",
-  other: "port 80 did not answer",
+/** "Checked 3 minutes ago", kept true while the page stays open. */
+function CheckedAgo({ at }: { at: string }) {
+  useNow(30_000)
+  return <p className="text-hint text-muted-foreground">Checked {relativeTime(at)}</p>
 }
 
-/** Where a plain-HTTP visitor ends up. Only a refused connection is called refused. */
-function plainVerdict(http: HTTPScan): { verdict: Verdict; label: string } {
-  const hops = http.redirectChain
-  const last = hops[hops.length - 1]
-  if (http.plainError)
-    return { verdict: "notice", label: PLAIN_ERRORS[http.plainErrorKind ?? "other"] }
-  if (http.plainRedirects) {
-    return {
-      verdict: "ok",
-      label: hops.length > 1 ? `redirects to HTTPS in ${hops.length} hops` : "redirects to HTTPS",
-    }
-  }
-  if (last?.internal) return { verdict: "notice", label: "not followed to an internal address" }
-  if (last?.error) return { verdict: "critical", label: "a redirect leads nowhere" }
-  if (last?.status && last.status >= 300 && last.status < 400) {
-    return { verdict: "critical", label: "redirects, never to HTTPS" }
-  }
-  if (hops.length > 1)
-    return { verdict: "critical", label: `stays on HTTP, answering ${last?.status}` }
-  return {
-    verdict: "critical",
-    label: `answers ${last?.status ?? http.plainStatus} without redirecting`,
-  }
+/**
+ * The domain against hstspreload.org's rules, each with what the scan saw of
+ * it. A subdomain is never submitted, so it gets the one rule that says so and
+ * a way to the name that would be.
+ */
+function PreloadPanel({ preload, domain }: { preload: PreloadCheck; domain: string }) {
+  const parent = preload.domain && preload.domain !== domain ? preload.domain : undefined
+  return (
+    <Panel plain>
+      <PanelHeader
+        title="HSTS preload"
+        actions={
+          <Status
+            verdict={preload.eligible ? "ok" : "notice"}
+            label={preload.eligible ? "eligible" : "not eligible"}
+          />
+        }
+      />
+      <PanelBody flush>
+        <RowList aria-label="HSTS preload rules">
+          {preload.rules.map((rule) => (
+            <ReportRow
+              key={rule.id}
+              leading={
+                rule.passed ? (
+                  <CheckCircle className="size-3.5 text-success" />
+                ) : (
+                  <CrossCircle className="size-3.5 text-muted-foreground" />
+                )
+              }
+              title={
+                <>
+                  <span className="sr-only">{rule.passed ? "Met: " : "Not met: "}</span>
+                  {rule.title}
+                </>
+              }
+              subtitle={rule.detail}
+              className="py-2"
+            />
+          ))}
+        </RowList>
+        <div className="space-y-2 pt-3 text-hint leading-relaxed text-muted-foreground">
+          <p>
+            Preloading has browsers use HTTPS for a domain and every name under it before the first
+            visit. Coming off the list takes months, so it suits a domain whose every subdomain
+            already serves HTTPS.
+          </p>
+          {parent && (
+            <Button variant="outline" size="xs" asChild>
+              <Link href={`/proxy/tls?domain=${encodeURIComponent(parent)}`}>Scan {parent}</Link>
+            </Button>
+          )}
+          {preload.eligible && (
+            <Button variant="outline" size="xs" asChild>
+              <a
+                href={`https://hstspreload.org/?domain=${encodeURIComponent(preload.domain)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <External className="size-3.5" />
+                Submit at hstspreload.org
+              </a>
+            </Button>
+          )}
+        </div>
+      </PanelBody>
+    </Panel>
+  )
 }
 
 function gradeTone(grade: string): Tone {

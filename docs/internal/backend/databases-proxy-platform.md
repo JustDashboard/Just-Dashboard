@@ -324,20 +324,52 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `tls.legacy-only` naming what was negotiated, and its HTTPS request makes the full offer too (a
   server taking TLS 1.2 only with RSA key exchange was reported as nothing answering, with DNS advice).
   Refused by both, it is `tls.refused` with the alert — no certificate for the name
-  (`ssl_reject_handshake`, Caddy), a client certificate wanted, or a suite Go lacks — and
-  `tls.unreachable` is kept for nothing answering at all; `TestLiveNginxWithOnlyRSAKeyExchangeIsReachable`
-  and `TestLiveNginxRejectedHandshakeIsARefusal`. When HTTPS gives no HTTP response (`httpsError`: a mail
-  server on 993, or a failing site) nothing else on the HTTP side is measured or graded — no HSTS or
-  header finding, no port-80 request. Otherwise the plain-HTTP side is followed by hand up to five hops
-  (`redirectChain`) and passes when it reaches `https://` on any host; `plainErrorKind` says whether
-  port 80 refused, timed out or did not resolve. Every hop after the first goes where the remote site's
+  (`ssl_reject_handshake`, Caddy), a client certificate wanted, or a suite Go lacks;
+  `TestLiveNginxWithOnlyRSAKeyExchangeIsReachable` and `TestLiveNginxRejectedHandshakeIsARefusal`.
+  **A scan that never completes a handshake says how far it got** (`failure`, `tlsscan_diagnosis.go`):
+  `classifyDialError` names the stage — `dns` (no record, or the lookup failed), `connect` (refused,
+  timed out, no route) or `handshake` (the server's alert, `plain-http` when the ClientHello is answered
+  with `HTTP/` — nginx's `listen 443;` without `ssl` — `not-tls` with the first bytes another protocol
+  sent, closed, or no answer). `dialTLS` connects and then handshakes as two steps so a handshake failure
+  carries the address it reached (`handshakeError`). `where` says whose answer it was: `here` (loopback or
+  an address on this machine's interfaces, private ones included), `cloudflare`, `elsewhere`, or
+  `unknown` when the provider maps this server's public address in front of it; the finding's advice
+  follows it (`tcp.refused` here is "nothing here listens on 443", elsewhere it is that host's refusal),
+  and `dns` carries `CheckDomainDNS`. `TestLiveNginxListenWithoutSSLIsDiagnosed` holds the plain-HTTP
+  case against a real nginx. **Only an HTTP answer is graded on HTTP** (`service`): a port registered to
+  a protocol that speaks TLS from its first byte and is not HTTP (`implicitTLSServices`: 465, 993, 995,
+  636, 853, 8883 and the rest) is sent no web request at all (`service: other`, `serviceName`); a
+  service that answers in its own protocol is `other` with its first line (`banner`, read off the
+  connection by `firstBytes`: net/http's error quotes only a fragment of a line that is not HTTP, and
+  nothing of a greeting sent on connect before the request, as SMTP and IMAP send theirs); a request
+  with no answer is `unknown` with `httpsError` and the `http.https-error` notice. In none of them is an
+  HSTS, header or redirect finding made, or port 80 asked. Otherwise the plain-HTTP side is followed by
+  hand up to five hops (`redirectChain`), passes when it reaches `https://` on any host, and says where
+  it ended (`redirectVerdict`: `same-host`, `other-host`, `stays-http`, `loop`, `too-many`, `dead-end`,
+  `internal`); `plainErrorKind` says whether port 80 refused, timed out or did not resolve. The HTTPS
+  answer's own redirect is `location`. Every hop after the first goes where the remote site's
   `Location` says, so its dial (checked on the resolved address, in a `net.Dialer` `Control` hook) may
   reach only the address the first request reached or a public one (`hopAllowed`, `IsPublicAddress`):
   a redirect to loopback, a private or link-local network or CGNAT is recorded as an `internal` hop and
   not requested, and graded as a notice (`http.redirect-internal`) rather than a missing redirect,
   because where the chain ends is not known. The serial is colon hex as openssl prints it, and the
-  unstapled-OCSP notice needs a responder in the leaf (`ocspServers`; Let's Encrypt names none).
-  `grade` is a pure function of the scan. The live certificate, TLS and DNS probes require
+  unstapled-OCSP notice needs a responder in the leaf (`ocspServers`; Let's Encrypt names none);
+  `crlUrls` and `spkiPin` (base64 SHA-256 of the public key, what `curl --pinnedpubkey` takes) are
+  reported beside them. **Expiry is judged against the certificate's term** (`tlsscan_lifetime.go`):
+  renewal is due in the last third of it, the last half for a term of ten days or less — certbot's rule
+  since 4.0, and Caddy's — and never more than 30 days out. `summarise` (`certs.go`) sets `expiring`
+  by it, so the Certificates page and the report agree; a 6-day certificate is no longer expiring for its
+  whole life. The report notes a certificate inside that window (`tls.renewal-due`) and grades B once
+  half of it has passed with the certificate still served (`tls.expiring`); `lifetimeHours` and
+  `renewalWindowHours` are in hours because a short-lived term is 160 of them. **HSTS preload** is
+  measured for a name on 443 that answered HTTP (`preload`, `tlsscan_preload.go`) against
+  hstspreload.org's rules, each with what was seen: a registrable domain by the Public Suffix List (a
+  subdomain gets only that rule, naming the parent to scan), a trusted certificate, a first plain-HTTP
+  redirect to HTTPS on the same host (a refused port 80 passes), an HTTPS redirect that stays on HTTPS,
+  `max-age` of a year, `includeSubDomains`, `preload`, and `www.` serving a trusted certificate when it
+  has a record — that handshake runs beside the probes. Six months stays the A+ threshold, as SSL
+  Labs'; the list asks for a year, which the report now says. `TestLiveNginxPreloadRules` checks the
+  rules against a real nginx. `grade` is a pure function of the scan. The live certificate, TLS and DNS probes require
   `system.admin`: each emits traffic to a caller-chosen destination, the same scanner boundary as
   `/network/probe`. What reaches them is `ParseScanTarget` (`scantarget.go`): a URL, host:port, a
   bracketed IPv6 address or a name in its own script become a host and port, and anything else is a 400

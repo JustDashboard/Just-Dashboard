@@ -40,7 +40,7 @@ func goodScan() *TLSScan {
 		Negotiated: "TLS 1.3",
 		Certificate: &Certificate{
 			Name: "example.com", Domains: []string{"example.com"},
-			DaysLeft: 60, NotAfter: time.Now().Add(60 * 24 * time.Hour),
+			DaysLeft: 60, NotBefore: time.Now().Add(-30 * 24 * time.Hour), NotAfter: time.Now().Add(60 * 24 * time.Hour),
 		},
 		Protocols: []ProtocolResult{
 			{Name: "TLS 1.0", Status: "refused"},
@@ -49,7 +49,7 @@ func goodScan() *TLSScan {
 			{Name: "TLS 1.3", Status: "offered"},
 		},
 		HTTP: &HTTPScan{
-			StatusCode: 200, PlainRedirects: true,
+			Service: "http", StatusCode: 200, PlainRedirects: true, RedirectVerdict: "same-host",
 			HSTS:    &HSTS{MaxAge: hstsStrongMaxAge, IncludeSubDomains: true},
 			Headers: []HeaderCheck{{Name: "X-Frame-Options", Present: true, Level: "important"}},
 		},

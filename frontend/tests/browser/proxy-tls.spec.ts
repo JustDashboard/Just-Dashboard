@@ -508,32 +508,77 @@ test("a version the server refuses reads as refused, in the server's words", asy
 
 test("a service that is not a website is not graded on HTTP headers", async ({ page }) => {
   await mockProxy(page, { included: true })
-  await scans(page, () => ({
+  const mail = {
     ...scan,
     domain: "mail.example.com",
     port: 993,
+    preload: undefined,
+    findings: [],
+    http: {
+      service: "other",
+      serviceName: "IMAP",
+      statusCode: 0,
+      plainRedirects: false,
+      redirectChain: [],
+      headers: [],
+    },
+  }
+  let answer: object = mail
+  await scans(page, () => answer)
+  await page.goto("/proxy/tls?domain=mail.example.com%3A993")
+  const https = page.locator("li").filter({ hasText: /^HTTPS/ })
+  await expect(https.getByText("not an HTTP service")).toBeVisible()
+  await expect(
+    https.getByText("Port 993 is registered to IMAP, so no web request was sent."),
+  ).toBeVisible()
+  await expect(page.getByText("no Strict-Transport-Security header")).toHaveCount(0)
+  await expect(page.getByText("Plain HTTP", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("HSTS is not set")).toHaveCount(0)
+  await expect(page.getByText("HSTS preload")).toHaveCount(0)
+  // No finding is no claim about headers that were never asked for.
+  await expect(page.getByText("Trusted chain and current protocols", { exact: true })).toBeVisible()
+  await expect(page.getByText(/headers that matter/)).toHaveCount(0)
+
+  // On a port of its own, the service's greeting is what says it is not a website.
+  answer = {
+    ...mail,
+    port: 10993,
+    http: {
+      ...mail.http,
+      serviceName: undefined,
+      banner: "* OK [CAPABILITY IMAP4rev1] Dovecot ready.",
+    },
+  }
+  await page.getByLabel("Domain to scan").fill("mail.example.com:10993")
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
+  await expect(page.getByText("Answered: * OK [CAPABILITY IMAP4rev1] Dovecot ready.")).toBeVisible()
+  await expect(page.getByText("not an HTTP service")).toBeVisible()
+  await expect(page.getByText("no HTTP answer")).toHaveCount(0)
+
+  // No answer at all could be a failing website or a quiet service, and says so.
+  answer = {
+    ...mail,
+    port: 10994,
     findings: [
       {
         id: "http.https-error",
         level: "notice",
         title: "HTTPS did not answer an HTTP request",
-        detail: 'malformed HTTP response "* OK IMAP4rev1 ready"',
+        detail: "the server closed the connection without an HTTP response",
       },
     ],
     http: {
-      statusCode: 0,
-      httpsError: 'malformed HTTP response "* OK IMAP4rev1 ready"',
-      plainRedirects: false,
-      redirectChain: [],
-      headers: [],
+      ...mail.http,
+      service: "unknown",
+      serviceName: undefined,
+      httpsError: "the server closed the connection without an HTTP response",
     },
-  }))
-  await page.goto("/proxy/tls?domain=mail.example.com%3A993")
+  }
+  await page.getByLabel("Domain to scan").fill("mail.example.com:10994")
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
   await expect(page.getByText("no HTTP answer")).toBeVisible()
-  await expect(page.getByText("Only TLS was checked.")).toBeVisible()
-  await expect(page.getByText("no Strict-Transport-Security header")).toHaveCount(0)
-  await expect(page.getByText("Plain HTTP", { exact: true })).toHaveCount(0)
-  await expect(page.getByText("HSTS is not set")).toHaveCount(0)
+  await expect(page.getByText("Only TLS was checked.", { exact: false })).toBeVisible()
+  await expect(page.getByText("not an HTTP service")).toHaveCount(0)
 })
 
 test("a redirect through another host is drawn hop by hop and counts", async ({ page }) => {
@@ -545,6 +590,7 @@ test("a redirect through another host is drawn hop by hop and counts", async ({ 
       plainRedirects: true,
       plainStatus: 301,
       plainLocation: "http://www.app.example.com/",
+      redirectVerdict: "other-host",
       redirectChain: [
         { url: "http://app.example.com/", status: 301, location: "http://www.app.example.com/" },
         {
@@ -557,7 +603,8 @@ test("a redirect through another host is drawn hop by hop and counts", async ({ 
   }))
   await page.goto("/proxy/tls?domain=app.example.com")
   const plain = page.locator("li").filter({ hasText: /^Plain HTTP/ })
-  await expect(plain.getByText("redirects to HTTPS in 2 hops")).toBeVisible()
+  // HTTPS is reached, on another host, which the verdict names.
+  await expect(plain.getByText("reaches HTTPS on www.app.example.com in 2 hops")).toBeVisible()
   await expect(
     plain.getByText("http://app.example.com/ 301 → http://www.app.example.com/"),
   ).toBeVisible()
@@ -579,6 +626,7 @@ test("a closed port 80 is named for what happened", async ({ page }) => {
       plainError: "dial tcp 203.0.113.4:80: i/o timeout",
       plainErrorKind: "timeout",
       redirectChain: [],
+      redirectVerdict: undefined,
     },
   }))
   await page.goto("/proxy/tls?domain=app.example.com")
@@ -733,6 +781,7 @@ test("a redirect into this machine reads as not followed, not as broken", async 
       plainRedirects: false,
       plainStatus: 301,
       plainLocation: "http://127.0.0.1:8080/admin",
+      redirectVerdict: "internal",
       redirectChain: [
         { url: "http://app.example.com/", status: 301, location: "http://127.0.0.1:8080/admin" },
         { url: "http://127.0.0.1:8080/admin", internal: true },
@@ -951,57 +1000,101 @@ test("a new watch shows its row being checked until its first check arrives", as
   expect(lists).toBe(2)
 })
 
-test("a server that refused the handshake is not said to be silent", async ({ page }) => {
-  await mockProxy(page, { included: true })
-  const refused = {
+/** A scan that never completed a handshake, stopped at `failure` with `finding`. */
+function failedScan(failure: object, finding: object, summary: string) {
+  return {
     ...scan,
     reachable: false,
     grade: "F",
-    summary: "The server on app.example.com:443 refused the handshake.",
-    error: "remote error: tls: unrecognized name",
+    summary,
+    error: "the Go error",
     certificate: undefined,
     protocols: [],
     chain: [],
     http: undefined,
-    findings: [
-      {
-        id: "tls.refused",
-        level: "critical",
-        title: "The server refused the handshake",
-        detail:
-          "It answered unrecognized name, both to the handshake a current client makes and to one offering every version and cipher suite this check has.",
-        advice:
-          "Something on port 443 speaks TLS and will not finish a handshake for app.example.com.",
-      },
-    ],
+    preload: undefined,
+    failure,
+    findings: [{ level: "critical", ...finding }],
   }
-  const silent = {
-    ...refused,
-    summary: "Nothing answered a TLS handshake on app.example.com:443.",
-    error: "dial tcp 203.0.113.4:443: connect: connection refused",
-    findings: [
-      {
-        id: "tls.unreachable",
-        level: "critical",
-        title: "Nothing answered a TLS handshake",
-        detail: "dial tcp 203.0.113.4:443: connect: connection refused",
-        advice: "Check the domain resolves to this server and that the proxy is listening on 443.",
-      },
-    ],
+}
+
+const here = {
+  domain: "app.example.com",
+  addresses: ["203.0.113.4"],
+  hostAddresses: ["203.0.113.4"],
+  hostAddressesKnown: true,
+  pointsHere: true,
+  behindProxy: false,
+  summary: "",
+}
+
+const refusedHandshake = failedScan(
+  {
+    stage: "handshake",
+    reason: "alert",
+    alert: "unrecognized name",
+    address: "203.0.113.4:443",
+    where: "here",
+    dns: here,
+  },
+  {
+    id: "tls.refused",
+    title: "The server refused the handshake",
+    detail:
+      "It answered unrecognized name, both to the handshake a current client makes and to one offering every version and cipher suite this check has.",
+    advice: "Something on port 443 speaks TLS and will not finish a handshake for app.example.com.",
+  },
+  "The server on app.example.com:443 refused the handshake.",
+)
+
+const refusedConnection = failedScan(
+  { stage: "connect", reason: "refused", address: "203.0.113.4:443", where: "here", dns: here },
+  {
+    id: "tcp.refused",
+    title: "Nothing is listening on port 443",
+    detail: "203.0.113.4:443 refused the connection.",
+    advice:
+      "That is this server. Nothing here accepts connections on port 443. Check that the proxy has a site listening on 443 and that it is running.",
+  },
+  "203.0.113.4:443 refused the connection.",
+)
+
+/** The four readings of a failed scan, as label → value. */
+async function tiles(page: Page) {
+  const out: Record<string, string> = {}
+  for (const tile of await page.locator("[data-slot='stat-tile']").all()) {
+    const label = (await tile.locator(".eyebrow").textContent()) ?? ""
+    out[label] = (await tile.locator(".numeric").first().textContent()) ?? ""
   }
-  let answer: object = refused
+  return out
+}
+
+test("a server that refused the handshake is not said to be silent", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let answer: object = refusedHandshake
   await scans(page, () => answer)
   await page.goto("/proxy/tls?domain=app.example.com")
   await expect(page.getByText("The server refused the handshake")).toBeVisible()
   await expect(page.getByText("It answered unrecognized name", { exact: false })).toBeVisible()
   await expect(page.getByText("will not finish a handshake for app.example.com")).toBeVisible()
-  await expect(page.getByText(/Nothing answered/)).toHaveCount(0)
-  await expect(page.getByText(/resolves to this server/)).toHaveCount(0)
+  expect(await tiles(page)).toEqual({
+    "app.example.com": "F",
+    Name: "resolves",
+    "Port 443": "open",
+    Handshake: "refused",
+  })
+  await expect(page.getByText("unrecognized name", { exact: true })).toBeVisible()
+  await expect(page.getByText(/Nothing is listening/)).toHaveCount(0)
 
-  answer = silent
+  answer = refusedConnection
   await page.getByRole("button", { name: "Scan", exact: true }).click()
-  await expect(page.getByText("Nothing answered a TLS handshake", { exact: true })).toBeVisible()
-  await expect(page.getByText(/resolves to this server/)).toBeVisible()
+  await expect(page.getByText("Nothing is listening on port 443")).toBeVisible()
+  expect(await tiles(page)).toEqual({
+    "app.example.com": "F",
+    Name: "resolves",
+    "Port 443": "refused",
+    Handshake: "—",
+  })
   await expect(page.getByText("The server refused the handshake")).toHaveCount(0)
 })
 
@@ -1057,4 +1150,239 @@ test("a full-length serial wraps inside its panel", async ({ page }) => {
       width,
     )
   }
+})
+
+test("a failed scan says where to look next, and only where the fault can be here", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let answer: object = refusedConnection
+  const seen = await scans(page, () => answer)
+  await page.goto("/proxy/tls?domain=app.example.com")
+  const diagnosis = page.getByText("Nothing is listening on port 443").locator("..").locator("..")
+  await expect(diagnosis.getByText("That is this server.", { exact: false })).toBeVisible()
+  await expect(diagnosis.getByRole("link", { name: "Listening ports" })).toHaveAttribute(
+    "href",
+    "/proxy/ports?q=:443",
+  )
+  await expect(page.getByText("203.0.113.4:443 · this server")).toBeVisible()
+  await expect(page.getByText("Nothing scanned yet")).toHaveCount(0)
+
+  // Scan again asks the same target once more.
+  await diagnosis.getByRole("button", { name: "Scan again" }).click()
+  await expect.poll(() => seen.length).toBe(2)
+  expect(seen[1].searchParams.get("domain")).toBe("app.example.com")
+
+  // A refusal from another host is not fixed on this server's pages.
+  answer = failedScan(
+    { stage: "connect", reason: "timeout", address: "198.51.100.7:443", where: "elsewhere" },
+    {
+      id: "tcp.timeout",
+      title: "No answer on port 443",
+      detail: "198.51.100.7:443 did not answer the connection within 8 seconds.",
+      advice: "198.51.100.7:443 is not this server.",
+    },
+    "198.51.100.7:443 did not answer the connection.",
+  )
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
+  await expect(page.getByText("No answer on port 443")).toBeVisible()
+  await expect(page.getByText("198.51.100.7:443 · not this server")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Listening ports" })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Firewall" })).toHaveCount(0)
+
+  // Dropped here, the firewall is the first place to look.
+  answer = failedScan(
+    { stage: "connect", reason: "timeout", address: "203.0.113.4:443", where: "here", dns: here },
+    {
+      id: "tcp.timeout",
+      title: "No answer on port 443",
+      detail: "203.0.113.4:443 did not answer the connection within 8 seconds.",
+    },
+    "203.0.113.4:443 did not answer the connection.",
+  )
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
+  await expect(page.getByRole("link", { name: "Firewall" })).toHaveAttribute(
+    "href",
+    "/security/firewall",
+  )
+  expect((await tiles(page))["Port 443"]).toBe("timed out")
+})
+
+test("a name that does not resolve stops at the name", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await scans(page, () =>
+    failedScan(
+      { stage: "dns", reason: "no-such-host" },
+      {
+        id: "dns.unresolved",
+        title: "The name does not resolve",
+        detail: "The resolver this server uses has no address for app.example.com.",
+        advice:
+          "Add an A or AAAA record for app.example.com pointing at the server that should answer.",
+      },
+      "app.example.com does not resolve.",
+    ),
+  )
+  await page.goto("/proxy/tls?domain=app.example.com")
+  await expect(page.getByText("The name does not resolve")).toBeVisible()
+  expect(await tiles(page)).toEqual({
+    "app.example.com": "F",
+    Name: "no record",
+    "Port 443": "—",
+    Handshake: "—",
+  })
+  await expect(page.getByText("not reached")).toHaveCount(2)
+  await expect(page.getByRole("link", { name: "Listening ports" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Scan again" })).toBeVisible()
+})
+
+test("plain HTTP on the TLS port is named, with the listen directive to fix", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await scans(page, () =>
+    failedScan(
+      {
+        stage: "handshake",
+        reason: "plain-http",
+        answer: "HTTP/",
+        address: "203.0.113.4:443",
+        where: "here",
+        dns: here,
+      },
+      {
+        id: "tls.plain-http",
+        title: "Port 443 answers plain HTTP, not TLS",
+        detail:
+          '203.0.113.4:443 answered the TLS handshake with "HTTP/": an HTTP server without TLS on that port.',
+        advice:
+          "In nginx a listen directive without ssl serves plain HTTP. Write it as listen 443 ssl; and give the server block a certificate.",
+      },
+      "203.0.113.4:443 answers plain HTTP, not TLS.",
+    ),
+  )
+  await page.goto("/proxy/tls?domain=app.example.com")
+  await expect(page.getByText("Port 443 answers plain HTTP, not TLS")).toBeVisible()
+  await expect(page.getByText("listen 443 ssl;", { exact: false })).toBeVisible()
+  await expect(page.getByText("answered “HTTP/”")).toBeVisible()
+  expect((await tiles(page)).Handshake).toBe("plain HTTP")
+  await expect(page.getByRole("link", { name: "Sites" })).toHaveAttribute("href", "/proxy/sites")
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test("the preload checklist gives every rule, and a subdomain the name to scan", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let answer: object = scan
+  await scans(page, () => answer)
+  await page.goto("/proxy/tls?domain=app.example.com")
+  const rules = page.getByRole("list", { name: "HSTS preload rules" })
+  await expect(rules.locator("li")).toHaveCount(1)
+  await expect(rules).toContainText("Not met: A registrable domain")
+  await expect(page.getByText("not eligible")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Scan example.com" })).toHaveAttribute(
+    "href",
+    "/proxy/tls?domain=example.com",
+  )
+  await expect(page.getByRole("link", { name: /hstspreload\.org/ })).toHaveCount(0)
+
+  const rule = (id: string, title: string, passed: boolean, detail: string) => ({
+    id,
+    title,
+    passed,
+    detail,
+  })
+  answer = {
+    ...scan,
+    domain: "example.com",
+    preload: {
+      domain: "example.com",
+      eligible: false,
+      rules: [
+        rule("registrable", "A registrable domain", true, "example.com is a registrable domain."),
+        rule("certificate", "A valid certificate", true, "The certificate is trusted."),
+        rule(
+          "redirect",
+          "Plain HTTP redirects to HTTPS on the same host first",
+          false,
+          "http://example.com/ redirects to http://www.example.com/ first. The first redirect has to go to https://example.com.",
+        ),
+        rule(
+          "max-age",
+          "max-age of at least a year (31536000)",
+          false,
+          "max-age is 15552000 seconds (180 days); the list asks for a year.",
+        ),
+        rule("include-subdomains", "includeSubDomains", true, "Set."),
+        rule("preload", "The preload directive", true, "Set."),
+        rule("www", "www.example.com serves HTTPS, if it exists", true, "No DNS record."),
+      ],
+    },
+  }
+  await page.getByLabel("Domain to scan").fill("example.com")
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
+  await expect(rules.locator("li")).toHaveCount(7)
+  await expect(rules.locator("li").filter({ hasText: "max-age" })).toContainText(
+    "Not met: max-age of at least a year (31536000)",
+  )
+  await expect(rules.getByText("15552000 seconds (180 days)", { exact: false })).toBeVisible()
+  await expect(rules.locator("li").filter({ hasText: "includeSubDomains" })).toContainText("Met:")
+  await expect(page.getByRole("link", { name: /Scan example\.com/ })).toHaveCount(0)
+
+  answer = {
+    ...(answer as typeof scan),
+    preload: {
+      domain: "example.com",
+      eligible: true,
+      rules: [rule("registrable", "A registrable domain", true, "example.com is registrable.")],
+    },
+  }
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
+  await expect(page.getByText("eligible", { exact: true })).toBeVisible()
+  const submit = page.getByRole("link", { name: "Submit at hstspreload.org" })
+  await expect(submit).toHaveAttribute("href", "https://hstspreload.org/?domain=example.com")
+  await expect(submit).toHaveAttribute("target", "_blank")
+})
+
+test("the live certificate gives its term, where it came from and its pin", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let answer: object = scan
+  await scans(page, () => answer)
+  await page.goto("/proxy/tls?domain=app.example.com")
+  const detail = (label: string) => page.locator(`dt:has-text("${label}") + dd`)
+  await expect(detail("Valid from")).not.toHaveText("—")
+  await expect(detail("Lifetime")).toHaveText("90 days, renewal due in the last 30 days")
+  await expect(detail("CRL")).toHaveText("http://r11.c.lencr.org/12.crl")
+  await expect(detail("SPKI pin")).toHaveText("C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=")
+  await expect(page.locator('dt:text-is("OCSP")')).toHaveCount(0)
+  const certificate = page
+    .locator("[data-slot='stat-tile']")
+    .filter({ has: page.locator(".eyebrow", { hasText: /^Certificate$/ }) })
+  await expect(certificate.locator(".numeric").first()).toHaveText("44d")
+  await expect(certificate.locator(".numeric").first()).not.toHaveClass(/text-warning/)
+  await expect(certificate.getByRole("meter")).toHaveCount(1)
+
+  // A six-day certificate on its last day reads in hours, amber as the
+  // Certificates page draws a certificate due for renewal.
+  const soon = Date.now() + 29 * 3_600_000
+  answer = {
+    ...scan,
+    domain: "short.example.com",
+    lifetimeHours: 160,
+    renewalWindowHours: 80,
+    ocspServers: ["http://ocsp.example.test"],
+    certificate: {
+      ...scan.certificate,
+      notBefore: new Date(soon - 160 * 3_600_000).toISOString(),
+      notAfter: new Date(soon).toISOString(),
+      daysLeft: 1,
+      expiring: true,
+    },
+  }
+  await page.getByLabel("Domain to scan").fill("short.example.com")
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
+  await expect(detail("Lifetime")).toHaveText("160 hours, renewal due in the last 80 hours")
+  await expect(page.locator('dt:text-is("OCSP") + dd')).toHaveText("http://ocsp.example.test")
+  await expect(certificate.locator(".numeric").first()).toHaveText(/^2[89]h$/)
+  await expect(certificate.locator(".numeric").first()).toHaveClass(/text-warning/)
 })

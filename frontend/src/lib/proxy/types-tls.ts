@@ -46,9 +46,31 @@ export type RedirectHop = {
   internal?: boolean
 }
 
+/**
+ * Where the plain-HTTP chain ended: HTTPS on the host it started from or on
+ * another one, an answer that is not a redirect, a loop, too many hops, a hop
+ * that did not answer or pointed nowhere usable, or a hop into this machine's
+ * network, which is not followed.
+ */
+export type RedirectVerdict =
+  "same-host" | "other-host" | "stays-http" | "loop" | "too-many" | "dead-end" | "internal"
+
 export type HTTPScan = {
+  /**
+   * "http" when HTTPS answered an HTTP request, "other" when the service is
+   * known not to be a website (its port is registered to another protocol,
+   * or it answered in one), "unknown" when the request got no answer that
+   * says either.
+   */
+  service: "http" | "other" | "unknown"
+  /** The protocol the port is registered to, when that is why no request was sent. */
+  serviceName?: string
+  /** The first line a service that is not HTTP answered with. */
+  banner?: string
   statusCode: number
   server?: string
+  /** Where the HTTPS answer redirects, when it does. */
+  location?: string
   /**
    * Why HTTPS gave no HTTP response — the service is not a website, or it is
    * failing. Nothing else on the HTTP side was measured then.
@@ -62,8 +84,9 @@ export type HTTPScan = {
   /** Why port 80 did not answer at all. */
   plainError?: string
   plainErrorKind?: "refused" | "timeout" | "dns" | "other"
-  /** Every plain-HTTP request made, in order. */
+  /** Every plain-HTTP request made, in order, and where that ended. */
   redirectChain: RedirectHop[]
+  redirectVerdict?: RedirectVerdict
   hsts?: HSTS
   headers: HeaderCheck[]
 }
@@ -76,12 +99,54 @@ export type ScanFinding = {
   advice?: string
 }
 
+/** One of hstspreload.org's submission rules and what the scan saw of it. */
+export type PreloadRule = {
+  id: string
+  title: string
+  passed: boolean
+  detail: string
+}
+
+/**
+ * A name on port 443 against the HSTS preload list's rules. For a subdomain,
+ * `domain` is the registrable domain to scan instead and the one rule says so.
+ */
+export type PreloadCheck = {
+  domain: string
+  eligible: boolean
+  rules: PreloadRule[]
+}
+
+/** How far a scan that never completed a handshake got, and why it stopped. */
+export type ScanFailure = {
+  stage: "dns" | "connect" | "handshake"
+  /**
+   * dns: no-such-host, timeout, error. connect: refused, timeout, unreachable,
+   * error. handshake: alert, plain-http, not-tls, closed, timeout, error.
+   */
+  reason: string
+  /** Where the failing connection went, once the name had resolved. */
+  address?: string
+  /** The TLS alert the server refused the handshake with. */
+  alert?: string
+  /** The first bytes a service that does not speak TLS sent back. */
+  answer?: string
+  /**
+   * Whose answer it was: this server, Cloudflare's proxy, another host, or
+   * unknown when the provider maps this server's public address in front of it.
+   */
+  where?: "here" | "cloudflare" | "elsewhere" | "unknown"
+  /** The name resolved beside this server's own addresses. */
+  dns?: DomainCheck
+}
+
 export type TLSScan = {
   domain: string
   port: number
   checkedAt: string
   reachable: boolean
   error?: string
+  failure?: ScanFailure
   grade: string
   summary: string
   negotiated?: string
@@ -107,7 +172,17 @@ export type TLSScan = {
   ocspStapled: boolean
   /** The OCSP responders the leaf names; with none there is nothing to staple. */
   ocspServers?: string[]
+  crlUrls?: string[]
+  /** Base64 SHA-256 of the leaf's public key: the pin curl's --pinnedpubkey takes. */
+  spkiPin?: string
+  /**
+   * The leaf's whole term and the end of it in which renewal is due, in hours:
+   * a short-lived certificate's 160 is no whole number of days.
+   */
+  lifetimeHours?: number
+  renewalWindowHours?: number
   http?: HTTPScan
+  preload?: PreloadCheck
   findings: ScanFinding[]
 }
 

@@ -175,7 +175,7 @@ func summarise(c *x509.Certificate, name, path string) *Certificate {
 	}
 	cert.DaysLeft = int(time.Until(c.NotAfter).Hours() / 24)
 	cert.Expired = time.Now().After(c.NotAfter)
-	cert.Expiring = !cert.Expired && cert.DaysLeft <= expiryWarningDays
+	cert.Expiring = renewalDue(c.NotBefore, c.NotAfter, time.Now())
 	cert.SelfSigned = c.Issuer.String() == c.Subject.String()
 	sum := sha256.Sum256(c.Raw)
 	cert.Fingerprint = colonHex(sum[:])

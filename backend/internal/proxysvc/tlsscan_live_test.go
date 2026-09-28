@@ -99,6 +99,23 @@ func TestLiveNginxRejectedHandshakeIsARefusal(t *testing.T) {
 // and returns its address. It skips when nginx is not installed.
 func startLiveNginx(t *testing.T, cert tls.Certificate, directives string) string {
 	t.Helper()
+	return scanNginx(t, cert, 1, func(ports []int, certPath, keyPath string) string {
+		return fmt.Sprintf(`    server {
+        listen 127.0.0.1:%d ssl;
+        server_name scan.test;
+        ssl_certificate %s;
+        ssl_certificate_key %s;
+        %s
+        return 200 "ok";
+    }`, ports[0], certPath, keyPath, directives)
+	})[0]
+}
+
+// scanNginx runs a private nginx whose http block holds the servers written
+// for count free loopback ports and cert's files, and returns an address per
+// port. It skips when nginx is not installed.
+func scanNginx(t *testing.T, cert tls.Certificate, count int, servers func(ports []int, certPath, keyPath string) string) []string {
+	t.Helper()
 	binary, err := exec.LookPath("nginx")
 	if err != nil {
 		t.Skip("nginx is not installed")
@@ -115,12 +132,17 @@ func startLiveNginx(t *testing.T, cert tls.Certificate, directives string) strin
 	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	// Each port is held until nginx is about to take it, so no two of them
+	// come out the same.
+	ports := make([]int, count)
+	held := make([]net.Listener, count)
+	for i := range ports {
+		listener, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		held[i], ports[i] = listener, listener.Addr().(*net.TCPAddr).Port
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
 
 	user := ""
 	if os.Getuid() == 0 {
@@ -137,22 +159,18 @@ events {}
 http {
     access_log off;
 %s
-    server {
-        listen 127.0.0.1:%d ssl;
-        server_name scan.test;
-        ssl_certificate %s;
-        ssl_certificate_key %s;
-        %s
-        return 200 "ok";
-    }
+%s
 }
-`, user, root, root, strings.Join(temp, "\n"), port, certPath, keyPath, directives)
+`, user, root, root, strings.Join(temp, "\n"), servers(ports, certPath, keyPath))
 	if err := os.WriteFile(config, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
 	command := exec.Command(binary, "-p", root, "-c", config, "-g", "daemon off;")
 	command.Stdout, command.Stderr = &output, &output
+	for _, listener := range held {
+		listener.Close()
+	}
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -163,17 +181,94 @@ http {
 			t.Log(output.String())
 		}
 	})
-	addr := "127.0.0.1:" + strconv.Itoa(port)
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		conn, err := net.DialTimeout("tcp", addr, time.Second)
-		if err == nil {
-			conn.Close()
-			return addr
+	addrs := make([]string, count)
+	for i, port := range ports {
+		addrs[i] = "127.0.0.1:" + strconv.Itoa(port)
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			conn, err := net.DialTimeout("tcp", addrs[i], time.Second)
+			if err == nil {
+				conn.Close()
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("nginx did not start: %v", err)
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("nginx did not start: %v", err)
+	}
+	return addrs
+}
+
+// nginx's `listen N;` without ssl — the commonest way to break HTTPS in a
+// config — answers the ClientHello with an HTTP 400, and the report said
+// nothing answered and to check DNS.
+func TestLiveNginxListenWithoutSSLIsDiagnosed(t *testing.T) {
+	cert, _ := scanTestCert(t, 14, nil)
+	addr := scanNginx(t, cert, 1, func(ports []int, _, _ string) string {
+		return fmt.Sprintf("    server {\n        listen 127.0.0.1:%d;\n        return 200 \"ok\";\n    }", ports[0])
+	})[0]
+	host, port := splitAddr(t, addr)
+	scan := ScanTLS(context.Background(), host, port)
+	f := scan.Failure
+	if scan.Grade != "F" || f == nil || f.Stage != "handshake" || f.Reason != "plain-http" || f.Answer != "HTTP/" || f.Where != "here" {
+		t.Fatalf("got %q %+v", scan.Summary, f)
+	}
+	if !hasFinding(scan, "tls.plain-http") || !strings.Contains(scan.Findings[0].Advice, fmt.Sprintf("listen %d ssl;", port)) {
+		t.Errorf("findings %+v", scan.Findings)
+	}
+}
+
+// A real nginx configured the way the preload list asks: port 80 sends
+// visitors straight to HTTPS on the same host, and HTTPS answers with a
+// year's max-age, includeSubDomains and preload. Its answers meet every rule
+// the scan can see, and the six-month max-age the site form writes does not.
+func TestLiveNginxPreloadRules(t *testing.T) {
+	cert, _ := scanTestCert(t, 15, nil)
+	addrs := scanNginx(t, cert, 3, func(ports []int, certPath, keyPath string) string {
+		return fmt.Sprintf(`    server {
+        listen 127.0.0.1:%d;
+        return 301 https://$host$request_uri;
+    }
+    server {
+        listen 127.0.0.1:%d ssl;
+        ssl_certificate %s;
+        ssl_certificate_key %s;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+        return 200 "ok";
+    }
+    server {
+        listen 127.0.0.1:%d ssl;
+        ssl_certificate %s;
+        ssl_certificate_key %s;
+        add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+        return 200 "ok";
+    }`, ports[0], ports[1], certPath, keyPath, ports[2], certPath, keyPath)
+	})
+	plain, preloaded, sixMonths := addrs[0], addrs[1], addrs[2]
+	www := &PreloadRule{ID: "www", Passed: true}
+
+	ready := scanHTTP(context.Background(), "https://"+preloaded+"/", "http://"+plain+"/", tlsOffer("", 0, 0))
+	if ready.Service != "http" || ready.RedirectVerdict != "same-host" || ready.HSTS == nil {
+		t.Fatalf("got %+v", ready)
+	}
+	scan := goodScan()
+	scan.HTTP = ready
+	if check := preloadCheck("example.com", scan, www); !check.Eligible {
+		t.Fatalf("every rule should pass: %+v", check)
+	}
+
+	short := scanHTTP(context.Background(), "https://"+sixMonths+"/", "http://"+plain+"/", tlsOffer("", 0, 0))
+	scan = goodScan()
+	scan.HTTP = short
+	check := preloadCheck("example.com", scan, www)
+	failed := []string{}
+	for _, rule := range check.Rules {
+		if !rule.Passed {
+			failed = append(failed, rule.ID)
 		}
-		time.Sleep(100 * time.Millisecond)
+	}
+	if check.Eligible || strings.Join(failed, " ") != "max-age preload" {
+		t.Fatalf("failed %v: %+v", failed, check.Rules)
 	}
 }
