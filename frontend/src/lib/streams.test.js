@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test"
 import {
   byUrgency,
   carries,
+  connectChange,
+  disconnectChange,
+  moduleLabel,
   durationError,
   formatDuration,
   includedPlace,
@@ -188,6 +191,34 @@ describe("module and include", () => {
     )
     expect(moduleRemedy({ state: "absent", usable: false })).toContain("built without it")
     expect(moduleRemedy({ state: "loaded", usable: true })).toBe("")
+  })
+})
+
+describe("connecting the directory", () => {
+  test("names each module state in a word or two", () => {
+    expect(moduleLabel({ state: "static", usable: true })).toBe("built in")
+    expect(moduleLabel({ state: "not-installed", usable: false })).toBe("not installed")
+    expect(moduleLabel({ state: "absent", usable: false })).toBe("not in this build")
+    expect(moduleLabel({ state: "unknown", usable: false })).toBe("could not check")
+  })
+
+  test("says what each change touches, and that disconnecting takes out only that", () => {
+    const dropIn = "/etc/nginx/modules-enabled/zz-just-dashboard-stream.conf"
+    expect(connectChange("dropin", dropIn)).toMatch(
+      /^Creates zz-just-dashboard-stream\.conf in \/etc\/nginx\/modules-enabled\. .*nginx\.conf stays/,
+    )
+    expect(connectChange("nginx.conf", "/etc/nginx/nginx.conf")).toMatch(
+      /^Adds a stream block to the end of nginx\.conf.*kept beside it\.$/,
+    )
+    expect(connectChange("stream-block", "/etc/nginx/streams.conf")).toContain(
+      "one include line to the stream block in /etc/nginx/streams.conf",
+    )
+    expect(disconnectChange("dropin", dropIn)).toBe(
+      `It removes ${dropIn}, the file the dashboard added.`,
+    )
+    expect(disconnectChange("nginx.conf", "/etc/nginx/nginx.conf")).toContain(
+      "the stream block the dashboard added to the end of nginx.conf",
+    )
   })
 })
 

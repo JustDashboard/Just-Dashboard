@@ -49,10 +49,55 @@ export function streamStatus(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/** The drop-in Ubuntu's nginx.conf takes: a new file in modules-enabled. */
+export const dropInPath = "/etc/nginx/modules-enabled/zz-just-dashboard-stream.conf"
+export const dropIn =
+  "# Managed by Just Dashboard.\n# Reads the streams on the Streams page, which live in /etc/nginx/streams.\nstream {\n    include /etc/nginx/streams/*.conf;\n}\n"
+
+/** The connect's plan, a drop-in unless the options say otherwise. */
+export function includePlan(overrides: Record<string, unknown> = {}) {
+  return {
+    mode: "dropin",
+    path: dropInPath,
+    exists: false,
+    before: "",
+    after: dropIn,
+    added: dropIn,
+    line: 1,
+    streams: [],
+    conflicts: [],
+    warnings: [],
+    ...overrides,
+  }
+}
+
+/** This host's nginx as `GET /proxy/modules` reports it: stream built dynamic and not installed. */
+export const modules = {
+  version: "nginx/1.26.3 (Ubuntu)",
+  openssl: "OpenSSL 3.4.1 11 Feb 2025",
+  modulesPath: "/usr/lib/nginx/modules",
+  modules: [
+    { name: "http_ssl_module", state: "static" },
+    { name: "http_stub_status_module", state: "static" },
+    { name: "http_realip_module", state: "static" },
+    { name: "http_auth_request_module", state: "static" },
+    { name: "http_v2_module", state: "static" },
+    { name: "http_v3_module", state: "static" },
+    {
+      name: "stream",
+      state: "not-installed",
+      path: "/usr/lib/nginx/modules/ngx_stream_module.so",
+      package: "libnginx-mod-stream",
+    },
+  ],
+}
+
 export const routes: ProxyRoutes = {
   "/proxy/streams/": (route, { included }) => json(route, streamStatus({ included })),
   "/proxy/streams/preview": (route) =>
     json(route, { content: "# Managed by Just Dashboard.\n", warnings: [] }),
+  "/proxy/streams/include/plan": (route) => json(route, includePlan()),
+  "/proxy/modules": (route) => json(route, modules),
 }
 
 export const showcase: ProxyRoutes = {

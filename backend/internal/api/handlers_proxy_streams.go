@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/updates"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -15,16 +18,97 @@ import (
 // rather than part of it: nginx's stream block is a top-level context, not
 // something a server file can reach, and pretending otherwise in the API would
 // invite a stream to be written where nginx never reads it.
+//
+// Connecting the directory — the include that has nginx read it — lives under
+// /include, and its removal is a POST to /include/remove rather than a DELETE:
+// DELETE /{name} deletes a stream, and a stream may be called "include".
 func (s *Server) mountStreamRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/", s.handle(s.handleStreamList))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPost, "/preview", s.handle(s.handleStreamPreview))
 		r.Method(http.MethodPost, "/", s.handle(s.handleStreamApply))
+		r.Method(http.MethodGet, "/include/plan", s.handle(s.handleStreamIncludePlan))
+		r.Method(http.MethodPost, "/include", s.handle(s.handleStreamIncludeApply))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/{name}", s.handle(s.handleStreamDelete))
+			r.Method(http.MethodPost, "/include/remove", s.handle(s.handleStreamIncludeRemove))
 		})
 	})
+}
+
+// mountModuleRoutes is what this nginx was built with and loads, which the
+// engine line reads before offering what needs a module. Readable by every
+// account, like the status it sits beside: it names modules, not secrets.
+func (s *Server) mountModuleRoutes(r chi.Router) {
+	r.Method(http.MethodGet, "/", s.handle(s.handleNginxModules))
+}
+
+// modulePackages remembers which module packages the host's package manager
+// has. Asking costs a repository lookup, and the answer changes only with the
+// repositories, so it is kept for ten minutes.
+type modulePackages struct {
+	mu    sync.Mutex
+	known map[string]packageAnswer
+}
+
+type packageAnswer struct {
+	has bool
+	at  time.Time
+}
+
+const modulePackageTTL = 10 * time.Minute
+
+// modulePackage names the package that installs a dynamic module on this host,
+// or nothing: only a package the package manager says it has is named, so the
+// page never offers an install that cannot find its package. A lookup that
+// fails for another reason names it anyway, and the install says the rest.
+func (s *Server) modulePackage(ctx context.Context, module string) string {
+	pkg := proxysvc.ModulePackage(s.modules.updates.Manager(), module)
+	if pkg == "" {
+		return ""
+	}
+	cache := &s.modules.proxyExtras.modulePackages
+	cache.mu.Lock()
+	answer, ok := cache.known[pkg]
+	cache.mu.Unlock()
+	if !ok || time.Since(answer.at) > modulePackageTTL {
+		_, err := s.modules.updates.Describe(ctx, pkg)
+		answer = packageAnswer{has: !errors.Is(err, updates.ErrUnknownPackage), at: time.Now()}
+		cache.mu.Lock()
+		if cache.known == nil {
+			cache.known = map[string]packageAnswer{}
+		}
+		cache.known[pkg] = answer
+		cache.mu.Unlock()
+	}
+	if !answer.has {
+		return ""
+	}
+	return pkg
+}
+
+func (s *Server) handleNginxModules(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 45*time.Second)
+	defer cancel()
+	report, err := s.modules.proxy.NginxModules(ctx, r.URL.Query().Get("fresh") != "")
+	if errors.Is(err, proxysvc.ErrNoNginx) {
+		return httpx.Err(http.StatusServiceUnavailable, "not_installed", err.Error())
+	}
+	if err != nil {
+		return httpx.Err(http.StatusBadGateway, "nginx_unreadable", err.Error()).Retry()
+	}
+	// The report is shared by every caller for a minute; the packages go on
+	// a copy.
+	out := *report
+	out.Modules = append([]proxysvc.NginxModule{}, report.Modules...)
+	for i, module := range out.Modules {
+		if module.State == proxysvc.ModuleNotInstalled {
+			out.Modules[i].Package = s.modulePackage(ctx, module.Name)
+		}
+	}
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
 }
 
 func (s *Server) handleStreamList(w http.ResponseWriter, r *http.Request) error {
@@ -38,9 +122,9 @@ func (s *Server) handleStreamList(w http.ResponseWriter, r *http.Request) error 
 			Describe("read", "the stream directory").Retry()
 	}
 	// Naming the package is worth a package-manager probe only when the
-	// module is missing, which is the one time the page says what to install.
-	if module := &status.Module; !module.Usable && module.State != proxysvc.ModuleUnknown && module.State != proxysvc.ModuleAbsent {
-		module.Package = proxysvc.StreamModulePackage(s.modules.updates.Manager())
+	// module is not installed, the one time the page offers to install it.
+	if module := &status.Module; module.State == proxysvc.ModuleNotInstalled {
+		module.Package = s.modulePackage(ctx, "stream")
 	}
 	httpx.JSON(w, http.StatusOK, status)
 	return nil
@@ -149,4 +233,99 @@ func (s *Server) handleStreamDelete(w http.ResponseWriter, r *http.Request) erro
 	httpx.SetAudit(r, "proxy.stream.delete", name, detail)
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
+}
+
+// streamIncludeError answers a refused connect or disconnect with its own
+// code: the page tells "install the module first" from "someone changed
+// nginx.conf since you looked" by it.
+func streamIncludeError(err error) error {
+	var refused *proxysvc.StreamIncludeError
+	if errors.As(err, &refused) {
+		return httpx.Err(http.StatusConflict, refused.Code, refused.Reason)
+	}
+	return mapProxyError(err)
+}
+
+func (s *Server) handleStreamIncludePlan(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 45*time.Second)
+	defer cancel()
+	plan, err := s.modules.proxy.PlanStreamInclude(ctx)
+	var refused *proxysvc.StreamIncludeError
+	if errors.As(err, &refused) {
+		return httpx.Err(http.StatusConflict, refused.Code, refused.Reason).Describe("work out", "the change")
+	}
+	if err != nil {
+		return mapProxyError(err)
+	}
+	httpx.JSON(w, http.StatusOK, plan)
+	return nil
+}
+
+type streamIncludeRequest struct {
+	// Mode and Path are the plan the operator was shown. A plan that has
+	// changed since is refused rather than made in its place.
+	Mode   string `json:"mode"`
+	Path   string `json:"path"`
+	Reload bool   `json:"reload"`
+}
+
+// handleStreamIncludeApply connects the stream directory. The audit names the
+// file changed and where its copy was kept, because nginx.conf may be it.
+func (s *Server) handleStreamIncludeApply(w http.ResponseWriter, r *http.Request) error {
+	var req streamIncludeRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	// Labelled before it runs, so a refusal is recorded as the connect it was.
+	httpx.SetAudit(r, "proxy.stream.include.add", req.Path, map[string]any{"mode": req.Mode})
+	ctx, cancel := timeoutCtx(r, 90*time.Second)
+	defer cancel()
+	res, err := s.modules.proxy.ApplyStreamInclude(ctx, req.Mode, req.Path, req.Reload)
+	if errors.Is(err, proxysvc.ErrInvalidConf) {
+		httpx.SetAudit(r, "proxy.stream.include.add", req.Path, map[string]any{"mode": req.Mode, "result": "rejected"})
+		return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
+	}
+	if err != nil {
+		return streamIncludeError(err)
+	}
+	httpx.SetAudit(r, "proxy.stream.include.add", res.Path, includeAuditDetail(res))
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
+
+// handleStreamIncludeRemove takes out the include the dashboard added. Every
+// stream stops forwarding at the reload, so it sits with the destructive
+// routes; it asks no typed phrase, since connecting again puts it back.
+func (s *Server) handleStreamIncludeRemove(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Reload bool `json:"reload"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	httpx.SetAudit(r, "proxy.stream.include.remove", "", nil)
+	ctx, cancel := timeoutCtx(r, 90*time.Second)
+	defer cancel()
+	res, err := s.modules.proxy.RemoveStreamInclude(ctx, req.Reload)
+	if errors.Is(err, proxysvc.ErrInvalidConf) {
+		httpx.SetAudit(r, "proxy.stream.include.remove", res.Path, map[string]any{"mode": res.Mode, "result": "rejected"})
+		return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
+	}
+	if err != nil {
+		return streamIncludeError(err)
+	}
+	httpx.SetAudit(r, "proxy.stream.include.remove", res.Path, includeAuditDetail(res))
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
+
+func includeAuditDetail(res *proxysvc.StreamIncludeResult) map[string]any {
+	detail := map[string]any{"mode": res.Mode, "streams": res.Streams, "reloaded": res.Reloaded}
+	if res.Backup != "" {
+		detail["backup"] = res.Backup
+	}
+	if res.ReloadError != "" {
+		detail["reloadError"] = res.ReloadError
+	}
+	return detail
 }

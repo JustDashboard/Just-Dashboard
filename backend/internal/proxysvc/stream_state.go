@@ -118,6 +118,8 @@ type streamInclude struct {
 	// not a top-level stream block.
 	misplaced string
 	err       error
+	// files is the configuration it was read from.
+	files []ConfigFile
 }
 
 func readStreamInclude(nginxDir, dir string) streamInclude {
@@ -130,19 +132,19 @@ func readStreamInclude(nginxDir, dir string) streamInclude {
 	case err != nil:
 		return streamInclude{err: err}
 	case !found:
-		return streamInclude{}
+		return streamInclude{files: files}
 	case len(context) == 1 && context[0] == "stream":
-		return streamInclude{included: true}
+		return streamInclude{included: true, files: files}
 	case len(context) == 0:
-		return streamInclude{misplaced: "the top level, outside any block"}
+		return streamInclude{misplaced: "the top level, outside any block", files: files}
 	}
-	return streamInclude{misplaced: strings.Join(context, " › ")}
+	return streamInclude{misplaced: strings.Join(context, " › "), files: files}
 }
 
 // streamIncludeFound reports whether nginx reads the stream directory inside a
-// top-level stream block. Reported rather than fixed: nginx.conf is the file
-// every other configuration on the host depends on, and a dashboard that
-// edits it silently is one bad write away from a server that will not start.
+// top-level stream block. Never fixed silently: nginx.conf is the file every
+// other configuration on the host depends on, so the fix is a change the
+// operator is shown and asks for (main_dropin.go).
 func streamIncludeFound(nginxDir, dir string) bool {
 	return readStreamInclude(nginxDir, dir).included
 }

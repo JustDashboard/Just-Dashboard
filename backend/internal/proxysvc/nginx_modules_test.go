@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -134,14 +135,130 @@ func TestStreamModuleWithoutNginx(t *testing.T) {
 	}
 }
 
-func TestStreamModulePackage(t *testing.T) {
-	for manager, want := range map[string]string{
-		"apt": "libnginx-mod-stream", "dnf": "nginx-mod-stream", "yum": "nginx-mod-stream",
-		"apk": "nginx-mod-stream", "pacman": "", "": "",
+func TestModulePackage(t *testing.T) {
+	for _, tc := range []struct{ manager, module, want string }{
+		{"apt", "stream", "libnginx-mod-stream"},
+		{"apt", "stream_geoip_module", "libnginx-mod-stream-geoip"},
+		{"apt", "http_image_filter_module", "libnginx-mod-http-image-filter"},
+		{"apt", "http_xslt_module", "libnginx-mod-http-xslt-filter"},
+		{"apt", "mail", "libnginx-mod-mail"},
+		{"dnf", "stream", "nginx-mod-stream"},
+		{"yum", "http_perl_module", "nginx-mod-http-perl"},
+		{"apk", "stream", "nginx-mod-stream"},
+		{"pacman", "stream", ""},
+		{"", "stream", ""},
 	} {
-		if got := StreamModulePackage(manager); got != want {
-			t.Errorf("%q: %q, want %q", manager, got, want)
+		if got := ModulePackage(tc.manager, tc.module); got != tc.want {
+			t.Errorf("%s %s: %q, want %q", tc.manager, tc.module, got, tc.want)
 		}
+	}
+}
+
+// The module report lists the --with- modules nginx -V names — not threads,
+// compat or the compiler flags — each placed by what the configuration loads
+// and what the host has installed. This host: every dynamic module built,
+// none installed, the static ones static.
+func TestNginxModules(t *testing.T) {
+	installed := t.TempDir()
+	for _, file := range []string{"ngx_stream_module.so", "ngx_http_xslt_filter_module.so", "ngx_mail_module.so"} {
+		if err := os.WriteFile(filepath.Join(installed, file), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dump := "# configuration file /etc/nginx/nginx.conf:\ninclude /etc/nginx/modules-enabled/*.conf;\nevents {}\n\n" +
+		"# configuration file /etc/nginx/modules-enabled/50-mod-stream.conf:\nload_module modules/ngx_stream_module.so;\n\n"
+	moduleNginx(t, withModulesPath(hostNginxV, installed), dump, "")
+	svc := New(t.TempDir(), "/nonexistent/Caddyfile")
+	report, err := svc.NginxModules(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Version != "nginx/1.26.3 (Ubuntu)" || report.OpenSSL != "OpenSSL 3.4.1 11 Feb 2025" || report.ModulesPath != installed {
+		t.Fatalf("report = %+v", report)
+	}
+	states := map[string]string{}
+	var names []string
+	for _, m := range report.Modules {
+		states[m.Name] = m.State
+		names = append(names, m.Name)
+	}
+	want := map[string]string{
+		"http_ssl_module": ModuleStatic, "http_v2_module": ModuleStatic, "http_v3_module": ModuleStatic,
+		"http_stub_status_module": ModuleStatic, "http_realip_module": ModuleStatic, "http_auth_request_module": ModuleStatic,
+		"stream_ssl_preread_module": ModuleStatic,
+		"stream":                    ModuleLoaded, "http_xslt_module": ModuleNotLoaded, "mail": ModuleNotLoaded,
+		"http_geoip_module": ModuleNotInstalled, "stream_geoip_module": ModuleNotInstalled,
+	}
+	for name, state := range want {
+		if states[name] != state {
+			t.Errorf("%s = %q, want %q", name, states[name], state)
+		}
+	}
+	for _, name := range []string{"threads", "compat", "debug", "pcre-jit", "cc-opt"} {
+		if _, ok := states[name]; ok {
+			t.Errorf("%s is listed as a module: %v", name, names)
+		}
+	}
+	for _, m := range report.Modules {
+		if m.Name == "http_xslt_module" && m.Path != filepath.Join(installed, "ngx_http_xslt_filter_module.so") {
+			t.Errorf("xslt path = %q", m.Path)
+		}
+		if m.State == ModuleStatic && m.Path != "" {
+			t.Errorf("a static module has a path: %+v", m)
+		}
+	}
+
+	// Kept for a minute: a second ask does not run nginx again, unless
+	// fresh, which the page uses after an install.
+	moduleNginx(t, alpineNginxV, "", "")
+	if again, _ := svc.NginxModules(context.Background(), false); again != report {
+		t.Fatal("the report was not kept")
+	}
+	fresh, err := svc.NginxModules(context.Background(), true)
+	if err != nil || fresh == report {
+		t.Fatalf("fresh = %+v, %v", fresh, err)
+	}
+	for _, m := range fresh.Modules {
+		if m.Name == "stream" && m.State != ModuleStatic {
+			t.Fatalf("fresh stream = %+v", m)
+		}
+	}
+}
+
+// A configuration that fails for another reason says nothing about what is
+// loaded: an installed module is unknown then, never "not loaded", while one
+// whose file is absent is still not installed.
+func TestNginxModulesWhenTheConfigurationFails(t *testing.T) {
+	installed := t.TempDir()
+	if err := os.WriteFile(filepath.Join(installed, "ngx_http_perl_module.so"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	moduleNginx(t, withModulesPath(hostNginxV, installed), "", "nginx: [emerg] unexpected \"}\" in /etc/nginx/sites-enabled/app:12\n")
+	report, err := New(t.TempDir(), "/nonexistent/Caddyfile").NginxModules(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range report.Modules {
+		switch m.Name {
+		case "http_perl_module":
+			if m.State != ModuleUnknown {
+				t.Errorf("perl = %+v", m)
+			}
+		case "stream":
+			if m.State != ModuleNotInstalled {
+				t.Errorf("stream = %+v", m)
+			}
+		}
+	}
+	if !strings.Contains(report.Detail, "unexpected") {
+		t.Errorf("detail = %q", report.Detail)
+	}
+}
+
+func TestNginxModulesWithoutNginx(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if _, err := New(t.TempDir(), "/nonexistent/Caddyfile").NginxModules(context.Background(), false); !errors.Is(err, ErrNoNginx) {
+		t.Fatalf("err = %v", err)
 	}
 }
 

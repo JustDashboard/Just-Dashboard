@@ -19,6 +19,8 @@ export type StreamFindingInput = { streams?: StreamStatus; streamsError?: Error 
  * stream module, "add the stream block" is advice that stops nginx reloading
  * — for every site, not only the streams. An include inside http does the
  * same once a file is there: nginx reads the file, as http, and refuses it.
+ * Both fixes the page can make — installing the module, connecting the
+ * directory — are named as the page's, so the advice leads to a button.
  *
  * A directory that could not be read is a finding of its own. Without one,
  * no streams read as nothing to report, and the overview said streams were
@@ -54,7 +56,11 @@ export function streamFindings({ streams, streamsError }: StreamFindingInput): P
       title: "nginx.conf has a stream block this nginx cannot read",
       detail:
         "nginx has no stream module, so its configuration test fails on the stream block and every reload is refused.",
-      advice: `${moduleRemedy(streams.module)} Or take the stream block out of nginx.conf.`,
+      advice: `${moduleRemedy(streams.module)} ${
+        streams.connection
+          ? "Or disconnect the stream directory on the Streams page."
+          : "Or take the stream block out of nginx.conf."
+      }`,
       meta: "streams",
       href: "/proxy/streams",
     })
@@ -77,7 +83,9 @@ export function streamFindings({ streams, streamsError }: StreamFindingInput): P
       level: "warning",
       title: `${these} but this nginx has no stream module`,
       detail: "Adding the stream block to nginx.conf now would fail nginx's configuration test.",
-      advice: `${moduleRemedy(streams.module)} Then include ${streams.dir} from a top-level stream block.`,
+      advice: streams.module.package
+        ? `Install ${streams.module.package} from the Streams page, then connect ${streams.dir} there.`
+        : `${moduleRemedy(streams.module)} Then connect ${streams.dir} on the Streams page.`,
       meta: "streams",
       href: "/proxy/streams",
     })
@@ -86,9 +94,12 @@ export function streamFindings({ streams, streamsError }: StreamFindingInput): P
       id: "streams.not-included",
       level: "warning",
       title: `${these} but nginx is not reading ${count === 1 ? "it" : "them"}`,
-      detail: `nginx.conf has no stream block including ${streams.dir}.`,
-      advice:
-        "Add the include the Streams page prints, at the top level of nginx.conf beside the http block.",
+      detail: streams.includeError
+        ? `Whether nginx.conf includes ${streams.dir} could not be read: ${streams.includeError}.`
+        : `nginx.conf has no stream block including ${streams.dir}.`,
+      advice: streams.includeError
+        ? "Make nginx.conf readable to the dashboard, then connect the directory on the Streams page."
+        : "Connect the directory on the Streams page, which shows the change to nginx.conf before it makes it.",
       meta: "streams",
       href: "/proxy/streams",
     })

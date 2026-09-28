@@ -53,6 +53,16 @@ export type StreamModule = {
   detail?: string
 }
 
+/**
+ * How the dashboard connects the stream directory: a file of its own in a
+ * directory nginx.conf includes at its top level, a block appended to
+ * nginx.conf, or one line in the stream block already there.
+ */
+export type StreamIncludeMode = "dropin" | "nginx.conf" | "stream-block"
+
+/** The include the dashboard added, which it can take out again. */
+export type StreamConnection = { mode: StreamIncludeMode; path: string }
+
 export type StreamStatus = {
   /** Whether a top-level stream block reads the directory. Without it the files are ignored. */
   included: boolean
@@ -61,6 +71,13 @@ export type StreamStatus = {
   /** Why nginx.conf could not be read to tell. */
   includeError?: string
   module: StreamModule
+  /** The dashboard's own include, when it is what reads the directory. */
+  connection?: StreamConnection
+  /**
+   * The file holding a top-level stream block that does not include the
+   * directory; the snippet is then the include line that goes inside it.
+   */
+  streamBlock?: string
   snippet: string
   dir: string
   streams: StreamEntry[]
@@ -92,4 +109,63 @@ export type StreamDeleteResult = {
   link?: string
   /** Why a file's content could not be kept; the file is removed all the same. */
   unread?: string
+}
+
+/** The change that connects the stream directory, shown before it is made. */
+export type StreamIncludePlan = {
+  mode: StreamIncludeMode
+  /** The file the change is made in. */
+  path: string
+  /** False for a drop-in, a file the change creates. */
+  exists: boolean
+  before: string
+  after: string
+  /** What the change adds, as it reads in the file. */
+  added: string
+  /** Where the added text starts in `after`, from 1. */
+  line: number
+  /** The stream files nginx starts reading. */
+  streams: string[]
+  /** Their sockets something already holds; the connect is refused while there are any. */
+  conflicts: string[]
+  warnings: string[]
+}
+
+/** What connecting or disconnecting did. */
+export type StreamIncludeResult = {
+  mode: StreamIncludeMode
+  path: string
+  /** The copy kept of a file the change edited. */
+  backup?: string
+  validation: ProxyValidation
+  /** Stream files nginx starts or stops reading. */
+  streams: number
+  reloaded: boolean
+  /** Why nginx did not reload after the change passed its test; the change stays. */
+  reloadError?: string
+  output?: string
+  warnings: string[]
+}
+
+/** One module this nginx was built with (`GET /proxy/modules`). */
+export type NginxModule = {
+  /** As configure names it: `http_v2_module`, `stream`. */
+  name: string
+  /** `unknown` when the configuration could not be read to tell loaded from not. */
+  state: "static" | "loaded" | "not-loaded" | "not-installed" | "unknown"
+  /** The shared object a dynamic module loads from. */
+  path?: string
+  /** What installs a module that is not installed, named only where the package manager has it. */
+  package?: string
+}
+
+/** What this nginx was built with and what of it the configuration loads. 503 without nginx. */
+export type NginxModules = {
+  /** nginx's own "nginx/1.26.3 (Ubuntu)". */
+  version: string
+  openssl?: string
+  modulesPath: string
+  modules: NginxModule[]
+  /** Why a dynamic module's state could not be read. */
+  detail?: string
 }

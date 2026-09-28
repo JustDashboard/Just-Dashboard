@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
-import { Code, Connection, Pencil, Plus, Trash, Warning } from "@/components/icons"
+import { Code, Connection, Pencil, Plus, Slash, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, del, errorMessage, get, post } from "@/lib/api"
 import type {
   StreamDeleteResult,
   StreamEntry,
+  StreamIncludeResult,
   StreamResult,
   StreamSpec,
   StreamStatus,
@@ -16,6 +17,7 @@ import type {
 import {
   byUrgency,
   carries,
+  disconnectChange,
   durationError,
   formatDuration,
   includedPlace,
@@ -45,8 +47,9 @@ import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { VerbBar, type Verb } from "@/components/verbs"
+import { VerbBar, VerbMenu, type Verb } from "@/components/verbs"
 import { ConfigEditor } from "@/components/proxy/config-editor"
+import { StreamSetup } from "@/components/proxy/stream-setup"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
@@ -66,7 +69,9 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  * to be loud about both, in order: nginx needs the stream module — Debian and
  * Ubuntu ship it as a separate package, and a stream block without it stops
  * nginx reloading at all — and nginx.conf has to include this directory from a
- * top-level stream block, or the files are written and silently ignored.
+ * top-level stream block, or the files are written and silently ignored. The
+ * page installs the one and connects the other (stream-setup.tsx), and takes
+ * its own include out again from the header's menu.
  */
 export function StreamsPage() {
   const { can } = useAuth()
@@ -165,6 +170,43 @@ export function StreamsPage() {
     })
   }
 
+  // Only the include the dashboard added can be taken out from here; one
+  // written by hand stays for the hand that wrote it.
+  const connection = data?.connection
+  const disconnect = () => {
+    if (!connection || !data) return
+    let result: StreamIncludeResult | undefined
+    const count = data.streams.length
+    confirm({
+      title: "Disconnect the stream directory",
+      confirmLabel: "Disconnect and reload",
+      description: (
+        <p>
+          nginx stops reading <code className="font-mono">{data.dir}</code>
+          {count > 0
+            ? `, and ${count === 1 ? "its stream stops" : `its ${count} streams stop`} forwarding as soon as it reloads`
+            : ""}
+          . {disconnectChange(connection.mode, connection.path)} The stream files stay, and Connect
+          puts it back.
+        </p>
+      ),
+      action: async () => {
+        result = await post<StreamIncludeResult>("/proxy/streams/include/remove", { reload: true })
+        refresh()
+      },
+      onDone: () => {
+        if (result?.reloadError) {
+          notify.warning("nginx did not reload", {
+            description: `The include is out and nginx's test passed, but the streams forward until nginx reloads: ${result.reloadError}`,
+          })
+        }
+      },
+    })
+  }
+  const pageVerbs: Verb[] = connection
+    ? [{ key: "disconnect", label: "Disconnect", icon: Slash, danger: true, run: disconnect }]
+    : []
+
   const verbsFor = (stream: StreamEntry): Verb[] => [
     {
       key: "edit",
@@ -259,7 +301,7 @@ export function StreamsPage() {
           configure until nginx is installed.
         </Notice>
       ) : (
-        <Readiness status={data} />
+        <StreamSetup status={data} admin={admin} onChanged={refresh} />
       )}
 
       <Panel plain>
@@ -267,15 +309,28 @@ export function StreamsPage() {
           title="Port forwarding"
           actions={
             admin &&
-            !noNginx &&
-            // Staging a forward is still useful before nginx reads the
-            // directory, but not while its test refuses every file there: the
-            // notice above says why, and a form could only end in "Not saved".
-            !blocked && (
-              <Button size="sm" variant={live ? "default" : "outline"} onClick={() => open(null)}>
-                <Plus className="size-4" />
-                {live ? "New stream" : "Prepare a stream"}
-              </Button>
+            !noNginx && (
+              <div className="flex items-center gap-1.5">
+                {
+                  // Staging a forward is still useful before nginx reads the
+                  // directory, but not while its test refuses every file
+                  // there: the notice above says why, and a form could only
+                  // end in "Not saved".
+                  !blocked && (
+                    <Button
+                      size="sm"
+                      variant={live ? "default" : "outline"}
+                      onClick={() => open(null)}
+                    >
+                      <Plus className="size-4" />
+                      {live ? "New stream" : "Prepare a stream"}
+                    </Button>
+                  )
+                }
+                {pageVerbs.length > 0 && (
+                  <VerbMenu verbs={pageVerbs} label="More stream directory actions" />
+                )}
+              </div>
             )
           }
         />
@@ -400,127 +455,6 @@ function describe(stream: StreamEntry): string {
     .join(" · ")
 }
 
-/**
- * What stands between this directory and a forwarded port, in the order it
- * has to be fixed: an outage first — the directory stopping every reload on
- * the host — then the module, because the include snippet breaks a nginx
- * that has none; then where the directory is included.
- */
-function Readiness({ status }: { status: StreamStatus }) {
-  const { module } = status
-  const missing = moduleMissing(module)
-  const outage = streamOutage(status)
-  const place = status.includedIn ? includedPlace(status.includedIn) : ""
-  const unchecked =
-    module.state === "unknown"
-      ? ` Whether this nginx has the stream module could not be checked (${module.detail ?? "no answer"}); if nginx then reports an unknown directive "stream", it does not.`
-      : ""
-  if (outage === "module") {
-    return (
-      <Notice
-        tone="danger"
-        icon={Warning}
-        title="nginx.conf has a stream block this nginx cannot read"
-      >
-        <p>
-          nginx has no stream module, so its configuration test fails on the{" "}
-          <code className="font-mono">stream</code> block and every reload is refused — for every
-          site on this host, not only the streams. {moduleRemedy(module)} Or take the stream block
-          out of nginx.conf.
-        </p>
-      </Notice>
-    )
-  }
-  if (outage === "misplaced") {
-    // nginx does read these files, as whatever block the include sits in, and
-    // refuses them there: "not reading these" would be the opposite of it.
-    return (
-      <Notice tone="danger" icon={Warning} title="These files stop every nginx reload">
-        <div className="space-y-2">
-          <p>
-            nginx.conf includes <code className="font-mono">{status.dir}</code> {place}, where a
-            stream is not allowed, so nginx&rsquo;s configuration test fails on these files and
-            every reload is refused — for every site on this host, not only the streams.
-          </p>
-          <p>
-            {missing
-              ? `Take out that include, which ends the refusals. ${moduleRemedy(module)} Then add this at the top level of nginx.conf — beside the http block, not inside it:`
-              : "Move the include into a stream block of its own at the top level of nginx.conf — beside the http block, not inside it:"}
-          </p>
-          <Well className="whitespace-pre">{status.snippet}</Well>
-          {!missing && <p>Deleting the files below also ends the refusals.{unchecked}</p>}
-        </div>
-      </Notice>
-    )
-  }
-  if (missing) {
-    return (
-      <Notice tone="warning" icon={Warning} title="This nginx cannot forward streams yet">
-        <div className="space-y-2">
-          <p>
-            nginx has no stream module, and a stream block in nginx.conf would fail its
-            configuration test until it does. {moduleRemedy(module)}
-          </p>
-          {status.includedIn && (
-            <p>
-              nginx.conf includes <code className="font-mono">{status.dir}</code> {place} instead,
-              where its test refuses any stream file, so nothing can be saved here until that
-              include comes out.
-            </p>
-          )}
-          <p>
-            Then add this at the top level of nginx.conf — beside the{" "}
-            <code className="font-mono">http</code> block, not inside it:
-          </p>
-          <Well className="whitespace-pre">{status.snippet}</Well>
-        </div>
-      </Notice>
-    )
-  }
-  if (status.included) return null
-  return (
-    <Notice
-      tone="warning"
-      icon={Warning}
-      title={
-        status.includedIn
-          ? "This directory is included in the wrong place"
-          : "nginx is not reading these yet"
-      }
-    >
-      <div className="space-y-2">
-        {status.includedIn ? (
-          <p>
-            nginx.conf includes <code className="font-mono">{status.dir}</code> {place}, where nginx
-            does not read the files as streams: its test refuses any file there, so nothing can be
-            saved here until the include moves into a stream block of its own at the top level:
-          </p>
-        ) : status.includeError ? (
-          <p>
-            nginx.conf could not be read to tell whether it includes this directory:{" "}
-            {status.includeError}. It needs a top-level stream block like this one:
-          </p>
-        ) : (
-          <p>
-            A stream lives in nginx&rsquo;s top-level <code className="font-mono">stream</code>{" "}
-            block, which a site file cannot reach. Until{" "}
-            <code className="font-mono">nginx.conf</code> includes this directory, anything
-            configured here is written and ignored.
-          </p>
-        )}
-        <Well className="whitespace-pre">{status.snippet}</Well>
-        <p>
-          Add that at the top level of nginx.conf — beside the{" "}
-          <code className="font-mono">http</code> block, not inside it. The dashboard does not edit
-          nginx.conf itself: every other configuration on the host depends on that file, and a bad
-          write there is a server that will not start.
-          {unchecked}
-        </p>
-      </div>
-    </Notice>
-  )
-}
-
 /** Who may reach the port, as a reading: a list of sources, or the fact that there is none. */
 function Restriction({ stream }: { stream: StreamEntry }) {
   if (stream.error) {
@@ -547,20 +481,18 @@ function Restriction({ stream }: { stream: StreamEntry }) {
 
 /**
  * The form's reminder, at the point of commit, of what keeps a saved stream
- * from forwarding — with the fix to hand, in the order it has to be made.
+ * from forwarding — and where the fix is: the page behind the form installs
+ * the module and connects the directory.
  */
 function NotLive({ status }: { status: StreamStatus }) {
   const missing = moduleMissing(status.module)
   return (
     <Notice tone="warning" icon={Warning} title="This will not forward anything yet">
-      <div className="space-y-2">
-        <p>
-          {missing
-            ? `nginx has no stream module, so nothing can read what you save here. ${moduleRemedy(status.module)} Then include this directory from a top-level stream block:`
-            : "nginx.conf has no stream block including this directory, so what you save here is written and ignored. Add this at the top level of nginx.conf — beside the http block, not inside it — and this stream starts forwarding on the next reload:"}
-        </p>
-        <Well className="whitespace-pre">{status.snippet}</Well>
-      </div>
+      <p>
+        {missing
+          ? `nginx has no stream module, so nothing can read what you save here. ${moduleRemedy(status.module)} Then connect this directory on the Streams page; this stream forwards from the reload that follows.`
+          : "nginx.conf does not include this directory yet, so what you save here is written and ignored until it is connected on the Streams page. It forwards from the reload that follows."}
+      </p>
     </Notice>
   )
 }

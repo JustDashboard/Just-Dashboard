@@ -1,4 +1,10 @@
-import type { StreamEntry, StreamModule, StreamSpec, StreamStatus } from "@/lib/types"
+import type {
+  StreamEntry,
+  StreamIncludeMode,
+  StreamModule,
+  StreamSpec,
+  StreamStatus,
+} from "@/lib/types"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 
 /**
@@ -136,6 +142,52 @@ export function moduleRemedy(module: StreamModule): string {
       return "This nginx was built without it, so streams need an nginx build that has it, such as nginx.org's own packages."
   }
   return ""
+}
+
+/** The module's state in a word or two, for the setup list. */
+export function moduleLabel(module: StreamModule): string {
+  switch (module.state) {
+    case "static":
+      return "built in"
+    case "loaded":
+      return "loaded"
+    case "not-installed":
+      return "not installed"
+    case "not-loaded":
+      return "not loaded"
+    case "absent":
+      return "not in this build"
+  }
+  return "could not check"
+}
+
+/** The last part of a path, which is what a sentence names a file by. */
+function baseName(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1)
+}
+
+/** What connecting changes, as a sentence, for the plan the sheet shows. */
+export function connectChange(mode: StreamIncludeMode, path: string): string {
+  switch (mode) {
+    case "dropin":
+      return `Creates ${baseName(path)} in ${path.slice(0, path.lastIndexOf("/"))}. nginx.conf already includes that directory at its top level, so the stream block sits beside http and nginx.conf stays as its package shipped it.`
+    case "nginx.conf":
+      return `Adds a stream block to the end of ${baseName(path)}, after every module it loads: it includes no directory at its top level where a file of its own could go. The file as it is now is kept beside it.`
+    case "stream-block":
+      return `Adds one include line to the stream block in ${path}. nginx refuses a second stream block, so the directory goes into the one that is there.`
+  }
+}
+
+/** What disconnecting takes out: only what connecting put in. */
+export function disconnectChange(mode: StreamIncludeMode, path: string): string {
+  switch (mode) {
+    case "dropin":
+      return `It removes ${path}, the file the dashboard added.`
+    case "nginx.conf":
+      return `It removes the stream block the dashboard added to the end of ${baseName(path)}.`
+    case "stream-block":
+      return `It removes the include line the dashboard added to the stream block in ${path}.`
+  }
 }
 
 /**

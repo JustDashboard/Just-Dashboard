@@ -23,6 +23,15 @@ const liveStreamImage = "nginx:1.27-alpine"
 // the other live tests, and skipped where Docker or the image is missing.
 func liveStreamNginx(t *testing.T) (*Service, string) {
 	t.Helper()
+	return liveStreamNginxWith(t, func(root string) string {
+		return fmt.Sprintf("pid %[1]s/nginx.pid;\nerror_log %[1]s/error.log;\nevents {}\nstream {\n    include %[1]s/stream.d/*.conf;\n}\n", root)
+	})
+}
+
+// liveStreamNginxWith is liveStreamNginx started on the nginx.conf conf writes for the
+// directory, which it is handed.
+func liveStreamNginxWith(t *testing.T, conf func(root string) string) (*Service, string) {
+	t.Helper()
 	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
 		t.Skip("set JD_DEPLOY_LIVE=1 to exercise a real nginx stream module")
 	}
@@ -30,13 +39,12 @@ func liveStreamNginx(t *testing.T) (*Service, string) {
 		t.Skipf("%s is not available: %v", liveStreamImage, err)
 	}
 	root := t.TempDir()
-	for _, dir := range []string{"stream.d", "bin"} {
+	for _, dir := range []string{"stream.d", "bin", "modules-enabled"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	conf := fmt.Sprintf("pid %[1]s/nginx.pid;\nerror_log %[1]s/error.log;\nevents {}\nstream {\n    include %[1]s/stream.d/*.conf;\n}\n", root)
-	if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte(conf), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte(conf(root)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	name := fmt.Sprintf("jd-stream-live-%d", time.Now().UnixNano())

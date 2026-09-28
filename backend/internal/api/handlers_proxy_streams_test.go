@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -283,5 +286,224 @@ func TestStreamListNamesAnUnreadableDirectory(t *testing.T) {
 	if w.Code != http.StatusInternalServerError || e.Code != "stream_dir_unreadable" || !strings.Contains(e.Message, "permission denied") ||
 		e.Operation != "read" || e.Resource != "the stream directory" || !e.Retryable {
 		t.Fatalf("got %d %+v", w.Code, e)
+	}
+}
+
+// includeServer is an API server over a temporary nginx directory shaped like
+// Ubuntu's — modules-enabled included at the top level — whose nginx has the
+// stream module built in, passes every test unless $dir/fail-test exists, and
+// logs its runs to $dir/runs.
+func includeServer(t *testing.T) (*client, *Server, string) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, sub := range []string{"stream.d", "bin", "modules-enabled"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	conf := "include " + dir + "/modules-enabled/*.conf;\nevents {}\nhttp {}\n"
+	if err := os.WriteFile(filepath.Join(dir, "nginx.conf"), []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shim := fmt.Sprintf(`#!/bin/sh
+echo "$*" >> '%[1]s/runs'
+case "$1" in
+-V) echo "nginx version: nginx/1.27.5" >&2; echo "configure arguments: --with-http_ssl_module --with-stream --with-stream_ssl_preread_module" >&2 ;;
+-t) if [ -e '%[1]s/fail-test' ]; then echo "nginx: [emerg] unknown directive \"strem\" in %[1]s/nginx.conf:9" >&2; exit 1; fi ;;
+esac
+exit 0
+`, dir)
+	if err := os.WriteFile(filepath.Join(dir, "bin", "nginx"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	s := testServer(t)
+	s.Cfg.NginxDir = dir
+	s.initModules()
+	return &client{t: t, h: s.Routes(), cookie: signIn(t, s)}, s, dir
+}
+
+// Planning and connecting need system.admin, disconnecting is destructive,
+// and the module report is read by every account, like the status beside it.
+func TestStreamIncludeRoutesAreGated(t *testing.T) {
+	_, s, _ := includeServer(t)
+	h := s.Routes()
+	gates := routeGates(t, h)
+	for _, rt := range []struct {
+		method, path string
+		want         [2]int
+	}{
+		{http.MethodGet, "/api/v1/proxy/modules", [2]int{0, 1}},
+		{http.MethodGet, "/api/v1/proxy/streams/include/plan", [2]int{1, 1}},
+		{http.MethodPost, "/api/v1/proxy/streams/include", [2]int{1, 1}},
+		{http.MethodPost, "/api/v1/proxy/streams/include/remove", [2]int{2, 2}},
+	} {
+		if got := gates[rt.method+" "+rt.path]; got != rt.want {
+			t.Errorf("%s %s: %v, want %v", rt.method, rt.path, got, rt.want)
+		}
+	}
+	reader := &client{t: t, h: h, cookie: signInAs(t, s, "reader", auth.RoleReadOnly)}
+	limited := &client{t: t, h: h, cookie: signInAs(t, s, "limited", auth.RoleLimited)}
+	for _, c := range []*client{reader, limited} {
+		for _, rt := range [][2]string{
+			{http.MethodGet, "/api/v1/proxy/streams/include/plan"},
+			{http.MethodPost, "/api/v1/proxy/streams/include"},
+			{http.MethodPost, "/api/v1/proxy/streams/include/remove"},
+		} {
+			if w := c.do(rt[0], rt[1], `{}`, nil); w.Code != http.StatusForbidden {
+				t.Errorf("%s %s = %d, want 403", rt[0], rt[1], w.Code)
+			}
+		}
+	}
+	if w := reader.do(http.MethodGet, "/api/v1/proxy/modules", "", nil); w.Code != http.StatusOK {
+		t.Errorf("a read-only account got %d for the module report: %s", w.Code, w.Body.String())
+	}
+}
+
+// The page's whole connect: the plan it shows, the connect it posts, the
+// listing that then says whose include reads the directory, and the
+// disconnect — each audited with the file it changed.
+func TestStreamIncludeConnectsAndDisconnectsThroughTheAPI(t *testing.T) {
+	c, s, dir := includeServer(t)
+	w := c.do(http.MethodGet, "/api/v1/proxy/streams/include/plan", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("plan: %d %s", w.Code, w.Body.String())
+	}
+	var plan proxysvc.StreamIncludePlan
+	if err := json.Unmarshal(w.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	dropIn := filepath.Join(dir, "modules-enabled", "zz-just-dashboard-stream.conf")
+	if plan.Mode != "dropin" || plan.Path != dropIn || !strings.Contains(plan.After, "stream {") {
+		t.Fatalf("plan = %+v", plan)
+	}
+
+	// A plan that no longer holds is refused, with its own code.
+	stale, _ := json.Marshal(map[string]any{"mode": "nginx.conf", "path": filepath.Join(dir, "nginx.conf"), "reload": true})
+	if w := c.do(http.MethodPost, "/api/v1/proxy/streams/include", string(stale), nil); w.Code != http.StatusConflict {
+		t.Fatalf("stale plan: %d %s", w.Code, w.Body.String())
+	} else if code, _ := errorCode(t, w.Body.Bytes()); code != "plan_changed" {
+		t.Fatalf("stale plan code = %s", code)
+	}
+
+	// A connect whose test fails is a 422 with nginx's words, and nothing stays.
+	if err := os.WriteFile(filepath.Join(dir, "fail-test"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"mode": plan.Mode, "path": plan.Path, "reload": true})
+	if w := c.do(http.MethodPost, "/api/v1/proxy/streams/include", string(body), nil); w.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(w.Body.String(), "strem") {
+		t.Fatalf("failed test: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(dropIn); !os.IsNotExist(err) {
+		t.Fatal("a drop-in that failed its test stayed")
+	}
+	os.Remove(filepath.Join(dir, "fail-test"))
+
+	w = c.do(http.MethodPost, "/api/v1/proxy/streams/include", string(body), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("connect: %d %s", w.Code, w.Body.String())
+	}
+	var res proxysvc.StreamIncludeResult
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if !res.Reloaded || res.Mode != "dropin" {
+		t.Fatalf("connect = %+v", res)
+	}
+	var status proxysvc.StreamStatus
+	if err := json.Unmarshal(c.do(http.MethodGet, "/api/v1/proxy/streams/", "", nil).Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if !status.Included || status.Connection == nil || status.Connection.Path != dropIn {
+		t.Fatalf("listing = %+v", status)
+	}
+	if w := c.do(http.MethodGet, "/api/v1/proxy/streams/include/plan", "", nil); w.Code != http.StatusConflict {
+		t.Fatalf("second plan: %d", w.Code)
+	} else if code, _ := errorCode(t, w.Body.Bytes()); code != "already_included" {
+		t.Fatalf("second plan code = %s", code)
+	}
+
+	if w := c.do(http.MethodPost, "/api/v1/proxy/streams/include/remove", `{"reload":true}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("disconnect: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(dropIn); !os.IsNotExist(err) {
+		t.Fatal("the drop-in is still there")
+	}
+	if w := c.do(http.MethodPost, "/api/v1/proxy/streams/include/remove", `{"reload":true}`, nil); w.Code != http.StatusConflict {
+		t.Fatalf("second disconnect: %d", w.Code)
+	} else if code, _ := errorCode(t, w.Body.Bytes()); code != "not_connected" {
+		t.Fatalf("second disconnect code = %s", code)
+	}
+
+	for _, action := range []string{"proxy.stream.include.add", "proxy.stream.include.remove"} {
+		entries, _, err := s.Audit.List(context.Background(), audit.Filter{Action: action})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var targets []string
+		for _, e := range entries {
+			targets = append(targets, e.Target+" "+e.Detail)
+		}
+		if len(entries) == 0 || !strings.Contains(strings.Join(targets, "\n"), dropIn) {
+			t.Errorf("%s audited as %q", action, targets)
+		}
+	}
+}
+
+// Where nginx has no stream module, connecting is refused with a code the
+// page answers with the install, and the listing names the package only when
+// the package manager has it.
+func TestStreamIncludeWaitsForTheModule(t *testing.T) {
+	c, _, dir := includeServer(t)
+	shim := fmt.Sprintf(`#!/bin/sh
+case "$1" in
+-V) echo "configure arguments: --modules-path=%[1]s/modules --with-stream=dynamic" >&2 ;;
+-T) echo "# configuration file %[1]s/nginx.conf:"; echo "events {}" ;;
+esac
+exit 0
+`, dir)
+	if err := os.WriteFile(filepath.Join(dir, "bin", "nginx"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w := c.do(http.MethodGet, "/api/v1/proxy/streams/include/plan", "", nil)
+	if code, _ := errorCode(t, w.Body.Bytes()); w.Code != http.StatusConflict || code != "module_missing" {
+		t.Fatalf("plan: %d %s", w.Code, w.Body.String())
+	}
+	var status proxysvc.StreamStatus
+	if err := json.Unmarshal(c.do(http.MethodGet, "/api/v1/proxy/streams/", "", nil).Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Module.State != proxysvc.ModuleNotInstalled {
+		t.Fatalf("module = %+v", status.Module)
+	}
+	// Without a package manager on PATH that has it, no package is promised.
+	if status.Module.Package != "" && status.Module.Package != "libnginx-mod-stream" {
+		t.Fatalf("package = %q", status.Module.Package)
+	}
+}
+
+// The module report: every --with- module and its state; 503 without nginx,
+// which the engine line reads as "nothing to show".
+func TestNginxModuleReport(t *testing.T) {
+	c, _, dir := includeServer(t)
+	w := c.do(http.MethodGet, "/api/v1/proxy/modules", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	var report proxysvc.NginxModules
+	if err := json.Unmarshal(w.Body.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Version != "nginx/1.27.5" || len(report.Modules) != 3 || report.Modules[1].Name != "stream" ||
+		report.Modules[1].State != proxysvc.ModuleStatic {
+		t.Fatalf("report = %+v", report)
+	}
+	if err := os.Remove(filepath.Join(dir, "bin", "nginx")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Join(dir, "bin"))
+	if w := c.do(http.MethodGet, "/api/v1/proxy/modules?fresh=1", "", nil); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("without nginx: %d %s", w.Code, w.Body.String())
 	}
 }

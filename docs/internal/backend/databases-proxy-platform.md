@@ -375,14 +375,48 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   certificate it did not issue.
 - **`streams.go`** — nginx's `stream` is a sibling of `http`, so a stream cannot live under
   sites-available. They go in `<JD_NGINX_DIR>/stream.d`, and the page says plainly when `nginx.conf` does not
-  include it. nginx.conf itself is never edited from here: everything else on the host depends on it.
+  include it. nginx.conf is never edited silently: the one change the dashboard makes to connect the
+  directory (below) is shown before it is made and asked for.
   - **The module comes first.** Debian and Ubuntu build the stream module dynamic and ship it as
     libnginx-mod-stream, which a plain `apt install nginx` leaves out; there a `stream` block is an unknown
     directive, `nginx -t` fails and every reload is refused. `nginx_modules.go` (`StreamModule`) reads
     `nginx -V` word by word (`--with-stream`, `=dynamic`; `--with-stream_ssl_module` is not the module), the
     `load_module` lines of a `nginx -T` dump, nginx's own "unknown directive" when a block is already there,
-    and the `.so` on the host, into static / loaded / not-loaded / not-installed / absent / unknown. The
-    list handler names the package for the host's package manager. Unknown is never reported as missing.
+    and the `.so` on the host, into static / loaded / not-loaded / not-installed / absent / unknown; a `.so`
+    that is absent is not-installed even when the dump fails. For not-installed the list handler names the
+    package (`ModulePackage`: `libnginx-mod-<name>` for apt, `nginx-mod-<name>` for dnf/yum/apk,
+    `http-xslt-filter` for XSLT) only when the package manager has it (`updates.Describe`, remembered ten
+    minutes in `proxyExtras.modulePackages`), and the page installs it through `POST /packages/install` as
+    a job — Debian's package links `modules-enabled/50-mod-stream.conf` itself. Unknown is never reported
+    as missing.
+  - **The module report** (`NginxModules`, `GET /proxy/modules`, every signed-in account) lists each
+    `--with-` module `nginx -V` names — not threads, compat or the compiler flags — with `version`, `openssl`
+    and `modulesPath`, each static / loaded / not-loaded / not-installed / unknown (the configuration could
+    not be read, `detail` says why) and, for not-installed, the package as above. Kept a minute per service
+    (`?fresh=1` asks again); 503 `not_installed` without nginx. Lane A's engine line reads it.
+  - **Connecting the directory** (`main_dropin.go`). `GET /proxy/streams/include/plan` (system.admin)
+    works out the change without writing: a drop-in `zz-just-dashboard-stream.conf` holding
+    `stream { include <dir>/*.conf; }` in the first directory nginx.conf includes at its top level by a
+    glob it matches (Ubuntu's `modules-enabled/*.conf`, so nginx.conf stays the conffile its package
+    shipped; `zz-` sorts after the modules' own files because nginx refuses a `load_module` after a block —
+    a load_module read after the drop-in sends it to the next mode); else the block appended to nginx.conf
+    between `# Just Dashboard: streams begin.`/`end.` markers in the file's own line endings; else, where a
+    top-level stream block exists (a second is "duplicate"), one `include …; # added by Just Dashboard`
+    line before its closing brace, found by an offset scanner that reads comments and quotes as nginx does.
+    The plan is checked with `NginxTree` (the changed configuration must read the directory in a stream
+    block) and lists the staged stream files and their sockets that another program or another staged
+    stream holds. Refusals are 409s with codes: `module_missing`, `already_included`, `include_misplaced`,
+    `stream_block_elsewhere` (outside `JD_NGINX_DIR`), `config_unreadable`. `POST /proxy/streams/include
+    {mode, path, reload}` re-plans under `s.mu`, refuses a plan that changed (`plan_changed`) or has
+    conflicts (`port_in_use`: `nginx -t` does not bind, and the failed bind would poison every later
+    reload), keeps `<file>.jd-stream-<unix>.bak` of an edited file unless an include would read it, writes
+    through the resolved path, runs `nginx -t`, and on failure puts the bytes back (mode and CRLF kept, the
+    copy removed; 422 `invalid_config`). `POST /proxy/streams/include/remove {reload}` (destructive — a
+    POST, since `DELETE /{name}` would take a stream called "include") takes out exactly what a connect
+    wrote — the unchanged drop-in, the marked block, the marked line — and nothing written by hand
+    (`not_connected`), with the same test and restore. The listing's `connection` names the dashboard's
+    own include, and `streamBlock` the file whose stream block the manual snippet (then an `include` line)
+    goes into. Audited `proxy.stream.include.add` / `.remove` with mode, file, copy, streams and reload.
   - **Where stream.d is read** (`stream_state.go`) is `NginxTree` over the files on disk, with a probe file
     placed where a new stream would go: an include inside `http` is named as misplaced, a `stream` block in
     its own file and a relative include count, and `upstream` or `other-stream.d` no longer do. It reads

@@ -35,7 +35,26 @@ describe("streamFindings", () => {
     const findings = streamFindings({ streams: status({ module: notInstalled }) })
     expect(ids(findings)).toEqual(["warning streams.module-missing"])
     expect(findings[0].advice).toBe(
-      "Install libnginx-mod-stream, the package with nginx's stream module. Then include /etc/nginx/stream.d from a top-level stream block.",
+      "Install libnginx-mod-stream from the Streams page, then connect /etc/nginx/stream.d there.",
+    )
+    // No package the host's manager has: the remedy in words, then the page.
+    const unnamed = streamFindings({
+      streams: status({ module: { state: "not-installed", usable: false } }),
+    })
+    expect(unnamed[0].advice).toBe(
+      "Install your distribution's package for nginx's stream module. Then connect /etc/nginx/stream.d on the Streams page.",
+    )
+  })
+
+  test("streams nginx does not read lead to the page's connect", () => {
+    const findings = streamFindings({ streams: status() })
+    expect(ids(findings)).toEqual(["warning streams.not-included"])
+    expect(findings[0].advice).toBe(
+      "Connect the directory on the Streams page, which shows the change to nginx.conf before it makes it.",
+    )
+    const unread = streamFindings({ streams: status({ includeError: "permission denied" }) })
+    expect(unread[0].detail).toBe(
+      "Whether nginx.conf includes /etc/nginx/stream.d could not be read: permission denied.",
     )
   })
 
@@ -43,6 +62,23 @@ describe("streamFindings", () => {
     const findings = streamFindings({ streams: status({ included: true, module: notInstalled }) })
     expect(ids(findings)).toEqual(["critical streams.module-missing"])
     expect(findings[0].detail).toContain("every reload is refused")
+    expect(findings[0].advice).toBe(
+      "Install libnginx-mod-stream, the package with nginx's stream module. Or take the stream block out of nginx.conf.",
+    )
+    // The dashboard's own include can be taken out from the page.
+    const ours = streamFindings({
+      streams: status({
+        included: true,
+        module: notInstalled,
+        connection: {
+          mode: "dropin",
+          path: "/etc/nginx/modules-enabled/zz-just-dashboard-stream.conf",
+        },
+      }),
+    })
+    expect(ours[0].advice).toBe(
+      "Install libnginx-mod-stream, the package with nginx's stream module. Or disconnect the stream directory on the Streams page.",
+    )
   })
 
   // nginx reads a file included inside http — as http — and its test refuses

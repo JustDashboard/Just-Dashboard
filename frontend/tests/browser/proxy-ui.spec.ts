@@ -159,7 +159,7 @@ test("a stream cannot be created as though nginx were reading it", async ({ page
 
   // And the form repeats it at the point of commit, with the fix to hand.
   await expect(page.getByText("This will not forward anything yet")).toBeVisible()
-  await expect(page.getByText(/include/).first()).toBeVisible()
+  await expect(page.getByRole("dialog").getByText(/include/)).toBeVisible()
   await expect(page.getByRole("button", { name: "Save for later" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Save and reload" })).toHaveCount(0)
 })

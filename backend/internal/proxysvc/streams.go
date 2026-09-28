@@ -13,8 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // Not everything worth proxying speaks HTTP.
@@ -109,6 +107,13 @@ type StreamStatus struct {
 	// Module is whether nginx can read a stream block at all. The snippet
 	// below breaks nginx where it cannot.
 	Module StreamModule `json:"module"`
+	// Connection is the include the dashboard added, when that is what reads
+	// the directory: the one the page can take out again.
+	Connection *StreamConnection `json:"connection,omitempty"`
+	// StreamBlock is the file holding a top-level stream block that does not
+	// include the directory. A second stream block is "duplicate" to nginx,
+	// so the snippet is then the include line that goes inside this one.
+	StreamBlock string `json:"streamBlock,omitempty"`
 	// Snippet is what to add to nginx.conf when it is not included.
 	Snippet string        `json:"snippet"`
 	Dir     string        `json:"dir"`
@@ -734,12 +739,19 @@ func (s *Service) Streams(ctx context.Context) (*StreamStatus, error) {
 	status := &StreamStatus{
 		Dir:     dir,
 		Streams: []StreamEntry{},
-		Snippet: "stream {\n    include " + dir + "/*.conf;\n}",
+		Snippet: "stream {\n    " + streamIncludeDirective(dir) + "\n}",
 	}
 	include := readStreamInclude(s.nginxDir, dir)
 	status.Included, status.IncludedIn = include.included, include.misplaced
 	if include.err != nil {
 		status.IncludeError = include.err.Error()
+	} else {
+		status.Connection = ownConnection(include.files, dir)
+		if !include.included && include.misplaced == "" {
+			if status.StreamBlock = streamBlockFile(include.files); status.StreamBlock != "" {
+				status.Snippet = streamIncludeDirective(dir)
+			}
+		}
 	}
 	status.Module = s.StreamModule(ctx)
 	entries, err := os.ReadDir(dir)
@@ -935,16 +947,7 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous st
 			Before: []byte(before), BeforeExisted: oldPath != "", After: []byte(content)})
 	}
 	if reload {
-		out, err := hostexec.Command(ctx, "nginx", "-s", "reload").CombinedOutput()
-		res.Output = strings.TrimSpace(string(out))
-		if err != nil {
-			res.ReloadError = res.Output
-			if res.ReloadError == "" {
-				res.ReloadError = err.Error()
-			}
-		} else {
-			res.Reloaded = true
-		}
+		res.Reloaded, res.Output, res.ReloadError = reloadNginx(ctx)
 	}
 	return res, nil
 }
