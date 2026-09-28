@@ -375,6 +375,52 @@ export type IssuePreview = {
   replacesKeyOf?: string
 }
 
+/** One preflight finding; "ok" is a check that passed. */
+export type PreflightCheck = {
+  id: string
+  /** The name it is about, when it is about one. */
+  name?: string
+  check: "dns" | "caa" | "http" | "lineage" | "rate"
+  level: "ok" | "notice" | "warning" | "critical"
+  title: string
+  detail: string
+  advice?: string
+}
+
+export type RateCount = {
+  used: number
+  limit: number
+  /** When the limit is reached: the moment a slot comes back. */
+  frees?: string
+}
+
+export type CertificateRateLimits = {
+  /** False when certbot orders from an authority these limits are not. */
+  applies: boolean
+  /** Certificates for exactly this set of names in seven days. */
+  duplicates: RateCount
+  /** New certificates per registered domain in seven days, from this host. */
+  registered: (RateCount & { domain: string })[]
+  /** Failed real runs per name in the last hour. */
+  failures: (RateCount & { domain: string })[]
+  scope: string
+}
+
+/** What would fail an issuance, asked before it runs. */
+export type IssuePreflight = {
+  checks: PreflightCheck[]
+  relation: {
+    kind: "new" | "identical" | "replaces" | "expands"
+    lineage?: string
+    added?: string[]
+    removed?: string[]
+  }
+  limits: CertificateRateLimits
+  /** A critical check: the real run is expected to fail. */
+  blocking: boolean
+  checkedAt: string
+}
+
 export type CertificateFindingKind =
   "key-readable" | "key-mismatch" | "key-reused" | "weak" | "uncovered" | "stale"
 

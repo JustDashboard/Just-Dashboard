@@ -30,6 +30,7 @@ import type {
   CertbotCert,
   CertbotState,
   DNSProvider,
+  IssuePreflight,
   IssuePreview,
   Job,
   VHost,
@@ -38,9 +39,11 @@ import { useViewState } from "@/lib/view-state"
 import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
+import { FindingList } from "@/components/finding-list"
 import { Field, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
+import { Meter } from "@/components/meter"
 import { ROW_BLEED } from "@/components/row-list"
 import { CertLife } from "@/components/proxy/expiry-status"
 import { dnsProviderProduct } from "@/components/proxy/marks"
@@ -1030,6 +1033,55 @@ function IssueDialogBody({
   const command = preview.plan ? preview.plan.args.map(shellWord).join(" ") : ""
   const { copied, copy } = useCopy()
 
+  // What would fail the run, asked of this host before it: only the fields
+  // the checks read, so typing an email does not probe the webroot again.
+  const preflightBody = JSON.stringify({
+    domains: parseDomains(domains),
+    method,
+    webRoot,
+    staging,
+    ...(certName && { certName }),
+  })
+  const [preflight, setPreflight] = useState<{
+    key: string
+    result?: IssuePreflight
+    error?: string
+  }>({ key: "" })
+  const [recheck, setRecheck] = useState(0)
+  const preflightReady = open && parseDomains(domains).length > 0
+  useEffect(() => {
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => {
+        if (!preflightReady) {
+          setPreflight({ key: "" })
+          return
+        }
+        setPreflight((p) => ({ ...p, key: "" }))
+        post<IssuePreflight>("/certificates/issue/preflight", JSON.parse(preflightBody), {
+          signal: controller.signal,
+        })
+          .then((result) => setPreflight({ key: preflightBody, result }))
+          .catch((err) => {
+            if (!controller.signal.aborted) {
+              setPreflight({ key: preflightBody, error: errorMessage(err) })
+            }
+          })
+      },
+      preflightReady ? 800 : 0,
+    )
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [preflightReady, preflightBody, recheck])
+  const checking = preflightReady && preflight.key !== preflightBody
+  // The override belongs to the request it was given for: change a name or
+  // the method and the new findings have to be read again.
+  const [overridden, setOverridden] = useState("")
+  const blocked =
+    !staging && (checking || (preflight.result?.blocking === true && overridden !== preflightBody))
+
   const submit = async () => {
     setBusy(true)
     try {
@@ -1075,7 +1127,8 @@ function IssueDialogBody({
               (!email.trim() && !hasAccount) ||
               (method === "dns" && !dnsProvider) ||
               (needsCredentials && !credentials.trim()) ||
-              (fileProvider && waitInvalid)
+              (fileProvider && waitInvalid) ||
+              blocked
             }
             pending={busy}
           >
@@ -1379,6 +1432,15 @@ function IssueDialogBody({
             />
           </Field>
         )}
+        {preflightReady && (
+          <PreflightChecks
+            result={preflight.key === preflightBody ? preflight.result : undefined}
+            error={preflight.key === preflightBody ? preflight.error : undefined}
+            checking={checking}
+            staging={staging}
+            onRecheck={() => setRecheck((n) => n + 1)}
+          />
+        )}
         <OptionList>
           <OptionRow
             title="Test run first"
@@ -1390,6 +1452,15 @@ function IssueDialogBody({
             checked={staging}
             onCheckedChange={setStaging}
           />
+          {!staging && !checking && preflight.result?.blocking && (
+            <OptionRow
+              title="Issue anyway"
+              hint="A check above expects the authority to refuse. A refused real run counts as a failed validation."
+              tone="danger"
+              checked={overridden === preflightBody}
+              onCheckedChange={(on) => setOverridden(on ? preflightBody : "")}
+            />
+          )}
         </OptionList>
         {!staging && testAuthority && (
           <Notice tone="warning" icon={Warning} title="This issues a test certificate">
@@ -1434,6 +1505,117 @@ function IssueDialogBody({
         )}
       </div>
     </Modal>
+  )
+}
+
+/**
+ * The preflight as a checklist: what failed or needs reading, one row each,
+ * and the rate limits a real run counts against as meters.
+ */
+function PreflightChecks({
+  result,
+  error,
+  checking,
+  staging,
+  onRecheck,
+}: {
+  result?: IssuePreflight
+  error?: string
+  checking: boolean
+  staging: boolean
+  onRecheck: () => void
+}) {
+  const open = result?.checks.filter((c) => c.level !== "ok") ?? []
+  const passed = (result?.checks.length ?? 0) - open.length
+  const limits = result?.limits
+  return (
+    <Field
+      label="Before the run"
+      hint={
+        checking
+          ? "Checking DNS, CAA and the challenge path from this host…"
+          : result && `${passed} of ${result.checks.length} checks passed.`
+      }
+      error={error}
+      trailing={
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={onRecheck}
+          disabled={checking}
+          pending={checking}
+        >
+          <RefreshClockwise />
+          Re-check
+        </Button>
+      }
+    >
+      {result && (
+        <div className="grid gap-3">
+          <FindingList
+            findings={open.map((c) => ({
+              id: c.id,
+              level: c.level === "ok" ? "notice" : c.level,
+              title: c.title,
+              detail: c.detail,
+              advice: c.advice,
+              meta: c.name,
+            }))}
+            emptyLabel="Every check passed"
+          />
+          {limits && limits.applies && (
+            <div className="grid gap-2">
+              <RateMeter label="Certificates for these names this week" count={limits.duplicates} />
+              {limits.registered.map((r) => (
+                <RateMeter
+                  key={r.domain}
+                  label={`Certificates for ${r.domain} this week`}
+                  count={r}
+                />
+              ))}
+              {limits.failures.map((f) => (
+                <RateMeter
+                  key={f.domain}
+                  label={`Failed runs for ${f.domain} this hour`}
+                  count={f}
+                />
+              ))}
+              <p className="text-hint text-muted-foreground">
+                {staging
+                  ? "A test run counts against the staging authority's limits, not these. "
+                  : ""}
+                {limits.scope}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </Field>
+  )
+}
+
+function RateMeter({
+  label,
+  count,
+}: {
+  label: string
+  count: IssuePreflight["limits"]["duplicates"]
+}) {
+  const pct = (count.used / count.limit) * 100
+  return (
+    <div className="grid gap-1">
+      <div className="flex items-baseline justify-between gap-3 text-xs">
+        <span className="min-w-0 truncate text-muted-foreground">{label}</span>
+        <span className="numeric shrink-0">
+          {count.used} of {count.limit}
+        </span>
+      </div>
+      <Meter
+        value={pct}
+        tone={count.used >= count.limit ? "danger" : pct >= 80 ? "warning" : "default"}
+        label={label}
+      />
+    </div>
   )
 }
 
