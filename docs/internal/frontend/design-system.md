@@ -1224,8 +1224,12 @@ drawn as its product (a container as its image's), its name with a "This dashboa
 dashboard's own, how it runs as one hint line, then the command and the account; the owner's page is
 the row's first inline verb. Grouped by application, one owner's sockets are a line whose name is the
 disclosure button, unfolding its sockets indented beneath it. How old the list is sits in the panel header beside Refresh, Pause and Export; a failed
-poll is a warning `Notice` over the rows it kept. Tables retain their scrolling boundary; forms and
-sections remain plain.
+poll is a warning `Notice` over the rows it kept. A socket first seen in the last day carries a `New`
+tag beside its protocol, a property of the row rather than a state. Below the table, Changes is a
+plain panel of lines grouped under day headings — the minute, the change as a `Status` word coloured
+as the table colours that socket, the port, its addresses, the program and where it answered — with
+its window as `Segments` in the header and the reach chips under it. Tables retain their scrolling
+boundary; forms and sections remain plain.
 `tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
 navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
 overview's failure states, its freshness and Refresh, its routes by role and the engine controls,

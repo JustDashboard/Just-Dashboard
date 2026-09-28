@@ -29,6 +29,7 @@ func (s *Server) mountPortRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/", s.handle(s.handlePortList))
 	r.Method(http.MethodGet, "/meta", s.handle(s.handlePortsMeta))
 	r.Method(http.MethodGet, "/firewall", s.handle(s.handlePortsFirewall))
+	s.mountPortHistoryRoutes(r)
 }
 
 // portsFirewall is the firewall as the ports page needs it: whether rules
@@ -138,7 +139,7 @@ func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
 	listeners = proxysvc.AttributeOwners(listeners, in)
 	s.nameDeployments(ctx, listeners)
 	placeListeners(listeners, netsec.ReadHostNetwork(ctx), <-firewall)
-	httpx.JSON(w, http.StatusOK, listeners)
+	httpx.JSON(w, http.StatusOK, s.withFirstSeen(r, listeners))
 	return nil
 }
 

@@ -27,7 +27,7 @@ import { errorMessage, get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { plural } from "@/lib/format"
 import { downloadText } from "@/lib/metrics-export"
-import type { Listener, PortsFirewall, PortsMeta } from "@/lib/types"
+import type { Listener, PortsFirewall, PortsMeta, SeenListener } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useMediaQuery } from "@/hooks/use-mobile"
@@ -102,6 +102,8 @@ import {
   type SocketGroup,
   type SortKey,
 } from "@/components/proxy/ports-list"
+import { isNew } from "@/components/proxy/ports-history"
+import { NewMark, PortChanges } from "@/components/proxy/port-changes"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -191,6 +193,7 @@ function PortsView() {
   const sort = useMemo(() => parseSort(sortValue) ?? DEFAULT_SORT, [sortValue])
   const [grouped, setGrouped] = useViewState("proxy.ports.grouped", false)
   const [hideEphemeral, setHideEphemeral] = useViewState("proxy.ports.hideEphemeral", false)
+  const [onlyNew, setOnlyNew] = useSessionState("proxy.ports.new", false)
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
   const [paused, setPaused] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -199,7 +202,7 @@ function PortsView() {
   const { data, error, loading, refresh } = usePoll(
     async (signal) => {
       try {
-        return { listeners: await get<Listener[]>("/ports", undefined, signal), at: Date.now() }
+        return { listeners: await get<SeenListener[]>("/ports", undefined, signal), at: Date.now() }
       } finally {
         // A refresh that aborted a poll in flight is still refreshing.
         if (!signal.aborted) setRefreshing(false)
@@ -246,10 +249,16 @@ function PortsView() {
     () => ({ terms: parseQuery(query), reach, proto, hide: hideEphemeral ? range : null }),
     [query, reach, proto, hideEphemeral, range],
   )
-  const facets = useMemo(() => facetCounts(all, filters, range), [all, filters, range])
+  // What the ports history first saw open in the last day, dated when the
+  // list arrived; "New in 24 hours" narrows every chip's count to them.
+  const listedAt = data?.at ?? 0
+  const fresh = useMemo(() => all.filter((socket) => isNew(socket, listedAt)), [all, listedAt])
+  const pool = onlyNew ? fresh : all
+  const newCount = useMemo(() => visibleSockets(fresh, filters).length, [fresh, filters])
+  const facets = useMemo(() => facetCounts(pool, filters, range), [pool, filters, range])
   const visible = useMemo(
-    () => sortSockets(visibleSockets(all, filters), sort),
-    [all, filters, sort],
+    () => sortSockets(visibleSockets(pool, filters), sort),
+    [pool, filters, sort],
   )
   const hidden = filters.hide ? facets.ephemeral : 0
   const entries = useMemo<Entry[]>(() => {
@@ -266,11 +275,12 @@ function PortsView() {
     })
   }, [grouped, visible, open])
 
-  const filtered = query.trim() !== "" || reach !== "all" || proto !== "all"
+  const filtered = query.trim() !== "" || reach !== "all" || proto !== "all" || onlyNew
   const clearFilters = () => {
     setQuery("")
     setReach("all")
     setProto("all")
+    setOnlyNew(false)
   }
   const toggleGroup = (key: string) =>
     setOpen((previous) => {
@@ -561,6 +571,15 @@ function PortsView() {
           <FilterChip selected={grouped} onClick={() => setGrouped(!grouped)}>
             Group by application
           </FilterChip>
+          {(fresh.length > 0 || onlyNew) && (
+            <FilterChip
+              selected={onlyNew}
+              onClick={() => setOnlyNew(!onlyNew)}
+              title="Sockets the ports history first saw listening in the last 24 hours"
+            >
+              New in 24 hours <ChipCount>{newCount}</ChipCount>
+            </FilterChip>
+          )}
           {range && ephemeralOnHost > 0 && (
             <FilterChip
               selected={hideEphemeral}
@@ -664,6 +683,7 @@ function PortsView() {
                             <span className="text-hint text-muted-foreground uppercase">
                               {entry.socket.protocol}
                             </span>
+                            <NewMark socket={entry.socket} now={listedAt} />
                           </div>
                           <p className="mt-1 font-mono text-hint wrap-anywhere text-muted-foreground">
                             <Addresses socket={entry.socket} />
@@ -743,6 +763,7 @@ function PortsView() {
                       <p className="text-hint text-muted-foreground uppercase">
                         {entry.socket.protocol}
                       </p>
+                      <NewMark socket={entry.socket} now={listedAt} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2 text-body">
@@ -804,6 +825,7 @@ function PortsView() {
       </Panel>
 
       <OrphanRules firewall={firewall.data} admin={admin} onChange={firewall.refresh} />
+      <PortChanges query={query} onClearQuery={() => setQuery("")} />
     </Page>
   )
 }
