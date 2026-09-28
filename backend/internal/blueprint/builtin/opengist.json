@@ -1,0 +1,102 @@
+{
+  "id": "opengist",
+  "version": "1.0.0",
+  "name": "Opengist",
+  "category": "tool",
+  "profile": "web",
+  "description": "A pastebin in which every gist is a real Git repository: paste a snippet in the browser or push one over HTTPS, then share the link. The repositories, the SQLite database and the full-text index all live in the data volume.",
+  "iconId": "git",
+  "docsUrl": "https://opengist.io/docs/",
+  "access": {
+    "kind": "setup",
+    "path": "/-/register",
+    "note": "Opengist starts with no accounts. Open the address as soon as the deploy finishes and create the first one at /-/register — the account that lands first in the database is made the administrator, and no later registration is. Registration then stays open to everybody: sign in, open /-/admin-panel/configuration and switch \"Disable signup\" on, or the next visitor gets an account of their own. Public gists are readable without signing in unless you switch \"Require login\" on in the same place."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0",
+    "upstreamUrl": "https://github.com/thomiceli/opengist",
+    "reviewedAt": "2026-09-22",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "ghcr.io/thomiceli/opengist:1.15.2",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "The address other people open. It becomes OG_EXTERNAL_URL, which Opengist puts in the clone command, the embed snippet and the invitation link it shows, and which it also reads to decide that the session cookie may be marked Secure."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 6157,
+      "protocol": "tcp",
+      "purpose": "The web interface, the REST API and git clone and push over HTTPS",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/opengist",
+      "purpose": "The gist repositories, the SQLite database, the Bleve search index and the session key generated on the first start",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/healthcheck",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "OG_EXTERNAL_URL",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "OG_SSH_GIT_ENABLED",
+        "value": "disabled"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Opengist migrates its SQLite database on start and does not migrate back. What this definition does not pass as environment — registration, required login, invitations — is changed in Opengist's own admin panel and stored in that database.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": { "domain": "gist.example.test" },
+      "digest": "sha256:8d2a319b6ed5aae98460710278833d5d93be447539c549e8804f8b829a5474ce"
+    }
+  ]
+}

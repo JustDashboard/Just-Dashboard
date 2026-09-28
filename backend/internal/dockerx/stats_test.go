@@ -154,3 +154,65 @@ func TestConvertStatsToleratesHostNetworking(t *testing.T) {
 		t.Errorf("block read = %d, want 7 — the other counters still apply", s.BlockRead)
 	}
 }
+
+func TestConvertStatsSeparatesIdleAndMissingCounters(t *testing.T) {
+	raw := container.StatsResponse{Networks: map[string]container.NetworkStats{
+		"eth0": {RxPackets: 3, TxErrors: 2, RxDropped: 1},
+	}}
+	idle := convertStats("abc", raw)
+	if !idle.NetworkAvailable || idle.NetRx != 0 || idle.BlockAvailable {
+		t.Fatalf("availability = %+v", idle)
+	}
+	if n := idle.Networks["eth0"]; n.RxPackets != 3 || n.TxErrors != 2 || n.RxDropped != 1 {
+		t.Fatalf("interface counters = %+v", n)
+	}
+	missing := convertStats("abc", container.StatsResponse{})
+	if missing.NetworkAvailable || missing.MemRSS != nil || missing.MemSwap != nil {
+		t.Fatalf("missing counters were fabricated: %+v", missing)
+	}
+}
+
+func TestConvertStatsMemoryMatchesDockerCLI(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		stats          map[string]uint64
+		working, cache uint64
+	}{
+		{"cgroup v1 hierarchy wins", map[string]uint64{"total_inactive_file": 300, "inactive_file": 100}, 700, 300},
+		{"cgroup v2", map[string]uint64{"inactive_file": 200}, 800, 200},
+		{"invalid cache cannot underflow", map[string]uint64{"inactive_file": 2000}, 1000, 0},
+		{"no cache", nil, 1000, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := convertStats("abc", container.StatsResponse{MemoryStats: container.MemoryStats{Usage: 1000, Stats: tc.stats}})
+			if got.MemRaw != 1000 || got.MemUsage != tc.working || got.MemCache != tc.cache {
+				t.Fatalf("raw/working/cache = %d/%d/%d", got.MemRaw, got.MemUsage, got.MemCache)
+			}
+		})
+	}
+	got := convertStats("abc", container.StatsResponse{MemoryStats: container.MemoryStats{
+		Stats: map[string]uint64{"anon": 400, "swap": 0},
+	}})
+	if got.MemRSS == nil || *got.MemRSS != 400 || got.MemSwap == nil || *got.MemSwap != 0 {
+		t.Fatalf("reported zero must be distinct from missing: %+v", got)
+	}
+}
+
+func TestSamplerDistinguishesIdleCPUFromUnmeasuredCPU(t *testing.T) {
+	s := (&Client{}).NewStatsSampler()
+	first := ContainerStats{CPUTotal: 100, SystemCPU: 1000}
+	s.fillCPU("abc", &first, 4)
+	if first.CPUReady {
+		t.Fatal("first sample is not an interval")
+	}
+	idle := ContainerStats{CPUTotal: 100, SystemCPU: 2000}
+	s.fillCPU("abc", &idle, 4)
+	if !idle.CPUReady || idle.CPUPercent != 0 {
+		t.Fatalf("idle CPU = %+v", idle)
+	}
+	reset := ContainerStats{CPUTotal: 1, SystemCPU: 3000}
+	s.fillCPU("abc", &reset, 4)
+	if reset.CPUReady {
+		t.Fatal("a reset is not an idle interval")
+	}
+}

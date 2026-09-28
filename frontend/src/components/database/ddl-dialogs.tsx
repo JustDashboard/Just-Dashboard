@@ -366,7 +366,13 @@ function TypeField({
         className={cn("font-mono", types.length > 0 && "pr-9")}
       />
       {types.length > 0 && (
-        <Popover open={open} onOpenChange={setOpen}>
+        // `modal`, because this popover opens inside a dialog. The dialog
+        // locks scrolling everywhere outside its own box and the popover is
+        // portalled outside it, so the wheel did nothing over the list of
+        // types and the twenty entries past the fold were unreachable
+        // except by typing. A modal popover registers its own scroll region
+        // with the same lock, and the list scrolls.
+        <Popover open={open} onOpenChange={setOpen} modal>
           <PopoverTrigger asChild>
             <button
               type="button"

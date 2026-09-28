@@ -243,10 +243,14 @@ export type ContainerHistoryPoint = {
   memLimit: number
   pids: number
   /** Bytes per second, differenced from the cumulative counters Docker reports. */
-  netRx: number
-  netTx: number
-  blockRead: number
-  blockWrite: number
+  netRx: number | null
+  netTx: number | null
+  blockRead: number | null
+  blockWrite: number | null
+  netRxPeak?: number | null
+  netTxPeak?: number | null
+  blockReadPeak?: number | null
+  blockWritePeak?: number | null
 }
 
 export type ContainerHistory = {
@@ -327,14 +331,6 @@ export type Health = {
   recorded: boolean
 }
 
-/** One ban or unban, read from fail2ban's own log rather than remembered here. */
-export type BanEvent = {
-  action: "ban" | "unban"
-  jail: string
-  ip: string
-  at: string
-}
-
 export type MetricsHistory = {
   from: string
   to: string
@@ -382,6 +378,7 @@ export type NetStats = {
   recvRate: number
   addrs: string[]
   isUp: boolean
+  kind: NetInterface["kind"]
 }
 
 export type DirEntry = {
@@ -519,7 +516,12 @@ export type ContainerStats = {
   name: string
   ts: string
   cpuPercent: number
+  cpuReady?: boolean
   memUsage: number
+  memRaw?: number
+  memCache?: number
+  memRss?: number | null
+  memSwap?: number | null
   memLimit: number
   memPercent: number
   netRx: number
@@ -538,6 +540,24 @@ export type ContainerStats = {
   /** Cumulative nanosecond totals. Only meaningful as a difference between two samples. */
   cpuTotal: number
   systemCpu: number
+  networks?: Record<string, ContainerNetworkCounters>
+  networkAvailable?: boolean
+  blockAvailable?: boolean
+  pidsLimit?: number
+  cpuPeriods?: number
+  cpuThrottledPeriods?: number
+  cpuThrottledTime?: number
+}
+
+export type ContainerNetworkCounters = {
+  rxBytes: number
+  txBytes: number
+  rxPackets: number
+  txPackets: number
+  rxErrors: number
+  txErrors: number
+  rxDropped: number
+  txDropped: number
 }
 
 export type DockerImage = {
@@ -810,6 +830,16 @@ export type DockerEvent = {
   image?: string
   stack?: string
   exitCode?: string
+  /** The compose service: what a stack's log names the container by (`db`, not `shop-db-1`). */
+  service?: string
+  /**
+   * The dashboard's own labels off the object this happened to, with the
+   * `io.just-dashboard.` prefix stripped — `environment-id`, `release-id`,
+   * `release-number` and `run-id` for a deployment's container. It is what
+   * lets a project page show its own restarts without inspecting a container
+   * that is by then already gone, and link a row to the run that made it.
+   */
+  owner?: Record<string, string>
   message: string
   level: "info" | "notice" | "error"
   /**
@@ -1186,6 +1216,8 @@ export type PM2Process = {
   autorestart: boolean
   maxMemoryRestart?: number
   createdAtMs?: number
+  /** PM2 stamps each line it writes (`--time`, `log_date_format`), so the log can be read by time. */
+  logTimes?: boolean
 }
 
 /** One account's PM2 daemon: whether what it runs would survive a reboot. */
@@ -1348,7 +1380,19 @@ export type Crontab = {
 export type LogSource = {
   id: string
   label: string
-  kind: "system" | "nginx" | "app" | "pm2" | "docker" | "journal"
+  kind:
+    | "system"
+    | "nginx"
+    | "app"
+    | "pm2"
+    | "docker"
+    | "journal"
+    /** Every container of one compose project, merged by time. */
+    | "stack"
+    /** The journal of one or more syslog identifiers (`journalctl -t`). */
+    | "journal-id"
+    /** The kernel ring (`journalctl -k`). */
+    | "kernel"
   path?: string
   size?: number
   modified?: string
@@ -1360,12 +1404,22 @@ export type LogSource = {
   detail?: string
   /** A live source's state — a stopped container still has logs worth reading. */
   status?: string
+  /**
+   * The lens the server reads this source through (`lib/log-lenses.ts`) —
+   * detected from the path, the image or the unit. Absent where none applies,
+   * and for a stack whose containers disagree.
+   */
+  lens?: string
+  /** A stack's services' images, for drawing it as the products it runs. */
+  images?: string[]
 }
 
 export type LogJournalUnit = {
   name: string
   description: string
   active: string
+  /** The lens `journal:<unit>` is read through. */
+  lens?: string
 }
 
 /**
@@ -1401,9 +1455,34 @@ export type LogLine = {
   file?: string
   /** Byte ranges of the search term, computed server-side where the browser cannot re-run a Go regexp. */
   match?: [number, number][]
+  /**
+   * The human sentence out of a structured line, and the context around it.
+   * Both are absent for the plain text that is most of a host's logs; where
+   * they are set, the line was JSON and the viewer shows the sentence with the
+   * request id and the rest a keystroke away rather than making the reader
+   * parse JSON by eye.
+   */
+  message?: string
+  fields?: Record<string, string>
+  /**
+   * What the line records, in its lens's words ("auth_failed", "slow",
+   * "ban"), and the values the lens read out of its text. A plain line keeps
+   * being drawn as the text it is; these are what it can be filtered,
+   * counted and labelled by.
+   */
+  event?: string
+  attrs?: Record<string, string>
+  /**
+   * The line continues the record above it — a Postgres DETAIL, a stack
+   * frame. It carries its head's level, took its head's verdict under the
+   * filter, and is folded under it.
+   */
+  cont?: boolean
+  /** The lens that named `event`, where it is not the stream's own (a syslog line read as auth). */
+  lens?: string
 }
 
-/** One column of the search histogram, counted by level. */
+/** One column of the search histogram, counted by level — or by `histogramBy`'s values. */
 export type LogBucket = {
   start: string
   total: number
@@ -1433,6 +1512,50 @@ export type LogSearchResult = {
   first?: string
   last?: string
   tookMillis: number
+  /** Top values per asked-for key, over every match in the window (`facets=`). */
+  facets?: Record<string, LogFacet>
+  /** The distribution of a numeric key over the matches (`measure=`). */
+  measure?: LogMeasure
+  /** The lens the search read the source through. */
+  lens?: string
+  /** What the histogram's counts are keyed by, when it is not the level. */
+  histogramBy?: string
+}
+
+export type LogFacetValue = {
+  value: string
+  count: number
+  /** How many of those lines were errors or worse. */
+  errors: number
+  sum?: number
+  max?: number
+  first?: string
+  last?: string
+  /** The last value seen of each `sample=` key, beside this one. */
+  samples?: Record<string, string>
+}
+
+export type LogFacet = {
+  values: LogFacetValue[]
+  distinct: number
+  /** The distinct count stopped being exact past the server's budget. */
+  distinctCapped?: boolean
+  /** Matches whose value is not among `values`. */
+  other: number
+  /** Matches that carry no value for the key at all. */
+  missing: number
+}
+
+export type LogMeasure = {
+  key: string
+  count: number
+  p50: number
+  p75: number
+  p90: number
+  p95: number
+  p99: number
+  max: number
+  mean: number
 }
 
 /** The frame the live socket opens with, before any lines. */
@@ -1444,6 +1567,8 @@ export type LogStreamMeta = {
   prefill?: { lines: number; complete: boolean }
   archives?: number
   note?: string
+  /** The lens the stream reads its lines through. */
+  lens?: string
 }
 
 export type LogRotateRule = {
@@ -1474,16 +1599,6 @@ export type LogRetention = {
   level: "ok" | "warn" | "unknown"
   lastRun?: string
   available: boolean
-}
-
-export type JournalEntry = {
-  timestamp: string
-  message: string
-  priority: number
-  unit?: string
-  pid?: string
-  hostname?: string
-  syslogIdentifier?: string
 }
 
 export type FileEntry = {
@@ -1564,6 +1679,10 @@ export type FilePlaces = {
   roots: string[]
   places: FilePlace[]
   bookmarks: FileBookmark[]
+  /** The colour each labelled folder is drawn in, by resolved path. Absent before 0.7.0. */
+  colours?: Record<string, string>
+  /** The server-wide colour chosen for every folder; absent until one is chosen. */
+  defaultColour?: string
 }
 
 export type FileFindHit = {
@@ -1610,6 +1729,9 @@ export type VHost = {
   upstreams: string[]
   tls: boolean
   certPath?: string
+  /** Where an nginx site writes its requests and errors, as its own page reads them. */
+  accessLogPath?: string
+  errorLogPath?: string
   modified: string
   size: number
 }
@@ -2239,6 +2361,19 @@ export type DeployProject = {
   envVarCount: number
 }
 
+/** What an archived deployment's plan recorded; absent for a legacy project. */
+export type DeploymentFacts = {
+  sourceKind?: DeploymentSourceKind
+  sourceRef?: string
+  sourceRepository?: string
+  buildMethod?: DeploymentBuildMethod
+  recipe?: DeploymentRecipe
+  framework?: string
+}
+
+/** A row of GET /deploy/?view=archived: the project record and what it deployed. */
+export type ArchivedDeployment = DeployProject & DeploymentFacts
+
 export type WorkloadProfile =
   "web" | "static" | "worker" | "image" | "compose" | "service" | "game" | "imported"
 
@@ -2312,6 +2447,15 @@ export type DeploymentEngineRun = {
   priority: number
   slotClass: "light" | "heavy"
   metadata: Record<string, unknown>
+  /** Where a run in flight stands; set by the list reads, absent once it ends. */
+  currentStep?: DeploymentCurrentStep
+}
+
+/** The step a run in flight is at: running, else blocking, else failed, else next. */
+export type DeploymentCurrentStep = {
+  key: string
+  label: string
+  state: DeploymentStepState
 }
 
 export type DeploymentStep = {
@@ -2328,6 +2472,102 @@ export type DeploymentStep = {
   errorCode?: string
   errorMessage?: string
   lastSeq: number
+}
+
+/**
+ * The Build step's evidence: the image it made and how it was prepared, read
+ * back from `DeploymentStep.evidence`. Everything is optional because a failed
+ * build, or one recorded before a field existed, left less behind.
+ */
+export type DeploymentBuildEvidence = {
+  result?: {
+    image?: {
+      reference: string
+      digest: string
+      sizeBytes?: number
+      os?: string
+      architecture?: string
+      platforms?: string[]
+    }
+    prepared?: {
+      method: DeploymentBuildMethod
+      recipe?: string
+      recipeVersion?: string
+      /** The language release the recipe built with: "rust 1.85", "java 21 (maven)". */
+      toolchain?: string
+      /** The Node major a JavaScript build ran on and what chose it: "22 (.nvmrc)". */
+      nodeVersion?: string
+      baseImages?: { reference: string; digest: string }[]
+      dockerfilePreview?: string
+      dockerfileDigest?: string
+      targetPlatform?: string
+      cachePolicy?: string
+    }
+  }
+}
+
+/**
+ * What a failed step's own output proved about why it failed, read from its
+ * evidence: `cause` on a failed build or release task, `diagnostics.cause` on
+ * a failed health gate. The code is also the step's error code and the run's
+ * terminal code; the subjects are identifiers the output named, never a line
+ * of it, and `lineSeq` is the transcript line that proves it.
+ */
+export type DeploymentFailureCause = {
+  code: string
+  phase?: "install" | "build" | "output_check" | "setup" | "dockerfile" | "base_image" | "pull"
+  command?: string
+  exitCode?: number
+  subjects?: string[]
+  /** What the code is about when it covers several tools: "package-lock.json", "go". */
+  detail?: string
+  lineSeq?: number
+  /** The Compose service whose build failed. */
+  service?: string
+  /** A schema_missing cause names its table here. */
+  table?: string
+  fix?: DeploymentCauseFix
+}
+
+/**
+ * The one plan change a cause's evidence supports. `set_build` and
+ * `set_runtime` replace the field with `value`; `add_variable` creates the
+ * variable in `scope`; `variable_scope` adds `scope` to an existing one;
+ * `review` opens a field whose right value the output cannot prove.
+ */
+export type DeploymentCauseFix = {
+  kind:
+    | "set_build"
+    | "set_runtime"
+    | "add_variable"
+    | "variable_scope"
+    | "remove_variable_scope"
+    | "review"
+  /** `configuration.build.packageManager`, `runtime.internalPort`, `variables.NAME`, `dependencies`. */
+  field: string
+  value?: string
+  scope?: string
+}
+
+/** What changed in the environment's settings since a run was planned. */
+export type DeploymentRunSettingsDrift = {
+  runId: number
+  planRevision: number
+  desiredRevision: number
+  changed: boolean
+  changes: DeploymentSettingsChange[]
+}
+
+/**
+ * One changed setting. `before`/`after` are plan values that are not secret
+ * — a package manager, a port, a command — or, for a variable, its scopes.
+ */
+export type DeploymentSettingsChange = {
+  kind: "build" | "runtime" | "source" | "variable"
+  field: string
+  change: "changed" | "added" | "removed" | "scope"
+  before?: string
+  after?: string
 }
 
 export type DeploymentRunSnapshot = {
@@ -2355,6 +2595,8 @@ export type DeploymentRuntimeService = {
   stack?: string
   service?: string
   startedAt?: string
+  /** The image reference the container was created from, as Docker reports it. */
+  image?: string
 }
 
 export type DeploymentRuntimeServices = {
@@ -2375,11 +2617,31 @@ export type DockerTemplate = {
   spec: ContainerSpec
 }
 
+/**
+ * How the first person to open a deployed template gets in. The catalogue
+ * declares it; the picker promises it before the deploy and the project's
+ * overview makes good on it afterwards.
+ */
+export type BlueprintAccess = {
+  /**
+   * `unavailable` never reaches the picker — it is legal only on a retired
+   * definition — but it does reach the project overview, because a deployment
+   * already running one still resolves its definition on every redeploy.
+   */
+  kind: "setup" | "credentials" | "token" | "client" | "open" | "unavailable"
+  username?: string
+  usernameVariable?: string
+  secretVariable?: string
+  path?: string
+  note: string
+}
+
 export type BlueprintSummary = {
   deploymentSupported?: boolean
   unavailableReason?: string
   id: string
   version: string
+  access: BlueprintAccess
   name: string
   category: "http" | "database" | "tool" | "automation" | "game"
   profile: "web" | "database" | "tool" | "worker" | "game" | "compose"
@@ -2404,7 +2666,7 @@ export type BlueprintChoice = {
 
 export type BlueprintInput = {
   name: string
-  kind: "text" | "number" | "boolean" | "choice" | "domain" | "memory" | "accept"
+  kind: "text" | "secret" | "number" | "boolean" | "choice" | "domain" | "memory" | "accept"
   label: string
   description?: string
   default?: string
@@ -2447,7 +2709,29 @@ export type BlueprintAutomation = {
   default?: boolean
 }
 
-export type BlueprintDetail = BlueprintSummary & {
+/**
+ * The detail endpoint answers with the definition itself, not the listing
+ * row: `image` is the pinned runtime object, and the fields the summary
+ * flattens out of provenance and resources are not repeated at the top level.
+ */
+export type BlueprintDetail = Omit<
+  BlueprintSummary,
+  | "image"
+  | "memoryMb"
+  | "license"
+  | "maintainer"
+  | "reviewedAt"
+  | "requiresAcceptance"
+  | "privileged"
+> & {
+  retired?: string
+  image: {
+    reference: string
+    tagPolicy: string
+    platforms?: string[]
+    pullPolicy?: string
+    command?: string[]
+  }
   provenance: {
     maintainer: string
     license: string
@@ -2616,6 +2900,8 @@ export type DeploymentDomainRoute = {
   certificate: "valid" | "expiring" | "expired" | "missing" | "not requested" | "unavailable"
   certificateName?: string
   certificateDaysLeft?: number
+  /** Who issued the covering certificate, read from the certificate itself. */
+  certificateIssuer?: string
   deepLink?: string
   certificateLink?: string
   protected?: boolean
@@ -2770,6 +3056,27 @@ export type DeploymentSummary = {
   lastRun?: DeploymentEngineRun
   activeRun?: DeploymentEngineRun
   updatedAt: string
+  /** owner/name for Git; the reference itself for an image or template, whose sourceRef is empty. */
+  sourceRepository?: string
+  /** A Git source's remote without userinfo: `https://host/path` or `git@host:path`. */
+  sourceRemote?: string
+  recipe?: DeploymentRecipe
+  /** What detection recognised the source as (`nextjs`, `vite`, `django`…), recorded at creation. */
+  framework?: string
+  /** Image references the live release runs, one per distinct Compose service image. */
+  images?: string[]
+  /** The newest runs, newest first, at most 14; the first is `lastRun`. */
+  recentRuns?: DeploymentRecentRun[]
+}
+
+/** One square of a deployment's run-history strip. */
+export type DeploymentRecentRun = {
+  id: number
+  runNumber: number
+  state: DeploymentRunState
+  operation: string
+  requestedAt: string
+  endedAt?: string
 }
 
 /** The commit a Git run built, recorded in the run's metadata under `commit`. */
@@ -2901,6 +3208,20 @@ export type DeploymentTrigger = {
   enabled: boolean
   lastDeliveryAt?: string
   lastStatus?: string
+  /**
+   * The delivery log as the list row draws it: the newest delivery in full, and
+   * the last 14 decisions oldest first. Present only for an administrator in a
+   * session — the log's own route is theirs alone — so absent is not "none".
+   */
+  lastDelivery?: DeploymentTriggerDelivery
+  recent?: DeploymentTriggerOutcome[]
+}
+
+/** One square of a trigger's recent-delivery strip. */
+export type DeploymentTriggerOutcome = {
+  decision: string
+  reason?: string
+  receivedAt: string
 }
 
 /** One account that installed the dashboard's GitHub App. */
@@ -2943,6 +3264,10 @@ export type GitHubAppRepository = {
   defaultBranch: string
   cloneUrl: string
   htmlUrl: string
+  /** What the picker sorts by, and the two marks it reads. */
+  pushedAt?: string
+  fork?: boolean
+  archived?: boolean
   credentialId?: number
 }
 
@@ -2961,7 +3286,27 @@ export type DeploymentSchedule = {
   timezone: string
   enabled: boolean
   nextRunAt?: string
+  /**
+   * The next five firings, led by `nextRunAt` and walked in `timezone`, so a
+   * daylight-saving change lands where the dispatcher puts it. Absent while paused.
+   */
+  nextRuns?: string[]
   steps: { action: string; config: Record<string, unknown>; required: boolean }[]
+}
+
+/** POST …/schedules/test: when an expression would fire, in its zone. */
+export type DeploymentScheduleTest = {
+  nextRunAt: string
+  nextRuns: string[]
+}
+
+export type DeploymentPreviewAddress = {
+  /** tailnet: a port on this host's Tailscale node, reachable only from the tailnet; domain: a public hostname. */
+  kind: "tailnet" | "domain"
+  url: string
+  port?: number
+  /** Whether the address currently answers: the mapping or route is in place for a live release. */
+  published: boolean
 }
 
 export type DeploymentPreview = {
@@ -2974,6 +3319,63 @@ export type DeploymentPreview = {
   updatedAt: string
   isolationStatus?: "pending" | "quarantined" | "cleared"
   isolationReason?: string
+  /** The pull request number, as providerRef reads as an integer. */
+  number: number
+  /**
+   * The deploy project the preview belongs to. A checkout on the Git page can
+   * be deployed by more than one project, and its verbs address this one.
+   */
+  projectId?: number
+  /** "dashboard" when Test this pull request created it; absent for a webhook delivery. */
+  origin?: "dashboard"
+  title?: string
+  /** The approved head the preview is configured at. */
+  revision?: string
+  headRef?: string
+  headRepository?: string
+  author?: string
+  /** The newest head seen on the pull request; differs from revision once new commits arrive. */
+  headRevision?: string
+  approvalState?: string
+  /** The head the production variables were copied for; absent when the preview carries none. */
+  variablesCopiedRevision?: string
+  liveReleaseId?: number
+  address?: DeploymentPreviewAddress
+  lastRun?: DeploymentRecentRun
+}
+
+/** A deploy project's pull requests on GitHub, joined to the previews built from them. */
+export type ProjectPullRequests = {
+  repository: string
+  host: string
+  available: boolean
+  /** not_github, sign_in_required, app_not_installed or not_installed when pull requests cannot be read. */
+  reason?: string
+  identity?: "cli" | "app"
+  /** A checkout of the same repository under the git roots, for the link to the Git page. */
+  checkoutPath?: string
+  pulls: GitPullRequest[]
+  previews: DeploymentPreview[]
+  production: {
+    environmentId: number
+    automatic: boolean
+    intervalSeconds: number
+    awaitingFirstDeployment: boolean
+  }
+  tailnet: TailscaleIdentity
+  /** The production build is a Compose stack, which previews cannot isolate. */
+  compose: boolean
+  /** The production source is a local checkout, which has no remote to fetch a pull request from. */
+  localCheckout: boolean
+  /** The runtime plan's internal port; 0 means nothing to publish. */
+  internalPort: number
+  /** Production release tasks, which a preview never runs. */
+  releaseTasks: number
+}
+
+/** Open pull request and preview counts per deploy project, for the fleet. */
+export type FleetPullRequests = {
+  projects: Record<string, { open: number; previews: number }>
 }
 
 export type DeploymentPreviewApproval = {
@@ -2984,6 +3386,8 @@ export type DeploymentPreviewApproval = {
   revision: string
   repository: string
   headRepository: string
+  /** The pull request's branch; absent on an approval recorded before deliveries kept it. */
+  headRef?: string
   author: string
   state: "pending" | "approved" | "rejected" | "superseded" | "closed"
   approvedBy?: string
@@ -3028,7 +3432,20 @@ export type DeploymentHostnameSuggestion = {
   certificateIssue?: string
   method: "wildcard" | "sslip" | "custom" | "none"
   detail: string
+  /** This server's public IPv4 — for a typed hostname, what its A record should name. */
   address?: string
+  /**
+   * For a typed hostname, whether its DNS already points at this server. Only an
+   * administrator is answered (resolving a chosen name is theirs, as on the proxy
+   * page), and never when this host has no public address — absent is not a no.
+   */
+  resolves?: boolean
+  /**
+   * Whether a live project already answers to the `name` this was asked with.
+   * Absent when the question was about a hostname, which carries no claim
+   * about project names at all.
+   */
+  nameTaken?: boolean
 }
 
 export type DeploymentDraftSource = {
@@ -3056,9 +3473,30 @@ export type DeploymentDraftSource = {
 
 export type NodePackageManager = "bun" | "npm" | "pnpm" | "yarn"
 
+/**
+ * The recipe stage a build variable is mounted in: the dependency install, the
+ * build command, or both — a root package's own postinstall runs inside the
+ * install. `validBuildSecretStep` is the server's closed set.
+ */
+export type BuildSecretStep = "install" | "build" | "install_and_build"
+
 /** The automatic recipes the backend can build; `validRecipe` is its closed set. */
 export type DeploymentRecipe =
-  "node" | "go" | "python" | "rust" | "java" | "dotnet" | "deno" | "php"
+  | "node"
+  | "go"
+  | "python"
+  | "rust"
+  | "java"
+  | "dotnet"
+  | "deno"
+  | "php"
+  | "site"
+  | "ruby"
+  | "elixir"
+  | "scala"
+  | "clojure"
+  | "dart"
+  | "gleam"
 
 /** An environment variable detection found the source reading. */
 export type DeploymentDetectedVariable = {
@@ -3066,13 +3504,210 @@ export type DeploymentDetectedVariable = {
   /** The example file's own value, when it had one and it was not credential-shaped. */
   example?: string
   sources: string[]
+  /**
+   * How the dashboard supplies the value when nothing is typed: a self-issued
+   * secret minted at commit, the planned domain, a harmless documented default,
+   * or a secret only the operator holds and has to paste.
+   */
+  setup?: DeploymentVariableSetup
+  /** The evidence behind `setup`, e.g. "Auth.js signs and encrypts sessions with it". */
+  setupReason?: string
+  generateLength?: number
+  generateFormat?: DeploymentGeneratedSecretFormat
+  domainTemplate?: string
+  defaultValue?: string
+  /** "build" when the value is read while the build runs. */
+  phase?: "build"
+  /** Compiled into the JavaScript every visitor downloads. */
+  browserInlined?: boolean
+  /** Read with no default where the application starts or builds. */
+  required?: boolean
+  /** Read with no default on a path that may not always run. */
+  requiredRead?: boolean
+  /** The files that read it while the build runs, which its build phase comes from. */
+  buildSources?: string[]
+  /** A committed file whose value for this name points at loopback. */
+  localhostIn?: string
+  /**
+   * "install" for a registry credential a package manager's configuration
+   * (.npmrc, .yarnrc.yml, bunfig.toml) names: only the dependency install
+   * reads it. `installRequired` says the install fails without it.
+   */
+  step?: "install"
+  installRequired?: boolean
 }
+
+/** A committed JavaScript lockfile, compared as data with package.json. */
+export type DeploymentDetectedLockfile = {
+  path: string
+  manager: NodePackageManager
+  /** `stale` is what the manager's frozen install would refuse. */
+  state: "in_sync" | "stale" | "unknown"
+  missing?: string[]
+  extra?: string[]
+  changed?: string[]
+  /** The sentence an operator reads: "package-lock.json is missing 15 dependencies (…)". */
+  note?: string
+}
+
+/**
+ * What the recipe installs when `manager` is chosen, computed by the same
+ * planner the build runs. An empty `install` with a blocked finding is a
+ * choice the build would refuse.
+ */
+export type DeploymentDetectedNodeInstall = {
+  manager: NodePackageManager
+  lockfile?: string
+  install?: string
+  toolchain?: string
+  /** Detection's commands for this manager's runner. */
+  buildCommand?: string
+  startCommand?: string
+  findings?: DeploymentPreflightFinding[]
+}
+
+export type DeploymentVariableSetup = "generate" | "domain" | "default" | "paste"
+
+/**
+ * A database address in the shape its consumer parses: JDBC (Spring,
+ * Quarkus), JDBC over MariaDB Connector/J, which accepts only
+ * `jdbc:mariadb://`, ADO.NET (.NET), or Rails' `mysql2://`.
+ */
+export type DeploymentDatabaseConnectionFormat = "jdbc" | "jdbc-mariadb" | "adonet" | "mysql2"
+
+export type DeploymentGeneratedSecretFormat = "" | "hex" | "base64" | "laravel" | "keylist"
 
 /** A database engine detection found the source connecting to. */
 export type DeploymentDetectedDatabase = {
   engine: string
   variable: string
   evidence: string
+  /** The connection shape the consumer parses when it is not a URL. */
+  format?: DeploymentDatabaseConnectionFormat
+  /** Postgres extensions the schema needs; the official image ships neither. */
+  extensions?: ("vector" | "postgis")[]
+  /** A driver that only speaks its hosted provider's protocol. */
+  hosted?:
+    | "neon-http"
+    | "neon-ws"
+    | "vercel-postgres"
+    | "planetscale-http"
+    | "prisma-accelerate"
+    | "upstash-rest"
+  /** Further databases on the same server the framework reads by name. */
+  alsoVariables?: string[]
+}
+
+/** A fact about the source's configuration that preflight answers. */
+export type DeploymentEnvironmentNote = {
+  code: string
+  detail?: string
+  path?: string
+}
+
+/**
+ * How detection proposes a release proves it serves (`DetectedReadiness`):
+ * the check `defaultChecks` builds, where it came from, and what the source
+ * says about hosts and HTTPS that preflight turns into findings.
+ */
+export type DeploymentDetectedReadiness = {
+  kind: "http" | "docker_health"
+  path?: string
+  /** Any answer below 500 (but 400 and 421) counts as ready. */
+  acceptAnyAnswer?: boolean
+  attempts?: number
+  intervalSeconds?: number
+  source: "healthcheck" | "platform" | "framework" | "code" | "convention"
+  evidence: string
+  slowStart?: string
+  modelDownload?: string
+  modelCache?: string
+  rootRoute?: "routed" | "unrouted"
+  httpsRedirect?: string
+  httpsRedirectIgnoresProxy?: boolean
+  allowedHosts?: string[]
+  allowedHostsSource?: string
+}
+
+/** The library that makes a candidate a process that never listens. */
+export type DeploymentDetectedBackgroundWorker = {
+  library: string
+  kind: string
+  evidence: string
+}
+
+/** A start command that backgrounds the application, which detection could not rewrite. */
+export type DeploymentDetectedStartDetach = {
+  command: string
+  script?: string
+  source: string
+  effect: "exits" | "backgrounds"
+  reason: string
+  action: string
+}
+
+/**
+ * What the source says about where its server listens: a port it fixes
+ * whatever PORT says, whether it reads PORT, and a loopback bind nothing
+ * outside the container reaches. Preflight re-checks these against the plan.
+ */
+export type DeploymentDetectedListen = {
+  port?: number
+  portFrom?: string
+  readsPort?: boolean
+  readsPortFrom?: string
+  loopback?: string
+  loopbackFrom?: string
+  loopbackCertain?: boolean
+  loopbackRecipeFix?: string
+  loopbackVariable?: string
+  unbridged?: string
+}
+
+/**
+ * A plain runtime variable the deployment's place behind the proxy decides:
+ * AUTH_TRUST_HOST, NEXTAUTH_URL (following the primary domain), HOST.
+ */
+export type DeploymentNetworkVariable = {
+  name: string
+  value?: string
+  domainTemplate?: string
+  reason: string
+}
+
+/**
+ * State the application writes to its own filesystem, which a new release
+ * would start without. `target` is where a managed volume can stand without
+ * hiding code (absent when none can); `variable` and `value` move the state
+ * under it; a server database linked through `databaseVariable` replaces the
+ * file altogether, and `connectionVariable` set to any driver but sqlite
+ * takes the file out of use (Laravel's DB_CONNECTION).
+ */
+export type DeploymentDetectedPersistentPath = {
+  kind: "sqlite" | "uploads" | "storage" | "volume" | "keys"
+  path: string
+  target?: string
+  variable?: string
+  value?: string
+  databaseVariable?: string
+  connectionVariable?: string
+  source: string
+  reason: string
+}
+
+/** `DetectedStaticSite` (backend `detect_static_site.go`). */
+export type DeploymentStaticSite = {
+  generator?: string
+  version?: string
+  declared?: string
+  unpinned?: boolean
+  versionIssue?: string
+  basePath?: string
+  basePathSource?: string
+  basePathExpression?: boolean
+  themeSubmodule?: string
+  hostingRules?: number
+  hostingRulesLeftOut?: number
 }
 
 export type DeploymentDetectionCandidate = {
@@ -3096,13 +3731,293 @@ export type DeploymentDetectionCandidate = {
   schemaTool?: string
   schemaCommand?: string
   schemaInStart?: boolean
+  /** The repository's release command applies the schema, so the start command does not. */
+  schemaInRelease?: boolean
   spaFallback?: boolean
   pythonVersion?: string
   unpinnedDependencies?: boolean
+  listen?: DeploymentDetectedListen
+  networkVariables?: DeploymentNetworkVariable[]
   variables?: DeploymentDetectedVariable[]
   databases?: DeploymentDetectedDatabase[]
+  persistentPaths?: DeploymentDetectedPersistentPath[]
+  /** Loads the project's seed data; `seedResets` says it clears tables first. */
+  seedCommand?: string
+  seedResets?: boolean
+  /** The schema step pushes the declared model instead of applying migrations. */
+  schemaPush?: boolean
+  /** Variable prefixes this root's framework compiles into browser code. */
+  browserPrefixes?: string[]
+  environmentNotes?: DeploymentEnvironmentNote[]
   evidence: { path: string; reason: string }[]
   needsDecision: string[]
+  readiness?: DeploymentDetectedReadiness
+  backgroundWorker?: DeploymentDetectedBackgroundWorker
+  startDetaches?: DeploymentDetectedStartDetach
+  /** What the Dockerfile's name, place or command says it was written for. */
+  dockerfileRole?: "production" | "development"
+  /** The Dockerfile stage to build when its last stage is a development one. */
+  dockerfileTarget?: string
+  /** The Dockerfile's build arguments, by name only. */
+  dockerfileArgs?: DeploymentDockerfileArg[]
+  /** Literal `FROM --platform=` values the Dockerfile pins. */
+  dockerfilePlatforms?: string[]
+  /** The Dockerfile's named stages, which a configured stage must be one of. */
+  dockerfileStages?: string[]
+  /** What detection proved about how this candidate's image would build. */
+  imageBuildIssues?: DeploymentImageBuildIssue[]
+  /** The command the repository declares runs once before each release. */
+  releaseCommand?: string
+  /** Why this candidate is offered but never chosen over the application: an example, a docs site, the frontend of an API. */
+  demotion?: string
+  /** A shape nothing on this server can serve. */
+  notDeployable?: DeploymentNotDeployableKind
+  /** The desktop shell (tauri, wails) whose frontend this is. */
+  desktopShell?: string
+  /** The other roots of a repository split into a frontend and an API. */
+  companions?: string[]
+  /** What the source runs besides this candidate's own process. */
+  processes?: DeploymentDetectedProcess[]
+  /** What other platforms' deployment files declare for this candidate. */
+  platformManifests?: DeploymentPlatformManifest[]
+  /** Serverless or edge code a container build does not run. */
+  serverlessCode?: { platform: string; paths: string[]; entry?: string; blocking?: boolean }[]
+  /**
+   * What a static site's own files say about its build and serving: the site
+   * generator and its release, the sub-path it was built for, the theme's Git
+   * submodule and the hosting rules the static server applies.
+   */
+  staticSite?: DeploymentStaticSite
+  /** Imports that resolve only on a case-insensitive disk. */
+  importCaseMismatches?: {
+    file: string
+    line: number
+    specifier: string
+    actual: string
+    language: "javascript" | "php"
+  }[]
+  lockfiles?: DeploymentDetectedLockfile[]
+  nodeInstalls?: DeploymentDetectedNodeInstall[]
+  /** The Node major the recipe builds on and where it came from, e.g. "22 (.nvmrc)". */
+  nodeVersion?: string
+  /**
+   * What the build reads that preflight judges against the configuration and
+   * the host: the env-validation schema it imports and the memory it is
+   * estimated to peak at.
+   */
+  nodeBuild?: {
+    envSchema?: string
+    envServer?: string[]
+    envClient?: string[]
+    envSkippable?: boolean
+    memoryMiB?: number
+    /** Names `prisma.config` reads that the recipe gives a placeholder while `prisma generate` runs. */
+    prismaEnv?: string[]
+    /** What the framework's configuration made the recipe do, said before Deploy. */
+    findings?: DeploymentPreflightFinding[]
+    /** Package scripts that start a development server or a watcher, with what they start. */
+    devScripts?: Record<string, string>
+    /** Package scripts that migrate or push, so a build that runs one needs the real database. */
+    prismaConnectScripts?: string[]
+  }
+  /** go.mod's toolchain line and the .go-version pin, judged against the plan's Go version. */
+  goToolchain?: string
+  goVersionFile?: string
+  /** The module's buildable main packages ("." is the root) and the one detection chose. */
+  goMainPackages?: string[]
+  /** How many main packages the bounded list above leaves out. */
+  goMainPackagesOmitted?: number
+  goPackage?: string
+  /** A Go module with no main package: nothing for the recipe to run. */
+  goLibrary?: boolean
+  /** How the Go module builds beyond its toolchain (detect_go.go). */
+  go?: {
+    context?: string
+    workspace?: boolean
+    localReplaces?: string[]
+    replacesOutside?: string[]
+    cgoModules?: string[]
+    cgoLocal?: string[]
+    cgoPackages?: string[]
+    cgoRuntime?: string[]
+    cgoUnknown?: string[]
+    vendored?: boolean
+    sumMissing?: boolean
+    sumStale?: string[]
+    ownerModules?: string[]
+    embeds?: {
+      pattern: string
+      path: string
+      present?: boolean
+      frontend?: string
+      framework?: string
+    }[]
+    codegen?: string
+    codegenMissing?: string[]
+    subcommand?: string
+    /** The go and toolchain lines of the go.work that uses the module. */
+    workGo?: string
+    workToolchain?: string
+  }
+  /** How the Rust crate builds: its workspace, binaries and native crates (detect_rust.go). */
+  rust?: {
+    workspace?: string
+    package?: string
+    /** The crate's binary targets, and the one the recipe serves unless the plan names another. */
+    binaries?: string[]
+    binary?: string
+    binaryReason?: string
+    nativePackages?: string[]
+    nativeCrates?: string[]
+    /** What the runtime image installs when the binary links dynamically (bindgen). */
+    nativeRuntime?: string[]
+    nativeUnmapped?: string[]
+    sqlxMacros?: boolean
+    sqlxOffline?: boolean
+    /** Where the offline query data is: a .sqlx directory or sqlx-data.json. */
+    sqlxOfflineData?: string
+    sqlxMigrate?: boolean
+    lockVersion?: number
+    lockStale?: string[]
+    toolchain?: string
+    heavyRelease?: string
+    fullstack?: "leptos" | "trunk" | "dioxus" | "shuttle"
+  }
+  /** The interpreter range pyproject declares, and the manifest the recipe installs from. */
+  pythonRequires?: string
+  pythonInstall?:
+    | "uv.lock"
+    | "poetry.lock"
+    | "pdm.lock"
+    | "Pipfile.lock"
+    | "Pipfile"
+    | "requirements.txt"
+    | "pyproject.toml"
+    | "setup.py"
+    | "environment.yml"
+  /**
+   * Debian packages the source needs in its image. `automatic` ones the Python
+   * recipe installs by itself; the others (another platform's Aptfile) seed
+   * `build.systemPackages`.
+   */
+  systemPackages?: DeploymentDetectedSystemPackage[]
+  /** What a Maven or Gradle build says about building it. */
+  javaBuild?: DeploymentDetectedJavaBuild
+  /** What a .NET project says about publishing it. */
+  dotnetBuild?: DeploymentDetectedDotnetBuild
+}
+
+export type DeploymentDetectedSystemPackage = {
+  name: string
+  reason?: string
+  source?: string
+  automatic?: boolean
+}
+
+/**
+ * A JVM candidate's build: the reactor or settings root it builds from and
+ * the module it selects there, how it packages, and the Java release its
+ * build files declare (`toolchain` for an exact Gradle toolchain) and its
+ * version files pin.
+ */
+export type DeploymentDetectedJavaBuild = {
+  tool: "maven" | "gradle"
+  context?: string
+  module?: string
+  packaging?: string
+  runnable?: boolean
+  library?: boolean
+  aggregator?: boolean
+  release?: number
+  releaseFrom?: string
+  toolchain?: boolean
+  pinned?: number
+  pinnedFrom?: string
+  wrapper?: string
+  wrapperUsable?: boolean
+  wrapperJarMissing?: boolean
+  foojay?: boolean
+  profiles?: string[]
+  vaadinDevMode?: boolean
+}
+
+/**
+ * A .NET candidate's project: the directory it publishes from, the targets
+ * it declares, the SDK global.json pins, and what the recipe changes about
+ * publishing it.
+ */
+export type DeploymentDetectedDotnetBuild = {
+  project: string
+  kind: string
+  context?: string
+  targets?: string[]
+  targetText?: string
+  multiTarget?: boolean
+  sdkPin?: string
+  sdkPinFrom?: string
+  rollForward?: string
+  native?: string[]
+  spaRoot?: string
+  appHost?: string
+  aspire?: string[]
+  /** The projects it references, with the frameworks each declares. */
+  references?: { project: string; targets?: string }[]
+}
+
+export type DeploymentDockerfileArg = {
+  name: string
+  hasDefault?: boolean
+  usedInFrom?: boolean
+  consumed?: boolean
+}
+
+export type DeploymentImageBuildIssue = {
+  code: string
+  severity: "blocked" | "warning"
+  line?: number
+  subject?: string
+  detail: string
+}
+
+export type DeploymentNotDeployableKind =
+  | "library"
+  | "cli"
+  | "editor-extension"
+  | "browser-extension"
+  | "github-action"
+  | "desktop-app"
+  | "mobile-app"
+  | "notebook"
+  | "windows-only"
+
+/** A process the source runs besides its main one: a queue worker, a scheduler, a release command. */
+export type DeploymentDetectedProcess = {
+  name: string
+  kind: "worker" | "scheduler" | "release" | "web"
+  command?: string
+  source: string
+  reason: string
+}
+
+/** Facts another platform's file (fly.toml, render.yaml, app.json, …) declares, and which were taken. */
+export type DeploymentPlatformManifest = {
+  file: string
+  platform: string
+  startCommand?: string
+  buildCommand?: string
+  outputDirectory?: string
+  port?: number
+  healthPath?: string
+  spaFallback?: boolean
+  dockerfile?: string
+  releaseCommand?: string
+  generatedVariables?: string[]
+  requiredVariables?: string[]
+  volumes?: string[]
+  systemPackages?: string[]
+  redirects?: number
+  toolchains?: string[]
+  applied?: string[]
 }
 
 export type DeploymentDetection = {
@@ -3132,20 +4047,47 @@ export type DeploymentDetection = {
       ports: string[]
       mounts: string[]
       advanced: string[]
+      buildTarget?: string
+      buildArgs?: { name: string; value?: string; fromEnvironment?: boolean }[]
+      platform?: string
+      imagePlatforms?: string[]
+      envFiles?: { path: string; required: boolean; missing?: boolean }[]
+      buildContextMissing?: boolean
+      dockerfileIssues?: DeploymentImageBuildIssue[]
     }[]
     variables: string[]
     warnings: string[]
     unsupported: string[]
     preview: string
     digest: string
+    /** The service readiness and the release's container follow. */
+    primaryService?: string
+    /** Variables the file interpolates with a default; never required. */
+    optionalVariables?: { name: string; default?: string }[]
   }
   selectedId?: string
+  /** Why `selectedId` won, or why nothing did. */
+  selectionReason?: string
   scannedFiles: number
   scannedBytes: number
   truncated: boolean
   truncatedReason?: string
   unavailable?: string
-  gitRequirements: { submodules: boolean; lfs: boolean }
+  gitRequirements: {
+    submodules: boolean
+    lfs: boolean
+    /** Each declared submodule, and whether the source's own access fetches it. */
+    submoduleList?: { path: string; sameSource: boolean }[]
+    submodulesChecked?: boolean
+    lfsChecked?: boolean
+    /** How many files LFS tracks, and (bounded) which. */
+    lfsFiles?: number
+    lfsPaths?: string[]
+  }
+  /** What detection recognised and deliberately did not offer, and why. */
+  setAside?: { path: string; reason: string; kind: string }[]
+  /** A reviewed template or the project's own published image of the same application. */
+  alternatives?: { kind: "template" | "image"; ref: string; label: string; evidence: string }[]
 }
 
 export type DeploymentBuildMethod =
@@ -3177,6 +4119,30 @@ export type NotificationChannel = {
   enabled: boolean
   createdAt: string
   updatedAt: string
+  /**
+   * The list's reading of a channel, only on GET /deploy/notifications — a
+   * mutation's answer is the bare channel, so reload the list after one. `via`
+   * is an e-mail channel's SMTP host; `recent` is the last 14 attempts, oldest first.
+   */
+  via?: string
+  lastDelivery?: NotificationAttempt
+  recent?: NotificationOutcome[]
+}
+
+/** A channel's newest delivery attempt, as its row reports it. */
+export type NotificationAttempt = {
+  status: string
+  event: string
+  responseClass: string
+  createdAt: string
+  nextAttemptAt?: string
+}
+
+/** One square of a channel's recent-delivery strip; `test` marks a message sent from the page. */
+export type NotificationOutcome = {
+  status: string
+  createdAt: string
+  test: boolean
 }
 
 export type NotificationChannelConfig = {
@@ -3196,6 +4162,10 @@ export type NotificationDelivery = {
   id: number
   channelId: number
   runId?: number
+  /** The run it announced; all three absent for a test message or a purged run. */
+  projectId?: number
+  projectName?: string
+  runNumber?: number
   event: string
   attempt: number
   status: string
@@ -3209,8 +4179,31 @@ export type DeploymentConfiguration = {
   build: {
     method: DeploymentBuildMethod
     recipe?: DeploymentRecipe
+    /**
+     * What detection recognised the source as, recorded at creation. Read-only:
+     * the server ignores a sent value and drops it once the method, recipe,
+     * root directory or source location changes.
+     */
+    framework?: string
     goVersion?: string
+    /** The main package a Go recipe builds, relative to the root directory; empty lets it choose. */
+    goPackage?: string
+    /** The binary target a Rust recipe serves; empty lets it choose. */
+    cargoBin?: string
     pythonVersion?: string
+    /**
+     * The Node major a JavaScript recipe builds and runs on, or the one the PHP, Python, Ruby
+     * or Elixir recipe installs front-end assets with; empty follows the repository.
+     */
+    nodeVersion?: string
+    /** The PHP release a PHP recipe builds on; empty lets composer.json and composer.lock decide. */
+    phpVersion?: string
+    /** Debian packages the Python recipe installs beside the ones its dependencies need. */
+    systemPackages?: string[]
+    /** The JDK release a Java recipe builds and runs on; empty lets the build and version files decide. */
+    javaVersion?: string
+    /** The .NET release a .NET recipe publishes for; empty lets the project and global.json decide. */
+    dotnetVersion?: string
     packageManager?: NodePackageManager
     rootDirectory?: string
     dockerfile?: string
@@ -3219,14 +4212,20 @@ export type DeploymentConfiguration = {
     outputDirectory?: string
     spaFallback?: boolean
     targetPlatform?: string
+    /** The Dockerfile stage to build (custom Dockerfiles only). */
+    target?: string
+    /** The Compose service readiness and the release's container follow; empty keeps detection's. */
+    primaryService?: string
     noCache?: boolean
-    secrets?: { variable: string; step: "install" | "build" }[]
+    secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {
       name: string
       command: string
       workingDirectory?: string
       timeoutSeconds: number
       env: string[]
+      /** "image" runs it in the release's own image; absent is the host shell. */
+      runner?: "image"
     }[]
   }
   runtime: {
@@ -3246,6 +4245,8 @@ export type DeploymentConfiguration = {
     cpus?: number
     pidsLimit?: number
     restartPolicy?: DeploymentRestartPolicy
+    /** The largest request body the route lets through, in MB; empty is 64. */
+    maxRequestBodyMb?: number
     mounts?: {
       source: string
       target: string
@@ -3261,8 +4262,12 @@ export type DeploymentConfiguration = {
     reference?: string
     // A plain literal a blueprint input became; secrets never travel here.
     value?: string
+    /** Recomputes this blueprint default when its primary domain changes. */
+    domainTemplate?: string
     // Length of a secret the server generates when the deployment is saved.
     generate?: number
+    /** The shape of that generated secret; empty is alphanumeric. */
+    generateFormat?: DeploymentGeneratedSecretFormat
   }[]
   dependencies: {
     kind: string
@@ -3310,6 +4315,21 @@ export type DeploymentVariable = {
   desiredRevision: number
 }
 
+/**
+ * POST …/variables/import?dryRun=1: what importing the same body would do to
+ * each name, in the order written, compared by digest on the server. One
+ * refused name refuses the whole import; `reason` says which line to fix.
+ */
+export type DeploymentDotenvImportPreview = {
+  variables: {
+    name: string
+    line: number
+    /** "skipped" is a name the request asked the import to leave out. */
+    change: "added" | "changed" | "unchanged" | "skipped" | "refused"
+    reason?: "invalid_name" | "duplicate" | "invalid_value"
+  }[]
+}
+
 export type DeploymentPendingChange = {
   kind: string
   name: string
@@ -3333,6 +4353,25 @@ export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "
   /** Present once the backend fills it in; until then the Source card falls back to the summary. */
   source?: DeploymentDraftSource
   identity?: SourceIdentity
+  /** The detected candidate this build still describes, from the evidence saved with the plan. */
+  detected?: DeploymentDetectionCandidate
+}
+
+/**
+ * One database bound to an environment's managed network, as reconciliation
+ * last observed it. `detail` is why the last pass could not repair a binding;
+ * it is empty while the database is connected.
+ */
+export type DeploymentDatabaseLink = {
+  connectionId: number
+  name: string
+  driver: DbDriver
+  database: string
+  network: string
+  hostname: string
+  status: "pending" | "connected" | "stale" | "unavailable"
+  detail?: string
+  checkedAt?: string
 }
 
 export type DeploymentRemovalTarget = {
@@ -3389,6 +4428,51 @@ export type DeploymentPreflightFinding = {
   owner?: string
   fieldId?: string
   deepLink?: string
+  /** The one plan change the finding offers, when the check could compute it. */
+  fix?: DeploymentCauseFix
+}
+
+/**
+ * POST /deploy/{id}/environments/{env}/check: preflight for the saved plan
+ * against the commit a deployment would build now — what analyze_plan runs
+ * before every build, asked before Deploy is pressed.
+ */
+export type DeploymentCheckResult = {
+  findings: DeploymentPreflightFinding[]
+  planRevision: number
+  sourceRevision?: string
+  checkedAt: string
+}
+
+/** One plan field whose saved value differs from what detection proposes now. */
+export type DeploymentDetectionChange = {
+  /** The plan field: `build.packageManager`, `runtime.internalPort`. */
+  field: string
+  label: string
+  saved: string
+  detected: string
+  /** What detection proposed when the plan was saved. */
+  previous?: string
+  /** Detection's answer moved since the plan was saved; false is an edit made on purpose. */
+  changed: boolean
+}
+
+/** Fresh detection of a project's source, compared with its saved plan (`.../detect`, a source change). */
+export type DeploymentDetectionProposal = {
+  /** The desired revision it was computed against — the guard an Apply saves with. */
+  revision: number
+  sourceRevision?: string
+  candidate?: DeploymentDetectionCandidate
+  /**
+   * Detection found nothing at the plan's root that builds the plan's way:
+   * `candidate` is what it selected instead, for information, and no field
+   * is compared with it.
+   */
+  elsewhere?: boolean
+  changes: DeploymentDetectionChange[]
+  variables: DeploymentDetectedVariable[]
+  newVariables: string[]
+  databases: DeploymentDetectedDatabase[]
 }
 
 export type DeploymentDraft = {
@@ -3396,6 +4480,8 @@ export type DeploymentDraft = {
   ownerUsername: string
   currentStep: "intent" | "source" | "detection" | "configuration" | "preflight"
   revision: number
+  /** Names saved encrypted on the server; values are never returned. */
+  environmentKeys?: string[]
   data: {
     intent?: { name: string; profile: WorkloadProfile }
     source?: DeploymentDraftSource
@@ -3467,6 +4553,8 @@ export type DeploymentCredential = {
   lastUsedAt?: string
   /** How many non-archived projects' current source uses it — 0 means safe to remove. */
   usedBy: number
+  /** The projects behind `usedBy`, ascending; `usedBy` counts environments, so it can be larger. */
+  usedByProjectIds?: number[]
 }
 
 /**
@@ -3646,6 +4734,78 @@ export type GitComparison = {
   files: number
   insertions: number
   deletions: number
+  baseSha?: string
+  headSha?: string
+  changes?: GitChangedFile[]
+}
+
+export type GitReflogEntry = {
+  sha: string
+  selector: string
+  message: string
+  author: string
+  at: string
+}
+
+export type GitBlame = {
+  ref: string
+  file: string
+  hasMore: boolean
+  lines: {
+    sha: string
+    line: number
+    originalLine: number
+    author: string
+    at: string
+    subject: string
+    content: string
+  }[]
+}
+
+export type GitSignature = {
+  status: string
+  signer?: string
+  key?: string
+  fingerprint?: string
+}
+
+export type GitWorktree = {
+  path: string
+  head: string
+  branch: string
+  current: boolean
+  main: boolean
+  locked: boolean
+  prunable: boolean
+  accessible: boolean
+}
+
+export type GitConflictSide = {
+  present: boolean
+  content: string
+  binary: boolean
+  mode?: string
+  object?: string
+}
+
+export type GitConflict = {
+  file: string
+  version: string
+  base: GitConflictSide
+  ours: GitConflictSide
+  theirs: GitConflictSide
+  result: string
+  editable: boolean
+  operation: string
+}
+
+export type GitPartialDiff = {
+  file: string
+  staged: boolean
+  body: string
+  version: string
+  lines: number[]
+  reason?: string
 }
 
 export type GitCommit = {
@@ -3664,12 +4824,20 @@ export type GitCommit = {
 }
 
 /** One node in the branch graph: a commit plus the lane its dot sits in. */
-export type GitGraphCommit = GitCommit & { col: number }
+export type GitGraphCommit = GitCommit & {
+  col: number
+  /** The lane each edge to a parent travels down, index for index with `parents`. */
+  parentLanes?: number[]
+}
 
 export type GitGraph = {
   commits: GitGraphCommit[]
   /** How many lanes wide the busiest row gets — the canvas is sized from this. */
   lanes: number
+  hasMore?: boolean
+  skip?: number
+  /** How many commits the query reaches in all — sent with the first page only. */
+  total?: number
 }
 
 export type GitBranch = {
@@ -3782,6 +4950,8 @@ export type GitHubDeviceState = {
 }
 
 export type GitPullRequest = {
+  headSha?: string
+  baseSha?: string
   number: number
   title: string
   url: string
@@ -3802,6 +4972,52 @@ export type GitPullRequest = {
   deletions?: number
   files?: number
   body?: string
+  /** owner/name of the head branch's repository; differs from the base repository on a fork. */
+  headRepository?: string
+  /** The head lives in another repository: its code is not this repository's own. */
+  fork?: boolean
+  updatedAt?: string
+  labels?: string[]
+  merged?: boolean
+  /** The preview environment built from this pull request, when a deploy project has one. */
+  preview?: DeploymentPreview | null
+}
+
+export type GitHubCheckRun = {
+  name: string
+  status: "queued" | "in_progress" | "completed"
+  /** success, failure, neutral, cancelled, skipped, timed_out, action_required, pending, or empty while running. */
+  conclusion?: string
+  url?: string
+  app?: string
+  startedAt?: string
+  completedAt?: string
+}
+
+export type GitHubIssue = {
+  number: number
+  title: string
+  url: string
+  state: string
+  author?: string
+  createdAt: string
+  updatedAt: string
+  comments: number
+  labels?: string[]
+  assignees?: string[]
+}
+
+/** The open pull requests of every GitHub-backed checkout the Git page lists, each joined to its previews. */
+export type GitPullRequestSummary = {
+  available: boolean
+  repos: {
+    path: string
+    repository: string
+    pulls: GitPullRequest[]
+    deployments: { projectId: number; name: string; environmentId: number }[]
+    /** Why this checkout's pull requests could not be read, in gh's words. */
+    error?: string
+  }[]
 }
 
 export type GitHubWorkflowRun = {
@@ -4012,7 +5228,7 @@ export type AttackSummary = {
   since?: string
 }
 
-/** One named, filed in-memory workspace containing one or more direct PTYs. */
+/** One session: a named workspace containing one or more direct PTYs. */
 export type TerminalWorkspace = {
   id: string
   title: string
@@ -4066,12 +5282,6 @@ export type TerminalWindowSummary = {
   /** Whether the operator named the window rather than it carrying a default. */
   named?: boolean
 } & Partial<TerminalActivity>
-
-/** A server-backed folder reconciled with live workspace membership. */
-export type TerminalFolder = {
-  name: string
-  collapsed?: boolean
-}
 
 /** An independent direct PTY shown as a window tab inside one session. */
 export type TerminalWindow = TerminalWindowSummary & {
@@ -4229,6 +5439,204 @@ export type DbSchemaGraph = {
 export type DbDiagramLayoutResponse = {
   layout: Record<string, unknown> | null
   updatedAt?: string
+}
+
+// --- the fleet, the server behind a connection, and the map ----------------
+
+/**
+ * One connection as the control center's fleet lists it: the row's facts
+ * with the readings the server answered — dialled, sized and counted in one
+ * request (`GET /databases/fleet`).
+ */
+export type DbFleetEntry = DbConnection & {
+  ok: boolean
+  error?: string
+  version?: string
+  latencyMs: number
+  bytes: number
+  sizesKnown: boolean
+  objects: number
+  objectWord: "tables" | "collections" | "keys"
+  sessions: number
+  source: "docker" | "host" | "remote" | "file"
+  container?: string
+  composeProject?: string
+  exposure: DbAccess["exposure"]
+  consumers: number
+  lastBackup?: string
+}
+
+export type DbFleet = {
+  connections: DbFleetEntry[]
+  unreachable: DbUnreachableServer[]
+  needsCredentials: DbCredentialServer[]
+  checkedAt: string
+}
+
+/** One account on the server, in the terms every engine shares. */
+export type DbRole = {
+  name: string
+  host?: string
+  login: boolean
+  superuser: boolean
+  createDb: boolean
+  createRole: boolean
+  connectionLimit: number
+  validUntil?: string
+  memberOf?: string[]
+  connections: number
+  locked?: boolean
+  system?: boolean
+}
+
+export type DbRoles = { roles: DbRole[]; supported: boolean; reason?: string }
+
+export type DbGrantLevel = "read" | "write" | "all"
+
+export type DbExtension = {
+  name: string
+  version?: string
+  availableVersion?: string
+  installed: boolean
+  schema?: string
+  comment?: string
+}
+
+export type DbExtensions = {
+  extensions: DbExtension[]
+  supported: boolean
+  editable?: boolean
+  reason?: string
+}
+
+export type DbSetting = {
+  name: string
+  value: string
+  unit?: string
+  category?: string
+  description?: string
+  source?: string
+  restartRequired?: boolean
+}
+
+export type DbSettings = { settings: DbSetting[]; supported: boolean }
+
+/** One thing the advisor found, with the fix where one statement is the fix. */
+export type DbAdvice = {
+  id: string
+  level: "critical" | "warning" | "notice"
+  category: "performance" | "schema" | "security" | "maintenance"
+  title: string
+  detail: string
+  advice?: string
+  objects?: string[]
+  sql?: string
+}
+
+export type DbAdviseReport = {
+  findings: DbAdvice[]
+  tablesChecked: number
+  engineChecks: boolean
+}
+
+export type DbStatement = {
+  id: string
+  query: string
+  calls: number
+  totalMs: number
+  meanMs: number
+  maxMs?: number
+  rows: number
+  hitRatio: number
+}
+
+export type DbStatements = {
+  statements: DbStatement[]
+  supported: boolean
+  reason?: string
+  totalMs: number
+}
+
+/**
+ * The logs a database's server writes, as GET /databases/{id}/logs/sources
+ * follows the connection to them: its container, or the file its process
+ * holds open, the file its package writes and its unit's journal. `primary`
+ * is where the server writes its own lines — the file even while logrotate
+ * has left it empty.
+ */
+export type DbLogSource = LogSource & { primary?: boolean }
+
+export type DbLogSources = {
+  sources: DbLogSource[]
+  /** Logs the server writes that the log roots do not reach. */
+  refused?: { path: string; reason: string }[]
+  /** Why there is no source, when there is none. */
+  reason?: string
+  /** What the sources are when nothing answers for the connection: a stopped server's log. */
+  note?: string
+}
+
+/** One statement the server itself recorded as slow — or, for ClickHouse, as run. */
+export type DbQueryEntry = {
+  at: string
+  durationMs: number
+  query: string
+  fp?: string
+  user?: string
+  db?: string
+  client?: string
+  rows?: number
+  examined?: number
+  error?: string
+  code?: string
+}
+
+/** GET /databases/{id}/querylog: the statements, where they were read, and what keeps them empty. */
+export type DbQueryLog = {
+  supported: boolean
+  reason?: string
+  source: "log" | "slowlog" | "query_log" | "slow_log" | "statements_history" | ""
+  /** The setting that keeps the log empty, and the statement that changes it. */
+  enable?: { setting: string; current: string; sql: string }
+  /** How slow a statement has to be to be recorded, in the engine's words. */
+  threshold?: string
+  entries: DbQueryEntry[]
+  truncated: boolean
+}
+
+export type DbBackupFile = {
+  file: string
+  size: number
+  takenAt: string
+  format: string
+}
+
+export type DbBackups = { dir: string; files: DbBackupFile[] }
+
+/** A node on the map of what talks to what. */
+export type DbTopoNode = {
+  id: string
+  kind: "database" | "deployment" | "container" | "host" | "remote"
+  name: string
+  product?: string
+  detail?: string
+  status?: string
+  href?: string
+  connId?: number
+}
+
+export type DbTopoEdge = {
+  from: string
+  to: string
+  via: ("binding" | "env" | "stack" | "network" | "session")[]
+  sessions: number
+  status: "connected" | "stale" | "broken" | "pending" | "observed" | string
+}
+
+export type DbTopology = {
+  nodes: DbTopoNode[]
+  edges: DbTopoEdge[]
+  checkedAt: string
 }
 
 // ---------------------------------------------------------------------------
@@ -4724,6 +6132,13 @@ export type SiteSpec = {
   basicAuthFile?: string
   basicAuthRealm?: string
   accessLog: boolean
+  /**
+   * Where the site's access_log and error_log write, read back from its file
+   * — never set by the form. Absent when it logs nowhere of its own: off,
+   * syslog, or nginx's shared log.
+   */
+  accessLogPath?: string
+  errorLogPath?: string
   locations: SiteLocation[]
   custom?: string
 }
@@ -4825,4 +6240,215 @@ export type JobLine = {
   stream: string
   text: string
   at: string
+}
+
+/**
+ * What a deployment served, as the ingress recorded it.
+ *
+ * The container's own output answers "what did the application print", which
+ * for a modern framework is a startup banner and then nothing at all. This is
+ * the other half of the Logs page: every request that reached the deployment,
+ * whether or not the application chose to say anything about it.
+ */
+export type RequestEntry = {
+  /**
+   * Where this request sits in the server's record of its route: a number
+   * that only rises. A live tail continues from it exactly, where "newer than
+   * the last timestamp" drops the second of two requests in one second — which
+   * is every request, in nginx's format.
+   */
+  seq?: number
+  time: string
+  method: string
+  path: string
+  query?: string
+  host?: string
+  proto?: string
+  status: number
+  size: number
+  remoteIp?: string
+  userAgent?: string
+  referer?: string
+  /** Absent where the format carries no duration — nginx's stock `combined` does not. */
+  durationMs?: number
+  tls?: boolean
+}
+
+export type RequestFacet = {
+  value: string
+  count: number
+  /** How many of those were 5xx, so the busiest and the failing are one table. */
+  errors: number
+  bytes?: number
+  p95?: number
+  /** How many were answered 4xx, and how many of those looked like a scanner's probe. */
+  refused?: number
+  probes?: number
+}
+
+/** One column of the request chart, counted by status family. */
+export type RequestBucket = {
+  start: string
+  total: number
+  counts: Record<string, number>
+  p95?: number
+  /** What the column's answers sent, for the Served reading's line. */
+  bytes?: number
+}
+
+/** The distribution, not an average: a p50 of 30ms hides a p99 of nine seconds. */
+export type RequestLatency = {
+  p50: number
+  p75: number
+  p90: number
+  p95: number
+  p99: number
+  max: number
+  mean: number
+}
+
+export type RequestSummary = {
+  total: number
+  scanned: number
+  classes: Record<string, number>
+  /** Shares of the window, 0–1. Two readings because they are two people's problem. */
+  errorRate: number
+  clientErrorRate: number
+  bytes: number
+  latency?: RequestLatency
+  /** Arrival rate, so the figure means the same thing whichever range is chosen. */
+  perMinute: number
+  /** Page views: documents a person opened, not what a page load dragged in or a scanner's probes. */
+  pages: number
+  methods: RequestFacet[]
+  statuses: RequestFacet[]
+  paths: RequestFacet[]
+  hosts: RequestFacet[]
+  clients: RequestFacet[]
+  agents: RequestFacet[]
+  /** The sites traffic arrived from, by host; the site's own links are not a source. */
+  referers: RequestFacet[]
+  /** Refused paths that look like scanning, and the clients that asked for several. */
+  probes: RequestFacet[]
+  scanners: RequestFacet[]
+  buckets: RequestBucket[]
+  bucketSeconds: number
+  first?: string
+  last?: string
+  /** The scan hit its own bound, so every figure above is a floor. */
+  truncated: boolean
+}
+
+/**
+ * What the server holds of a route's record, so an empty window can explain
+ * itself: whether a record exists at all, how far back what is held reaches,
+ * whether that is the whole retained record or a tail of it, and how fresh.
+ */
+export type RequestCoverage = {
+  exists: boolean
+  from?: string
+  to?: string
+  held: number
+  complete: boolean
+  /** The newest request's sequence — what a live tail continues from. */
+  cursor: number
+  refreshedAt: string
+  /** The last read failed; these figures are from the previous successful one. */
+  stale?: boolean
+}
+
+export type DeploymentRequests = {
+  status: "available" | "unavailable"
+  reason?: string
+  /** Which server wrote the record: the two drivers do not record the same things. */
+  driver?: string
+  format?: string
+  /** Whether this format carries a request duration at all. */
+  latency: boolean
+  /**
+   * Where the proxy says why it failed a request: the Caddy ingress
+   * container, whose output carries its error lines, or nginx's error file
+   * for the site. At most one is set.
+   */
+  ingress?: string
+  errorLog?: string
+  /** What is held reaches the start of the retained record; false means every figure is a floor. */
+  complete: boolean
+  observedAt: string
+  entries: RequestEntry[]
+  slowest?: RequestEntry[]
+  summary: RequestSummary
+  coverage: RequestCoverage
+}
+
+/** One window's worth of traffic, small enough to sit beside a release or on a card. */
+export type TrafficReading = {
+  requests: number
+  pages: number
+  perMinute: number
+  errorRate: number
+  p95?: number
+  from: string
+  until: string
+}
+
+/** What a release did to the traffic: the same reading either side of its activation. */
+export type RunTraffic = {
+  status: "available" | "unavailable"
+  reason?: string
+  activationCompletedAt?: string
+  windowMinutes: number
+  before?: TrafficReading
+  after?: TrafficReading
+  latency: boolean
+}
+
+/** A project's last hour on a card: alive, failing, and a line to draw. */
+export type TrafficPulse = {
+  status: "available" | "unavailable"
+  perMinute: number
+  errorRate: number
+  pages: number
+  points: number[]
+}
+
+export type TrafficAlertKind = "error_rate" | "latency" | "silence"
+
+/**
+ * A rule over a deployment's request record, told to the notification
+ * channels once when it crosses its line and once when it comes back.
+ */
+export type TrafficAlert = {
+  id: number
+  projectId: number
+  environmentId: number
+  kind: TrafficAlertKind
+  /** A percentage for error_rate, milliseconds for latency, unused for silence. */
+  threshold: number
+  windowMinutes: number
+  /** Channel ids; empty means every enabled channel. */
+  channels: number[]
+  enabled: boolean
+  state: "ok" | "firing"
+  stateSince?: string
+  observed: number
+  checkedAt?: string
+  firedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type TrafficAlertList = {
+  alerts: TrafficAlert[]
+  kinds: TrafficAlertKind[]
+}
+
+/** What Docker did to this deployment's containers, as opposed to what they printed. */
+export type DeploymentLifecycle = {
+  status: "available" | "unavailable"
+  reason?: string
+  /** Whether the event stream is connected, so an empty feed can explain itself. */
+  watching: boolean
+  since?: string
+  events: DockerEvent[]
 }

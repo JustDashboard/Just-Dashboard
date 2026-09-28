@@ -149,6 +149,19 @@ CREATE TABLE IF NOT EXISTS db_diagram_layouts (
   PRIMARY KEY (connection_id, schema_name)
 );
 
+-- Boards live with the dashboard's other durable state, including embedded
+-- Excalidraw image data. Revision guards prevent a stale tab overwriting a
+-- newer save. A new table is additive for existing installations.
+CREATE TABLE IF NOT EXISTS boards (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  scene      TEXT NOT NULL DEFAULT '{"elements":[],"appState":{},"files":{}}',
+  revision   INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_boards_updated ON boards(updated_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS backup_jobs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,
@@ -562,8 +575,10 @@ CREATE TABLE IF NOT EXISTS deploy_variable_revisions (
   active         INTEGER NOT NULL DEFAULT 1,
   created_by     TEXT NOT NULL DEFAULT 'migration',
   created_at     INTEGER NOT NULL,
+  copied_from_environment INTEGER NOT NULL DEFAULT 0,
   UNIQUE(environment_id, key, revision)
 );
+
 CREATE INDEX IF NOT EXISTS idx_deploy_variable_active
   ON deploy_variable_revisions(environment_id, active, key);
 
@@ -657,6 +672,7 @@ CREATE TABLE IF NOT EXISTS deploy_database_bindings (
   container_id TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
   checked_at INTEGER NOT NULL DEFAULT 0,
+  detail TEXT NOT NULL DEFAULT '',
   PRIMARY KEY(environment_id, connection_id)
 );
 
@@ -719,6 +735,7 @@ CREATE TABLE IF NOT EXISTS deploy_drafts (
   current_step         TEXT NOT NULL DEFAULT 'intent',
   revision             INTEGER NOT NULL DEFAULT 1,
   data_json            TEXT NOT NULL DEFAULT '{}',
+  environment_enc      TEXT NOT NULL DEFAULT '',
   findings_json        TEXT NOT NULL DEFAULT '[]',
   plan_preview         TEXT NOT NULL DEFAULT '',
   committed_project_id INTEGER NOT NULL DEFAULT 0,
@@ -779,6 +796,25 @@ CREATE TABLE IF NOT EXISTS deploy_notification_deliveries (
   UNIQUE(channel_id, run_id, event, attempt)
 );
 
+CREATE TABLE IF NOT EXISTS deploy_traffic_alerts (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id     INTEGER NOT NULL REFERENCES deploy_projects(id) ON DELETE CASCADE,
+  environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL,
+  threshold      REAL NOT NULL DEFAULT 0,
+  window_minutes INTEGER NOT NULL DEFAULT 5,
+  channels       TEXT NOT NULL DEFAULT '[]',
+  enabled        INTEGER NOT NULL DEFAULT 1,
+  state          TEXT NOT NULL DEFAULT 'ok',
+  state_since    INTEGER NOT NULL DEFAULT 0,
+  observed       REAL NOT NULL DEFAULT 0,
+  checked_at     INTEGER NOT NULL DEFAULT 0,
+  fired_at       INTEGER NOT NULL DEFAULT 0,
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_deploy_traffic_alerts_project ON deploy_traffic_alerts(project_id);
+
 CREATE TABLE IF NOT EXISTS deploy_preview_refs (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   trigger_id     INTEGER NOT NULL REFERENCES deploy_triggers(id) ON DELETE CASCADE,
@@ -786,8 +822,13 @@ CREATE TABLE IF NOT EXISTS deploy_preview_refs (
   environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
   state          TEXT NOT NULL DEFAULT 'open',
   updated_at     INTEGER NOT NULL,
+  origin         TEXT NOT NULL DEFAULT '',
+  title          TEXT NOT NULL DEFAULT '',
+  head_revision  TEXT NOT NULL DEFAULT '',
+  variables_copied_revision TEXT NOT NULL DEFAULT '',
   UNIQUE(trigger_id, provider_ref)
 );
+
 
 CREATE TABLE IF NOT EXISTS deploy_preview_approvals (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -810,6 +851,22 @@ CREATE TABLE IF NOT EXISTS deploy_preview_quarantines (
   created_at     INTEGER NOT NULL,
   updated_at     INTEGER NOT NULL
 );
+
+-- Where a preview answers: a port on this host's Tailscale node that
+-- tailscale serve maps to the preview's loopback publication. The port is
+-- unique per kind so two previews can never be served on the same one.
+
+CREATE TABLE IF NOT EXISTS deploy_preview_addresses (
+  environment_id INTEGER PRIMARY KEY REFERENCES deploy_environments(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL DEFAULT 'tailnet',
+  port           INTEGER NOT NULL,
+  upstream_port  INTEGER NOT NULL DEFAULT 0,
+  url            TEXT NOT NULL DEFAULT '',
+  published      INTEGER NOT NULL DEFAULT 0,
+  updated_at     INTEGER NOT NULL,
+  UNIQUE(kind, port)
+);
+
 
 CREATE TABLE IF NOT EXISTS watched_domains (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -964,6 +1021,10 @@ CREATE INDEX IF NOT EXISTS idx_container_samples_identity_ts
   ON metric_container_samples(container_id, ts);
 CREATE INDEX IF NOT EXISTS idx_deploy_runs_queue
   ON deploy_runs(state, priority, requested_at, id);
+-- Every fleet poll ranks each project's runs newest first; an index in that
+-- order lets the ranking read ids from the index alone instead of sorting rows.
+CREATE INDEX IF NOT EXISTS idx_deploy_runs_project_requested
+  ON deploy_runs(project_id, requested_at DESC, id DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_deploy_runs_idempotency
   ON deploy_runs(project_id, environment_id, operation, idempotency_key)
   WHERE idempotency_key <> '';
@@ -1013,10 +1074,27 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"backup_jobs", "retention_days", "INTEGER NOT NULL DEFAULT 0"},
 	{"backup_jobs", "pause_containers", "TEXT NOT NULL DEFAULT '[]'"},
 	{"deploy_preview_approvals", "generation", "INTEGER NOT NULL DEFAULT 1"},
+	// A preview started from the dashboard's "Test this pull request" rather
+	// than from a webhook remembers where it came from, the pull request's
+	// title, the newest head the reconciler has seen, and the head whose
+	// production variables were copied in ('' = none copied).
+	{"deploy_preview_refs", "origin", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_preview_refs", "title", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_preview_refs", "head_revision", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_preview_refs", "variables_copied_revision", "TEXT NOT NULL DEFAULT ''"},
+	// A variable copied from production into a preview keeps its provenance,
+	// so closing the preview can drop exactly the copies and nothing the
+	// operator typed there themselves.
+	{"deploy_variable_revisions", "copied_from_environment", "INTEGER NOT NULL DEFAULT 0"},
+
 	{"deploy_git_watches", "reason", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "baseline_revision", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_database_networks", "network_id", "TEXT NOT NULL DEFAULT ''"},
+	// Reconciliation knew why a binding could not be repaired and threw the
+	// reason away, so the settings page could only say "check that the
+	// container is running". The reason is kept on the binding it belongs to.
+	{"deploy_database_bindings", "detail", "TEXT NOT NULL DEFAULT ''"},
 	// Notification channels grew provider kinds beside the signed webhook.
 	// Existing rows are webhooks whose URL is also their display target.
 	{"deploy_notification_channels", "kind", "TEXT NOT NULL DEFAULT 'webhook'"},
@@ -1033,6 +1111,7 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_projects", "updated_at", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_projects", "archived_at", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_projects", "archived_name", "TEXT NOT NULL DEFAULT ''"},
+	{"deploy_drafts", "environment_enc", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_runs", "environment_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "run_number", "INTEGER NOT NULL DEFAULT 0"},
 	{"deploy_runs", "source_revision", "TEXT NOT NULL DEFAULT ''"},
@@ -1103,6 +1182,13 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Name continuity serves Docker charts; release attribution needs the exact
 	// observed container identity. Old samples deliberately remain unattributed.
 	{"metric_container_samples", "container_id", "TEXT NOT NULL DEFAULT ''"},
+	// Unknown for pre-upgrade rows: an absent measurement must not become an
+	// idle interface or an operator-configured limit during migration.
+	{"metric_container_samples", "network_available", "INTEGER DEFAULT NULL"},
+	{"metric_container_samples", "block_available", "INTEGER DEFAULT NULL"},
+	{"metric_container_samples", "mem_limited", "INTEGER DEFAULT NULL"},
+	{"metric_container_samples", "cpu_total", "INTEGER DEFAULT NULL"},
+	{"metric_container_samples", "sample_time", "REAL DEFAULT NULL"},
 
 	// Inode exhaustion fills a filesystem that reports free space, and is
 	// invisible in a used-bytes percentage.
@@ -1239,4 +1325,21 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 		`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 		key, value)
 	return err
+}
+
+// SetSettings keeps related settings visible together when one request changes both.
+func (s *Store) SetSettings(ctx context.Context, values map[string]string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for key, value := range values {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+			key, value); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

@@ -7,11 +7,15 @@
   "description": "The MySQL and MariaDB administration app, configured to ask for the server to connect to at sign-in.",
   "iconId": "database",
   "docsUrl": "https://docs.phpmyadmin.net/",
+  "access": {
+    "kind": "open",
+    "note": "phpMyAdmin has no account of its own: because PMA_ARBITRARY is set, the first page asks for a server, a username and a password, and you sign in with credentials your MySQL or MariaDB server already has. Anyone who reaches this address gets that form and can try credentials against any reachable database, so either give the domain proxy password protection or leave the domain empty and reach it over the leased loopback port."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-2.0",
     "upstreamUrl": "https://github.com/phpmyadmin/phpmyadmin",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

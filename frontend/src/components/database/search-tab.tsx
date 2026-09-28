@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { ArrowRight, Inspect, MagnifyingGlass } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { plural } from "@/lib/format"
@@ -41,7 +42,7 @@ export function SearchTab({
   schema: string
   onOpenTable?: (schema: string, table: string) => void
 }) {
-  const [needle, setNeedle] = useState("")
+  const [needle, setNeedle] = useSessionState(`databases.${conn.id}.search.needle`, "")
   const [result, setResult] = useState<DbSearchResult | null>(null)
   const [ran, setRan] = useState("")
   const [busy, setBusy] = useState(false)
@@ -62,7 +63,7 @@ export function SearchTab({
   }
 
   return (
-    <Panel plain className="animate-rise">
+    <Panel className="animate-rise">
       <PanelHeader title="Find a value" />
       <PanelToolbar>
         <SearchInput
@@ -112,7 +113,7 @@ export function SearchTab({
                 description={`Searched ${plural(result.tablesScanned, "table")}.`}
               />
             ) : (
-              <div className="-mx-4 min-w-0 overflow-x-auto">
+              <div className="group-data-[plain]/panel:-mx-4 min-w-0 overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>

@@ -266,6 +266,15 @@ func TestResolveGitRefDistinguishesNotFoundFromUnavailable(t *testing.T) {
 	if _, err := analyzer.ResolveGitRef(context.Background(), source, "network-down"); !errors.Is(err, ErrSourceUnavailable) {
 		t.Fatalf("unreachable remote error = %v, want ErrSourceUnavailable", err)
 	}
+	// A pull request head is not a branch or tag, however well-formed: a
+	// manual run must not deploy a fork's commit past the preview flow's
+	// approval, so it is refused before git runs (the fake would answer 128).
+	for _, ref := range []string{"refs/pull/1/head", "refs/merge-requests/2/head"} {
+		_, err := analyzer.ResolveGitRef(context.Background(), source, ref)
+		if !errors.Is(err, ErrInvalidRef) || !strings.Contains(err.Error(), "is not a valid branch or tag name") {
+			t.Fatalf("ResolveGitRef(%q) = %v, want ErrInvalidRef", ref, err)
+		}
+	}
 }
 
 // While the live runtime is stopped, an observed branch change is recorded

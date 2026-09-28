@@ -64,7 +64,23 @@ type Trigger struct {
 	LastStatus     string        `json:"lastStatus,omitempty"`
 	CreatedAt      time.Time     `json:"createdAt"`
 	UpdatedAt      time.Time     `json:"updatedAt"`
+	// LastDelivery and Recent are the trigger's delivery log as its list row
+	// draws it. Only AttachTriggerDeliveries fills them, because the log is an
+	// administrator's reading and the list is not.
+	LastDelivery *TriggerDelivery `json:"lastDelivery,omitempty"`
+	Recent       []TriggerOutcome `json:"recent,omitempty"`
 }
+
+// TriggerOutcome is one square of a trigger's recent-delivery strip: what this
+// host decided about a delivery, and why when it did not deploy.
+type TriggerOutcome struct {
+	Decision   string    `json:"decision"`
+	Reason     string    `json:"reason,omitempty"`
+	ReceivedAt time.Time `json:"receivedAt"`
+}
+
+// triggerRecentOutcomes is how many deliveries a trigger's strip draws.
+const triggerRecentOutcomes = 14
 
 type TriggerConfig struct {
 	Repository    string   `json:"repository,omitempty"`
@@ -349,6 +365,44 @@ func (s *AutomationStore) TriggerDeliveries(ctx context.Context, projectID, envi
 	return out, rows.Err()
 }
 
+// AttachTriggerDeliveries gives each trigger its newest delivery and its last
+// triggerRecentOutcomes decisions, oldest first, read for every trigger in
+// one statement rather than one delivery request per row.
+func (s *AutomationStore) AttachTriggerDeliveries(ctx context.Context, triggers []Trigger) error {
+	if len(triggers) == 0 {
+		return nil
+	}
+	byID := make(map[int64]*Trigger, len(triggers))
+	ids := make([]int64, 0, len(triggers))
+	for i := range triggers {
+		byID[triggers[i].ID] = &triggers[i]
+		ids = append(ids, triggers[i].ID)
+	}
+	placeholders, args := inPlaceholders(ids)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT trigger_id,delivery_id,event,ref,status,reason,run_id,received_at FROM (
+		  SELECT id,trigger_id,delivery_id,event,ref,status,reason,run_id,received_at,
+		         ROW_NUMBER() OVER (PARTITION BY trigger_id ORDER BY id DESC) AS rank
+		    FROM deploy_webhook_deliveries WHERE trigger_id IN `+placeholders+`
+		) WHERE rank<=? ORDER BY trigger_id,id`, append(args, triggerRecentOutcomes)...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var triggerID, received int64
+		var d TriggerDelivery
+		if err := rows.Scan(&triggerID, &d.DeliveryID, &d.Event, &d.Ref, &d.Decision, &d.Reason, &d.RunID, &received); err != nil {
+			return err
+		}
+		d.ReceivedAt = time.Unix(received, 0).UTC()
+		trigger := byID[triggerID]
+		trigger.Recent = append(trigger.Recent, TriggerOutcome{Decision: d.Decision, Reason: d.Reason, ReceivedAt: d.ReceivedAt})
+		trigger.LastDelivery = &d
+	}
+	return rows.Err()
+}
+
 func (s *AutomationStore) DeleteTrigger(ctx context.Context, projectID, environmentID, triggerID int64) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM deploy_triggers WHERE id=? AND environment_id=? AND environment_id IN (SELECT id FROM deploy_environments WHERE project_id=?)`, triggerID, environmentID, projectID)
 	if err != nil {
@@ -433,6 +487,15 @@ type ProviderEvent struct {
 	PreviewClosed  bool
 	Author         string
 	HeadRepository string
+	// HeadRef is the branch a pull request proposes. PreviewRef is the ref the
+	// build fetches, which on GitHub and GitLab is the provider's own
+	// refs/pull/N/head rather than a name anyone chose.
+	HeadRef string
+	// BaseRef is the branch the pull request wants to land on, and Merged
+	// says whether a close delivery closed it by merging: that is what turns
+	// a preview teardown into a production redeploy.
+	BaseRef string
+	Merged  bool
 }
 
 func VerifyProvider(provider string, headers http.Header, body []byte, secret string) (ProviderEvent, error) {
@@ -487,13 +550,16 @@ func VerifyProvider(provider string, headers http.Header, body []byte, secret st
 		result.ChangedPaths = githubChanged(raw)
 		if pr, ok := raw["pull_request"].(map[string]any); ok {
 			result.PreviewNumber = intValue(raw["number"])
-			result.PreviewRef = nestedString(pr, "head", "ref")
+			result.HeadRef = nestedString(pr, "head", "ref")
 			result.Revision = nestedString(pr, "head", "sha")
 			result.PreviewClosed = result.Action == "closed"
+			result.Merged = boolValue(pr["merged"])
+			result.BaseRef = nestedString(pr, "base", "ref")
 			result.Author = nestedString(pr, "user", "login")
 			result.HeadRepository = nestedString(pr, "head", "repo", "full_name")
 			result.PreviewRef = fmt.Sprintf("refs/pull/%d/head", result.PreviewNumber)
 		}
+
 	}
 	if provider == "gitlab" {
 		result.Repository = nestedString(raw, "project", "path_with_namespace")
@@ -502,11 +568,14 @@ func VerifyProvider(provider string, headers http.Header, body []byte, secret st
 		result.Action = stringValue(raw["object_kind"])
 		if attrs, ok := raw["object_attributes"].(map[string]any); ok {
 			result.PreviewNumber = intValue(attrs["iid"])
-			result.PreviewRef = stringValue(attrs["source_branch"])
+			result.HeadRef = stringValue(attrs["source_branch"])
 			result.Revision = nestedString(attrs, "last_commit", "id")
 			state := stringValue(attrs["state"])
 			result.PreviewClosed = state == "closed" || state == "merged"
+			result.Merged = state == "merged"
+			result.BaseRef = stringValue(attrs["target_branch"])
 			result.Author = nestedString(raw, "user", "username")
+
 			result.HeadRepository = nestedString(attrs, "source", "path_with_namespace")
 			result.PreviewRef = fmt.Sprintf("refs/merge-requests/%d/head", result.PreviewNumber)
 		}
@@ -523,10 +592,14 @@ func VerifyProvider(provider string, headers http.Header, body []byte, secret st
 		}
 		if pr, ok := raw["pullrequest"].(map[string]any); ok {
 			result.PreviewNumber = intValue(pr["id"])
-			result.PreviewRef = nestedString(pr, "source", "branch", "name")
+			result.HeadRef = nestedString(pr, "source", "branch", "name")
+			result.PreviewRef = result.HeadRef
 			result.Revision = nestedString(pr, "source", "commit", "hash")
 			result.PreviewClosed = strings.Contains(event, "fulfilled") || strings.Contains(event, "rejected")
+			result.Merged = strings.Contains(event, "fulfilled")
+			result.BaseRef = nestedString(pr, "destination", "branch", "name")
 			result.Author = nestedString(pr, "author", "nickname")
+
 			result.HeadRepository = nestedString(pr, "source", "repository", "full_name")
 		}
 	}
@@ -554,6 +627,8 @@ func VerifyGenericHook(body []byte, secret, signature string) bool {
 	return verifyHMAC(body, secret, signature)
 }
 func stringValue(v any) string { s, _ := v.(string); return s }
+func boolValue(v any) bool     { b, _ := v.(bool); return b }
+
 func intValue(v any) int {
 	switch x := v.(type) {
 	case float64:
@@ -686,7 +761,15 @@ type Schedule struct {
 	Steps         []ScheduleStep `json:"steps"`
 	CreatedAt     time.Time      `json:"createdAt"`
 	UpdatedAt     time.Time      `json:"updatedAt"`
+	// NextRuns is the next ScheduleNextRuns firings, starting with NextRunAt,
+	// walked in the schedule's own time zone so a daylight-saving change
+	// lands where the dispatcher will put it. A paused schedule has none.
+	NextRuns []time.Time `json:"nextRuns,omitempty"`
 }
+
+// ScheduleNextRuns is how many upcoming firings a schedule reports.
+const ScheduleNextRuns = 5
+
 type ScheduleStep struct {
 	Action   string          `json:"action"`
 	Config   json.RawMessage `json:"config"`
@@ -721,6 +804,13 @@ func (s *AutomationStore) ListSchedules(ctx context.Context, projectID, environm
 		if next > 0 {
 			x := time.Unix(next, 0).UTC()
 			v.NextRunAt = &x
+			if v.Enabled {
+				// The stored firing is the dispatcher's own answer and leads;
+				// an expression that no longer walks (a zone gone from the
+				// host's tzdata) is left to the dispatcher to disable.
+				rest, _ := NextCronRuns(v.Expression, v.Timezone, x, ScheduleNextRuns-1)
+				v.NextRuns = append([]time.Time{x}, rest...)
+			}
 		}
 		steps, err := s.scheduleSteps(ctx, v.ID)
 		if err != nil {
@@ -1002,36 +1092,48 @@ func validScheduleAction(action string) bool {
 	return false
 }
 
+// PreviewRef is one preview environment as the pull request panels and the
+// automation page read it. Everything past IsolationReason is read from the
+// approval, source, address and run rows beside the preview in one query, so
+// a list of pull requests can say what each preview is doing without a
+// second round trip per row.
 type PreviewRef struct {
 	ID              int64     `json:"id"`
 	TriggerID       int64     `json:"triggerId"`
+	ProjectID       int64     `json:"projectId"`
 	ProviderRef     string    `json:"providerRef"`
+	Number          int       `json:"number"`
 	EnvironmentID   int64     `json:"environmentId"`
 	EnvironmentSlug string    `json:"environmentSlug"`
 	State           string    `json:"state"`
 	UpdatedAt       time.Time `json:"updatedAt"`
 	IsolationStatus string    `json:"isolationStatus,omitempty"`
 	IsolationReason string    `json:"isolationReason,omitempty"`
+	// Origin is "" for a preview a webhook opened and PreviewOriginDashboard
+	// for one started with "Test this pull request".
+	Origin string `json:"origin,omitempty"`
+	Title  string `json:"title,omitempty"`
+	// Revision is the approved head the preview is configured at;
+	// HeadRevision is the newest head seen on the pull request since. They
+	// differ once new commits arrive, which is what "out of date" means.
+	Revision       string `json:"revision,omitempty"`
+	HeadRef        string `json:"headRef,omitempty"`
+	HeadRepository string `json:"headRepository,omitempty"`
+	Author         string `json:"author,omitempty"`
+	HeadRevision   string `json:"headRevision,omitempty"`
+	ApprovalState  string `json:"approvalState,omitempty"`
+	// VariablesCopiedRevision is the head whose production variables were
+	// copied into the preview, or "" when none are.
+	VariablesCopiedRevision string          `json:"variablesCopiedRevision,omitempty"`
+	LiveReleaseID           int64           `json:"liveReleaseId,omitempty"`
+	Address                 *PreviewAddress `json:"address,omitempty"`
+	LastRun                 *RecentRun      `json:"lastRun,omitempty"`
 }
 
 func (s *AutomationStore) ListPreviews(ctx context.Context, projectID int64) ([]PreviewRef, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id,p.trigger_id,p.provider_ref,p.environment_id,e.slug,p.state,p.updated_at,COALESCE(q.status,''),COALESCE(q.reason,'') FROM deploy_preview_refs p JOIN deploy_environments e ON e.id=p.environment_id LEFT JOIN deploy_preview_quarantines q ON q.environment_id=e.id WHERE e.project_id=? ORDER BY p.updated_at DESC`, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []PreviewRef{}
-	for rows.Next() {
-		var p PreviewRef
-		var updated int64
-		if err := rows.Scan(&p.ID, &p.TriggerID, &p.ProviderRef, &p.EnvironmentID, &p.EnvironmentSlug, &p.State, &updated, &p.IsolationStatus, &p.IsolationReason); err != nil {
-			return nil, err
-		}
-		p.UpdatedAt = time.Unix(updated, 0).UTC()
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return s.previewRefs(ctx, `WHERE e.project_id=? ORDER BY p.updated_at DESC,p.id DESC`, projectID)
 }
+
 func (s *AutomationStore) EnsurePreview(ctx context.Context, t *Trigger, event ProviderEvent) (*PreviewRef, bool, error) {
 	if !t.Config.Preview || event.PreviewNumber <= 0 {
 		return nil, false, ErrWrongEvent
@@ -1271,6 +1373,25 @@ func NextCron(expression, timezone string, after time.Time) (time.Time, error) {
 	}
 	return time.Time{}, fmt.Errorf("schedule has no occurrence in the next year")
 }
+
+// NextCronRuns is the next count firings after the given instant, in order.
+// A schedule with fewer in the coming year answers with the ones it has.
+func NextCronRuns(expression, timezone string, after time.Time, count int) ([]time.Time, error) {
+	runs := make([]time.Time, 0, count)
+	for len(runs) < count {
+		next, err := NextCron(expression, timezone, after)
+		if err != nil {
+			if len(runs) > 0 {
+				break
+			}
+			return nil, err
+		}
+		runs = append(runs, next)
+		after = next
+	}
+	return runs, nil
+}
+
 func parseCronField(raw string, min, max int) (map[int]bool, error) {
 	out := map[int]bool{}
 	for _, part := range strings.Split(raw, ",") {
@@ -1322,7 +1443,39 @@ type NotificationChannel struct {
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// Via, LastDelivery and Recent are the list page's reading of a channel
+	// and only NotificationChannelsWithHistory fills them: the dispatcher
+	// reads channels on every run and has no use for their history.
+	//
+	// Via is the mail server an e-mail channel hands its messages to. The host
+	// is not a credential — the sign-in beside it is — so it alone is read
+	// back out of the sealed configuration.
+	Via          string                `json:"via,omitempty"`
+	LastDelivery *NotificationAttempt  `json:"lastDelivery,omitempty"`
+	Recent       []NotificationOutcome `json:"recent,omitempty"`
 }
+
+// NotificationAttempt is a channel's newest delivery attempt as its row
+// reports it: what was sent, how it went and whether a retry is still ahead.
+type NotificationAttempt struct {
+	Status        string     `json:"status"`
+	Event         string     `json:"event"`
+	ResponseClass string     `json:"responseClass"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
+}
+
+// NotificationOutcome is one square of a channel's recent-delivery strip. Test
+// marks a message an operator sent from the page, which says nothing about
+// whether deployments are being announced.
+type NotificationOutcome struct {
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"createdAt"`
+	Test      bool      `json:"test"`
+}
+
+// notificationRecentOutcomes is how many attempts a channel's strip draws.
+const notificationRecentOutcomes = 14
 
 // NotificationWrite is the create/update request. Kind is fixed at creation;
 // Config carries the per-kind credentials and is never echoed back.
@@ -1347,13 +1500,25 @@ type NotificationDelivery struct {
 	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
 	CreatedAt     time.Time  `json:"createdAt"`
 	CompletedAt   *time.Time `json:"completedAt,omitempty"`
+	// ProjectID, ProjectName and RunNumber name the run a delivery announced,
+	// so its history row can say "api · run #12" and link to it. All three are
+	// absent for a test message and for a run that has since been purged.
+	ProjectID   int64  `json:"projectId,omitempty"`
+	ProjectName string `json:"projectName,omitempty"`
+	RunNumber   int64  `json:"runNumber,omitempty"`
 }
 
 func (s *AutomationStore) NotificationDeliveries(ctx context.Context, channelID int64, limit int) ([]NotificationDelivery, error) {
 	if limit < 1 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,channel_id,run_id,event,attempt,status,response_class,next_attempt_at,created_at,completed_at FROM deploy_notification_deliveries WHERE channel_id=? ORDER BY id DESC LIMIT ?`, channelID, limit)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT d.id,d.channel_id,d.run_id,d.event,d.attempt,d.status,d.response_class,d.next_attempt_at,d.created_at,d.completed_at,
+		       COALESCE(r.project_id,0),COALESCE(NULLIF(p.archived_name,''),p.name,''),COALESCE(r.run_number,0)
+		  FROM deploy_notification_deliveries d
+		  LEFT JOIN deploy_runs r ON r.id=d.run_id AND d.run_id<>0
+		  LEFT JOIN deploy_projects p ON p.id=r.project_id
+		 WHERE d.channel_id=? ORDER BY d.id DESC LIMIT ?`, channelID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1362,7 +1527,7 @@ func (s *AutomationStore) NotificationDeliveries(ctx context.Context, channelID 
 	for rows.Next() {
 		var d NotificationDelivery
 		var next, created, completed int64
-		if err := rows.Scan(&d.ID, &d.ChannelID, &d.RunID, &d.Event, &d.Attempt, &d.Status, &d.ResponseClass, &next, &created, &completed); err != nil {
+		if err := rows.Scan(&d.ID, &d.ChannelID, &d.RunID, &d.Event, &d.Attempt, &d.Status, &d.ResponseClass, &next, &created, &completed, &d.ProjectID, &d.ProjectName, &d.RunNumber); err != nil {
 			return nil, err
 		}
 		d.CreatedAt = time.Unix(created, 0).UTC()
@@ -1420,6 +1585,76 @@ func (s *AutomationStore) ListNotificationChannels(ctx context.Context) ([]Notif
 	}
 	defer rows.Close()
 	return scanNotificationChannels(rows)
+}
+
+// NotificationChannelsWithHistory is the channel list as its page reads it:
+// every channel with its newest attempt, its last notificationRecentOutcomes
+// outcomes oldest first, and an e-mail channel's mail server. The history is
+// one statement for every channel, not a request per row.
+func (s *AutomationStore) NotificationChannelsWithHistory(ctx context.Context) ([]NotificationChannel, error) {
+	channels, err := s.ListNotificationChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]*NotificationChannel, len(channels))
+	for i := range channels {
+		byID[channels[i].ID] = &channels[i]
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT channel_id,event,status,response_class,next_attempt_at,created_at FROM (
+		  SELECT id,channel_id,event,status,response_class,next_attempt_at,created_at,
+		         ROW_NUMBER() OVER (PARTITION BY channel_id ORDER BY id DESC) AS rank
+		    FROM deploy_notification_deliveries
+		) WHERE rank<=? ORDER BY channel_id,id`, notificationRecentOutcomes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var channelID, next, created int64
+		var attempt NotificationAttempt
+		if err := rows.Scan(&channelID, &attempt.Event, &attempt.Status, &attempt.ResponseClass, &next, &created); err != nil {
+			return nil, err
+		}
+		channel := byID[channelID]
+		if channel == nil {
+			// Created between the two reads; it is drawn without a history
+			// until the next one.
+			continue
+		}
+		attempt.CreatedAt = time.Unix(created, 0).UTC()
+		if next > 0 {
+			x := time.Unix(next, 0).UTC()
+			attempt.NextAttemptAt = &x
+		}
+		channel.Recent = append(channel.Recent, NotificationOutcome{Status: attempt.Status, CreatedAt: attempt.CreatedAt, Test: attempt.Event == NotificationEventTest})
+		channel.LastDelivery = &attempt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	mail, err := s.db.QueryContext(ctx, `SELECT id,config_enc FROM deploy_notification_channels WHERE kind=?`, NotificationKindEmail)
+	if err != nil {
+		return nil, err
+	}
+	defer mail.Close()
+	for mail.Next() {
+		var channelID int64
+		var sealed string
+		if err := mail.Scan(&channelID, &sealed); err != nil {
+			return nil, err
+		}
+		channel := byID[channelID]
+		if channel == nil {
+			continue
+		}
+		// A configuration this key cannot open leaves the host unnamed: its
+		// deliveries already say "sealed", and the list must still load.
+		if config, err := s.openNotificationConfig(sealed); err == nil {
+			channel.Via = config.SMTPHost
+		}
+	}
+	return channels, mail.Err()
 }
 
 func (s *AutomationStore) notificationChannel(ctx context.Context, id int64) (*NotificationChannel, error) {

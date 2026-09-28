@@ -1,12 +1,14 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 )
 
 func TestApplicationConnectionURLPreservesCredentialsAndDatabase(t *testing.T) {
@@ -121,6 +123,74 @@ func TestDatabaseLoopbackBindingMatchesSavedAddress(t *testing.T) {
 	} {
 		if got := sameDatabaseLoopback(tc.saved, tc.observed); got != tc.want {
 			t.Fatalf("saved %s, observed %s: got %v, want %v", tc.saved, tc.observed, got, tc.want)
+		}
+	}
+}
+
+// A consumer that parses JDBC or ADO.NET gets the same connection in its own
+// shape, and the typed reference records the shape so the release resolves it
+// the same way.
+func TestDatabaseURLRendersTheConsumersFormat(t *testing.T) {
+	s, router := dbTestRouter(t)
+	dsn := "postgres://app:unique-password@db.example.test:5432/app?sslmode=require"
+	sealed, err := s.Sealer.Seal(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.Store.DB.Exec(`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES(?,?,?,?)`, "app-db", "postgres", sealed, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := result.LastInsertId()
+	for _, test := range []struct {
+		query, url, reference string
+	}{
+		{"&format=jdbc", "jdbc:postgresql://db.example.test:5432/app?password=unique-password&sslmode=require&user=app", pathf("${{database.%d.jdbc}}", id)},
+		{"&format=adonet", "Host=db.example.test;Port=5432;Database=app;Username=app;Password=unique-password", pathf("${{database.%d.adonet}}", id)},
+		{"&database=app_cache", "postgres://app:unique-password@db.example.test:5432/app_cache?sslmode=require", pathf("${{database.%d.url.app_cache}}", id)},
+		{"&format=url", dsn, pathf("${{database.%d}}", id)},
+	} {
+		response := do(t, router, http.MethodGet, pathf("/databases/%d/url", id)+"?target=container"+test.query, "")
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s: status %d %s", test.query, response.Code, response.Body.String())
+		}
+		var body struct{ URL, Reference string }
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.URL != test.url || body.Reference != test.reference {
+			t.Fatalf("%s: url %q reference %q", test.query, body.URL, body.Reference)
+		}
+		if _, err := deploy.ParseVariableReference(body.Reference); err != nil {
+			t.Fatalf("%s: reference %q does not parse: %v", test.query, body.Reference, err)
+		}
+	}
+	for _, query := range []string{"&format=odbc", "&database=../etc", "&format=mysql2"} {
+		response := do(t, router, http.MethodGet, pathf("/databases/%d/url", id)+"?target=container"+query, "")
+		if response.Code != http.StatusBadRequest || strings.Contains(response.Body.String(), "unique-password") {
+			t.Fatalf("%s: status %d", query, response.Code)
+		}
+	}
+}
+
+func TestDatabaseReferenceShapeIsReadOnlyAfterANumericID(t *testing.T) {
+	for target, want := range map[string][3]string{
+		"5.jdbc":          {"5", "jdbc", ""},
+		"5.url.app_cache": {"5", "url", "app_cache"},
+		"5.adonet":        {"5", "adonet", ""},
+		"5.jdbc-mariadb":  {"5", "jdbc-mariadb", ""},
+		"my.db.jdbc":      {},
+		"5.jdbc.../x":     {},
+		"5":               {},
+		"5.url":           {"5", "url", ""},
+	} {
+		match := databaseReferenceShapeRE.FindStringSubmatch(target)
+		got := [3]string{}
+		if match != nil {
+			got = [3]string{match[1], match[2], match[3]}
+		}
+		if got != want {
+			t.Fatalf("%s = %v, want %v", target, got, want)
 		}
 	}
 }

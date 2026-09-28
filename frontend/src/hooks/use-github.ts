@@ -1,7 +1,7 @@
 "use client"
 
-import { get } from "@/lib/api"
-import type { GitHubStatus } from "@/lib/types"
+import { downloadUrl, get } from "@/lib/api"
+import type { GitHubAppStatus, GitHubStatus } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 
 /**
@@ -23,4 +23,45 @@ export function useGitHubAccount(path?: string, enabled = true) {
     [path ?? ""],
     { enabled },
   )
+}
+
+/**
+ * The dashboard's own GitHub App: whether one was created, which accounts
+ * installed it, and where to install it on another.
+ *
+ * It lived in `deploy/github-app-card.tsx` while the Credentials page was the
+ * only screen asking. The import picker asks the same question — which of the
+ * two GitHub identities can reach a repository — and pulling the card in for
+ * its hook would have dragged the manifest flow, the dialog and the drawing
+ * along with it.
+ */
+export function useGitHubApp() {
+  return usePoll((signal) => get<GitHubAppStatus>("/deploy/github-app/", undefined, signal), 30000)
+}
+
+/**
+ * Where the App is on its way from nothing to deploying: not created, created
+ * but installed nowhere, or installed and ready to import from. Every surface
+ * that draws the App reads it from here, so the tile, the picture and the lit
+ * step can never disagree.
+ */
+export type GitHubAppStage = "create" | "install" | "import"
+
+export function githubAppStage(status: GitHubAppStatus | undefined): GitHubAppStage | undefined {
+  if (!status) return undefined
+  if (!status.configured) return "create"
+  return status.installations.length === 0 ? "install" : "import"
+}
+
+/**
+ * An account's picture, through this server.
+ *
+ * Not `github.com/<account>.png` directly: the page's own policy allows images
+ * from this origin only (`proxy.ts`), so every avatar drawn from GitHub was
+ * blocked before it was fetched and every identity in the product fell back to
+ * its initials. The server reads it once an hour per account instead, which is
+ * also the reason the operator's browser never announces a visit to GitHub.
+ */
+export function githubAvatarUrl(account: string) {
+  return downloadUrl("/git/github/avatar", { account })
 }

@@ -1,134 +1,332 @@
 "use client"
 
-import { useRef, useState } from "react"
-import type { Dispatch, SetStateAction } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, SettingsSliders } from "@/components/icons"
+import { ArrowRight } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
+import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type {
-  DeploymentBuildMethod,
   DeploymentDraft,
+  DeploymentDraftSource,
   DeploymentPreflight,
   DeploymentPreflightFinding,
-  DeploymentRecipe,
-  NodePackageManager,
   WorkloadProfile,
   GitHubBranch,
 } from "@/lib/types"
-import { Field, FieldRow, FormSection, OptionList, OptionRow } from "@/components/form"
-import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { ErrorState, Notice } from "@/components/state"
-import { Tag } from "@/components/tag"
+import { FlowActions, FlowPanel, FlowPanelBody } from "@/components/flow"
+import { BorderBeam } from "@/components/ui/border-beam"
+import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
+import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  DEPLOYMENT_NAME,
-  WorkloadMark,
-  frameworkLabel,
-  humanize,
-} from "@/components/deploy/vocabulary"
-import {
-  FindingRow,
-  blockingFindings,
-  warningFindings,
-} from "@/components/deploy/deployment-findings"
-import {
+  checksForRuntime,
+  composeSourceForCandidate,
   discoveredEnvironmentRows,
+  environmentRowsToSend,
   mergeDiscoveredRows,
+  releaseStrategy,
   validateConfiguration,
-  withPackageManagerRunner,
+  variablesWithoutScope,
 } from "@/components/deploy/deployment-defaults"
-import { EnvironmentEditor } from "@/components/deploy/new-project/environment-editor"
-import { PublicAddress } from "@/components/deploy/new-project/public-address"
-import { ConfigureAdvanced } from "@/components/deploy/new-project/configure-advanced"
+import { PlanWiring } from "@/components/deploy/new-project/plan-wiring"
+import { StepProject } from "@/components/deploy/new-project/step-project"
+import { StepRuntime } from "@/components/deploy/new-project/step-runtime"
+import { StepVariables } from "@/components/deploy/new-project/step-variables"
+import { StepReview } from "@/components/deploy/new-project/step-review"
+import {
+  SECTION_FOLDS,
+  SECTION_IDS,
+  SECTION_STEPS,
+  sectionForField,
+  type PlanSection,
+} from "@/components/deploy/new-project/plan-sections"
 import {
   adoptImport,
   commitDraft,
+  configurationForSave,
+  withHeldDomainVariables,
+  declaredVariablesNeedReview,
   enqueueDeploy,
   environmentText,
-  importEnvironment,
   loadDraft,
   preflightDraft,
+  firstDeployRevision,
   reinspect,
+  redetectedConfiguration,
   saveConfiguration,
+  saveIntent,
   selectCandidate,
+  stepAfter,
+  stepBefore,
+  fetchHostnameSuggestion,
+  forgetNewProject,
   type ConfigureFlow,
+  type ConfigureStepKey,
+  type DraftGitPolicy,
+  type EnvironmentDraft,
   type EnvironmentRow,
+  type FlowUpdate,
 } from "@/components/deploy/new-project/draft"
+import { withoutPlatformVariables } from "@/components/deploy/settings/dotenv"
 
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
 }
 
 /**
- * The one configure screen every source lands on, from a picked repository to
- * an adopted container. What differs between sources is which parts show —
- * the build fields are git only, an import ends in one "Adopt workload"
- * button instead of Save/Deploy — not how any of it is built.
+ * The configure half of `/deploy/new`, for every source from a picked
+ * repository to an adopted container — and, since this pass, four screens
+ * rather than one.
+ *
+ * One screen carried the source controls, the name, the type, a ten-field
+ * build fold, the environment editor, the public address, two
+ * automatic-deployment switches, an "Advanced" fold holding seven more
+ * sections, and the findings: past forty controls for a Git repository, every
+ * one of them in the document before the reader had answered the first. The
+ * fix is not fewer settings — each of them is there because a deployment went
+ * wrong without it — it is asking for them four at a time, in the order a
+ * deployment actually decides them.
+ *
+ * This file is the sequence and everything the sequence owns: the draft's
+ * lifecycle, the environment held in memory, preflight and its
+ * acknowledgements, and the one command at the end. Each screen is a file of
+ * its own beside it. What differs between sources is still which parts show —
+ * the build fold is Git-only, an import ends in "Adopt workload" — not how
+ * any of it is built.
  */
 export function Configure({
   flow,
   onFlowChange,
   onChangeSource,
   initialAdvanced,
+  step,
+  onStepChange,
 }: {
   flow: ConfigureFlow
   // Accepts the functional updater form too: the two calls in `submit` below
   // run after an `await`, and merging onto the closed-over `flow` there would
   // revert anything the operator typed while the request was in flight.
-  // `new-project.tsx` wires this straight to its `useState<ConfigureFlow>()`
-  // setter, which is why the state type carries `| undefined` here even
-  // though this component only ever runs once `flow` itself is set — every
-  // functional update below guards it back out.
-  onFlowChange: Dispatch<SetStateAction<ConfigureFlow | undefined>>
+  // `new-project.tsx` wires this straight to the remembered flow's setter,
+  // which is why the type carries `| null` here even though this component
+  // only ever runs once `flow` itself is set — every functional update below
+  // guards it back out.
+  onFlowChange: (next: FlowUpdate) => void
   onChangeSource: () => void
   initialAdvanced: boolean
+  step: ConfigureStepKey
+  onStepChange: (step: ConfigureStepKey) => void
 }) {
   const router = useRouter()
-  const advancedRef = useRef<HTMLDivElement>(null)
   const [nameTouched, setNameTouched] = useState(false)
-  const [envRows, setEnvRows] = useState<EnvironmentRow[]>(() =>
-    discoveredEnvironmentRows(flow.candidate),
+  /**
+   * The name a live project already holds, when it is the one being typed.
+   *
+   * The schema's UNIQUE constraint is the authority and it refuses at commit —
+   * after the source, the detection, the configuration and the preflight have
+   * all been filled in. Asking the hostname suggestion, which this page calls
+   * for the name anyway, moves that refusal to the moment the name is typed.
+   */
+  const [nameTaken, setNameTaken] = useState<string>()
+  // The environment is remembered in memory only — never Web Storage, never
+  // the URL — and belongs to this draft: a different source starts from what
+  // its own detection found rather than from the last one's secrets.
+  const [environment, setEnvironment] = useMemoryState<EnvironmentDraft | null>(
+    "deploy.new.configure.environment",
+    null,
   )
+  const draftId = flow.draft.id
+  const own = environment?.draftId === draftId ? environment : null
+  const discovered = useMemo(
+    () =>
+      discoveredEnvironmentRows(flow.candidate).map((row) =>
+        flow.draft.environmentKeys?.includes(row.name)
+          ? { ...row, value: "", generated: false, note: undefined }
+          : row,
+      ),
+    [flow.candidate, flow.draft.environmentKeys],
+  )
+  const envRows = own?.rows ?? discovered
+  const dotenv = own?.dotenv ?? ""
+  const retainedKeys = own?.retainedKeys ?? flow.draft.environmentKeys ?? []
+  const setEnvRows = (next: EnvironmentRow[] | ((rows: EnvironmentRow[]) => EnvironmentRow[])) =>
+    setEnvironment((current) => {
+      const mine = current?.draftId === draftId ? current : null
+      const rows = typeof next === "function" ? next(mine?.rows ?? discovered) : next
+      return {
+        draftId,
+        rows,
+        dotenv: mine?.dotenv ?? "",
+        retainedKeys: mine?.retainedKeys ?? retainedKeys,
+      }
+    })
+  const setDotenv = (value: string) =>
+    setEnvironment((current) => {
+      const mine = current?.draftId === draftId ? current : null
+      return {
+        draftId,
+        rows: mine?.rows ?? discovered,
+        dotenv: value,
+        retainedKeys: mine?.retainedKeys ?? retainedKeys,
+      }
+    })
+  const removeRetainedKey = (key: string) =>
+    setEnvironment((current) => ({
+      draftId,
+      rows: current?.draftId === draftId ? current.rows : discovered,
+      dotenv: current?.draftId === draftId ? current.dotenv : "",
+      retainedKeys: (current?.draftId === draftId ? current.retainedKeys : retainedKeys).filter(
+        (name) => name !== key,
+      ),
+    }))
+  // The detected rows are written down as soon as they exist, so a generated
+  // value (a Laravel key) is the same one on every visit rather than minted
+  // again each time the page mounts.
+  useEffect(() => {
+    if (own) return
+    setEnvironment({
+      draftId,
+      rows: discovered,
+      dotenv: "",
+      retainedKeys: flow.draft.environmentKeys ?? [],
+    })
+  }, [own, draftId, discovered, setEnvironment, flow.draft.environmentKeys])
   // A branch change re-detects, and the new candidate may read variables the
   // old one did not; they join the rows without touching anything typed.
-  const [rowsCandidate, setRowsCandidate] = useState(flow.candidate)
-  if (rowsCandidate !== flow.candidate) {
-    setRowsCandidate(flow.candidate)
-    setEnvRows((current) => mergeDiscoveredRows(current, discoveredEnvironmentRows(flow.candidate)))
-  }
-  const [dotenv, setDotenv] = useState("")
+  const rowsCandidate = useRef(flow.candidate)
+  useEffect(() => {
+    const previous = rowsCandidate.current
+    if (previous === flow.candidate) return
+    rowsCandidate.current = flow.candidate
+    setEnvironment((current) => {
+      const mine = current?.draftId === draftId ? current : null
+      const found = discoveredEnvironmentRows(flow.candidate).map((row) =>
+        mine?.retainedKeys.includes(row.name)
+          ? { ...row, value: "", generated: false, note: undefined }
+          : row,
+      )
+      const rows = mine?.rows ?? discoveredEnvironmentRows(previous)
+      return {
+        draftId,
+        rows: mergeDiscoveredRows(rows, found),
+        dotenv: mine?.dotenv ?? "",
+        retainedKeys: mine?.retainedKeys ?? [],
+      }
+    })
+  }, [flow.candidate, draftId, setEnvironment])
   const [branch, setBranch] = useState(flow.source.ref ?? "main")
   const [branchBusy, setBranchBusy] = useState(false)
-  const [preflight, setPreflight] = useState<DeploymentPreflight>()
-  const [acknowledged, setAcknowledged] = useState<string[]>([])
-  const [configErrors, setConfigErrors] = useState<Record<string, string>>({})
+  const sentRows = environmentRowsToSend(envRows, flow.configuration.variables)
+  // A pasted local .env's PORT and development NODE_ENV are not the
+  // deployment's; a Compose file may interpolate ${PORT} itself, so its paste
+  // is sent whole.
+  const pasted =
+    flow.configuration.build.method === "compose"
+      ? { text: dotenv, skipped: [] }
+      : withoutPlatformVariables(dotenv)
+  const text = environmentText(sentRows, pasted.text)
+  const environmentNames = new Set([
+    ...retainedKeys,
+    ...sentRows.map((row) => row.name),
+    ...Array.from(
+      pasted.text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm),
+      (match) => match[1],
+    ),
+  ])
+  /**
+   * The plan as it stands, as one comparable value.
+   *
+   * `flow.configuration` is replaced wholesale by every edit, so its identity
+   * cannot say whether anything actually changed — a re-render that rebuilt
+   * the same plan would read as a change, and re-checking on each of those is
+   * a request per keystroke.
+   */
+  const signatureFor = (configuration: typeof flow.configuration) =>
+    JSON.stringify({
+      name: flow.name,
+      profile: flow.profile,
+      source: flow.source,
+      configuration: configurationForSave(configuration, flow.source),
+      dotenv: text,
+      retainedKeys,
+    })
+  const planSignature = signatureFor(flow.configuration)
+  // Preflight's findings and which warnings were acknowledged belong to the
+  // draft they were computed for, so a fresh source never inherits them — and
+  // to the *plan* they were computed for, which is what `checked` records.
+  // Review draws its passes now, not only its refusals, so a reader who goes
+  // back from it to change the port and returns would otherwise be reading a
+  // list of things this server agreed to about a plan that no longer exists.
+  // The signature includes unsaved environment values, so it belongs in memory.
+  const [review, setReview] = useMemoryState<{
+    draftId: string
+    checked?: string
+    preflight?: DeploymentPreflight
+    acknowledged: string[]
+  } | null>("deploy.new.configure.preflight", null)
+  // A result computed for a different plan reads as no result: the sections
+  // it feeds empty, and the effect below asks again.
+  const preflight =
+    review?.draftId === draftId && review.checked === planSignature ? review.preflight : undefined
+  const acknowledged =
+    review?.draftId === draftId && review.checked === planSignature ? review.acknowledged : []
+  const setPreflight = (next: DeploymentPreflight, checked: string) =>
+    setReview((current) => ({
+      draftId,
+      checked,
+      preflight: next,
+      acknowledged:
+        current?.draftId === draftId && current.checked === checked ? current.acknowledged : [],
+    }))
+  const setAcknowledged = (next: string[]) =>
+    setReview((current) => ({
+      draftId,
+      checked: current?.draftId === draftId ? current.checked : undefined,
+      preflight: current?.draftId === draftId ? current.preflight : undefined,
+      acknowledged: next,
+    }))
   const [busy, setBusy] = useState("")
+  const mutating = useRef(false)
   const [failure, setFailure] = useState<Error>()
-  // A blueprint's declarative variables (a generated password, a EULA
-  // acceptance) are review material, not a power-user setting — open by
-  // default the same way the old wizard opened them for a blueprint source.
-  const [advancedOpen, setAdvancedOpen] = useState(
-    initialAdvanced ||
-      (flow.source.mode === "blueprint" && flow.configuration.variables.length > 0),
+  // The server's own defaults, shown rather than assumed: this is the decision
+  // that used to be reachable only after the first push had already deployed.
+  const [gitPolicy, setGitPolicy] = useSessionState<DraftGitPolicy>(
+    "deploy.new.configure.gitPolicy",
+    { automatic: true, watchInclude: [], watchExclude: [], commitStatuses: true },
   )
   const [created, setCreated] = useState<{
     projectId: number
     environmentId: number
-    ready: boolean
   }>()
+  // Once the project exists nothing about this setup is unfinished, and the
+  // next "New project" starts blank. Forgotten on the way out rather than at
+  // commit, so the "Deployment created" panel is not swapped for the source
+  // chooser in the frame before the project page opens.
+  const done = Boolean(created)
+  useEffect(() => {
+    if (!done) return
+    return () => forgetNewProject()
+  }, [done])
+
+  // Debounced, because it runs on every keystroke of the name field, and
+  // never fatal: an unanswered question leaves the commit to refuse as before.
+  const typedName = flow.name.trim()
+  useEffect(() => {
+    if (!typedName || !DEPLOYMENT_NAME.test(typedName)) return
+    let cancelled = false
+    const timer = setTimeout(() => {
+      void fetchHostnameSuggestion(typedName).then((suggestion) => {
+        if (cancelled) return
+        setNameTaken(suggestion?.nameTaken ? typedName : undefined)
+      })
+    }, 400)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [typedName])
 
   const branches = usePoll(
     (signal) =>
@@ -145,50 +343,90 @@ export function Configure({
   const configuration = flow.configuration
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
   const isImport = flow.source.kind === "import"
-  const nameInvalid = nameTouched && !DEPLOYMENT_NAME.test(flow.name)
+  const nameCollides = nameTaken === flow.name.trim() && flow.name.trim() !== ""
   // A detected row the operator left empty is skipped, not set to nothing:
   // the application may have a default for it, and an empty secret is a
-  // value that fails somewhere far from here.
-  const text = environmentText(
-    envRows.filter((row) => !row.detected || row.value),
-    dotenv,
-  )
+  // value that fails somewhere far from here. Review counts these same rows:
+  // the environment lives in memory and the step in the session store, so a
+  // reload used to land back on Review reading "3 values" with none to send.
 
-  const setConfiguration = (next: typeof configuration) =>
-    onFlowChange({ ...flow, configuration: next })
-  const updateBuild = (patch: Partial<typeof configuration.build>) =>
-    setConfiguration({ ...configuration, build: { ...configuration.build, ...patch } })
-
-  const changeBranch = async (nextRef: string) => {
-    setBranch(nextRef)
-    if (!nextRef.trim() || nextRef === flow.source.ref) return
+  // A branch or a clone option is part of the saved source, so changing one
+  // saves it again and detects again.
+  const resaveSource = async (nextSource: DeploymentDraftSource) => {
+    if (mutating.current) return
+    mutating.current = true
     setBranchBusy(true)
     setFailure(undefined)
     try {
-      const nextSource = { ...flow.source, ref: nextRef }
       const result = await reinspect(flow.draft, flow.profile, nextSource)
-      onFlowChange({
-        ...flow,
-        source: nextSource,
-        draft: result.draft,
-        candidate: result.candidate,
-        detection: result.detection,
-        configuration: result.configuration,
-      })
+      const profile =
+        flow.profile === flow.candidate?.profile
+          ? (result.candidate?.profile ?? flow.profile)
+          : flow.profile
+      onFlowChange((current) =>
+        current
+          ? {
+              ...current,
+              source: nextSource,
+              profile,
+              draft: result.draft,
+              candidate: result.candidate,
+              detection: result.detection,
+              configuration: redetectedConfiguration(flow, result, profile),
+            }
+          : current,
+      )
     } catch (error) {
+      // Saving the source may have succeeded before detection failed.
+      try {
+        const fresh = await loadDraft(draftId)
+        onFlowChange((current) => (current ? { ...current, draft: fresh } : current))
+      } catch {
+        /* The original inspection error is the useful one. */
+      }
       setFailure(asError(error))
     } finally {
+      mutating.current = false
       setBranchBusy(false)
     }
   }
 
+  const changeBranch = async (nextRef: string) => {
+    const ref = nextRef.trim()
+    setBranch(ref)
+    if (!ref || ref === flow.source.ref) return
+    await resaveSource({ ...flow.source, ref })
+  }
+
+  const changeCloneOptions = (
+    options: Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs">,
+  ) => void resaveSource({ ...flow.source, ...options })
+
   const changeProfile = (profile: WorkloadProfile) => {
-    onFlowChange({
+    const internalPort =
+      profile === "worker"
+        ? 0
+        : profile === "static" && configuration.build.method !== "dockerfile"
+          ? 80
+          : configuration.runtime.internalPort || flow.candidate?.port || 0
+    // Saying "this is a web application" is what makes the release safe:
+    // preflight only allows candidate-first activation, and only requires a
+    // readiness gate, for a web or static profile. Choosing one and leaving
+    // the plan stop-first with nothing verifying it would answer half the
+    // question the operator just answered.
+    const checks = checksForRuntime(
+      configuration.checks,
+      profile,
+      internalPort,
+      flow.candidate?.readiness,
+    )
+    return onFlowChange({
       ...flow,
       profile,
       configuration: {
         ...configuration,
         domains: profile === "worker" ? [] : configuration.domains,
+        checks,
         build: {
           ...configuration.build,
           startCommand:
@@ -198,12 +436,11 @@ export function Configure({
         },
         runtime: {
           ...configuration.runtime,
-          internalPort:
-            profile === "worker"
-              ? 0
-              : profile === "static" && configuration.build.method !== "dockerfile"
-                ? 80
-                : configuration.runtime.internalPort || 3000,
+          internalPort,
+          // Blue/green needs a candidate to stand beside the live one, which
+          // preflight refuses for anything but a web or static profile, and
+          // for a plan whose volume two releases would write at once.
+          strategy: releaseStrategy(profile, configuration.runtime.mounts),
         },
       },
     })
@@ -213,6 +450,8 @@ export function Configure({
   // `selectedId`, but nothing sent one, so the finding blocked every ambiguous
   // plan with no way to resolve it from this screen.
   const pickCandidate = async (id: string) => {
+    if (mutating.current) return
+    mutating.current = true
     setFailure(undefined)
     setBusy("detect")
     try {
@@ -224,6 +463,38 @@ export function Configure({
               draft: result.draft,
               candidate: result.candidate,
               detection: result.detection,
+              profile: result.candidate?.profile ?? current.profile,
+              configuration: redetectedConfiguration(flow, result),
+            }
+          : current,
+      )
+    } catch (error) {
+      setFailure(asError(error))
+    } finally {
+      mutating.current = false
+      setBusy("")
+    }
+  }
+
+  // `compose_analysis_missing`'s remedy: the same repository, branch and
+  // files, read as a Compose source so its services are analysed and built.
+  const deployAsCompose = async () => {
+    const nextSource = composeSourceForCandidate(flow.source, flow.candidate)
+    if (!nextSource || mutating.current) return
+    mutating.current = true
+    setFailure(undefined)
+    setBusy("detect")
+    try {
+      const result = await reinspect(flow.draft, "compose", nextSource)
+      onFlowChange((current) =>
+        current
+          ? {
+              ...current,
+              source: nextSource,
+              profile: "compose",
+              draft: result.draft,
+              candidate: result.candidate,
+              detection: result.detection,
               configuration: result.configuration,
             }
           : current,
@@ -231,75 +502,198 @@ export function Configure({
     } catch (error) {
       setFailure(asError(error))
     } finally {
+      mutating.current = false
       setBusy("")
     }
   }
 
-  // A compose/required-variable decision's field lives inside Advanced, which
-  // starts closed; open it and bring it into view rather than leave the
-  // finding's "Next:" sentence pointing at a control nobody can see.
-  const openRemedyField = (finding: DeploymentPreflightFinding) => {
-    if (!finding.fieldId?.startsWith("variables.")) return
-    setAdvancedOpen(true)
+  const current: ConfigureStepKey = created ? "done" : step === "done" ? "review" : step
+
+  /** The head of the screen, so a step change starts where the question is. */
+  const toTop = () =>
+    requestAnimationFrame(() => {
+      const header = document.querySelector<HTMLElement>("[data-slot='flow-header']")
+      const heading = header?.querySelector("h1")
+      if (heading) {
+        heading.tabIndex = -1
+        heading.focus({ preventScroll: true })
+      }
+      header?.scrollIntoView({
+        block: "start",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+      })
+    })
+
+  const goto = (next: ConfigureStepKey) => {
+    setFailure(undefined)
+    onStepChange(next)
+    toTop()
+  }
+
+  /**
+   * Sends the reader to the fields that decide one part of the plan: a node
+   * of the drawing beside the form, or a preflight finding's "Open it".
+   *
+   * It used to be a scroll and a fold forced open, because every field was on
+   * one screen and half of them were hidden. It is a step first now, and the
+   * fold only matters for the few sections that are still one.
+   */
+  const openSection = (section: PlanSection) => {
+    onStepChange(SECTION_STEPS[section])
+    // Two frames: one for the step being opened to render, one for the fold
+    // inside it to lay out before anything is scrolled to it.
     requestAnimationFrame(() =>
-      advancedRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }),
+      requestAnimationFrame(() => {
+        const fold = SECTION_FOLDS[section]
+        if (fold) {
+          const element = document.getElementById(fold)
+          if (element instanceof HTMLDetailsElement) element.open = true
+        }
+        document
+          .getElementById(SECTION_IDS[section])
+          ?.scrollIntoView({ block: "start", behavior: "smooth" })
+      }),
     )
   }
 
-  const submit = async (operation: "save" | "deploy") => {
-    if (!DEPLOYMENT_NAME.test(flow.name)) {
-      setNameTouched(true)
-      setFailure(new Error("Use 1–64 letters, numbers, dots, dashes, or underscores for the name."))
+  const openRemedyField = (finding: DeploymentPreflightFinding) => {
+    const section = sectionForField(finding.fieldId)
+    if (section) openSection(section)
+  }
+
+  // A finding's computed change is applied to the plan on this screen; the
+  // plan it changes is a new one, which Review checks again on its own.
+  const applyFindingFix = (finding: DeploymentPreflightFinding) => {
+    const fix = finding.fix
+    if (fix?.kind !== "remove_variable_scope" || !fix.scope || !fix.field.startsWith("variables."))
       return
-    }
-    if (
-      envRows.some((row) => (row.name || row.value) && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(row.name))
-    ) {
-      setFailure(
-        new Error(
-          "Give each environment variable a valid key, using letters, numbers and underscores.",
-        ),
+    const name = fix.field.slice("variables.".length)
+    const scope = fix.scope
+    onFlowChange((current) =>
+      current
+        ? {
+            ...current,
+            configuration: {
+              ...current.configuration,
+              variables: variablesWithoutScope(current.configuration.variables, name, scope),
+            },
+          }
+        : current,
+    )
+  }
+
+  /**
+   * What stops this step from being finished, said in the words the reader
+   * can act on.
+   *
+   * The whole list still runs at Deploy — a step is a way of asking, not a
+   * new authority — but a name that cannot be a name, or an environment key
+   * with a space in it, is refused where it was typed rather than four
+   * screens later under a button.
+   */
+  const stepError = (target: ConfigureStepKey): string | undefined => {
+    const errors = validateConfiguration(configuration, flow.profile)
+    if (target === "project") {
+      if (isGitSource && branch.trim() !== (flow.source.ref ?? "main"))
+        return "Apply a valid branch before continuing."
+      if (!DEPLOYMENT_NAME.test(flow.name))
+        return "Use 1–64 letters, numbers, dots, dashes, or underscores for the name."
+      if (nameCollides) return `A project is already called ${flow.name}. Choose another name.`
+      if (
+        flow.profile === "static" &&
+        configuration.build.method === "recipe" &&
+        !configuration.build.outputDirectory?.trim()
       )
-      return
-    }
-    const names = envRows.map((row) => row.name).filter(Boolean)
-    if (new Set(names).size !== names.length) {
-      setFailure(new Error("Each environment variable needs a unique key."))
-      return
-    }
-    if (
-      flow.profile === "static" &&
-      configuration.build.method === "recipe" &&
-      !configuration.build.outputDirectory?.trim()
-    ) {
-      setFailure(
-        new Error("Set the output directory for your static website, such as dist or out."),
+        return "Set the output directory for your static website, such as dist or out."
+      return (
+        errors.buildMethod ??
+        errors.pythonVersion ??
+        errors.nodeVersion ??
+        errors.phpVersion ??
+        errors.javaVersion ??
+        errors.dotnetVersion ??
+        errors.target ??
+        errors.startCommand ??
+        errors.buildSecrets ??
+        errors.releaseTasks
       )
+    }
+    if (target === "runtime") {
+      // Only the profiles preflight demands a readiness gate from: an image or
+      // a service may legitimately publish nothing.
+      if (
+        (flow.profile === "web" || flow.profile === "static") &&
+        (configuration.runtime.internalPort ?? 0) === 0
+      )
+        return "Set the port your application listens on inside the container."
+      return errors.internalPort ?? errors.hostPort ?? errors.maxRequestBodyMb
+    }
+    if (target === "variables") {
+      if (
+        envRows.some((row) => (row.name || row.value) && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(row.name))
+      )
+        return "Give each environment variable a valid key, using letters, numbers and underscores."
+      const names = envRows.map((row) => row.name).filter(Boolean)
+      if (new Set(names).size !== names.length)
+        return "Each environment variable needs a unique key."
+      return errors.variables ?? errors.eula
+    }
+    return undefined
+  }
+
+  const advance = () => {
+    const problem = stepError(current)
+    if (problem) {
+      if (current === "project") setNameTouched(true)
+      setFailure(new Error(problem))
       return
     }
-    const nextErrors = validateConfiguration(configuration, flow.profile)
-    setConfigErrors(nextErrors)
-    if (Object.keys(nextErrors).length) {
-      setFailure(new Error(Object.values(nextErrors)[0]))
+    const next = stepAfter(current)
+    if (next) goto(next)
+  }
+
+  const back = () => {
+    const previous = stepBefore(current)
+    if (previous) goto(previous)
+    else onChangeSource()
+  }
+
+  const submit = async (operation: "save" | "deploy" | "check") => {
+    if (mutating.current) return
+    for (const target of ["project", "runtime", "variables"] as const) {
+      const problem = stepError(target)
+      if (!problem) continue
+      // Refused on the screen that owns the answer, not on Review: a blocked
+      // Deploy that names a field the reader cannot see is the defect the
+      // steps were drawn to remove.
+      if (target === "project") setNameTouched(true)
+      onStepChange(target)
+      setFailure(new Error(problem))
+      toTop()
       return
     }
 
+    mutating.current = true
     setBusy(operation)
     setFailure(undefined)
     try {
       // Readiness follows the runtime publication, which may differ from the
       // container port when Docker allocates a free host port.
-      const toSave = {
-        ...configuration,
-        checks: configuration.checks.map((check) =>
-          check.phase === "readiness" && check.kind === "http"
-            ? { ...check, config: { ...(check.config ?? {}), port: undefined } }
-            : check,
-        ),
+      const toSave = configurationForSave(configuration, flow.source)
+      let working = flow.draft
+      const savePlan = async (draft: DeploymentDraft) => {
+        working = draft
+        if (draft.data.intent?.name !== flow.name || draft.data.intent?.profile !== flow.profile) {
+          working = await saveIntent(working, { name: flow.name, profile: flow.profile })
+          onFlowChange((current) => (current ? { ...current, draft: working } : current))
+        }
+        return saveConfiguration(working, toSave, text, retainedKeys)
       }
       let saved: DeploymentDraft
       try {
-        saved = await saveConfiguration(flow.draft, toSave)
+        saved = await savePlan(working)
       } catch (error) {
         // saveConfiguration bumps the revision on the server whether or not
         // what follows succeeds; without this, a failure past this point
@@ -308,16 +702,25 @@ export function Configure({
         // itself just produced (or another tab's, either way the current one).
         if (!(error instanceof ApiError) || error.code !== "draft_revision_conflict") throw error
         const fresh = await loadDraft(flow.draft.id)
-        saved = await saveConfiguration(fresh, toSave)
+        saved = await savePlan(fresh)
       }
+      // The server seals visitor passwords and records staged variable scopes.
+      // Keeping the submitted copy would lose those values on reload.
+      const canonical = withHeldDomainVariables(
+        saved.data.configuration ?? toSave,
+        configuration.variables,
+      )
       onFlowChange((current) =>
-        current ? { ...current, draft: saved, configuration: toSave } : current,
+        current ? { ...current, draft: saved, configuration: canonical } : current,
       )
       const checkedDraft = await preflightDraft(saved)
       onFlowChange((current) =>
-        current ? { ...current, draft: checkedDraft.draft, configuration: toSave } : current,
+        current ? { ...current, draft: checkedDraft.draft, configuration: canonical } : current,
       )
-      setPreflight(checkedDraft.preflight)
+      setPreflight(checkedDraft.preflight, signatureFor(canonical))
+      // Review's own arrival runs this far and no further: the screen asks
+      // "is this right", and it cannot answer without having asked the server.
+      if (operation === "check") return
 
       const blockers = blockingFindings(checkedDraft.preflight.findings)
       const warnings = warningFindings(checkedDraft.preflight.findings)
@@ -327,20 +730,30 @@ export function Configure({
 
       const commit = isImport
         ? await adoptImport(checkedDraft.draft, acknowledged, flow.importPreview?.unsupported ?? [])
-        : await commitDraft(checkedDraft.draft, acknowledged)
+        : await commitDraft(
+            checkedDraft.draft,
+            acknowledged,
+            // Only a Git source polls a branch, so only a Git source has a
+            // policy to record; anything else keeps the server's defaults.
+            isGitSource ? gitPolicy : undefined,
+          )
+      onStepChange("done")
       setCreated({
         projectId: commit.projectId,
         environmentId: commit.environmentId,
-        ready: !text.trim(),
       })
 
-      if (text.trim()) {
-        await importEnvironment(commit.projectId, commit.environmentId, commit.planRevision, text)
-      }
-      setCreated({ projectId: commit.projectId, environmentId: commit.environmentId, ready: true })
-
       if (operation === "deploy" && !isImport) {
-        const run = await enqueueDeploy(commit.projectId, commit.environmentId)
+        const run = await enqueueDeploy(
+          commit.projectId,
+          commit.environmentId,
+          // The commit the check above read, which is the one it passed.
+          firstDeployRevision(
+            flow.source,
+            checkedDraft.draft.data.detection,
+            checkedDraft.preflight.findings,
+          ),
+        )
         router.push(`/deploy/${commit.projectId}/runs/${run.id}`)
         return
       }
@@ -348,596 +761,311 @@ export function Configure({
     } catch (error) {
       setFailure(asError(error))
     } finally {
+      mutating.current = false
+      setBusy("")
+    }
+  }
+
+  /**
+   * Preflight, when Review is reached rather than when Deploy is pressed.
+   *
+   * It ran inside the press, so the screen titled "Ready to deploy?" had
+   * checked nothing by the time it was read: with no finding to draw, a plan
+   * with nothing wrong with it showed one section of four facts, and the
+   * first press was a check whose findings appeared under a button the reader
+   * had already pressed. Running it on arrival is what makes the step the
+   * last look it is named for, and what makes Deploy one press.
+   *
+   * Guarded on there being no result *for this plan* — `preflight` reads as
+   * undefined once `planSignature` moves — so arriving asks once, re-reading
+   * the same screen asks nothing, and going back to change the port and
+   * returning asks again rather than showing what the server agreed to about
+   * the previous plan. `submit` runs the three step gates first, so an arrival
+   * carrying an unanswered field is still sent to the screen that owns it —
+   * and that changes `current`, which is what stops this from firing again.
+   *
+   * A check that fails leaves `preflight` empty and clears `busy`, which is
+   * every condition above, so on its own this would save and ask again at
+   * once — a revision a pass, for as long as preflight kept failing. It asks
+   * once per plan; after a failure, Deploy is the retry.
+   */
+  const autoChecked = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    const plan = `${draftId}:${planSignature}`
+    if (current !== "review" || preflight || busy || created) return
+    if (autoChecked.current === plan) return
+    // Scheduled rather than called: `submit` raises the busy flag as its first
+    // act, and a state write in an effect's own body is a cascading render.
+    // The cleanup drops a check nobody is waiting for any more.
+    const timer = setTimeout(() => {
+      autoChecked.current = plan
+      void submit("check")
+    }, 0)
+    return () => clearTimeout(timer)
+    // `submit` closes over the whole form; re-running this for each of those
+    // is what the `preflight` guard is there to make unnecessary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, preflight, busy, created, draftId, planSignature])
+
+  /**
+   * `source_moved`'s remedy: the branch has moved past the commit Review
+   * checked, so detection reads the newer one — keeping the candidate the
+   * reader chose where it still exists — and Review asks again. The plan may
+   * come out the same, so the answer about the old commit is dropped rather
+   * than left standing for an unchanged signature.
+   */
+  const inspectAgain = async () => {
+    if (mutating.current) return
+    mutating.current = true
+    setFailure(undefined)
+    setBusy("detect")
+    try {
+      const selected = flow.detection?.selectedId
+      const result = selected
+        ? await selectCandidate(flow.draft, flow.profile, flow.source, selected).catch(() =>
+            reinspect(flow.draft, flow.profile, flow.source),
+          )
+        : await reinspect(flow.draft, flow.profile, flow.source)
+      onFlowChange((current) =>
+        current
+          ? {
+              ...current,
+              draft: result.draft,
+              candidate: result.candidate,
+              detection: result.detection,
+              configuration: redetectedConfiguration(flow, result),
+            }
+          : current,
+      )
+      setReview(null)
+      autoChecked.current = undefined
+    } catch (error) {
+      setFailure(asError(error))
+    } finally {
+      mutating.current = false
       setBusy("")
     }
   }
 
   if (created)
     return (
-      <Panel>
-        <PanelHeader title="Deployment created" />
-        <PanelBody className="space-y-4">
+      /* The outcome lands on the same focused surface the plan was decided on
+         (§17), not on a framed `Panel` borrowed from the reading register —
+         the sequence ends where it was being worked. Its name is the page's
+         `h1`, which is where the question was: a panel header repeating it
+         would be the same sentence twice. */
+      <FlowPanel>
+        <FlowPanelBody className="space-y-4">
           {failure ? (
             <ErrorState error={failure} />
           ) : (
             <p className="text-body">Starting the first release…</p>
           )}
           <p className="text-body text-muted-foreground">
-            Your project and configuration are saved.{" "}
-            {created.ready
-              ? "Open the deployment to check its run history and continue."
-              : "Environment setup did not finish. Review the Variables settings before starting the first release."}
+            Your project, configuration and environment are saved. Open the deployment to check its
+            run history and continue.
           </p>
-          {!created.ready && text && (
-            <details>
-              <summary className="cursor-pointer text-body focus-ring">
-                Keep a copy of your environment variables
-              </summary>
-              <Textarea
-                className="mt-3 font-mono text-xs"
-                aria-label="Unsaved environment variables"
-                readOnly
-                value={text}
-              />
-            </details>
-          )}
-          <Button asChild>
-            <Link
-              href={
-                created.ready
-                  ? `/deploy/${created.projectId}/deployments`
-                  : `/deploy/${created.projectId}/settings/variables`
-              }
-            >
-              {created.ready ? "Open deployment" : "Finish environment setup"}
+        </FlowPanelBody>
+        <FlowActions>
+          <Button asChild className="h-11 sm:h-9">
+            <Link href={`/deploy/${created.projectId}/deployments`}>
+              Open deployment
               <ArrowRight className="size-4" />
             </Link>
           </Button>
-        </PanelBody>
-      </Panel>
+        </FlowActions>
+      </FlowPanel>
     )
 
+  const errors = validateConfiguration(configuration, flow.profile)
   const blockers = preflight ? blockingFindings(preflight.findings) : []
   const warnings = preflight ? warningFindings(preflight.findings) : []
   const outstanding = warnings.filter((finding) => !acknowledged.includes(finding.code))
-  const candidates = flow.detection?.candidates ?? []
-  const ambiguous =
-    candidates.length > 1 || blockers.some((finding) => finding.code === "detection_ambiguous")
+  const last = current === "review"
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6">
+    /* The form on the left and the plan it is building on the right: every
+       field changes the drawing beside it, so what a project *is* — a source,
+       a build, a container, a name — is on screen while it is being decided
+       rather than discovered afterwards on the overview. It is also how a
+       four-step sequence stays one thing: the drawing does not change when
+       the step does, and each of its nodes goes to the step that decides it.
+
+       Both are held to the window: the drawing stays beside the fields, and
+       when a step has more settings than the window has room for it is the
+       fields that scroll — between the question and the command, which stay
+       where the reader left them. */
+    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
       {/* Disabled while a submit is in flight: inputs left editable during the
           async save/preflight round trip could be typed into and then
           silently reverted once the response handler lands (§14). */}
-      <fieldset disabled={Boolean(busy)} className="contents space-y-6">
-        {failure && <ErrorState error={failure} />}
+      <fieldset disabled={Boolean(busy) || branchBusy} className="contents">
+        {/* The one surface on this screen that carries depth (§16): the fields
+            are what the reader is deciding, and the drawing beside them is a
+            reading of what they already say. Giving the drawing an edge too
+            would be two foregrounds, which is none. */}
+        <FlowPanel className="relative min-w-0 xl:col-start-1 xl:row-start-1 xl:max-h-full xl:min-h-0 xl:self-start">
+          {/* §17 pass 7: the surface says its own work is in flight. A save,
+              a re-detect and a preflight all disable the fieldset, and a form
+              that greys out with no other answer reads as one that stopped
+              responding. */}
+          {(busy || branchBusy) && <BorderBeam duration={3} />}
+          {/* Keyed by step, so each screen rises the way a block that has just
+              arrived does (§11) rather than swapping in place. */}
+          <FlowPanelBody
+            key={current}
+            className="animate-rise space-y-6 xl:min-h-0 xl:overflow-y-auto"
+          >
+            {failure && <ErrorState error={failure} />}
 
-        <FormSection
-          title="Source"
-          actions={
-            <Button
-              variant="ghost"
-              size="xs"
-              className="text-muted-foreground"
-              onClick={onChangeSource}
-            >
-              Change source
-            </Button>
-          }
-        >
-          <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <WorkloadMark profile={flow.profile} size="sm" />
-              <span className="min-w-0 truncate text-body font-medium">{flow.sourceLabel}</span>
-              {isGitSource &&
-                (flow.githubRepo ? (
-                  <Select value={branch} onValueChange={(value) => void changeBranch(value)}>
-                    <SelectTrigger aria-label="Branch" className="w-36 font-mono">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(branches.data ?? []).map((entry) => (
-                        <SelectItem key={entry.name} value={entry.name}>
-                          {entry.name}
-                          {entry.default ? " (default)" : ""}
-                        </SelectItem>
-                      ))}
-                      {!(branches.data ?? []).some((entry) => entry.name === branch) && (
-                        <SelectItem value={branch}>{branch}</SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    aria-label="Branch"
-                    value={branch}
-                    disabled={branchBusy}
-                    className="w-36 font-mono"
-                    onChange={(event) => setBranch(event.target.value)}
-                    onBlur={(event) => void changeBranch(event.target.value)}
-                  />
-                ))}
-            </div>
-            {flow.candidate?.framework && (
-              <Tag tone="success">{frameworkLabel(flow.candidate.framework)}</Tag>
+            {current === "project" && (
+              <StepProject
+                flow={flow}
+                onFlowChange={onFlowChange}
+                onChangeProfile={changeProfile}
+                branch={branch}
+                branchBusy={branchBusy}
+                branches={branches.data ?? []}
+                onChangeBranch={(ref) => void changeBranch(ref)}
+                onChangeCloneOptions={changeCloneOptions}
+                onEditBranch={setBranch}
+                onPickCandidate={(id) => void pickCandidate(id)}
+                onDeployAsCompose={() => void deployAsCompose()}
+                busy={busy}
+                nameTouched={nameTouched}
+                onNameTouched={() => setNameTouched(true)}
+                nameCollides={nameCollides}
+                errors={errors}
+              />
             )}
-          </div>
-          {flow.detection?.unavailable && (
-            <Notice tone="warning" title="Some evidence is unavailable">
-              {flow.detection.unavailable}
-            </Notice>
-          )}
-          {flow.detection?.compose && (
-            <div className="space-y-2 pt-1">
-              <div className="flex flex-wrap gap-1.5">
-                {flow.detection.compose.services.map((service) => (
-                  <Tag key={service.name} mono>
-                    {service.name}
-                  </Tag>
-                ))}
-              </div>
-              {flow.detection.compose.unsupported.map((item) => (
-                <Notice key={item} tone="warning" title="Needs explicit review">
-                  {item}
-                </Notice>
-              ))}
-              <details>
-                <summary className="cursor-pointer rounded-sm py-2 text-xs font-medium focus-ring">
-                  Show effective Compose plan
-                </summary>
-                <Well className="max-h-72 text-hint whitespace-pre-wrap">
-                  {flow.detection.compose.preview}
-                </Well>
-              </details>
-            </div>
-          )}
-        </FormSection>
 
-        {ambiguous && (
-          <FormSection
-            title="Choose the detected candidate"
-            hint="Multiple equally strong roots or build methods were found."
-          >
-            <OptionList role="group" aria-label="Detected candidates">
-              {candidates.map((item) => (
-                <OptionRow
-                  key={item.id}
-                  title={item.name}
-                  hint={`${humanize(item.confidence)} confidence · ${
-                    item.framework ? `${item.framework} via ` : ""
-                  }${humanize(item.buildMethod)}${
-                    item.root && item.root !== "." ? ` in ${item.root}` : ""
-                  }`}
-                  checked={item.id === flow.detection?.selectedId}
-                  onCheckedChange={(checked) => checked && void pickCandidate(item.id)}
-                  disabled={busy === "detect"}
-                />
-              ))}
-            </OptionList>
-          </FormSection>
-        )}
+            {current === "runtime" && (
+              <StepRuntime
+                flow={flow}
+                onFlowChange={onFlowChange}
+                errors={errors}
+                foldsOpen={initialAdvanced}
+              />
+            )}
 
-        <FieldRow columns={2}>
-          <Field
-            label="Project name"
-            htmlFor="deployment-name"
-            hint="Used in URLs, container labels and release history."
-            error={
-              nameInvalid
-                ? "Start with a letter or number. Use up to 64 letters, numbers, dots, dashes, or underscores."
-                : undefined
+            {current === "variables" && (
+              <StepVariables
+                flow={flow}
+                onFlowChange={onFlowChange}
+                rows={envRows}
+                onRowsChange={setEnvRows}
+                dotenv={dotenv}
+                onDotenvChange={setDotenv}
+                platformSkipped={pasted.skipped}
+                retainedKeys={retainedKeys}
+                onRemoveRetainedKey={removeRetainedKey}
+                suppliedVariables={[...environmentNames]}
+                referencesOpen={declaredVariablesNeedReview(flow)}
+              />
+            )}
+
+            {current === "review" && (
+              <StepReview
+                flow={flow}
+                branch={isGitSource ? branch : undefined}
+                gitPolicy={gitPolicy}
+                onGitPolicyChange={setGitPolicy}
+                variableCount={
+                  [...environmentNames].filter(
+                    (name) => !configuration.variables.some((variable) => variable.name === name),
+                  ).length
+                }
+                suppliedVariables={[...environmentNames]}
+                findings={preflight?.findings ?? []}
+                checking={busy === "check"}
+                blockers={blockers}
+                warnings={warnings}
+                acknowledged={acknowledged}
+                onAcknowledgedChange={setAcknowledged}
+                onOpenRemedy={openRemedyField}
+                canOpenRemedy={(finding) => Boolean(sectionForField(finding.fieldId))}
+                onApplyFix={applyFindingFix}
+                onInspectAgain={() => void inspectAgain()}
+              />
+            )}
+          </FlowPanelBody>
+          {/* The one gesture that advances, on the foot of the surface holding
+              what it is about to change (§16). On the first step there is no
+              step behind it, so the way back out of the sequence is the way
+              back to the chooser — one control, not two words for it. */}
+          <FlowActions
+            note={
+              !last
+                ? undefined
+                : isImport
+                  ? "Adopting records this workload as a deployment without starting, stopping, or changing it."
+                  : "Deploy saves the plan, applies the environment, and starts the release."
             }
-          >
-            <Input
-              id="deployment-name"
-              required
-              maxLength={64}
-              autoComplete="off"
-              aria-invalid={nameInvalid}
-              value={flow.name}
-              onBlur={() => setNameTouched(true)}
-              onChange={(event) => onFlowChange({ ...flow, name: event.target.value })}
-            />
-          </Field>
-          {isGitSource && (
-            <Field label="Project type" htmlFor="workload-type">
-              <Select
-                value={flow.profile}
-                onValueChange={(value) => changeProfile(value as WorkloadProfile)}
-              >
-                <SelectTrigger id="workload-type" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="web">Web application</SelectItem>
-                  <SelectItem value="static">Static website</SelectItem>
-                  <SelectItem value="worker">Worker or bot</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
-        </FieldRow>
-
-        {isGitSource && (
-          <details
-            open={
-              !flow.candidate ||
-              Boolean(flow.detection?.unavailable) ||
-              (flow.profile === "static" &&
-                configuration.build.method === "recipe" &&
-                !configuration.build.outputDirectory)
-            }
-          >
-            <summary className="cursor-pointer rounded-md py-2 text-body font-medium focus-ring">
-              Build & output settings
-              {flow.candidate?.framework ? ` · ${frameworkLabel(flow.candidate.framework)}` : ""}
-            </summary>
-            <div className="grid gap-4 pt-3 sm:grid-cols-2">
-              <Field label="Build method" htmlFor="build-method">
-                <Select
-                  value={configuration.build.method}
-                  onValueChange={(value) => updateBuild({ method: value as DeploymentBuildMethod })}
+            secondary={
+              <>
+                <Button
+                  variant="ghost"
+                  className="h-11 text-muted-foreground sm:h-9"
+                  onClick={back}
+                  disabled={Boolean(busy)}
                 >
-                  <SelectTrigger id="build-method" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="recipe">Automatic recipe</SelectItem>
-                    <SelectItem value="dockerfile">Dockerfile</SelectItem>
-                    <SelectItem value="static">Static files</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field
-                label="Port the app listens on"
-                htmlFor="internal-port"
-                hint="What the container serves on, not the host port."
-              >
-                <Input
-                  id="internal-port"
-                  type="number"
-                  min={0}
-                  max={65535}
-                  value={configuration.runtime.internalPort ?? 0}
-                  onChange={(event) =>
-                    setConfiguration({
-                      ...configuration,
-                      runtime: {
-                        ...configuration.runtime,
-                        internalPort: Number(event.target.value) || 0,
-                      },
-                    })
-                  }
-                  className="font-mono"
-                />
-              </Field>
-              {configuration.build.method === "recipe" && (
-                <Field label="Language" htmlFor="recipe">
-                  <Select
-                    value={configuration.build.recipe ?? "node"}
-                    onValueChange={(value) => {
-                      const recipe = value as DeploymentRecipe
-                      updateBuild({
-                        recipe,
-                        goVersion: recipe === "go" ? configuration.build.goVersion : undefined,
-                        pythonVersion:
-                          recipe === "python" ? configuration.build.pythonVersion : undefined,
-                        packageManager:
-                          recipe === "node" ? configuration.build.packageManager : undefined,
-                      })
-                    }}
+                  {current === "project" ? "Change source" : "Back"}
+                </Button>
+                {last && !isImport && (
+                  <Button
+                    variant="ghost"
+                    className="h-11 sm:h-9"
+                    onClick={() => void submit("save")}
+                    pending={busy === "save"}
+                    disabled={Boolean(busy)}
                   >
-                    <SelectTrigger id="recipe" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="node">JavaScript / TypeScript</SelectItem>
-                      <SelectItem value="go">Go</SelectItem>
-                      <SelectItem value="python">Python</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              )}
-              {configuration.build.method === "recipe" && configuration.build.recipe === "node" && (
-                <Field
-                  label="Package manager"
-                  htmlFor="package-manager"
-                  hint={
-                    (flow.candidate?.packageManagers?.length ?? 0) > 1 &&
-                    !flow.candidate?.packageManager
-                      ? `This repository has lockfiles for ${flow.candidate?.packageManagers?.join(" and ")}. Choose the one it uses.`
-                      : "Leave on the lockfile unless the repository has more than one."
-                  }
-                >
-                  <Select
-                    value={configuration.build.packageManager ?? "lockfile"}
-                    onValueChange={(value) => {
-                      const packageManager =
-                        value === "lockfile" ? undefined : (value as NodePackageManager)
-                      updateBuild({
-                        packageManager,
-                        buildCommand: withPackageManagerRunner(
-                          configuration.build.buildCommand ?? "",
-                          packageManager,
-                        ),
-                        startCommand: withPackageManagerRunner(
-                          configuration.build.startCommand ?? "",
-                          packageManager,
-                        ),
-                      })
-                    }}
-                  >
-                    <SelectTrigger id="package-manager" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="lockfile">From the lockfile</SelectItem>
-                      <SelectItem value="bun">Bun</SelectItem>
-                      <SelectItem value="npm">npm</SelectItem>
-                      <SelectItem value="pnpm">pnpm</SelectItem>
-                      <SelectItem value="yarn">Yarn</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              )}
-              {configuration.build.method === "recipe" && configuration.build.recipe === "go" && (
-                <Field
-                  label="Go version"
-                  htmlFor="go-version"
-                  hint="Leave empty to use .go-version or go.mod."
-                >
-                  <Input
-                    id="go-version"
-                    value={configuration.build.goVersion ?? ""}
-                    onChange={(event) => updateBuild({ goVersion: event.target.value })}
-                    placeholder="1.26"
-                  />
-                </Field>
-              )}
-              {configuration.build.method === "recipe" &&
-                configuration.build.recipe === "python" && (
-                  <Field
-                    label="Python version"
-                    htmlFor="python-version"
-                    hint="Leave empty to use .python-version, runtime.txt or pyproject.toml."
-                  >
-                    <Input
-                      id="python-version"
-                      value={configuration.build.pythonVersion ?? ""}
-                      onChange={(event) => updateBuild({ pythonVersion: event.target.value })}
-                      placeholder="3.13"
-                    />
-                  </Field>
+                    Save only
+                  </Button>
                 )}
-              {configuration.build.method === "dockerfile" && (
-                <Field label="Dockerfile path" htmlFor="dockerfile">
-                  <Input
-                    id="dockerfile"
-                    className="font-mono"
-                    value={configuration.build.dockerfile ?? "Dockerfile"}
-                    onChange={(event) => updateBuild({ dockerfile: event.target.value })}
-                  />
-                </Field>
-              )}
-              {configuration.build.method !== "dockerfile" && (
-                <>
-                  <Field label="Build command" htmlFor="build-command">
-                    <Input
-                      id="build-command"
-                      value={configuration.build.buildCommand ?? ""}
-                      onChange={(event) => updateBuild({ buildCommand: event.target.value })}
-                      placeholder="npm run build"
-                      className="font-mono"
-                    />
-                  </Field>
-                  <Field
-                    label="Start command"
-                    htmlFor="start-command"
-                    hint="Leave empty and set an output directory to serve static files instead."
-                  >
-                    <Input
-                      id="start-command"
-                      value={configuration.build.startCommand ?? ""}
-                      onChange={(event) => updateBuild({ startCommand: event.target.value })}
-                      placeholder="npm run start"
-                      className="font-mono"
-                    />
-                  </Field>
-                </>
-              )}
-              <Field label="Root directory" htmlFor="root-directory" hint="For a monorepo.">
-                <Input
-                  id="root-directory"
-                  value={configuration.build.rootDirectory ?? ""}
-                  onChange={(event) => updateBuild({ rootDirectory: event.target.value })}
-                  placeholder="apps/web"
-                  className="font-mono"
-                />
-              </Field>
-              <Field
-                label="Output directory"
-                htmlFor="output-directory"
-                hint="Set only for a site with no server process."
-              >
-                <Input
-                  id="output-directory"
-                  value={configuration.build.outputDirectory ?? ""}
-                  onChange={(event) => updateBuild({ outputDirectory: event.target.value })}
-                  placeholder="dist"
-                  className="font-mono"
-                />
-              </Field>
-              {(configuration.build.method === "static" ||
-                (configuration.build.method === "recipe" &&
-                  Boolean(configuration.build.outputDirectory))) && (
-                <div className="sm:col-span-2">
-                  <OptionRow
-                    title="Single-page application"
-                    hint="Answers paths without a file with index.html, so client-side routes open directly."
-                    checked={configuration.build.spaFallback ?? false}
-                    onCheckedChange={(spaFallback) =>
-                      updateBuild({ spaFallback: spaFallback || undefined })
-                    }
-                  />
-                </div>
-              )}
-            </div>
-          </details>
-        )}
-
-        <EnvironmentEditor
-          rows={envRows}
-          onRowsChange={setEnvRows}
-          dotenv={dotenv}
-          onDotenvChange={setDotenv}
-          hostNetwork={configuration.runtime.hostNetwork}
-          databases={flow.candidate?.databases}
-          onConnectDatabase={(connection, url, variable) => {
-            setEnvRows((current) => [
-              ...current.filter((row) => row.name && row.name !== variable),
-              { name: variable, value: url },
-            ])
-            setConfiguration({
-              ...configuration,
-              dependencies: [
-                ...configuration.dependencies.filter(
-                  (item) =>
-                    item.resourceKind !== "database_connection" ||
-                    item.resourceId !== String(connection.id),
-                ),
-                {
-                  kind: "database",
-                  ownership: "linked",
-                  resourceKind: "database_connection",
-                  resourceId: String(connection.id),
-                  config: {},
-                },
-              ],
-            })
-          }}
-        />
-
-        {flow.profile !== "worker" && (
-          <PublicAddress
-            domain={configuration.domains[0]}
-            suggestion={flow.hostname}
-            onChange={(domain) =>
-              setConfiguration({ ...configuration, domains: domain ? [domain] : [] })
+              </>
             }
-          />
-        )}
-
-        <div ref={advancedRef} className="space-y-6">
-          <button
-            type="button"
-            aria-expanded={advancedOpen}
-            onClick={() => setAdvancedOpen(!advancedOpen)}
-            className="flex min-h-11 w-full items-center justify-between rounded-xl border border-hairline bg-surface-header px-3.5 text-body font-medium focus-ring"
           >
-            <span className="flex items-center gap-2">
-              <SettingsSliders className="size-4" />
-              Advanced
-            </span>
-            <span className="text-xs font-normal text-muted-foreground">
-              {advancedOpen ? "Hide" : "Show"}
-            </span>
-          </button>
-          {advancedOpen && (
-            <ConfigureAdvanced
-              configuration={configuration}
-              onChange={setConfiguration}
-              errors={configErrors}
-            />
-          )}
-        </div>
-
-        {(blockers.length > 0 || warnings.length > 0) && (
-          <FormSection title="Findings">
-            <div className="space-y-2">
-              {blockers.map((finding, index) => (
-                <FindingRow
-                  key={`${finding.code}:${finding.fieldId ?? index}`}
-                  finding={finding}
-                  index={index}
-                  onOpenRemedy={openRemedyField}
-                />
-              ))}
-            </div>
-            {warnings.length > 0 && (
-              <Group tone="warning" className="space-y-2">
-                {warnings.map((finding, index) => (
-                  <Label
-                    key={`${finding.code}:${finding.fieldId ?? index}`}
-                    className="flex min-h-11 items-start gap-3 text-xs"
-                  >
-                    <Checkbox
-                      className="mt-0.5"
-                      checked={acknowledged.includes(finding.code)}
-                      onCheckedChange={(checked) =>
-                        setAcknowledged(
-                          checked
-                            ? [...new Set([...acknowledged, finding.code])]
-                            : acknowledged.filter((code) => code !== finding.code),
-                        )
-                      }
-                    />
-                    <span>
-                      <span className="block font-medium">{finding.title}</span>
-                      <span className="mt-0.5 block text-muted-foreground">
-                        {finding.measured || finding.means}
-                      </span>
-                    </span>
-                  </Label>
-                ))}
-              </Group>
-            )}
-          </FormSection>
-        )}
-
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-4">
-          <p className="text-hint text-muted-foreground">
-            {isImport
-              ? "Adopting records this workload as a deployment without starting, stopping, or changing it."
-              : "Deploy saves the plan, applies the environment, and starts the release."}
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            {isImport ? (
+            {last ? (
               <Button
                 className="h-11 sm:h-9"
                 onClick={() => void submit("deploy")}
                 pending={busy === "deploy"}
                 disabled={Boolean(busy)}
               >
-                Adopt workload
-              </Button>
-            ) : (
-              <>
-                <Button
-                  variant="ghost"
-                  className="h-11 sm:h-9"
-                  onClick={() => void submit("save")}
-                  pending={busy === "save"}
-                  disabled={Boolean(busy)}
-                >
-                  Save only
-                </Button>
-                <Button
-                  className="h-11 sm:h-9"
-                  onClick={() => void submit("deploy")}
-                  pending={busy === "deploy"}
-                  disabled={Boolean(busy)}
-                >
-                  <ArrowRight className="size-4" />
-                  {blockers.length
+                <ArrowRight className="size-4" />
+                {isImport
+                  ? "Adopt workload"
+                  : blockers.length
                     ? "Re-check and deploy"
                     : outstanding.length
                       ? "Acknowledge, then deploy"
                       : "Deploy"}
-                </Button>
-              </>
+              </Button>
+            ) : (
+              <Button className="h-11 sm:h-9" onClick={advance} disabled={Boolean(busy)}>
+                <ArrowRight className="size-4" />
+                Continue
+              </Button>
             )}
-          </div>
-        </div>
+          </FlowActions>
+        </FlowPanel>
+
+        {/* After the fields in the document, beside them from `xl`: stacked on
+            a phone, the drawing came first and the question's first field
+            started two-thirds of the way down every step — the same summary
+            scrolled past four times. It is a reading of what the fields say,
+            so it follows them and the command. */}
+        <aside className="min-w-0 xl:col-start-2 xl:row-start-1 xl:min-h-0 xl:overflow-y-auto">
+          <PlanWiring
+            profile={flow.profile}
+            source={flow.source}
+            sourceLabel={flow.sourceLabel}
+            branch={isGitSource ? branch : undefined}
+            framework={flow.candidate?.framework}
+            configuration={configuration}
+            onOpenSection={openSection}
+          />
+        </aside>
       </fieldset>
     </div>
   )

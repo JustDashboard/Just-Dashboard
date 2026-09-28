@@ -35,9 +35,11 @@ func TestRuntimeServicesScopeAvailabilityAndSecretFreeProjection(t *testing.T) {
 	}
 	live := container("web", "7", "10")
 	live.Health, live.ComposeStack, live.ComposeSvc = "healthy", "jd-e7", "web"
+	task := container("jd-e7-run3-task1", "7", "11")
+	task.Labels[releaseTaskLabel] = "migrate"
 	owner := &runtimeObservationFake{items: []dockerx.Container{
 		live, container("candidate", "7", "11"), container("other", "8", "10"),
-		container("invalid", "7", "oops"),
+		container("invalid", "7", "oops"), task,
 	}}
 	result := ObserveRuntimeServices(t.Context(), owner, 7, 10)
 	if result.Status != "available" || result.ObservedAt.IsZero() || len(result.Services) != 2 {
@@ -72,5 +74,33 @@ func TestRuntimeServicesScopeAvailabilityAndSecretFreeProjection(t *testing.T) {
 	ObserveRuntimeServices(t.Context(), owner, 0, 0)
 	if owner.calls != before {
 		t.Fatal("invalid environment queried Docker")
+	}
+}
+
+func TestReleaseRuntimeDownNeedsEveryObservedContainerDown(t *testing.T) {
+	container := func(release, state string) dockerx.Container {
+		return dockerx.Container{ID: release + "-" + state, State: state, Labels: map[string]string{
+			"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": "7",
+			"io.just-dashboard.release-id": release,
+		}}
+	}
+	runtime := ReleaseRuntime{ReleaseID: 10, EnvironmentID: 7}
+	for _, test := range []struct {
+		name  string
+		owner RuntimeObserver
+		want  bool
+	}{
+		{"exited", &runtimeObservationFake{items: []dockerx.Container{container("10", "exited")}}, true},
+		{"one service still running", &runtimeObservationFake{items: []dockerx.Container{
+			container("10", "exited"), container("10", "running")}}, false},
+		{"only another release running", &runtimeObservationFake{items: []dockerx.Container{
+			container("10", "exited"), container("11", "running")}}, true},
+		{"no containers", &runtimeObservationFake{}, false},
+		{"Docker unreadable", &runtimeObservationFake{err: errors.New("down")}, false},
+		{"no Docker", nil, false},
+	} {
+		if got := ReleaseRuntimeDown(t.Context(), test.owner, runtime); got != test.want {
+			t.Errorf("%s: down = %v, want %v", test.name, got, test.want)
+		}
 	}
 }

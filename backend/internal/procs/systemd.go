@@ -258,11 +258,28 @@ type JournalEntry struct {
 	PID       string    `json:"pid,omitempty"`
 	Hostname  string    `json:"hostname,omitempty"`
 	Syslog    string    `json:"syslogIdentifier,omitempty"`
+
+	// The fields below are what the log viewer reads a record's meaning from,
+	// and are not part of the unit pages' wire shape.
+	//
+	// The manager's own lines about a unit — Started, Failed with result
+	// 'exit-code', Scheduled restart job — are written by PID 1, so their
+	// _SYSTEMD_UNIT is init.scope. The unit they are about is in UNIT, and
+	// the run they belong to in INVOCATION_ID; reading only the underscore
+	// fields drops exactly the lines that say how a run ended.
+	About      string `json:"-"` // UNIT ‖ USER_UNIT
+	Comm       string `json:"-"` // _COMM, the program when no identifier was given
+	Invocation string `json:"-"` // the run About names, else the writer's own: see ParseJournalLine
+	MessageID  string `json:"-"` // MESSAGE_ID, the stable name of a manager event
+	Result     string `json:"-"` // UNIT_RESULT
+	ExitCode   string `json:"-"` // EXIT_CODE: exited, killed or dumped
+	ExitStatus string `json:"-"` // EXIT_STATUS: a number, or a signal name
+	// Cursor is the record's place in the journal, which a read that meets
+	// it again from the other direction can stop at: two records can share
+	// a microsecond, and no two share a cursor.
+	Cursor string `json:"-"`
 }
 
-// JournalCommand builds a journalctl invocation. JSON output is used rather
-// than the default text so message boundaries and priorities survive
-// multi-line log records intact.
 // JournalOptions is everything the unified log viewer can ask the journal
 // for. It exists because the journal is the one source where narrowing the
 // query is not an optimisation: `journalctl -n 300` hands back the last three
@@ -271,8 +288,11 @@ type JournalEntry struct {
 // full of matches. Pushing the window down to journalctl is what makes "the
 // last 300 errors" mean what it says.
 type JournalOptions struct {
-	Unit       string
-	Identifier string
+	Unit string
+	// Identifiers narrow to these syslog identifiers (`-t`, repeated, OR'ed):
+	// sshd, sshd-session and sudo together are "who logged in" on a host with
+	// no auth.log.
+	Identifiers []string
 	// Lines caps the tail. Zero means no cap, which is what a search over an
 	// explicit time window wants — there the window is the bound.
 	Lines  int
@@ -286,19 +306,14 @@ type JournalOptions struct {
 	MaxPriority int
 	Boot        bool
 	Kernel      bool
+	// Reverse reads newest first (`--reverse`): a search that may run out of
+	// time before the end of its window must reach the end it is for.
+	Reverse bool
 }
 
-// JournalCommand is the tail form kept for the per-unit views, which want the
-// last n records of one unit and nothing else.
-func JournalCommand(ctx context.Context, unit string, lines int, follow bool, since string) (*exec.Cmd, error) {
-	if lines <= 0 || lines > 20000 {
-		lines = 300
-	}
-	return JournalCommandOpts(ctx, JournalOptions{
-		Unit: unit, Lines: lines, Follow: follow, Since: since, MaxPriority: -1,
-	})
-}
-
+// JournalCommandOpts builds a journalctl invocation. JSON output is used
+// rather than the default text so message boundaries and priorities survive
+// multi-line log records intact.
 func JournalCommandOpts(ctx context.Context, opts JournalOptions) (*exec.Cmd, error) {
 	args := []string{"--output=json", "--no-pager"}
 	if opts.Unit != "" {
@@ -307,11 +322,11 @@ func JournalCommandOpts(ctx context.Context, opts JournalOptions) (*exec.Cmd, er
 		}
 		args = append(args, "-u", opts.Unit)
 	}
-	if opts.Identifier != "" {
-		if err := ValidateName(opts.Identifier); err != nil {
+	for _, ident := range opts.Identifiers {
+		if err := ValidateName(ident); err != nil {
 			return nil, err
 		}
-		args = append(args, "-t", opts.Identifier)
+		args = append(args, "-t", ident)
 	}
 	if opts.Lines > 20000 {
 		opts.Lines = 20000
@@ -343,6 +358,9 @@ func JournalCommandOpts(ctx context.Context, opts JournalOptions) (*exec.Cmd, er
 	if opts.Follow {
 		args = append(args, "-f")
 	}
+	if opts.Reverse {
+		args = append(args, "--reverse")
+	}
 	// The journal is host state, not container state: this image mounts
 	// /var/log but not the volatile /run/log/journal where the current boot's
 	// records live, so a container-local journalctl returns the previous
@@ -366,12 +384,36 @@ func ParseJournalLine(line []byte) (JournalEntry, bool) {
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return JournalEntry{}, false
 	}
+	first := func(keys ...string) string {
+		for _, k := range keys {
+			if v := journalString(raw[k]); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
 	e := JournalEntry{
-		Message:  journalString(raw["MESSAGE"]),
-		Unit:     journalString(raw["_SYSTEMD_UNIT"]),
-		PID:      journalString(raw["_PID"]),
-		Hostname: journalString(raw["_HOSTNAME"]),
-		Syslog:   journalString(raw["SYSLOG_IDENTIFIER"]),
+		Message:    journalString(raw["MESSAGE"]),
+		Unit:       journalString(raw["_SYSTEMD_UNIT"]),
+		PID:        journalString(raw["_PID"]),
+		Hostname:   journalString(raw["_HOSTNAME"]),
+		Syslog:     journalString(raw["SYSLOG_IDENTIFIER"]),
+		About:      first("UNIT", "USER_UNIT"),
+		Comm:       journalString(raw["_COMM"]),
+		Invocation: first("_SYSTEMD_INVOCATION_ID", "INVOCATION_ID", "USER_INVOCATION_ID"),
+		MessageID:  journalString(raw["MESSAGE_ID"]),
+		Result:     journalString(raw["UNIT_RESULT"]),
+		ExitCode:   journalString(raw["EXIT_CODE"]),
+		ExitStatus: journalString(raw["EXIT_STATUS"]),
+		Cursor:     journalString(raw["__CURSOR"]),
+	}
+	if e.About != "" {
+		// A manager's line about a unit carries that unit's run in
+		// INVOCATION_ID (USER_INVOCATION_ID from a user manager), and its own
+		// in _SYSTEMD_INVOCATION_ID. PID 1 has none of its own, but a user
+		// manager is user@1000.service, one run under which every run of
+		// every user unit would otherwise group into one.
+		e.Invocation = first("INVOCATION_ID", "USER_INVOCATION_ID", "_SYSTEMD_INVOCATION_ID")
 	}
 	if p, err := strconv.Atoi(journalString(raw["PRIORITY"])); err == nil {
 		e.Priority = p

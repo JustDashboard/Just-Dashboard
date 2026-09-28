@@ -15,7 +15,7 @@ func TestGeneratedDockerfileCannotFollowCheckoutSymlinkOutsideContext(t *testing
 	if err := os.Symlink(outside, filepath.Join(root, ".just-dashboard")); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeGeneratedDockerfile(root, "replacement"); err == nil {
+	if err := writeGeneratedFile(root, "Dockerfile", "replacement"); err == nil {
 		t.Fatal("generated file escaped context")
 	}
 	content, err := os.ReadFile(canary)

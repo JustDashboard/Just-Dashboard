@@ -2,6 +2,7 @@
 
 import { External } from "@/components/icons"
 import type { useConfirm } from "@/components/confirm-dialog"
+import { Hint } from "@/components/docker/explain"
 import { Tag } from "@/components/tag"
 
 /**
@@ -39,5 +40,38 @@ export function PortLink({ ip, port, target }: { ip?: string; port: number; targ
         <External className="size-2.5" />
       </a>
     </Tag>
+  )
+}
+
+/**
+ * Names that suggest storage holds a database's own files.
+ *
+ * A guess, and treated as one: it decides whether a warning is shown, never
+ * whether an action is allowed. Getting it wrong in one direction costs a
+ * sentence somebody did not need; in the other it costs a corrupted database,
+ * so it leans towards warning.
+ */
+const DATABASE_HINTS =
+  /(postgres|mysql|mariadb|mongo|redis|elastic|clickhouse|cassandra|influx|couch)/i
+
+export function looksLikeDatabase(...hints: (string | undefined)[]): boolean {
+  return hints.some((hint) => hint !== undefined && DATABASE_HINTS.test(hint))
+}
+
+/**
+ * The sentence that has to sit above a file browser pointed at a database.
+ *
+ * A database's files are consistent only from the database's point of view;
+ * editing one underneath a running Postgres is how a volume stops being
+ * restorable, and neither the file manager nor the browser embedded in these
+ * panels gives any hint that this directory is different from any other.
+ */
+export function DatabaseStorageWarning() {
+  return (
+    <Hint className="text-warning">
+      This looks like a database&apos;s own files. Reading is safe; changing or deleting one
+      underneath a running database corrupts it in ways that only show up later. Stop the container
+      first if you need to write here.
+    </Hint>
   )
 }

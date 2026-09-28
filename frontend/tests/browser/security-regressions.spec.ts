@@ -67,8 +67,10 @@ for (const admin of [false, true]) {
     await expect(page.getByRole("button", { name: "Create stack", exact: true })).toHaveCount(
       admin ? 1 : 0,
     )
+    // A stack is a page of its own, so its controls are checked there.
     await page.getByRole("button", { name: "permission-test", exact: true }).click()
-    const panel = page.getByRole("dialog")
+    await page.waitForURL(/\/docker\/stacks\/permission-test$/)
+    const panel = page.getByRole("main")
     await expect(panel.getByText("worker", { exact: true })).toBeVisible()
     await expect(panel.getByRole("button", { name: "Deploy", exact: true })).toHaveCount(
       admin ? 1 : 0,
@@ -149,7 +151,7 @@ async function databaseFixture(page: Page) {
     }
     await fulfill(route, body)
   })
-  await page.goto("/databases?conn=1&schema=public&table=items")
+  await page.goto("/databases/browse?conn=1&schema=public&table=items")
   await expect(page.getByRole("checkbox", { name: "Select row 1", exact: true })).toBeVisible()
   return { mutations, held }
 }
@@ -185,7 +187,13 @@ test("slow polling has only one request in flight", async ({ page }) => {
   const pending: Route[] = []
   let initial = true
   await page.route("**/api/v1/**", async (route) => {
-    const path = new URL(route.request().url()).pathname.slice(7)
+    const url = new URL(route.request().url())
+    const path = url.pathname.slice(7)
+    // The last day's readings poll on their own cadence; the trail's own
+    // request is the one this is about.
+    if (path === "/audit/" && url.searchParams.has("since")) {
+      return fulfill(route, { entries: [], total: 0 })
+    }
     if (path === "/audit/") {
       if (initial) {
         initial = false
@@ -270,9 +278,17 @@ test("a reset password is changed only after the account's second factor", async
 
 test("same-name PM2 applications use trusted daemon and process identities", async ({ page }) => {
   const actions: URL[] = [],
-    sockets: URL[] = []
-  await page.routeWebSocket("**/api/v1/pm2/**", (ws) => {
+    sockets: URL[] = [],
+    legacy: URL[] = [],
+    reads: URL[] = []
+  // The sheet reads a process's logs as one of the host's log sources; the
+  // id it asks for is built from the daemon's account and the process id the
+  // list keyed the row on, never from the name alone.
+  await page.routeWebSocket("**/api/v1/logs/stream**", (ws) => {
     sockets.push(new URL(ws.url()))
+  })
+  await page.routeWebSocket("**/api/v1/pm2/**", (ws) => {
+    legacy.push(new URL(ws.url()))
   })
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url()),
@@ -286,6 +302,10 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
         }),
       })
     let body: unknown = []
+    if (path.startsWith("/logs/")) {
+      reads.push(url)
+      body = {}
+    }
     if (path === "/auth/session") body = signedIn
     if (path === "/pm2/")
       body = {
@@ -338,8 +358,7 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
   await expect(page.getByRole("dialog")).toContainText("bob #0")
   await page.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect.poll(() => sockets.length).toBe(1)
-  expect(sockets[0].searchParams.get("user")).toBe("bob")
-  expect(sockets[0].searchParams.get("id")).toBe("0")
+  expect(sockets[0].searchParams.get("source")).toBe("pm2:bob/0/same-name")
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   const alice = page.getByRole("row").filter({ hasText: "alice" })
@@ -350,6 +369,11 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
     page.getByText("Add this daemon's log directory to JD_LOG_ROOTS.", { exact: true }),
   ).toBeVisible()
   expect(sockets).toHaveLength(1)
+  expect(legacy).toEqual([])
+  // Nor is it described or searched: the sentence is the whole of the tab.
+  expect(reads.filter((read) => read.searchParams.get("source")?.startsWith("pm2:alice/"))).toEqual(
+    [],
+  )
 })
 
 test("Redis scan cursors retain all unsigned 64-bit digits in requests", async ({ page }) => {
@@ -385,7 +409,7 @@ test("Redis scan cursors retain all unsigned 64-bit digits in requests", async (
     }
     await fulfill(route, body)
   })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
   await expect(page.getByRole("button", { name: /example/ })).toBeVisible()
   await page.getByRole("button", { name: "Next", exact: true }).click()
   await expect.poll(() => cursors).toEqual(["0", cursor])

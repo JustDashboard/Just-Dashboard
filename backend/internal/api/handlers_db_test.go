@@ -120,6 +120,9 @@ func TestRoutineDatabaseRoutesDoNotAskForAPhrase(t *testing.T) {
 		{http.MethodDelete, "/databases/1/documents", `{"collection":"c","id":"x"}`, "a document is Mongo's row"},
 		{http.MethodPost, "/databases/1/activity/kill", `{"pid":"42"}`, "a stopped query rolls back; nothing is lost"},
 		{http.MethodPost, "/databases/1/import", `{"table":"t","data":"a,b\n1,2"}`, "an append adds rows and removes none"},
+		{http.MethodDelete, "/databases/1/server/roles/reports", `{}`, "an account is recreated from its name and a new password"},
+		{http.MethodDelete, "/databases/1/server/extensions/pgcrypto", `{}`, "an extension is one CREATE EXTENSION away"},
+		{http.MethodDelete, "/databases/1/backups", `{"file":"x.dump"}`, "a dump can be taken again while the database is there"},
 	} {
 		rec := driveWithoutConfirmation(t, router, c)
 		if strings.Contains(rec.Body.String(), "confirmation") {

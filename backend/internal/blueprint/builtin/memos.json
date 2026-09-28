@@ -7,11 +7,16 @@
   "description": "A lightweight notes service: quick notes with tags, Markdown and an API, stored in one SQLite file.",
   "iconId": "globe",
   "docsUrl": "https://www.usememos.com/docs",
+  "access": {
+    "kind": "setup",
+    "path": "/auth/signup",
+    "note": "No account exists yet: the first visit redirects to the sign-up form, and the account it creates is the instance owner. Open the address yourself right after deploying, because whoever fills that form first owns the instance."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/usememos/memos",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
@@ -28,9 +27,9 @@ func (s *Server) mountGitHubAppRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPost, "/manifest", s.handle(s.handleGitHubAppManifest))
-			// GitHub sends the operator's browser back here after creating
-			// the App: a GET, carrying the state this dashboard issued.
-			r.Method(http.MethodGet, "/callback", s.handle(s.handleGitHubAppCallback))
+			// The page finishes GitHub's redirect here with the code and
+			// state it was sent back with, under its own session.
+			r.Method(http.MethodPost, "/callback", s.handle(s.handleGitHubAppCallback))
 			r.Method(http.MethodDelete, "/", s.handle(s.handleGitHubAppDisconnect))
 		})
 	})
@@ -78,19 +77,29 @@ func (s *Server) handleGitHubAppManifest(w http.ResponseWriter, r *http.Request)
 	return nil
 }
 
-// handleGitHubAppCallback is GitHub's redirect after the App is created. It
-// lands in a browser, so its answers are redirects to the credentials page
-// rather than JSON: connected, or failed with the reason.
+// handleGitHubAppCallback finishes the manifest flow. GitHub redirects the
+// operator's browser to the Credentials page with a one-time code and the
+// state this dashboard issued; the page posts both here. It is a POST from
+// the page rather than the GET GitHub performs because that redirect is a
+// cross-site navigation, on which the browser withholds the SameSite=Strict
+// session cookie — so the API could never see who was completing it.
 func (s *Server) handleGitHubAppCallback(w http.ResponseWriter, r *http.Request) error {
-	query := r.URL.Query()
-	credentials, err := s.modules.githubApp.CompleteManifest(r.Context(), query.Get("code"), query.Get("state"))
+	var request struct {
+		Code  string `json:"code"`
+		State string `json:"state"`
+	}
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		return err
+	}
+	credentials, err := s.modules.githubApp.CompleteManifest(r.Context(), request.Code, request.State)
+	if errors.Is(err, githubapp.ErrBadState) {
+		return httpx.Err(http.StatusBadRequest, "github_app_state", err.Error())
+	}
 	if err != nil {
-		httpx.SetAudit(r, "deploy.githubapp.connect", "", map[string]any{"error": err.Error()})
-		http.Redirect(w, r, "/deploy/credentials?github-app=failed&reason="+url.QueryEscape(err.Error()), http.StatusSeeOther)
-		return nil
+		return httpx.Err(http.StatusBadGateway, "github_unavailable", err.Error())
 	}
 	httpx.SetAudit(r, "deploy.githubapp.connect", credentials.Slug, map[string]any{"appId": credentials.ID, "owner": credentials.Owner})
-	http.Redirect(w, r, "/deploy/credentials?github-app=connected", http.StatusSeeOther)
+	httpx.JSON(w, http.StatusOK, map[string]any{"slug": credentials.Slug, "owner": credentials.Owner})
 	return nil
 }
 

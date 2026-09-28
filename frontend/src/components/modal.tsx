@@ -42,6 +42,10 @@ const WIDTHS = {
  * what makes a long form usable: the raw `DialogContent` scrolls as one box, so
  * a form taller than the window pushed its own Save button off the bottom edge.
  * Here the body scrolls inside a frame whose header and footer stay put.
+ *
+ * What goes in the body — the subject first, kinds as cards, sections under
+ * hairlines, the command last and on the right — is written once, at
+ * `SidePanel`, and holds here unchanged.
  */
 export function Modal({
   open,

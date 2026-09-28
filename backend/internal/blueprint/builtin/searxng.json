@@ -1,0 +1,98 @@
+{
+  "id": "searxng",
+  "version": "1.0.0",
+  "name": "SearXNG",
+  "category": "http",
+  "profile": "web",
+  "description": "A metasearch page. It forwards a query to Google, Bing, Wikipedia and around two hundred other engines from the server rather than the browser, merges the results and keeps no profile of who asked. It is a page for people, not a search API: the image ships with only the HTML format enabled and the format list is not settable by environment, so the JSON endpoint another program would call answers 403 and this definition cannot turn it on. It holds no state of its own — preferences live in the visitor's cookie, and the settings file is rebuilt from the image on every start.",
+  "iconId": "globe",
+  "docsUrl": "https://docs.searxng.org/",
+  "access": {
+    "kind": "open",
+    "note": "SearXNG has no accounts and no password: opening this address gives anyone the search page. Every query they run leaves from your server's address, so a public domain means strangers searching through your IP — which is what gets that IP rate-limited, CAPTCHA-walled and eventually blocked by the engines behind it. The bot limiter that would slow abusers down needs a Valkey server this definition does not run, so it stays off. Switch \"Ask visitors for a password\" on for this deployment's address and only the people you give that password to can search through your server."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "AGPL-3.0-or-later",
+    "upstreamUrl": "https://github.com/searxng/searxng",
+    "reviewedAt": "2026-09-22",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "searxng/searxng:2026.9.21-df67eb6c2",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "The address other people open. SearXNG builds every result, image-proxy and preferences link from it, so a wrong value sends visitors back to the wrong host."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The search page",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 512,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/healthz",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "SEARXNG_BASE_URL",
+        "value": "https://{{input.domain}}/"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "There is nothing to migrate. The container writes its settings file only when the file is missing, and this definition mounts nothing over it, so every start regenerates it from the image and a new version's engine list and defaults arrive with the image. Upstream tags a build most days; the pinned one is a specific build, not a moving name.",
+    "backupFirst": false
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "search.example.test"
+      },
+      "digest": "sha256:7d3e406f127910848aeebf78442b459cbc17c060f05da0d69ff0cc9b64cd5d38"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "session-key",
+      "variable": "SEARXNG_SECRET",
+      "label": "Session signing key",
+      "length": 32,
+      "description": "Signs the session cookie and the HMAC on every proxied image and favicon URL, and is the password for the local result cache. The image invents a random one for any container started without it, so without this value a redeploy silently changes the key and invalidates the links and cache built under the old one."
+    }
+  ]
+}

@@ -53,7 +53,9 @@ export function proxy(request: NextRequest) {
     "media-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
-    "form-action 'self'",
+    // GitHub's manifest flow is a form the page posts to github.com from the
+    // operator's own browser; 'self' alone silently blocked it.
+    "form-action 'self' https://github.com",
     "frame-ancestors 'none'",
     "manifest-src 'self'",
     // Only where the browser actually arrived over HTTPS. The ssh-tunnel

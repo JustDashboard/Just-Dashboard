@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { PM2Daemon, PM2StartRequest } from "@/lib/types"
@@ -49,16 +50,20 @@ export function PM2StartDialog({
   onOpenChange: (open: boolean) => void
   onStarted: () => void
 }) {
-  const [account, setAccount] = useState(daemons[0]?.account ?? "")
-  const [script, setScript] = useState("")
-  const [name, setName] = useState("")
-  const [cwd, setCwd] = useState("")
-  const [interpreter, setInterpreter] = useState("auto")
-  const [mode, setMode] = useState<Mode>("fork")
-  const [instances, setInstances] = useState("2")
-  const [watch, setWatch] = useState(false)
-  const [memory, setMemory] = useState("")
-  const [args, setArgs] = useState("")
+  // Kept for the tab while the dialog is open; the page forgets it on close.
+  const [account, setAccount] = useSessionState(
+    "processes.pm2.start.account",
+    daemons[0]?.account ?? "",
+  )
+  const [script, setScript] = useSessionState("processes.pm2.start.script", "")
+  const [name, setName] = useSessionState("processes.pm2.start.name", "")
+  const [cwd, setCwd] = useSessionState("processes.pm2.start.cwd", "")
+  const [interpreter, setInterpreter] = useSessionState("processes.pm2.start.interpreter", "auto")
+  const [mode, setMode] = useSessionState<Mode>("processes.pm2.start.mode", "fork")
+  const [instances, setInstances] = useSessionState("processes.pm2.start.instances", "2")
+  const [watch, setWatch] = useSessionState("processes.pm2.start.watch", false)
+  const [memory, setMemory] = useSessionState("processes.pm2.start.memory", "")
+  const [args, setArgs] = useSessionState("processes.pm2.start.args", "")
   const [busy, setBusy] = useState(false)
 
   const chosenAccount = account || daemons[0]?.account || ""

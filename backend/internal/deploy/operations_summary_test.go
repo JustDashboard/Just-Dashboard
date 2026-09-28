@@ -181,11 +181,11 @@ func healthyOperationsOwners(environmentID int64) (OperationsOwners, *countingDe
 			ServerNames: []string{"app.example.test"}, TLS: true,
 		}},
 		certificates: []proxysvc.Certificate{{
-			Name: "app.example.test", Domains: []string{"app.example.test"}, DaysLeft: 70,
+			Name: "app.example.test", Domains: []string{"app.example.test"}, DaysLeft: 70, Issuer: "R10",
 		}},
 	}
 	runtime := &countingRuntimeObserver{containers: []dockerx.Container{{
-		ID: "c0ffee0000ff", Name: "jd-e1-r1", State: "running", Health: "healthy",
+		ID: "c0ffee0000ff", Name: "jd-e1-r1", State: "running", Health: "healthy", Image: "example.test/app:v1",
 		Labels: map[string]string{
 			"io.just-dashboard.managed":        "true",
 			"io.just-dashboard.environment-id": "1",
@@ -213,10 +213,13 @@ func TestOperationsSummaryReadsEveryOwnerOnceAndDiagnosesNothing(t *testing.T) {
 		t.Fatalf("domains = %#v", operations.Domains)
 	}
 	domain := operations.Domains.Domains[0]
-	if domain.Route != "served" || domain.Certificate != "valid" ||
+	if domain.Route != "served" || domain.Certificate != "valid" || domain.CertificateIssuer != "R10" ||
 		domain.ServedBy != deploymentRouteName(fixture.envID) ||
 		domain.DeepLink != "/proxy/sites?site="+deploymentRouteName(fixture.envID) {
 		t.Fatalf("domain route = %#v", domain)
+	}
+	if len(operations.Runtime.Services) != 1 || operations.Runtime.Services[0].Image != "example.test/app:v1" {
+		t.Fatalf("runtime services = %#v", operations.Runtime.Services)
 	}
 	if operations.Storage.Status != statusAvailable || len(operations.Storage.Mounts) != 2 {
 		t.Fatalf("storage = %#v", operations.Storage)

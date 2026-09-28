@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
@@ -117,4 +118,35 @@ func applicationConnectionURL(driver dbx.Driver, dsn string, info *dbx.ConnInfo,
 	}
 	u.Host = net.JoinHostPort(host, port)
 	return u.String(), nil
+}
+
+// databaseExtensions answers which of the schema extensions detection asks
+// about a saved PostgreSQL connection offers. It is one read-only catalogue
+// query on the dashboard's own pool, bounded in time; other engines answer
+// nil, which preflight reads as "not asked".
+func (s *Server) databaseExtensions(ctx context.Context, id int64) ([]string, error) {
+	conn, dsn, err := s.dbConnRow(ctx, id)
+	if err != nil || conn.Driver != dbx.DriverPostgres || s.modules.dbs == nil {
+		return nil, err
+	}
+	probe, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	pool, err := s.modules.dbs.Pool(probe, conn.ID, conn.Driver, dsn)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := pool.QueryContext(probe, `SELECT name FROM pg_available_extensions WHERE name IN ('vector', 'postgis') ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	available := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		available = append(available, name)
+	}
+	return available, rows.Err()
 }

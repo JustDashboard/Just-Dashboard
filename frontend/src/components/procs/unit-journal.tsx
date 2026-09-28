@@ -1,34 +1,29 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useMemo, useState } from "react"
+import { useViewState } from "@/lib/view-state"
 import Link from "next/link"
-import type { JournalEntry, LogLine, SystemdUnit, SystemdUnitDetail } from "@/lib/types"
-import { useSocket, type Envelope } from "@/hooks/use-socket"
+import type { SystemdUnit, SystemdUnitDetail } from "@/lib/types"
+import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
+import { journalSource } from "@/lib/log-sources"
 import { useConfirm } from "@/components/confirm-dialog"
-import { LogViewer } from "@/components/log-viewer"
+import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { Detail, DetailList } from "@/components/page"
+import { Servers } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { ProductLogo, unitProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbBar } from "@/components/verbs"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useUnitControl, useUnitVerbs } from "@/components/procs/unit-actions"
-
-const LOG_LIMIT = 5000
-
-/** syslog priorities, mapped onto the viewer's level vocabulary. */
-function levelFor(priority: number): string {
-  if (priority <= 2) return "critical"
-  if (priority === 3) return "error"
-  if (priority === 4) return "warn"
-  if (priority <= 6) return "info"
-  return "debug"
-}
+import { unitRunsView } from "@/components/procs/unit-runs"
+import { authUnit } from "@/components/procs/shared"
 
 /**
  * One unit, opened: its state, how it runs, and its journal. The verbs sit in
@@ -58,7 +53,14 @@ function UnitSheet({
   onChanged?: () => void
 }) {
   const { confirm, dialog } = useConfirm()
-  const [tab, setTab] = useState(initialTab ?? "overview")
+  // Which tab a unit opens on, remembered the way a container's is; a caller
+  // asking for a specific tab ("open its journal") is answered first.
+  const [remembered, remember] = useViewState("processes.services.detail.tab", "overview")
+  const [tab, setTabState] = useState(initialTab ?? remembered)
+  const setTab = (next: string) => {
+    setTabState(next)
+    remember(next)
+  }
   const detail = usePoll(
     (signal) =>
       get<SystemdUnitDetail>(`/systemd/${encodeURIComponent(unit ?? "")}`, undefined, signal),
@@ -77,8 +79,14 @@ function UnitSheet({
     <SidePanel
       open={unit !== null}
       onOpenChange={onOpenChange}
-      title={unit ?? "Unit"}
-      description="Service state, configuration and live journal"
+      // The sheet opens on the unit as the product it runs, then its name.
+      title={
+        <>
+          <ProductLogo id={unit ? unitProduct(unit) : undefined} size="sm" fallback={Servers} />
+          <span className="min-w-0 truncate">{unit ?? "Unit"}</span>
+        </>
+      }
+      description="Service state, configuration, journal and runs"
       actions={
         service && (
           <UnitSheetActions
@@ -105,7 +113,7 @@ function UnitSheet({
           </TabsContent>
           <TabsContent value="journal" className="flex min-h-0 flex-1 flex-col">
             {/* Keyed on the unit so switching units starts a clean buffer. */}
-            <JournalStream key={unit} unit={unit} />
+            <UnitLogs key={unit} unit={unit} />
           </TabsContent>
         </Tabs>
       )}
@@ -277,58 +285,39 @@ function restartSummary(policy: string | undefined): { label: string; hint: stri
   }
 }
 
-function JournalStream({ unit }: { unit: string }) {
-  const [lines, setLines] = useState<LogLine[]>([])
-  const [failed, setFailed] = useState<string | null>(null)
-
-  const onMessage = useCallback((envelope: Envelope) => {
-    // The stream was empty on every unit because the server read the journal
-    // from inside its own container, where only the previous boot's flushed
-    // entries are visible. It now reads the host's live journal, so anything
-    // still empty here is genuinely quiet — the message below says which.
-    if (envelope.type === "error" || envelope.error) {
-      setFailed(envelope.error || "The journal stream closed with an error.")
-      return
-    }
-    if (envelope.type !== "journal") return
-    const batch = envelope.data as JournalEntry[]
-    setLines((prev) => {
-      const next = [
-        ...prev,
-        ...batch.map((e) => ({
-          text: e.message,
-          level: levelFor(e.priority),
-          timestamp: e.timestamp,
-          source: e.syslogIdentifier,
-        })),
-      ]
-      return next.length > LOG_LIMIT ? next.slice(next.length - LOG_LIMIT) : next
-    })
-  }, [])
-
-  const { state } = useSocket(`/systemd/${encodeURIComponent(unit)}/journal/stream`, {
-    onMessage,
-    query: { lines: 300 },
-  })
-
-  if (failed) return <ErrorState error={new Error(failed)} />
+/**
+ * The unit's journal, read the way the logs page reads it — live, searched,
+ * added up through the unit's lens — and its runs beside that: when systemd
+ * started it, how long each lasted and how it ended. One unit only; the
+ * whole journal is the logs page's.
+ *
+ * sshd's journal is login records, which only an administrator reads. For
+ * anyone else it opens nothing: the server refuses the read before the
+ * socket upgrades, and a pane retrying a refusal while it says the tunnel
+ * dropped is wrong twice.
+ */
+function UnitLogs({ unit }: { unit: string }) {
+  const { can } = useAuth()
+  const sources = useMemo<ServiceLogSource[]>(
+    () => [{ id: journalSource(unit), label: unit, kind: "journal", product: unitProduct(unit) }],
+    [unit],
+  )
+  const views = useMemo(() => [unitRunsView(unit)], [unit])
+  if (authUnit(unit) && !can("system.admin")) {
+    return (
+      <Notice title="Login records need an administrator">
+        {unit}&apos;s journal holds every sign-in attempt, and a failed one can hold a password
+        typed into the username prompt, so only an administrator can read it.
+      </Notice>
+    )
+  }
   return (
-    <LogViewer
-      className="h-full min-h-80"
-      lines={lines}
-      onClear={() => setLines([])}
-      toolbar={
-        <Status
-          state={state}
-          live={state === "open"}
-          label={state === "open" ? "Live" : state === "connecting" ? "Connecting" : "Reconnecting"}
-        />
-      }
-      emptyMessage={
-        state === "open"
-          ? `No journal entries for ${unit} yet — a quiet unit logs nothing.`
-          : "Connecting to the journal…"
-      }
+    <ServiceLogs
+      sources={sources}
+      views={views}
+      layout="sheet"
+      className="min-h-0 flex-1"
+      paneClassName="min-h-80"
     />
   )
 }

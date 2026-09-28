@@ -43,7 +43,8 @@ import {
   Notes,
   Plus,
   RotateCounterClockwise,
-  SidebarRight,
+  SidebarRightClose,
+  SidebarRightOpen,
   Table as TableIcon,
   Trash,
 } from "@/components/icons"
@@ -830,7 +831,7 @@ function Canvas({
             title="Inspector (i)"
             className="size-7 min-w-0 px-0"
           >
-            <SidebarRight className="size-3.5" />
+            {inspector ? <SidebarRightClose /> : <SidebarRightOpen />}
           </Toggle>
           <Button
             size="icon-sm"
@@ -908,9 +909,13 @@ function Canvas({
               {doc.grid && (
                 <Background
                   variant={BackgroundVariant.Dots}
-                  gap={20}
+                  gap={24}
                   size={1}
-                  className="[&_circle]:fill-border"
+                  // A prop rather than a class: React Flow's own
+                  // `.react-flow__background-pattern.dots` fill outranks a
+                  // utility on the circle, which left the dots at its default
+                  // grey — the brightest thing on the canvas.
+                  color="var(--grid-dot)"
                 />
               )}
               {doc.minimap && (

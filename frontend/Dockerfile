@@ -9,13 +9,19 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ENV NEXT_TELEMETRY_DISABLED=1
-# The Monaco runtime is copied out of node_modules into public/ before the
-# build, exactly as `bun run build` does outside the image. It is not optional
-# packaging: without it the editor falls back to fetching itself from a CDN,
-# and the Query tab is a permanent "Loading…" on any install whose browser
-# cannot reach the public internet — which is most of them, since this is
-# normally reached down a tunnel.
+# JD_IMAGE_BUILD tells next.config.ts this is an operator's install rather than
+# a developer's gate, which drops the type-check pass and the prerender source
+# maps. Install and update are both `docker compose up --build`, so this build
+# runs on the server being installed to; the type-check it would repeat there
+# already ran before the release, and its second Node process overlapping the
+# compiler is what made a 2 GB machine fail here, intermittently. The emitted
+# app is byte-for-byte the same either way — measured, not assumed.
+ENV NEXT_TELEMETRY_DISABLED=1 JD_IMAGE_BUILD=1
+# The Monaco runtime and Excalidraw fonts are copied out of node_modules into
+# public/ before the build, exactly as `bun run build` does outside the image.
+# Without the local Monaco runtime the Query tab cannot load offline; without
+# the fonts a board's lettering depends on a public CDN. This panel is normally
+# reached down a tunnel, so both assets must be packaged with the image.
 #
 # Dependencies are resolved by bun, but the compile itself runs under Node:
 # the baseline bun binary in the official image segfaults tearing down after
@@ -23,6 +29,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # and is why the script is called here rather than through the package script
 # that wraps it.
 RUN node scripts/sync-monaco.mjs \
+ && node scripts/sync-excalidraw.mjs \
  && node node_modules/next/dist/bin/next build
 
 FROM node:22-bookworm-slim AS runtime

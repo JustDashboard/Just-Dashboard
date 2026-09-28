@@ -1,0 +1,11 @@
+[project]
+name = "jd-pdm"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["litestar>=2.13", "uvicorn>=0.30"]
+
+[tool.pdm]
+distribution = false
+
+[tool.pdm.scripts]
+start = "uvicorn app:app --host 0.0.0.0 --port 8000"

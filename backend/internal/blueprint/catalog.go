@@ -19,20 +19,35 @@ var (
 
 	catalogOnce sync.Once
 	catalog     []*Blueprint
+	everything  []*Blueprint
 	catalogByID map[string]*Blueprint
 	catalogErr  error
 )
 
-// Catalog returns every reviewed built-in, ordered by category then name. The
+// Catalog returns every offered built-in, ordered by category then name. The
 // files are parsed and validated once; a built-in that fails validation makes
 // the whole catalogue fail, which is what turns the rules in validate.go into
 // a build-time guarantee rather than a style guide.
+//
+// Retired definitions are not offered and so are not here. They are still
+// shipped, still parsed and still held to every rule — see All.
 func Catalog() ([]*Blueprint, error) {
 	catalogOnce.Do(loadCatalog)
 	if catalogErr != nil {
 		return nil, catalogErr
 	}
 	return catalog, nil
+}
+
+// All returns every shipped built-in, retired ones included. The rules in
+// validate.go apply to a retired definition exactly as they do to an offered
+// one: it is still the thing a running deployment re-resolves on redeploy.
+func All() ([]*Blueprint, error) {
+	catalogOnce.Do(loadCatalog)
+	if catalogErr != nil {
+		return nil, catalogErr
+	}
+	return everything, nil
 }
 
 func Get(id string) (*Blueprint, error) {
@@ -92,18 +107,25 @@ func loadCatalog() {
 			return
 		}
 		catalogByID[parsed.ID] = parsed
-		catalog = append(catalog, parsed)
+		everything = append(everything, parsed)
+		if parsed.Retired == "" {
+			catalog = append(catalog, parsed)
+		}
 	}
 	if len(catalog) == 0 {
 		catalogErr = errors.New("no built-in blueprints are embedded")
 		return
 	}
-	sort.Slice(catalog, func(i, j int) bool {
-		if catalog[i].Category != catalog[j].Category {
-			return catalog[i].Category < catalog[j].Category
+	byCategoryThenName := func(entries []*Blueprint) func(i, j int) bool {
+		return func(i, j int) bool {
+			if entries[i].Category != entries[j].Category {
+				return entries[i].Category < entries[j].Category
+			}
+			return entries[i].Name < entries[j].Name
 		}
-		return catalog[i].Name < catalog[j].Name
-	})
+	}
+	sort.Slice(catalog, byCategoryThenName(catalog))
+	sort.Slice(everything, byCategoryThenName(everything))
 }
 
 // DeploymentSupport says whether this dashboard can deploy a blueprint end to
@@ -145,6 +167,7 @@ type Summary struct {
 	UnavailableReason   string   `json:"unavailableReason"`
 	ID                  string   `json:"id"`
 	Version             string   `json:"version"`
+	Access              Access   `json:"access"`
 	Name                string   `json:"name"`
 	Category            Category `json:"category"`
 	Profile             Profile  `json:"profile"`
@@ -163,7 +186,7 @@ type Summary struct {
 func Summarize(blueprint *Blueprint) Summary {
 	supported, reason := DeploymentSupport(blueprint)
 	summary := Summary{DeploymentSupported: supported, UnavailableReason: reason,
-		ID: blueprint.ID, Version: blueprint.Version, Name: blueprint.Name,
+		ID: blueprint.ID, Version: blueprint.Version, Access: blueprint.Access, Name: blueprint.Name,
 		Category: blueprint.Category, Profile: blueprint.Profile, Description: blueprint.Description,
 		IconID: blueprint.IconID, DocsURL: blueprint.DocsURL, License: blueprint.Provenance.License,
 		Maintainer: blueprint.Provenance.Maintainer, ReviewedAt: blueprint.Provenance.ReviewedAt,

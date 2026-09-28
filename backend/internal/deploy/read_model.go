@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -46,6 +48,79 @@ type DeploymentSummary struct {
 	LastRun        *EngineRun `json:"lastRun,omitempty"`
 	ActiveRun      *EngineRun `json:"activeRun,omitempty"`
 	UpdatedAt      time.Time  `json:"updatedAt"`
+	// SourceRepository is the identity's repository: owner/name for Git, and
+	// the reference itself for an image or template, whose Ref is empty.
+	// SourceRemote is where a Git source is fetched from, with any userinfo
+	// removed, so the fleet can name the host without seeing a credential.
+	SourceRepository string `json:"sourceRepository,omitempty"`
+	SourceRemote     string `json:"sourceRemote,omitempty"`
+	// Recipe and Framework say what the desired build plan builds: the
+	// automatic recipe, and the framework detection recognised in the source.
+	Recipe    string `json:"recipe,omitempty"`
+	Framework string `json:"framework,omitempty"`
+	// Images are the image references the live release runs: the single
+	// container's, or one per Compose service in the order the stack lists them.
+	Images []string `json:"images,omitempty"`
+	// RecentRuns are the project's newest runs, newest first and at most
+	// recentRunLimit, so a card can draw its run history without a request
+	// per project. The first one is LastRun.
+	RecentRuns []RecentRun `json:"recentRuns,omitempty"`
+}
+
+// RecentRun is one run in a deployment's history strip: its outcome and
+// where to open it, without the metadata a full run carries.
+type RecentRun struct {
+	ID          int64      `json:"id"`
+	RunNumber   int64      `json:"runNumber"`
+	State       RunState   `json:"state"`
+	Operation   Operation  `json:"operation"`
+	RequestedAt time.Time  `json:"requestedAt"`
+	EndedAt     *time.Time `json:"endedAt,omitempty"`
+}
+
+// recentRunLimit is how many runs a history strip shows: two weeks of a
+// daily deploy, and still one line on a phone-width card.
+const recentRunLimit = 14
+
+// CurrentStep is where a run in flight stands. Label is the step as the
+// release path names it, so a list can say what a run is doing without
+// loading its snapshot.
+type CurrentStep struct {
+	Key   StepKey   `json:"key"`
+	Label string    `json:"label"`
+	State StepState `json:"state"`
+}
+
+var stepLabels = map[StepKey]string{
+	StepResolveSource:        "Resolve source",
+	StepAcquireSource:        "Fetch source",
+	StepAnalyzePlan:          "Check plan",
+	StepPrepareContext:       "Prepare build context",
+	StepBuildArtifact:        "Build",
+	StepRenderRuntime:        "Render runtime",
+	StepReleaseTask:          "Release task",
+	StepBackupGate:           "Backup check",
+	StepProvisionCertificate: "Certificate",
+	StepStartCandidate:       "Start new release",
+	StepVerifyReadiness:      "Readiness checks",
+	StepVerifySmoke:          "Smoke checks",
+	StepActivate:             "Switch traffic",
+	StepRetirePrevious:       "Retire previous release",
+	StepRecordRelease:        "Record release",
+	StepNotify:               "Notify",
+	StepLegacyPipeline:       "Compatibility pipeline",
+}
+
+// DeploymentFacts are the source and build facts an archived deployment's
+// plan recorded, so the archived list can draw each one as what it deployed
+// rather than as a generic workload.
+type DeploymentFacts struct {
+	SourceKind       SourceKind  `json:"sourceKind,omitempty"`
+	SourceRef        string      `json:"sourceRef,omitempty"`
+	SourceRepository string      `json:"sourceRepository,omitempty"`
+	BuildMethod      BuildMethod `json:"buildMethod,omitempty"`
+	Recipe           string      `json:"recipe,omitempty"`
+	Framework        string      `json:"framework,omitempty"`
 }
 
 type ActiveWork struct {
@@ -101,7 +176,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		       e.strategy, e.expected_downtime,
 		       COALESCE(l.plan_revision, 0),
 		       COALESCE(src.kind, ''), COALESCE(NULLIF(l.source_identity_json, '{}'), src.identity_json, '{}'),
-		       COALESCE(build.method, 'none'),
+		       COALESCE(build.method, 'none'), COALESCE(build.config_json, '{}'),
 		       COALESCE(runtime.config_json, '{}'), COALESCE(live_runtime.port, 0),
 		       COALESCE(live_runtime.state, ''),
 		       COALESCE((
@@ -130,13 +205,13 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		var summary DeploymentSummary
 		var updated int64
 		var expectedDowntime, livePort int
-		var identityJSON, runtimeJSON, liveRuntimeState string
+		var identityJSON, buildJSON, runtimeJSON, liveRuntimeState string
 		if err := rows.Scan(
 			&summary.ID, &summary.Name, &summary.Profile, &updated,
 			&summary.EnvironmentID, &summary.EnvironmentName, &summary.EnvironmentKind,
 			&summary.DesiredRevision, &summary.LiveReleaseID, &summary.Strategy,
 			&expectedDowntime, &summary.LivePlanRevision, &summary.SourceKind,
-			&identityJSON, &summary.BuildMethod, &runtimeJSON, &livePort, &liveRuntimeState,
+			&identityJSON, &summary.BuildMethod, &buildJSON, &runtimeJSON, &livePort, &liveRuntimeState,
 			&summary.Endpoint,
 		); err != nil {
 			return nil, err
@@ -154,6 +229,12 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 			if summary.SourceRevision == "" {
 				summary.SourceRevision = identity.Digest
 			}
+			summary.SourceRepository = identity.Repository
+			summary.SourceRemote = displayRemote(identity.Remote)
+		}
+		var build BuildPlanConfig
+		if json.Unmarshal([]byte(buildJSON), &build) == nil {
+			summary.Recipe, summary.Framework = build.Recipe, build.Framework
 		}
 		var runtime RuntimePlanConfig
 		if json.Unmarshal([]byte(runtimeJSON), &runtime) == nil {
@@ -180,15 +261,15 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 			releaseIDs = append(releaseIDs, summary.LiveReleaseID)
 		}
 	}
-	health, serviceCounts, err := s.liveReleaseFacts(ctx, releaseIDs)
+	health, serviceCounts, images, err := s.liveReleaseFacts(ctx, releaseIDs)
 	if err != nil {
 		return nil, err
 	}
-	lastRuns, err := s.latestProjectRuns(ctx, projectIDs, false)
+	lastRuns, recentRuns, err := s.recentProjectRuns(ctx, projectIDs)
 	if err != nil {
 		return nil, err
 	}
-	activeRuns, err := s.latestProjectRuns(ctx, projectIDs, true)
+	activeRuns, err := s.activeProjectRuns(ctx, projectIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +281,9 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		}
 		summary.Health = string(outcome)
 		summary.ServiceCount = serviceCounts[summary.LiveReleaseID]
+		summary.Images = images[summary.LiveReleaseID]
 		summary.LastRun, summary.ActiveRun = lastRuns[summary.ID], activeRuns[summary.ID]
+		summary.RecentRuns = recentRuns[summary.ID]
 	}
 
 	activeRows, err := s.db.QueryContext(ctx, `
@@ -229,12 +312,6 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 			Scan(&work.ProjectName, &work.Environment); err != nil {
 			return nil, err
 		}
-		_ = s.db.QueryRowContext(ctx, `
-			SELECT step_key, status FROM deploy_steps
-			 WHERE run_id = ? AND status IN ('running','blocked','failed','pending')
-			 ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'blocked' THEN 1
-			          WHEN 'failed' THEN 2 ELSE 3 END, ordinal, attempt DESC LIMIT 1`, run.ID).
-			Scan(&work.CurrentStep, &work.CurrentStatus)
 		if run.State == RunQueued {
 			queuePosition++
 			work.QueuePosition = queuePosition
@@ -243,6 +320,31 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 	}
 	if err := activeRows.Err(); err != nil {
 		return nil, err
+	}
+	// Every run a card shows in flight is one of the host's active runs, so
+	// one batched read places both the in-progress block and each card.
+	activeIDs := make([]int64, 0, len(result.ActiveWork))
+	for _, work := range result.ActiveWork {
+		activeIDs = append(activeIDs, work.Run.ID)
+	}
+	steps, err := s.currentSteps(ctx, activeIDs)
+	if err != nil {
+		return nil, err
+	}
+	for index := range result.ActiveWork {
+		work := &result.ActiveWork[index]
+		if step := steps[work.Run.ID]; step != nil {
+			work.Run.CurrentStep = step
+			work.CurrentStep, work.CurrentStatus = step.Key, step.State
+		}
+	}
+	for index := range result.Deployments {
+		summary := &result.Deployments[index]
+		for _, run := range []*EngineRun{summary.LastRun, summary.ActiveRun} {
+			if run != nil {
+				run.CurrentStep = steps[run.ID]
+			}
+		}
 	}
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(CASE WHEN slot_class = 'heavy' THEN 1 ELSE 0 END), 0),
@@ -253,20 +355,21 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 	return result, nil
 }
 
-// liveReleaseFacts answers, in one fixed set of statements, the two questions
-// the fleet read needs about every summary's live release: its health and how
-// many services its runtime snapshot describes. A health outcome is only
-// reported when the release's own recorded checks were all observed; anything
-// less stays unavailable rather than being rounded up to healthy. A service
-// count is read from the same snapshot regardless of whether the runtime is
-// currently live or stopped, so a stopped Compose deployment still reports
-// its service count.
+// liveReleaseFacts answers, in one fixed set of statements, the questions the
+// fleet read needs about every summary's live release: its health, how many
+// services its runtime snapshot describes, and which images those services
+// run. A health outcome is only reported when the release's own recorded
+// checks were all observed; anything less stays unavailable rather than being
+// rounded up to healthy. The service count and images are read from the same
+// snapshot regardless of whether the runtime is currently live or stopped, so
+// a stopped Compose deployment still reports what it runs.
 func (s *OrchestrationStore) liveReleaseFacts(
 	ctx context.Context,
 	releaseIDs []int64,
-) (map[int64]HealthOutcome, map[int64]int, error) {
+) (map[int64]HealthOutcome, map[int64]int, map[int64][]string, error) {
 	result := map[int64]HealthOutcome{}
 	serviceCounts := map[int64]int{}
+	images := map[int64][]string{}
 	wanted := []int64{}
 	for _, releaseID := range releaseIDs {
 		if releaseID > 0 {
@@ -277,7 +380,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 		}
 	}
 	if len(wanted) == 0 {
-		return result, serviceCounts, nil
+		return result, serviceCounts, images, nil
 	}
 	placeholders, args := inPlaceholders(wanted)
 
@@ -285,18 +388,18 @@ func (s *OrchestrationStore) liveReleaseFacts(
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT release_id FROM deploy_release_runtimes WHERE state = 'live' AND release_id IN `+placeholders, args...)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for rows.Next() {
 		var releaseID int64
 		if err := rows.Scan(&releaseID); err != nil {
 			rows.Close()
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		liveRuntimes[releaseID] = true
 	}
 	if err := rows.Close(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	live := []int64{}
 	for _, releaseID := range wanted {
@@ -311,25 +414,25 @@ func (s *OrchestrationStore) liveReleaseFacts(
 	releases := map[int64]*ReleaseWithArtifacts{}
 	rows, err = s.db.QueryContext(ctx, `SELECT `+releaseColumns+` FROM deploy_releases WHERE id IN `+placeholders, args...)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for rows.Next() {
 		release, scanErr := scanRelease(rows)
 		if scanErr != nil {
 			rows.Close()
-			return nil, nil, scanErr
+			return nil, nil, nil, scanErr
 		}
 		releases[release.ID] = &ReleaseWithArtifacts{Release: *release, Artifacts: []ReleaseArtifact{}}
 	}
 	if err := rows.Close(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	rows, err = s.db.QueryContext(ctx, `
 		SELECT id, release_id, kind, reference, digest, metadata_json, size_bytes,
 		       retain_until, state, created_at
 		  FROM deploy_release_artifacts WHERE release_id IN `+placeholders+` ORDER BY id`, args...)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for rows.Next() {
 		var artifact ReleaseArtifact
@@ -339,7 +442,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 			&artifact.Digest, &metadata, &artifact.SizeBytes, &retainUntil, &artifact.State,
 			&createdAt); err != nil {
 			rows.Close()
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		artifact.Metadata = json.RawMessage(metadata)
 		artifact.RetainUntil, artifact.CreatedAt = unixTimePtr(retainUntil), unixTime(createdAt)
@@ -348,7 +451,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 		}
 	}
 	if err := rows.Close(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	for _, releaseID := range wanted {
@@ -365,10 +468,11 @@ func (s *OrchestrationStore) liveReleaseFacts(
 			count = len(snapshot.Compose.Services)
 		}
 		serviceCounts[releaseID] = count
+		images[releaseID] = snapshotImages(snapshot)
 	}
 
 	if len(live) == 0 {
-		return result, serviceCounts, nil
+		return result, serviceCounts, images, nil
 	}
 	livePlaceholders, liveArgs := inPlaceholders(live)
 
@@ -382,21 +486,21 @@ func (s *OrchestrationStore) liveReleaseFacts(
 		    FROM deploy_runs WHERE release_id IN `+livePlaceholders+`
 		) WHERE rank = 1`, liveArgs...)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for rows.Next() {
 		var releaseID, runID int64
 		if err := rows.Scan(&releaseID, &runID); err != nil {
 			rows.Close()
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		healthRuns[releaseID], runReleases[runID] = runID, releaseID
 	}
 	if err := rows.Close(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if len(runReleases) == 0 {
-		return result, serviceCounts, nil
+		return result, serviceCounts, images, nil
 	}
 	runIDs := make([]int64, 0, len(runReleases))
 	for runID := range runReleases {
@@ -412,7 +516,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 		   AND status IN ('passed','warning','skipped')
 		 ORDER BY attempt DESC`, runArgs...)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for rows.Next() {
 		var runID int64
@@ -420,7 +524,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 		var raw string
 		if err := rows.Scan(&runID, &key, &raw); err != nil {
 			rows.Close()
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if evidence[runID] == nil {
 			evidence[runID] = map[StepKey]json.RawMessage{}
@@ -430,7 +534,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 		}
 	}
 	if err := rows.Close(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	for _, releaseID := range live {
@@ -452,7 +556,7 @@ func (s *OrchestrationStore) liveReleaseFacts(
 		}
 		result[releaseID] = healthFromEvidence(snapshot.Checks, evidence[runID])
 	}
-	return result, serviceCounts, nil
+	return result, serviceCounts, images, nil
 }
 
 func healthFromEvidence(checks []PlannedCheck, latest map[StepKey]json.RawMessage) HealthOutcome {
@@ -485,27 +589,22 @@ func healthFromEvidence(checks []PlannedCheck, latest map[StepKey]json.RawMessag
 	return summarizeChecks(observed)
 }
 
-// latestProjectRuns reads the newest run, or newest recoverable run, for every
-// named project in one statement.
-func (s *OrchestrationStore) latestProjectRuns(
+// activeProjectRuns reads the newest run still in flight for every named
+// project in one statement.
+func (s *OrchestrationStore) activeProjectRuns(
 	ctx context.Context,
 	projectIDs []int64,
-	active bool,
 ) (map[int64]*EngineRun, error) {
 	result := map[int64]*EngineRun{}
 	if len(projectIDs) == 0 {
 		return result, nil
 	}
 	placeholders, args := inPlaceholders(projectIDs)
-	filter := ""
-	if active {
-		filter = " AND " + activeRunWhere
-	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+engineRunColumns+` FROM (
 		  SELECT `+engineRunColumns+`,
 		         ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY requested_at DESC, id DESC) AS rank
-		    FROM deploy_runs WHERE project_id IN `+placeholders+filter+`
+		    FROM deploy_runs WHERE project_id IN `+placeholders+` AND `+activeRunWhere+`
 		) WHERE rank = 1`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read deployment run: %w", err)
@@ -517,6 +616,179 @@ func (s *OrchestrationStore) latestProjectRuns(
 			return nil, scanErr
 		}
 		result[run.ProjectID] = run
+	}
+	return result, rows.Err()
+}
+
+// recentProjectRuns reads every named project's newest runs in one statement:
+// the last run whole, and the history strip of at most recentRunLimit runs,
+// newest first. Both come from one ranking, so the strip always starts with
+// the last run and the fleet ranks a project's runs once rather than twice.
+// The ranking carries only ids, which idx_deploy_runs_project_requested
+// answers in order, and whole rows are fetched for the runs it keeps: a window
+// over every run's full row was the fleet read's most expensive statement.
+func (s *OrchestrationStore) recentProjectRuns(
+	ctx context.Context,
+	projectIDs []int64,
+) (map[int64]*EngineRun, map[int64][]RecentRun, error) {
+	lastRuns := map[int64]*EngineRun{}
+	recentRuns := map[int64][]RecentRun{}
+	if len(projectIDs) == 0 {
+		return lastRuns, recentRuns, nil
+	}
+	placeholders, args := inPlaceholders(projectIDs)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+engineRunColumns+` FROM (
+		  SELECT id AS ranked_id,
+		         ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY requested_at DESC, id DESC) AS rank
+		    FROM deploy_runs WHERE project_id IN `+placeholders+`
+		) ranked JOIN deploy_runs ON deploy_runs.id = ranked.ranked_id
+		 WHERE ranked.rank <= ? ORDER BY project_id, ranked.rank`, append(args, recentRunLimit)...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read recent deployment runs: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		run, err := scanEngineRun(rows)
+		if err != nil {
+			return nil, nil, err
+		}
+		if lastRuns[run.ProjectID] == nil {
+			lastRuns[run.ProjectID] = run
+		}
+		recentRuns[run.ProjectID] = append(recentRuns[run.ProjectID], RecentRun{
+			ID: run.ID, RunNumber: run.RunNumber, State: run.State, Operation: run.Operation,
+			RequestedAt: run.RequestedAt, EndedAt: run.EndedAt,
+		})
+	}
+	return lastRuns, recentRuns, rows.Err()
+}
+
+// currentSteps reads where each named run stands in one statement: the step
+// it is running, else the one blocking it, else a failed one, else the next
+// one waiting. A run without steps is absent from the result.
+func (s *OrchestrationStore) currentSteps(ctx context.Context, runIDs []int64) (map[int64]*CurrentStep, error) {
+	result := map[int64]*CurrentStep{}
+	if len(runIDs) == 0 {
+		return result, nil
+	}
+	placeholders, args := inPlaceholders(runIDs)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT run_id, step_key, status FROM (
+		  SELECT run_id, step_key, status,
+		         ROW_NUMBER() OVER (
+		           PARTITION BY run_id
+		           ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'blocked' THEN 1
+		                    WHEN 'failed' THEN 2 ELSE 3 END, ordinal, attempt DESC
+		         ) AS rank
+		    FROM deploy_steps
+		   WHERE run_id IN `+placeholders+` AND status IN ('running','blocked','failed','pending')
+		) WHERE rank = 1`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read current deployment steps: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var runID int64
+		step := &CurrentStep{}
+		if err := rows.Scan(&runID, &step.Key, &step.State); err != nil {
+			return nil, err
+		}
+		step.Label = stepLabels[step.Key]
+		result[runID] = step
+	}
+	return result, rows.Err()
+}
+
+// snapshotImages lists the image references a release's runtime snapshot
+// runs, without repeats.
+func snapshotImages(snapshot runtimeReleaseSnapshot) []string {
+	references := []string{snapshot.Image.Reference}
+	if snapshot.Compose != nil {
+		references = references[:0]
+		for _, service := range snapshot.Compose.Services {
+			references = append(references, service.Reference)
+		}
+	}
+	result := []string{}
+	for _, reference := range references {
+		if reference != "" && !slices.Contains(result, reference) {
+			result = append(result, reference)
+		}
+	}
+	return result
+}
+
+// displayRemote is a Git remote as the fleet may show it: a URL reduced to
+// scheme, host and path, or an SCP-style host:path. Userinfo is dropped — a
+// remote recorded before credentials were refused in URLs could carry a token
+// there — and anything that does not parse is left out rather than echoed.
+func displayRemote(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return ""
+	}
+	if !strings.Contains(remote, "://") {
+		host, path, ok := strings.Cut(remote, ":")
+		user, afterUser, hasUser := strings.Cut(host, "@")
+		if hasUser {
+			host = afterUser
+		}
+		if !ok || !validRemoteHost(host) || path == "" {
+			return ""
+		}
+		// git@ is the SSH service account every forge uses, not a secret, and
+		// it is the spelling a host is recognised by.
+		if user == "git" {
+			return "git@" + strings.ToLower(host) + ":" + path
+		}
+		return strings.ToLower(host) + ":" + path
+	}
+	parsed, err := url.Parse(remote)
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	return (&url.URL{Scheme: parsed.Scheme, Host: strings.ToLower(parsed.Host), Path: parsed.Path}).String()
+}
+
+// ArchivedDeploymentFacts reads every archived project's source and build
+// facts in one statement, keyed by project id. A legacy project without a
+// production environment is absent.
+func (s *OrchestrationStore) ArchivedDeploymentFacts(ctx context.Context) (map[int64]DeploymentFacts, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.id, COALESCE(src.kind, ''),
+		       COALESCE(NULLIF(l.source_identity_json, '{}'), src.identity_json, '{}'),
+		       COALESCE(build.method, ''), COALESCE(build.config_json, '{}')
+		  FROM deploy_projects p
+		  JOIN deploy_environments e ON e.project_id = p.id
+		   AND e.slug = 'production' AND e.archived_at = 0
+		  LEFT JOIN deploy_releases l ON l.id = e.live_release_id
+		  LEFT JOIN deploy_sources src ON src.environment_id = e.id
+		   AND src.revision = e.desired_revision
+		  LEFT JOIN deploy_build_plans build ON build.environment_id = e.id
+		   AND build.revision = e.desired_revision
+		 WHERE p.archived_at != 0`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[int64]DeploymentFacts{}
+	for rows.Next() {
+		var projectID int64
+		var facts DeploymentFacts
+		var identityJSON, buildJSON string
+		if err := rows.Scan(&projectID, &facts.SourceKind, &identityJSON, &facts.BuildMethod, &buildJSON); err != nil {
+			return nil, err
+		}
+		var identity SourceIdentity
+		if json.Unmarshal([]byte(identityJSON), &identity) == nil {
+			facts.SourceRef, facts.SourceRepository = identity.Ref, identity.Repository
+		}
+		var build BuildPlanConfig
+		if json.Unmarshal([]byte(buildJSON), &build) == nil {
+			facts.Recipe, facts.Framework = build.Recipe, build.Framework
+		}
+		result[projectID] = facts
 	}
 	return result, rows.Err()
 }
@@ -651,6 +923,19 @@ func (s *OrchestrationStore) ProjectRunsFiltered(
 	if len(result) > limit {
 		nextBefore = result[limit-1].ID
 		result = result[:limit]
+	}
+	inFlight := []int64{}
+	for _, run := range result {
+		if !run.State.Terminal() {
+			inFlight = append(inFlight, run.ID)
+		}
+	}
+	steps, err := s.currentSteps(ctx, inFlight)
+	if err != nil {
+		return nil, 0, err
+	}
+	for index := range result {
+		result[index].CurrentStep = steps[result[index].ID]
 	}
 	return result, nextBefore, nil
 }

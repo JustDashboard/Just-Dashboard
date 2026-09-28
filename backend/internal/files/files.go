@@ -200,12 +200,13 @@ func (s *Service) List(path string, showHidden bool) (*Listing, error) {
 		return nil, err
 	}
 	out := &Listing{Path: dir, Parent: filepath.Dir(dir), Entries: []Entry{}, Roots: s.roots}
+	owners := newEntryNames()
 	for _, d := range names {
 		if !showHidden && strings.HasPrefix(d.Name(), ".") {
 			continue
 		}
 		full := filepath.Join(dir, d.Name())
-		e, err := s.entry(full, d.Name())
+		e, err := s.entryWithNames(full, d.Name(), owners)
 		if err != nil {
 			continue
 		}
@@ -223,6 +224,10 @@ func (s *Service) List(path string, showHidden bool) (*Listing, error) {
 }
 
 func (s *Service) entry(full, name string) (*Entry, error) {
+	return s.entryWithNames(full, name, newEntryNames())
+}
+
+func (s *Service) entryWithNames(full, name string, owners entryNames) (*Entry, error) {
 	// Lstat, not Stat: the listing must show the link itself, including one
 	// whose target is missing.
 	li, err := os.Lstat(full)
@@ -251,8 +256,8 @@ func (s *Service) entry(full, name string) (*Entry, error) {
 	}
 	if st, ok := li.Sys().(*syscall.Stat_t); ok {
 		e.UID, e.GID = st.Uid, st.Gid
-		e.Owner = lookupUser(st.Uid)
-		e.Group = lookupGroup(st.Gid)
+		e.Owner = owners.users.lookup(st.Uid, lookupUser)
+		e.Group = owners.groups.lookup(st.Gid, lookupGroup)
 	}
 	if !e.IsDir {
 		e.MimeHint = mimeHint(name)
@@ -260,51 +265,40 @@ func (s *Service) entry(full, name string) (*Entry, error) {
 	return e, nil
 }
 
-// User and group lookups hit NSS, which can be slow; a directory listing does
-// hundreds of them, so results are memoised for the process lifetime.
-//
-// The lock is not optional. These are filled from entry(), which runs on the
-// request goroutine for /files/list, /files/stat and /files/search, so two
-// operators browsing at once wrote the same map concurrently. A concurrent map
-// write is a runtime throw, not a panic: httpx.Recoverer cannot catch it and
-// the process dies, taking every open PTY, log tail and metrics socket with it.
-var (
-	nssMu      sync.RWMutex
-	userCache  = map[uint32]string{}
-	groupCache = map[uint32]string{}
-)
+// NSS may be slow, but account names are mutable. Reuse them only within one
+// listing so a rename or a reused UID is visible on the next request.
+type nameCache map[uint32]string
+
+type entryNames struct {
+	users, groups nameCache
+}
+
+func newEntryNames() entryNames {
+	return entryNames{users: nameCache{}, groups: nameCache{}}
+}
+
+func (c nameCache) lookup(id uint32, resolve func(uint32) string) string {
+	if name, ok := c[id]; ok {
+		return name
+	}
+	name := resolve(id)
+	c[id] = name
+	return name
+}
 
 func lookupUser(uid uint32) string {
-	nssMu.RLock()
-	v, ok := userCache[uid]
-	nssMu.RUnlock()
-	if ok {
-		return v
-	}
 	name := strconv.FormatUint(uint64(uid), 10)
 	if u, err := user.LookupId(name); err == nil {
 		name = u.Username
 	}
-	nssMu.Lock()
-	userCache[uid] = name
-	nssMu.Unlock()
 	return name
 }
 
 func lookupGroup(gid uint32) string {
-	nssMu.RLock()
-	v, ok := groupCache[gid]
-	nssMu.RUnlock()
-	if ok {
-		return v
-	}
 	name := strconv.FormatUint(uint64(gid), 10)
 	if g, err := user.LookupGroupId(name); err == nil {
 		name = g.Name
 	}
-	nssMu.Lock()
-	groupCache[gid] = name
-	nssMu.Unlock()
 	return name
 }
 
@@ -540,21 +534,33 @@ func (s *Service) Delete(path string, recursive bool) error {
 // names one. The destination has to be free unless overwrite says otherwise:
 // rename(2) replaces a file silently, which is how "move a.txt here" used to
 // eat the a.txt that was already there without a word.
-func (s *Service) Move(from, to string, overwrite bool) error {
-	src, err := s.ResolveEntry(from)
+// MoveEnds is where a move from one path to another starts and lands: onto
+// `to` itself, or inside it when `to` is an existing directory. The API reads
+// it to carry what it keeps about a path — a folder's colour — along with the
+// entry.
+func (s *Service) MoveEnds(from, to string) (src, dst string, err error) {
+	src, err = s.ResolveEntry(from)
 	if err != nil {
-		return err
+		return "", "", err
 	}
-	dst, err := s.ResolveEntry(to)
+	dst, err = s.ResolveEntry(to)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if st, err := os.Stat(dst); err == nil && st.IsDir() && dst != src {
 		dst, err = s.Resolve(dst)
 		if err != nil {
-			return err
+			return "", "", err
 		}
 		dst = filepath.Join(dst, filepath.Base(src))
+	}
+	return src, dst, nil
+}
+
+func (s *Service) Move(from, to string, overwrite bool) error {
+	src, dst, err := s.MoveEnds(from, to)
+	if err != nil {
+		return err
 	}
 	if dst == src {
 		return nil

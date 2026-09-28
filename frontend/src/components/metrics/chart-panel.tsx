@@ -40,6 +40,7 @@ export const ChartPanel = memo(function ChartPanel({
   format,
   axisFormat,
   domain,
+  yTicks,
   height = 180,
   events,
   onZoom,
@@ -61,6 +62,8 @@ export const ChartPanel = memo(function ChartPanel({
   /** Shorter tick labels, where the full format is too wide for the gutter. */
   axisFormat?: (value: number) => string
   domain?: [number | string, number | string]
+  /** Y ticks, where the domain would split into unround steps. */
+  yTicks?: number[]
   height?: number
   events?: MetricEvent[]
   onZoom?: (from: number, to: number) => void
@@ -121,6 +124,7 @@ export const ChartPanel = memo(function ChartPanel({
               config={config}
               height={height}
               domain={domain}
+              yTicks={yTicks}
               unit={unit}
               format={format}
               axisFormat={axisFormat}

@@ -96,20 +96,75 @@ func underscoreToWords(s string) string { return strings.ReplaceAll(s, "_", " ")
 // query runner that dialled a fresh connection per request would exhaust the
 // server's connection limit under any real use.
 type Manager struct {
-	mu    sync.Mutex
-	pools map[int64]*sql.DB
+	mu      sync.Mutex
+	pools   map[int64]*sql.DB
+	opening map[int64]*poolOpening
+}
+
+type poolOpening struct {
+	done        chan struct{}
+	cancel      context.CancelFunc
+	db          *sql.DB
+	err         error
+	invalidated bool
 }
 
 func NewManager() *Manager {
-	return &Manager{pools: map[int64]*sql.DB{}}
+	return &Manager{pools: map[int64]*sql.DB{}, opening: map[int64]*poolOpening{}}
 }
 
 func (m *Manager) Pool(ctx context.Context, id int64, driver Driver, dsn string) (*sql.DB, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if db, ok := m.pools[id]; ok {
+		m.mu.Unlock()
 		return db, nil
 	}
+	if pending, ok := m.opening[id]; ok {
+		m.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-pending.done:
+			if !pending.invalidated && ctx.Err() == nil &&
+				(errors.Is(pending.err, context.Canceled) || errors.Is(pending.err, context.DeadlineExceeded)) {
+				return m.Pool(ctx, id, driver, dsn)
+			}
+			return pending.db, pending.err
+		}
+	}
+	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	pending := &poolOpening{done: make(chan struct{}), cancel: cancel}
+	m.opening[id] = pending
+	m.mu.Unlock()
+
+	// Dial only this connection outside the map lock. A refused or slow
+	// handshake must not queue requests for unrelated, already healthy pools.
+	db, err := openPool(pingCtx, driver, dsn)
+	cancel()
+	m.mu.Lock()
+	if m.opening[id] != pending {
+		// Close (including a saved-connection edit) invalidated this attempt.
+		// Never publish a pool for the old credentials after that boundary.
+		err = context.Canceled
+	} else {
+		delete(m.opening, id)
+		if err == nil {
+			m.pools[id] = db
+		}
+	}
+	if err == nil {
+		pending.db = db
+	}
+	pending.err = err
+	close(pending.done)
+	m.mu.Unlock()
+	if err != nil && db != nil {
+		_ = db.Close()
+	}
+	return pending.db, err
+}
+
+func openPool(ctx context.Context, driver Driver, dsn string) (*sql.DB, error) {
 	d, err := DialectFor(driver)
 	if err != nil {
 		return nil, err
@@ -131,13 +186,10 @@ func (m *Manager) Pool(ctx context.Context, id int64, driver Driver, dsn string)
 	// Then whatever the engine needs on top — SQLite's single writer, say.
 	d.TunePool(db)
 
-	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := db.PingContext(pingCtx); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
-	m.pools[id] = db
 	return db, nil
 }
 
@@ -171,19 +223,31 @@ func Probe(ctx context.Context, driver Driver, dsn string) (string, error) {
 
 func (m *Manager) Close(id int64) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if db, ok := m.pools[id]; ok {
-		db.Close()
-		delete(m.pools, id)
+	db := m.pools[id]
+	delete(m.pools, id)
+	if pending := m.opening[id]; pending != nil {
+		delete(m.opening, id)
+		pending.invalidated = true
+		pending.cancel()
+	}
+	m.mu.Unlock()
+	if db != nil {
+		_ = db.Close()
 	}
 }
 
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	for id, db := range m.pools {
-		db.Close()
-		delete(m.pools, id)
+	pools := m.pools
+	m.pools = map[int64]*sql.DB{}
+	for id, pending := range m.opening {
+		delete(m.opening, id)
+		pending.invalidated = true
+		pending.cancel()
+	}
+	m.mu.Unlock()
+	for _, db := range pools {
+		_ = db.Close()
 	}
 }
 
@@ -230,9 +294,13 @@ func ListDatabases(ctx context.Context, db *sql.DB, driver Driver) ([]Database, 
 }
 
 type Table struct {
-	Schema  string `json:"schema"`
-	Name    string `json:"name"`
-	Type    string `json:"type"`
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	// The planner's estimate, and -1 where the engine has none: a table the
+	// planner has never analysed, a view, an engine that does not count. It
+	// used to be floored to 0, and a catalogue that cannot say how many rows a
+	// table has was indistinguishable from one saying the table is empty.
 	Rows    int64  `json:"estimatedRows"`
 	Size    int64  `json:"size,omitempty"`
 	Comment string `json:"comment,omitempty"`

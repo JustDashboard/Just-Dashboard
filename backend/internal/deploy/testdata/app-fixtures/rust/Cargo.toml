@@ -2,6 +2,15 @@
 name = "jd-acceptance-rust"
 version = "0.1.0"
 edition = "2021"
+default-run = "jd-acceptance-rust"
+
+[[bin]]
+name = "maintenance"
+path = "src/maintenance.rs"
+
+[[bin]]
+name = "jd-acceptance-rust"
+path = "src/main.rs"
 
 [dependencies]
 axum = "0.8"

@@ -42,7 +42,8 @@ var (
 const DefaultHost = "github.com"
 
 type Service struct {
-	http *http.Client
+	http    *http.Client
+	command func(context.Context, string, string, ...string) (string, error)
 
 	mu       sync.Mutex
 	flows    map[string]*deviceFlow
@@ -57,6 +58,16 @@ func New() *Service {
 	}
 }
 
+// NewWithRunner is New with every gh invocation answered by run instead of
+// the binary, for tests in other packages that drive routes end to end
+// without gh installed. run receives the directory, the stdin payload and
+// gh's argv, exactly as the binary would.
+func NewWithRunner(run func(ctx context.Context, dir, stdin string, args ...string) (string, error)) *Service {
+	s := New()
+	s.command = run
+	return s
+}
+
 // Available reports whether gh can be run at all.
 //
 // Only this container's own copy counts. The host's gh would run as root in
@@ -64,6 +75,9 @@ func New() *Service {
 // credential helper naming a path — none of which the account that owns the
 // repository, and therefore runs the push, can use.
 func (s *Service) Available() bool {
+	if s.command != nil {
+		return true
+	}
 	_, err := exec.LookPath("gh")
 	return err == nil
 }
@@ -236,8 +250,8 @@ func (s *Service) LoginWithToken(ctx context.Context, dir, host, token string) (
 		return nil, fmt.Errorf("gh auth login: %s", firstMeaningfulLine(out))
 	}
 	s.forget()
-	if out, err := s.run(ctx, dir, "", "auth", "setup-git", "--hostname", host); err != nil {
-		return nil, fmt.Errorf("gh auth setup-git: %s", firstMeaningfulLine(out))
+	if err := s.setupGit(ctx, dir, host); err != nil {
+		return nil, err
 	}
 	acc, err := s.Status(ctx, dir)
 	if err != nil {
@@ -267,11 +281,60 @@ func (s *Service) Configure(ctx context.Context, dir string) (*Account, error) {
 	if host == "" {
 		host = DefaultHost
 	}
-	if out, err := s.run(ctx, dir, "", "auth", "setup-git", "--hostname", host); err != nil {
-		return nil, fmt.Errorf("gh auth setup-git: %s", firstMeaningfulLine(out))
+	if err := s.setupGit(ctx, dir, host); err != nil {
+		return nil, err
 	}
 	s.ensureIdentity(ctx, dir, acc)
 	return acc, nil
+}
+
+// portableHelper is the credential helper as this dashboard leaves it: gh by
+// name, found on the PATH of whichever side runs git.
+const portableHelper = "!gh auth git-credential"
+
+// setupGit makes git in this account hand the token to a push, from this page
+// and from a shell on the host alike.
+//
+// `gh auth setup-git` writes the helper as the absolute path of the gh that ran
+// it, which is this image's /usr/bin/gh. git reads that line wherever it runs
+// as this account, and the Terminal page and ssh run it on the host, where gh
+// is somewhere else or nowhere — so every push from a shell failed with
+// "/usr/bin/gh: not found" while this page reported the account as set up.
+// Named without a path, each side runs its own copy, and both read the same
+// token from the same bind-mounted home. The blank entry gh writes before the
+// helper is left alone: it is what stops a generic helper answering first.
+func (s *Service) setupGit(ctx context.Context, dir, host string) error {
+	if out, err := s.run(ctx, dir, "", "auth", "setup-git", "--hostname", host); err != nil {
+		return fmt.Errorf("gh auth setup-git: %s", firstMeaningfulLine(out))
+	}
+	out, _ := s.git(ctx, dir, "config", "--global", "--get-regexp", `^credential\..*\.helper$`)
+	for _, key := range pathBoundHelpers(out) {
+		if out, err := s.git(ctx, dir, "config", "--global", "--replace-all", key,
+			portableHelper, " auth git-credential$"); err != nil {
+			return fmt.Errorf("git config %s: %s", key, firstMeaningfulLine(out))
+		}
+	}
+	return nil
+}
+
+// pathBoundHelpers reads `git config --get-regexp` output for the credential
+// keys whose gh helper is pinned to one filesystem's path.
+func pathBoundHelpers(config string) []string {
+	var keys []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(config, "\n") {
+		key, value, _ := strings.Cut(strings.TrimSpace(line), " ")
+		if !strings.HasPrefix(key, "credential.") || !strings.HasSuffix(key, ".helper") {
+			continue
+		}
+		if !strings.HasPrefix(value, "!") || !strings.HasSuffix(value, " auth git-credential") ||
+			value == portableHelper || seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 // Logout removes the stored credential. It is recoverable by definition —
@@ -369,11 +432,18 @@ func (s *Service) remoteProtocol(ctx context.Context, dir string) string {
 // find the token. gh writes the helper as a `credential.<host>.helper` entry;
 // asking git for the resolved value is more honest than reading the file,
 // since a repository may override the global one.
+//
+// A helper pinned to a path counts as not set: it works from this page and
+// fails in the Terminal, and reporting it as unset is what offers the one
+// press that rewrites it (setupGit) to every install signed in before this.
 func (s *Service) credentialHelperSet(ctx context.Context, dir, host string) bool {
 	if host == "" {
 		host = DefaultHost
 	}
 	out, _ := s.git(ctx, dir, "config", "--get-regexp", `^credential\.`)
+	if len(pathBoundHelpers(out)) > 0 {
+		return false
+	}
 	return strings.Contains(out, "gh auth git-credential") ||
 		strings.Contains(out, "credential.https://"+host)
 }
@@ -395,6 +465,9 @@ func (s *Service) git(ctx context.Context, dir string, args ...string) (string, 
 // answer one, and the failure mode of an unanswered prompt is a subprocess
 // that hangs until the context expires rather than an error anybody can read.
 func (s *Service) run(ctx context.Context, dir, stdin string, args ...string) (string, error) {
+	if s.command != nil {
+		return s.command(ctx, dir, stdin, args...)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)
@@ -412,8 +485,13 @@ func (s *Service) run(ctx context.Context, dir, stdin string, args ...string) (s
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	var out boundedOutput
+	cmd.Stdout, cmd.Stderr = &out, &out
+	err := cmd.Run()
+	if out.overflow {
+		return "GitHub response exceeds 8 MiB; open it on GitHub to read the complete output", fmt.Errorf("GitHub response too large")
+	}
+	return out.String(), err
 }
 
 func ownerName(dir string) string {

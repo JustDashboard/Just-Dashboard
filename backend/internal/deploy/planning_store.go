@@ -29,11 +29,21 @@ type DraftSaveRequest struct {
 	Intent        *DraftIntentConfig `json:"intent,omitempty"`
 	Source        *DraftSourceConfig `json:"source,omitempty"`
 	Configuration *PlanConfiguration `json:"configuration,omitempty"`
+	// Omitted retains staged inputs; an explicit empty document clears them.
+	Dotenv *string `json:"dotenv,omitempty"`
+	// Retained names let a resumed form keep masked values it cannot read back.
+	RetainEnvironmentKeys []string `json:"retainEnvironmentKeys,omitempty"`
 }
 
 type DraftCommitRequest struct {
 	Revision             int      `json:"revision"`
 	AcknowledgedWarnings []string `json:"acknowledgedWarnings"`
+	// GitPolicy is the automatic-deployment decision, taken while the project
+	// is being created rather than after. A Git deployment polls its branch
+	// from the moment it exists and the default is to deploy every push, so
+	// "manual only" used to be a setting you could reach only once an
+	// unintended release had already gone out.
+	GitPolicy *GitDeploymentPolicy `json:"gitPolicy,omitempty"`
 }
 
 type DraftCommitResult struct {
@@ -494,9 +504,9 @@ func (s *PlanningStore) Create(ctx context.Context, ownerUserID int64, ownerUser
 }
 
 func (s *PlanningStore) Get(ctx context.Context, id string) (*Draft, error) {
-	draft, err := scanDraft(s.db.QueryRowContext(ctx, `
+	draft, err := s.scanDraft(s.db.QueryRowContext(ctx, `
 		SELECT id, owner_user_id, owner_username, current_step, revision, data_json,
-		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at
+		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at, environment_enc
 		  FROM deploy_drafts WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDraftNotFound
@@ -508,6 +518,31 @@ func (s *PlanningStore) Get(ctx context.Context, id string) (*Draft, error) {
 		return nil, ErrDraftExpired
 	}
 	return draft, nil
+}
+
+// Discard removes an unfinished setup the caller owns.
+//
+// Every press of Import creates a draft, and abandoning one at the source or
+// configure step left it in the unfinished-setups list for its whole 30-day
+// life with no way to clear it: three attempts at the same repository read as
+// three pieces of unfinished work. A committed draft is never discarded — it
+// is the record that a project came from this plan.
+func (s *PlanningStore) Discard(ctx context.Context, id string, userID int64, admin bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	draft, err := s.getUnlocked(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := AuthorizeDraft(draft, userID, admin); err != nil {
+		return err
+	}
+	if draft.CommittedProjectID != 0 {
+		return fmt.Errorf("%w: this setup already created a project", ErrDraftCommitted)
+	}
+	_, err = s.db.ExecContext(ctx,
+		`DELETE FROM deploy_drafts WHERE id = ? AND committed_project_id = 0`, id)
+	return err
 }
 
 // ListDrafts returns the caller's own uncommitted, unexpired drafts, newest
@@ -547,13 +582,13 @@ func (s *PlanningStore) ListDrafts(ctx context.Context, ownerUserID int64) ([]Dr
 	return out, rows.Err()
 }
 
-func scanDraft(row interface{ Scan(...any) error }) (*Draft, error) {
+func (s *PlanningStore) scanDraft(row interface{ Scan(...any) error }) (*Draft, error) {
 	var draft Draft
 	var data, findings string
 	var created, updated, expires int64
 	if err := row.Scan(&draft.ID, &draft.OwnerUserID, &draft.OwnerUsername, &draft.CurrentStep,
 		&draft.Revision, &data, &findings, &draft.PlanPreview, &draft.CommittedProjectID,
-		&created, &updated, &expires); err != nil {
+		&created, &updated, &expires, &draft.environmentEnc); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(data), &draft.Data); err != nil {
@@ -568,6 +603,16 @@ func scanDraft(row interface{ Scan(...any) error }) (*Draft, error) {
 	draft.CreatedAt = time.Unix(created, 0).UTC()
 	draft.UpdatedAt = time.Unix(updated, 0).UTC()
 	draft.ExpiresAt = time.Unix(expires, 0).UTC()
+	if draft.environmentEnc != "" {
+		plaintext, err := s.sealer.Open(draft.environmentEnc)
+		if err != nil {
+			return nil, fmt.Errorf("deployment draft environment cannot be decrypted")
+		}
+		if err := json.Unmarshal([]byte(plaintext), &draft.environment); err != nil {
+			return nil, fmt.Errorf("deployment draft environment is malformed")
+		}
+	}
+	draft.refreshEnvironmentKeys()
 	return &draft, nil
 }
 
@@ -603,9 +648,12 @@ func (s *PlanningStore) Save(
 	if _, ok := draftSteps[request.Step]; !ok || request.Step == DraftDetection || request.Step == DraftPreflight {
 		return nil, fmt.Errorf("%w: invalid client-saved draft step", ErrInvalidPlan)
 	}
+	if len(request.RetainEnvironmentKeys) > 0 && (request.Step != DraftConfiguration || request.Dotenv == nil) {
+		return nil, fmt.Errorf("%w: retained environment keys require a configuration and dotenv document", ErrInvalidPlan)
+	}
 	switch request.Step {
 	case DraftIntent:
-		if request.Intent == nil || request.Source != nil || request.Configuration != nil {
+		if request.Intent == nil || request.Source != nil || request.Configuration != nil || request.Dotenv != nil {
 			return nil, fmt.Errorf("%w: intent step requires only intent data", ErrInvalidPlan)
 		}
 		if err := request.Intent.Validate(); err != nil {
@@ -614,11 +662,11 @@ func (s *PlanningStore) Save(
 		copy := *request.Intent
 		draft.Data.Intent = &copy
 	case DraftSource:
-		if request.Source == nil || request.Intent != nil || request.Configuration != nil {
+		if request.Source == nil || request.Intent != nil || request.Configuration != nil || request.Dotenv != nil {
 			return nil, fmt.Errorf("%w: source step requires only source data", ErrInvalidPlan)
 		}
 		copy := canonicalSourceConfig(*request.Source)
-		if err := copy.ValidateForDeployment(); err != nil {
+		if err := copy.validateForNewDeployment(); err != nil {
 			return nil, err
 		}
 		if exists, err := s.credentialExists(ctx, copy.CredentialID); err != nil {
@@ -626,18 +674,63 @@ func (s *PlanningStore) Save(
 		} else if !exists {
 			return nil, fmt.Errorf("%w: credential does not exist", ErrInvalidSource)
 		}
+		keepEnvironment := false
+		if draft.Data.Source != nil {
+			previous := *draft.Data.Source
+			// Reinspect another branch of this repository without losing values
+			// that a resumed form correctly cannot read back from the server.
+			if previous.Kind == SourceGit {
+				previous.Ref = copy.Ref
+			}
+			keepEnvironment = bytes.Equal(mustJSON(previous), mustJSON(copy))
+		}
 		draft.Data.Source = &copy
 		draft.Data.Detection = nil
+		if !keepEnvironment {
+			draft.environment, draft.environmentEnc = nil, ""
+			draft.refreshEnvironmentKeys()
+		}
 	case DraftConfiguration:
 		if request.Configuration == nil || request.Intent != nil || request.Source != nil {
 			return nil, fmt.Errorf("%w: configuration step requires only configuration data", ErrInvalidPlan)
 		}
 		copy := canonicalConfiguration(*request.Configuration)
+		// Detection names the framework at commit; the browser does not.
+		copy.Build.Framework = ""
+		if request.Dotenv != nil {
+			values, err := ParseDotenv(*request.Dotenv)
+			if err != nil {
+				return nil, err
+			}
+			for _, name := range request.RetainEnvironmentKeys {
+				value, exists := draft.environment[name]
+				if !exists {
+					return nil, fmt.Errorf("%w: retained environment variable %q does not exist", ErrInvalidVariable, name)
+				}
+				if _, supplied := values[name]; !supplied {
+					values[name] = value
+				}
+			}
+			draft.environment = values
+			draft.environmentEnc = ""
+			if len(values) > 0 {
+				plaintext, _ := json.Marshal(values)
+				draft.environmentEnc, err = s.sealer.Seal(string(plaintext))
+				if err != nil {
+					return nil, err
+				}
+			}
+			draft.refreshEnvironmentKeys()
+		}
+		copy = draft.withEnvironmentMetadata(copy)
 		if err := sealDomainProtection(&copy); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
 		if err := copy.Validate(); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+		}
+		if _, _, err := ResolveVariableGraph(draft.variableValues(copy), nil); err != nil {
+			return nil, err
 		}
 		draft.Data.Configuration = &copy
 	}
@@ -687,7 +780,7 @@ func (s *PlanningStore) SaveDetection(
 		if err != nil {
 			return nil, err
 		}
-		configuration := canonicalConfiguration(plan.Configuration)
+		configuration := draft.withEnvironmentMetadata(canonicalConfiguration(plan.Configuration))
 		draft.Data.Configuration = &configuration
 	}
 	draft.CurrentStep = DraftDetection
@@ -732,6 +825,13 @@ func (s *PlanningStore) SavePreflight(
 	if err := validatePreflightFindings(result.Findings); err != nil {
 		return nil, err
 	}
+	// Which project owns a volume is the store's to say, so its refusal joins
+	// the findings here, where the caller's result shows it too.
+	owners, err := managedVolumeOwners(ctx, s.db, plannedManagedVolumes(canonicalConfiguration(*draft.Data.Configuration)))
+	if err != nil {
+		return nil, err
+	}
+	result.Findings = append(result.Findings, managedVolumeOwnerFindings(owners)...)
 	draft.CurrentStep = DraftPreflight
 	draft.Revision++
 	draft.Findings = append([]PreflightFinding(nil), result.Findings...)
@@ -775,10 +875,10 @@ func (s *PlanningStore) persistDraft(ctx context.Context, draft *Draft) (*Draft,
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE deploy_drafts
 		   SET current_step = ?, revision = ?, data_json = ?, findings_json = ?,
-		       plan_preview = ?, updated_at = ?
+		       plan_preview = ?, updated_at = ?, environment_enc = ?
 		 WHERE id = ? AND revision = ? AND committed_project_id = 0`,
 		draft.CurrentStep, draft.Revision, string(data), string(findings), draft.PlanPreview,
-		draft.UpdatedAt.Unix(), draft.ID, draft.Revision-1)
+		draft.UpdatedAt.Unix(), draft.environmentEnc, draft.ID, draft.Revision-1)
 	if err != nil {
 		return nil, err
 	}
@@ -789,9 +889,9 @@ func (s *PlanningStore) persistDraft(ctx context.Context, draft *Draft) (*Draft,
 }
 
 func (s *PlanningStore) getUnlocked(ctx context.Context, id string) (*Draft, error) {
-	draft, err := scanDraft(s.db.QueryRowContext(ctx, `
+	draft, err := s.scanDraft(s.db.QueryRowContext(ctx, `
 		SELECT id, owner_user_id, owner_username, current_step, revision, data_json,
-		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at
+		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at, environment_enc
 		  FROM deploy_drafts WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDraftNotFound
@@ -862,6 +962,13 @@ func (s *PlanningStore) Commit(
 		return nil, err
 	}
 	defer tx.Rollback()
+	owners, err := managedVolumeOwners(ctx, tx, plannedManagedVolumes(canonicalConfiguration(*draft.Data.Configuration)))
+	if err != nil {
+		return nil, err
+	}
+	if err := errManagedVolumeOwned(owners); err != nil {
+		return nil, err
+	}
 	now := s.now().UTC()
 	repoPath := sourceRepositoryPath(s.managedRoot, draft)
 	branch := draft.Data.Source.Ref
@@ -892,6 +999,7 @@ func (s *PlanningStore) Commit(
 		return nil, err
 	}
 	configuration := canonicalConfiguration(*draft.Data.Configuration)
+	configuration.Build.Framework = detectedFramework(draft.Data.Detection, configuration.Build)
 	expectedDowntime := 0
 	if configuration.Runtime.Strategy == StrategyStopFirst {
 		expectedDowntime = 1
@@ -908,6 +1016,9 @@ func (s *PlanningStore) Commit(
 	}
 	environmentID, err := result.LastInsertId()
 	if err != nil {
+		return nil, err
+	}
+	if err := commitGitPolicy(ctx, tx, environmentID, request.GitPolicy, now.Unix()); err != nil {
 		return nil, err
 	}
 	sourceJSON, _ := json.Marshal(draft.Data.Source)
@@ -936,7 +1047,7 @@ func (s *PlanningStore) Commit(
 		INSERT INTO deploy_build_plans(
 		  environment_id, revision, method, config_json, evidence_json, preview, digest, created_at)
 		VALUES(?, 1, ?, ?, ?, ?, ?, ?)`, environmentID, configuration.Build.Method,
-		string(buildJSON), string(detectionJSON), buildPreview, digestBytes(buildJSON), now.Unix()); err != nil {
+		string(buildJSON), string(detectionJSON), buildPreview, buildPlanDigest(configuration.Build), now.Unix()); err != nil {
 		return nil, err
 	}
 	runtimeJSON, _ := json.Marshal(configuration.Runtime)
@@ -950,11 +1061,16 @@ func (s *PlanningStore) Commit(
 	}
 	for _, variable := range configuration.Variables {
 		value := variable.Reference
+		sensitivity := variable.Sensitivity
+		staged, supplied := draft.environment[variable.Name]
 		switch {
+		case supplied:
+			value = staged
+			sensitivity = suppliedVariableSensitivity(variable)
 		case variable.Generate > 0:
 			// Generated here and never anywhere else: the value exists only
 			// sealed, revealed on demand through the audited reveal route.
-			value, err = generatedSecret(variable.Generate)
+			value, err = generatedSecretValue(variable.Generate, variable.GenerateFormat)
 			if err != nil {
 				return nil, err
 			}
@@ -970,10 +1086,13 @@ func (s *PlanningStore) Commit(
 			  environment_id, key, revision, sensitivity, scopes, value_enc,
 			  value_digest, active, created_by, created_at)
 			VALUES(?, ?, 1, ?, ?, ?, ?, 1, ?, ?)`, environmentID, variable.Name,
-			variable.Sensitivity, strings.Join(variable.Scopes, ","), sealed,
+			sensitivity, strings.Join(variable.Scopes, ","), sealed,
 			digestBytes([]byte(value)), draft.OwnerUsername, now.Unix()); err != nil {
 			return nil, err
 		}
+	}
+	if err := s.validateActiveVariableGraphTx(ctx, tx, environmentID); err != nil {
+		return nil, err
 	}
 	for _, dependency := range configuration.Dependencies {
 		config := dependency.Config
@@ -1073,11 +1192,20 @@ func validateDraftComplete(draft *Draft) error {
 	if err := draft.Data.Intent.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidPlan, err)
 	}
-	if err := draft.Data.Source.ValidateForDeployment(); err != nil {
+	if err := draft.Data.Source.validateForNewDeployment(); err != nil {
 		return err
 	}
 	if err := draft.Data.Configuration.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
+	values, _, err := ResolveVariableGraph(draft.variableValues(*draft.Data.Configuration), nil)
+	if err != nil {
+		return err
+	}
+	for _, variable := range draft.Data.Configuration.Variables {
+		if variable.Required && values[variable.Name] == "" {
+			return fmt.Errorf("%w: required variable %s has no value", ErrPreflightBlocked, variable.Name)
+		}
 	}
 	return nil
 }

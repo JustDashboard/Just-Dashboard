@@ -13,7 +13,7 @@ import { rawUrl, thumbnailKind } from "@/components/files/media"
  * A picture is drawn as itself and a video as its first frame, so a folder of
  * screenshots or recordings is recognisable without opening anything — which
  * is the whole of what a file manager is for when the files are media. Every
- * other kind keeps its category glyph.
+ * other kind is its folder or its page (`file-icon.tsx`).
  *
  * Nothing here is fetched until it is on screen. Images use the browser's own
  * lazy loading; a video element is not even mounted until the tile scrolls
@@ -47,7 +47,7 @@ export function Thumbnail({
           ? "h-32 w-full rounded-md"
           : "h-24 w-full rounded-md"
   const glyph =
-    size === "row" ? "size-4" : size === "sm" ? "size-8" : size === "lg" ? "size-14" : "size-11"
+    size === "row" ? "size-6" : size === "sm" ? "size-12" : size === "lg" ? "size-22" : "size-16"
 
   return (
     <span
@@ -76,7 +76,7 @@ export function Thumbnail({
       {kind === "video" && (
         <VideoPoster entry={entry} hoverPlay={hoverPlay} onBroken={() => setBroken(true)} />
       )}
-      {!kind && <FileIcon entry={entry} className={glyph} badgeClassName="bg-background" />}
+      {!kind && <FileIcon entry={entry} detail={size !== "row"} className={glyph} />}
     </span>
   )
 }

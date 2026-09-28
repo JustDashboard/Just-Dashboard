@@ -1,41 +1,48 @@
 "use client"
 
 import { useState } from "react"
-import { Cross, LockOpen, SettingsSliders, Shield, Slash } from "@/components/icons"
+import {
+  Cross,
+  LockOpen,
+  SecureConnection,
+  SettingsSliders,
+  Shield,
+  Slash,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
+import { cn } from "@/lib/utils"
 import type { Fail2banJail, JailConfig, JailParamResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
-import { IconAction, RowActions } from "@/components/icon-action"
+import { DimActions, IconAction } from "@/components/icon-action"
 import { SidePanel } from "@/components/side-panel"
-import { RowLink } from "@/components/page"
+import { ProductLogo } from "@/components/product-logo"
+import { jailProduct } from "@/components/security/marks"
+import { Status } from "@/components/status-dot"
+import { Meter } from "@/components/meter"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Field, FieldRow, FormSection } from "@/components/form"
 import { Label } from "@/components/ui/label"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 /**
- * Every jail in one table, with the addresses it is holding one click away.
+ * Every jail as a card you open, with the addresses it is holding one press
+ * away.
  *
- * This was a card per jail in a two-column grid, and a jail is not a card's
- * worth of anything: a busy sshd jail with four bans and an idle nginx jail
- * with none were the same size box, so the grid ended every visit with a
- * ragged edge and a half-page of empty card. Three jails is a table of three
- * rows — the numbers line up in a column, which is the only way "which jail is
- * doing the work" is answerable at a glance — and the addresses, which are the
- * part you act on, get the detail surface the rest of the product uses for
- * exactly that.
+ * A jail was a row in a table, and before that a card in a two-column grid
+ * whose boxes were all one size whatever was in them. It is a card again, of
+ * the shape the Backups and Docker pages settled on: every one of these opens
+ * the jail's own sheet, so it is a destination and takes the lit edge §16
+ * gives to things you take — and its readings, which the table lined up in
+ * columns, keep a fixed measure each on a wide screen so a column of cards is
+ * still scanned down the way the table was. Beneath its name the jail says
+ * what it watches, and its mark is the service it watches for: nginx's for
+ * `nginx-http-auth`, a glyph for `sshd`, which has no mark to draw.
  */
 export function JailsPanel({
   jails,
@@ -68,7 +75,6 @@ export function JailsPanel({
   }
 
   const selected = jails.find((j) => j.name === open)
-
   // A ban by hand. The route has been on the server since the jail controls
   // shipped and nothing on the page reached it — so the address that kept
   // appearing in the log could be blocked forever at the firewall, or not at
@@ -85,88 +91,96 @@ export function JailsPanel({
   return (
     <>
       <Panel plain>
-        <PanelHeader title="Jails" />
-        <PanelBody flush>
+        <PanelHeader
+          title="Jails"
+          actions={
+            jails.length > 0 ? (
+              <span className="numeric text-hint text-muted-foreground">
+                {jails.length === 1 ? "1 jail" : `${jails.length} jails`}
+              </span>
+            ) : undefined
+          }
+        />
+        <PanelBody flush className="pt-3">
           {jails.length === 0 ? (
             <EmptyState
               icon={Slash}
               title="No jails configured"
               description="A running fail2ban with no jails bans nobody. Enable at least the sshd jail."
-              className="mt-3"
             />
           ) : (
-            <div className="-mx-4 min-w-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Jail</TableHead>
-                    <TableHead>Banned now</TableHead>
-                    <TableHead className="hidden sm:table-cell">Failing now</TableHead>
-                    <TableHead className="hidden md:table-cell">Bans in total</TableHead>
-                    <TableHead className="hidden lg:table-cell">Failures in total</TableHead>
-                    <TableHead className="hidden w-full xl:table-cell">Watching</TableHead>
-                    <TableHead className="w-px" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {jails.map((jail) => (
-                    <TableRow
-                      key={jail.name}
-                      className="group"
-                      onActivate={() => setOpen(jail.name)}
-                    >
-                      <TableCell>
-                        <RowLink onClick={() => setOpen(jail.name)}>{jail.name}</RowLink>
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          className={countClass(jail.currentlyBanned > 0)}
-                        >{`${jail.currentlyBanned}`}</span>
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell">
-                        <span
-                          className={countClass(jail.currentlyFailed > 0)}
-                        >{`${jail.currentlyFailed}`}</span>
-                      </TableCell>
-                      <TableCell className="numeric hidden text-muted-foreground md:table-cell">
-                        {jail.totalBanned}
-                      </TableCell>
-                      <TableCell className="numeric hidden text-muted-foreground lg:table-cell">
-                        {jail.totalFailed}
-                      </TableCell>
-                      <TableCell className="hidden font-mono text-hint text-muted-foreground xl:table-cell">
-                        {jail.fileList.join(", ") || "—"}
-                      </TableCell>
-                      <TableCell>
-                        {canManage && (
-                          <RowActions className="justify-end">
-                            <IconAction
-                              label={`Tune ${jail.name}`}
-                              onClick={() => setTuning(jail.name)}
-                            >
-                              <SettingsSliders />
-                            </IconAction>
-                            <IconAction
-                              label={`Release every ban in ${jail.name}`}
-                              disabled={busy || jail.bannedIps.length === 0}
-                              onClick={() =>
-                                act(
-                                  () =>
-                                    post(`/fail2ban/${encodeURIComponent(jail.name)}/unban-all`, {}),
-                                  `Released every ban in ${jail.name}`,
-                                )
-                              }
-                            >
-                              <LockOpen />
-                            </IconAction>
-                          </RowActions>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <ChoiceList className="animate-rise">
+              {jails.map((jail, index) => (
+                <ChoiceRow
+                  key={jail.name}
+                  index={index}
+                  verb={jail.name}
+                  onSelect={() => setOpen(jail.name)}
+                  leading={
+                    <ProductLogo
+                      id={jailProduct(jail.name)}
+                      fallback={jail.name === "sshd" ? SecureConnection : Slash}
+                    />
+                  }
+                  title={jail.name}
+                  description={
+                    <span className="font-mono">{jail.fileList.join(", ") || "no log named"}</span>
+                  }
+                  trailing={
+                    <Status
+                      tone={jail.currentlyBanned > 0 ? "warning" : "running"}
+                      label={
+                        jail.currentlyBanned > 0 ? `${jail.currentlyBanned} banned now` : "Watching"
+                      }
+                    />
+                  }
+                  actions={
+                    canManage ? (
+                      <DimActions>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          aria-label={`Tune ${jail.name}`}
+                          onClick={() => setTuning(jail.name)}
+                        >
+                          Tune
+                        </Button>
+                        <IconAction
+                          label={`Release every ban in ${jail.name}`}
+                          disabled={busy || jail.bannedIps.length === 0}
+                          onClick={() =>
+                            act(
+                              () =>
+                                post(`/fail2ban/${encodeURIComponent(jail.name)}/unban-all`, {}),
+                              `Released every ban in ${jail.name}`,
+                            )
+                          }
+                        >
+                          <LockOpen />
+                        </IconAction>
+                      </DimActions>
+                    ) : undefined
+                  }
+                >
+                  <div className="grid grid-cols-2 items-center gap-4 border-t border-hairline pt-3 sm:grid-cols-4">
+                    <JailReading label="failing now" value={jail.currentlyFailed} />
+                    <JailReading label="bans in total" value={jail.totalBanned} muted />
+                    <JailReading label="failures in total" value={jail.totalFailed} muted />
+                    <div className="space-y-1.5">
+                      <span className="text-hint text-muted-foreground">Currently held</span>
+                      <Meter
+                        value={
+                          jail.totalBanned > 0 ? (jail.currentlyBanned / jail.totalBanned) * 100 : 0
+                        }
+                        size="thin"
+                        tone={jail.currentlyBanned > 0 ? "warning" : "default"}
+                        label={`${jail.currentlyBanned} of ${jail.totalBanned} bans still active`}
+                      />
+                    </div>
+                  </div>
+                </ChoiceRow>
+              ))}
+            </ChoiceList>
           )}
         </PanelBody>
       </Panel>
@@ -206,11 +220,25 @@ export function JailsPanel({
           )
         }
       >
-        <div className="space-y-4">
+        <div className="space-y-5">
+          {selected && (
+            <div className="flex items-center gap-3">
+              <ProductLogo
+                id={jailProduct(selected.name)}
+                fallback={selected.name === "sshd" ? SecureConnection : Slash}
+              />
+              <div>
+                <span className="text-title font-medium">{selected.name}</span>
+                <p className="text-hint text-muted-foreground">
+                  {selected.bannedIps.length} addresses held · {selected.totalBanned} bans in total
+                </p>
+              </div>
+            </div>
+          )}
           {canManage && selected && (
             <div className="space-y-1.5">
               <Label htmlFor="jail-ban-address">Ban an address now</Label>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <Input
                   id="jail-ban-address"
                   value={banning}
@@ -219,7 +247,12 @@ export function JailsPanel({
                   placeholder="203.0.113.9"
                   className="font-mono text-xs"
                 />
-                <Button size="sm" variant="outline" onClick={ban} disabled={busy || !banning.trim()}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={ban}
+                  disabled={busy || !banning.trim()}
+                >
                   <Slash className="size-3.5" />
                   Ban
                 </Button>
@@ -256,7 +289,9 @@ export function JailsPanel({
                           onClick={() =>
                             act(
                               () =>
-                                post(`/fail2ban/${encodeURIComponent(selected.name)}/unban`, { ip }),
+                                post(`/fail2ban/${encodeURIComponent(selected.name)}/unban`, {
+                                  ip,
+                                }),
                               `${ip} unbanned`,
                             )
                           }
@@ -302,9 +337,40 @@ export function JailsPanel({
   )
 }
 
-/** A count that goes quiet at zero — a column of grey noughts is not a signal. */
-function countClass(active: boolean) {
-  return active ? "numeric text-xs font-medium" : "numeric text-xs text-muted-foreground"
+/**
+ * One of a jail's counts, in a fixed measure so a column of cards lines up
+ * the way the table's columns did. It goes quiet at zero — a column of grey
+ * noughts is not a signal — and a count of addresses held right now takes the
+ * warning tone, because that is the reading the page is opened for.
+ */
+function JailReading({
+  label,
+  value,
+  tone,
+  muted,
+}: {
+  label: string
+  value: number
+  /** The tone the figure takes when it is not zero. */
+  tone?: "warning"
+  /** A lifetime total, quieter than the live counts beside it. */
+  muted?: boolean
+}) {
+  const active = value > 0 && !muted
+  return (
+    <span className="flex min-w-0 flex-col gap-1">
+      <span
+        className={cn(
+          "numeric text-title",
+          active ? "font-medium" : "text-muted-foreground",
+          active && tone === "warning" && "text-warning",
+        )}
+      >
+        {value}
+      </span>
+      <span className="text-hint text-muted-foreground">{label}</span>
+    </span>
+  )
 }
 
 /**
@@ -342,7 +408,7 @@ function JailTuning({
   const [busy, setBusy] = useState(false)
 
   const value = (key: keyof JailConfig, fallback: number) =>
-    pending[key] ?? String((data?.[key] as number | undefined) ?? fallback)
+    pending[key.toLowerCase()] ?? String((data?.[key] as number | undefined) ?? fallback)
 
   const save = async () => {
     setBusy(true)
@@ -393,43 +459,61 @@ function JailTuning({
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      size="sm"
+      size="md"
       title={<>Tune {jail}</>}
       description="This many failures inside this window earns a ban of this length."
       footer={
         <>
           <span className="flex-1" />
-          <Button onClick={save} disabled={busy || Object.keys(pending).length === 0}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={save}
+            pending={busy}
+            disabled={busy || Object.keys(pending).length === 0}
+          >
             Apply
           </Button>
         </>
       }
     >
       <div className="grid gap-4">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <NumberField
-            label="Failures"
-            hint="before a ban"
-            value={value("maxRetry", 5)}
-            onChange={(v) => setPending((p) => ({ ...p, maxretry: v }))}
+        <div className="flex items-center gap-3">
+          <ProductLogo
+            id={jailProduct(jail)}
+            fallback={jail === "sshd" ? SecureConnection : Slash}
           />
-          <NumberField
-            label="Window"
-            hint="seconds"
-            value={value("findTime", 600)}
-            onChange={(v) => setPending((p) => ({ ...p, findtime: v }))}
-          />
-          <NumberField
-            label="Ban for"
-            hint="seconds"
-            value={value("banTime", 600)}
-            onChange={(v) => setPending((p) => ({ ...p, bantime: v }))}
-          />
+          <div>
+            <span className="text-title font-medium">{jail}</span>
+            <p className="text-hint text-muted-foreground">fail2ban jail</p>
+          </div>
         </div>
+        <FormSection title="Ban policy">
+          <FieldRow columns={3}>
+            <NumberField
+              label="Failures"
+              hint="before a ban"
+              value={value("maxRetry", 5)}
+              onChange={(v) => setPending((p) => ({ ...p, maxretry: v }))}
+            />
+            <NumberField
+              label="Window"
+              hint="seconds"
+              value={value("findTime", 600)}
+              onChange={(v) => setPending((p) => ({ ...p, findtime: v }))}
+            />
+            <NumberField
+              label="Ban for"
+              hint="seconds"
+              value={value("banTime", 600)}
+              onChange={(v) => setPending((p) => ({ ...p, bantime: v }))}
+            />
+          </FieldRow>
+        </FormSection>
 
-        <div className="space-y-1.5">
+        <FormSection title="Never ban">
           <div className="flex items-center justify-between gap-2">
-            <Label>Never ban</Label>
             {/* The address this browser arrived from, by name. Banning
                 yourself is the commonest way to lose a server you were in the
                 middle of hardening, and the allowlist is the control that
@@ -470,7 +554,7 @@ function JailTuning({
               <EmptyNote className="py-2">Nothing allowlisted.</EmptyNote>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <Input
               value={ignore}
               onChange={(e) => setIgnore(e.target.value)}
@@ -488,7 +572,7 @@ function JailTuning({
               Add
             </Button>
           </div>
-        </div>
+        </FormSection>
 
         <Notice title="Applied now, and kept">
           The change goes to the running fail2ban at once and is written to a drop-in under{" "}
@@ -512,15 +596,13 @@ function NumberField({
   onChange: (value: string) => void
 }) {
   return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
+    <Field label={label} hint={hint}>
       <Input
         value={value}
         inputMode="numeric"
         aria-label={label}
         onChange={(e) => onChange(e.target.value)}
       />
-      <p className="text-hint text-muted-foreground">{hint}</p>
-    </div>
+    </Field>
   )
 }

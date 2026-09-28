@@ -7,11 +7,17 @@
   "description": "A time-series database with its own UI and query language, set up on first start with an organisation, a bucket and an admin token.",
   "iconId": "database",
   "docsUrl": "https://docs.influxdata.com/influxdb/v2/",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "DOCKER_INFLUXDB_INIT_USERNAME",
+    "secretVariable": "DOCKER_INFLUXDB_INIT_PASSWORD",
+    "note": "The first page is a sign-in form for an account that already exists: the admin user you chose here, with the admin password generated here (the admin API token is a second credential, for programs, not for this form). Set a public domain or there is no page to open at all — without one this server is only reachable by other containers on this host."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/influxdata/influxdb",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -89,6 +95,18 @@
     }
   ],
   "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "INFLUXD_PPROF_DISABLED",
+        "value": "true"
+      },
+      {
+        "kind": "set_variable",
+        "name": "INFLUXD_METRICS_DISABLED",
+        "value": "true"
+      }
+    ],
     "stop": [
       {
         "kind": "stop_signal",

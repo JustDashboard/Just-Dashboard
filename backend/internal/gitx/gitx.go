@@ -84,7 +84,18 @@ func validatePath(file string) error {
 }
 
 type Service struct {
-	roots []string
+	roots     []string
+	mutations sync.Map
+}
+
+// Lock serializes dashboard mutations of one checkout. Git's own index locks
+// still arbitrate with terminal clients; the dashboard lock also covers the
+// validation/read/write steps of a conflict resolution or partial stage.
+func (s *Service) Lock(path string) func() {
+	value, _ := s.mutations.LoadOrStore(path, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 func New(roots []string) *Service {
@@ -244,7 +255,7 @@ func (s *Service) Discover(ctx context.Context) ([]Repo, error) {
 	}
 	sort.Strings(found)
 
-	// A summary is half a dozen git invocations, and a server with thirty
+	// A summary uses several git invocations, and a server with thirty
 	// checkouts was spending two seconds answering a list that polls. Four at
 	// a time keeps the total under the poll interval without turning a
 	// rescan into a load spike.
@@ -303,24 +314,27 @@ func (s *Service) Summary(ctx context.Context, path string) (*Repo, error) {
 		r.Branch = strings.TrimSpace(out)
 	} else {
 		r.Detached = true
-		if sha, err := s.run(ctx, path, "rev-parse", "--short", "HEAD"); err == nil {
-			r.Branch = "detached at " + strings.TrimSpace(sha)
-		}
 	}
-	if sha, err := s.run(ctx, path, "rev-parse", "--short", "HEAD"); err == nil {
-		r.Head = strings.TrimSpace(sha)
-	} else {
-		r.Empty = true
-	}
-	// %x1f is a unit separator: safe against subjects containing anything.
-	if out, err := s.run(ctx, path, "log", "-1", "--pretty=format:%s%x1f%an%x1f%ct"); err == nil {
+	// The log already reads HEAD; return its abbreviation with the commit
+	// metadata instead of launching another process for the same revision.
+	if out, err := s.run(ctx, path, "log", "-1", "--pretty=format:%h%x1f%s%x1f%an%x1f%ct"); err == nil {
 		parts := strings.Split(strings.TrimSpace(out), "\x1f")
-		if len(parts) == 3 {
-			r.Subject, r.Author = parts[0], parts[1]
-			if secs, err := strconv.ParseInt(parts[2], 10, 64); err == nil {
+		if len(parts) == 4 {
+			r.Head, r.Subject, r.Author = parts[0], parts[1], parts[2]
+			if secs, err := strconv.ParseInt(parts[3], 10, 64); err == nil {
 				r.CommitAt = time.Unix(secs, 0).UTC()
 			}
 		}
+	}
+	if r.Head == "" {
+		if sha, err := s.run(ctx, path, "rev-parse", "--short", "HEAD"); err == nil {
+			r.Head = strings.TrimSpace(sha)
+		} else {
+			r.Empty = true
+		}
+	}
+	if r.Detached && r.Head != "" {
+		r.Branch = "detached at " + r.Head
 	}
 	if out, err := s.run(ctx, path, "remote", "get-url", "origin"); err == nil {
 		r.Remote = scrubRemote(strings.TrimSpace(out))
@@ -351,16 +365,23 @@ func (s *Service) Summary(ctx context.Context, path string) (*Repo, error) {
 			if len(parts) == 2 {
 				r.Upstream = parts[0]
 				r.Gone = strings.Contains(parts[1], "gone")
+				for _, count := range strings.Split(strings.Trim(parts[1], "[]"), ",") {
+					fields := strings.Fields(count)
+					if len(fields) != 2 {
+						continue
+					}
+					n, _ := strconv.Atoi(fields[1])
+					switch fields[0] {
+					case "ahead":
+						r.Ahead = n
+					case "behind":
+						r.Behind = n
+					}
+				}
 			}
 		}
 	}
-	if out, err := s.run(ctx, path, "rev-list", "--left-right", "--count", "@{upstream}...HEAD"); err == nil {
-		fields := strings.Fields(strings.TrimSpace(out))
-		if len(fields) == 2 {
-			r.Behind, _ = strconv.Atoi(fields[0])
-			r.Ahead, _ = strconv.Atoi(fields[1])
-		}
-	}
+
 	return r, nil
 }
 
@@ -406,9 +427,8 @@ type Status struct {
 	Stashes  int          `json:"stashes"`
 	Identity Identity     `json:"identity"`
 	// Operation is a merge, rebase, revert or cherry-pick that stopped
-	// halfway — the state this dashboard never creates itself, but which a
-	// shell can leave behind and which makes every commit here fail until it
-	// is finished or abandoned.
+	// halfway, either in the workspace or a shell. The workspace resolves
+	// conflicts before continuing or explicitly aborting it.
 	Operation string `json:"operation,omitempty"`
 }
 
@@ -518,11 +538,11 @@ func (s *Service) operationInProgress(ctx context.Context, path string) string {
 		gitDir = filepath.Join(path, gitDir)
 	}
 	for _, m := range []struct{ marker, op string }{
+		{"rebase-merge", "rebase"},
+		{"rebase-apply", "rebase"},
 		{"MERGE_HEAD", "merge"},
 		{"CHERRY_PICK_HEAD", "cherry-pick"},
 		{"REVERT_HEAD", "revert"},
-		{"rebase-merge", "rebase"},
-		{"rebase-apply", "rebase"},
 		{"BISECT_LOG", "bisect"},
 	} {
 		if _, err := os.Stat(filepath.Join(gitDir, m.marker)); err == nil {
@@ -902,10 +922,21 @@ func (s *Service) runAllowing(ctx context.Context, dir string, exit int, args ..
 }
 
 func (s *Service) execute(ctx context.Context, dir string, timeout time.Duration, args ...string) ([]byte, error) {
+	return s.executeInput(ctx, dir, timeout, "", args...)
+}
+
+func (s *Service) executeInput(ctx context.Context, dir string, timeout time.Duration, input string, args ...string) ([]byte, error) {
+	return s.executeEnv(ctx, dir, timeout, input, nil, args...)
+}
+
+func (s *Service) executeEnv(ctx context.Context, dir string, timeout time.Duration, input string, extra map[string]string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 	// A prompt would hang the request forever: fail instead of asking. The
 	// terminal variable covers ssh, the git one covers credential helpers,
 	// and GIT_EDITOR=true is the editor that accepts whatever git proposes —
@@ -926,6 +957,26 @@ func (s *Service) execute(ctx context.Context, dir string, timeout time.Duration
 		"GIT_PAGER=cat",
 		"LC_ALL=C",
 	)
+	verb := args[0]
+	if verb == "--no-pager" && len(args) > 1 {
+		verb = args[1]
+	}
+	// Git stash invokes its own commands with special pathspecs (including
+	// :/). Making those literal prevents it from cleaning the work it saved.
+	// Only commands receiving caller-selected paths need literal pathspecs.
+	switch verb {
+	case "diff", "show", "ls-files", "blame", "add", "checkout", "reset", "rm":
+		env = append(env, "GIT_LITERAL_PATHSPECS=1")
+	}
+	for key, value := range extra {
+		filtered := env[:0]
+		for _, entry := range env {
+			if !strings.HasPrefix(entry, key+"=") {
+				filtered = append(filtered, entry)
+			}
+		}
+		env = append(filtered, key+"="+value)
+	}
 	cmd.Env = env
 	// A server's repositories usually belong to a service or login account,
 	// not to root. Running as that owner means git's "dubious ownership"

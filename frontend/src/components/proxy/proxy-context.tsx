@@ -51,11 +51,3 @@ export function engineUnit(status: ProxyStatus | undefined): string | undefined 
   if (status.caddy && !status.ingressContainer) return "caddy.service"
   return undefined
 }
-
-/** The engine's name and version as one label: "nginx/1.26.3", "Caddy v2.8". */
-export function engineLabel(status: ProxyStatus | undefined): string {
-  if (!status) return "—"
-  if (status.nginx) return `nginx ${status.nginxVersion ?? ""}`.trim()
-  if (status.caddy) return `Caddy ${status.caddyVersion ?? ""}`.trim()
-  return "none detected"
-}

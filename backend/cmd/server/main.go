@@ -27,6 +27,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
@@ -36,6 +37,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--git-editor" {
+		if err := gitx.RunEditor(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	// The container healthcheck re-executes this binary rather than shipping
 	// curl into the image, which keeps the runtime surface smaller.
 	healthcheck := flag.Bool("healthcheck", false, "probe the local server and exit non-zero if it is unhealthy")

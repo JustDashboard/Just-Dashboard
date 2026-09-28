@@ -23,6 +23,11 @@ COPY . .
 # CGO stays off so the binary runs on a slim base without a libc mismatch;
 # the SQLite driver is pure Go precisely so this works.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/just-dashboard ./cmd/server
+# The terminal holder runs on the host, not in this image, for as long as a
+# session lasts — the dashboard copies it out at boot. Static for the same
+# reason as above, and small so each session pins megabytes rather than the
+# whole dashboard. See internal/ptyhold.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/jd-terminal-holder ./cmd/terminal-holder
 
 FROM debian:bookworm-slim
 
@@ -35,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gnupg \
       tzdata \
       git \
+      git-lfs \
       openssh-client \
       systemd \
       tmux \
@@ -123,7 +129,9 @@ https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.lis
 # gh would run as the host's root in the host's namespaces, and the account
 # that actually pushes would never see either half. Signed in from this image,
 # both halves land in the same account's home — which is bind-mounted from the
-# host, so a shell over ssh finds the same credential.
+# host. The helper gh writes names this image's /usr/bin/gh, so ghx rewrites it
+# to plain `gh` and a shell over ssh runs the host's own copy against the same
+# token.
 RUN install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/githubcli.gpg \
@@ -135,6 +143,7 @@ https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cl
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /out/just-dashboard /usr/local/bin/just-dashboard
+COPY --from=build /out/jd-terminal-holder /usr/local/bin/jd-terminal-holder
 
 # Runs as root deliberately: managing systemd units, the firewall, host
 # accounts and a PTY all require it. The security boundary is the network

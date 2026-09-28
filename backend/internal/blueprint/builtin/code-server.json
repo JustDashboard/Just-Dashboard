@@ -7,11 +7,17 @@
   "description": "VS Code in the browser, running on this server with its own home directory. Everything the editor installs — extensions, settings, repositories — lives in the volume.",
   "iconId": "git",
   "docsUrl": "https://coder.com/docs/code-server",
+  "access": {
+    "kind": "token",
+    "secretVariable": "PASSWORD",
+    "path": "/login",
+    "note": "code-server has no user accounts. The generated value of PASSWORD is the whole credential: the first visit redirects to /login, which is a single password box, and you paste it there. Logins are rate-limited to two per minute plus twelve per hour, and anyone holding that one value gets a full editor and terminal inside the container."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/coder/code-server",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -24,8 +30,8 @@
       "name": "domain",
       "kind": "domain",
       "label": "Public domain",
-      "required": false,
-      "description": "Optional; the address other people open; nothing else here changes when it does."
+      "required": true,
+      "description": "The editor is only published through the proxy, so this is the address it answers on."
     }
   ],
   "ports": [
@@ -77,8 +83,8 @@
   "fixtures": [
     {
       "name": "default",
-      "inputs": {},
-      "digest": "sha256:2ee39b3fad7c001870d7a5875cc3b248235230cb8e03de14a3047fca0587a608"
+      "inputs": { "domain":  "code-server.example.test" },
+      "digest": "sha256:8c43c985dc8f67149b747814bbde9b66baf09eb2a513a0107d9bd16d025604af"
     }
   ],
   "secrets": [

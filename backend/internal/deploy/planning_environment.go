@@ -1,0 +1,123 @@
+package deploy
+
+import (
+	"slices"
+	"sort"
+)
+
+func (d *Draft) refreshEnvironmentKeys() {
+	d.EnvironmentKeys = nil
+	for name := range d.environment {
+		// Empty overrides still suppress defaults and must survive a resumed form.
+		d.EnvironmentKeys = append(d.EnvironmentKeys, name)
+	}
+	sort.Strings(d.EnvironmentKeys)
+}
+
+func (d *Draft) withEnvironmentMetadata(configuration PlanConfiguration) PlanConfiguration {
+	seen := map[string]bool{}
+	for _, variable := range configuration.Variables {
+		seen[variable.Name] = true
+	}
+	// Existing declarations remain the fallback when an override is removed,
+	// including an automatic password generator and operator-selected scopes.
+	// Commit marks the supplied value secret independently of its fallback,
+	// unless it is browser-public (suppliedVariableSensitivity).
+	names := make([]string, 0, len(d.environment))
+	for name := range d.environment {
+		if !seen[name] {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	installOnly := d.installOnlyCredentials()
+	for _, name := range names {
+		scopes := []string{"runtime", "build"}
+		if installOnly[name] {
+			// Only the install reads a registry token, so the running
+			// application never receives it.
+			scopes = []string{"build"}
+		}
+		configuration.Variables = append(configuration.Variables, PlannedVariable{
+			Name: name, Sensitivity: suppliedVariableSensitivity(PlannedVariable{Name: name, Sensitivity: "plain"}),
+			Scopes: scopes,
+		})
+	}
+	return canonicalConfiguration(d.withInstallCredentials(configuration))
+}
+
+// installOnlyCredentials are the registry credentials detection found in a
+// package manager's configuration and nowhere the source reads at run time.
+func (d *Draft) installOnlyCredentials() map[string]bool {
+	names := map[string]bool{}
+	candidate := selectedDetectionCandidate(d.Data.Detection)
+	if candidate == nil {
+		return names
+	}
+	for _, detected := range candidate.Variables {
+		if detected.Step == "install" && len(detected.Sources) > 0 && !slices.ContainsFunc(detected.Sources, func(source string) bool {
+			return !registryConfigSource(source)
+		}) {
+			names[detected.Name] = true
+		}
+	}
+	return names
+}
+
+// withInstallCredentials maps each registry credential detection found in a
+// package manager's configuration to the install step, when the plan gives
+// it a build-scoped value and has not mapped it already: the install is the
+// one step that reads it, and a value left on the build step never reaches
+// the install that fails without it.
+func (d *Draft) withInstallCredentials(configuration PlanConfiguration) PlanConfiguration {
+	candidate := selectedDetectionCandidate(d.Data.Detection)
+	if candidate == nil || configuration.Build.Method != BuildRecipe {
+		return configuration
+	}
+	for _, detected := range candidate.Variables {
+		if detected.Step != "install" || slices.ContainsFunc(configuration.Build.Secrets, func(secret BuildSecretConfig) bool {
+			return secret.Variable == detected.Name
+		}) {
+			continue
+		}
+		if slices.ContainsFunc(configuration.Variables, func(variable PlannedVariable) bool {
+			return variable.Name == detected.Name && slices.Contains(variable.Scopes, "build")
+		}) {
+			configuration.Build.Secrets = append(configuration.Build.Secrets, BuildSecretConfig{Variable: detected.Name, Step: "install"})
+		}
+	}
+	return configuration
+}
+
+// suppliedVariableSensitivity is how a value typed into the environment is
+// stored: secret, because that is where secrets are typed — except a
+// browser-public name (NEXT_PUBLIC_, VITE_, …) not declared secret, whose
+// value the framework compiles into the page's JavaScript by design. Keeping
+// that one plain is what lets a custom Dockerfile or a Compose build receive
+// it as a build argument, which a secret never becomes.
+func suppliedVariableSensitivity(declared PlannedVariable) string {
+	if declared.Sensitivity == "plain" && publicBuildVariable(declared.Name) {
+		return "plain"
+	}
+	return "secret"
+}
+
+// The same precedence is used for required checks, reference validation and
+// commit, including a deliberately empty input overriding a generated default.
+func (d *Draft) variableValues(configuration PlanConfiguration) map[string]string {
+	values := make(map[string]string, len(configuration.Variables))
+	for _, variable := range configuration.Variables {
+		switch {
+		case variable.Reference != "":
+			values[variable.Name] = variable.Reference
+		case variable.Generate != 0:
+			values[variable.Name] = "generated-at-commit"
+		default:
+			values[variable.Name] = variable.Value
+		}
+	}
+	for name, value := range d.environment {
+		values[name] = value
+	}
+	return values
+}

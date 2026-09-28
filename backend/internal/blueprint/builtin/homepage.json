@@ -4,14 +4,19 @@
   "name": "Homepage",
   "category": "http",
   "profile": "web",
-  "description": "A start page for a server: bookmarks, service tiles and widgets, all from YAML files in its config volume. Its own host-name check is left to the proxy in front of it, which only ever forwards the domain configured here.",
+  "description": "A start page for a server: bookmarks, service tiles and widgets, all from YAML files in its config volume. It is published with its own sign-in gate on, so the password generated here is what opens it.",
   "iconId": "globe",
   "docsUrl": "https://gethomepage.dev/",
+  "access": {
+    "kind": "token",
+    "secretVariable": "HOMEPAGE_AUTH_PASSWORD",
+    "note": "Homepage asks for a password and no user name, so the generated password here is the whole credential and everyone who uses the page shares it. Reveal it from the Variables tab and paste it into the sign-in form the address opens on."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-3.0",
     "upstreamUrl": "https://github.com/gethomepage/homepage",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -24,8 +29,8 @@
       "name": "domain",
       "kind": "domain",
       "label": "Public domain",
-      "required": false,
-      "description": "Optional; the address other people open; nothing else here changes when it does."
+      "required": true,
+      "description": "The address other people open. Sign-in needs it too: Homepage refuses to start with the gate on and no address to sign cookies for."
     }
   ],
   "ports": [
@@ -57,7 +62,7 @@
       "kind": "http",
       "phase": "readiness",
       "required": true,
-      "path": "/",
+      "path": "/api/healthcheck",
       "timeoutSeconds": 60
     }
   ],
@@ -73,6 +78,16 @@
         "kind": "set_variable",
         "name": "HOMEPAGE_ALLOWED_HOSTS",
         "value": "*"
+      },
+      {
+        "kind": "set_variable",
+        "name": "HOMEPAGE_AUTH_ENABLED",
+        "value": "true"
+      },
+      {
+        "kind": "set_variable",
+        "name": "HOMEPAGE_EXTERNAL_URL",
+        "value": "https://{{input.domain}}"
       }
     ]
   },
@@ -80,12 +95,28 @@
     "detector": "registry",
     "notes": "Configuration files carry over between versions."
   },
+  "secrets": [
+    {
+      "name": "auth-password",
+      "variable": "HOMEPAGE_AUTH_PASSWORD",
+      "label": "Sign-in password",
+      "length": 32,
+      "description": "The whole credential: Homepage asks for a password and no user name."
+    },
+    {
+      "name": "auth-secret",
+      "variable": "HOMEPAGE_AUTH_SECRET",
+      "label": "Session signing key",
+      "length": 48,
+      "description": "Signs the sign-in cookie. Changing it signs everyone out."
+    }
+  ],
   "security": {},
   "fixtures": [
     {
       "name": "default",
-      "inputs": {},
-      "digest": "sha256:e279884db0dfc8aae7e3ecd7691372ec89f927243a9b4c766d2b6e9363640708"
+      "inputs": { "domain": "home.example.test" },
+      "digest": "sha256:06aee95879e911b301c8a41e577ada51f5eb74e8dcd6ffcccc0697184c5975ba"
     }
   ]
 }

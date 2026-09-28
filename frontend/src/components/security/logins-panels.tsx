@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
 import { ClockRewind, Logout, Users } from "@/components/icons"
 import { get, post, ApiError } from "@/lib/api"
@@ -11,14 +12,17 @@ import type { AttackSummary, LoginRecord, LoginSession } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { PageHeader, SearchInput } from "@/components/page"
+import { PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { IconAction, RowActions } from "@/components/icon-action"
+import { IconAction, DimActions } from "@/components/icon-action"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
+import { Address, PeerIdentity } from "@/components/security/marks"
+import { InitialsMark } from "@/components/account/user-avatar"
+import { ProductLogo } from "@/components/product-logo"
+import { Meter } from "@/components/meter"
 import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import { VerbActions } from "@/components/verbs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
@@ -35,7 +39,10 @@ import {
  * The three halves of "who has been on this machine": a snapshot of the
  * interactive logins right now, who has been trying and failing — the
  * question that actually matters on an exposed host — and who got in, which
- * the host has been keeping in wtmp all along.
+ * the host has been keeping in wtmp all along. A person is drawn as their
+ * initials in the hue the users list gives them, an address as the network it
+ * is on, and an attacker's attempts against the most persistent one's as a
+ * meter, so the row worth blocking is found before its figure is read.
  */
 export function LoginsPanels() {
   const { can } = useAuth()
@@ -44,10 +51,7 @@ export function LoginsPanels() {
     (signal) => get<LoginSession[]>("/ssh-sessions", undefined, signal),
     10000,
   )
-  const history = usePoll(
-    (signal) => get<LoginRecord[]>("/logins", { limit: 100 }, signal),
-    60000,
-  )
+  const history = usePoll((signal) => get<LoginRecord[]>("/logins", { limit: 100 }, signal), 60000)
   // Failed attempts are admin-only: btmp records whatever was typed at a
   // login prompt, and what people type at a login prompt is sometimes their
   // password in the username field.
@@ -65,22 +69,7 @@ export function LoginsPanels() {
 
   return (
     <>
-      <PageHeader
-        eyebrow="Security"
-        title="Logins"
-        actions={
-          sessions.data && (
-            <Status
-              verdict={remote > 0 ? "notice" : "ok"}
-              label={
-                list.length === 0
-                  ? "nobody logged in"
-                  : `${list.length} session${list.length === 1 ? "" : "s"}${remote > 0 ? `, ${remote} over ssh` : ""}`
-              }
-            />
-          )
-        }
-      />
+      <PageContext eyebrow="Security" title="Logins" />
 
       <StatGrid columns={4}>
         <StatTile
@@ -122,8 +111,10 @@ export function LoginsPanels() {
       </StatGrid>
 
       <CurrentSessions poll={sessions} />
-      {admin && <AttackersPanel poll={attackers} />}
-      <LoginHistoryPanel history={history} />
+      <div className={cn("grid min-w-0 items-start gap-6", admin && "2xl:grid-cols-2")}>
+        {admin && <AttackersPanel poll={attackers} />}
+        <LoginHistoryPanel history={history} />
+      </div>
     </>
   )
 }
@@ -136,8 +127,15 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
 
   return (
     <>
-      <Panel plain>
-        <PanelHeader title="Interactive logins" />
+      <Panel>
+        <PanelHeader
+          title="Interactive logins"
+          actions={
+            <span className="numeric text-hint text-muted-foreground">
+              {sessions.length} open {sessions.length === 1 ? "session" : "sessions"}
+            </span>
+          }
+        />
         <PanelBody flush>
           {loading && !data ? (
             <LoadingPanel rows={3} className="mt-3" />
@@ -151,37 +149,51 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
               className="mt-3"
             />
           ) : (
-            <div className="-mx-4 min-w-0">
+            <div className="min-w-0 group-data-[plain]/panel:-mx-4">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>User</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="hidden sm:table-cell">Terminal</TableHead>
-                    <TableHead className="hidden md:table-cell">Logged in</TableHead>
-                    <TableHead className="hidden lg:table-cell">Idle</TableHead>
-                    <TableHead className="w-full">From</TableHead>
-                    <TableHead className="w-px" />
+                    <TableHead>Account</TableHead>
+                    <TableHead className="w-full">Connection</TableHead>
+                    <TableHead>Session</TableHead>
+                    <TableHead className="w-px">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {sessions.map((session, i) => (
                     <TableRow key={`${session.user}-${session.tty}-${i}`} className="group">
-                      <TableCell className="text-body font-medium">{session.user}</TableCell>
+                      <TableCell className="py-4">
+                        <div className="flex items-center gap-3">
+                          <InitialsMark name={session.user} />
+                          <div className="space-y-1">
+                            <span className="block text-body font-medium">{session.user}</span>
+                            <span className="font-mono text-hint text-muted-foreground">
+                              {session.tty} · {session.isSsh ? "SSH" : "local"}
+                            </span>
+                          </div>
+                        </div>
+                      </TableCell>
                       <TableCell>
-                        <Tag>{session.isSsh ? "ssh" : "local"}</Tag>
+                        <Address ip={session.from || "local"} />
                       </TableCell>
-                      <TableCell className="hidden font-mono sm:table-cell">{session.tty}</TableCell>
-                      <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">
-                        {session.loginTime ? timestamp(session.loginTime) : "—"}
+                      <TableCell>
+                        <div className="space-y-1.5">
+                          <span
+                            className="block text-body"
+                            title={session.loginTime ? timestamp(session.loginTime) : undefined}
+                          >
+                            {session.loginTime ? relativeTime(session.loginTime) : "—"}
+                          </span>
+                          <span className="block text-hint text-muted-foreground">
+                            Idle: {session.idle || "—"}
+                          </span>
+                        </div>
                       </TableCell>
-                      <TableCell className="numeric hidden text-muted-foreground lg:table-cell">
-                        {session.idle ?? "—"}
-                      </TableCell>
-                      <TableCell className="font-mono">{session.from || "local"}</TableCell>
                       <TableCell>
                         {can("system.admin") && session.pid ? (
-                          <RowActions className="justify-end">
+                          <DimActions className="justify-end">
                             <IconAction
                               label={`Disconnect ${session.user}`}
                               className="text-destructive"
@@ -206,7 +218,7 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
                             >
                               <Logout />
                             </IconAction>
-                          </RowActions>
+                          </DimActions>
                         ) : null}
                       </TableCell>
                     </TableRow>
@@ -237,6 +249,7 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
   const [blocking, setBlocking] = useState<string | null>(null)
   const { data, error, loading, refresh } = poll
   const unavailable = error instanceof ApiError && error.code === "login_history_unavailable"
+  const most = Math.max(1, ...(data?.attackers ?? []).map((a) => a.attempts))
 
   const block = async (ip: string) => {
     setBlocking(ip)
@@ -254,7 +267,7 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
   }
 
   return (
-    <Panel plain>
+    <Panel>
       <PanelHeader
         title="Attackers"
         actions={
@@ -269,7 +282,11 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
       />
       <PanelBody flush>
         {unavailable ? (
-          <Notice tone="default" title="This host cannot read its failed-login record" className="mt-3">
+          <Notice
+            tone="default"
+            title="This host cannot read its failed-login record"
+            className="mt-3"
+          >
             <code className="font-mono">lastb</code> reads btmp and comes from{" "}
             <code className="font-mono">util-linux-extra</code>, which minimal cloud images leave
             out. Install it and this fills in.
@@ -290,49 +307,56 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
             className="mt-3"
           />
         ) : (
-          <div className="-mx-4 min-w-0">
+          <div className="min-w-0 group-data-[plain]/panel:-mx-4">
             <Table containerClassName="max-h-[28rem]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>
                   <TableHead>Address</TableHead>
-                  <TableHead>Attempts</TableHead>
-                  <TableHead className="hidden w-full sm:table-cell">Accounts tried</TableHead>
-                  <TableHead className="hidden md:table-cell">First</TableHead>
-                  <TableHead className="hidden sm:table-cell">Last</TableHead>
-                  <TableHead className="w-px" />
+                  <TableHead className="w-full">Attempts</TableHead>
+                  <TableHead>
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.attackers.map((attacker) => (
                   <TableRow key={attacker.address} className="group">
-                    <TableCell className="font-mono">{attacker.address}</TableCell>
+                    <TableCell className="py-4">
+                      <PeerIdentity ip={attacker.address} />
+                      <span className="mt-2 block text-hint text-muted-foreground">
+                        {attacker.users.length
+                          ? `Tried ${attacker.users.join(", ")}`
+                          : "No accounts recorded"}
+                      </span>
+                    </TableCell>
                     <TableCell>
-                      <span
-                        className={cn(
-                          "numeric text-xs font-medium",
-                          attacker.attempts >= 50 ? "text-destructive" : "text-muted-foreground",
-                        )}
-                      >
-                        {attacker.attempts}
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden sm:table-cell">
-                      <span className="flex flex-wrap gap-1">
-                        {attacker.users.map((user) => (
-                          <Tag key={user} mono>
-                            {user}
-                          </Tag>
-                        ))}
-                        {attacker.users.length === 0 && (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">
-                      {relativeTime(attacker.first)}
-                    </TableCell>
-                    <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">
-                      {relativeTime(attacker.last)}
+                      <div className="min-w-24 space-y-2">
+                        <div className="flex items-center justify-between gap-4">
+                          <span
+                            className={cn(
+                              "numeric text-body font-medium",
+                              attacker.attempts >= 50 && "text-destructive",
+                            )}
+                          >
+                            {attacker.attempts}
+                          </span>
+                          <span
+                            className="text-hint text-muted-foreground"
+                            title={`Last: ${timestamp(attacker.last)}`}
+                          >
+                            {relativeTime(attacker.last)}
+                          </span>
+                        </div>
+                        <Meter
+                          value={(attacker.attempts / most) * 100}
+                          tone={attacker.attempts >= 50 ? "danger" : "default"}
+                          size="thin"
+                          label={`${attacker.attempts} attempts`}
+                        />
+                        <span className="block text-hint text-muted-foreground">
+                          Since {relativeTime(attacker.first)}
+                        </span>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <VerbActions
@@ -366,8 +390,8 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
  */
 function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<LoginRecord[]>> }) {
   const { can } = useAuth()
-  const [failed, setFailed] = useState(false)
-  const [query, setQuery] = useState("")
+  const [failed, setFailed] = useSessionState("security.logins.failed", false)
+  const [query, setQuery] = useSessionState("security.logins.query", "")
   const admin = can("system.admin")
   const showFailed = failed && admin
 
@@ -388,7 +412,7 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
   }, [data, query])
 
   return (
-    <Panel plain>
+    <Panel>
       <PanelHeader
         title={showFailed ? "Failed login attempts" : "Recent logins"}
         actions={
@@ -432,15 +456,15 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
           <Notice tone="default" title="This host cannot read its login record" className="mt-3">
             <div className="space-y-1.5">
               <p>
-                <code className="font-mono">last</code> and{" "}
-                <code className="font-mono">lastb</code> are what read wtmp and btmp, and they
-                come from <code className="font-mono">util-linux-extra</code> — which minimal
-                cloud images leave out. Install it and this fills in; the records themselves have
-                been there all along.
+                <code className="font-mono">last</code> and <code className="font-mono">lastb</code>{" "}
+                are what read wtmp and btmp, and they come from{" "}
+                <code className="font-mono">util-linux-extra</code> — which minimal cloud images
+                leave out. Install it and this fills in; the records themselves have been there all
+                along.
               </p>
               <p>
-                Until then this page has no answer, which is not the same as a host nobody has
-                tried to log in to.
+                Until then this page has no answer, which is not the same as a host nobody has tried
+                to log in to.
               </p>
             </div>
           </Notice>
@@ -459,42 +483,53 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
             />
           )
         ) : (
-          <div className="-mx-4 min-w-0">
+          <div className="min-w-0 group-data-[plain]/panel:-mx-4">
             <Table containerClassName="max-h-[28rem]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead className="hidden sm:table-cell">Terminal</TableHead>
+                  <TableHead>Account</TableHead>
+                  <TableHead className="w-full">Origin</TableHead>
                   <TableHead>When</TableHead>
-                  <TableHead className="hidden md:table-cell">Lasted</TableHead>
-                  <TableHead className="w-full">From</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {shown.map((record, i) => (
                   <TableRow key={`${record.user}-${record.loginTime ?? i}-${i}`}>
-                    <TableCell className="text-body font-medium">
-                      <span className="flex items-center gap-2">
-                        {record.user}
-                        {record.kind !== "login" && (
-                          <Tag>{record.kind === "boot" ? "boot" : "shutdown"}</Tag>
+                    <TableCell className="py-4">
+                      <div className="flex items-center gap-3">
+                        {record.kind === "login" ? (
+                          <InitialsMark name={record.user} />
+                        ) : (
+                          <ProductLogo id="linux" size="sm" />
                         )}
-                      </span>
+                        <div className="space-y-1">
+                          <span className="block text-body font-medium">{record.user}</span>
+                          <span className="block font-mono text-hint text-muted-foreground">
+                            {record.kind === "login" ? record.tty || "—" : record.kind}
+                          </span>
+                        </div>
+                      </div>
                     </TableCell>
-                    <TableCell className="hidden font-mono sm:table-cell">
-                      {record.tty || "—"}
+                    <TableCell className="whitespace-normal">
+                      <Address ip={record.from || "local"} />
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {record.loginTime ? timestamp(record.loginTime) : "—"}
+                    <TableCell>
+                      <div className="space-y-1.5">
+                        <span
+                          className="block text-body"
+                          title={record.loginTime ? timestamp(record.loginTime) : undefined}
+                        >
+                          {record.loginTime ? relativeTime(record.loginTime) : "—"}
+                        </span>
+                        {record.active ? (
+                          <Status state="active" label="still open" />
+                        ) : (
+                          <span className="block text-hint text-muted-foreground">
+                            {record.duration ?? record.ended ?? "—"}
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
-                    <TableCell className="numeric hidden text-muted-foreground md:table-cell">
-                      {record.active ? (
-                        <Status state="active" label="still open" />
-                      ) : (
-                        (record.duration ?? record.ended ?? "—")
-                      )}
-                    </TableCell>
-                    <TableCell className="font-mono">{record.from || "local"}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -4,18 +4,24 @@
   "name": "Nextcloud",
   "category": "http",
   "profile": "web",
-  "description": "Files, calendars, contacts and the apps around them. This runs on SQLite, which is right for a few people; link a PostgreSQL or MariaDB database later for more.",
+  "description": "Files, calendars, contacts and the apps around them. This runs on SQLite, which is right for a few people and is what one image can carry.",
   "iconId": "globe",
   "docsUrl": "https://docs.nextcloud.com/",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "NEXTCLOUD_ADMIN_USER",
+    "secretVariable": "NEXTCLOUD_ADMIN_PASSWORD",
+    "note": "Nextcloud installs itself before the first page loads, so the address opens straight onto a login form for the admin user named here with the password generated here. Reveal it from the Variables tab and sign in; there is no setup wizard to walk through."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "AGPL-3.0",
     "upstreamUrl": "https://github.com/nextcloud/server",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
-    "reference": "nextcloud:35.0.0-apache",
+    "reference": "nextcloud:34.0.4-apache",
     "tagPolicy": "pinned",
     "pullPolicy": "missing"
   },
@@ -67,7 +73,7 @@
       "phase": "readiness",
       "required": true,
       "path": "/status.php",
-      "timeoutSeconds": 180
+      "timeoutSeconds": 360
     }
   ],
   "operations": {
@@ -90,6 +96,16 @@
       },
       {
         "kind": "set_variable",
+        "name": "OVERWRITECLIURL",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "TRUSTED_PROXIES",
+        "value": "10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
+      },
+      {
+        "kind": "set_variable",
         "name": "SQLITE_DATABASE",
         "value": "nextcloud"
       }
@@ -107,7 +123,7 @@
       "inputs": {
         "domain": "cloud.example.test"
       },
-      "digest": "sha256:5db1460a2ba429588b55c17538802c3d87c20749aa312d7bcb619fa400786d80"
+      "digest": "sha256:c272acddd6b31eba7591453f67bf58c37ba295ff12770cd38ce3f74751c54bc5"
     }
   ],
   "secrets": [

@@ -7,11 +7,17 @@
   "description": "The default relational database. It is never published to the network: other containers reach it over the Docker network, and the dashboard's Databases page connects to it directly.",
   "iconId": "database",
   "docsUrl": "https://www.postgresql.org/docs/16/index.html",
+  "access": {
+    "kind": "client",
+    "usernameVariable": "POSTGRES_USER",
+    "secretVariable": "POSTGRES_PASSWORD",
+    "note": "Nothing signs in through a browser: port 5432 is internal-only and never proxied, so this deployment has no address to open. Other containers reach it over the Docker network as the user you named here, with the generated password revealed from the Variables tab, and the dashboard's Databases page picks up the same pair on its own. Note that POSTGRES_USER is the cluster superuser, not an account scoped to one database."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "PostgreSQL",
     "upstreamUrl": "https://hub.docker.com/_/postgres",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": { "reference": "postgres:16-alpine", "tagPolicy": "minor", "pullPolicy": "missing" },
@@ -30,7 +36,7 @@
   ],
   "resources": { "memoryMb": 512, "minMemoryMb": 256 },
   "checks": [
-    { "name": "Accepts connections", "kind": "command", "phase": "readiness", "required": true, "command": ["pg_isready", "-U", "postgres"], "timeoutSeconds": 60 }
+    { "name": "Accepts connections", "kind": "command", "phase": "readiness", "required": true, "command": ["pg_isready", "-h", "127.0.0.1"], "timeoutSeconds": 60 }
   ],
   "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGINT" }] },
   "automation": [
@@ -38,5 +44,5 @@
   ],
   "update": { "detector": "registry", "backupFirst": true, "notes": "PostgreSQL major versions need an explicit dump and restore; the minor tag policy keeps this blueprint inside one major." },
   "security": {},
-  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:a1cf75db1eafabba2db9306d6935ea9a4216b12be681229f31e69783b22a31cf" }]
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:4f7c8a1ab41539ff85468ea662ca072b59e9961c5165dd1826d9fd6dc9a04517" }]
 }

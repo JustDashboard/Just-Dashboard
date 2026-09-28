@@ -7,11 +7,15 @@
   "description": "A tiny HTTP server that answers with the request it received: the hostname, the headers, the client address. The right first deployment for checking that a domain, a certificate and the proxy line up before anything real depends on them.",
   "iconId": "globe",
   "docsUrl": "https://github.com/traefik/whoami",
+  "access": {
+    "kind": "open",
+    "note": "whoami has no authentication of any kind, so anyone who reaches this address is shown the container's hostname and IP addresses, their own client IP, and every header the reverse proxy forwarded. It is worse than it looks: GET /?env=true prints the container's entire environment to any anonymous caller, so never put a variable on this deployment you would not publish."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/traefik/whoami",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

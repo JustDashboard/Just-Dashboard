@@ -33,10 +33,31 @@ type RuntimeService struct {
 	Stack       string     `json:"stack,omitempty"`
 	Service     string     `json:"service,omitempty"`
 	StartedAt   *time.Time `json:"startedAt,omitempty"`
+	// Image is the reference the container was created from, as Docker
+	// reports it, so a service can be drawn as the product it runs.
+	Image string `json:"image,omitempty"`
 }
 
 func ObserveRuntimeServices(ctx context.Context, owner RuntimeObserver, environmentID, liveReleaseID int64) RuntimeServices {
 	return observeRuntimeServices(ctx, owner, environmentID, liveReleaseID, 0)
+}
+
+// ReleaseRuntimeDown is true when Docker holds the release's containers and
+// none of them is running. A runtime recorded live goes down without a stop
+// run when its containers exit, are stopped in Docker, or are not brought back
+// after a daemon restart; the project page reads that as stopped and offers
+// Start, so start admission has to accept the same observation.
+func ReleaseRuntimeDown(ctx context.Context, owner RuntimeObserver, runtime ReleaseRuntime) bool {
+	observed := observeRuntimeServices(ctx, owner, runtime.EnvironmentID, runtime.ReleaseID, runtime.ReleaseID)
+	if observed.Status != "available" || len(observed.Services) == 0 {
+		return false
+	}
+	for _, service := range observed.Services {
+		if service.State == "running" {
+			return false
+		}
+	}
+	return true
 }
 
 func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environmentID, liveReleaseID, onlyReleaseID int64) RuntimeServices {
@@ -68,8 +89,11 @@ func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 	result.Status = "available"
 	result.ObservedAt = time.Now().UTC()
 	for _, item := range containers {
+		// A release task's one-shot container carries its release's labels
+		// but is not one of the release's services.
 		if item.Labels["io.just-dashboard.managed"] != "true" ||
-			item.Labels["io.just-dashboard.environment-id"] != labels["io.just-dashboard.environment-id"] {
+			item.Labels["io.just-dashboard.environment-id"] != labels["io.just-dashboard.environment-id"] ||
+			item.Labels[releaseTaskLabel] != "" {
 			continue
 		}
 		releaseID, err := strconv.ParseInt(item.Labels["io.just-dashboard.release-id"], 10, 64)
@@ -84,7 +108,7 @@ func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 			ContainerID: item.ID, Name: item.Name, ReleaseID: releaseID,
 			LiveRelease: releaseID == liveReleaseID, State: item.State,
 			Health: health, ImageID: item.ImageID, Stack: item.ComposeStack,
-			Service: item.ComposeSvc, StartedAt: item.StartedAt,
+			Service: item.ComposeSvc, StartedAt: item.StartedAt, Image: item.Image,
 		})
 	}
 	sort.Slice(result.Services, func(i, j int) bool {

@@ -42,11 +42,32 @@ type Server struct {
 	// scans are enough for the UI without letting requests multiply host I/O.
 	diskScans chan struct{}
 
+	// Reserve database names during image pulls so concurrent quick setups
+	// cannot both select the same free container and persistent volume.
+	databaseProvisionMu    sync.Mutex
+	databaseProvisionNames map[string]bool
+
 	// The dashboard's own address, for links that leave the dashboard
 	// (notifications, commit statuses). See dashboardEndpoint.
 	endpointMu       sync.Mutex
 	endpointCache    string
 	endpointCachedAt time.Time
+
+	// The icons deployed websites declare, read once an hour per project.
+	favicons faviconCache
+
+	// The GitHub accounts' own pictures, read once an hour per account.
+	avatars avatarCache
+
+	// The reference a bare image id was created from, by image id, for
+	// choosing a container's log lens. The container list reports a moved
+	// tag's image as sha256:…, and a Postgres container read as an app is
+	// the first thing a database page would get wrong.
+	logImageRefs sync.Map
+
+	// Each database connection's logs as last resolved, by connection id,
+	// for the page's two polls to share (handlers_db_logs.go).
+	dbLogSourcesKept sync.Map
 
 	modules moduleSet
 }
@@ -95,6 +116,11 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.backupRunner.RecoverRestoreChecks(cleanupCtx); err != nil {
 		s.Log.Warn("backup restore verification cleanup needs attention", "err", err)
 	}
+	// Before the engine resumes any run: a release task this process's
+	// predecessor was running has nobody reading its output or its exit.
+	if err := s.modules.deployRuntime.RemoveOrphanedReleaseTasks(cleanupCtx); err != nil {
+		s.Log.Warn("release task containers left by a previous start could not be removed", "err", err)
+	}
 	cleanupCancel()
 	// The metrics recorder is started here rather than lazily on the first
 	// request precisely because nothing may ever request it: its whole
@@ -138,12 +164,34 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	s.modules.deploySchedule.Start(ctx)
-	if err := s.modules.deployEngine.Start(ctx); err != nil {
+	s.modules.trafficAlerts.Start(ctx)
+	if err := s.startDeployEngine(ctx); err != nil {
 		return err
 	}
 	s.modules.deployGit.Start(ctx)
+	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)
 	return nil
+}
+
+// startDeployEngine puts tailscale's serve config and the preview address
+// table in agreement, then starts the engine — in that order. A restart may
+// have left a served port whose preview is gone, or a preview recorded as
+// reachable that nothing serves, and both are put right before any preview
+// page reads the record. The engine comes second because a run it resumes at
+// boot may publish a preview the moment it starts, and a sweep still reading
+// the config would take that fresh mapping for a dead one.
+func (s *Server) startDeployEngine(ctx context.Context) error {
+	sweepCtx, sweepCancel := context.WithTimeout(ctx, 2*time.Minute)
+	sweep, err := s.modules.deployExecutor.SweepTailnet(sweepCtx)
+	sweepCancel()
+	if len(sweep.Withdrawn) > 0 || len(sweep.Unpublished) > 0 {
+		s.Log.Info("tailnet preview addresses reconciled", "withdrawnPorts", sweep.Withdrawn, "unpublishedEnvironments", sweep.Unpublished)
+	}
+	if err != nil {
+		s.Log.Warn("tailnet preview addresses need attention", "error", err)
+	}
+	return s.modules.deployEngine.Start(ctx)
 }
 
 // Shutdown releases the resources that outlive a request: database pools,
@@ -151,6 +199,7 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) Shutdown() {
 	s.modules.deployPreviews.Stop()
 	s.modules.deployGit.Stop()
+	s.modules.previewReconciler.Stop()
 	s.modules.deployDatabases.Stop()
 	// Stop fresh claims first. Active work is given a bounded grace to reach a
 	// persisted boundary; Engine.Shutdown never injects a cancellation into an

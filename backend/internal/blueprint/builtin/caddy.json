@@ -4,36 +4,37 @@
   "name": "Caddy",
   "category": "http",
   "profile": "web",
-  "description": "A web server that obtains its own certificates. Useful as a second server behind the dashboard's proxy, or on a host where nginx is not installed.",
+  "description": "Serves a directory of files over HTTP using Caddy's built-in static file server. TLS is the dashboard's own Caddy in front of it, so this one obtains no certificates of its own.",
   "iconId": "globe",
   "docsUrl": "https://caddyserver.com/docs/",
+  "access": {
+    "kind": "open",
+    "note": "There is no login and no upload page: anyone who reaches this address can read every file in the site volume. A fresh deploy answers with Caddy's own welcome page, because Docker seeds the empty volume from the image; put your own files in with the dashboard's file manager, and keep an index.html at the root or requests to / answer 403."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Apache-2.0",
     "upstreamUrl": "https://hub.docker.com/_/caddy",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
-  "image": { "reference": "caddy:2.9-alpine", "tagPolicy": "minor", "pullPolicy": "missing" },
+  "image": { "reference": "caddy:2.11-alpine", "tagPolicy": "minor", "pullPolicy": "missing" },
   "inputs": [
-    { "name": "domain", "kind": "domain", "label": "Public domain", "description": "Leave empty to serve only behind the dashboard's own proxy." }
+    { "name": "domain", "kind": "domain", "label": "Public domain", "description": "The address other people open. Nothing inside the container reads it." }
   ],
   "ports": [
     { "name": "http", "internal": 80, "protocol": "tcp", "purpose": "HTTP requests", "exposure": "proxy", "primary": true }
   ],
   "volumes": [
     { "name": "site", "target": "/usr/share/caddy", "purpose": "The files this site serves", "data": true, "backup": true },
-    { "name": "config", "target": "/data", "purpose": "Certificates and Caddy's own state", "data": true, "backup": true }
+    { "name": "state", "target": "/data", "purpose": "Caddy's own state", "data": true, "backup": true }
   ],
   "resources": { "memoryMb": 256, "minMemoryMb": 64 },
   "checks": [
     { "name": "Serves the site root", "kind": "http", "phase": "readiness", "required": true, "path": "/", "timeoutSeconds": 30 }
   ],
   "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
-  "files": [
-    { "path": "/etc/caddy/Caddyfile", "label": "Caddyfile", "format": "raw", "restartRequired": true }
-  ],
-  "update": { "detector": "registry", "notes": "Caddy keeps its certificates in the data volume across upgrades." },
+  "update": { "detector": "registry", "notes": "Stateless apart from the site files; the served directory carries over between versions." },
   "security": {},
-  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:fc2e0a01773d3b9ca73e159ee3159a47e4b9a2e29565be5ea597ae7c123e7514" }]
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:a1d79a80e18d19a7bdb4aaee9414c3b6805e10f7d31a6bde30cd634c475853d0" }]
 }

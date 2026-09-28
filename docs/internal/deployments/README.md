@@ -1,12 +1,16 @@
 # Deployment guides
 
+- [`Deployment creation audit`](../../audits/2026-09-22-deploy-new/README.md) — wizard state, template
+  usability, encrypted draft inputs, database connections and local acceptance evidence.
 - [`implementation.md`](implementation.md) — current implementation, invariants, feature joins, automation, and topology.
-- [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, preview variables, storage, network and cleanup.
+- [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, previews tested from the dashboard, copied production variables, tailnet-only addresses, reconciliation with GitHub, storage, network and cleanup.
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.
-- [`recipes.md`](recipes.md) — build variable delivery, the framework catalogue (JavaScript, Python, Go, Rust, Java, .NET, Deno, PHP), environment discovery, Procfiles, the single-page fallback and toolchain selection.
+- [`recipes.md`](recipes.md) — build variable delivery, the framework catalogue (JavaScript, Python, Go, Rust, Java, .NET, Deno, PHP), environment discovery, Procfiles, where a server listens and whom it trusts behind the proxy, repository shape and candidate selection, other platforms' deployment files, background processes, ecosystems without a recipe, submodules and LFS, the single-page fallback and toolchain selection.
 - [`git-policy.md`](git-policy.md) — shared polling/hook policy, manual-only mode, complete path comparison and decision evidence.
 - [`database-networks.md`](database-networks.md) — logical database URLs, owned networks, replacement reconciliation and cleanup.
+- [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
+  logs, the request readings, container lifecycle events, and the three container-output fixes.
 - [`notifications.md`](notifications.md) — run observers, Discord/Slack/Telegram/e-mail/webhook channels, delivery history, GitHub commit statuses and pull request comments.
 - [`github-app.md`](github-app.md) — the dashboard's GitHub App: manifest flow, installation credentials for clones, App-delivered triggers, statuses and pull request comments.
 - [`gap-closure-plan.md`](../../audits/2026-09-16-deployments/gap-closure-plan.md) — second-pass re-evaluation, defects D1–D7, competitive position and remaining phases.

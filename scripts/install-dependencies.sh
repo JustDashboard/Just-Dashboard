@@ -89,3 +89,60 @@ jd_install_terminal_extras() {
   jd_zsh_plugin_present "$plugin" || { printf 'zsh plugin is still missing: %s\n' "$plugin" >&2; return 1; }
  done
 }
+
+# gh from GitHub's own repository on Debian and Ubuntu, whose packaged copy is
+# years behind on an LTS release; the distribution's elsewhere, falling back to
+# GitHub's RPM repository where the distribution has none. The same source the
+# backend image installs from, so both read the token in one format.
+jd_install_gh() {
+ command -v gh >/dev/null 2>&1 && return 0
+ if command -v apt-get >/dev/null 2>&1; then
+  mkdir -p /etc/apt/keyrings /etc/apt/sources.list.d || return 1
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+   -o /etc/apt/keyrings/githubcli-archive-keyring.gpg || return 1
+  chmod a+r /etc/apt/keyrings/githubcli-archive-keyring.gpg || return 1
+  printf 'deb [arch=%s signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' \
+   "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/github-cli.list || return 1
+  # The index was refreshed before this repository existed.
+  JD_APT_UPDATED=0
+  jd_pkg_install gh || return 1
+ elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+  if ! jd_pkg_install gh; then
+   mkdir -p /etc/yum.repos.d || return 1
+   curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo -o /etc/yum.repos.d/gh-cli.repo || return 1
+   jd_pkg_install gh || return 1
+  fi
+ elif command -v zypper >/dev/null 2>&1; then
+  if ! jd_pkg_install gh; then
+   zypper --non-interactive addrepo https://cli.github.com/packages/rpm/gh-cli.repo || return 1
+   zypper --non-interactive --gpg-auto-import-keys refresh || return 1
+   jd_pkg_install gh || return 1
+  fi
+ else
+  jd_pkg_install github-cli || return 1
+ fi
+ command -v gh >/dev/null 2>&1
+}
+
+# The web terminal and ssh are shells on the host, so a push from either runs
+# the host's git — and the GitHub sign-in made on the Git page reaches it only
+# through the host's gh. The Security tools page runs whois and traceroute on
+# the host for the same reason. Best effort by design: each missing tool is
+# installed on its own so one unavailable package does not cost the others,
+# and what could not be installed is named rather than fatal.
+jd_install_host_tools() {
+ local failed=() tool
+ for tool in git git-lfs whois traceroute; do
+  command -v "$tool" >/dev/null 2>&1 && continue
+  printf 'Installing host tool: %s\n' "$tool"
+  jd_pkg_install "$tool" && command -v "$tool" >/dev/null 2>&1 || failed+=("$tool")
+ done
+ if ! command -v gh >/dev/null 2>&1; then
+  printf 'Installing host tool: gh\n'
+  jd_install_gh || failed+=(gh)
+ fi
+ if [ "${#failed[@]}" -gt 0 ]; then
+  printf 'Could not install: %s\n' "${failed[*]}" >&2
+  return 1
+ fi
+}

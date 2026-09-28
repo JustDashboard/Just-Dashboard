@@ -7,11 +7,15 @@
   "description": "A media server for films, series, music and photos with apps for every screen. Put the media into its volume, or add a bind mount to an existing library under Storage after the first deploy.",
   "iconId": "globe",
   "docsUrl": "https://jellyfin.org/docs/",
+  "access": {
+    "kind": "setup",
+    "note": "Jellyfin has no default account. The first visitor is walked through the setup wizard — language, then the administrator account it creates. Open the address immediately after deploying, because whoever reaches it first becomes the owner of the server."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-2.0",
     "upstreamUrl": "https://github.com/jellyfin/jellyfin",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -62,8 +66,8 @@
     }
   ],
   "resources": {
-    "memoryMb": 1024,
-    "minMemoryMb": 512
+    "memoryMb": 4096,
+    "minMemoryMb": 2048
   },
   "checks": [
     {
@@ -85,7 +89,7 @@
   },
   "update": {
     "detector": "registry",
-    "notes": "Jellyfin migrates its database on start.",
+    "notes": "Jellyfin 12.0 changed the database in a way that cannot be rolled back without a full restore, and the first start after it rebuilds every library. Back up the configuration volume before updating.",
     "backupFirst": true
   },
   "security": {},
@@ -93,7 +97,7 @@
     {
       "name": "default",
       "inputs": {},
-      "digest": "sha256:96fb3921a567f3c5c918a5ff4883fa7cf2bf2c70e020076e8ec5bd232fbb7cc2"
+      "digest": "sha256:cbfa41fcb199bd9a0422011b31d223df30ef5311b91a5f918be4f35272f5abd9"
     }
   ]
 }

@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,6 +42,15 @@ func terminalServer(t *testing.T) (*Server, http.Handler) {
 		t.Fatal(err)
 	}
 	_, loopback, _ := net.ParseCIDR("127.0.0.1/32")
+	// The terminal account is the host's lowest regular account unless one is
+	// named, and a session's clipboard directory is chowned to it. As root the
+	// backend may give a file to anyone; as the account running the tests it
+	// may only keep it, so the tests name that account rather than depend on
+	// it happening to be the lowest one on the machine.
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := &config.Config{
 		Addr:           "127.0.0.1:8080",
 		DataDir:        t.TempDir(),
@@ -50,6 +60,7 @@ func terminalServer(t *testing.T) (*Server, http.Handler) {
 		FileRoots:      []string{t.TempDir()},
 		LogRoots:       []string{t.TempDir()},
 		TerminalEnable: true,
+		TerminalUser:   me.Username,
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL, cfg.Require2FA)

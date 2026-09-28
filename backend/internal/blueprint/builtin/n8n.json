@@ -7,15 +7,19 @@
   "description": "A workflow automation server. Its credentials are encrypted with a key generated here; losing that key loses every stored credential.",
   "iconId": "bolt",
   "docsUrl": "https://docs.n8n.io/",
+  "access": {
+    "kind": "setup",
+    "note": "n8n has no account until someone makes one: the first visitor to https://<domain>/ gets a sign-up form and becomes the instance owner, so open the address the moment the deployment is ready rather than leaving it sitting unclaimed. The password you choose must be at least eight characters with at least one number and one capital letter."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Sustainable Use License",
     "upstreamUrl": "https://github.com/n8n-io/n8n",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7",
     "updateNotes": "Reviewed under the Sustainable Use License: internal business use is permitted, resale as a hosted service is not."
   },
-  "image": { "reference": "n8nio/n8n:1.70.1", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "image": { "reference": "n8nio/n8n:2.39.10", "tagPolicy": "pinned", "pullPolicy": "missing" },
   "inputs": [
     { "name": "domain", "kind": "domain", "label": "Public domain", "required": true, "description": "Webhook URLs are built from this, so external services break if it changes." },
     { "name": "timezone", "kind": "text", "label": "Schedule timezone", "default": "UTC", "variable": "GENERIC_TIMEZONE", "pattern": "^[A-Za-z0-9_+/-]{1,64}$", "description": "Cron nodes fire against this timezone." }
@@ -31,17 +35,18 @@
   ],
   "resources": { "memoryMb": 1024, "minMemoryMb": 512 },
   "checks": [
-    { "name": "Editor answers", "kind": "http", "phase": "readiness", "required": true, "path": "/healthz", "timeoutSeconds": 120 }
+    { "name": "Database ready", "kind": "http", "phase": "readiness", "required": true, "path": "/healthz/readiness", "timeoutSeconds": 300 }
   ],
   "operations": {
     "startup": [
       { "kind": "set_variable", "name": "N8N_HOST", "value": "{{input.domain}}" },
-      { "kind": "set_variable", "name": "WEBHOOK_URL", "value": "https://{{input.domain}}/" },
-      { "kind": "set_variable", "name": "N8N_PROTOCOL", "value": "https" }
+      { "kind": "set_variable", "name": "N8N_WEBHOOK_URL", "value": "https://{{input.domain}}/" },
+      { "kind": "set_variable", "name": "N8N_PROTOCOL", "value": "https" },
+      { "kind": "set_variable", "name": "N8N_PROXY_HOPS", "value": "1" }
     ],
     "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }]
   },
-  "update": { "detector": "registry", "backupFirst": true, "notes": "n8n runs database migrations on start and does not support downgrading across them." },
+  "update": { "detector": "registry", "backupFirst": true, "notes": "n8n runs database migrations on start and does not support downgrading across them. The 2.x line dropped MySQL and MariaDB support and removed several nodes; read the 2.0 breaking changes before moving an existing instance across it." },
   "security": {},
-  "fixtures": [{ "name": "default", "inputs": { "domain": "flows.example.test" }, "digest": "sha256:91454865cd3b921e7ec2f47b6c53bd6370df3dc674f31a0679b181622ad96cec" }]
+  "fixtures": [{ "name": "default", "inputs": { "domain": "flows.example.test" }, "digest": "sha256:86eb4b653f83273078cc47d517b5d561fd0e64810b61c8a97640d153df035bde" }]
 }

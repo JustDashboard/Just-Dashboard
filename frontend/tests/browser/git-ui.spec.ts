@@ -25,7 +25,14 @@ const user = {
   needsTotp: false,
   needsEnrollment: false,
   require2fa: false,
-  capabilities: ["read", "service.control", "file.write", "terminal", "destructive", "system.admin"],
+  capabilities: [
+    "read",
+    "service.control",
+    "file.write",
+    "terminal",
+    "destructive",
+    "system.admin",
+  ],
   user: {
     id: 1,
     username: "operator",
@@ -83,7 +90,14 @@ const status = {
   files: [
     { path: "a.txt", index: "M", worktree: "M", label: "modified", staged: true, unstaged: true },
     { path: "b.txt", index: "A", worktree: "", label: "added", staged: true, unstaged: false },
-    { path: "new.txt", index: "?", worktree: "?", label: "untracked", staged: false, unstaged: true },
+    {
+      path: "new.txt",
+      index: "?",
+      worktree: "?",
+      label: "untracked",
+      staged: false,
+      unstaged: true,
+    },
   ],
   clean: false,
   stashes: 1,
@@ -96,17 +110,71 @@ async function json(route: Route, body: unknown) {
 
 type Seen = { method: string; path: string; headers: Record<string, string> }
 
-async function mockGit(page: Page) {
+/** An open pull request as the summary lists one: enough for a card's strip. */
+const pr = (number: number, title: string) => ({
+  number,
+  title,
+  url: `https://github.com/acme/app/pull/${number}`,
+  state: "open",
+  draft: false,
+  head: `feature-${number}`,
+  base: "main",
+  author: "Ada",
+  createdAt: now,
+  comments: 0,
+  headSha: "a".repeat(40),
+  checks: "success",
+})
+
+/** A preview ready at #12's head, which holds "Test this pull request" back on its row. */
+const readyPreview = {
+  id: 1,
+  triggerId: 2,
+  providerRef: "12",
+  environmentId: 12,
+  environmentSlug: "pr-12",
+  state: "open",
+  updatedAt: now,
+  number: 12,
+  projectId: 4,
+  revision: "a".repeat(40),
+  headRevision: "a".repeat(40),
+  liveReleaseId: 3,
+  address: { kind: "tailnet", url: "https://vps.tail.ts.net:21000", port: 21000, published: true },
+}
+
+type Summary = { available: boolean; repos: ({ path: string } & Record<string, unknown>)[] }
+
+async function mockGit(
+  page: Page,
+  pulls: Summary = { available: true, repos: [] },
+  checkouts: Record<string, unknown>[] = [app, lib],
+) {
   const seen: Seen[] = []
   await page.route("**/api/v1/**", async (route) => {
     const req = route.request()
-    const path = new URL(req.url()).pathname.replace(/^\/api\/v1/, "")
+    const url = new URL(req.url())
+    const path = url.pathname.replace(/^\/api\/v1/, "")
     seen.push({ method: req.method(), path, headers: req.headers() })
     switch (path) {
       case "/auth/session":
         return json(route, user)
       case "/git/":
-        return json(route, { available: true, repos: [app, lib] })
+        return json(route, { available: true, repos: checkouts })
+      case "/git/pull-requests": {
+        // The workspace asks for its own checkout; the list asks for all.
+        const one = url.searchParams.get("path")
+        return json(
+          route,
+          one ? { ...pulls, repos: pulls.repos.filter((r) => r.path === one) } : pulls,
+        )
+      }
+      case "/git/github/pulls/12":
+        return json(route, pr(12, "Add caching"))
+      case "/git/github/pulls/12/files":
+        return json(route, { headSha: "a".repeat(40), hasMore: false, limited: false, files: [] })
+      case "/git/github/pulls/12/conversation":
+        return json(route, { entries: [], hasMore: false })
       case "/git/github/":
         return json(route, { available: true, account: { loggedIn: false, gitConfigured: false } })
       case "/git/status":
@@ -137,17 +205,30 @@ test("the list answers what is waiting before the rows are read", async ({ page 
   await page.goto("/git")
   await expect(page.getByRole("heading", { name: "Git" })).toBeVisible()
 
-  // Four readings, and the ones that matter carry a figure.
-  const tiles = page.locator("[data-slot=stat-tile]")
-  await expect(tiles).toHaveCount(4)
-  await expect(tiles.nth(0)).toContainText("2")
-  await expect(tiles.nth(1)).toContainText("1")
-  await expect(tiles.nth(2)).toContainText("1")
-
-  // The chips exist only for states something is in: nothing is detached.
-  await expect(page.getByRole("button", { name: /^Uncommitted/ })).toBeVisible()
+  // The readings are on the chips, which is where the four stat tiles went:
+  // each one names a state and carries its count, and pressing it is how the
+  // answer is acted on. A state nothing is in gets no chip at all.
+  await expect(page.getByRole("button", { name: "Uncommitted 1" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Behind 1" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Unpushed 1" })).toBeVisible()
   await expect(page.getByRole("button", { name: /^Detached/ })).toHaveCount(0)
-  await page.getByRole("button", { name: /^Behind/ }).click()
+
+  // The checkouts are shelved by the account their remote belongs to — `app`
+  // is acme's on github.com, `lib` has no remote — and the shelf with
+  // something wrong on it comes first without being asked: `app` is dirty.
+  const names = page.getByRole("button", { name: /^(app|lib)$/ })
+  await expect(names.first()).toHaveText("app")
+  const shelves = page.getByRole("list", { name: /^(acme|No remote)$/ })
+  await expect(shelves).toHaveCount(2)
+  await expect(shelves.first()).toHaveAttribute("aria-label", "acme")
+  await expect(
+    page.getByRole("list", { name: "acme" }).getByRole("button", { name: "app", exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("list", { name: "No remote" }).getByRole("button", { name: "lib", exact: true }),
+  ).toBeVisible()
+
+  await page.getByRole("button", { name: "Behind 1" }).click()
   await expect(page.getByRole("button", { name: "app", exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "lib", exact: true })).toHaveCount(0)
 
@@ -155,6 +236,103 @@ test("the list answers what is waiting before the rows are read", async ({ page 
   await page.getByRole("button", { name: "app", exact: true }).click()
   await expect(page).toHaveURL(/repo=%2Fsrv%2Fapp/)
   await expect(page.getByRole("button", { name: "Back to repositories" })).toBeVisible()
+})
+
+/**
+ * What GitHub says is waiting on a checkout sits on its card, and is a filter.
+ *
+ * The pull requests used to live one click and a tab away, inside the
+ * workspace, where the question the list page is opened with — is anything
+ * waiting — could not see them. Now a card carries the first of them, a choice
+ * of its own that opens the checkout *on* that request in one history entry,
+ * and counts the rest. The foot must not disturb what the card already
+ * promised: the repository's name is still the only button called that, and
+ * the card is the height of every other card — three requests stacked on one
+ * used to stretch its whole shelf into empty space.
+ */
+test("open pull requests sit on the card and open the checkout on them", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const web = { ...lib, path: "/srv/web", name: "web", remote: "https://github.com/acme/web.git" }
+  const pulls: Summary = {
+    available: true,
+    repos: [
+      {
+        path: "/srv/app",
+        repository: "acme/app",
+        pulls: [
+          { ...pr(12, "Add caching"), preview: readyPreview },
+          pr(13, "Fix login"),
+          pr(14, "Bump dependencies"),
+          pr(15, "Write docs"),
+        ],
+        deployments: [{ projectId: 4, name: "app", environmentId: 9 }],
+      },
+      {
+        path: "/srv/lib",
+        repository: "acme/lib",
+        pulls: [],
+        deployments: [],
+        error: "not signed in",
+      },
+      {
+        path: "/srv/web",
+        repository: "acme/web",
+        pulls: [pr(20, "Fix the header")],
+        deployments: [{ projectId: 5, name: "web", environmentId: 10 }],
+      },
+    ],
+  }
+  await mockGit(page, pulls, [app, lib, web])
+  await page.goto("/git")
+  await expect(page.getByRole("button", { name: "Pull requests 2" })).toBeVisible()
+
+  // The first on the card, and a count for the rest.
+  await expect(page.getByRole("button", { name: "Open pull request #12" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open pull request #13" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "3 more pull requests" })).toBeVisible()
+  // A checkout gh could not answer for says so in one quiet word.
+  await expect(page.getByText("pull requests unavailable")).toBeVisible()
+  // The foot adds no button named like a repository.
+  await expect(page.getByRole("button", { name: /^(app|lib|web)$/ })).toHaveCount(3)
+
+  // Four requests, one, or a word for none: every card is one height, on
+  // either shelf.
+  const cards = page.locator("ul[aria-label='acme'] > li, ul[aria-label='No remote'] > li")
+  await expect(cards).toHaveCount(3)
+  const heights = await cards.evaluateAll((lis) =>
+    lis.map((li) => Math.round(li.getBoundingClientRect().height)),
+  )
+  expect(new Set(heights).size).toBe(1)
+
+  // The foot's verbs follow the Overview's rule: a request whose preview is
+  // ready at this commit has nothing to test, and one without a preview has.
+  await page.getByRole("button", { name: "More actions for #12" }).click()
+  await expect(page.getByRole("menuitem", { name: /^Merge/ })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: /^Test this pull request/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "More actions for #20" }).click()
+  await expect(page.getByRole("menuitem", { name: /^Test this pull request/ })).toBeVisible()
+  await page.keyboard.press("Escape")
+
+  // The chip narrows to the checkouts with something to merge, and the
+  // search box finds a pull request by its number, drawn on the card or not.
+  await page.getByRole("button", { name: "Pull requests 2" }).click()
+  await expect(page.getByRole("button", { name: "lib", exact: true })).toHaveCount(0)
+  await page.getByPlaceholder("Filter by name, path, branch or pull request").fill("#13")
+  await expect(page.getByRole("button", { name: "app", exact: true })).toBeVisible()
+  await page.getByPlaceholder("Filter by name, path, branch or pull request").fill("#99")
+  await expect(page.getByRole("button", { name: "app", exact: true })).toHaveCount(0)
+  await page.getByPlaceholder("Filter by name, path, branch or pull request").fill("")
+
+  // A pull request opens the checkout on its GitHub tab, with the request in
+  // the preview column — one history entry, so Back leaves the workspace.
+  await page.getByRole("button", { name: "Open pull request #12" }).click()
+  await expect(page).toHaveURL(/\?repo=%2Fsrv%2Fapp&pull=12$/)
+  await expect(page.getByRole("tab", { name: "GitHub" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.locator("[data-slot=git-preview]")).toContainText("Add caching")
+  await page.goBack()
+  await expect(page).toHaveURL(/\/git$/)
+  await expect(page.getByRole("button", { name: "Open pull request #12" })).toBeVisible()
 })
 
 test("a file staged and edited again is listed on both sides", async ({ page }) => {
@@ -176,6 +354,60 @@ test("a file staged and edited again is listed on both sides", async ({ page }) 
   await expect(page.getByRole("button", { name: /parked work/ })).toBeVisible()
   // Who the commit is recorded as, beside the button that records it.
   await expect(page.getByRole("button", { name: /^as Ada/ })).toBeVisible()
+})
+
+/**
+ * A folder coloured in Files is that colour in a checkout's tree too.
+ *
+ * The labels were only ever provided on the Files page, so every other tree
+ * drew the default blue however the folders had been coloured — and coming
+ * back from Files, where the colour was just changed, must show the new one.
+ */
+test("the tree draws folders in the colours chosen in Files", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockGit(page)
+  const palette: { defaultColour: string; colours: Record<string, string> } = {
+    defaultColour: "yellow",
+    colours: { "/srv/app/docs": "red" },
+  }
+  const folder = (name: string) => ({
+    name,
+    path: `/srv/app/${name}`,
+    size: 0,
+    mode: "drwxr-xr-x",
+    isDir: true,
+    isSymlink: false,
+    modified: now,
+  })
+  await page.route("**/api/v1/files/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/files/places") {
+      return json(route, { home: "/srv/app", roots: ["/"], places: [], bookmarks: [], ...palette })
+    }
+    if (path === "/files/list") {
+      return json(route, { path: "/srv/app", entries: [folder("docs"), folder("src")] })
+    }
+    if (path === "/files/colours/default") {
+      palette.defaultColour = route.request().postDataJSON().colour
+      palette.colours = {}
+      return json(route, palette)
+    }
+    return route.fallback()
+  })
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+
+  const drawn = (name: string) => page.locator(`[data-entry-path='/srv/app/${name}'] [data-folder]`)
+  await expect(drawn("src")).toHaveAttribute("style", /--folder-yellow/)
+  await expect(drawn("docs")).toHaveAttribute("style", /--folder-red/)
+
+  await page.getByRole("link", { name: "Files", exact: true }).click()
+  await page.getByRole("button", { name: "Colour all folders" }).click()
+  await page.getByRole("menuitem", { name: "Green" }).click()
+  await expect.poll(() => palette.defaultColour).toBe("green")
+  await page.goBack()
+
+  await expect(drawn("src")).toHaveAttribute("style", /--folder-green/)
+  await expect(drawn("docs")).toHaveAttribute("style", /--folder-green/)
 })
 
 test("discarding a file sends the typed phrase the server demands", async ({ page }) => {
@@ -200,6 +432,61 @@ test("discarding a file sends the typed phrase the server demands", async ({ pag
 })
 
 /**
+ * Dragging a column wider has a floor, and the floor is the other column.
+ *
+ * The widths were stored raw: `usePanelSize` deliberately does not clamp
+ * ("only the page knows what else is on the row") and this page did no
+ * clamping at all, so the tree and the changes list could each be dragged to
+ * any width at all and the preview — `flex-1 min-w-0`, so it yields to
+ * everything — was squeezed to nothing and the diff disappeared.
+ */
+test("a column cannot be dragged over the preview", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockGit(page)
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+
+  const preview = page.locator("[data-slot=git-preview]")
+  await expect(preview).toBeVisible()
+  const before = (await preview.boundingBox())!.width
+
+  const handle = page.getByRole("separator", { name: "Changes panel width" })
+  const box = (await handle.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 2000, box.y + box.height / 2, { steps: 8 })
+  await page.mouse.up()
+
+  const after = (await preview.boundingBox())!.width
+  // The drag did something — and stopped where the diff still has room.
+  expect(after).toBeLessThan(before)
+  expect(after).toBeGreaterThan(320)
+  // The separator reports the width it actually has, not the one asked for.
+  expect(Number(await handle.getAttribute("aria-valuenow"))).toBeLessThanOrEqual(640)
+})
+
+/**
+ * And a width stored on a wider monitor gives way on arrival, not a frame
+ * later. The fit is applied from a ref callback rather than an effect for
+ * exactly this: an effect runs after the browser has painted, so the collapsed
+ * layout would be drawn once before the correction.
+ */
+test("a width left over from a wider screen is fitted on arrival", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockGit(page)
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "jd.panel.sizes",
+      JSON.stringify({ "git.tree": 2400, "git.work": 2400 }),
+    )
+  })
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+
+  const preview = page.locator("[data-slot=git-preview]")
+  await expect(preview).toBeVisible()
+  expect((await preview.boundingBox())!.width).toBeGreaterThan(320)
+})
+
+/**
  * The design system's structural rules, on both faces of the page: every
  * icon-only control carries an accessible name, and nothing is a filled pill.
  */
@@ -208,7 +495,9 @@ for (const path of ["/git", "/git?repo=%2Fsrv%2Fapp"] as const) {
     await page.setViewportSize({ width: 1440, height: 900 })
     await mockGit(page)
     await page.goto(path)
-    await expect(page.locator("[data-slot=stat-tile], [data-slot=pane-header]").first()).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: path.includes("?") ? "Back to repositories" : "Rescan" }),
+    ).toBeVisible()
 
     const unnamed = await page.evaluate(() => {
       const bad: string[] = []

@@ -7,6 +7,15 @@ import { Dialog as SheetPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 import { usePortalContainer } from "@/lib/portal-container"
 
+/**
+ * The close button, the same target as `ui/dialog.tsx`'s — 40px on a touch
+ * screen, 32px under a pointer, centred on `SidePanel`'s title strip. Written
+ * out again rather than imported: the rule that keeps everything but `Modal`
+ * off the raw dialog applies to this file too.
+ */
+const CLOSE =
+  "absolute top-0.5 right-1 flex size-10 items-center justify-center rounded-md text-muted-foreground focus-ring transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none sm:top-1.5 sm:right-2 sm:size-8 [&_svg]:pointer-events-none [&_svg]:shrink-0"
+
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
 }
@@ -72,7 +81,7 @@ function SheetContent({
       >
         {children}
         {showCloseButton && (
-          <SheetPrimitive.Close className="absolute top-4 right-4 rounded-sm opacity-70 focus-ring transition-opacity hover:opacity-100 disabled:pointer-events-none data-[state=open]:bg-secondary">
+          <SheetPrimitive.Close className={CLOSE}>
             <Cross className="size-4" />
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>

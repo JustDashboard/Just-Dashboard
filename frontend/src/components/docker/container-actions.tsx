@@ -47,16 +47,14 @@ import {
  * The labels are the other half of the point. `RotateClockwise` and
  * `ArrowCircleUp` are perfectly good glyphs and neither of them means anything
  * to somebody meeting Docker this week — every verb therefore carries a word,
- * and in the overflow menu a line of plain English under it. A button that
- * needs a tooltip before you dare press it is a button you do not press.
+ * and the overflow menu lists the words. A button that needs a tooltip before
+ * you dare press it is a button you do not press.
  */
 
 export type ContainerVerb = {
   key: string
   /** The word on the button and in the menu. */
   label: string
-  /** One line of plain English, shown in the menu under the label. */
-  detail: string
   icon: React.ComponentType<{ className?: string }>
   run: () => void
   /** Drawn inline in a row or a card; the rest go behind the overflow menu. */
@@ -149,7 +147,6 @@ export function useContainerVerbs({
           key: "unpause",
           progressive: "Resuming",
           label: "Resume",
-          detail: "Unfreezes it and lets it carry on where it left off.",
           icon: Play,
           inline: true,
           run: () => void act(container, "unpause", "Resuming").catch(() => undefined),
@@ -159,7 +156,6 @@ export function useContainerVerbs({
           key: "start",
           progressive: "Starting",
           label: "Start",
-          detail: "Runs it again, with everything it was configured with.",
           icon: Play,
           inline: true,
           run: () => void act(container, "start", "Starting").catch(() => undefined),
@@ -172,7 +168,6 @@ export function useContainerVerbs({
         key: "restart",
         progressive: "Restarting",
         label: "Restart",
-        detail: "Stops it and starts it again. Whatever it serves is interrupted.",
         icon: RotateClockwise,
         inline: true,
         run: () =>
@@ -192,7 +187,6 @@ export function useContainerVerbs({
         key: "stop",
         progressive: "Stopping",
         label: "Stop",
-        detail: "Shuts it down cleanly. It stays here and can be started again.",
         icon: StopCircle,
         inline: true,
         run: () =>
@@ -213,7 +207,6 @@ export function useContainerVerbs({
     verbs.push({
       key: "logs",
       label: "Logs",
-      detail: "What the application inside has been printing. The first place to look.",
       icon: Logs,
       run: () => onOpenTab("logs"),
     })
@@ -222,7 +215,6 @@ export function useContainerVerbs({
       verbs.push({
         key: "shell",
         label: "Open a shell",
-        detail: "A command line inside this container — not on the server itself.",
         icon: Terminal,
         run: () => onOpenTab("shell"),
       })
@@ -233,7 +225,6 @@ export function useContainerVerbs({
         key: "pause",
         progressive: "Pausing",
         label: "Pause",
-        detail: "Freezes every process in place without shutting anything down.",
         icon: Pause,
         run: () => void act(container, "pause", "Pausing").catch(() => undefined),
       })
@@ -242,7 +233,6 @@ export function useContainerVerbs({
     verbs.push({
       key: "copy-id",
       label: "Copy container id",
-      detail: "The handle every docker command on the server wants.",
       icon: Copy,
       run: () => void copyText(container.id, "Container id copied"),
     })
@@ -254,7 +244,6 @@ export function useContainerVerbs({
       verbs.push({
         key: "update",
         label: "Update to a newer image",
-        detail: `Pulls a newer ${container.image} and rebuilds it with the same settings.`,
         icon: ArrowCircleUp,
         run: () =>
           confirm({
@@ -288,7 +277,6 @@ export function useContainerVerbs({
       verbs.push({
         key: "remove",
         label: "Remove",
-        detail: "Deletes the container. Named volumes and their data are kept.",
         icon: Trash,
         danger: true,
         run: () =>
@@ -323,8 +311,8 @@ export function useContainerVerbs({
  * Five icon-only buttons in a table cell is a row that ends in a puzzle. Worse
  * on a phone, where the reveal rule makes all five permanently visible and they
  * take a third of the width. The menu is not a place to hide things — it is
- * where a verb gets a sentence next to it, which is the only form most of these
- * are usable in.
+ * where a verb gets its word, which is the only form most of these are usable
+ * in.
  */
 export function ContainerRowActions({
   verbs,
@@ -371,23 +359,7 @@ function PlainActions({ className, ...props }: React.ComponentProps<"div">) {
   return <div className={cn("flex shrink-0 items-center gap-0.5", className)} {...props} />
 }
 
-/**
- * A menu entry's text: the verb, and one line of plain English under it.
- *
- * The stack list's overflow menu had retyped this beside the container menu's
- * copy, and the two had already drifted a pixel apart in line height. One
- * shape, so every Docker menu reads as the same menu.
- */
-export function MenuItemBody({ label, detail }: { label: string; detail: string }) {
-  return (
-    <span className="min-w-0 flex-1">
-      <span className="block text-body leading-tight font-medium">{label}</span>
-      <span className="mt-0.5 block text-hint leading-snug text-muted-foreground">{detail}</span>
-    </span>
-  )
-}
-
-/** The overflow menu, where a verb is a word and a line rather than a glyph. */
+/** The overflow menu, where a verb is a word rather than a glyph. */
 export function ContainerMenu({
   verbs,
   align,
@@ -411,21 +383,20 @@ export function ContainerMenu({
           <MoreHorizontal />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align ?? "end"} className="w-68">
+      <DropdownMenuContent align={align ?? "end"} className="min-w-44">
         {verbs.map((verb, i) => (
           <Fragment key={verb.key}>
             {verb.danger && i > 0 && <DropdownMenuSeparator />}
             <DropdownMenuItem
               variant={verb.danger ? "destructive" : "default"}
               disabled={disabled}
-              className="items-start gap-2.5 py-1.5"
               onSelect={(event) => {
                 event.preventDefault()
                 verb.run()
               }}
             >
-              <verb.icon className="mt-0.5 size-3.5 shrink-0" />
-              <MenuItemBody label={verb.label} detail={verb.detail} />
+              <verb.icon className="size-3.5" />
+              {verb.label}
             </DropdownMenuItem>
           </Fragment>
         ))}

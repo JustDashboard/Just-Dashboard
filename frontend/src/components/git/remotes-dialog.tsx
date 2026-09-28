@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, Trash } from "@/components/icons"
+import { Pencil, Plus, Trash } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { GitRemote } from "@/lib/types"
@@ -41,6 +41,7 @@ export function RemotesDialog({
   const [url, setUrl] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const [editing, setEditing] = useState(false)
   const remotes = usePoll(
     (signal) => get<GitRemote[]>("/git/remotes", { path: repoPath }, signal),
     0,
@@ -52,8 +53,13 @@ export function RemotesDialog({
     setBusy(true)
     setError(undefined)
     try {
-      await post("/git/remote", { name: name.trim(), url: url.trim() }, { query: { path: repoPath } })
-      notify.success(`Added remote ${name.trim()}`)
+      await post(
+        editing ? "/git/remote/update" : "/git/remote",
+        { name: name.trim(), url: url.trim() },
+        { query: { path: repoPath } },
+      )
+      notify.success(`${editing ? "Updated" : "Added"} remote ${name.trim()}`)
+      setEditing(false)
       setName("")
       setUrl("")
       remotes.refresh()
@@ -116,6 +122,20 @@ export function RemotesDialog({
                     </span>
                   )}
                 </span>
+                {canControl && (
+                  <IconAction
+                    label={`Edit ${r.name}`}
+                    disabled={busy}
+                    onClick={() => {
+                      setName(r.name)
+                      setUrl(r.fetchUrl.includes("***@") ? "" : r.fetchUrl)
+                      setEditing(true)
+                      setError(undefined)
+                    }}
+                  >
+                    <Pencil />
+                  </IconAction>
+                )}
                 {canDestruct && (
                   <IconAction
                     label={`Forget ${r.name}`}
@@ -148,18 +168,27 @@ export function RemotesDialog({
               </Notice>
             )}
             <FieldRow>
-              <Field label="Name" htmlFor="remote-name" hint="origin for the main one, upstream for a fork's source.">
+              <Field
+                label="Name"
+                htmlFor="remote-name"
+                hint="origin for the main one, upstream for a fork's source."
+              >
                 <Input
                   id="remote-name"
                   autoComplete="off"
                   spellCheck={false}
                   value={name}
+                  disabled={editing || busy}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="origin"
                   className="font-mono"
                 />
               </Field>
-              <Field label="URL" htmlFor="remote-url" hint="https://, ssh:// or git@host:owner/repo.git.">
+              <Field
+                label="URL"
+                htmlFor="remote-url"
+                hint="https://, ssh:// or git@host:owner/repo.git."
+              >
                 <Input
                   id="remote-url"
                   autoComplete="off"
@@ -173,8 +202,23 @@ export function RemotesDialog({
             </FieldRow>
             <Button type="submit" size="sm" variant="outline" disabled={!canAdd} pending={busy}>
               <Plus className="size-3.5" />
-              Add remote
+              {editing ? "Save remote" : "Add remote"}
             </Button>
+            {editing && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  setEditing(false)
+                  setName("")
+                  setUrl("")
+                  setError(undefined)
+                }}
+              >
+                Cancel edit
+              </Button>
+            )}
           </form>
         )}
       </div>

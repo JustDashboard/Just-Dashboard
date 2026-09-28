@@ -75,6 +75,19 @@ func TestBlueprintDraftCommitsGeneratedSecretsAndInputValues(t *testing.T) {
 	if len(configuration.Checks) != 1 || configuration.Checks[0].Kind != "command" || !configuration.Checks[0].Required {
 		t.Fatalf("checks = %#v", configuration.Checks)
 	}
+	// Reinspection renders the reviewed defaults again, but must keep the
+	// metadata for sealed user inputs that the next commit will transfer.
+	staged := "EXTRA=staged-secret-survives-blueprint-redetection"
+	draft, err = fixture.plans.Save(ctx, draft.ID, 41, true, DraftSaveRequest{
+		Revision: draft.Revision, Step: DraftConfiguration, Configuration: configuration, Dotenv: &staged,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err = fixture.plans.SaveDetection(ctx, draft.ID, 41, true, draft.Revision, detection)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	preflight, err := PreflightDraft(ctx, draft, &preflightObserverFake{observation: HostObservation{
 		Facilities: map[string]FacilityObservation{"docker": {Available: true}}, Paths: []PathObservation{}, Ports: []PortObservation{},
@@ -123,6 +136,9 @@ func TestBlueprintDraftCommitsGeneratedSecretsAndInputValues(t *testing.T) {
 	if opened["POSTGRES_DB"] != "shop" || opened["POSTGRES_USER"] != "shop_rw" {
 		t.Fatalf("input values were not stored: %#v", opened)
 	}
+	if opened["EXTRA"] != "staged-secret-survives-blueprint-redetection" || sensitivity["EXTRA"] != "secret" {
+		t.Fatal("blueprint redetection dropped a sealed input before commit")
+	}
 	if !regexp.MustCompile(`^[A-Za-z0-9]{40}$`).MatchString(opened["POSTGRES_PASSWORD"]) || sensitivity["POSTGRES_PASSWORD"] != "secret" {
 		t.Fatalf("generated password = %q (%s)", opened["POSTGRES_PASSWORD"], sensitivity["POSTGRES_PASSWORD"])
 	}
@@ -153,11 +169,8 @@ func TestUnsupportedBlueprintsAreRefusedBeforeAnyResourceExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"prometheus", "minecraft-java"} {
-		inputs := map[string]string{}
-		if id == "minecraft-java" {
-			inputs["eula"] = "true"
-		}
+	for _, id := range []string{"minecraft-java", "minecraft-bedrock"} {
+		inputs := map[string]string{"eula": "true"}
 		_, err := fixture.plans.Save(ctx, draft.ID, 41, true, DraftSaveRequest{
 			Revision: draft.Revision, Step: DraftSource,
 			Source: &DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: id, BlueprintVersion: "1.0.0", BlueprintInputs: inputs},
@@ -169,7 +182,8 @@ func TestUnsupportedBlueprintsAreRefusedBeforeAnyResourceExists(t *testing.T) {
 	// A preview-only blueprint still renders for the catalogue, without a
 	// registry lookup and therefore without a deployable digest.
 	analyzer := NewHostSourceAnalyzer(nil, nil, t.TempDir(), &planningDockerFake{}, nil)
-	detection, err := analyzer.Analyze(ctx, DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint, BlueprintID: "prometheus", BlueprintVersion: "1.0.0"})
+	detection, err := analyzer.Analyze(ctx, DraftSourceConfig{Kind: SourceBlueprint, Mode: SourceModeBlueprint,
+		BlueprintID: "minecraft-java", BlueprintVersion: "1.0.0", BlueprintInputs: map[string]string{"eula": "true"}})
 	if err != nil || detection.Source.Digest != "" {
 		t.Fatalf("preview render = %#v, %v", detection.Source, err)
 	}

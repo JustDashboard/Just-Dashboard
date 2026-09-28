@@ -1,7 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { PG_LINES } from "./logs-lens-fixture"
 
 /**
- * The databases section, after its redesign: the connection is the title, the
+ * The databases section, after its redesign: the connection is the workbench location, the
  * schema-editing forms show their statement, a server found on the host is
  * offered by its engine's name (it used to be offered as the literal text
  * "{server.driver}"), and the diagram remembers what was done to it — on the
@@ -43,6 +44,18 @@ const connection = {
   port: "5432",
   user: "app",
   database: "shop",
+  createdAt: now,
+}
+
+/** A second connection, so switching between them can be asserted. */
+const otherConnection = {
+  id: 2,
+  name: "cache",
+  driver: "postgres",
+  host: "127.0.0.1",
+  port: "5433",
+  user: "app",
+  database: "cache",
   createdAt: now,
 }
 
@@ -124,6 +137,138 @@ const localAccess = {
   firewall: { backend: "ufw", active: true, open: false, editable: true },
 }
 
+/** Every connection dialled at once, as the control center reads it. */
+const fleet = {
+  checkedAt: now,
+  connections: [
+    {
+      ...connection,
+      ok: true,
+      version: "PostgreSQL 16.4",
+      latencyMs: 3,
+      bytes: 5242880,
+      sizesKnown: true,
+      objects: 3,
+      objectWord: "tables",
+      sessions: 2,
+      source: "docker",
+      container: "shop-db",
+      exposure: "local",
+      consumers: 1,
+      lastBackup: now,
+    },
+    {
+      ...otherConnection,
+      ok: false,
+      error: "connection refused",
+      latencyMs: 0,
+      bytes: 0,
+      sizesKnown: false,
+      objects: 0,
+      objectWord: "tables",
+      sessions: 0,
+      source: "docker",
+      container: "cache-db",
+      exposure: "public",
+      consumers: 0,
+    },
+  ],
+  unreachable: [],
+  needsCredentials: [
+    {
+      driver: "postgres",
+      host: "127.0.0.1",
+      port: 5433,
+      process: "postgres",
+      name: "postgres on this server",
+      user: "postgres",
+      database: "postgres",
+    },
+  ],
+}
+
+/** What feeds what: one deployment bound to shop, one container seen connected. */
+const topology = {
+  checkedAt: now,
+  nodes: [
+    {
+      id: "db:1",
+      kind: "database",
+      name: "shop",
+      product: "postgres",
+      detail: "shop",
+      connId: 1,
+      href: "/databases/overview?conn=1",
+    },
+    {
+      id: "deploy:7",
+      kind: "deployment",
+      name: "api",
+      product: "nextjs",
+      detail: "jd-e7-r1",
+      status: "connected",
+      href: "/deploy/7",
+    },
+    {
+      id: "container:worker",
+      kind: "container",
+      name: "worker",
+      product: "python",
+      detail: "python:3.12",
+      status: "running",
+      href: "/docker/containers/abc",
+    },
+  ],
+  edges: [
+    { from: "db:1", to: "deploy:7", via: ["binding", "session"], sessions: 2, status: "connected" },
+    { from: "db:1", to: "container:worker", via: ["env"], sessions: 0, status: "observed" },
+  ],
+}
+
+/** The container behind the connection, as the server resolves its log. */
+const containerLog = {
+  sources: [
+    {
+      id: "docker:shop-db",
+      label: "shop-db",
+      kind: "docker",
+      detail: "postgres:16",
+      status: "running",
+      lens: "postgres",
+      primary: true,
+      rotated: false,
+    },
+  ],
+}
+
+const emptyQueryLog = { supported: true, source: "log", entries: [], truncated: false }
+
+/**
+ * A log search: the lens's readings ask for event counts and level counts
+ * over the last hour; History asks for lines, which this server has none of.
+ */
+function logSearch(url: URL) {
+  const events = [
+    { value: "slow", count: 12, errors: 0 },
+    { value: "auth_failed", count: 1, errors: 1 },
+    { value: "startup", count: 1, errors: 0 },
+  ]
+  return {
+    lines: [],
+    scanned: 4200,
+    matched: url.searchParams.get("levels") ? 3 : 14,
+    truncated: false,
+    complete: true,
+    files: [],
+    histogram: [],
+    tookMillis: 3,
+    facets:
+      url.searchParams.get("facets") === "event"
+        ? { event: { values: events, distinct: events.length, other: 0, missing: 0 } }
+        : undefined,
+  }
+}
+
 async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -135,14 +280,50 @@ async function json(route: Route, body: unknown, status = 200) {
  */
 async function mockDatabases(
   page: Page,
-  state: { layout: unknown; puts: unknown[]; access?: unknown; deletes?: unknown[] },
+  state: {
+    layout: unknown
+    puts: unknown[]
+    access?: unknown
+    deletes?: unknown[]
+    /** Every /export request's query string, so the download can be asserted. */
+    exports?: string[]
+    /** Every /browse request's query string, for the paging assertions. */
+    browses?: string[]
+    /** What GET /databases/1/logs/sources answers; the container by default. */
+    logSources?: unknown
+    queryLog?: unknown
+    /** Every live log socket's query and every log search, in order. */
+    sockets?: URLSearchParams[]
+    searches?: URLSearchParams[]
+  },
 ) {
+  // The server log's live tail: a Postgres log's own lines, already read
+  // through its lens, for any source the page opens.
+  await page.routeWebSocket("**/api/v1/logs/stream**", (socket) => {
+    const params = new URL(socket.url()).searchParams
+    state.sockets?.push(params)
+    socket.send(
+      JSON.stringify({
+        type: "meta",
+        data: { kind: "docker", label: params.get("source"), lens: params.get("lens") },
+        ts: Date.now(),
+      }),
+    )
+    socket.send(JSON.stringify({ type: "logs", data: PG_LINES, ts: Date.now() }))
+  })
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api\/v1/, "")
     const method = route.request().method()
     if (path === "/auth/session") return json(route, user)
     if (path === "/databases/1/access") return json(route, state.access ?? localAccess)
+    if (path === "/databases/1/logs/sources") return json(route, state.logSources ?? containerLog)
+    if (path === "/databases/1/querylog") return json(route, state.queryLog ?? emptyQueryLog)
+    if (path === "/logs/source" || path === "/logs/retention") return json(route, {})
+    if (path === "/logs/search") {
+      state.searches?.push(url.searchParams)
+      return json(route, logSearch(url))
+    }
     if (path === "/databases/1/url") {
       const target = url.searchParams.get("target")
       const host = target === "public" ? "203.0.113.9" : "127.0.0.1"
@@ -160,7 +341,7 @@ async function mockDatabases(
     }
     if (path === "/updates/self" || path === "/dashboard/update")
       return json(route, { current: "0.6.7", latest: "0.6.7" })
-    if (path === "/databases/") return json(route, [connection])
+    if (path === "/databases/") return json(route, [connection, otherConnection])
     if (path === "/databases/drivers") return json(route, drivers)
     if (path === "/databases/sync")
       return json(route, {
@@ -178,7 +359,8 @@ async function mockDatabases(
           },
         ],
       })
-    if (path === "/databases/1/ping") return json(route, { ok: true })
+    if (path === "/databases/1/ping" || path === "/databases/2/ping")
+      return json(route, { ok: true })
     if (path === "/databases/1/tables") return json(route, tables)
     if (path === "/databases/1/table") {
       const table = url.searchParams.get("table") ?? "users"
@@ -203,7 +385,26 @@ async function mockDatabases(
         createSql: `CREATE TABLE ${table} ()`,
       })
     }
-    if (path === "/databases/1/browse")
+    if (path === "/databases/1/relations")
+      return json(route, {
+        orders: [
+          {
+            name: "orders_customer_id_fkey",
+            columns: ["customer_id"],
+            refTable: "users",
+            refColumns: ["id"],
+            onDelete: "CASCADE",
+          },
+        ],
+      })
+    if (path === "/databases/1/count") return json(route, { count: 1200 })
+    if (path === "/databases/1/export") {
+      state.exports?.push(url.search)
+      // A download still has to be fulfilled, or the navigation never settles.
+      return route.fulfill({ status: 200, contentType: "text/csv", body: "id,email\n" })
+    }
+    if (path === "/databases/1/browse") {
+      state.browses?.push(url.search)
       return json(route, {
         columns: ["id", "email"],
         types: ["int4", "text"],
@@ -213,6 +414,120 @@ async function mockDatabases(
         duration: "1ms",
         truncated: false,
         statement: "",
+      })
+    }
+    if (path === "/databases/fleet") return json(route, fleet)
+    if (path === "/databases/topology" || path === "/databases/1/consumers")
+      return json(route, topology)
+    if (path === "/databases/1/schemas")
+      return json(route, [
+        { name: "shop", size: 5242880, owner: "app", encoding: "UTF8" },
+        { name: "analytics", size: 1048576, owner: "app", encoding: "UTF8" },
+      ])
+    if (path === "/databases/1/server/roles")
+      return json(route, {
+        supported: true,
+        roles: [
+          {
+            name: "app",
+            login: true,
+            superuser: false,
+            createDb: true,
+            createRole: false,
+            connectionLimit: -1,
+            connections: 2,
+          },
+          {
+            name: "postgres",
+            login: true,
+            superuser: true,
+            createDb: true,
+            createRole: true,
+            connectionLimit: -1,
+            connections: 0,
+          },
+        ],
+      })
+    if (path === "/databases/1/server/extensions")
+      return json(route, {
+        supported: true,
+        editable: true,
+        extensions: [
+          {
+            name: "pgcrypto",
+            version: "1.3",
+            availableVersion: "1.3",
+            installed: true,
+            schema: "public",
+            comment: "cryptographic functions",
+          },
+          {
+            name: "vector",
+            availableVersion: "0.7.0",
+            installed: false,
+            comment: "vector data type and ivfflat and hnsw access methods",
+          },
+        ],
+      })
+    if (path === "/databases/1/server/settings")
+      return json(route, {
+        supported: true,
+        settings: [
+          {
+            name: "max_connections",
+            value: "100",
+            category: "Connections",
+            description: "Sets the maximum number of concurrent connections.",
+            source: "configuration file",
+            restartRequired: true,
+          },
+        ],
+      })
+    if (path === "/databases/1/advisor")
+      return json(route, {
+        tablesChecked: 3,
+        engineChecks: true,
+        findings: [
+          {
+            id: "unindexed-foreign-key",
+            level: "warning",
+            category: "performance",
+            title: "1 foreign key with no index",
+            detail: "Every delete of the referenced row scans the referencing table.",
+            advice: "Create an index on the referencing columns.",
+            objects: ["orders(customer_id)"],
+            sql: 'CREATE INDEX "orders_customer_id_idx" ON "public"."orders" ("customer_id");',
+          },
+        ],
+      })
+    if (path === "/databases/1/statements")
+      return json(route, {
+        supported: true,
+        totalMs: 12000,
+        statements: [
+          {
+            id: "1",
+            query: "SELECT * FROM orders WHERE customer_id = $1",
+            calls: 900,
+            totalMs: 9000,
+            meanMs: 10,
+            maxMs: 80,
+            rows: 900,
+            hitRatio: 0.99,
+          },
+        ],
+      })
+    if (path === "/databases/1/backups")
+      return json(route, {
+        dir: "/var/backups/just-dashboard/databases/shop",
+        files: [
+          {
+            file: "shop-2026-09-24T02-00-00.dump",
+            size: 2048000,
+            takenAt: now,
+            format: "pg_dump archive",
+          },
+        ],
       })
     if (path === "/databases/1/graph") return json(route, graph)
     if (path === "/databases/1/diagram") {
@@ -232,7 +547,14 @@ async function mockDatabases(
     if (path === "/databases/1/overview")
       return json(route, {
         schema: "",
-        tables: [],
+        tables: tables.map((t) => ({
+          schema: t.schema,
+          table: t.name,
+          rows: t.estimatedRows,
+          bytes: t.size,
+          dataBytes: t.size,
+          indexBytes: 0,
+        })),
         totalBytes: 5242880,
         totalRows: 9600,
         tableCount: 3,
@@ -252,13 +574,27 @@ async function mockDatabases(
   })
 }
 
-test("the connection is the section's title and the tables are on the rail", async ({ page }) => {
+test("the connection sits in the compact workbench strip and the tables are on the rail", async ({
+  page,
+}) => {
   await mockDatabases(page, { layout: null, puts: [] })
-  await page.goto("/databases")
+  await page.goto("/databases/browse")
 
   await expect(
     page.getByRole("button", { name: "Connection: shop. Switch connection" }),
   ).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Database shop" })).toHaveClass(/sr-only/)
+  // The state and the command beside it share the strip's centre line. The
+  // state was wrapped in a bare span, whose 16px line box set the 12px word
+  // three pixels below the button's label.
+  const word = page.getByText("connected", { exact: true })
+  await expect(word).toBeVisible()
+  const state = await word.boundingBox()
+  const command = await page.getByRole("button", { name: "New database" }).boundingBox()
+  expect(state && command).toBeTruthy()
+  const offset = Math.abs(state!.y + state!.height / 2 - (command!.y + command!.height / 2))
+  expect(offset, "the connection state sits off the strip's centre line").toBeLessThan(1)
+  await page.screenshot({ path: "test-results/database-context-1280.png", fullPage: true })
   // The section's pages are the sidebar's, not a strip above the page, and
   // every one of them carries the connection it was opened with.
   const rail = page.getByRole("navigation", { name: "Sidebar" })
@@ -273,9 +609,173 @@ test("the connection is the section's title and the tables are on the rail", asy
   await expect(page.getByRole("button", { name: "Insert" })).toBeVisible()
 })
 
+test("the connection strip wraps without sideways scrolling on a phone", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/databases/browse")
+  await expect(
+    page.getByRole("button", { name: "Connection: shop. Switch connection" }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "New database" })).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    ),
+  ).toBe(false)
+  await page.screenshot({ path: "test-results/database-context-phone.png", fullPage: true })
+})
+
+/**
+ * The export is the view. Narrowing the grid and pressing Export as CSV used to
+ * download the whole table, which looks exactly like a correct export until
+ * somebody opens the file.
+ */
+test("exporting carries the conditions and the order the grid is under", async ({ page }) => {
+  const exports: string[] = []
+  await mockDatabases(page, { layout: null, puts: [], exports })
+  await page.goto("/databases/browse?conn=1")
+
+  await page.getByRole("button", { name: /^users/ }).click()
+  await expect(page.getByText("ada@example.com")).toBeVisible()
+
+  // Order by a column, then narrow to one value.
+  await page.getByRole("button", { name: "email", exact: true }).click()
+  await page.getByRole("button", { name: "Filter rows" }).click()
+  await page.getByRole("button", { name: "Add condition" }).click()
+  await page.getByRole("textbox", { name: "Value" }).fill("ada@example.com")
+
+  await page.getByRole("button", { name: "More table actions" }).click()
+  await page.getByRole("menuitem", { name: /Export as CSV/ }).click()
+
+  await expect.poll(() => exports.length).toBeGreaterThan(0)
+  const query = exports[exports.length - 1]
+  expect(query).toContain("orderBy=email")
+  expect(query).toContain("ada%40example.com")
+  expect(query).toContain("limit=100000")
+})
+
+/**
+ * A grid can always say what a row points at. Saying what points *at* it needs
+ * the rest of the schema — the route for which existed from the start and was
+ * called by nothing.
+ */
+test("a row says which tables reference it, and following one lands filtered", async ({ page }) => {
+  const browses: string[] = []
+  await mockDatabases(page, { layout: null, puts: [], browses })
+  await page.goto("/databases/browse?conn=1")
+
+  await page.getByRole("button", { name: /^users/ }).click()
+  await page.getByRole("button", { name: "More row actions" }).first().click()
+  // The row names the table and, beside it, the column that points here.
+  const reference = page.getByRole("menuitem", { name: /orders/ })
+  await expect(reference).toContainText("customer_id")
+  await reference.click()
+
+  // It is the same navigation the rail does, plus a filter: the orders table,
+  // narrowed to the row that was open.
+  await expect.poll(() => browses.some((q) => q.includes("table=orders"))).toBe(true)
+  const landed = browses.filter((q) => q.includes("table=orders")).pop() ?? ""
+  expect(decodeURIComponent(landed)).toContain('"column":"customer_id"')
+  await expect(page.getByRole("button", { name: "Remove this condition" })).toBeVisible()
+})
+
+/** Paging past the first few hundred rows, without pressing Next four hundred times. */
+test("the grid pages by typing a page number and by First and Last", async ({ page }) => {
+  const browses: string[] = []
+  await mockDatabases(page, { layout: null, puts: [], browses })
+  await page.goto("/databases/browse?conn=1")
+
+  await page.getByRole("button", { name: /^users/ }).click()
+  await expect(page.getByText("ada@example.com")).toBeVisible()
+  // The sync notice about a server that needs credentials never expires by
+  // design, and it sits over the footer's controls at this height.
+  await page.getByLabel("Close toast").click()
+
+  await page.getByRole("textbox", { name: "Page" }).fill("7")
+  await page.getByRole("textbox", { name: "Page" }).press("Enter")
+  await expect.poll(() => browses.some((q) => q.includes("offset=600"))).toBe(true)
+
+  // Last needs a count, so it appears once the table has been counted.
+  await expect(page.getByRole("button", { name: "Last" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Count all rows" }).click()
+  await expect(page.getByRole("button", { name: "Last" })).toBeVisible()
+  await page.getByRole("button", { name: "Last" }).click()
+  await expect.poll(() => browses.some((q) => q.includes("offset=1100"))).toBe(true)
+
+  await page.getByRole("button", { name: "First" }).click()
+  await expect(page.getByRole("textbox", { name: "Page" })).toHaveValue("1")
+})
+
+/**
+ * An exact count belongs to the conditions it was taken under. When it did not,
+ * counting a filtered view and then clearing the filter left the page count
+ * clamped to the filtered total — Next was enabled and did nothing, and the
+ * button that would have corrected the figure was hidden because a figure existed.
+ */
+test("counting a filtered view does not clamp paging once the filter is gone", async ({ page }) => {
+  const browses: string[] = []
+  await mockDatabases(page, { layout: null, puts: [], browses })
+  await page.goto("/databases/browse?conn=1")
+
+  await page.getByRole("button", { name: /^users/ }).click()
+  await expect(page.getByText("ada@example.com")).toBeVisible()
+  await page.getByLabel("Close toast").click()
+
+  // Count under a filter…
+  await page.getByRole("button", { name: "Filter rows" }).click()
+  await page.getByRole("button", { name: "Add condition" }).click()
+  await page.getByRole("textbox", { name: "Value" }).fill("ada@example.com")
+  await page.getByRole("button", { name: "Count all rows" }).click()
+  await expect(page.getByRole("button", { name: "Last" })).toBeVisible()
+
+  // …then drop it. The count no longer describes this view, so the page total
+  // and the Last it implied go with it, and paging is free again.
+  await page.getByRole("button", { name: "Remove this condition" }).click()
+  await expect(page.getByRole("button", { name: "Last" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Count all rows" })).toBeVisible()
+
+  // The clamp is what broke: under the stale count the page field could not
+  // leave page 1, because ceil(1 / 100) said there was only one page.
+  browses.length = 0
+  await page.getByRole("textbox", { name: "Page" }).fill("3")
+  await page.getByRole("textbox", { name: "Page" }).press("Enter")
+  await expect.poll(() => browses.some((q) => q.includes("offset=200"))).toBe(true)
+  await expect(page.getByRole("textbox", { name: "Page" })).toHaveValue("3")
+})
+
+/**
+ * The value viewer is the one way to read a JSON blob the column has truncated,
+ * and it hung off a click handler on the `<td>` — which a keyboard cannot reach.
+ */
+test("a cell opens its value from the keyboard", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/browse?conn=1")
+
+  await page.getByRole("button", { name: /^users/ }).click()
+  const cell = page.getByRole("button", { name: "ada@example.com", exact: true })
+  await cell.focus()
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("dialog")).toContainText("ada@example.com")
+})
+
+/**
+ * The rail's filter and schema belong to the connection being read. Under one
+ * shared key, a schema chosen on one engine emptied the rail on the next.
+ */
+test("the table filter belongs to the connection, not to the rail", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/browse?conn=1")
+
+  await page.getByRole("textbox", { name: "Filter tables" }).fill("orders")
+  await expect(page.getByRole("button", { name: /^users/ })).toHaveCount(0)
+
+  await page.goto("/databases/browse?conn=2")
+  await expect(page.getByRole("textbox", { name: "Filter tables" })).toHaveValue("")
+})
+
 test("the create table form shows the statement it will run", async ({ page }) => {
   await mockDatabases(page, { layout: null, puts: [] })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
 
   await page.getByRole("button", { name: "Create table" }).click()
   const dialog = page.getByRole("dialog")
@@ -294,7 +794,7 @@ test("the create table form shows the statement it will run", async ({ page }) =
 
 test("a server found on the host is offered by its engine's name", async ({ page }) => {
   await mockDatabases(page, { layout: null, puts: [] })
-  await page.goto("/databases?conn=1")
+  await page.goto("/databases/browse?conn=1")
 
   // The sync toast carries the one way in; the dialog used to be titled with
   // the literal text "{server.driver}".
@@ -313,6 +813,21 @@ test("the diagram draws every table and remembers what was hidden", async ({ pag
   const nodes = page.locator(".react-flow__node")
   await expect(nodes).toHaveCount(3)
   await expect(page.getByRole("button", { name: "Full screen" })).toBeVisible()
+
+  // The grid dots take `--grid-dot`, not React Flow's default grey: a class
+  // on the circle loses to the library's own fill rule and did nothing.
+  const dots = await page
+    .locator(".react-flow__background circle")
+    .first()
+    .evaluate((circle) => {
+      const probe = document.createElementNS("http://www.w3.org/2000/svg", "circle")
+      probe.style.fill = "var(--grid-dot)"
+      circle.parentNode!.appendChild(probe)
+      const want = getComputedStyle(probe).fill
+      probe.remove()
+      return { got: getComputedStyle(circle).fill, want }
+    })
+  expect(dots.got).toBe(dots.want)
 
   await page.getByRole("button", { name: "Export the diagram" }).click()
   await expect(page.getByRole("menuitem", { name: /PNG image/ })).toBeVisible()
@@ -354,25 +869,64 @@ test("structure picks a table from its own rail and edits from there", async ({ 
  * asked for, and only offers to forget a connection the sync would not simply
  * re-add on the next load.
  */
-test("the connection string is masked, shown on request, and the public one names the server", async ({
+/**
+ * A database opens on its own overview: the connection string first, in the
+ * shapes it is pasted in, the facts beside it, its largest tables as bars
+ * that open in Browse, and the things reading it.
+ */
+test("a database opens on its overview: the string, the facts, the tables and what it feeds", async ({
   page,
 }) => {
   await mockDatabases(page, { layout: null, puts: [] })
-  await page.goto("/databases/connection?conn=1")
+  await page.route("**/api/v1/databases/sync", (route) =>
+    json(route, { added: [], already: [], needsCredentials: [] }),
+  )
+  await page.setViewportSize({ width: 1696, height: 992 })
+  await page.goto("/databases/overview?conn=1")
 
-  const local = page.getByText("On this server", { exact: true }).locator("..")
-  await expect(local).toContainText("postgres://app:••••••@127.0.0.1:5432/shop")
-  await expect(local).not.toContainText("s3cret")
+  const string = page.locator("[data-slot=connection-string]")
+  await expect(string).toContainText("postgres://app:••••••@127.0.0.1:5432/shop")
+  await expect(string).not.toContainText("s3cret")
   await page.getByRole("button", { name: "Show the connection string" }).click()
-  await expect(local).toContainText("postgres://app:s3cret@127.0.0.1:5432/shop?sslmode=disable")
+  await expect(string).toContainText("postgres://app:s3cret@127.0.0.1:5432/shop?sslmode=disable")
   await page.getByRole("button", { name: "Hide the connection string" }).click()
-  await expect(local).not.toContainText("s3cret")
+  await expect(string).not.toContainText("s3cret")
+  // The same string in the shape an .env file and a shell take.
+  await page.getByRole("button", { name: ".env" }).click()
+  await expect(string).toContainText("DATABASE_URL=postgres://app:••••••@127.0.0.1:5432/shop")
+  await page.getByRole("button", { name: "psql" }).click()
+  await expect(string).toContainText('psql "postgres://app:••••••@127.0.0.1:5432/shop')
+  await page.getByRole("button", { name: "URL" }).click()
 
-  // Loopback only, so the second row explains rather than offers a string,
-  // and Maintenance carries the switch that opens it up.
+  // Loopback only, so the other target explains rather than offers a string,
+  // and names the page whose switch opens it up.
+  await page.getByRole("button", { name: "From anywhere" }).click()
   await expect(
     page.getByText("Not reachable from outside this server", { exact: false }),
   ).toBeVisible()
+  await expect(string).toHaveCount(0)
+
+  // The facts, from the read that dials every connection.
+  await expect(page.getByRole("heading", { name: "At a glance" })).toBeVisible()
+  await expect(page.getByText("answers in 3 ms")).toBeVisible()
+  await expect(page.getByText("this server only")).toBeVisible()
+  // The largest tables as bars that open in Browse, and the map of what
+  // reads it.
+  const bars = page.locator("[data-slot=bar-list]")
+  await expect(bars).toContainText("orders")
+  await expect(page.getByRole("list", { name: "What they feed" })).toContainText("api")
+  await page.screenshot({
+    path: "test-results/database-docs.png",
+    fullPage: true,
+    animations: "disabled",
+  })
+  await bars.getByRole("button", { name: "Browse orders" }).click()
+  await expect(page).toHaveURL(/\/databases\/browse\?conn=1&schema=public&table=orders/)
+})
+
+test("the Connection page keeps the switch that opens a loopback database up", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/connection?conn=1")
   await expect(page.getByRole("button", { name: "Open up…" })).toBeVisible()
   // A database running here is re-added by the sync, so there is nothing to
   // forget: the Remove row is not drawn.
@@ -392,10 +946,13 @@ test("a server published to every interface hands out the public string and can 
       firewall: { backend: "ufw", active: true, open: true, editable: true },
     },
   })
-  await page.goto("/databases/connection?conn=1")
+  await page.goto("/databases/overview?conn=1")
 
-  const remote = page.getByText("From anywhere", { exact: true }).locator("..")
-  await expect(remote).toContainText("postgres://app:••••••@203.0.113.9:5432/shop")
+  await page.getByRole("button", { name: "From anywhere" }).click()
+  await expect(page.locator("[data-slot=connection-string]")).toContainText(
+    "postgres://app:••••••@203.0.113.9:5432/shop",
+  )
+  await page.goto("/databases/connection?conn=1")
   await expect(page.getByText("The firewall lets it through", { exact: false })).toBeVisible()
   await expect(page.getByRole("button", { name: "Close", exact: true })).toBeVisible()
 })
@@ -419,7 +976,11 @@ test("a connection to a server somewhere else keeps its Remove row and has no sw
 
   await expect(page.getByText("Remove from the dashboard")).toBeVisible()
   await expect(page.getByRole("button", { name: "Open up…" })).toHaveCount(0)
-  await expect(page.getByText("From anywhere")).toHaveCount(0)
+  await page.goto("/databases/overview?conn=1")
+  await expect(page.locator("[data-slot=connection-string]")).toContainText(
+    "postgres://app:••••••@127.0.0.1:5432/shop",
+  )
+  await expect(page.getByRole("button", { name: "From anywhere" })).toHaveCount(0)
 })
 
 test("deleting a container database can take the container and its data with it", async ({
@@ -445,10 +1006,580 @@ test("deleting a container database can take the container and its data with it"
   expect(deletes[0]).toEqual({ removeContainer: true })
 })
 
+/**
+ * The section opens on the control center rather than on one connection's
+ * table rail: every database as a card drawn as its engine, with what needs
+ * attention above them and the servers found on this machine offered.
+ */
+test("the section opens on every database at once, worst first", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases")
+
+  await expect(page.getByRole("heading", { name: "Databases", level: 1 })).toHaveClass(/sr-only/)
+  // No connection strip on a page about every connection, and no tiles over
+  // the cards: the cards are the readings.
+  await expect(page.getByRole("button", { name: /Switch connection/ })).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  // The unreachable one stands first, and a card opens the database's own
+  // overview. The cards only: the map below also links each database by name.
+  const cards = page
+    .locator("[data-slot=choice-card]")
+    .getByRole("link", { name: /^Open (shop|cache)$/ })
+  await expect(cards).toHaveCount(2)
+  await expect(cards.first()).toHaveAccessibleName("Open cache")
+  await expect(cards.first()).toHaveAttribute("href", "/databases/overview?conn=2")
+  await expect(page.getByText("cache connection refused")).toBeVisible()
+  // A server found on the machine is offered, and its dialog can make the
+  // account from the host's own shell.
+  await page.getByRole("button", { name: "Connect postgres on this server" }).click()
+  const dialog = page.getByRole("dialog", { name: "Connect PostgreSQL on this server" })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Make the account and connect" })).toBeVisible()
+  await expect(dialog.getByLabel("Account to make")).toHaveValue("just_dashboard")
+  await page.keyboard.press("Escape")
+  // The map draws both columns.
+  await expect(page.getByRole("list", { name: "What they feed" })).toContainText("api")
+  await page.screenshot({ path: "test-results/database-overview-1280.png", fullPage: true })
+  await page.setViewportSize({ width: 1720, height: 1000 })
+  await page.screenshot({ path: "test-results/database-overview-1720.png", fullPage: true })
+  // A press anywhere on a card opens it — on its readings, not only on the
+  // two words of its title. The whole surface took the pointer cursor and
+  // only the title went anywhere, which read as a click that had not landed.
+  await page
+    .locator("[data-slot=choice-card]")
+    .filter({ hasText: "shop" })
+    .getByText("Sessions", { exact: true })
+    .click()
+  await expect(page).toHaveURL(/\/databases\/overview\?conn=1/)
+})
+
+test("the map draws every link and the topology page its readings", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/topology")
+  await expect(page.getByRole("list", { name: "Databases" })).toContainText("shop")
+  await expect(page.getByRole("list", { name: "What they feed" })).toContainText("worker")
+  await expect(page.getByText("linked by its deployment · 2 open sessions")).toBeVisible()
+  // The readings are the section's own line and the lanes' heads, not tiles.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(page.getByText("2 links · 1 carrying sessions")).toBeVisible()
+  await expect(page.getByRole("list", { name: "How to read the map" })).toBeVisible()
+  await page.setViewportSize({ width: 1720, height: 1000 })
+  await page.screenshot({
+    path: "test-results/database-topology-1720.png",
+    fullPage: true,
+    animations: "disabled",
+  })
+})
+
+/**
+ * The type picker is a popover inside a dialog. The dialog's scroll lock
+ * used to swallow the wheel over it, so the list could not be scrolled and
+ * every type past the fold was reachable only by typing.
+ */
+test("the create table type list scrolls with the wheel", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/browse?conn=1")
+  await page.getByRole("button", { name: "Create table" }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("button", { name: "Browse types" }).click()
+  const list = page.locator("[data-slot=command-list]")
+  await expect(list).toBeVisible()
+  await list.evaluate((el) => {
+    el.style.maxHeight = "40px"
+  })
+  await list.hover()
+  await page.mouse.wheel(0, 200)
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+})
+
+test("the server page lists accounts, databases and extensions", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/server?conn=1")
+  await expect(page.getByText("2 databases on this server")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open as a connection" })).toBeVisible()
+  await page.getByRole("button", { name: /^Accounts/ }).click()
+  await expect(page.getByRole("cell", { name: "postgres", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "New account" }).click()
+  const dialog = page.getByRole("dialog", { name: "New account" })
+  await dialog.getByLabel("Name").fill("reports")
+  await expect(dialog.getByText(/CREATE ROLE "reports" WITH LOGIN PASSWORD/)).toBeVisible()
+  await expect(dialog.getByText(/GRANT CONNECT ON DATABASE "shop" TO "reports"/)).toBeVisible()
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: /^Extensions/ }).click()
+  await expect(page.getByRole("button", { name: "Enable" })).toBeVisible()
+})
+
+test("the advisor draws findings with their fix", async ({ page }) => {
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.goto("/databases/advisor?conn=1")
+  await expect(page.getByText("1 foreign key with no index")).toBeVisible()
+  await page.getByRole("button", { name: /1 foreign key with no index/ }).click()
+  await expect(page.getByText(/CREATE INDEX "orders_customer_id_idx"/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open in the console" })).toBeVisible()
+})
+
+/**
+ * `/databases/logs`: the server's own log on the database's page, found from
+ * the connection and read through its engine's lens — its container's output
+ * or the file and the journal its process writes — with its queries beside
+ * it, and never a link that leaves for the host's Logs page.
+ */
+const SLOW_SQL =
+  "SELECT o.id, o.total\n  FROM orders o\n  JOIN customers c ON c.id = o.customer_id\n WHERE c.region = 'eu'"
+
+const slowLog = {
+  supported: true,
+  source: "log",
+  enable: {
+    setting: "log_min_duration_statement",
+    current: "-1",
+    sql: "ALTER SYSTEM SET log_min_duration_statement = '250ms';",
+  },
+  entries: [
+    {
+      at: "2026-09-27T10:01:03.221Z",
+      durationMs: 1843.221,
+      query: SLOW_SQL,
+      fp: "3f2a9c1d0b7e",
+      user: "postgres",
+      db: "shop",
+      client: "172.18.0.5",
+    },
+    {
+      at: "2026-09-27T09:58:40.000Z",
+      durationMs: 312,
+      query: "UPDATE stock SET qty = qty - 1 WHERE sku = 'A-1'",
+      fp: "9a0b1c2d3e4f",
+      user: "app",
+      db: "shop",
+    },
+  ],
+  truncated: false,
+}
+
+test("/databases/logs reads a container database's output through its engine's lens", async ({
+  page,
+}) => {
+  const sockets: URLSearchParams[] = []
+  await mockDatabases(page, { layout: null, puts: [], sockets })
+  await page.goto("/databases/logs?conn=1")
+
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("deadlock", { exact: true })).toBeVisible({ timeout: 15_000 })
+  // The container, asked for by name, read as the engine the page knows it is.
+  expect(sockets[0].get("source")).toBe("docker:shop-db")
+  expect(sockets[0].get("lens")).toBe("postgres")
+
+  // The lens's figures are the counts on the lens row's chips — the section
+  // draws no tiles — and a press narrows the stream to the lines one counts.
+  // A reading a quick view already asks is that view's count: one chip per
+  // question, not two with two different counts.
+  const restarts = page.getByRole("button", { name: /^Restarts\s*\d/ })
+  await expect(restarts).toContainText("1")
+  await expect(page.getByRole("button", { name: /^Slow statements/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Slow\s*12$/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Errors\s*3$/ })).toBeVisible()
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await restarts.click()
+  await expect(restarts).toHaveAttribute("aria-pressed", "true")
+  await expect.poll(() => sockets.at(-1)?.getAll("f")).toEqual(["event:startup"])
+  await restarts.click()
+  await expect.poll(() => sockets.at(-1)?.getAll("f")).toEqual([])
+  await expect(page.locator('[data-slot=page] a[href^="/logs"]')).toHaveCount(0)
+})
+
+test("/databases/logs offers a host database's file and its unit's journal, and no link to /logs", async ({
+  page,
+}) => {
+  const sockets: URLSearchParams[] = []
+  const searches: URLSearchParams[] = []
+  const file = "/var/log/postgresql/postgresql-17-main.log"
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    sockets,
+    searches,
+    logSources: {
+      sources: [
+        {
+          id: `file:${file}`,
+          label: "postgresql-17-main.log",
+          kind: "app",
+          path: file,
+          size: 0,
+          modified: now,
+          archives: 1,
+          archiveBytes: 1297,
+          lens: "postgres",
+          detail: "Empty since it was last rotated — History reads the rotated files too",
+          primary: true,
+          rotated: true,
+        },
+        {
+          id: "journal:postgresql@17-main.service",
+          label: "postgresql@17-main.service",
+          kind: "journal",
+          lens: "postgres",
+          detail:
+            "What systemd recorded starting and stopping it; the server's own lines are in postgresql-17-main.log",
+          rotated: false,
+        },
+      ],
+    },
+  })
+  await page.goto("/databases/logs?conn=1")
+  await expect(page.getByLabel("Log lines").getByText("deadlock", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  })
+  expect(sockets[0].get("source")).toBe(`file:${file}`)
+
+  const picker = page.getByRole("combobox", { name: "Server log" })
+  await picker.click()
+  await page.getByRole("option", { name: "postgresql@17-main.service" }).click()
+  await expect.poll(() => sockets.at(-1)?.get("source")).toBe("journal:postgresql@17-main.service")
+  await expect(page).toHaveURL(/source=journal%3Apostgresql%4017-main\.service/)
+
+  // The file logrotate emptied opens its History on the rotated one too.
+  await picker.click()
+  await page.getByRole("option", { name: "postgresql-17-main.log" }).click()
+  await page.getByRole("button", { name: "History", exact: true }).click()
+  await expect
+    .poll(() => searches.find((s) => s.get("limit") === "3000")?.get("archives"))
+    .toBe("true")
+  expect(searches.find((s) => s.get("limit") === "3000")?.get("source")).toBe(`file:${file}`)
+  await expect(page.locator('[data-slot=page] a[href^="/logs"]')).toHaveCount(0)
+})
+
+test("/databases/logs lists the slow statements, each opening on the whole statement and the log around it", async ({
+  page,
+}) => {
+  const searches: URLSearchParams[] = []
+  await mockDatabases(page, { layout: null, puts: [], searches, queryLog: slowLog })
+  await page.goto("/databases/logs?conn=1&view=queries")
+  await expect(page.getByRole("button", { name: "Queries", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+    { timeout: 15_000 },
+  )
+
+  // Postgres reports log_min_duration_statement off server-wide, and its log
+  // has slow statements anyway — set for one database. The rows answer that.
+  await expect(page.getByText("Slow statements are not being logged")).toHaveCount(0)
+
+  // A row is one line; opened, it is the whole statement and what came with it.
+  const row = page.getByRole("button", { name: /SELECT o\.id, o\.total FROM orders o JOIN/ })
+  await expect(row).toBeVisible()
+  await expect(row).toContainText("1.84s")
+  await row.click()
+  await expect(
+    page.getByText("JOIN customers c ON c.id = o.customer_id", { exact: false }).last(),
+  ).toBeVisible()
+  await expect(page.getByText("172.18.0.5").last()).toBeVisible()
+  await page.screenshot({ path: "test-results/database-logs-queries-1280.png", fullPage: true })
+
+  // The server log a minute either side, every line of it.
+  await page.getByRole("button", { name: "Server log around this" }).click()
+  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect
+    .poll(() => searches.find((s) => s.get("limit") === "3000")?.get("since"))
+    .toBe("2026-09-27T10:00:03.221Z")
+  const history = searches.find((s) => s.get("limit") === "3000")!
+  expect(history.get("until")).toBe("2026-09-27T10:02:03.221Z")
+  expect(history.getAll("f")).toEqual([])
+})
+
+test("/databases/logs asks every time a shape was slow over the list's window, and runs a statement in the query console", async ({
+  page,
+}) => {
+  const searches: URLSearchParams[] = []
+  await mockDatabases(page, { layout: null, puts: [], searches, queryLog: slowLog })
+  await page.goto("/databases/logs?conn=1&view=queries")
+  const queries = page.getByRole("button", { name: "Queries", exact: true })
+  await expect(queries).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
+
+  // The list reads the last week; the pane's own History is on its last
+  // day. The shape's question is the list's, not the pane's.
+  await page.getByRole("group", { name: "Window" }).getByRole("button", { name: "7d" }).click()
+  await page.getByRole("button", { name: /SELECT o\.id, o\.total FROM orders o JOIN/ }).click()
+  await page.getByRole("button", { name: "More actions for this statement" }).click()
+  const asked = Date.now()
+  await page.getByRole("menuitem", { name: "Every time this shape was slow" }).click()
+  await expect
+    .poll(() => searches.find((s) => s.get("limit") === "3000")?.getAll("f"))
+    .toEqual(["event:slow", "fp:3f2a9c1d0b7e"])
+  const shape = searches.find((s) => s.get("limit") === "3000")!
+  const since = Date.parse(shape.get("since")!)
+  expect(Math.abs(asked - 7 * 24 * 3600_000 - since)).toBeLessThan(120_000)
+  expect(Date.parse(shape.get("until")!)).toBeGreaterThanOrEqual(asked - 1000)
+
+  // The totals over every run are the third reading.
+  await queries.click()
+  await page.getByRole("button", { name: "Top statements" }).click()
+  await expect(page.getByRole("heading", { name: "Top statements" })).toBeVisible()
+  await expect(page.getByText("SELECT * FROM orders WHERE customer_id = $1")).toBeVisible()
+
+  // A statement runs in the section's query console.
+  await page.getByRole("button", { name: "Latest" }).click()
+  await page.getByRole("button", { name: /UPDATE stock SET qty/ }).click()
+  await page.getByRole("button", { name: "Open in Query" }).click()
+  await expect(page).toHaveURL(/\/databases\/query\?conn=1&sql=UPDATE\+stock|sql=UPDATE%20stock/)
+})
+
+test("/databases/logs says which setting keeps slow statements out of an empty log, with the statement that changes it", async ({
+  page,
+}) => {
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    queryLog: { ...slowLog, entries: [] },
+  })
+  await page.goto("/databases/logs?conn=1&view=queries")
+  const notice = page.getByText("Slow statements are not being logged")
+  await expect(notice).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/log_min_duration_statement, which is -1/)).toBeVisible()
+  // One statement, since the console runs one; the reload is named, not bundled.
+  await expect(page.getByText(/run SELECT pg_reload_conf\(\); after it/)).toBeVisible()
+  await expect(page.getByText("No slow statements recorded")).toBeVisible()
+
+  // The fix is the advisor's: the statement, run in the query console.
+  await page.getByRole("button", { name: "Open in Query" }).click()
+  await expect(page).toHaveURL(
+    /\/databases\/query\?conn=1&sql=ALTER\+SYSTEM|\/databases\/query\?conn=1&sql=ALTER%20SYSTEM/,
+  )
+})
+
+/** A host Postgres: its file, emptied by logrotate, and its unit's journal. */
+const LOG_FILE = "/var/log/postgresql/postgresql-17-main.log"
+const hostLog = {
+  sources: [
+    {
+      id: `file:${LOG_FILE}`,
+      label: "postgresql-17-main.log",
+      kind: "app",
+      path: LOG_FILE,
+      size: 0,
+      modified: now,
+      archives: 1,
+      archiveBytes: 1297,
+      lens: "postgres",
+      detail: "Empty since it was last rotated — History reads the rotated files too",
+      primary: true,
+      rotated: true,
+    },
+    {
+      id: "journal:postgresql@17-main.service",
+      label: "postgresql@17-main.service",
+      kind: "journal",
+      lens: "postgres",
+      detail:
+        "What systemd recorded starting and stopping it; the server's own lines are in postgresql-17-main.log",
+      rotated: false,
+    },
+  ],
+  refused: [
+    {
+      path: "/var/lib/postgresql/17/main/log/postgresql-Sat.log",
+      reason: "outside the log roots (/var/log)",
+    },
+  ],
+}
+
+test("/databases/logs reads the log around a statement in the server's own file, whichever log is open", async ({
+  page,
+}) => {
+  const searches: URLSearchParams[] = []
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    searches,
+    logSources: hostLog,
+    queryLog: slowLog,
+  })
+  const journal = encodeURIComponent("journal:postgresql@17-main.service")
+  await page.goto(`/databases/logs?conn=1&source=${journal}&view=queries`)
+  // The file the roots refuse is named whole, directory and all: that is
+  // what an administrator adds to JD_LOG_ROOTS.
+  await expect(page.getByText("/var/lib/postgresql/17/main/log/postgresql-Sat.log")).toBeVisible({
+    timeout: 15_000,
+  })
+
+  await page.getByRole("button", { name: /SELECT o\.id, o\.total FROM orders o JOIN/ }).click()
+  await page.getByRole("button", { name: "Server log around this" }).click()
+  await expect(page.getByRole("combobox", { name: "Server log" })).toContainText(
+    "postgresql-17-main.log",
+  )
+  // Once, on the file and its rotated one, never first on the journal.
+  await expect
+    .poll(() => searches.filter((s) => s.get("limit") === "3000").map((s) => s.get("source")))
+    .toEqual([`file:${LOG_FILE}`])
+  const history = searches.find((s) => s.get("limit") === "3000")!
+  expect(history.get("archives")).toBe("true")
+  expect(history.get("since")).toBe("2026-09-27T10:00:03.221Z")
+  await expect(page).toHaveURL(/source=file%3A%2Fvar%2Flog%2Fpostgresql/)
+  await expect(page).toHaveURL(/view=search/)
+})
+
+test("/databases/logs keeps a stopped server's log on screen and says it is not answering", async ({
+  page,
+}) => {
+  await page.clock.install()
+  let stopped = false
+  await mockDatabases(page, { layout: null, puts: [] })
+  await page.route("**/api/v1/databases/1/logs/sources", (route) =>
+    json(
+      route,
+      stopped
+        ? {
+            sources: [],
+            reason:
+              "Nothing on this machine is listening on port 5438, and no unit of this engine's was found by name.",
+          }
+        : containerLog,
+    ),
+  )
+  await page.goto("/databases/logs?conn=1")
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("deadlock", { exact: true })).toBeVisible({ timeout: 15_000 })
+
+  // The next reading finds nothing listening; the log it was reading stays.
+  stopped = true
+  await page.clock.runFor(61_000)
+  await expect(page.getByText("The server is not answering")).toBeVisible()
+  await expect(lines.getByText("deadlock", { exact: true })).toBeVisible()
+})
+
+test("/databases/logs names a server found stopped as not answering", async ({ page }) => {
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    logSources: {
+      ...containerLog,
+      sources: [{ ...containerLog.sources[0], status: "exited" }],
+      note: "shop-db is exited, so nothing answers for this connection. Its output runs up to the moment it stopped.",
+    },
+  })
+  await page.goto("/databases/logs?conn=1")
+  await expect(page.getByText("The server is not answering")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/shop-db is exited/)).toBeVisible()
+  await expect(page.getByLabel("Log lines").getByText("deadlock", { exact: true })).toBeVisible()
+})
+
+test("/databases/logs keeps the readings on the lines' own row, not over the Queries view", async ({
+  page,
+}) => {
+  const sockets: URLSearchParams[] = []
+  await mockDatabases(page, { layout: null, puts: [], sockets })
+  await page.goto("/databases/logs?conn=1&view=queries")
+  const queries = page.getByRole("button", { name: "Queries", exact: true })
+  await expect(queries).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
+  // Back through the section's own link, which names no view: the pane
+  // opens on the reading it was left on.
+  await page.goto("/databases/logs?conn=1")
+  await expect(queries).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
+  // Queries reads no filter, so nothing over it narrows lines out of sight.
+  const restarts = page.getByRole("button", { name: /^Restarts/ })
+  await expect(restarts).toHaveCount(0)
+
+  await page.getByRole("button", { name: "Live", exact: true }).click()
+  await restarts.click()
+  await expect(restarts).toHaveAttribute("aria-pressed", "true")
+  await expect.poll(() => sockets.at(-1)?.getAll("f")).toEqual(["event:startup"])
+})
+
+test("/databases/logs on a phone says why a remote server has no log here, whole", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const reason = "The server is on another machine (10.0.4.9), and its log is there."
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    logSources: { sources: [], reason },
+    queryLog: {
+      supported: true,
+      source: "slowlog",
+      threshold: "10 ms",
+      entries: [],
+      truncated: false,
+    },
+  })
+  await page.goto("/databases/logs?conn=1")
+  const why = page.getByText(reason)
+  await expect(why).toBeVisible({ timeout: 15_000 })
+  expect(await why.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  await expect(page.getByLabel("Log lines")).toHaveCount(0)
+})
+
+test("/databases/logs on a SQLite file lists what was run from here, with no log pane", async ({
+  page,
+}) => {
+  const sockets: URLSearchParams[] = []
+  await mockDatabases(page, {
+    layout: null,
+    puts: [],
+    sockets,
+    logSources: {
+      sources: [],
+      reason: "A SQLite database is a file, not a server: it writes no log of its own.",
+    },
+  })
+  const notes = {
+    ...connection,
+    name: "notes",
+    driver: "sqlite",
+    host: "",
+    port: "",
+    user: "",
+    database: "/srv/notes.db",
+  }
+  await page.route("**/api/v1/databases/", (route) => json(route, [notes]))
+  await page.route("**/api/v1/databases/1/history**", (route) =>
+    json(route, [
+      {
+        id: 2,
+        sql: "DELETE FROM notes WHERE archived",
+        risk: "critical",
+        success: false,
+        durationMs: 2,
+        rowCount: 0,
+        ranAt: now,
+      },
+      {
+        id: 1,
+        sql: "SELECT * FROM notes WHERE id = 3",
+        risk: "safe",
+        success: true,
+        durationMs: 4,
+        rowCount: 1,
+        ranAt: now,
+      },
+    ]),
+  )
+  await page.goto("/databases/logs?conn=1")
+  await expect(page.getByText("Statements run from here")).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/writes no log of its own/)).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: /SELECT \* FROM notes WHERE id = 3/ }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: /DELETE FROM notes/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveCount(0)
+  expect(sockets).toHaveLength(0)
+})
+
 for (const path of [
-  "/databases?conn=1",
+  "/databases",
+  "/databases/overview?conn=1",
+  "/databases/browse?conn=1",
   "/databases/diagram?conn=1",
   "/databases/connection?conn=1",
+  "/databases/topology",
+  "/databases/server?conn=1",
+  "/databases/advisor?conn=1",
+  "/databases/backups?conn=1",
+  "/databases/logs?conn=1",
 ]) {
   test(`every icon-only control on ${path} has an accessible name`, async ({ page }) => {
     await mockDatabases(page, { layout: null, puts: [] })

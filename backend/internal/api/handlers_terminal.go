@@ -93,7 +93,7 @@ func mapTermError(err error) error {
 }
 
 // workspace is one terminal as the operator thinks of it: a named, filed group
-// of direct PTYs. Every workspace in the response is live and process-local.
+// of direct PTYs. Every workspace in the response is live.
 type workspace struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
@@ -196,7 +196,10 @@ func (s *Server) handleTerminalList(w http.ResponseWriter, r *http.Request) erro
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"enabled": s.modules.term.Enabled(),
-		"login":   login,
+		// Whether a session outlives the dashboard — held on the host — or
+		// ends when it restarts, which the page says before you rely on it.
+		"persistent": s.modules.term.Holding(),
+		"login":      login,
 		// The folders come with the listing rather than from a second
 		// request, because the rail cannot be drawn without both and two
 		// polls would render a session in a folder that has not arrived yet

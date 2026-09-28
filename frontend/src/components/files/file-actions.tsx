@@ -4,15 +4,18 @@ import { Fragment, useState } from "react"
 import Link from "next/link"
 import {
   ArrowMove,
+  Check,
   Clipboard,
   Copy,
   CornerUpRight,
   Download,
   Eye,
   FileZip,
+  FolderClosed,
   FolderOpen,
   GitHubMark,
   Image as ImageIcon,
+  MoreHorizontal,
   Pencil,
   Shield,
   Star,
@@ -28,16 +31,30 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Button } from "@/components/ui/button"
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { copyText } from "@/lib/clipboard"
 import { isArchive, mediaKind } from "@/components/files/media"
+import {
+  FOLDER_COLOURS,
+  FOLDER_COLOUR_NAMES,
+  FolderSwatch,
+  type FolderColour,
+} from "@/components/files/file-icon"
 
 export { isArchive, isImage } from "@/components/files/media"
 
@@ -60,6 +77,9 @@ export type FileActions = {
   onEditImage: () => void
   onToggleStar: () => void
   starred: boolean
+  /** The colour a folder is drawn in, and the way to change it. */
+  colour: FolderColour
+  onColour: (colour: FolderColour) => void
 }
 
 /**
@@ -83,6 +103,34 @@ export type Verb = {
   danger?: boolean
   /** The key that does the same thing from the keyboard. */
   shortcut?: string
+  /** A drawing in place of the glyph — a colour's own swatch. */
+  mark?: React.ReactNode
+  /** The current one of a set of choices. */
+  checked?: boolean
+  /** Verbs one level down, behind this one. */
+  submenu?: Verb[]
+}
+
+/**
+ * A folder's colour, as a verb with the nine labels under it. The swatch in
+ * front of each is the folder as it would be drawn, so the choice is made by
+ * looking rather than by reading nine colour names.
+ */
+export function colourVerb(current: FolderColour, onPick: (colour: FolderColour) => void): Verb {
+  return {
+    id: "colour",
+    label: "Colour",
+    icon: FolderClosed,
+    mark: <FolderSwatch colour={current} className="size-3.5" />,
+    submenu: FOLDER_COLOURS.map((colour) => ({
+      id: `colour-${colour}`,
+      label: FOLDER_COLOUR_NAMES[colour],
+      icon: FolderClosed,
+      mark: <FolderSwatch colour={colour} className="size-3.5" />,
+      checked: colour === current,
+      onSelect: () => onPick(colour),
+    })),
+  }
 }
 
 export function archiveHref(base: string, paths: string[], format: "zip" | "tar.gz") {
@@ -193,6 +241,7 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
         icon: actions.starred ? StarFill : Star,
         onSelect: actions.onToggleStar,
       })
+      go.push(colourVerb(actions.colour, actions.onColour))
     }
     groups.push(go)
   }
@@ -245,15 +294,35 @@ type MenuItemComponent = React.ComponentType<{
   children?: React.ReactNode
 }>
 
+/** The three primitives a verb with a submenu needs, from whichever menu is open. */
+type SubmenuComponents = {
+  Sub: React.ComponentType<{ children?: React.ReactNode }>
+  SubTrigger: React.ComponentType<{ className?: string; children?: React.ReactNode }>
+  SubContent: React.ComponentType<{ className?: string; children?: React.ReactNode }>
+}
+
+const DROPDOWN_SUBMENU: SubmenuComponents = {
+  Sub: DropdownMenuSub,
+  SubTrigger: DropdownMenuSubTrigger,
+  SubContent: DropdownMenuSubContent,
+}
+const CONTEXT_SUBMENU: SubmenuComponents = {
+  Sub: ContextMenuSub,
+  SubTrigger: ContextMenuSubTrigger,
+  SubContent: ContextMenuSubContent,
+}
+
 /** Draws verb groups into whichever menu primitive is open. */
 export function VerbList({
   groups,
   Item,
   Separator,
+  submenu,
 }: {
   groups: Verb[][]
   Item: MenuItemComponent
   Separator: React.ComponentType<{ className?: string }>
+  submenu: SubmenuComponents
 }) {
   const visible = groups.filter((group) => group.length > 0)
   return (
@@ -262,7 +331,7 @@ export function VerbList({
         <Fragment key={i}>
           {i > 0 && <Separator />}
           {group.map((verb) => (
-            <VerbItem key={verb.id} verb={verb} Item={Item} />
+            <VerbItem key={verb.id} verb={verb} Item={Item} submenu={submenu} />
           ))}
         </Fragment>
       ))}
@@ -270,11 +339,37 @@ export function VerbList({
   )
 }
 
-function VerbItem({ verb, Item }: { verb: Verb; Item: MenuItemComponent }) {
+function VerbItem({
+  verb,
+  Item,
+  submenu,
+}: {
+  verb: Verb
+  Item: MenuItemComponent
+  submenu: SubmenuComponents
+}) {
+  const mark = verb.mark ?? <verb.icon className="size-3.5" />
+  if (verb.submenu) {
+    const { Sub, SubTrigger, SubContent } = submenu
+    return (
+      <Sub>
+        <SubTrigger className="text-body">
+          {mark}
+          <span className="min-w-0 flex-1 truncate">{verb.label}</span>
+        </SubTrigger>
+        <SubContent className="w-44">
+          {verb.submenu.map((inner) => (
+            <VerbItem key={inner.id} verb={inner} Item={Item} submenu={submenu} />
+          ))}
+        </SubContent>
+      </Sub>
+    )
+  }
   const body = (
     <>
-      <verb.icon className="size-3.5" />
+      {mark}
       <span className="min-w-0 flex-1 truncate">{verb.label}</span>
+      {verb.checked && <Check className="size-3.5" />}
       {verb.shortcut && (
         <span className="ml-3 shrink-0 text-micro tracking-wide text-muted-foreground">
           {verb.shortcut}
@@ -315,23 +410,83 @@ export function FileActionsMenu({
   caps,
   actions,
   children,
+  open,
+  onOpenChange,
 }: {
   entry: FileEntry
   caps: RowCaps
   actions: FileActions
   children: React.ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       {children}
       <DropdownMenuContent align="end" className="w-56">
         <VerbList
           groups={fileVerbs(entry, caps, actions)}
           Item={DropdownMenuItem}
           Separator={DropdownMenuSeparator}
+          submenu={DROPDOWN_SUBMENU}
         />
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+// Thousands of closed menus cost more to mount than the directory's text.
+// Keep the trigger immediately usable; instantiate its menu on first use and
+// retain it afterwards so Radix can restore focus when it closes.
+export function FileActionsButton({
+  entry,
+  caps,
+  actions,
+  className,
+  label = "More actions",
+}: {
+  entry: FileEntry
+  caps: RowCaps
+  actions: FileActions
+  className?: string
+  label?: string
+}) {
+  const [mounted, setMounted] = useState(false)
+  const [open, setOpen] = useState(false)
+  const activate = () => {
+    setMounted(true)
+    setOpen(true)
+  }
+  const button = (
+    <Button
+      size="icon-xs"
+      variant="ghost"
+      aria-label={label}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      title="Rename, move, copy, permissions, delete"
+      className={className}
+      onClick={mounted ? undefined : activate}
+      onKeyDown={
+        mounted
+          ? undefined
+          : (event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault()
+                activate()
+              }
+            }
+      }
+    >
+      <MoreHorizontal className="size-3.5" />
+    </Button>
+  )
+  return mounted ? (
+    <FileActionsMenu entry={entry} caps={caps} actions={actions} open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
+    </FileActionsMenu>
+  ) : (
+    button
   )
 }
 
@@ -386,7 +541,12 @@ export function ListingContextMenu({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-56">
-        <VerbList groups={groups} Item={ContextMenuItem} Separator={ContextMenuSeparator} />
+        <VerbList
+          groups={groups}
+          Item={ContextMenuItem}
+          Separator={ContextMenuSeparator}
+          submenu={CONTEXT_SUBMENU}
+        />
       </ContextMenuContent>
     </ContextMenu>
   )

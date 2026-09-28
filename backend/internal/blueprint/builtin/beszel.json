@@ -1,0 +1,97 @@
+{
+  "id": "beszel",
+  "version": "1.0.0",
+  "name": "Beszel",
+  "category": "http",
+  "profile": "web",
+  "description": "A monitoring hub for a fleet of machines: CPU, memory, disk, network and per-container history with alerts, collected by a small agent you install on each machine you want to watch. This deployment is the hub only; it keeps its history in SQLite on the data volume and needs no scrape configuration.",
+  "iconId": "monitoring",
+  "docsUrl": "https://beszel.dev/guide/getting-started",
+  "access": {
+    "kind": "setup",
+    "note": "Beszel ships with no accounts and no default password. The first visitor is shown a Create-account form in place of the sign-in form, and the account it creates is the admin that owns the hub; the form then disappears and only that admin can add anyone else. Open the address the moment the deploy finishes — whoever reaches it first owns it. The hub is empty until you install the Beszel agent on a machine and add that machine here; the agent is a separate per-host install, not part of this deployment."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "MIT",
+    "upstreamUrl": "https://github.com/henrygd/beszel",
+    "reviewedAt": "2026-09-22",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "henrygd/beszel:0.20.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "The address you and your agents reach the hub at. Beszel writes it into the links in alert e-mails and push notifications, so it is required rather than cosmetic."
+    }
+  ],
+  "secrets": [],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8090,
+      "protocol": "tcp",
+      "purpose": "The dashboard, the API and the agent connections",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/beszel_data",
+      "purpose": "The metric history, the systems, the alert rules and the hub's own SSH key",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 256,
+    "minMemoryMb": 128
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/api/health",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "APP_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Beszel runs its database migrations on start and keeps the key pair your agents already trust, so existing agents reconnect without being re-added. Back the data volume up first: the migrations are one-way.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": { "domain": "beszel.example.test" },
+      "digest": "sha256:d7baf06875b2dbece9dcc95e18b0aa842f53ceeb0839bcfa0c0fa2b3698d71ac"
+    }
+  ]
+}

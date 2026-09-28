@@ -23,6 +23,18 @@ type ComposeServicePlan struct {
 	Mounts          []string `json:"mounts"`
 	Healthcheck     bool     `json:"healthcheck"`
 	Advanced        []string `json:"advanced"`
+
+	// The rest of a service's build (compose_build.go): the stage, the
+	// build arguments by name with the file's own value expression, the
+	// platform it pins, its env_file paths, and what analysing it in its
+	// checkout proved about building it.
+	BuildTarget         string            `json:"buildTarget,omitempty"`
+	BuildArgs           []ComposeBuildArg `json:"buildArgs,omitempty"`
+	Platform            string            `json:"platform,omitempty"`
+	ImagePlatforms      []string          `json:"imagePlatforms,omitempty"`
+	EnvFiles            []ComposeEnvFile  `json:"envFiles,omitempty"`
+	BuildContextMissing bool              `json:"buildContextMissing,omitempty"`
+	DockerfileIssues    []ImageBuildIssue `json:"dockerfileIssues,omitempty"`
 }
 
 type ComposeAnalysis struct {
@@ -33,6 +45,13 @@ type ComposeAnalysis struct {
 	Warnings    []string             `json:"warnings"`
 	Unsupported []string             `json:"unsupported"`
 	Preview     string               `json:"preview"`
+
+	// PrimaryService is the service readiness and the release's container
+	// identity follow: one that builds or publishes a port, never a database.
+	PrimaryService string `json:"primaryService,omitempty"`
+	// OptionalVariables are interpolated with a default (`${PORT:-3000}`), so
+	// Compose runs without them; Variables are the ones it cannot.
+	OptionalVariables []ComposeOptionalVariable `json:"optionalVariables,omitempty"`
 }
 
 func analyzeComposeDocuments(documents []ComposeDocument) (ComposeAnalysis, error) {
@@ -53,6 +72,7 @@ func analyzeComposeDocuments(documents []ComposeDocument) (ComposeAnalysis, erro
 	hash := sha256.New()
 	serviceMap := map[string]ComposeServicePlan{}
 	variableSet := map[string]bool{}
+	optionalSet := map[string]composeVariableUse{}
 	previews := make([]string, 0, len(documents))
 	for _, document := range documents {
 		analysis.Files = append(analysis.Files, document.Path)
@@ -103,6 +123,7 @@ func analyzeComposeDocuments(documents []ComposeDocument) (ComposeAnalysis, erro
 			return ComposeAnalysis{}, fmt.Errorf("%w: %s: %v", ErrInvalidCompose, document.Path, err)
 		}
 		collectComposeVariables(mapping, variableSet)
+		collectComposeDefaults(mapping, optionalSet)
 		sanitized := cloneYAMLNode(&root)
 		maskComposeSecrets(sanitized, nil)
 		encoded, err := yaml.Marshal(sanitized)
@@ -129,6 +150,8 @@ func analyzeComposeDocuments(documents []ComposeDocument) (ComposeAnalysis, erro
 		analysis.Variables = append(analysis.Variables, variable)
 	}
 	sort.Strings(analysis.Variables)
+	analysis.Variables, analysis.OptionalVariables = splitComposeVariables(analysis.Variables, optionalSet)
+	analysis.PrimaryService = composePrimaryService(analysis.Services)
 	analysis.Digest = "sha256:" + hex.EncodeToString(hash.Sum(nil))
 	analysis.Preview = strings.Join(previews, "\n---\n")
 	return analysis, nil
@@ -194,6 +217,19 @@ func composeServiceFromNode(name string, node *yaml.Node, documentPath string) (
 		if dockerfileValue == "" || !validComposeRelativeReference(dockerfileValue) {
 			return service, nil, nil, fmt.Errorf("Dockerfile path escapes the build context")
 		}
+		if build.Kind == yaml.MappingNode {
+			var argsErr error
+			service.BuildTarget = scalarMappingValue(build, "target")
+			service.BuildArgs, argsErr = composeBuildArgs(mappingValue(build, "args"))
+			if argsErr != nil {
+				return service, nil, nil, argsErr
+			}
+			for _, key := range []string{"secrets", "ssh"} {
+				if mappingValue(build, key) != nil {
+					unsupported = append(unsupported, "service "+name+" build uses "+key+", which deployment builds do not provide")
+				}
+			}
+		}
 		if strings.Contains(contextValue, "$") || strings.Contains(dockerfileValue, "$") {
 			unsupported = append(unsupported, "service "+name+" uses a dynamic build path that cannot be immutably contained")
 			service.BuildContext = contextValue
@@ -232,6 +268,8 @@ func composeServiceFromNode(name string, node *yaml.Node, documentPath string) (
 		}
 	}
 	service.Healthcheck = mappingValue(node, "healthcheck") != nil
+	service.Platform = strings.ToLower(scalarMappingValue(node, "platform"))
+	service.EnvFiles = composeEnvFiles(mappingValue(node, "env_file"))
 	advancedKeys := map[string]string{
 		"privileged": "privileged", "devices": "devices", "cap_add": "capabilities",
 		"pid": "pid_namespace", "ipc": "ipc_namespace", "security_opt": "security_options",
@@ -530,7 +568,9 @@ func isVariableExpression(value string) bool {
 	return composeVariableRE.MatchString(value)
 }
 
-var composeVariableRE = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
+// `${NAME:?message}` is a reference that refuses to run without a value, so
+// it carries no literal any more than `${NAME}` does.
+var composeVariableRE = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*(?::?\?[^}]*)?\}$`)
 
 func URLHasCredentials(value string) bool {
 	if !strings.Contains(value, "://") {

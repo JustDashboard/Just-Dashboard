@@ -39,14 +39,12 @@ export function scanDomain(vhost: VHost): string | undefined {
 }
 
 /**
- * The access log the site form writes for a site, addressed the way the log
- * viewer addresses a file. A hand-written site may log elsewhere; the viewer
- * says so rather than this guessing.
+ * The site's own page: what it is, its verbs, and its requests and errors
+ * read where it is. Every site has one — a Caddy route with no file on the
+ * host still has a log to read.
  */
-export function accessLogSource(vhost: VHost): string | undefined {
-  if (vhost.kind !== "nginx") return undefined
-  const stem = vhost.name.replace(/\.conf$/, "")
-  return `/var/log/nginx/${stem}.access.log`
+export function sitePath(name: string): string {
+  return `/proxy/sites/${encodeURIComponent(name)}`
 }
 
 export function useSiteVerbs({
@@ -77,13 +75,11 @@ export function useSiteVerbs({
   const hasFile = Boolean(vhost.path)
   const url = siteUrl(vhost)
   const domain = scanDomain(vhost)
-  const log = accessLogSource(vhost)
 
   if (managedByForm && admin) {
     verbs.push({
       key: "edit",
       label: "Edit",
-      detail: "Open the site in the form that writes its nginx config.",
       icon: Pencil,
       inline: true,
       disabled: Boolean(busy),
@@ -94,9 +90,6 @@ export function useSiteVerbs({
     verbs.push({
       key: "raw",
       label: admin ? "Raw config" : "View config",
-      detail: admin
-        ? "Edit the file itself. Tested with the server's own parser before it takes effect."
-        : "Read the configuration file as it is on disk.",
       icon: Code,
       inline: true,
       run: () => onRaw(vhost),
@@ -106,7 +99,6 @@ export function useSiteVerbs({
     verbs.push({
       key: "open",
       label: "Open site",
-      detail: `Visit ${url} in a new tab.`,
       icon: External,
       run: () => window.open(url, "_blank", "noopener,noreferrer"),
     })
@@ -115,25 +107,22 @@ export function useSiteVerbs({
     verbs.push({
       key: "scan",
       label: "TLS report",
-      detail: "Grade what a visitor actually gets: protocols, chain, redirect and headers.",
       icon: Inspect,
       run: () => router.push(`/proxy/tls?domain=${encodeURIComponent(domain)}`),
     })
   }
-  if (log) {
-    verbs.push({
-      key: "log",
-      label: "Access log",
-      detail: "The requests this site served, in the log viewer.",
-      icon: Logs,
-      run: () => router.push(`/logs?source=${encodeURIComponent(log)}`),
-    })
-  }
+  // The site's logs on its own page, where they are read as its requests
+  // and its errors rather than as a file on the host Logs page.
+  verbs.push({
+    key: "log",
+    label: "Logs",
+    icon: Logs,
+    run: () => router.push(sitePath(vhost.name)),
+  })
   if (managedByForm && admin) {
     verbs.push({
       key: "duplicate",
       label: "Duplicate",
-      detail: "Start a new site from this one's settings, with a different name and domains.",
       icon: Copy,
       run: () => onDuplicate(vhost),
     })
@@ -147,7 +136,6 @@ export function useSiteVerbs({
         ? {
             key: "disable",
             label: "Disable",
-            detail: "Stop serving it and reload. The file stays on disk.",
             icon: Slash,
             progressive: "Disabling",
             disabled: Boolean(busy),
@@ -156,7 +144,6 @@ export function useSiteVerbs({
         : {
             key: "enable",
             label: "Enable",
-            detail: "Link it into sites-enabled and reload nginx.",
             icon: CheckCircle,
             progressive: "Enabling",
             disabled: Boolean(busy),
@@ -168,7 +155,6 @@ export function useSiteVerbs({
     verbs.push({
       key: "delete",
       label: "Delete",
-      detail: "Remove the file and its link, then reload. The previous content is kept as a .bak.",
       icon: Trash,
       danger: true,
       disabled: Boolean(busy),

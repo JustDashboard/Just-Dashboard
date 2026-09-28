@@ -8,9 +8,8 @@ import { cn } from "@/lib/utils"
 import type { AuthFile } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Field } from "@/components/form"
+import { Field, FormSection, FormSections } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -71,12 +70,13 @@ export function AuthFilesPanel() {
 
   return (
     <>
-      <Panel plain>
-        <PanelHeader
+      <FormSections>
+        <FormSection
+          aside
           title="Password files"
+          hint={`${data?.length ?? 0} files for HTTP basic authentication`}
           actions={<AuthUserDialog files={data ?? []} onDone={refresh} />}
-        />
-        <PanelBody flush>
+        >
           {loading ? (
             <LoadingRows rows={2} />
           ) : error ? (
@@ -134,8 +134,6 @@ export function AuthFilesPanel() {
                       {
                         key: "delete",
                         label: "Delete file",
-                        detail:
-                          "Remove the file. A site still pointing at it fails its next reload.",
                         icon: Trash,
                         danger: true,
                         run: () => removeFile(file),
@@ -146,8 +144,8 @@ export function AuthFilesPanel() {
               ))}
             </ul>
           )}
-        </PanelBody>
-      </Panel>
+        </FormSection>
+      </FormSections>
       {dialog}
     </>
   )

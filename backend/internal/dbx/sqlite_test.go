@@ -199,6 +199,67 @@ func TestSQLiteExport(t *testing.T) {
 	}
 }
 
+// The export takes the view the grid is showing. Before it did, narrowing a
+// table to one row and pressing Export as CSV downloaded every row in it —
+// which looks exactly like a correct export until somebody opens the file.
+func TestSQLiteExportTakesTheFiltersAndTheOrder(t *testing.T) {
+	db, _ := openTestDB(t)
+	ctx := context.Background()
+
+	var filtered strings.Builder
+	count, _, err := ExportBrowse(ctx, db, DriverSQLite, BrowseOptions{
+		Schema: "main", Table: "users",
+		Filters: []Filter{{Column: "email", Op: "eq", Value: "a@x.io"}},
+	}, ExportCSV, &filtered, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Errorf("filtered export wrote %d rows, want 1", count)
+	}
+	if body := filtered.String(); strings.Contains(body, "b@x.io") {
+		t.Errorf("filtered export carried a row the filter excluded: %q", body)
+	}
+
+	var ordered strings.Builder
+	if _, _, err := ExportBrowse(ctx, db, DriverSQLite, BrowseOptions{
+		Schema: "main", Table: "users", OrderBy: "email", Desc: true,
+	}, ExportCSV, &ordered, 0); err != nil {
+		t.Fatal(err)
+	}
+	if first, second := strings.Index(ordered.String(), "b@x.io"), strings.Index(ordered.String(), "a@x.io"); first > second {
+		t.Errorf("descending export is in ascending order: %q", ordered.String())
+	}
+
+	// A filter the operator could not have written is refused rather than
+	// silently dropped, which would hand back the whole table again.
+	if _, _, err := ExportBrowse(ctx, db, DriverSQLite, BrowseOptions{
+		Schema: "main", Table: "users",
+		Filters: []Filter{{Column: "email", Op: "; DROP TABLE users --", Value: "x"}},
+	}, ExportCSV, &strings.Builder{}, 0); err == nil {
+		t.Error("export accepted an unknown filter operator")
+	}
+}
+
+// A catalogue that cannot say how many rows a table holds says so, rather than
+// reporting zero and being read as "this table is empty".
+func TestSQLiteTablesReportAnUnknownRowCount(t *testing.T) {
+	db, _ := openTestDB(t)
+	tables, err := ListTables(context.Background(), db, DriverSQLite, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tables) == 0 {
+		t.Fatal("no tables listed")
+	}
+	for _, table := range tables {
+		if table.Rows != -1 {
+			t.Errorf("%s reports %d rows; SQLite keeps no estimate, so it must report -1",
+				table.Name, table.Rows)
+		}
+	}
+}
+
 func TestSQLiteDumpRestore(t *testing.T) {
 	db, path := openTestDB(t)
 	db.Close() // release the handle so the dump reads a settled file

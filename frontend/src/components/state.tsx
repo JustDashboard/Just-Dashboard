@@ -27,16 +27,32 @@ export function LoadingRows({ rows = 5, className }: { rows?: number; className?
  * Its first row is heavier than the rest so the placeholder has the same
  * silhouette as the thing arriving — a header strip over rows — rather than
  * an undifferentiated stack of grey bars that jumps when the data lands.
+ *
+ * `plain` is the same silhouette with no frame, for a page whose blocks arrive
+ * as plain panels (§2): a framed box that gives way to unframed rows is the
+ * jump this placeholder exists to prevent, one edge later. Its title and rows
+ * start on the page's own edge, where the plain block's will.
  */
-export function LoadingPanel({ rows = 6, className }: { rows?: number; className?: string }) {
+export function LoadingPanel({
+  rows = 6,
+  plain,
+  className,
+}: {
+  rows?: number
+  plain?: boolean
+  className?: string
+}) {
+  const gutter = plain ? "px-0" : "px-5"
   return (
-    <div className={cn("min-w-0 overflow-hidden rounded-xl border bg-card", className)}>
-      <div className="flex min-h-12 items-center border-b border-hairline px-5 py-3">
+    <div
+      className={cn("min-w-0 overflow-hidden", !plain && "rounded-xl border bg-card", className)}
+    >
+      <div className={cn("flex min-h-12 items-center border-b border-hairline py-3", gutter)}>
         <Skeleton className="h-4 w-40" />
       </div>
       <div className="divide-y divide-hairline">
         {Array.from({ length: rows }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3 px-5 py-3.5">
+          <div key={i} className={cn("flex items-center gap-3 py-3.5", gutter)}>
             <Skeleton className="h-3.5 flex-1" style={{ maxWidth: `${34 + ((i * 13) % 26)}%` }} />
             <Skeleton className="h-3.5 w-16" />
             <Skeleton className="h-3.5 w-24" />
@@ -70,12 +86,20 @@ export function EmptyState({
   title,
   description,
   icon: Icon = Inbox,
+  mark,
   action,
   className,
 }: {
   title: string
   description?: React.ReactNode
   icon?: React.ComponentType<{ className?: string }>
+  /**
+   * What the list would hold, drawn as itself in place of the glyph on its
+   * plate — the products a list of channels or credentials is built for, as
+   * `ProductLogos` (§14). An empty list that shows the Discord, Slack and
+   * Telegram marks says what goes in it before the sentence under it does.
+   */
+  mark?: React.ReactNode
   action?: React.ReactNode
   className?: string
 }) {
@@ -84,12 +108,17 @@ export function EmptyState({
       data-slot="empty-state"
       className={cn(
         "flex min-w-0 flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center",
+        // A flow screen's focused surface is already the frame around it, and
+        // a dashed one inside it is a frame in a frame.
+        "in-data-[slot=flow-panel]:border-0",
         className,
       )}
     >
-      <span className="flex size-10 items-center justify-center rounded-xl border border-hairline bg-surface-header text-muted-foreground">
-        <Icon className="size-4.5" />
-      </span>
+      {mark ?? (
+        <span className="flex size-10 items-center justify-center rounded-xl border border-hairline bg-surface-header text-muted-foreground">
+          <Icon className="size-4.5" />
+        </span>
+      )}
       <div className="space-y-1">
         <p className="text-body font-medium">{title}</p>
         {description && (
@@ -133,19 +162,19 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        "flex min-w-0 items-start gap-3 rounded-xl border p-4",
+        // A notice's anatomy (§14): the fence step, and the glyph on the
+        // banner's own ground — the tinted plate it stood on was a fourth
+        // object in the one hue, on a box that already had a wash and a rule.
+        "flex min-w-0 items-start gap-2.5 rounded-lg border p-3",
         unavailable ? "border-hairline bg-card" : "border-rule-danger bg-wash-danger",
         className,
       )}
     >
-      <span
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-lg",
-          unavailable ? "bg-muted text-muted-foreground" : "bg-plot-danger text-destructive",
-        )}
-      >
-        {unavailable ? <Slash className="size-4" /> : <Warning className="size-4" />}
-      </span>
+      {unavailable ? (
+        <Slash aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      ) : (
+        <Warning aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive" />
+      )}
       <div className="min-w-0 flex-1 space-y-1">
         {/*
           "Something went wrong" is the fallback, not the headline. Where the
@@ -195,6 +224,18 @@ export function ErrorState({
  * lockout protection, an editor that validates before it saves, a shell that
  * runs as root. Deliberately quieter than ErrorState: it is context, not a
  * failure, and a page that shouts everything says nothing.
+ *
+ * **The glyph is a mark, not a plate.** This was the last 28px tinted square
+ * with an icon inside it left in the product: §14 took the prop off
+ * `PanelHeader`, `Modal`, `SidePanel`, `Section`, `ChartPanel` and `StatTile`,
+ * and a `Notice` kept one because its glyph is allowed — a severity is a thing
+ * a shape can say. What is not allowed is the plate around it, and on a tinted
+ * banner it was the fourth tinted object in a box that needed one: a wash, a
+ * rule, a plate and the glyph on it, all the same hue, for a sentence saying
+ * the certificate was fine. The glyph stands on the banner's own ground now,
+ * at the size of the title's own line, and `rounded-lg` puts the banner on
+ * §9's fence step beside `Group`, which is what it is, rather than on the
+ * block step beside `Panel`, which it is not.
  */
 export function Notice({
   title,
@@ -212,7 +253,7 @@ export function Notice({
   return (
     <div
       className={cn(
-        "flex min-w-0 items-start gap-3 rounded-xl border p-3.5",
+        "flex min-w-0 items-start gap-2.5 rounded-lg border p-3",
         tone === "default" && "border-hairline bg-card",
         tone === "warning" && "border-rule-warning bg-wash-warning",
         tone === "danger" && "border-rule-danger bg-wash-danger",
@@ -221,17 +262,19 @@ export function Notice({
       )}
     >
       {Icon && (
-        <span
+        <Icon
+          aria-hidden
           className={cn(
-            "flex size-7 shrink-0 items-center justify-center rounded-lg",
-            tone === "default" && "bg-muted text-muted-foreground",
-            tone === "warning" && "bg-plot-warning text-warning",
-            tone === "danger" && "bg-plot-danger text-destructive",
-            tone === "success" && "bg-plot-success text-success",
+            // No nudge: the title is `leading-tight`, a 16px line box, so a
+            // 16px glyph at the top edge already shares its centre. The
+            // `mt-0.5` this carried dropped the glyph two pixels below it.
+            "size-4 shrink-0",
+            tone === "default" && "text-muted-foreground",
+            tone === "warning" && "text-warning",
+            tone === "danger" && "text-destructive",
+            tone === "success" && "text-success",
           )}
-        >
-          <Icon className="size-3.5" />
-        </span>
+        />
       )}
       <div className="min-w-0 space-y-1">
         <p className="text-body leading-tight font-medium">{title}</p>

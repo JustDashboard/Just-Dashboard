@@ -22,6 +22,26 @@ type deploymentDependencyObserver struct {
 	backups *backups.Store
 	docker  *dockerx.Client
 	now     func() time.Time
+	// extensions reads which schema extensions a linked PostgreSQL offers,
+	// so preflight can refuse a pgvector schema on a server without it
+	// before the first migration fails. Preflight asks through
+	// DatabaseExtensions, and only when detection says the schema needs one.
+	extensions func(context.Context, int64) ([]string, error)
+}
+
+// DatabaseExtensions answers which of the wanted extensions a linked
+// connection offers; nil when it cannot be asked.
+func (o *deploymentDependencyObserver) DatabaseExtensions(ctx context.Context, resourceID string, wanted []string) ([]string, error) {
+	id, err := strconv.ParseInt(resourceID, 10, 64)
+	if err != nil || id <= 0 || o.extensions == nil || len(wanted) == 0 {
+		return nil, errors.New("database extensions cannot be asked")
+	}
+	return o.extensions(ctx, id)
+}
+
+func (o *deploymentDependencyObserver) withExtensionProbe(probe func(context.Context, int64) ([]string, error)) *deploymentDependencyObserver {
+	o.extensions = probe
+	return o
 }
 
 func newDeploymentDependencyObserver(
@@ -43,6 +63,7 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 		}
 		switch dependency.ResourceKind {
 		case "backup_job":
+			// The list until the job is known to exist; its own page after.
 			observed.DeepLink = "/backups"
 			id, err := strconv.ParseInt(dependency.ResourceID, 10, 64)
 			if err != nil || id <= 0 || o.backups == nil {
@@ -54,6 +75,7 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 				observed.Detail = "backup job was not found"
 				break
 			}
+			observed.DeepLink = "/backups/" + strconv.FormatInt(id, 10)
 			observed.Available, observed.Status = true, "never run"
 			maxAge := 0
 			var config struct {
@@ -73,7 +95,8 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 				return nil, lastErr
 			}
 		case "database_connection":
-			observed.DeepLink = "/databases/" + dependency.ResourceID
+			// Databases selects a connection by query, not by path.
+			observed.DeepLink = "/databases"
 			id, err := strconv.ParseInt(dependency.ResourceID, 10, 64)
 			if err != nil || id <= 0 || o.store == nil {
 				observed.Detail = "database connection id is invalid"
@@ -87,6 +110,7 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 				}
 				return nil, err
 			}
+			observed.DeepLink = "/databases/connection?conn=" + strconv.FormatInt(id, 10)
 			observed.Available, observed.Status = true, name
 		case "docker_volume":
 			observed.DeepLink = "/docker/volumes/" + dependency.ResourceID

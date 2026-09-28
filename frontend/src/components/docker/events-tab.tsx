@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { ChartActivity, DotMark, Stop } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -54,8 +55,8 @@ export function EventsTab() {
   // Empty means everything, which is what the server does with no `kinds` —
   // so "All" is a real state rather than "every box ticked", and the two
   // cannot disagree.
-  const [kinds, setKinds] = useState<string[]>([])
-  const [search, setSearch] = useState("")
+  const [kinds, setKinds] = useSessionState<string[]>("docker.events.kinds", [])
+  const [search, setSearch] = useSessionState("docker.events.query", "")
   const [live, setLive] = useState<DockerEvent[]>([])
 
   const query = useMemo(() => ({ limit: 300, kinds: kinds.join(","), search }), [kinds, search])

@@ -7,11 +7,17 @@
   "description": "The MySQL relational database, LTS line. It is never published to the network: other containers reach it over the Docker network, and the dashboard's Databases page connects to it directly.",
   "iconId": "database",
   "docsUrl": "https://dev.mysql.com/doc/refman/8.4/en/",
+  "access": {
+    "kind": "client",
+    "usernameVariable": "MYSQL_USER",
+    "secretVariable": "MYSQL_PASSWORD",
+    "note": "Nothing signs in through a browser: port 3306 is internal-only and never proxied, so this deployment has no address to open. Other containers reach it over the Docker network as the user you named here with the generated password from the Variables tab, and the dashboard's Databases page picks up the same pair on its own. That account has GRANT ALL on the one database you named; the separate root password stays in the Variables tab for administration."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-2.0",
     "upstreamUrl": "https://hub.docker.com/_/mysql",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -111,7 +117,8 @@
       "name": "root-password",
       "variable": "MYSQL_ROOT_PASSWORD",
       "label": "Root password",
-      "length": 40
+      "length": 40,
+      "description": "The whole server, not the one database. Reveal it only for administration."
     }
   ]
 }

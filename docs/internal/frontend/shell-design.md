@@ -1,6 +1,6 @@
 # Frontend shell and design system
 
-The App Router currently has 48 `page.tsx` entry points, including nested database, Docker, proxy,
+The App Router currently has 85 `page.tsx` entry points, including nested database, Docker, proxy,
 security, and deployment workflows plus `/login`. Most page modules are client components; the three
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
@@ -8,8 +8,10 @@ deployment detail/new wrappers remain server components and hand interaction to 
 ## The shell
 
 `(dashboard)/layout.tsx` owns `CommandPaletteProvider`, `SelfUpdateProvider`, `NavScopeProvider`,
-`SidebarProvider` + `AppSidebar`, and `MetricsStream` — which renders nothing and exists to hold the
-metrics socket open for the whole shell, so Overview's charts keep filling from other pages. Its
+`SidebarProvider` + `AppSidebar`, `MetricsStream` — which renders nothing and exists to hold the
+metrics socket open for the whole shell, so Overview's charts keep filling from other pages — and
+`SavedFolderColours` around the page, which reads the folder labels from `/files/places` and again on
+each navigation, so a folder coloured in Files is that colour in every tree and browser. Its
 redirect to `/login` is convenience, not a control; every API call behind it is authenticated server-side.
 
 **The scroll container is on the `SidebarInset`, not the document.** That is what lets a page ask for
@@ -26,12 +28,14 @@ them. **Those strips are gone. There is no route-level tab anywhere in the produ
 remains switches between views of one page, never between pages (see `components/tabs.tsx` below).
 
 Which panel is showing is derived from the route, not remembered, so a pasted link opens with the rail
-already inside the right section. The single piece of state is the step back out, which shows the level
-above without leaving the page you are on and is dropped on the next navigation. Three levels exist:
-the top-level list, a section, and one deployment inside Deployments.
+already inside the right section. The single piece of state is a look elsewhere without leaving the
+page you are on — the step back out, or a group opened from the list — and it is dropped on the next
+navigation. Three levels exist: the top-level list, a section, and one deployment inside Deployments —
+or, inside a group, the group, a section in it, and that section's pages (Monitoring → Processes →
+PM2; Server configuration → Proxy & TLS → Sites).
 
 `components/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
-`PROJECT_SETTINGS_NAV`, `navMatches`, `sectionFor`, `navLocation` — so `app-sidebar.tsx` and
+`PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `sectionsFor`, `navLocation` — so `app-sidebar.tsx` and
 `command-palette.tsx` walk the same lists without a second copy, and neither imports the other. Items
 may carry a `capability`, and every reader hides what the role cannot use. ⌘K covers every page and is
 the one surface that still sees them all at once.
@@ -41,21 +45,42 @@ shows** — "Browse", "Live", "Version", otherwise "Overview" — so every desti
 and "where am I" points at exactly one row. The palette skips the child whose href is the section's own,
 which is how one array serves both.
 
+A **group** (`NavGroup`) is a row with a chevron and no page: Monitoring holds Metrics, Processes and
+Logs, and Server configuration holds Proxy & TLS, Packages, System users and Audit log. There is nothing
+that is "Monitoring" as such, so pressing the row opens its panel over the page you are on rather than
+navigating, and a group owns a path only through its entries (`navOwns`) — Metrics, Processes and Logs
+share no prefix. `sectionsFor` returns the chain of groups and sections a path sits inside, and the rail
+draws one panel per link of it; the breadcrumb names every link (`navLocation().parents`).
+
 `components/nav-scope.tsx` is for the two panels the route cannot describe. A section calls
 `useNavScope(...)` and the rail draws what it publishes: the databases layout, because which pages exist
 depends on whether the connection is SQL and because every one of them carries `?conn=` (`replaces: true`
 — it stands in place of the static Databases panel); and `deploy/project-shell.tsx`, because a project's
-name, its game-only pages and its pending-changes mark are not in the URL (a level *below* Deployments).
+name and its mark (its favicon or product), its game-only pages and which of its settings pages hold a
+saved change that is not live yet (`PENDING_KIND_PAGE`) are not in the URL (a level *below* Deployments).
 The rail draws a project's rows from the route alone until that registration lands, so the panel does not
 reflow — only the name fills in. The alternative was the rail polling the driver catalogue and a project
-on every page in the product to draw a list the page beneath it already holds.
+on every page in the product to draw a list the page beneath it already holds. A project's run page
+keeps the project's panel, with Deployments marked as where you are, because a run is opened from there.
 
-The groups run in the order a day on the server runs, and a page's header eyebrow is its group's
-label: **Server** (Overview, Metrics, Processes, Logs), **Apps** (Deployments first, then Docker,
-Databases, Proxy & TLS), **Workspace** (Terminal, Files, Git), **Protection** (Security, Backups) and
-**System** (Packages, System users, Audit log, Settings). Deployments open the second group because
-shipping something is the reason most visits happen; until 0.6.7 it sat fourth in a group called
-Operations, between Packages and Backups.
+A scope's head is not a section's. A section's name is one of this product's words and is drawn as an
+eyebrow, the rail's label voice; a project or a connection is a name somebody typed, and small caps
+turned `api-production` into API-PRODUCTION, so a scope's head (`named` in `app-sidebar.tsx`) is printed
+as written at `text-title` semibold — a step above the rows, so the name reads as what the rows belong
+to rather than as one of them — after the scope's `mark`, the thing drawn as itself at the rows' icon
+size, a project's favicon or product (`ProjectMark size="xs"`), a connection's engine
+(`ProductGlyph`). The mark rides along with the rest of the scope but is not what decides a republish,
+so it is derived from the same data as the title. A scope carries no `icon`: a glyph in a
+row's slot made the heading read as one more row to press.
+
+The groups run in the order a day on the server runs, and the rail names each group:
+**Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
+then Databases, Docker), **Workspace** (Boards, Terminal, Files, Git), **Protection** (Security, Backups),
+**Advanced** (Server configuration: Proxy & TLS, Packages, System users, Audit log) and **System**
+(Settings). The top-level list is twelve rows rather than seventeen: the three monitoring pages answer
+one question, and the four configuration pages are opened to change the server rather than to use it.
+Deployments open the second group because shipping something is the reason most visits happen; until
+0.6.7 it sat fourth in a group called Operations, between Packages and Backups.
 
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys and, for
 `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
@@ -63,8 +88,10 @@ panel the rail drills into once you are inside `/account`; the palette's Account
 the rail's foot. That menu opens with the account's picture,
 display name, sign-in name and role, then the five pages (Security carries a `Status` for two-factor)
 and Sign out. The picture is `components/account/user-avatar.tsx`: the stored image when there is
-one, otherwise the display name's initials on the brand plot, square with the control radius rather
-than a circle, because a filled circle holding two letters is the pill §4 forbids.
+one, otherwise the display name's initials in a hue taken from the username (`lib/hue.ts`'s `LANES`,
+so the same person keeps one colour in the rail, the users list and their profile), square with the
+control radius rather than a circle, because a filled circle holding two letters is the pill §4
+forbids.
 
 ## The design system
 
@@ -72,22 +99,60 @@ A small set of files defines the visual language, and pages compose them rather 
 layout. [`design-system.md`](design-system.md) states the rules in full; this is the map.
 
 - `components/page.tsx` — `Page` (one measure, gutter and rhythm; `fill` for terminal and logs, whose
-  content *is* the viewport), `PageHeader`, `PageState`, `Section`, `Toolbar`, `SearchInput`,
-  `Metric`/`MetricStrip`, `DetailList`/`Detail`, `RowLink`. **None of the heading primitives takes a
+  content *is* the viewport), `PageContext` (an accessible page name, plus a linked parent and verbs
+  on detail pages, with no visual page title; list commands live in their section or workbench),
+  `PageState`, `Section`, `Toolbar`, `SearchInput`,
+  `Metric`/`MetricStrip`, `DetailList`/`Detail`, `RowLink` (`SearchInput` is 40px and a line of its
+  own below `sm`; `MetricStrip` is two-up on a phone — §8). **None of the heading primitives takes a
   `description`** — see rule 5 in [`design-system.md`](design-system.md).
 - `components/panel.tsx` — `Panel`, `PanelHeader`, `PanelToolbar`, `PanelBody`, `PanelFooter`; `Pane`,
   `PaneHeader`, `PaneFooter`; `Well`. A **panel** is *the* content block: a framed surface with a header
   on its own ground and a hairline under it, so a toolbar or full-bleed table sits flush beneath
   without a second edge. `Panel plain` is the same anatomy with no frame, for a list that is the
-  whole of a section; `interactive` is the hover a panel-as-link takes. A **pane** is the same frame,
+  whole of a section — but **not for a table**, whose panel keeps its frame because the grid owns a
+  scroll region and a boundary you cannot see is one that lies about where the data ends (§2);
+  `interactive` is the hover a panel-as-link takes. A **pane** is the same frame,
   for a working region of the page rather than a block of content on it — a session rail, a file
   tree, a log console — and its strips keep a faint tint. Neither lifts; the distinction is semantic
   and shows in how the two are composed and in their header heights.
-- `components/row-list.tsx` — `RowList` and `Row`: the one list-of-rows. A leading mark, a title, an
-  optional second line and whatever sits at the right edge; a row with `href` is a link with a
-  revealed arrow, with `onClick` a button, with neither inert.
+- `components/row-list.tsx` — `RowList` and `Row`: the list-of-rows you *read*. A leading mark, a
+  title, an optional second line and whatever sits at the right edge; a row with `href` is a link
+  with a revealed arrow, with `onClick` a button, with neither inert.
+  Its counterpart is `ChoiceList`/`ChoiceRow` in `components/flow.tsx`, for a row you *take* — a
+  project to enter, a site to open, a stack to look inside. Same anatomy, plus an arrow that is
+  always drawn and a border that lights under the pointer. Which one a list gets is decided by
+  whether its rows are destinations, not by which register the page is in: see §15 pass 3 and the
+  last subsection of §16 in `design-system.md`.
 - `components/modal.tsx` — `Modal` (the centred task surface) and `PaletteModal` (a search overlay whose
   input is its own header). `components/side-panel.tsx` — `SidePanel`, the right-hand detail surface.
+
+  **Which detail views are sheets.** A sheet is for a *glance*: you open it with the list still
+  showing, read it, and close it — the list is the context you are using. A detail that holds a
+  **stream, a terminal, or an editor** is not that. You stay in it for minutes, the list behind it is
+  dead weight, and a sheet's `sm:max-w-3xl` is about ninety columns of terminal. Those are their own
+  destination with a breadcrumb back: `PageContext` with the parent as an `eyebrow` link and the
+  verbs in `actions`, then the resource name and state among the page's facts — a `MetricStrip` on
+  a container's and a stack's page. The run page (`deploy/run-page.tsx`) goes one step further:
+  since the 2026-09-24 pass it opens on the `HostIdentity` line the host Overview opens on (the
+  source as its forge, the commit, who or what started the run, how long it has taken), because a
+  run is one thing described the way the product describes every thing, and since 2026-09-25 that
+  line is the first thing on the page — its verbs sit at the line's end beside the run's state, and
+  the way back is the rail's panel and the menu's Open project rather than an eyebrow. A container,
+  a compose stack and a backup job went that way on 2026-09-21, and a proxy site
+  (`/proxy/sites/<name>`) on 2026-09-27, since it now holds its logs — the way back is a "Sites" link
+  beside its verbs, the form and the raw file staying sheets it opens; every other detail in the
+  product is a `SidePanel` and should stay one. A sheet that shows a log — a unit's journal, a PM2
+  application's output — draws the service logs in their `layout="sheet"` form (no readings, no value
+  columns, no facts beside the name), because the unit or the process is still the glance and the log
+  one tab of it.
+
+  Their tabs stay **in** the page — they are views of one thing, which is what `tabClasses` is for.
+  Do not reintroduce a route-level strip for them (see the `SectionNav` note below), and do not give
+  one a `useNavScope`: the rail drills into a *section* with many pages, not into a leaf.
+
+  One thing a sheet gives free that a page does not: `onOpenChange` is a single funnel every exit
+  passes through, which is where `files/file-editor.tsx` guards unsaved work. The App Router cannot
+  block a soft navigation, so a detail that guards a dirty buffer on close stays a sheet.
   `Modal` and `SidePanel` share one anatomy: title, tinted strip, a body that is the only
   part that scrolls, a footer strip. Both take `actions` in the title strip; `Modal`'s
   `size="full"` is the whole viewport with that anatomy intact, for the one task that is looking
@@ -95,21 +160,33 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   accessible description and nothing is drawn. **Raw `Dialog`/`Sheet` are assembled only in those three
   components** — a page or a feature panel never opens one itself.
 - `components/tabs.tsx` — the switchers that remain, all of which switch between *views of one page*:
-  `tabClasses` (the underlined tab, for the log console's live feed against its search, the packages
-  page's installed against its updates, the deploy wizard's source kinds), `FilterChip` and `ChipCount`.
+  `tabClasses` (the underlined tab, for a log pane's Live, History and Insights and the page's own
+  views beside them, the packages page's installed, updates, search and log, the deploy wizard's source
+  kinds), `FilterChip`, `ChipCount` and
+  `ChipStrip`, the run every set of chips sits in (sideways-scrolling on a phone, wrapping from `sm`).
   `SectionNav` and `TabLink` — the route-level strips — were deleted in 0.6.7 when the rail started
   drilling into sections; do not reintroduce a strip that changes the URL.
 - `components/form.tsx` — what goes inside a task surface: `Field` (a label, a control, one line under
   it — a hint, or the error while there is one), `FieldRow`, `FormSection` (an eyebrow and a hairline
-  opening part of a longer form), `OptionList`/`OptionRow` (a switch with its sentence), `FormFacts`
+  opening part of a longer form), `FormSections` (a run of `FormSection aside`s; `railFrom="xl"`
+  moves the rail up for a form inside a shell that already spends a column, said once and inherited),
+  `FieldCheck` (one rule a value has to meet, lit as it is met — a run of them in an
+  `aria-live="polite"` wrapper), `OptionList`/`OptionRow` (a switch with its sentence), `FormFacts`
   (what the form operates on, as data under the title), `Statement` (the SQL a schema-editing form is
   about to run, with a copy) and `FormNote`. The databases section's dialogs are built from these and
   nothing else.
 - `components/stat-tile.tsx` — `StatTile` (a small name over a 24px figure, an optional meter and one
   hint) and `StatGrid`, which runs them across the page with a hairline between cells and no frame
-  around them, the first column on the page's own edge. `framed` restores the box. `StatLink` wraps a
+  around them, every tile the same inset and a lone last tile taking its row. `framed` restores the
+  box. `StatLink` wraps a
   tile that is also a destination — the Docker and proxy overviews, and the Services row on the host
-  overview — with the revealed arrow that says so on touch.
+  overview — with the revealed arrow that says so on touch; `StatButton` wraps one whose press
+  narrows what is under it (a lens's readings wherever a page draws them, a site's request figures)
+  with a revealed funnel and `aria-pressed`. `dense` sets the tiles two to a row on a phone.
+- `components/outcome-strip.tsx` — `OutcomeStrip`, the last few attempts at something as a square per
+  attempt in the colour of how it ended, oldest first: a backup job's runs, a project's runs, a
+  channel's messages, a webhook's deliveries, a schedule's firings. One drawing, so a strip means the
+  same thing on every page it appears on.
 - `components/status-dot.tsx` — `Status`, the one live-state indicator: a coloured dot and a word.
   `components/tag.tsx` — `Tag`, small-caps text marking a *fixed property* of a row. No chip, no border.
   **There is no badge and no pill in this product**; `ui/badge.tsx` was deleted so the decision cannot
@@ -128,7 +205,9 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
 **Reach for `Panel`/`Pane`/`Page`, not raw `Card`**, and add a variant there rather than a one-off in a
 feature page — before these existed, fourteen pages read as fourteen products. `components/state.tsx`
 does the same for the non-happy paths (`Spinner`, `LoadingRows`, `LoadingPanel`, `EmptyState`,
-`EmptyNote`, `ErrorState`, `Notice`). `min-w-0` on the frame and its children is load-bearing: a wide
+`EmptyNote`, `ErrorState`, `Notice`); `LoadingPanel plain` is the same silhouette unframed, for a page
+whose blocks arrive plain, and `EmptyState`'s `mark` draws what the list would hold (`ProductLogos`) in
+place of the glyph. `min-w-0` on the frame and its children is load-bearing: a wide
 table's intrinsic width would otherwise widen the flex column and take the whole shell sideways instead
 of scrolling inside its panel.
 
@@ -171,7 +250,13 @@ you are*, and a filter borrowing either reads as the page's main action.
 
 `components/ui/*` is generated shadcn/ui (new-york, zinc) with its icons rewired to
 the Heroicons vocabulary in `components/icons.tsx` — compose rather than
-edit. `ui/context-menu.tsx` is the right-click menu, drawn with the dropdown's classes so the two
+edit. Every side-panel toggle — the navigation rail's trigger, the terminal's rail and Files/Diff, the
+Files sidebar and details, the logs sources, the ER diagram's inspector — draws its panel's side and
+state with `SidebarLeftOpen`/`Close` or `SidebarRightOpen`/`Close` (drawn inline in `icons.tsx`,
+since Heroicons has no sidebar): a rounded window with a bar inset on the panel's side, solid while
+the panel shows and an empty outline of the same bar while it is hidden. They are drawn one pixel
+wide on a 16px grid and render at 16px, where every line lands on a pixel. They mean a panel toggle and nothing else, which is why the Files page's
+Places menu is a map pin. `ui/context-menu.tsx` is the right-click menu, drawn with the dropdown's classes so the two
 read as one menu; a feature that needs both (the file listing) renders one verb list into whichever
 opened. Feature pieces live in `components/<feature>/`: `database/`, `docker/`, `files/`, `git/`, `logs/`,
 `metrics/`, `packages/`, `procs/`, `proxy/`, `security/`, `terminal/`, `update/`.
@@ -226,7 +311,11 @@ series.
   legend shows the value its series held at that instant. Max reads the peak column where a series has
   one, since the maximum of the *means* is exactly what a downsampled window hides.
 - `sparkline.tsx` — a bare SVG path for a table cell, not recharts: forty containers would otherwise mount
-  forty responsive containers and resize observers.
+  forty responsive containers and resize observers. It also exports `TileTrend`, the one shape a
+  reading's last hour takes in a `StatTile`'s `trend` slot on the deployment pages: the tile's full
+  width, 36px, rising once. It draws nothing below two points, or for a series that never moves on a
+  scale of its own, and the tile then leaves no band. Its colour is a series colour, never a status
+  one, so a failing share is `--chart-3`.
 - `range-picker.tsx`, `health-panel.tsx` — the window control (pan and zoom-out appear only once a window
   has been dragged) and the verdict.
 

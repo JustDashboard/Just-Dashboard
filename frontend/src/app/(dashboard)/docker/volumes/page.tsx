@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Plus } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
 import { useAuth } from "@/hooks/use-auth"
-import { Page, PageHeader } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
 import { VolumesTab } from "@/components/docker/volumes-tab"
 import { Button } from "@/components/ui/button"
 
@@ -14,9 +14,11 @@ export default function DockerVolumesPage() {
   const [creating, setCreating] = useState(false)
   return (
     <Page>
-      <PageHeader
-        eyebrow="Docker"
-        title="Volumes"
+      <PageContext eyebrow="Docker" title="Volumes" />
+      <VolumesTab
+        confirm={confirm}
+        creating={creating}
+        onCreatingChange={setCreating}
         actions={
           can("service.control") && (
             <Button size="sm" onClick={() => setCreating(true)}>
@@ -26,7 +28,6 @@ export default function DockerVolumesPage() {
           )
         }
       />
-      <VolumesTab confirm={confirm} creating={creating} onCreatingChange={setCreating} />
       {dialog}
     </Page>
   )

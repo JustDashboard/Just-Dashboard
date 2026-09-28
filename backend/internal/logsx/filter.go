@@ -22,10 +22,19 @@ type Filter struct {
 	Regex      bool     `json:"regex"`
 	IgnoreCase bool     `json:"ignoreCase"`
 	Levels     []string `json:"levels,omitempty"`
+	// Lens is the lens every line is read through before the filter looks at
+	// it, resolved by the caller: the one the operator forced, or the one the
+	// source was detected as. Empty reads no lens, which is exactly how every
+	// line was read before lenses existed; "none" is the operator saying so.
+	Lens string `json:"lens,omitempty"`
+	// Fields are the raw f= predicates on what the lens and the structured
+	// parse read out of a line (see predicate.go).
+	Fields []string `json:"fields,omitempty"`
 
 	include func(string) bool
 	reject  func(string) bool
 	levels  map[string]bool
+	fields  []fieldTest
 }
 
 // LevelUnknown is the pseudo-level for a line the parser could not classify,
@@ -38,15 +47,20 @@ const LevelUnknown = "unknown"
 // Levels is the closed set the UI offers, worst first.
 var Levels = []string{"critical", "error", "warn", "info", "debug", LevelUnknown}
 
-// NewFilter compiles the matchers once. A bad regular expression is reported
-// here rather than per line, so the socket refuses to open with a message
-// instead of streaming nothing and looking broken.
+// NewFilter compiles the matchers once. A bad regular expression, an unknown
+// lens or a malformed field predicate is reported here rather than per line,
+// so the socket refuses to open with a message instead of streaming nothing
+// and looking broken.
 func NewFilter(f Filter) (*Filter, error) {
 	out := &Filter{
 		Query:      f.Query,
 		Exclude:    f.Exclude,
 		Regex:      f.Regex,
 		IgnoreCase: f.IgnoreCase,
+		Lens:       f.Lens,
+	}
+	if _, err := LensByID(f.Lens); err != nil {
+		return nil, err
 	}
 	build := func(pattern, what string) (func(string) bool, error) {
 		if pattern == "" {
@@ -92,13 +106,20 @@ func NewFilter(f Filter) (*Filter, error) {
 		out.levels[l] = true
 		out.Levels = append(out.Levels, l)
 	}
+	if out.fields, err = compileFields(f.Fields); err != nil {
+		return nil, err
+	}
+	if len(f.Fields) > 0 {
+		out.Fields = append([]string(nil), f.Fields...)
+	}
 	return out, nil
 }
 
 // Empty reports whether the filter would keep every line, which lets a caller
-// skip the per-line work entirely on the common case of an unfiltered tail.
+// skip the per-line work entirely on the common case of an unfiltered tail. A
+// lens alone does not make a filter: it names lines, it does not drop them.
 func (f *Filter) Empty() bool {
-	return f == nil || (f.include == nil && f.reject == nil && len(f.levels) == 0)
+	return f == nil || (f.include == nil && f.reject == nil && len(f.levels) == 0 && len(f.fields) == 0)
 }
 
 // MatchText tests only the text, for the callers that have not parsed a level
@@ -128,8 +149,32 @@ func (f *Filter) MatchLevel(level string) bool {
 	return f.levels[level]
 }
 
+// MatchFields tests the field predicates. Different keys are AND'ed; within
+// a key the forms combine as fieldTest describes.
+func (f *Filter) MatchFields(l *Line) bool {
+	if f == nil {
+		return true
+	}
+	for i := range f.fields {
+		if !f.fields[i].match(l) {
+			return false
+		}
+	}
+	return true
+}
+
+// MatchParsed is everything but the text, for the callers that tested the raw
+// text before parsing and should not pay for it twice.
+func (f *Filter) MatchParsed(l *Line) bool {
+	return f.MatchLevel(l.Level) && f.MatchFields(l)
+}
+
 func (f *Filter) Match(l Line) bool {
-	return f.MatchText(l.Text) && f.MatchLevel(l.Level)
+	return f.match(&l)
+}
+
+func (f *Filter) match(l *Line) bool {
+	return f.MatchText(l.Text) && f.MatchParsed(l)
 }
 
 // containsFold is a case-insensitive substring test that allocates nothing.

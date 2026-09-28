@@ -7,11 +7,18 @@
   "description": "A bookmark manager with tags, full-text search and a browser extension. Its SQLite database lives in the data volume.",
   "iconId": "globe",
   "docsUrl": "https://linkding.link/",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "LD_SUPERUSER_NAME",
+    "secretVariable": "LD_SUPERUSER_PASSWORD",
+    "path": "/login",
+    "note": "Sign in with the name you chose under \"First user\" and the generated password from the Variables tab. linkding creates that superuser the first time the container starts and leaves it alone on every later start."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/sissbruecker/linkding",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -24,8 +31,8 @@
       "name": "domain",
       "kind": "domain",
       "label": "Public domain",
-      "required": false,
-      "description": "Optional; the address other people open; nothing else here changes when it does."
+      "required": true,
+      "description": "The address other people open. It is also the origin linkding trusts for the login form, so the form cannot be submitted without it."
     },
     {
       "name": "admin-user",
@@ -72,6 +79,13 @@
     }
   ],
   "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "LD_CSRF_TRUSTED_ORIGINS",
+        "value": "https://{{input.domain}}"
+      }
+    ],
     "stop": [
       {
         "kind": "stop_signal",
@@ -88,8 +102,8 @@
   "fixtures": [
     {
       "name": "default",
-      "inputs": {},
-      "digest": "sha256:3a03add3ffa0678dcba626c793a7ec50eea489cda5bc28539f51b37ef874aad2"
+      "inputs": { "domain": "links.example.test" },
+      "digest": "sha256:9b432cce99d4f85922c0852ad83f7da19cdef4b36375a6bc2f903e0d02e5a853"
     }
   ],
   "secrets": [

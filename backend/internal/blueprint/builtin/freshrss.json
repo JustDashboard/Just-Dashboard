@@ -7,11 +7,15 @@
   "description": "A feed aggregator that keeps up with hundreds of feeds on a small server. The first visit runs its setup; SQLite is the right choice there for one person.",
   "iconId": "globe",
   "docsUrl": "https://freshrss.github.io/FreshRSS/",
+  "access": {
+    "kind": "setup",
+    "note": "The first visit runs FreshRSS's install wizard, which creates the only account on this instance. Whoever opens the address first becomes its owner, so open it yourself as soon as the deployment is ready."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "AGPL-3.0",
     "upstreamUrl": "https://github.com/FreshRSS/FreshRSS",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

@@ -1,21 +1,34 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
-import { ArrowRight, Key, TerminalWindow, Warning } from "@/components/icons"
+import { ArrowRight, Key, SecureConnection, TerminalWindow, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { lensFor } from "@/lib/log-lenses"
 import type { Job, Posture, SecurityFinding, SSHDConfig, SSHSetting } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
-import { PageHeader } from "@/components/page"
+import { FormSection, FormSections, InfoTip } from "@/components/form"
+import { PageContext } from "@/components/page"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { InitialsMark } from "@/components/account/user-avatar"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { Row, ROW_BLEED, RowList } from "@/components/row-list"
+import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
+import { AUTH_LOG } from "@/components/security/host-logs"
+import {
+  HostLogSection,
+  useAddressLineVerbs,
+  useHostLog,
+  useReadingPress,
+} from "@/components/security/log-section"
+import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -40,12 +53,22 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  * right and wrong is the difference between a bot wasting its time and a bot
  * getting in.
  *
- * The page opens on those three and the port, as readings; the settings
- * follow as rows, and changes are staged and applied together: sshd is tested
+ * The page opens on the server itself — sshd, where it listens, what it was
+ * read from and what holds the listener, in the identity line every page
+ * that describes a thing opens on, with its verdict at the right end — then
+ * on those three and the port as readings; the settings follow as rows, and
+ * changes are staged and applied together: sshd is tested
  * with its own parser before the daemon is asked to reload, and the file is
  * put back if the test fails. The one refusal that is not about syntax is the
  * important one — turning off password authentication on a host where nobody
  * has a key.
+ *
+ * Last is what those settings let happen: the auth log, read through its
+ * lens — who signed in and how, who tried and failed, the addresses behind
+ * the failures, every sudo — with the day's counts as a second row of the
+ * readings, so "passwords on" sits above "412 failed attempts" rather than
+ * a page away from it. An attacker's address in it is blocked from the line
+ * it is on.
  */
 export function SSHPanel({
   posture,
@@ -64,9 +87,18 @@ export function SSHPanel({
     { enabled: admin },
   )
   const [pending, setPending] = useState<Record<string, string>>({})
-  const [only, setOnly] = useState<"all" | "attention">("all")
+  const [only, setOnly] = useSessionState<"all" | "attention">("security.ssh.only", "all")
   const [busy, setBusy] = useState(false)
   const console_ = useJobConsole()
+  // Asked beside the config, not after it: the grid's second row waits on it.
+  const authLog = useHostLog(AUTH_LOG, admin)
+  const readings = useLensReadings(authLog.data?.id ?? "", AUTH_LENS, {
+    forcedLens: "auth",
+    only: SSH_READINGS,
+    enabled: Boolean(authLog.data) && Boolean(data?.available),
+  })
+  const lineVerbs = useAddressLineVerbs({ comment: "blocked from the auth log", blockOn: ATTACKS })
+  const [ask, press] = useReadingPress()
 
   // The effective configuration is only right once sshd has reloaded.
   const jobStatus = console_.job?.status
@@ -75,35 +107,20 @@ export function SSHPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobStatus])
 
-  const dirty = useMemo(() => Object.keys(pending).length > 0, [pending])
-  const insecure = data?.settings.filter((s) => !s.secure).length ?? 0
-
-  const header = (
-    <PageHeader
-      eyebrow="Security"
-      title="SSH"
-      actions={
-        data?.available && (
-          <>
-            {data.hasMatchBlocks && (
-              <Tag
-                tone="warning"
-                icon={Warning}
-                title="Some values are overridden for particular users or addresses. What is shown here is the unconditional configuration; the conditional parts are not editable from this page."
-              >
-                match blocks
-              </Tag>
-            )}
-            <RecentJobs kinds={["ssh."]} onOpen={console_.open} />
-            <Status
-              verdict={insecure === 0 ? "ok" : "warning"}
-              label={insecure === 0 ? "Hardened" : `${insecure} below recommendation`}
-            />
-          </>
-        )
-      }
-    />
+  const changes = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(pending).filter(
+          ([key, value]) =>
+            data?.available &&
+            data.settings.some((setting) => setting.key === key && setting.value !== value),
+        ),
+      ),
+    [pending, data],
   )
+  const dirty = Object.keys(changes).length > 0
+
+  const header = <PageContext eyebrow="Security" title="SSH" />
 
   if (!admin) {
     return (
@@ -111,8 +128,8 @@ export function SSHPanel({
         {header}
         <EmptyState
           icon={TerminalWindow}
-          title="SSH settings need the admin capability"
-          description="They name the accounts that hold keys, which is a map of who can reach this machine."
+          title="SSH needs the admin capability"
+          description="Its settings name the accounts that hold keys, which is a map of who can reach this machine, and its log records what was typed at the login prompt — sometimes a password."
         />
       </>
     )
@@ -147,6 +164,7 @@ export function SSHPanel({
   }
 
   const valueOf = (setting: SSHSetting) => pending[setting.key] ?? setting.value
+  const insecure = data.settings.filter((s) => !s.secure).length
   const changed = (setting: SSHSetting) =>
     pending[setting.key] !== undefined && pending[setting.key] !== setting.value
   const setting = (key: string) => data.settings.find((s) => s.key === key)
@@ -184,7 +202,7 @@ export function SSHPanel({
           // a job for the write, the sshd -t and the reload, which is the part
           // worth watching: this is the one operation where "it said it
           // worked" is not the same as knowing the daemon came back.
-          const job = await post<Job>("/ssh/config", { settings: pending }, { confirm: c })
+          const job = await post<Job>("/ssh/config", { settings: changes }, { confirm: c })
           console_.attach(job)
           setPending({})
         } finally {
@@ -197,6 +215,64 @@ export function SSHPanel({
     <>
       {header}
 
+      <HostIdentity
+        fallback={SecureConnection}
+        title={
+          <>
+            sshd{" "}
+            <span className="font-mono text-body font-normal text-muted-foreground">
+              port {data.ports.join(", ") || "22"}
+            </span>
+          </>
+        }
+        facts={
+          <>
+            <span>
+              {data.source.endsWith("-T") ? "as sshd reports it" : "read from sshd_config"}
+            </span>
+            {data.socket?.unit && (
+              <>
+                <FactDot />
+                <span title="The systemd socket that holds the listener">
+                  listener held by{" "}
+                  <span className="font-mono text-foreground">{data.socket.unit}</span>
+                </span>
+              </>
+            )}
+            {data.managedFile && (
+              <>
+                <FactDot />
+                <span>
+                  <InfoTip label="Where SSH changes are saved">{data.managedFile}</InfoTip>
+                </span>
+              </>
+            )}
+            {data.hasMatchBlocks && (
+              <>
+                <FactDot />
+                <Tag
+                  tone="warning"
+                  icon={Warning}
+                  title="Some values are overridden for particular users or addresses. What is shown here is the unconditional configuration; the conditional parts are not editable from this page."
+                >
+                  match blocks
+                </Tag>
+              </>
+            )}
+          </>
+        }
+        aside={
+          <span className="flex flex-wrap items-center gap-3">
+            <RecentJobs kinds={["ssh."]} onOpen={console_.open} />
+            <Status
+              verdict={insecure === 0 ? "ok" : "warning"}
+              label={insecure === 0 ? "Hardened" : `${insecure} below recommendation`}
+              className="text-body"
+            />
+          </span>
+        }
+      />
+
       <JobConsole
         job={console_.job}
         lines={console_.lines}
@@ -205,17 +281,22 @@ export function SSHPanel({
       />
 
       {/* The four facts an attacker cares about, before the twelve settings
-          that produce them. */}
-      <StatGrid columns={4}>
+          that produce them — and under them, from the auth log, what the
+          last day made of those facts. One grid: the log's counts are
+          readings of the same server, not a second block of figures, drawn
+          while the log is still being found so the row does not arrive after
+          the page has settled. Two-up on a phone: eight figures one-up are a
+          screen and a half before the finding they explain. */}
+      <StatGrid columns={4} dense>
         <StatTile
           label="Port"
           value={data.ports.join(", ") || "22"}
           hint={
-            data.socket?.unit
-              ? `held by ${data.socket.unit}`
-              : data.source.endsWith("-T")
-                ? "as sshd reports it"
-                : "read from sshd_config"
+            data.ports.length > 1
+              ? "listening on more than one"
+              : (data.ports[0] ?? "22") === "22"
+                ? "the default, which every scanner tries first"
+                : "not the default, so most scanners walk past"
           }
         />
         <StatTile
@@ -230,9 +311,13 @@ export function SSHPanel({
         />
         <StatTile
           label="Root login"
-          value={root?.value ?? "—"}
+          value={root?.value === "prohibit-password" ? "Keys only" : (root?.value ?? "—")}
           tone={root?.value === "yes" ? "danger" : "default"}
-          hint={root?.value === "yes" ? "every bot tries root first" : "root cannot use a password"}
+          hint={
+            root?.value === "yes"
+              ? "direct root access permitted"
+              : "effective root authentication policy"
+          }
         />
         <StatTile
           label="Keyed accounts"
@@ -244,6 +329,14 @@ export function SSHPanel({
               : `${data.keyedAccounts.reduce((n, a) => n + a.keys, 0)} authorized keys in total`
           }
         />
+        {readings.tiles.map((tile) => (
+          <ReadingTile
+            key={tile.reading.id}
+            tile={tile}
+            window={readings.window}
+            onPick={() => press(tile.reading)}
+          />
+        ))}
       </StatGrid>
 
       <AreaFindings posture={posture} area="ssh" onFix={onFix} />
@@ -253,22 +346,19 @@ export function SSHPanel({
           control rather than in a footnote. */}
       {noKeys && (
         <Notice tone="warning" icon={Key} title="No account on this host has an SSH key">
-          Password authentication cannot safely be turned off until one does — with no key
-          anywhere, doing so would leave nobody a way in, and the server refuses the change for
-          that reason. Add a key from the Users page first.
+          Password authentication cannot safely be turned off until one does — with no key anywhere,
+          doing so would leave nobody a way in, and the server refuses the change for that reason.
+          Add a key from the Users page first.
         </Notice>
       )}
 
       <Panel plain>
         <PanelHeader
           title="Settings"
-          advanced
           actions={
-            data.socket?.unit ? (
-              <Tag mono title="The systemd socket that holds the listener">
-                {data.socket.unit}
-              </Tag>
-            ) : undefined
+            <span className="numeric text-hint text-muted-foreground">
+              {data.settings.length} directives
+            </span>
           }
         />
         <PanelToolbar>
@@ -293,32 +383,56 @@ export function SSHPanel({
           </span>
         </PanelToolbar>
         <PanelBody flush>
-          <div className="divide-y divide-hairline">
-            {shown.map((s) => (
-              <SettingRow
-                key={s.key}
-                setting={s}
-                value={valueOf(s)}
-                changed={changed(s)}
-                note={
-                  s.key === "Port" || s.key === "port"
-                    ? data.socket?.unit
-                      ? `${data.socket.unit} holds this listener, so sshd never binds a port of its own. Changing it here writes the directive and a drop-in for the socket, then restarts it — which is the half that moves where connections land.`
-                      : undefined
-                    : undefined
-                }
-                onChange={(v) => setPending((p) => ({ ...p, [s.key]: v }))}
-              />
-            ))}
+          <FormSections railFrom="xl" className="pt-5">
+            {SSH_GROUPS.map((group) => {
+              const settings = shown.filter((setting) => sshGroup(setting.key) === group.title)
+              if (settings.length === 0) return null
+              const warnings = settings.filter((setting) => !setting.secure).length
+              return (
+                <FormSection
+                  aside
+                  key={group.title}
+                  title={group.title}
+                  hint={
+                    <span className="space-y-3">
+                      <span className="numeric block">{settings.length} directives</span>
+                      <Status
+                        verdict={warnings ? "warning" : "ok"}
+                        label={warnings ? `${warnings} below recommendation` : "At recommendation"}
+                      />
+                    </span>
+                  }
+                >
+                  <div className="divide-y divide-hairline">
+                    {settings.map((s) => (
+                      <SettingRow
+                        key={s.key}
+                        setting={s}
+                        value={valueOf(s)}
+                        changed={changed(s)}
+                        note={
+                          s.key.toLowerCase() === "port" && data.socket?.unit
+                            ? `${data.socket.unit} owns this listener. Applying a port change also updates and restarts that socket.`
+                            : undefined
+                        }
+                        onChange={(value) =>
+                          setPending((previous) => ({ ...previous, [s.key]: value }))
+                        }
+                      />
+                    ))}
+                  </div>
+                </FormSection>
+              )
+            })}
             {shown.length === 0 && (
               <EmptyNote>Every setting is at or above its recommendation.</EmptyNote>
             )}
-          </div>
+          </FormSections>
         </PanelBody>
         {dirty && (
-          <PanelFooter>
-            <span className="text-xs text-muted-foreground">
-              {Object.keys(pending).length} pending — written to {data.managedFile}
+          <PanelFooter className="sticky bottom-0 z-10 bg-background">
+            <span className="text-hint text-muted-foreground">
+              {Object.keys(changes).length} unsaved changes
             </span>
             <span className="flex-1" />
             <Button size="sm" variant="outline" onClick={() => setPending({})} disabled={busy}>
@@ -353,6 +467,7 @@ export function SSHPanel({
               {data.keyedAccounts.map((account) => (
                 <Row
                   key={account.user}
+                  leading={<InitialsMark name={account.user} />}
                   title={account.user}
                   trailing={
                     <span className="numeric text-hint text-muted-foreground">
@@ -367,27 +482,82 @@ export function SSHPanel({
         </PanelBody>
       </Panel>
 
+      <HostLogSection
+        title="Auth log"
+        log={authLog}
+        storageKey="security.ssh.log"
+        lineVerbs={lineVerbs}
+        ask={ask}
+        readings={readings}
+      />
+
       {dialog}
     </>
   )
 }
 
+const AUTH_LENS = lensFor("auth")
+
 /**
- * One sshd directive as a row in a plain divided list.
- *
- * Three columns, always in the same place: what it is, what it is set to, and
- * — only where the value is below the recommendation — why that matters. The
- * row only raises its voice where the setting is below the recommendation: a
- * `Status` and the "recommended … because …" line appear there and nowhere
- * else. Every row used to be washed in one of two colours, which made a list
- * of twelve mostly-fine settings look like twelve problems; the one wash that
- * stays is the faint primary tint on a row you have changed and not yet
- * applied, because that is a state of the page rather than of the host.
- *
- * A two-value choice (password auth on/off, root login) is a segmented control
- * rather than a dropdown — the two states are the whole decision and both
- * should be visible without opening a menu.
+ * The auth lens's readings that are about SSH, for the second row: who got
+ * in, who tried, under which names, from how many places. Its sudo failures
+ * are a reading of the host's accounts rather than of sshd, and are one
+ * quick view away in the log.
  */
+const SSH_READINGS = ["accepted", "failed", "invalid", "attackers"]
+
+/**
+ * The lines whose address a deny answers: a wrong password, an account that
+ * does not exist, a connection that ran out of tries or gave up before
+ * authenticating. A login is not one of them — the address a deploy key or
+ * the operator signs in from is the last one to refuse.
+ */
+const ATTACKS = [
+  "ssh_failed",
+  "ssh_invalid_user",
+  "ssh_max_attempts",
+  "ssh_preauth_closed",
+  "ssh_scan",
+]
+
+const SSH_GROUPS = [
+  {
+    title: "Authentication",
+    keys: [
+      "passwordauthentication",
+      "pubkeyauthentication",
+      "permitrootlogin",
+      "kbdinteractiveauthentication",
+      "challengeresponseauthentication",
+      "permitemptypasswords",
+      "usepam",
+    ],
+  },
+  {
+    title: "Access",
+    keys: ["port", "listenaddress", "allowusers", "allowgroups", "denyusers", "denygroups"],
+  },
+  {
+    title: "Session limits",
+    keys: [
+      "maxauthtries",
+      "logingracetime",
+      "clientaliveinterval",
+      "clientalivecountmax",
+      "maxsessions",
+      "maxstartups",
+    ],
+  },
+  { title: "Other directives", keys: [] },
+]
+
+function sshGroup(key: string) {
+  return (
+    SSH_GROUPS.find((group) => group.keys.includes(key.toLowerCase()))?.title ?? "Other directives"
+  )
+}
+
+/** Keep the control in one column and its recommendation beside the setting it explains. */
 function SettingRow({
   setting,
   value,
@@ -409,30 +579,38 @@ function SettingRow({
   return (
     <div
       className={cn(
-        "grid min-w-0 grid-cols-1 items-start gap-x-6 gap-y-3 px-5 py-3 md:grid-cols-[minmax(0,1fr)_13rem] xl:grid-cols-[minmax(0,30rem)_13rem_minmax(0,1fr)]",
-        ROW_BLEED,
+        "grid min-w-0 items-center gap-x-6 gap-y-3 py-5 first:pt-0 sm:grid-cols-[minmax(0,1fr)_12rem]",
         changed && "bg-wash-primary",
       )}
     >
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-body font-medium">{setting.label}</span>
-          <code className="font-mono text-hint text-muted-foreground">{setting.key}</code>
+          <label htmlFor={`ssh-${setting.key}`} className="text-body font-medium">
+            {setting.label}
+          </label>
+          <InfoTip label={`About ${setting.label}`}>
+            {setting.detail}
+            {note && ` ${note}`}
+          </InfoTip>
           {changed ? (
             <Tag className="text-primary">pending</Tag>
           ) : (
             below && <Status verdict="warning" label="below recommendation" />
           )}
         </div>
-        <p className="text-hint leading-relaxed text-muted-foreground">{setting.detail}</p>
-        {note && (
-          <p className="text-hint leading-relaxed text-muted-foreground/90 italic">{note}</p>
+        <code className="block font-mono text-hint text-muted-foreground">{setting.key}</code>
+        {below && (
+          <p className="max-w-md text-hint leading-relaxed text-warning">
+            Recommended {setting.recommended}.
+            {setting.risk && <span className="text-muted-foreground"> {setting.risk}</span>}
+          </p>
         )}
       </div>
 
-      <div className={cn("min-w-0", setting.kind === "list" && "xl:col-span-2")}>
+      <div className="min-w-0">
         {setting.kind === "list" ? (
           <Input
+            id={`ssh-${setting.key}`}
             value={value}
             placeholder="deploy admin — empty allows everyone"
             className="font-mono text-xs"
@@ -448,6 +626,7 @@ function SettingRow({
             size="sm"
             className="w-full"
             aria-label={setting.label}
+            id={`ssh-${setting.key}`}
           >
             {setting.options!.map((option) => (
               <ToggleGroupItem key={option} value={option} className="flex-1 text-xs capitalize">
@@ -457,7 +636,7 @@ function SettingRow({
           </ToggleGroup>
         ) : setting.kind === "choice" ? (
           <Select value={value} onValueChange={onChange}>
-            <SelectTrigger className="w-full" aria-label={setting.label}>
+            <SelectTrigger id={`ssh-${setting.key}`} className="w-full" aria-label={setting.label}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -470,6 +649,7 @@ function SettingRow({
           </Select>
         ) : (
           <Input
+            id={`ssh-${setting.key}`}
             value={value}
             inputMode="numeric"
             aria-label={setting.label}
@@ -477,18 +657,6 @@ function SettingRow({
           />
         )}
       </div>
-
-      {below && (
-        <p
-          className={cn(
-            "min-w-0 text-hint leading-relaxed",
-            setting.kind === "list" ? "md:col-span-2 xl:col-span-3" : "xl:col-start-3",
-          )}
-        >
-          <span className="font-medium text-warning">Recommended {setting.recommended}.</span>
-          {setting.risk && <span className="text-foreground/75"> {setting.risk}</span>}
-        </p>
-      )}
     </div>
   )
 }

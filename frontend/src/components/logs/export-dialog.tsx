@@ -34,11 +34,14 @@ export function ExportDialog({
   source,
   filter,
   boot,
+  lens,
 }: {
   sourceId: string
   source: LogSource | null
   filter: LogFilterState
   boot: boolean
+  /** The lens the reader forced; the filter's fields are read through it. */
+  lens?: string
 }) {
   const [open, setOpen] = useState(false)
   const [range, setRange] = useState<LogTimeRange>("all")
@@ -52,6 +55,9 @@ export function ExportDialog({
   const href = downloadUrl("/logs/download", {
     source: sourceId,
     ...(withFilter ? filterQuery(filter) : {}),
+    // The same reading as the screen, so `f=event:slow` exports the lines
+    // that were slow there rather than whatever an undetected file calls slow.
+    lens: lens || undefined,
     ...window,
     archives: archives && hasArchives ? "true" : undefined,
     boot: boot ? "true" : undefined,
@@ -68,9 +74,11 @@ export function ExportDialog({
 
   return (
     <>
+      {/* The glyph alone on a phone, where the strip's width is the
+          source's name's: the word stays the button's name. */}
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         <Download className="size-4" />
-        Export
+        <span className="max-sm:sr-only">Export</span>
       </Button>
       <Modal
         open={open}
@@ -129,7 +137,7 @@ export function ExportDialog({
               {isFilterActive(filter) && (
                 <OptionRow
                   title="Apply the filter that is on screen"
-                  hint="Only the lines the current search, exclusion and levels keep."
+                  hint="Only the lines the current search, exclusion, levels and fields keep."
                   checked={withFilter}
                   onCheckedChange={setWithFilter}
                 />

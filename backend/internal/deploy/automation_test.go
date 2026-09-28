@@ -431,3 +431,67 @@ func TestSignedNotificationPersistsOnlyResponseClass(t *testing.T) {
 		t.Fatalf("response secret persisted: count=%d err=%v", leaks, err)
 	}
 }
+
+// A close delivery says whether the pull request was merged and which branch
+// it targeted: merged is what turns a preview teardown into a production
+// redeploy, and the base branch is what the redeploy is for.
+func TestVerifyProviderReportsMergedAndBaseRef(t *testing.T) {
+	secret := "provider-secret"
+	signed := func(t *testing.T, body []byte) string {
+		t.Helper()
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write(body)
+		return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	}
+	sha := strings.Repeat("a", 40)
+	github := map[string]any{
+		"action": "closed", "number": 12, "repository": map[string]any{"full_name": "acme/app"},
+		"pull_request": map[string]any{
+			"merged": true, "user": map[string]any{"login": "dev"},
+			"head": map[string]any{"ref": "feature", "sha": sha, "repo": map[string]any{"full_name": "dev/app"}},
+			"base": map[string]any{"ref": "main"},
+		},
+	}
+	body, _ := json.Marshal(github)
+	headers := http.Header{}
+	headers.Set("X-Hub-Signature-256", signed(t, body))
+	headers.Set("X-GitHub-Event", "pull_request")
+	headers.Set("X-GitHub-Delivery", "gh-close")
+	got, err := VerifyProvider("github", headers, body, secret)
+	if err != nil || !got.PreviewClosed || !got.Merged || got.BaseRef != "main" || got.HeadRef != "feature" || got.Revision != sha {
+		t.Fatalf("github merged close = %+v, %v", got, err)
+	}
+	github["pull_request"].(map[string]any)["merged"] = false
+	github["action"] = "synchronize"
+	body, _ = json.Marshal(github)
+	headers.Set("X-Hub-Signature-256", signed(t, body))
+	got, err = VerifyProvider("github", headers, body, secret)
+	if err != nil || got.PreviewClosed || got.Merged || got.BaseRef != "main" {
+		t.Fatalf("github synchronize = %+v, %v", got, err)
+	}
+
+	gitlab := []byte(`{"object_kind":"merge_request","project":{"path_with_namespace":"acme/app"},"user":{"username":"dev"},"object_attributes":{"iid":4,"state":"merged","source_branch":"feature","target_branch":"main","last_commit":{"id":"` + sha + `"}}}`)
+	headers = http.Header{}
+	headers.Set("X-Gitlab-Token", secret)
+	headers.Set("X-Gitlab-Event-UUID", "gl-merge")
+	headers.Set("X-Gitlab-Event", "Merge Request Hook")
+	got, err = VerifyProvider("gitlab", headers, gitlab, secret)
+	if err != nil || !got.PreviewClosed || !got.Merged || got.BaseRef != "main" || got.PreviewNumber != 4 {
+		t.Fatalf("gitlab merged = %+v, %v", got, err)
+	}
+
+	bitbucket := []byte(`{"repository":{"full_name":"acme/app"},"pullrequest":{"id":8,"author":{"nickname":"dev"},"source":{"branch":{"name":"feature"},"commit":{"hash":"` + sha + `"},"repository":{"full_name":"acme/app"}},"destination":{"branch":{"name":"main"}}}}`)
+	headers = http.Header{}
+	headers.Set("X-Hub-Signature", signed(t, bitbucket))
+	headers.Set("X-Request-UUID", "bb-merge")
+	headers.Set("X-Event-Key", "pullrequest:fulfilled")
+	got, err = VerifyProvider("bitbucket", headers, bitbucket, secret)
+	if err != nil || !got.PreviewClosed || !got.Merged || got.BaseRef != "main" || got.PreviewNumber != 8 {
+		t.Fatalf("bitbucket fulfilled = %+v, %v", got, err)
+	}
+	headers.Set("X-Event-Key", "pullrequest:rejected")
+	got, err = VerifyProvider("bitbucket", headers, bitbucket, secret)
+	if err != nil || !got.PreviewClosed || got.Merged {
+		t.Fatalf("bitbucket rejected = %+v, %v", got, err)
+	}
+}

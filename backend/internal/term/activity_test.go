@@ -217,6 +217,23 @@ func TestActivityFollowsTheForegroundJob(t *testing.T) {
 	}
 	drain(200 * time.Millisecond)
 
+	// An idle program's odd redraw is not work — Claude Code at its prompt
+	// repaints on a focus change or a resize. Bursts a second and a half
+	// apart, while it holds the terminal, never become a run.
+	type_("sh -c 'while :; do sleep 1.5; printf x; done'\n")
+	until("redrawing program announced", 5*time.Second, func(a Activity) bool { return a.Busy })
+	for _, a := range drain(4 * time.Second) {
+		if a.Working {
+			t.Errorf("occasional redraws were marked working: %+v", a)
+		}
+	}
+	if a := sess.Activity(); a.Working {
+		t.Errorf("occasional redraws were marked working: %+v", a)
+	}
+	type_("\x03")
+	until("prompt back after the redraws", 5*time.Second, func(a Activity) bool { return !a.Busy })
+	drain(200 * time.Millisecond)
+
 	// Sustained output is work; its end is stamped and reaches the subscriber.
 	type_("sh -c 'while :; do echo tick; sleep 0.1; done'\n")
 	until("output counted as work", 8*time.Second, func(a Activity) bool { return a.Working })

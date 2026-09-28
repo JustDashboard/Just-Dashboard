@@ -31,14 +31,39 @@ import { ErrorState, LoadingPanel } from "@/components/state"
 export function Page({
   className,
   fill,
+  register = "reading",
   ...props
-}: React.ComponentProps<"div"> & { fill?: boolean }) {
+}: React.ComponentProps<"div"> & {
+  /**
+   * `"xl"` holds the page to the window only where its columns sit side by
+   * side — a flow page decided in one view (§17 pass 8) that stacks and
+   * scrolls like any other page below that width.
+   */
+  fill?: boolean | "xl"
+  /**
+   * Which register this page is drawn in (§16).
+   *
+   * `reading` is the product: a page that reports state, drawn flat, where
+   * the figures are the loud thing. `flow` is a page where the reader is
+   * deciding something in sequence — it composes `components/flow.tsx`
+   * instead of bare panels and rows, and it is the only place the depth,
+   * the lit border and the mandatory command face are allowed.
+   *
+   * It is stamped on the page element rather than inferred, so which register
+   * a page is in is one grep, a page cannot be half in each by accident, and
+   * a browser test can assert that only the flow pages carry the flow
+   * affordances.
+   */
+  register?: "reading" | "flow"
+}) {
   return (
     <div
       data-slot="page"
+      data-register={register}
       className={cn(
-        "mx-auto flex w-full max-w-[1440px] min-w-0 flex-col gap-6 px-5 py-6 md:gap-8 md:px-8 md:py-8",
-        fill && "h-full min-h-0 overflow-hidden",
+        "group/page mx-auto flex w-full max-w-[1440px] min-w-0 flex-col gap-6 px-5 py-6 md:gap-8 md:px-8 md:py-8",
+        fill === true && "h-full min-h-0 overflow-hidden",
+        fill === "xl" && "xl:h-full xl:min-h-0 xl:overflow-hidden",
         className,
       )}
       {...props}
@@ -47,20 +72,13 @@ export function Page({
 }
 
 /**
- * The title band at the top of a page: where it sits in the product, what it
- * is called, and what you can do to it.
+ * The accessible name and contextual controls of a reading page.
  *
- * The eyebrow repeats the nav group rather than the page name, so the band
- * answers "where am I" without restating the sidebar item directly above it.
- *
- * There is no description. Every page carried a sentence under its heading
- * explaining what the page was, which is a caption for a title the reader has
- * already read and understood — it pushed the first real row of every page a
- * line and a half down the screen and was never looked at twice. What a page
- * actually needs said goes in a `Notice`, where it is a fact rather than a
- * subtitle; what it does not need said goes nowhere.
+ * The rail identifies the page visually. A repeated title above the content
+ * used a full row without adding context, so only a linked parent and controls
+ * are drawn here. The h1 still names the page for assistive technology.
  */
-export function PageHeader({
+export function PageContext({
   eyebrow,
   title,
   actions,
@@ -71,22 +89,28 @@ export function PageHeader({
   actions?: React.ReactNode
   className?: string
 }) {
+  const back = typeof eyebrow === "string" ? null : eyebrow
+
   return (
-    <div
-      data-slot="page-header"
-      className={cn("flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3", className)}
-    >
-      <div className="min-w-0 space-y-1.5">
-        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-        {/* The largest type on the page, by a clear step: the title is the one
-            thing that has to be found without reading, and at 20px it sat two
-            pixels from the panel titles it was meant to rank above. */}
-        <h1 className="truncate text-2xl leading-tight font-semibold tracking-tight">{title}</h1>
-      </div>
-      {actions && (
-        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">{actions}</div>
+    <>
+      <h1 className="sr-only">{title}</h1>
+      {(back || actions) && (
+        <div
+          data-slot="page-context"
+          className={cn(
+            "flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2",
+            className,
+          )}
+        >
+          {back && <div className="text-body text-muted-foreground">{back}</div>}
+          {actions && (
+            <div className={cn("flex max-w-full flex-wrap items-center gap-2", back && "ml-auto")}>
+              {actions}
+            </div>
+          )}
+        </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -129,6 +153,13 @@ export function Toolbar({ className, ...props }: React.ComponentProps<"div">) {
  * The filter box, which appeared in six pages as the same three elements
  * assembled slightly differently each time — a different width, a different
  * icon offset, sometimes no icon at all.
+ *
+ * On a phone it is a field like any other: 40px, beside the 40px `Select
+ * size="sm"` it usually shares a toolbar with, and at `Input`'s own 16px so
+ * iOS does not zoom the page when it takes focus. It also takes the first
+ * line of a wrapping toolbar to itself — a call site's `flex-1` had squeezed
+ * the projects search to 95px beside its chips at 390. From `sm` it is the
+ * 32px box it always was. The dense one is a pane's chrome and keeps its size.
  */
 export function SearchInput({
   dense,
@@ -144,7 +175,13 @@ export function SearchInput({
   containerClassName?: string
 }) {
   return (
-    <div className={cn("relative flex w-full items-center sm:w-72", containerClassName)}>
+    <div
+      className={cn(
+        "relative flex w-full min-w-0 items-center sm:w-72",
+        !dense && "max-sm:basis-full",
+        containerClassName,
+      )}
+    >
       <MagnifyingGlass
         className={cn(
           "pointer-events-none absolute top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground",
@@ -152,7 +189,7 @@ export function SearchInput({
         )}
       />
       <Input
-        className={cn(dense ? "h-7 pl-7 text-xs" : "h-8 pl-8 text-body", className)}
+        className={cn(dense ? "h-7 pl-7 text-xs" : "h-10 pl-8 sm:h-8", className)}
         {...props}
       />
       {trailing && <div className="absolute right-1 flex items-center gap-0.5">{trailing}</div>}
@@ -185,12 +222,22 @@ export function Metric({
   )
 }
 
-/** A horizontal run of Metrics, separated by rules rather than by gap alone. */
+/**
+ * A horizontal run of Metrics, separated by rules rather than by gap alone.
+ *
+ * Two columns on a phone rather than a wrapping row: wrapped, the first
+ * metric of each new line kept the rule and the indent that belonged beside
+ * its neighbour on the line above, and a date took whatever width was left of
+ * the line and truncated in it. In a grid every rule is between two cells and
+ * every value has half the width to itself.
+ */
 export function MetricStrip({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "flex flex-wrap gap-x-6 gap-y-3 [&>*]:min-w-0 [&>*+*]:border-l [&>*+*]:border-hairline [&>*+*]:pl-6",
+        "grid grid-cols-2 gap-x-4 gap-y-3 [&>*]:min-w-0",
+        "max-sm:[&>*:nth-child(2n)]:border-l max-sm:[&>*:nth-child(2n)]:border-hairline max-sm:[&>*:nth-child(2n)]:pl-4",
+        "sm:flex sm:flex-wrap sm:gap-x-6 sm:[&>*+*]:border-l sm:[&>*+*]:border-hairline sm:[&>*+*]:pl-6",
         className,
       )}
       {...props}
@@ -304,7 +351,7 @@ export function PageState({
 }) {
   return (
     <Page>
-      <PageHeader eyebrow={eyebrow} title={title} />
+      <PageContext eyebrow={eyebrow} title={title} />
       {error ? <ErrorState error={error} onRetry={onRetry} /> : (skeleton ?? <LoadingPanel />)}
     </Page>
   )

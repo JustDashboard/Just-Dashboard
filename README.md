@@ -6,7 +6,7 @@
 Metrics, Docker, processes, logs, a real shell, files, git, databases, the reverse proxy,
 the firewall, backups and deploys, behind a login that lives on your private network.
 
-**Version 0.6.7** · Go backend · Next.js frontend · one `docker compose` stack
+**Version 0.7.0** · Go backend · Next.js frontend · one `docker compose` stack
 
 [Install](#install) · [Security](#read-this-before-you-expose-it) · [Support](#who-makes-this) · [The tour](#the-tour) · [Configuration](#configuration) · [Licence](#licence)
 
@@ -28,15 +28,27 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
 ## What it does
 
 - **Deploys from a repository, an image, a template or a Compose file.** Detection fills the
-  form in; every release is immutable, so rollback reactivates what ran before. Web services get
-  a health-gated cutover.
+  form in for Node, Bun and Deno, Python, PHP, Go, Rust, Java and Kotlin, .NET, Ruby, Elixir, Scala,
+  Clojure, Dart, Gleam and static site generators: it picks the application out of a repository's
+  examples, docs and tooling, reads lockfiles to choose the package manager and runtime, plans a
+  volume for the SQLite file, uploads or key ring an app would otherwise lose on its next release, and
+  says before you deploy what it will not run. Every deployment is checked against the commit it
+  builds before it builds, what would stop it or deserves a look is shown before Deploy is pressed,
+  and a build that still fails names its cause and the setting that fixes it. Every release is
+  immutable, so rollback reactivates what ran before. Web services get a health-gated cutover.
 - **Databases you can hand out.** Eight engines browsed, queried and diagrammed from one place. A
   database started here gets a connection string, and one press opens it to the internet or
   closes it again.
-- **Fifty-three reviewed templates.** PostgreSQL, Redis, MinIO, n8n, Grafana, Uptime Kuma,
-  Vaultwarden, Nextcloud, Jellyfin, code-server, Ollama and more, one click each.
+- **Boards for the server you run.** Sketch with the bundled Excalidraw editor, keep multiple boards
+  in the dashboard's own database, and place linked cards for this host, deployment projects and
+  database connections. Changes save automatically; an older tab cannot silently replace a newer save.
+- **Fifty-seven reviewed templates, each one saying how you get in.** PostgreSQL, Redis, n8n,
+  Grafana, Uptime Kuma, Vaultwarden, Nextcloud, Jellyfin, code-server, Ollama, Open WebUI, ntfy,
+  Qdrant, NocoDB and more, one click each — and every card says whether you create the first
+  account yourself, sign in with a password this server generated, or find no sign-in page at all.
 - **Automatic Git deployments, previews and notifications.** Push to deploy, approved previews
-  per pull request, and every run reported to Discord, Slack, Telegram, e-mail, a webhook and
+  per pull request — test one from the Git page or a project's overview at an address only your
+  tailnet can reach — and every run reported to Discord, Slack, Telegram, e-mail, a webhook and
   the commit's status on GitHub.
 - **Backups that know what is not backed up.** Every volume, stack, deployment, repository and
   database listed, one press from a job, with writers frozen while the archive is taken.
@@ -55,10 +67,14 @@ The installer asks how you intend to reach it. **Tailscale is the default**: the
 invisible to the internet and the dashboard answers at `https://your-box.tailnet-name.ts.net:8443`
 with a real certificate. **An SSH tunnel is the fallback**, served on loopback. It then generates
 the master key and a first password, builds the stack and prints the command to get in.
-Everything it asked is editable afterwards under **Settings → Configuration**.
+Everything it asked is editable afterwards under **Settings → Configuration**. It also installs
+the host tools the web terminal and the dashboard's pages run on the server itself — `gh` from
+GitHub's own repository, `git-lfs`, `whois` and `traceroute` — where they are missing, so a GitHub
+sign-in on the Git page works from the terminal and over ssh too.
 
 To upgrade, `git pull` and `docker compose up -d --build`, use the in-app update, or run
-`sudo ./install.sh` again. All three keep your `.env`, database, accounts and sessions.
+`sudo ./install.sh` again. All three keep your `.env`, database, accounts and sessions; only
+the installer adds host tools a newer release relies on.
 
 ## Read this before you expose it
 
@@ -103,13 +119,25 @@ Create containers from a template, a pasted `docker run` or a form, with the com
 before it runs. Two verdicts: what Docker reports, and what needs attention — exposure, disk,
 memory limits, security posture — each with an explanation and, where possible, a button.
 Stacks deploy, rebuild and roll back with the compose diff shown first.
+Each container's Usage tab combines live CPU, memory, network and block I/O readings with recorded
+history. Inspect per-interface transfer rates, totals, packet errors and drops, memory cache and CPU
+throttling; unavailable readings stay distinct from zero activity.
 
 ### Terminal
 
 ![A terminal window, with the Files companion beside it](docs/terminal.png)
 
 A real PTY into a host account. Sessions group windows, each named after what it is running,
-and they survive the tab closing. Files and Git sit beside the shell.
+and they keep running on the server until you close them — with the tab closed, and across
+dashboard restarts and upgrades — so an agent left working is still working when you come back.
+Files and Git sit beside the shell.
+
+### Boards
+
+Open **Boards** in Workspace to create a drawing. Each board has its own address and is saved in
+`JD_DATA_DIR` with the dashboard's other state. **Add server item** inserts a linked host, project or
+database card. The card shows the resource's name and status when inserted; its link opens the current
+resource page. Board editing needs `service.control`, and deletion asks for the board's name.
 
 ### Files
 
@@ -118,6 +146,8 @@ and they survive the tab closing. Files and Git sit beside the shell.
 Browse, preview, edit with a diff before saving, drag and drop, upload whole folders, crop
 pictures, chmod, search by content, archive and extract. Every path is checked against
 `JD_FILE_ROOTS` before anything happens.
+The folder button in the toolbar changes every folder's colour. The inspector and folder menus can
+then set a different colour for one folder.
 
 ### Git
 
@@ -125,22 +155,35 @@ pictures, chmod, search by content, archive and extract. Every path is checked a
 
 Every repository under the configured roots. Stage, commit, push, stash, branch, merge, tag, and
 open pull requests from the page, signed in to GitHub with the same device flow `gh` uses.
+Stage individual lines or chunks, resolve conflicts, compare branches, inspect blame and signatures,
+recover commits, and edit local history with a recovery branch. Worktrees, submodules, Git LFS and
+patch import/export open in the same workspace. Review GitHub pull requests and Actions job logs,
+or connect a GitLab/Gitea token for requests on those providers.
 
 ### Deployments
 
-![A project, with its website preview and what needs attention](docs/deployments.png)
+![A project with its website preview and live release](docs/deployments.png)
 
 Point it at a repository, an image, a template, a Compose stack or something already running. It
 says what it found, shows the plan, and runs it as a job with a permanent URL. Each project has
 an overview with a live preview, deployments with rollback, logs, runtime, a console and settings.
+Setup can generate template credentials and suggest a public address, create and connect a private
+database on this server, or use an external database connection. Build commands, variables, storage,
+health checks and runtime limits remain editable before the first deployment.
 
 ### Databases
 
-![A database connection, with its connection string and the switch that opens it to the internet](docs/databases.png)
+![A database's overview: its connection string in the shapes it is pasted in, its facts, its largest tables and what reads it](docs/databases.png)
 
-PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. Browse
-and edit rows, change the structure, run queries, draw the schema, and hand out the connection
-string — on this server or, with one press, from anywhere.
+PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. The
+section opens on every database at once — which answer, what they take, who is connected, what
+each one feeds — with a map of the deployments, containers and machines reading them, and a
+database opens on its connection string, as the URL, the `.env` line or the shell command, on
+this server or, with one press, from anywhere. Browse and edit rows, change the structure, run
+queries, draw the schema, read the advisor's findings with their fixes, manage the server's
+accounts, databases and extensions, keep and restore dumps, and read the server's own log and the
+statements it recorded as slow. A database installed on the machine itself is connected by letting the
+dashboard make its own account on it.
 
 ### And the rest
 
@@ -148,7 +191,7 @@ string — on this server or, with one press, from anywhere.
 | --- | --- |
 | **Metrics** | CPU split by user, system, iowait and steal; memory judged on what is available; pressure, disks, inodes, sockets and interfaces, with seven days of history the backend records itself. |
 | **Processes** | Live table, PM2, systemd services and cron jobs, each with its verbs as words. |
-| **Logs** | Files, container output, PM2 and the journal in one viewer, filtered on the server. |
+| **Logs** | Files, container output, compose stacks, PM2 and the journal in one viewer, filtered on the server, each read as what it is — Postgres's slow statements and auth failures, nginx's requests and upstream errors, sshd's logins and attackers — with quick views and insights. Every service's page shows its own log the same way, where the service is. |
 | **Proxy & TLS** | Sites written as ordinary nginx, streams, certificates through certbot including DNS wildcards, and a live TLS report. |
 | **Security** | A verdict on the host: firewall (ufw or firewalld), sshd, fail2ban, open ports, connections, logins and who is attacking. |
 | **Backups** | Scheduled archives to disk, S3 or B2, native database dumps, single-file and in-place restore, and a list of what is not covered. |
@@ -159,7 +202,7 @@ string — on this server or, with one press, from anywhere.
 
 ## Version, and updating
 
-This is **0.6.7**. It is not 1.0 because the API is still moving. Every release is in
+This is **0.7.0**. It is not 1.0 because the API is still moving. Every release is in
 [CHANGELOG.md](CHANGELOG.md) and in the dashboard itself, where **Update now** pulls, rebuilds
 and restarts from a container that outlives the restart. The update check is one unauthenticated
 GET of one file from GitHub; `JD_UPDATE_CHECK=false` turns it off.
@@ -272,11 +315,10 @@ cd frontend && bun install && bun dev  # UI on :3000
 ```
 
 Set `NEXT_PUBLIC_WS_BASE=http://localhost:8080` for WebSockets and `JD_ALLOWED_ORIGINS=http://localhost:3000`
-on the backend. Before a pull request:
+on the backend. Before a pull request, run the checks your change can reach:
 
 ```bash
-cd backend  && go build ./... && go vet ./... && go test ./...
-cd frontend && bun run lint && bun run build && bun run test:browser
+scripts/test-changed.sh
 ```
 
 Without the installer: `cp .env.example .env`, set `JD_MASTER_KEY` (`openssl rand -hex 32`),
@@ -295,4 +337,5 @@ restore. The Backups page lists the dashboard itself under Coverage and writes t
 
 [AGPL-3.0](LICENSE). Run it, change it, distribute it, but if you run a modified version as a
 network service, publish your changes. Contributions are welcome under the terms in
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md). The product logos bundled in `frontend/public/logos/` are their
+owners' trademarks and keep their own licences, listed in that directory's `NOTICE`.

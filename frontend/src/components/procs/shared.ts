@@ -1,4 +1,5 @@
-import type { ProcessRow } from "@/lib/types"
+import type { LogSource, LogSourceIndex, ProcessRow } from "@/lib/types"
+import { journalIdSource, journalSource } from "@/lib/log-sources"
 import type { Tone } from "@/components/tone"
 
 /** The word for who supervises a process, as the table and the sheet print it. */
@@ -33,7 +34,7 @@ export function managerHref(process: Pick<ProcessRow, "manager" | "managerName">
     case "pm2":
       return `/processes/pm2?app=${encodeURIComponent(process.managerName)}`
     case "container":
-      return `/docker/containers?container=${encodeURIComponent(process.managerName)}`
+      return `/docker/containers/${encodeURIComponent(process.managerName)}`
     default:
       return null
   }
@@ -56,4 +57,46 @@ export function cpuTone(percent: number): Tone {
 /** One process across polls: a PID alone is reused, the pair is not. */
 export function processKey(process: { pid: number; createTime: string }): string {
   return `${process.pid}-${process.createTime}`
+}
+
+/**
+ * sshd's unit under either distribution's name, and the per-connection
+ * instances a socket-activated sshd runs as: the units whose journal is
+ * login records, which the server reads to administrators only
+ * (`authJournalUnit` in `handlers_logs.go`). A page that knows it would be
+ * refused says so rather than opening a read that is.
+ */
+export function authUnit(unit: string): boolean {
+  const name = unit.replace(/\.service$/, "")
+  return name === "ssh" || name === "sshd" || name.startsWith("ssh@") || name.startsWith("sshd@")
+}
+
+/** The names cron's daemon runs under: Debian's, Red Hat's, and cronie's own. */
+const CRON_UNITS = ["cron.service", "crond.service", "cronie.service"]
+
+/**
+ * Where this host's cron writes what it ran, in the order that reads it
+ * best: the daemon's own unit, whose journal holds each job's line and the
+ * daemon's; a cron file where syslog splits one out (`/var/log/cron` on Red
+ * Hat); or, on a journal with neither, the jobs' lines by program — the same
+ * reading the logs page's rail offers. Nothing when the host has none of
+ * them, which is a host without cron or without a readable log of it.
+ */
+export function cronLogSource(index: LogSourceIndex | undefined): LogSource | undefined {
+  if (!index || !Array.isArray(index.sources)) return undefined
+  const unit = index.units?.find((u) => CRON_UNITS.includes(u.name))
+  if (unit) {
+    return { id: journalSource(unit.name), label: unit.name, kind: "journal", rotated: false }
+  }
+  const file = index.sources.find((s) => s.path && s.lens === "cron")
+  if (file) return file
+  if (index.sources.some((s) => s.kind === "journal")) {
+    return {
+      id: journalIdSource(["CRON", "crond"]),
+      label: "cron",
+      kind: "journal-id",
+      rotated: false,
+    }
+  }
+  return undefined
 }

@@ -1,36 +1,46 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { ClockRewind, Slash } from "@/components/icons"
-import { get, ApiError } from "@/lib/api"
-import { timestamp } from "@/lib/format"
-import type { BanEvent, Fail2banJail } from "@/lib/types"
+import { Slash } from "@/components/icons"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { ProductGlyph } from "@/components/product-logo"
+import { Address, jailProduct } from "@/components/security/marks"
+import { get } from "@/lib/api"
+import { lensFor } from "@/lib/log-lenses"
+import type { Fail2banJail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { PageHeader, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { PageContext } from "@/components/page"
+import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
+import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
+import { FAIL2BAN_LOG } from "@/components/security/host-logs"
+import {
+  HostLogSection,
+  useAddressLineVerbs,
+  useHostLog,
+  useReadingPress,
+} from "@/components/security/log-section"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { JailsPanel } from "@/components/security/jail-panel"
 import { OffendersPanel } from "@/components/security/offenders-panel"
 import { useSecurity } from "@/components/security/security-context"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  stickyTableHeader,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 /**
- * fail2ban: the jails, the addresses they are holding, and — under that — what
- * the tool has actually been doing, because a ban expires and the jail is
- * empty again by morning however busy the night was.
+ * fail2ban: the tool itself in one identity line, drawn as its own mark with
+ * whether it is running at the right end; the jails, the addresses they are
+ * holding, and — under that — what the tool has actually been doing, because
+ * a ban expires and the jail is empty again by morning however busy the night
+ * was.
+ *
+ * What it has been doing is its own log, read through the fail2ban lens: every
+ * strike a jail counted as well as every ban, so an address three strikes
+ * from a ban is on the page before it is banned, and Insights ranks the
+ * strikes and bans by jail and the addresses banned more than once. The day's
+ * counts are the second row of the readings. It used to be a table of bans
+ * and unbans parsed from the file alone, which on a host where fail2ban
+ * writes to the journal said there was nothing to read; the journal is read
+ * now instead.
  */
 export function IntrusionPanels() {
   const { can } = useAuth()
@@ -49,21 +59,30 @@ export function IntrusionPanels() {
   const bannedNow = jails.reduce((n, j) => n + j.currentlyBanned, 0)
   const failingNow = jails.reduce((n, j) => n + j.currentlyFailed, 0)
   const bansTotal = jails.reduce((n, j) => n + j.totalBanned, 0)
-
-  const header = (
-    <PageHeader
-      eyebrow="Security"
-      title="Intrusion prevention"
-      actions={
-        data?.running && (
-          <Status
-            verdict={bannedNow > 0 ? "notice" : "ok"}
-            label={bannedNow > 0 ? `${bannedNow} banned now` : "nobody banned"}
-          />
-        )
-      }
+  const watched = new Set(jails.flatMap((j) => j.fileList)).size
+  const activity = useHostLog(FAIL2BAN_LOG, Boolean(data?.available))
+  const readings = useLensReadings(activity.data?.id ?? "", FAIL2BAN_LENS, {
+    forcedLens: "fail2ban",
+    enabled: Boolean(activity.data) && Boolean(data?.running),
+  })
+  const lineVerbs = useAddressLineVerbs({
+    comment: "blocked from fail2ban's log",
+    onBlocked: refresh,
+    blockOn: OFFENCES,
+  })
+  const [ask, press] = useReadingPress()
+  const activitySection = (
+    <HostLogSection
+      title="Activity"
+      log={activity}
+      storageKey="security.intrusion.log"
+      lineVerbs={lineVerbs}
+      ask={ask}
+      readings={readings}
     />
   )
+
+  const header = <PageContext eyebrow="Security" title="Intrusion prevention" />
 
   if (loading && !data) {
     return (
@@ -106,6 +125,8 @@ export function IntrusionPanels() {
             data.error ?? "Installed and stopped is the state that looks protected and is not."
           }
         />
+        {/* Its last lines are usually why. */}
+        {activitySection}
       </>
     )
   }
@@ -114,10 +135,39 @@ export function IntrusionPanels() {
     <>
       {header}
 
+      <HostIdentity
+        mark="fail2ban"
+        title="fail2ban"
+        facts={
+          <>
+            <span className="numeric">
+              {jails.length === 1 ? "1 jail" : `${jails.length} jails`}
+            </span>
+            <FactDot />
+            <span className="numeric">
+              {watched === 1 ? "1 log watched" : `${watched} logs watched`}
+            </span>
+            {exposure?.client && (
+              <>
+                <FactDot />
+                <span className="inline-flex items-center gap-1">
+                  <span>you</span>
+                  <Address ip={exposure.client} className="text-foreground" />
+                </span>
+              </>
+            )}
+          </>
+        }
+        aside={<Status tone="running" label="running" className="text-body" />}
+      />
+
       {/* The four numbers the rest of the page is an explanation of. They were
           a "·"-joined sentence in each jail's header, which meant comparing two
-          jails was reading two sentences. */}
-      <StatGrid columns={4}>
+          jails was reading two sentences. Under them, from the log, the last
+          day's bans, strikes, unbans and errors — the jails' counters start
+          again with every restart, the log does not. Two-up on a phone: eight
+          short figures one-up are a screen and a half before the jails. */}
+      <StatGrid columns={4} dense>
         <StatTile label="Jails" value={jails.length} hint="configured and running" />
         <StatTile
           label="Banned now"
@@ -125,8 +175,20 @@ export function IntrusionPanels() {
           tone={bannedNow > 0 ? "warning" : "default"}
           hint="held this instant — bans expire"
         />
-        <StatTile label="Failing now" value={failingNow} hint="attempts inside the current window" />
+        <StatTile
+          label="Failing now"
+          value={failingNow}
+          hint="attempts inside the current window"
+        />
         <StatTile label="Bans in total" value={bansTotal} hint="since fail2ban last started" />
+        {readings.tiles.map((tile) => (
+          <ReadingTile
+            key={tile.reading.id}
+            tile={tile}
+            window={readings.window}
+            onPick={() => press(tile.reading)}
+          />
+        ))}
       </StatGrid>
 
       <AreaFindings posture={posture} area="intrusion" onFix={applyFix} />
@@ -138,131 +200,28 @@ export function IntrusionPanels() {
         onChanged={refresh}
       />
 
-      <OffendersPanel onBlocked={refresh} />
-      <BanHistoryPanel />
+      <OffendersPanel onBlocked={refresh} journal={activity.data?.kind === "journal"} />
+      {activitySection}
     </>
   )
 }
 
+const FAIL2BAN_LENS = lensFor("fail2ban")
+
 /**
- * What fail2ban has done recently, read from its own log — not remembered by
- * the dashboard and not inferred by polling the jail: a ban shorter than the
- * interval would never be seen that way, and the events either side of a
- * restart would be invented.
+ * The lines whose address a deny answers: every strike and ban, and the ones
+ * fail2ban let go. An address it was told to ignore is one the operator
+ * trusts, and is never offered.
  */
-function BanHistoryPanel() {
-  const [query, setQuery] = useState("")
-  const [kind, setKind] = useState<"all" | "ban" | "unban">("all")
-  const { data, error, loading } = usePoll(
-    (signal) => get<BanEvent[]>("/fail2ban/history", { limit: 100 }, signal),
-    60000,
-  )
+const OFFENCES = ["found", "ban", "increase", "restore_ban", "already_banned", "unban"]
 
-  const unavailable = error instanceof ApiError && error.code === "fail2ban_unavailable"
-
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return (data ?? []).filter(
-      (e) =>
-        (kind === "all" || e.action === kind) &&
-        (!q || `${e.ip} ${e.jail}`.toLowerCase().includes(q)),
-    )
-  }, [data, kind, query])
-
+/** A jail's name with the mark of the service it watches, where that is one. */
+export function JailName({ name }: { name: string }) {
+  const product = jailProduct(name)
   return (
-    <Panel plain>
-      <PanelHeader
-        title="Ban activity"
-        actions={
-          data && data.length > 0 ? (
-            <span className="numeric text-hint text-muted-foreground">
-              {data.length} recorded events
-            </span>
-          ) : undefined
-        }
-      />
-      {data && data.length > 0 && (
-        <PanelToolbar>
-          <ToggleGroup
-            type="single"
-            value={kind}
-            onValueChange={(next) => next && setKind(next as "all" | "ban" | "unban")}
-            variant="outline"
-            size="sm"
-            aria-label="Which events to show"
-          >
-            <ToggleGroupItem value="all" className="px-2.5 text-hint">
-              Everything
-            </ToggleGroupItem>
-            <ToggleGroupItem value="ban" className="px-2.5 text-hint">
-              Bans
-            </ToggleGroupItem>
-            <ToggleGroupItem value="unban" className="px-2.5 text-hint">
-              Releases
-            </ToggleGroupItem>
-          </ToggleGroup>
-          <span className="flex-1" />
-          <SearchInput
-            dense
-            aria-label="Filter ban activity"
-            placeholder="Address or jail"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            containerClassName="sm:w-56"
-          />
-        </PanelToolbar>
-      )}
-      <PanelBody flush>
-        {unavailable ? (
-          <Notice tone="default" title="No fail2ban log on this host" className="mt-3">
-            fail2ban is not installed, or it logs only to the journal. There is no file to read
-            back.
-          </Notice>
-        ) : error ? (
-          <ErrorState error={error} className="mt-3" />
-        ) : loading ? (
-          <LoadingPanel className="mt-3" />
-        ) : shown.length === 0 ? (
-          <EmptyState
-            icon={ClockRewind}
-            title={data?.length ? "Nothing matches" : "No ban activity recorded"}
-            className="mt-3"
-          />
-        ) : (
-          <div className="-mx-4 min-w-0">
-            <Table containerClassName="max-h-[24rem]">
-              <TableHeader className={stickyTableHeader}>
-                <TableRow>
-                  <TableHead>When</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Address</TableHead>
-                  <TableHead className="w-full">Jail</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {shown.map((event, i) => (
-                  <TableRow key={`${event.at}-${event.ip}-${i}`}>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {timestamp(event.at)}
-                    </TableCell>
-                    <TableCell>
-                      <Status
-                        state={event.action === "ban" ? "failed" : "exited"}
-                        label={event.action === "ban" ? "banned" : "released"}
-                      />
-                    </TableCell>
-                    <TableCell className="font-mono">{event.ip}</TableCell>
-                    <TableCell className="text-body text-muted-foreground">{event.jail}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-        {!unavailable && !error && !loading && data?.length === 0 && shown.length === 0 && (
-          <EmptyNote className="sr-only">No ban activity recorded.</EmptyNote>
-        )}
-      </PanelBody>
-    </Panel>
+    <span className="inline-flex items-center gap-1.5">
+      {product && <ProductGlyph id={product} />}
+      <span>{name}</span>
+    </span>
   )
 }

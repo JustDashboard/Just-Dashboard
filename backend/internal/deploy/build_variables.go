@@ -15,8 +15,9 @@ func buildVariableNames(variables map[string]string) []string {
 }
 
 // Build scope is a usable contract on its own. Explicit stage mappings narrow
-// selected credentials to install; other build values reach only the build
-// command through ephemeral mounts, never ARG, ENV or the generated Dockerfile.
+// selected credentials to install, or widen a value to install and build
+// alike; other build values reach only the build command through ephemeral
+// mounts, never ARG, ENV or the generated Dockerfile.
 func recipeBuildBindings(config BuildPlanConfig, names []string) ([]BuildSecretConfig, error) {
 	bindings := append([]BuildSecretConfig{}, config.Secrets...)
 	if config.Method != BuildRecipe {

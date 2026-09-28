@@ -1,0 +1,118 @@
+{
+  "id": "ntfy",
+  "version": "1.0.0",
+  "name": "ntfy",
+  "category": "http",
+  "profile": "web",
+  "description": "A pub-sub notification server. A script, a cron job or a backup hook publishes to a topic with a plain HTTP POST; the web app, the phone apps or another curl subscribe to it. Messages, attachments and any accounts live in SQLite files on the data volume.",
+  "iconId": "bolt",
+  "docsUrl": "https://docs.ntfy.sh/",
+  "access": {
+    "kind": "open",
+    "note": "ntfy starts with no accounts and no sign-in form: anonymous access to every topic is read-write, which is exactly what makes `curl -d \"backup done\" https://your-domain/alerts` work with nothing to set up first. It also means anyone who reaches this address can publish to and subscribe to any topic, and the topic name is the only thing protecting it — a public domain is a public message board, and a stranger who guesses a topic can push notifications to your phone. To close it later, run `ntfy user add --role=admin <name>` in this container's terminal and add NTFY_AUTH_DEFAULT_ACCESS=deny-all to the deployment's variables; the account database is on the data volume, so it survives a redeploy."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/binwiederhier/ntfy",
+    "reviewedAt": "2026-09-22",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "binwiederhier/ntfy:v2.28.0",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing",
+    "command": ["serve"]
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "The address other people and your scripts publish to. ntfy builds the copy-able publish URLs, the attachment links and the e-mail bodies from it, so it is required rather than cosmetic."
+    }
+  ],
+  "secrets": [],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 80,
+      "protocol": "tcp",
+      "purpose": "The web app and the publish/subscribe API, which are the same port",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/var/lib/ntfy",
+      "purpose": "The message cache, attachments and the account database",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 128,
+    "minMemoryMb": 64
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/v1/health",
+      "timeoutSeconds": 30
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "NTFY_BASE_URL",
+        "value": "https://{{input.domain}}"
+      },
+      {
+        "kind": "set_variable",
+        "name": "NTFY_BEHIND_PROXY",
+        "value": "true"
+      },
+      {
+        "kind": "set_variable",
+        "name": "NTFY_CACHE_FILE",
+        "value": "/var/lib/ntfy/cache.db"
+      },
+      {
+        "kind": "set_variable",
+        "name": "NTFY_AUTH_FILE",
+        "value": "/var/lib/ntfy/auth.db"
+      },
+      {
+        "kind": "set_variable",
+        "name": "NTFY_ATTACHMENT_CACHE_DIR",
+        "value": "/var/lib/ntfy/attachments"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "ntfy migrates the message cache and the account database on start. Everything else it needs is environment, so there is no configuration file to reconcile between versions.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": { "domain": "ntfy.example.test" },
+      "digest": "sha256:e6e20d2c05100462699504b3390fdc69272e2525d45c1e1be7865adde5640fe7"
+    }
+  ]
+}

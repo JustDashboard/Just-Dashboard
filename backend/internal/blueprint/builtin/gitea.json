@@ -7,17 +7,20 @@
   "description": "A self-hosted Git service with pull requests, issues and CI hooks. SSH is a direct port because the proxy cannot carry the Git SSH protocol.",
   "iconId": "git",
   "docsUrl": "https://docs.gitea.com/",
+  "access": {
+    "kind": "setup",
+    "note": "Gitea ships with no accounts and no default password. Because the image leaves INSTALL_LOCK false, the very first page you open is Gitea's own installer: it pre-fills the database (SQLite inside the data volume) and its \"Administrator Account Settings\" section is where you create the owner. Open the address immediately after the deploy finishes, because whoever reaches the installer first configures and owns the server."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/go-gitea/gitea",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
-  "image": { "reference": "gitea/gitea:1.22.6-rootless", "tagPolicy": "pinned", "pullPolicy": "missing" },
+  "image": { "reference": "gitea/gitea:1.27.3-rootless", "tagPolicy": "pinned", "pullPolicy": "missing" },
   "inputs": [
-    { "name": "domain", "kind": "domain", "label": "Public domain", "required": true, "description": "Gitea writes this into clone URLs, so changing it later rewrites what users copy." },
-    { "name": "ssh-port", "kind": "number", "label": "SSH port", "default": "2222", "minimum": 1024, "maximum": 65535, "advanced": true, "description": "Published directly on the host. Port 22 belongs to the host's own SSH server." }
+    { "name": "domain", "kind": "domain", "label": "Public domain", "required": true, "description": "Gitea writes this into clone URLs, so changing it later rewrites what users copy." }
   ],
   "ports": [
     { "name": "http", "internal": 3000, "protocol": "tcp", "purpose": "Web interface and HTTPS clone", "exposure": "proxy", "primary": true },
@@ -35,14 +38,12 @@
   "operations": {
     "startup": [
       { "kind": "set_variable", "name": "GITEA__server__ROOT_URL", "value": "https://{{input.domain}}/" },
-      { "kind": "set_variable", "name": "GITEA__server__SSH_PORT", "value": "{{input.ssh-port}}" }
+      { "kind": "set_variable", "name": "GITEA__server__DOMAIN", "value": "{{input.domain}}" },
+      { "kind": "set_variable", "name": "GITEA__server__SSH_DOMAIN", "value": "{{input.domain}}" }
     ],
     "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }]
   },
-  "files": [
-    { "path": "/etc/gitea/app.ini", "label": "Gitea configuration", "format": "raw", "restartRequired": true, "description": "The file Gitea writes on first run. Edits here survive restarts; the environment variables above win on every start." }
-  ],
-  "update": { "detector": "registry", "backupFirst": true, "notes": "Gitea migrates its database on first start after an upgrade and does not migrate back." },
+  "update": { "detector": "registry", "backupFirst": true, "notes": "Gitea migrates its database on first start after an upgrade and does not migrate back. Settings this definition does not pass as environment are changed in Gitea's own Site Administration pages." },
   "security": {},
-  "fixtures": [{ "name": "default", "inputs": { "domain": "git.example.test" }, "digest": "sha256:d065f104af72d49b3822f6cab8d9b87ae3fa5077349f9846e1e43c1ee3af1d55" }]
+  "fixtures": [{ "name": "default", "inputs": { "domain": "git.example.test" }, "digest": "sha256:ee86274c4548b9f36d0d56766d500b1baa9b1ab98afee07a4db160eeb142abf4" }]
 }

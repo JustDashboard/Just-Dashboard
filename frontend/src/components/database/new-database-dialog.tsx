@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/state"
 import { Modal } from "@/components/modal"
-import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
+import { EngineCard, driverKind } from "@/components/choice-card"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 
 /**
@@ -168,15 +168,15 @@ export function NewDatabaseDialog({
             ) : (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {options.data.map((o) => (
-                  <ChoiceCard
+                  <EngineCard
                     key={o.engine}
+                    engine={o.engine}
+                    label={o.label}
+                    kind={driverKind(o.driver)}
+                    detail={o.image}
                     selected={engine === o.engine}
                     onClick={() => setEngine(o.engine)}
-                    className="min-h-0 gap-0.5 px-2.5 py-2"
-                  >
-                    <ChoiceCardTitle className="truncate">{o.label}</ChoiceCardTitle>
-                    <ChoiceCardHint className="w-full truncate font-mono">{o.image}</ChoiceCardHint>
-                  </ChoiceCard>
+                  />
                 ))}
               </div>
             )}

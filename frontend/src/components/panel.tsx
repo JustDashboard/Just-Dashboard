@@ -159,6 +159,13 @@ export function PanelToolbar({ className, ...props }: React.ComponentProps<"div"
  * `flush` drops the padding for a body that is one full-bleed table or list,
  * and is also what the alignment rule in globals.css keys off so those tables
  * still line their outer columns up with the header's text.
+ *
+ * A plain panel keeps a step under the header's hairline even when flush. The
+ * rule is the only thing marking where a section begins, and with nothing
+ * below it the first surface the body draws — a row's hover wash, a table
+ * header — butted straight into it, so the rule read as an edge *of* that
+ * surface rather than as the line under the title. Twelve pixels above it,
+ * eight below: enough that the hairline belongs to neither side.
  */
 export function PanelBody({
   className,
@@ -172,7 +179,9 @@ export function PanelBody({
       data-flush={flush ? "" : undefined}
       className={cn(
         "min-w-0",
-        flush ? "" : "p-5 group-data-[plain]/panel:px-0 group-data-[plain]/panel:py-4",
+        flush
+          ? "group-data-[plain]/panel:pt-2"
+          : "p-5 group-data-[plain]/panel:px-0 group-data-[plain]/panel:py-4",
         scroll && "min-h-0 flex-1 overflow-auto",
         className,
       )}

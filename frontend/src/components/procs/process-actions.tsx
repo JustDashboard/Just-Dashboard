@@ -107,7 +107,6 @@ export function useProcessVerbs({
       verbs.push({
         key: "inspect",
         label: "Inspect",
-        detail: "Resources, open ports, the parent chain and its children.",
         icon: Inspect,
         run: onInspect,
       })
@@ -118,7 +117,6 @@ export function useProcessVerbs({
         key: "term",
         progressive: "Terminating",
         label: "Terminate",
-        detail: "Asks it to exit cleanly (SIGTERM). A supervised process comes straight back.",
         icon: StopCircle,
         inline,
         run: () =>
@@ -147,7 +145,6 @@ export function useProcessVerbs({
         key: "kill",
         progressive: "Killing",
         label: "Kill",
-        detail: "Ends it this instant with no chance to clean up (SIGKILL).",
         icon: Stop,
         inline,
         danger: true,
@@ -170,7 +167,6 @@ export function useProcessVerbs({
           key: "cont",
           progressive: "Resuming",
           label: "Resume",
-          detail: "Lets a paused process carry on where it was (SIGCONT).",
           icon: Play,
           run: () => void signal(process, "SIGCONT", "Resuming").catch(() => undefined),
         })
@@ -179,7 +175,6 @@ export function useProcessVerbs({
           key: "stop",
           progressive: "Pausing",
           label: "Pause",
-          detail: "Freezes it in place without ending it (SIGSTOP). Resume undoes it.",
           icon: Pause,
           run: () =>
             confirm({
@@ -199,7 +194,6 @@ export function useProcessVerbs({
         key: "hup",
         progressive: "Reloading",
         label: "Hang up",
-        detail: "SIGHUP: many daemons re-read their configuration; a shell job exits.",
         icon: RefreshClockwise,
         run: () =>
           confirm({
@@ -221,10 +215,6 @@ export function useProcessVerbs({
       verbs.push({
         key: "owner",
         label: `Open ${process.managerName}`,
-        detail:
-          process.manager === "container"
-            ? "The container this runs in, where stopping and restarting live."
-            : `The ${managerName(process.manager)} entry that supervises it.`,
         icon: ArrowUpRight,
         run: () => router.push(owner),
       })
@@ -233,7 +223,6 @@ export function useProcessVerbs({
       verbs.push({
         key: "cwd",
         label: "Open working directory",
-        detail: process.cwd,
         icon: FolderOpen,
         run: () => router.push(`/files?path=${encodeURIComponent(process.cwd ?? "/")}`),
       })
@@ -241,7 +230,6 @@ export function useProcessVerbs({
     verbs.push({
       key: "copy-pid",
       label: "Copy PID",
-      detail: `${process.pid} — for kill, strace, or a search on the Security page.`,
       icon: Copy,
       run: () => void copyText(String(process.pid), "PID copied"),
     })
@@ -249,7 +237,6 @@ export function useProcessVerbs({
       verbs.push({
         key: "copy-cmd",
         label: "Copy command line",
-        detail: "Exactly how it was started, arguments included.",
         icon: Copy,
         run: () => void copyText(process.cmdline, "Command line copied"),
       })

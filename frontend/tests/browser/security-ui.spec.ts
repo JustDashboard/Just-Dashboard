@@ -1,11 +1,15 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { HOST_LOG_SOURCES, mockHostLogs } from "./host-logs-fixture"
 
 /**
  * The Security section against a mocked API: every page renders its readings
  * from the shapes the backend sends, the joins between pages hold (an address
  * in one list is a block, a ban or a lookup in another), and the design
- * system's structural rules — no framed block on the page, every icon-only
+ * system's structural rules — framed tables and workspaces, every icon-only
  * control named, row controls reachable without a pointer — hold on all eight.
+ * SSH, Firewall and Intrusion each read their service's log in place, through
+ * its lens, with the day's counts in the page's one grid; the host's logs are
+ * `host-logs-fixture.ts`'s.
  *
  * Nothing here needs a firewall, an sshd or a fail2ban: the checks are about
  * what the page does with the answers, which is the part a Go test cannot see.
@@ -19,7 +23,14 @@ const admin = {
   needsTotp: false,
   needsEnrollment: false,
   require2fa: false,
-  capabilities: ["read", "service.control", "file.write", "terminal", "destructive", "system.admin"],
+  capabilities: [
+    "read",
+    "service.control",
+    "file.write",
+    "terminal",
+    "destructive",
+    "system.admin",
+  ],
   user: {
     id: 1,
     username: "operator",
@@ -84,10 +95,48 @@ const firewall = {
     profiles: true,
   },
   rules: [
-    { number: 1, action: "ALLOW", direction: "IN", to: "22/tcp", from: "Anywhere", port: "22", protocol: "tcp", service: "SSH", raw: "22/tcp ALLOW IN Anywhere" },
-    { number: 2, action: "ALLOW", direction: "IN", to: "443/tcp", from: "Anywhere", port: "443", protocol: "tcp", service: "HTTPS", raw: "443/tcp ALLOW IN Anywhere" },
-    { number: 3, action: "DENY", direction: "IN", to: "Anywhere", from: "203.0.113.9", comment: "repeat offender", raw: "Anywhere DENY IN 203.0.113.9 # repeat offender" },
-    { number: 4, action: "ALLOW", direction: "IN", to: "22/tcp", from: "Anywhere", port: "22", protocol: "tcp", ipv6: true, raw: "22/tcp (v6) ALLOW IN Anywhere (v6)" },
+    {
+      number: 1,
+      action: "ALLOW",
+      direction: "IN",
+      to: "22/tcp",
+      from: "Anywhere",
+      port: "22",
+      protocol: "tcp",
+      service: "SSH",
+      raw: "22/tcp ALLOW IN Anywhere",
+    },
+    {
+      number: 2,
+      action: "ALLOW",
+      direction: "IN",
+      to: "443/tcp",
+      from: "Anywhere",
+      port: "443",
+      protocol: "tcp",
+      service: "HTTPS",
+      raw: "443/tcp ALLOW IN Anywhere",
+    },
+    {
+      number: 3,
+      action: "DENY",
+      direction: "IN",
+      to: "Anywhere",
+      from: "203.0.113.9",
+      comment: "repeat offender",
+      raw: "Anywhere DENY IN 203.0.113.9 # repeat offender",
+    },
+    {
+      number: 4,
+      action: "ALLOW",
+      direction: "IN",
+      to: "22/tcp",
+      from: "Anywhere",
+      port: "22",
+      protocol: "tcp",
+      ipv6: true,
+      raw: "22/tcp (v6) ALLOW IN Anywhere (v6)",
+    },
   ],
 }
 
@@ -133,28 +182,60 @@ const offenders = {
   since: iso(60 * 24 * 6),
 }
 
-const history = [
-  { action: "ban", jail: "sshd", ip: "203.0.113.9", at: iso(30) },
-  { action: "unban", jail: "sshd", ip: "192.0.2.77", at: iso(45) },
-]
-
 const connections = {
   total: 14,
   listening: 6,
   loopback: 4,
   peers: [
-    { address: "203.0.113.50", count: 3, established: 3, ports: [443], processes: ["caddy"], private: false, service: "HTTPS" },
-    { address: "100.110.34.9", count: 2, established: 1, ports: [8443], processes: ["caddy"], private: true },
+    {
+      address: "203.0.113.50",
+      count: 3,
+      established: 3,
+      ports: [443],
+      processes: ["caddy"],
+      private: false,
+      service: "HTTPS",
+    },
+    {
+      address: "100.110.34.9",
+      count: 2,
+      established: 1,
+      ports: [8443],
+      processes: ["caddy"],
+      private: true,
+    },
   ],
 }
 
 const sessions = [
-  { user: "ubuntu", tty: "pts/0", from: "100.110.34.9", loginTime: iso(40), idle: "active", pid: 4242, isSsh: true },
+  {
+    user: "ubuntu",
+    tty: "pts/0",
+    from: "100.110.34.9",
+    loginTime: iso(40),
+    idle: "active",
+    pid: 4242,
+    isSsh: true,
+  },
 ]
 
 const logins = [
-  { kind: "login", user: "ubuntu", tty: "pts/0", from: "100.110.34.9", loginTime: iso(40), active: true },
-  { kind: "boot", user: "reboot", tty: "", from: "6.14.0-37-generic", loginTime: iso(60 * 24), duration: "1 day" },
+  {
+    kind: "login",
+    user: "ubuntu",
+    tty: "pts/0",
+    from: "100.110.34.9",
+    loginTime: iso(40),
+    active: true,
+  },
+  {
+    kind: "boot",
+    user: "reboot",
+    tty: "",
+    from: "6.14.0-37-generic",
+    loginTime: iso(60 * 24),
+    duration: "1 day",
+  },
 ]
 
 const attackers = {
@@ -164,21 +245,85 @@ const attackers = {
   capped: false,
   since: iso(60 * 24 * 6),
   attackers: [
-    { address: "203.0.113.9", attempts: 2200, users: ["root", "admin", "ubuntu"], first: iso(60 * 24 * 6), last: iso(12) },
-    { address: "198.51.100.4", attempts: 112, users: ["deploy"], first: iso(60 * 8), last: iso(70) },
+    {
+      address: "203.0.113.9",
+      attempts: 2200,
+      users: ["root", "admin", "ubuntu"],
+      first: iso(60 * 24 * 6),
+      last: iso(12),
+    },
+    {
+      address: "198.51.100.4",
+      attempts: 112,
+      users: ["deploy"],
+      first: iso(60 * 8),
+      last: iso(70),
+    },
   ],
 }
 
 const network = {
   interfaces: [
-    { name: "eth0", addresses: ["203.0.113.20/24"], mtu: 1500, up: true, loopback: false, kind: "physical", bytesSent: 1e9, bytesRecv: 4e9, public: true },
-    { name: "tailscale0", addresses: ["100.110.34.31/32"], mtu: 1280, up: true, loopback: false, kind: "tunnel", bytesSent: 1e7, bytesRecv: 2e7, public: false },
-    { name: "docker0", addresses: ["172.17.0.1/16"], mtu: 1500, up: true, loopback: false, kind: "bridge", bytesSent: 0, bytesRecv: 0, public: false },
-    { name: "veth1a2b", addresses: [], mtu: 1500, up: true, loopback: false, kind: "virtual", bytesSent: 0, bytesRecv: 0, public: false },
+    {
+      name: "eth0",
+      addresses: ["203.0.113.20/24"],
+      mtu: 1500,
+      up: true,
+      loopback: false,
+      kind: "physical",
+      bytesSent: 1e9,
+      bytesRecv: 4e9,
+      public: true,
+    },
+    {
+      name: "tailscale0",
+      addresses: ["100.110.34.31/32"],
+      mtu: 1280,
+      up: true,
+      loopback: false,
+      kind: "tunnel",
+      bytesSent: 1e7,
+      bytesRecv: 2e7,
+      public: false,
+    },
+    {
+      name: "docker0",
+      addresses: ["172.17.0.1/16"],
+      mtu: 1500,
+      up: true,
+      loopback: false,
+      kind: "bridge",
+      bytesSent: 0,
+      bytesRecv: 0,
+      public: false,
+    },
+    {
+      name: "veth1a2b",
+      addresses: [],
+      mtu: 1500,
+      up: true,
+      loopback: false,
+      kind: "virtual",
+      bytesSent: 0,
+      bytesRecv: 0,
+      public: false,
+    },
   ],
   routes: [
-    { destination: "default", gateway: "203.0.113.1", interface: "eth0", metric: "100", family: "ipv4", raw: "default via 203.0.113.1 dev eth0 metric 100" },
-    { destination: "172.17.0.0/16", interface: "docker0", family: "ipv4", raw: "172.17.0.0/16 dev docker0" },
+    {
+      destination: "default",
+      gateway: "203.0.113.1",
+      interface: "eth0",
+      metric: "100",
+      family: "ipv4",
+      raw: "default via 203.0.113.1 dev eth0 metric 100",
+    },
+    {
+      destination: "172.17.0.0/16",
+      interface: "docker0",
+      family: "ipv4",
+      raw: "172.17.0.0/16 dev docker0",
+    },
   ],
   resolvers: ["127.0.0.53"],
   search: ["example.internal"],
@@ -193,17 +338,68 @@ const sshd = {
   hasMatchBlocks: false,
   socket: { unit: "ssh.socket", ports: ["22"] },
   settings: [
-    { key: "permitrootlogin", label: "Root login", value: "prohibit-password", recommended: "prohibit-password", secure: true, detail: "Whether root may log in over SSH at all.", options: ["no", "prohibit-password", "forced-commands-only", "yes"], kind: "choice" },
-    { key: "passwordauthentication", label: "Password authentication", value: "yes", recommended: "no", secure: false, detail: "Whether a password alone is enough to get a shell.", risk: "With this on, your server's security is whatever the weakest password on it is.", options: ["no", "yes"], kind: "choice" },
-    { key: "maxauthtries", label: "Attempts per connection", value: "6", recommended: "3 or fewer", secure: false, detail: "How many guesses one connection gets.", risk: "Six passwords per handshake instead of one.", kind: "number" },
-    { key: "port", label: "Port", value: "22", recommended: "any", secure: true, detail: "Where sshd listens.", kind: "number" },
-    { key: "allowusers", label: "Only these accounts may log in", value: "", recommended: "", secure: true, detail: "A space-separated list.", kind: "list" },
+    {
+      key: "permitrootlogin",
+      label: "Root login",
+      value: "prohibit-password",
+      recommended: "prohibit-password",
+      secure: true,
+      detail: "Whether root may log in over SSH at all.",
+      options: ["no", "prohibit-password", "forced-commands-only", "yes"],
+      kind: "choice",
+    },
+    {
+      key: "passwordauthentication",
+      label: "Password authentication",
+      value: "yes",
+      recommended: "no",
+      secure: false,
+      detail: "Whether a password alone is enough to get a shell.",
+      risk: "With this on, your server's security is whatever the weakest password on it is.",
+      options: ["no", "yes"],
+      kind: "choice",
+    },
+    {
+      key: "maxauthtries",
+      label: "Attempts per connection",
+      value: "6",
+      recommended: "3 or fewer",
+      secure: false,
+      detail: "How many guesses one connection gets.",
+      risk: "Six passwords per handshake instead of one.",
+      kind: "number",
+    },
+    {
+      key: "port",
+      label: "Port",
+      value: "22",
+      recommended: "any",
+      secure: true,
+      detail: "Where sshd listens.",
+      kind: "number",
+    },
+    {
+      key: "allowusers",
+      label: "Only these accounts may log in",
+      value: "",
+      recommended: "",
+      secure: true,
+      detail: "A space-separated list.",
+      kind: "list",
+    },
   ],
 }
 
 const services = [
   { key: "ssh", name: "SSH", port: "22", protocol: "tcp", detail: "Remote shell." },
-  { key: "redis", name: "Redis", port: "6379", protocol: "tcp", detail: "Cache.", danger: "Never open this to the world." },
+  {
+    key: "redis",
+    name: "Redis",
+    port: "6379",
+    protocol: "tcp",
+    detail: "Cache.",
+    danger: "Never open this to the world.",
+  },
 ]
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -212,8 +408,30 @@ async function json(route: Route, body: unknown, status = 200) {
 
 type Mutation = { method: string; path: string; body: unknown }
 
-/** The whole Security API, answered from the fixtures above; every write is recorded. */
-async function mockSecurity(page: Page, mutations: Mutation[] = []) {
+/** An account that may read the section and change nothing in it. */
+const readonly = {
+  ...admin,
+  capabilities: ["read"],
+  user: { ...admin.user, username: "viewer", role: "readonly" },
+}
+
+/**
+ * The whole Security API, answered from the fixtures above; every write is
+ * recorded. The session, the firewall's status and the host's log files can
+ * be swapped for the case under test, and any route answered with a body of
+ * its own; what the logs routes were asked is returned.
+ */
+async function mockSecurity(
+  page: Page,
+  mutations: Mutation[] = [],
+  options: {
+    session?: typeof admin
+    firewall?: typeof firewall
+    sources?: typeof HOST_LOG_SOURCES
+    outside?: string[]
+    overrides?: Record<string, unknown>
+  } = {},
+) {
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -222,9 +440,11 @@ async function mockSecurity(page: Page, mutations: Mutation[] = []) {
       mutations.push({ method: request.method(), path, body: request.postDataJSON() })
       return json(route, { output: "ok" })
     }
+    const overrides = options.overrides ?? {}
+    if (path in overrides) return json(route, overrides[path])
     switch (path) {
       case "/auth/session":
-        return json(route, admin)
+        return json(route, options.session ?? admin)
       case "/exposure":
         return json(route, exposure)
       case "/security/posture":
@@ -232,17 +452,22 @@ async function mockSecurity(page: Page, mutations: Mutation[] = []) {
       case "/security/services":
         return json(route, services)
       case "/firewall/":
-        return json(route, firewall)
+        return json(route, options.firewall ?? firewall)
       case "/firewall/apps":
         return json(route, [{ name: "OpenSSH", ports: ["22/tcp"] }])
       case "/fail2ban/":
         return json(route, jails)
       case "/fail2ban/offenders":
         return json(route, offenders)
-      case "/fail2ban/history":
-        return json(route, history)
       case "/fail2ban/sshd/config":
-        return json(route, { name: "sshd", banTime: 600, findTime: 600, maxRetry: 5, ignoreIp: ["127.0.0.0/8"], actions: ["iptables-multiport"] })
+        return json(route, {
+          name: "sshd",
+          banTime: 600,
+          findTime: 600,
+          maxRetry: 5,
+          ignoreIp: ["127.0.0.0/8"],
+          actions: ["iptables-multiport"],
+        })
       case "/connections":
         return json(route, connections)
       case "/ssh-sessions":
@@ -266,6 +491,7 @@ async function mockSecurity(page: Page, mutations: Mutation[] = []) {
         return json(route, [])
     }
   })
+  return mockHostLogs(page, { sources: options.sources, outside: options.outside })
 }
 
 const PAGES = [
@@ -279,14 +505,36 @@ const PAGES = [
   "/security/tools",
 ] as const
 
+/**
+ * §2: a Panel frames a table's scroll region, so a row's offscreen actions
+ * remain visibly contained. Findings and forms stay plain; pictures and the
+ * Tools panes own their separate edges under §7.
+ *
+ * Asserted structurally rather than as a count, so the rule keeps holding as
+ * pages gain and lose tables.
+ */
+async function framedNonTables(page: Page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"))
+      .filter((el) => !el.querySelector("[data-slot=table-container]"))
+      .map((el) => el.outerHTML.slice(0, 120)),
+  )
+}
+
 test("the overview reads as readings, findings and how the panel is reached", async ({ page }) => {
   await mockSecurity(page)
   await page.goto("/security")
   await page.waitForLoadState("networkidle")
 
-  // The facts row: the grade, the allowlist and the address this browser came from.
-  await expect(page.getByText("Tailscale only")).toBeVisible()
-  await expect(page.getByText("100.110.34.9", { exact: true })).toBeVisible()
+  // The identity line: the way in drawn as itself, the grade, the allowlist,
+  // the address this browser came from, and the posture's verdict at its end.
+  const identity = page.locator("[data-slot=host-identity]")
+  // Twice: the way in on the tile, and the network this browser is on.
+  await expect(identity.locator('img[src="/logos/tailscale.svg"]')).toHaveCount(2)
+  await expect(identity.getByText("Tailscale only")).toBeVisible()
+  await expect(identity.getByText("100.110.34.9", { exact: true })).toBeVisible()
+  await expect(identity.getByText("Needs attention")).toBeVisible()
+  await expect(identity).toContainText("7 checks")
 
   // Five tiles, each a destination with a figure read from its own poll.
   // Scoped to the grid: the sidebar and the section strip link to the same
@@ -294,6 +542,16 @@ test("the overview reads as readings, findings and how the panel is reached", as
   const grid = page.locator("[data-slot=stat-grid]")
   const tiles = grid.locator("a")
   await expect(tiles).toHaveCount(5)
+  // One width and one inset for all five, the first included: the first column
+  // used to give up its left padding, which put the hover wash flush against
+  // its name.
+  const cells = await tiles.evaluateAll((links) =>
+    links.map((a) => {
+      const tile = a.querySelector("[data-slot=stat-tile]")!
+      return `${Math.round(a.getBoundingClientRect().width)} ${getComputedStyle(tile).paddingLeft}`
+    }),
+  )
+  expect(new Set(cells).size, cells.join(" | ")).toBe(1)
   await expect(grid.getByRole("link", { name: "Firewall", exact: true })).toContainText("ufw")
   await expect(grid.getByRole("link", { name: "SSH", exact: true })).toContainText("1 finding")
   await expect(grid.getByRole("link", { name: "Intrusion", exact: true })).toContainText(
@@ -312,15 +570,13 @@ test("the overview reads as readings, findings and how the panel is reached", as
 })
 
 for (const path of PAGES) {
-  test(`${path} draws no framed block on the page`, async ({ page }) => {
+  test(`${path} keeps non-table Panels plain`, async ({ page }) => {
     await mockSecurity(page)
     await page.goto(path)
     await page.waitForLoadState("networkidle")
-    // A dialog or sheet may frame itself; a block in the page's flow may not.
-    const framed = await page
-      .locator("[data-slot=page] section[data-slot=panel]:not([data-plain])")
-      .count()
-    expect(framed, `framed panels on ${path}`).toBe(0)
+    // A dialog or sheet may frame itself, and so may a table (§2); any other
+    // block in the page's flow may not.
+    expect(await framedNonTables(page), `framed non-table blocks on ${path}`).toEqual([])
   })
 
   test(`every icon-only control on ${path} has an accessible name`, async ({ page }) => {
@@ -390,6 +646,13 @@ test("a jail's sheet bans an address by hand and the tuning offers the caller's 
   await page.waitForLoadState("networkidle")
 
   await expect(page.locator("[data-slot=stat-grid]")).toContainText("Banned now")
+  // fail2ban as its own mark, and each jail a card that opens its sheet.
+  await expect(
+    page.locator("[data-slot=host-identity]").locator('img[src="/logos/fail2ban.webp"]'),
+  ).toHaveCount(1)
+  const jail = page.locator("[data-slot=choice-row]").filter({ hasText: "sshd" })
+  await expect(jail).toHaveCount(1)
+  await expect(jail).toContainText("banned now")
   await page.getByRole("button", { name: "sshd", exact: true }).click()
   await page.getByLabel("Ban an address now").fill("192.0.2.200")
   await page.getByRole("button", { name: "Ban", exact: true }).click()
@@ -425,7 +688,11 @@ test("an offender is blocked with a plain deny and looked up on the tools page",
   await expect(page.getByRole("textbox", { name: "Target" })).toHaveValue("203.0.113.9")
   await expect(page.getByRole("textbox", { name: "Target" })).toHaveCount(1)
   await page.getByRole("button", { name: "Every tool" }).click()
-  expect(await page.getByRole("textbox", { name: "Target" }).count()).toBeGreaterThan(10)
+  await page.getByRole("button", { name: "DNS", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Target" })).toHaveCount(1)
+  await expect(page.getByRole("textbox", { name: "Target" })).toBeEmpty()
+  await page.getByRole("button", { name: "Ownership", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Target" })).toHaveValue("203.0.113.9")
 })
 
 test("connections offers a block only for an address that is not private", async ({ page }) => {
@@ -439,6 +706,10 @@ test("connections offers a block only for an address that is not private", async
   const tailnet = page.getByRole("row").filter({ hasText: "100.110.34.9" })
   await expect(tailnet.getByRole("button", { name: "Block at the firewall" })).toHaveCount(0)
   await expect(tailnet.getByRole("button", { name: "More actions" })).toBeVisible()
+  // The address drawn as the network it is on, and the process as its product.
+  await expect(tailnet.locator('img[src="/logos/tailscale.svg"]')).toHaveCount(1)
+  await expect(internet.locator('img[src="/logos/tailscale.svg"]')).toHaveCount(0)
+  await expect(internet.locator('img[src="/logos/caddy.svg"]')).toHaveCount(1)
 })
 
 test("the logins page folds the failed record into attackers", async ({ page }) => {
@@ -463,17 +734,346 @@ test("the network page leads with what faces the internet", async ({ page }) => 
   await page.waitForLoadState("networkidle")
 
   await expect(page.locator("[data-slot=stat-grid]")).toContainText("eth0")
-  await expect(page.getByText("1 on a public address")).toBeVisible()
+  await expect(
+    page.locator("[data-slot=stat-tile]").filter({ hasText: "Public addresses" }),
+  ).toContainText("eth0")
   // Docker's devices are folded away until asked for.
   await expect(page.getByRole("row").filter({ hasText: "veth1a2b" })).toHaveCount(0)
   await page.getByRole("radio", { name: /Everything/ }).click()
   await expect(page.getByRole("row").filter({ hasText: "veth1a2b" })).toBeVisible()
+  // Each device drawn as what made it: the tunnel as Tailscale, the bridge as Docker.
+  const devices = page.getByRole("table").first()
+  await expect(
+    devices
+      .getByRole("row")
+      .filter({ hasText: "tailscale0" })
+      .locator('img[src="/logos/tailscale.svg"]'),
+  ).toHaveCount(1)
+  await expect(
+    devices.getByRole("row").filter({ hasText: "docker0" }).locator('img[src="/logos/docker.svg"]'),
+  ).toHaveCount(1)
+})
+
+/** A figure in the page's one grid, by its name. */
+function tile(page: Page, label: string) {
+  return page
+    .locator("[data-slot=stat-grid] [data-slot=stat-tile]")
+    .filter({ has: page.getByText(label, { exact: true }) })
+}
+
+test("the ssh page reads its auth log through the lens, the day's counts in its one grid", async ({
+  page,
+}) => {
+  const logs = await mockSecurity(page)
+  await page.goto("/security/ssh")
+  await page.waitForLoadState("networkidle")
+
+  // One grid (§15): the settings' four facts, then what the log says the
+  // last day made of them.
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(8)
+  await expect(tile(page, "Accepted logins")).toContainText("2")
+  // Wrong passwords, unknown accounts and a connection that ran out of tries.
+  await expect(tile(page, "Failed attempts")).toContainText("8")
+  await expect(tile(page, "Invalid users")).toContainText("2")
+  await expect(tile(page, "Attackers")).toContainText("3")
+
+  // The lines as what they record, the lens's noise hidden as a chip.
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("invalid user", { exact: true }).first()).toBeVisible()
+  await expect(lines.getByText("too many attempts", { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Clear the scans and cron sessions hidden filter" }),
+  ).toBeVisible()
+  await expect(lines.getByText(/203\.0\.113\.250/)).toHaveCount(0)
+  const socket = logs.sockets.at(-1)!
+  expect(socket.get("source")).toBe("file:/var/log/auth.log")
+  // auth.log is the auth lens's on the server too, and the page hands the
+  // pane the server's own description of it: no lens of its own, nothing
+  // under More, and the file is not asked after a second time.
+  expect(socket.has("lens")).toBe(false)
+  await expect(page.getByRole("button", { name: "More", exact: true })).toBeVisible()
+  expect(socket.getAll("f")).toEqual(["event:!cron_session", "event:!ssh_scan"])
+  // Found by asking after the two files, not by listing everything the
+  // logs page could open.
+  expect(logs.requests).not.toContain("/logs/sources")
+  expect(logs.requests.filter((path) => path === "/logs/source")).toHaveLength(2)
+
+  // The grid's readings are the last day's, through the auth lens.
+  const readings = logs.searches.filter((search) => search.get("lens") === "auth")
+  expect(readings.length).toBeGreaterThan(0)
+  for (const search of readings) {
+    expect(search.get("source")).toBe("file:/var/log/auth.log")
+    const since = Date.parse(search.get("since")!)
+    expect(Math.abs(Date.now() - since - 24 * 3_600_000)).toBeLessThan(5 * 60_000)
+  }
+
+  // A quick view is the server's question, not a filter over what arrived.
+  await page.getByRole("button", { name: /^Failed\b/ }).click()
+  await expect
+    .poll(() => logs.sockets.at(-1)?.getAll("f"))
+    .toEqual(["event:ssh_failed", "event:ssh_invalid_user", "event:ssh_max_attempts"])
+  await expect(lines.getByText("sudo", { exact: true })).toHaveCount(0)
+
+  // A figure in the page's grid is a press away from the lines it counts,
+  // asked of the pane further down.
+  await page.getByRole("button", { name: "Show the lines behind accepted logins" }).click()
+  await expect.poll(() => logs.sockets.at(-1)?.getAll("f")).toEqual(["event:ssh_accepted"])
+  await expect(page.getByRole("button", { name: /^Accepted\b/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+})
+
+test("an attacker in the auth log is blocked from its line; a tailnet address is not", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/ssh")
+  const lines = page.getByLabel("Log lines")
+
+  await lines.getByText(/Failed password for root from 203\.0\.113\.197 port 9051/).click()
+  await page.getByRole("button", { name: "Block at the firewall" }).click()
+  await expect
+    .poll(() => mutations.find((m) => m.path === "/firewall/rules")?.body)
+    .toEqual({
+      action: "deny",
+      direction: "in",
+      from: "203.0.113.197",
+      comment: "blocked from the auth log",
+    })
+
+  // The operator's own session over the tailnet: nothing at the edge to block.
+  await lines.getByText(/Accepted password for ubuntu from 100\.64\.12\.7/).click()
+  await expect(page.getByRole("button", { name: "Only this event" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Block at the firewall" })).toHaveCount(0)
+
+  // A login from a public address is somebody with a key — a deploy, the
+  // operator at home — and one press would lock them out: its address can be
+  // looked up, not blocked.
+  await lines.getByText(/Accepted publickey for deploy from 198\.51\.100\.20/).click()
+  await expect(page.getByRole("button", { name: "Only this event" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Block at the firewall" })).toHaveCount(0)
+  await page.getByRole("button", { name: "More actions for this line" }).click()
+  await expect(page.getByRole("menuitem", { name: "Who owns this address" })).toBeVisible()
+})
+
+test("without the admin capability the ssh page says so and reads no auth data", async ({
+  page,
+}) => {
+  const logs = await mockSecurity(page, [], { session: readonly })
+  await page.goto("/security/ssh")
+  await page.waitForLoadState("networkidle")
+
+  await expect(page.getByText("SSH needs the admin capability")).toBeVisible()
+  await expect(page.getByLabel("Log lines")).toHaveCount(0)
+  // Not asked and refused: not asked. The server refuses auth data to this
+  // account too (`handlers_logs.go`), but the page never makes it say so.
+  expect(logs.requests).toEqual([])
+})
+
+test("a host with no auth.log reads sshd and sudo through the journal", async ({ page }) => {
+  const logs = await mockSecurity(page, [], {
+    sources: HOST_LOG_SOURCES.filter((s) => s.id !== "file:/var/log/auth.log"),
+  })
+  await page.goto("/security/ssh")
+  await expect(
+    page.getByLabel("Log lines").getByText("invalid user", { exact: true }).first(),
+  ).toBeVisible()
+  expect(logs.sockets.at(-1)!.get("source")).toBe(
+    "journal-id:sshd,sshd-session,sshd-auth,sudo,su,systemd-logind",
+  )
+  await expect(page.getByText(/This host keeps no auth\.log/)).toBeVisible()
+})
+
+test("an auth.log outside the log roots is said to be, not said to be missing", async ({
+  page,
+}) => {
+  const logs = await mockSecurity(page, [], {
+    sources: HOST_LOG_SOURCES.filter((s) => s.id !== "file:/var/log/auth.log"),
+    outside: ["/var/log/auth.log"],
+  })
+  await page.goto("/security/ssh")
+  await expect(
+    page.getByLabel("Log lines").getByText("invalid user", { exact: true }).first(),
+  ).toBeVisible()
+  expect(logs.sockets.at(-1)!.get("source")).toMatch(/^journal-id:sshd,/)
+  await expect(page.getByText(/auth\.log is outside JD_LOG_ROOTS/)).toBeVisible()
+  await expect(page.getByText(/keeps no auth\.log/)).toHaveCount(0)
+})
+
+test("the firewall page reads what its rules did, with the day's counts in its grid", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  const logs = await mockSecurity(page, mutations, {
+    firewall: { ...firewall, logging: "on (low)" },
+  })
+  await page.goto("/security/firewall")
+  await page.waitForLoadState("networkidle")
+
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(7)
+  await expect(tile(page, "Blocked")).toContainText("5")
+  await expect(tile(page, "Sources")).toContainText("2")
+  await expect(tile(page, "Rate-limited")).toContainText("2")
+
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("rate limited", { exact: true }).first()).toBeVisible()
+  expect(logs.sockets.at(-1)!.get("source")).toBe("file:/var/log/ufw.log")
+  // ufw.log is the firewall lens's on the server too.
+  expect(logs.sockets.at(-1)!.has("lens")).toBe(false)
+
+  // A drop is already the firewall's answer, and an allowed connection may
+  // be the operator's own; a rate limit is where a deny is the next one.
+  await lines.getByText(/SRC=203\.0\.113\.11 .*DPT=4448/).click()
+  await expect(page.getByRole("button", { name: "More actions for this line" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Block at the firewall" })).toHaveCount(0)
+  await lines.getByText(/\[UFW ALLOW\] .*SRC=198\.51\.100\.20 /).click()
+  await expect(page.getByRole("button", { name: "Only this event" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Block at the firewall" })).toHaveCount(0)
+  // A packet this host sent names the host as its source: no verbs for it.
+  await lines.getByText(/\[UFW AUDIT\] IN= OUT=ens3 SRC=198\.51\.100\.87/).click()
+  await page.getByRole("button", { name: "More actions for this line" }).click()
+  await expect(page.getByRole("menuitem", { name: "Copy line" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Who owns this address" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await lines.getByText(/SRC=203\.0\.113\.197 /).click()
+  await page.getByRole("button", { name: "Block at the firewall" }).click()
+  await expect
+    .poll(() => mutations.find((m) => m.path === "/firewall/rules")?.body)
+    .toMatchObject({ from: "203.0.113.197", comment: "blocked from the firewall log" })
+
+  await page.getByRole("button", { name: /^Blocked\b/ }).click()
+  await expect.poll(() => logs.sockets.at(-1)?.getAll("f")).toEqual(["event:block"])
+})
+
+test("with no ufw.log the firewall's drops are read from kern.log, then the kernel ring", async ({
+  page,
+}) => {
+  const logs = await mockSecurity(page, [], {
+    firewall: { ...firewall, logging: "on (low)" },
+    sources: HOST_LOG_SOURCES.filter((s) => s.id !== "file:/var/log/ufw.log"),
+  })
+  await page.goto("/security/firewall")
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("rate limited", { exact: true }).first()).toBeVisible()
+  // kern.log is the kernel lens's on the server, and the page asks the
+  // firewall's questions of it — the one place it names a lens.
+  expect(logs.sockets.at(-1)!.get("source")).toBe("file:/var/log/kern.log")
+  expect(logs.sockets.at(-1)!.get("lens")).toBe("firewall")
+  await expect(page.getByRole("button", { name: /^Blocked\b/ })).toBeVisible()
+
+  // The page's lens is where the pane starts, not a setting the reader
+  // changed: More is not lit for it, and Auto under Read as lets it go.
+  const more = page.getByRole("button", { name: "More", exact: true })
+  await expect(more).toBeVisible()
+  await more.click()
+  await page.getByRole("combobox", { name: "Read as" }).click()
+  await page.getByRole("option", { name: /^Auto/ }).click()
+  await expect.poll(() => logs.sockets.at(-1)?.has("lens")).toBe(false)
+  await expect(page.getByRole("button", { name: /^More\s*1$/ })).toBeVisible()
+})
+
+test("a host with neither file reads the firewall's drops from the kernel ring", async ({
+  page,
+}) => {
+  const logs = await mockSecurity(page, [], {
+    firewall: { ...firewall, logging: "on (low)" },
+    sources: HOST_LOG_SOURCES.filter(
+      (s) => s.id !== "file:/var/log/ufw.log" && s.id !== "file:/var/log/kern.log",
+    ),
+  })
+  await page.goto("/security/firewall")
+  await expect(
+    page.getByLabel("Log lines").getByText("rate limited", { exact: true }).first(),
+  ).toBeVisible()
+  expect(logs.sockets.at(-1)!.get("source")).toBe("kernel:")
+  expect(logs.sockets.at(-1)!.get("lens")).toBe("firewall")
+  await expect(page.getByText(/This host keeps no ufw\.log or kern\.log/)).toBeVisible()
+})
+
+test("with logging off the firewall log points at the control that turns it on", async ({
+  page,
+}) => {
+  const logs = await mockSecurity(page)
+  await page.goto("/security/firewall")
+  await page.waitForLoadState("networkidle")
+
+  await expect(page.getByText("ufw is not logging")).toBeVisible()
+  // Zeroes that mean "not recorded" are not drawn as readings.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(4)
+  await page.getByRole("button", { name: "Choose a logging level" }).click()
+  await expect(page.getByRole("combobox", { name: "Logging default" })).toBeFocused()
+  expect(logs.sockets).toHaveLength(0)
+  expect(logs.searches).toHaveLength(0)
+})
+
+test("intrusion's activity is fail2ban's own log, strikes and repeat offenders included", async ({
+  page,
+}) => {
+  const logs = await mockSecurity(page)
+  await page.goto("/security/intrusion")
+  await page.waitForLoadState("networkidle")
+
+  await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(1)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(8)
+  await expect(tile(page, "Strikes")).toContainText("8")
+  await expect(tile(page, "Bans")).toContainText("3")
+
+  const activity = page
+    .locator("[data-slot=panel]")
+    .filter({ has: page.getByRole("heading", { name: "Activity", exact: true }) })
+  const lines = activity.getByLabel("Log lines")
+  await expect(lines.getByText("strike", { exact: true }).first()).toBeVisible()
+  await expect(lines.getByText("ban increased", { exact: true })).toBeVisible()
+  expect(logs.sockets.at(-1)!.get("source")).toBe("file:/var/log/fail2ban.log")
+  expect(logs.sockets.at(-1)!.has("lens")).toBe(false)
+
+  // Every strike and ban is an address a deny answers; one in ignoreip is
+  // one the operator trusts.
+  await lines.getByText(/\[sshd\] Ignore 198\.51\.100\.20/).click()
+  await expect(activity.getByRole("button", { name: "Only this event" })).toBeVisible()
+  await expect(activity.getByRole("button", { name: "Block at the firewall" })).toHaveCount(0)
+  await lines.getByText(/\[sshd\] Found 198\.51\.100\.61/).click()
+  await expect(activity.getByRole("button", { name: "Block at the firewall" })).toBeVisible()
+
+  await activity.getByRole("button", { name: "Insights", exact: true }).click()
+  await expect(activity.getByRole("heading", { name: "Strikes by jail" })).toBeVisible()
+  await expect(activity.getByRole("heading", { name: "Repeat offenders" })).toBeVisible()
+  const offenders = logs.searches.find((s) => s.get("facets") === "client")!
+  expect(offenders.getAll("f")).toEqual(["event:ban"])
+})
+
+test("with no fail2ban.log the activity is read from its unit's journal", async ({ page }) => {
+  const logs = await mockSecurity(page, [], {
+    sources: HOST_LOG_SOURCES.filter((s) => s.id !== "file:/var/log/fail2ban.log"),
+  })
+  await page.route("**/api/v1/fail2ban/offenders**", (route) =>
+    json(route, { ...offenders, bans: 0, unbans: 0, offenders: [], perDay: [], since: undefined }),
+  )
+  await page.goto("/security/intrusion")
+  await expect(
+    page.getByLabel("Log lines").getByText("strike", { exact: true }).first(),
+  ).toBeVisible()
+  expect(logs.sockets.at(-1)!.get("source")).toBe("journal:fail2ban.service")
+  // The fold above reads the file, which this host does not keep: it points
+  // at Activity rather than saying nothing was ever banned.
+  await expect(page.getByText("No bans in fail2ban.log")).toBeVisible()
+  await expect(page.getByText("Nothing has been banned yet")).toHaveCount(0)
+  // With no table to hold, the fold draws no frame (§2).
+  expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
 })
 
 test.describe("with no hover available", () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 844 } })
 
-  for (const path of ["/security/connections", "/security/logins", "/security/intrusion"] as const) {
+  for (const path of [
+    "/security/connections",
+    "/security/logins",
+    "/security/intrusion",
+  ] as const) {
     test(`row controls on ${path} are reachable without a pointer`, async ({ page }) => {
       await mockSecurity(page)
       await page.goto(path)
@@ -507,7 +1107,7 @@ test.describe("screenshots", () => {
   const dir = process.env.JD_SECURITY_SHOTS
   test.skip(!dir, "set JD_SECURITY_SHOTS to a directory to capture them")
 
-  for (const width of [1280, 1720]) {
+  for (const width of [390, 1280, 1720]) {
     test.describe(`${width} wide`, () => {
       test.use({ viewport: { width, height: 1000 } })
       for (const path of PAGES) {
@@ -518,8 +1118,282 @@ test.describe("screenshots", () => {
           await page.waitForTimeout(400)
           const name = path.replace(/^\/security\/?/, "") || "overview"
           await page.screenshot({ path: `${dir}/${name}-${width}.png`, fullPage: true })
+          // The shell owns scrolling, so a full-page shot captures only the
+          // first screen. Walk the remaining content without changing layout.
+          for (let part = 1; part <= 8; part++) {
+            const moved = await page.locator("[data-slot=page]").evaluate((element) => {
+              let parent = element.parentElement
+              while (parent && !/auto|scroll/.test(getComputedStyle(parent).overflowY)) {
+                parent = parent.parentElement
+              }
+              if (!parent || parent.scrollTop + parent.clientHeight >= parent.scrollHeight - 1)
+                return false
+              parent.scrollTop += parent.clientHeight - 80
+              return true
+            })
+            if (!moved) break
+            await page.screenshot({ path: `${dir}/${name}-${width}-scroll-${part}.png` })
+          }
         })
+      }
+      test(`rule and jail dialogs at ${width}`, async ({ page }) => {
+        await mockSecurity(page)
+        await page.goto("/security/firewall")
+        await page.getByRole("button", { name: "Add rule", exact: true }).click()
+        await expect(page.getByRole("dialog")).toBeVisible()
+        await expect(page.getByRole("button", { name: "Add rule", exact: true })).toBeInViewport()
+        await page.screenshot({ path: `${dir}/rule-dialog-${width}.png` })
+        await page.getByRole("button", { name: "Use Tailnet", exact: true }).click()
+        const source = page.getByRole("textbox", { name: "Address or CIDR", exact: true })
+        await source.scrollIntoViewIfNeeded()
+        await expect(source).toHaveValue("100.64.0.0/10")
+        await page.screenshot({ path: `${dir}/rule-source-${width}.png` })
+        await page.getByRole("button", { name: "Cancel", exact: true }).click()
+        await page.goto("/security/intrusion")
+        await page.getByRole("button", { name: "Tune sshd", exact: true }).click()
+        await expect(page.getByRole("textbox", { name: "Failures", exact: true })).toHaveValue("5")
+        await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeInViewport()
+        await page.screenshot({ path: `${dir}/jail-dialog-${width}.png` })
+      })
+    })
+  }
+})
+
+test("jail policy inputs keep edits and send all three values together", async ({ page }) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/intrusion")
+  await page.getByRole("button", { name: "Tune sshd", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByRole("textbox", { name: "Failures", exact: true })).toHaveValue("5")
+  await dialog.getByRole("textbox", { name: "Failures", exact: true }).fill("3")
+  await dialog.getByRole("textbox", { name: "Window", exact: true }).fill("900")
+  await dialog.getByRole("textbox", { name: "Ban for", exact: true }).fill("1800")
+  await expect(dialog.getByRole("textbox", { name: "Failures", exact: true })).toHaveValue("3")
+  await expect(dialog.getByRole("textbox", { name: "Window", exact: true })).toHaveValue("900")
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click()
+  await expect
+    .poll(() => mutations.find((entry) => entry.path === "/fail2ban/sshd/config")?.body)
+    .toEqual({ params: { maxretry: 3, findtime: 900, bantime: 1800 } })
+})
+
+test("reverting an SSH setting removes the pending change", async ({ page }) => {
+  await mockSecurity(page)
+  await page.goto("/security/ssh")
+  const password = page.getByRole("radiogroup", { name: "Password authentication" })
+  await password.getByRole("radio", { name: "no", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Test and apply", exact: true })).toBeVisible()
+  await password.getByRole("radio", { name: "yes", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Test and apply", exact: true })).toHaveCount(0)
+})
+
+test("a source-only firewall deny stays editable and preserves its source", async ({ page }) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/firewall")
+  await page
+    .getByRole("row")
+    .filter({ hasText: "repeat offender" })
+    .getByRole("button", { name: "Edit rule", exact: true })
+    .click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByRole("textbox", { name: "Address or CIDR", exact: true })).toHaveValue(
+    "203.0.113.9",
+  )
+  await dialog.getByRole("button", { name: "Save changes", exact: true }).click()
+  await expect
+    .poll(() => mutations.find((entry) => entry.path === "/firewall/rules/3")?.body)
+    .toMatchObject({ action: "deny", direction: "in", from: "203.0.113.9", port: "" })
+})
+
+test("the rule builder shows the service warning and requires a deliberate source choice", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/firewall")
+  await page.getByRole("button", { name: "Add rule", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("combobox", { name: "Service", exact: true }).click()
+  await page.getByRole("option", { name: /Redis/ }).click()
+  await expect(dialog.getByText("Redis open to the internet", { exact: true })).toBeVisible()
+  await dialog.getByRole("button", { name: "Use Tailnet", exact: true }).click()
+  await expect(dialog.getByRole("textbox", { name: "Address or CIDR", exact: true })).toHaveValue(
+    "100.64.0.0/10",
+  )
+  await expect(dialog.getByText("Redis open to the internet", { exact: true })).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Add rule", exact: true }).click()
+  await expect
+    .poll(() => mutations.find((entry) => entry.path === "/firewall/rules")?.body)
+    .toMatchObject({ action: "allow", port: "6379", from: "100.64.0.0/10" })
+})
+
+test("limited readers see no SSH, diagnostic, firewall or failed-login mutations", async ({
+  page,
+}) => {
+  await mockSecurity(page, [], {
+    overrides: {
+      "/auth/session": {
+        ...admin,
+        capabilities: ["read"],
+        user: { ...admin.user, role: "viewer" },
+      },
+    },
+  })
+  await page.goto("/security/firewall")
+  await expect(page.getByRole("button", { name: "Add rule", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("switch", { name: "Firewall enabled" })).toHaveCount(0)
+  await page.goto("/security/logins")
+  await expect(page.getByRole("radio", { name: "Failed", exact: true })).toHaveCount(0)
+  await page.goto("/security/ssh")
+  await expect(page.getByText("SSH needs the admin capability", { exact: true })).toBeVisible()
+  await page.goto("/security/tools")
+  await expect(
+    page.getByText("Diagnostics need the admin capability", { exact: true }),
+  ).toBeVisible()
+})
+
+for (const [path, endpoint, reply, message] of [
+  ["firewall", "/firewall/", { available: false }, "No firewall on this host"],
+  [
+    "ssh",
+    "/ssh/config",
+    { available: false, settings: [], ports: [], keyedAccounts: [] },
+    "No SSH server on this host",
+  ],
+  ["intrusion", "/fail2ban/", { available: false }, "fail2ban is not installed"],
+] as const) {
+  test(`${path} keeps its unavailable state distinct from a healthy reading`, async ({ page }) => {
+    await mockSecurity(page, [], { overrides: { [endpoint]: reply } })
+    await page.goto(`/security/${path}`)
+    await expect(page.getByText(message, { exact: true })).toBeVisible()
+    await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
+  })
+}
+
+for (const width of [390, 1280, 1720]) {
+  for (const path of PAGES) {
+    test(`${path} keeps its content in the viewport at ${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await mockSecurity(page)
+      await page.goto(path)
+      await page.waitForLoadState("networkidle")
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      )
+      expect(overflow, path).toBeLessThanOrEqual(0)
+      // Tables may scroll on a phone; at desktop every action column must fit.
+      if (width >= 1280) {
+        const clipped = await page
+          .locator('[data-slot="table-container"]')
+          .evaluateAll((elements) =>
+            elements
+              .filter((element) => element.scrollWidth > element.clientWidth + 1)
+              .map((element) => element.textContent?.slice(0, 100)),
+          )
+        expect(clipped, `${path} clips a table at ${width}`).toEqual([])
       }
     })
   }
+}
+
+test("diagnostics retain drafts and finish requests while another tool is selected", async ({
+  page,
+}) => {
+  await mockSecurity(page)
+  const requests: string[] = []
+  let finishDNS: (() => void) | undefined
+  const dnsFinished = new Promise<void>((resolve) => {
+    finishDNS = resolve
+  })
+  await page.route("**/api/v1/network/probe", async (route) => {
+    const body = route.request().postDataJSON()
+    requests.push(body.tool)
+    if (body.tool === "dns") await dnsFinished
+    await json(route, {
+      ok: true,
+      tool: body.tool,
+      target: body.target,
+      duration: "12ms",
+      output: `${body.tool} result for ${body.target}`,
+    })
+  })
+  await page.goto("/security/tools")
+  await page.getByRole("textbox", { name: "Target", exact: true }).fill("example.com")
+  expect(requests).toEqual([])
+  await page.getByRole("button", { name: "Run", exact: true }).click()
+  await expect.poll(() => requests).toEqual(["dns"])
+  await page.getByRole("button", { name: "Ping", exact: true }).click()
+  await page.getByRole("textbox", { name: "Target", exact: true }).fill("other.example.com")
+  await page.getByRole("button", { name: "Run", exact: true }).click()
+  await expect(page.getByText("ping result for other.example.com", { exact: true })).toBeVisible()
+  finishDNS!()
+  await page.getByRole("button", { name: "DNS", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "example.com",
+  )
+  await expect(page.getByText("dns result for example.com", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Ping", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "other.example.com",
+  )
+})
+
+test("a new diagnostic deep link overrides only that tool's saved input and never runs itself", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/tools?tool=dns&target=first.example.com")
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "first.example.com",
+  )
+  await page.evaluate(() =>
+    window.history.pushState(
+      null,
+      "",
+      "/security/tools?tool=dns&target=second.example.com&record=MX",
+    ),
+  )
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "second.example.com",
+  )
+  await expect(page.getByRole("combobox", { name: "Record type", exact: true })).toContainText("MX")
+  await page.getByRole("textbox", { name: "Target", exact: true }).fill("saved.example.com")
+  await page.evaluate(() =>
+    window.history.pushState(null, "", "/security/tools?tool=ping&target=third.example.com"),
+  )
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "third.example.com",
+  )
+  await page.getByRole("button", { name: "DNS", exact: true }).click()
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveValue(
+    "saved.example.com",
+  )
+  await expect(page.getByRole("combobox", { name: "Record type", exact: true })).toContainText("MX")
+  expect(mutations).toEqual([])
+})
+
+test("firewall and SSH changes still require their typed confirmation", async ({ page }) => {
+  const mutations: Mutation[] = []
+  await mockSecurity(page, mutations)
+  await page.goto("/security/firewall")
+  await page.getByRole("switch", { name: "Firewall enabled" }).click()
+  await expect(page.getByRole("dialog")).toContainText("disable firewall")
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: "Disable", exact: true }),
+  ).toBeDisabled()
+  expect(mutations).toEqual([])
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.goto("/security/ssh")
+  await page
+    .getByRole("radiogroup", { name: "Password authentication" })
+    .getByRole("radio", { name: "no", exact: true })
+    .click()
+  await page.getByRole("button", { name: "Test and apply", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("change ssh")
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: "Test and apply", exact: true }),
+  ).toBeDisabled()
+  expect(mutations).toEqual([])
 })

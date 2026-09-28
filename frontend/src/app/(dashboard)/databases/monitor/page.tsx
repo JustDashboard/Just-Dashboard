@@ -16,7 +16,7 @@ export default function MonitorPage() {
           conn={conn}
           schema={selection.schema}
           confirm={confirm}
-          onOpenTable={(schema, table) => goto("/databases", { schema, table })}
+          onOpenTable={(schema, table) => goto("/databases/browse", { schema, table })}
         />
       </div>
       {dialog}

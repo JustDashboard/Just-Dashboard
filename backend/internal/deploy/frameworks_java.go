@@ -2,54 +2,21 @@ package deploy
 
 import (
 	"fmt"
-	"regexp"
+	"strconv"
 	"strings"
 )
 
-// The Java recipe builds with Maven or Gradle on a Temurin JDK and runs the
-// one executable jar the build produces on the matching JRE. Versions are the
-// LTS releases the catalogue's images carry.
-var (
-	javaRecipeVersions = map[string]bool{"11": true, "17": true, "21": true, "25": true}
-	javaPomVersionRE   = regexp.MustCompile(`<(?:java\.version|maven\.compiler\.(?:release|source|target)|release)>\s*(?:1\.)?([0-9]{1,2})\s*<`)
-	javaGradleRE       = regexp.MustCompile(`(?:JavaLanguageVersion\.of\(|jvmToolchain\(|VERSION_|sourceCompatibility\s*=\s*['"]?(?:1\.)?|toolchain\s*\{[^}]*languageVersion[^}]*of\()\s*([0-9]{1,2})`)
-	javaVersionFileRE  = regexp.MustCompile(`\b(?:1\.)?([0-9]{1,2})\b`)
-	javaModulesRE      = regexp.MustCompile(`<modules>`)
-)
-
+// javaFrameworks names a JVM web framework from the build definition as the
+// passes read it — dependencies, plugin ids, and what version-catalog
+// aliases resolve to (detect_jvm.go) — with the port it listens on by
+// convention.
 var javaFrameworks = []struct {
 	marker, name string
 	port         int
 }{
-	{"spring-boot", "spring-boot", 8080}, {"quarkus", "quarkus", 8080}, {"micronaut", "micronaut", 8080},
+	{"spring-boot", "spring-boot", 8080}, {"org.springframework.boot", "spring-boot", 8080},
+	{"quarkus", "quarkus", 8080}, {"micronaut", "micronaut", 8080},
 	{"io.javalin", "javalin", 7070}, {"io.ktor", "ktor", 8080}, {"io.helidon", "helidon", 8080}, {"io.vertx", "vertx", 8080},
-}
-
-// chooseJavaRecipeVersion reads the language level a project declares — a
-// `.java-version` file, then the pom's compiler properties, then Gradle's
-// toolchain or compatibility settings — and maps it to a catalogue release.
-func chooseJavaRecipeVersion(versionFile, pom, gradle string) (string, error) {
-	selected := ""
-	if match := javaVersionFileRE.FindStringSubmatch(firstMeaningfulLine(versionFile)); match != nil {
-		selected = match[1]
-	}
-	if selected == "" {
-		if match := javaPomVersionRE.FindStringSubmatch(pom); match != nil {
-			selected = match[1]
-		}
-	}
-	if selected == "" {
-		if match := javaGradleRE.FindStringSubmatch(gradle); match != nil {
-			selected = match[1]
-		}
-	}
-	if selected == "" {
-		return "21", nil
-	}
-	if !javaRecipeVersions[selected] {
-		return "", fmt.Errorf("%w: the Java recipe builds on Java 11, 17, 21 or 25; this project declares %s — use a Dockerfile for other releases", ErrUnsupportedBuilder, selected)
-	}
-	return selected, nil
 }
 
 func firstMeaningfulLine(content string) string {
@@ -62,8 +29,28 @@ func firstMeaningfulLine(content string) string {
 	return ""
 }
 
+// javaFramework is the first catalogue framework a build definition names.
+func javaFramework(build string) string {
+	for _, framework := range javaFrameworks {
+		if strings.Contains(build, framework.marker) {
+			return framework.name
+		}
+	}
+	return ""
+}
+
+func javaFrameworkPort(name string) int {
+	for _, framework := range javaFrameworks {
+		if framework.name == name {
+			return framework.port
+		}
+	}
+	return 0
+}
+
 // javaCandidate builds the candidate for a root with a Maven pom or a Gradle
-// build script.
+// build script, from what its build — the reactor or settings root that
+// owns it included — says.
 func javaCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate {
 	tool, manifest := "maven", "pom.xml"
 	if len(marker.pomXML) == 0 {
@@ -76,32 +63,46 @@ func javaCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate 
 		Evidence:      []DetectionEvidence{{Path: joinRoot(marker.root, manifest), Reason: strings.ToUpper(tool[:1]) + tool[1:] + " build definition"}},
 		NeedsDecision: []string{},
 	}
-	build := string(marker.pomXML)
-	if tool == "gradle" {
-		build = string(marker.gradleBuild)
+	project := marker.jvm
+	if project == nil {
+		// The walk read the build file, the project reader could not; the
+		// recipe reads the same way, and says why when it prepares.
+		project = &jvmProject{tool: tool, framework: javaFramework(string(marker.pomXML) + string(marker.gradleBuild))}
 	}
-	if _, err := chooseJavaRecipeVersion(string(marker.javaVersionFile), string(marker.pomXML), string(marker.gradleBuild)); err != nil {
-		candidate.RecipeIssue = err.Error()
+	candidate.Evidence = append(candidate.Evidence, project.evidence...)
+	if framework := project.framework; framework != "" {
+		port := javaFrameworkPort(framework)
+		candidate.Framework = framework
+		candidate.Profile, candidate.Port = ProfileWeb, port
+		candidate.Confidence = ConfidenceHigh
+		candidate.Name = framework + " application in " + rootLabel
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, manifest), Reason: framework + " dependency; listens on " + fmt.Sprint(port) + " by convention"})
 	}
-	if tool == "maven" && javaModulesRE.MatchString(build) {
-		candidate.Confidence = ConfidenceLow
-		candidate.RecipeIssue = "multi-module Maven project; set the root directory to the module that builds the application, or use a Dockerfile"
+	if project.packagingBy != "" {
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, manifest), Reason: "runnable artifact from " + project.packagingBy})
 	}
-	for _, framework := range javaFrameworks {
-		if strings.Contains(build, framework.marker) {
-			candidate.Framework = framework.name
-			candidate.Profile, candidate.Port = ProfileWeb, framework.port
-			candidate.Confidence = ConfidenceHigh
-			candidate.Name = framework.name + " application in " + rootLabel
-			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, manifest), Reason: framework.name + " dependency; listens on " + fmt.Sprint(framework.port) + " by convention"})
-			break
-		}
-	}
-	if candidate.Framework == "java" {
+	if candidate.Framework == "java" && !project.library {
 		candidate.NeedsDecision = append(candidate.NeedsDecision, "confirm whether this application serves HTTP (web application) or runs as a worker, and its port")
 	}
-	if tool == "gradle" && !marker.gradlew {
-		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, manifest), Reason: "no Gradle wrapper; the image's own Gradle builds it"})
+	if project.toolchain.tool != "" {
+		if plan, err := planJavaToolchain(project.toolchain, ""); err == nil {
+			reason := "builds and runs on Java " + strconv.Itoa(plan.release) + " (" + plan.from + ")"
+			if plan.mapped != "" {
+				reason = plan.mapped
+			}
+			candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, manifest), Reason: boundedEvidenceSentence(reason)})
+		}
+	}
+	if tool == "gradle" && !project.toolchain.wrapperUsable {
+		reason := "no Gradle wrapper; the image's own Gradle builds it"
+		if project.wrapperJarMissing {
+			reason = "gradlew is committed without gradle/wrapper/gradle-wrapper.jar; the image's own Gradle builds it"
+		}
+		candidate.Evidence = append(candidate.Evidence, DetectionEvidence{Path: joinRoot(marker.root, manifest), Reason: reason})
+	}
+	if project.android != "" {
+		candidate.RecipeIssue = boundedEvidenceSentence(project.android + "; use a Dockerfile that installs the Android command-line tools")
+		candidate.Confidence = ConfidenceLow
 	}
 	if procfileWeb := procfileProcess(marker.procfile, "web"); procfileWeb != "" && rejectPlanSecretLiteral("Procfile web process", procfileWeb) == nil {
 		candidate.StartCommand = procfileWeb
@@ -114,83 +115,44 @@ func javaCandidate(marker *detectedMarkers, rootLabel string) DetectedCandidate 
 	if candidate.RecipeIssue != "" && candidate.Confidence == ConfidenceHigh {
 		candidate.Confidence = ConfidenceMedium
 	}
+	candidate.JavaBuild = project.detected()
+	candidate.Variables = append(candidate.Variables, project.variables...)
 	return candidate
 }
 
-type javaRecipe struct {
-	tool    string
-	version string
-	wrapper bool
+// detected is the project as the candidate keeps it for preflight.
+func (p *jvmProject) detected() *DetectedJavaBuild {
+	if p.tool == "" {
+		return nil
+	}
+	build := &DetectedJavaBuild{
+		Tool: p.tool, Packaging: p.packaging, Runnable: p.runnable(), Library: p.library,
+		Release: p.toolchain.declared, ReleaseFrom: p.toolchain.declaredFrom, Toolchain: p.toolchain.toolchain,
+		Pinned: p.toolchain.pinned, PinnedFrom: p.toolchain.pinnedFrom,
+		Wrapper: p.toolchain.wrapper, WrapperUsable: p.toolchain.wrapperUsable, WrapperJarMissing: p.wrapperJarMissing,
+		Foojay: p.toolchain.foojay, Profiles: p.profiles, VaadinDevMode: p.vaadinDevMode,
+		Aggregator: p.aggregator,
+	}
+	// Gradle is named by the settings root it runs from, which a composite
+	// build's wider context holds.
+	where := p.context
+	if p.tool == "gradle" {
+		where = p.reactor
+	}
+	if where != p.root || p.module != "" && p.module != ":" {
+		build.Context = contextLabel(displayDir(where))
+		if p.module != ":" {
+			build.Module = p.module
+		}
+	}
+	return build
 }
 
-func selectJavaRecipe(root string) (javaRecipe, error) {
-	pom, _ := readContainedRegular(root, "pom.xml", 512<<10)
-	gradle := []byte{}
-	for _, name := range []string{"build.gradle.kts", "build.gradle"} {
-		if regularExists(root, name) {
-			gradle, _ = readContainedRegular(root, name, 512<<10)
-			break
-		}
+// toolchainFacts turns what a candidate kept back into what the toolchain
+// plan reads.
+func (b *DetectedJavaBuild) toolchainFacts() javaToolchainFacts {
+	return javaToolchainFacts{
+		tool: b.Tool, declared: b.Release, declaredFrom: b.ReleaseFrom, toolchain: b.Toolchain,
+		pinned: b.Pinned, pinnedFrom: b.PinnedFrom, wrapper: b.Wrapper, wrapperUsable: b.WrapperUsable, foojay: b.Foojay,
 	}
-	versionFile, _ := readContainedRegular(root, ".java-version", 4096)
-	switch {
-	case len(pom) > 0:
-		if javaModulesRE.Match(pom) {
-			return javaRecipe{}, fmt.Errorf("%w: multi-module Maven project; set the root directory to the module that builds the application or use a Dockerfile", ErrUnsupportedBuilder)
-		}
-	case regularExists(root, "build.gradle") || regularExists(root, "build.gradle.kts"):
-	default:
-		return javaRecipe{}, fmt.Errorf("%w: Java recipe requires pom.xml or a build.gradle script", ErrUnsupportedBuilder)
-	}
-	version, err := chooseJavaRecipeVersion(string(versionFile), string(pom), string(gradle))
-	if err != nil {
-		return javaRecipe{}, err
-	}
-	if len(pom) > 0 {
-		return javaRecipe{tool: "maven", version: version}, nil
-	}
-	return javaRecipe{tool: "gradle", version: version, wrapper: regularExists(root, "gradlew")}, nil
-}
-
-func renderJavaDockerfile(recipe javaRecipe, config BuildPlanConfig, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
-	if len(bases) != 2 {
-		return nil, ErrBuilderUnavailable
-	}
-	build := strings.TrimSpace(config.BuildCommand)
-	jars, tool := "target", "Maven"
-	lines := []string{"FROM " + immutableImageReference(bases[0]) + " AS build", "WORKDIR /src", "COPY . ."}
-	if recipe.tool == "maven" {
-		if build == "" {
-			build = "mvn -q -B -DskipTests package"
-		}
-		lines = append(lines, "RUN "+installSecrets+"mvn -q -B dependency:resolve || true")
-	} else {
-		tool, jars = "Gradle", "build/libs"
-		runner := "gradle"
-		if recipe.wrapper {
-			runner = "chmod +x ./gradlew && ./gradlew"
-		}
-		if build == "" {
-			build = runner + " --no-daemon -q build -x test"
-		}
-	}
-	lines = append(lines,
-		"RUN "+buildSecrets+build,
-		// The one executable jar: not a sources, javadoc, plain (Spring Boot's
-		// unrepackaged) or original (the pre-shade) artifact.
-		"RUN mkdir -p /out && cp \"$(ls "+jars+"/*.jar 2>/dev/null | grep -v -e '-sources' -e '-javadoc' -e '-plain' -e '/original-' | head -n 1)\" /out/app.jar || (echo '"+tool+" build produced no executable jar in "+jars+"/' >&2; exit 1)",
-		"FROM "+immutableImageReference(bases[1]),
-		"RUN adduser -D -u 10001 app",
-		"USER app",
-		"WORKDIR /app",
-		"COPY --from=build /out/app.jar /app/app.jar",
-		// The JVM sizes its heap from the container's limit rather than the host's memory.
-		`ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75"`,
-	)
-	if strings.TrimSpace(config.StartCommand) == "" {
-		lines = append(lines, `CMD ["java","-jar","/app/app.jar"]`)
-	} else {
-		lines = append(lines, shellCMD(config.StartCommand))
-	}
-	return lines, nil
 }

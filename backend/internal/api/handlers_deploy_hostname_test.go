@@ -2,10 +2,15 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 // The generated label is the deployment's public identity, so it has to be a
@@ -105,5 +110,45 @@ func TestCertificateDetailPreservesChallengeFailure(t *testing.T) {
 	reason := "port 80 is already used by caddy; configure challenge routing"
 	if got := certificateDetail(hostnameSuggestion{CertificateIssue: reason}); got != reason {
 		t.Fatalf("challenge error hidden by installation advice: %q", got)
+	}
+}
+
+// A typed hostname is answered with the address its A record should name and,
+// for an administrator, whether it already points here. localhost never does;
+// a host without a public address of its own cannot compare at all, and a
+// read-only account cannot make the server resolve a name of its choosing.
+func TestTypedHostnameReportsWhetherItResolvesHere(t *testing.T) {
+	s := testServer(t)
+	routes := s.Routes()
+	ask := func(role auth.Role) hostnameSuggestion {
+		t.Helper()
+		caller := &client{t: t, h: routes, cookie: signInAs(t, s, "hostname-"+string(role), role)}
+		response := caller.do(http.MethodGet, "/api/v1/deploy/hostname?hostname=localhost", "", nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("hostname as %s = %d %s", role, response.Code, response.Body.String())
+		}
+		var suggestion hostnameSuggestion
+		if err := json.Unmarshal(response.Body.Bytes(), &suggestion); err != nil {
+			t.Fatal(err)
+		}
+		if suggestion.Method != "custom" || suggestion.NameTaken != nil {
+			t.Fatalf("suggestion as %s = %+v, want the custom answer", role, suggestion)
+		}
+		return suggestion
+	}
+	admin, reader := ask(auth.RoleAdmin), ask(auth.RoleReadOnly)
+	if reader.Resolves != nil {
+		t.Fatalf("read-only suggestion = %+v, want no DNS answer", reader)
+	}
+	address := firstIPv4(proxysvc.PublicAddresses())
+	if reader.Address != address || admin.Address != address {
+		t.Fatalf("addresses = %q / %q, want %q", admin.Address, reader.Address, address)
+	}
+	if address == "" {
+		if admin.Resolves != nil {
+			t.Fatalf("admin suggestion = %+v, want no comparison from a host without a public address", admin)
+		}
+	} else if admin.Resolves == nil || *admin.Resolves {
+		t.Fatalf("admin suggestion = %+v, want a name that does not point here", admin)
 	}
 }

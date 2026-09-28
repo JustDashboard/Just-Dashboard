@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test"
-import { deployment, json, mockProject, now, project, run, steps } from "./deploy-fixture"
+import {
+  backupJob,
+  deployment,
+  json,
+  mockProject,
+  now,
+  project,
+  run,
+  steps,
+} from "./deploy-fixture"
 
 /**
  * Settings part B — Domains, Storage, Databases & backups, Automation, and
@@ -21,17 +30,25 @@ test.describe("Domains", () => {
     })
     await page.goto("/deploy/7/settings/domains")
 
-    const card = page
-      .locator('[data-slot="panel"]')
-      .filter({ has: page.getByRole("heading", { name: "Domains", exact: true }) })
-    await expect(card).toBeVisible()
-    await expect(card.getByText("api.example.test", { exact: true })).toBeVisible()
+    const form = page.getByRole("form", { name: "Domains" })
+    await expect(form).toBeVisible()
+    await expect(form.getByText("api.example.test", { exact: true })).toBeVisible()
     await expect(page.getByText("Routed here", { exact: true })).toBeVisible()
     await expect(page.getByText("Certificate valid", { exact: true })).toBeVisible()
+    // The certificate's days left, and the figures over the list.
+    await expect(form.getByText("70 days left", { exact: true })).toBeVisible()
+    await expect(page.getByText("1 of 1", { exact: true })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Open api.example.test" })).toHaveAttribute(
+      "href",
+      "https://api.example.test/",
+    )
     // The default bind address is loopback, so the firewall notice is absent.
     await expect(page.getByText(/binds a public address/)).toHaveCount(0)
 
-    await page.getByRole("switch", { name: "HTTPS" }).click()
+    const https = page.getByRole("button", { name: "HTTPS on api.example.test" })
+    await expect(https).toHaveAttribute("aria-pressed", "true")
+    await https.click()
+    await expect(page.getByText("1 unsaved change", { exact: true })).toBeVisible()
     await page.getByRole("button", { name: "Save", exact: true }).click()
     await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
     await expect.poll(() => puts.length).toBe(1)
@@ -64,8 +81,8 @@ test.describe("Domains", () => {
     await expect(sheet).toBeVisible()
     await sheet.getByRole("textbox", { name: "Hostname" }).fill("next.example.test")
     await sheet.getByRole("textbox", { name: "Hostname" }).press("Tab")
-    await expect(sheet.getByText("HTTPS is ready for this name")).toBeVisible()
-    await sheet.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(sheet.getByText("HTTPS ready", { exact: true })).toBeVisible()
+    await sheet.getByRole("button", { name: "Add domain", exact: true }).click()
 
     await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
     await expect.poll(() => puts.length).toBe(1)
@@ -73,6 +90,34 @@ test.describe("Domains", () => {
       { hostname: "api.example.test", https: true, ownership: "managed" },
       { hostname: "next.example.test", https: true, ownership: "managed" },
     ])
+  })
+
+  test("adding a domain says it also saves the list's unsaved edits, and Cancel forgets the sheet", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/settings/domains")
+
+    // Turning HTTPS off is a draft the row answers for: the live certificate
+    // stops being its answer, and it says what the next deployment does.
+    await page.getByRole("button", { name: "HTTPS on api.example.test" }).click()
+    await expect(page.getByText("HTTP only on deploy", { exact: true })).toBeVisible()
+    await expect(page.getByText("Certificate valid", { exact: true })).toHaveCount(0)
+
+    await page.getByRole("button", { name: "Add domain", exact: true }).click()
+    const sheet = page.getByRole("dialog", { name: "Add domain" })
+    await expect(sheet.getByText("Also saves 1 unsaved change", { exact: true })).toBeVisible()
+    await sheet.getByRole("textbox", { name: "Hostname" }).fill("next.example.test")
+    await sheet.getByRole("switch", { name: "Ask visitors for a password" }).click()
+    await sheet.getByLabel("Password", { exact: true }).fill("a-typed-secret")
+    await sheet.getByRole("button", { name: "Cancel", exact: true }).click()
+    await expect(sheet).toHaveCount(0)
+
+    await page.getByRole("button", { name: "Add domain", exact: true }).click()
+    await expect(sheet.getByRole("textbox", { name: "Hostname" })).toHaveValue("")
+    await expect(
+      sheet.getByRole("switch", { name: "Ask visitors for a password" }),
+    ).not.toBeChecked()
   })
 
   test("a domain refusal is shown on its own row, not just as a toast", async ({ page }) => {
@@ -92,11 +137,14 @@ test.describe("Domains", () => {
       })
     })
     await page.goto("/deploy/7/settings/domains")
-    await page.getByRole("switch", { name: "HTTPS" }).click()
+    await page.getByRole("button", { name: "HTTPS on api.example.test" }).click()
     await page.getByRole("button", { name: "Save", exact: true }).click()
     await expect(
-      page.getByText("hostname is already routed elsewhere", { exact: true }),
+      page
+        .getByRole("list", { name: "Domains" })
+        .getByText("hostname is already routed elsewhere", { exact: true }),
     ).toBeVisible()
+    await expect(page.getByText("Not saved", { exact: true })).toBeVisible()
     await expect(page.getByText("Could not save domains")).toHaveCount(0)
   })
 
@@ -150,7 +198,12 @@ test.describe("Storage", () => {
     const targets = page.getByRole("textbox", { name: "Container path" })
     await sources.nth(1).fill("cache")
     await targets.nth(1).fill("/cache")
-    await page.getByRole("switch", { name: "Read only" }).nth(1).click()
+    // Read-only is the binary inside the container path's own edge.
+    await page.getByRole("button", { name: "Read only" }).nth(1).click()
+    // The source says which kind of thing it names as it is typed.
+    await expect(
+      page.getByRole("list", { name: "Mounts" }).getByText("volume", { exact: true }),
+    ).toHaveCount(2)
 
     await page.getByRole("button", { name: "Save", exact: true }).click()
     await expect(page.getByText("Storage saved", { exact: true })).toBeVisible()
@@ -162,8 +215,8 @@ test.describe("Storage", () => {
       ],
     })
 
-    await expect(page.getByRole("heading", { name: "Storage evidence" })).toBeVisible()
-    const evidence = page.getByRole("list", { name: "Storage evidence" })
+    await expect(page.getByRole("heading", { name: "In the live release" })).toBeVisible()
+    const evidence = page.getByRole("list", { name: "In the live release" })
     await expect(evidence.getByText("/data", { exact: true })).toBeVisible()
     await expect(evidence.getByText("Present", { exact: true })).toBeVisible()
     await expect(evidence.getByText("volume", { exact: true })).toBeVisible()
@@ -222,25 +275,26 @@ test.describe("Databases & backups", () => {
     })
     await page.goto("/deploy/7/settings/databases")
 
-    await expect(page.getByRole("heading", { name: "Databases & backups" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Linked databases" })).toBeVisible()
     await expect(page.getByText("No database is linked", { exact: false })).toBeVisible()
 
     await page.getByRole("button", { name: "Add database", exact: true }).click()
     await page.getByRole("button", { name: "Use existing", exact: true }).click()
-    await page.getByRole("combobox", { name: "Existing database" }).click()
-    await page.getByRole("option", { name: "orders-db · postgres" }).click()
     // The link now exists on the server; the row appears once the page refreshes.
     links = [
       {
         connectionId: 9,
         name: "orders-db",
+        driver: "postgres",
+        database: "orders",
         network: "jd-e12-db-abc",
         hostname: "db-9.jd.internal",
         status: "connected",
         checkedAt: now,
       },
     ]
-    await page.getByRole("button", { name: "Connect database", exact: true }).click()
+    // A saved connection is a row you take, drawn as its engine; taking it is the advance.
+    await page.getByRole("button", { name: "Connect orders-db", exact: true }).click()
 
     await expect(page.getByText("Database linked", { exact: true })).toBeVisible()
     await expect.poll(() => configPuts.length).toBe(1)
@@ -257,19 +311,34 @@ test.describe("Databases & backups", () => {
     )
     await expect.poll(() => variablePuts.length).toBe(1)
     expect(variablePuts[0].url).toContain("/variables/DATABASE_URL")
+    // A new variable reaches the build too, the way a database linked while
+    // creating the project does: a static env import or Prisma's config reads it there.
     expect(variablePuts[0].body).toMatchObject({
       value: "${{database.9}}",
       sensitivity: "secret",
-      scopes: ["runtime"],
+      scopes: ["runtime", "build"],
     })
 
     const orders = page.getByRole("link", { name: "orders-db", exact: true })
-    await expect(orders).toHaveAttribute("href", "/databases?conn=9")
+    await expect(orders).toHaveAttribute("href", "/databases/overview?conn=9")
     await expect(page.getByText("db-9.jd.internal", { exact: true })).toBeVisible()
     await expect(page.getByText("Connected", { exact: true })).toBeVisible()
+    // The engine is spelled as the picture above spells it, not as the driver key.
+    await expect(
+      page.getByRole("list", { name: "Linked databases" }).getByText("PostgreSQL", { exact: true }),
+    ).toBeVisible()
+    // How the application reaches it, drawn as a picture once it is bound.
+    await expect(
+      page.getByRole("list", { name: "How the application reaches its databases" }),
+    ).toBeVisible()
 
-    await page.getByRole("button", { name: "Remove database", exact: true }).click()
-    await expect(page.getByText("Dependencies saved", { exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Actions for orders-db" }).click()
+    await page.getByRole("menuitem", { name: "Remove database" }).click()
+    // The fixture's configuration echoes no `reference` for the variable that
+    // was just written, so the page sees a bound database it cannot name a
+    // carrier for and asks before removing the link alone.
+    await expect(page.getByText("This page finds no variable referencing orders-db")).toBeVisible()
+    await page.getByRole("button", { name: "Remove the link", exact: true }).click()
     await expect.poll(() => configPuts.length).toBe(2)
     expect(configPuts[1].dependencies).toEqual(
       expect.arrayContaining([expect.objectContaining({ kind: "backup" })]),
@@ -285,8 +354,8 @@ test.describe("Databases & backups", () => {
     await mockProject(page)
     await page.route("**/api/v1/backups/", (route) =>
       json(route, [
-        { id: 4, name: "Nightly snapshot" },
-        { id: 5, name: "Weekly full" },
+        backupJob({ id: 4, name: "Nightly snapshot", lastSuccessAt: now, nextRun: now }),
+        backupJob({ id: 5, name: "Weekly full" }),
       ]),
     )
     await page.route("**/api/v1/deploy/7/runs/84", async (route) => {
@@ -322,15 +391,18 @@ test.describe("Databases & backups", () => {
     })
     await page.goto("/deploy/7/settings/databases")
 
-    await expect(page.getByRole("combobox", { name: "Backup job" })).toHaveText("Nightly snapshot")
+    // A chosen job is the Backups page's own card, which opens the job.
+    await expect(
+      page.getByRole("link", { name: "Open the backup job Nightly snapshot" }),
+    ).toHaveAttribute("href", "/backups/4")
     const requiredSwitch = page.getByRole("switch", { name: "Backup before deploy" })
     await expect(requiredSwitch).toBeChecked()
     const restoreSwitch = page.getByRole("switch", { name: "Require restore evidence" })
     await expect(restoreSwitch).not.toBeChecked()
-    await expect(page.getByRole("spinbutton", { name: "Maximum age (hours)" })).toHaveValue("24")
+    await expect(page.getByRole("spinbutton", { name: "Maximum age" })).toHaveValue("24")
 
     await restoreSwitch.click()
-    await page.getByRole("spinbutton", { name: "Maximum age (hours)" }).fill("12")
+    await page.getByRole("spinbutton", { name: "Maximum age" }).fill("12")
     await page.getByRole("button", { name: "Save", exact: true }).click()
     await expect(page.getByText("Dependencies saved", { exact: true })).toBeVisible()
     await expect.poll(() => puts.length).toBe(1)
@@ -343,15 +415,17 @@ test.describe("Databases & backups", () => {
     ])
 
     await expect(page.getByRole("heading", { name: "Latest backup gate evidence" })).toBeVisible()
-    await expect(page.getByText("#4", { exact: true })).toBeVisible()
+    // The gate names the job rather than its number now that the page holds
+    // the job list it is gating on.
+    await expect(page.getByText("Nightly snapshot").first()).toBeVisible()
     await expect(page.getByText("#201", { exact: true })).toBeVisible()
 
-    await expect(page.getByRole("heading", { name: "Backups", exact: true })).toBeVisible()
-    const backupEvidence = page.getByRole("list", { name: "Backup evidence" })
-    await expect(backupEvidence.getByText("Backup job 4", { exact: true })).toBeVisible()
-    await expect(backupEvidence.getByRole("link", { name: "Open the backup job" })).toHaveAttribute(
+    // The job's own facts are on its row, and the live release's observation
+    // of it folds onto the same row rather than into a second panel below.
+    await expect(page.getByText("Observed · last run success")).toBeVisible()
+    await expect(page.getByRole("link", { name: "Open the backup job" })).toHaveAttribute(
       "href",
-      "/backups",
+      "/backups/4",
     )
   })
 
@@ -442,10 +516,253 @@ test.describe("Databases & backups", () => {
     await page.getByRole("button", { name: "Add backup", exact: true }).click()
     await expect(page.getByRole("combobox", { name: "Backup job" })).toBeVisible()
 
-    await page.getByRole("button", { name: "Remove database", exact: true }).click()
+    await page.getByRole("button", { name: "Actions for Database 9" }).click()
+    await page.getByRole("menuitem", { name: "Remove database" }).click()
     await expect(page.getByText("Dependencies saved", { exact: true })).toBeVisible()
     await expect.poll(() => puts.length).toBe(1)
     expect(puts[0].dependencies).toEqual([])
+  })
+})
+
+/**
+ * The configuration a linked project is in: one database dependency, one
+ * variable carrying it as a typed reference, and the binding observed.
+ */
+async function mockLinkedDatabase(
+  page: import("@playwright/test").Page,
+  options: {
+    status?: string
+    detail?: string
+    variables?: Record<string, unknown>[]
+    dependencies?: Record<string, unknown>[]
+  } = {},
+) {
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7/environments/12/database-links", (route) =>
+    json(route, [
+      {
+        connectionId: 9,
+        name: "orders-db",
+        driver: "postgres",
+        database: "orders",
+        network: "jd-e12-db-abc",
+        hostname: "db-9.jd.internal",
+        status: options.status ?? "connected",
+        detail: options.detail,
+        checkedAt: now,
+      },
+    ]),
+  )
+  await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    await json(route, {
+      revision: 3,
+      build: { method: "recipe" },
+      runtime: {
+        internalPort: 3000,
+        hostPort: 0,
+        bindAddress: "127.0.0.1",
+        strategy: "blue_green",
+        mounts: [],
+      },
+      variables: options.variables ?? [
+        {
+          name: "DATABASE_URL",
+          revision: 1,
+          sensitivity: "secret",
+          scopes: ["runtime"],
+          masked: "••••••••",
+          valueDigest: `sha256:${"1".repeat(64)}`,
+          reference: { kind: "database", target: "9" },
+          pending: false,
+          createdBy: "operator",
+          createdAt: now,
+          environmentId: 12,
+          desiredRevision: 3,
+        },
+      ],
+      dependencies: options.dependencies ?? [
+        {
+          kind: "database",
+          ownership: "linked",
+          resourceKind: "database_connection",
+          resourceId: "9",
+          config: {},
+        },
+      ],
+      checks: [],
+      domains: [],
+      pending: { pending: false, desiredRevision: 3, changes: [] },
+    })
+  })
+}
+
+test.describe("Databases & backups evidence", () => {
+  test("the readings report the link, the policy and the dump coverage", async ({ page }) => {
+    await mockLinkedDatabase(page)
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("Linked databases").first()).toBeVisible()
+    await expect(page.getByText("All connected", { exact: true })).toBeVisible()
+    // A linked database with no backup policy at all is the reading that
+    // earns its space; the gate would refuse nothing, and nothing is kept.
+    await expect(page.getByText("None", { exact: true })).toBeVisible()
+    await expect(page.getByText("A linked database with no backup policy")).toBeVisible()
+    await expect(page.getByText("0 of 1", { exact: true })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Back up orders-db" })).toHaveAttribute(
+      "href",
+      "/backups?database=9",
+    )
+  })
+
+  test("the variable that carries a database is named, and removal takes it with the link", async ({
+    page,
+  }) => {
+    await mockLinkedDatabase(page)
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.route("**/api/v1/deploy/7/environments/12/variables/**", async (route) => {
+      if (route.request().method() !== "DELETE") return route.fallback()
+      await json(route, { desiredRevision: 4 })
+    })
+    const configPuts: Record<string, unknown>[] = []
+    const variableDeletes: string[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        configPuts.push(request.postDataJSON())
+      }
+      if (request.method() === "DELETE" && request.url().includes("/variables/")) {
+        variableDeletes.push(request.url())
+      }
+    })
+    await page.goto("/deploy/7/settings/databases")
+
+    // The variable that carries it is the row's own link into Variables.
+    await expect(
+      page
+        .getByRole("list", { name: "Linked databases" })
+        .getByRole("link", { name: "DATABASE_URL", exact: true }),
+    ).toHaveAttribute("href", "/deploy/7/settings/variables")
+
+    await page.getByRole("button", { name: "Actions for orders-db" }).click()
+    await page.getByRole("menuitem", { name: "Remove database" }).click()
+
+    // Runtime activation attaches a database by reading the variable, so a
+    // removal that left the variable behind reattached it on the next deploy.
+    await expect(page.getByText("DATABASE_URL carries this database")).toBeVisible()
+    await page.getByRole("button", { name: "Remove the link and its variables" }).click()
+
+    await expect.poll(() => variableDeletes.length).toBe(1)
+    expect(variableDeletes[0]).toContain("/variables/DATABASE_URL")
+    await expect.poll(() => configPuts.length).toBe(1)
+    expect(configPuts[0].dependencies).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "database" })]),
+    )
+    // The delete advanced the environment's desired revision, so the write
+    // after it has to send the one the delete handed back or be refused.
+    expect(configPuts[0].revision).toBe(4)
+  })
+
+  test("a job that takes no dump of a linked database says so, and can be given one", async ({
+    page,
+  }) => {
+    await mockLinkedDatabase(page, {
+      dependencies: [
+        {
+          kind: "database",
+          ownership: "linked",
+          resourceKind: "database_connection",
+          resourceId: "9",
+          config: {},
+        },
+        {
+          kind: "backup",
+          ownership: "linked",
+          resourceKind: "backup_job",
+          resourceId: "4",
+          config: { requiredBeforeDeploy: true, maxAgeSeconds: 86400 },
+        },
+      ],
+    })
+    let dumps: number[] = []
+    await page.route("**/api/v1/backups/", (route) =>
+      json(route, [backupJob({ id: 4, name: "Nightly snapshot", databaseDumps: dumps })]),
+    )
+    const jobPuts: Record<string, unknown>[] = []
+    await page.route("**/api/v1/backups/4", async (route) => {
+      if (route.request().method() !== "PUT") return route.fallback()
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      jobPuts.push(body)
+      dumps = body.databaseDumps as number[]
+      await json(route, backupJob({ id: 4, name: "Nightly snapshot", databaseDumps: dumps }))
+    })
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("Nightly snapshot takes no native dump of orders-db")).toBeVisible()
+    await expect(page.getByText("0 of 1", { exact: true })).toBeVisible()
+
+    await page.getByRole("button", { name: "Add the dump to Nightly snapshot" }).click()
+    await expect(page.getByText("Nightly snapshot now dumps this database")).toBeVisible()
+    await expect.poll(() => jobPuts.length).toBe(1)
+    expect(jobPuts[0].databaseDumps).toEqual([9])
+    // The destination's keys are preserved precisely by not being sent.
+    expect(jobPuts[0]).not.toHaveProperty("secrets")
+    expect(jobPuts[0]).toMatchObject({ name: "Nightly snapshot", schedule: "0 3 * * *" })
+
+    await expect(page.getByText("1 of 1", { exact: true })).toBeVisible()
+    await expect(page.getByText("Nightly snapshot takes no native dump of orders-db")).toHaveCount(
+      0,
+    )
+  })
+
+  test("a binding that could not be repaired reports the reason reconciliation recorded", async ({
+    page,
+  }) => {
+    await mockLinkedDatabase(page, {
+      status: "unavailable",
+      detail: "the saved database port belongs to a different container; reconnect it explicitly",
+    })
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("orders-db needs reconnection")).toBeVisible()
+    await expect(
+      page.getByText("the saved database port belongs to a different container"),
+    ).toBeVisible()
+    await expect(page.getByText("1 needs attention", { exact: true })).toBeVisible()
+  })
+
+  test("a linked database with no variable carrying it is called out", async ({ page }) => {
+    await mockLinkedDatabase(page, { variables: [] })
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    // No observed binding either: nothing is holding this database's address.
+    await page.route("**/api/v1/deploy/7/environments/12/database-links", (route) =>
+      json(route, []),
+    )
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("No variable carries this database")).toBeVisible()
+    await expect(page.getByText("No variable carries a linked database.")).toBeVisible()
+  })
+
+  test("a database bound by a literal address is not reported as uncarried", async ({ page }) => {
+    // An install from before typed references stores the URL itself, so the
+    // reference this page reads is absent while the database is plainly bound.
+    // Calling that "no variable carries it" would be a false alarm — and the
+    // page must not overclaim either: a binding outlives the variable that
+    // made it, so it reports what it observed, not a variable it cannot see.
+    await mockLinkedDatabase(page, { variables: [] })
+    await page.route("**/api/v1/backups/", (route) => json(route, []))
+    await page.goto("/deploy/7/settings/databases")
+
+    await expect(page.getByText("No variable carries this database")).toHaveCount(0)
+    await expect(
+      page.getByText("Bound on the managed network; no variable names one by reference."),
+    ).toBeVisible()
+
+    await page.getByRole("button", { name: "Actions for orders-db" }).click()
+    await page.getByRole("menuitem", { name: "Remove database" }).click()
+    await expect(page.getByText("This page finds no variable referencing orders-db")).toBeVisible()
   })
 })
 
@@ -453,7 +770,7 @@ test.describe("Databases & backups field errors", () => {
   test("a dependency refusal is shown on its own row, not just as a toast", async ({ page }) => {
     await mockProject(page)
     await page.route("**/api/v1/backups/", (route) =>
-      json(route, [{ id: 4, name: "Nightly snapshot" }]),
+      json(route, [backupJob({ id: 4, name: "Nightly snapshot" })]),
     )
     await page.route("**/api/v1/deploy/7/environments/12/configuration", async (route) => {
       if (route.request().method() !== "PUT") return route.fallback()
@@ -470,7 +787,7 @@ test.describe("Databases & backups field errors", () => {
       })
     })
     await page.goto("/deploy/7/settings/databases")
-    await page.getByRole("spinbutton", { name: "Maximum age (hours)" }).fill("0")
+    await page.getByRole("spinbutton", { name: "Maximum age" }).fill("0")
     await page.getByRole("button", { name: "Save", exact: true }).click()
     await expect(page.getByText("maximum age must be positive", { exact: true })).toBeVisible()
     await expect(page.getByText("Could not save dependencies")).toHaveCount(0)
@@ -520,12 +837,20 @@ test.describe("Automation", () => {
     await page.goto("/deploy/7/settings/automation")
 
     await expect(page.getByRole("heading", { name: "Webhooks", exact: true })).toBeVisible()
-    await page.getByRole("button", { name: "Add webhook", exact: true }).click()
+    // With none yet, the section offers the senders themselves, and the head
+    // says what already deploys it.
+    await expect(page.getByText(/already deploy it — a webhook adds another sender/)).toBeVisible()
+    // The picture's empty mark and the section's button are one act, named alike.
+    await page.getByRole("button", { name: "Add webhook", exact: true }).first().click()
     const sheet = page.getByRole("dialog", { name: "Add webhook" })
+    // The sender is picked by its card; GitHub is the one chosen to start.
+    await expect(
+      sheet.getByRole("group", { name: "Provider" }).getByRole("button", { name: /^GitHub/ }),
+    ).toHaveAttribute("aria-pressed", "true")
     await sheet.getByRole("textbox", { name: "Name" }).fill("Deploy hook")
     await sheet.getByRole("textbox", { name: "Repository" }).fill("Wayy01/storefront")
     await sheet.getByRole("textbox", { name: "Branch" }).fill("main")
-    await sheet.getByRole("button", { name: "Create webhook" }).click()
+    await sheet.getByRole("button", { name: "Add webhook" }).click()
 
     await expect(page.getByText("Webhook created", { exact: true })).toBeVisible()
     await expect(page.getByText("Copy this secret now")).toBeVisible()
@@ -535,7 +860,11 @@ test.describe("Automation", () => {
       page.getByText(`${new URL(page.url()).origin}/api/v1/hooks/providers/github/provider-hook`),
     ).toBeVisible()
     await expect(page.getByText("one-time-provider-secret")).toBeVisible()
-    await page.getByRole("button", { name: "Dismiss", exact: true }).click()
+    // The sheet became its own result: where on GitHub the two values go.
+    await expect(
+      sheet.getByText("Open the repository's Settings → Webhooks → Add webhook."),
+    ).toBeVisible()
+    await sheet.getByRole("button", { name: "Done", exact: true }).click()
     await expect(page.getByText("Copy this secret now")).toHaveCount(0)
 
     await expect(page.getByText("Deploy hook", { exact: true })).toBeVisible()
@@ -544,7 +873,7 @@ test.describe("Automation", () => {
     await expect(page.getByText("Webhook disabled", { exact: true })).toBeVisible()
     await expect(page.getByText("Disabled", { exact: true })).toBeVisible()
 
-    await page.getByRole("button", { name: "Deploy hook actions" }).click()
+    await page.getByRole("button", { name: "Actions for Deploy hook" }).click()
     await page.getByRole("menuitem", { name: "Remove" }).click()
     await page.getByRole("dialog").getByRole("button", { name: "Remove webhook" }).click()
     await expect(page.getByText("Deploy hook", { exact: true })).toHaveCount(0)
@@ -555,7 +884,7 @@ test.describe("Automation", () => {
   }) => {
     await mockProject(page)
     await page.route("**/api/v1/backups/", (route) =>
-      json(route, [{ id: 4, name: "Nightly snapshot" }]),
+      json(route, [backupJob({ id: 4, name: "Nightly snapshot" })]),
     )
     let schedules: Record<string, unknown>[] = []
     await page.route("**/api/v1/deploy/7/environments/12/schedules**", async (route) => {
@@ -595,17 +924,29 @@ test.describe("Automation", () => {
     })
     await page.goto("/deploy/7/settings/automation")
 
-    await page.getByRole("button", { name: "Add schedule", exact: true }).click()
+    // The picture's empty mark and the section's button are one act, named alike.
+    await page.getByRole("button", { name: "Add schedule", exact: true }).first().click()
     const sheet = page.getByRole("dialog", { name: "Add schedule" })
     await sheet.getByRole("textbox", { name: "Name" }).fill("Nightly backup")
-    await sheet.getByRole("combobox", { name: "Action" }).click()
-    await page.getByRole("option", { name: "Backup", exact: true }).click()
+    // When it fires is built from words, not typed as cron fields.
+    await expect(sheet.getByRole("combobox", { name: "Repeats" })).toHaveText(/Every day/)
+    await sheet
+      .getByRole("group", { name: "Action" })
+      .getByRole("button", { name: /^Backup/ })
+      .click()
     await sheet.getByRole("combobox", { name: "Backup job" }).click()
     await page.getByRole("option", { name: "Nightly snapshot", exact: true }).click()
-    await sheet.getByRole("button", { name: "Create schedule" }).click()
+    await sheet.getByRole("button", { name: "Add schedule" }).click()
 
     await expect(page.getByText("Schedule created", { exact: true })).toBeVisible()
+    // An untouched builder still posts the nightly expression, with the job.
+    expect(schedules[0]).toMatchObject({
+      expression: "0 3 * * *",
+      steps: [{ action: "backup", config: { jobId: 4 } }],
+    })
     await expect(page.getByText("Nightly backup", { exact: true })).toBeVisible()
+    const scheduleList = page.getByRole("list", { name: "Schedules" })
+    await expect(scheduleList.getByText(/^Every day at 03:00 · /)).toBeVisible()
     await expect(page.getByText("Enabled", { exact: true }).first()).toBeVisible()
 
     await page.getByRole("button", { name: "Runs", exact: true }).click()
@@ -618,7 +959,7 @@ test.describe("Automation", () => {
     await expect(page.getByText("Schedule paused", { exact: true })).toBeVisible()
     await expect(page.getByText("Paused", { exact: true })).toBeVisible()
 
-    await page.getByRole("button", { name: "Nightly backup actions" }).click()
+    await page.getByRole("button", { name: "Actions for Nightly backup" }).click()
     await page.getByRole("menuitem", { name: "Remove" }).click()
     await page.getByRole("dialog").getByRole("button", { name: "Remove schedule" }).click()
     await expect(page.getByText("Nightly backup", { exact: true })).toHaveCount(0)
@@ -720,7 +1061,13 @@ test.describe("Automation", () => {
     await expect(page.getByText("Isolation incomplete", { exact: true })).toBeVisible()
     await expect(page.getByText("Stopped for isolation", { exact: true })).toBeVisible()
 
-    const openRow = page.getByText("pr-42", { exact: true }).locator("..").locator("..")
+    const openRow = page.getByRole("listitem").filter({ hasText: "pr-42" })
+    // A preview blocked for isolation cannot be deployed from its card.
+    await expect(
+      page.getByRole("listitem").filter({ hasText: "pr-40" }).getByRole("button", {
+        name: "Deploy preview",
+      }),
+    ).toBeDisabled()
     await openRow.getByRole("button", { name: "Deploy preview" }).click()
     await expect(page.getByText("Preview deployment queued", { exact: true })).toBeVisible()
     expect(deployed).toBe(1)
@@ -789,7 +1136,7 @@ test.describe("Automation", () => {
     await page.goto("/deploy/7/settings/automation")
 
     await expect(page.getByText("Deploy hook", { exact: true })).toBeVisible()
-    await page.getByRole("button", { name: "Deploy hook actions" }).click()
+    await page.getByRole("button", { name: "Actions for Deploy hook" }).click()
     await page.getByRole("menuitem", { name: "Deliveries" }).click()
 
     await expect(page.getByRole("heading", { name: "Deliveries · Deploy hook" })).toBeVisible()
@@ -802,9 +1149,13 @@ test.describe("Automation", () => {
       "href",
       "/deploy/7/runs/84",
     )
+    // Counted by what was decided, and narrowed to one decision by its chip.
+    await sheet.getByRole("button", { name: /^Refused/ }).click()
+    await expect(sheet.getByText(/preview approval required/)).toBeVisible()
+    await expect(sheet.getByText(/no watched path changed/)).toHaveCount(0)
     await page.keyboard.press("Escape")
 
-    await page.getByRole("button", { name: "Deploy hook actions" }).click()
+    await page.getByRole("button", { name: "Actions for Deploy hook" }).click()
     await page.getByRole("menuitem", { name: "Rotate secret" }).click()
     await page.getByRole("dialog").getByRole("button", { name: "Rotate secret" }).click()
     await expect(page.getByText("Copy the new secret for Deploy hook now")).toBeVisible()
@@ -847,6 +1198,42 @@ test.describe("Automation", () => {
     expect(rejectBody).toEqual({ revision: "deadbeefcafefeed0000" })
   })
 
+  test("a sender's repository wraps inside the picture instead of running past its edge", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/environments/12/triggers**", (route) =>
+      route.request().method() === "GET"
+        ? json(route, [
+            {
+              id: 31,
+              projectId: 7,
+              environmentId: 12,
+              name: "GitHub webhook",
+              kind: "github",
+              provider: "github",
+              config: { repository: "JustDashboard/frontend", ref: "main", delivery: "app" },
+              hookId: "provider-hook",
+              enabled: true,
+              lastStatus: "",
+            },
+          ])
+        : route.fallback(),
+    )
+    await page.goto("/deploy/7/settings/automation")
+
+    const picture = page.getByRole("list", { name: "What deploys this project" })
+    const title = picture.getByText("JustDashboard/frontend@main", { exact: true })
+    for (const width of [1024, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect(title).toBeVisible()
+      const frame = (await picture.boundingBox())!
+      const words = (await title.boundingBox())!
+      expect(words.x).toBeGreaterThanOrEqual(frame.x)
+      expect(words.x + words.width).toBeLessThanOrEqual(frame.x + frame.width)
+    }
+  })
+
   test("legacy compose projects show only the legacy hook", async ({ page }) => {
     await mockProject(page, { normalized: false })
     await page.goto("/deploy/7/settings/automation")
@@ -882,9 +1269,7 @@ test.describe("Runtime", () => {
     })
     await page.goto("/deploy/7/settings/runtime")
 
-    const card = page
-      .locator('[data-slot="panel"]')
-      .filter({ has: page.getByRole("heading", { name: "Runtime", exact: true }) })
+    const card = page.getByRole("form", { name: "Runtime" })
     const port = card.getByRole("spinbutton", { name: "Application port" })
     await port.fill("99999")
     await card.getByRole("button", { name: "Save", exact: true }).click()
@@ -893,6 +1278,8 @@ test.describe("Runtime", () => {
     await expect(
       page.getByText("runtime port must be between 1 and 65535", { exact: true }),
     ).toBeVisible()
+    // The rail head of the section holding the field says the save was refused.
+    await expect(card.getByText("Not saved", { exact: true })).toBeVisible()
     await expect(page.getByText("Could not save runtime settings")).toHaveCount(0)
   })
 })
@@ -912,15 +1299,66 @@ test.describe("Settings cards keep independent unsaved edits", () => {
     const taskCommand = page.getByRole("textbox", { name: "Release task 1 command" })
     await taskCommand.fill("./bin/migrate --force")
 
-    const buildCard = page
-      .locator('[data-slot="panel"]')
-      .filter({ has: page.getByRole("heading", { name: "Build", exact: true }) })
+    const buildCard = page.getByRole("form", { name: "Build" })
     await buildCard.getByRole("textbox", { name: "Root directory" }).fill("apps/api")
     await buildCard.getByRole("button", { name: "Save", exact: true }).click()
     await expect(page.getByText("Build settings saved", { exact: true })).toBeVisible()
     await expect.poll(() => puts.length).toBe(1)
 
     await expect(taskCommand).toHaveValue("./bin/migrate --force")
+  })
+
+  // Each draft is keyed on its own section's saved value, not the page's
+  // revision, so the save beside it bumping the revision restarts nothing.
+  test("saving release tasks does not discard an unsaved Build edit", async ({ page }) => {
+    await mockProject(page)
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    await page.goto("/deploy/7/settings/build")
+
+    const root = page.getByRole("form", { name: "Build" }).getByRole("textbox", {
+      name: "Root directory",
+    })
+    await root.fill("apps/web")
+
+    const tasks = page.getByRole("form", { name: "Release tasks" })
+    await tasks.getByRole("button", { name: "Add release task", exact: true }).click()
+    await tasks.getByLabel("Release task 1 name").fill("Migrate")
+    await tasks.getByLabel("Release task 1 command").fill("./bin/migrate")
+    await tasks.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(page.getByText("Release tasks saved", { exact: true })).toBeVisible()
+    await expect.poll(() => puts.length).toBe(1)
+    // The release tasks' save wrote the saved build, not the unsaved draft.
+    expect((puts[0].build as Record<string, unknown>).rootDirectory).toBeUndefined()
+
+    await expect(root).toHaveValue("apps/web")
+  })
+
+  test("saving health checks does not discard an unsaved Runtime edit", async ({ page }) => {
+    await mockProject(page)
+    const puts: Record<string, unknown>[] = []
+    page.on("request", (request) => {
+      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
+        puts.push(request.postDataJSON())
+      }
+    })
+    await page.goto("/deploy/7/settings/runtime")
+
+    const memory = page.getByRole("form", { name: "Runtime" }).getByLabel("Memory limit")
+    await memory.fill("768")
+
+    const checks = page.getByRole("form", { name: "Health checks" })
+    await checks.getByRole("button", { name: "Add check", exact: true }).click()
+    await checks.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(page.getByText("Health checks saved", { exact: true })).toBeVisible()
+    await expect.poll(() => puts.length).toBe(1)
+    expect((puts[0].runtime as Record<string, unknown>).memoryMb).toBeUndefined()
+
+    await expect(memory).toHaveValue("768")
   })
 })
 
@@ -931,6 +1369,8 @@ test.describe("Danger zone", () => {
 
     await expect(page.getByRole("heading", { name: "Stop the application" })).toBeVisible()
     await page.getByRole("button", { name: "Stop", exact: true }).click()
+    // The header menu's own verb, so it asks before the containers go down.
+    await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click()
     await expect(page).toHaveURL(/\/deploy\/7\/runs\/\d+$/)
     expect(dashboard.actions()).toEqual(["stop"])
   })
@@ -956,7 +1396,9 @@ test.describe("Danger zone", () => {
     expect(dashboard.actions()).toEqual(["start"])
   })
 
-  test("archiving replaces the archive card with resource removal", async ({ page }) => {
+  test("archiving turns the archive row into a restore and opens resource removal", async ({
+    page,
+  }) => {
     await mockProject(page)
     let archived = 0
     await page.route("**/api/v1/deploy/7/archive", (route) => {
@@ -966,15 +1408,23 @@ test.describe("Danger zone", () => {
     await page.goto("/deploy/7/settings/danger")
 
     await expect(page.getByRole("heading", { name: "Archive this deployment" })).toBeVisible()
-    await expect(page.getByRole("heading", { name: "Remove managed resources" })).toHaveCount(0)
+    // Removal and deletion are drawn from the start, in order, each saying
+    // what has to come first rather than offering a button for it.
+    await expect(page.getByRole("heading", { name: "Remove managed resources" })).toBeVisible()
+    await expect(page.getByText("Archive the deployment first")).toHaveCount(2)
+    await expect(page.getByRole("button", { name: "Delete permanently" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Refresh" })).toHaveCount(0)
+
     await page.getByRole("button", { name: "Archive", exact: true }).click()
-    const dialog = page.getByRole("dialog", { name: "Archive deployment" })
-    await expect(dialog).toContainText("Triggers will be disabled")
+    const dialog = page.getByRole("dialog", { name: "Archive api-production" })
+    await expect(dialog).toContainText("It leaves the active list")
     await dialog.getByRole("button", { name: "Archive deployment" }).click()
 
     expect(archived).toBe(1)
     await expect(page.getByRole("heading", { name: "Archive this deployment" })).toHaveCount(0)
+    await expect(page.getByRole("heading", { name: "Restore this deployment" })).toBeVisible()
     await expect(page.getByRole("heading", { name: "Remove managed resources" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Refresh" })).toBeVisible()
   })
 
   test("an archived project can remove a typed-confirmation target, then be deleted permanently", async ({
@@ -1026,9 +1476,11 @@ test.describe("Danger zone", () => {
     await page.goto("/deploy/7/settings/danger")
 
     await expect(page.getByRole("heading", { name: "Archive this deployment" })).toHaveCount(0)
-    await page.getByRole("button", { name: "Preview targets" }).click()
+    // The plan is read on arrival: each target as the thing it is, marked
+    // where it holds data and where its name has to be typed.
     await expect(page.getByText("api-data", { exact: true }).first()).toBeVisible()
-    await expect(page.getByText(/typed confirmation/)).toBeVisible()
+    await expect(page.getByText(/type its name to remove/)).toBeVisible()
+    await expect(page.getByText("holds data", { exact: true })).toBeVisible()
 
     await page.getByRole("button", { name: "Remove", exact: true }).click()
     const removeDialog = page.getByRole("dialog", { name: "Remove api-data" })
@@ -1045,6 +1497,9 @@ test.describe("Danger zone", () => {
     await page.locator("[data-sonner-toast]").first().waitFor({ state: "detached", timeout: 15000 })
     await page.getByRole("button", { name: "Delete permanently", exact: true }).first().click()
     const purgeDialog = page.getByRole("dialog", { name: /Delete .* permanently/ })
+    // Rare and unrecoverable, so the deployment's name is typed first.
+    await expect(purgeDialog.getByRole("button", { name: "Delete permanently" })).toBeDisabled()
+    await purgeDialog.getByRole("textbox").fill(project.name)
     await purgeDialog.getByRole("button", { name: "Delete permanently" }).click()
     await expect(page).toHaveURL(/\/deploy\?view=archived$/)
     expect(purged).toBe(1)
@@ -1064,7 +1519,7 @@ test.describe("Screenshots", () => {
     test(`${screen.name} at 1280 and 390`, async ({ page }, testInfo) => {
       await mockProject(page)
       await page.route("**/api/v1/backups/", (route) =>
-        json(route, [{ id: 4, name: "Nightly snapshot" }]),
+        json(route, [backupJob({ id: 4, name: "Nightly snapshot" })]),
       )
       await page.route("**/api/v1/docker/volumes/", (route) => json(route, []))
       // The shell scrolls an inner div (`h-svh overflow-hidden` on the
@@ -1107,11 +1562,13 @@ test.describe("Password protection", () => {
       }
     })
     await page.goto("/deploy/7/settings/domains")
-    await expect(page.getByRole("link", { name: "api.example.test" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Open api.example.test" })).toBeVisible()
+    const password = page.getByRole("button", { name: "Password on api.example.test" })
+    const https = page.getByRole("button", { name: "HTTPS on api.example.test" })
 
     // Turning protection on asks for the two fields; the password leaves the
     // browser exactly once, as a password.
-    await page.getByRole("switch", { name: "Password" }).click()
+    await password.click()
     await page.getByLabel("User name").fill("team")
     await page.locator("#domain-password-0").fill("correct horse battery")
     await page.getByRole("button", { name: "Save", exact: true }).click()
@@ -1129,10 +1586,10 @@ test.describe("Password protection", () => {
     // Once the server holds a hash, saving something else keeps it and
     // sends no password.
     await page.goto("/deploy/7/settings/domains")
-    await expect(page.getByRole("switch", { name: "Password" })).toBeChecked()
+    await expect(password).toHaveAttribute("aria-pressed", "true")
     await expect(page.getByLabel("User name")).toHaveValue("team")
     await expect(page.locator("#domain-password-0")).toHaveAttribute("placeholder", "Unchanged")
-    await page.getByRole("switch", { name: "HTTPS" }).click()
+    await https.click()
     await page.getByRole("button", { name: "Save", exact: true }).click()
     await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
     await expect.poll(() => puts.length).toBe(2)
@@ -1149,7 +1606,7 @@ test.describe("Password protection", () => {
     ])
 
     // Turning it off sends no protection at all.
-    await page.getByRole("switch", { name: "Password" }).click()
+    await password.click()
     await expect(page.getByLabel("User name")).toHaveCount(0)
     await page.getByRole("button", { name: "Save", exact: true }).click()
     await expect.poll(() => puts.length).toBe(3)

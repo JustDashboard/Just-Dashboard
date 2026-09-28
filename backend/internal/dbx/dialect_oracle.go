@@ -75,12 +75,12 @@ func (oracleDialect) Databases(ctx context.Context, db *sql.DB) ([]Database, err
 
 func (oracleDialect) Tables(ctx context.Context, db *sql.DB, schema string) ([]Table, error) {
 	rows, err := db.QueryContext(ctx, `
-	  SELECT owner, table_name, 'table', NVL(num_rows, 0), 0, NULL
+	  SELECT owner, table_name, 'table', NVL(num_rows, -1), 0, NULL
 	  FROM all_tables
 	  WHERE (:1 IS NULL OR owner = :1)
 	    AND owner NOT IN ('SYS','SYSTEM','OUTLN','XDB','MDSYS','CTXSYS','DBSNMP')
 	  UNION ALL
-	  SELECT owner, view_name, 'view', 0, 0, NULL
+	  SELECT owner, view_name, 'view', -1, 0, NULL
 	  FROM all_views
 	  WHERE (:1 IS NULL OR owner = :1)
 	    AND owner NOT IN ('SYS','SYSTEM','OUTLN','XDB','MDSYS','CTXSYS','DBSNMP')

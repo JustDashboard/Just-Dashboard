@@ -50,6 +50,10 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			// but the password is already known, so the request is the
 			// password and nothing else is typed.
 			r.Method(http.MethodPost, "/host", s.handle(s.handleDBConnectHost))
+			// And for a server whose password nobody knows: make the account
+			// from the host's own shell, where peer authentication lets the
+			// engine's system account in without one.
+			r.Method(http.MethodPost, "/host/grant", s.handle(s.handleDBHostGrant))
 			r.Method(http.MethodPost, "/sync", s.handle(s.handleDBSync))
 			r.Method(http.MethodGet, "/provision/options", s.handle(s.handleDBProvisionOptions))
 			r.Method(http.MethodPost, "/provision", s.handle(s.handleDBProvision))
@@ -66,6 +70,12 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			})
 		})
 		// Read surface: available to any authenticated role, including readonly.
+		// The fleet and the topology are every connection at once — the
+		// section's landing page and its map of what talks to what.
+		r.Method(http.MethodGet, "/fleet", s.handle(s.handleDBFleet))
+		r.Method(http.MethodGet, "/topology", s.handle(s.handleDBTopology))
+		r.Method(http.MethodGet, "/{id}/consumers", s.handle(s.handleDBConsumers))
+		s.mountDatabaseAdminRoutes(r)
 		r.Method(http.MethodGet, "/{id}/ping", s.handle(s.handleDBPing))
 		r.Method(http.MethodGet, "/{id}/stats", s.handle(s.handleDBStats))
 		r.Method(http.MethodGet, "/{id}/schemas", s.handle(s.handleDBList))
@@ -87,6 +97,11 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		// reading the schema; only saving sits with the other writes below.
 		r.Method(http.MethodGet, "/{id}/diagram", s.handle(s.handleDBDiagramGet))
 		r.Method(http.MethodGet, "/{id}/activity", s.handle(s.handleDBActivity))
+		// The server's own log and the statements it recorded. Reading either
+		// is reading what the server printed and the statements it ran, which
+		// the activity list and /statements already show any role.
+		r.Method(http.MethodGet, "/{id}/logs/sources", s.handle(s.handleDBLogSources))
+		r.Method(http.MethodGet, "/{id}/querylog", s.handle(s.handleDBQueryLog))
 		r.Method(http.MethodGet, "/{id}/search", s.handle(s.handleDBSearch))
 		r.Method(http.MethodGet, "/{id}/overview", s.handle(s.handleDBOverview))
 		r.Method(http.MethodGet, "/orm/targets", s.handle(s.handleDBTargets))
@@ -946,6 +961,14 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 	if !format.Valid() {
 		format = dbx.ExportCSV
 	}
+	// The grid's conditions travel with the export, so a download taken from a
+	// narrowed view is that view rather than the whole table. They are parsed
+	// before a single response header is written: once the body has started, a
+	// rejected filter can only arrive as JSON inside a file called .csv.
+	filters, err := parseFilters(q.Get("filters"))
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
 	conn, dsn, err := s.dbConnRow(r.Context(), id)
 	if err != nil {
 		return err
@@ -984,8 +1007,11 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 		if perr != nil {
 			return perr
 		}
-		count, truncated, err = dbx.ExportTable(ctx, pool, conn.Driver, q.Get("schema"), table, format, w,
-			atoiDefault(q.Get("limit"), 0))
+		count, truncated, err = dbx.ExportBrowse(ctx, pool, conn.Driver, dbx.BrowseOptions{
+			Schema: q.Get("schema"), Table: table,
+			OrderBy: q.Get("orderBy"), Desc: q.Get("dir") == "desc",
+			Filters: filters,
+		}, format, w, atoiDefault(q.Get("limit"), 0))
 	}
 	if err != nil {
 		// Headers are already sent, so the error cannot become a JSON body; it is
@@ -995,8 +1021,10 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 			map[string]any{"table": table, "error": err.Error()})
 		return nil
 	}
-	httpx.SetAudit(r, "database.export", conn.Name,
-		map[string]any{"table": table, "format": string(format), "rows": count, "truncated": truncated})
+	httpx.SetAudit(r, "database.export", conn.Name, map[string]any{
+		"table": table, "format": string(format), "rows": count, "truncated": truncated,
+		"filtered": q.Get("filters") != "",
+	})
 	return nil
 }
 

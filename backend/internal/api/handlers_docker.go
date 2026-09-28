@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
@@ -52,8 +51,6 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			// Where a published port is actually reachable, including
 			// through the reverse proxy this dashboard also manages.
 			r.Method(http.MethodGet, "/{id}/routes", s.handle(s.handleContainerRoutes))
-			r.Method(http.MethodGet, "/{id}/logs", s.handle(s.handleContainerLogs))
-			r.Method(http.MethodGet, "/{id}/logs/stream", s.handle(s.handleContainerLogStream))
 			r.Method(http.MethodGet, "/{id}/stats/stream", s.handle(s.handleContainerStatStream))
 			r.Method(http.MethodGet, "/stats/history", s.handle(s.handleContainerSparklines))
 			r.Method(http.MethodGet, "/{id}/stats/history", s.handle(s.handleContainerStatsHistory))
@@ -150,7 +147,6 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/", s.handle(s.handleStackList))
 			r.Method(http.MethodGet, "/{name}", s.handle(s.handleStackDetail))
 			r.Method(http.MethodGet, "/{name}/config", s.handle(s.handleStackConfig))
-			r.Method(http.MethodGet, "/{name}/logs/stream", s.handle(s.handleStackLogStream))
 			// What a deploy would do, and what the last few did. Read-only:
 			// the preview changes nothing and the history is a record.
 			r.Method(http.MethodGet, "/{name}/preview", s.handle(s.handleStackPreview))
@@ -430,7 +426,7 @@ func (s *Server) containerName(ctx context.Context, ref string) string {
 }
 
 // handleContainerStream is the `docker stats`-equivalent feed backing the
-// container table: one socket, one sampling loop, all running containers.
+// container table: one shared sampling loop, all running containers.
 func (s *Server) handleContainerStream(w http.ResponseWriter, r *http.Request) error {
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
@@ -442,116 +438,26 @@ func (s *Server) handleContainerStream(w http.ResponseWriter, r *http.Request) e
 	go conn.Keepalive(ctx)
 	go conn.DrainControl(cancel)
 
-	// A sampler per socket, so each client's CPU deltas span its own even
-	// intervals rather than whatever the last caller happened to leave behind.
-	sampler := s.modules.docker.NewStatsSampler()
-
-	t := time.NewTicker(2 * time.Second)
-	defer t.Stop()
-	for {
-		list, err := s.modules.docker.ListContainers(ctx, true)
-		if err != nil {
-			conn.SendError(err.Error())
-			return nil
-		}
-		if err := conn.Send("containers", list); err != nil {
-			return nil
-		}
-		ids := make([]string, 0, len(list))
-		for _, c := range list {
-			if c.State == "running" {
-				ids = append(ids, c.ID)
-			}
-		}
-		if stats, err := sampler.Sample(ctx, ids); err == nil {
-			if err := conn.Send("stats", stats); err != nil {
-				return nil
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-t.C:
-		}
-	}
-}
-
-func (s *Server) handleContainerLogs(w http.ResponseWriter, r *http.Request) error {
-	q := r.URL.Query()
-	ch, closer, err := s.modules.docker.Logs(r.Context(), httpx.URLParam(r, "id"), dockerx.LogOptions{
-		Tail:       defaultStr(q.Get("tail"), "500"),
-		Since:      q.Get("since"),
-		Until:      q.Get("until"),
-		Timestamps: q.Get("timestamps") == "true",
-	})
-	if err != nil {
-		return s.dockerErr(err)
-	}
-	defer closer.Close()
-	lines := []dockerx.LogLine{}
-	for line := range ch {
-		lines = append(lines, line)
-		if len(lines) >= 20000 {
-			break
-		}
-	}
-	httpx.JSON(w, http.StatusOK, lines)
-	return nil
-}
-
-func (s *Server) handleContainerLogStream(w http.ResponseWriter, r *http.Request) error {
-	q := r.URL.Query()
-	conn, err := s.WS.Upgrade(w, r)
-	if err != nil {
-		return nil
-	}
-	defer conn.Close()
-	ctx, cancel := contextWithCancel(r)
-	defer cancel()
-	go conn.Keepalive(ctx)
-	go conn.DrainControl(cancel)
-
-	ch, closer, err := s.modules.docker.Logs(ctx, httpx.URLParam(r, "id"), dockerx.LogOptions{
-		Tail:       defaultStr(q.Get("tail"), "500"),
-		Timestamps: q.Get("timestamps") == "true",
-		Follow:     true,
-	})
-	if err != nil {
-		conn.SendError(err.Error())
-		return nil
-	}
-	defer closer.Close()
-
-	// Lines are batched on a short tick: a chatty container can emit
-	// thousands per second, and one frame each would drown the browser.
-	batch := make([]dockerx.LogLine, 0, 256)
-	flush := time.NewTicker(150 * time.Millisecond)
-	defer flush.Stop()
+	updates, unsubscribe := s.modules.docker.SubscribeContainers()
+	defer unsubscribe()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case line, ok := <-ch:
+		case update, ok := <-updates:
 			if !ok {
-				if len(batch) > 0 {
-					conn.Send("logs", batch)
-				}
-				conn.Send("eof", nil)
 				return nil
 			}
-			batch = append(batch, line)
-			if len(batch) >= 256 {
-				if err := conn.Send("logs", batch); err != nil {
-					return nil
-				}
-				batch = batch[:0]
+			if update.Err != nil {
+				conn.SendError(update.Err.Error())
+				return nil
 			}
-		case <-flush.C:
-			if len(batch) > 0 {
-				if err := conn.Send("logs", batch); err != nil {
-					return nil
-				}
-				batch = batch[:0]
+			var data any = update.Containers
+			if update.Kind == "stats" {
+				data = update.Stats
+			}
+			if err := conn.Send(update.Kind, data); err != nil {
+				return nil
 			}
 		}
 	}

@@ -20,6 +20,18 @@ type ReleaseMetricWindow struct {
 	Status    string                            `json:"status"`
 	Reason    string                            `json:"reason,omitempty"`
 	History   *metrics.ContainerIdentityHistory `json:"history,omitempty"`
+	// Sources name the history's series by container id, so a chart can
+	// label a line with its container and image rather than a bare id.
+	Sources []RunMetricSource `json:"sources,omitempty"`
+}
+
+// RunMetricSource names one series' container from the runtime identity the
+// release recorded. A Compose release records its container ids but not which
+// service each one ran, so its series stay unnamed rather than guessed.
+type RunMetricSource struct {
+	ContainerID string `json:"containerId"`
+	Name        string `json:"name,omitempty"`
+	Image       string `json:"image,omitempty"`
 }
 
 type RunMetricComparison struct {
@@ -52,6 +64,15 @@ func runtimeMetricIDs(runtime ReleaseRuntime) []string {
 		}
 	}
 	return ids
+}
+
+func runtimeMetricSources(runtime ReleaseRuntime) []RunMetricSource {
+	if runtime.Kind != "container" || runtime.RuntimeID == "" {
+		return nil
+	}
+	var metadata dockerReleaseRuntimeMetadata
+	_ = json.Unmarshal(runtime.Metadata, &metadata)
+	return []RunMetricSource{{ContainerID: runtime.RuntimeID, Name: runtime.Name, Image: metadata.Image}}
 }
 
 // RunMetrics joins persisted runtime identities through the Metrics owner. It
@@ -119,7 +140,7 @@ func (s *OrchestrationStore) releaseMetricWindow(ctx context.Context, owner Metr
 		result.Reason = "Container history could not be read. Open Metrics to inspect retained history."
 		return result
 	}
-	result.History = history
+	result.History, result.Sources = history, runtimeMetricSources(*runtime)
 	result.Status = "available"
 	for _, series := range history.Series {
 		samples := 0

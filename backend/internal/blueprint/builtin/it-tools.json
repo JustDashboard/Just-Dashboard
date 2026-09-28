@@ -7,11 +7,15 @@
   "description": "A collection of small developer utilities in one page — token generators, hash and encoding tools, converters, a JWT decoder — with nothing sent anywhere.",
   "iconId": "bolt",
   "docsUrl": "https://it-tools.tech/",
+  "access": {
+    "kind": "open",
+    "note": "IT-Tools has no accounts and no login: anyone who reaches this address gets every tool on the page. All of them run in the visitor's own browser and nothing is saved on the server, so the risk is strangers using your copy rather than reading what you typed into it — but remember the page includes token and password generators, so treat anything generated on a shared address as shared."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-3.0",
     "upstreamUrl": "https://github.com/CorentinTh/it-tools",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

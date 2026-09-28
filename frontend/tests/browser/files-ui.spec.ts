@@ -3,10 +3,14 @@ import { expect, test, type Page, type Route } from "@playwright/test"
 /**
  * The file manager as a person meets it, against a mocked API.
  *
- * Four claims the redesign rests on, each of which a type check cannot make:
+ * The claims the redesign rests on, each of which a type check cannot make:
  *
  *   the sidebar is a fixed list of places, starred and recent folders that
  *   stays put while the listing walks into folders;
+ *
+ *   there is no page header: the page's commands are in the workbench's
+ *   strip, and a folder's colour is picked there and in the inspector, drawn
+ *   everywhere the folder is, and stored on the server;
  *
  *   a picture is visible as itself in the listing, and Space opens it full
  *   screen with the folder's other files an arrow away;
@@ -82,7 +86,12 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
 
-async function mockFiles(page: Page) {
+/** The labels the mocked server holds, which a test can change as the real one would. */
+async function mockFiles(
+  page: Page,
+  colours: Record<string, string> = { [`${home}/photos`]: "red" },
+  palette: { defaultColour?: string } = {},
+) {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api\/v1/, "")
@@ -99,6 +108,8 @@ async function mockFiles(page: Page) {
           { name: "/var/log", path: "/var/log", kind: "notable", hint: "Log files" },
         ],
         bookmarks: [{ path: `${home}/photos`, name: "photos" }],
+        colours,
+        defaultColour: palette.defaultColour,
       })
     }
     if (path === "/files/list") {
@@ -167,6 +178,17 @@ async function mockFiles(page: Page) {
     if (path === "/files/upload") {
       return json(route, { uploaded: ["x"], path: url.searchParams.get("path") }, 201)
     }
+    if (path === "/files/colours/default") {
+      palette.defaultColour = route.request().postDataJSON().colour
+      for (const target of Object.keys(colours)) delete colours[target]
+      return json(route, { defaultColour: palette.defaultColour, colours })
+    }
+    if (path === "/files/colours") {
+      const { path: target, colour } = route.request().postDataJSON()
+      if (colour) colours[target] = colour
+      else delete colours[target]
+      return json(route, { colours })
+    }
     return json(route, [])
   })
 }
@@ -177,12 +199,46 @@ async function openFiles(page: Page) {
   await page.locator("tr[data-entry-path]").first().waitFor()
 }
 
+test("large listings retain find, selection and keyboard menu focus", async ({ page }) => {
+  await mockFiles(page)
+  const many = Array.from({ length: 500 }, (_, i) =>
+    entry(`large-${String(i).padStart(4, "0")}.txt`),
+  )
+  await page.route("**/api/v1/files/list**", (route) =>
+    json(route, { path: home, parent: "/home", entries: many, roots: ["/"] }),
+  )
+  await openFiles(page)
+  await expect(page.locator("tr[data-entry-path]")).toHaveCount(500)
+  const found = await page.evaluate(() =>
+    (window as unknown as { find: (text: string) => boolean }).find("large-0499.txt"),
+  )
+  expect(found).toBe(true)
+  const last = page.locator(`tr[data-entry-path="${home}/large-0499.txt"]`)
+  await last.scrollIntoViewIfNeeded()
+  await expect(last).toBeInViewport()
+  await page.getByRole("checkbox", { name: "Select all", exact: true }).click()
+  const checkbox = last.getByRole("checkbox", { name: "Select large-0499.txt", exact: true })
+  await checkbox.focus()
+  await checkbox.press("Space")
+  await expect(checkbox).toHaveAttribute("aria-checked", "false")
+  await expect(page.getByRole("checkbox", { name: "Select all", exact: true })).toHaveAttribute(
+    "aria-checked",
+    "mixed",
+  )
+  const more = last.getByRole("button", { name: "More actions", exact: true })
+  await more.focus()
+  await more.press("ArrowDown")
+  await expect(page.getByRole("menuitem", { name: /Rename/ })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(more).toBeFocused()
+})
+
 test("the sidebar is a fixed list of places that stays put while browsing", async ({ page }) => {
   await mockFiles(page)
   await openFiles(page)
 
   // The places, the starred folder and the system directories are all on the page.
-  const sidebar = page.locator("div:has(> [data-slot='pane-header'])").first()
+  const sidebar = page.getByRole("navigation", { name: "Places" })
   const homeRow = sidebar.locator(`button[title='${home}']`)
   await expect(homeRow).toContainText("Home")
   await expect(homeRow).toHaveAttribute("aria-current", "location")
@@ -199,6 +255,118 @@ test("the sidebar is a fixed list of places that stays put while browsing", asyn
   await expect(homeRow).not.toHaveAttribute("aria-current", "location")
   await expect(sidebar.locator(`button[title='${home}/photos']`)).toBeVisible()
   await expect(sidebar.locator("button[title='/var/log']")).toBeVisible()
+})
+
+test("the commands sit in the workbench's strip, not in a page header", async ({ page }) => {
+  await mockFiles(page)
+  await openFiles(page)
+
+  await expect(page.locator("[data-slot='page-header']")).toHaveCount(0)
+  const strip = page.locator("[data-slot='pane-header']").first()
+  for (const name of ["Find", "New", "Upload", "Hide the sidebar", "Hide the details"]) {
+    await expect(strip.getByRole("button", { name, exact: true })).toBeVisible()
+  }
+  // The strip starts where the page's frame does: nothing sits above it.
+  const frame = await strip.boundingBox()
+  const pageBox = await page.locator("[data-slot='page']").boundingBox()
+  expect(frame!.y - pageBox!.y).toBeLessThan(20)
+})
+
+test("a folder's colour is drawn everywhere it is and saved on the server", async ({ page }) => {
+  const colours: Record<string, string> = { [`${home}/photos`]: "red" }
+  await mockFiles(page, colours)
+  const sent: { path: string; colour: string }[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/files/colours")) sent.push(request.postDataJSON())
+  })
+  await openFiles(page)
+
+  // The label the server keeps is the one drawn, in the listing and the sidebar.
+  const photos = `${home}/photos`
+  const row = page.locator(`tr[data-entry-path='${photos}'] [data-folder]`)
+  await expect(row).toHaveAttribute("style", /--folder-red/)
+  await expect(
+    page
+      .getByRole("navigation", { name: "Places" })
+      .locator(`button[title='${photos}'] [data-folder]`),
+  ).toHaveAttribute("style", /--folder-red/)
+
+  // Picked in the inspector, it is drawn at once and sent for that folder.
+  await page.locator(`tr[data-entry-path='${home}/site']`).click()
+  await page.getByRole("radio", { name: "Green" }).click()
+  await expect(page.locator(`tr[data-entry-path='${home}/site'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-green/,
+  )
+  await expect.poll(() => sent).toEqual([{ path: `${home}/site`, colour: "green" }])
+
+  // Choosing a folder's own default clears its label rather than storing it.
+  await page.getByRole("radio", { name: "Blue" }).click()
+  await expect.poll(() => sent.at(-1)).toEqual({ path: `${home}/site`, colour: "" })
+  await expect(page.locator(`tr[data-entry-path='${home}/site'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-blue/,
+  )
+  expect(colours).toEqual({ [`${home}/photos`]: "red" })
+})
+
+test("the compact toolbar control colours all folders and individual colours still work", async ({
+  page,
+}) => {
+  const colours: Record<string, string> = { [`${home}/photos`]: "red" }
+  const palette: { defaultColour?: string } = {}
+  await mockFiles(page, colours, palette)
+  const sent: { url: string; body: { path?: string; colour: string } }[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/files/colours")) {
+      sent.push({ url: request.url(), body: request.postDataJSON() })
+    }
+  })
+  await openFiles(page)
+
+  const button = page.getByRole("button", { name: "Colour all folders" })
+  const icon = button.locator("[data-folder]")
+  const buttonBox = await button.boundingBox()
+  const iconBox = await icon.boundingBox()
+  expect(iconBox!.width).toBeLessThanOrEqual(18)
+  expect(buttonBox!.width).toBeLessThanOrEqual(32)
+
+  await button.click()
+  await page.getByRole("menuitem", { name: "Yellow" }).click()
+  await expect(page.locator(`tr[data-entry-path='${home}/photos'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-yellow/,
+  )
+  await expect(page.locator(`tr[data-entry-path='${home}/site'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-yellow/,
+  )
+  await expect.poll(() => sent[0]?.body).toEqual({ colour: "yellow" })
+  expect(sent[0].url).toContain("/files/colours/default")
+  await expect.poll(() => palette.defaultColour).toBe("yellow")
+  expect(colours).toEqual({})
+
+  await page.locator(`tr[data-entry-path='${home}/site']`).click()
+  await page.getByRole("radio", { name: "Green" }).click()
+  await expect(page.locator(`tr[data-entry-path='${home}/site'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-green/,
+  )
+  await expect(page.locator(`tr[data-entry-path='${home}/photos'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-yellow/,
+  )
+  await expect.poll(() => sent[1]?.body).toEqual({ path: `${home}/site`, colour: "green" })
+
+  await page.reload()
+  await expect(page.locator(`tr[data-entry-path='${home}/site'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-green/,
+  )
+  await expect(page.locator(`tr[data-entry-path='${home}/photos'] [data-folder]`)).toHaveAttribute(
+    "style",
+    /--folder-yellow/,
+  )
 })
 
 test("pictures are visible in the listing and Space opens the viewer", async ({ page }) => {

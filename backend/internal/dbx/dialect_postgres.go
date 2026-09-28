@@ -55,7 +55,7 @@ func (postgresDialect) Databases(ctx context.Context, db *sql.DB) ([]Database, e
 const postgresTablesQuery = `SELECT n.nspname, c.relname,
 	                CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view'
 	                               WHEN 'm' THEN 'materialized view' ELSE c.relkind::text END,
-	                COALESCE(c.reltuples::bigint, 0),
+	                COALESCE(c.reltuples::bigint, -1),
 	                COALESCE(pg_total_relation_size(c.oid), 0),
 	                COALESCE(obj_description(c.oid), '')
 	         FROM pg_class c

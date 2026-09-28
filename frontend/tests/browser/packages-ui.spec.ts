@@ -1,17 +1,21 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { mockHostLogs } from "./host-logs-fixture"
 
 /**
  * The Packages page, checked in a browser against a mocked host.
  *
  * What these assert is what a type check cannot: that the page reads the way
- * the design system says (design-system.md §15) — the manager and the index
- * age as a facts row under the title, four figures as tiles, three views under
- * one underlined strip, each a plain panel, and no framed block anywhere on
- * the page; that the one decision worth making in a hurry (security updates
- * waiting) carries its own button above the fold; that a row's fixed
- * properties sit at its edge; and that the search, the install verb and the
- * package sheet are all reachable from the strip. The screenshots at 1280 and
- * 1720 are the eyes the assertions do not have.
+ * the design system says (design-system.md §15) — the host's identity line
+ * with its distribution as the mark and the manager and index age as facts,
+ * four figures as tiles carrying the products they count, three views under
+ * one underlined strip, and no framed block but a table anywhere on the page;
+ * that every package is drawn as the software it is (§14) and an upgrade shows
+ * the part of the version it changes; that the one decision worth making in a
+ * hurry (security updates waiting) carries its own button above the fold; that
+ * a row's fixed properties sit at its edge; that the search, the install
+ * verb and the package sheet are all reachable from the strip; and that the
+ * package manager's own log is read in place, through its lens. The
+ * screenshots at 1280 and 1720 are the eyes the assertions do not have.
  */
 
 const now = new Date().toISOString()
@@ -146,6 +150,22 @@ const report = {
   lastChecked: now,
 }
 
+const host = {
+  hostname: "web-1",
+  os: "linux",
+  platform: "ubuntu",
+  platformVersion: "24.04",
+  kernelVersion: "6.8.0-45-generic",
+  kernelArch: "x86_64",
+  virtualization: "kvm",
+  bootTime: now,
+  uptimeSeconds: 86400,
+  processes: 212,
+  cpuModel: "AMD EPYC 7B13",
+  cpuCores: 4,
+  cpuMhz: 2450,
+}
+
 const search = [
   {
     name: "htop",
@@ -207,6 +227,7 @@ async function mockHost(page: Page) {
     const method = route.request().method()
     if (path === "/auth/session") return json(route, user)
     if (path === "/updates/self") return json(route, { current: "0.6.7", latest: "0.6.7" })
+    if (path === "/system/host") return json(route, host)
     if (path === "/packages/") return json(route, inventory)
     if (path === "/packages/updates") return json(route, report)
     if (path === "/packages/search") return json(route, search)
@@ -231,16 +252,37 @@ async function mockHost(page: Page) {
   })
 }
 
-test("the page reads the host as facts and figures, with nothing framed", async ({ page }) => {
+/**
+ * §2: the only block on a page that may draw a frame is a table. A grid owns a
+ * scroll region, and an edge is what says where it ends — a row whose actions
+ * sit past the boundary otherwise reads as a row with no actions. Everything
+ * else in the page's flow stays plain, which is what the frame is read against.
+ *
+ * Asserted structurally rather than as a count, so the rule keeps holding as
+ * pages gain and lose tables.
+ */
+async function framedNonTables(page: Page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("[data-slot=page] [data-slot=panel]:not([data-plain])"))
+      .filter((el) => !el.querySelector("[data-slot=table-container]"))
+      .map((el) => el.outerHTML.slice(0, 120)),
+  )
+}
+
+test("the page opens on the host and its figures, with nothing framed", async ({ page }) => {
   await mockHost(page)
   await page.goto("/packages")
   await page.waitForLoadState("networkidle")
 
-  // The manager and the index age are a row under the title, not a caption.
-  const facts = page.locator("[data-slot='page'] > div").nth(1)
-  await expect(facts).toContainText("apt")
-  await expect(facts).toContainText("index refreshed")
-  await expect(facts).toContainText("1 security update")
+  // The distribution as the mark, the manager beside its name, the index age
+  // as a fact and what is owed as the verdict at the line's end.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("Ubuntu 24.04")
+  await expect(identity).toContainText("apt")
+  await expect(identity).toContainText("index refreshed")
+  await expect(identity).toContainText("1 security update")
+  await expect(identity.locator("img[src='/logos/ubuntu.svg']")).toHaveCount(1)
+  await expect(identity.getByRole("button", { name: "Refresh index" })).toBeVisible()
 
   const tiles = page.locator("[data-slot='stat-tile']")
   await expect(tiles).toHaveCount(4)
@@ -249,15 +291,33 @@ test("the page reads the host as facts and figures, with nothing framed", async 
   await expect(tiles.nth(2)).toContainText("3")
   await expect(tiles.nth(2)).toContainText("1 security")
   await expect(tiles.nth(3)).toContainText("gcc-13 is the largest")
+  // The tiles say which software they count: what was asked for, what is behind.
+  await expect(tiles.nth(1).locator("img[src='/logos/postgresql.svg']")).toHaveCount(1)
+  await expect(tiles.nth(2).locator("img[src='/logos/curl.svg']")).toHaveCount(1)
 
   // The decision, above the fold, with its own button.
   await expect(page.getByRole("button", { name: "Install security updates" })).toBeVisible()
 
-  // No framed block: the three views are each a toolbar, a hairline and rows.
-  const framed = await page.locator("[data-slot='panel']:not([data-plain])").count()
-  expect(framed, "a framed panel on the packages page").toBe(0)
+  // Each view is a toolbar, a hairline and a framed table (§2) — and nothing
+  // else on the page carries an edge.
+  expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
   // The pill-shaped tab list is gone; the strip is the product's underlined one.
   expect(await page.locator("[data-slot='tabs-list']").count()).toBe(0)
+})
+
+test("each package is drawn as the software it is", async ({ page }) => {
+  await mockHost(page)
+  await page.goto("/packages")
+  await page.waitForLoadState("networkidle")
+  await page.getByRole("button", { name: /^Everything/ }).click()
+
+  const logo = (name: string) => page.getByRole("row", { name }).locator("img[src^='/logos/']")
+  await expect(logo("nginx")).toHaveAttribute("src", "/logos/nginx.svg")
+  await expect(logo("postgresql-16")).toHaveAttribute("src", "/logos/postgresql.svg")
+  await expect(logo("curl")).toHaveAttribute("src", "/logos/curl.svg")
+  // A library nothing names keeps its section's glyph on the same tile.
+  await expect(logo("libc6")).toHaveCount(0)
+  await expect(page.getByRole("row", { name: /libc6/ }).locator("svg").first()).toBeVisible()
 })
 
 test("the installed view filters and puts a row's properties at its edge", async ({ page }) => {
@@ -307,8 +367,17 @@ test("updates and add software are reachable from the strip", async ({ page }) =
   await expect(page.getByRole("button", { name: "Upgrade all 3" })).toBeVisible()
   const security = page.getByRole("row", { name: /openssl/ })
   await expect(security.getByRole("cell").last()).toContainText("security")
+  // The upgrade keeps "3.0.13-0ubuntu3" and changes ".4", in amber for a fix.
+  await expect(security.getByText(".4", { exact: true })).toHaveClass(/text-warning/)
+  // The origin is the archive that published it.
+  await expect(security.locator("img[src='/logos/ubuntu.svg']")).toHaveCount(1)
 
   await strip.getByRole("button", { name: "Add software" }).click()
+  // An empty search offers software to look for, each drawn as itself.
+  const suggestion = page.getByRole("button", { name: "postgresql", exact: true })
+  await expect(suggestion.locator("img[src='/logos/postgresql.svg']")).toHaveCount(1)
+  await suggestion.click()
+  await expect(page.getByPlaceholder(/What do you need/)).toHaveValue("postgresql")
   await page.getByPlaceholder(/What do you need/).fill("htop")
   await expect(page.getByText("2 matches")).toBeVisible()
   const htop = page.getByRole("listitem").filter({ hasText: "htop" }).first()
@@ -324,9 +393,77 @@ test("updates and add software are reachable from the strip", async ({ page }) =
   await expect(page.getByText("Install htop")).toBeVisible()
 })
 
+test("the Log view reads the package manager's own log in place", async ({ page }) => {
+  await mockHost(page)
+  const logs = await mockHostLogs(page)
+  await page.goto("/packages")
+  await page.waitForLoadState("networkidle")
+  // Nothing of the log is asked for until the view is.
+  expect(logs.requests).toEqual([])
+
+  const strip = page.getByRole("navigation", { name: "Package views" })
+  await strip.getByRole("button", { name: "Log", exact: true }).click()
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("install", { exact: true })).toBeVisible()
+  await expect(lines.getByText("upgrade", { exact: true })).toBeVisible()
+  await expect(lines.getByText("remove", { exact: true })).toBeVisible()
+
+  // History and Insights over apt's transactions, opened on everything the
+  // file holds — a day of a package log is usually nothing — and no tail.
+  const history = logs.searches[0]
+  expect(history.get("source")).toBe("file:/var/log/apt/history.log")
+  // Every package log is the packages lens's on the server, and the page
+  // hands the pane the server's own description: no lens of its own, and no
+  // file asked after twice.
+  expect(history.has("lens")).toBe(false)
+  await expect(page.getByRole("button", { name: "More", exact: true })).toBeVisible()
+  expect(history.has("since")).toBe(false)
+  expect(logs.requests).not.toContain("/logs/sources")
+  // One for each of the seven files the view asks after (`package-logs.ts`).
+  expect(logs.requests.filter((path) => path === "/logs/source")).toHaveLength(7)
+  expect(logs.sockets).toHaveLength(0)
+  await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveCount(0)
+  // The page keeps its one run of figures.
+  await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(1)
+
+  await page.getByRole("combobox", { name: "Package log" }).click()
+  await page.getByRole("option", { name: "dpkg" }).click()
+  await expect(lines.getByText("configure", { exact: true })).toBeVisible()
+
+  await page.getByRole("button", { name: "Insights", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "By package" })).toBeVisible()
+  expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
+})
+
+test("the package log stays on the page when the inventory cannot be read", async ({ page }) => {
+  await mockHost(page)
+  await mockHostLogs(page)
+  await page.route("**/api/v1/packages/", (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "internal",
+          message: "dpkg was interrupted, you must manually run dpkg --configure -a",
+        },
+      }),
+    }),
+  )
+  await page.goto("/packages")
+  await expect(page.getByText(/dpkg was interrupted/).first()).toBeVisible()
+  // The views are gone with the inventory; apt's own record of what it was
+  // doing when it stopped is not.
+  await expect(page.getByRole("navigation", { name: "Package views" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Package log" })).toBeVisible()
+  await expect(page.getByLabel("Log lines").getByText("install", { exact: true })).toBeVisible()
+  expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
+})
+
 for (const width of [1280, 1720]) {
   test(`looks right at ${width}`, async ({ page }) => {
     await mockHost(page)
+    await mockHostLogs(page)
     await page.setViewportSize({ width, height: 1000 })
     await page.goto("/packages")
     await page.waitForLoadState("networkidle")
@@ -335,6 +472,7 @@ for (const width of [1280, 1720]) {
       ["installed", "Installed"],
       ["updates", "Updates"],
       ["install", "Add software"],
+      ["log", "Log"],
     ] as const) {
       await strip.getByRole("button", { name: new RegExp(`^${label}`) }).click()
       const overflow = await page.evaluate(

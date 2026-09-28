@@ -24,9 +24,7 @@ import {
  * Everything that can be done to a table, behind one menu.
  *
  * Declared once and drawn by the Browse and Structure workbenches alike, so
- * the two never disagree about what a table can have done to it. Each verb
- * carries its word and, where the word alone is a guess, a line under it —
- * "Empty table" and "Drop table" are one letter apart in a hurry.
+ * the two never disagree about what a table can have done to it.
  */
 export function TableMenu({
   canWrite,
@@ -61,11 +59,11 @@ export function TableMenu({
           <MoreHorizontal />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
+      <DropdownMenuContent align="end" className="min-w-44">
         {onCount && (
           <DropdownMenuItem onClick={onCount}>
             <Hash />
-            <Words title="Count rows" hint="An exact COUNT(*), on request." />
+            Count rows
           </DropdownMenuItem>
         )}
         {onExport && (
@@ -83,7 +81,7 @@ export function TableMenu({
         {canWrite && onImport && (
           <DropdownMenuItem onClick={onImport}>
             <CloudUpload />
-            <Words title="Import data…" hint="CSV or JSON, in one transaction." />
+            Import data…
           </DropdownMenuItem>
         )}
         {canDDL && (
@@ -107,24 +105,15 @@ export function TableMenu({
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onClick={onTruncate}>
               <Trash />
-              <Words title="Empty table…" hint="Deletes every row; the table stays." />
+              Empty table…
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={onDrop}>
               <Trash />
-              <Words title="Drop table…" hint="Deletes the table and everything in it." />
+              Drop table…
             </DropdownMenuItem>
           </>
         )}
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-function Words({ title, hint }: { title: string; hint: string }) {
-  return (
-    <span className="flex min-w-0 flex-col">
-      <span>{title}</span>
-      <span className="text-hint text-muted-foreground">{hint}</span>
-    </span>
   )
 }

@@ -20,6 +20,8 @@ import (
 	"github.com/shirou/gopsutil/v4/load"
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/net"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 )
 
 type HostInfo struct {
@@ -129,6 +131,9 @@ type NetStats struct {
 	RecvRate    float64  `json:"recvRate"`
 	Addrs       []string `json:"addrs"`
 	IsUp        bool     `json:"isUp"`
+	// Kind is netsec's name for the device, so the metrics page can set
+	// Docker's veth pairs and bridges aside the way the Network page does.
+	Kind string `json:"kind"`
 }
 
 // Snapshot is one frame of the live dashboard. Rates are per second and are
@@ -408,7 +413,7 @@ func (c *Collector) network(ctx context.Context, elapsed float64) []NetStats {
 			BytesSent: ct.BytesSent, BytesRecv: ct.BytesRecv,
 			PacketsSent: ct.PacketsSent, PacketsRecv: ct.PacketsRecv,
 			ErrIn: ct.Errin, ErrOut: ct.Errout, DropIn: ct.Dropin, DropOut: ct.Dropout,
-			Addrs: []string{},
+			Addrs: []string{}, Kind: netsec.ClassifyInterface(ct.Name),
 		}
 		if m, ok := meta[ct.Name]; ok {
 			for _, a := range m.Addrs {
@@ -429,7 +434,12 @@ func (c *Collector) network(ctx context.Context, elapsed float64) []NetStats {
 		c.mu.Unlock()
 		out = append(out, n)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Interface < out[j].Interface })
+	sort.Slice(out, func(i, j int) bool {
+		if a, b := netsec.KindRank(out[i].Kind), netsec.KindRank(out[j].Kind); a != b {
+			return a < b
+		}
+		return out[i].Interface < out[j].Interface
+	})
 	return out
 }
 

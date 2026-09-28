@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext } from "react"
-import type { DbConnection, DbDriverInfo } from "@/lib/types"
+import type { DbConnection, DbCredentialServer, DbDriverInfo } from "@/lib/types"
 
 export type DbSelection = { schema: string; table?: string }
 
@@ -27,6 +27,14 @@ export type DatabaseContextValue = {
   select: (params: SectionParams) => void
   /** The same as `goto` builds, as a string — for a `<Link>`. */
   hrefFor: (pathname: string, params?: SectionParams) => string
+  /**
+   * The section's three ways to add a connection, owned by the layout because
+   * its dialogs are, and offered to an administrator only: start one here,
+   * point at one elsewhere, or give a server found on this host its password.
+   */
+  openNew?: () => void
+  openConnect?: () => void
+  connectHost?: (server: DbCredentialServer) => void
 }
 
 export type SectionParams = {

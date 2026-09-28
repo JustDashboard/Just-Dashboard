@@ -70,12 +70,14 @@ func (sqliteDialect) Databases(ctx context.Context, db *sql.DB) ([]Database, err
 }
 
 // Tables reads sqlite_master. Row and size figures are not free here — each
-// would be a COUNT(*) per table on every listing — so they are left at zero
-// rather than making the table list quadratic.
+// would be a COUNT(*) per table on every listing — so the row count is reported
+// as unknown rather than making the table list quadratic.
 func (sqliteDialect) Tables(ctx context.Context, db *sql.DB, _ string) ([]Table, error) {
+	// -1, not 0: the catalogue saying nothing must not read as it saying the
+	// table is empty. Size stays 0, which `omitempty` drops from the wire.
 	rows, err := db.QueryContext(ctx, `SELECT 'main', name,
 	                CASE type WHEN 'table' THEN 'table' ELSE type END,
-	                0, 0, ''
+	                -1, 0, ''
 	         FROM sqlite_master
 	         WHERE type IN ('table','view')
 	           AND name NOT LIKE 'sqlite_%'

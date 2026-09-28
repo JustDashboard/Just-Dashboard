@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError } from "@/lib/api"
 
-type PollState<T> = {
+export type PollState<T> = {
   data: T | undefined
   error: Error | undefined
   loading: boolean

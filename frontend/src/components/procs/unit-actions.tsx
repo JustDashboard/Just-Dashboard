@@ -103,7 +103,6 @@ export function useUnitVerbs({
         key: "start",
         progressive: "Starting",
         label: "Start",
-        detail: "Runs it now. Whether it also runs after a reboot is the startup setting.",
         icon: Play,
         inline: true,
         run: () => void act(unit, "start", "Starting").catch(() => undefined),
@@ -114,7 +113,6 @@ export function useUnitVerbs({
         key: "restart",
         progressive: "Restarting",
         label: "Restart",
-        detail: "Stops it and starts it again. Whatever it serves is interrupted.",
         icon: RotateClockwise,
         inline: true,
         run: () =>
@@ -135,7 +133,6 @@ export function useUnitVerbs({
           key: "stop",
           progressive: "Stopping",
           label: "Stop",
-          detail: "Shuts it down. It stays installed and can be started again.",
           icon: StopCircle,
           inline: true,
           run: () =>
@@ -158,7 +155,6 @@ export function useUnitVerbs({
       verbs.push({
         key: "journal",
         label: "Journal",
-        detail: "What it has logged, live. The first place to look when it fails.",
         icon: Logs,
         run: () => onOpenTab("journal"),
       })
@@ -169,7 +165,6 @@ export function useUnitVerbs({
         key: "reload",
         progressive: "Reloading",
         label: "Reload configuration",
-        detail: "Asks it to re-read its configuration without stopping.",
         icon: RefreshClockwise,
         run: () => void act(unit, "reload", "Reloading").catch(() => undefined),
       })
@@ -179,7 +174,6 @@ export function useUnitVerbs({
       verbs.push({
         key: "reset-failed",
         label: "Clear failed state",
-        detail: "Marks it inactive rather than failed, without starting it.",
         icon: Backspace,
         run: () => void act(unit, "reset-failed", "Clearing").catch(() => undefined),
       })
@@ -191,14 +185,12 @@ export function useUnitVerbs({
           ? {
               key: "disable",
               label: "Disable on boot",
-              detail: "Stays as it is now, but does not start after the next reboot.",
               icon: Slash,
               run: () => void act(unit, "disable", "Disabling").catch(() => undefined),
             }
           : {
               key: "enable",
               label: "Enable on boot",
-              detail: "Starts after every reboot. Does not start it now.",
               icon: Lightning,
               run: () => void act(unit, "enable", "Enabling").catch(() => undefined),
             },
@@ -209,7 +201,6 @@ export function useUnitVerbs({
       verbs.push({
         key: "file",
         label: "Open unit file",
-        detail: unit.fragmentPath,
         icon: FileText,
         run: () => router.push(`/files?path=${encodeURIComponent(unit.fragmentPath ?? "/")}`),
       })
@@ -217,7 +208,6 @@ export function useUnitVerbs({
     verbs.push({
       key: "copy",
       label: "Copy unit name",
-      detail: `${unit.name} — for systemctl and journalctl.`,
       icon: Copy,
       run: () => void copyText(unit.name, "Unit name copied"),
     })

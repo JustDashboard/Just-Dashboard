@@ -19,11 +19,14 @@ func TestRunLogHandoffUsesRunActivationAndExactPreviewRelease(t *testing.T) {
 			"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": environment,
 			"io.just-dashboard.release-id": release}}
 	}
+	preview := container("preview", "7", "11")
+	preview.Image = "ghcr.io/acme/preview:pr-4"
 	owner := &runtimeObservationFake{items: []dockerx.Container{
-		container("preview", "7", "11"), container("prior", "7", "10"), container("production", "8", "11"),
+		preview, container("prior", "7", "10"), container("production", "8", "11"),
 	}}
 	result := ObserveRunLogs(t.Context(), owner, snapshot)
 	if result.Status != "available" || len(result.Sources) != 1 || result.Sources[0].Name != "preview" ||
+		result.Sources[0].Image != "ghcr.io/acme/preview:pr-4" ||
 		owner.calls != 1 || owner.labels["io.just-dashboard.release-id"] != "11" || owner.labels["io.just-dashboard.environment-id"] != "7" {
 		t.Fatalf("unscoped runtime handoff: %+v owner=%+v", result, owner)
 	}

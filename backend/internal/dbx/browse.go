@@ -114,22 +114,51 @@ func Browse(ctx context.Context, db *sql.DB, driver Driver, opts BrowseOptions) 
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, opts.Schema, opts.Table)
-	if err != nil {
-		return nil, err
-	}
 	if opts.Limit <= 0 || opts.Limit > 1000 {
 		opts.Limit = 100
 	}
 	if opts.Offset < 0 {
 		opts.Offset = 0
 	}
-
-	where, args, err := buildWhere(d, opts.Filters, 1)
+	sel, err := browseSelect(d, opts)
 	if err != nil {
 		return nil, err
 	}
 
+	tail, tailArgs := d.Paginate(opts.Limit, opts.Offset, len(sel.args)+1)
+	// SQL Server's Paginate supplies its own mandatory ORDER BY; when the
+	// operator has chosen one, theirs replaces it rather than sitting next to it.
+	if sel.ordered {
+		tail = strings.TrimPrefix(tail, "ORDER BY (SELECT NULL) ")
+	}
+	args := append(sel.args, tailArgs...)
+
+	return RunQuery(ctx, db, sel.query+" "+tail, opts.Limit, args...)
+}
+
+// selection is one unpaged read of a table: the relation, the operator's
+// conditions and the order they chose.
+type selection struct {
+	query   string
+	args    []any
+	ordered bool
+}
+
+// browseSelect assembles that read. It exists so the grid and the export cannot
+// disagree about which rows they are looking at: the export used to be a bare
+// SELECT * of the whole table, so narrowing a million rows to eleven and
+// pressing Export as CSV produced a million-row file — the filters being
+// applied "on the server, across the whole table" made that worse rather than
+// better, because it is exactly the claim that makes the download look right.
+func browseSelect(d Dialect, opts BrowseOptions) (*selection, error) {
+	rel, err := qualify(d, opts.Schema, opts.Table)
+	if err != nil {
+		return nil, err
+	}
+	where, args, err := buildWhere(d, opts.Filters, 1)
+	if err != nil {
+		return nil, err
+	}
 	order := ""
 	if opts.OrderBy != "" {
 		col, err := d.QuoteIdent(opts.OrderBy)
@@ -144,17 +173,7 @@ func Browse(ctx context.Context, db *sql.DB, driver Driver, opts BrowseOptions) 
 		}
 		order = " ORDER BY " + col + " " + dir
 	}
-
-	tail, tailArgs := d.Paginate(opts.Limit, opts.Offset, len(args)+1)
-	// SQL Server's Paginate supplies its own mandatory ORDER BY; when the
-	// operator has chosen one, theirs replaces it rather than sitting next to it.
-	if order != "" {
-		tail = strings.TrimPrefix(tail, "ORDER BY (SELECT NULL) ")
-	}
-	args = append(args, tailArgs...)
-
-	query := "SELECT * FROM " + rel + where + order + " " + tail
-	return RunQuery(ctx, db, query, opts.Limit, args...)
+	return &selection{query: "SELECT * FROM " + rel + where + order, args: args, ordered: order != ""}, nil
 }
 
 // BrowseTable is the unfiltered, unsorted form, kept because most callers want

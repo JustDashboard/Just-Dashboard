@@ -1,140 +1,177 @@
 "use client"
 
-import { DesktopDevice } from "@/components/icons"
+import { DesktopDevice, Terminal } from "@/components/icons"
 import { del, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { calendarDate, relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
+import { describeClient, parseAgent } from "@/lib/clients"
 import type { SessionInfo } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { rowReveal } from "@/components/icon-action"
-import { Panel, PanelBody } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { Tag } from "@/components/tag"
+import { DimActions } from "@/components/icon-action"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ClientMark, NetworkFact } from "@/components/client-mark"
+import { Row, RowList } from "@/components/row-list"
+import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { cn } from "@/lib/utils"
-
-/**
- * A user agent as a person would say it: "Chrome on macOS", "curl". The raw
- * string is kept as the cell's title for the one time it matters, but a table
- * of sessions is read to answer "is that my phone or somebody else", and a
- * 120-character token string does not answer it.
- */
-export function describeClient(ua: string) {
-  const browser = /Edg\//.test(ua)
-    ? "Edge"
-    : /OPR\//.test(ua)
-      ? "Opera"
-      : /Firefox\//.test(ua)
-        ? "Firefox"
-        : /Chrome\//.test(ua)
-          ? "Chrome"
-          : /Safari\//.test(ua)
-            ? "Safari"
-            : /curl\//.test(ua)
-              ? "curl"
-              : ua.split(/[\s/]/)[0] || "Unknown client"
-  const os = /Windows/.test(ua)
-    ? "Windows"
-    : /iPhone|iPad/.test(ua)
-      ? "iOS"
-      : /Android/.test(ua)
-        ? "Android"
-        : /Mac OS X|Macintosh/.test(ua)
-          ? "macOS"
-          : /Linux/.test(ua)
-            ? "Linux"
-            : ""
-  return os ? `${browser} on ${os}` : browser
-}
 
 export function useSessions() {
   return usePoll((signal) => get<SessionInfo[]>("/account/sessions", undefined, signal), 20000)
 }
 
-export function SessionsTable({ sessions }: { sessions: ReturnType<typeof useSessions> }) {
-  const { data, error, loading, refresh } = sessions
-  if (loading && !data) return <LoadingPanel />
-  if (error) return <ErrorState error={error} />
+/**
+ * How recently a session has to have been seen to be "active now". The
+ * server moves `lastSeenAt` at most every thirty seconds, and an open tab
+ * polls well inside that, so two minutes is a tab that is open rather than
+ * one that was.
+ */
+const ACTIVE_MS = 2 * 60_000
+
+function activeNow(session: SessionInfo) {
+  return Date.now() - new Date(session.lastSeenAt).getTime() < ACTIVE_MS
+}
+
+function factorLabel(session: SessionInfo) {
+  return session.twoFactorPassed ? "password and code" : "password only"
+}
+
+/**
+ * The session this page is being read through, as one identity line: the
+ * shape the Overview gives the machine and the profile gives the account.
+ * It is the one row that cannot be signed out from here, and the one the
+ * reader compares every other row against.
+ */
+export function CurrentSession({ session }: { session: SessionInfo }) {
+  const agent = parseAgent(session.userAgent)
+  return (
+    <HostIdentity
+      mark={agent.product ?? agent.osProduct}
+      fallback={agent.device === "program" ? Terminal : DesktopDevice}
+      title={<span title={session.userAgent}>{agent.client}</span>}
+      facts={
+        <>
+          {agent.os && (
+            <>
+              <HostFact product={agent.osProduct}>{agent.os}</HostFact>
+              <FactDot />
+            </>
+          )}
+          <NetworkFact ip={session.ip} />
+          <FactDot />
+          <span>signed in {relativeTime(session.createdAt)}</span>
+          <FactDot />
+          <span>{factorLabel(session)}</span>
+          <FactDot />
+          <span>expires {relativeTime(session.expiresAt)}</span>
+        </>
+      }
+      aside={<Status tone="running" label="this device" />}
+    />
+  )
+}
+
+/**
+ * Every session but this one, most recently seen first. A reading, not a
+ * destination — a session has no page of its own — so these are rows with a
+ * hairline between them rather than cards with an edge (§16), each drawn as
+ * the browser and system that hold it.
+ */
+export function OtherSessions({ sessions }: { sessions: ReturnType<typeof useSessions> }) {
+  const { data, refresh } = sessions
+  const others = (data ?? [])
+    .filter((s) => !s.current)
+    .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
 
   return (
     <Panel plain>
+      <PanelHeader
+        title="Other sessions"
+        actions={
+          <span className="flex items-center gap-3">
+            <span className="numeric text-hint text-muted-foreground">
+              {plural(others.length, "session")}
+            </span>
+            <SignOutOthersButton sessions={sessions} />
+          </span>
+        }
+      />
       <PanelBody flush>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-full">Device</TableHead>
-              <TableHead>Address</TableHead>
-              <TableHead>Signed in</TableHead>
-              <TableHead>Last seen</TableHead>
-              <TableHead className="w-px" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data?.map((session) => (
-              <TableRow key={session.id} className="group">
-                <TableCell>
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-body font-medium" title={session.userAgent}>
-                      {describeClient(session.userAgent)}
+        {others.length === 0 ? (
+          <EmptyNote className="py-4">Signed in nowhere else.</EmptyNote>
+        ) : (
+          <RowList className="animate-rise">
+            {others.map((session) => (
+              <Row
+                key={session.id}
+                className="group"
+                leading={<ClientMark userAgent={session.userAgent} />}
+                title={<span title={session.userAgent}>{describeClient(session.userAgent)}</span>}
+                subtitle={
+                  <span className="inline-flex max-w-full min-w-0 items-center gap-2">
+                    <NetworkFact ip={session.ip} />
+                    <FactDot />
+                    <span className="shrink-0">signed in {relativeTime(session.createdAt)}</span>
+                    <span className="hidden shrink-0 items-center gap-2 md:inline-flex">
+                      <FactDot />
+                      {factorLabel(session)}
                     </span>
-                    {session.current && <Tag tone="success">this device</Tag>}
                   </span>
-                </TableCell>
-                <TableCell className="font-mono">{session.ip}</TableCell>
-                <TableCell className="text-muted-foreground">{calendarDate(session.createdAt)}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {relativeTime(session.lastSeenAt)}
-                </TableCell>
-                <TableCell>
-                  {!session.current && (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      className={cn("text-destructive", rowReveal())}
-                      onClick={async () => {
-                        try {
-                          await del(`/account/sessions/${session.id}`)
-                          notify.success("Session signed out")
-                          refresh()
-                        } catch (err) {
-                          notify.error("Could not sign that session out", err)
-                        }
-                      }}
-                    >
-                      Sign out
-                    </Button>
-                  )}
-                </TableCell>
-              </TableRow>
+                }
+                trailing={
+                  activeNow(session) ? (
+                    <Status tone="running" label="active now" />
+                  ) : (
+                    <span className="hidden text-xs text-muted-foreground sm:inline">
+                      seen {relativeTime(session.lastSeenAt)}
+                    </span>
+                  )
+                }
+              >
+                <DimActions>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="text-destructive"
+                    aria-label={`Sign out ${describeClient(session.userAgent)} from ${session.ip}`}
+                    onClick={async () => {
+                      try {
+                        await del(`/account/sessions/${session.id}`)
+                        notify.success("Session signed out")
+                        refresh()
+                      } catch (err) {
+                        notify.error("Could not sign that session out", err)
+                      }
+                    }}
+                  >
+                    Sign out
+                  </Button>
+                </DimActions>
+              </Row>
             ))}
-            {data?.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} className="p-0">
-                  <EmptyState icon={DesktopDevice} title="No sessions" />
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+          </RowList>
+        )}
       </PanelBody>
     </Panel>
   )
 }
 
-/** The header's one command: everywhere but here. */
-export function SignOutOthersButton({
-  sessions,
-}: {
-  sessions: ReturnType<typeof useSessions>
-}) {
+/** The sessions page's body: this device, then everywhere else. */
+export function SessionsView({ sessions }: { sessions: ReturnType<typeof useSessions> }) {
+  const { data, error, loading, refresh } = sessions
+  if (loading && !data) return <LoadingRows rows={4} />
+  if (error && !data) return <ErrorState error={error} onRetry={refresh} />
+  const current = data?.find((s) => s.current)
+  return (
+    <>
+      {current && <CurrentSession session={current} />}
+      <OtherSessions sessions={sessions} />
+    </>
+  )
+}
+
+/** The other sessions list's command: everywhere but here. */
+export function SignOutOthersButton({ sessions }: { sessions: ReturnType<typeof useSessions> }) {
   const others = (sessions.data ?? []).filter((s) => !s.current).length
   return (
     <Button
@@ -145,7 +182,9 @@ export function SignOutOthersButton({
         try {
           const res = await post<{ revoked: number }>("/account/sessions/revoke-others")
           notify.success(
-            res.revoked === 1 ? "1 other session signed out" : `${res.revoked} other sessions signed out`,
+            res.revoked === 1
+              ? "1 other session signed out"
+              : `${res.revoked} other sessions signed out`,
           )
           sessions.refresh()
         } catch (err) {

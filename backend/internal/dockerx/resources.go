@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
 )
@@ -48,14 +48,13 @@ func (c *Client) CreateVolume(ctx context.Context, spec VolumeSpec) (*Volume, er
 	if driver == "" {
 		driver = "local"
 	}
+	defer c.forgetDiskUsage()
 	v, err := cli.VolumeCreate(ctx, volume.CreateOptions{
 		Name: name, Driver: driver, Labels: spec.Labels, DriverOpts: spec.Options,
 	})
 	if err != nil {
 		return nil, err
 	}
-	// The disk-usage cache now describes a world without this volume in it.
-	c.invalidateDiskUsage()
 	return &Volume{
 		Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 		CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: 0,
@@ -139,7 +138,7 @@ func (c *Client) VolumeDetail(ctx context.Context, name string) (*VolumeDetail, 
 // already carries the mounts, and a host with sixty containers would otherwise
 // spend sixty round trips on the socket every time the volumes tab polls.
 func (c *Client) volumeUsers(ctx context.Context) (map[string][]VolumeUser, error) {
-	list, err := c.ListContainers(ctx, true)
+	list, err := c.listContainerSummaries(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +315,7 @@ func (c *Client) NetworkDetail(ctx context.Context, id string) (*NetworkDetail, 
 	// Aliases and state are not in the network inspect, only in the
 	// container's — which is why this joins rather than reads one endpoint.
 	state := map[string]Container{}
-	if list, err := c.ListContainers(ctx, true); err == nil {
+	if list, err := c.listContainerSummaries(ctx, container.ListOptions{All: true}); err == nil {
 		for _, ct := range list {
 			state[ct.ID] = ct
 		}
@@ -379,15 +378,6 @@ func (c *Client) DisconnectNetwork(ctx context.Context, networkID, containerID s
 // it applies to, rather than only as part of "prune everything".
 func (c *Client) PruneNetworks(ctx context.Context) (PruneReport, error) {
 	return c.pruneNetworks(ctx)
-}
-
-// invalidateDiskUsage drops the cached walk after an operation that changed
-// what is on disk, so the figure the operator sees next is not the one from
-// before they acted.
-func (c *Client) invalidateDiskUsage() {
-	c.duMu.Lock()
-	c.duVal, c.duAt = nil, time.Time{}
-	c.duMu.Unlock()
 }
 
 // validResourceName matches what the Engine accepts for volumes and networks:

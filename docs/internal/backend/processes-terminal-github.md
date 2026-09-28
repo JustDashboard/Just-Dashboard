@@ -12,6 +12,9 @@ a failed detection.
 - Process disk counters are cumulative in `/proc`, so `Table` keeps one small, mutex-protected previous
   sample per PID and returns rates. The create timestamp participates in the identity because Linux reuses
   PIDs; a replacement starts at zero rather than inheriting the old process's apparent I/O spike.
+- Concurrent inventory readers share a scan already in progress. Each receives its own row slice for
+  sorting and PM2 enrichment, and canceling one reader does not cancel the others. The last reader's
+  departure cancels collection; completed scans are not cached, so the next refresh starts fresh.
 - Search, user/state/manager filters and sorting all run **before** the response limit. The response says
   matched, available and truncated separately and carries facets from the complete snapshot — cutting
   first made the old promise that filtering could reach the rest of the table false. That richer response
@@ -34,7 +37,17 @@ a failed detection.
   SIGTERM, SIGKILL, SIGSTOP/SIGCONT and SIGHUP as words with a sentence each. PM2 can gracefully reload and
   `pm2 save` persists the current list for an existing startup hook; it does not install or rewrite that
   platform-specific hook. The systemd sheet reads effective runtime properties beside the journal and
-  links to the unit file; static units do not get an enable/disable control they cannot use.
+  links to the unit file; static units do not get an enable/disable control they cannot use. Its
+  journal is the unit's `journal:<unit>` source on the `/logs` routes, read through the unit's lens
+  with the manager's own lines through the `systemd` lens, and its **Runs** view
+  (`lib/unit-runs.ts`) is one `/logs/search` over a week of that journal asking for the manager's lines
+  alone (`lens=systemd`, `f=program:systemd` and the lifecycle events), grouped by `invocation` —
+  a run's start only from `starting` or `started`, lines the browser still drops when another unit or
+  another program wrote them (a user manager's journal holds every user unit's), a crash loop at three
+  scheduled restarts in ten minutes. systemd-coredump's report is left out: it carries its own unit and
+  invocation and would read as a run, and the manager's `code=dumped` exit already says the run
+  dumped core. sshd's unit is refused to anyone but `system.admin` by the log routes (see
+  [Logs](docker-files-logs.md#logs)), and the sheet says so rather than opening a socket.
 - `GET /pm2/` also carries `daemons`: per account, when `~/.pm2/dump.pm2` was last written and whether a
   `pm2-<user>.service` boot hook exists (a stat under the host's `/etc` and `/lib`); the page states
   both, because a daemon with three online applications and no saved list restores nothing. The
@@ -55,12 +68,29 @@ a failed detection.
   then uses `setpriv` to switch UID/GID and supplementary groups before loading the account's PM2
   executable. No dashboard environment is inherited, privilege escalation is disabled, and command
   output is bounded. The host must provide `/usr/bin/setpriv`; failure never falls back to root.
-- Each PM2 row carries trusted `daemonId` (the Linux username) and numeric `id`. Controls and logs pass
+- Each PM2 row carries trusted `daemonId` (the Linux username) and numeric `id`. Controls pass
   `?user=<daemonId>&id=<id>`; ambiguous name-only calls are refused. Controls refresh the process list,
   verify the name/account/id tuple, and invoke PM2 with the numeric id. `pm2 save` visits each account.
+  A process's logs are the unified source `pm2:<daemon>/<id>/<name>` (account and name path-escaped) on
+  the `/logs` routes, read through the `pm2` lens behind PM2's own timestamp prefix. `PM2Process.logTimes`
+  says whether PM2 stamps each line (`--time` or `log_date_format`): without it a line carries only
+  whatever time the application printed, so the sheet offers its "around the last start" window only
+  when it is true.
 - PM2 log filenames cannot grant access outside `JD_LOG_ROOTS`. An administrator must explicitly
   configure custom log directories; the source list and stream errors explain this requirement. Unified
   log source ids carry account, numeric id and name, while unique legacy name-only ids remain accepted.
+- **The per-feature log routes are gone.** `GET /systemd/{name}/journal`, `/systemd/{name}/journal/stream`
+  and `/pm2/{name}/logs/stream` had no caller once the sheets embedded the service logs, and they read
+  a unit's journal and a process's files around what the `/logs` routes decide — the auth-data gate
+  among it. `procs.JournalCommand`, their tail form, went with them; `JournalCommandOpts` builds every
+  journalctl run, with `Identifiers` (`-t`, repeated) for a `journal-id:` source, `Kernel` for `-k` and
+  `Reverse` for a search that must reach the newest end first.
+- **`ParseJournalLine` reads what the manager recorded about a unit**, not only who wrote the line. The
+  manager's "Started …" and "Failed with result 'exit-code'" come from PID 1 (`_SYSTEMD_UNIT` is
+  `init.scope`), so it keeps `UNIT`/`USER_UNIT`, `_COMM`, `MESSAGE_ID`, `UNIT_RESULT`, `EXIT_CODE`,
+  `EXIT_STATUS` and the cursor, and takes the invocation of the unit a manager line names
+  (`INVOCATION_ID`, then `USER_INVOCATION_ID`) over the writer's own: a user manager is
+  `user@1000.service`, one run, under which every run of every user unit would otherwise fold into one.
 - systemd grew `reset-failed` (`service.control`) and `POST /systemd/daemon-reload` (`system.admin`),
   and `GET /systemd/timers` joins `list-timers --all` (schedule) with `list-units --type=timer` (state)
   and `list-unit-files --type=timer` (startup) on the unit name. `next` and `last` are read as
@@ -76,15 +106,20 @@ a failed detection.
   browser's clock; the page says so. There is no "run now" for a cron line: a crontab command is a
   shell string, and running it would mean a request-built `sh -c`, which invariant 4 forbids. Writes use
   stdin (`crontab -u <user> -`), so a container-only temporary file or spool cannot receive a host job.
+  What cron ran is read from its own log on the Scheduled page, through the `cron` lens: the daemon's
+  unit journal (`cron`, `crond` or `cronie`), else a cron file, else the journal's `CRON`/`crond` lines
+  (`journal-id:`), chosen from `GET /logs/sources` and asked again when that read fails; a timer's row
+  opens the activated service's runs.
 
 ## The terminal
 
 `internal/term` runs direct PTYs. Three properties are load-bearing:
 
-**Every window is a direct PTY.** There is no persistent-session choice and no pane/split layer. A
-dashboard session is an in-memory workspace grouping independent PTYs as windows; each window therefore
-keeps native terminal capability negotiation and ends with the dashboard process. Closing a session ends
-all of its windows, while closing one window leaves its siblings running.
+**Every window is a direct PTY.** There is no multiplexer and no pane/split layer. A dashboard session
+is a workspace grouping independent PTYs as windows; each window therefore keeps native terminal
+capability negotiation. Where the host allows it, each PTY is held on the host rather than by this
+process, so it outlives the dashboard (below). Closing a session ends all of its windows, while closing
+one window leaves its siblings running.
 
 **`su -l` cannot open a shell in a chosen directory**, because login *is* chdir-to-home; tmux's `-c` is
 not enough, since su walks straight back out. `loginArgv(shell, keepCWD)` moves the chdir off su onto the
@@ -102,9 +137,11 @@ was looking at, falling back to the workspace's first window and then home; beca
 validated, a stale directory can only send the new window home, never kill it.
 
 **Session organisation is intentionally lightweight.** `GET /terminal/` groups live `Session` values by
-`WorkspaceID`; naming, folder membership and pinning are copied across the workspace's windows in memory.
-Folders remain the dashboard's ordered record (`handlers_terminal_folders.go`, settings key
-`terminal.folders`), while membership stays on each workspace. There is no session/window colour model.
+`WorkspaceID`; naming, folder membership and pinning are copied across the workspace's windows in memory
+(and to each window's holder). Folders remain the dashboard's ordered record (`handlers_terminal_folders.go`,
+settings key `terminal.folders`), while membership stays on each workspace. The terminal page no longer
+offers folders, renaming or pinning — a session is opened and closed — but the routes remain. There is
+no session/window colour model.
 Renaming a folder moves every matching workspace in one request. Window routes use opaque PTY ids and
 support create, rename, reorder and close. Selecting a window is client state, remembered per browser:
 the page keeps each visited window's emulator and socket alive while hidden, preserving the complete
@@ -114,6 +151,43 @@ A new browser attachment still receives only the bounded best-effort history, no
 snapshot. Unnamed sessions and windows are "Terminal", numbered from 2 when that is taken (`freeName`);
 `SessionMeta.Named` and the window's `named` record whether the operator chose the name, because a chosen
 name is shown as given while a default gives way to what the window is doing.
+
+### Sessions outlive the dashboard
+
+A PTY ends when the last descriptor on its master closes, and the dashboard used to hold every one: each
+restart — an upgrade, a settings change, a rebuild, a crash — closed them all, and the kernel's hangup
+killed the shell and whatever ran in it, an agent included. The shells were never inside the container
+(su hands each to logind, which gives it a session scope of its own); the descriptor was the whole
+problem. So `internal/ptyhold` holds it instead. `term.HoldSessions` (called by module setup after
+`SetupShell`) copies `jd-terminal-holder` from beside the dashboard binary into `<JD_DATA_DIR>/terminal/`
+(root-only, 0700; an identical copy is left alone, because every running holder pins the file it was
+started from), checks the host can run it there, and from then on `Create` starts each window as
+`systemd-run --unit jd-terminal-<id> --collect --property KillMode=process -- <holder> <socket>` through
+`hostexec`. The holder listens on `<id>.sock`, receives the login argv, directory, size and environment
+over the socket (never on its command line, which any host account can read), starts the shell on a PTY,
+and answers with the master itself over `SCM_RIGHTS`. Input, resizes and `TIOCGPGRP` therefore go
+straight to the kernel as before; only output passes through the holder, which is the one reader, keeps
+reading while nobody is attached (so a program never blocks on a full terminal) and keeps the last
+128 KiB. The environment is built, not inherited — `PATH`, the account's identity, `LANG` and the
+terminal variables — so the dashboard's own environment, secrets included, never reaches a held shell.
+
+The holder also keeps an opaque record for the dashboard (`heldMeta`: workspace, window name and order,
+title, owner, shell, account, created). At boot `adopt` attaches to every socket in the directory,
+restores each window from its record, seeds the scrollback with what the holder kept — read as part of
+the handshake, so the first browser to attach already gets it — and resumes reading; a socket nobody
+answers (a holder killed outright, a host reboot) is removed. `Shutdown` only lets go. Closing a window
+sends a hangup and drops the dashboard's copy of the master, the holder closes its own and the kernel
+hangs the terminal up; a shell still there after three seconds is killed, then the holder tells the
+dashboard and exits, and the unit is collected. `KillMode=process` makes the unit ending the holder
+ending: anything the operator deliberately left running (`nohup`, `disown`) survives as it would an ssh
+session closing. Held sessions are never reaped for idleness — they exist so work can run with nobody
+watching. Protocol: SOCK_SEQPACKET, one packet per message whose first byte is its kind, versioned by
+`ptyhold.Version`, which a newer dashboard must keep speaking to the holders already running.
+
+Where holding is impossible — not root, a host without systemd, a data directory the host does not see at
+the same path, a path too long for a socket — `HoldSessions` says why in the log and the terminal works as
+before, each PTY in this process and ending with it; the listing's `persistent` is then false and the
+page says so. A server that reboots ends every session either way.
 
 **What a window is doing is read off the PTY, not asked of the shell** (`activity.go`). Two facts, both
 available without touching the account's shell configuration. The title is parsed out of the byte stream
@@ -137,14 +211,19 @@ title, and what was last published stands until the shell is back.
 Holding the terminal is not working, and the difference is what the marks are for. A job is announced
 (`busy`) only once it has lasted a second (`holdOff`): `ls` holds the terminal for milliseconds, and a
 tab that switched its name for every one of those would flicker all day. `working` is true only while
-something is actually happening — output has been arriving for a second (`sustain`) and the last of it
-is less than 2.5 s old (`quietAfter`), or the job is using at least 5% of a core over a tick (its leader,
-its reaped children and its live descendants, from `/proc/<pid>/stat`). Output within 150 ms of a
+something is actually happening — output has kept arriving for a second (`sustain`), with no pause in
+it longer than a second (`runGap`) until it counts, and the last of it is less than 2.5 s old
+(`quietAfter`); or the job has used at least 5% of a core over two ticks running (its leader, its reaped
+children and its live descendants, from `/proc/<pid>/stat`). The run is measured from its first output
+to its last, not to now: measured to now, a single redraw from an agent at its prompt — on a focus
+change or a resize — counted as a second and a half of work, and one reading over the threshold (a
+garbage collection, a status-line script) as a tick of it, so an idle Claude Code flickered between
+idle and working all day. Output within 150 ms of a
 keystroke (`echoWindow`) is its echo, or an editor redrawing its input line, and does not count. An
 editor or an agent waiting at its prompt is therefore busy and not working; an agent streaming an
 answer, a build or a test run is working, and a compiler that prints nothing is caught by its CPU.
-`finishedAt` stamps the end of a stretch of work and is kept until work starts again; the browser
-decides how long to show it. The read loop observes at most every 100 ms during output and once more
+`finishedAt` stamps the end of a stretch of work and is kept until work starts again; the terminal page
+no longer draws it. The read loop observes at most every 100 ms during output and once more
 350 ms after it stops, because the echo of the Enter that starts a command arrives before the shell has
 handed over the terminal; while a job is in the foreground, or output has just gone quiet, a 500 ms tick
 keeps looking, so a silent job's CPU and the end of a run are noticed without output; the listing and
@@ -173,15 +252,36 @@ Startup-timeout failures include bounded PTY output to distinguish launch failur
 ## GitHub sign-in
 
 `internal/ghx` exists because the honest answer to "why did my push ask for a password" used to be an ssh
-session.
+session. It has since grown into the GitHub half of the git page — sign-in, pull requests listed, viewed,
+reviewed, merged and checked out, check runs, issues, comments and Actions logs — and the reader the
+deploy pages use for the repository a project deploys.
 
 - **Everything is per repository.** gh stores its token under the home of whichever account runs it and
   writes a credential helper into that account's git config; gitx already runs git as the account that
   *owns the checkout* (`hostexec.AsOwner`), so ghx runs gh the same way. Sign in as root, push as
-  `deploy`, and the push is anonymous again. Every route takes `?path=`.
+  `deploy`, and the push is anonymous again. The routes about a checkout take `?path=`, and it is not
+  decoration: it names whose credential answers. `/repos`, `/branches` and `/avatar` take none, and the
+  sign-in routes accept an empty one, which means the dashboard's own account — the one every root-owned
+  checkout uses. **Where the answer decides what this server builds, the checkout is not consulted.**
+  The deploy pages' reads (`api.pullRequests`) and the preview reconciler go to the GitHub App's
+  installation where the App is installed on the repository, else to the dashboard's own login (`dir ""`),
+  never to a checkout matched by remote: a host account owning a checkout under `JD_GIT_ROOTS` would
+  otherwise supply the head commit the dashboard builds and runs. The Git page keeps reading as the
+  checkout's owner for display and for that owner's own actions; its merge, once it succeeds, reconciles
+  the repository's previews through the trusted identity (`reconcileCheckoutMerge`) and drops the deploy
+  pages' caches, and signing the dashboard's own account in or out (`/auth/device/{id}`, `/auth/token`,
+  `/auth/logout` with no path) drops their cached "not signed in" answer (`ForgetLogin`).
 - **gh is in the image, not borrowed from the host** — the host's copy runs as the host's root in the
   host's namespaces, and the account that pushes would see neither token nor helper. From this image both
-  land in the same account's home, bind-mounted, so ssh finds the same credential.
+  land in the same account's home, bind-mounted. `gh auth setup-git` writes the helper as its own
+  absolute path (`/usr/bin/gh`, the image's copy), which the Terminal page and ssh — both host shells —
+  cannot run, so `setupGit` rewrites it to `!gh auth git-credential` and each side runs the gh on its
+  own PATH against the same token. gh's blank entry in front of it stays, so a generic helper such as
+  `store` never answers for GitHub first. A helper still pinned to a path reads as not configured, which
+  is what offers "Use this account for git" once to installs signed in before the rewrite. The host's gh
+  comes from `install.sh` (`jd_install_host_tools`, GitHub's own repository on Debian and Ubuntu), at
+  `/usr/bin/gh`, which is on every PATH, interactive or not. An install upgraded without re-running the
+  installer and with no gh of its own cannot push over HTTPS from a shell; the Git page is unaffected.
 - **The login is the CLI's own device flow, performed here.** `gh auth login` is a series of prompts and a
   web request has nobody to answer one, so `device.go` runs the OAuth device flow against the GitHub
   CLI's public client id — which is what makes the token indistinguishable from one gh minted, and what
@@ -189,20 +289,71 @@ session.
   device code stays server-side and the token never reaches the browser; the page holds an opaque flow id.
   The polling interval is enforced from the flow's own clock, because GitHub's remedy for polling too fast
   is to slow the whole flow. `LoginWithToken` is three steps that are one operation (store, `gh auth
-  setup-git`, write a committer identity if missing) — any two without the third is a state nobody can
+  setup-git` and its rewrite, write a committer identity if missing) — any two without the third is a state nobody can
   see: a token with no helper pushes anonymously, a helper with no identity fails at the commit.
+- **An account's picture is read here, not by the browser.** `GET /git/github/avatar?account=` reads
+  a GitHub account's picture on the page's behalf, for the same reason `/deploy/{id}/favicon` reads a
+  deployed site's icon: the dashboard document's policy is `img-src 'self' data: blob:`, so
+  every GitHub avatar the product drew — the Git tab's two identity rows, the App card's
+  installations, the git tools' account button — was blocked before it was fetched and fell back to
+  initials. Widening the policy would instead have the operator's browser announce each view of those
+  pages to GitHub. Since the 2026-09-24 deployment pass `ForgeFace` (`git/marks.tsx`) draws through it
+  as well: a pull request's author on a preview approval — a login read from the provider's webhook
+  payload, not one of the operator's own accounts — and the repository owners on `/deploy/new`. The
+  login rule and the fixed address below are what make a login from a payload safe to ask about, and
+  any forge but GitHub is drawn as initials without a request. The address is fixed (`github.com/<login>.png`, which needs no token) and the login
+  is matched against GitHub's own rule for one before it is built, so nothing the browser sends
+  chooses a host; redirects are followed only within github.com and githubusercontent.com over HTTPS,
+  three at most. It reads at most 512 KB within five seconds, accepts only an image, and remembers
+  each account for an hour (an absence for ten minutes) in a map bounded at 32 entries. The picture is
+  served with `nosniff`, a sandboxing CSP and private caching; `404 avatar_unavailable` means the page
+  keeps the initials. A host with no route to GitHub loses the pictures and nothing else.
 - **`gh auth status` is parsed, because it has no `--json` and never will.** It is written for a person,
   so the wording is the contract; `parseAuthStatus` matches both wordings gh has shipped and `ghx_test.go`
   pins them. Every field is optional, so a rewording costs a scope list rather than the page.
-- **Pull requests are the one thing git has no verb for.** `CreatePull` shells to `gh pr create` and the
+- **Pull requests are the thing git has no verb for.** `CreatePull` shells to `gh pr create` and the
   handler pushes the branch first, since gh refuses an unseen branch and its remedy is an interactive
   prompt. That is also why `gitx.Push` sets the upstream itself rather than repeating git's advice.
   `ListPulls` takes a state (open, closed, merged, all) and folds each request's review decision and
   status-check rollup into one word each — one failing check outranks any number of passes, one pending
-  outranks passes — so the row can say "checks failed" without a second call; `ViewPull` adds what
-  GitHub computes lazily (mergeable, additions, deletions, changed files, body). `MergePull` runs
-  `gh pr merge` with merge, squash or rebase and an optional `--delete-branch`; `CheckoutPull` runs
-  `gh pr checkout`; `ListRuns` reads `gh run list` for a branch. Merging and checking out sit under
-  `service.control` like every other recoverable git write, and each is audited with the request number.
+  outranks passes — so the row can say "checks failed" without a second call; it also carries the head
+  commit (`headSha`), the head repository and whether it is a fork (`isCrossRepository`), labels,
+  `updatedAt` and `merged`. `ViewPull` adds what GitHub computes lazily (mergeable, additions, deletions,
+  changed files, body). `MergePull` runs `gh pr merge` with merge, squash or rebase, an optional
+  `--delete-branch` and, when the request carries `headSha`, `--match-head-commit <sha>`, so a push that
+  lands between reading and merging is refused by GitHub rather than merged unseen; `CheckoutPull` runs
+  `gh pr checkout`; `ListRuns` reads `gh run list` for a branch. The `…In` variants — `ListPullsIn`,
+  `ViewPullIn`, `MergePullIn` — address a repository by name with `--repo owner/name` instead of a
+  checkout, with `dir ""` running as the dashboard's own account, and refuse an unknown state rather
+  than reading it as open; they are what the deploy pages and the reconciler use. `PullChecks` reads a
+  commit's check runs and its combined status (`gh api repos/o/r/commits/<sha>/check-runs` and
+  `…/status`, a hundred each) and folds both into one list in the check run's vocabulary — a status
+  context becomes `completed/success`, `completed/failure` or `in_progress/pending`, a third-party
+  `details_url` is kept only when it is http(s) — and refuses a malformed sha or repository before gh
+  runs. `ListIssues` runs `gh issue list --repo --state --limit --json`; `CommentIssue` posts
+  `{"body"}` on gh's stdin to `gh api repos/o/r/issues/<n>/comments --method POST --input -`, which takes
+  a pull request's number as readily as an issue's, so a body is never an argument. On the page:
+  `GET /pulls/{number}/checks?path=&head=` (the full head sha is required, so a listing's checks never
+  describe an older commit), `GET /issues?path=&state=&limit=` (open by default) and, under
+  `service.control`, `POST /pulls/{number}/comment?path=` (`{body}`, trimmed, at most 60000 bytes,
+  audited `github.pull.comment` with the number and never the text). Merging, checking out and
+  commenting sit under `service.control` like every other recoverable git write, and each is audited
+  with the request number. The list page reads `GET /git/pull-requests` once a minute: every checkout
+  under the roots that is on github.com, each read as its owner, at most four gh at a time inside a
+  20-second budget and cached 60 s per path, with the previews the deploy projects built from each
+  request joined in — the Git page can then say where a request's preview stands without knowing
+  anything about deploy projects itself.
   `gitConfigured` answers "would a commit and push from this page be this account's" with one dot, and
   knows an **ssh** remote never consults a credential helper.
+- **Reviews stay on the viewed revision.** `/pulls/{number}/files` pages through changed-file patches,
+  checking the head before and after each read. Missing binary/large patches and GitHub's 3,000-file
+  ceiling are explicit. `/conversation` combines issue comments, review summaries and inline comments
+  in pages. `/review` requires `service.control`, a closed review event, and the viewed head SHA; the
+  server verifies that head and sends `commit_id` through `gh api --input -`. Comment text is never an
+  argument or audit field. Enterprise API calls derive their hostname from the authenticated repo URL.
+- **Runs open inside the preview.** `/runs/{id}` returns jobs and steps; `/runs/{id}/log` verifies the
+  selected job/step belongs to that run and reads normal or failed logs through `gh run view`. Step
+  selection uses gh's tab-separated step labels. Missing labels, unavailable/expired logs and responses
+  over 8 MiB produce an explanation and retain the link to GitHub. All gh output is capped at 8 MiB.
+- **GitLab and Gitea** use the separate `forgex` REST adapter and encrypted per-checkout account setup,
+  described in [`git-workspace-expansion.md`](git-workspace-expansion.md#provider-accounts).

@@ -15,7 +15,7 @@ export type ToolPrefill = { target?: string; record?: string }
  *
  * A hook instance per block is what makes the tools independent — no shared
  * target, no shared busy flag, and one block's slow traceroute never blocks
- * another's quick DNS lookup. A prefill seeds the inputs once, on mount: the
+ * another's quick DNS lookup. A new deep link replaces only that tool's inputs:
  * Connections, Logins and Intrusion pages send an address here with the tool
  * already chosen, and the run itself is still a press — a probe is traffic
  * this server sends to an address, and arriving on a page should not send any.
@@ -32,6 +32,22 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ProbeResult | null>(null)
   const [past, setPast] = useState<ProbeResult[]>([])
+
+  // A link can choose a different target without leaving the workbench. Keep
+  // the hook mounted so other drafts, results and in-flight requests survive.
+  const seed = prefill ? JSON.stringify(prefill) : ""
+  const [previousSeed, setPreviousSeed] = useState(seed)
+  if (seed !== previousSeed) {
+    setPreviousSeed(seed)
+    if (prefill) {
+      setTarget(prefill.target ?? "")
+      setRecord(
+        prefill.record && def.recordOptions?.includes(prefill.record)
+          ? prefill.record
+          : (def.recordOptions?.[0] ?? ""),
+      )
+    }
+  }
 
   const canRun = !def.needsTarget || target.trim().length > 0
 

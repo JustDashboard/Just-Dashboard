@@ -1,0 +1,5 @@
+baseURL = "https://user.github.io/repo/"
+title = "Hugo fixture"
+disableKinds = ["taxonomy", "term", "RSS"]
+[security.funcs]
+getenv = ['^HUGO_', '^PUBLIC_API_URL$']

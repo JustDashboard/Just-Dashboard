@@ -87,7 +87,7 @@ func TestLiveC4ArtifactAdapters(t *testing.T) {
 			t.Fatal(err)
 		}
 		result, err := builder.Build(context.Background(), t.TempDir(), "unused", BuildPlanConfig{Method: BuildImage},
-			PreparedBuild{Method: BuildImage}, nil, "", SourceIdentity{
+			PreparedBuild{Method: BuildImage}, nil, nil, "", SourceIdentity{
 				Kind: SourceImage, Repository: resolved.Reference, Digest: resolved.Digest,
 			}, nil, nil)
 		if err != nil {
@@ -116,7 +116,7 @@ func TestLiveC4ArtifactAdapters(t *testing.T) {
 			t.Fatal(err)
 		}
 		result, err := builder.Build(context.Background(), root, tag, BuildPlanConfig{Method: BuildCompose},
-			prepared, nil, "", SourceIdentity{Kind: SourceCompose}, &analysis, nil)
+			prepared, nil, nil, "", SourceIdentity{Kind: SourceCompose}, &analysis, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -155,7 +155,7 @@ func TestLiveC4ArtifactAdapters(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := builder.Build(context.Background(), root, failedTag, BuildPlanConfig{Method: BuildDockerfile},
-			prepared, nil, "", SourceIdentity{}, nil, nil); err == nil {
+			prepared, nil, nil, "", SourceIdentity{}, nil, nil); err == nil {
 			t.Fatal("deliberately failing build succeeded")
 		}
 		after, err := liveDockerOutput(context.Background(), "inspect", "--format", "{{.Id}}|{{.State.Running}}|{{.Image}}", name)
@@ -204,7 +204,13 @@ func livePrepareAndBuild(
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := builder.Build(context.Background(), root, tag, config, prepared, variables, "", SourceIdentity{}, compose, emit)
+	// Every value a live build is given is treated as secret, as the
+	// strictest redaction the executor applies.
+	secret := map[string]bool{}
+	for name := range variables {
+		secret[name] = true
+	}
+	result, err := builder.Build(context.Background(), root, tag, config, prepared, variables, secret, "", SourceIdentity{}, compose, emit)
 	if err != nil {
 		t.Fatal(err)
 	}

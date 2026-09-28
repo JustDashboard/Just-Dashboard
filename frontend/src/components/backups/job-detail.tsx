@@ -1,19 +1,45 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { CloudDownload, Database, Download, Eye, FolderOpen, ShieldCheck } from "@/components/icons"
+import Link from "next/link"
+import { useParams, useRouter } from "next/navigation"
+import { useSessionState } from "@/lib/view-state"
+import {
+  ArrowLeft,
+  CloudDownload,
+  Database,
+  Download,
+  Eye,
+  FolderOpen,
+  ShieldCheck,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { downloadUrl, get, post } from "@/lib/api"
 import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
-import type { BackupArchiveEntry, BackupJob, BackupRestoreResult, BackupRun } from "@/lib/types"
+import type {
+  BackupArchiveEntry,
+  BackupJob,
+  BackupResourceReport,
+  BackupRestoreResult,
+  BackupRun,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import type { useConfirm } from "@/components/confirm-dialog"
-import { Detail, DetailList, SearchInput } from "@/components/page"
+import { useConfirm } from "@/components/confirm-dialog"
+import {
+  Detail,
+  DetailList,
+  Metric,
+  MetricStrip,
+  Page,
+  PageContext,
+  SearchInput,
+} from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { Field, FormNote } from "@/components/form"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
@@ -36,39 +62,64 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { retentionLabel, scheduleLabel, targetLabel } from "@/components/backups/shared"
+import { useJobVerbs } from "@/components/backups/job-verbs"
+import { JobDialog } from "@/components/backups/job-form"
 
 type Confirm = ReturnType<typeof useConfirm>["confirm"]
 
 /**
- * One job, opened: what it is, its runs, and what can be done with a run —
- * read its log, look inside it, put files back, put a database back, prove
- * it restores, take it off the server.
+ * One job: what it is, its runs, and what can be done with a run — read its
+ * log, look inside it, put files back, put a database back, prove it restores,
+ * take it off the server.
+ *
+ * This was a sheet over the job table until 2026-09-21. A run carries a log,
+ * an archive you browse, and two restores that each opened a dialog *on top
+ * of* the sheet — three surfaces deep for a thing you are reading carefully,
+ * because restoring from the wrong run is not recoverable. So a job is its own
+ * destination, the dialogs are dialogs over a page, and `/deploy/[id]/runs`
+ * already had the shape.
  */
-export function JobSheet({
-  job,
-  verbs,
-  confirm,
-  onOpenChange,
-}: {
-  job: BackupJob | null
-  /** The job's own verbs, drawn as a bar under the title. */
-  verbs: Verb[]
-  confirm: Confirm
-  onOpenChange: (open: boolean) => void
-}) {
+export function JobPage() {
+  const { job: jobId } = useParams<{ job: string }>()
+  const router = useRouter()
   const { can } = useAuth()
+  const { confirm, dialog } = useConfirm()
+  const [editing, setEditing] = useState<BackupJob | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [restore, setRestore] = useState<{ run: BackupRun; paths: string[] } | null>(null)
   const [restoreDatabase, setRestoreDatabase] = useState<BackupRun | null>(null)
   const [browsing, setBrowsing] = useState<BackupRun | null>(null)
   const [verifying, setVerifying] = useState<number | null>(null)
+  const jobPoll = usePoll(
+    (signal) => get<BackupJob>(`/backups/${jobId}`, undefined, signal),
+    15000,
+    [jobId],
+  )
+  const job = jobPoll.data ?? null
   const runs = usePoll(
     (signal) =>
-      get<{ runs: BackupRun[]; running: boolean }>(`/backups/${job?.id}/runs`, undefined, signal),
+      get<{ runs: BackupRun[]; running: boolean }>(`/backups/${jobId}/runs`, undefined, signal),
     5000,
-    [job?.id],
-    { enabled: job !== null },
+    [jobId],
   )
+  // The edit form suggests what on this server a job could also cover, so it
+  // wants the same coverage report the list page reads.
+  const resources = usePoll(
+    (signal) => get<BackupResourceReport>("/backups/resources", undefined, signal),
+    60000,
+  )
+  const verbsFor = useJobVerbs({
+    confirm,
+    refresh: () => {
+      jobPoll.refresh()
+      runs.refresh()
+    },
+    onEdit: setEditing,
+    // Deleting a job from its own page has to leave it: what the page is about
+    // is gone, and the list is where the reader was.
+    onDeleted: () => router.replace("/backups"),
+  })
+  const verbs = job ? verbsFor(job) : []
   const selected = runs.data?.runs.find((run) => run.id === selectedId) ?? null
 
   const verify = async (run: BackupRun) => {
@@ -92,7 +143,6 @@ export function JobSheet({
       {
         key: "log",
         label: "Log",
-        detail: "What the run wrote, and the evidence it left.",
         icon: Eye,
         inline: true,
         run: () => setSelectedId(run.id),
@@ -102,7 +152,6 @@ export function JobSheet({
     out.push({
       key: "browse",
       label: "Browse files",
-      detail: "List what the archive holds without unpacking it.",
       icon: FolderOpen,
       run: () => {
         setSelectedId(run.id)
@@ -113,7 +162,6 @@ export function JobSheet({
       out.push({
         key: "restore",
         label: "Restore files…",
-        detail: "Unpack into a directory, or put everything back where it came from.",
         icon: CloudDownload,
         run: () => setRestore({ run, paths: [] }),
       })
@@ -121,7 +169,6 @@ export function JobSheet({
         out.push({
           key: "restore-db",
           label: "Restore database…",
-          detail: "Load a native dump back into its connection, or into a drill database.",
           icon: Database,
           run: () => setRestoreDatabase(run),
         })
@@ -131,7 +178,6 @@ export function JobSheet({
       out.push({
         key: "verify",
         label: "Verify restore",
-        detail: "Restore a temporary copy and run the application's checker against it.",
         icon: ShieldCheck,
         disabled: verifying === run.id,
         run: () => void verify(run),
@@ -141,7 +187,6 @@ export function JobSheet({
       out.push({
         key: "download",
         label: "Download archive",
-        detail: "Save the verified .tar.gz to this computer.",
         icon: Download,
         run: () => window.open(downloadUrl(`/backups/runs/${run.id}/download`), "_blank"),
       })
@@ -151,16 +196,64 @@ export function JobSheet({
 
   return (
     <>
-      <SidePanel
-        open={job !== null}
-        onOpenChange={onOpenChange}
-        title={job?.name ?? "Backup"}
-        description="The job's definition, its run history and what each run can do."
-        actions={job && <VerbBar verbs={verbs} menuLabel={`More actions for ${job.name}`} />}
-        bodyClassName="space-y-6 p-4"
-      >
+      <Page>
+        <PageContext
+          eyebrow={
+            <Link
+              href="/backups"
+              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <ArrowLeft className="size-3" /> Backups
+            </Link>
+          }
+          title={job?.name ?? "Backup"}
+          actions={
+            job && (
+              <>
+                {!job.enabled && <Tag>paused</Tag>}
+                <VerbBar verbs={verbs} menuLabel={`More actions for ${job.name}`} />
+              </>
+            )
+          }
+        />
+
+        {jobPoll.error && !job && <ErrorState error={jobPoll.error} />}
+        {jobPoll.loading && !job && <LoadingRows />}
+
         {job && (
           <>
+            <MetricStrip className="animate-rise">
+              <Metric label="Job" value={job.name} />
+              <Metric label="Schedule" value={scheduleLabel(job.schedule)} />
+            </MetricStrip>
+            {/*
+              What the job holds and when it next fires, as figures (§15 pass 2).
+              The sheet had all four as clauses inside two `Detail` rows — a
+              reader asking "is this thing actually keeping anything" had to
+              read a sentence to find out, on a page whose entire subject is
+              whether the answer is yes.
+            */}
+            <StatGrid className="animate-rise">
+              <StatTile label="Stored" value={String(job.stored.runs)} hint="archives kept" />
+              <StatTile
+                label="Holding"
+                value={bytes(job.stored.bytes)}
+                hint={retentionLabel(job)}
+              />
+              <StatTile
+                label="Last run"
+                value={job.lastRun ? relativeTime(job.lastRun.startedAt) : "never"}
+                tone={job.lastRun?.status === "failed" ? "danger" : undefined}
+                hint={job.lastRun?.status ?? "no run yet"}
+              />
+              <StatTile
+                label="Next run"
+                value={job.enabled && job.nextRun ? relativeTime(job.nextRun) : "—"}
+                tone={!job.enabled ? "warning" : undefined}
+                hint={job.enabled ? scheduleLabel(job.schedule) : "schedule paused"}
+              />
+            </StatGrid>
+
             <DetailList className="text-body">
               <Detail label="Sources">
                 <ul className="min-w-0 space-y-0.5 font-mono text-xs">
@@ -179,27 +272,17 @@ export function JobSheet({
               <Detail label="Destination" className="font-mono">
                 {targetLabel(job)}
               </Detail>
-              <Detail label="Schedule">
-                {scheduleLabel(job.schedule)}
-                {job.nextRun && job.enabled && (
-                  <span className="text-muted-foreground"> · next {relativeTime(job.nextRun)}</span>
-                )}
-                {!job.enabled && job.schedule && (
-                  <span className="text-muted-foreground"> · paused</span>
-                )}
-              </Detail>
-              <Detail label="Retention">
-                {retentionLabel(job)}
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {job.stored.runs} stored, {bytes(job.stored.bytes)}
-                </span>
-              </Detail>
-              {(job.sqlitePaths?.length || job.databaseDumps?.length || job.pauseContainers?.length) ? (
+              {job.sqlitePaths?.length ||
+              job.databaseDumps?.length ||
+              job.pauseContainers?.length ? (
                 <Detail label="Consistency">
                   {[
-                    job.sqlitePaths?.length ? plural(job.sqlitePaths.length, "SQLite snapshot") : "",
-                    job.databaseDumps?.length ? plural(job.databaseDumps.length, "native dump") : "",
+                    job.sqlitePaths?.length
+                      ? plural(job.sqlitePaths.length, "SQLite snapshot")
+                      : "",
+                    job.databaseDumps?.length
+                      ? plural(job.databaseDumps.length, "native dump")
+                      : "",
                     job.pauseContainers?.length ? `pauses ${job.pauseContainers.join(", ")}` : "",
                   ]
                     .filter(Boolean)
@@ -209,17 +292,20 @@ export function JobSheet({
               {job.recovery && (
                 <Detail label="Recovery check">
                   {job.recovery.automatic ? "After every successful run" : "On request"}
-                  <span className="text-muted-foreground"> · schema {job.recovery.schemaVersion}</span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · schema {job.recovery.schemaVersion}
+                  </span>
                 </Detail>
               )}
             </DetailList>
 
-            <Panel plain>
+            <Panel>
               <PanelHeader
                 title="Runs"
                 actions={runs.data?.running && <Status state="running" label="running now" />}
               />
-              <PanelBody flush className="-mx-4">
+              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
                 {runs.loading && !runs.data ? (
                   <LoadingRows rows={3} className="px-4" />
                 ) : runs.data?.runs.length === 0 ? (
@@ -288,7 +374,16 @@ export function JobSheet({
             )}
           </>
         )}
-      </SidePanel>
+        {editing && (
+          <JobDialog
+            job={editing}
+            resources={resources.data?.resources ?? []}
+            onOpenChange={(open: boolean) => !open && setEditing(null)}
+            onDone={jobPoll.refresh}
+          />
+        )}
+        {dialog}
+      </Page>
 
       {restore && (
         <RestoreFilesDialog
@@ -323,7 +418,7 @@ function RunDetail({
   canRestore: boolean
   onRestorePaths: (paths: string[]) => void
 }) {
-  const [showFiles, setShowFiles] = useState(browsing)
+  const [showFiles, setShowFiles] = useSessionState(`backups.run.${run.id}.files.open`, browsing)
   const verification = run.restoreVerification
   return (
     <div className="animate-rise space-y-4">
@@ -345,7 +440,9 @@ function RunDetail({
             <p className="font-mono text-hint break-all text-muted-foreground">{run.artifact}</p>
           )}
           {run.manifest?.pausedContainers && run.manifest.pausedContainers.length > 0 && (
-            <FormNote>Paused during the archive: {run.manifest.pausedContainers.join(", ")}</FormNote>
+            <FormNote>
+              Paused during the archive: {run.manifest.pausedContainers.join(", ")}
+            </FormNote>
           )}
           {verification && (
             <div className="space-y-2 text-body">
@@ -367,11 +464,7 @@ function RunDetail({
         </PanelBody>
       </Panel>
       {showFiles && (
-        <ArchiveBrowser
-          run={run}
-          canRestore={canRestore}
-          onRestorePaths={onRestorePaths}
-        />
+        <ArchiveBrowser run={run} canRestore={canRestore} onRestorePaths={onRestorePaths} />
       )}
     </div>
   )
@@ -391,7 +484,7 @@ function ArchiveBrowser({
   canRestore: boolean
   onRestorePaths: (paths: string[]) => void
 }) {
-  const [filter, setFilter] = useState("")
+  const [filter, setFilter] = useSessionState(`backups.run.${run.id}.files.filter`, "")
   const [chosen, setChosen] = useState<string[]>([])
   const entries = usePoll(
     (signal) =>
@@ -583,8 +676,8 @@ function RestoreFilesDialog({
         {inPlace ? (
           <div className="space-y-1.5">
             <FormNote tone="warning">
-              Each source tree is written back over its original path. Anything changed there
-              since the backup is replaced.
+              Each source tree is written back over its original path. Anything changed there since
+              the backup is replaced.
             </FormNote>
             <ul className="space-y-0.5 font-mono text-xs">
               {sources.map((s) => (
@@ -717,4 +810,3 @@ function RestoreDatabaseDialog({
     </Modal>
   )
 }
-

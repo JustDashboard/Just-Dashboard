@@ -12,6 +12,9 @@ type RunLogSource struct {
 	Name          string `json:"name"`
 	LiveURL       string `json:"liveUrl"`
 	ActivationURL string `json:"activationUrl,omitempty"`
+	// Image is the container's image reference, so a source can be drawn as
+	// its product rather than as a container id.
+	Image string `json:"image,omitempty"`
 }
 
 type RunLogs struct {
@@ -62,7 +65,10 @@ func ObserveRunLogs(ctx context.Context, owner RuntimeObserver, snapshot RunSnap
 	result.Status, result.Reason = runtime.Status, runtime.Reason
 	for _, service := range runtime.Services {
 		query := url.Values{"source": {"docker:" + service.ContainerID}}
-		source := RunLogSource{ContainerID: service.ContainerID, Name: service.Name, LiveURL: "/logs?" + query.Encode()}
+		source := RunLogSource{
+			ContainerID: service.ContainerID, Name: service.Name, Image: service.Image,
+			LiveURL: "/logs?" + query.Encode(),
+		}
 		if at := result.ActivationCompletedAt; at != nil {
 			query.Set("mode", "search")
 			query.Set("since", at.Add(-5*time.Minute).UTC().Format("2006-01-02T15:04:05.000Z"))

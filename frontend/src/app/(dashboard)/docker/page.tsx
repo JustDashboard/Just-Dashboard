@@ -6,14 +6,20 @@ import { useRouter } from "next/navigation"
 import { ArrowRight, Box, Clipboard, Layers, Sparkles } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes } from "@/lib/format"
-import { cn } from "@/lib/utils"
 import type { ComposeStack, Container, DockerDiagnosis, DockerDiskUsage } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Page, PageHeader, PageState } from "@/components/page"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import {
+  ProductLogo,
+  ProductLogos,
+  containerProduct,
+  imageProducts,
+} from "@/components/product-logo"
+import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Row, ROW_BLEED, RowList } from "@/components/row-list"
+import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { Status, StatusDot } from "@/components/status-dot"
 import { EmptyState } from "@/components/state"
@@ -108,23 +114,7 @@ export default function DockerOverviewPage() {
     // The page rises once, when its first container list lands — the same
     // arrival the host Overview makes.
     <Page className="animate-rise">
-      {/* New containers come from the Deploy pages — no standalone create flow. */}
-      <PageHeader
-        eyebrow="Server"
-        title={
-          <span className="inline-flex items-center gap-2">
-            Docker
-            {/*
-              The one word on this page that has to be understood before any of
-              the others, and the section's front page never said what it was.
-              A hover card rather than a paragraph: an operator who knows Docker
-              never sees it, and somebody who does not is one gesture from an
-              answer written for them.
-            */}
-            <ExplainIcon name="docker" className="translate-y-0.5" />
-          </span>
-        }
-      />
+      <PageContext title="Docker" />
 
       {/*
         Four readings, four destinations. Every one of them is a link now: three
@@ -221,7 +211,7 @@ export default function DockerOverviewPage() {
       {/* A server with nothing on it is not an error state, and it is the one
           moment where the page should be teaching rather than reporting. */}
       {containers.length === 0 && detected.length === 0 ? (
-        <FirstRun canStart={can("service.control")} />
+        <FirstRun canDeploy={can("service.control")} />
       ) : (
         <>
           {/*
@@ -244,7 +234,13 @@ export default function DockerOverviewPage() {
                 }
               />
               <PanelBody flush>
-                <RowList className="animate-rise">
+                {/*
+                  Destinations, so they are choices (§16): every row here is a
+                  container to open, and the edge that answers the pointer is
+                  what says so. The hairlines are gone with the `RowList` —
+                  each card owns its own edge.
+                */}
+                <ChoiceList aria-label="Containers that are not running" className="animate-rise">
                   {idle.slice(0, 6).map((container) => (
                     <IdleRow
                       key={container.id}
@@ -255,9 +251,12 @@ export default function DockerOverviewPage() {
                       onChanged={refreshContainers}
                     />
                   ))}
-                </RowList>
+                </ChoiceList>
                 {idle.length > 6 && (
-                  <p className="border-t border-hairline py-2 text-hint text-muted-foreground">
+                  // Aligned with the card titles above it rather than with the
+                  // cards' own edges, and with no rule over it: a hairline
+                  // under a gapped list reads as an edge the last card lost.
+                  <p className="px-3 pt-2 text-hint text-muted-foreground">
                     and {idle.length - 6} more.
                   </p>
                 )}
@@ -277,12 +276,19 @@ export default function DockerOverviewPage() {
                 </span>
               }
               actions={
-                <Link
-                  href="/docker/stacks"
-                  className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-                >
-                  Manage <ArrowRight className="size-3" />
-                </Link>
+                <span className="flex flex-wrap items-center gap-3">
+                  <Link
+                    href="/docker/stacks"
+                    className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+                  >
+                    Manage <ArrowRight className="size-3" />
+                  </Link>
+                  {can("service.control") && (
+                    <Button size="sm" asChild>
+                      <Link href="/deploy">Open Deploy</Link>
+                    </Button>
+                  )}
+                </span>
               }
             />
             <PanelBody flush>
@@ -293,21 +299,29 @@ export default function DockerOverviewPage() {
                   description="A stack is a directory with a compose file in it — one file describing several containers that belong together. The dashboard finds them by the labels compose puts on containers, and by looking under the configured compose directories."
                 />
               ) : (
-                <RowList className="animate-rise">
+                // A run of destinations, not of readings: every one of these
+                // rows is a project to enter, so §16 makes them choices and
+                // gives them the lit edge. The row still says the same four
+                // things — the dot, the name, the directory it was found in,
+                // and what state it is in.
+                <ChoiceList aria-label="Compose projects" className="animate-rise">
                   {detected.map((stack) => (
-                    <Row
+                    <ChoiceRow
                       key={stack.name}
-                      href={`/docker/stacks?stack=${encodeURIComponent(stack.name)}`}
-                      leading={
-                        <StatusDot tone={stackTone(stack)} live={stack.state === "running"} />
+                      href={`/docker/stacks/${encodeURIComponent(stack.name)}`}
+                      verb={`Open ${stack.name}`}
+                      leading={<StackMark stack={stack} />}
+                      title={
+                        <span className="flex min-w-0 items-center gap-2">
+                          <StatusDot tone={stackTone(stack)} live={stack.state === "running"} />
+                          <span className="truncate">{stack.name}</span>
+                        </span>
                       }
-                      title={stack.name}
-                      subtitle={stack.workingDir}
-                      mono
+                      description={<span className="font-mono">{stack.workingDir}</span>}
                       trailing={<StackStateBadge stack={stack} />}
                     />
                   ))}
-                </RowList>
+                </ChoiceList>
               )}
             </PanelBody>
           </Panel>
@@ -367,6 +381,10 @@ export default function DockerOverviewPage() {
  * down", and a row of five controls would turn it into a second containers
  * page. Start is inline because it is the answer; everything else is one click
  * away in the menu beside it.
+ *
+ * A `ChoiceRow` rather than a hand-laid `<li>`, because the row *goes*
+ * somewhere (§16). The verbs sit in its actions slot, dimmed until the pointer
+ * arrives rather than hidden behind it, so they still exist on a touch screen.
  */
 function IdleRow({
   container,
@@ -382,43 +400,34 @@ function IdleRow({
   onChanged: () => void
 }) {
   const router = useRouter()
+  const href = `/docker/containers/${encodeURIComponent(container.id)}`
   const verbs = useContainerVerbs({
     container,
     confirm,
     act,
     // There is no detail panel on this page, so the verbs that open one — logs,
     // a shell — go to the page that has it rather than quietly doing nothing.
-    onOpenTab: () =>
-      router.push(`/docker/containers?container=${encodeURIComponent(container.id)}`),
+    onOpenTab: () => router.push(href),
     onChanged,
   })
 
   return (
-    <li
-      className={cn(
-        "group flex min-w-0 items-center gap-3 px-5 py-2.5 transition-colors hover:bg-row-hover",
-        ROW_BLEED,
-        pending && "opacity-70",
-      )}
-    >
-      <span className="min-w-0 flex-1">
-        <Link
-          href={`/docker/containers?container=${encodeURIComponent(container.id)}`}
-          className="block truncate rounded-sm text-body font-medium focus-ring hover:text-primary"
-        >
-          {container.name}
-        </Link>
-        <span className="block truncate font-mono text-hint text-muted-foreground">
-          {container.image}
-        </span>
-      </span>
-      <Status
-        state={container.state}
-        label={pending ? `${pending}…` : container.status}
-        className="shrink-0"
-      />
-      <ContainerRowActions verbs={verbs} reveal={false} />
-    </li>
+    <ChoiceRow
+      href={href}
+      verb={`Open ${container.name}`}
+      leading={<ProductLogo id={containerProduct(container)} size="sm" />}
+      title={container.name}
+      description={<span className="font-mono">{container.image}</span>}
+      trailing={
+        <Status
+          state={container.state}
+          label={pending ? `${pending}…` : container.status}
+          className="shrink-0"
+        />
+      }
+      actions={<ContainerRowActions verbs={verbs} reveal={false} dim />}
+      className={pending ? "opacity-70" : undefined}
+    />
   )
 }
 
@@ -430,8 +439,12 @@ function IdleRow({
  * decided to put something on. The three routes are the same three the create
  * panel opens with, stated here because this is where the question is actually
  * asked.
+ *
+ * Open Deploy sits with this explanation on an empty server, so the command
+ * appears where the reader learns what to start. The routes below offer the
+ * more specific starting points.
  */
-function FirstRun({ canStart }: { canStart: boolean }) {
+function FirstRun({ canDeploy }: { canDeploy: boolean }) {
   return (
     // Plain, and the three routes are rows rather than three framed cards in
     // a framed panel: on a page that draws no other box, the first thing a
@@ -440,7 +453,7 @@ function FirstRun({ canStart }: { canStart: boolean }) {
       <PanelHeader
         title="Nothing is running on this server yet"
         actions={
-          canStart && (
+          canDeploy && (
             <Button size="sm" asChild>
               <Link href="/deploy">Open Deploy</Link>
             </Button>
@@ -491,6 +504,17 @@ function Route({
       title={title}
       subtitle={detail}
       className="py-2.5"
+    />
+  )
+}
+
+/** What a project is made of: its services' products, or Compose itself. */
+function StackMark({ stack }: { stack: ComposeStack }) {
+  const images = stack.services.map((service) => service.image).filter(Boolean)
+  return (
+    <ProductLogos
+      ids={images.length > 0 ? imageProducts(images) : ["docker-compose"]}
+      ring="ring-choice-surface"
     />
   )
 }

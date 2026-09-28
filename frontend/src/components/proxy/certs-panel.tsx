@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import {
   CheckCircle,
   CloudUpload,
-  Copy,
+  Globe,
   Inspect,
   RefreshClockwise,
   ShieldOff,
@@ -13,19 +13,19 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, del, get, post } from "@/lib/api"
-import { copyText } from "@/lib/clipboard"
 import { calendarDate } from "@/lib/format"
 import type { Certificate, CertbotState, DNSProvider, Job } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
-import { Page, PageHeader } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Page, PageContext } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo } from "@/components/product-logo"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { Tag } from "@/components/tag"
-import { VerbActions, type Verb } from "@/components/verbs"
+import { VerbBar } from "@/components/verbs"
 import { useProxy } from "@/components/proxy/proxy-context"
 import {
   ALL_CERTS,
@@ -36,28 +36,23 @@ import {
   RenewalNotice,
   useRenew,
 } from "@/components/proxy/certbot-panel"
-import { ExpiryStatus } from "@/components/proxy/expiry-status"
+import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
+import { CertificateInventory } from "@/components/proxy/certificate-inventory"
+import { Field, FormSection, FormSections } from "@/components/form"
 import { ImportDialog } from "@/components/proxy/import-dialog"
+import { RenewalLog } from "@/components/proxy/renewal-log"
+import { certificateProduct } from "@/components/proxy/marks"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  stickyTableHeader,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 type Watched = { id: number; domain: string; port: number; certificate?: Certificate }
 
 /**
- * Every certificate on the host and everything done to one: four readings,
- * certbot's lineages with their verbs, what is installed and which site uses
- * it, the domains checked with a live handshake — which catches one renewed
- * on disk but never reloaded, the failure that is invisible in a file — and
- * the DNS plugins a wildcard needs.
+ * Inventory and lifecycle controls sit beside each other: the certificate you
+ * inspect stays separate from the certbot lineage you renew. Every renewal
+ * certbot ran follows them across the page's width, which a log needs. Watched
+ * domains stay distinct because a live handshake can disagree with the file on
+ * disk.
  */
 export function CertificatesPage() {
   const { can } = useAuth()
@@ -171,7 +166,7 @@ export function CertificatesPage() {
             tone: "success" as const,
           }
         : {
-            value: "Not scheduled",
+            value: "Off",
             hint: certbot.data.renewUnit
               ? `${certbot.data.renewUnit} is off`
               : "no timer or cron entry found",
@@ -180,30 +175,9 @@ export function CertificatesPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Proxy"
-        title="Certificates"
-        actions={
-          admin && (
-            <>
-              <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
-                <CloudUpload className="size-3.5" />
-                Import
-              </Button>
-              {!certbotGone && (
-                <Button
-                  size="sm"
-                  onClick={() => setIssue({ open: true, domains: undefined, staging: true })}
-                >
-                  Issue certificate
-                </Button>
-              )}
-            </>
-          )
-        }
-      />
+      <PageContext eyebrow="Proxy" title="Certificates" />
 
-      <StatGrid columns={4}>
+      <StatGrid columns={4} dense>
         <StatTile
           label="Certificates"
           value={certs.data ? counts.all : "—"}
@@ -263,83 +237,112 @@ export function CertificatesPage() {
         </Notice>
       )}
 
-      {certbot.data && (
-        <RenewalNotice state={certbot.data} admin={admin} onChanged={certbot.refresh} />
-      )}
-
-      <Panel plain>
-        <PanelHeader
-          title="certbot"
-          actions={
-            admin && (
-              <>
-                <RecentJobs kinds={["certbot."]} onOpen={console_.open} />
-                {certbot.data && certbot.data.certs.length > 0 && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy !== ""}
-                    pending={busy === ALL_CERTS}
-                    onClick={() => renew(ALL_CERTS, false)}
-                  >
-                    <RefreshClockwise className="size-3.5" />
-                    Renew all due
+      <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_22rem] [&>*]:min-w-0">
+        <Panel plain>
+          <PanelHeader
+            title="Installed on this host"
+            actions={
+              admin && (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+                    <CloudUpload className="size-3.5" />
+                    Import
                   </Button>
-                )}
-              </>
-            )
-          }
-        />
-        <PanelBody flush>
-          {certbotGone ? (
-            <CertbotMissing />
-          ) : certbot.loading ? (
-            <LoadingRows rows={3} />
-          ) : certbot.error ? (
-            <ErrorState error={certbot.error} />
-          ) : certbot.data ? (
-            <div className="animate-rise">
-              <CertbotLineages
-                state={certbot.data}
-                admin={admin}
-                busy={busy}
-                onRenew={renew}
-                onRevoke={revoke}
+                  {!certbotGone && (
+                    <Button
+                      size="sm"
+                      onClick={() => setIssue({ open: true, domains: undefined, staging: true })}
+                    >
+                      Issue certificate
+                    </Button>
+                  )}
+                </>
+              )
+            }
+          />
+          <PanelBody flush>
+            {certs.loading ? (
+              <LoadingRows rows={3} />
+            ) : certs.error ? (
+              <ErrorState error={certs.error} />
+            ) : certs.data && certs.data.length > 0 ? (
+              <CertificateInventory certs={certs.data} canScan={admin} />
+            ) : (
+              <EmptyState
+                icon={ShieldOff}
+                title="No certificates found"
+                description="certbot's live directory, imported certificates and every certificate a site names are all listed here once one exists."
+                className="mt-2"
               />
-            </div>
-          ) : null}
-        </PanelBody>
-      </Panel>
+            )}
+          </PanelBody>
+        </Panel>
 
-      <Panel plain>
-        <PanelHeader title="Installed certificates" />
-        <PanelBody flush>
-          {certs.loading ? (
-            <LoadingRows rows={3} />
-          ) : certs.error ? (
-            <ErrorState error={certs.error} />
-          ) : certs.data && certs.data.length > 0 ? (
-            <div className="-mx-4 min-w-0 animate-rise">
-              <CertTable
-                certs={certs.data}
-                onScan={(d) => router.push(`/proxy/tls?domain=${encodeURIComponent(d)}`)}
-                canScan={admin}
-              />
-            </div>
-          ) : (
-            <EmptyState
-              icon={ShieldOff}
-              title="No certificates found"
-              description="certbot's live directory, imported certificates and every certificate a site names are all listed here once one exists."
-              className="mt-2"
+        <div className="space-y-8">
+          <Panel plain>
+            <PanelHeader
+              title="Automatic renewal"
+              actions={
+                admin && (
+                  <>
+                    <RecentJobs kinds={["certbot."]} onOpen={console_.open} />
+                    {certbot.data && certbot.data.certs.length > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy !== ""}
+                        pending={busy === ALL_CERTS}
+                        onClick={() => renew(ALL_CERTS, false)}
+                      >
+                        <RefreshClockwise className="size-3.5" />
+                        Renew all due
+                      </Button>
+                    )}
+                  </>
+                )
+              }
+            />
+            <PanelBody flush>
+              {certbot.data && (
+                <RenewalNotice state={certbot.data} admin={admin} onChanged={certbot.refresh} />
+              )}
+              {certbotGone ? (
+                <CertbotMissing />
+              ) : certbot.loading ? (
+                <LoadingRows rows={3} />
+              ) : certbot.error ? (
+                <ErrorState error={certbot.error} />
+              ) : certbot.data ? (
+                <CertbotLineages
+                  state={certbot.data}
+                  admin={admin}
+                  busy={busy}
+                  onRenew={renew}
+                  onRevoke={revoke}
+                />
+              ) : null}
+            </PanelBody>
+          </Panel>
+
+          {admin && providers.data && (
+            <DnsProvidersPanel
+              providers={providers.data}
+              admin={admin}
+              onChanged={providers.refresh}
             />
           )}
-        </PanelBody>
-      </Panel>
+        </div>
+      </div>
 
-      <Panel plain>
-        <PanelHeader
+      {/* Every renewal certbot ran, not only the ones started from this
+          page: the timer's runs are the ones nobody was watching. */}
+      {!certbotGone && <RenewalLog certbot={certbot.data} />}
+
+      <FormSections>
+        <FormSection
+          aside
           title="Watched domains"
+          hint={`${watched.data?.length ?? 0} checked every five minutes`}
           actions={
             watched.data &&
             watched.data.length > 0 && (
@@ -349,107 +352,125 @@ export function CertificatesPage() {
               </Button>
             )
           }
-        />
-        {admin && (
-          <PanelToolbar>
-            <Input
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && domain.trim() && addDomain()}
-              placeholder="example.com, or mail.example.com:993"
-              aria-label="Domain to watch"
-              className="h-8 w-full text-body sm:w-80"
-            />
-            <Button size="sm" onClick={addDomain} disabled={!domain.trim()}>
-              Watch
-            </Button>
-          </PanelToolbar>
-        )}
-        <PanelBody flush>
-          {watched.loading ? (
-            <LoadingRows rows={2} />
-          ) : watched.error ? (
-            <ErrorState error={watched.error} />
-          ) : !watched.data?.length ? (
-            <p className="py-2 text-body text-muted-foreground">
-              Nothing watched yet. A watched domain is checked with a real handshake every five
-              minutes, which is what catches a certificate renewed on disk and never reloaded.
-            </p>
-          ) : (
-            <div className="-mx-4 min-w-0 animate-rise">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-full">Domain</TableHead>
-                    <TableHead>Issuer</TableHead>
-                    <TableHead>Expires</TableHead>
-                    <TableHead>Live check</TableHead>
-                    <TableHead className="w-px" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {watched.data.map((row) => (
-                    <TableRow key={row.id} className="group">
-                      <TableCell>
-                        <span className="text-body font-medium">{row.domain}</span>
+        >
+          {admin && (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (domain.trim()) void addDomain()
+              }}
+              className="flex items-end gap-2"
+            >
+              <Field label="Domain to watch" htmlFor="watch-domain" className="min-w-0 flex-1">
+                <Input
+                  id="watch-domain"
+                  value={domain}
+                  onChange={(event) => setDomain(event.target.value)}
+                  placeholder="example.com or mail.example.com:993"
+                />
+              </Field>
+              <Button type="submit" size="sm" disabled={!domain.trim()}>
+                Watch
+              </Button>
+            </form>
+          )}
+          <div>
+            {watched.loading ? (
+              <LoadingRows rows={2} />
+            ) : watched.error ? (
+              <ErrorState error={watched.error} />
+            ) : !watched.data?.length ? (
+              <p className="py-2 text-body text-muted-foreground">
+                Nothing watched yet. A watched domain is checked with a real handshake every five
+                minutes, which is what catches a certificate renewed on disk and never reloaded.
+              </p>
+            ) : (
+              <ChoiceList aria-label="Watched domains" className="animate-rise">
+                {watched.data.map((row) => (
+                  <ChoiceRow
+                    key={row.id}
+                    verb={admin ? `Inspect ${row.domain}` : row.domain}
+                    disabled={!admin}
+                    href={
+                      admin
+                        ? `/proxy/tls?domain=${encodeURIComponent(row.port === 443 ? row.domain : `${row.domain}:${row.port}`)}`
+                        : undefined
+                    }
+                    leading={
+                      <ProductLogo
+                        id={certificateProduct(row.certificate)}
+                        size="sm"
+                        fallback={Globe}
+                      />
+                    }
+                    title={
+                      <>
+                        {row.domain}
                         {row.port !== 443 && (
                           <span className="numeric ml-1.5 font-mono text-hint text-muted-foreground">
                             :{row.port}
                           </span>
                         )}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {row.certificate?.issuer ?? "—"}
-                      </TableCell>
-                      <TableCell>
-                        {row.certificate?.notAfter ? calendarDate(row.certificate.notAfter) : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <ExpiryStatus cert={row.certificate} />
-                      </TableCell>
-                      <TableCell>
-                        {admin && (
-                          <VerbActions
-                            dim
-                            verbs={[
-                              {
-                                key: "scan",
-                                label: "TLS report",
-                                detail: "Grade what a visitor gets: protocols, chain and headers.",
-                                icon: Inspect,
-                                inline: true,
-                                run: () =>
-                                  router.push(
-                                    `/proxy/tls?domain=${encodeURIComponent(row.domain)}`,
-                                  ),
+                      </>
+                    }
+                    description={
+                      row.certificate
+                        ? [
+                            row.certificate.issuer,
+                            row.certificate.notAfter &&
+                              `until ${calendarDate(row.certificate.notAfter)}`,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")
+                        : "not checked yet"
+                    }
+                    trailing={<ExpiryStatus cert={row.certificate} />}
+                    className="gap-3 p-4"
+                  >
+                    {row.certificate?.error && (
+                      <p className="text-hint break-all text-destructive">
+                        {row.certificate.error}
+                      </p>
+                    )}
+                    {row.certificate && !row.certificate.error && (
+                      <CertLife cert={row.certificate} className="w-full" />
+                    )}
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {admin && (
+                        <VerbBar
+                          menuLabel={`More actions for ${row.domain}`}
+                          verbs={[
+                            {
+                              key: "scan",
+                              label: "TLS report",
+                              icon: Inspect,
+                              inline: true,
+                              run: () =>
+                                router.push(
+                                  `/proxy/tls?domain=${encodeURIComponent(row.port === 443 ? row.domain : `${row.domain}:${row.port}`)}`,
+                                ),
+                            },
+                            {
+                              key: "remove",
+                              label: "Stop watching",
+                              icon: Trash,
+                              danger: true,
+                              run: async () => {
+                                await del(`/certificates/watched/${row.id}`)
+                                watched.refresh()
                               },
-                              {
-                                key: "remove",
-                                label: "Stop watching",
-                                detail: "Drop it from the list. Nothing on the host changes.",
-                                icon: Trash,
-                                danger: true,
-                                run: async () => {
-                                  await del(`/certificates/watched/${row.id}`)
-                                  watched.refresh()
-                                },
-                              },
-                            ]}
-                          />
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </PanelBody>
-      </Panel>
-
-      {admin && providers.data && (
-        <DnsProvidersPanel providers={providers.data} admin={admin} onChanged={providers.refresh} />
-      )}
+                            },
+                          ]}
+                        />
+                      )}
+                    </div>
+                  </ChoiceRow>
+                ))}
+              </ChoiceList>
+            )}
+          </div>
+        </FormSection>
+      </FormSections>
 
       {admin && (
         <>
@@ -470,88 +491,5 @@ export function CertificatesPage() {
       )}
       {dialog}
     </Page>
-  )
-}
-
-function CertTable({
-  certs,
-  canScan,
-  onScan,
-}: {
-  certs: Certificate[]
-  canScan: boolean
-  onScan: (domain: string) => void
-}) {
-  const verbsFor = (cert: Certificate): Verb[] => {
-    const domain = cert.domains.find((d) => !d.startsWith("*"))
-    const verbs: Verb[] = [
-      {
-        key: "copy",
-        label: "Copy path",
-        detail: "The certificate's path on disk, for a site's TLS field.",
-        icon: Copy,
-        inline: true,
-        run: () => void copyText(cert.path, "Path copied"),
-      },
-    ]
-    if (domain && canScan) {
-      verbs.push({
-        key: "scan",
-        label: "TLS report",
-        detail: `Grade what a visitor to ${domain} actually gets.`,
-        icon: Inspect,
-        run: () => onScan(domain),
-      })
-    }
-    return verbs
-  }
-  return (
-    <Table containerClassName="max-h-[28rem]">
-      <TableHeader className={stickyTableHeader}>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead className="w-full">Domains</TableHead>
-          <TableHead>Used by</TableHead>
-          <TableHead>Issuer</TableHead>
-          <TableHead>Expires</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="w-px" />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {certs.map((cert) => (
-          <TableRow key={cert.path || cert.name} className="group">
-            <TableCell>
-              <div className="max-w-[16rem] min-w-0">
-                <div className="flex min-w-0 items-baseline gap-2">
-                  <span className="truncate text-body font-medium">{cert.name}</span>
-                  <Tag>{cert.source.startsWith("nginx:") ? "site" : cert.source}</Tag>
-                  {cert.selfSigned && <Tag tone="warning">self-signed</Tag>}
-                </div>
-                <p className="truncate font-mono text-hint text-muted-foreground">{cert.path}</p>
-              </div>
-            </TableCell>
-            <TableCell className="max-w-xs truncate">
-              {cert.domains.join(", ") || <span className="text-muted-foreground">—</span>}
-            </TableCell>
-            <TableCell className="max-w-[12rem] truncate text-muted-foreground">
-              {cert.usedBy.length > 0 ? cert.usedBy.join(", ") : "no site"}
-            </TableCell>
-            <TableCell className="max-w-[12rem] truncate text-muted-foreground">
-              {cert.issuer || "—"}
-            </TableCell>
-            <TableCell>
-              {cert.notAfter && !cert.error ? calendarDate(cert.notAfter) : "—"}
-            </TableCell>
-            <TableCell>
-              <ExpiryStatus cert={cert} />
-            </TableCell>
-            <TableCell>
-              <VerbActions dim verbs={verbsFor(cert)} />
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
   )
 }

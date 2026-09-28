@@ -7,11 +7,17 @@
   "description": "A web administration interface for MongoDB. Give it the connection string of the database it should manage, and a password of its own.",
   "iconId": "database",
   "docsUrl": "https://github.com/mongo-express/mongo-express#readme",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "ME_CONFIG_BASICAUTH_USERNAME",
+    "secretVariable": "ME_CONFIG_BASICAUTH_PASSWORD",
+    "note": "The browser asks for a name and password before any page loads: the sign-in user you chose here and the generated password beside it. It is a browser prompt rather than a sign-in page, and it covers every path except the health endpoint."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/mongo-express/mongo-express",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -29,12 +35,11 @@
     },
     {
       "name": "mongodb-url",
-      "kind": "text",
+      "kind": "secret",
       "label": "MongoDB connection string",
       "variable": "ME_CONFIG_MONGODB_URL",
       "required": true,
-      "pattern": "^mongodb(\\+srv)?://.{1,512}$",
-      "description": "The database's own connection string, for example from the MongoDB blueprint's Variables tab."
+      "description": "Connect a MongoDB database in Configure, or supply ME_CONFIG_MONGODB_URL through encrypted Variables for an external database."
     },
     {
       "name": "admin-user",
@@ -94,10 +99,8 @@
   "fixtures": [
     {
       "name": "default",
-      "inputs": {
-        "mongodb-url": "mongodb://db-1.jd.internal:27017/app"
-      },
-      "digest": "sha256:df9c877808a952c8ef8de85b0250f855aca77779d5d8a045a69a7fd6c51c9bba"
+      "inputs": {},
+      "digest": "sha256:f1fde1f2f3b2267b8a5d2c379f3fef219953100ea297f0a5d420095b51508362"
     }
   ],
   "secrets": [

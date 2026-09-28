@@ -32,14 +32,16 @@ type recoveryEvidence struct {
 	CandidateStopped bool                 `json:"candidateStopped"`
 	RouteRestored    bool                 `json:"routeRestored"`
 	RuntimeRestored  bool                 `json:"runtimeRestored"`
+	TailnetRestored  bool                 `json:"tailnetRestored"`
 	Stop             *RuntimeStopEvidence `json:"stop,omitempty"`
 }
 
 type activationStepEvidence struct {
-	ReleaseID    int64                    `json:"releaseId"`
-	Route        *routeActivationEvidence `json:"route,omitempty"`
-	PublicChecks []CheckEvidence          `json:"publicChecks"`
-	Recovery     *recoveryEvidence        `json:"recovery,omitempty"`
+	ReleaseID    int64                      `json:"releaseId"`
+	Route        *routeActivationEvidence   `json:"route,omitempty"`
+	Tailnet      *tailnetActivationEvidence `json:"tailnet,omitempty"`
+	PublicChecks []CheckEvidence            `json:"publicChecks"`
+	Recovery     *recoveryEvidence          `json:"recovery,omitempty"`
 }
 
 type routeActivationEvidence struct {
@@ -394,7 +396,8 @@ func (e *NormalizedStepExecutor) startCandidate(
 	}, func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) })
 	if err != nil {
 		recovery := e.restorePrevious(ctx, execution, release.Release, snapshot.Plan)
-		return runtimeStepFailure(err, "candidate_start_failed", "the candidate runtime did not start", recovery)
+		code, message := candidateStartFailure(err)
+		return runtimeStepFailure(err, code, message, recovery)
 	}
 	runtime, err := e.store.RecordCandidateRuntime(ctx, execution.Run, execution.ClaimToken, started.Input)
 	if err != nil {
@@ -406,6 +409,9 @@ func (e *NormalizedStepExecutor) startCandidate(
 		return runtimeStepFailure(err, "runtime_record_failed", "the candidate started but its identity could not be recorded", recovery)
 	}
 	_ = stepLog(execution, "status", fmt.Sprintf("Started immutable candidate release #%d", release.Release.Number))
+	for _, variable := range webConcurrencyEnvironment(snapshot, variables) {
+		_ = stepLog(execution, "status", "WEB_CONCURRENCY="+variable.Value+": "+webConcurrencyReason(snapshot.Plan))
+	}
 	return StepResult{State: StepPassed, Evidence: mustJSON(startedStepEvidence{
 		ReleaseID: release.Release.ID, Runtime: *runtime, Target: started.Target,
 		PreviousStop: previousStop, ExpectedDowntime: release.Release.ExpectedDowntime,
@@ -506,10 +512,19 @@ func (e *NormalizedStepExecutor) verifyChecks(
 		// Read the candidate's own account of itself before compensation
 		// removes it. This is the difference between "could not connect" and
 		// "Error: DATABASE_URL is not set".
-		diagnostics := e.captureRuntimeDiagnostics(ctx, execution, release.Release, *runtime)
+		diagnostics := e.captureRuntimeDiagnostics(ctx, execution, release.Release, *runtime, runtimeCauseContext{
+			build: plan.Build, runtime: snapshot.Plan, variables: snapshot.Variables, compose: snapshot.Compose != nil, checks: checks,
+			manager: e.releaseNodeManager(ctx, execution.Run.ID, plan),
+		})
 		message := checkFailureMessage(phase, outcome, checks...) + diagnosticsSuffix(diagnostics)
+		// A cause the output proves is the run's terminal code, so every
+		// surface that reads the code names it; the health evidence stays.
+		failedCode := "health_gate_failed"
+		if diagnostics != nil && diagnostics.Cause != nil {
+			failedCode = diagnostics.Cause.Code
+		}
 		if operationTargetsLiveRelease(execution.Run.Operation) {
-			state, code := StepFailed, "health_gate_failed"
+			state, code := StepFailed, failedCode
 			if ctx.Err() != nil {
 				state, code, message = StepCancelled, "cancelled", "health verification was cancelled"
 			}
@@ -517,7 +532,7 @@ func (e *NormalizedStepExecutor) verifyChecks(
 				Evidence: mustJSON(map[string]any{"health": evidence, "diagnostics": diagnostics})}
 		}
 		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
-		state, code := StepFailed, "health_gate_failed"
+		state, code := StepFailed, failedCode
 		if ctx.Err() != nil {
 			state, code, message = StepCancelled, "cancelled", "health verification was cancelled"
 		}
@@ -568,6 +583,7 @@ func (e *NormalizedStepExecutor) activate(
 			return StepResult{State: StepUnavailable, ErrorCode: "proxy_unavailable", ErrorMessage: "a managed domain requires an available HTTP proxy", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
 		routeValue := deploymentRoute(release.Release.EnvironmentID, snapshot.Domains, runtime.Host, runtime.Port)
+		routeValue.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
 		if routeValue.TLS {
 			resolver, ok := e.proxy.(interface {
 				ResolveDeploymentCertificate(context.Context, []string) (string, string, error)
@@ -628,6 +644,27 @@ func (e *NormalizedStepExecutor) activate(
 			return StepResult{State: StepFailed, ErrorCode: "activation_verification_failed", ErrorMessage: "the proxy cutover could not be verified", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
 	}
+	address, err := e.store.PreviewAddressFor(ctx, release.Release.EnvironmentID)
+	if err != nil {
+		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
+		evidence.Recovery = &recovery
+		failure := normalizedStepFailure(err)
+		failure.Evidence, failure.Recovered = mustJSON(evidence), recoveryComplete(recovery, snapshot.Plan, release.Release)
+		return failure
+	}
+	if address != nil && address.Kind == previewAddressTailnet {
+		// The tailnet mapping moves to the candidate before the release
+		// pointer does, so a mapping that cannot be made never leaves a
+		// live release nobody can reach.
+		published, failure := e.publishPreviewAddress(ctx, execution, release.Release.EnvironmentID, *address, *runtime)
+		if failure != nil {
+			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
+			evidence.Recovery = &recovery
+			failure.Evidence, failure.Recovered = mustJSON(evidence), recoveryComplete(recovery, snapshot.Plan, release.Release)
+			return *failure
+		}
+		evidence.Tailnet = published
+	}
 	if _, err := e.store.ActivateCandidate(ctx, execution.Run.ID, execution.ClaimToken, release.Release.ID); err != nil {
 		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 		evidence.Recovery = &recovery
@@ -664,6 +701,10 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, 
 		Name: deploymentRouteName(environmentID), Domains: names,
 		Upstream: "http://" + net.JoinHostPort(runtimeCheckHost(host), fmt.Sprintf("%d", port)),
 		TLS:      tls, ForceHTTPS: tls, BasicAuth: users,
+		// The request record is what the project's Logs page reads. nginx has
+		// always written one for these routes; asking Caddy for it too is what
+		// makes the two drivers answer the same question.
+		AccessLog: true,
 	}
 }
 
@@ -701,6 +742,7 @@ func (e *NormalizedStepExecutor) stopCandidateAndRestore(
 	} else {
 		recovery.RuntimeRestored = previous.RuntimeRestored
 	}
+	recovery.TailnetRestored = e.restoreTailnet(recoveryCtx, execution, release, recovery.RuntimeRestored)
 	_ = e.store.SetRuntimeState(recoveryCtx, execution.Run.ID, execution.ClaimToken, release.ID, "failed")
 	return recovery
 }
@@ -716,7 +758,8 @@ func (e *NormalizedStepExecutor) restorePrevious(
 	}
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(runtimeGrace(plan)+30)*time.Second)
 	defer cancel()
-	recovery := &recoveryEvidence{RouteRestored: true}
+	// Nothing before activation touches the route or the tailnet mapping.
+	recovery := &recoveryEvidence{RouteRestored: true, TailnetRestored: true}
 	previousRuntime, err := e.store.RuntimeForRelease(recoveryCtx, release.PredecessorReleaseID)
 	if err != nil {
 		return recovery
@@ -745,7 +788,7 @@ func (e *NormalizedStepExecutor) restorePrevious(
 
 func recoveryComplete(recovery recoveryEvidence, plan RuntimePlanConfig, release Release) bool {
 	runtimeOK := recovery.RuntimeRestored || release.PredecessorReleaseID == 0 || plan.Strategy == StrategyBlueGreen
-	return recovery.CandidateStopped && recovery.RouteRestored && runtimeOK
+	return recovery.CandidateStopped && recovery.RouteRestored && runtimeOK && recovery.TailnetRestored
 }
 
 func (e *NormalizedStepExecutor) retirePrevious(
@@ -839,13 +882,17 @@ func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution St
 		if err := removeRoute(); err != nil {
 			return normalizedStepFailure(err)
 		}
+		addressWithdrawn, err := e.withdrawPreviewAddress(cleanupCtx, execution.Run.EnvironmentID)
+		if err != nil {
+			return tailnetWithdrawFailure(err)
+		}
 		if err := removeResources(); err != nil {
 			return normalizedStepFailure(err)
 		}
 		if err := e.store.CompletePreviewRemoval(cleanupCtx, execution.Run.ID, execution.ClaimToken, 0); err != nil {
 			return normalizedStepFailure(err)
 		}
-		return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{"reason": "preview had no live release", "routeRemoved": true})}
+		return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{"reason": "preview had no live release", "routeRemoved": true, "addressWithdrawn": addressWithdrawn})}
 	}
 	if err != nil {
 		return normalizedStepFailure(err)
@@ -870,13 +917,17 @@ func (e *NormalizedStepExecutor) removePreview(ctx context.Context, execution St
 	if err = removeRoute(); err != nil {
 		return normalizedStepFailure(err)
 	}
+	addressWithdrawn, err := e.withdrawPreviewAddress(cleanupCtx, execution.Run.EnvironmentID)
+	if err != nil {
+		return tailnetWithdrawFailure(err)
+	}
 	if err := removeResources(); err != nil {
 		return normalizedStepFailure(err)
 	}
 	if err = e.store.CompletePreviewRemoval(cleanupCtx, execution.Run.ID, execution.ClaimToken, live.Release.ID); err != nil {
 		return normalizedStepFailure(err)
 	}
-	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{"releaseId": live.Release.ID, "runtimeId": runtime.RuntimeID, "stop": stopped, "routeRemoved": true})}
+	return StepResult{State: StepPassed, Evidence: mustJSON(map[string]any{"releaseId": live.Release.ID, "runtimeId": runtime.RuntimeID, "stop": stopped, "routeRemoved": true, "addressWithdrawn": addressWithdrawn})}
 }
 
 func (e *NormalizedStepExecutor) recordRelease(ctx context.Context, execution StepExecution) StepResult {
@@ -1105,9 +1156,10 @@ func (e *NormalizedStepExecutor) stopLiveRuntime(ctx context.Context, execution 
 }
 
 // startLiveRuntime is start_candidate for a start run: it starts a runtime
-// this environment already recorded as stopped. There is no fresh candidate
-// and, on failure, no compensation to attempt — the runtime is left exactly
-// as stopped as it was found.
+// this environment recorded as stopped, or one still recorded live whose
+// containers Docker reports all down. There is no fresh candidate and, on
+// failure, no compensation to attempt — the runtime is left exactly as
+// stopped as it was found.
 func (e *NormalizedStepExecutor) startLiveRuntime(ctx context.Context, execution StepExecution) StepResult {
 	releaseID, err := operationTargetReleaseID(execution.Run)
 	if err != nil {
@@ -1125,7 +1177,8 @@ func (e *NormalizedStepExecutor) startLiveRuntime(ctx context.Context, execution
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	if runtime.State != "stopped" {
+	observer, _ := e.runtime.(RuntimeObserver)
+	if runtime.State != "stopped" && !(runtime.State == "live" && ReleaseRuntimeDown(ctx, observer, *runtime)) {
 		return StepResult{State: StepFailed, ErrorCode: "runtime_not_stopped", ErrorMessage: "the live runtime is already running"}
 	}
 	variables, err := e.runtimeVariablesForRelease(ctx, releaseID, *runtime)
@@ -1181,6 +1234,28 @@ func (e *NormalizedStepExecutor) runtimeVariablesForRelease(
 	return e.variablesForScope(ctx, release.Release.RunID, release.Release.EnvironmentID, "runtime")
 }
 
+// releaseNodeManager is the JavaScript package manager the release's image
+// carries: the one this run's build installed with, else the plan's, else
+// the one detection resolved for a plan left to the lockfile.
+func (e *NormalizedStepExecutor) releaseNodeManager(ctx context.Context, runID int64, plan *StoredExecutionPlan) string {
+	if plan.Build.Method != BuildRecipe || plan.Build.Recipe != "node" {
+		return ""
+	}
+	var prepared preparedStepEvidence
+	if e.latestStepEvidence(ctx, runID, StepPrepareContext, &prepared) == nil {
+		if manager := preparedNodeManager(prepared.Prepared); manager != "" {
+			return manager
+		}
+	}
+	if plan.Build.PackageManager != "" {
+		return plan.Build.PackageManager
+	}
+	if candidate := e.causeCandidate(ctx, runID, plan); candidate != nil {
+		return candidate.PackageManager
+	}
+	return ""
+}
+
 func runtimeFromInput(input ReleaseRuntimeInput) ReleaseRuntime {
 	return ReleaseRuntime{
 		ReleaseID: input.ReleaseID, Kind: input.Kind, RuntimeID: input.RuntimeID, Name: input.Name,
@@ -1229,6 +1304,7 @@ func (e *NormalizedStepExecutor) captureRuntimeDiagnostics(
 	execution StepExecution,
 	release Release,
 	runtime ReleaseRuntime,
+	causeContext runtimeCauseContext,
 ) *runtimeDiagnosticsEvidence {
 	diagnoser, ok := e.runtime.(RuntimeDiagnoser)
 	if !ok || runtime.RuntimeID == "" {
@@ -1269,8 +1345,11 @@ func (e *NormalizedStepExecutor) captureRuntimeDiagnostics(
 	if evidence.Lines == 0 {
 		_ = stepLog(execution, "status", "The application printed no output before the check failed.")
 	}
-	if cause := applicationOutputCause(result.Containers); cause != nil {
+	if cause := applicationOutputCause(result.Containers, causeContext); cause != nil {
 		cause.Table = redact.sanitize(cause.Table)
+		for index, subject := range cause.Subjects {
+			cause.Subjects[index] = redact.sanitize(subject)
+		}
 		evidence.Cause = cause
 		_ = stepLog(execution, "status", "Diagnosis: "+cause.sentence())
 	}

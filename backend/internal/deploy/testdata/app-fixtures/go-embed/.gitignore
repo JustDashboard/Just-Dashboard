@@ -1,0 +1,4 @@
+web/dist/*
+!web/dist/.gitkeep
+web/node_modules/
+views/*_templ.go

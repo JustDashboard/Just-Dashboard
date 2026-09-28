@@ -21,16 +21,17 @@ import { useGitHubAccount } from "@/hooks/use-github"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Notice, Spinner } from "@/components/state"
 import { Tag } from "@/components/tag"
+import { Status } from "@/components/status-dot"
+import { Detail, DetailList } from "@/components/page"
+import { ForgeFace } from "@/components/git/marks"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Field } from "@/components/form"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -64,8 +65,9 @@ export function GitHubAccountControl({
    * the only thing asking.
    */
   status?: ReturnType<typeof useGitHubAccount>
-  /** For a crowded strip: the avatar, the login, and nothing else. */
-  compact?: boolean
+  /** For a crowded strip: the avatar, the login, and nothing else — or, for
+   *  a strip too narrow for a login, the avatar alone. */
+  compact?: boolean | "avatar"
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
@@ -151,7 +153,9 @@ export function GitHubAccountControl({
     )
   }
 
-  const initials = (account.login ?? "?").slice(0, 2).toUpperCase()
+  const scopes = account.scopes ?? []
+  const overSsh = account.gitConfigured && account.remoteProtocol === "ssh"
+  const hasFacts = Boolean(account.committerEmail || account.owner || scopes.length || overSsh)
 
   return (
     <DropdownMenu>
@@ -166,13 +170,17 @@ export function GitHubAccountControl({
                 compact && "h-6 gap-1 pr-1.5 pl-1 text-hint font-normal",
               )}
             >
-              <Avatar size="sm" className={compact ? "size-4" : "size-5"}>
-                {account.avatarUrl && <AvatarImage src={account.avatarUrl} alt="" />}
-                <AvatarFallback className="text-micro">{initials}</AvatarFallback>
-              </Avatar>
-              <span className={compact ? "max-w-[7rem] truncate" : "max-w-[10rem] truncate"}>
-                {account.login}
-              </span>
+              <ForgeFace
+                login={account.login}
+                provider="github"
+                size="xs"
+                className={compact ? undefined : "size-5"}
+              />
+              {compact !== "avatar" && (
+                <span className={compact ? "max-w-[7rem] truncate" : "max-w-[10rem] truncate"}>
+                  {account.login}
+                </span>
+              )}
               {!account.gitConfigured && <span className="size-1.5 rounded-full bg-warning" />}
             </Button>
           </DropdownMenuTrigger>
@@ -180,37 +188,78 @@ export function GitHubAccountControl({
         <TooltipContent>
           {account.gitConfigured
             ? `Commits and pushes from this page are made as ${account.login}`
-            : "Signed in, but git here is not set up to use the account"}
+            : "Signed in, but git on this server is not set up to use the account everywhere"}
         </TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="w-72">
-        <DropdownMenuLabel className="space-y-1 font-normal">
-          <p className="text-body font-medium">{account.name || account.login}</p>
-          <p className="text-hint text-muted-foreground">
-            {account.login} on {account.host}
-            {account.owner ? ` · for the ${account.owner} account` : ""}
-          </p>
-          {account.committerEmail && (
-            <p className="truncate font-mono text-micro text-muted-foreground">
-              {account.committerName} &lt;{account.committerEmail}&gt;
+      {/* Laid out as the sidebar's account menu is: the face and name, then
+          what git will do with them, then the verbs — and the name printed as
+          written, because a login in the eyebrow's small caps is the literal
+          string §4 keeps out of caps. */}
+      <DropdownMenuContent align="end" className="w-72 p-0">
+        <div className="flex min-w-0 items-center gap-3 p-3">
+          <ForgeFace login={account.login} provider="github" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-body leading-tight font-medium">
+              {account.name || account.login}
             </p>
-          )}
-        </DropdownMenuLabel>
-        {account.scopes && account.scopes.length > 0 && (
-          <div className="flex flex-wrap gap-1 px-2 pb-1.5">
-            {account.scopes.map((s) => (
-              <Tag key={s} mono>
-                {s}
-              </Tag>
-            ))}
+            <p className="mt-0.5 flex min-w-0 items-center gap-1 text-hint leading-tight text-muted-foreground">
+              <GitHubMark className="size-3 shrink-0" />
+              <span className="truncate">
+                {account.login} on {account.host}
+              </span>
+            </p>
           </div>
+          <Status
+            tone={account.gitConfigured ? "running" : "warning"}
+            label={account.gitConfigured ? "git ready" : "not set up"}
+            className="shrink-0 text-hint"
+          />
+        </div>
+        {hasFacts && (
+          <>
+            <DropdownMenuSeparator className="my-0" />
+            <div className="space-y-2.5 px-3 py-2.5">
+              <DetailList>
+                {account.committerEmail && (
+                  <Detail
+                    label="Commits as"
+                    className="truncate font-mono text-hint text-foreground/85"
+                  >
+                    <span title={`${account.committerName} <${account.committerEmail}>`}>
+                      {account.committerName} &lt;{account.committerEmail}&gt;
+                    </span>
+                  </Detail>
+                )}
+                {account.owner && (
+                  <Detail label="Host account" className="font-mono text-hint text-foreground/85">
+                    {account.owner}
+                  </Detail>
+                )}
+                {scopes.length > 0 && (
+                  <Detail label="Scopes" className="flex flex-wrap gap-1">
+                    {scopes.map((s) => (
+                      <Tag key={s} mono>
+                        {s}
+                      </Tag>
+                    ))}
+                  </Detail>
+                )}
+              </DetailList>
+              {overSsh && (
+                <p className="text-hint text-muted-foreground">
+                  This repository pushes over SSH, so the push uses this server&apos;s key. Commits
+                  are recorded as the account, and pull requests are opened as it.
+                </p>
+              )}
+            </div>
+          </>
         )}
-        {!account.gitConfigured ? (
-          <div className="space-y-1.5 px-2 pb-1.5">
+        {!account.gitConfigured && (
+          <div className="space-y-2 border-t border-rule-warning bg-wash-warning px-3 py-2.5">
             <p className="text-hint text-muted-foreground">
               {!account.committerEmail
                 ? "git here has no name and address, so it cannot record a commit as you yet."
-                : "git here is not set up to hand the token to a push yet."}
+                : "git on this server is not set up to hand the token to every push yet, from the Terminal and ssh as well as this page."}
             </p>
             <Button
               size="sm"
@@ -223,57 +272,54 @@ export function GitHubAccountControl({
               Use this account for git
             </Button>
           </div>
-        ) : (
-          account.remoteProtocol === "ssh" && (
-            <p className="px-2 pb-1.5 text-hint text-muted-foreground">
-              This repository pushes over SSH, so the push uses this server&apos;s key. Commits are
-              recorded as the account, and pull requests are opened as it.
-            </p>
-          )
         )}
-        <DropdownMenuSeparator />
-        {account.profileUrl && (
-          <DropdownMenuItem asChild>
-            <a href={account.profileUrl} target="_blank" rel="noreferrer">
-              <External className="size-3.5" />
-              View profile on GitHub
-            </a>
+        <DropdownMenuSeparator className="my-0" />
+        <div className="p-1">
+          {account.profileUrl && (
+            <DropdownMenuItem asChild>
+              <a href={account.profileUrl} target="_blank" rel="noreferrer">
+                <External className="size-4" />
+                View profile on GitHub
+              </a>
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem onSelect={() => status.refresh()}>
+            <RefreshClockwise className="size-4" />
+            Re-check
           </DropdownMenuItem>
-        )}
-        <DropdownMenuItem onSelect={() => status.refresh()}>
-          <RefreshClockwise className="size-3.5" />
-          Re-check
-        </DropdownMenuItem>
+        </div>
         {canAdmin && (
           <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive"
-              onSelect={() =>
-                confirm({
-                  title: `Sign out of GitHub`,
-                  confirmLabel: "Sign out",
-                  description: (
-                    <p>
-                      Removes the stored token for{" "}
-                      <span className="font-medium">{account.login}</span>
-                      {account.owner ? ` on the ${account.owner} account` : ""}. Pushes from this
-                      page will stop being authenticated until somebody signs in again.
-                    </p>
-                  ),
-                  action: async () => {
-                    await post("/git/github/auth/logout", undefined, {
-                      query: { path: repoPath, host: account.host },
-                    })
-                    status.refresh()
-                    notify.success("Signed out of GitHub")
-                  },
-                })
-              }
-            >
-              <Logout className="size-3.5" />
-              Sign out
-            </DropdownMenuItem>
+            <DropdownMenuSeparator className="my-0" />
+            <div className="p-1">
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() =>
+                  confirm({
+                    title: `Sign out of GitHub`,
+                    confirmLabel: "Sign out",
+                    description: (
+                      <p>
+                        Removes the stored token for{" "}
+                        <span className="font-medium">{account.login}</span>
+                        {account.owner ? ` on the ${account.owner} account` : ""}. Pushes from this
+                        page will stop being authenticated until somebody signs in again.
+                      </p>
+                    ),
+                    action: async () => {
+                      await post("/git/github/auth/logout", undefined, {
+                        query: { path: repoPath, host: account.host },
+                      })
+                      status.refresh()
+                      notify.success("Signed out of GitHub")
+                    },
+                  })
+                }
+              >
+                <Logout className="size-4" />
+                Sign out
+              </DropdownMenuItem>
+            </div>
           </>
         )}
       </DropdownMenuContent>

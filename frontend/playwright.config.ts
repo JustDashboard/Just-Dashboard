@@ -6,10 +6,21 @@ const crossBrowser = process.env.JD_BROWSER_PROJECTS === "all"
 
 export default defineConfig({
   testDir: "./tests/browser",
-  fullyParallel: false,
+  /*
+    Every spec mocks its own API through `page.route`, so nothing here shares
+    state but the server — which serves a build and holds none. The suite ran
+    one worker at a time anyway, and thirty specs against a cold server is the
+    five to ten minutes that stopped anybody running it during a change.
+
+    Parallel on CI as well. It was serialised there — one worker, one file at
+    a time — which made the browser gate fifteen of the frontend job's twenty
+    minutes; CI now splits the suite into shards (`--shard`), and a shard
+    split by test rather than by file needs `fullyParallel` to balance.
+  */
+  fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  workers: 1,
+  workers: "50%",
   reporter: process.env.CI ? [["line"], ["html", { open: "never" }]] : "list",
   outputDir: "test-results",
   use: {
@@ -17,12 +28,22 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
+  /*
+    A server already listening on the port is used as-is. Booting a fresh one
+    per invocation is most of what a single-spec run cost, and the cost was
+    paid on every iteration of a change — so the suite was run once at the end,
+    which is the opposite of what it is for. `bun run start --port 43117` in
+    another terminal now makes each run the tests themselves.
+
+    Never on CI: there, a leftover server would be a stale build, and the whole
+    point of the run is that it is the build in the diff.
+  */
   webServer: externallyManaged
     ? undefined
     : {
         command: "bun run start --hostname 127.0.0.1 --port 43117",
         url: baseURL,
-        reuseExistingServer: false,
+        reuseExistingServer: !process.env.CI,
         timeout: 120_000,
       },
   projects: [

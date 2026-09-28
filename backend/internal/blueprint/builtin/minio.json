@@ -7,11 +7,18 @@
   "description": "S3-compatible object storage. The console and the S3 API are separate ports because they are separate audiences.",
   "iconId": "database",
   "docsUrl": "https://min.io/docs/minio/container/index.html",
+  "access": {
+    "kind": "client",
+    "usernameVariable": "MINIO_ROOT_USER",
+    "secretVariable": "MINIO_ROOT_PASSWORD",
+    "note": "The routed address serves the S3 API, not the console: applications use the root user as the access key and the generated root password as the secret key. The console runs on a second port this deployment never publishes, so there is no browser sign-in here."
+  },
+  "retired": "Retired 2026-09-22. Upstream archived the repository, the Docker Hub repository this definition pointed at no longer exists, and there is no newer community release to move the pin to — so the one pullable image stays on the wrong side of a known privilege-escalation fix. The console also never reached the operator: only the primary proxied port becomes a route, and that port is the S3 API.",
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "AGPL-3.0",
     "upstreamUrl": "https://hub.docker.com/r/minio/minio",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

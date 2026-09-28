@@ -161,6 +161,7 @@ export function StructureTab({
     <Pane className="min-h-0 flex-1">
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,14rem)_minmax(0,1fr)] lg:grid-cols-[17rem_minmax(0,1fr)] lg:grid-rows-1">
         <TableRail
+          connId={conn.id}
           tables={tables.data}
           loading={tables.loading}
           selected={selection}
@@ -224,9 +225,9 @@ export function StructureTab({
             {table && !detail.error && !d && <LoadingRows rows={8} className="p-4" />}
             {table && d && (
               <div className="animate-rise space-y-8 p-5">
-                <Panel plain>
+                <Panel>
                   <PanelHeader title="Columns" />
-                  <PanelBody flush className="-mx-5">
+                  <PanelBody flush className="group-data-[plain]/panel:-mx-5">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -283,9 +284,9 @@ export function StructureTab({
                 </Panel>
 
                 <div className="grid gap-8 xl:grid-cols-2 [&>*]:min-w-0">
-                  <Panel plain>
+                  <Panel>
                     <PanelHeader title="Indexes" />
-                    <PanelBody flush className="-mx-5">
+                    <PanelBody flush className="group-data-[plain]/panel:-mx-5">
                       {d.indexes.length === 0 ? (
                         <EmptyNote>No indexes.</EmptyNote>
                       ) : (
@@ -331,9 +332,9 @@ export function StructureTab({
                     </PanelBody>
                   </Panel>
 
-                  <Panel plain>
+                  <Panel>
                     <PanelHeader title="Foreign keys" />
-                    <PanelBody flush className="-mx-5">
+                    <PanelBody flush className="group-data-[plain]/panel:-mx-5">
                       {d.foreignKeys.length === 0 ? (
                         <EmptyNote>No foreign keys.</EmptyNote>
                       ) : (

@@ -1,20 +1,22 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
 import { ListOrdered, Router, Shield } from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { Listener } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { Page, PageHeader, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogo, portProduct, processProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { VerbActions, type Verb } from "@/components/verbs"
+import { VerbBar, type Verb } from "@/components/verbs"
 import { DANGEROUS_PORTS } from "@/components/proxy/attention"
 import {
   stickyTableHeader,
@@ -45,8 +47,8 @@ const REACH_LABEL: Record<Reach, string> = {
  */
 export function PortsPage() {
   const router = useRouter()
-  const [filter, setFilter] = useState("")
-  const [reach, setReach] = useState<Reach>("all")
+  const [filter, setFilter] = useSessionState("proxy.ports.query", "")
+  const [reach, setReach] = useSessionState<Reach>("proxy.ports.reach", "all")
   const { data, error, loading } = usePoll(
     (signal) => get<Listener[]>("/ports", undefined, signal),
     15_000,
@@ -66,20 +68,26 @@ export function PortsPage() {
   )
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
-    return all.filter((l) => {
-      if (reach === "exposed" && !l.exposed) return false
-      if (reach === "loopback" && l.exposed) return false
-      if (reach === "tcp" && l.protocol !== "tcp") return false
-      if (reach === "udp" && l.protocol !== "udp") return false
-      if (!needle) return true
-      return (
-        String(l.port).includes(needle) ||
-        (l.process ?? "").toLowerCase().includes(needle) ||
-        (l.cmdline ?? "").toLowerCase().includes(needle) ||
-        (l.user ?? "").toLowerCase().includes(needle) ||
-        l.address.includes(needle)
-      )
-    })
+    return all
+      .filter((l) => {
+        if (reach === "exposed" && !l.exposed) return false
+        if (reach === "loopback" && l.exposed) return false
+        if (reach === "tcp" && l.protocol !== "tcp") return false
+        if (reach === "udp" && l.protocol !== "udp") return false
+        if (!needle) return true
+        return (
+          String(l.port).includes(needle) ||
+          (l.process ?? "").toLowerCase().includes(needle) ||
+          (l.cmdline ?? "").toLowerCase().includes(needle) ||
+          (l.user ?? "").toLowerCase().includes(needle) ||
+          l.address.includes(needle)
+        )
+      })
+      .sort((a, b) => {
+        const rank = (listener: Listener) =>
+          listener.exposed ? (DANGEROUS_PORTS[listener.port] ? 0 : 1) : 2
+        return rank(a) - rank(b) || a.port - b.port
+      })
   }, [all, filter, reach])
 
   const verbsFor = (l: Listener): Verb[] => {
@@ -88,7 +96,6 @@ export function PortsPage() {
       verbs.push({
         key: "process",
         label: "Process",
-        detail: "Open it under Processes: connections, open files, parent chain, and its verbs.",
         icon: ListOrdered,
         inline: true,
         run: () => router.push(`/processes?pid=${l.pid}`),
@@ -98,8 +105,6 @@ export function PortsPage() {
       verbs.push({
         key: "firewall",
         label: "Firewall",
-        detail:
-          "Whether the firewall lets the internet reach this port, and the rule that decides.",
         icon: Shield,
         run: () => router.push("/security/firewall"),
       })
@@ -107,7 +112,7 @@ export function PortsPage() {
     return verbs
   }
 
-  const header = <PageHeader eyebrow="Proxy" title="Listening ports" />
+  const header = <PageContext eyebrow="Proxy" title="Listening ports" />
 
   if (loading && !data) {
     return (
@@ -130,7 +135,7 @@ export function PortsPage() {
     <Page className="animate-rise">
       {header}
 
-      <StatGrid columns={4}>
+      <StatGrid columns={4} dense>
         <StatTile
           label="Listening"
           value={counts.all}
@@ -160,38 +165,43 @@ export function PortsPage() {
       </StatGrid>
 
       <Panel plain>
-        <PanelHeader title="Sockets" />
-        <PanelToolbar>
+        <PanelHeader
+          title="Listening sockets"
+          actions={<span className="text-hint text-muted-foreground">Refreshes every 15s</span>}
+        />
+        <Toolbar className="justify-between gap-x-4">
           <SearchInput
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Port, process, user or address"
-            containerClassName="sm:w-64"
           />
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <ChipStrip>
             {(Object.keys(REACH_LABEL) as Reach[]).map((key) => (
               <FilterChip key={key} selected={reach === key} onClick={() => setReach(key)}>
                 {REACH_LABEL[key]} <ChipCount>{counts[key]}</ChipCount>
               </FilterChip>
             ))}
-          </div>
-        </PanelToolbar>
+          </ChipStrip>
+        </Toolbar>
         <PanelBody flush>
           {visible.length === 0 ? (
             <EmptyState icon={Router} title="No sockets match" className="mt-4" />
           ) : (
             <>
-              <div className="-mx-4 hidden min-w-0 md:block">
-                <Table containerClassName="max-h-[calc(100svh-24rem)]">
+              <div className="hidden min-w-0 lg:block">
+                {/* The grid scrolls independently, so its border marks that boundary. */}
+                <Table
+                  className="table-fixed"
+                  containerClassName="max-h-[calc(100svh-24rem)] rounded-xl border bg-card"
+                >
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>
-                      <TableHead className="w-20">Port</TableHead>
-                      <TableHead className="w-16">Proto</TableHead>
-                      <TableHead>Bound to</TableHead>
-                      <TableHead className="w-full">Process</TableHead>
-                      <TableHead className="hidden lg:table-cell">User</TableHead>
-                      <TableHead>Reach</TableHead>
-                      <TableHead className="w-px" />
+                      <TableHead className="w-[20%]">Endpoint</TableHead>
+                      <TableHead>Application</TableHead>
+                      <TableHead className="w-44">Reach</TableHead>
+                      <TableHead className="w-36">
+                        <span className="sr-only">Actions</span>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -200,38 +210,57 @@ export function PortsPage() {
                         key={`${listener.protocol}-${listener.address}-${listener.port}-${listener.pid}-${i}`}
                         className="group"
                       >
-                        <TableCell className="numeric font-mono text-body">
-                          {listener.port}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground uppercase">
-                          {listener.protocol}
-                        </TableCell>
-                        <TableCell className="font-mono">{listener.address || "*"}</TableCell>
-                        <TableCell>
-                          <div className="max-w-[26rem] min-w-0">
-                            <div className="truncate text-body">
-                              {listener.process || "unknown"}
-                            </div>
-                            <p className="truncate font-mono text-hint text-muted-foreground">
-                              {listener.cmdline}
-                            </p>
+                        <TableCell className="py-4">
+                          <div className="flex items-baseline gap-2">
+                            <span className="numeric font-mono text-title font-semibold">
+                              {listener.port}
+                            </span>
+                            <span className="text-hint text-muted-foreground uppercase">
+                              {listener.protocol}
+                            </span>
                           </div>
+                          <p
+                            className="mt-1 truncate font-mono text-hint text-muted-foreground"
+                            title={listener.address}
+                          >
+                            {listener.address || "*"}
+                          </p>
                         </TableCell>
-                        <TableCell className="hidden lg:table-cell">
-                          {listener.user ?? "—"}
+                        <TableCell>
+                          <div className="flex min-w-0 items-center gap-3">
+                            <ProcessMark listener={listener} />
+                            <div className="min-w-0">
+                              <p className="truncate text-body font-medium">
+                                {listener.process || "unknown"}
+                              </p>
+                              <p
+                                className="truncate font-mono text-hint text-muted-foreground"
+                                title={listener.cmdline}
+                              >
+                                {listener.cmdline || "No command reported"}
+                              </p>
+                              <p className="mt-1 text-hint text-muted-foreground">
+                                {listener.user || "unknown user"}
+                                {listener.pid > 0 && ` · PID ${listener.pid}`}
+                              </p>
+                            </div>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <ReachStatus listener={listener} />
                         </TableCell>
                         <TableCell>
-                          <VerbActions dim verbs={verbsFor(listener)} />
+                          <VerbBar
+                            verbs={verbsFor(listener)}
+                            menuLabel={`Actions for ${listener.protocol} port ${listener.port}`}
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
-              <ul className="divide-y divide-hairline md:hidden">
+              <ul className="divide-y divide-hairline lg:hidden">
                 {visible.map((listener, i) => (
                   <li
                     key={`${listener.protocol}-${listener.address}-${listener.port}-${listener.pid}-${i}`}
@@ -240,11 +269,14 @@ export function PortsPage() {
                       ROW_BLEED,
                     )}
                   >
-                    <span className="numeric w-12 shrink-0 font-mono text-body">
+                    <span className="numeric w-14 shrink-0 font-mono text-title font-semibold">
                       {listener.port}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-body">{listener.process || "unknown"}</div>
+                      <div className="flex min-w-0 items-center gap-2 text-body">
+                        <ProcessMark listener={listener} />
+                        <span className="truncate">{listener.process || "unknown"}</span>
+                      </div>
                       {/* Which address a port is bound to is the whole reason
                           this page exists — it must not be the line that gets
                           dropped on a narrow screen. */}
@@ -253,11 +285,11 @@ export function PortsPage() {
                         <span className="uppercase"> · {listener.protocol}</span>
                         {listener.user && ` · ${listener.user}`}
                       </p>
-                      <div className="mt-1.5">
+                      <div className="mt-1.5 flex">
                         <ReachStatus listener={listener} />
                       </div>
                     </div>
-                    <VerbActions verbs={verbsFor(listener)} className="shrink-0" />
+                    <VerbBar verbs={verbsFor(listener)} className="shrink-0" />
                   </li>
                 ))}
               </ul>
@@ -267,6 +299,17 @@ export function PortsPage() {
       </Panel>
     </Page>
   )
+}
+
+/**
+ * The process as the product it is, bare at the line's height — Postgres on
+ * 5432, nginx on 443 — the way the identity line draws a host's facts. Read
+ * from the process name first and the port second, so a `postgres` on an
+ * unusual port is still Postgres and a `python` on 5432 is not.
+ */
+function ProcessMark({ listener }: { listener: Listener }) {
+  const product = processProduct(listener.process ?? "") ?? portProduct(listener.port)
+  return <ProductLogo id={product} size="sm" fallback={Router} />
 }
 
 function ReachStatus({ listener }: { listener: Listener }) {

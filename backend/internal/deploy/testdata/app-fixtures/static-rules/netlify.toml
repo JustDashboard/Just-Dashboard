@@ -1,0 +1,10 @@
+# The same rules again, as a move from _redirects to netlify.toml leaves them.
+[[redirects]]
+  from = "/old"
+  to = "/documentation"
+  status = 301
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"

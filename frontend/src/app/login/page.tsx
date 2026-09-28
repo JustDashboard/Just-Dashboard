@@ -2,16 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import {
-  ArrowRight,
-  Check,
-  Copy,
-  External,
-  Eye,
-  EyeOff,
-  Key,
-  ShieldCheck,
-} from "@/components/icons"
+import { ArrowRight, Check, Copy, Eye, EyeOff, Key, ShieldCheck } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -23,6 +14,7 @@ import { Notice } from "@/components/state"
 import { Logo } from "@/components/logo"
 import { useCopy } from "@/hooks/use-copy"
 import { Well } from "@/components/panel"
+import { TotpSecret } from "@/components/account/totp-secret"
 
 type Step = "credentials" | "totp" | "enroll" | "password"
 
@@ -356,7 +348,7 @@ export default function LoginPage() {
                   </div>
                 ) : (
                   <form onSubmit={submitEnrollment} className="space-y-4">
-                    <SecretBlock secret={enrollment.secret} otpauthUrl={enrollment.otpauthUrl} />
+                    <TotpSecret secret={enrollment.secret} otpauthUrl={enrollment.otpauthUrl} />
                     <div className="space-y-1.5">
                       <Label htmlFor="enroll-code">Code from your app</Label>
                       <Input
@@ -441,41 +433,6 @@ function Steps({ current, enrolling }: { current: Step; enrolling: boolean }) {
         )
       })}
     </ol>
-  )
-}
-
-/**
- * The TOTP seed, grouped in fours so it can be read aloud or typed without
- * losing your place, with the otpauth:// link beside it for the phone that is
- * already holding the authenticator.
- */
-function SecretBlock({ secret, otpauthUrl }: { secret: string; otpauthUrl: string }) {
-  const { copy, copied } = useCopy()
-  const grouped = secret.replace(/\s+/g, "").match(/.{1,4}/g) ?? [secret]
-
-  return (
-    <div className="space-y-2">
-      <Label>Secret</Label>
-      <div className="flex flex-wrap gap-1 rounded-lg border border-hairline bg-surface-sunken p-2.5">
-        {grouped.map((chunk, i) => (
-          <code key={i} className="font-mono text-body tracking-widest">
-            {chunk}
-          </code>
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => void copy(secret)}>
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? "Copied" : "Copy secret"}
-        </Button>
-        <Button type="button" variant="ghost" size="sm" asChild>
-          <a href={otpauthUrl}>
-            <External className="size-3.5" />
-            Open in authenticator
-          </a>
-        </Button>
-      </div>
-    </div>
   )
 }
 

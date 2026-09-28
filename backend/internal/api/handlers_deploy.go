@@ -30,18 +30,35 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodGet, "/drafts", s.handle(s.handleDeploymentDraftList))
 			r.Method(http.MethodGet, "/drafts/{draft}", s.handle(s.handleDeploymentDraftGet))
 			r.Method(http.MethodPut, "/drafts/{draft}", s.handle(s.handleDeploymentDraftSave))
+			r.Method(http.MethodDelete, "/drafts/{draft}", s.handle(s.handleDeploymentDraftDiscard))
 			r.Method(http.MethodPost, "/drafts/{draft}/detect", s.handle(s.handleDeploymentDraftDetect))
 			r.Method(http.MethodPost, "/drafts/{draft}/preflight", s.handle(s.handleDeploymentDraftPreflight))
 		})
 		r.Method(http.MethodGet, "/", s.handle(s.handleDeployList))
 		r.Method(http.MethodGet, "/hostname", s.handle(s.handleDeploymentHostname))
+		// Static, and registered before /{id} for the same reason /hostname
+		// is: chi prefers the literal segment, so the fleet's counts never
+		// read as a project called "pull-requests".
+		r.Method(http.MethodGet, "/pull-requests", s.handle(s.handleDeploymentPullRequestSummary))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleDeployGet))
+		r.Method(http.MethodGet, "/{id}/pull-requests", s.handle(s.handleDeploymentPullRequests))
+		r.Method(http.MethodGet, "/{id}/pull-requests/{number}/checks", s.handle(s.handleDeploymentPullRequestChecks))
 		r.Method(http.MethodGet, "/{id}/preview-frame", s.handle(s.handleDeploymentPreviewFrame))
+		r.Method(http.MethodGet, "/{id}/favicon", s.handle(s.handleDeploymentFavicon))
 		r.Method(http.MethodGet, "/{id}/runs", s.handle(s.handleDeployRuns))
 		r.Method(http.MethodGet, "/{id}/runs/{run}", s.handle(s.handleDeploymentRunGet))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/logs", s.handle(s.handleDeploymentRunLogs))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/metrics", s.handle(s.handleDeploymentRunMetrics))
 		r.Method(http.MethodGet, "/{id}/runs/{run}/stream", s.handle(s.handleDeploymentRunStream))
+		r.Method(http.MethodGet, "/{id}/runs/{run}/settings-drift", s.handle(s.handleDeploymentRunSettingsDrift))
+		r.Method(http.MethodGet, "/{id}/requests", s.handle(s.handleDeploymentRequests))
+		r.Method(http.MethodGet, "/{id}/requests/stream", s.handle(s.handleDeploymentRequestStream))
+		r.Method(http.MethodGet, "/{id}/requests/export", s.handle(s.handleDeploymentRequestExport))
+		r.Method(http.MethodGet, "/{id}/runs/{run}/traffic", s.handle(s.handleDeploymentRunTraffic))
+		r.Method(http.MethodGet, "/{id}/lifecycle", s.handle(s.handleDeploymentLifecycle))
+		r.Method(http.MethodGet, "/{id}/lifecycle/stream", s.handle(s.handleDeploymentLifecycleStream))
+		r.Method(http.MethodGet, "/{id}/alerts", s.handle(s.handleTrafficAlertList))
+		r.Method(http.MethodGet, "/traffic", s.handle(s.handleDeploymentTrafficPulse))
 		r.Method(http.MethodGet, "/{id}/commits", s.handle(s.handleDeployCommits))
 		r.Method(http.MethodGet, "/{id}/env", s.handle(s.handleDeployEnvList))
 		r.Method(http.MethodGet, "/{id}/environments/{env}/releases", s.handle(s.handleDeploymentReleases))
@@ -66,8 +83,15 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{id}/run", s.handle(s.handleDeployRun))
 			r.Method(http.MethodPost, "/{id}/environments/{env}/runs", s.handle(s.handleDeploymentRunCreate))
+			r.Method(http.MethodPost, "/{id}/environments/{env}/check", s.handle(s.handleDeploymentCheck))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/cancel", s.handle(s.handleDeploymentRunCancel))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/retry", s.handle(s.handleDeploymentRunRetry))
+			// Merging and commenting speak on GitHub as the dashboard's own
+			// account, which is why an API token may not: the same rule as
+			// the Git page's write routes, with the session requirement the
+			// deploy page's other GitHub-facing verbs carry.
+			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/pull-requests/{number}/merge", s.handle(s.handleDeploymentPullRequestMerge))
+			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/pull-requests/{number}/comment", s.handle(s.handleDeploymentPullRequestComment))
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
@@ -91,8 +115,12 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/{name}/rotate", s.handle(s.handleDeploymentVariableRotate))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/configuration", s.handle(s.handleDeploymentConfigurationSave))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/source", s.handle(s.handleDeploymentSourceUpdate))
+				r.Method(http.MethodPost, "/{id}/environments/{env}/detect", s.handle(s.handleDeploymentDetect))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/git-policy", s.handle(s.handleDeploymentGitPolicyPut))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/approve", s.handle(s.handleDeploymentPreviewApprove))
+				// Testing a pull request is the approval of that head, so it
+				// sits with the approval route it stands in for.
+				r.Method(http.MethodPost, "/{id}/pull-requests/{number}/preview", s.handle(s.handleDeploymentPullRequestPreview))
 				r.Method(http.MethodPost, "/{id}/duplicate", s.handle(s.handleDeploymentDuplicate))
 				r.Method(http.MethodPost, "/{id}/removal-plan", s.handle(s.handleDeploymentRemovalPlan))
 				r.Method(http.MethodGet, "/credentials", s.handle(s.handleDeploymentCredentials))
@@ -108,6 +136,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/{id}/environments/{env}/schedules/test", s.handle(s.handleDeploymentScheduleTest))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/schedules/{schedule}", s.handle(s.handleDeploymentScheduleUpdate))
 				r.Method(http.MethodDelete, "/{id}/environments/{env}/schedules/{schedule}", s.handle(s.handleDeploymentScheduleDelete))
+				r.Method(http.MethodPost, "/{id}/alerts", s.handle(s.handleTrafficAlertCreate))
+				r.Method(http.MethodPut, "/{id}/alerts/{alert}", s.handle(s.handleTrafficAlertUpdate))
+				r.Method(http.MethodDelete, "/{id}/alerts/{alert}", s.handle(s.handleTrafficAlertDelete))
+				r.Method(http.MethodPost, "/{id}/alerts/{alert}/test", s.handle(s.handleTrafficAlertTest))
 				r.Method(http.MethodPost, "/notifications", s.handle(s.handleDeploymentNotificationCreate))
 				r.Method(http.MethodPut, "/notifications/{channel}", s.handle(s.handleDeploymentNotificationUpdate))
 				r.Method(http.MethodPost, "/notifications/{channel}/test", s.handle(s.handleDeploymentNotificationTest))
@@ -132,6 +164,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// saved DNS-provider credential: destructive, but never a typed
 			// phrase, since the secret is pasted again in a minute.
 			r.Method(http.MethodDelete, "/credentials/{id}", s.handle(s.handleDeploymentCredentialDelete))
+			// Closing a preview removes its container, volumes and address:
+			// destructive, with an ordinary confirmation, since the pull
+			// request can be tested again in a minute.
+			r.With(httpx.RequireSession).Method(http.MethodPost, "/{id}/pull-requests/{number}/preview/close", s.handle(s.handleDeploymentPullRequestClose))
 		})
 	})
 }
@@ -178,11 +214,32 @@ func mapDeployError(err error) error {
 		return httpx.Err(http.StatusBadRequest, "ref_not_applicable", err.Error())
 	case errors.Is(err, deploy.ErrRefNotFound):
 		return httpx.Err(http.StatusBadRequest, "ref_not_found", err.Error())
+	case errors.As(err, new(*deploy.SourceFailure)):
+		// The remote answered and git's output named why: a refused
+		// credential, a missing repository, an unreachable host or a commit
+		// that is gone. Each has its own remedy, so each keeps its own code.
+		return httpx.Err(http.StatusBadGateway, sourceFailureCode(err), err.Error())
 	case errors.Is(err, deploy.ErrSourceUnavailable):
 		return httpx.Err(http.StatusBadGateway, "source_unavailable", err.Error())
+	case errors.Is(err, deploy.ErrPreviewAddressExhausted):
+		return httpx.Err(http.StatusConflict, "preview_address_exhausted", err.Error())
+	case errors.Is(err, deploy.ErrPreviewAddressMissing):
+		return httpx.Err(http.StatusConflict, "preview_address_missing", err.Error())
+	case errors.Is(err, deploy.ErrPullRequestRateLimited):
+		return httpx.Err(http.StatusTooManyRequests, "github_rate_limited", err.Error())
+	case errors.Is(err, deploy.ErrPullRequestUnreadable):
+		return httpx.Err(http.StatusBadGateway, "pull_request_unreadable", err.Error())
 	default:
 		return httpx.BadRequest("%v", err)
 	}
+}
+
+func sourceFailureCode(err error) string {
+	var failure *deploy.SourceFailure
+	if errors.As(err, &failure) {
+		return failure.Code
+	}
+	return "source_unavailable"
 }
 
 func (s *Server) enrichProject(r *http.Request, p *deploy.Project) {
@@ -209,10 +266,20 @@ func (s *Server) handleDeployList(w http.ResponseWriter, r *http.Request) error 
 		return httpx.Internal(err)
 	}
 	if r.URL.Query().Get("view") == "archived" {
-		archived := make([]*deploy.Project, 0)
+		facts, err := s.modules.deployRuns.ArchivedDeploymentFacts(r.Context())
+		if err != nil {
+			return httpx.Internal(err)
+		}
+		// Each row carries what it deployed beside the project record, so the
+		// archived list can draw it as that product without a read per row.
+		type archivedDeployment struct {
+			*deploy.Project
+			deploy.DeploymentFacts
+		}
+		archived := make([]archivedDeployment, 0)
 		for _, p := range projects {
 			if p.ArchivedAt != nil {
-				archived = append(archived, p)
+				archived = append(archived, archivedDeployment{Project: p, DeploymentFacts: facts[p.ID]})
 			}
 		}
 		httpx.JSON(w, http.StatusOK, archived)
@@ -798,7 +865,13 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 			return nil, deploy.ErrAlreadyStopped
 		}
 		if operation == deploy.OperationStart && runtime.State != "stopped" {
-			return nil, deploy.ErrNotStopped
+			var observer deploy.RuntimeObserver
+			if s.modules.docker != nil {
+				observer = s.modules.docker
+			}
+			if runtime.State != "live" || !deploy.ReleaseRuntimeDown(ctx, observer, *runtime) {
+				return nil, deploy.ErrNotStopped
+			}
 		}
 	case deploy.OperationRollback:
 		if targetReleaseID <= 0 || targetReleaseID == target.LiveReleaseID {
@@ -838,6 +911,13 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	manualOverride := trigger == deploy.TriggerManual && (sourceRevision != "" || requestedRef != "")
 	if manualOverride && !(source.Kind == deploy.SourceGit && deploy.IsRemoteGitSource(source)) {
 		return nil, deploy.ErrRefNotApplicable
+	}
+	// A pull request's head reaches an environment through "Test this pull
+	// request", where an administrator approves that exact commit for a
+	// preview; named here it would deploy anyone's pull request to production
+	// with no approval at all.
+	if requestedRef != "" && deploy.IsProviderPullRef(requestedRef) && target.Kind != deploy.EnvironmentPreview {
+		return nil, fmt.Errorf("%w: %s is a pull request head, which only a preview environment builds", deploy.ErrRefNotApplicable, requestedRef)
 	}
 	if deploy.IsRemoteGitSource(source) {
 		switch {
@@ -967,6 +1047,24 @@ func (s *Server) handleDeploymentRunGet(w http.ResponseWriter, r *http.Request) 
 		return mapDeployError(deploy.ErrRunNotFound)
 	}
 	httpx.JSON(w, http.StatusOK, snapshot)
+	return nil
+}
+
+// handleDeploymentRunSettingsDrift says what changed in the environment's
+// settings since a run was planned, so a failed run's page can offer a deploy
+// with the current settings rather than a retry of the ones that failed. It
+// reads what the configuration read already shows: plan fields, and variable
+// names and scopes without values.
+func (s *Server) handleDeploymentRunSettingsDrift(w http.ResponseWriter, r *http.Request) error {
+	projectID, runID, err := deploymentRunIDs(r)
+	if err != nil {
+		return err
+	}
+	drift, err := s.modules.deployPlanning.RunSettingsDrift(r.Context(), projectID, runID)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	httpx.JSON(w, http.StatusOK, drift)
 	return nil
 }
 

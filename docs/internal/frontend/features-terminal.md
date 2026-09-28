@@ -41,7 +41,8 @@
   single row ("9 containers have no memory limit") whose body states the shared reasoning once and names
   the containers as chips that run that container's own remedy. The severity filter strip, the "N
   distinct" counter and the Hide button are gone — four chips and two counters framing a list capped at
-  five rows. `ContainerFindings` filters the page's single pass for one container's detail panel.
+  five rows. `ContainerFindings` filters a diagnosis pass for one container; the containers page passes its own,
+  and the container's page asks for one.
   `RuntimeHealthPanel` is the other half and counts what is *fine* as well as what is not, because a
   list of problems can never say "eight healthy, four with no health check at all" — and that last
   number is what stops "all healthy" meaning "nothing is being watched".
@@ -78,27 +79,42 @@ that does something.
   each row carries the stack's state, its services (dot, name, ports, health) and the one action that
   belongs there — deploy when the application is down. It opens with the same search box and state
   chips as the containers page, because "which of these is down" is the same question asked of the same
-  server. The detail panel follows the same rule as a container: the compose verbs that are pressed
-  daily (deploy, restart) sit inline, and the rest are behind one overflow menu where each gets its word
-  and its sentence — the menu item's word-and-sentence body is `MenuItemBody` in
-  `container-actions.tsx`, shared with the container menu. Its services tab, the deploy preview's
+  server. A stack's own page follows the same rule as a container's: the compose verbs that are pressed
+  daily (deploy, restart) sit inline, and the rest are behind one overflow menu, one word to a line,
+  drawn the same way as the container menu. Its services tab, the deploy preview's
   service rows and the deployment history are hairline lists the eye reads down, not stacks of bordered
   rows; the preview's verdict and the network panel's shape diagram are the two `Group tinted` fences
   the section keeps, and a diff or a captured compose file sits in a `Well`.
 - `stack-detail.tsx` is a stack as the application it is: clickable ports, the compose file editable in
-  place (validated before saving — and saving is *not* deploying, which the UI says), one merged log feed
-  tagged by service, links to Files, git and a shell in the stack's directory. `container-detail.tsx` adds
+  place (validated before saving — and saving is *not* deploying, which the UI says), its logs as one
+  source (`stack:<name>`: every container merged by time, each line under its service in that service's
+  hue, the stack's readings over it, and an Events view of what Docker did to the project), a Files tab
+  over the stack's directory, and links to git and a shell in it. `container-detail.tsx` adds
   the reachability join (published port + the proxy site pointing at it turns "running on 3000" into a
-  URL), the writable-layer investigator, the failure diagnosis, editable limits, raw inspect, and
+  URL), the writable-layer investigator, the failure diagnosis (whose window the Logs tab opens as a
+  Crash window chip, and the Overview's notice as Read those lines), its logs through the lens its
+  image names with an Events view beside them (`container-events.tsx`: the health check's probes,
+  Docker's events for the container with crash loops folded and an exit's last lines under it),
+  editable limits, raw inspect, and
   Update/Duplicate/Rename — the last two behind a statement of consequence when compose owns the
   container, because the next deploy silently undoes them days later. Its Storage tab leads with the path
   *inside* the container — the one the application's own configuration names — states the kind of storage
-  in words rather than as a Docker noun, and puts where it actually lives on the second line; the header
-  answers the question the tab is opened with, which is how much of this survives a rebuild. Its Usage
-  tab drops the network chart entirely for a container on the host's network namespace: Docker reports no
-  per-container interface there, and a chart-shaped hole explaining itself beside a real chart draws the
-  eye first to say "nothing here". `build-dialog.tsx` is where the git panel and Docker stop being two
-  products: a repository we already pull is a build context.
+  in words rather than as a Docker noun, and puts where it actually lives beside it, one line per mount with
+  the kind at the row's edge (amber for memory, which does not survive a rebuild). Under the mounts, the
+  first volume or bind is already open in `files/inline-browser.tsx` — the same component the volume
+  panel and the stack's Files tab use, drawn as the file manager's own listing in a pane, here in its
+  `fill` form so the listing takes the tab's height — because naming a mount does not answer whether the
+  backup landed or what the application wrote. With more than one to look in, the rows are the switch
+  between them; a tmpfs row never is, since memory has nowhere on this filesystem to look. Storage that looks
+  like a database's own files is named as such above the browser while the container is running
+  (`docker/shared.tsx`). Its Usage tab leads with live CPU, memory working set and network receive/send
+  tiles, then processor/task, memory and block I/O details and a per-interface table of rates, totals,
+  packet rates, errors and drops. Live readings can be paused and remain independent of history
+  retention. Host networking links to host metrics; shared container namespaces are labelled as shared.
+  Recorded charts stay visible for idle interfaces (zero is data); charts with no measurable intervals
+  are omitted with a compact explanation. CPU/memory and network/block charts share one range control,
+  carry measured peaks, and use the reading register's plain surfaces. `build-dialog.tsx` is where the
+  git panel and Docker stop being two products: a repository we already pull is a build context.
 
 Four deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`, `/audit?action=`.
 All but the terminal one are read once as an initial value rather than kept in sync — the URL is where
@@ -107,10 +123,16 @@ mount, because a shell is a process. The audit link is how the Docker event feed
 event; landing on an unfiltered list of everything the dashboard has ever done is not the entry it
 promised.
 
-Docker's `/docker/containers?container=` and `/docker/stacks?stack=` select the owning detail panel.
-`useQuerySelection` keeps panel selection in browser history so reload and back/forward restore it;
-closing clears only that selection parameter. Deployment runtime rows use these handoffs, including
-when a container disappears between the observation and the click: the owner panel displays its error.
+A container and a stack are their own destinations — `/docker/containers/<id>` and
+`/docker/stacks/<name>` — since 2026-09-21: each holds its logs, and the container a shell and
+the stack a compose editor, which is the test for a page rather than a sheet (`shell-design.md`). The
+container takes `?tab=` so a link can ask its question — "show me the logs" lands on the logs. The
+`?container=` and `?stack=` addresses those pages replaced still resolve, by redirect. Deployment
+runtime rows use these handoffs, including when a container disappears between the observation and
+the click: the page reports it, and a container removed from its own page returns to the list.
+
+`useQuerySelection` still keeps the remaining sheets' selections in browser history so reload and
+back/forward restore them; closing clears only that selection parameter.
 
 **Security and proxy** (`components/security/`, `components/proxy/`) follow the same rule — teaching next
 to the control, not in a banner above it. `posture-panel.tsx` turns a finding's `fix` into a button and
@@ -124,47 +146,71 @@ under the domain field because "the name does not point here yet" causes most ce
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
 protocol row.
 
-The security section is eight pages of one shape, the host Overview's: a page header carrying the
-area's verdict, a run of `StatTile` readings on the page's own ground, the findings about that area
-under them (`AreaFindings`, plain), then the detail as plain tables that bleed to the page edge. The
-overview opens on how this browser reaches the panel — the exposure grade, the allowlist, the tunnel
-interfaces and **the address you arrived from** (`Exposure.client`) as a row of facts — then five
-tiles, one per area with a figure, each a `StatLink` to its page, and the whole posture as one findings
-list. There is no second list of the areas: the rail's Security panel already names every page, and the
-tiles carry the verdicts that used to sit beside seven links. The rules it follows are the ones the
-[design system](design-system.md) states, plus four of its own:
+The security section has eight reading pages (§15–16), all retaining their headline
+`StatGrid` readings. The overview adds a picture of the observed browser → access scope → dashboard
+path using the deployment section's `SettingPicture`, `WireNode` and still `AnimatedBeam` vocabulary.
+It describes access to the dashboard, not exposure of every port on the host. The finding severity
+counts and unavailable checks sit in a rail beside the findings.
 
-- **An address is the same thing on every page.** A remote peer on Connections, a repeat offender in
-  the ban log and an attacker in the failed-login record all take the verbs in `address-verbs.tsx`:
-  *block at the firewall* inline (a source-only deny the server puts in front of every allow, omitted
-  for a role that cannot write rules and for a private peer), and behind the menu the three lookups —
-  who owns it, reverse lookup, trace the route — each of which opens the Tools page narrowed to that
-  probe with the address filled in (`?tool=asn&target=…`). Arriving never runs the probe; a probe is
-  traffic this server sends to an address, and the run stays a press.
-- **The jail sheet can ban, and the tuning dialog knows who you are.** `POST /fail2ban/{jail}/ban`
-  existed since the jail controls shipped and nothing on the page reached it; the sheet has the input
-  now, with the server refusing the caller's own address. The tuning dialog's allowlist offers "Never
-  ban my address" — the exposure's `client` — because banning yourself is the commonest way to lose a
-  server you were in the middle of hardening, and its notice says what actually happens: applied to the
-  running fail2ban and written to `jail.d/99-just-dashboard.local`, not "lost at the next restart".
-- **Logins folds btmp into attackers.** Five hundred lines of the same three addresses answer nothing;
-  `GET /logins/attackers` (admin, like the listing it is folded from) gives each address its attempts,
-  the account names it tried most — "root, admin, ubuntu" is a scanner, one real name is somebody who
-  knows the host — and the block beside it.
-- **A standing fact is not a banner.** Text that never changes — the firewall's lockout guard, "a probe
-  answers outward, not inward" — is stated *once*, in the footer of the thing it qualifies or at the top
-  of the page it applies to, never repeated per block. Only a `Notice` that explains why the control
-  under it will refuse (sshd with no key on the host) stays above the control, and it sits under the
-  readings rather than above them. The firewall's defaults are readings in tiles and, where the backend
-  can take an instruction, controls in one plain "Defaults" block — a read-only host gets the tiles and
-  no row of dead controls under them.
+- **Firewall:** the rules are the working column, with default-policy and logging controls beside
+  them on wide screens. Each row groups its destination service, port and comment; actions stay
+  visible. The rule dialog groups policy, destination and source, using source choice cards
+  (Tailscale's own mark for a tailnet source) and service marks where the port identifies a product.
+  Address-only deny/reject rules can be edited without inventing a destination port. Existing
+  typed confirmations for toggle, reset and inbound-deny policy remain. The page ends on the Firewall
+  log (`ufw.log`, else `kern.log`, else the kernel ring, read as the firewall lens); while ufw or
+  firewalld says logging is off, the section says so and its button brings the logging control
+  beside the rules into view instead of drawing an empty pane.
+- **SSH:** authentication, access, session limits and other directives are `FormSection aside`
+  groups. Every control occupies the same column; recommendations sit with the setting, explanatory
+  detail is available beside its label, and a sticky pending footer applies the changed values
+  together. Reverting a draft to its effective value removes it from the change set. The apply
+  dialog still requires `change ssh`; the backend tests and reloads through its existing job. For an
+  administrator the page ends on the Auth log (`auth.log` or `secure`, else the journal's sshd, sudo,
+  su and logind lines); anyone else is told the page needs an administrator and no log is asked for.
+- **Intrusion:** jail destination rows carry the watched service, current state, counts and a meter
+  of bans still held. The jail sheet retains manual ban and release actions. Its tuning form shows
+  the subject, groups the three policy numbers, and offers the browser's address for the allowlist.
+  Draft values use fail2ban's lowercase parameter names while the saved configuration uses camel
+  case. Repeat offenders take their row alone, and Activity — fail2ban's own log, every strike as
+  well as every ban — follows across the page; where fail2ban writes only to its journal, the
+  offenders' fold says Activity reads it instead rather than "nothing has been banned".
+- **Each area reads its own log in place.** SSH, Firewall and Intrusion read the file an operator
+  would open first, each asked after with `GET /logs/source` rather than out of the whole log index,
+  and fall back to the journal's reading of the same program, saying in the pane's facts whether the
+  file is missing or outside `JD_LOG_ROOTS` (`host-logs.ts`, `log-section.tsx`). The day's counts
+  from the log are a second run of the page's one grid, each a press that narrows the log under it.
+  The client of a line takes the same address verbs as a peer anywhere else in the section, but the
+  block only where the line is an attack a deny answers — a failed or invalid login, a strike or a
+  ban, a rate-limited packet — never an accepted login, an `ignoreip` match or an allowed packet,
+  which can be the operator's own; an outbound packet's address is this host's, and gets no verbs.
+- **Connections:** each peer's address and network share one column, its process and ports another,
+  with a socket count and a comparative meter. **Logins** groups account/terminal, origin and session
+  age, then places attackers and login history beside one another when there is room. Addresses
+  use `PeerIdentity` or the inline `Address`; real product marks and consistent account initials
+  carry through all three pages. Address block and lookup actions remain in `address-verbs.tsx`.
+- **Network:** devices group identity, addresses/reach, link state/MTU and transferred bytes. The
+  received/sent meter compares cumulative byte counts, not bandwidth or utilization. Routes keep
+  their own table beside the resolver facts. Virtual and bridge devices remain folded by default.
+- **Tools:** 21 probes plus the browser-only subnet calculator occupy a two-pane workbench. The
+  searchable chooser selects one labelled form and result area. Other probes stay mounted while
+  hidden, preserving drafts, results and in-flight requests when switching. A new query-string
+  arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs it;
+  sending traffic remains an explicit Run action. The metrics and outward-tool hint distinguish
+  outbound reachability from inbound exposure.
 
-`tests/browser/security-ui.spec.ts` drives all eight pages against a mocked API: the readings each
-page draws from the shapes the backend sends, the joins above (the block a row sends, the ban the sheet
-sends, the allowlist the tuning offers, the prefill Tools arrives with), that no block on any page is
-framed, that every icon-only control is named, that row controls are reachable without a pointer, and
-that nothing scrolls sideways on a phone. Set `JD_SECURITY_SHOTS` to a directory to have it write
-review screenshots of every page at 1280 and 1720 wide.
+Capability-gated controls, unavailable modules, backend paths and audit/confirmation boundaries
+retain their contracts. Tables keep their frames because they own scroll regions; plain findings
+and forms do not. Phone tables scroll inside those frames without expanding the page.
+
+`tests/browser/security-ui.spec.ts` checks all eight pages, their mutations and lookup handoffs,
+probe draft/request preservation, jail policy edits, SSH draft reversion, source-only rules,
+typed confirmations, limited roles and unavailable modules, and each area's log — its lens, its
+readings, its fallbacks and which lines offer a block — against the lines the Go lenses read
+(`host-logs-fixture.ts`). It checks the viewport at 390, 1280 and 1720, and requires desktop tables to
+fit their action columns. `JD_SECURITY_SHOTS` writes
+review screenshots at those three widths, including scrolled content and rule/jail dialogs.
+The changed-file gate also runs the design-system checks.
 
 **Packages.** `install-panel.tsx` updates as you type, which is not decoration: the reason people open a
 terminal instead of a package page is that they do not know the name (`postgresql-client`, not `psql`;
@@ -176,28 +222,40 @@ feature; the installed table caps at 400 rendered rows with the count said plain
 is drawn per design-system §15: the search is a plain panel of hand-laid rows (`ROW_BLEED`) whose
 install verb is an outline button — sixty brand faces in a result list would be sixty commands — and
 a started install is a `Status`, not a disabled button; the sheet's usage sections open with an eyebrow
-alone, and its copyable commands sit on the control ground.
+alone, and its copyable commands sit on the control ground. The fourth view, **Log**
+(`components/packages/log-view.tsx`), reads what the package manager did from its own logs — apt's
+history with each transaction's command and who asked, dpkg's record, the unattended runs, dnf's — in
+History and Insights only, opening on everything on disk, since a package log is written a few times
+a week and a live tail of it is an empty pane; it is named Log because the pane's own first tab is
+History.
 
 ## The terminal panel
 
 `components/terminal/` is the session rail and window strip; `components/xterm-pane.tsx` is the emulator. The
 split matters — the pane is reused by the compose runner and knows nothing about sessions.
 
-- The page is **one framed workbench**. The rail, the emulator and the Files/Git column are `Pane flush`
+- The page is **one framed workbench**. The rail, the emulator and the Files/Diff column are `Pane flush`
   inside a single `rounded-xl border` wrapper, separated by a hairline each (drawn on the rail's right
-  edge and the tools column's left edge; they turn into top and bottom rules when the columns stack
-  below `lg`). Three framed panes with a gutter between them read as three boxes floating on the page;
-  the screen is one working surface. Immersive mode drops the wrapper's frame along with the page.
-- `session-rail.tsx` is a plain column: a "Sessions" strip with the two new-buttons, then the list. A row
-  is one line — the session's label and, at the end, the activity mark (below). Rows carry no terminal
-  glyph (every row is a terminal) and no directory line under the title (the label carries the
-  directory at a prompt). Rows are plain rounded rows with no fence or divider between them; the
-  active one is `bg-accent` and the others take the row hover, and that is the whole difference —
-  no brand bar or other colour on the active row. The filter box
-  appears only once there are more than five sessions — a filter over one session is a box with
-  nothing to do. Folder headers are plain disclosure rows: chevron and explanatory name only, with no
-  folder icon, count, nested container or empty invitation. Pinning still sorts a session to the top
-  of its folder.
+  edge and the tools column's left edge). Three framed panes with a gutter between them read as three
+  boxes floating on the page; the screen is one working surface. The three columns' top strips are all
+  40px (the rail's and the tools column's `PaneHeader` are pinned to `h-10`, the emulator's strip is
+  `min-h-10`), so their hairlines meet as one rule across the frame. Immersive mode drops the wrapper's
+  frame along with the page. Below `lg` the rail and the tools column **cover the emulator** inside the
+  frame instead of sitting beside it — stacked over and under it they left a phone's terminal one line
+  tall — so only one of the two is up at a time (`useMediaQuery` in `page.tsx` decides), picking a
+  session puts the rail away, and each carries its own hide button while it is an overlay — and only
+  then: beside the emulator, the strip's two toggles are the one way to hide either panel.
+- `session-rail.tsx` is a plain column: a "Sessions" strip with the new-session button, then the
+  list, newest first. A row is one line — the program mark, the session's label and, at the end, the
+  activity mark (below), with the close button after it under the pointer (`rowReveal`). That is
+  everything a row offers: the operator asked for folders, renaming, pinning and the row's `⋯` menu to
+  go, because sessions that name themselves after what they run need no filing system — a session is
+  opened and closed. Rows carry no directory line under the title (the label carries the directory at
+  a prompt). Rows are plain rounded rows with no fence or divider between them; the active one is
+  `bg-accent` and the others take the row hover, and that is the whole difference — no brand bar or
+  other colour on the active row. The filter box appears only once there are more than five
+  sessions — a filter over one session is a box with nothing to do. The backend's folder, pin and
+  rename routes remain; the page no longer calls them.
 - **Names follow the shell.** An unnamed session or window is "Terminal" (numbered from 2 when that is
   taken), and that default is only a fallback. A tab is labelled the way a desktop terminal's title
   bar is: the title the foreground program set through OSC 0/2, the program's name when it set none,
@@ -206,27 +264,33 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   (`plainTitle`): saying "working" is the activity mark's job, and a label that carried both said it
   twice. A session is labelled after its
   *current* window — the one last on screen in any browser (the pane sends a `focus` frame), or
-  failing that the newest. A name the operator typed, for a session or a window, is shown as typed
-  (`named` in the API), so renaming still works as it did. `lib/terminal-activity.ts` holds the rule
+  failing that the newest. The page offers no renaming; a name given through the API (`named`) is
+  still shown as given. `lib/terminal-activity.ts` holds the rule
   once for the strip and the rail. The state arrives two ways: polled with the window list and the
   session listing (every five seconds), and pushed over each visited window's attach socket as a
   `state` frame the moment it changes, which is what makes a tab's mark and title move with the
   shell rather than with the poll. The server side is in
   [`processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal).
-- **The activity mark** (`activity-mark.tsx`) says what is happening in a window, and it is the
-  product's own vocabulary rather than a spinner: a breathing `StatusDot` — "this is live" — while the
-  window is *working*, and a check once it has finished. It is drawn on every window tab and, for
-  the session, on its row in the rail. The mark's box is one fixed size whatever it holds and is
-  present even when empty, so a tab sized to its label does not grow and shrink as a dot becomes a
-  check or a mark appears. Working is the server's word for "output has
-  been arriving for a second and still is, or the job is burning CPU": an agent streaming an answer,
-  a build, a test run. A program that is merely open — an editor, Claude Code or Codex waiting for
-  the next message — holds the terminal and gets no mark, because nothing is happening; that is
-  exactly when an agent's own title glyph goes still, and the tab follows the same signal. Nothing
-  is announced for a command over in a blink (`ls`), so the label never flickers. The finished check
-  is a notification: `useFinished` keeps it on a tab or row you are not looking at until you go
-  there, and shows it for four seconds on the one you are, after which that finish counts as seen
-  (`terminal.viewed` in `view-state`, keyed by session or `session/window`, pruned with the sessions).
+- **The activity mark** (`activity-mark.tsx`) is one still `StatusDot` whose colour is the window's
+  state, in this order: **red** when this browser's socket to the window has dropped, **green** while
+  it is *working*, and **orange** when it is idle. Nothing on it moves and there is no "finished"
+  state: a breathing dot while working and a green finish held for a while after made an agent at its
+  prompt, whose odd redraw the server used to read as work, cycle orange, green and back all day. It
+  is drawn at the end of every window tab and, for the session, at the end of its row in the rail —
+  the same place in both, beside the close; a row is red when any window of it that this browser
+  attached has dropped. The mark's box is one fixed size, so a tab does not change width as its state changes.
+  Working is the server's word for "output has been arriving for a second and still is, or the job is
+  burning CPU": an agent streaming an answer, a build, a test run. A program that is merely open — an
+  editor, Claude Code or Codex waiting for the next message — holds the terminal and is idle, because
+  nothing is happening; that is exactly when an agent's own title glyph goes still, and the tab
+  follows the same signal. Nothing is announced for a command over in a blink (`ls`), so the label
+  never flickers, and one redraw is not a run of work (see
+  [`processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal)).
+  Disconnected is known only in the browser — to the
+  server the PTY is alive — so `page.tsx` sets it when a window's socket closes and clears it on the
+  first `state` frame a reattached socket receives, which the server sends on every attach. Idle is
+  the resting state and is hidden from screen readers; the other two are named (`role="img"`), and
+  the mark carries its state as `data-activity`.
 - **The page remembers where you were.** Which session was open, and within each session which
   window, live in `view-state` (`terminal.session`, `terminal.windows`) rather than in component
   state, so leaving for another page and coming back lands on the same window rather than on the
@@ -234,31 +298,43 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   tab you had open, which is furniture. Entries for sessions that have ended are dropped as the
   listing arrives.
 - `window-strip.tsx` places compact, horizontally scrolling direct-PTY tabs between exactly two workspace
-  toggles: sessions on the left and Files/Git on the right. The strip is embedded in the emulator's own
-  title bar; there is no separate workspace bar or working-directory/shell title.
-  A tab is its label with the activity mark's slot in front of it, lit while the window is working or
-  has just finished: rename and close sit on the tab but appear under the pointer (`rowReveal`), the
-  way a browser's do; the active tab keeps its close visible. Double-click renames. There are no split,
-  layout or colour actions. Closing the last window closes its session through the session endpoint.
+  toggles: sessions on the left and Files/Diff on the right. Each draws the side its panel is on and
+  the way pressing it moves the panel (`SidebarLeftOpen`/`Close`, `SidebarRightOpen`/`Close`). The strip
+  is embedded in the emulator's own title bar; there is no separate workspace bar or
+  working-directory/shell title.
+  A tab reads as a rail row does: the program mark, the label, then the activity mark beside the close.
+  Close appears under the pointer (`rowReveal`), the way a browser's does; the active tab keeps it
+  visible. There is no rename (double-click only selects) and no split, layout or colour action.
+  Closing the last window closes its session through the session endpoint.
 - The control-key row under the emulator is a run of monospace words on the footer strip, not framed
   keycaps.
-- `workspace-tools.tsx` is the Files/Git companion. Its header is two section tabs (`tabClasses`, the
-  brand underline, no glyphs) with the changed-file count beside "Git". Under that, the Files half is a
+- `workspace-tools.tsx` is the Files/Diff companion. Its header is two section tabs (`tabClasses`, the
+  brand underline, no glyphs) with the changed-file count beside "Diff". Under that, the Files half is a
   strip with the root path (middle-truncated), **new file** and **refresh** inline, and hidden files /
-  new folder / open in Files behind one menu — `file-tree.tsx` draws that strip; the Files page's sidebar
-  drops it (`chrome={false}`) and draws its own place switcher above the same tree, which there also
-  reveals the folder being browsed, reloads its open folders on `refreshTick`, and takes drops. The Git half (`git-tools.tsx`) is two strips before content: the repository's
-  reading (branch, `detached` tag, ahead/behind, the GitHub account) with **pull** and **push** inline
-  and fetch / stash / pop behind one menu where each verb carries a sentence (§13); then a `FilterChip`
-  row switching Changes / History / Branches, with a `+` for a new branch on the Branches view that
-  opens an inline create row rather than a permanent form. Changed-file rows colour only the status
-  letter; the list is all changes, so a tinted band on every row said nothing. A file staged and then
-  edited again is listed under both headings with the letter for each side (`lib/git-status.ts` takes
-  the side), and discarding an untracked file deletes it and says so. Clicking a changed
-  file shows its diff, untracked files included — the server diffs those against nothing, so a new
-  file reads as the addition it is, and the file viewer's Diff toggle does the same. Branches are
-  grouped: local first, remotes under their own label, no per-row glyph and no "remote" word on every
-  line.
+  new folder / open in Files behind one menu — `file-tree.tsx` draws that strip, and each entry in the
+  same folders and pages the Files page draws (`files/file-icon.tsx`), in the colours folders were
+  labelled with there. (The Files page's own sidebar is no longer this tree but a fixed list of
+  places, `files-sidebar.tsx`.) The
+  second tab is **Diff** (`diff-tools.tsx`), and it is only that: the work in the repository the shell
+  is in, read rather than operated on. It was a git client — pull, push, stash, stage, commit, history,
+  branches — beside a terminal that already has git in it and a Git page that is the client, so it was
+  cut to the one question a column beside a shell answers: *what have I changed?* A strip names the
+  branch (with the git mark, and ahead/behind) and links **Open in Git** to `/git?repo=<path>`; a
+  second says how many files and how many lines added and removed, with fold-all and unfold-all; then
+  every changed file under its name — the status letter in its colour (M amber, A and untracked green,
+  D red, R cyan), the directory muted before the file name, the file's own +/− — with its diff below
+  it, staged and unstaged halves both shown and labelled when a file has both. Long diffs start folded.
+  The list is the status the panel already polls; the diffs are read again when that list changes, as
+  the whole unstaged and the whole staged diff plus one request per untracked file (the first twenty),
+  split per file by `lib/diff-files.ts`. A browser that had the old Git tab open (`terminal.tools.tab`
+  stored as `git`) comes back to Diff.
+  Each rail row and each window tab also carries **the program it is running** as that program's own
+  mark (`ProgramMark` in `activity-mark.tsx`, `programProduct` in `product-logo.tsx`: Claude, Neovim,
+  Vim, Node, Bun, Python, Go, git, Docker, psql, redis-cli, kubectl and the rest), read off the
+  foreground process the backend reports while a window is busy. A shell at its prompt, or a program
+  with no mark of its own (`htop`, Codex, OpenCode), is drawn as a terminal
+  (`public/logos/terminal.svg`, drawn for this product): left empty, an agent with no logo read as a
+  window with nothing in it.
   The emulator toolbar keeps search, snippets, appearance and fullscreen visible, with copy, export,
   folder navigation, shortcuts and clear in Terminal actions. Text size lives in Appearance.
   Input stays in the shell: there is no separate composer or Workspace/Focus mode. Bundled Bash and
@@ -293,10 +369,20 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 
 In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 
-- **New session always opens a direct PTY.** A session is still nameable, pinnable and fileable because
-  those properties belong to its in-memory workspace. New window creates a sibling direct PTY and the
-  browser connects each visited window's emulator to that window's opaque id. There is no persistent
-  option, detach/reattach path or pane model in the terminal API.
+- **New session always opens a direct PTY, held on the host.** New window creates a sibling direct PTY
+  and the browser connects each visited window's emulator to that window's opaque id. Where the host
+  runs systemd each PTY is owned by a holder rather than by the dashboard
+  ([`processes-terminal-github.md`](../backend/processes-terminal-github.md#sessions-outlive-the-dashboard)),
+  so a session keeps running — an agent included — with every browser closed and across dashboard
+  restarts, until it is closed or its shell exits. The listing's `persistent` says which, and the empty
+  state says so before anybody relies on it. There is still no pane model and no multiplexer.
+- **A dropped socket reconnects by itself.** A terminal-page pane whose socket closes (the dashboard
+  restarting, a laptop waking, the network) retries on its own, backing off from one second to ten,
+  and the banner says the session is still running and that it is reconnecting; Reconnect only skips
+  the wait. A window that has really ended leaves the next listing, which unmounts the pane and ends the
+  retrying. The compose runner, which shares the pane, never retries: re-issuing its GET runs the
+  command again. A failing listing poll no longer replaces the workbench with an error once it has
+  loaded, so a restart does not take the panes down with it.
 - **Visited windows keep their emulator and socket while hidden.** A TUI updates the screen incrementally;
   remounting xterm on each window/session switch loses its parser, alternate buffer and unchanged cells.
   The server's last 128 KiB of raw output is not a screen snapshot and may start inside an escape sequence.
@@ -323,8 +409,10 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
   `preventDefault`: returning false from `attachCustomKeyEventHandler` stops xterm, not the browser, so
   without it the confirmation opened *and* the native paste went through.
 - **Direct PTY reconnect uses best-effort shell-history replay.** A direct PTY has no independent screen
-  model, so the handler subscribes before resizing and then sends its bounded output suffix. The replay
-  protocol below prevents terminal capability replies from being typed into the current prompt.
+  model, so the handler subscribes before resizing and then sends its bounded output suffix — after a
+  dashboard restart, the suffix the holder kept, including what was printed while nobody was attached.
+  The replay protocol below prevents terminal capability replies from being typed into the current
+  prompt.
 - **Replies are suppressed while direct-PTY scrollback is replayed.** `CSI c` and friends are the shell asking the
   terminal a question, and xterm answers down the channel a keystroke uses — so replaying a buffer
   containing one typed `1;2c0;276` at whatever prompt exists now and left a column of "command not found".
@@ -366,13 +454,13 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 server's replay limit, ANSI/UTF-8 split across messages, background terminal replies, resize while hidden,
 window/session switching, screen preservation, input routing and cleanup when windows/sessions close.
 
-**Open-shell links are consumed once.** The page removes `cwd` and `folder` from the current history
+**Open-shell links are consumed once.** The page removes `cwd` from the current history
 entry before creating the session, preserving other query parameters and the hash. A refresh cannot
 replay a launch or recreate a closed session; a later explicit Open shell link can still launch anew.
 The link gives the session no title: the prompt names the directory, and a title would have pinned the
 row to the folder the shell started in.
 
 **The page has no separate header or workspace bar.** A terminal is the one screen whose content *is* the
-viewport. "New session" sits in the rail beside "New folder"; the emulator title bar contains the two
+viewport. "New session" sits alone in the rail's strip; the emulator title bar contains the two
 panel toggles and window tabs, with no shell, user or working-directory title. The one banner that stays
 is a missing login account — a broken feature rather than information.

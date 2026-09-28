@@ -3,22 +3,26 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/forgex"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ghx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
@@ -56,34 +60,59 @@ type moduleSet struct {
 	files         *files.Service
 	git           *gitx.Service
 	github        *ghx.Service
+	forge         *forgex.Service
 	updates       *updates.Service
 	selfUpdate    *selfupdate.Service
 	selfConfig    *selfcfg.Service
 	certKeeper    *selfcfg.CertKeeper
 	proxy         *proxysvc.Service
+	// requests holds what every deployment's ingress and every proxy site
+	// served, read once and advanced by what was appended since; every poll
+	// and live tail on a project's Logs page and a site's page is answered
+	// from it.
+	requests *accesslog.Store
+	// trafficAlerts watches the request record for the rules operators set,
+	// and tells the notification channels when one crosses its line.
+	trafficAlerts *deploy.TrafficAlertEvaluator
 	dbs           *dbx.Manager
 	linuxUsers    *linuxusers.Service
 	netsec        *netsec.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
-	jobs             *jobs.Manager
-	backupStore      *backups.Store
-	backupRunner     *backups.Runner
-	backupSched      *backups.Scheduler
-	deployStore      *deploy.Store
-	deployer         *deploy.Deployer
-	deployRuns       *deploy.OrchestrationStore
-	deployEngine     *deploy.Engine
-	deployPlanning   *deploy.PlanningStore
-	deploySources    *deploy.HostSourceAnalyzer
-	deployPreflight  *deploy.HostPreflightObserver
+	jobs            *jobs.Manager
+	backupStore     *backups.Store
+	backupRunner    *backups.Runner
+	backupSched     *backups.Scheduler
+	deployStore     *deploy.Store
+	deployer        *deploy.Deployer
+	deployRuns      *deploy.OrchestrationStore
+	deployEngine    *deploy.Engine
+	deployPlanning  *deploy.PlanningStore
+	deploySources   *deploy.HostSourceAnalyzer
+	deployPreflight *deploy.HostPreflightObserver
+	// deployChecker answers the advisory check and Detect again with the
+	// evaluation analyze_plan runs before every build.
+	deployChecker    *deploy.DeploymentChecker
 	deployArtifacts  *deploy.ArtifactBuilder
 	deployAutomation *deploy.AutomationStore
 	deploySchedule   *deploy.AutomationScheduler
 	deployGit        *deploy.GitWatcher
 	deployDatabases  *deploymentDatabaseNetworks
 	deployPreviews   *deploy.PreviewQuarantineController
+	deployRuntime    *deploy.DockerRuntimeOwner
+	// deployExecutor is the normalized release path, kept for the tailnet
+	// sweep Start runs once the engine is up.
+	deployExecutor *deploy.NormalizedStepExecutor
+	// tailnet publishes preview environments on this host's Tailscale node
+	// through `tailscale serve`; the executor and the preview route share it.
+	tailnet deploy.TailnetPublisher
+	// pullRequests reads pull requests through the trusted GitHub identity
+	// for the deploy pages and the reconciler.
+	pullRequests *pullRequests
+	// previewReconciler polls GitHub for every open preview so a merge that
+	// no webhook announces still closes it.
+	previewReconciler *deploy.PreviewReconciler
 	// githubApp is the dashboard's own GitHub identity: one App, installed on
 	// the accounts whose repositories deploy here.
 	githubApp *githubapp.Service
@@ -118,11 +147,17 @@ func (s *Server) initModules() {
 		if err := s.modules.term.SetupShell(); err != nil {
 			s.Log.Warn("terminal prompt setup unavailable", "error", err)
 		}
+		// After the shell setup, because a held session is started with the
+		// login SetupShell assembles.
+		if err := s.modules.term.HoldSessions(s.Cfg.DataDir); err != nil {
+			s.Log.Warn("terminal sessions will end when the dashboard restarts", "error", err)
+		}
 	}
 	s.modules.files = files.New(s.Cfg.FileRoots)
 	s.modules.gameVersions = gameserver.New()
 	s.modules.git = gitx.New(s.Cfg.GitRoots)
 	s.modules.github = ghx.New()
+	s.modules.forge = forgex.New(s.Store, s.Sealer)
 	s.modules.updates = updates.New()
 	// The one module that manages the dashboard rather than the server. It is
 	// given a *function* for listing containers rather than the Docker client,
@@ -158,6 +193,7 @@ func (s *Server) initModules() {
 	s.modules.certKeeper = selfcfg.NewCertKeeper(
 		s.Cfg.Site, s.Cfg.TLSMode, s.Cfg.DataDir, s.restartProxy, s.Log)
 	s.modules.proxy = proxysvc.NewWithDockerIngress(s.Cfg.NginxDir, s.Cfg.CaddyFile)
+	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()
@@ -202,14 +238,19 @@ func (s *Server) initModules() {
 		s.modules.proxy,
 	).WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(
 		s.Store, s.modules.backupStore, s.modules.docker,
-	))
+	).withExtensionProbe(s.databaseExtensions))
+	s.modules.deployChecker = deploy.NewDeploymentChecker(
+		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
+	)
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker)
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
+	s.modules.deployRuntime = runtimeOwner
 	s.modules.deployPreviews = deploy.NewPreviewQuarantineController(s.modules.deployRuns, runtimeOwner, s.modules.proxy,
 		func(ctx context.Context, environmentID int64, phase string, success bool) {
 			s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.preview.quarantine." + phase, Target: strconv.FormatInt(environmentID, 10), Success: success})
 		}, func(err error) { s.Log.Warn("preview isolation needs attention", "error", err) })
+	s.modules.tailnet = tailnetPublisher{serve: selfcfg.NewTailnetServe()}
 	normalizedExecutor := deploy.NewNormalizedStepExecutor(
 		s.modules.deployRuns,
 		s.modules.deployPlanning,
@@ -226,7 +267,9 @@ func (s *Server) initModules() {
 		// join adds is that the run asks for one before it starts anything,
 		// instead of reaching a cutover that has nothing to serve.
 		WithCertificateIssuer(s.modules.proxy).
-		WithNotifications(s.modules.deployAutomation)
+		WithNotifications(s.modules.deployAutomation).
+		WithTailnetPublisher(s.modules.tailnet)
+	s.modules.deployExecutor = normalizedExecutor
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,
 		deploy.NewDeploymentStepExecutor(
@@ -254,7 +297,53 @@ func (s *Server) initModules() {
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)
+	// Alerts reach the same channels a deployment's own outcome does, through
+	// the same delivery, with two more events those channels can carry.
+	s.modules.trafficAlerts = deploy.NewTrafficAlertEvaluator(
+		s.modules.deployAutomation, s.modules.requests,
+		func(ctx context.Context, channelID int64, envelope deploy.NotificationEnvelope) error {
+			return s.modules.deployAutomation.DeliverNotification(ctx, nil, channelID, envelope)
+		},
+		s.trafficAlertNames, s.Log)
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)
+	s.modules.pullRequests = newPullRequests(s.modules.github, s.modules.githubApp, s.modules.git)
+	s.modules.previewReconciler = deploy.NewPreviewReconciler(s.modules.deployAutomation, s.modules.pullRequests, s.closePreviewTarget, s.Log)
+}
+
+// tailnetPublisher adapts selfcfg's `tailscale serve` driver to the deploy
+// package's publisher contract, which knows ports and loopback targets and
+// nothing about the CLI.
+type tailnetPublisher struct {
+	serve *selfcfg.TailnetServe
+}
+
+func (p tailnetPublisher) PublishTailnet(ctx context.Context, port, upstreamPort, previousUpstream int) (string, error) {
+	return p.serve.Publish(ctx, port, upstreamPort, previousUpstream)
+}
+
+func (p tailnetPublisher) WithdrawTailnet(ctx context.Context, port int) error {
+	return p.serve.Withdraw(ctx, port)
+}
+
+func (p tailnetPublisher) ServedTailnetPorts(ctx context.Context) (map[int]int, error) {
+	// A host without the client serves nothing, and says so quietly: the
+	// sweep then withdraws nothing and marks any recorded tailnet address
+	// unpublished, instead of warning at every boot of every install.
+	if !hostexec.Available("tailscale") {
+		return map[int]int{}, nil
+	}
+	entries, err := p.serve.Served(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ports := make(map[int]int, len(entries))
+	for port, entry := range entries {
+		// Every served port is a key, so allocation steps around it; the
+		// value names the upstream only for a mapping the dashboard could
+		// have made itself, the one kind a sweep or withdrawal may touch.
+		ports[port] = entry.LoopbackUpstream()
+	}
+	return ports, nil
 }
 
 // restartProxy restarts the Caddy container in this dashboard's own stack.
@@ -406,6 +495,22 @@ func (p githubStatusPoster) PostCommitStatus(ctx context.Context, nameWithOwner,
 // point at. It is the self-configuration report's endpoint — the one the
 // settings page shows — cached briefly because the report reads the stack's
 // env file and asks Docker where the stack lives.
+// trafficAlertNames supplies what an alert's message says about where it is
+// from: the project's name, the environment's, and the Logs page to open.
+func (s *Server) trafficAlertNames(ctx context.Context, projectID, environmentID int64) (string, string, string) {
+	project, environment := "", ""
+	if summary, err := s.modules.deployRuns.DeploymentSummary(ctx, projectID, deploy.QueueBudget{
+		Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots,
+	}); err == nil {
+		project, environment = summary.Name, summary.EnvironmentName
+	}
+	url := ""
+	if base := strings.TrimRight(strings.TrimSpace(s.dashboardEndpoint()), "/"); base != "" {
+		url = fmt.Sprintf("%s/deploy/%d/logs", base, projectID)
+	}
+	return project, environment, url
+}
+
 func (s *Server) dashboardEndpoint() string {
 	s.endpointMu.Lock()
 	defer s.endpointMu.Unlock()

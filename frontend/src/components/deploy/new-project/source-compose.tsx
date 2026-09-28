@@ -1,23 +1,24 @@
 "use client"
 
 import { useState } from "react"
-import { ArrowDown, ArrowUp, Plus, Trash } from "@/components/icons"
+import { ArrowDown, ArrowUp, CloudUpload, FileText, Plus, Servers, Trash } from "@/components/icons"
+import { SourceRepository } from "@/components/git/glyphs"
+import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
 import { Field } from "@/components/form"
-import { Group, Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
+import { Group, Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Textarea } from "@/components/ui/textarea"
+import { CredentialSelect } from "@/components/deploy/credentials-page"
+import { ProductGlyph, hostProduct } from "@/components/product-logo"
+import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type { DeploymentComposeDocument, DeploymentDraftSource } from "@/lib/types"
 import { deploymentName } from "@/components/deploy/vocabulary"
+import { useSourceInspection } from "./use-source-inspection"
 import { validateSource, type WizardErrors } from "@/components/deploy/deployment-defaults"
 import {
   inspectAndPrepare,
@@ -26,6 +27,35 @@ import {
 } from "@/components/deploy/new-project/draft"
 
 type FilesMode = "compose_paste" | "compose_upload" | "compose_git" | "compose_local"
+
+/**
+ * Where a stack's files can live. Four kinds, so four cards (§16) rather than
+ * a select: a closed dropdown said "Paste" and hid the three answers a reader
+ * with the files in a repository was looking for.
+ */
+const MODES: {
+  key: FilesMode
+  label: string
+  hint: string
+  icon: React.ComponentType<{ className?: string }>
+}[] = [
+  { key: "compose_paste", label: "Paste", hint: "Type or paste the YAML here", icon: FileText },
+  { key: "compose_upload", label: "Upload", hint: "Files from this computer", icon: CloudUpload },
+  {
+    key: "compose_git",
+    label: "In a Git repository",
+    hint: "Cloned from a URL and branch",
+    // Not `GitBranch`, which is Heroicons' share arrow standing in for a
+    // branch (§14): here the reader picks the kind by its drawing.
+    icon: SourceRepository,
+  },
+  {
+    key: "compose_local",
+    label: "On this server",
+    hint: "A directory already on the host",
+    icon: Servers,
+  },
+]
 
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error))
@@ -37,19 +67,21 @@ function asError(error: unknown) {
  * on Configure's source row once inspected, the same as a framework tag.
  */
 export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFlow) => void }) {
-  const [mode, setMode] = useState<FilesMode>("compose_paste")
-  const [documents, setDocuments] = useState<DeploymentComposeDocument[]>([
-    { path: "compose.yml", content: "", order: 0 },
-  ])
-  const [selectors, setSelectors] = useState<string[]>([])
-  const [gitUrl, setGitUrl] = useState("")
-  const [gitRef, setGitRef] = useState("main")
-  const [credentialId, setCredentialId] = useState(0)
-  const [localPath, setLocalPath] = useState("")
-  const [subdirectory, setSubdirectory] = useState("")
+  const [mode, setMode] = useSessionState<FilesMode>("deploy.new.compose.mode", "compose_paste")
+  const [documents, setDocuments] = useMemoryState<DeploymentComposeDocument[]>(
+    "deploy.new.compose.documents",
+    [{ path: "compose.yml", content: "", order: 0 }],
+  )
+  const [selectors, setSelectors] = useSessionState<string[]>("deploy.new.compose.selectors", [])
+  const [gitUrl, setGitUrl] = useMemoryState("deploy.new.compose.url", "")
+  const [gitRef, setGitRef] = useSessionState("deploy.new.compose.ref", "main")
+  const [credentialId, setCredentialId] = useSessionState("deploy.new.compose.credential", 0)
+  const [localPath, setLocalPath] = useSessionState("deploy.new.compose.path", "")
+  const [subdirectory, setSubdirectory] = useSessionState("deploy.new.compose.subdirectory", "")
   const [errors, setErrors] = useState<WizardErrors>({})
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<Error>()
+  const inspection = useSourceInspection(onInspected)
 
   const buildSource = (): DeploymentDraftSource => {
     // Omitted rather than sent empty: the server finds docker-compose.yml or
@@ -87,6 +119,7 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
         : "compose"
 
   const inspect = async () => {
+    if (busy) return
     const source = buildSource()
     const validation = validateSource(source)
     if (Object.keys(validation).length) {
@@ -97,8 +130,8 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
     setBusy(true)
     setFailure(undefined)
     try {
-      onInspected(
-        await inspectAndPrepare(deploymentName(name), "compose", source, {
+      await inspection.inspect(() =>
+        inspectAndPrepare(deploymentName(name), "compose", source, {
           sourceLabel: "Compose stack",
         }),
       )
@@ -110,24 +143,18 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
   }
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4">
-      {failure && <ErrorState error={failure} />}
-      <Panel plain>
-        <PanelHeader title="Compose stack" />
-        <PanelBody className="space-y-4">
-          <Field label="Where are the files" htmlFor="compose-mode">
-            <Select value={mode} onValueChange={(value) => setMode(value as FilesMode)}>
-              <SelectTrigger id="compose-mode" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="compose_paste">Paste</SelectItem>
-                <SelectItem value="compose_upload">Upload</SelectItem>
-                <SelectItem value="compose_git">In a Git repository</SelectItem>
-                <SelectItem value="compose_local">On this server</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
+    // The same two columns as every other source: what is being decided, and
+    // beside it what it is decided from.
+    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
+      {/* The one surface with depth on this tab (§16): which files the stack is
+          made of, and where they live, is the whole decision here. The tab drew
+          it as a `Panel plain` whose foot looked like every other panel foot in
+          the product, so nothing said which thing on the screen was being
+          decided. */}
+      <FlowPanel className="min-w-0 xl:max-h-full xl:min-h-0 xl:self-start">
+        <FlowPanelHeader title="Compose stack" />
+        <FlowPanelBody className="space-y-4 xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
+          {failure && <ErrorState error={failure} />}
 
           {(mode === "compose_paste" || mode === "compose_upload") && (
             <ComposeFilesEditor
@@ -140,19 +167,27 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
 
           {mode === "compose_git" && (
             <div className="grid gap-4 sm:grid-cols-2">
+              {/* The Git tab's Clone URL, drawn the same way: the host read as
+                  it is typed and shown at the field's head. */}
               <Field
                 label="Git URL"
                 htmlFor="compose-git-url"
                 className="sm:col-span-2"
                 error={errors.url}
               >
-                <Input
-                  id="compose-git-url"
-                  value={gitUrl}
-                  onChange={(event) => setGitUrl(event.target.value)}
-                  placeholder="https://github.com/owner/repository.git"
-                  className="font-mono"
-                />
+                <InputGroup>
+                  <InputGroupAddon aria-hidden className="px-3">
+                    <ProductGlyph id={hostProduct(gitUrl) ?? "git"} />
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    id="compose-git-url"
+                    value={gitUrl}
+                    aria-invalid={Boolean(errors.url)}
+                    onChange={(event) => setGitUrl(event.target.value)}
+                    placeholder="https://github.com/you/app.git"
+                    className="font-mono"
+                  />
+                </InputGroup>
               </Field>
               <Field label="Branch or tag" htmlFor="compose-git-ref">
                 <Input
@@ -162,18 +197,15 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
                   className="font-mono"
                 />
               </Field>
-              <Field
-                label="Credential id"
-                htmlFor="compose-git-credential"
-                hint="Leave 0 for a public source."
-              >
-                <Input
+              {/* The saved credentials by name and host, as the Git tab offers
+                  them: this was a number field asking for a credential's id,
+                  which nothing on the page told the reader. */}
+              <Field label="Credential" htmlFor="compose-git-credential">
+                <CredentialSelect
                   id="compose-git-credential"
-                  type="number"
-                  min={0}
-                  value={credentialId || ""}
-                  onChange={(event) => setCredentialId(Number(event.target.value) || 0)}
-                  className="font-mono"
+                  kind="git"
+                  value={credentialId || undefined}
+                  onChange={(next) => setCredentialId(next ?? 0)}
                 />
               </Field>
             </div>
@@ -218,12 +250,45 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
               error={errors.compose}
             />
           )}
-        </PanelBody>
-        <PanelFooter className="justify-end">
+        </FlowPanelBody>
+        {/* Inspect is what advances the tab, so it is the command in the foot of
+            the focused surface rather than one more button in a panel footer.
+            The two "Add file" buttons stay `outline`: one brand face per screen,
+            and neither of them leaves this step. */}
+        <FlowActions>
           <Button className="h-11 sm:h-9" pending={busy} onClick={() => void inspect()}>
             Inspect
           </Button>
-        </PanelFooter>
+        </FlowActions>
+      </FlowPanel>
+
+      <Panel plain className="order-first min-w-0 xl:order-last xl:min-h-0 xl:overflow-y-auto">
+        <PanelHeader title="Where the files are" />
+        <PanelBody>
+          <div role="group" aria-label="Where the files are" className="grid gap-2">
+            {MODES.map((option) => (
+              <ChoiceCard
+                key={option.key}
+                selected={mode === option.key}
+                onClick={() => setMode(option.key)}
+                className="min-h-0 flex-row items-center gap-3"
+              >
+                <option.icon
+                  aria-hidden
+                  className={
+                    mode === option.key
+                      ? "size-4 shrink-0 text-brand"
+                      : "size-4 shrink-0 text-muted-foreground"
+                  }
+                />
+                <span className="flex min-w-0 flex-col">
+                  <ChoiceCardTitle>{option.label}</ChoiceCardTitle>
+                  <ChoiceCardHint>{option.hint}</ChoiceCardHint>
+                </span>
+              </ChoiceCard>
+            ))}
+          </div>
+        </PanelBody>
       </Panel>
     </div>
   )
@@ -251,7 +316,7 @@ function ComposeFilesEditor({
     )
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="eyebrow">Compose files</p>
         <Button
           type="button"
@@ -289,18 +354,18 @@ function ComposeFilesEditor({
         />
       )}
       {error && (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-hint leading-relaxed text-destructive">
           {error}
         </p>
       )}
       {documents.map((document, index) => (
         <Group key={`${document.order}-${index}`}>
-          <div className="mb-2 flex gap-2">
+          <div className="mb-2 flex items-center gap-2">
             <Input
               value={document.path}
               onChange={(event) => update(index, "path", event.target.value)}
               aria-label={`Compose file ${index + 1} path`}
-              className="h-9 font-mono text-xs"
+              className="font-mono sm:text-xs"
             />
             <IconAction
               label={`Remove ${document.path}`}
@@ -315,7 +380,7 @@ function ComposeFilesEditor({
             onChange={(event) => update(index, "content", event.target.value)}
             aria-label={`${document.path} content`}
             rows={10}
-            className="min-h-48 resize-y font-mono text-xs"
+            className="min-h-48 resize-y font-mono sm:text-xs"
             placeholder={"services:\n  web:\n    image: nginx:alpine"}
           />
         </Group>
@@ -342,7 +407,9 @@ function ComposeSelectorEditor({
     onChange(next)
   }
   return (
-    <div className="space-y-2 rounded-xl border border-hairline p-3">
+    // Unframed: inside the one surface with depth, a hairline box around a
+    // part of the form is a frame drawn inside a frame.
+    <div className="space-y-2">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <p className="text-body font-medium">Compose file order</p>
@@ -362,7 +429,7 @@ function ComposeSelectorEditor({
         </Button>
       </div>
       {error && (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-hint leading-relaxed text-destructive">
           {error}
         </p>
       )}
@@ -377,7 +444,7 @@ function ComposeSelectorEditor({
               onChange(paths.map((item, i) => (i === index ? event.target.value : item)))
             }
             aria-label={`Compose file ${index + 1} path`}
-            className="min-w-0 font-mono text-xs"
+            className="min-w-0 font-mono sm:text-xs"
           />
           <IconAction
             label={`Move ${path} earlier`}

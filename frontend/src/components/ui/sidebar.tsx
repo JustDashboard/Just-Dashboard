@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { SidebarLeft } from "@/components/icons"
+import { SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
 import { Slot } from "radix-ui"
 
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -246,7 +246,8 @@ function Sidebar({
 }
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, isMobile, open, openMobile } = useSidebar()
+  const showing = isMobile ? openMobile : open
 
   return (
     <Button
@@ -262,7 +263,7 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       }}
       {...props}
     >
-      <SidebarLeft />
+      {showing ? <SidebarLeftClose /> : <SidebarLeftOpen />}
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   )

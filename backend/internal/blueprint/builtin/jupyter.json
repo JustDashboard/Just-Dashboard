@@ -7,15 +7,20 @@
   "description": "JupyterLab with a minimal Python environment. Notebooks are kept in the work volume; the token is what the browser signs in with.",
   "iconId": "bolt",
   "docsUrl": "https://jupyter-docker-stacks.readthedocs.io/",
+  "access": {
+    "kind": "token",
+    "secretVariable": "JUPYTER_TOKEN",
+    "note": "JupyterLab opens on a single box asking for a token. Reveal the sign-in token from the Variables tab and paste it there; the browser remembers it afterwards. Anyone holding that token can run arbitrary code and shell commands inside the container, so treat it as a root password for this deployment, not a login."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "BSD-3-Clause",
     "upstreamUrl": "https://github.com/jupyter/docker-stacks",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
-    "reference": "quay.io/jupyter/minimal-notebook:python-3.13.15",
+    "reference": "quay.io/jupyter/minimal-notebook:2026-09-21",
     "tagPolicy": "pinned",
     "pullPolicy": "missing"
   },
@@ -78,7 +83,7 @@
     {
       "name": "default",
       "inputs": {},
-      "digest": "sha256:053dafa82dfbb659ceb75c70453d8c63670bc9c7dc373c0d5f8d7eed56f6762d"
+      "digest": "sha256:dcef8f9a855cd2335248ce0288e056ce2b92d5e469d6141ab5ed6ca53b60c006"
     }
   ],
   "secrets": [

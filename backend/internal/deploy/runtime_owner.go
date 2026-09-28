@@ -80,6 +80,9 @@ type ContainerDiagnostics struct {
 	Error        string           `json:"error,omitempty"`
 	Lines        []RuntimeLogLine `json:"-"`
 	Truncated    bool             `json:"truncated,omitempty"`
+	// Listening is what a running container listens on, read from its own
+	// /proc/net/tcp.
+	Listening []ListeningSocket `json:"-"`
 }
 
 type RuntimeLogLine struct {
@@ -136,6 +139,13 @@ func (o *DockerRuntimeOwner) WithNetworks(owner RuntimeNetworkOwner) *DockerRunt
 	return o
 }
 
+func (o *DockerRuntimeOwner) ListContainersWithLabels(ctx context.Context, labels map[string]string) ([]dockerx.Container, error) {
+	if o.client == nil {
+		return nil, ErrRuntimeUnavailable
+	}
+	return o.client.ListContainersWithLabels(ctx, labels)
+}
+
 // DiagnoseRuntime inspects every container the runtime record names and reads
 // a bounded tail of its output. It never stops, starts or removes anything.
 func (o *DockerRuntimeOwner) DiagnoseRuntime(ctx context.Context, runtime ReleaseRuntime) (RuntimeDiagnostics, error) {
@@ -164,6 +174,9 @@ func (o *DockerRuntimeOwner) DiagnoseRuntime(ctx context.Context, runtime Releas
 			OOMKilled: detail.OOMKilled, RestartCount: detail.RestartNum, Error: detail.Error,
 		}
 		item.Lines, item.Truncated = o.tailContainerLogs(ctx, id)
+		if item.State == "running" {
+			item.Listening = o.listeningSockets(ctx, id)
+		}
 		result.Containers = append(result.Containers, item)
 	}
 	if len(result.Containers) == 0 && firstErr != nil {
@@ -314,16 +327,10 @@ func containerRuntimeEnvironment(plan RuntimePlanConfig, variables map[string]st
 	return environment, names
 }
 
-func (o *DockerRuntimeOwner) startContainer(
-	ctx context.Context,
-	request CandidateRuntimeRequest,
-) (StartedRuntime, error) {
-	image := immutableRuntimeImage(request.Snapshot.Image)
-	if image == "" {
-		return StartedRuntime{}, fmt.Errorf("%w: candidate has no immutable image", ErrArtifactMissing)
-	}
-	plan := request.Snapshot.Plan
-	environment, variableNames := containerRuntimeEnvironment(plan, request.RuntimeVariables)
+// runtimeMountSpecs are the plan's mounts as the container runtime takes
+// them: a path is a bind of that host directory, anything else a named
+// volume.
+func runtimeMountSpecs(plan RuntimePlanConfig) []dockerx.MountSpec {
 	mounts := make([]dockerx.MountSpec, 0, len(plan.Mounts))
 	for _, planned := range plan.Mounts {
 		kind := "volume"
@@ -334,6 +341,22 @@ func (o *DockerRuntimeOwner) startContainer(
 			Type: kind, Source: planned.Source, Target: planned.Target, ReadOnly: planned.ReadOnly,
 		})
 	}
+	return mounts
+}
+
+func (o *DockerRuntimeOwner) startContainer(
+	ctx context.Context,
+	request CandidateRuntimeRequest,
+) (StartedRuntime, error) {
+	image := immutableRuntimeImage(request.Snapshot.Image)
+	if image == "" {
+		return StartedRuntime{}, fmt.Errorf("%w: candidate has no immutable image", ErrArtifactMissing)
+	}
+	plan := request.Snapshot.Plan
+	environment, variableNames := containerRuntimeEnvironment(plan, request.RuntimeVariables)
+	environment = append(environment, withdrawnProxyTrust(request.Snapshot, request.RuntimeVariables)...)
+	environment = append(environment, webConcurrencyEnvironment(request.Snapshot, request.RuntimeVariables)...)
+	mounts := runtimeMountSpecs(plan)
 	devices := make([]dockerx.DeviceSpec, 0, len(plan.Devices))
 	for _, device := range plan.Devices {
 		devices = append(devices, dockerx.DeviceSpec{Host: device, Container: device, Permissions: "rwm"})
@@ -420,6 +443,9 @@ func (o *DockerRuntimeOwner) startCompose(
 		return StartedRuntime{}, err
 	}
 	primaryService := resolved.Services[0].Plan.Name
+	if resolved.PrimaryService != "" {
+		primaryService = resolved.PrimaryService
+	}
 	containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{
 		"io.just-dashboard.managed":        "true",
 		"io.just-dashboard.environment-id": strconv.FormatInt(request.Release.EnvironmentID, 10),

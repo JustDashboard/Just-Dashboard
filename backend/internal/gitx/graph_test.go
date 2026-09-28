@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"testing"
 )
 
@@ -34,6 +36,32 @@ func TestLayoutGraphLanes(t *testing.T) {
 		}
 		// The SVG is sized from Lanes; a dot in a higher lane is silently
 		// clipped, so a col past the count is a bug the renderer cannot show.
+		if c.Col >= g.Lanes {
+			t.Errorf("%s in lane %d but the graph is only %d wide", c.SHA, c.Col, g.Lanes)
+		}
+	}
+
+	// The merge's second edge runs down the lane the feature branch holds, and
+	// the feature branch's last edge stays in that lane until it reaches C1 in
+	// lane 0 — bending at F1 instead would draw it through C3 and C2.
+	wantVia := map[string][]int{"C4": {0, 1}, "C3": {0}, "C2": {0}, "F2": {1}, "F1": {1}, "C1": nil}
+	for _, c := range g.Commits {
+		if !slices.Equal(c.ParentLanes, wantVia[c.SHA]) {
+			t.Errorf("%s edges run down lanes %v, want %v", c.SHA, c.ParentLanes, wantVia[c.SHA])
+		}
+	}
+}
+
+// A root commit frees its own lane, and the trim that follows must not shrink
+// the graph to narrower than the column that root was just drawn in: an orphan
+// branch's only commit opens a lane and closes it on the same row.
+func TestLayoutGraphCountsARootsLane(t *testing.T) {
+	g := layoutGraph([]Commit{
+		{SHA: "A", Parents: []string{"B"}},
+		{SHA: "R", Parents: nil},
+		{SHA: "B", Parents: nil},
+	})
+	for _, c := range g.Commits {
 		if c.Col >= g.Lanes {
 			t.Errorf("%s in lane %d but the graph is only %d wide", c.SHA, c.Col, g.Lanes)
 		}
@@ -136,6 +164,91 @@ func TestGraphSpansEveryBranch(t *testing.T) {
 	}
 	if len(g.Commits) != 3 || g.Lanes < 1 {
 		t.Errorf("Graph = %d commits, %d lanes; want 3 commits and at least one lane", len(g.Commits), g.Lanes)
+	}
+}
+
+// The graph is read a page at a time as the reader scrolls, and the pages are
+// drawn as one canvas: a commit has to be in the same lane whether it arrived
+// on the first page or the fourth, or every boundary is a visible break.
+func TestGraphPagesKeepTheirLanes(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("commit", "-qm", "root", "--allow-empty")
+	for _, branch := range []string{"one", "two"} {
+		git("checkout", "-qb", branch, "main")
+		for i := range 3 {
+			git("commit", "-qm", branch+" work "+strconv.Itoa(i), "--allow-empty")
+		}
+	}
+	git("checkout", "-q", "main")
+	for i := range 3 {
+		git("commit", "-qm", "main work "+strconv.Itoa(i), "--allow-empty")
+	}
+	git("merge", "-q", "--no-ff", "-m", "merge one", "one")
+
+	svc := New([]string{dir})
+	whole, err := svc.GraphPage(context.Background(), dir, GraphQuery{Limit: 50})
+	if err != nil {
+		t.Fatalf("GraphPage: %v", err)
+	}
+	if whole.Total != len(whole.Commits) || whole.HasMore {
+		t.Fatalf("whole graph: total %d, %d commits, hasMore %v", whole.Total, len(whole.Commits), whole.HasMore)
+	}
+	want := map[string]int{}
+	for _, c := range whole.Commits {
+		want[c.SHA] = c.Col
+	}
+
+	seen := 0
+	for skip := 0; ; skip += 3 {
+		page, err := svc.GraphPage(context.Background(), dir, GraphQuery{Limit: 3, Skip: skip})
+		if err != nil {
+			t.Fatalf("GraphPage skip %d: %v", skip, err)
+		}
+		for _, c := range page.Commits {
+			if c.Col != want[c.SHA] {
+				t.Errorf("%q is in lane %d on the page at %d, lane %d in the whole graph", c.Subject, c.Col, skip, want[c.SHA])
+			}
+		}
+		seen += len(page.Commits)
+		if skip > 0 && page.Total != 0 {
+			t.Errorf("page at %d counted the history again", skip)
+		}
+		if !page.HasMore {
+			break
+		}
+	}
+	if seen != len(whole.Commits) {
+		t.Errorf("pages held %d commits, the whole graph %d", seen, len(whole.Commits))
+	}
+
+	// A search result is a list of matches, not a topology: one lane however
+	// many unmatched commits sit between them.
+	found, err := svc.GraphPage(context.Background(), dir, GraphQuery{Limit: 50, Search: "WORK 1"})
+	if err != nil {
+		t.Fatalf("GraphPage search: %v", err)
+	}
+	if len(found.Commits) != 3 || found.Total != 3 || found.Lanes != 1 {
+		t.Fatalf("search: %d commits, total %d, %d lanes; want 3, 3, 1", len(found.Commits), found.Total, found.Lanes)
+	}
+	for _, c := range found.Commits {
+		if c.Col != 0 || c.ParentLanes != nil {
+			t.Errorf("search result %q laid out in lane %d with edges %v", c.Subject, c.Col, c.ParentLanes)
+		}
 	}
 }
 

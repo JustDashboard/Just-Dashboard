@@ -1,0 +1,137 @@
+{
+  "id": "open-webui",
+  "version": "1.0.0",
+  "name": "Open WebUI",
+  "category": "http",
+  "profile": "web",
+  "description": "A chat interface for language models. It talks to an Ollama deployment or any OpenAI-compatible endpoint, which are added from Admin Settings after sign-in; chats, users and settings live in a SQLite database in the data volume.",
+  "iconId": "bolt",
+  "docsUrl": "https://docs.openwebui.com/",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "WEBUI_ADMIN_EMAIL",
+    "secretVariable": "WEBUI_ADMIN_PASSWORD",
+    "path": "/auth",
+    "note": "Sign in with the address you chose under \"Administrator email\" and the generated password from the Variables tab. Open WebUI creates that administrator only on the first start of an empty database and then turns sign-up off, so nobody else can claim the instance; invite the rest from Admin Settings, and change the password inside Open WebUI afterwards."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Open WebUI License (BSD-3-Clause with a branding clause)",
+    "upstreamUrl": "https://github.com/open-webui/open-webui",
+    "reviewedAt": "2026-09-22",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "ghcr.io/open-webui/open-webui:v0.11.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": true,
+      "description": "The address other people open. Open WebUI stores it as its own base URL, which is what web search and any OAuth provider are handed."
+    },
+    {
+      "name": "admin-email",
+      "kind": "text",
+      "label": "Administrator email",
+      "variable": "WEBUI_ADMIN_EMAIL",
+      "required": true,
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "description": "The address that signs in first. It is lower-cased on both sides, so capitals here do not lock you out."
+    },
+    {
+      "name": "admin-name",
+      "kind": "text",
+      "label": "Administrator display name",
+      "variable": "WEBUI_ADMIN_NAME",
+      "default": "Admin",
+      "required": true,
+      "description": "Shown beside that account inside Open WebUI. It is not used to sign in."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 8080,
+      "protocol": "tcp",
+      "purpose": "The chat interface and its API",
+      "exposure": "proxy",
+      "primary": true
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "target": "/app/backend/data",
+      "purpose": "Chats, users, uploaded documents, the vector index and the SQLite database",
+      "data": true,
+      "backup": true
+    }
+  ],
+  "resources": {
+    "memoryMb": 2048,
+    "minMemoryMb": 1024
+  },
+  "checks": [
+    {
+      "name": "Health endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "timeoutSeconds": 180
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "WEBUI_URL",
+        "value": "https://{{input.domain}}"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Open WebUI migrates its database on start; the first start of a new version takes noticeably longer than the ones after it. The base URL and the sign-up switch are stored in the database the first time they are read, so changing the domain later needs the matching change under Admin Settings as well.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {
+        "domain": "chat.example.test",
+        "admin-email": "operator@example.test",
+        "admin-name": "Admin"
+      },
+      "digest": "sha256:790c956493218039c9b930aca4b711b0e9c517c4302470c1ebf6cf5befcdffae"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "WEBUI_ADMIN_PASSWORD",
+      "label": "Administrator password",
+      "length": 24,
+      "description": "Reveal it from the Variables tab to sign in the first time. It only seeds the very first account, so rotating it on a later redeploy does not reset the account you already have."
+    },
+    {
+      "name": "session-key",
+      "variable": "WEBUI_SECRET_KEY",
+      "label": "Session signing key",
+      "length": 48,
+      "description": "Signs login tokens. Open WebUI refuses to start without one, and the key it generates for itself is written beside the application rather than into the data volume, so leaving it to the image would sign everyone out on every redeploy."
+    }
+  ]
+}

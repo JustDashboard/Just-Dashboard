@@ -2,15 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Plus, ShieldOff, SidebarLeft, SidebarRight, TerminalWindow } from "@/components/icons"
+import {
+  Plus,
+  ShieldOff,
+  SidebarLeftClose,
+  SidebarLeftOpen,
+  SidebarRightClose,
+  SidebarRightOpen,
+  TerminalWindow,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, patch, post } from "@/lib/api"
-import type {
-  TerminalActivity,
-  TerminalFolder,
-  TerminalWindow as Window,
-  TerminalWorkspace,
-} from "@/lib/types"
+import type { TerminalActivity, TerminalWindow as Window, TerminalWorkspace } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import {
   actionFor,
@@ -20,9 +23,9 @@ import {
   type ShortcutAction,
 } from "@/lib/terminal-keymap"
 import { usePanelSize } from "@/lib/panel-size"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
-import { useConfirm } from "@/components/confirm-dialog"
 import { Page } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { XtermPane } from "@/components/xterm-pane"
@@ -36,17 +39,19 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 
 type TerminalList = {
   enabled: boolean
+  /** Whether a session outlives the dashboard, held on the host, or ends when it restarts. */
+  persistent: boolean
   login: { user: string; home: string; shell: string; error?: string }
-  folders: TerminalFolder[]
   sessions: TerminalWorkspace[]
 }
 
 const RAIL = { min: 208, max: 480, base: 288 }
 const TOOLS = { min: 256, max: 640, base: 336 }
 const TERMINAL_MIN = 360
+// Tailwind's `lg`, below which the columns stop fitting beside each other.
+const STACKED = "(max-width: 1023px)"
 
 export default function TerminalPage() {
-  const { confirm, dialog } = useConfirm()
   const router = useRouter()
   // Which session, and within each session which window, was on screen. Kept
   // in the browser rather than in component state, so leaving for another
@@ -60,16 +65,23 @@ export default function TerminalPage() {
     "terminal.windows",
     {},
   )
-  // Which finishes have been seen, keyed by session or `session/window` (see
-  // `useFinished`); held here only to be pruned with the sessions.
-  const [viewed, setViewed] = useViewState<Record<string, number>>("terminal.viewed", {})
   // What each visited window's socket last said it was doing — newer than any
   // poll, and dropped when the socket closes so the polled fields take over.
   const [activity, setActivity] = useState<Record<string, TerminalActivity>>({})
+  // Windows whose socket in this browser has dropped, until it is back. The
+  // listing cannot say so — to the server the PTY is alive and well — and the
+  // server sends a window's state the moment a socket attaches, so the first
+  // activity from a reattached socket is what clears it.
+  const [dropped, setDropped] = useState<Record<string, boolean>>({})
   const [windowLists, setWindowLists] = useState<Record<string, Window[]>>({})
   const [visitedWindows, setVisitedWindows] = useState<{ id: string; sessionId: string }[]>([])
   const [showRail, setShowRail] = useViewState("terminal.rail", true)
   const [showTools, setShowTools] = useViewState("terminal.tools", true)
+  // Below `lg` the rail and the tools column cover the emulator instead of
+  // sitting beside it. Stacked under and over it, they left a phone's terminal
+  // one line tall — the two side panels are each "the whole screen" there, so
+  // only one is up at a time and picking a session puts the rail away.
+  const overlay = useMediaQuery(STACKED)
   const [immersive, setImmersive] = useState(false)
   const workspaceRef = useRef<HTMLDivElement>(null)
   const focusPaneRef = useRef<(() => void) | null>(null)
@@ -80,7 +92,6 @@ export default function TerminalPage() {
 
   const params = useSearchParams()
   const requestedCwd = params.get("cwd")
-  const requestedFolder = params.get("folder") ?? undefined
   const launched = useRef(false)
   // Five seconds rather than ten: the listing now carries whether each session
   // is working, and that is worth seeing sooner. The remembered windows of
@@ -95,18 +106,12 @@ export default function TerminalPage() {
           Object.fromEntries(Object.entries(windows).filter(([id]) => live.has(id))),
         )
       }
-      const owner = (key: string) => key.split("/")[0]
-      if (Object.keys(viewed).some((key) => !live.has(owner(key)))) {
-        setViewed((seen) =>
-          Object.fromEntries(Object.entries(seen).filter(([key]) => live.has(owner(key)))),
-        )
-      }
     }
     return list
   }, 5000)
 
   const openSession = useCallback(
-    async (cwd?: string, folder?: string) => {
+    async (cwd?: string) => {
       try {
         // No title, even for a shell opened in a chosen directory: the rail
         // follows the shell, whose prompt names the directory it is in, and a
@@ -115,7 +120,6 @@ export default function TerminalPage() {
           rows: 30,
           cols: 110,
           cwd,
-          folder,
         })
         await refresh()
         setRemembered(session.id)
@@ -136,10 +140,9 @@ export default function TerminalPage() {
     launched.current = true
     const url = new URL(window.location.href)
     url.searchParams.delete("cwd")
-    url.searchParams.delete("folder")
     window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash)
-    void openSession(requestedCwd, requestedFolder)
-  }, [requestedCwd, requestedFolder, data, openSession])
+    void openSession(requestedCwd)
+  }, [requestedCwd, data, openSession])
 
   useEffect(() => {
     const el = workspaceRef.current
@@ -202,6 +205,9 @@ export default function TerminalPage() {
   if (active && activeWindow && !openWindows.some((window) => window.id === activeWindow.id)) {
     openWindows.push({ id: activeWindow.id, sessionId: active })
   }
+  const droppedWindows = openWindows.filter((window) => dropped[window.id])
+  const disconnectedWindows = new Set(droppedWindows.map((window) => window.id))
+  const disconnectedSessions = new Set(droppedWindows.map((window) => window.sessionId))
   if (
     openWindows.length !== visitedWindows.length ||
     openWindows.some((window, index) => window !== visitedWindows[index])
@@ -230,34 +236,32 @@ export default function TerminalPage() {
     [refresh, windows],
   )
 
+  const toggleRail = () => {
+    if (!showRail && overlay) setShowTools(false)
+    setShowRail(!showRail)
+  }
+  const toggleTools = () => {
+    if (!showTools && overlay) setShowRail(false)
+    setShowTools(!showTools)
+  }
+
   const select = (session: TerminalWorkspace) => {
     setRemembered(session.id)
+    if (overlay) setShowRail(false)
     focusPaneRef.current?.()
   }
   const showWindow = (id: string) => {
     if (active) setRememberedWindows((windows) => ({ ...windows, [active]: id }))
   }
-  const setMeta = (id: string, next: Record<string, unknown>) =>
-    act(() => patch(`/terminal/${encodeURIComponent(id)}`, next), "Could not update that session")
 
   // Closing a shell asks nothing first, for the same reason the API route
   // carries no typed phrase: it is an everyday act, and a dialog in front of
-  // an everyday act stops being read and starts being dismissed. Deleting a
-  // folder below still asks, because nobody does that a dozen times a day.
+  // an everyday act stops being read and starts being dismissed.
   const closeSession = (session: TerminalWorkspace) =>
     act(async () => {
       await del(`/terminal/${encodeURIComponent(session.id)}`)
       if (active === session.id) setRemembered("")
     }, "Could not close that session")
-
-  const deleteFolder = (folder: TerminalFolder) =>
-    confirm({
-      title: `Delete ${folder.name}?`,
-      description:
-        "Sessions in this folder will move back to All sessions. No terminal will close.",
-      confirmLabel: "Delete folder",
-      action: () => del(`/terminal/folders/${encodeURIComponent(folder.name)}`).then(refresh),
-    })
 
   // A new window opens beside the one you were looking at, so it starts where
   // that shell currently is. The polled list carries a cwd up to five seconds
@@ -369,8 +373,8 @@ export default function TerminalPage() {
       if (previous) showWindow(previous.id)
     },
     "window.close": () => activeWindow && closeWindow(activeWindow.id),
-    "workspace.rail": () => setShowRail((value) => !value),
-    "workspace.tools": () => setShowTools((value) => !value),
+    "workspace.rail": toggleRail,
+    "workspace.tools": toggleTools,
   }
   for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
     navigation[`session.${n}`] = () => sessions[n - 1] && select(sessions[n - 1])
@@ -410,7 +414,10 @@ export default function TerminalPage() {
         <LoadingPanel rows={4} />
       </Page>
     )
-  if (error)
+  // Only when there is nothing to show. A listing that fails while the
+  // dashboard restarts must not take the workbench down with it: the shells
+  // are still running, and each pane reconnects to its own on its own.
+  if (error && !data)
     return (
       <Page className="px-2 py-2 md:px-3 md:py-3">
         <ErrorState error={error} />
@@ -431,22 +438,21 @@ export default function TerminalPage() {
     <>
       <WorkspaceToggle
         active={showRail}
-        onClick={() => setShowRail((value) => !value)}
+        onClick={toggleRail}
         label={showRail ? "Hide the sessions rail" : "Show the sessions rail"}
         action="workspace.rail"
-        icon={SidebarLeft}
+        icon={showRail ? SidebarLeftClose : SidebarLeftOpen}
       />
       {active ? (
         <WindowStrip
-          sessionId={active}
           windows={windowList}
           activeId={activeWindow?.id ?? null}
           activity={activity}
+          disconnected={disconnectedWindows}
           onSelect={(id) => {
             showWindow(id)
             focusPaneRef.current?.()
           }}
-          onRename={(id, name) => updateWindow(id, { name }, "Could not rename that window")}
           onReorder={(id, position) => updateWindow(id, { position }, "Could not move that window")}
           onNew={() => void openWindow()}
           onClose={closeWindow}
@@ -458,10 +464,10 @@ export default function TerminalPage() {
       )}
       <WorkspaceToggle
         active={showTools}
-        onClick={() => setShowTools((value) => !value)}
+        onClick={toggleTools}
         label={showTools ? "Hide files & git" : "Show files & git"}
         action="workspace.tools"
-        icon={SidebarRight}
+        icon={showTools ? SidebarRightClose : SidebarRightOpen}
       />
     </>
   )
@@ -478,38 +484,30 @@ export default function TerminalPage() {
           tools column are separated by a hairline each rather than by a gutter
           and three borders: three framed panes with gaps between them read as
           three boxes floating on the page, and the screen is one working
-          surface. */}
+          surface. The three columns' top strips are all 40px, so their
+          hairlines run across the frame as one rule. The panel toggles live
+          only in the emulator's strip; a second copy inside each panel said
+          the same thing twice. Below `lg` a panel covers that strip, so there
+          it carries its own way out. */}
       <div
         ref={workspaceRef}
         style={{ "--jd-rail": `${railPx}px`, "--jd-tools": `${toolsPx}px` } as React.CSSProperties}
         className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card lg:flex-row",
+          "relative flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card",
           immersive && "fixed inset-0 z-50 rounded-none border-0 bg-background",
         )}
       >
         {showRail && (
-          <div className="relative flex min-h-[16rem] shrink-0 border-b border-hairline lg:min-h-0 lg:w-(--jd-rail) lg:border-r lg:border-b-0">
+          <div className="absolute inset-0 z-20 flex bg-card lg:relative lg:inset-auto lg:z-auto lg:w-(--jd-rail) lg:shrink-0 lg:border-r lg:border-hairline">
             <SessionRail
               sessions={sessions}
-              folders={data.folders}
               activeId={active}
               activity={activity}
+              disconnected={disconnectedSessions}
               onSelect={select}
-              onRename={(session, title) => setMeta(session.id, { title })}
-              onTogglePinned={(session) => setMeta(session.id, { favourite: !session.favourite })}
-              onSetFolder={(id, folder) => setMeta(id, { folder })}
               onClose={closeSession}
-              onNew={(folder) => void openSession(undefined, folder)}
-              onCreateFolder={(name) =>
-                void act(() => post("/terminal/folders", { name }), "Could not create that folder")
-              }
-              onUpdateFolder={(name, next) =>
-                void act(
-                  () => patch(`/terminal/folders/${encodeURIComponent(name)}`, next),
-                  "Could not update that folder",
-                )
-              }
-              onDeleteFolder={deleteFolder}
+              onNew={() => void openSession()}
+              onHide={overlay ? () => setShowRail(false) : undefined}
             />
             <ResizeHandle
               side="left"
@@ -537,8 +535,12 @@ export default function TerminalPage() {
               onOpenFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
               focusRef={focusPaneRef}
               className="min-h-0 flex-1"
-              onActivity={(state) => setActivity((prev) => ({ ...prev, [window.id]: state }))}
+              onActivity={(state) => {
+                setActivity((prev) => ({ ...prev, [window.id]: state }))
+                setDropped((prev) => (prev[window.id] ? { ...prev, [window.id]: false } : prev))
+              }}
               onExit={() => {
+                setDropped((prev) => ({ ...prev, [window.id]: true }))
                 setActivity((prev) => {
                   if (!(window.id in prev)) return prev
                   const next = { ...prev }
@@ -555,12 +557,16 @@ export default function TerminalPage() {
           {!activeWindow && active && <LoadingPanel rows={4} />}
           {!activeWindow && !active && (
             <Pane flush className="flex-1">
-              <PaneHeader className="gap-1">{terminalHeader}</PaneHeader>
+              <PaneHeader className="h-10 gap-1 py-0">{terminalHeader}</PaneHeader>
               <EmptyState
                 className="flex-1"
                 icon={TerminalWindow}
                 title="No sessions yet"
-                description="Open a direct PTY to start working. It ends when the dashboard closes."
+                description={
+                  data.persistent
+                    ? "Sessions keep running on the server until you close them, even with this page closed or the dashboard restarting."
+                    : "Sessions keep running with this page closed, but end when the dashboard restarts."
+                }
                 action={
                   <Button size="sm" onClick={() => void openSession()}>
                     <Plus className="size-4" />
@@ -573,7 +579,7 @@ export default function TerminalPage() {
         </div>
 
         {showTools && (
-          <div className="relative flex min-h-[16rem] shrink-0 flex-col border-t border-hairline lg:min-h-0 lg:w-(--jd-tools) lg:border-t-0 lg:border-l">
+          <div className="absolute inset-0 z-20 flex flex-col bg-card lg:relative lg:inset-auto lg:z-auto lg:w-(--jd-tools) lg:shrink-0 lg:border-l lg:border-hairline">
             <ResizeHandle
               side="right"
               label="Files and git panel width"
@@ -587,12 +593,11 @@ export default function TerminalPage() {
             <WorkspaceTools
               dir={currentDir}
               onOpenInFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
-              onClose={() => setShowTools(false)}
+              onClose={overlay ? () => setShowTools(false) : undefined}
             />
           </div>
         )}
       </div>
-      {dialog}
     </Page>
   )
 }
@@ -627,7 +632,7 @@ function WorkspaceToggle({
           )}
           onClick={onClick}
         >
-          <Icon className="size-3.5" />
+          <Icon />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{chord ? `${label} · ${formatChord(chord)}` : label}</TooltipContent>

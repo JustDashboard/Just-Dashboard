@@ -19,6 +19,7 @@ import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
+import { PackageMark } from "@/components/packages/marks"
 import { Detail, DetailList } from "@/components/page"
 import { Well } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
@@ -155,9 +156,11 @@ export function PackageSheet({
         open={Boolean(name)}
         onOpenChange={onOpenChange}
         width="md"
+        // The sheet opens on the thing itself: its mark, then its name.
         title={
           <>
-            <span className="truncate font-mono">{name}</span>
+            {name && <PackageMark name={name} section={detail?.section} />}
+            <span className="min-w-0 truncate font-mono">{name}</span>
             {detail?.installed && <Status verdict="ok" label="Installed" />}
             {upgradable && <Status verdict="warning" label={`${upgradable} available`} />}
           </>

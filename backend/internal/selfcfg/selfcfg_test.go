@@ -401,3 +401,30 @@ func TestDropStaleCertificateKeepsTheOneThatFits(t *testing.T) {
 		t.Fatal("the key outlived the certificate it belongs to")
 	}
 }
+
+// A rebuild prints far more than the report's tail has room for; the log
+// route reads the transcript whole, and an absent one is empty rather than an
+// error, because a page asking before any restart has simply nothing to show.
+func TestTranscriptIsTheWholeRun(t *testing.T) {
+	store := NewStore(t.TempDir())
+	if got := store.Transcript(); got != "" {
+		t.Fatalf("no run, but a transcript: %q", got)
+	}
+	f, err := store.OpenLog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 8000; i++ {
+		io.WriteString(f, "#12 0.345 compiling a package of the backend\n")
+	}
+	io.WriteString(f, "The dashboard is running the new configuration.\n")
+	f.Close()
+
+	if tail := store.Tail(); !strings.HasPrefix(tail, "… earlier output trimmed …\n") {
+		t.Fatal("the fixture is too small to be trimmed by the tail")
+	}
+	full := store.Transcript()
+	if strings.Count(full, "\n") != 8001 || strings.Contains(full, "earlier output trimmed") {
+		t.Errorf("the transcript is not the whole run: %d lines", strings.Count(full, "\n"))
+	}
+}

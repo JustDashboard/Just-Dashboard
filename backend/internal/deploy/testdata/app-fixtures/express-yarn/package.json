@@ -1,0 +1,13 @@
+{
+  "name": "jd-acceptance-express-yarn",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node build-check.cjs && node write-value.cjs",
+    "start": "node server.cjs",
+    "postinstall": "node install-check.cjs"
+  },
+  "dependencies": {
+    "express": "5.1.0"
+  }
+}

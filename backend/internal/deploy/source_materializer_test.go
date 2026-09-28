@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,6 +134,55 @@ func TestInlineComposeMaterializationPreservesFileOrderAndPrivacy(t *testing.T) 
 	info, err := os.Stat(materialized.Workspace)
 	if err != nil || info.Mode().Perm() != 0o700 {
 		t.Fatalf("workspace mode = %v, %v", info, err)
+	}
+}
+
+// A branch that moved on since the run was planned still holds the recorded
+// commit in its history; only one rewritten out of that history is gone.
+func TestReleaseMirrorFindsARecordedCommitTheBranchMovedPast(t *testing.T) {
+	t.Parallel()
+	upstream := t.TempDir()
+	runPlanningGitFixture(t, upstream, "init", "-q", "-b", "main")
+	runPlanningGitFixture(t, upstream, "config", "user.email", "fixture@example.test")
+	runPlanningGitFixture(t, upstream, "config", "user.name", "Fixture")
+	commit := func(content string) string {
+		writeBuildFixture(t, upstream, "message.txt", content)
+		runPlanningGitFixture(t, upstream, "add", "message.txt")
+		runPlanningGitFixture(t, upstream, "commit", "-q", "-m", content)
+		return strings.TrimSpace(runPlanningGitOutput(t, upstream, "rev-parse", "HEAD"))
+	}
+	recorded := commit("planned\n")
+	commit("pushed after planning\n")
+	runPlanningGitFixture(t, upstream, "checkout", "-q", "-b", "side", recorded+"~0")
+	sideOnly := commit("never on main\n")
+	runPlanningGitFixture(t, upstream, "checkout", "-q", "main")
+
+	environment := append(cleanPlanningGitEnvironment(os.Environ()),
+		"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null")
+	mirror := filepath.Join(t.TempDir(), "release.git")
+	if err := ensurePlanningMirror(context.Background(), mirror, upstream, environment); err != nil {
+		t.Fatal(err)
+	}
+	if err := fetchReleaseRevision(context.Background(), mirror, environment, "main", recorded); err != nil {
+		t.Fatalf("a commit the branch moved past = %v", err)
+	}
+	target := filepath.Join(t.TempDir(), "source")
+	if err := fetchExactGit(context.Background(), mirror, upstream, target, recorded, environment); err != nil {
+		t.Fatalf("materializing the recorded commit = %v", err)
+	}
+	if content, err := os.ReadFile(filepath.Join(target, "message.txt")); err != nil || string(content) != "planned\n" {
+		t.Fatalf("materialized %q, %v", content, err)
+	}
+
+	// A commit outside the branch's history is asked for by its id, which
+	// this remote serves; only one it does not have at all is gone.
+	if err := fetchReleaseRevision(context.Background(), mirror, environment, "main", sideOnly); err != nil {
+		t.Fatalf("a commit outside the branch's history = %v", err)
+	}
+	err := fetchReleaseRevision(context.Background(), mirror, environment, "main", strings.Repeat("e", 40))
+	var failure *SourceFailure
+	if !errors.As(err, &failure) || failure.Code != "source_revision_unavailable" || !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("a commit the remote does not have = %v", err)
 	}
 }
 
@@ -270,5 +320,78 @@ func TestReadCommitMetadataFailsClosedOnAnUnreadableRevision(t *testing.T) {
 	}
 	if commit := commitMetadataForSource(context.Background(), SourceModeLocalCheckout, repository, missing); commit != nil {
 		t.Fatalf("commitMetadataForSource swallowed nothing: %#v", commit)
+	}
+}
+
+// A first deployment is pinned to the commit Review checked, and the branch
+// may have moved on by the time it runs. The commit arrives with the branch
+// fetch, behind its new head, or — once the branch no longer contains it —
+// by its id; either way the workspace is exactly that commit, and one the
+// remote no longer has is refused rather than replaced by the head.
+func TestRemoteMaterializationBuildsAPinnedCommitTheBranchMovedPast(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+	origin, reviewed := gitTree(t, map[string]string{"package.json": `{"name":"reviewed"}`})
+	runPlanningGitFixture(t, origin, "branch", "-M", "main")
+	writeBuildFixture(t, origin, "package.json", `{"name":"moved on"}`)
+	runPlanningGitFixture(t, origin, "commit", "-qam", "later")
+	// The managed mirror is pointed at the fixture repository in place of the
+	// https remote the source names; every other Git call is the real one.
+	bin := t.TempDir()
+	writePlanningFixture(t, filepath.Join(bin, "git"), `#!/bin/sh
+if [ "$1" = config ] && [ "$2" = remote.origin.url ]; then
+  exec "$MATERIALIZE_REAL_GIT" config remote.origin.url "$MATERIALIZE_ORIGIN"
+fi
+exec "$MATERIALIZE_REAL_GIT" "$@"
+`)
+	if err := os.Chmod(filepath.Join(bin, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MATERIALIZE_REAL_GIT", realGit)
+	t.Setenv("MATERIALIZE_ORIGIN", origin)
+
+	analyzer := NewHostSourceAnalyzer(nil, nil, t.TempDir(), nil, nil)
+	source := DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://git.example.test/team/app.git", Ref: "main"}
+	remote, repository, err := remoteForSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := func(revision string) SourceIdentity {
+		return SourceIdentity{Kind: SourceGit, Remote: remote, Repository: repository,
+			Ref: canonicalSourceConfig(source).Ref, Revision: revision}
+	}
+	materialized := func(revision string) (string, error) {
+		target := filepath.Join(t.TempDir(), "source")
+		if err := analyzer.materializeRemoteGit(context.Background(), source, identity(revision), target); err != nil {
+			return "", err
+		}
+		if head := strings.TrimSpace(runPlanningGitOutput(t, target, "rev-parse", "HEAD")); head != revision {
+			t.Fatalf("materialized %s, want %s", head, revision)
+		}
+		manifest, err := os.ReadFile(filepath.Join(target, "package.json"))
+		return string(manifest), err
+	}
+	if manifest, err := materialized(reviewed); err != nil || !strings.Contains(manifest, "reviewed") {
+		t.Fatalf("the reviewed commit behind a moved branch = %q, %v", manifest, err)
+	}
+
+	// A commit the branch no longer contains — a force push — is fetched by id.
+	runPlanningGitFixture(t, origin, "checkout", "-q", "-b", "abandoned")
+	writeBuildFixture(t, origin, "package.json", `{"name":"abandoned"}`)
+	runPlanningGitFixture(t, origin, "commit", "-qam", "abandoned")
+	abandoned := strings.TrimSpace(runPlanningGitOutput(t, origin, "rev-parse", "HEAD"))
+	runPlanningGitFixture(t, origin, "checkout", "-q", "main")
+	runPlanningGitFixture(t, origin, "branch", "-D", "abandoned")
+	if manifest, err := materialized(abandoned); err != nil || !strings.Contains(manifest, "abandoned") {
+		t.Fatalf("a commit off the branch = %q, %v", manifest, err)
+	}
+
+	var failure *SourceFailure
+	if _, err := materialized(strings.Repeat("e", 40)); !errors.Is(err, ErrSourceUnavailable) ||
+		!errors.As(err, &failure) || failure.Code != "source_revision_unavailable" {
+		t.Fatalf("a commit the remote does not have = %v", err)
 	}
 }

@@ -18,6 +18,8 @@ type artifactBackendFake struct {
 	failBuild  error
 	inspected  map[string]ResolvedImage
 	inspectErr error
+	// printed are lines the build prints after its first secret.
+	printed []string
 }
 
 func (f *artifactBackendFake) ResolveImage(_ context.Context, reference, _ string) (ResolvedImage, error) {
@@ -36,6 +38,11 @@ func (f *artifactBackendFake) BuildImage(
 	f.builds = append(f.builds, invocation)
 	if len(invocation.Secrets) > 0 {
 		if err := emit(BuildLog{Stream: "stdout", Text: "tool output " + invocation.Secrets[0].Value}); err != nil {
+			return ResolvedImage{}, err
+		}
+	}
+	for _, line := range f.printed {
+		if err := emit(BuildLog{Stream: "stdout", Text: line}); err != nil {
 			return ResolvedImage{}, err
 		}
 	}
@@ -97,13 +104,13 @@ func TestAutomaticRecipesAndExplicitAdaptersRenderPinnedPlans(t *testing.T) {
 			name:   "go",
 			files:  map[string]string{"go.mod": "module example.test/app\n", "cmd/app/main.go": "package main\nfunc main() {}\n"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "go"},
-			want:   []string{"FROM golang:1.26-alpine@sha256:", "go mod download", "go build -trimpath", "ENTRYPOINT [\"/app\"]"},
+			want:   []string{"FROM golang:1.27-alpine@sha256:", "go mod download", "go build -trimpath", "ENTRYPOINT [\"/app\"]"},
 		},
 		{
 			name:   "python",
 			files:  map[string]string{"requirements.txt": "uvicorn==0.35.0\nfastapi==0.116.1\n", "app.py": "app = object()\n"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "uvicorn app:app"},
-			want:   []string{"FROM python:3.13-slim@sha256:", "pip install --no-cache-dir", "uvicorn app:app"},
+			want:   []string{"FROM python:3.13-slim-trixie@sha256:", "pip install --no-cache-dir", "uvicorn app:app"},
 		},
 		{
 			name:   "static",
@@ -175,7 +182,7 @@ func TestRecipeBuildSecretsUseNamedMountsAndAreRedacted(t *testing.T) {
 	var logs []string
 	result, err := builder.Build(
 		context.Background(), root, "just-dashboard/test:secret", config, prepared,
-		map[string]string{"NPM_TOKEN": "fixture-super-secret"}, "", SourceIdentity{}, nil,
+		map[string]string{"NPM_TOKEN": "fixture-super-secret"}, map[string]bool{"NPM_TOKEN": true}, "", SourceIdentity{}, nil,
 		func(line BuildLog) error { logs = append(logs, line.Text); return nil },
 	)
 	if err != nil {
@@ -196,6 +203,48 @@ func TestRecipeBuildSecretsUseNamedMountsAndAreRedacted(t *testing.T) {
 	}
 }
 
+// A build's transcript is redacted of what the variables' own sensitivity
+// says is secret, and of a plain value that carries credential material
+// anyway. A plain flag or port stays readable: an Auth.js build prints
+// AUTH_TRUST_HOST's value and the port it will serve on, and a log that
+// replaced "true" and "3000" everywhere hid the build's account of itself.
+func TestBuildLogsHideSecretsButNotPlainValues(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeBuildFixture(t, root, "package.json", `{"scripts":{"build":"next build","start":"next start"}}`)
+	writeBuildFixture(t, root, "package-lock.json", "{}")
+	config := BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npm run build", StartCommand: "npm start"}
+	variables := map[string]string{
+		"AUTH_SECRET": "fixture-auth-secret", "AUTH_TRUST_HOST": "true", "PORT": "3000",
+		"DATABASE_URL": "postgres://app:plain-typed-password@db-4.jd.internal/app",
+	}
+	secret := map[string]bool{"AUTH_SECRET": true}
+	backend := &artifactBackendFake{printed: []string{
+		"AUTH_TRUST_HOST=true required=true", "ready on port 3000",
+		"secret fixture-auth-secret", "connecting to postgres://app:plain-typed-password@db-4.jd.internal/app",
+	}}
+	builder := NewArtifactBuilder(backend)
+	prepared, err := builder.Prepare(context.Background(), root, config, false, "just-dashboard/test:plain", buildVariableNames(variables)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs []string
+	if _, err := builder.Build(context.Background(), root, "just-dashboard/test:plain", config, prepared, variables, secret, "",
+		SourceIdentity{}, nil, func(line BuildLog) error { logs = append(logs, line.Text); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(logs, "\n")
+	if strings.Contains(joined, "fixture-auth-secret") || strings.Contains(joined, "plain-typed-password") {
+		t.Fatalf("a secret reached the build log: %s", joined)
+	}
+	if !strings.Contains(joined, "AUTH_TRUST_HOST=true required=true") || !strings.Contains(joined, "ready on port 3000") {
+		t.Fatalf("a plain value was redacted: %s", joined)
+	}
+	if redact := buildRedactor(buildLogRedactions(variables, secret)); redact("port 3000, trusted true") != "port 3000, trusted true" {
+		t.Fatal("the failure diagnosis redacts plain values")
+	}
+}
+
 func TestImageAndComposeAdaptersPinResolvedDigests(t *testing.T) {
 	t.Parallel()
 	backend := &artifactBackendFake{}
@@ -203,7 +252,7 @@ func TestImageAndComposeAdaptersPinResolvedDigests(t *testing.T) {
 	imageDigest := fakeContentDigest("image-v1")
 	imageResult, err := builder.Build(
 		context.Background(), t.TempDir(), "unused", BuildPlanConfig{Method: BuildImage},
-		PreparedBuild{Method: BuildImage}, nil, "auth-out-of-band",
+		PreparedBuild{Method: BuildImage}, nil, nil, "auth-out-of-band",
 		SourceIdentity{Kind: SourceImage, Repository: "registry.example/app:current", Digest: imageDigest},
 		nil, nil,
 	)
@@ -223,7 +272,7 @@ func TestImageAndComposeAdaptersPinResolvedDigests(t *testing.T) {
 	}
 	composeResult, err := builder.Build(
 		context.Background(), t.TempDir(), "unused", BuildPlanConfig{Method: BuildCompose},
-		PreparedBuild{Method: BuildCompose}, nil, "", SourceIdentity{Kind: SourceCompose},
+		PreparedBuild{Method: BuildCompose}, nil, nil, "", SourceIdentity{Kind: SourceCompose},
 		compose, nil,
 	)
 	if err != nil {
@@ -260,7 +309,7 @@ func TestComposeAdapterBuildsContainedServiceContexts(t *testing.T) {
 		context.Background(), root, "just-dashboard/release:1-2",
 		BuildPlanConfig{Method: BuildCompose, NoCache: true, TargetPlatform: "linux/amd64"},
 		PreparedBuild{Method: BuildCompose, CachePolicy: "no_cache", TargetPlatform: "linux/amd64"},
-		nil, "", SourceIdentity{Kind: SourceCompose}, &analysis, nil,
+		nil, nil, "", SourceIdentity{Kind: SourceCompose}, &analysis, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -291,7 +340,7 @@ func TestComposeAdapterRejectsEscapingBuildSymlink(t *testing.T) {
 	}
 	_, err := NewArtifactBuilder(&artifactBackendFake{}).Build(
 		context.Background(), root, "just-dashboard/release:1-2", BuildPlanConfig{Method: BuildCompose},
-		PreparedBuild{Method: BuildCompose, CachePolicy: "reuse"}, nil, "", SourceIdentity{Kind: SourceCompose}, compose, nil,
+		PreparedBuild{Method: BuildCompose, CachePolicy: "reuse"}, nil, nil, "", SourceIdentity{Kind: SourceCompose}, compose, nil,
 	)
 	if !errors.Is(err, ErrUnsupportedBuilder) {
 		t.Fatalf("escaping Compose build symlink error = %v", err)

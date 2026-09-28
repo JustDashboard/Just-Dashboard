@@ -27,14 +27,19 @@ strategy, and feature ownership behind those rules.
 - [`backend/observability-security.md`](backend/observability-security.md) — metrics, health, exposure,
   posture, login history, sshd, firewall/fail2ban, and six package managers.
 - [`backend/docker-files-logs.md`](backend/docker-files-logs.md) — Docker, compose, file management,
-  archives, previews, log discovery/search/tailing, and their frontend integration.
+  archives, previews, log discovery/search/tailing, the lenses that read each kind of log, and the
+  service logs every page embeds.
 - [`backend/processes-terminal-github.md`](backend/processes-terminal-github.md) — processes, systemd, PM2,
   cron, PTYs, terminal organization, and GitHub device authentication.
 - [`backend/git-backups-users.md`](backend/git-backups-users.md) — Git working copies and mutations,
   backup scheduling/storage/restore, and host accounts/SSH keys.
+- [`backend/git-workspace-expansion.md`](backend/git-workspace-expansion.md) — conflict resolution,
+  partial staging, recovery, local rebase, worktrees, provider reviews, LFS and patch exchange.
 - [`backend/databases-proxy-platform.md`](backend/databases-proxy-platform.md) — eight database engines,
   nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent mode, configuration, releases, self-update, and the
   dashboard's own settings (restart, rebuild, rollback, Tailscale certificates).
+- [`boards.md`](boards.md) — Excalidraw integration, server-side board storage, save conflicts, resource
+  cards, and board route permissions.
 
 ## Deployments and frontend
 
@@ -59,6 +64,8 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-09-22-deploy-new/README.md`](../audits/2026-09-22-deploy-new/README.md) — deployment
+  creation audit, template/framework coverage, implementation plan and verification evidence.
 - [`../audits/2026-09-16-deployments/README.md`](../audits/2026-09-16-deployments/README.md) — deployment capability audit, fresh verification results, competitor comparison, and prioritized gaps.
 - [`../audits/2026-09-17-proxy/README.md`](../audits/2026-09-17-proxy/README.md) — proxy and TLS audit: defects fixed under the hood, capability map, competitor comparison, and ranked gaps.
 - [`../audits/0.6.7/remediation-report.md`](../audits/0.6.7/remediation-report.md) — audit fixes,

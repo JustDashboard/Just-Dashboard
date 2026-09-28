@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { useParams, useRouter } from "next/navigation"
 import {
   ArrowCircleUp,
+  ArrowLeft,
   Box,
   Code,
   FloppyDisk,
-  FolderOpen,
   GitBranch,
   Play,
   RefreshClockwise,
@@ -19,12 +20,13 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post, put, ApiError } from "@/lib/api"
-import type { ComposeService, ComposeValidation, LogLine, StackDetail } from "@/lib/types"
+import type { ComposeService, ComposeValidation, StackDetail } from "@/lib/types"
+import { stackSource } from "@/lib/log-sources"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { PortLink, type ConfirmFn } from "@/components/docker/shared"
+import { PortLink } from "@/components/docker/shared"
+import { containerEventsView } from "@/components/docker/container-events"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
 import { ContainerMenu, type ContainerVerb } from "@/components/docker/container-actions"
 import { Hint, Term } from "@/components/docker/explain"
@@ -35,8 +37,12 @@ import {
   type ComposeActionKey,
 } from "@/components/docker/stack-state"
 import { CodeEditor } from "@/components/code-editor"
-import { LogViewer } from "@/components/log-viewer"
-import { SidePanel } from "@/components/side-panel"
+import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
+import { useConfirm } from "@/components/confirm-dialog"
+import { Metric, MetricStrip, Page, PageContext } from "@/components/page"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { FileBrowser } from "@/components/files/inline-browser"
+import { ProductLogo, ProductLogos, imageProduct, imageProducts } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -63,67 +69,51 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
  * directory is a checkout with uncommitted changes, two commits behind its
  * remote, is exactly the context somebody needs before pressing redeploy — and
  * it is one link away rather than a different product.
+ *
+ * It was a sheet over the stack list until 2026-09-21. A compose editor, a
+ * merged log feed and a watched command are three things you stay with, and
+ * none of them wants the list showing behind it — so a stack is its own
+ * destination with a breadcrumb back.
  */
-export function StackDetailPanel({
-  name,
-  onOpenChange,
-  onChanged,
-  confirm,
-}: {
-  name: string | null
-  onOpenChange: (open: boolean) => void
-  onChanged?: () => void
-  confirm: ConfirmFn
-}) {
-  return (
-    <StackBody
-      key={name ?? "none"}
-      name={name}
-      onOpenChange={onOpenChange}
-      onChanged={onChanged}
-      confirm={confirm}
-    />
-  )
+export function StackPage() {
+  const { name } = useParams<{ name: string }>()
+  const stack = decodeURIComponent(name)
+  return <StackBody key={stack} name={stack} />
 }
 
-function StackBody({
-  name,
-  onOpenChange,
-  onChanged,
-  confirm,
-}: {
-  name: string | null
-  onOpenChange: (open: boolean) => void
-  onChanged?: () => void
-  confirm: ConfirmFn
-}) {
+function StackBody({ name }: { name: string }) {
   const { can } = useAuth()
+  const router = useRouter()
+  const { confirm, dialog } = useConfirm()
   const [tab, setTab] = useViewState("docker.stack.tab", "services")
   const runner = useRunConsole()
 
   const { data, error, loading, refresh } = usePoll<StackDetail>(
-    (signal) =>
-      get<StackDetail>(`/docker/stacks/${encodeURIComponent(name ?? "")}`, undefined, signal),
+    (signal) => get<StackDetail>(`/docker/stacks/${encodeURIComponent(name)}`, undefined, signal),
     // Slower while a command is running: the poll would otherwise fight the
     // console for attention, and the interesting output is in the console.
     runner.running ? 0 : 10000,
     [name],
-    // Not while closed: with no name the path is the stack *list*, and this
-    // panel would render an array's missing fields.
-    { enabled: name !== null },
   )
 
   const reload = useCallback(() => {
     refresh()
-    onChanged?.()
-  }, [refresh, onChanged])
+  }, [refresh])
 
   const run = async (action: string, opts: { confirmPhrase?: string; service?: string } = {}) => {
-    const code = await runner.run(`/docker/stacks/${encodeURIComponent(name ?? "")}/run`, {
+    const code = await runner.run(`/docker/stacks/${encodeURIComponent(name)}/run`, {
       action,
       service: opts.service,
       confirm: opts.confirmPhrase,
     })
+    // `down` removes the containers, and with them the stack this page is
+    // about: compose only knows a stack that has some. Staying here would
+    // report the disappearance as an error about something the reader just
+    // asked for on purpose.
+    if (action === "down" && code === 0) {
+      router.replace("/docker/stacks")
+      return
+    }
     reload()
     if (code !== 0) throw new Error(`compose ${action} exited with status ${code}`)
   }
@@ -138,29 +128,53 @@ function StackBody({
   const confirmRun = (action: string, title: string, description: React.ReactNode) =>
     confirm({
       title,
-      phrase: action === "down" ? (name ?? "") : undefined,
+      phrase: action === "down" ? name : undefined,
       confirmLabel: title.split(" ")[0],
       description,
       action: (phrase) => run(action, { confirmPhrase: phrase }),
     })
 
   return (
-    <SidePanel
-      open={name !== null}
-      onOpenChange={onOpenChange}
-      width="xl"
-      title={
-        <>
-          {name}
-          {data && <StackStateBadge stack={data} />}
-        </>
-      }
-      description={data ? `${data.summary} · ${data.workingDir}` : undefined}
-      bodyClassName="flex min-h-0 flex-1 flex-col gap-3 p-4"
-      actions={
-        data && <StackActions data={data} run={run} confirmRun={confirmRun} runner={runner} />
-      }
-    >
+    <Page fill>
+      <div className="flex min-w-0 shrink-0 flex-col gap-4">
+        <PageContext
+          eyebrow={
+            <Link
+              href="/docker/stacks"
+              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <ArrowLeft className="size-3" /> Stacks
+            </Link>
+          }
+          title={name}
+          actions={
+            data && (
+              <>
+                <StackStateBadge stack={data} />
+                <StackActions data={data} run={run} confirmRun={confirmRun} runner={runner} />
+              </>
+            )
+          }
+        />
+        {/* What the stack is, as data in the page rather than the sentence
+            the panel read to a screen reader and drew nowhere (§15 pass 8). */}
+        {data && (
+          <MetricStrip className="animate-rise">
+            <Metric
+              label="Stack"
+              value={
+                <span className="inline-flex items-center gap-2">
+                  <StackLogos stack={data} />
+                  {name}
+                </span>
+              }
+            />
+            <Metric label="Services" value={data.summary} />
+            <Metric label="Directory" value={data.workingDir} />
+          </MetricStrip>
+        )}
+      </div>
+
       {error && <ErrorState error={error} />}
       {loading && !data && <LoadingRows />}
 
@@ -200,6 +214,12 @@ function StackBody({
               {/* What a deploy would change, before it changes it. */}
               <TabsTrigger value="preview">Deploy preview</TabsTrigger>
               <TabsTrigger value="compose">Compose file</TabsTrigger>
+              {/* The stack's own directory, read where the stack is: the
+                  compose file's neighbours — an `.env`, a mounted config, the
+                  data a bind mount writes — are what a stack is opened to
+                  check, and a link to another page asked for a second
+                  navigation to see them. */}
+              {data.workingDir && <TabsTrigger value="files">Files</TabsTrigger>}
               <TabsTrigger value="history">History</TabsTrigger>
               <TabsTrigger value="logs">Logs</TabsTrigger>
             </TabsList>
@@ -211,14 +231,15 @@ function StackBody({
                   description="This stack has a compose file but no containers. Bring it up to start them."
                 />
               ) : (
-                /* Rows with a hairline between them and nothing around them:
-                   the services are the rows of a table the eye reads down,
-                   and the side panel is already the frame. */
-                <ul className="animate-rise divide-y divide-hairline">
+                /* Cards, because each service is its container to open — the
+                   same lit edge the containers list gives the same container
+                   (§16). A tab panel below the stack facts needs no frame of its
+                   own around them. */
+                <ChoiceList aria-label="Services" className="animate-rise">
                   {data.services.map((svc) => (
                     <ServiceRow key={svc.name} service={svc} managed={data.managed} onRun={run} />
                   ))}
-                </ul>
+                </ChoiceList>
               )}
             </TabsContent>
             <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto">
@@ -232,16 +253,28 @@ function StackBody({
                 canValidate={can("system.admin")}
               />
             </TabsContent>
+            {data.workingDir && (
+              <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto">
+                {tab === "files" && (
+                  <FileBrowser
+                    root={data.workingDir}
+                    label={data.name}
+                    emptyNote="This stack's directory is empty."
+                  />
+                )}
+              </TabsContent>
+            )}
             <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto">
               {tab === "history" && <DeploymentHistoryPanel stack={data.name} />}
             </TabsContent>
-            <TabsContent value="logs" className="min-h-0 flex-1">
-              {tab === "logs" && <StackLogs stack={data.name} active />}
+            <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto">
+              {tab === "logs" && <StackLogs stack={data} />}
             </TabsContent>
           </Tabs>
         </>
       )}
-    </SidePanel>
+      {dialog}
+    </Page>
   )
 }
 
@@ -269,8 +302,8 @@ function StackActions({
    * `Up` and `Down` are precise and mean nothing without the compose reference
    * — and `Down` is the worst of the two, because it sounds like the opposite
    * of `Up` and is not: it deletes the containers and the project network. Two
-   * are pressed often enough to sit inline; the rest are behind one menu, where
-   * each gets its word and its sentence. Every confirmation still carries both
+   * are pressed often enough to sit inline; the rest are behind one menu, one
+   * word to a line. Every confirmation still carries both
    * the blast radius and the exact command being run, so an operator who knows
    * compose can check the translation.
    */
@@ -294,7 +327,6 @@ function StackActions({
     verbs.push({
       key: "update",
       label: COMPOSE_ACTIONS.update.label,
-      detail: "Pulls newer images and replaces the containers using them.",
       icon: ArrowCircleUp,
       run: () => act("update"),
     })
@@ -303,7 +335,6 @@ function StackActions({
     verbs.push({
       key: "build",
       label: COMPOSE_ACTIONS.build.label,
-      detail: "Rebuilds the images this stack builds from source. Nothing restarts yet.",
       icon: Wrench,
       run: () => act("build"),
     })
@@ -312,7 +343,6 @@ function StackActions({
     verbs.push({
       key: "down",
       label: COMPOSE_ACTIONS.down.label,
-      detail: "Stops and deletes the containers and the project network. Volumes are kept.",
       icon: StopCircle,
       danger: true,
       run: () =>
@@ -351,8 +381,9 @@ function StackActions({
 /**
  * The links out.
  *
- * A stack is a directory; this dashboard has a file manager, a git panel and a
- * terminal that can each be pointed at one. The git line is the load-bearing
+ * A stack is a directory; this dashboard has a git panel and a terminal that
+ * can each be pointed at one. Its files are the Files tab, which opens onto
+ * the file manager from there. The git line is the load-bearing
  * part — "uncommitted changes" means compose will deploy something that is in
  * no commit, and "2 behind" means a pull would change what deploying does.
  */
@@ -361,12 +392,6 @@ function StackLinks({ data }: { data: StackDetail }) {
   if (!data.workingDir) return null
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <Button size="xs" variant="outline" asChild>
-        <Link href={`/files?path=${encodeURIComponent(data.workingDir)}`}>
-          <FolderOpen className="size-3" />
-          Files
-        </Link>
-      </Button>
       {can("terminal") && (
         <Button size="xs" variant="outline" asChild>
           <Link href={`/terminal?cwd=${encodeURIComponent(data.workingDir)}`}>
@@ -400,6 +425,19 @@ function StackLinks({ data }: { data: StackDetail }) {
   )
 }
 
+/** What a stack is made of, beside its name: its services' products, or Compose. */
+function StackLogos({ stack }: { stack: StackDetail }) {
+  const images = stack.services.map((service) => service.image).filter(Boolean)
+  return (
+    <ProductLogos ids={images.length > 0 ? imageProducts(images) : ["docker-compose"]} size="md" />
+  )
+}
+
+/**
+ * One service, as the card that opens its container. A service compose has
+ * not created yet has no container to open, and says so where its image would
+ * be.
+ */
 function ServiceRow({
   service,
   managed,
@@ -411,12 +449,23 @@ function ServiceRow({
 }) {
   const { can } = useAuth()
   const published = service.ports.filter((p) => p.publicPort)
+  const control = managed && can("system.admin") && can("service.control")
 
   return (
-    <li className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
-      <div className="min-w-0 flex-1 basis-48">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="truncate text-body font-medium">{service.name}</span>
+    <ChoiceRow
+      verb={service.name}
+      disabled={service.missing}
+      href={
+        service.container
+          ? `/docker/containers/${encodeURIComponent(service.container)}`
+          : undefined
+      }
+      leading={
+        <ProductLogo id={service.image ? imageProduct(service.image) : undefined} size="sm" />
+      }
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{service.name}</span>
           {service.missing ? (
             <Status verdict="warning" label="Not created" />
           ) : (
@@ -428,48 +477,52 @@ function ServiceRow({
               label={service.health.charAt(0).toUpperCase() + service.health.slice(1)}
             />
           )}
-        </div>
-        <p className="truncate font-mono text-hint text-muted-foreground">
+        </span>
+      }
+      description={
+        <span className="font-mono">
           {service.missing
             ? "defined in the compose file, but no container exists for it"
             : service.image}
-        </p>
-      </div>
-
-      {published.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {published.map((p, i) => (
-            <PortLink key={i} ip={p.ip} port={p.publicPort ?? 0} target={p.privatePort} />
-          ))}
-        </div>
-      )}
-
-      {managed && can("system.admin") && can("service.control") && !service.missing && (
-        <Button
-          size="xs"
-          variant="ghost"
-          title="Recreates this service from the compose file without touching the rest of the stack"
-          onClick={() =>
-            onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
-          }
-        >
-          <RefreshClockwise className="size-3" />
-          Recreate service
-        </Button>
-      )}
-      {managed && can("system.admin") && can("service.control") && service.missing && (
-        <Button
-          size="xs"
-          variant="outline"
-          onClick={() =>
-            onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
-          }
-        >
-          <Play className="size-3" />
-          Create it
-        </Button>
-      )}
-    </li>
+        </span>
+      }
+      trailing={
+        published.length > 0 && (
+          <span className="hidden flex-wrap justify-end gap-1 sm:flex">
+            {published.map((p, i) => (
+              <PortLink key={i} ip={p.ip} port={p.publicPort ?? 0} target={p.privatePort} />
+            ))}
+          </span>
+        )
+      }
+      actions={
+        control &&
+        (service.missing ? (
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() =>
+              onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
+            }
+          >
+            <Play className="size-3" />
+            Create it
+          </Button>
+        ) : (
+          <Button
+            size="xs"
+            variant="ghost"
+            title="Recreates this service from the compose file without touching the rest of the stack"
+            onClick={() =>
+              onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
+            }
+          >
+            <RefreshClockwise className="size-3" />
+            Recreate service
+          </Button>
+        ))
+      }
+    />
   )
 }
 
@@ -613,44 +666,47 @@ function ComposeEditor({
 
 /* ------------------------------------------------------------------ logs -- */
 
-/** Every container in the stack, merged into one feed and tagged by service. */
-function StackLogs({ stack, active }: { stack: string; active: boolean }) {
-  const [lines, setLines] = useState<LogLine[]>([])
-
-  const onMessage = useCallback((envelope: Envelope) => {
-    if (envelope.type !== "logs") return
-    const batch = envelope.data as { stream: string; text: string; service?: string }[]
-    setLines((prev) => {
-      const next = [
-        ...prev,
-        // No stream-to-level mapping: services that log everything to stderr
-        // would otherwise paint the whole merged feed red. The viewer colours
-        // lines by their own words instead.
-        ...batch.map((l) => ({
-          // The service prefix goes into the text rather than a column so the
-          // filter box searches it too — "show me only what the database
-          // said" is the commonest thing to want from a merged feed.
-          text: l.service ? `${l.service} | ${l.text}` : l.text,
-        })),
-      ]
-      return next.length > 5000 ? next.slice(next.length - 5000) : next
-    })
-  }, [])
-
-  const query = useMemo(() => ({ tail: 200 }), [])
-  const { state } = useSocket(`/docker/stacks/${encodeURIComponent(stack)}/logs/stream`, {
-    onMessage,
-    enabled: active,
-    query,
-  })
-
+/**
+ * Every container in the stack, as one log.
+ *
+ * It was a socket of its own that followed the running services only and
+ * wrote `db | ` in front of each line — so a crashed service's last words
+ * were never in it, a JSON line stopped being JSON, and the only way to read
+ * one service was to type its name into the filter. The stack is a log
+ * source now (`stack:<project>`): every container's output merged by time,
+ * the exited ones included, each line read through its own container's lens
+ * and carrying its service as the lane down the left and as a field to
+ * narrow by. Events is what Docker did to them, beside it.
+ */
+function StackLogs({ stack }: { stack: StackDetail }) {
+  // As one string: the stack's poll hands a new array every ten seconds.
+  const images = stack.services
+    .map((service) => service.image)
+    .filter(Boolean)
+    .join(",")
+  const running = stack.services.some((service) => service.state === "running")
+  const sources = useMemo<ServiceLogSource[]>(
+    () => [
+      {
+        id: stackSource(stack.name),
+        label: stack.name,
+        kind: "stack",
+        status: running ? "running" : "exited",
+        images: images ? images.split(",") : undefined,
+        product: "docker-compose",
+      },
+    ],
+    [stack.name, running, images],
+  )
+  const views = useMemo(() => [containerEventsView({ stack: stack.name })], [stack.name])
   return (
-    <LogViewer
-      className="h-full"
-      lines={lines}
-      showTimestamps={false}
-      onClear={() => setLines([])}
-      emptyMessage={state === "open" ? "No output yet." : "Connecting…"}
+    <ServiceLogs
+      sources={sources}
+      storageKey={`docker.stack.${stack.name}.logs`}
+      views={views}
+      readings
+      className="h-full min-h-0"
+      paneClassName="min-h-[30rem]"
     />
   )
 }

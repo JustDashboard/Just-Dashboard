@@ -4,35 +4,36 @@
   "name": "Redis",
   "category": "database",
   "profile": "database",
-  "description": "An in-memory store for caches, queues and sessions. Persistence is on so a restart does not silently empty it.",
+  "description": "An in-memory store for caches, queues and sessions, reachable only by other containers on this host. The official image takes no password from the environment, so it runs without one.",
   "iconId": "database",
   "docsUrl": "https://redis.io/docs/latest/",
+  "access": {
+    "kind": "open",
+    "note": "This Redis has no password. The official image takes requirepass only from a command argument or a configuration file, neither of which can carry a secret generated here, so nothing authenticates. Its port is never published to the host, so the exposure is every other container on the same Docker network: treat the store as readable, writable and erasable by all of them."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
-    "license": "RSALv2",
+    "license": "RSALv2 / SSPLv1 / AGPLv3",
     "upstreamUrl": "https://hub.docker.com/_/redis",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
-  "image": { "reference": "redis:7.4-alpine", "tagPolicy": "minor", "pullPolicy": "missing" },
+  "image": { "reference": "redis:8.10-alpine", "tagPolicy": "minor", "pullPolicy": "missing" },
   "inputs": [
-    { "name": "maxmemory", "kind": "memory", "label": "Memory limit", "default": "256", "minimum": 64, "maximum": 65536, "advanced": true, "description": "Redis is evicted against this figure, so it should stay below the container limit." }
-  ],
-  "secrets": [
-    { "name": "password", "variable": "REDIS_PASSWORD", "label": "Redis password", "length": 40 }
+    { "name": "maxmemory", "kind": "memory", "label": "Container memory limit", "default": "256", "minimum": 64, "maximum": 65536, "advanced": true, "description": "The container's limit. Redis is not given a maxmemory of its own, so it keeps allocating until this cap stops it." }
   ],
   "ports": [
     { "name": "redis", "internal": 6379, "protocol": "tcp", "purpose": "Client connections from other containers on this host", "exposure": "internal", "primary": true }
   ],
   "volumes": [
-    { "name": "data", "target": "/data", "purpose": "The append-only file Redis restores from", "data": true, "backup": true }
+    { "name": "data", "target": "/data", "purpose": "The RDB snapshot Redis restores from", "data": true, "backup": true }
   ],
   "resources": { "memoryMb": 384, "minMemoryMb": 128 },
   "checks": [
     { "name": "Responds to PING", "kind": "command", "phase": "readiness", "required": true, "command": ["redis-cli", "ping"], "timeoutSeconds": 30 }
   ],
   "operations": { "stop": [{ "kind": "stop_signal", "signal": "SIGTERM" }] },
-  "update": { "detector": "registry", "notes": "Redis reads the append-only file written by the previous minor version." },
+  "update": { "detector": "registry", "notes": "Redis 8 reads the RDB snapshot written by Redis 7 and is not reversible; back up the volume first. Redis 8 also autoloads its four bundled modules, so baseline memory is higher than Redis 7's." },
   "security": {},
-  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:5e5e1998d5ae22b6f2f55891704cc6e5645ad7044318ca636037a347306d5fb0" }]
+  "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:247ed6d423e8840996adc46f8f420c3952b1e7ec5fe17b90d31413e213c84119" }]
 }

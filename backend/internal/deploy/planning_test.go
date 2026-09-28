@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,7 +28,9 @@ func TestDetectorIsDeterministicBoundedAndDoesNotFollowSymlinks(t *testing.T) {
 	writePlanningFixture(t, filepath.Join(root, "apps", "web", "package.json"), `{
   "name":"web","scripts":{"build":"vite build"},"devDependencies":{"vite":"6.0.0"}
 }`)
+	writePlanningFixture(t, filepath.Join(root, "apps", "web", "bun.lock"), "{}")
 	writePlanningFixture(t, filepath.Join(root, "services", "api", "go.mod"), "module example.test/api\n")
+	writePlanningFixture(t, filepath.Join(root, "services", "api", "main.go"), "package main\n\nfunc main() {}\n")
 	writePlanningFixture(t, filepath.Join(root, ".gitmodules"), "[submodule \"shared\"]\n  path = shared\n")
 	writePlanningFixture(t, filepath.Join(root, ".gitattributes"), "assets/** filter=lfs diff=lfs merge=lfs -text\n")
 	outside := t.TempDir()
@@ -51,13 +54,20 @@ func TestDetectorIsDeterministicBoundedAndDoesNotFollowSymlinks(t *testing.T) {
 	if string(firstJSON) != string(secondJSON) {
 		t.Fatalf("detection is not deterministic:\n%s\n%s", firstJSON, secondJSON)
 	}
-	if len(first.Candidates) != 2 || first.SelectedID != "" {
+	if len(first.Candidates) != 2 || first.SelectedID != "" ||
+		first.Candidates[0].Confidence != ConfidenceHigh || first.Candidates[1].Confidence != ConfidenceHigh {
 		t.Fatalf("monorepo detection = %#v, want two ambiguous high-confidence candidates", first)
+	}
+	// The declared submodule and LFS pattern lie outside both build roots,
+	// so they are recorded as evidence and owe neither candidate a decision.
+	if !first.GitRequirements.Submodules || !first.GitRequirements.LFS || len(first.GitRequirements.SubmoduleList) != 1 ||
+		first.GitRequirements.SubmoduleList[0].Path != "shared" || first.GitRequirements.LFSFiles != 0 {
+		t.Fatalf("Git requirements = %#v", first.GitRequirements)
 	}
 	for _, candidate := range first.Candidates {
 		decisions := strings.Join(candidate.NeedsDecision, " ")
-		if !strings.Contains(decisions, "submodules") || !strings.Contains(decisions, "Git LFS") {
-			t.Fatalf("candidate lacks bounded Git dependency evidence: %#v", candidate)
+		if strings.Contains(decisions, "submodule") || strings.Contains(decisions, "LFS") {
+			t.Fatalf("candidate owes a Git decision for paths outside its root: %#v", candidate)
 		}
 		for _, evidence := range candidate.Evidence {
 			if strings.Contains(evidence.Path, "linked-outside") {
@@ -160,7 +170,13 @@ func TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials(t *testi
 		{"ref option", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "-upload-pack=evil"}},
 		{"ref reflog", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "main@{1}"}},
 		{"ref double slash", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "feature//escape"}},
-		{"ref arbitrary namespace", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/pull/1/head"}},
+		{"ref arbitrary namespace", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/notes/x"}},
+		{"ref pull without number", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/pull/head"}},
+		{"ref pull merge commit", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/pull/1/merge"}},
+		{"ref pull non-numeric", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/pull/x/head"}},
+		{"ref pull trailing component", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/pull/1/head/extra"}},
+		{"ref merge request merge commit", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: "refs/merge-requests/1/merge"}},
+
 		{"git query", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git?token=secret"}},
 		{"git encoded traversal", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/%2e%2e/repo.git"}},
 		{"subdirectory traversal", DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Subdirectory: "../secret"}},
@@ -203,6 +219,24 @@ func TestSourceAndPlanValidationRejectsTraversalAndPlaintextCredentials(t *testi
 	}
 	if err := validCompose.Validate(); err != nil {
 		t.Fatalf("typed Compose variable was rejected: %v", err)
+	}
+	// A preview's source points at the provider's own pull request ref; it
+	// is the one ref outside refs/heads and refs/tags a source may name.
+	for _, ref := range []string{"refs/pull/1/head", "refs/pull/1234/head", "refs/merge-requests/7/head"} {
+		pull := DraftSourceConfig{Kind: SourceGit, Mode: SourceModeGitURL, URL: "https://example.test/owner/repo.git", Ref: ref}
+		if err := pull.Validate(); err != nil {
+			t.Fatalf("pull request ref %q was rejected: %v", ref, err)
+		}
+	}
+	// The same shapes, and nothing else, are what IsProviderPullRef names
+	// for the routes that must refuse a pull request head from a request.
+	for ref, want := range map[string]bool{
+		"refs/pull/1/head": true, "refs/merge-requests/7/head": true,
+		"refs/pull/1/merge": false, "refs/heads/pull/1/head": false, "pull/1/head": false, "main": false, "refs/tags/v1": false,
+	} {
+		if got := IsProviderPullRef(ref); got != want {
+			t.Fatalf("IsProviderPullRef(%q) = %t, want %t", ref, got, want)
+		}
 	}
 
 	base := PlanConfiguration{
@@ -598,7 +632,7 @@ test -z "${GIT_CONFIG_VALUE_0:-}"
 test -z "${JD_PLANNING_SECRET:-}"
 test -f "${GIT_CONFIG_GLOBAL:-missing}"
 test "$(stat -c '%a' "$GIT_CONFIG_GLOBAL")" = '600'
-grep -q 'fixture-bearer' "$GIT_CONFIG_GLOBAL"
+grep -q 'Authorization: Basic eC1hY2Nlc3MtdG9rZW46Zml4dHVyZS1iZWFyZXI=' "$GIT_CONFIG_GLOBAL"
 	case "$1" in
 	  ls-remote)
 	    printf '%s\trefs/heads/main\n' "${PLANNING_GIT_REMOTE_REVISION:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
@@ -1334,9 +1368,13 @@ type planningDockerFake struct {
 	validatedProject   string
 	validatedVariables []string
 	image              *dockerx.DistributionImage
+	imageDetail        *dockerx.ImageDetail
 	container          *dockerx.ContainerSpec
 	stacks             []dockerx.ComposeStack
-	registryAuth       string
+	// registryAuth is written by the Compose analysis' concurrent image
+	// lookups (resolveComposeImagePlatforms), so writes hold mu.
+	mu           sync.Mutex
+	registryAuth string
 }
 
 func (f *planningDockerFake) Ping(context.Context) dockerx.Availability {
@@ -1344,11 +1382,21 @@ func (f *planningDockerFake) Ping(context.Context) dockerx.Availability {
 }
 
 func (f *planningDockerFake) ResolveDistributionImage(_ context.Context, _ string, auth string) (*dockerx.DistributionImage, error) {
+	f.mu.Lock()
 	f.registryAuth = auth
+	f.mu.Unlock()
 	if f.image == nil {
 		return nil, errors.New("image missing")
 	}
 	copy := *f.image
+	return &copy, nil
+}
+
+func (f *planningDockerFake) InspectImage(context.Context, string) (*dockerx.ImageDetail, error) {
+	if f.imageDetail == nil {
+		return nil, errors.New("image is not present on this host")
+	}
+	copy := *f.imageDetail
 	return &copy, nil
 }
 
@@ -1565,7 +1613,7 @@ func TestRegistryCredentialIsPassedOutOfBandAndNotReturned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := base64.RawURLEncoding.DecodeString(fake.registryAuth)
+	decoded, err := base64.URLEncoding.DecodeString(fake.registryAuth)
 	if err != nil || !strings.Contains(string(decoded), "registry-secret") {
 		t.Fatalf("registry auth was not passed to the Engine request: %q, %v", decoded, err)
 	}
@@ -1619,7 +1667,10 @@ func TestProviderRemoteNormalization(t *testing.T) {
 		{"main", "refs/heads/main", "main"},
 		{"refs/heads/release", "refs/heads/release", "release"},
 		{"refs/tags/v1.2.3", "refs/tags/v1.2.3", "v1.2.3"},
+		{"refs/pull/1/head", "refs/pull/1/head", "refs/pull/1/head"},
+		{"refs/merge-requests/7/head", "refs/merge-requests/7/head", "refs/merge-requests/7/head"},
 	} {
+
 		remote, clone := planningGitRef(test.input)
 		if remote != test.remote || clone != test.clone {
 			t.Errorf("planningGitRef(%q) = %q/%q, want %q/%q", test.input, remote, clone, test.remote, test.clone)
@@ -1656,9 +1707,9 @@ func TestCanonicalConfigurationOrdering(t *testing.T) {
 }
 
 // A Node project's detected commands have to name the package manager its
-// lockfile locks to. The recipe picks its base image from that same lockfile,
-// and oven/bun carries no npm: "npm run build" was a build that installed
-// cleanly and then died on `npm: not found`, with the configuration screen
+// lockfile locks to. The recipe provisions its toolchain from that same
+// lockfile, and a runner the image lacked was a build that installed cleanly
+// and then died on `<runner>: not found`, with the configuration screen
 // showing nothing wrong.
 func TestDetectedJavaScriptCommandsFollowTheLockfile(t *testing.T) {
 	manifest := `{"name":"site","scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.2.10"}}`
@@ -1694,9 +1745,10 @@ func TestDetectedJavaScriptCommandsFollowTheLockfile(t *testing.T) {
 	}
 }
 
-// With no lockfile, or with several, the recipe refuses to build at all — so
-// the detected command only has to be the one that fails legibly rather than
-// the one that happens to match a package manager nobody pinned.
+// With several lockfiles nothing resolves until a package manager is
+// chosen, and the build refuses until then — so the detected command only
+// has to be the one that fails legibly rather than the one that happens to
+// match a package manager nobody pinned.
 func TestDetectedJavaScriptCommandsFallBackToNpm(t *testing.T) {
 	root := t.TempDir()
 	writePlanningFixture(t, filepath.Join(root, "package.json"),

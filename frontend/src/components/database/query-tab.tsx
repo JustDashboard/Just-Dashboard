@@ -19,7 +19,7 @@ import { plural } from "@/lib/format"
 import { del, get, post } from "@/lib/api"
 import { resultToCSV } from "@/lib/db-export"
 import { cn, ringSafeScroll } from "@/lib/utils"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import type {
   DbConnection,
   DbHistoryEntry,
@@ -52,8 +52,14 @@ export function QueryTab({ conn, confirm }: { conn: DbConnection; confirm: Confi
   const { can } = useAuth()
   const params = useSearchParams()
   // A statement handed over in the URL — the diagram's "query this table" —
-  // opens in the editor; it is not run until Run is pressed.
-  const [sql, setSql] = useState(() => params.get("sql") || "SELECT 1;")
+  // opens in the editor; it is not run until Run is pressed. Otherwise the
+  // editor holds what was last typed against this connection: a query is
+  // the slowest thing on the page to write and the easiest to lose.
+  const [sql, setSql] = useSessionState(
+    `databases.${conn.id}.query.sql`,
+    "SELECT 1;",
+    params.get("sql") || undefined,
+  )
   const [risk, setRisk] = useState<QueryRisk | null>(null)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [plan, setPlan] = useState<QueryResult | null>(null)

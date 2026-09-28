@@ -7,11 +7,17 @@
   "description": "A document database. Like every database here it stays on the Docker network rather than on a published host port.",
   "iconId": "database",
   "docsUrl": "https://www.mongodb.com/docs/manual/",
+  "access": {
+    "kind": "client",
+    "usernameVariable": "MONGO_INITDB_ROOT_USERNAME",
+    "secretVariable": "MONGO_INITDB_ROOT_PASSWORD",
+    "note": "Nothing signs in through a browser: this is the MongoDB wire protocol, reachable only by other containers that share its Docker network, and no host port is published. The root user named above is created in the admin database the first time the empty volume starts and the server then runs with --auth, so reveal the password from the Variables tab and hand it to whatever connects."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "SSPL-1.0",
     "upstreamUrl": "https://hub.docker.com/_/mongo",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7",
     "updateNotes": "Reviewed under the SSPL: self-hosting is permitted, offering it as a managed service is not."
   },

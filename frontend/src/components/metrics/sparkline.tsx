@@ -78,6 +78,54 @@ export function Sparkline({
   )
 }
 
+/**
+ * A reading's recent shape, in a `StatTile`'s `trend` slot.
+ *
+ * The deploy tiles put 72px sparklines inside their hints or beside their
+ * figures — one idea at three sizes in three places — while the host Overview
+ * drew its tiles' last hour from a helper of its own, which it keeps: that one
+ * also draws a flat series. This is the deploy section's one shape: the
+ * tile's full width, 36px tall, rising once when its points land
+ * (§11 *arrived*). Nothing is drawn below two points, which is not yet a
+ * shape, nor for a series that never moves on a scale of its own: scaled to
+ * its own maximum it fills the band and reads as a full meter, and a flat
+ * line has no shape to show (§10). With a fixed `max` a flat line sits at its
+ * level and says so. The tile leaves no band for what is not drawn.
+ *
+ * `label` is the whole accessible name, window included — "CPU over the last
+ * hour" — because only the caller knows the window. Colour is a series
+ * colour, never a status one: a failing share is `--chart-3`, because
+ * `--destructive` on a line says the line itself is an error (§3).
+ */
+export function TileTrend({
+  values,
+  label,
+  color = "var(--chart-1)",
+  max,
+}: {
+  values: number[]
+  label: string
+  color?: string
+  /** Fixes the vertical scale — 100 for a percentage. */
+  max?: number
+}) {
+  if (values.length < 2) return null
+  if (max === undefined && Math.min(...values) === Math.max(...values)) return null
+  return (
+    <div className="h-full animate-rise">
+      <Sparkline
+        values={values}
+        max={max}
+        color={color}
+        width={240}
+        height={36}
+        className="h-9 w-full"
+        label={label}
+      />
+    </div>
+  )
+}
+
 function buildPath(
   values: number[],
   max: number | undefined,

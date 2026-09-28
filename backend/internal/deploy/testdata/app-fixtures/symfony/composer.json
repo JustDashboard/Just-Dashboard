@@ -1,0 +1,28 @@
+{
+  "type": "project",
+  "require": {
+    "php": ">=8.4",
+    "symfony/asset": "8.1.*",
+    "symfony/asset-mapper": "8.1.*",
+    "symfony/console": "8.1.*",
+    "symfony/dotenv": "8.1.*",
+    "symfony/framework-bundle": "8.1.*",
+    "symfony/runtime": "8.1.*",
+    "symfony/twig-bundle": "8.1.*",
+    "symfony/yaml": "8.1.*"
+  },
+  "require-dev": {
+    "symfony/debug-bundle": "8.1.*"
+  },
+  "config": {
+    "allow-plugins": { "symfony/runtime": true },
+    "sort-packages": true
+  },
+  "autoload": {
+    "psr-4": { "App\\": "src/" }
+  },
+  "scripts": {
+    "post-install-cmd": ["@php bin/console cache:clear"],
+    "post-update-cmd": ["@php bin/console cache:clear"]
+  }
+}

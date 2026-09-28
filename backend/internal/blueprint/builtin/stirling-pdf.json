@@ -7,11 +7,17 @@
   "description": "PDF tools in the browser: merge, split, convert, compress, sign and OCR, processed on this server and kept nowhere.",
   "iconId": "bolt",
   "docsUrl": "https://docs.stirlingpdf.com/",
+  "access": {
+    "kind": "credentials",
+    "usernameVariable": "SECURITY_INITIALLOGIN_USERNAME",
+    "secretVariable": "SECURITY_INITIALLOGIN_PASSWORD",
+    "note": "Stirling PDF 2.x has its login switched on, so the first thing you see is a sign-in form rather than the tools page. Use the sign-in name you entered here and the generated password shown beside it; it may ask you to choose a new password straight away. Both values only seed the account on the very first start with an empty settings volume — after that the account lives in the app's own database."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/Stirling-Tools/Stirling-PDF",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -26,6 +32,15 @@
       "label": "Public domain",
       "required": false,
       "description": "Optional; the address other people open; nothing else here changes when it does."
+    },
+    {
+      "name": "admin-username",
+      "kind": "text",
+      "label": "Sign-in name",
+      "variable": "SECURITY_INITIALLOGIN_USERNAME",
+      "default": "admin",
+      "required": true,
+      "description": "The first administrator's sign-in name. Seeded on the first start only; afterwards you change it inside the application."
     }
   ],
   "ports": [
@@ -52,6 +67,15 @@
       "purpose": "Custom fonts, signatures and templates",
       "data": true,
       "backup": true
+    }
+  ],
+  "secrets": [
+    {
+      "name": "admin-password",
+      "variable": "SECURITY_INITIALLOGIN_PASSWORD",
+      "label": "Sign-in password",
+      "length": 32,
+      "description": "Generated here. Without it the image starts with its own published default password."
     }
   ],
   "resources": {
@@ -85,7 +109,7 @@
     {
       "name": "default",
       "inputs": {},
-      "digest": "sha256:f4c23e47c6308380daa72b630878b727b1c5c1f86b628a180dde5dab789d5276"
+      "digest": "sha256:e85f8fa48aa103236cef487cb572aae6efd0f946bc24240656cec7c18a0e84a6"
     }
   ]
 }

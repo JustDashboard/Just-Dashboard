@@ -1,0 +1,19 @@
+{
+  "name": "jd-acceptance-express-vite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development node server/index.js",
+    "build": "node build-check.cjs && vite build && esbuild server/index.js --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "start": "NODE_ENV=production node dist/index.js",
+    "postinstall": "node install-check.cjs"
+  },
+  "dependencies": {
+    "express": "5.1.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.0",
+    "esbuild": "0.28.2"
+  }
+}

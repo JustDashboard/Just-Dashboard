@@ -1,0 +1,6 @@
+[versions]
+java = "21"
+
+[plugins]
+# The build applies only Gradle's own plugins, so it downloads nothing; the
+# catalog is here because `gradle init` writes one.

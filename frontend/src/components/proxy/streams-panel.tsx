@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Connection, Pencil, Plus, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
@@ -10,25 +11,20 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Page, PageHeader, RowLink } from "@/components/page"
+import { ChoiceRow } from "@/components/flow"
+import { Page, PageContext } from "@/components/page"
 import { Pane, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { ProductLogo, ProductLogos, portProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { VerbActions, type Verb } from "@/components/verbs"
+import { VerbBar, type Verb } from "@/components/verbs"
 import { DANGEROUS_PORTS } from "@/components/proxy/attention"
+import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 /**
  * Forwarding the things that do not speak HTTP.
@@ -46,8 +42,8 @@ import {
 export function StreamsPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
-  const [editing, setEditing] = useState<StreamSpec | null>(null)
-  const [form, setForm] = useState({ open: false, session: 0 })
+  const [editing, setEditing] = useSessionState<StreamSpec | null>("proxy.streams.editing", null)
+  const [form, setForm] = useSessionState("proxy.streams.form", { open: false, session: 0 })
   const { data, error, loading, refresh } = usePoll<StreamStatus>(
     (signal) => get("/proxy/streams/", undefined, signal),
     60_000,
@@ -91,7 +87,6 @@ export function StreamsPage() {
     {
       key: "edit",
       label: "Edit",
-      detail: "Change where the port goes, who may reach it, or the timeout.",
       icon: Pencil,
       inline: true,
       run: () => open(stream),
@@ -99,36 +94,13 @@ export function StreamsPage() {
     {
       key: "delete",
       label: "Delete",
-      detail: "Remove the forward and reload. The previous file is kept as a .bak.",
       icon: Trash,
       danger: true,
       run: () => remove(stream),
     },
   ]
 
-  const header = (
-    <PageHeader
-      eyebrow="Proxy"
-      title="Streams"
-      actions={
-        admin &&
-        data && (
-          // Kept enabled when nginx is not reading the directory yet:
-          // staging the forward before editing nginx.conf is a reasonable
-          // order to work in. What it must not do is look like the thing
-          // that makes the port live, so it says which of the two it is.
-          <Button
-            size="sm"
-            variant={data.included ? "default" : "outline"}
-            onClick={() => open(null)}
-          >
-            <Plus className="size-4" />
-            {data.included ? "New stream" : "Prepare a stream"}
-          </Button>
-        )
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Proxy" title="Streams" />
 
   if (loading && !data) {
     return (
@@ -152,7 +124,7 @@ export function StreamsPage() {
     <Page className="animate-rise">
       {header}
 
-      <StatGrid columns={4}>
+      <StatGrid columns={4} dense>
         <StatTile
           label="Streams"
           value={counts.all}
@@ -196,67 +168,83 @@ export function StreamsPage() {
       )}
 
       <Panel plain>
-        <PanelHeader title="Port forwarding" />
+        <PanelHeader
+          title="Port forwarding"
+          actions={
+            admin && (
+              // Staging a forward is still useful before nginx reads the directory.
+              <Button
+                size="sm"
+                variant={data.included ? "default" : "outline"}
+                onClick={() => open(null)}
+              >
+                <Plus className="size-4" />
+                {data.included ? "New stream" : "Prepare a stream"}
+              </Button>
+            )
+          }
+        />
         <PanelBody flush>
           {data.streams.length === 0 ? (
             <EmptyState
-              icon={Connection}
+              mark={<ProductLogos ids={["postgresql", "redis", "minecraft-java"]} size="md" />}
               title="Nothing forwarded"
               description="Point a port on this host at a service somewhere else — a database replica, a bastion, a game server. Anything TCP or UDP."
               className="mt-2"
             />
           ) : (
-            <div className="-mx-4 min-w-0 animate-rise">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-full">Name</TableHead>
-                    <TableHead>Listening</TableHead>
-                    <TableHead>Forwards to</TableHead>
-                    <TableHead>Restricted to</TableHead>
-                    <TableHead className="w-px" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data.streams.map((stream) => (
-                    <TableRow
-                      key={stream.name}
-                      className="group"
-                      onActivate={admin ? () => open(stream) : undefined}
-                    >
-                      <TableCell>
-                        {admin ? (
-                          <RowLink onClick={() => open(stream)}>{stream.name}</RowLink>
-                        ) : (
-                          <span className="text-body font-medium">{stream.name}</span>
-                        )}
-                        {stream.proxyProtocol && (
-                          <p className="text-hint text-muted-foreground">sends the PROXY header</p>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono">
-                        <span className="numeric">{stream.listen}</span>
-                        <span className="ml-1 text-muted-foreground uppercase">
-                          {stream.protocol}
-                        </span>
-                      </TableCell>
-                      <TableCell className="font-mono">{stream.upstream}</TableCell>
-                      <TableCell>
-                        {stream.allowFrom.length > 0 ? (
-                          <span className="font-mono text-hint">{stream.allowFrom.join(", ")}</span>
-                        ) : (
-                          <Status
-                            verdict={DANGEROUS_PORTS[stream.listen] ? "critical" : "warning"}
-                            label="anyone"
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell>{admin && <VerbActions dim verbs={verbsFor(stream)} />}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            // Every row opens the stream's form, so it is a choice and carries
+            // the edge (§16). Each is drawn as the service its port is — a
+            // forward on 5432 as Postgres — where the port says so, and as a
+            // bare connection where it does not.
+            <ProxyGrid aria-label="Streams">
+              {[...data.streams].sort(byUrgency).map((stream, index) => (
+                <ChoiceRow
+                  key={stream.name}
+                  verb={admin ? `Edit ${stream.name}` : stream.name}
+                  onSelect={admin ? () => open(stream) : undefined}
+                  disabled={!admin}
+                  index={index}
+                  className="h-full gap-4 p-4"
+                  leading={
+                    <ProductLogo id={portProduct(stream.listen)} size="md" fallback={Connection} />
+                  }
+                  title={<span className="text-title">{stream.name}</span>}
+                  description={[
+                    `${stream.protocol.toUpperCase()} forwarding`,
+                    stream.proxyProtocol && "PROXY header",
+                    stream.timeout && `${stream.timeout}s timeout`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  trailing={
+                    <Status
+                      verdict={data.included ? "ok" : "warning"}
+                      label={data.included ? "configured" : "not live"}
+                    />
+                  }
+                >
+                  <RoutePath
+                    sourceLabel="Listen on this host"
+                    source={<span className="numeric text-2xl font-semibold">{stream.listen}</span>}
+                    destinationLabel="Forward to"
+                    destination={stream.upstream}
+                  />
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <span className="block text-hint text-muted-foreground">Allowed sources</span>
+                      <Restriction stream={stream} />
+                    </div>
+                    {admin && (
+                      <VerbBar
+                        verbs={verbsFor(stream)}
+                        menuLabel={`More actions for ${stream.name}`}
+                      />
+                    )}
+                  </div>
+                </ChoiceRow>
+              ))}
+            </ProxyGrid>
           )}
         </PanelBody>
       </Panel>
@@ -267,12 +255,40 @@ export function StreamsPage() {
         spec={editing}
         included={data.included}
         snippet={data.snippet}
-        onOpenChange={(open) => setForm((f) => ({ ...f, open }))}
+        onOpenChange={(open) => {
+          setForm((f) => ({ ...f, open }))
+          if (!open) forgetSessionState("proxy.stream.form.")
+        }}
         onSaved={refresh}
       />
       {dialog}
     </Page>
   )
+}
+
+/** Who may reach the port, as a reading: a list of sources, or the fact that there is none. */
+function Restriction({ stream }: { stream: StreamSpec }) {
+  if (stream.allowFrom.length > 0) {
+    return (
+      <span className="block font-mono text-hint break-all text-muted-foreground">
+        {stream.allowFrom.join(", ")}
+      </span>
+    )
+  }
+  return (
+    <Status
+      verdict={DANGEROUS_PORTS[stream.listen] ? "critical" : "warning"}
+      label={
+        DANGEROUS_PORTS[stream.listen] ? `${DANGEROUS_PORTS[stream.listen]} to anyone` : "anyone"
+      }
+    />
+  )
+}
+
+/** A stream open to anyone above a restricted one, a database port first among those. */
+function byUrgency(a: StreamSpec, b: StreamSpec): number {
+  const rank = (s: StreamSpec) => (s.allowFrom.length > 0 ? 2 : DANGEROUS_PORTS[s.listen] ? 0 : 1)
+  return rank(a) - rank(b) || a.listen - b.listen
 }
 
 const BLANK: StreamSpec = {
@@ -301,8 +317,14 @@ function StreamForm({
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }) {
-  const [spec, setSpec] = useState<StreamSpec>(initial ?? BLANK)
-  const [allow, setAllow] = useState((initial?.allowFrom ?? []).join(", "))
+  const [spec, setSpec] = useSessionState<StreamSpec>(
+    `proxy.stream.form.${initial?.name ?? "new"}.spec`,
+    initial ?? BLANK,
+  )
+  const [allow, setAllow] = useSessionState(
+    `proxy.stream.form.${initial?.name ?? "new"}.allow`,
+    (initial?.allowFrom ?? []).join(", "),
+  )
   const [preview, setPreview] = useState("")
   const [previewError, setPreviewError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -386,7 +408,12 @@ function StreamForm({
       open={open}
       onOpenChange={(o) => !busy && onOpenChange(o)}
       width="lg"
-      title={initial ? `Edit ${initial.name}` : "New stream"}
+      title={
+        <>
+          <ProductLogo id={portProduct(spec.listen)} size="sm" fallback={Connection} />
+          {initial ? `Edit ${initial.name}` : "New stream"}
+        </>
+      }
       description="A port on this host, forwarded somewhere else"
       bodyClassName="flex min-h-0 flex-1 flex-col gap-4 p-4"
       footer={

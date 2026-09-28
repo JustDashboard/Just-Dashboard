@@ -7,11 +7,15 @@
   "description": "A local-first personal finance tool. The server only syncs the encrypted budget files between devices; the data volume is what a backup has to carry.",
   "iconId": "globe",
   "docsUrl": "https://actualbudget.org/docs/",
+  "access": {
+    "kind": "setup",
+    "note": "Actual has no user accounts and no default password. The first page you open is a bootstrap screen that asks you to choose the server password, and that one password is how every device signs in. Whoever opens the address first sets it, so open it immediately after the deploy finishes."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/actualbudget/actual",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -57,7 +61,7 @@
       "kind": "http",
       "phase": "readiness",
       "required": true,
-      "path": "/",
+      "path": "/health",
       "timeoutSeconds": 60
     }
   ],
@@ -79,7 +83,7 @@
     {
       "name": "default",
       "inputs": {},
-      "digest": "sha256:6d4ec861dc148fc60926dd57e99188a1e53670aee630a4ab765f4edabaebdc0f"
+      "digest": "sha256:72a142a50401634902d8b7efe07da73627ba9be63067c3c8387203c84db5c10e"
     }
   ]
 }

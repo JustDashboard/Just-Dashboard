@@ -45,8 +45,13 @@ func TestBlueprintPreviewKeepsSocketReadOnlyAndUDPExplicit(t *testing.T) {
 		t.Fatal(err)
 	}
 	mount := plan.Configuration.Runtime.Mounts[0]
-	if mount.Source != "/var/run/docker.sock" || !mount.ReadOnly || mount.Ownership != OwnershipLinked || len(plan.Configuration.Dependencies) != 0 {
-		t.Fatalf("socket mapped to owned storage: %#v", plan.Configuration)
+	if mount.Source != "/var/run/docker.sock" || !mount.ReadOnly || mount.Ownership != OwnershipLinked {
+		t.Fatalf("socket is not a linked read-only mount: %#v", mount)
+	}
+	for _, dependency := range plan.Configuration.Dependencies {
+		if strings.Contains(dependency.ResourceID, "docker.sock") {
+			t.Fatalf("socket mapped to owned storage: %#v", dependency)
+		}
 	}
 	bedrock, err := RenderBlueprintPlan(DraftSourceConfig{BlueprintID: "minecraft-bedrock", BlueprintVersion: "1.0.0", BlueprintInputs: map[string]string{"eula": "true"}}, "bedrock")
 	if err != nil {
@@ -68,14 +73,19 @@ func TestBlueprintPreviewKeepsSocketReadOnlyAndUDPExplicit(t *testing.T) {
 		}
 	}
 	// Blueprints the release path cannot run end to end say so in the
-	// catalogue; the ones it can are offered without a caveat.
-	if summary := blueprint.Summarize(mustBlueprint(t, "prometheus")); summary.DeploymentSupported || !strings.Contains(summary.UnavailableReason, "configuration files") {
+	// catalogue; the ones it can are offered without a caveat. No shipped
+	// definition declares a pre-start configuration file any more — that is
+	// what kept Gitea and Prometheus undeployable — so the refusal is proved
+	// against the rule rather than against a definition that no longer breaks it.
+	withFile := *mustBlueprint(t, "prometheus")
+	withFile.Files = []blueprint.ConfigFile{{Path: "/etc/prometheus/prometheus.yml", Label: "Scrape configuration", Format: "yaml"}}
+	if summary := blueprint.Summarize(&withFile); summary.DeploymentSupported || !strings.Contains(summary.UnavailableReason, "configuration files") {
 		t.Fatalf("catalogue hides the config-file limitation: %+v", summary)
 	}
 	if summary := blueprint.Summarize(mustBlueprint(t, "minecraft-java")); summary.DeploymentSupported || !strings.Contains(summary.UnavailableReason, "game-server") {
 		t.Fatalf("catalogue hides the game limitation: %+v", summary)
 	}
-	for _, id := range []string{"redis", "postgresql", "uptime-kuma", "dozzle"} {
+	for _, id := range []string{"redis", "postgresql", "uptime-kuma", "dozzle", "prometheus", "gitea"} {
 		if summary := blueprint.Summarize(mustBlueprint(t, id)); !summary.DeploymentSupported || summary.UnavailableReason != "" {
 			t.Fatalf("%s should be deployable: %+v", id, summary)
 		}

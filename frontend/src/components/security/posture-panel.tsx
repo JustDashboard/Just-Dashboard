@@ -12,9 +12,11 @@ import {
   TerminalWindow,
   Warning,
 } from "@/components/icons"
+import { relativeTime } from "@/lib/format"
 import type { Posture, SecurityFinding } from "@/lib/types"
-import { Metric, MetricStrip } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { FormSection } from "@/components/form"
+import { ProductGlyph } from "@/components/product-logo"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { FindingList, type Finding } from "@/components/finding-list"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -60,39 +62,46 @@ export function PosturePanel({
   if (!posture) return null
 
   const count = (level: SecurityFinding["level"]) =>
-    posture.findings.filter((f) => f.level === level).length
+    posture.findings.filter((finding) => finding.level === level).length
 
   return (
-    <Panel plain className={className}>
-      <PanelHeader title="Findings" actions={<PostureBadge status={posture.status} />} />
-      {/* The severity split as figures rather than as a sentence: three
-          findings and three critical findings are not the same morning, and
-          the header used to read identically either way. */}
-      {posture.findings.length > 0 && (
-        <PanelToolbar>
-          <MetricStrip>
-            <Metric label="critical" value={count("critical")} />
-            <Metric label="warning" value={count("warning")} />
-            <Metric label="notice" value={count("notice")} />
-            <Metric
-              label="not checked"
-              value={posture.skipped.length}
-              hint={posture.skipped.length > 0 ? posture.skipped.join(", ") : undefined}
+    <FormSection
+      aside
+      title="Findings"
+      className={className}
+      hint={
+        <div className="space-y-4">
+          <p>Checked {relativeTime(posture.checkedAt)}</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
+            <Status
+              verdict={count("critical") ? "critical" : "notice"}
+              label={`${count("critical")} critical`}
             />
-          </MetricStrip>
-        </PanelToolbar>
-      )}
-      <PanelBody>
-        <FindingList
-          findings={posture.findings.map((f) => toFinding(f, onFix))}
-          emptyLabel={
-            posture.skipped.length > 0
-              ? `Everything that could be checked is in order — ${posture.skipped.join(", ")} could not be`
-              : "Exposure, firewall, SSH, intrusion prevention, open ports, certificates and pending security updates all check out"
-          }
-        />
-      </PanelBody>
-    </Panel>
+            <Status
+              verdict={count("warning") ? "warning" : "notice"}
+              label={`${count("warning")} warning`}
+            />
+            <Status verdict="notice" label={`${count("notice")} notice`} />
+          </div>
+          {posture.skipped.length > 0 && (
+            <p className="border-t border-hairline pt-3">
+              <span className="font-medium text-foreground">Not checked</span>
+              <br />
+              {posture.skipped.join(", ")}
+            </p>
+          )}
+        </div>
+      }
+    >
+      <FindingList
+        findings={posture.findings.map((finding) => toFinding(finding, onFix))}
+        emptyLabel={
+          posture.skipped.length > 0
+            ? `No findings in completed checks. Not checked: ${posture.skipped.join(", ")}.`
+            : "All security checks passed"
+        }
+      />
+    </FormSection>
   )
 }
 
@@ -152,7 +161,11 @@ function toFinding(finding: SecurityFinding, onFix?: (f: SecurityFinding) => voi
     advice: finding.advice,
     meta: (
       <span className="inline-flex items-center gap-1">
-        <AreaIcon area={finding.area} className="size-3" />
+        {finding.area === "intrusion" ? (
+          <ProductGlyph id="fail2ban" />
+        ) : (
+          <AreaIcon area={finding.area} className="size-3" />
+        )}
         {finding.area}
       </span>
     ),

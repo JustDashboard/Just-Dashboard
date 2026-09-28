@@ -60,8 +60,16 @@ type SiteSpec struct {
 	BasicAuthFile  string   `json:"basicAuthFile,omitempty"`
 	BasicAuthRealm string   `json:"basicAuthRealm,omitempty"`
 
-	AccessLog bool           `json:"accessLog"`
-	Locations []SiteLocation `json:"locations"`
+	AccessLog bool `json:"accessLog"`
+	// AccessLogPath and ErrorLogPath are the files the site's access_log and
+	// error_log write to, read back from the file rather than set by the
+	// form: a hand-written site logs wherever its author said, and a page that
+	// guessed the managed spelling for it read an empty file and reported a
+	// site nobody visits. Empty when the site logs nowhere of its own — off,
+	// syslog, stderr, or no directive and so nginx's shared log.
+	AccessLogPath string         `json:"accessLogPath,omitempty"`
+	ErrorLogPath  string         `json:"errorLogPath,omitempty"`
+	Locations     []SiteLocation `json:"locations"`
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
 	// unbalanced brace — a form that cannot express everything needs

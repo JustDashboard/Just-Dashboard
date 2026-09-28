@@ -67,19 +67,30 @@ func StreamExport(ctx context.Context, db *sql.DB, query string, args []any, for
 	}
 }
 
-// ExportTable streams an entire table to w. The relation is built from
-// validated, quoted identifiers — the same choke point BrowseTable uses — so no
-// caller-supplied text reaches the statement unescaped.
-func ExportTable(ctx context.Context, db *sql.DB, driver Driver, schema, table string, format ExportFormat, w io.Writer, maxRows int) (int, bool, error) {
+// ExportBrowse streams the rows the grid is showing — the same relation, the
+// same conditions, the same order, without the page — to w.
+//
+// It goes through the same assembly as Browse rather than re-deriving the
+// statement, which is what keeps the two honest with each other: the export
+// used to be an unconditional SELECT * of the table, so a filtered view and its
+// download disagreed about everything but the column names. The relation and
+// every identifier still come from validated, quoted identifiers, and the
+// conditions still travel as bound arguments.
+func ExportBrowse(ctx context.Context, db *sql.DB, driver Driver, opts BrowseOptions, format ExportFormat, w io.Writer, maxRows int) (int, bool, error) {
 	d, err := DialectFor(driver)
 	if err != nil {
 		return 0, false, err
 	}
-	rel, err := qualify(d, schema, table)
+	sel, err := browseSelect(d, opts)
 	if err != nil {
 		return 0, false, err
 	}
-	return StreamExport(ctx, db, "SELECT * FROM "+rel, nil, format, w, maxRows)
+	return StreamExport(ctx, db, sel.query, sel.args, format, w, maxRows)
+}
+
+// ExportTable streams an entire table to w, unfiltered and unordered.
+func ExportTable(ctx context.Context, db *sql.DB, driver Driver, schema, table string, format ExportFormat, w io.Writer, maxRows int) (int, bool, error) {
+	return ExportBrowse(ctx, db, driver, BrowseOptions{Schema: schema, Table: table}, format, w, maxRows)
 }
 
 func scanRow(rows *sql.Rows, n int) ([]any, error) {

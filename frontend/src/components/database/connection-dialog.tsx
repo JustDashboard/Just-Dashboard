@@ -1,6 +1,7 @@
 "use client"
 
 import { useId, useMemo, useState } from "react"
+import { useMemoryState } from "@/lib/view-state"
 import { CheckCircle, CrossCircle, Router } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { errorMessage, get, post, put } from "@/lib/api"
@@ -18,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Modal } from "@/components/modal"
-import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
+import { EngineCard } from "@/components/choice-card"
 import { FilterChip } from "@/components/tabs"
 import { Notice, Spinner } from "@/components/state"
 import { Field, FieldRow, FormFact, FormFacts, FormNote, FormSection } from "@/components/form"
@@ -59,19 +60,27 @@ export function ConnectionDialog({
     (signal) => get<DbDriverInfo[]>("/databases/drivers", undefined, signal),
     0,
   )
-  const [name, setName] = useState(existing?.name ?? "")
-  const [driver, setDriver] = useState<DbDriver>(existing?.driver ?? "postgres")
-  const [mode, setMode] = useState<"fields" | "string">(
+  // Kept in memory for the tab — memory, because a password is typed here —
+  // until the dialog is closed, so checking a port on the way does not mean
+  // filling the address in again.
+  const draft = `databases.connect.${existing?.id ?? "new"}`
+  const [name, setName] = useMemoryState(`${draft}.name`, existing?.name ?? "")
+  const [driver, setDriver] = useMemoryState<DbDriver>(
+    `${draft}.driver`,
+    existing?.driver ?? "postgres",
+  )
+  const [mode, setMode] = useMemoryState<"fields" | "string">(
+    `${draft}.mode`,
     existing?.driver === "sqlite" ? "string" : "fields",
   )
-  const [fields, setFields] = useState<DsnFields>({
+  const [fields, setFields] = useMemoryState<DsnFields>(`${draft}.fields`, {
     ...EMPTY_FIELDS,
     host: existing?.host || EMPTY_FIELDS.host,
     port: existing?.port ?? "",
     user: existing?.user ?? "",
     database: existing?.database ?? "",
   })
-  const [raw, setRaw] = useState("")
+  const [raw, setRaw] = useMemoryState(`${draft}.raw`, "")
   const [testResult, setTestResult] = useState<{
     ok: boolean
     version?: string
@@ -196,21 +205,18 @@ export function ConnectionDialog({
             ) : (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {drivers.data.map((d) => (
-                  <ChoiceCard
+                  <EngineCard
                     key={d.id}
+                    engine={d.id}
+                    label={d.label}
+                    kind={d.kind}
                     selected={driver === d.id}
                     onClick={() => {
                       setDriver(d.id)
                       setMode(d.id === "sqlite" ? "string" : "fields")
                       set({ port: "" })
                     }}
-                    className="min-h-0 gap-0.5 px-2.5 py-2"
-                  >
-                    <ChoiceCardTitle className="truncate">{d.label}</ChoiceCardTitle>
-                    <ChoiceCardHint>
-                      {d.kind === "sql" ? "SQL" : d.kind === "document" ? "Documents" : "Key–value"}
-                    </ChoiceCardHint>
-                  </ChoiceCard>
+                  />
                 ))}
               </div>
             )}

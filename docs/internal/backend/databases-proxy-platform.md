@@ -31,6 +31,14 @@ overflowing cursors.
 `internal/dbx` drives PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and
 Redis on pure-Go drivers, so the image still needs no CGO.
 
+Pool initialization is coordinated per connection ID. Dialing and pinging do not hold the manager's
+map lock, and waiters can cancel independently. Closing or editing a connection invalidates an
+initialization already in progress; its old credentials cannot publish a pool afterwards.
+Completion and diagram reads batch catalogue facts for up to 500 table names per query, with the
+diagram's existing 120-table cap applied first. Each dialect keeps its type spelling, key order and
+referential actions. A refused bulk read falls back to the existing per-table reads so restricted
+accounts retain partial results. Full table details and mutation preconditions use fresh dialect reads.
+
 - **`Dialect` is the whole abstraction**: driver name, quote character, bind marker, pagination tail,
   catalogue queries, DDL keywords, session list, size query — one method each, six implementations. The
   old shape was a `switch driver` inside a dozen functions; it worked at three engines and broke at seven,
@@ -52,6 +60,24 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   fires and nobody knows which table grew (row counts are the engine's estimate — counting forty tables
   exactly is a full scan to answer a question about *relative* size). `search.go` finds which table holds
   a value, bounded three ways at once; those bounds are what make it safe to point at production.
+- **The export is the view, not the table.** `/databases/{id}/export` takes the grid's `filters`,
+  `orderBy` and `dir` and assembles the statement through the same `browseSelect` the page fetch uses,
+  so a download taken from a narrowed grid is that grid. It was an unconditional `SELECT * FROM`, which
+  made the panel's own promise — "applied on the server, across the whole table" — the reason the file
+  looked right. The filters are parsed **before** any response header is written: once the body has
+  started, a rejected filter can only arrive as JSON inside a file named `.csv`. `ExportTable` remains
+  as the unfiltered form. The row cap is still 100 000 and still reported only to the audit trail, so
+  the page states the cap in the menu item that spends it and sends it as the request's own `limit`.
+- **An unknown row count says so.** `Table.Rows` (`estimatedRows`) is `-1` where the catalogue has no
+  estimate — a table PostgreSQL has never analysed, a view, SQLite, which keeps no count at all — and
+  `>= 0` only where the engine actually answered. It used to be floored to zero in three dialects and
+  leaked a raw `reltuples` of `-1` in a fourth, so a catalogue that could not say how many rows a table
+  held was indistinguishable from one saying the table was empty, and every table in a fresh database
+  was drawn as having no rows. `Count` on request is the number that is true. The ClickHouse query casts
+  before it substitutes (`ifNull(toInt64(total_rows), -1)`): `total_rows` is `Nullable(UInt64)`, and asking
+  24.8 or 25.8 for a supertype of that and a signed literal is `NO_COMMON_TYPE`, which fails the whole
+  catalogue — 26.x accepts either form, so the version a contributor happens to run decides whether the
+  mistake is visible.
 - **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
   connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
   and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
@@ -115,18 +141,155 @@ Redis on pure-Go drivers, so the image still needs no CGO.
   reporting a negative session age. Oracle has an optional live fixture using `JD_TEST_ORACLE_DSN`;
   without a configured server, its unit coverage does not establish live-engine compatibility.
 
+- **The section opens on every database at once.** `GET /databases/fleet` dials every saved
+  connection concurrently (six at a time, twelve seconds each) and hands back the row's facts with
+  what the server answered: reachable, version, latency, the database's size where the engine
+  reports one, its tables/collections/keys, sessions less this dashboard's own pool, where it runs
+  (`docker`, `host`, `remote`, `file` — read through the same `describeDBAccess` the Connection
+  page uses, so the two agree), its exposure, how many deployment environments are bound to it,
+  and when its newest dump landed. For an administrator it also lists what the sync would report
+  and could not connect — a container with no reachable port, a native server waiting for a
+  password — read without writing anything. `GET /databases/topology` (and `/{id}/consumers` for
+  one connection) joins four sources into nodes and edges: `deploy_database_bindings` with the
+  project and environment names, running containers whose environment names the server's
+  address, container name, compose service or `db-N.jd.internal` alias (one concurrent inspect
+  pass, eight at a time), compose-stack siblings and shared user networks (drawn dashed, as a
+  link that could carry), and the engine's own session list with client addresses mapped back to
+  containers by IP, to this host for loopback and bridge-gateway addresses, or to another
+  machine. A binding's word (`connected`, `stale`, `broken`) outranks an observation's. Both are
+  on the read surface; the detected-but-unconnected half is filled only for `system.admin`.
+  Fleet, topology and consumer reads reuse one Docker list and one inspection per container within
+  their request, including the fleet's administrator-only discovery. Each request starts fresh; the
+  snapshot is never used for access-changing actions.
+- **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
+  implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
+  Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)
+  and Redis (`ACL LIST`/`SETUSER`/`DELUSER`, saved where an aclfile exists) mapped onto the same
+  `Role` shape. Routes under `/databases/{id}/server/`: `roles` (list on the read surface; create,
+  alter and `/{name}/grant` under `system.admin`; drop under `s.destructive`, refused for the
+  account the connection signs in with), `databases` (create, and `/connect` to save a sibling
+  connection to another database on the same server under the same credentials, probed before it
+  is stored), `extensions` (list; create and drop for Postgres, listed only for MySQL's plugins)
+  and `settings` (a curated read of `pg_settings`, `global_variables`, `system.server_settings`,
+  `sys.configurations`; Mongo's `serverStatus` and Redis's `INFO` flattened to the same rows).
+  Identifiers go through the dialect's `QuoteIdent`; a grant runs inside the target database on
+  the engines that grant from there (`GrantNeedsDatabase`) through a pool opened for that one
+  statement; a password is the one value no engine binds in `CREATE ROLE`/`CREATE USER`, so it is
+  refused if it carries a control character and quoted by the same per-engine rule `dumpString`
+  applies (`passwordLiteral`). Audited as `database.role.create/alter/drop/grant`,
+  `database.create`, `database.connection.sibling`, `database.extension.create/drop`.
+- **The advisor and statement statistics.** `GET /databases/{id}/advisor?schema=` runs
+  `dbx.Advise`: generic checks over the introspected structure on every SQL engine (tables with no
+  primary key, foreign keys no index begins with, capped at 300 tables), plus an engine's own
+  `Adviser` where it keeps statistics — Postgres (unused indexes over 1 MiB, identical indexes,
+  never-analysed tables, dead rows past a fifth, sequences past 80 % of their ceiling, connections
+  past 80 % of `max_connections`, a cache hit ratio under 90 %, sessions idle in a transaction
+  for five minutes, `password_encryption = md5`, login superusers besides `postgres`, no
+  `pg_stat_statements`) and MySQL (non-InnoDB tables, the slow log and `performance_schema` off,
+  superusers at host `%`, a buffer pool under 128 MiB). The handler prepends one finding no
+  catalogue can make, for an administrator: the server published on every interface with the
+  firewall off or open. Each finding carries the objects it names and, where one statement fixes
+  it, that statement; nothing is executed. `GET /databases/{id}/statements` reads
+  `pg_stat_statements` (13+ and older column names both) or
+  `performance_schema.events_statements_summary_by_digest`, top N by total time, and reports
+  `supported: false` with the reason where neither is there.
+- **The server's own log, found from its connection.** `GET /databases/{id}/logs/sources`
+  (`handlers_db_logs.go`, on the read surface — reading what the server printed is what `/activity`
+  already shows any role) answers `{sources, refused?, reason?, note?}`, each source in `/logs/sources`'
+  shape plus `primary`, read through the engine's lens by the connection's driver (`driverLens` — a
+  Postgres in a custom image is still Postgres). A SQLite file and a server on another machine have none,
+  with the reason. A container behind the connection is `docker:<name>` — the name, so the log survives
+  a recreate. One the connection dials at its own private address is found by that address whatever
+  its image (`containerAt`): one built in-house, or whose moved tag the list names by id, is still the
+  engine the connection says. A server on this machine is followed from its port: the listener (`proxysvc.ListListeners`;
+  behind `docker-proxy`, the container publishing the port, whatever its image says), its process's
+  manager (`procs.ManagerOf`, where a `container` manager is `docker:<name>` again), the files it and up
+  to 64 of its children hold open **for appending** (`/proc/<pid>/fd` with `fdinfo`'s flags, log-like
+  names only — a data file is opened for writing, a log for appending), the engine package's conventional
+  files that exist (`/var/log/postgresql/postgresql-<V>-<C>.log` from the Debian unit's instance name,
+  MySQL's, Redis's, MongoDB's, ClickHouse's), then the unit's journal. The first file is primary even at
+  0 bytes — rotation just emptied it, and the page opens it with its rotated set — and a journal is
+  primary only when no file is the server's (Debian's Postgres writes nothing there but systemd's starts
+  and stops). A path the log roots refuse is listed under `refused` with the reason rather than dropped,
+  and the journal beside it is not made primary, since the statements are in that file. With nothing
+  listening — stopped, crashed or starting, which is when a log is read most — it is found the ways a
+  stopped server can be: a container publishing the port without `docker-proxy`, the container the
+  connection is named after (the sync names adopted containers so), running or not, and the engine's
+  units by name, skipping one serving another port and Debian's umbrella `postgresql.service`, with
+  their files and journals and a `note` saying the server is not answering. Nothing goes through
+  `hostexec`: `/proc` is read, the units come from the same systemd listing `/logs/sources` uses, and
+  every file through `logs.Allow`. One resolution answers for 45 seconds per connection
+  (`Server.dbLogSourcesKept`, keyed on a hash of the DSN, never stored when the request's deadline cut
+  it short), since the page and its Queries view ask on different cadences and each asking walks every
+  process's sockets.
+- **The statements it recorded.** `GET /databases/{id}/querylog?since&until&limit&minMs` (read, 15
+  seconds; no `since` is the last day, `limit` 200 up to 500, a malformed bound a 400) answers
+  `{supported, reason?, source, enable?, threshold?, entries, truncated}` from wherever the engine keeps
+  its slow statements: Postgres's server log searched through its lens for `event:slow`, rotated files
+  included, each statement rejoined from its continuation lines (the search budgets 50 lines per row,
+  capped at 20 000, and counts rows once joined) with `enable` the `ALTER SYSTEM` for
+  `log_min_duration_statement` and its current value from `pg_settings`; MySQL's `mysql.slow_log` where
+  `log_output` has `TABLE` and the slow log is on (the `minMs` floor in the SQL), else
+  `performance_schema.events_statements_history` from `long_query_time` up; MariaDB's `slow_log` only;
+  Redis's `SLOWLOG GET 128`; MongoDB's log through its lens, or `getLog global` over the connection when
+  the server is elsewhere or its file is refused; ClickHouse's `system.query_log`, initial queries past
+  `QueryStart` that took 250 ms or more (`minMs` raises the floor; `threshold` names it), since the log
+  holds every query and the newest few hundred of a busy server's would be its last few seconds, with
+  its own read marked and left out. SQL Server, Oracle and SQLite are
+  `supported: false` with the reason, and so is a Postgres whose log the roots refuse, naming the path
+  and `JD_LOG_ROOTS`. `fp` is `logsx.Fingerprint` — over the statement, over Redis's command and key
+  shape, over a Mongo command's shape — shared with the lenses, so a statement found in the log and in
+  the Queries list is one group (ClickHouse's is `normalized_query_hash` as 12 hex digits). A read that runs
+  out of time sets `truncated` with a reason rather than passing a partial list off as the window. Like
+  `/activity` and `/statements`, it returns statement text with its literals at read capability.
+- **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory
+  newest first with each file's size and format; `DELETE /databases/{id}/backups` (destructive,
+  not typed: the database is still there to dump again) removes one, contained against that
+  directory exactly as the download is. The fleet reads the same listing for "last backup".
+- **An account made from the host.** `POST /databases/host/grant` (admin) is for the native
+  server whose password nobody knows — the apt-installed Postgres whose `postgres` role has never
+  had one. It runs the engine's client on the host through `hostexec`: `psql` as the host's
+  `postgres` account (looked up in the host's passwd, which is mounted at `/etc`, through
+  `setpriv`) over the Unix socket, where peer authentication admits it, with one `DO` block that
+  creates or resets the account (`format('%I … %L')`, so the server quotes both); `mysql`
+  (or `mariadb`) as root over the socket, making the account for both `localhost` and
+  `127.0.0.1`; `mongosh` under the localhost exception; `clickhouse-client` as `default`. Redis
+  has no accounts, so its `requirepass` is read from `/etc/redis/redis.conf` (or Valkey's).
+  The password is generated on the server unless supplied, reaches the client as one argv
+  element and never a shell, and the connection is probed over TCP before anything is saved;
+  an existing connection to the same address is re-sealed rather than duplicated. Audited as
+  `database.connection.host.grant` with the account and outcome, never the password.
+  `TestLiveHostPostgresAccount` exercises it as root against a real native server
+  (`JD_TEST_HOST_PG_PORT`).
+
 ### Database provisioning for deployments
 
 Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explicit admin URL read.
+A project's Databases settings reuses the same two reads for a linked connection: `/ping` behind its
+Test connection verb, and `?target=container` behind Copy application URL, which stays admin-only and
+audited there as everywhere else.
 Quick setup provisions with `exposure: local`, so those ports are published to host loopback only;
 the Databases page's own dialog defaults to every interface (above). The data volume is named
-`<container>-data`, and provisioning refuses with `409 volume_exists` when that volume already exists:
+`<container>-data`. With no name supplied, provisioning reserves the first available `jd-<engine>`,
+`jd-<engine>-2`, etc., checking both containers and retained data volumes. In-flight requests reserve
+distinct names before pulling images. Explicit names remain exact and provisioning refuses with
+`409 volume_exists` when that volume already exists:
 an official image that finds a populated data directory skips initialisation, so the freshly generated
 password is never set and the server refuses every sign-in while looking reachable. The `/ping` reply's
 `error` is surfaced by both creation dialogs so an engine's own refusal is not reported as "not ready".
-`/adopt` is idempotent by address: a container whose address is already covered by a connection gets
-that row back, and when the container's credentials differ from the stored DSN the row is re-sealed in
-place (audited as `database.connection.refresh`, pool dropped) rather than returned stale — a database
+Besides the five engines, provisioning offers `pgvector` (`pgvector/pgvector:pg16`) and `postgis`
+(`postgis/postgis:16-3.5-alpine`, listed and accepted only on x86-64, the one architecture it is
+published for): the same PostgreSQL 16 contract with the extension a retrieval or geospatial schema
+creates on its first migration, which the official image lacks. Deployment setup
+preselects one when detection read that extension from the schema. `mongodb` is refused before any pull
+on a CPU without AVX (x86-64) or ARMv8.2 atomics (arm64), where MongoDB 5 and later die with an illegal
+instruction. The URL read also takes `format` and `database`; see
+[deployment database networks](../deployments/database-networks.md).
+`/adopt` is idempotent by driver, address, database and login user: a matching connection gets that row
+back, and when the container's password differs the row is re-sealed in place while preserving its
+transport and query options (audited as `database.connection.refresh`, pool dropped). Different databases,
+users and engines on one address are never overwritten; ambiguous duplicate matches require an explicit
+saved-connection choice. This keeps replacement credentials current — a database
 removed and created again under the same name takes the same loopback port back with a new password,
 and a `${{database.N}}` reference must keep resolving to a URL that works.
 The URL endpoint's `target=container`
@@ -233,7 +396,43 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   parameter — where `4430` and `127.0.0.1:8443` used to count as TLS, and the pre-1.25
   `listen 443 ssl http2` reads back as HTTP/2 on. A file with no `access_log` directive is logging
   to nginx's default, so an unmanaged file round-trips with logging on rather than the first save
-  writing `access_log off;`.
+  writing `access_log off;`. Only a server-level `access_log`/`error_log` is the site's —
+  `access_log off` under `/favicon.ico` silences one path, and read as the site's it told the form a
+  site logging to nginx's shared file kept no log at all — and the first that names a file is `SiteSpec.AccessLogPath`
+  / `ErrorLogPath` (`logFile`: `off`, `syslog:`, `stderr`, `memory:`, anything under `/dev/`, a path
+  with a variable and a relative one are not a file this can read). There is no fallback to the managed
+  names: nginx writes nothing there once the directive is gone. `VHost` carries both, read the same way
+  in the listing, so a list of sites says which keep a request record of their own without a read per
+  site; the renderer and every reader spell the managed paths through `nginxAccessLogPath` /
+  `nginxErrorLogPath`.
+- **A site's requests are read the way a deployment's are** (`site_access_log.go`,
+  `handlers_proxy_site_requests.go`). `GET /proxy/sites/{name}/requests`, `/requests/stream`
+  (WebSocket) and `/requests/export` (CSV) are reads, like the site itself, and share
+  `requestFilterFrom`, the window, the cursor tail and the export with the deployment routes (one
+  `followRequests`/`exportRequests` for both), over the one `accesslog.Store` — two stores would hold
+  two caps, and the cap bounds what the whole process keeps. `SiteRequestRoute` resolves the record
+  **from the site's file on every request**, so an edit that moves `access_log` — the form, the raw
+  sheet or an editor over SSH — reads the new file from the next poll: an nginx site is the record
+  `file:<its access log>`, refused unless `logs.Allow` accepts it; a `just-dashboard-*` site whose file
+  logs where the renderer puts it, and a Docker Caddy route with no file on the host, are the
+  deployment's own route, the record its Logs page already holds — the latter only while the ingress
+  holds that route's file, since any reader can type a `just-dashboard-*` name and each would start a
+  record and a lookup of its own. An export neutralises a cell a client wrote (`csvText`): an agent, a
+  referer, a path or a host that starts with `=`, `+`, `-`, `@`, a tab or a return gets a leading `'`,
+  so a spreadsheet reads it as text rather than running it. `SiteRecordReader` asks `logs.Allow`
+  again before every open of the live file and of each rotated generation, since a generation beside
+  the file can be a link to anywhere, and generations are the names logrotate gives (`logsx.Archives`:
+  `.N` and dated), compressed ones skipped — for deployments' nginx files too. A site with no file, no
+  access log of its own (off, syslog, or nginx's shared log, whose combined lines do not say which site
+  answered) or one outside the roots answers `unavailable` with that sentence, and the stream and export
+  refuse it with a 400. The name in the URL is unescaped, so a Caddy host with a colon works. A
+  deployment's window carries `ingress` (the Caddy container) or `errorLog` (the nginx site's
+  `.error.log`), where the proxy says why it failed a request. The rest of the proxy's logs are read on
+  the pages they are about, through the `/logs` routes: a site's own page (its access and error files,
+  nginx's shared error log narrowed to its names, the ingress container or `journal:caddy.service`),
+  the overview's Engine log (nginx's two files and unit, a host Caddy's unit, and the Docker Caddy
+  ingress once `GET /logs/source` finds its container) and Certificates' Renewals (`letsencrypt.log`
+  and the renewal unit's journal, through the `certbot` lens).
 - **`SetVHostEnabled` replaces a stale link.** Enabling a site whose `sites-enabled` entry already
   existed but pointed elsewhere returned success and changed nothing; it goes through `linkEnabled`
   now, so the switch saying on means nginx reads the file. `parseCaddyfile` tracks brace depth so
@@ -385,6 +584,13 @@ done by hand, and the UI refuses to fold it away.
   edited compose file is normal, so a local change survives unless it genuinely collides. And it **waits
   for the health URL to answer** before calling itself finished, since `compose up -d` returns as soon as
   containers start and a backend that starts then dies looks identical from there.
+- **The transcript is read two ways.** The report carries `Store.Tail()` — the last 64 KB, with a
+  `… earlier output trimmed …` marker when there is more — because it is polled every two seconds during a
+  run and a rebuild prints a few hundred kilobytes. `GET /api/v1/dashboard/update/log` answers
+  `Store.Transcript()`, the whole file up to 8 MiB from the end, as `text/plain` with `no-store`; it is
+  readable by the same every-role audience as the report that already carries its end. The console on
+  `/dashboard` reads it once when the tail says it was trimmed and extends it with each polled tail
+  (`frontend/src/lib/transcript.ts`).
 
 ### The dashboard's own settings
 
@@ -451,7 +657,9 @@ requests from overwriting the configuration needed for rollback.
   `JD_TLS` into the scheme and the `tls` directive: a Caddyfile cannot branch, and an installer that
   edited a tracked one would make every later `git pull` a merge conflict.
 - Routes: `GET/PUT /api/v1/dashboard/config`, `POST /api/v1/dashboard/restart`,
-  `DELETE /api/v1/dashboard/config/run`, all `system.admin`, the two mutations inside `s.destructive`.
+  `DELETE /api/v1/dashboard/config/run` and `GET /api/v1/dashboard/config/log` (the whole restart
+  transcript as `text/plain`, the same two reads the update transcript has), all `system.admin`, the two
+  mutations inside `s.destructive`.
 
 Database provisioning uses the shared `internal/portalloc` range selection instead of a 64-port window.
 It returns and audits Docker's actual host binding if a competing process claims the initial choice.
@@ -464,6 +672,15 @@ which `install.sh` runs when the terminal is enabled: it installs `zsh`, `zsh-au
 `zsh-syntax-highlighting` where missing and, on success, appends `JD_TERMINAL_SHELL=<zsh path>` to a fresh
 `.env`. A re-run that kept its `.env` asks first, and never touches a file that already names a shell.
 That install is best effort: a failure is a warning, and the terminal opens the account's own shell.
+`jd_install_host_tools` runs on every install and re-run, before any question: the web terminal is a host
+shell, so its git and the Git page's GitHub sign-in need host packages, and Security → Tools runs `whois`
+and `traceroute` on the host. It installs whichever of `git`, `git-lfs`, `whois` and `traceroute` are
+missing one package at a time, so an unavailable one costs only itself, and `gh` through `jd_install_gh`:
+GitHub's signed apt repository on Debian and Ubuntu (their packaged gh is years behind on an LTS release;
+the image uses the same repository), the distribution's package on dnf, yum and zypper with GitHub's RPM
+repository as the fallback, and `github-cli` on apk and pacman. Failures are named and warned about, never
+fatal. Firewalls, fail2ban and cron are deliberately absent: the dashboard manages them when present, and
+installing one changes the host's security or scheduling rather than supplying a tool.
 The backend image still includes Certbot for container execution; host installation supplies host tooling
 and the distribution renewal schedule. `python3 scripts/test_install_dependencies.py` verifies the
 installer with fake package commands, without changing host packages. Hostname readiness returns

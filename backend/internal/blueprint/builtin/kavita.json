@@ -7,11 +7,15 @@
   "description": "A reading server for manga, comics and books with progress tracking and OPDS. Put the library into its volume, or add a bind mount under Storage after the first deploy.",
   "iconId": "globe",
   "docsUrl": "https://wiki.kavitareader.com/",
+  "access": {
+    "kind": "setup",
+    "note": "Kavita ships with no accounts. The first visitor is shown a registration form, and the account it creates becomes the administrator — after that, registration is closed and everyone else needs an invite. Open the address immediately after deploying, because whoever reaches it first owns the server."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-3.0",
     "upstreamUrl": "https://github.com/Kareadita/Kavita",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
@@ -69,6 +73,13 @@
     }
   ],
   "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "ASPNETCORE_FORWARDEDHEADERS_ENABLED",
+        "value": "true"
+      }
+    ],
     "stop": [
       {
         "kind": "stop_signal",
@@ -86,7 +97,7 @@
     {
       "name": "default",
       "inputs": {},
-      "digest": "sha256:d2661bb61451695146bdb68953c7b9bf3f5c45a38f7c473423c7d633caddaaeb"
+      "digest": "sha256:68f14fb8a9327c1916e33fb39fb28dc2fd272037eb49ee806e6aba1fd6325fe5"
     }
   ]
 }

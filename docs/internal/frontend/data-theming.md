@@ -4,13 +4,54 @@
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
   `X-Confirm-Encoding: uri` (including Unicode and surrounding whitespace), `ApiError` with
   `needsConfirmation`/`isAuthProblem`/`needsTotp`; `wsUrl()` and
-  `downloadUrl()` build the non-JSON URLs.
+  `downloadUrl()` build the non-JSON URLs. A `Query` value may be an array, which is a repeated
+  parameter (`f=a&f=b`, the log routes' field predicates): joining on a character and splitting it again
+  on the server breaks on a value that holds it, and an IPv6 address is all colons. `useSocket` takes the
+  same `Query`.
+- A log source is asked for by one id, built only in `lib/log-sources.ts` (`dockerSource`,
+  `fileSource` → `file:<path>`, `journalSource`, `journalIdSource`, `kernelSource`, `stackSource`,
+  `pm2Source`): an id spelled by hand — a bare path here, `file:` there — was a different session key for
+  the same file and opened on the wrong remembered filter.
 - `usePoll` schedules the next request only after the previous one settles and pauses scheduled
   requests on hidden tabs. Its fixed-length dependency list identifies the resource: changing it
   immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
   retain the same resource's data. Cleanup aborts the request and ignores late responses.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket.
+- Persisted view/session values use individual Web Storage entries, so changing a small filter does not
+  serialize unrelated editor drafts. Writes remain synchronous for reload persistence. Existing single
+  documents migrate on first read, with restoration and the old persistence path if splitting exceeds
+  quota. Prefix deletion and sign-out remove the same values; the memory store never writes to storage.
+- `lib/view-state.ts` is what a page remembers about itself, in three stores drawn by how long the
+  thing should live. `useViewState` is **how the page is arranged** — a hidden panel, a chosen tab, a
+  sort order, a toggle — in localStorage, so a reload keeps it. `useSessionState` is **what you were
+  doing** — the filter in the box, the chip narrowed to, the page of results, the row whose detail is
+  open, the SQL in the editor, a form half filled in — in sessionStorage, so it survives moving between
+  pages and a reload and is gone when the tab closes. `useMemoryState` is the same for a value that must
+  never be written down by the browser (a secret in an unsaved form: a credential, a database password,
+  a backup destination's keys, an environment value): it lives as long as the page's JavaScript does,
+  across navigation but not a reload. All three have `useState`'s shape; a dotted key names the page and
+  the thing, and a third argument to `useSessionState` is the value the address bar handed over, which
+  wins on arrival and is remembered from then on. A form draft is keyed under the revision or name it
+  was read from, so a save from anywhere starts it again from the server's copy — except where one
+  revision covers several forms: every deployment settings form saves a new revision of the whole
+  configuration, so each keys its draft on a digest of its *own* saved value (`useSettingDraft`), and
+  a save of the form beside it leaves the draft alone while its own save still restarts it. A
+  dialog's fields are
+  forgotten (`forgetSessionState`/`forgetMemoryState` by prefix) when it is closed by hand, never by
+  navigation; and `forgetWorkingState` empties both working stores on sign-out. `useQuerySelection`
+  keeps a sheet's selection in the address bar and, per page and key, in the session store, so
+  arriving on the rail's bare link puts the last selection back with `replaceState`; the databases
+  layout does the same for `?conn=`, `?schema=` and `?table=`. Every route area was reviewed for this:
+  filters, chips, facets, pagination, chosen sub-tabs, open detail rows, in-progress forms and the
+  whole new-project flow are remembered; a search box is no longer the exception it used to be. A
+  service's logs keep their reading — source, view, filter, lens, range, window — under the embedding
+  page's `storageKey` (`databases.<id>.logs`, `docker.container.<id>.logs`, `docker.stack.<name>.logs`,
+  `deploy.<id>.output`, `proxy.site.<name>`, `security.ssh.log`, `packages.log`, …), never under
+  `logs.*`, which is the host Logs page's own; a sheet's live only as long as it is open. A request
+  record's question is kept under its owner's key (`deploy.<id>.requests`,
+  `proxy.site.<name>.requests`), so a deployment's or a site's requests read the same question on its
+  own page and on `/logs`.
 - `useMetricsWindow` — the charts' window as a **stack**: zooming is exploratory, so the way out of five
   minutes is the hour it was inside, not the day you started from. Deliberately component state — a named
   range is a standing choice, a zoom is a question being asked now, and restoring yesterday's zoom shows an
@@ -27,17 +68,26 @@
   connection and table. Exact integer/decimal SQL values and Redis scan cursors travel as strings;
   `lib/db-values.ts` preserves precision and rejects non-finite ordinary numeric input. CSV exports
   escape column names and carriage returns with the same rules as cell values.
-- PM2 actions, deletes, and log sockets send both the trusted `daemonId` as `user` and numeric `id`.
-  The application name alone cannot identify a process across multiple account-owned daemons.
-  A false `logsAvailable` shows the server's `logsUnavailableReason` instead of opening a rejected
-  socket. Available log streams show their connection state, including reconnects.
+- PM2 actions and deletes send both the trusted `daemonId` as `user` and numeric `id`, and a PM2
+  application's logs are the `pm2:<daemon>/<id>/<name>` source on `/logs/stream` (`pm2Source`, the
+  account and name escaped): the application name alone cannot identify a process across multiple
+  account-owned daemons. A false `logsAvailable` shows the server's `logsUnavailableReason` instead of
+  opening a rejected socket. Available log streams show their connection state, including reconnects,
+  and a stream that ended says Stopped rather than reconnecting for ever.
 - Blueprint catalogue entries expose `deploymentSupported` and `unavailableReason`. Unsupported
   entries remain visible with their reason but cannot be selected or inspected for deployment.
+  Template selection keeps a stable details column while fetching, preserves per-template edits, and
+  ignores obsolete inspection responses. The new-project flow keeps secret-bearing inputs in memory;
+  saved environment values resume as masked names from the encrypted server draft. Hostname changes
+  update only unchanged template-derived URL defaults, and retain visitor password protection.
 - Compose stack creation, file edits, validation, and execution require `system.admin` alongside each
   action's existing capability. Stack pages hide those controls from limited accounts, explain the
   restriction, and retain stack/config/log read views. Direct container controls retain their separate
   capability checks.
-- `ConfirmDialog` collects the typed phrase and the server re-checks it. Its `phrase` is optional and the
+- `ConfirmDialog` collects the typed phrase and the server re-checks it — with one exception: deleting an
+  archived deployment permanently asks for the project's name in the dialog alone, and its route keeps
+  ordinary confirmation ([`permanent-deletion.md`](../deployments/permanent-deletion.md)). Its
+  `phrase` is optional and the
   absence is meaningful: a request without one is reversible but still deserves a pause (deleting a
   terminal folder loses a grouping and nothing else), and asking somebody to type "delete folder" teaches
   them to type phrases without reading — the one habit the typed confirmation exists to prevent.
@@ -50,7 +100,11 @@
   and the `MetricsWindow` a dragged span becomes (fixed in the past, fetched once, never re-polled).
   **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
   magnitude, and a chart drawing twenty coarse points and a hundred fine ones at equal spacing lies about
-  when things happened. Container charts offer only recorded ranges. `hooks/use-metrics.ts` and
+  when things happened. Container charts offer only recorded ranges; the container Usage tab also has
+  a separate `container-live-usage.tsx` reading section on its existing stats WebSocket. Its rate helper
+  differences Docker timestamps and per-interface counters, rejects resets and gaps, and establishes a
+  new baseline after reconnects. Pausing freezes labelled readings; a disconnected or ten-second-stale
+  feed clears current figures without hiding recorded history. `hooks/use-metrics.ts` and
   `hooks/use-metrics-history.ts` are the React surface over those two.
 - `hooks/use-self-update.tsx` is one poll for the whole shell, and its gotcha is the feature's design
   problem: **the API goes away in the middle of the thing it is watching**. A failed poll during a run
@@ -67,6 +121,21 @@
   did not come up and was undone — because showing that as either success or failure would misreport it.
   The form on `/dashboard/configuration` **derives** its draft from the poll rather than mirroring it into
   state: a copy refreshed every two seconds would wipe half-typed input during a restart.
+- `hooks/use-arrivals.ts` answers which rows of a polled or streamed list were not in it the last time
+  it changed, so those rows alone take `animate-rise` (request rows, container events, deliveries,
+  players). It is empty on the first render and holds its answer until the keys change again, kept as
+  state adjusted during render rather than in an effect, so an arrival costs no second paint and a
+  re-render mid-rise does not cut it short.
+- Both runs' transcripts are drawn by `components/run-transcript.tsx` over `lib/transcript.ts`, and a
+  deployment's build console paints its lines with the same row and the same drip
+  (`components/transcript-line.tsx`, which both import). The polled
+  report carries only the file's last 64 KB; when that tail starts with the server's trimmed marker the
+  console reads the whole file once (`getText` on `…/update/log` or `…/config/log`) and from then on
+  extends it with each tail, finding where the tail begins in the whole copy (`extendTranscript`) and
+  reading the file again only when the two stop overlapping. A read that fails during the restart leaves
+  the tail on screen. While a run is live and the reader is at the end, the lines a poll brought are let
+  out a few a frame rather than landing at once; scrolled up, searching or with reduced motion they are
+  drawn outright. `lib/transcript.test.js` covers the line shapes and the merge.
 - **There is one theme.** The light palette was removed: every tinted surface, status hue, chart colour
   and terminal ANSI slot had to be chosen twice and verified twice, and the second set was seen by almost
   nobody. Colours live on `:root` in `globals.css`. `lib/themes.ts` is now one function —

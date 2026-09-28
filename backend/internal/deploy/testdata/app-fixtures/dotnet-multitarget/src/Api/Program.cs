@@ -1,0 +1,6 @@
+using Core;
+
+var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
+app.MapGet("/", () => Results.Content(Greeting.Page, "text/html"));
+app.Run();

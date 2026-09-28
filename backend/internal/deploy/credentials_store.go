@@ -7,6 +7,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -67,6 +69,10 @@ type CredentialSummary struct {
 	UpdatedAt  time.Time  `json:"updatedAt"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 	UsedBy     int        `json:"usedBy"`
+	// UsedByProjectIDs names the projects behind UsedBy, so the page can draw
+	// who a credential serves instead of only counting them. UsedBy counts
+	// environments; a project with two on the same credential appears once.
+	UsedByProjectIDs []int64 `json:"usedByProjectIds,omitempty"`
 }
 
 // CredentialCreateRequest is POST /deploy/credentials's body.
@@ -199,11 +205,41 @@ const credentialUsageJoin = `
 	  LEFT JOIN deploy_environments e ON e.id = src.environment_id AND e.desired_revision = src.revision AND e.archived_at = 0
 	  LEFT JOIN deploy_projects p ON p.id = e.project_id AND p.archived_at = 0`
 
-func (s *PlanningStore) ListCredentials(ctx context.Context) ([]CredentialSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `
+// credentialSummarySelect reads the usage count and the projects behind it
+// from the same join, so the two can never describe different sets.
+const credentialSummarySelect = `
 		SELECT c.id, c.name, c.kind, c.config_json, c.created_at, c.updated_at,
-		       COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN e.id END)
-		`+credentialUsageJoin+`
+		       COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN e.id END),
+		       GROUP_CONCAT(DISTINCT p.id)
+		` + credentialUsageJoin
+
+func scanCredentialSummary(row interface{ Scan(...any) error }) (*CredentialSummary, error) {
+	var summary CredentialSummary
+	var config string
+	var created, updated int64
+	var projects sql.NullString
+	if err := row.Scan(&summary.ID, &summary.Name, &summary.Kind, &config, &created, &updated, &summary.UsedBy, &projects); err != nil {
+		return nil, err
+	}
+	summary.CreatedAt, summary.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
+	applyCredentialConfig(&summary, config)
+	if projects.Valid {
+		for _, raw := range strings.Split(projects.String, ",") {
+			id, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			summary.UsedByProjectIDs = append(summary.UsedByProjectIDs, id)
+		}
+		// GROUP_CONCAT promises no order; sorting keeps two reads of the
+		// same state identical.
+		slices.Sort(summary.UsedByProjectIDs)
+	}
+	return &summary, nil
+}
+
+func (s *PlanningStore) ListCredentials(ctx context.Context) ([]CredentialSummary, error) {
+	rows, err := s.db.QueryContext(ctx, credentialSummarySelect+`
 		 GROUP BY c.id ORDER BY c.name`)
 	if err != nil {
 		return nil, err
@@ -211,15 +247,11 @@ func (s *PlanningStore) ListCredentials(ctx context.Context) ([]CredentialSummar
 	defer rows.Close()
 	out := []CredentialSummary{}
 	for rows.Next() {
-		var summary CredentialSummary
-		var config string
-		var created, updated int64
-		if err := rows.Scan(&summary.ID, &summary.Name, &summary.Kind, &config, &created, &updated, &summary.UsedBy); err != nil {
+		summary, err := scanCredentialSummary(rows)
+		if err != nil {
 			return nil, err
 		}
-		summary.CreatedAt, summary.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
-		applyCredentialConfig(&summary, config)
-		out = append(out, summary)
+		out = append(out, *summary)
 	}
 	return out, rows.Err()
 }
@@ -237,24 +269,15 @@ func applyCredentialConfig(summary *CredentialSummary, raw string) {
 }
 
 func (s *PlanningStore) GetCredential(ctx context.Context, id int64) (*CredentialSummary, error) {
-	var summary CredentialSummary
-	var config string
-	var created, updated int64
-	err := s.db.QueryRowContext(ctx, `
-		SELECT c.id, c.name, c.kind, c.config_json, c.created_at, c.updated_at,
-		       COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN e.id END)
-		`+credentialUsageJoin+`
-		 WHERE c.id = ? GROUP BY c.id`, id).
-		Scan(&summary.ID, &summary.Name, &summary.Kind, &config, &created, &updated, &summary.UsedBy)
+	summary, err := scanCredentialSummary(s.db.QueryRowContext(ctx, credentialSummarySelect+`
+		 WHERE c.id = ? GROUP BY c.id`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCredentialNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	summary.CreatedAt, summary.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
-	applyCredentialConfig(&summary, config)
-	return &summary, nil
+	return summary, nil
 }
 
 func (s *PlanningStore) CreateCredential(ctx context.Context, request CredentialCreateRequest) (*CredentialSummary, error) {

@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { deployment, json, mockProject, now, project } from "./deploy-fixture"
 
 /**
- * Settings → General's "Source" card: changing a committed project's
+ * Settings → General's "Source" form: changing a committed project's
  * repository or image in place (`PUT /deploy/{id}/environments/{env}/source`).
  *
  * The shared fixture's configuration read has no `source`/`identity` yet —
@@ -22,9 +22,7 @@ function overflow(page: Page) {
 }
 
 function sourceCard(page: Page) {
-  return page
-    .locator("form")
-    .filter({ has: page.getByRole("heading", { name: "Source", exact: true }) })
+  return page.getByRole("form", { name: "Source" })
 }
 
 const baseConfiguration = {
@@ -118,6 +116,8 @@ test.describe("Source setting card", () => {
     await expect(card.getByRole("combobox", { name: "Credential" })).toHaveText("GitHub PAT")
     await expect(card.getByLabel("Include Git LFS objects")).toBeChecked()
     await expect(card.getByLabel("Include Git submodules")).not.toBeChecked()
+    // The head says how the source is reached, beside the repository's link.
+    await expect(card.getByText("Git URL", { exact: true })).toBeVisible()
 
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.screenshot({ path: test.info().outputPath("source-1280.png"), fullPage: true })
@@ -166,6 +166,12 @@ test.describe("Source setting card", () => {
     await expect(card.getByLabel("Repository URL")).toHaveValue("https://github.com/acme/api")
     await expect(card.getByText("Enter the repository again.")).toHaveCount(0)
     await expect(card.getByLabel("Branch or tag")).toHaveValue("main")
+    // The App's installation is what reads a connected repository, so there is
+    // no token or key to pick until the URL is changed.
+    await expect(card.getByText(/Read through the GitHub App/)).toBeVisible()
+    await expect(card.getByRole("combobox", { name: "Credential" })).toHaveCount(0)
+    await card.getByLabel("Repository URL").fill("https://gitlab.com/acme/mirror.git")
+    await expect(card.getByRole("combobox", { name: "Credential" })).toBeVisible()
   })
 
   test("asks for the repository again for a connected provider it cannot derive a URL for", async ({

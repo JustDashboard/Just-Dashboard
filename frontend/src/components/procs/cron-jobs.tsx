@@ -1,8 +1,9 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Clock, Copy, Pause, Pencil, Play, Trash } from "@/components/icons"
-import { get, put } from "@/lib/api"
+import { forgetSessionState, useSessionState } from "@/lib/view-state"
+import { Clock, Copy, Pause, Pencil, Play, Plus, Trash } from "@/components/icons"
+import { put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import {
   CRON_PRESETS,
@@ -17,11 +18,12 @@ import { relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { CronJob, Crontab } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
-import { usePoll } from "@/hooks/use-poll"
+import type { PollState } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
+import { ProductLogo, programProduct } from "@/components/product-logo"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -55,10 +57,17 @@ type ConfirmFn = (request: ConfirmRequest) => void
  * own lines (`lib/crontab.ts`) and sending the file back. The text editor
  * is still there, one button away, for the crontab that does something the
  * builder cannot say.
+ *
+ * The crontab is polled by the page rather than here, because the page's
+ * readings — how many jobs, what fires next — are made of it too. Each job
+ * is drawn as the program its command starts (§14): `docker system prune` is
+ * Docker's, `certbot renew` is Let's Encrypt's, and a script of the
+ * operator's own keeps the clock.
  */
 export function CronJobsPanel({
   user,
   users,
+  crontab,
   onUserChange,
   confirm,
   adding,
@@ -66,23 +75,19 @@ export function CronJobsPanel({
 }: {
   user: string
   users: string[]
+  crontab: PollState<Crontab>
   onUserChange: (user: string) => void
   confirm: ConfirmFn
   adding: boolean
   onAddingChange: (open: boolean) => void
 }) {
   const { can } = useAuth()
-  const crontab = usePoll(
-    (signal) => get<Crontab>(`/cron/user/${encodeURIComponent(user)}`, undefined, signal),
-    30_000,
-    [user],
-  )
   // The draft remembers whose crontab it is, so switching accounts cannot
   // save one account's text over another's.
   const [draftFor, setDraftFor] = useState<{ user: string; text: string } | null>(null)
   const draft = draftFor?.user === user ? draftFor.text : null
   const setDraft = (text: string | null) => setDraftFor(text === null ? null : { user, text })
-  const [editing, setEditing] = useState<CronJob | null>(null)
+  const [editing, setEditing] = useSessionState<CronJob | null>("processes.cron.editing", null)
   const [saving, setSaving] = useState(false)
 
   const save = async (content: string, done: string, confirmText?: string) => {
@@ -105,11 +110,17 @@ export function CronJobsPanel({
 
   return (
     <>
-      <Panel plain>
+      <Panel>
         <PanelHeader
           title="Cron jobs"
           actions={
             <>
+              {admin && (
+                <Button size="sm" onClick={() => onAddingChange(true)}>
+                  <Plus className="size-3.5" />
+                  Add job
+                </Button>
+              )}
               <Select value={user} onValueChange={onUserChange}>
                 <SelectTrigger size="sm" className="w-40" aria-label="Crontab account">
                   <SelectValue />
@@ -145,7 +156,7 @@ export function CronJobsPanel({
                   {admin && " Add one, or paste a crontab with Edit as text."}
                 </EmptyNote>
               ) : (
-                <Table containerClassName="-mx-4 max-h-[calc(100svh-22rem)] w-auto">
+                <Table containerClassName="group-data-[plain]/panel:-mx-4 max-h-[calc(100svh-22rem)] w-auto">
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>
                       <TableHead className="w-56">Schedule</TableHead>
@@ -247,6 +258,7 @@ export function CronJobsPanel({
           onClose={() => {
             onAddingChange(false)
             setEditing(null)
+            forgetSessionState("processes.cron.job.")
           }}
           onSave={async (edit) => {
             const next = editing ? replaceJob(raw, editing, edit) : appendJob(raw, edit)
@@ -282,7 +294,6 @@ function CronJobRow({
           ? {
               key: "enable",
               label: "Enable",
-              detail: "Uncomments the line. It runs at its next scheduled time.",
               icon: Play,
               inline: true,
               run: onToggle,
@@ -290,7 +301,6 @@ function CronJobRow({
           : {
               key: "disable",
               label: "Disable",
-              detail: "Comments the line out. It stays here and can be enabled again.",
               icon: Pause,
               inline: true,
               run: onToggle,
@@ -299,7 +309,6 @@ function CronJobRow({
       list.push({
         key: "edit",
         label: "Edit",
-        detail: "Change the schedule, the command or the note above it.",
         icon: Pencil,
         inline: true,
         run: onEdit,
@@ -308,7 +317,6 @@ function CronJobRow({
     list.push({
       key: "copy",
       label: "Copy command",
-      detail: "The command line exactly as cron runs it.",
       icon: Copy,
       run: () => void copyText(job.command, "Command copied"),
     })
@@ -316,7 +324,6 @@ function CronJobRow({
       list.push({
         key: "remove",
         label: "Remove",
-        detail: "Deletes the line from the crontab.",
         icon: Trash,
         danger: true,
         run: () =>
@@ -357,8 +364,7 @@ function CronJobRow({
         )}
       </TableCell>
       <TableCell className="whitespace-normal">
-        <p className="font-mono text-xs break-all">{job.command}</p>
-        {job.comment && <p className="text-hint text-muted-foreground">{job.comment}</p>}
+        <CommandCell command={job.command} comment={job.comment} />
       </TableCell>
       <TableCell>
         <Status
@@ -370,6 +376,23 @@ function CronJobRow({
         <VerbActions dim verbs={verbs} />
       </TableCell>
     </TableRow>
+  )
+}
+
+/**
+ * A cron line's command, drawn as the program it starts where that is a
+ * product, with the note above the line under it. Shared with the system
+ * cron files on the Scheduled page, so a job is one shape wherever it lives.
+ */
+export function CommandCell({ command, comment }: { command: string; comment?: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <ProductLogo id={programProduct(command)} size="sm" fallback={Clock} />
+      <div className="min-w-0">
+        <p className="font-mono text-xs break-all">{command}</p>
+        {comment && <p className="text-hint text-muted-foreground">{comment}</p>}
+      </div>
+    </div>
   )
 }
 
@@ -403,16 +426,19 @@ function CronJobDialog({
   onClose: () => void
   onSave: (edit: JobEdit) => Promise<void>
 }) {
-  // Mounted only while open, so every field starts from the job being edited.
+  // Every field starts from the job being edited and is kept for the tab
+  // until the dialog is closed, so a walk to the Files page for the exact
+  // path of a script comes back to the half-written job.
   const [initial] = useState(() => fieldsOf(job))
-  const [preset, setPreset] = useState<CronPreset>(initial.preset)
-  const [time, setTime] = useState(initial.time)
-  const [weekday, setWeekday] = useState(initial.weekday)
-  const [monthDay, setMonthDay] = useState(initial.monthDay)
-  const [custom, setCustom] = useState(job?.schedule ?? "")
-  const [command, setCommand] = useState(job?.command ?? "")
-  const [comment, setComment] = useState(job?.comment ?? "")
-  const [enabled, setEnabled] = useState(job ? !job.disabled : true)
+  const draft = `processes.cron.job.${job ? job.line : "new"}`
+  const [preset, setPreset] = useSessionState<CronPreset>(`${draft}.preset`, initial.preset)
+  const [time, setTime] = useSessionState(`${draft}.time`, initial.time)
+  const [weekday, setWeekday] = useSessionState(`${draft}.weekday`, initial.weekday)
+  const [monthDay, setMonthDay] = useSessionState(`${draft}.monthDay`, initial.monthDay)
+  const [custom, setCustom] = useSessionState(`${draft}.custom`, job?.schedule ?? "")
+  const [command, setCommand] = useSessionState(`${draft}.command`, job?.command ?? "")
+  const [comment, setComment] = useSessionState(`${draft}.comment`, job?.comment ?? "")
+  const [enabled, setEnabled] = useSessionState(`${draft}.enabled`, job ? !job.disabled : true)
   const [busy, setBusy] = useState(false)
 
   const [hh, mm] = time.split(":").map((v) => Number(v))

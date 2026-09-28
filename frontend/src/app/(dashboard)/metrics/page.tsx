@@ -33,7 +33,7 @@ import {
   windowStatSum,
   type WindowStat,
 } from "@/lib/metrics-summary"
-import { Page, PageHeader, PageState, Section } from "@/components/page"
+import { Page, PageContext, PageState, Section } from "@/components/page"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
 import { ChartPanel } from "@/components/metrics/chart-panel"
@@ -51,6 +51,8 @@ import {
 import type { Series } from "@/components/metrics/metric-chart"
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
+import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
+import { cpuProduct, platformProduct, virtualizationProduct } from "@/components/product-logo"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -286,11 +288,51 @@ export default function MetricsPage() {
 
   return (
     <Page className="animate-rise">
-      <PageHeader
-        eyebrow="Server"
-        title="Metrics"
-        actions={
+      <PageContext title="Metrics" />
+
+      {/* What this machine is made of. The Overview's line says what it
+          runs; this one says what it runs on, drawn as the processor itself,
+          because every figure below is a share of something named here. */}
+      <HostIdentity
+        mark={cpuProduct(host.cpuModel, host.kernelArch)}
+        title={host.cpuModel || "Unknown processor"}
+        facts={
           <>
+            <span className="numeric">
+              {cores} cores{host.cpuMhz > 0 ? ` at ${(host.cpuMhz / 1000).toFixed(1)} GHz` : ""}
+            </span>
+            <FactDot />
+            <span className="numeric">{bytes(snapshot.memory.total, 0)} memory</span>
+            <FactDot />
+            <span className="numeric">
+              {snapshot.swap.total > 0 ? `${bytes(snapshot.swap.total, 0)} swap` : "no swap"}
+            </span>
+            {host.virtualization && (
+              <>
+                <FactDot />
+                <HostFact product={virtualizationProduct(host.virtualization)}>
+                  {host.virtualization}
+                </HostFact>
+              </>
+            )}
+            <FactDot />
+            <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
+            <FactDot />
+            {recorded.disabled ? (
+              <Tag tone="warning">history off</Tag>
+            ) : (
+              recorded.history && (
+                <span className="numeric">
+                  sampled every {recorded.history.sampleIntervalSeconds}s, kept{" "}
+                  {duration(recorded.history.retentionSeconds)}
+                </span>
+              )
+            )}
+          </>
+        }
+        aside={
+          <div className="flex max-w-full flex-wrap items-center gap-2">
+            {health && <HealthVerdict status={health.status} className="text-body" />}
             {live && (
               <IconAction
                 label={paused ? "Resume live feed" : "Pause live feed"}
@@ -301,50 +343,15 @@ export default function MetricsPage() {
                 {paused ? <Play /> : <Pause />}
               </IconAction>
             )}
-            {/* Exactly the window and resolution on screen, peaks included —
-                the numbers a chart is the wrong way to hand to somebody. */}
+            {/* Export the exact window and resolution on screen, peaks included. */}
             <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={exportCsv}>
               <Download />
               Export CSV
             </Button>
             <RangePicker controls={controls} />
-          </>
+          </div>
         }
       />
-
-      {/* What this machine is made of. The Overview's row says what it runs;
-          this one says what it runs on, because every figure below is a share
-          of something named here. */}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
-        <span className="truncate">{host.cpuModel || "Unknown processor"}</span>
-        <Dot />
-        <span className="numeric">
-          {cores} cores{host.cpuMhz > 0 ? ` at ${(host.cpuMhz / 1000).toFixed(1)} GHz` : ""}
-        </span>
-        <Dot />
-        <span className="numeric">{bytes(snapshot.memory.total, 0)} memory</span>
-        <Dot />
-        <span className="numeric">
-          {snapshot.swap.total > 0 ? `${bytes(snapshot.swap.total, 0)} swap` : "no swap"}
-        </span>
-        <Dot />
-        <span className="numeric">up {duration(snapshot.uptimeSeconds)}</span>
-        {host.virtualization && <Tag>{host.virtualization}</Tag>}
-        {recorded.disabled ? (
-          <Tag tone="warning">history off</Tag>
-        ) : (
-          recorded.history && (
-            <>
-              <Dot />
-              <span className="numeric">
-                sampled every {recorded.history.sampleIntervalSeconds}s, kept{" "}
-                {duration(recorded.history.retentionSeconds)}
-              </span>
-            </>
-          )
-        )}
-        {health && <HealthVerdict status={health.status} />}
-      </div>
 
       <Readings
         snapshot={snapshot}
@@ -542,10 +549,6 @@ export default function MetricsPage() {
       </Section>
     </Page>
   )
-}
-
-function Dot() {
-  return <span className="text-muted-foreground/40">·</span>
 }
 
 /** The figures a tile compares between this window and the one before it. */

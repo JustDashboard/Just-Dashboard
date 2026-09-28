@@ -26,6 +26,12 @@ type schemaTool struct {
 	Push          string
 	// applied reports whether a command already runs this tool's schema step.
 	applied func(string) bool
+	// advice is the remedy when the tool has no command a start can run.
+	advice string
+	// direct says Deploy names its own program (node build/ace.js), so a
+	// start runs it as written rather than through the package manager's
+	// binary runner.
+	direct bool
 }
 
 // The dependency named for each tool is its command-line package, not its
@@ -74,6 +80,39 @@ var schemaTools = []schemaTool{
 		Deploy:     "knex migrate:latest", Push: "knex migrate:latest",
 		applied: commandMentions("knex migrate"),
 	},
+	// The frameworks that own their migrations. No dependency names them
+	// here: the catalogue entry that serves the framework does
+	// (nodeFrameworkResolution.Schema), since the command depends on what
+	// the framework's build writes and where its server starts.
+	{
+		Name: "lucid", Label: "Lucid", Deploy: "node build/ace.js migration:run --force", direct: true,
+		applied: commandMentions("migration:run"),
+	},
+	{
+		// Medusa migrates from the server `medusa build` writes, where its
+		// compiled configuration is; the subshell keeps that directory from
+		// the command that follows.
+		Name: "medusa", Label: "Medusa", Deploy: "(cd .medusa/server && medusa db:migrate)", direct: true,
+		applied: commandMentions("medusa db:migrate", "medusa migrations run"),
+	},
+	{
+		Name: "keystone", Label: "Keystone", Deploy: "keystone prisma migrate deploy",
+		applied: commandMentions("--with-migrations", "prisma migrate deploy"),
+	},
+	{
+		Name: "redwood-prisma", Label: "Redwood's Prisma", Deploy: "rw prisma migrate deploy",
+		applied: commandMentions("prisma migrate deploy", "prisma db push"),
+	},
+}
+
+// nodeSchemaStep is the command a start runs first to apply a tool's
+// schema: the tool's binary through the package manager's runner, or a
+// command that names its own program as written.
+func nodeSchemaStep(runner string, tool schemaTool, command string) string {
+	if tool.direct {
+		return command
+	}
+	return nodeExecRunner(runner) + " " + command
 }
 
 func commandMentions(phrases ...string) func(string) bool {
@@ -98,14 +137,23 @@ type detectedSchemaTool struct {
 	Tool     schemaTool
 	Command  string
 	Evidence DetectionEvidence
+	// owned says the framework's catalogue entry named the step, not the
+	// package's own dependencies: the package's start script is not the
+	// start, so only the start command itself can apply it.
+	owned bool
 }
 
 // detectSchemaTool picks the first configured tool the manifest depends on.
 // Paths are relative to the package root. The precedence matters only when a
 // project carries two tools, where the earlier one is the one that owns
-// migrations in practice.
-func detectSchemaTool(dependencies map[string]string, paths []string) *detectedSchemaTool {
+// migrations in practice. prisma is what Prisma's own configuration says
+// about where its schema and migrations are, which moves them out of the
+// default lookup.
+func detectSchemaTool(dependencies map[string]string, paths []string, prisma nodePrismaFacts) *detectedSchemaTool {
 	for _, tool := range schemaTools {
+		if tool.Name == "prisma" && prisma.schema != "" {
+			tool.configFile, tool.migrationFile = prismaDeclaredLocations(prisma, paths)
+		}
 		declared := ""
 		for _, name := range tool.Dependencies {
 			if dependencies[name] != "" {
@@ -153,10 +201,37 @@ func detectSchemaTool(dependencies map[string]string, paths []string) *detectedS
 	return nil
 }
 
+// prismaDeclaredLocations matches a schema at the path package.json or
+// prisma.config declares — a file, or a directory of .prisma files — and
+// the migrations Prisma keeps beside it or at the declared path.
+func prismaDeclaredLocations(prisma nodePrismaFacts, paths []string) (func(string) bool, func(string) bool) {
+	schema := prisma.schema
+	directory := path.Dir(schema)
+	for _, candidate := range paths {
+		if strings.HasPrefix(candidate, schema+"/") {
+			directory = schema
+			break
+		}
+	}
+	migrations := path.Join(directory, "migrations")
+	if prisma.migrations != "" {
+		migrations = prisma.migrations
+	}
+	config := func(p string) bool {
+		return p == schema || (directory == schema && strings.HasPrefix(p, schema+"/") && strings.HasSuffix(p, ".prisma"))
+	}
+	migration := func(p string) bool {
+		return path.Base(p) == "migration.sql" && strings.HasPrefix(p, migrations+"/")
+	}
+	return config, migration
+}
+
 func schemaToolByName(name string) *schemaTool {
-	for index := range schemaTools {
-		if schemaTools[index].Name == name {
-			return &schemaTools[index]
+	for _, tools := range [][]schemaTool{schemaTools, runtimeSchemaTools} {
+		for index := range tools {
+			if tools[index].Name == name {
+				return &tools[index]
+			}
 		}
 	}
 	return nil
@@ -174,7 +249,29 @@ func schemaStepConfigured(candidate *DetectedCandidate, build BuildPlanConfig) b
 		return true
 	}
 	for _, task := range build.ReleaseTasks {
-		if tool.applied(task.Command) {
+		// A host task that needs the application's toolchain cannot apply
+		// anything; counting it cleared the warning for a step that fails.
+		if _, unbuilt := releaseTaskNeedsApplication(task.Command); unbuilt && task.Runner != ReleaseTaskRunnerImage {
+			continue
+		}
+		if tool.applied(task.Command) || (candidate.SchemaInRelease && sameReleaseCommand(task.Command, candidate.ReleaseCommand)) {
+			return true
+		}
+	}
+	return false
+}
+
+// releaseAppliesSchema says whether the repository's declared release
+// command runs the tool's schema step, itself or through the package
+// scripts it runs. The release task runs it once before each release, so
+// chained into the start command too it would run twice — the second time
+// in every container start, racing the release it follows.
+func releaseAppliesSchema(tool *schemaTool, release string, scripts map[string]string) bool {
+	if tool == nil || strings.TrimSpace(release) == "" {
+		return false
+	}
+	for _, segment := range nodeReachedSegments(scripts, []string{release}, false) {
+		if tool.applied(segment) {
 			return true
 		}
 	}

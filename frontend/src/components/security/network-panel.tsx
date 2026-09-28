@@ -7,11 +7,14 @@ import { cn } from "@/lib/utils"
 import type { NetworkInfo } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { Detail, DetailList, PageHeader } from "@/components/page"
+import { Detail, DetailList, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, ErrorState, LoadingPanel } from "@/components/state"
 import { Reach } from "@/components/security/reach"
+import { InterfaceMark, interfaceProduct } from "@/components/security/marks"
+import { Meter } from "@/components/meter"
+import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -35,6 +38,12 @@ const VIRTUAL = ["virtual", "bridge"]
  * operator has to take the dashboard's word for which one they have. The
  * routing table answers the other half: which interface carries the default
  * route is what "the internet reaches this box here" means.
+ *
+ * Every device is drawn as what made it — Tailscale's tunnel and Docker's
+ * bridges as their marks, a physical port as a glyph for its kind — so a list
+ * of nine devices is scanned for the two that are not the container network
+ * before a name is read. The devices, routes and resolvers are readings, so
+ * they stay tables.
  */
 export function NetworkPanel() {
   const [scope, setScope] = useViewState<"real" | "all">("security.network.devices", "real")
@@ -57,22 +66,7 @@ export function NetworkPanel() {
   }, [data?.interfaces, scope])
 
   const exposed = data?.interfaces.filter((i) => i.public && i.up) ?? []
-  const header = (
-    <PageHeader
-      eyebrow="Security"
-      title="Network"
-      actions={
-        data && (
-          <Status
-            verdict={exposed.length > 0 ? "warning" : "ok"}
-            label={
-              exposed.length > 0 ? `${exposed.length} on a public address` : "no public address"
-            }
-          />
-        )
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Security" title="Network" />
 
   if (loading && !data) {
     return (
@@ -103,7 +97,9 @@ export function NetworkPanel() {
         <StatTile
           label="Devices"
           value={data.interfaces.length}
-          hint={virtual > 0 ? `${virtual} made by Docker` : "none made by Docker"}
+          hint={
+            virtual > 0 ? `${virtual} virtual or bridge devices` : "no virtual or bridge devices"
+          }
         />
         <StatTile
           label="Up"
@@ -131,8 +127,15 @@ export function NetworkPanel() {
         />
       </StatGrid>
 
-      <Panel plain>
-        <PanelHeader title="Interfaces" />
+      <Panel>
+        <PanelHeader
+          title="Interfaces"
+          actions={
+            <span className="text-hint text-muted-foreground">
+              {interfaces.length} shown · refreshes every minute
+            </span>
+          }
+        />
         <PanelToolbar>
           <ToggleGroup
             type="single"
@@ -154,40 +157,77 @@ export function NetworkPanel() {
           {interfaces.length === 0 ? (
             <EmptyNote>No devices match.</EmptyNote>
           ) : (
-            <div className="-mx-4 min-w-0">
+            <div className="min-w-0 group-data-[plain]/panel:-mx-4">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Device</TableHead>
-                    <TableHead>Reach</TableHead>
-                    <TableHead className="hidden lg:table-cell">MTU</TableHead>
-                    <TableHead className="hidden md:table-cell">In / out</TableHead>
                     <TableHead className="w-full">Addresses</TableHead>
+                    <TableHead>Link</TableHead>
+                    <TableHead>Transferred</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {interfaces.map((ifc) => (
                     <TableRow key={ifc.name} className={cn(!ifc.up && "opacity-60")}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-medium">{ifc.name}</span>
-                          <Tag>{ifc.kind}</Tag>
-                          {!ifc.up && <Status state="stopped" label="down" />}
+                      <TableCell className="py-4">
+                        <div className="flex items-center gap-3">
+                          <InterfaceMark device={ifc} />
+                          <div className="space-y-1">
+                            <span className="block font-mono text-body font-medium">
+                              {ifc.name}
+                            </span>
+                            <Tag>{ifc.kind}</Tag>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="min-w-44 whitespace-normal">
+                        <div className="space-y-1.5">
+                          {ifc.addresses.length ? (
+                            ifc.addresses.map((address) => (
+                              <span key={address} className="block font-mono text-body break-all">
+                                {address}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-muted-foreground">No address</span>
+                          )}
+                          <Reach
+                            scope={ifc.public ? "internet" : ifc.loopback ? "local" : "private"}
+                          />
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Reach
-                          scope={ifc.public ? "internet" : ifc.loopback ? "local" : "private"}
-                        />
+                        <div className="space-y-1.5">
+                          <Status
+                            state={ifc.up ? "active" : "stopped"}
+                            label={ifc.up ? "Up" : "Down"}
+                          />
+                          <span className="numeric block text-hint text-muted-foreground">
+                            MTU {ifc.mtu}
+                          </span>
+                        </div>
                       </TableCell>
-                      <TableCell className="numeric hidden text-muted-foreground lg:table-cell">
-                        {ifc.mtu}
-                      </TableCell>
-                      <TableCell className="numeric hidden whitespace-nowrap text-muted-foreground md:table-cell">
-                        {bytes(ifc.bytesRecv)} / {bytes(ifc.bytesSent)}
-                      </TableCell>
-                      <TableCell className="font-mono text-hint whitespace-normal">
-                        {ifc.addresses.join("  ") || "—"}
+                      <TableCell>
+                        <div className="w-32 space-y-2">
+                          <div className="flex justify-between gap-3 text-hint">
+                            <span className="text-muted-foreground">Received</span>
+                            <span className="numeric">{bytes(ifc.bytesRecv)}</span>
+                          </div>
+                          <Meter
+                            value={
+                              ifc.bytesRecv + ifc.bytesSent
+                                ? (ifc.bytesRecv / (ifc.bytesRecv + ifc.bytesSent)) * 100
+                                : 0
+                            }
+                            size="thin"
+                            label={`${bytes(ifc.bytesRecv)} received, ${bytes(ifc.bytesSent)} sent`}
+                          />
+                          <div className="flex justify-between gap-3 text-hint">
+                            <span className="text-muted-foreground">Sent</span>
+                            <span className="numeric">{bytes(ifc.bytesSent)}</span>
+                          </div>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -198,17 +238,17 @@ export function NetworkPanel() {
         </PanelBody>
       </Panel>
 
-      {/* Two plain blocks side by side; the gap between them is the separation. */}
+      {/* Routes own a bounded table; resolver facts stay on the page beside it. */}
       <div className="grid items-start gap-x-8 gap-y-6 lg:grid-cols-[2fr_1fr] [&>*]:min-w-0">
-        <Panel plain>
+        <Panel>
           <PanelHeader title="Routes" />
           <PanelBody flush>
-            <div className="-mx-4 min-w-0">
+            <div className="min-w-0 group-data-[plain]/panel:-mx-4">
               <Table containerClassName="max-h-[22rem]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Destination</TableHead>
-                    <TableHead>Via</TableHead>
+                    <TableHead>Gateway</TableHead>
                     <TableHead>Device</TableHead>
                     <TableHead className="hidden sm:table-cell">Metric</TableHead>
                     <TableHead className="w-full" />
@@ -220,18 +260,23 @@ export function NetworkPanel() {
                       key={`${route.family}-${route.destination}-${i}`}
                       className={cn(route.destination === "default" && "bg-row-hover/40")}
                     >
-                      <TableCell className="font-mono">
-                        {route.destination}
-                        {route.destination === "default" && (
-                          <Tag className="ml-2">{route.family}</Tag>
-                        )}
+                      <TableCell className="py-4 font-mono">
+                        <span className="block font-medium">{route.destination}</span>
+                        <Tag>{route.family}</Tag>
                       </TableCell>
                       <TableCell className="font-mono text-hint text-muted-foreground">
                         {route.gateway || "on-link"}
                       </TableCell>
-                      <TableCell className="font-mono text-hint">{route.interface || "—"}</TableCell>
+                      <TableCell className="font-mono text-hint">
+                        <span className="inline-flex items-center gap-1.5">
+                          {route.interface && interfaceProduct(route.interface) && (
+                            <ProductGlyph id={interfaceProduct(route.interface)!} />
+                          )}
+                          {route.interface || "—"}
+                        </span>
+                      </TableCell>
                       <TableCell className="numeric hidden text-hint text-muted-foreground sm:table-cell">
-                        {route.metric || "—"}
+                        {route.metric ?? "—"}
                       </TableCell>
                       <TableCell />
                     </TableRow>
@@ -250,7 +295,14 @@ export function NetworkPanel() {
         </Panel>
 
         <Panel plain>
-          <PanelHeader title="Resolvers" />
+          <PanelHeader
+            title="DNS resolvers"
+            actions={
+              <span className="numeric text-hint text-muted-foreground">
+                {data.resolvers.length}
+              </span>
+            }
+          />
           <PanelBody className="space-y-3">
             <DetailList>
               {data.resolvers.map((server, i) => (

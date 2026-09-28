@@ -43,6 +43,16 @@ function DialogOverlay({
 }
 
 /**
+ * The close button: a 40px target on a touch screen and 32px under a pointer,
+ * centred on the 43px title strip `Modal` draws — it was a bare 16px glyph,
+ * the smallest thing to hit on a surface whose fields are 44px. It answers the
+ * pointer with a wash, as every control with no face of its own does (§2),
+ * rather than an opacity step. `ui/sheet.tsx` draws the same one.
+ */
+const CLOSE =
+  "absolute top-0.5 right-1 flex size-10 items-center justify-center rounded-md text-muted-foreground focus-ring transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none sm:top-1.5 sm:right-2 sm:size-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+
+/**
  * The dialog is `fixed` and centred, so content taller than the window hangs
  * off both ends with no way to reach it — the page behind cannot scroll a
  * fixed box into view. That is not cosmetic here: the typed-confirmation
@@ -72,10 +82,7 @@ function DialogContent({
       >
         {children}
         {showCloseButton && (
-          <DialogPrimitive.Close
-            data-slot="dialog-close"
-            className="absolute top-4 right-4 rounded-sm opacity-70 focus-ring transition-opacity hover:opacity-100 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
-          >
+          <DialogPrimitive.Close data-slot="dialog-close" className={CLOSE}>
             <Cross />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>

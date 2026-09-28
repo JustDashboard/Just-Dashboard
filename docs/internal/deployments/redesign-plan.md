@@ -50,8 +50,9 @@ removes the containers:
   public address — are titled and ruled rather than framed. Preflight findings keep their frame.
 - **Project overview:** the preview and its facts sit on the page; branch and deploy-on-push are two
   facts beside the source instead of a fourth panel; recent deployments and resource usage are plain
-  lists. The settings destinations keep framed forms with a footer action, which is the shape a
-  settings page reads best in.
+  lists. The settings destinations kept framed forms with a footer action, taken then for the
+  shape a settings page reads best in; "Life and colour" (2026-09-24) below replaced them with
+  section heads in a rail and one Save at each form's foot.
 - **Run:** the summary is the page's own opening (facts, progress line, outcome) rather than a box;
   the four views switch with the underline strip; execution details are a plain list. The build
   transcript keeps its frame because it is a scrolling console.
@@ -122,14 +123,14 @@ screens below live in `frontend/src/components/deploy/` and are covered by
 
 | Route | Screen |
 | --- | --- |
-| `/deploy` | Projects: in-progress runs, search, state chips, a grid of project cards (or rows) with the workload mark, the address, the branch and commit subject, the Compose service count and one status word. `?view=archived` lists archived projects with Restore and Delete permanently. |
+| `/deploy` | Projects: in-progress runs, search, state chips, a grid of project cards (or rows) with the workload mark, the address, the branch and commit subject, the Compose service count and one status word (until 2026-09-24; see "Life and colour"). `?view=archived` lists archived projects with Restore and Delete permanently. |
 | `/deploy/notifications` | The fleet-level notification channels (Discord, Slack, Telegram, e-mail, signed webhook) with test delivery, pause, history and removal. |
-| `/deploy/new` | One page: unfinished setups to resume, a source strip (Git repository, Docker image, Template, Database, Compose, Existing workload) and a configure form (name, type, build & output settings, environment variables, database, public address, an Advanced disclosure) that ends in Deploy or Save only. `?draft=` resumes a draft and `?mode=advanced` opens Advanced. |
-| `/deploy/[id]` | The project shell (name, status word, Visit, the one command, a verbs menu, a facts row; its pages are the sidebar's third level, not a tab strip) and the Overview: the production block with the site preview and its facts, findings that need attention, recent deployments, live usage. |
-| `/deploy/[id]/deployments` | Delivery figures, filter chips, and the run rows — status, duration, title, commit subject, branch · sha · trigger · time — with Roll back, Compare with live, Pin, Retry and Cancel behind each row, and older pages on request. |
-| `/deploy/[id]/logs`, `/runtime`, `/console` | Runtime logs in the Logs workspace; services, live usage and recorded charts, routes/storage/backup evidence; a shell inside the live container. Game servers add `/players` and `/game-settings`. |
-| `/deploy/[id]/settings/*` | General, Build, Runtime (with the health-check editor), Variables, Domains, Storage, Databases & backups, Automation (webhooks with their delivery log, schedules, previews), Danger zone — each a stack of setting cards with a footer Save, reached from the Settings group on the rail rather than a rail of their own. |
-| `/deploy/[id]/runs/[run]` | The deployment page: status, facts, the release path with durations, the build console (search, stage, errors, wrap, follow), runtime logs, details and metrics. |
+| `/deploy/new` | One page: unfinished setups to resume, a source strip (Git repository, Docker image, Template, Database, Compose) and a configure form (name, type, build & output settings, environment variables, database, public address, an Advanced disclosure) that ends in Deploy or Save only. `?draft=` resumes a draft and `?mode=advanced` opens Advanced. |
+| `/deploy/[id]` | The project shell (name, status word, Visit, the one command, a verbs menu, a facts row; its pages are the sidebar's third level, not a tab strip) and the Overview: the production block with the site preview and its facts, findings that need attention, recent deployments, live usage (until 2026-09-24; see "Life and colour"). |
+| `/deploy/[id]/deployments` | Delivery figures, filter chips, and the run rows — status, duration, title, commit subject, branch · sha · trigger · time — with Roll back, Compare with live, Pin, Retry and Cancel behind each row, and older pages on request (the rows until 2026-09-24; see "Life and colour"). |
+| `/deploy/[id]/logs`, `/runtime`, `/console` | Five traffic readings and an alerts line over one pane of five views (three until 2026-09-27) — Requests (what the ingress served, from a record the server keeps in memory, with deploy and container marks on the chart, and each request's own lines and what the proxy said inline), Insights (the window faceted: failing pages, scanners, bots, sources, slowest, and the output's exceptions), Output (what the containers wrote, per service), Builds (the recent runs' transcripts) and Events (Docker's exits, OOM kills, restarts and health flips, crash loops folded), see [`request-observability.md`](request-observability.md); services, live usage and recorded charts, routes/storage/backup evidence; a shell inside the live container. Game servers add `/players` and `/game-settings`. |
+| `/deploy/[id]/settings/*` | General, Build, Runtime (with the health-check editor), Variables, Domains, Storage, Databases & backups, Automation (webhooks with their delivery log, schedules, previews), Danger zone — each a run of rail sections whose forms end in their own Save (a stack of setting cards with a footer Save until 2026-09-24), reached from the Settings group on the rail rather than a rail of their own. |
+| `/deploy/[id]/runs/[run]` | The deployment page: status, facts, the release path with durations, the build console (search, stage, errors, wrap, follow), runtime logs, details and metrics (its facts a row until 2026-09-24; see "Life and colour"). |
 
 Backend additions in the same change: `stop` and `start` operations (and `stopped` on every
 summary), a `ref`/`sourceRevision` override on manual deploys, commit subject/author/date recorded
@@ -170,3 +171,341 @@ archive/candidate-release/remove-managed fixes listed in the audit ledger
   real provider, Discord/Slack/Telegram/e-mail delivery, public TLS issuance, and credentials
   against a real remote host (SSH and bearer plumbing were verified against a local bare
   repository and a refused loopback connection).
+
+## Pictures — 2026-09-19
+
+Four screens gained a drawing of the thing they are about, and the library components that draw
+it were brought in through the shadcn registry (Magic UI, rewritten onto the design system's
+tokens; see `docs/internal/frontend/design-system.md` §11):
+
+- **Credentials:** the GitHub App as the accounts that installed it, the App and this server,
+  with the traffic between them as lines (`github-app-card.tsx`, `wire.tsx`).
+- **Deployment page:** the release path as a timeline — one bar in seven segments, each as long as
+  the stage took, the working stage's name lit by `ui/text-shimmer` — and a burst of paper when a
+  release goes live in front of the reader (`run-pipeline.tsx`). Details rows open to the step's
+  evidence and timings and lead to the build console only where the step wrote to it
+  (`run-steps.tsx`); a stage with no output says so in the console. Metrics draws the before and
+  after windows on one scale with sparklines and reads the change (`run-metrics.tsx`); Runtime
+  logs says what the stream is and where the two views look (`run-logs.tsx`).
+- **Project overview:** the preview is one tile that is the website laid out at desktop width and
+  shrunk, and one link that opens it (`site-preview.tsx`); the column beside it is the way a
+  request reaches the project — source, live release, runtime, domains — drawn on an opaque ground
+  so the line never shows through a mark (`project-wiring.tsx`, `wire.tsx`); the delivery insights
+  sit under it, and the usage tiles carry the last hour's shape beside the live figure.
+- **Projects and the project header:** a card, a row and the title carry the website's own icon,
+  read through `GET /deploy/{id}/favicon` — the dashboard's image policy allows its own origin
+  only — bound to the recorded website address, one host, one megabyte, remembered for an hour
+  (`project-mark.tsx`, `handlers_deploy_favicon.go`).
+- **Notifications:** the projects on the left, this server in the middle and a mark per channel on
+  the right, with dashed rings an administrator presses to add a kind not yet set up; the rows under
+  it are the list.
+- **Projects:** cards land one after another, a card whose run is in progress carries a light
+  around its frame and a seven-dot release path beside its state; the in-progress rows carry the
+  same dots. **New project:** "Start with something ready" is a bento of the five other ways in.
+  **Deployments:** the delivery figures count up.
+
+The deployment, project, projects, credentials and design-system browser specs pass against these
+surfaces; the details and preview scenarios were rewritten for the rows that open and the tile that
+is a link.
+
+## New project — 2026-09-20
+
+`/deploy/new` was the one screen in the rebuild that still read as a form with a picture stuck
+beside it, and four of the decisions it exists to make could only be made after the project was
+already running. Both were fixed in the same pass.
+
+- **The plan is the picture** (`new-project/plan-wiring.tsx`). The configure screen draws what the
+  setup will create as the four things a request passes through — source → build → runtime →
+  address — in the `wire.tsx` vocabulary the project overview already uses for a deployment that
+  exists, so the screen where a project is planned and the screen where it is read agree about what
+  a project is. Nothing pulses: a pulse means live traffic and a plan has none. A step not yet
+  decided is a dashed line to a dashed ring, exactly as an undeployed project's release is. Every
+  step is pressable and opens the fields that decide it, which makes the drawing the form's table of
+  contents — the release strategy and the memory limit are readable without opening Advanced to
+  find them, and an unbounded container reads as "No memory or CPU limit" rather than as silence,
+  because on one server that is the thing that takes the dashboard down with it. The screen splits
+  at `xl` (drawing left, a sticky summary right); below it the plan is read first and the form
+  follows.
+- **The Git tab's bento is gone.** The "Pictures" pass above put a grid of the five other sources on
+  the Git tab; the source strip above it already did that job, so the same six ways in were drawn
+  twice, one of them wired to a tab the other did not know about. The space now carries the clone
+  options — submodules and LFS — as a disclosure that says it governs every import made on the tab.
+- **Four decisions moved to creation**, each one previously reachable only from settings after a
+  production service had already done the wrong thing once: whether pushes deploy themselves and
+  which paths count (`new-project/automatic-deployment.tsx`, committed as the environment's
+  `deploy_git_policies` row inside the commit transaction — no decision writes no row, so every
+  other caller keeps `gitDeploymentPolicy`'s defaults); a second and third hostname; what an image
+  is (project type is offered for an image source, not only a Git one, so an HTTP application
+  shipped as a container can be told it is one and earn the readiness gate and candidate-first
+  activation preflight requires for it); and whether an unfinished setup is still wanted —
+  `DELETE /deploy/drafts/{draft}`, audited, owner-only, refused once committed, and called by the
+  page itself when a second source is inspected in place of the first.
+- **What the screen knew but did not say.** An image's exposed port is read from its own
+  configuration (`imageExposedPort`, lowest TCP port, absence tolerated) instead of arriving as
+  zero; a project name a live project already holds is reported by `GET /deploy/hostname?name=` as
+  `nameTaken` — a pointer, so "not asked" stays distinguishable from "free" — and flagged while it
+  is typed rather than refused by the schema's UNIQUE constraint at commit; what detection could not
+  settle (`needsDecision`) is shown on the source row; all eight build recipes are offered rather
+  than the four that fit on the old control; and an acknowledged warning now carries its remedy and
+  its owning page's link, which is how `backup_policy_missing`'s deep link was found to be drawn
+  nowhere.
+
+Deliberately not done: no `runtime_unbounded` finding (a warning that fires on every plan and has to
+be acknowledged on every deploy teaches operators to acknowledge without reading — the plan drawing
+says it instead), no `readiness_missing` for image profiles (it is blocking severity and would refuse
+existing image deployments), and no second server, second environment or promotion — those are an
+architectural change (R12), not a change to this page.
+
+Verified: `go build ./... && go vet ./... && go test ./...`, the deployment race packages, the
+frontend lint, type-check, unit and complete browser suites against a clean production build, and
+`scripts/e2e-deployments.py` against a real backend and Docker. Screenshots at 1280, 1720 and 390
+were reviewed; nothing scrolls sideways. Not verified live: a real GitHub push through the new
+`gitPolicy`, and public TLS for a second hostname.
+
+## The chooser — 2026-09-20 (second pass)
+
+The 2026-09-20 entry above rebuilt Configure and left the half of `/deploy/new` the reader arrives on
+untouched. Opened side by side with the host Overview it failed §15's passes 3, 7 and 9 outright, and
+the operator's complaint named all three without using their numbers: the page had no life, it never
+said which of the two GitHub identities was connected, and the tabs other than Git were dry.
+
+- **One measure.** Five of the six sources rendered into `mx-auto w-full max-w-2xl` while Git rendered
+  full width, so pressing a tab collapsed the page from its own width to a 672px centred column under
+  a title and a strip that stayed full width. Every source now starts on the page's own left edge
+  (§15 pass 9). Git, Docker image and Template are two columns at `xl` — the list and the thing you do
+  when the list has not got it (paste a URL, pull from a registry, fill in the chosen template);
+  Compose, Database and Existing workload are a left-aligned form, because a form does not want 1440px.
+  The Template tab's second column exists only once a template is chosen: a reserved empty column
+  reads as a layout bug.
+- **Both GitHub identities, said once.** The App was inferred from `(appRepos.data?.length ?? 0) > 0`,
+  so an App installed on an account that had granted it nothing reported as no App at all and the page
+  offered to connect one that was already connected. The Git tab now reads `GET /deploy/github-app/`
+  through `hooks/use-github.ts` (lifted out of `github-app-card.tsx`, which had owned the hook since
+  Credentials was the only caller) and opens with two rows — the App and the CLI — each carrying a
+  `Status`, what it grants, how many repositories it is responsible for, and the repair for whichever
+  is missing. `installUrl` was in the type and drawn nowhere; it is now the block's action *and* the
+  remedy inside the empty result of a filter, which is where "my repository is not here" is actually
+  felt. A GitHub-side failure degrades to one muted line: the page used to paint `ErrorState` across
+  the top of the import path whenever an optional integration was unreachable, which every run of
+  `deploy-fixture.ts` reproduced as a red "Not mocked" banner because both App routes were unmocked.
+- **Provenance is a heading, not a tag on every row.** `<Tag>App</Tag>` at a row's right edge was three
+  characters at 10px with nothing on the page defining them. The rows are grouped under the identity
+  that clones them, and only when there is more than one.
+- **The rows are the target.** Ten outline `Import` buttons down the right edge became §12's shape —
+  the name is the control and carries the verb in its accessible name, the row around it answers the
+  pointer — on the repository, image and template lists alike. A template that cannot be deployed has
+  no control at all, so nothing announces one. A press that takes a second says `Importing…` (§13).
+- **Recency.** The list arrived in whatever order the API answered in. `pushedAt` was on
+  `GitHubRepoSummary` and discarded by the picker's own projection; it did not exist at all on
+  `GitHubAppRepository`, which serves nearly every row on a dashboard with an App, so
+  `internal/githubapp` now carries `pushedAt`, `fork` and `archived` through the installation listing.
+  Newest push first, anything that never reported one last.
+- **Both scroll containers grew a sideways scrollbar** — §15 pass 3 names this defect verbatim, and it
+  was visible in the screenshots the complaint arrived with. A container over bleeding rows pays the
+  bleed (`-mx-3 px-3`), and the caps went from `32rem`/`20rem` to `min(60vh,42rem)`.
+- **Unfinished setups stopped opening the page.** Four rows, two lines each, above the thing the reader
+  came to do. One line each now, with a count in the header and `expiresAt` — on the wire since the
+  type was written, drawn nowhere — said only within three days of lapsing, because every draft expires
+  and "29 days from now" on all four is a column of the same word.
+- **The strip carries a mark per source.** Six words in a line are six words to read; the glyphs are
+  wayfinding in §14's sense (the reader is choosing between kinds of thing, not being told what page
+  they are on) and every one is `aria-hidden`, so each button's accessible name is still exactly its
+  label.
+- **Nothing was installed.** The 2026 registry landscape was surveyed — Magic UI, Aceternity, Motion
+  Primitives, Kibo, cult-ui, Origin/coss, Base UI, Ark UI, React Aria, Tremor, shadcn's own `Item`
+  and `InputGroup` — and every candidate either duplicates a primitive in `components/` or sells the
+  gradient, glow, shadow and hover-transform §15 bans in one sentence. `ui/bento-grid.tsx` went the
+  other way: dead since the 2026-09-20 pass removed the Git tab's bento, it is deleted, and the §11
+  sentence still describing it as shipped is corrected.
+
+Verified: `bun run lint`, `bun run build`, `bun test src` (80), the complete browser suite against the
+production build (336 passed, 16 conditional skips), `go build ./... && go vet ./...`, and
+`go test ./internal/githubapp ./internal/api`. Screenshots of all six sources at 390, 1280 and 1720
+were reviewed, and no tab scrolls sideways at any of those widths or at 768. Not verified live: a real
+GitHub App installation listing (the new `pushedAt`/`fork`/`archived` fields are exercised against the
+package's fake GitHub only), and a real `gh` sign-in.
+
+## Held to the window — 2026-09-23
+
+The operator's reading of the chooser after the second pass: it looked right and scrolled, the Git
+tab named one account twice, the only colour on the screen was the language marks, and the template
+catalogue was sixty-two cards of four different heights under five server categories, one of which
+held twenty-eight of them.
+
+- **No page scroll.** At `xl` the page is `<Page fill="xl">` and every source but Database is the same
+  two columns: the focused surface, capped at the window with `max-h-full self-start` so a short list
+  is not a tall empty panel, and a 22rem column beside it (the identities and the paste field, the
+  registry field, the chosen template's settings or a note that they open there, where a stack's files
+  live). Database — five engines and two fields — is one capped panel. The list inside each surface
+  scrolls under its own toolbar; the Configure steps scroll their fields between the question and
+  Continue. Unfinished setups left the page's flow for a counted button beside the question. Below
+  `xl` everything stacks and scrolls as before (`design-system.md` §17 pass 8).
+- **One account is one row.** Where the App is installed on the account the CLI is signed in as —
+  compared case-insensitively — the identity is one row: the face, the login, "GitHub App · GitHub
+  CLI", the repository count and "Connected". Two accounts are still two rows. Each repository row
+  carries its owner's picture, with the owner stepped back in the title; an avatar still loading
+  shows the GitHub glyph rather than initials in a circle (§4). The list and the identity row are
+  drawn once, after both identities have answered: the App's rows used to land first under
+  placeholders for the CLI's `gh` round trip, and the list redrew itself when the second answer came.
+- **Products are drawn as themselves.** `components/product-logo.tsx` (then `deploy/product-logo.tsx`) maps every blueprint id, the five
+  quick-setup engines and image names to a bundled logo in `public/logos/` (homarr-labs
+  dashboard-icons under Apache-2.0, Jupyter from Simple Icons, MySQL from devicon lifted to L 0.72 —
+  `NOTICE` travels with them). §14 records why the colour is the artwork's and the strip's is not.
+- **Shelves, not categories.** The catalogue is shelved client-side by what a template is for —
+  Productivity, Media, Monitoring, Automation, AI, Developer tools, Databases, Web & files, Game
+  servers — with a blueprint the map does not name falling back to its server `category`, so a new
+  definition is never missing. `FilterChip`s narrow to one shelf and count what the search left on
+  each. Cards are one height: logo, name, a two-line description and the sign-in word; the image
+  reference moved to the settings panel, where it was the widest thing in every card.
+- **Compose's four sources are cards** beside the editor rather than options in a closed select, and
+  the database engines say what kind of store each is.
+
+Verified: `bun run lint`, `bunx tsc --noEmit`, `bun test src`, `bun run build`, and the deploy-new
+(all five files), deploy-project, deploy-credentials, database, navigation, git, docker and
+design-system browser specs against the production build — 163 tests, with new ones for the single
+identity, the topic shelves and a shell that does not scroll at 1280×800 on any source or Configure
+step. Screenshots at 1280 and 1720 were reviewed; 390 stacks and scrolls. Not verified live: the
+logos against a real catalogue response, and a real GitHub App installation.
+
+## Life and colour — 2026-09-24
+
+The passes above made the deployment section correct and left it the one grey corner of the
+product. In the days after the rebuild the rest of the dashboard learnt to draw each thing as the
+product it is, to carry a reading's last hour inside its tile, to light the cards you take and to
+put a form's section heads in a rail — the account pages, Files, Backups, the logs console and the
+host Overview, Configuration, Docker — while the deployment pages still named most things rather
+than drawing them, framed every settings form and gave a run's history as a line of words. This pass
+redesigned every page of the section, and every sheet, dialog and menu on them, to those shapes;
+`design-system.md` §2, §7, §11, §12, §14 and §15 carry the rules it followed and the ones it wrote.
+
+- **The fleet** (`projects-page.tsx`, with its decisions in `fleet.ts` and a project in
+  `fleet-card.tsx`) opens on four readings the chips under them cannot say: how many projects are
+  live, with their products; requests a minute across the fleet, with the hour as a line; the share
+  of them failing, weighted by traffic, amber from 1% and red from 5%, naming the worst site; and
+  the build slots in use. In-progress runs are lit rows that open the run, the seven-segment
+  release path sweeping beside the stage it is at. Attention is a finding list — a failed deploy
+  with the engine's own reason, a live release failing its health check, a site failing 5% or
+  more — and the per-state counts are on the chips, which scroll on a phone. Cards are ordered
+  worst first and are lit destinations: the project drawn as itself, its source as its forge,
+  repository and branch, its last commit in its author's colour, its hour of traffic, its last
+  fourteen runs as a strip and who started the last one — or, while a run is in flight, a light
+  round the card and the stage it is at. Their verbs are the project header's own. The search also
+  finds a product, a framework, an image or a commit subject. The empty fleet offers the five
+  sources as cards; the archive draws each project as what it deployed, at a step of opacity, with
+  its source and how many variables deleting it would lose, and deleting one asks for its name and
+  lists what goes and what stays on the server.
+- **Credentials** opens on four readings — held and across which hosts, in use, never used, last
+  used — with the GitHub App's state in its own section, its setup a three-segment path rather than
+  numbered circles and each installed account drawn as its GitHub picture. A credential is a card
+  drawn as the host it signs in to, naming the projects that read through it; its sheet opens on
+  the four kinds as cards or, when editing, on the credential, draws the host's product as it is
+  typed, and names a pasted token by its prefix or a key by its first line, warning on a mismatch
+  or a public key. **Notifications** opens on whether messages arrive — channels, delivered and
+  failed in the last day, the last message — draws each channel as its service in the picture and
+  on its card with its last fourteen attempts, orders failing channels first, and opens a channel's
+  own sheet of attempts grouped by day, each linked to the run it announced. A signed webhook's
+  secret is shown once, in the sheet that made it, with the command that verifies a signature.
+- **A project** opens on the identity line the host Overview does: its favicon or product, the
+  address with the certificate's state in the lock's colour, the source, commit, runtime and
+  release as facts on their own marks, and its state with what needs attention. The Overview is,
+  in order, the run in flight as the runs list's own row (confetti once if it goes live while
+  watched), Production — the website tile, now switchable to a phone's width, beside the wiring
+  drawn as products, over four live readings (requests, failing share, processor, memory) — first
+  sign-in, what needs attention, delivery, and recent deployments beside preview environments from
+  `2xl`. The separate Traffic and Resource usage panels became those readings. Deploy a specific
+  version picks from the commits the project's runs recorded; Connect a database takes a saved
+  connection by its row.
+- **Deployments and the run page.** Runs are one shared row (`run-row.tsx`) grouped under In
+  progress and then by day, each with who started it as a face or a product, a duration bar that
+  turns amber past twice the median, and verbs declared once in `run-verbs.tsx` — among them a new
+  *What changed in this release*. A failure reason in the delivery figures narrows the list to the
+  failed runs. The run page opens on an identity line that carries the run's verbs — Cancel, Retry,
+  Redeploy, Visit and the release's menu — beside its state, draws a stage the run did not include
+  as dashed, and names a failure in words with the engine's code beside it and a way to the failing
+  step. The build console groups each step's lines under a sticky rule,
+  counts its errors, shows elapsed time, downloads `deployment-N.log` and, from `2xl`, lists the
+  stages in a rail. Rolling back is the brand command, and the dialog draws the swap it will make.
+- **Logs.** The five readings each carry their hour — requests with the agents that asked as
+  logos, failing as a sixty-minute strip, the slow tenth, bytes served and the container's
+  disruptions as a tick rail. The alerts line names the channels a rule tells by their logos, says
+  when a rule tells no one, and writes the first rule in a sheet on the page. The request rows,
+  the opened request (now with Copy as curl and Block) and Insights draw a request by the log
+  console's colours; Insights opens on a response-time ladder whose marks narrow the rows to
+  requests that slow; Events are grouped under hour rules with each event on its product's tile.
+- **Runtime and the consoles.** Services are cards drawn as their image's product with processor,
+  memory and ports joined from Docker, the candidate of a run in flight lit; then the four live
+  usage tiles, domains with their issuer and days left, storage beside backups from `xl`,
+  dependencies linking to the backup job or connection they name, and usage history last. Each
+  join that fails leaves its block saying so in its header. The Docker console is one strip over a
+  pane sized to the window; a game server's three pages carry one line under the header with the
+  join address, the edition and how many are online, its console is a transcript with players in
+  their own colours, and its server settings are a railed form with a save bar that follows.
+- **Settings.** All nine are rail forms (`settings/setting-card.tsx`), with a pending strip that no
+  longer carries a second "Deploy changes", and drafts keyed per form so a save of one no longer
+  discards the edits in another. General's sections are Name, Source and Automatic deployment,
+  the last with its picture and the commit-status switch. Build and Runtime open on readings drawn
+  from the draft and the live release — the last build's size and platform, the memory limit
+  against the last hour's peak, a blue/green strategy the plan cannot run said before it is
+  deployed — and Build picks its builder and package manager from product cards. Variables is its
+  list first, its counts on chips, with the editor and the `.env` import as sheets; the import
+  says what each name will do before anything is written. Domains, Storage and Databases open on
+  four readings each; Add domain shows the record to create and, for an administrator, whether it
+  already points here. Automation opens on four readings and a picture of what deploys the
+  project, with webhooks, schedules and previews as cards that open their own sheets: a
+  webhook's deliveries, a schedule's past firings and next five runs, a pull request's review
+  with a fork warning. Danger zone is one frame of acts in lifecycle order — stop, archive (or,
+  new here, restore), remove what it made, delete — whose removal plan loads as soon as the
+  project is archived.
+- **Create.** The source strip is a group of pressed buttons rather than a tablist and scrolls at
+  a phone's edge; identities and repository owners are their faces; the Clone URL, Compose Git URL
+  and Image reference fields draw their host's logo as they are typed; Compose from Git picks a
+  saved credential by name instead of an id; and Configure's container access and cache options
+  say their consequence in their titles.
+
+Backend additions in the same change, each additive and optional on the wire, with no schema,
+route, capability or authentication change: the deployment summary's source repository, its remote
+with any credential removed, recipe, framework, live images and its newest fourteen runs; the step
+a run in flight stands at, on the fleet, the run list and the summary; the detected framework
+recorded on the build plan at commit and owned by the server; the facts archived rows are drawn
+from; a runtime service's image, on the operations read and the run's log sources, and a
+single-container release's metric series named by container; a domain's certificate issuer; the
+projects behind a credential's usage count; a notification channel's last delivery and last
+fourteen outcomes, and each delivery's project and run; a trigger's last delivery and last fourteen
+decisions, for an administrator; `?limit=` on both delivery logs; a schedule's next five runs, and
+the same on the schedule check; a pull request's branch on its preview approval; a dry run of the
+variables import, audited as `deploy.variable.import_preview`; the A record a typed hostname needs
+and, for an administrator, whether it already resolves here; and bytes per column on the request
+summary. Three defects were fixed on the way: the request summary said its columns were a minute
+wide whatever the window, so a day's chart captioned 24-minute points as one minute, and a window
+that touched one column more than the chart has dropped the newest (the minute a 5xx had just been
+counted in) rather than the oldest; the dependency deep links pointed at `/databases/<id>`, which
+is not a route, and at the backup list rather than the job; and a missing commit summary was logged
+on a stream the transcript does not accept, which failed the append and silenced every line the
+step wrote after it. [`implementation.md`](implementation.md) has the contracts.
+
+Deliberately not done: no second resolver of what a project is — `projectProduct` in
+`vocabulary.tsx` is the one, and `ProjectMark` stays one tile rather than a stack of logos, so a
+column of titles lines up; another administrator's picture is not fetched for a run's starter (a
+users request per list), so they are initials in the colour the rail gives them; Cancel is not a
+danger verb, being undone by deploying again; the Insights window stays a select; a Compose
+release's metric series stay unnamed, because its recorded runtime lists container ids without the
+service each ran, and naming them would be a guess; a domain carries no self-signed tag, a fact
+only the certificates page holds; the trigger delivery summaries and a hostname's DNS answer are
+not given to read-only accounts, because the delivery log is an administrator's route and a DNS
+lookup of a name the caller chose is the proxy page's administrator check; a webhook the GitHub
+App delivers offers no payload address and no secret rotation, since the App's own secret signs it;
+and nothing new came in from a component registry (`design-system.md` §11 records the evaluation).
+Delete permanently asks for the project's name in its dialog; its route keeps the ordinary
+confirmation [`permanent-deletion.md`](permanent-deletion.md) describes.
+
+Verified: `bunx tsc --noEmit`, `bun run lint`, `bun test src` (306 tests), `go build ./...`,
+`go vet ./...` and `go test ./...`, `bun run build`, and the complete browser suite against that
+production build — 502 passed with 16 conditional skips and none failed, after a first run's one
+failure, a host Overview reading, was fixed. The deployment specs and `design-system.spec.ts` were
+extended to the new surfaces, the latter checking the fleet, the archive and every settings page
+for named controls at 1280 and at 390, for filled pills and for a foreground, and Credentials and
+Notifications for filled pills, against the fixture's showcase (`mockProject(page, { showcase:
+true })`), which fills every place a page can draw. Screenshots of every page, sheet, dialog and
+menu at 390, 1280 and 1720 were reviewed. Not verified live: a real GitHub push, provider webhooks,
+delivery to a real Discord, Slack, Telegram or mail server, and certificates from a real issuer,
+whose intermediate names are what the issuer mark is read from.

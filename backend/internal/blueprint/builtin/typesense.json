@@ -7,11 +7,16 @@
   "description": "A typo-tolerant search engine with an API applications call directly.",
   "iconId": "database",
   "docsUrl": "https://typesense.org/docs/",
+  "access": {
+    "kind": "client",
+    "secretVariable": "TYPESENSE_API_KEY",
+    "note": "Typesense has no web interface of its own, so a browser that opens this address gets an API error rather than a login page. Applications authenticate every request with the header X-TYPESENSE-API-KEY set to the admin API key generated for this deployment; use that key only to mint narrower search-only keys, never in page JavaScript."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-3.0",
     "upstreamUrl": "https://github.com/typesense/typesense",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

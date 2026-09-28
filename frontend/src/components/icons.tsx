@@ -65,6 +65,7 @@ import {
   DocumentPlusIcon,
   DocumentTextIcon,
   EllipsisHorizontalIcon,
+  EnvelopeIcon,
   ExclamationCircleIcon,
   ExclamationTriangleIcon,
   EyeIcon,
@@ -100,6 +101,7 @@ import {
   NoSymbolIcon,
   NumberedListIcon,
   PaintBrushIcon,
+  PaperAirplaneIcon,
   PauseIcon,
   PencilSquareIcon,
   PhotoIcon,
@@ -137,7 +139,6 @@ import {
   UserMinusIcon,
   UserPlusIcon,
   UsersIcon,
-  ViewColumnsIcon,
   ViewfinderCircleIcon,
   WifiIcon,
   WindowIcon,
@@ -147,6 +148,7 @@ import {
   BookOpenIcon,
   MoonIcon,
 } from "@heroicons/react/24/solid"
+import { cn } from "@/lib/utils"
 
 /**
  * The icon vocabulary.
@@ -165,9 +167,10 @@ import {
  * Where Heroicons draws one thing for several of our words — `Clock` and
  * `Stopwatch`, `Link` and `Linked`, `Shield` and `ShieldCheck` — they share
  * the glyph, because that is what they always were. Where Heroicons has no
- * drawing at all — there is no floppy disk, no git branch, no sidebar — the
- * mapping picks the nearest true thing (`DocumentArrowDown` for save,
- * `Share` for a branch, `ViewColumns` for a sidebar) and says so next to it.
+ * drawing at all — there is no floppy disk, no git branch — the mapping picks
+ * the nearest true thing (`DocumentArrowDown` for save, `Share` for a branch)
+ * and says so next to it. The side-panel toggles are the exception: there was
+ * no near-enough drawing, so they are drawn here (`sidebarGlyph`).
  *
  * **Both themes come free, and that is a property to protect.** Every glyph
  * here paints with `fill="currentColor"` and nothing else — no hard-coded hex,
@@ -175,11 +178,11 @@ import {
  * colour around it is, which means it inherits `text-muted-foreground` on a
  * near-white card and on a near-black one without either being a special case.
  *
- * File-type glyphs do not live here. The file browser's per-extension
- * vocabulary is Material Design Icons in `files/file-icon.tsx` — a general UI
- * set has no `JSON` or `JPG` to draw, and MDI's file boxes do. The `File`,
- * `Folder*` and `Acronym*` names below are only the generic chrome (a new
- * folder button, an empty-state sheet, a JSON badge outside the file browser).
+ * File-type drawings do not live here. The file browser draws its own folders
+ * and pages in `files/file-icon.tsx`, with a format's logo on the page and a
+ * few of the glyphs below pressed into a folder's face. The `File`, `Folder*`
+ * and `Acronym*` names below are only the generic chrome (a new folder button,
+ * an empty-state sheet, a JSON badge outside the file browser).
  */
 
 export type IconProps = SVGProps<SVGSVGElement> & {
@@ -336,6 +339,63 @@ export const LoaderCircle: Icon = forwardRef(function LoaderCircle(
   )
 })
 
+/* The side-panel toggles, drawn inline. They were Heroicons' `ViewColumns`,
+   three equal columns: the same glyph for a left panel and a right one, shown
+   or hidden, so a toggle at either end of a strip said nothing about which
+   panel it moved. Each of these is a window with a bar inset on the panel's
+   side: solid while the panel shows, an empty outline of the same bar while
+   it is hidden. A caller picks `Close` (showing) or `Open` (hidden) from its
+   panel's state.
+
+   A filled strip running the window's full height read as a heavy block, and
+   a chevron beside it as clutter, so the bar sits inside the frame and the
+   state is the fill alone. They are one pixel wide on a 16px grid and render
+   at 16px unless a caller says otherwise: shrunk from a 24-unit grid to 14px,
+   every line fell between two pixels. */
+function sidebarGlyph(side: "left" | "right", showing: boolean, name: string): Icon {
+  function SidebarGlyph(
+    { size = 16, title, className, ...props }: IconProps,
+    ref: Ref<SVGSVGElement>,
+  ) {
+    return (
+      <svg
+        ref={ref}
+        viewBox="0 0 16 16"
+        width={size}
+        height={size}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+        className={cn("size-4", className)}
+        {...props}
+      >
+        {title ? <title>{title}</title> : null}
+        {/* Drawn for the left and mirrored for the right, so the pair cannot
+            drift apart. */}
+        <g transform={side === "right" ? "matrix(-1 0 0 1 16 0)" : undefined}>
+          <rect x="1.5" y="2.5" width="13" height="11" rx="2.5" />
+          {showing ? (
+            <rect x="3" y="4" width="3" height="8" rx="1" fill="currentColor" stroke="none" />
+          ) : (
+            <rect x="3.5" y="4.5" width="2" height="7" rx="0.5" />
+          )}
+        </g>
+      </svg>
+    )
+  }
+  const Forwarded = forwardRef<SVGSVGElement, Omit<IconProps, "ref">>(SidebarGlyph)
+  Forwarded.displayName = name
+  return Forwarded
+}
+
+export const SidebarLeftOpen: Icon = sidebarGlyph("left", false, "SidebarLeftOpen")
+export const SidebarLeftClose: Icon = sidebarGlyph("left", true, "SidebarLeftClose")
+export const SidebarRightOpen: Icon = sidebarGlyph("right", false, "SidebarRightOpen")
+export const SidebarRightClose: Icon = sidebarGlyph("right", true, "SidebarRightClose")
+
 export const CheckCircle: Icon = adapt(CheckCircleIcon, "CheckCircle")
 export const CrossCircle: Icon = adapt(XCircleIcon, "CrossCircle")
 export const DotMark: Icon = adapt(MinusSmallIcon, "DotMark")
@@ -376,8 +436,6 @@ export const Globe: Icon = adapt(GlobeAltIcon, "Globe")
 export const Database: Icon = adapt(CircleStackIcon, "Database")
 export const Layout: Icon = adapt(RectangleGroupIcon, "Layout")
 export const Table: Icon = adapt(TableCellsIcon, "Table")
-export const SidebarLeft: Icon = adapt(ViewColumnsIcon, "SidebarLeft")
-export const SidebarRight: Icon = adapt(ViewColumnsIcon, "SidebarRight")
 export const Footer: Icon = adapt(Bars3Icon, "Footer")
 export const ListOrdered: Icon = adapt(NumberedListIcon, "ListOrdered")
 export const ListUnordered: Icon = adapt(ListBulletIcon, "ListUnordered")
@@ -392,6 +450,13 @@ export const TerminalWindow: Icon = adapt(WindowIcon, "TerminalWindow")
 export const Logs: Icon = adapt(QueueListIcon, "Logs")
 export const Rss: Icon = adapt(RssIcon, "Rss")
 export const Notes: Icon = adapt(ClipboardDocumentListIcon, "Notes")
+
+/* Messages. E-mail is a protocol a dozen providers speak rather than a
+   product, so an e-mail channel keeps a glyph where a Discord or a Slack one
+   draws its own logo — the argument §14 makes for S3. `PaperAirplane` is a
+   message leaving: the verb that sends a test delivery, not a kind of thing. */
+export const Envelope: Icon = adapt(EnvelopeIcon, "Envelope")
+export const PaperAirplane: Icon = adapt(PaperAirplaneIcon, "PaperAirplane")
 
 /* git and deployment. Heroicons draws no git glyphs, so these are the nearest
    true things: a branch is connected nodes coming apart (`Share`), a merge the

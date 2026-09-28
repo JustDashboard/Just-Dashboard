@@ -1,0 +1,10 @@
+[book]
+title = "mdBook fixture"
+authors = ["x"]
+src = "src"
+
+[output.html]
+site-url = "/my-book/"
+
+[output.linkcheck]
+optional = true

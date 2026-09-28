@@ -7,15 +7,19 @@
   "description": "A music streaming server that speaks the Subsonic API, so every Subsonic client works with it. Point it at a music folder; scanning is automatic.",
   "iconId": "globe",
   "docsUrl": "https://www.navidrome.org/docs/",
+  "access": {
+    "kind": "setup",
+    "note": "Navidrome ships with no accounts. The first visitor gets a \"Create Admin\" form, and the account it creates is the server administrator. Open the address immediately after deploying — whoever opens it first owns the server."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-3.0",
     "upstreamUrl": "https://github.com/navidrome/navidrome",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {
-    "reference": "deluan/navidrome:0.64.0",
+    "reference": "deluan/navidrome:0.64.1",
     "tagPolicy": "pinned",
     "pullPolicy": "missing"
   },
@@ -86,7 +90,7 @@
     {
       "name": "default",
       "inputs": {},
-      "digest": "sha256:c51275abb5c033951ecaac69146e57aa716400fe0a074321b922a14d54dcaaaa"
+      "digest": "sha256:77fae78ce77c607e32dc34871ce9780a599fa3ea25ccff8fdf556e717816975a"
     }
   ]
 }

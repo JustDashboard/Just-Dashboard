@@ -1,9 +1,10 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useMemoryState } from "@/lib/view-state"
 import { notify } from "@/lib/toast"
 import { get, post, put } from "@/lib/api"
-import { bytes, calendarDate, clock } from "@/lib/format"
+import { bytes } from "@/lib/format"
 import type { BackupJob, BackupResource, Container, DbConnection } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Modal } from "@/components/modal"
@@ -24,18 +25,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { SearchInput } from "@/components/page"
+import { RESOURCE_KIND_LABEL, lines } from "@/components/backups/shared"
 import {
-  RESOURCE_KIND_LABEL,
-  SCHEDULE_PRESETS,
-  WEEKDAYS,
-  lines,
+  ScheduleBuilder,
   scheduleExpression,
   scheduleFields,
-  schedulePreview,
-  scheduleLabel,
   scheduleValid,
-  type SchedulePreset,
-} from "@/components/backups/shared"
+} from "@/components/schedule-builder"
 
 /** What a job starts out as when it is opened for something in particular. */
 export type JobPrefill = {
@@ -70,36 +66,79 @@ export function JobDialog({
   onOpenChange: (open: boolean) => void
   onDone: () => void
 }) {
-  const [name, setName] = useState(job?.name ?? prefill?.name ?? "")
-  const [sources, setSources] = useState((job?.sources ?? prefill?.sources ?? []).join("\n"))
-  const [excludes, setExcludes] = useState((job?.excludes ?? prefill?.excludes ?? []).join("\n"))
-  const [targetKind, setTargetKind] = useState<BackupJob["targetKind"]>(job?.targetKind ?? "local")
-  const [path, setPath] = useState(job?.target.path ?? "/var/backups/just-dashboard")
-  const [bucket, setBucket] = useState(job?.target.bucket ?? "")
-  const [region, setRegion] = useState(job?.target.region ?? "")
-  const [endpoint, setEndpoint] = useState(job?.target.endpoint ?? "")
-  const [prefix, setPrefix] = useState(job?.target.prefix ?? "")
-  const [accessKey, setAccessKey] = useState("")
-  const [secretKey, setSecretKey] = useState("")
-  const [schedule, setSchedule] = useState(() => scheduleFields(job?.schedule ?? "0 3 * * *"))
-  const [retention, setRetention] = useState(String(job?.retention ?? 7))
-  const [retentionDays, setRetentionDays] = useState(String(job?.retentionDays ?? 0))
-  const [enabled, setEnabled] = useState(job?.enabled ?? true)
-  const [sqlitePaths, setSQLitePaths] = useState(
+  // Every field is kept in memory for the tab until the dialog is closed —
+  // memory rather than storage, because the destination's keys are typed
+  // here too — so checking a path or a volume does not mean starting over.
+  const draft = `backups.job.${job?.id ?? "new"}`
+  const [name, setName] = useMemoryState(`${draft}.name`, job?.name ?? prefill?.name ?? "")
+  const [sources, setSources] = useMemoryState(
+    `${draft}.sources`,
+    (job?.sources ?? prefill?.sources ?? []).join("\n"),
+  )
+  const [excludes, setExcludes] = useMemoryState(
+    `${draft}.excludes`,
+    (job?.excludes ?? prefill?.excludes ?? []).join("\n"),
+  )
+  const [targetKind, setTargetKind] = useMemoryState<BackupJob["targetKind"]>(
+    `${draft}.targetKind`,
+    job?.targetKind ?? "local",
+  )
+  const [path, setPath] = useMemoryState(
+    `${draft}.path`,
+    job?.target.path ?? "/var/backups/just-dashboard",
+  )
+  const [bucket, setBucket] = useMemoryState(`${draft}.bucket`, job?.target.bucket ?? "")
+  const [region, setRegion] = useMemoryState(`${draft}.region`, job?.target.region ?? "")
+  const [endpoint, setEndpoint] = useMemoryState(`${draft}.endpoint`, job?.target.endpoint ?? "")
+  const [prefix, setPrefix] = useMemoryState(`${draft}.prefix`, job?.target.prefix ?? "")
+  const [accessKey, setAccessKey] = useMemoryState(`${draft}.accessKey`, "")
+  const [secretKey, setSecretKey] = useMemoryState(`${draft}.secretKey`, "")
+  const [schedule, setSchedule] = useMemoryState(
+    `${draft}.schedule`,
+    scheduleFields(job?.schedule ?? "0 3 * * *"),
+  )
+  const [retention, setRetention] = useMemoryState(
+    `${draft}.retention`,
+    String(job?.retention ?? 7),
+  )
+  const [retentionDays, setRetentionDays] = useMemoryState(
+    `${draft}.retentionDays`,
+    String(job?.retentionDays ?? 0),
+  )
+  const [enabled, setEnabled] = useMemoryState(`${draft}.enabled`, job?.enabled ?? true)
+  const [sqlitePaths, setSQLitePaths] = useMemoryState(
+    `${draft}.sqlitePaths`,
     (job?.sqlitePaths ?? prefill?.sqlitePaths ?? []).join("\n"),
   )
-  const [databaseDumps, setDatabaseDumps] = useState<number[]>(
+  const [databaseDumps, setDatabaseDumps] = useMemoryState<number[]>(
+    `${draft}.databaseDumps`,
     job?.databaseDumps ?? prefill?.databaseDumps ?? [],
   )
-  const [pauseContainers, setPauseContainers] = useState<string[]>(
+  const [pauseContainers, setPauseContainers] = useMemoryState<string[]>(
+    `${draft}.pauseContainers`,
     job?.pauseContainers ?? prefill?.pauseContainers ?? [],
   )
-  const [recoveryEnabled, setRecoveryEnabled] = useState(Boolean(job?.recovery))
-  const [recoveryImage, setRecoveryImage] = useState(job?.recovery?.image ?? "")
-  const [recoveryCommand, setRecoveryCommand] = useState((job?.recovery?.command ?? []).join("\n"))
-  const [recoverySchema, setRecoverySchema] = useState(job?.recovery?.schemaVersion ?? "")
-  const [expectedOutput, setExpectedOutput] = useState("")
-  const [recoveryAutomatic, setRecoveryAutomatic] = useState(job?.recovery?.automatic ?? false)
+  const [recoveryEnabled, setRecoveryEnabled] = useMemoryState(
+    `${draft}.recoveryEnabled`,
+    Boolean(job?.recovery),
+  )
+  const [recoveryImage, setRecoveryImage] = useMemoryState(
+    `${draft}.recoveryImage`,
+    job?.recovery?.image ?? "",
+  )
+  const [recoveryCommand, setRecoveryCommand] = useMemoryState(
+    `${draft}.recoveryCommand`,
+    (job?.recovery?.command ?? []).join("\n"),
+  )
+  const [recoverySchema, setRecoverySchema] = useMemoryState(
+    `${draft}.recoverySchema`,
+    job?.recovery?.schemaVersion ?? "",
+  )
+  const [expectedOutput, setExpectedOutput] = useMemoryState(`${draft}.expectedOutput`, "")
+  const [recoveryAutomatic, setRecoveryAutomatic] = useMemoryState(
+    `${draft}.recoveryAutomatic`,
+    job?.recovery?.automatic ?? false,
+  )
   const [busy, setBusy] = useState(false)
 
   const connections = usePoll(
@@ -115,7 +154,6 @@ export function JobDialog({
 
   const expression = scheduleExpression(schedule)
   const valid = scheduleValid(expression)
-  const preview = useMemo(() => schedulePreview(expression), [expression])
 
   const sourceList = lines(sources)
   const canSave = name.trim().length > 0 && sourceList.length > 0 && valid && !busy
@@ -173,7 +211,9 @@ export function JobDialog({
     if (res.suggest.databaseDumps?.length) {
       return res.suggest.databaseDumps.every((id) => databaseDumps.includes(id))
     }
-    return res.suggest.sources.length > 0 && res.suggest.sources.every((s) => sourceList.includes(s))
+    return (
+      res.suggest.sources.length > 0 && res.suggest.sources.every((s) => sourceList.includes(s))
+    )
   }
   const togglePick = (res: BackupResource, on: boolean) => {
     const merge = (current: string[], extra: string[] | undefined) =>
@@ -340,9 +380,9 @@ export function JobDialog({
           <ScheduleBuilder
             fields={schedule}
             onChange={setSchedule}
-            expression={expression}
-            valid={valid}
-            preview={preview}
+            idPrefix="job"
+            label="Runs"
+            manual
           />
           <FieldRow>
             <Field
@@ -407,9 +447,13 @@ export function JobDialog({
               deployment linked to the database accepts this as its backup coverage.
             </FormNote>
             {connections.error && <ErrorState error={connections.error} />}
-            {(connections.data?.length ?? 0) === 0 && !connections.loading && !connections.error && (
-              <FormNote>No saved database connections yet. Add one on the Databases page first.</FormNote>
-            )}
+            {(connections.data?.length ?? 0) === 0 &&
+              !connections.loading &&
+              !connections.error && (
+                <FormNote>
+                  No saved database connections yet. Add one on the Databases page first.
+                </FormNote>
+              )}
             <div className="grid gap-1.5 sm:grid-cols-2">
               {connections.data?.map((connection) => (
                 <Label
@@ -540,7 +584,9 @@ export function JobDialog({
                       value={expectedOutput}
                       onChange={(e) => setExpectedOutput(e.target.value)}
                       placeholder={
-                        job?.recovery ? "Blank keeps the saved fingerprint" : "schema-v1:canary-present"
+                        job?.recovery
+                          ? "Blank keeps the saved fingerprint"
+                          : "schema-v1:canary-present"
                       }
                     />
                   </Field>
@@ -595,22 +641,15 @@ function ResourcePicker({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button
-          size="xs"
-          variant="outline"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
+        <Button size="xs" variant="outline" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           {open ? "Hide what this server has" : "Pick from what this server has"}
         </Button>
         {count > 0 && (
-          <span className="numeric text-hint text-muted-foreground">
-            {count} picked
-          </span>
+          <span className="numeric text-hint text-muted-foreground">{count} picked</span>
         )}
       </div>
       {open && (
-        <Group className="space-y-2 animate-rise">
+        <Group className="animate-rise space-y-2">
           <SearchInput
             dense
             value={filter}
@@ -638,7 +677,9 @@ function ResourcePicker({
                     </span>
                   </span>
                   {res.protected && (
-                    <span className="shrink-0 text-hint text-muted-foreground">already backed up</span>
+                    <span className="shrink-0 text-hint text-muted-foreground">
+                      already backed up
+                    </span>
                   )}
                 </Label>
               </li>
@@ -649,139 +690,6 @@ function ResourcePicker({
           </ul>
         </Group>
       )}
-    </div>
-  )
-}
-
-/**
- * A schedule as a sentence with the moments it fires under it, so "every
- * day at 3" and the expression the server stores cannot drift apart.
- */
-function ScheduleBuilder({
-  fields,
-  onChange,
-  expression,
-  valid,
-  preview,
-}: {
-  fields: ReturnType<typeof scheduleFields>
-  onChange: (fields: ReturnType<typeof scheduleFields>) => void
-  expression: string
-  valid: boolean
-  preview: Date[]
-}) {
-  const set = (patch: Partial<typeof fields>) => onChange({ ...fields, ...patch })
-  const timed = fields.preset === "daily" || fields.preset === "weekly" || fields.preset === "monthly"
-  return (
-    <div className="space-y-3">
-      <FieldRow columns={3}>
-        <Field label="Runs" htmlFor="job-preset">
-          <Select
-            value={fields.preset}
-            onValueChange={(v) => set({ preset: v as SchedulePreset })}
-          >
-            <SelectTrigger id="job-preset" size="sm" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SCHEDULE_PRESETS.map((p) => (
-                <SelectItem key={p.key} value={p.key}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        {(timed || fields.preset === "hourly") && (
-          <Field
-            label={fields.preset === "hourly" ? "At minute" : "At"}
-            htmlFor="job-time"
-            hint="Server time, 24-hour clock."
-          >
-            {fields.preset === "hourly" ? (
-              <Input
-                id="job-time"
-                type="number"
-                min={0}
-                max={59}
-                value={fields.time.split(":")[1] ?? "0"}
-                onChange={(e) => set({ time: `00:${e.target.value.padStart(2, "0")}` })}
-                className="font-mono"
-              />
-            ) : (
-              <Input
-                id="job-time"
-                type="time"
-                value={fields.time}
-                onChange={(e) => set({ time: e.target.value })}
-                className="font-mono"
-              />
-            )}
-          </Field>
-        )}
-        {fields.preset === "weekly" && (
-          <Field label="On" htmlFor="job-weekday">
-            <Select value={fields.weekday} onValueChange={(v) => set({ weekday: v })}>
-              <SelectTrigger id="job-weekday" size="sm" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {WEEKDAYS.map((d, i) => (
-                  <SelectItem key={d} value={String(i)}>
-                    {d}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-        )}
-        {fields.preset === "monthly" && (
-          <Field label="On day" htmlFor="job-day" hint="Months without that day skip it.">
-            <Input
-              id="job-day"
-              type="number"
-              min={1}
-              max={31}
-              value={fields.monthDay}
-              onChange={(e) => set({ monthDay: e.target.value })}
-              className="font-mono"
-            />
-          </Field>
-        )}
-      </FieldRow>
-      {fields.preset === "custom" && (
-        <Field
-          label="Cron expression"
-          htmlFor="job-cron"
-          hint="Five fields: minute, hour, day of month, month, day of week."
-          error={!valid ? "That is not an expression cron understands." : undefined}
-        >
-          <Input
-            id="job-cron"
-            value={fields.custom}
-            onChange={(e) => set({ custom: e.target.value })}
-            placeholder="0 3 * * *"
-            className="font-mono"
-          />
-        </Field>
-      )}
-      <FormNote>
-        {expression === "" ? (
-          "Runs only when you press Run now."
-        ) : valid ? (
-          <>
-            {scheduleLabel(expression)}
-            {preview.length > 0 && (
-              <span className="text-muted-foreground/80">
-                {" · next "}
-                {preview.map((d) => `${calendarDate(d.toISOString())} ${clock(d.toISOString())}`).join(", ")}
-              </span>
-            )}
-          </>
-        ) : (
-          "Fix the expression to see when it fires."
-        )}
-      </FormNote>
     </div>
   )
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
@@ -50,6 +51,22 @@ type hostnameSuggestion struct {
 	Method            string `json:"method"`
 	Detail            string `json:"detail"`
 	Address           string `json:"address,omitempty"`
+	// Resolves answers, for a hostname an administrator typed, whether its
+	// DNS already points at this server — the record they have to create is
+	// an A record to Address. A pointer for the same reason as NameTaken: a
+	// host with no public address of its own cannot make the comparison, and
+	// that silence is not a "no".
+	Resolves *bool `json:"resolves,omitempty"`
+	// NameTaken answers, for the `name` this was asked with, whether a live
+	// project already owns it. The name is unique in the schema, so without
+	// this the collision was a refusal at the very end of the setup — after
+	// the source, the detection, the configuration and the preflight.
+	//
+	// A pointer because "no" and "not asked" are different answers: asking
+	// about a hostname is a certificate question and carries no claim about
+	// project names, and `omitempty` on a bool would have made a free name
+	// indistinguishable from that silence.
+	NameTaken *bool `json:"nameTaken,omitempty"`
 }
 
 var hostnameSlugStripRE = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -66,16 +83,32 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 		suggestion.Covered, suggestion.CertificateName = s.certificateCovering(ctx, chosen)
 		suggestion.CertificateMethod, suggestion.CertificateIssue = s.certificateMethod(ctx)
 		suggestion.Detail = certificateDetail(suggestion)
+		if address := firstIPv4(proxysvc.PublicAddresses()); address != "" {
+			suggestion.Address = address
+			// The reverse proxy's own DNS check, so two pages never disagree
+			// about one name — and behind its capability, since resolving a
+			// caller-chosen name is traffic the caller directs. A lookup this
+			// request ran out of time for is no answer at all.
+			if httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+				if check := proxysvc.CheckDomainDNS(ctx, chosen); ctx.Err() == nil {
+					suggestion.Resolves = &check.PointsHere
+				}
+			}
+		}
 		httpx.JSON(w, http.StatusOK, suggestion)
 		return nil
 	}
 
 	name := r.URL.Query().Get("name")
+	// Answered alongside the hostname because the page asks for both at the
+	// same moment, and because the alternative — the schema's own UNIQUE
+	// refusal — arrives at commit, after the whole setup has been filled in.
+	taken := s.deploymentNameTaken(ctx, name)
 	if base, certName := s.wildcardBase(ctx); base != "" {
 		slug := s.suggestHostnameSlug(ctx, name, base)
 		httpx.JSON(w, http.StatusOK, hostnameSuggestion{
 			Hostname: slug + "." + base, Base: base, Covered: true, CertificateName: certName,
-			Method: "wildcard",
+			Method: "wildcard", NameTaken: &taken,
 			Detail: "Covered by the existing wildcard certificate for *." + base + ".",
 		})
 		return nil
@@ -84,7 +117,7 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 	address := firstIPv4(proxysvc.PublicAddresses())
 	if address == "" {
 		httpx.JSON(w, http.StatusOK, hostnameSuggestion{
-			Method: "none",
+			Method: "none", NameTaken: &taken,
 			Detail: "This server has no globally routable address, so a public hostname cannot be generated. Enter a domain that already points here.",
 		})
 		return nil
@@ -93,6 +126,7 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 	slug := s.suggestHostnameSlug(ctx, name, base)
 	suggestion := hostnameSuggestion{
 		Hostname: slug + "." + base, Base: base, Method: "sslip", Address: address,
+		NameTaken: &taken,
 	}
 	suggestion.CertificateMethod, suggestion.CertificateIssue = s.certificateMethod(ctx)
 	suggestion.Covered, suggestion.CertificateName = s.certificateCovering(ctx, suggestion.Hostname)
@@ -225,6 +259,22 @@ func (s *Server) suggestHostnameSlug(ctx context.Context, name, domainSuffix str
 		}
 	}
 	return base
+}
+
+// deploymentNameTaken reports whether a live project already answers to this
+// name. It compares exactly the way the schema's UNIQUE constraint does —
+// `deploy_projects.name` is BINARY-collated, and an archived project releases
+// its name into `archived_name` — so the answer here and the refusal at commit
+// can never disagree.
+func (s *Server) deploymentNameTaken(ctx context.Context, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	var exists int
+	err := s.Store.DB.QueryRowContext(ctx,
+		`SELECT 1 FROM deploy_projects WHERE name = ? LIMIT 1`, name).Scan(&exists)
+	return err == nil
 }
 
 // hostnameDomainTaken reports whether an active project already configured

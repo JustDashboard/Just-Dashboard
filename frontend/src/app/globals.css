@@ -18,11 +18,11 @@
 :root {
   --radius: 0.5rem;
 
-  --background: oklch(0.105 0 0);
+  --background: oklch(0.16 0 0);
   --foreground: oklch(1 0 0);
-  --card: oklch(0.128 0 0);
+  --card: oklch(0.183 0 0);
   --card-foreground: oklch(1 0 0);
-  --popover: oklch(0.16 0 0);
+  --popover: oklch(0.2 0 0);
   --popover-foreground: oklch(1 0 0);
 
   /* Primary is the neutral ink mark: a *reading* drawn as a fill rather than
@@ -33,9 +33,9 @@
   --primary: oklch(1 0 0);
   --primary-foreground: oklch(0 0 0);
 
-  --secondary: oklch(0.19 0 0);
+  --secondary: oklch(0.23 0 0);
   --secondary-foreground: oklch(0.9461 0 0);
-  --muted: oklch(0.175 0 0);
+  --muted: oklch(0.215 0 0);
   --muted-foreground: oklch(0.7118 0.0129 286.0665);
   --destructive: oklch(0.6368 0.2078 25.3313);
   --destructive-foreground: oklch(1 0 0);
@@ -90,8 +90,8 @@
   --warning: oklch(0.79 0.152 78);
   --warning-foreground: oklch(0.22 0.05 78);
 
-  --border: oklch(0.235 0 0);
-  --input: oklch(0.235 0 0);
+  --border: oklch(0.275 0 0);
+  --input: oklch(0.275 0 0);
   /* Focus is the vivid blue. It is the one mark that has to be found
      instantly, and at this chroma nothing else on the ground competes with
      it — the pale brand sits on faces and marks, never around a control. */
@@ -114,9 +114,9 @@
      press; blue is where you are. */
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
-  --sidebar-accent: oklch(0.18 0 0);
+  --sidebar-accent: oklch(0.22 0 0);
   --sidebar-accent-foreground: oklch(1 0 0);
-  --sidebar-border: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.245 0 0);
   --sidebar-ring: var(--signal);
 
   /* Git status. The convention every git client uses — green means added — so
@@ -159,6 +159,11 @@
   /* The rule between a panel header and its body. Softer than --border, which
      has to hold its own as an outline against the page. */
   --hairline: color-mix(in oklab, var(--border) 70%, transparent);
+
+  /* The dots of a diagram's grid. A grid mark is a ruler, not a reading, and it
+     repeats across the whole plane, so it sits below even the hairline: there
+     when looked for, gone when the tables are. */
+  --grid-dot: color-mix(in oklab, var(--border) 45%, transparent);
 
   /* The border an interactive card takes under the pointer: a step up from
      `--border`, so a card that leads somewhere answers the hover the way a
@@ -235,6 +240,35 @@
    * sunken well and inside a table row. */
   --meter-track: color-mix(in oklab, var(--foreground) 14%, transparent);
 
+  /* ---- The flow register -------------------------------------------------
+   *
+   * Three values spent only where the reader is *deciding* something — the
+   * deploy flow's chooser and its Configure screen. The reading register has
+   * no use for them and must not grow one: see §16.
+   *
+   * `--flow-surface` is the ground of the one surface per screen that is
+   * allowed depth. It is a step above `--card` rather than a new colour,
+   * because what makes it read as foreground is being the only one. It was
+   * two steps above and read as a grey slab laid over the page rather than as
+   * the page's own foreground: at L 0.226 against a 0.145 ground it was
+   * lighter than every other surface in the product. The border and the lit
+   * edge do the separating, so the ground only has to be *a* step.
+   *
+   * `--choice-surface` is the ground of a card you pick — a repository, a
+   * template, a database engine. It sits a step *below* the focused surface,
+   * so a run of choices reads as recessed into the panel holding them rather
+   * than as more slabs stacked on it. The three grounds are one ladder:
+   * page 0.145 → choice 0.168 → focused 0.185.
+   *
+   * `--flow-lit` is the brand at the strength a *border* needs to be seen
+   * under the pointer without becoming a glow — it is spent on a one-pixel
+   * edge and nowhere else. `--flow-lit-soft` is the same edge at rest on a
+   * card that is already chosen. */
+  --flow-surface: color-mix(in oklab, var(--card) 98%, var(--foreground) 2%);
+  --choice-surface: var(--card);
+  --flow-lit: color-mix(in oklab, var(--brand) 76%, transparent);
+  --flow-lit-soft: color-mix(in oklab, var(--brand) 24%, transparent);
+
   --rule-brand: color-mix(in oklab, var(--brand) 38%, transparent);
   --rule-primary: color-mix(in oklab, var(--primary) 30%, transparent);
   --rule-success: color-mix(in oklab, var(--success) 32%, transparent);
@@ -255,6 +289,92 @@
   --tag-blue: oklch(0.65 0.17 255);
   --tag-violet: oklch(0.65 0.18 295);
   --tag-pink: oklch(0.68 0.19 350);
+
+  /* The colour a language is already known by.
+   *
+   * §14 keeps one exception to "no decorative glyph": a mark the reader is
+   * *finding something by*. A repository list is scanned, and the language is
+   * the second thing that decides which of forty rows is the one — so the
+   * glyph is wayfinding, and a wayfinding mark drawn in the same grey as the
+   * forty words around it is doing the half of its job that costs pixels and
+   * none of the half that saves a read. Twenty identical grey marks are a
+   * texture; twenty hues are an index.
+   *
+   * The hue is not a choice this design system gets to make. It is GitHub
+   * Linguist's, which is the colour the same repository carries on the site
+   * the list was fetched from — the argument `--brand` makes for itself one
+   * screen up, applied to somebody else's mark.
+   *
+   * What the system *does* decide is the lightness, and it is one rule rather
+   * than twenty judgements: the logo's own hue and chroma at 0.72, the rung
+   * `--tag-*` already sits on. Linguist's values were picked for a white page
+   * and four of them (Lua's navy, Ruby's oxblood, Markdown's ink, C's grey)
+   * are near-invisible on a 0.145 ground.
+   *
+   * Written out as literal `oklch()` rather than as `oklch(from <hex> …)`,
+   * which states the rule once and would be the nicer source. Relative colour
+   * syntax is the one modern colour function Lightning CSS cannot downlevel:
+   * every other computed token in this file gets an automatic fallback (see
+   * the `@supports` guards in the built stylesheet), and these twenty would
+   * have shipped without one, below the floor Next's default browserslist
+   * target declares — Firefox 111-127 and Chrome 111-118 are inside it and
+   * parse none of it. The comment on each line carries the Linguist hex the
+   * value came from, which is what a later edit needs. */
+  --language-typescript: oklch(0.72 0.14 253.3); /* #3178c6 */
+  --language-javascript: oklch(0.72 0.153 102.1); /* #f1e05a */
+  --language-python: oklch(0.72 0.102 246.5); /* #3572a5 */
+  --language-go: oklch(0.72 0.13 223.9); /* #00add8 */
+  --language-rust: oklch(0.72 0.081 51.2); /* #dea584 */
+  --language-java: oklch(0.72 0.123 69.4); /* #b07219 */
+  --language-kotlin: oklch(0.72 0.189 297.2); /* #a97bff */
+  --language-ruby: oklch(0.72 0.125 25.8); /* #701516 */
+  --language-php: oklch(0.72 0.091 272); /* #4f5d95 */
+  --language-swift: oklch(0.72 0.199 31.6); /* #f05138 */
+  --language-c: oklch(0.72 0 90); /* #555555 */
+  --language-cpp: oklch(0.72 0.206 6.9); /* #f34b7d */
+  --language-csharp: oklch(0.72 0.198 288.4); /* #7355dd */
+  --language-haskell: oklch(0.72 0.087 294.8); /* #5e5086 */
+  --language-lua: oklch(0.72 0.188 264.1); /* #000080 */
+  --language-r: oklch(0.72 0.166 249.3); /* #198ce7 */
+  --language-html: oklch(0.72 0.194 34.8); /* #e34c26 */
+  --language-css: oklch(0.72 0.16 303.4); /* #663399 */
+  --language-scss: oklch(0.72 0.159 352); /* #c6538c */
+  --language-markdown: oklch(0.72 0.168 261.4); /* #083fa1 */
+
+  /* The file manager's own artwork: a folder and a sheet of paper.
+   *
+   * A folder is the colour it was labelled — blue until somebody says
+   * otherwise, the way a desktop's folders are — and a label is the operator's
+   * (§3's tag argument: "the red one is production" has to stay red). Only the
+   * face is named here; the tab behind it and the emblem pressed into it are a
+   * step and two steps darker of whatever the face is, mixed in the glyph
+   * (`[data-folder]` below), so nine labels are nine values rather than
+   * twenty-seven.
+   *
+   * The sheet is light on purpose. A document is drawn as paper with the
+   * format's own logo on it, and those logos were drawn for paper — Rust's
+   * black gear and Markdown's ink vanish on a 0.16 ground and are themselves on
+   * a page. It stops short of white so a folder of forty files is a column of
+   * pages rather than forty lamps. The band along its foot carries the
+   * extension in the format's colour (`--language-*`, `--tag-*`). */
+  --folder-blue: oklch(0.72 0.12 243);
+  --folder-teal: oklch(0.72 0.1 200);
+  --folder-green: oklch(0.72 0.14 150);
+  --folder-yellow: oklch(0.8 0.14 92);
+  --folder-orange: oklch(0.74 0.15 60);
+  --folder-red: oklch(0.67 0.17 25);
+  --folder-pink: oklch(0.72 0.15 350);
+  --folder-purple: oklch(0.68 0.14 300);
+  --folder-graphite: oklch(0.62 0.015 260);
+  --doc-page: oklch(0.93 0.005 250);
+  --doc-fold: oklch(0.8 0.012 250);
+  --doc-line: oklch(0.78 0.015 250);
+  --doc-label: oklch(0.99 0 0);
+}
+
+[data-folder] {
+  --folder-back: color-mix(in oklab, var(--folder) 80%, #000);
+  --folder-mark: color-mix(in oklab, var(--folder) 64%, #000);
 }
 
 @theme inline {
@@ -321,6 +441,11 @@
   --color-surface-sunken: var(--surface-sunken);
   --color-hairline: var(--hairline);
   --color-border-strong: var(--border-strong);
+
+  --color-flow-surface: var(--flow-surface);
+  --color-choice-surface: var(--choice-surface);
+  --color-flow-lit: var(--flow-lit);
+  --color-flow-lit-soft: var(--flow-lit-soft);
   /* Registered so `bg-row-hover` is a real utility. It was written both as
      `bg-row-hover` and as `bg-[var(--row-hover)]` across the app, and only the
      second one did anything — which is why the terminal rail's rows and the
@@ -597,6 +722,21 @@
   }
 }
 
+/* The ring for a *group* of controls drawn as one box — an `InputGroup`, whose
+ * border belongs to the group and whose focus therefore does too. The inner
+ * control drops its own ring (it has no border of its own to hang one on) and
+ * the box answers instead, which is the whole point of drawing the field and
+ * the switch beside it inside one edge. `:has()` rather than `:focus-within`
+ * because only a *keyboard* focus should paint it, the same rule the other
+ * two follow. */
+@utility focus-ring-within {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  &:has(:focus-visible) {
+    outline-color: var(--ring);
+  }
+}
+
 /* The same ring for a control with no room outside itself to draw one — a tab
  * in a strip that would clip it, a table row, a segment in a toolbar. */
 @utility focus-ring-inset {
@@ -605,6 +745,23 @@
   &:focus-visible {
     outline-color: var(--ring);
   }
+}
+
+/* The rule under a flow screen's question (§16).
+ *
+ * A hairline that starts at the brand and fades out across the measure. It is
+ * the one gradient the product draws, and it is one pixel tall: what it says
+ * is "this is the head of a sequence", which a flat hairline cannot say on a
+ * page whose every other block is also separated by one. On a reading page the
+ * blocks are peers and the flat rule is correct — which is why this is a
+ * register-B utility and not a change to `--hairline`. */
+@utility flow-rule {
+  background-image: linear-gradient(
+    to right,
+    var(--rule-brand),
+    var(--hairline) 28%,
+    transparent 92%
+  );
 }
 
 @layer components {
@@ -681,17 +838,45 @@
   mask-image: radial-gradient(72% 60% at 50% 40%, black, transparent 100%);
 }
 
-/* A table header is chrome, not data. The tint separates it from the rows
- * without a heavier rule, and being opaque rather than a translucent utility
- * it also holds up as a sticky header with rows scrolling under it. */
-[data-slot="panel"] [data-slot="table-container"] thead {
-  background-color: var(--card);
+/* The ground a wiring picture is drawn on: the ER diagram's dot grid, as a
+ * utility for a picture that is not a React Flow canvas. The dots take the
+ * same `--grid-dot` as the diagram, and they fade out toward the edges so the
+ * plane has a middle rather than a border. */
+.wire-grid {
+  background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1.5px);
+  background-size: 24px 24px;
+  background-position: 12px 12px;
+  mask-image: radial-gradient(80% 80% at 50% 50%, black 40%, transparent 100%);
 }
 
-/* An empty state nested in a panel would draw a second frame just inside the
- * first. The panel is already the container — the dashed border is for when
- * the empty state stands on its own. */
-[data-slot="panel"] [data-slot="empty-state"] {
+/* A table header is chrome, not data: it is opaque rather than a translucent
+ * utility so that rows scroll *under* a sticky header rather than through it.
+ *
+ * What it is opaque *with* has to be the ground the panel it sits in actually
+ * has. It was `--card` unconditionally, and a plain panel has no card — so
+ * every table on a plain panel (the process table, the audit log, the ports
+ * list) carried a faint unexplained band one step off the page, overhanging
+ * the header hairline above it by the table's own `-mx-4` bleed. Declaring
+ * the ground on the panel rather than reading it at the table means the
+ * nearest panel wins, so a framed block nested in a plain section is still
+ * opaque with its own card. */
+[data-slot="panel"] {
+  --panel-ground: var(--card);
+}
+[data-slot="panel"][data-plain] {
+  --panel-ground: var(--background);
+}
+[data-slot="panel"] [data-slot="table-container"] thead {
+  background-color: var(--panel-ground);
+}
+
+/* An empty state nested in a panel or a pane would draw a second frame just
+ * inside the first — and its rounded corners land against the container's
+ * own corners and header hairline, which reads as a mismatched inset frame.
+ * The container is already the frame; the dashed border is for when the
+ * empty state stands on its own. */
+[data-slot="panel"] [data-slot="empty-state"],
+[data-slot="pane"] [data-slot="empty-state"] {
   border: 0;
 }
 
@@ -718,10 +903,17 @@
  * looked for — and it is now the same gesture as every other depth in the
  * product, where a surface separates by its ground rather than by a glow. */
 .scroll-affordance {
+  /* The cover gradient has to be the ground the table actually sits on, which
+     is what `--panel-ground` already resolves (card framed, background plain).
+     It read `--card` unconditionally, so every table on a plain panel wore a
+     faint lighter smear down both edges — the same defect the sticky header
+     above was fixed for, missed here because the gradient names the colour
+     rather than inheriting it. The shade stays `--background`: it is a shadow
+     cast onto the page, not a fill of the surface. */
   --scroll-edge-shade: color-mix(in oklab, var(--background) 88%, transparent);
   background-image:
-    linear-gradient(to right, var(--card) 30%, transparent),
-    linear-gradient(to left, var(--card) 30%, transparent),
+    linear-gradient(to right, var(--panel-ground, var(--card)) 30%, transparent),
+    linear-gradient(to left, var(--panel-ground, var(--card)) 30%, transparent),
     linear-gradient(to right, var(--scroll-edge-shade), transparent),
     linear-gradient(to left, var(--scroll-edge-shade), transparent);
   background-position:
@@ -738,7 +930,28 @@
   background-attachment: local, local, scroll, scroll;
 }
 
-/* A table that runs to the panel's edge still lines its outer columns up with
+/* A table is a region, and a region takes an edge.
+ *
+ * §2 says a block on a page is plain unless it can say why it needs one. A
+ * table can say why, and the reason is its own scrolling: the container is
+ * `overflow-auto`, so at any width where the columns stop fitting the grid is
+ * already clipped — and with no boundary drawn, a row whose actions are cut
+ * off reads as a row that has no actions rather than as a region you can
+ * scroll. The proxy Sites table shipped exactly that. §7 gives a `Pane` a
+ * frame for this same property; the only thing separating the two is that a
+ * `Pane` is a region of a workspace and this one sits in a page's flow.
+ *
+ * So a table's panel is framed rather than plain. The bleed that lines a
+ * *plain* panel's first column up with its title is measured from the page's
+ * own edge; inside a frame that origin is wrong, and it put the grid fifteen
+ * pixels through its own border. Rather than compensate for it here — the
+ * bleed is written three ways across the call sites, `-mx-4` on a wrapper,
+ * `-mx-5` on the body, and nothing at all — each one now carries the
+ * `group-data-[plain]/panel:` variant, so the bleed simply does not apply when
+ * the panel has an edge — and the rule below, which was written for the plain
+ * case, is what lands the column on the panel's gutter in the framed one.
+ *
+ * A table that runs to the panel's edge still lines its outer columns up with
  * the panel's own padding, so the first column reads as a continuation of the
  * title above it rather than a grid that merely shares the frame.
  *

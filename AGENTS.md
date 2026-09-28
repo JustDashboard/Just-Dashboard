@@ -8,13 +8,19 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 
 - Inspect the worktree before editing. Preserve unrelated user changes and never use destructive Git
   commands to discard work.
+- Always assume other agents are working in this repository. Create a separate Git worktree and task
+  branch from the active branch before editing. Run commands in that worktree and leave other agents'
+  worktrees untouched.
 - Read the relevant sections of [`docs/internal/README.md`](docs/internal/README.md) before changing
   architecture, security, backend features, frontend behavior, releases, or deployment code. For the
   deployment subsystem, follow [`docs/internal/deployments/`](docs/internal/deployments/README.md).
   The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout.
-- A request to *redesign a page with the design system* means running the ordered passes in
-  [`docs/internal/frontend/design-system.md`](docs/internal/frontend/design-system.md) §15 against
-  that page, with the host Overview as the reference. Read §15 before touching any UI for that request.
+- A request to *redesign a page with the design system* means running that page's register's ordered
+  passes in [`docs/internal/frontend/design-system.md`](docs/internal/frontend/design-system.md).
+  **Decide the register first** — §16 has the table and the test, which is what the reader came to do
+  rather than what the page contains. A page that *reports* takes §15's passes with the host Overview
+  as the reference; a page where the reader is *deciding* a sequence takes §17's, with `/deploy/new`
+  as the reference. Read §16 and the relevant passes before touching any UI for that request.
 - Do not add or change CI: no GitHub Actions workflows, no `.github/` automation, no hosted checks of
   any kind, unless the operator asks for them by name. Verification happens locally with the commands
   below; a red check on GitHub that nobody asked for is confusion, not safety.
@@ -22,8 +28,14 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 - Match project style: Go uses standard formatting; TS/TSX uses Prettier with no semicolons, double
   quotes, a 100-column print width, and trailing commas. Comments explain why, not what.
 - Commit messages are imperative sentences describing intent, without conventional-commit prefixes.
-  Do not change repository or global Git configuration or user identity. Do not commit or push unless
-  the user asks.
+  Do not change repository or global Git configuration or user identity.
+- **Every change, however small, goes through its own branch and pull request.** Start a new branch
+  from the branch that is currently checked out (the active branch — a release branch such as
+  `patch/0.7.0`, not `main`, unless `main` is what is checked out), commit the change there, push it,
+  and open a pull request back into that active branch. This needs no separate go-ahead. After filing
+  the pull request, watch its checks and review, fix failures or conflicts on the task branch, and keep
+  it ready for operator review. **Merging the pull request and deleting the branch do** require the
+  operator's permission every time, unless they said to merge in the same request.
 - **Before every push, documentation review is mandatory.** Compare the complete diff with
   `docs/internal/`, `AGENTS.md`, `README.md`, and `CONTRIBUTING.md`. Update every document affected by
   changes to behavior, architecture, security, configuration, commands, tests, or workflow in the same
@@ -32,12 +44,31 @@ architecture and security model; detailed guidance is indexed in [`docs/internal
 
 ## Required checks
 
-Run checks appropriate to the changed surface; before a pull request, the full required gate is:
+**Never run the whole browser suite or `go test ./...`.** They take minutes to report on pages and
+packages the change never touched. Run what the change can reach:
 
 ```bash
-cd backend && go build ./... && go vet ./... && go test ./...
-cd ../frontend && bun run lint && bun run build && bun run test:browser
+scripts/test-changed.sh          # against the branch this one started from, or name a base
 ```
+
+It reads the diff (committed, staged, unstaged and untracked) and runs Prettier and ESLint on the
+changed frontend files, `tsc --noEmit`, `bun test src`, `go build ./...` and `go vet` on the changed
+packages, the Go tests beside each changed file, and the browser specs that open a page the change
+renders, with `design-system.spec.ts` for any UI change. The header of the script says how each is
+picked. Use it while working and again before a pull request. There is no separate full gate.
+
+`bun test src` is the fast layer over the pure logic in `src/lib` and `src/components`, usually in well
+under a second. Anything expressible there belongs there rather than in a browser spec.
+
+**Browser specs run against a server you already have up**, built from the tree under test:
+
+```bash
+cd frontend && bun run build && bun run start --hostname 127.0.0.1 --port 43117   # once per build
+```
+
+Rebuild and restart it after a source change, or the specs test the old build. `JD_BROWSER_BASE_URL`
+points them at a server on another port when worktrees run side by side. To iterate on one spec, run
+it directly: `bunx playwright test tests/browser/docker-ui.spec.ts` (~30s).
 
 Install the browser once with `bun run test:browser:install`. Deployment changes have additional live,
 race, and browser requirements in [`CONTRIBUTING.md`](CONTRIBUTING.md). `go.mod` requires Go 1.26.8.

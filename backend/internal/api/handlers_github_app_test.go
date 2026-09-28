@@ -113,19 +113,24 @@ func TestGitHubAppRoutesConnectRouteDeliveriesAndDisconnect(t *testing.T) {
 	endpoint := strings.TrimRight(s.dashboardEndpoint(), "/")
 	if start.Action != "https://github.example.test/organizations/acme/settings/apps/new?state="+start.State ||
 		start.Manifest.HookAttributes["url"] != endpoint+"/api/v1/hooks/github-app" ||
-		start.Manifest.RedirectURL != endpoint+"/api/v1/deploy/github-app/callback" {
+		start.Manifest.RedirectURL != endpoint+"/deploy/credentials" {
 		t.Fatalf("manifest start = %+v (endpoint %s)", start, endpoint)
 	}
-	if response := admin.do(http.MethodGet, "/api/v1/deploy/github-app/callback?code=one-time-code&state=forged", "", nil); response.Code != http.StatusSeeOther || !strings.Contains(response.Header().Get("Location"), "github-app=failed") {
-		t.Fatalf("forged state=%d %s", response.Code, response.Header().Get("Location"))
+	if response := admin.do(http.MethodPost, "/api/v1/deploy/github-app/callback", `{"code":"one-time-code","state":"forged"}`, nil); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "github_app_state") {
+		t.Fatalf("forged state=%d %s", response.Code, response.Body.String())
 	}
 	started = admin.do(http.MethodPost, "/api/v1/deploy/github-app/manifest", `{}`, nil)
 	if err := json.Unmarshal(started.Body.Bytes(), &start); err != nil {
 		t.Fatal(err)
 	}
-	callback := admin.do(http.MethodGet, "/api/v1/deploy/github-app/callback?code=one-time-code&state="+start.State, "", nil)
-	if callback.Code != http.StatusSeeOther || callback.Header().Get("Location") != "/deploy/credentials?github-app=connected" {
-		t.Fatalf("callback=%d %s %s", callback.Code, callback.Header().Get("Location"), callback.Body.String())
+	// A reader cannot finish the exchange even with a real state: the
+	// credentials it stores read every repository the App is installed on.
+	if response := reader.do(http.MethodPost, "/api/v1/deploy/github-app/callback", `{"code":"one-time-code","state":"`+start.State+`"}`, nil); response.Code != http.StatusForbidden {
+		t.Fatalf("reader callback=%d", response.Code)
+	}
+	callback := admin.do(http.MethodPost, "/api/v1/deploy/github-app/callback", `{"code":"one-time-code","state":"`+start.State+`"}`, nil)
+	if callback.Code != http.StatusOK || !strings.Contains(callback.Body.String(), `"slug"`) {
+		t.Fatalf("callback=%d %s", callback.Code, callback.Body.String())
 	}
 	status := reader.do(http.MethodGet, "/api/v1/deploy/github-app/", "", nil)
 	var parsed struct {

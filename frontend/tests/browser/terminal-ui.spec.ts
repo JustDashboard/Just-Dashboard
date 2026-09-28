@@ -220,34 +220,54 @@ test("names windows after their work and remembers where you were", async ({ pag
     first.socket.send(JSON.stringify({ type: "state", data }))
 
   // A program that set no title, open but doing nothing: the tab and the rail
-  // show its name and mark nothing.
+  // show its name, and their dots say idle.
   state({ busy: true, process: "claude" })
   await expect(tabA).toHaveAttribute("data-busy", "true")
   await expect(tabA.getByRole("button", { name: "claude", exact: true })).toBeVisible()
   await expect(rowA).toContainText("claude")
   await expect(tabA).not.toHaveAttribute("data-working", "true")
   await expect(rowA).not.toHaveAttribute("data-working", "true")
+  await expect(tabA.locator("[data-activity=idle] > span")).toHaveClass(/bg-warning/)
+  await expect(rowA.locator("[data-activity=idle] > span")).toHaveClass(/bg-warning/)
+  // The dot sits at the end of the tab, beside its close, where the rail puts
+  // it on a row.
+  const dot = (await tabA.locator("[data-activity]").boundingBox())!
+  const name = (await tabA.getByText("claude", { exact: true }).boundingBox())!
+  const close = (await tabA.getByRole("button", { name: /^Close window/ }).boundingBox())!
+  expect(dot.x).toBeGreaterThanOrEqual(name.x + name.width)
+  expect(dot.x + dot.width).toBeLessThanOrEqual(close.x)
+  // A session is opened and closed, and that is all: nothing to file it in,
+  // rename it or pin it with.
+  await expect(page.getByRole("button", { name: "New folder" })).toHaveCount(0)
+  await expect(rowA.getByRole("button", { name: /^More for/ })).toHaveCount(0)
+  await expect(tabA.getByRole("button", { name: /^Rename/ })).toHaveCount(0)
+  await tabA.getByRole("button", { name: "claude", exact: true }).dblclick()
+  await expect(page.getByLabel("Terminal windows").locator("input")).toHaveCount(0)
   // It names itself and starts working: the title wins over the process, the
   // glyph the agent spins in front of its name is dropped — the mark says
   // that — and the tab and the row are marked.
   state({ busy: true, process: "claude", title: "✳ Claude Code", working: true })
   // The mark's label joins the button's accessible name, which is what a
   // screen reader should hear.
-  await expect(tabA.getByRole("button", { name: "Working Claude Code", exact: true })).toBeVisible()
+  await expect(tabA.getByRole("button", { name: "Claude Code Working", exact: true })).toBeVisible()
   await expect(tabA).not.toContainText("✳")
   await expect(rowA).toContainText("Claude Code")
   await expect(rowA).not.toContainText("✳")
   await expect(tabA).toHaveAttribute("data-working", "true")
   await expect(rowA).toHaveAttribute("data-working", "true")
   await expect(tabA.getByRole("img", { name: "Working" })).toBeVisible()
-  // It stops: the finish is marked on the tab and the row, and the tab does
-  // not change width as the dot becomes a check.
+  // Working is a still green dot: nothing on the mark moves.
+  await expect(tabA.locator("[data-activity=working] > span")).toHaveClass(/bg-success/)
+  await expect(tabA.locator("[data-activity] .animate-breathe")).toHaveCount(0)
+  // It stops: the tab and the row go straight back to idle — there is no
+  // "finished" state lingering in green — and the tab does not change width.
   const workingWidth = (await tabA.boundingBox())!.width
   state({ busy: true, process: "claude", title: "✳ Claude Code", finishedAt: Date.now() })
   await expect(tabA).not.toHaveAttribute("data-working", "true")
-  await expect(tabA).toHaveAttribute("data-finished", "true")
-  await expect(rowA).toHaveAttribute("data-finished", "true")
-  await expect(tabA.getByRole("img", { name: "Finished" })).toBeVisible()
+  await expect(rowA).not.toHaveAttribute("data-working", "true")
+  await expect(tabA.locator("[data-activity=idle] > span")).toHaveClass(/bg-warning/)
+  await expect(rowA.locator("[data-activity=idle] > span")).toHaveClass(/bg-warning/)
+  await expect(tabA.locator("[data-activity] svg")).toHaveCount(0)
   expect((await tabA.boundingBox())!.width).toBe(workingWidth)
   // Back at the prompt, which titles the window after its directory.
   state({ busy: false, title: "~" })
@@ -274,5 +294,38 @@ test("names windows after their work and remembers where you were", async ({ pag
   await page.getByRole("link", { name: "Terminal", exact: true }).click()
   await expect(page.locator('[data-session="session-b"]')).toHaveAttribute("data-active", "true")
   await expect(page.locator('[data-window="window-c"]')).toHaveAttribute("data-active", "true")
+  expect(errors).toEqual([])
+})
+
+// A window whose socket in this browser drops is red on its tab and on its
+// session's row, goes back to its session by itself — the session is still
+// running on the server — and stops being red once it is attached again.
+test("a dropped connection is red until it is back", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { connections, errors } = await terminalFixture(page, "dom")
+  const tabA = page.locator('[data-window="window-a"]')
+  const rowA = page.locator('[data-session="session-a"]')
+
+  connections.get("window-a")![0].socket.close()
+  await expect(tabA).toHaveAttribute("data-disconnected", "true")
+  await expect(rowA).toHaveAttribute("data-disconnected", "true")
+  await expect(tabA.getByRole("img", { name: "Disconnected" })).toBeVisible()
+  await expect(tabA.locator("[data-activity=disconnected] > span")).toHaveClass(/bg-destructive/)
+  await expect(page.locator('[data-session="session-b"]')).not.toHaveAttribute(
+    "data-disconnected",
+    "true",
+  )
+
+  await expect(
+    page.getByText("Connection lost. The session is still running on the server — reconnecting."),
+  ).toBeVisible()
+  // Nobody presses anything. The server sends the window's state the moment a
+  // socket attaches.
+  await expect.poll(() => connections.get("window-a")?.length).toBe(2)
+  connections
+    .get("window-a")![1]
+    .socket.send(JSON.stringify({ type: "state", data: { busy: false, title: "~" } }))
+  await expect(tabA).not.toHaveAttribute("data-disconnected", "true")
+  await expect(rowA).not.toHaveAttribute("data-disconnected", "true")
   expect(errors).toEqual([])
 })

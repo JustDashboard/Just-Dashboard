@@ -67,6 +67,10 @@ type DomainRoute struct {
 	CertificateDaysLeft int           `json:"certificateDaysLeft,omitempty"`
 	DeepLink            string        `json:"deepLink,omitempty"`
 	CertificateLink     string        `json:"certificateLink,omitempty"`
+	// CertificateIssuer is who issued the covering certificate, read from the
+	// same certificate as its name, so the issuer is observed rather than
+	// inferred from the domain's ownership.
+	CertificateIssuer string `json:"certificateIssuer,omitempty"`
 }
 
 type StorageSummary struct {
@@ -130,9 +134,15 @@ func (s *OrchestrationStore) Operations(
 		Dependencies: DependencySummary{Status: statusUnavailable, Items: []DependencyObservation{}},
 	}
 	input := DiagnosisInput{
-		LiveReleaseID: summary.LiveReleaseID, PendingChanges: summary.PendingChanges,
+		ProjectID: summary.ID, LiveReleaseID: summary.LiveReleaseID, PendingChanges: summary.PendingChanges,
 		DesiredRevision: summary.DesiredRevision, LivePlanRevision: summary.LivePlanRevision,
 		Runtime: result.Runtime,
+	}
+	if summary.LastRun != nil && summary.LastRun.EnvironmentID == summary.EnvironmentID {
+		input.LastRun = summary.LastRun
+	}
+	if watch, err := s.GitWatchStatus(ctx, summary.ID, summary.EnvironmentID); err == nil {
+		input.GitWatch = &watch
 	}
 	if summary.LiveReleaseID <= 0 {
 		result.Reason = "This deployment has no live release. Deploy it to record the runtime, domain and storage evidence this page reads."
@@ -443,6 +453,7 @@ func observeDomainRoutes(
 					continue
 				}
 				row.CertificateName, row.CertificateDaysLeft = certificate.Name, certificate.DaysLeft
+				row.CertificateIssuer = certificate.Issuer
 				row.CertificateLink = "/proxy/certificates"
 				switch {
 				case certificate.Expired:
@@ -479,3 +490,8 @@ func vhostServes(vhost proxysvc.VHost, hostname string) bool {
 func deploymentRouteName(environmentID int64) string {
 	return fmt.Sprintf("just-dashboard-env-%d.conf", environmentID)
 }
+
+// RouteNameFor is the same spelling for callers outside this package. The API
+// layer needs it to follow the route's request record, and a second literal
+// there would be a second answer to "which file is this deployment's".
+func RouteNameFor(environmentID int64) string { return deploymentRouteName(environmentID) }

@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ApiError, get, post } from "@/lib/api"
+import { forgetWorkingState } from "@/lib/view-state"
 import type { AuthStatus, Capability } from "@/lib/types"
 
 type AuthContextValue = {
@@ -85,6 +86,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await post("/auth/logout")
     } finally {
+      // Whatever was half done belongs to the account that signed out, not to
+      // the next one to use this browser.
+      forgetWorkingState()
       setStatus(null)
       router.push("/login")
     }

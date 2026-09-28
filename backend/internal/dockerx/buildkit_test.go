@@ -73,3 +73,38 @@ func TestBuildxCommandRejectsDuplicateOrMalformedSecretAndPlatform(t *testing.T)
 		})
 	}
 }
+
+func TestBuildxCommandPassesTargetAndBuildArgsThroughTheEnvironment(t *testing.T) {
+	t.Setenv("NEXT_PUBLIC_API_URL", "inherited-from-the-dashboard")
+	argv, environment, err := BuildxCommand(ImmutableBuildOptions{
+		Dockerfile: "Dockerfile", Tag: "just-dashboard/test:run-8", Target: "production",
+		BuildArgs: []BuildxArg{{Name: "NEXT_PUBLIC_API_URL", Value: "https://api.example.com"}, {Name: "NODE_VERSION", Value: "22"}},
+	}, "/tmp/build-metadata.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "--target production") ||
+		!strings.Contains(joined, "--build-arg NEXT_PUBLIC_API_URL --build-arg NODE_VERSION") ||
+		strings.Contains(joined, "api.example.com") {
+		t.Fatalf("argv = %s", joined)
+	}
+	values := []string{}
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, "NEXT_PUBLIC_API_URL=") {
+			values = append(values, entry)
+		}
+	}
+	if !slices.Equal(values, []string{"NEXT_PUBLIC_API_URL=https://api.example.com"}) {
+		t.Fatalf("build argument environment = %v", values)
+	}
+	for name, options := range map[string]ImmutableBuildOptions{
+		"target":         {Dockerfile: "Dockerfile", Tag: "t:1", Target: "prod --push"},
+		"argument name":  {Dockerfile: "Dockerfile", Tag: "t:1", BuildArgs: []BuildxArg{{Name: "A=B"}}},
+		"duplicate name": {Dockerfile: "Dockerfile", Tag: "t:1", BuildArgs: []BuildxArg{{Name: "A"}, {Name: "A"}}},
+	} {
+		if _, _, err := BuildxCommand(options, "/tmp/m.json"); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+	}
+}

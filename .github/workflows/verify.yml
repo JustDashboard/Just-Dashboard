@@ -12,12 +12,20 @@ concurrency:
   group: verify-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Every push runs the gates on the self-hosted runner, which takes one job at
-# a time. A pull request from a branch in this repository is already covered by
-# the push that created it, and a second run for the same commit both queued
-# behind the first and, when the newer cancelled the older, showed on the pull
-# request as a failure. The pull-request event therefore only runs for forks,
-# whose pushes never reach this repository.
+# A pull request from a branch in this repository is already covered by the
+# push that created it, and a second run for the same commit both doubled the
+# work and, when the newer cancelled the older, showed on the pull request as a
+# failure. The pull-request event therefore only runs for forks, whose pushes
+# never reach this repository.
+#
+# Everything that does not need this server's Docker daemon runs on GitHub's
+# hosted runners, in parallel and sharded: the repository is public, so they
+# cost nothing, and every push used to queue the backend, frontend and live
+# jobs one after another on the one self-hosted runner — about fifty-five
+# minutes — on the same machine that serves the dashboard and its deployments.
+# The self-hosted runner now takes only the live Docker fixtures, and only when
+# the code they exercise changed. A push that changes nothing a job reads skips
+# that job.
 
 env:
   JD_TEST_POSTGRES_DSN: postgres://jd_test:jd_test@127.0.0.1:1/jd_test?sslmode=disable
@@ -29,10 +37,55 @@ env:
   JD_TEST_REDIS_DSN: redis://127.0.0.1:1
 
 jobs:
-  backend:
+  changes:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
-    runs-on: [self-hosted, linux, x64, just-dashboard]
-    timeout-minutes: 25
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.diff.outputs.backend }}
+      frontend: ${{ steps.diff.outputs.frontend }}
+      live: ${{ steps.diff.outputs.live }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: diff
+        name: Decide which gates this change reaches
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # A new branch, a force-push past history this clone lacks, or a
+          # manual run has nothing to compare with, so it runs everything.
+          base=""
+          if [ "$EVENT" = pull_request ]; then
+            base=$PR_BASE
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && [ "${BEFORE//0/}" != "" ] &&
+            git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base=$BEFORE
+          fi
+          if [ -z "$base" ]; then
+            printf 'backend=true\nfrontend=true\nlive=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$base" "$GITHUB_SHA")
+          printf '%s\n' "$files"
+          reaches() { if printf '%s\n' "$files" | grep -Eq "$1"; then echo true; else echo false; fi; }
+          ci='^\.github/workflows/|^scripts/(go-test-shard\.sh|check-live-test-results\.py)$'
+          {
+            echo "backend=$(reaches "^backend/|$ci")"
+            echo "frontend=$(reaches "^frontend/|$ci")"
+            echo "live=$(reaches "^backend/(go\.(mod|sum)|internal/(deploy|api|proxysvc|dockerx|store|backups)/)|$ci")"
+          } >> "$GITHUB_OUTPUT"
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -44,10 +97,7 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
-          # The runner's home persists between jobs, so the module and build
-          # caches are already on disk; restoring a cache archive over them
-          # fails on files that exist, and saving one afterwards fails the job.
-          cache: false
+          cache-dependency-path: backend/go.sum
       - name: Build, vet and test
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
@@ -55,9 +105,6 @@ jobs:
           go build ./... 2>&1 | tee "$RUNNER_TEMP/jd-ci/backend-build.txt"
           go vet ./... 2>&1 | tee "$RUNNER_TEMP/jd-ci/backend-vet.txt"
           go test -count=1 -json ./... | tee "$RUNNER_TEMP/jd-ci/backend-tests.jsonl"
-      - name: Deployment race gate
-        run: |
-          go test -race -p 1 -count=1 -json ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store ./internal/dockerx | tee "$RUNNER_TEMP/jd-ci/backend-race.jsonl"
       - name: Retain backend evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -66,10 +113,58 @@ jobs:
           path: ${{ runner.temp }}/jd-ci/
           retention-days: 30
 
-  frontend:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
-    runs-on: [self-hosted, linux, x64, just-dashboard]
+  race:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: api-1, shard: 1, of: 5, packages: ./internal/api }
+          - { name: api-2, shard: 2, of: 5, packages: ./internal/api }
+          - { name: api-3, shard: 3, of: 5, packages: ./internal/api }
+          - { name: api-4, shard: 4, of: 5, packages: ./internal/api }
+          - { name: api-5, shard: 5, of: 5, packages: ./internal/api }
+          - { name: deploy-1, shard: 1, of: 3, packages: ./internal/deploy }
+          - { name: deploy-2, shard: 2, of: 3, packages: ./internal/deploy }
+          - { name: deploy-3, shard: 3, of: 3, packages: ./internal/deploy }
+          - name: rest
+            shard: 1
+            of: 1
+            packages: ./internal/proxysvc ./internal/backups ./internal/store ./internal/dockerx
+    name: race (${{ matrix.name }})
+    defaults:
+      run:
+        working-directory: backend
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Deployment race gate
+        run: |
+          mkdir -p "$RUNNER_TEMP/jd-ci"
+          ../scripts/go-test-shard.sh ${{ matrix.shard }} ${{ matrix.of }} ${{ matrix.packages }} |
+            tee "$RUNNER_TEMP/jd-ci/backend-race-${{ matrix.name }}.jsonl"
+      - name: Retain race evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: race-evidence-${{ matrix.name }}
+          path: ${{ runner.temp }}/jd-ci/
+          retention-days: 30
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: frontend
@@ -81,23 +176,76 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version-file: frontend/package.json
-      - name: Install locked dependencies and Chromium
-        run: |
-          bun install --frozen-lockfile
-          bun run test:browser:install
-      - name: Lint, unit tests, production build and browser gate
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ hashFiles('frontend/bun.lock') }}
+      - name: Lint, types and unit tests
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
+          bun install --frozen-lockfile
           bun --version | tee "$RUNNER_TEMP/jd-ci/bun-version.txt"
           bun run lint 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-lint.txt"
+          bunx tsc --noEmit 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-types.txt"
           bun run test 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-unit.txt"
-          bun run build 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-build.txt"
-          bun run test:browser 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-browser.txt"
-      - name: Retain browser evidence
+      - name: Retain frontend evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: frontend-evidence
+          path: ${{ runner.temp }}/jd-ci/
+          retention-days: 30
+
+  browser:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    name: browser (${{ matrix.shard }}/6)
+    defaults:
+      run:
+        working-directory: frontend
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version-file: frontend/package.json
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ hashFiles('frontend/bun.lock') }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/bun.lock') }}
+      # Next's compiler cache: a build whose sources barely moved reuses the
+      # last one's work. Keyed on the sources, restored from the newest.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: frontend/.next/cache
+          key: next-${{ hashFiles('frontend/bun.lock') }}-${{ hashFiles('frontend/src/**') }}
+          restore-keys: next-${{ hashFiles('frontend/bun.lock') }}-
+      - name: Install locked dependencies and Chromium
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+      - name: Production build and browser shard
+        run: |
+          mkdir -p "$RUNNER_TEMP/jd-ci"
+          bun run build 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-build.txt"
+          bunx playwright test --shard=${{ matrix.shard }}/6 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-browser.txt"
+      - name: Retain browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-evidence-${{ matrix.shard }}
           path: |
             ${{ runner.temp }}/jd-ci/
             frontend/playwright-report/
@@ -105,7 +253,8 @@ jobs:
           retention-days: 30
 
   deployment-live:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
+    needs: changes
+    if: needs.changes.outputs.live == 'true'
     runs-on: [self-hosted, linux, x64, just-dashboard]
     timeout-minutes: 45
     env:

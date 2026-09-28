@@ -25,10 +25,10 @@ func TestCompetingLockfilesBuildOnlyWithAnExplicitPackageManager(t *testing.T) {
 		refused  string
 	}{
 		{name: "unresolved", refused: "competing lockfiles bun.lock and package-lock.json"},
-		{name: "selected bun", selected: "bun", want: []string{"FROM oven/bun:1-alpine@sha256:", "bun install --frozen-lockfile"}},
+		{name: "selected bun", selected: "bun", want: []string{"FROM node:22-alpine@sha256:", "COPY --from=oven/bun:1-alpine@sha256:", "bun install --frozen-lockfile"}},
 		{name: "selected npm", selected: "npm", want: []string{"FROM node:22-alpine@sha256:", "npm ci"}},
 		{name: "selected without lockfile", selected: "pnpm", refused: "the build uses pnpm, but the source has no pnpm lockfile"},
-		{name: "declared bun", manifest: `,"packageManager":"bun@1.2.21"`, want: []string{"FROM oven/bun:1-alpine@sha256:", "bun install --frozen-lockfile"}},
+		{name: "declared bun", manifest: `,"packageManager":"bun@1.2.21"`, want: []string{"COPY --from=oven/bun:1.2.21-alpine@sha256:", "bun install --frozen-lockfile"}},
 		{name: "selection overrides declaration", manifest: `,"packageManager":"bun@1.2.21"`, selected: "npm", want: []string{"npm ci"}},
 		{name: "declared without lockfile", manifest: `,"packageManager":"yarn@4.9.2"`, refused: "competing lockfiles"},
 	} {

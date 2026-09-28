@@ -133,7 +133,12 @@ export function ChangesSheet({
       >
         <>
           {report?.run && (
-            <UpdateProgress run={report.run} log={report.log} restarting={restarting} />
+            <UpdateProgress
+              run={report.run}
+              log={report.log}
+              restarting={restarting}
+              transcriptClassName="h-80"
+            />
           )}
 
           {report?.check.enabled === false && (

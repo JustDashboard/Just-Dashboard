@@ -43,6 +43,22 @@ func (s *Server) handleDeploymentDraftList(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
+// handleDeploymentDraftDiscard throws away one of the caller's unfinished
+// setups, so the resume list on the new-project page stays the work that is
+// actually still wanted.
+func (s *Server) handleDeploymentDraftDiscard(w http.ResponseWriter, r *http.Request) error {
+	principal := httpx.MustPrincipal(r)
+	id := chi.URLParam(r, "draft")
+	if err := s.modules.deployPlanning.Discard(
+		r.Context(), id, principal.UserID(), principal.Can(auth.CapSystemAdmin),
+	); err != nil {
+		return mapDeploymentPlanningError(err)
+	}
+	httpx.SetAudit(r, "deploy.draft.discard", id, nil)
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 func (s *Server) handleDeploymentDraftGet(w http.ResponseWriter, r *http.Request) error {
 	draft, err := s.deploymentDraftForPrincipal(r)
 	if err != nil {
@@ -56,6 +72,10 @@ func (s *Server) handleDeploymentDraftSave(w http.ResponseWriter, r *http.Reques
 	var request deploy.DraftSaveRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
+	}
+	// A draft becomes a production environment, never a preview.
+	if request.Source != nil && deploy.IsProviderPullRef(request.Source.Ref) {
+		return refusePullRequestHead(request.Source.Ref)
 	}
 	principal := httpx.MustPrincipal(r)
 	draft, err := s.modules.deployPlanning.Save(
@@ -108,6 +128,9 @@ func (s *Server) handleDeploymentDraftDetect(w http.ResponseWriter, r *http.Requ
 			return mapDeploymentPlanningError(fmt.Errorf(
 				"%w: selected candidate %q was not among the detected candidates", deploy.ErrInvalidPlan, request.SelectedID))
 		}
+		if detection.SelectedID != request.SelectedID {
+			detection.SelectionReason = "chosen on the project step"
+		}
 		detection.SelectedID = request.SelectedID
 	}
 	principal := httpx.MustPrincipal(r)
@@ -139,8 +162,8 @@ func (s *Server) handleDeploymentDraftPreflight(w http.ResponseWriter, r *http.R
 		return mapDeploymentPlanningError(deploy.ErrDraftRevision)
 	}
 	principal := httpx.MustPrincipal(r)
-	preflight, err := deploy.PreflightDraft(
-		r.Context(), draft, s.modules.deployPreflight, principal.Can(auth.CapSystemAdmin),
+	preflight, err := deploy.PreflightDraftWithSource(
+		r.Context(), draft, s.modules.deployPreflight, s.deploymentSourceInspector(), principal.Can(auth.CapSystemAdmin),
 	)
 	if err != nil {
 		return mapDeploymentPlanningError(err)
@@ -286,6 +309,15 @@ func sameStringSet(expected, actual []string) bool {
 	return true
 }
 
+// deploymentSourceInspector is the analyzer as a SourceInspector, or none: a
+// typed nil pointer would read as an inspector and fail on first use.
+func (s *Server) deploymentSourceInspector() deploy.SourceInspector {
+	if s.modules.deploySources == nil {
+		return nil
+	}
+	return s.modules.deploySources
+}
+
 func (s *Server) deploymentDraftForPrincipal(r *http.Request) (*deploy.Draft, error) {
 	draft, err := s.modules.deployPlanning.Get(r.Context(), chi.URLParam(r, "draft"))
 	if err != nil {
@@ -370,6 +402,10 @@ func mapDeploymentPlanningError(err error) error {
 		return httpx.Err(http.StatusBadRequest, "invalid_compose", err.Error())
 	case errors.Is(err, deploy.ErrUnsupportedSource):
 		return httpx.Err(http.StatusUnprocessableEntity, "unsupported_source", err.Error())
+	case errors.Is(err, deploy.ErrRefNotFound):
+		return httpx.Err(http.StatusBadRequest, "ref_not_found", err.Error())
+	case errors.As(err, new(*deploy.SourceFailure)):
+		return httpx.Err(http.StatusBadGateway, sourceFailureCode(err), err.Error())
 	case errors.Is(err, deploy.ErrGitUnavailable):
 		return httpx.Err(http.StatusServiceUnavailable, "git_unavailable", "Git source evidence is unavailable")
 	case errors.Is(err, deploy.ErrDockerUnavailable):

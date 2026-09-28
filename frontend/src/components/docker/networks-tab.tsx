@@ -1,19 +1,21 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import { Linked, NetworkDevice, Slash, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
-import { cn } from "@/lib/utils"
 import type { Container, DockerNetwork, NetworkDetail, NetworkMember } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
 import { IconAction } from "@/components/icon-action"
 import { Group, Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { Row, ROW_BLEED, RowList } from "@/components/row-list"
+import { Row, RowList } from "@/components/row-list"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
+import { Detail, DetailList, SearchInput } from "@/components/page"
 import { ChipCount, FilterChip } from "@/components/tabs"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Hint } from "@/components/docker/explain"
@@ -31,14 +33,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 
 /**
  * Networks, and — the part that was missing — who is on them.
@@ -53,18 +47,23 @@ export function NetworksTab({
   confirm,
   creating: externalCreating,
   onCreatingChange,
+  actions,
 }: {
   confirm: ConfirmFn
   creating?: boolean
   onCreatingChange?: (open: boolean) => void
+  actions?: React.ReactNode
 }) {
   const { can } = useAuth()
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useSessionState<string | null>("docker.networks.selected", null)
   const [internalCreating, setInternalCreating] = useState(false)
   const creating = externalCreating ?? internalCreating
   const setCreating = onCreatingChange ?? setInternalCreating
-  const [filter, setFilter] = useState("")
-  const [state, setState] = useState<"all" | "custom" | "system">("all")
+  const [filter, setFilter] = useSessionState("docker.networks.query", "")
+  const [state, setState] = useSessionState<"all" | "custom" | "system">(
+    "docker.networks.state",
+    "all",
+  )
 
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<DockerNetwork[]>("/docker/networks/", undefined, signal),
@@ -102,12 +101,14 @@ export function NetworksTab({
 
   return (
     <div className="space-y-4">
-      {/* Plain: the list is the page. */}
+      {/* Plain: the list is the page, and each network is a card with its own
+          edge — a frame around framed cards is the nesting §12 refuses. */}
       <Panel plain className="animate-rise">
         <PanelHeader
           title="Networks"
           actions={
             <>
+              {actions}
               {/* POST /docker/networks/prune has existed since this tab did and
                   nothing ever called it. A network left behind by a removed
                   stack is invisible clutter that also holds a subnet out of the
@@ -195,117 +196,19 @@ export function NetworksTab({
               }
             />
           ) : (
-            <>
-              <ul className="divide-y divide-hairline lg:hidden">
-                {visible.map((network) => (
-                  <NetworkListItem
-                    key={network.id}
-                    network={network}
-                    confirm={confirm}
-                    onOpen={() => setSelected(network.id)}
-                    onChanged={refresh}
-                  />
-                ))}
-              </ul>
-
-              <div className="-mx-4 hidden min-w-0 lg:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Driver</TableHead>
-                      <TableHead className="w-full">Subnets</TableHead>
-                      <TableHead className="text-right">Containers</TableHead>
-                      <TableHead className="w-px text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {visible.map((network) => (
-                      <TableRow
-                        key={network.id}
-                        className="group"
-                        onActivate={() => setSelected(network.id)}
-                      >
-                        <TableCell>
-                          <span className="flex min-w-0 items-center gap-2">
-                            <RowLink onClick={() => setSelected(network.id)}>
-                              {network.name}
-                            </RowLink>
-                            {network.internal && <Tag className="shrink-0">no internet</Tag>}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {SYSTEM_NETWORKS.includes(network.name)
-                            ? "Docker system"
-                            : "User-created"}
-                        </TableCell>
-                        <TableCell>{network.driver}</TableCell>
-                        <TableCell className="font-mono text-hint text-muted-foreground">
-                          {network.subnets.join(", ") || "—"}
-                        </TableCell>
-                        <TableCell className="numeric text-right">
-                          {network.usedBy.length > 0 ? (
-                            <Tooltip>
-                              <TooltipTrigger className="cursor-default">
-                                {network.usedBy.length}
-                              </TooltipTrigger>
-                              <TooltipContent>{network.usedBy.join(", ")}</TooltipContent>
-                            </Tooltip>
-                          ) : (
-                            <span className="text-muted-foreground">0</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <span className="flex w-10 justify-end">
-                            {can("destructive") &&
-                              (SYSTEM_NETWORKS.includes(network.name) ||
-                              network.usedBy.length > 0 ? (
-                                <IconAction
-                                  label={
-                                    SYSTEM_NETWORKS.includes(network.name)
-                                      ? "Docker's own network — cannot be removed"
-                                      : `In use by ${network.usedBy.length} container${network.usedBy.length === 1 ? "" : "s"} — cannot be removed while attached`
-                                  }
-                                  className="text-muted-foreground opacity-40"
-                                  onClick={() => setSelected(network.id)}
-                                >
-                                  <Trash />
-                                </IconAction>
-                              ) : (
-                                <IconAction
-                                  reveal
-                                  label="Remove"
-                                  className="text-destructive"
-                                  onClick={() =>
-                                    confirm({
-                                      title: "Delete network",
-                                      confirmLabel: "Delete",
-                                      description: (
-                                        <p>
-                                          Removes <b>{network.name}</b>. Nothing is attached to it,
-                                          so nothing loses a route. A compose project recreates its
-                                          own network on the next deploy.
-                                        </p>
-                                      ),
-                                      action: async (c) => {
-                                        await del(`/docker/networks/${network.id}`, { confirm: c })
-                                        refresh()
-                                      },
-                                    })
-                                  }
-                                >
-                                  <Trash />
-                                </IconAction>
-                              ))}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
+            // One card per network at every width: each opens who is on it,
+            // so each is a choice (§16).
+            <ChoiceList aria-label="Networks" className="animate-rise">
+              {visible.map((network) => (
+                <NetworkCard
+                  key={network.id}
+                  network={network}
+                  confirm={confirm}
+                  onOpen={() => setSelected(network.id)}
+                  onChanged={refresh}
+                />
+              ))}
+            </ChoiceList>
           )}
         </PanelBody>
       </Panel>
@@ -324,14 +227,15 @@ export function NetworksTab({
 const SYSTEM_NETWORKS = ["bridge", "host", "none"]
 
 /**
- * One network on a screen too narrow for the table.
+ * One network, as a card that opens who is on it.
  *
- * The same shape of row as the volumes and containers lists: the name is a
- * real `<button>`, the facts run down the row, and the removal control is
- * drawn at rest — with the reason in place of the button where Docker would
- * refuse, which is the part of this cell that actually teaches.
+ * Docker's own three say so beside the name; the subnet, the driver and how
+ * many containers are attached are the second line, which a column of cards is
+ * scanned down for the one nothing is using. The removal
+ * control is drawn at rest, with the reason in place of the button where Docker
+ * would refuse, which is the part of this row that actually teaches.
  */
-function NetworkListItem({
+function NetworkCard({
   network,
   confirm,
   onOpen,
@@ -345,74 +249,81 @@ function NetworkListItem({
   const { can } = useAuth()
   const system = SYSTEM_NETWORKS.includes(network.name)
   const removable = can("destructive") && !system && network.usedBy.length === 0
+  const attached = `${network.usedBy.length} container${network.usedBy.length === 1 ? "" : "s"}`
 
   return (
-    <li
-      className={cn(
-        "group min-w-0 space-y-1.5 px-4 py-3 transition-colors hover:bg-row-hover",
-        ROW_BLEED,
-      )}
-    >
-      <div className="flex min-w-0 items-start justify-between gap-2">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="flex max-w-full min-w-0 items-center gap-2 truncate rounded-sm text-left text-body focus-ring hover:text-primary"
-        >
+    <ChoiceRow
+      verb={network.name}
+      onSelect={onOpen}
+      leading={<ProductLogo fallback={NetworkDevice} size="sm" />}
+      title={
+        <span className="flex min-w-0 items-center gap-2">
           <span className="truncate">{network.name}</span>
+          {system && <Tag className="shrink-0">Docker system</Tag>}
           {network.internal && <Tag className="shrink-0">no internet</Tag>}
-        </button>
-        {can("destructive") &&
-          (removable ? (
-            <IconAction
-              label="Remove"
-              className="text-destructive"
-              onClick={() =>
-                confirm({
-                  title: "Delete network",
-                  confirmLabel: "Delete",
-                  description: (
-                    <p>
-                      Removes <b>{network.name}</b>. Nothing is attached to it, so nothing loses a
-                      route. A compose project recreates its own network on the next deploy.
-                    </p>
-                  ),
-                  action: async (c) => {
-                    await del(`/docker/networks/${network.id}`, { confirm: c })
-                    onChanged()
-                  },
-                })
-              }
-            >
-              <Trash />
-            </IconAction>
+        </span>
+      }
+      // One line a phone can hold whole: the subnet first, because it is the
+      // fact two networks are told apart by, then what drives it and who is on
+      // it. The attached names are one hover away.
+      description={
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0 font-mono">{network.subnets.join(", ") || "no subnet"}</span>
+          <span aria-hidden>·</span>
+          <span className="shrink-0">{network.driver}</span>
+          <span aria-hidden>·</span>
+          {network.usedBy.length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="numeric shrink-0 cursor-default">{attached}</span>
+              </TooltipTrigger>
+              <TooltipContent>{network.usedBy.join(", ")}</TooltipContent>
+            </Tooltip>
           ) : (
-            <IconAction
-              label={
-                system
-                  ? "Docker's own network — cannot be removed"
-                  : `In use by ${network.usedBy.length} container${network.usedBy.length === 1 ? "" : "s"} — cannot be removed while attached`
-              }
-              className="text-muted-foreground opacity-40"
-              onClick={onOpen}
-            >
-              <Trash />
-            </IconAction>
-          ))}
-      </div>
-
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-hint text-muted-foreground">
-          {system ? "Docker system" : "User-created"} · {network.driver}
+            <span className="numeric shrink-0">{attached}</span>
+          )}
         </span>
-        <span className="truncate font-mono text-hint text-muted-foreground">
-          {network.subnets.join(", ") || "no subnet"}
-        </span>
-        <span className="numeric text-hint text-muted-foreground">
-          {network.usedBy.length} container{network.usedBy.length === 1 ? "" : "s"}
-        </span>
-      </div>
-    </li>
+      }
+      actions={
+        can("destructive") &&
+        (removable ? (
+          <IconAction
+            label="Remove"
+            className="text-destructive"
+            onClick={() =>
+              confirm({
+                title: "Delete network",
+                confirmLabel: "Delete",
+                description: (
+                  <p>
+                    Removes <b>{network.name}</b>. Nothing is attached to it, so nothing loses a
+                    route. A compose project recreates its own network on the next deploy.
+                  </p>
+                ),
+                action: async (c) => {
+                  await del(`/docker/networks/${network.id}`, { confirm: c })
+                  onChanged()
+                },
+              })
+            }
+          >
+            <Trash />
+          </IconAction>
+        ) : (
+          <IconAction
+            label={
+              system
+                ? "Docker's own network — cannot be removed"
+                : `In use by ${attached} — cannot be removed while attached`
+            }
+            className="text-muted-foreground opacity-40"
+            onClick={onOpen}
+          >
+            <Trash />
+          </IconAction>
+        ))
+      }
+    />
   )
 }
 

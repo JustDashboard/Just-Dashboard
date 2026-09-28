@@ -5,7 +5,7 @@
 `api.Server` holds config, logger, store, auth service, sealer, audit logger, authenticator, WS
 upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
-`table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `updates`, `selfUpdate`, `proxy`, `dbs`,
+`table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
 `linuxUsers`, `netsec`, `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
@@ -20,7 +20,10 @@ rather than swallowed in construction. It starts the metrics recorder (here, not
 purpose is to have been running while nobody was looking), the Docker event log, the self-update check,
 the backup scheduler, `selfupdate.Installer.Reconcile`, `selfcfg.Applier.Reconcile` and the Tailscale
 certificate keeper. `Shutdown` releases what outlives a request:
-sampler, scheduler, live PTYs, database pools, Docker client.
+sampler, scheduler, live PTYs, database pools, Docker client. A held terminal session is let go rather
+than ended — its holder is a systemd unit of its own on the host — and module setup takes every
+running holder back before the first request
+([`processes-terminal-github.md`](../backend/processes-terminal-github.md#sessions-outlive-the-dashboard)).
 
 The deployment engine also starts automatic production Git branch monitoring after its recovery.
 The monitor makes bounded outbound ref reads every five seconds and queues immutable source revisions;
@@ -56,12 +59,26 @@ only bound.
   environment; a user-owned executable is never run as the dashboard's root identity.
 - Argv is passed through unchanged and **never** through a shell. Keep it that way ([invariant 6](../security/invariants.md#invariants-that-must-not-regress)).
 
+Local interactive rebase uses Git's editor protocol: `gitx` sets the editor to the current server
+executable with the fixed `--git-editor` mode. Git invokes that fixed command itself; request values
+remain in a validated JSON plan and never enter shell syntax. The helper starts before server flags or
+configuration, accepts only Git's expected metadata targets, and supports no arbitrary command or
+`exec` todo entries. Continue uses the same persisted plan after a conflict or server restart.
+
 `files.Resolve` is the single choke point for client-supplied paths: it checks the cleaned path *and*
 the symlink-resolved path (the nearest existing ancestor for new paths) against `JD_FILE_ROOTS`. Every new
 filesystem entry point goes through it, including the ones that do not look like file operations —
 backup restore destinations, database dump paths, bind-mount sources, build contexts. `ResolveEntry`
 applies the same containment but returns the entry rather than its target: use it for delete, move, stat
 and chmod, which act *on* a symlink.
+
+Logs are read under their own roots: `logsx.Service.Allow` holds a path, after resolving symlinks, to
+`JD_LOG_ROOTS`. Every log file the dashboard opens passes it, including the paths no request typed — a
+PM2 process's files from its record, the files a database server holds open (read from `/proc`), the
+access and error logs a proxy site's `access_log`/`error_log` directives name, and each rotated
+generation beside a site's log, asked again before every open because a generation can be a link to
+anywhere. A directive or a process is something an operator can point anywhere, so the path it yields is
+contained like one typed into a request; a refused one is named with the reason, never read.
 
 `internal/safepath` holds the archive-unpacking rules (absolute symlink targets refused, nothing written
 through a symlink already in the destination, the final component unlinked rather than followed). Both
@@ -117,7 +134,7 @@ State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` blo
 `internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
 through the rename: moving it would strand every existing install's accounts, audit log and secrets.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`); backups
+`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`); boards (`boards`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,

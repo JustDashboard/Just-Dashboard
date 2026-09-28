@@ -7,11 +7,17 @@
   "description": "A MySQL-compatible relational database, kept off the network like every database here.",
   "iconId": "database",
   "docsUrl": "https://mariadb.com/kb/en/documentation/",
+  "access": {
+    "kind": "client",
+    "usernameVariable": "MARIADB_USER",
+    "secretVariable": "MARIADB_PASSWORD",
+    "note": "Nothing signs in through a browser: port 3306 is internal-only and never proxied, so this deployment has no address to open. Other containers reach it over the Docker network as the user you named here with the generated password from the Variables tab, and the dashboard's Databases page picks up the same pair on its own. That account has GRANT ALL on the one database you named; the separate root password stays in the Variables tab for administration."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-2.0",
     "upstreamUrl": "https://hub.docker.com/_/mariadb",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": { "reference": "mariadb:11.4", "tagPolicy": "minor", "pullPolicy": "missing" },
@@ -37,7 +43,7 @@
   "automation": [
     { "name": "Nightly backup", "description": "Dumps the database every night before most people are awake.", "cron": "0 3 * * *", "timezone": "UTC", "actions": ["backup"], "default": true }
   ],
-  "update": { "detector": "registry", "backupFirst": true, "notes": "MariaDB upgrades run mariadb-upgrade on first start; a restore needs the pre-update dump." },
+  "update": { "detector": "registry", "backupFirst": true, "notes": "The official image does not run mariadb-upgrade unless MARIADB_AUTO_UPGRADE is set, so an upgrade across major versions needs that step run by hand. A restore needs the pre-update dump." },
   "security": {},
   "fixtures": [{ "name": "default", "inputs": {}, "digest": "sha256:b86a8bc528b88837e1faa95a7ae26649d3e0c95a848baed64cb2f84fbe1bb8c1" }]
 }

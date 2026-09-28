@@ -229,6 +229,14 @@ func (s *OrchestrationStore) CompletePreviewRemoval(ctx context.Context, runID i
 	if _, err = tx.ExecContext(ctx, `UPDATE deploy_environments SET live_release_id=0,archived_at=?,updated_at=? WHERE id=?`, now, now, environmentID); err != nil {
 		return err
 	}
+	// Production's copied variables leave with the preview: a reopened pull
+	// request asks for them again rather than inheriting stale secrets.
+	if _, err = tx.ExecContext(ctx, `UPDATE deploy_variable_revisions SET active=0 WHERE environment_id=? AND copied_from_environment<>0 AND active=1`, environmentID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE deploy_preview_refs SET variables_copied_revision='' WHERE environment_id=?`, environmentID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

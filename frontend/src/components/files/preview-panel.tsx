@@ -5,7 +5,6 @@ import {
   ArrowUpRight,
   Calculator,
   Clipboard,
-  Cross,
   Download,
   Eye,
   Fingerprint,
@@ -14,15 +13,20 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { downloadUrl, get } from "@/lib/api"
-import { bytes, relativeTime, timestamp } from "@/lib/format"
+import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileChecksum, FileEntry, FilePreview, FileUsage } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Detail, DetailList } from "@/components/page"
-import { PaneHeader, Well } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
-import { IconAction } from "@/components/icon-action"
-import { FileIcon, kindOfEntry } from "@/components/files/file-icon"
+import { Well } from "@/components/panel"
+import { ErrorState, LoadingRows } from "@/components/state"
+import {
+  FileIcon,
+  kindOfEntry,
+  useFolderColour,
+  type FolderColour,
+} from "@/components/files/file-icon"
+import { FolderColourSwatches } from "@/components/files/folder-colour"
 import { Meter } from "@/components/meter"
 import { copyText } from "@/lib/clipboard"
 import { rawUrl } from "@/components/files/media"
@@ -41,44 +45,45 @@ export { rawUrl } from "@/components/files/media"
  * the directory. Opening it — the viewer, the editor, the image editor, the
  * download — is the deliberate second action.
  *
+ * It opens on the thing itself, large — the picture, the video, or the folder
+ * or page it is drawn as — with its name and kind under it, the way a desktop's
+ * preview column does; a folder carries its colour there too. With nothing
+ * chosen it describes the folder being browsed rather than asking to be
+ * clicked: that column was a sentence of instructions on every visit.
+ *
  * Nothing here loads a whole file. The text is a head the server trimmed, the
  * image is a URL the browser fetches itself, and the recursive size of a
  * directory is asked for rather than computed on hover.
  */
 export function PreviewPanel({
   entry,
+  folder,
   canWrite,
+  onColour,
   onOpen,
   onView,
   onEditImage,
   onNavigate,
-  onClose,
   className,
 }: {
   entry: FileEntry | null
+  /** The folder being browsed, shown while nothing in it is chosen. */
+  folder: FileEntry | null
   canWrite: boolean
+  onColour: (entry: FileEntry, colour: FolderColour) => void
   /** The editor. */
   onOpen: (path: string) => void
   /** The full-screen viewer. */
   onView: (entry: FileEntry) => void
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
-  onClose: () => void
   className?: string
 }) {
-  if (!entry) {
+  const shown = entry ?? folder
+  if (!shown) {
     return (
       <div className={cn("flex min-h-0 flex-col", className)}>
-        <PaneHeader className="gap-2 pr-1.5">
-          <span className="min-w-0 flex-1 truncate text-body font-medium">Details</span>
-          <IconAction label="Hide the details" className="size-7" onClick={onClose}>
-            <Cross />
-          </IconAction>
-        </PaneHeader>
-        <EmptyNote className="px-5 py-10 leading-relaxed">
-          Click a file to see what it is — the first lines, the picture, what is inside an archive —
-          without opening it.
-        </EmptyNote>
+        <LoadingRows rows={3} className="p-4" />
       </div>
     )
   }
@@ -87,14 +92,15 @@ export function PreviewPanel({
   // by an effect that clears four pieces of state on the way past.
   return (
     <Preview
-      key={entry.path}
-      entry={entry}
+      key={shown.path}
+      entry={shown}
+      current={!entry}
       canWrite={canWrite}
+      onColour={onColour}
       onOpen={onOpen}
       onView={onView}
       onEditImage={onEditImage}
       onNavigate={onNavigate}
-      onClose={onClose}
       className={className}
     />
   )
@@ -102,21 +108,24 @@ export function PreviewPanel({
 
 function Preview({
   entry,
+  current,
   canWrite,
+  onColour,
   onOpen,
   onView,
   onEditImage,
   onNavigate,
-  onClose,
   className,
 }: {
   entry: FileEntry
+  /** The folder being browsed, rather than a row in it. */
+  current: boolean
   canWrite: boolean
+  onColour: (entry: FileEntry, colour: FolderColour) => void
   onOpen: (path: string) => void
   onView: (entry: FileEntry) => void
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
-  onClose: () => void
   className?: string
 }) {
   const [preview, setPreview] = useState<FilePreview>()
@@ -134,26 +143,17 @@ function Preview({
     return () => controller.abort()
   }, [path, modified])
 
-  const kind = kindOfEntry(entry)
   return (
-    <div className={cn("flex min-h-0 flex-col", className)}>
-      <PaneHeader className="gap-2 pr-1.5">
-        <FileIcon entry={entry} className="size-5 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-body leading-tight font-medium" title={entry.name}>
-            {entry.name}
-          </h2>
-          <p className="truncate text-hint leading-tight text-muted-foreground">
-            {preview?.kind === "dir" ? "Folder" : kind.label}
-            {preview?.width ? ` · ${preview.width}×${preview.height}` : ""}
-          </p>
-        </div>
-        <IconAction label="Hide the details" className="size-7" onClick={onClose}>
-          <Cross />
-        </IconAction>
-      </PaneHeader>
-
-      <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+    <div className={cn("flex min-h-0 flex-col overflow-auto", className)}>
+      <Hero
+        entry={entry}
+        preview={preview}
+        current={current}
+        canWrite={canWrite}
+        onColour={onColour}
+        onView={onView}
+      />
+      <div className="space-y-4 p-4">
         {error && <ErrorState error={error} />}
         {!preview && !error && <LoadingRows rows={3} />}
         {preview && (
@@ -161,13 +161,12 @@ function Preview({
             <PreviewBody
               entry={entry}
               preview={preview}
+              current={current}
               canWrite={canWrite}
               onOpen={onOpen}
-              onView={onView}
               onEditImage={onEditImage}
               onNavigate={onNavigate}
             />
-            <Facts entry={entry} preview={preview} />
             <Actions
               entry={entry}
               preview={preview}
@@ -175,6 +174,7 @@ function Preview({
               onOpen={onOpen}
               onView={onView}
             />
+            <Facts entry={entry} preview={preview} />
           </>
         )}
       </div>
@@ -182,62 +182,116 @@ function Preview({
   )
 }
 
+/**
+ * The thing, large, and what it is called. A picture or a video is itself;
+ * everything else is the folder or the page the listing draws it as, at a
+ * size where the page can carry its extension.
+ */
+function Hero({
+  entry,
+  preview,
+  current,
+  canWrite,
+  onColour,
+  onView,
+}: {
+  entry: FileEntry
+  preview: FilePreview | undefined
+  current: boolean
+  canWrite: boolean
+  onColour: (entry: FileEntry, colour: FolderColour) => void
+  onView: (entry: FileEntry) => void
+}) {
+  const colour = useFolderColour(entry.path, entry.name)
+  const kind = kindOfEntry(entry)
+  const facts = [
+    current ? "This folder" : kind.label,
+    preview?.width ? `${preview.width}×${preview.height}` : null,
+    preview?.kind === "dir"
+      ? plural(preview.childCount ?? 0, "item")
+      : preview && !entry.isDir
+        ? bytes(preview.size)
+        : null,
+  ].filter(Boolean)
+
+  return (
+    <div className="flex flex-col items-center gap-3 border-b border-hairline px-4 pt-6 pb-4 text-center">
+      {preview?.kind === "image" ? (
+        <button
+          type="button"
+          className="flex max-h-56 w-full items-center justify-center overflow-hidden rounded-lg border border-hairline checkerboard p-2 focus-ring"
+          onClick={() => onView(entry)}
+          title="View full screen"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={rawUrl(entry.path, preview.modified)}
+            alt={entry.name}
+            className="max-h-52 max-w-full object-contain"
+          />
+        </button>
+      ) : preview?.kind === "video" ? (
+        <video
+          src={rawUrl(entry.path, preview.modified)}
+          controls
+          preload="metadata"
+          className="max-h-56 w-full rounded-lg border border-hairline bg-black"
+        />
+      ) : (
+        <FileIcon entry={entry} detail className="size-24" />
+      )}
+      <div className="w-full min-w-0 space-y-1">
+        <h2
+          className="line-clamp-2 text-title leading-snug font-semibold break-all"
+          title={entry.name}
+        >
+          {entry.name}
+        </h2>
+        <p className="numeric truncate text-hint text-muted-foreground">{facts.join(" · ")}</p>
+      </div>
+      {entry.isDir && canWrite && (
+        <FolderColourSwatches
+          value={colour}
+          onPick={(next) => onColour(entry, next)}
+          className="justify-center"
+        />
+      )}
+    </div>
+  )
+}
+
 function PreviewBody({
   entry,
   preview,
+  current,
   canWrite,
   onOpen,
-  onView,
   onEditImage,
   onNavigate,
 }: {
   entry: FileEntry
   preview: FilePreview
+  current: boolean
   canWrite: boolean
   onOpen: (path: string) => void
-  onView: (entry: FileEntry) => void
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
 }) {
   switch (preview.kind) {
     case "image":
-      return (
-        <div className="space-y-2">
-          <button
-            type="button"
-            className="flex max-h-72 w-full items-center justify-center overflow-hidden rounded-lg border border-hairline checkerboard p-2 focus-ring"
-            onClick={() => onView(entry)}
-            title="View full screen"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={rawUrl(entry.path, preview.modified)}
-              alt={entry.name}
-              className="max-h-64 max-w-full object-contain"
-            />
-          </button>
-          {canWrite && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full"
-              onClick={() => onEditImage(entry.path)}
-            >
-              <Pencil className="size-3.5" />
-              Crop, rotate, resize
-            </Button>
-          )}
-        </div>
-      )
+      return canWrite ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full"
+          onClick={() => onEditImage(entry.path)}
+        >
+          <Pencil className="size-3.5" />
+          Crop, rotate, resize
+        </Button>
+      ) : null
     case "video":
-      return (
-        <video
-          src={rawUrl(entry.path, preview.modified)}
-          controls
-          preload="metadata"
-          className="max-h-72 w-full rounded-lg border border-hairline bg-black"
-        />
-      )
+      return null
     case "audio":
       return <audio src={rawUrl(entry.path, preview.modified)} controls className="w-full" />
     case "pdf":
@@ -264,7 +318,14 @@ function PreviewBody({
     case "archive":
       return <ArchiveListing preview={preview} />
     case "dir":
-      return <DirectoryPreview entry={entry} preview={preview} onNavigate={onNavigate} />
+      return (
+        <DirectoryPreview
+          entry={entry}
+          preview={preview}
+          current={current}
+          onNavigate={onNavigate}
+        />
+      )
     default:
       return (
         <div className="rounded-lg border border-dashed border-hairline p-4 text-center text-xs text-muted-foreground">
@@ -278,10 +339,13 @@ function PreviewBody({
 function DirectoryPreview({
   entry,
   preview,
+  current,
   onNavigate,
 }: {
   entry: FileEntry
   preview: FilePreview
+  /** The folder being browsed, which there is no opening. */
+  current: boolean
   onNavigate: (path: string) => void
 }) {
   const [usage, setUsage] = useState<FileUsage>()
@@ -301,15 +365,17 @@ function DirectoryPreview({
   return (
     <div className="space-y-2">
       <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          className="flex-1"
-          onClick={() => onNavigate(entry.path)}
-        >
-          <FolderOpen className="size-3.5" />
-          Open
-        </Button>
+        {!current && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-1"
+            onClick={() => onNavigate(entry.path)}
+          >
+            <FolderOpen className="size-3.5" />
+            Open
+          </Button>
+        )}
         <Button size="sm" variant="outline" className="flex-1" onClick={measure} pending={busy}>
           <Calculator className="size-3.5" />
           Measure

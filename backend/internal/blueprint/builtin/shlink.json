@@ -7,11 +7,16 @@
   "description": "A URL shortener with visit statistics and an API; the domain is what every short link starts with.",
   "iconId": "globe",
   "docsUrl": "https://shlink.io/documentation/",
+  "access": {
+    "kind": "client",
+    "secretVariable": "INITIAL_API_KEY",
+    "note": "Nothing signs in here through a browser. Shlink is the redirect engine and the REST API; it ships no admin interface, so opening https://<your domain>/ returns Shlink's own \"not found\" response rather than a login page. Reveal the initial API key from the Variables tab and send it as the X-Api-Key header, or paste it into a separately hosted Shlink web client pointed at this address. The key is created only on the first start of an empty database."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "MIT",
     "upstreamUrl": "https://github.com/shlinkio/shlink",
-    "reviewedAt": "2026-09-18",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7"
   },
   "image": {

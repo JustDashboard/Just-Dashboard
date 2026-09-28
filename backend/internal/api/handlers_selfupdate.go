@@ -23,6 +23,9 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 		// read-only operator seeing "0.6 is out" is how the person who *can*
 		// install it finds out.
 		r.Method(http.MethodGet, "/update", s.handle(s.handleSelfUpdateStatus))
+		// The same audience as the report, which already carries this
+		// transcript's last 64 KB: this is the rest of it, asked for once.
+		r.Method(http.MethodGet, "/update/log", s.handle(s.handleSelfUpdateLog))
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
@@ -45,6 +48,7 @@ func (s *Server) mountSelfUpdateRoutes(r chi.Router) {
 			// read-only operator needs on screen.
 			r.Method(http.MethodGet, "/config", s.handle(s.handleSelfConfigStatus))
 			r.Method(http.MethodDelete, "/config/run", s.handle(s.handleSelfConfigDismiss))
+			r.Method(http.MethodGet, "/config/log", s.handle(s.handleSelfConfigLog))
 			// Applying settings and restarting both take the dashboard away
 			// for a minute and can leave it answering somewhere else. The
 			// rollback makes them recoverable rather than irreversible, but
@@ -155,6 +159,24 @@ func (s *Server) handleSelfUpdateInstall(w http.ResponseWriter, r *http.Request)
 	// 202: the work has been handed to a container that outlives this process.
 	httpx.JSON(w, http.StatusAccepted, run)
 	return nil
+}
+
+// handleSelfUpdateLog answers the whole transcript of the last upgrade as
+// plain text. The report is polled every two seconds during a run and carries
+// only the end; this is read when somebody wants the build from its first line.
+func (s *Server) handleSelfUpdateLog(w http.ResponseWriter, r *http.Request) error {
+	writeTranscript(w, s.modules.selfUpdate.Transcript())
+	return nil
+}
+
+// writeTranscript answers a run's output as text. It is never cached: the
+// file is rewritten by every run, and a stale copy is the previous run's story.
+func writeTranscript(w http.ResponseWriter, text string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(text))
 }
 
 // handleSelfUpdateDismiss forgets a finished run, which is what clears the

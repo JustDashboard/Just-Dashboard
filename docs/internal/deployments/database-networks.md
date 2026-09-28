@@ -5,6 +5,26 @@ connection as a dependency. Execution resolves that identity through Databases u
 encrypted credentials. The explicit admin URL read remains audited and non-cacheable. It is read-only:
 it does not create a network, publish a port, or change the saved host DSN.
 
+`GET /databases/{id}/url` takes `format` (`url`, `jdbc`, `jdbc-mariadb`, `adonet`, `mysql2`) and
+`database` (another database on the same server) for an application that parses JDBC (credentials as
+query parameters; `jdbc-mariadb` writes MariaDB Connector/J's own `jdbc:mariadb://` scheme, since quick
+setup's MariaDB records a `mysql://` address), ADO.NET keywords or Rails' `mysql2://`, and for Rails 8's
+cache, queue and cable databases. The typed
+reference records both after the numeric id — `${{database.5.jdbc}}`, `${{database.5.url.app_cache}}`
+— and the release resolves the same shape from the container URL. Only a numeric id takes a suffix, so
+a connection name containing dots is never misread. Relinking a variable from Settings → Databases
+keeps the shape its previous reference asked for. Quick setup also offers PostgreSQL 16 with pgvector
+(`pgvector/pgvector:pg16`) or PostGIS (`postgis/postgis:16-3.5-alpine`, offered and accepted only on
+x86-64, the one architecture that image is published for), which Databases already recognises, and
+refuses MongoDB 7 on a CPU without AVX or ARMv8.2 atomics before pulling it.
+
+Creation stages entered variables in the draft's encrypted environment column before preflight and
+commits them with the initial project transaction. A required connection can therefore be satisfied by
+a managed database reference or an external provider URL before the first run. The browser receives
+only staged variable names when resuming, never saved values. Closing the database sheet cancels a
+pending connection read; a delayed reply cannot add a database to an abandoned form. Standalone
+provisioning remembers an already-created container across source-tab changes and resumes its setup.
+
 For a saved loopback connection backed by a recognized running Docker database, the container URL uses
 `db-ID.jd.internal` and the engine's internal port. Discovery requires the exact observed loopback
 address and published port; ambiguous localhost bindings and unsupported network namespaces fail.
@@ -38,9 +58,18 @@ old database with the alias or an unrelated alias owner blocks repair. Attach/de
 are audited without connection strings. Cancellation stops reconciliation with the server.
 
 `GET /deploy/{project}/environments/{environment}/database-links` reports the connection identity,
-hostname, network and last observation, scoped to that environment. Configuration → Dependencies
-shows these observations. Connected means the network binding was observed; it does not prove database
-schema or application health. Observations older than 30 seconds are marked stale.
+its engine and database, hostname, network and last observation, scoped to that environment.
+Configuration → Dependencies shows these observations. Connected means the network binding was
+observed; it does not prove database schema or application health. Observations older than 30 seconds
+are marked stale. The database name is read from the sealed DSN the way every other database route
+reads it; a connection whose DSN no longer resolves keeps its row without that name.
+
+A binding that reconciliation could not repair carries `detail`, the reason of the pass that failed —
+a replaced container that no longer matches the saved identity, an alias another container holds, a
+namespace that cannot join a bridge. It is bounded to 300 characters, holds no connection string, and
+is the same sentence the routes performing these operations already return. A connected or stale
+binding reports no reason: staleness is the age of the last pass, not a failure. The additive
+`deploy_database_bindings.detail` column defaults to empty for existing installs.
 
 ## Removal and existing installs
 
@@ -64,10 +93,17 @@ to save its typed reference. Saved non-loopback IP connections, remote servers a
 receive automatic container discovery. Application drivers must reconnect and resolve DNS after a
 database interruption; this feature does not preserve an existing TCP connection through replacement.
 
+External providers remain ordinary saved connections or encrypted application variables: provider
+credentials, TLS options and hostnames are preserved. For Supabase, choose the connection URL suited to
+the server's network; its direct endpoint generally uses IPv6, while the shared session pooler supports
+IPv4. See [Supabase's connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres).
+No hosted-provider account or live provider credentials are required by the local test fixtures.
+
 ## Verification
 
 - Component/API tests cover reference parsing, replacement identity, scoped status, stale observations,
-  safe removal plans, linked-database deletion, early preview credential refusal and generated-file containment.
+  the reported engine and recorded reconciliation reason with its bound, safe removal plans,
+  linked-database deletion, early preview credential refusal and generated-file containment.
 - `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
   provisions PostgreSQL, MySQL, MariaDB, Redis and MongoDB, authenticates from a separate client container,
   refuses a preview's production credential/network reference before allocation,

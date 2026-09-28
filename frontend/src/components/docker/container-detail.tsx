@@ -1,19 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowCircleUp,
-  Clock,
+  ArrowLeft,
+  ClockRewind,
   Copy,
-  Download,
   Eye,
   EyeOff,
-  FolderClosed,
   Information,
   Layers,
   Pencil,
-  Servers,
   ShieldOff,
   Warning,
 } from "@/components/icons"
@@ -26,30 +25,38 @@ import type {
   DockerDiagnosis,
   FailureDiagnosis,
   FileChange,
-  LogLine,
   MigrationPlan,
   PortRoute,
   WritableEntry,
   WritableLayerReport,
 } from "@/lib/types"
-import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { LogViewer } from "@/components/log-viewer"
+import { useMediaQuery } from "@/hooks/use-mobile"
+import { dockerSource } from "@/lib/log-sources"
+import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { XtermPane } from "@/components/xterm-pane"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ContainerUsage } from "@/components/docker/container-usage"
+import { ContainerLiveUsage } from "@/components/docker/container-live-usage"
 import { statusWord } from "@/components/docker/container-cells"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { ContainerFindings } from "@/components/docker/attention"
+import { containerEventsView } from "@/components/docker/container-events"
 import { PortTag, RouteRow } from "@/components/docker/exposure"
 import { ExplainIcon, Hint, Term } from "@/components/docker/explain"
-import type { ConfirmFn } from "@/components/docker/shared"
-import { SidePanel } from "@/components/side-panel"
-import { Detail, DetailList } from "@/components/page"
-import { Group, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { ROW_BLEED } from "@/components/row-list"
+import {
+  DatabaseStorageWarning,
+  looksLikeDatabase,
+  type ConfirmFn,
+} from "@/components/docker/shared"
+import { FileBrowser } from "@/components/files/inline-browser"
+import { ProductLogo, containerProduct } from "@/components/product-logo"
+import { useConfirm } from "@/components/confirm-dialog"
+import { Detail, DetailList, Metric, MetricStrip, Page, PageContext } from "@/components/page"
+import { Group, Well } from "@/components/panel"
+import { FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -58,74 +65,60 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { copyText } from "@/lib/clipboard"
 
-/** How many log lines the panel keeps before dropping the oldest. */
-const LOG_LIMIT = 5000
-
-export function ContainerDetailSheet({
-  containerId,
-  focusTab,
-  onOpenChange,
-  diagnosis,
-  confirm,
-  onChanged,
-}: {
-  containerId: string | null
-  /**
-   * Which tab to land on, when the thing that opened this panel was asking a
-   * particular question — "show me the logs", "open a shell", a finding whose
-   * evidence is the usage chart. Without it every one of those routes arrived
-   * at Overview and cost a second click, which is the reason a log button that
-   * merely selects a row never feels like a log button.
-   */
-  focusTab?: string
-  onOpenChange: (open: boolean) => void
-  /** The page's one diagnosis pass, filtered to this container rather than refetched. */
-  diagnosis?: DockerDiagnosis
-  confirm?: ConfirmFn
-  onChanged?: () => void
-}) {
+/**
+ * One container, as a place of its own.
+ *
+ * This was a `SidePanel` over the container table until 2026-09-21. Seven
+ * tabs, a recorded-usage chart, a live log socket and an interactive shell is
+ * not a thing you glance at with the list showing behind it: an xterm inside a
+ * sheet's `sm:max-w-3xl` is about ninety columns, and the table it half-covers
+ * is not context anybody is using while they read a deploy's output. So a
+ * container is its own destination with a breadcrumb back, the way a
+ * deployment run is one.
+ *
+ * The tabs stayed *in* the page. They switch between views of one thing, which
+ * is what the underlined tab is for; the route-level strip was retired in
+ * 0.6.7 and this is not the reason to bring it back (`shell-design.md`). What
+ * the panel took as a `focusTab` prop is `?tab=` now — the same job, and it
+ * survives a reload and a shared link.
+ */
+export function ContainerPage() {
+  const { id } = useParams<{ id: string }>()
+  const tab = useSearchParams().get("tab")
   return (
-    <ContainerDetailPanel
-      // Keyed on the container *and* the requested tab so asking for the logs
-      // of the container already open still moves to the logs.
-      key={`${containerId ?? "none"}:${focusTab ?? ""}`}
-      containerId={containerId}
-      focusTab={focusTab}
-      onOpenChange={onOpenChange}
-      diagnosis={diagnosis}
-      confirm={confirm}
-      onChanged={onChanged}
-    />
+    // Keyed on the container *and* the requested tab, so a link to the logs of
+    // the container already open still moves to the logs.
+    <ContainerDetailPanel key={`${id}:${tab ?? ""}`} containerId={id} focusTab={tab ?? undefined} />
   )
 }
 
 function ContainerDetailPanel({
   containerId,
   focusTab,
-  onOpenChange,
-  diagnosis,
-  confirm,
-  onChanged,
 }: {
-  containerId: string | null
+  containerId: string
+  /**
+   * Which tab to land on, when the thing that linked here was asking a
+   * particular question — "show me the logs", "open a shell", a finding whose
+   * evidence is the usage chart. Without it every one of those routes arrived
+   * at Overview and cost a second click, which is the reason a log button that
+   * merely selects a row never feels like a log button.
+   */
   focusTab?: string
-  onOpenChange: (open: boolean) => void
-  diagnosis?: DockerDiagnosis
-  confirm?: ConfirmFn
-  onChanged?: () => void
 }) {
   const { can } = useAuth()
+  const router = useRouter()
+  const { confirm, dialog } = useConfirm()
   const [detail, setDetail] = useState<ContainerDetail>()
   const [error, setError] = useState<Error>()
   // Which tab a container opens on. Somebody watching a deploy wants Logs
   // every time, and reopening on Overview is a click paid per container. A
-  // caller that asked for a specific tab overrides the remembered one — it is
+  // link that asked for a specific tab overrides the remembered one — it is
   // answering a question rather than arranging furniture.
   const [remembered, remember] = useViewState("docker.container.tab", "overview")
   // Seeded once, because this component is keyed on the container and the
-  // requested tab: a caller asking for the logs gets the logs, and the moment
-  // the reader moves to another tab that choice becomes the remembered one
-  // again.
+  // requested tab: a link to the logs gets the logs, and the moment the reader
+  // moves to another tab that choice becomes the remembered one again.
   const [tab, setTabState] = useState(focusTab ?? remembered)
   const setTab = useCallback(
     (next: string) => {
@@ -136,73 +129,129 @@ function ContainerDetailPanel({
   )
   const [reloads, setReloads] = useState(0)
 
+  // The page's own diagnosis pass. As a panel this was handed the container
+  // table's single poll, filtered to the open container; on its own route
+  // there is nobody above to ask.
+  const health = usePoll<DockerDiagnosis>(
+    (signal) => get<DockerDiagnosis>("/docker/health", undefined, signal),
+    60_000,
+  )
+  // Why it stopped, read once for the page rather than by the tab that says
+  // so: the Logs tab opens on the same diagnosis's window.
+  const failure = usePoll<FailureDiagnosis>(
+    (signal) =>
+      get<FailureDiagnosis>(`/docker/containers/${containerId}/failure`, undefined, signal),
+    0,
+    [containerId],
+  )
+  // Whether the Logs tab is handed that window rather than the tail.
+  const [crash, setCrash] = useState(false)
+
+  // Whether this page has ever had its container, so a 404 can be told apart
+  // from a bad address.
+  const loaded = useRef(false)
+
   useEffect(() => {
-    if (!containerId) return
     const controller = new AbortController()
     get<ContainerDetail>(
       `/docker/containers/${encodeURIComponent(containerId)}`,
       undefined,
       controller.signal,
     )
-      .then(setDetail)
-      .catch((err) => !controller.signal.aborted && setError(err))
+      .then((next) => {
+        loaded.current = true
+        setDetail(next)
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        // Removing a container is done from this page, and the thing the page
+        // is about then stops existing. An error state about a container the
+        // reader just deleted on purpose is not news — the list is.
+        if (err instanceof ApiError && err.status === 404 && loaded.current) {
+          router.replace("/docker/containers")
+          return
+        }
+        setError(err)
+      })
     return () => controller.abort()
-  }, [containerId, reloads])
+  }, [containerId, reloads, router])
 
   const shell = can("terminal") && detail?.state === "running"
+  const changed = useCallback(() => {
+    setReloads((n) => n + 1)
+    health.refresh()
+    failure.refresh()
+  }, [health, failure])
 
   return (
-    <SidePanel
-      open={containerId !== null}
-      onOpenChange={onOpenChange}
-      title={
-        <>
-          {detail?.name ?? "Container"}
-          {detail && (
-            <Status
-              state={detail.state}
-              live={detail.state === "running"}
-              label={statusWord(detail)}
+    <Page fill>
+      <div className="flex min-w-0 shrink-0 flex-col gap-4">
+        <PageContext
+          eyebrow={
+            <Link
+              href="/docker/containers"
+              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+            >
+              <ArrowLeft className="size-3" /> Containers
+            </Link>
+          }
+          title={detail?.name ?? "Container"}
+          actions={
+            detail && (
+              <>
+                <Status
+                  state={detail.state}
+                  live={detail.state === "running"}
+                  label={statusWord(detail)}
+                />
+                {/* Start, stop and restart were reachable from the table and
+                    nowhere else, so opening a container to look at why it is
+                    unhappy meant closing it again to do anything about it. */}
+                <ContainerLifecycle
+                  detail={detail}
+                  confirm={confirm}
+                  onOpenTab={setTab}
+                  onChanged={changed}
+                />
+                <ContainerActions detail={detail} confirm={confirm} onChanged={changed} />
+              </>
+            )
+          }
+        />
+        {/* What the container *is*, as its own row of facts rather than as tags
+            crammed into the title (§15 pass 8, and the same call `ProjectShell`
+            makes). "Which image is this" is the second question anybody opening
+            a container has, and it used to need the Overview tab. */}
+        {detail && (
+          <MetricStrip className="animate-rise">
+            <Metric
+              label="Container"
+              value={
+                <span className="inline-flex items-center gap-2">
+                  <ProductLogo id={containerProduct(detail)} />
+                  {detail.name}
+                </span>
+              }
             />
-          )}
-          {/* What it is running, on screen rather than only in the accessible
-              description. "Which image is this" is the second question anybody
-              opening this panel has, and it used to need the Overview tab. */}
-          {detail && <Tag mono>{detail.image}</Tag>}
-          {detail?.composeStack && <Tag>managed by compose</Tag>}
-        </>
-      }
-      description={detail?.image ?? containerId ?? undefined}
-      bodyClassName="flex min-h-0 flex-1 flex-col p-4"
-      actions={
-        detail && (
-          <>
-            {/* Start, stop and restart were reachable from the table and
-                nowhere else, so opening a container to look at why it is
-                unhappy meant closing it again to do anything about it. */}
-            {confirm && (
-              <ContainerLifecycle
-                detail={detail}
-                confirm={confirm}
-                onOpenTab={setTab}
-                onChanged={() => {
-                  setReloads((n) => n + 1)
-                  onChanged?.()
-                }}
+            <Metric label="Image" value={detail.image} />
+            <Metric label="ID" value={detail.id.slice(0, 12)} />
+            {detail.composeStack && (
+              <Metric
+                label="Compose stack"
+                value={
+                  <Link
+                    href={`/docker/stacks/${encodeURIComponent(detail.composeStack)}`}
+                    className="rounded-sm focus-ring hover:underline"
+                  >
+                    {detail.composeStack}
+                  </Link>
+                }
               />
             )}
-            <ContainerActions
-              detail={detail}
-              confirm={confirm}
-              onChanged={() => {
-                setReloads((n) => n + 1)
-                onChanged?.()
-              }}
-            />
-          </>
-        )
-      }
-    >
+          </MetricStrip>
+        )}
+      </div>
+
       {error && <ErrorState error={error} />}
       {!detail && !error && <LoadingRows />}
 
@@ -221,35 +270,49 @@ function ContainerDetailPanel({
           <TabsContent value="overview" className="min-h-0 flex-1 space-y-4 overflow-y-auto">
             {/*
               Why it is not working, then what is wrong with it, then the facts
-              about it. An operator who opened this panel opened it for the
+              about it. An operator who opened this page opened it for the
               first of those, and the version this replaces led with the third.
             */}
-            <FailurePanel containerId={detail.id} />
-            <ContainerFindings diagnosis={diagnosis} containerId={detail.id} />
+            <FailurePanel
+              data={failure.data}
+              onReadLogs={() => {
+                setCrash(true)
+                setTab("logs")
+              }}
+            />
+            <ContainerFindings diagnosis={health.data} containerId={detail.id} />
             <OverviewFields detail={detail} />
             <Reachability containerId={detail.id} />
           </TabsContent>
 
-          {/* Recorded history rather than a live feed: the point is the spike
-              that happened while nobody had this panel open. The limits sit
-              above the charts because this is where somebody realises theirs
-              are wrong. */}
-          <TabsContent value="usage" className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+          <TabsContent value="usage" className="min-h-0 flex-1 space-y-6 overflow-y-auto">
+            <ContainerLiveUsage key={detail.id} detail={detail} />
             <ResourceLimitsEditor detail={detail} onSaved={() => setReloads((n) => n + 1)} />
-            <ContainerUsage containerId={detail.id} name={detail.name} />
+            <ContainerUsage containerId={detail.id} name={detail.name} plain />
           </TabsContent>
 
-          <TabsContent value="logs" className="min-h-0 flex-1">
-            <ContainerLogs containerId={detail.id} active={tab === "logs"} />
+          {/* Scrolls on a phone, where the readings and a pane worth reading
+              are taller than what is left of the window under the facts. */}
+          <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto">
+            <ContainerLogs
+              detail={detail}
+              failure={failure.data}
+              crash={crash}
+              onCrashChange={setCrash}
+            />
           </TabsContent>
 
           <TabsContent value="env" className="min-h-0 flex-1">
             <EnvironmentList env={detail.env} />
           </TabsContent>
 
-          <TabsContent value="mounts" className="min-h-0 flex-1 space-y-3 overflow-y-auto">
-            <MountList mounts={detail.mounts} />
-            <WritableLayer containerId={detail.id} />
+          {/* The listing takes the tab's height and scrolls inside itself, so
+              the tab only scrolls once a writable-layer report outgrows it. */}
+          <TabsContent value="mounts" className="min-h-0 flex-1 overflow-y-auto">
+            <div className="flex h-full min-h-0 flex-col gap-3">
+              <MountList detail={detail} />
+              <WritableLayer containerId={detail.id} />
+            </div>
           </TabsContent>
 
           <TabsContent value="inspect" className="min-h-0 flex-1">
@@ -263,7 +326,8 @@ function ContainerDetailPanel({
           )}
         </Tabs>
       )}
-    </SidePanel>
+      {dialog}
+    </Page>
   )
 }
 
@@ -438,7 +502,7 @@ function EnvironmentList({ env }: { env: string[] }) {
                 <Button
                   size="xs"
                   variant="ghost"
-                  className="ml-auto shrink-0 font-normal"
+                  className="-my-1 ml-auto shrink-0 font-normal"
                   aria-label={`Copy ${row.name}`}
                   onClick={() => void copyText(row.value, `${row.name} copied`)}
                 >
@@ -450,7 +514,7 @@ function EnvironmentList({ env }: { env: string[] }) {
                 <Button
                   size="xs"
                   variant="ghost"
-                  className="shrink-0 font-normal"
+                  className="-my-1 shrink-0 font-normal"
                   aria-label={`${revealed[row.name] ? "Hide" : "Reveal"} ${row.name}`}
                   onClick={() => setRevealed((prev) => ({ ...prev, [row.name]: !prev[row.name] }))}
                 >
@@ -615,70 +679,90 @@ function FieldGroup({ title, children }: { title: React.ReactNode; children: Rea
   )
 }
 
-function ContainerLogs({ containerId, active }: { containerId: string; active: boolean }) {
-  const [lines, setLines] = useState<LogLine[]>([])
-  const [timestamps, setTimestamps] = useState(true)
-
-  const onMessage = useCallback((envelope: Envelope) => {
-    if (envelope.type !== "logs") return
-    const batch = envelope.data as { stream: string; text: string }[]
-    setLines((prev) => {
-      // No stream-to-level mapping here: plenty of programs log everything to
-      // stderr, and painting all of it red is what made this pane unreadable.
-      // The viewer colours lines by their own words instead.
-      const next = [...prev, ...batch.map((l) => ({ text: l.text }))]
-      return next.length > LOG_LIMIT ? next.slice(next.length - LOG_LIMIT) : next
-    })
-  }, [])
-
-  const query = useMemo(
-    () => ({ tail: 500, timestamps: timestamps ? "true" : "false" }),
-    [timestamps],
+/**
+ * The container's output, read where the container is.
+ *
+ * It was a raw tail — the text, a filter box and Save — which could not
+ * look further back than the socket's first five hundred lines, read every
+ * line as the same grey string, and saved only what happened to be on
+ * screen. It is the service logs every page embeds now, on this container:
+ * Live, History and Insights over its whole log, read through the lens its
+ * image names (a Postgres container's lines as Postgres events, an nginx
+ * one's as requests), the lens's readings above it, and Events — what
+ * Docker did to it — as a view of its own beside them, so an exit and the
+ * lines that led to it are one page.
+ *
+ * The failure diagnosis's window is the one question worth a chip: a
+ * container that is looping or has died is read at the failure, because by
+ * the time anybody looks the tail is the next attempt starting up.
+ */
+function ContainerLogs({
+  detail,
+  failure,
+  crash,
+  onCrashChange,
+}: {
+  detail: ContainerDetail
+  failure?: FailureDiagnosis
+  /** Whether the pane is handed the failure's window. */
+  crash: boolean
+  onCrashChange: (on: boolean) => void
+}) {
+  const product = containerProduct(detail)
+  const sources = useMemo<ServiceLogSource[]>(
+    () => [
+      {
+        id: dockerSource(detail.id),
+        label: detail.name,
+        kind: "docker",
+        status: detail.state,
+        product,
+      },
+    ],
+    [detail.id, detail.name, detail.state, product],
   )
-  const { state } = useSocket(`/docker/containers/${containerId}/logs/stream`, {
-    onMessage,
-    enabled: active,
-    query,
-  })
-
+  const views = useMemo(
+    () => [containerEventsView({ containerId: detail.id, healthcheck: detail.hasHealthcheck })],
+    [detail.id, detail.hasHealthcheck],
+  )
+  const logWindow = failure?.logWindow
+  // A clean exit has a window too — the minutes before it stopped — and
+  // calling that a crash would be the page inventing one.
+  const crashed =
+    failure?.state === "looping" || (detail.state !== "running" && detail.exitCode !== 0)
+  const label = crashed ? "Crash window" : "Before it stopped"
+  // The pane lets go of the window the moment the reader moves off it —
+  // Live, another range, a zoom, History on an event — so the chip is on
+  // exactly while the pane reads the window, and a press brings it back.
+  const chip = logWindow && (
+    <FilterChip
+      selected={crash}
+      onClick={() => onCrashChange(!crash)}
+      title={`The logs worth reading are ${logWindow.reason}.`}
+    >
+      <ClockRewind aria-hidden className="size-3 text-muted-foreground" />
+      {label}
+    </FilterChip>
+  )
+  // The pane's strip has no room for the chip beside four views on a phone.
+  const wide = useMediaQuery("(min-width: 640px)")
   return (
-    <LogViewer
-      className="h-full"
-      lines={lines}
-      showTimestamps={false}
-      onClear={() => setLines([])}
-      emptyMessage={state === "open" ? "No output yet." : "Connecting…"}
-      toolbar={
-        <>
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() => {
-              setLines([])
-              setTimestamps((t) => !t)
-            }}
-          >
-            {timestamps ? "Hide times" : "Show times"}
-          </Button>
-          {/*
-            Saved from what is already in the browser rather than re-fetched.
-            The pane holds the tail it was given plus everything since; asking
-            the server for a file would be a second, differently-truncated copy
-            of the same thing, and this is what the reader is actually looking
-            at.
-          */}
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() => downloadLines(containerId, lines)}
-            disabled={lines.length === 0}
-          >
-            <Download className="size-3" />
-            Save
-          </Button>
-        </>
-      }
-    />
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      {!wide && chip && <div className="flex shrink-0">{chip}</div>}
+      <ServiceLogs
+        sources={sources}
+        // Kept for the tab, per container: the Environment tab and back is
+        // not a reason to lose the question on screen.
+        storageKey={`docker.container.${detail.id}.logs`}
+        readings
+        views={views}
+        window={crash && logWindow ? { ...logWindow, label } : undefined}
+        onLeaveWindow={() => onCrashChange(false)}
+        actions={wide && chip}
+        className="min-h-0 flex-1"
+        paneClassName="min-h-[30rem]"
+      />
+    </div>
   )
 }
 
@@ -797,7 +881,7 @@ function ContainerActions({
     return (
       <>
         <Button size="sm" variant="outline" asChild>
-          <Link href={`/docker/stacks?stack=${encodeURIComponent(detail.composeStack ?? "")}`}>
+          <Link href={`/docker/stacks/${encodeURIComponent(detail.composeStack ?? "")}`}>
             <Layers className="size-3.5" />
             Open stack
           </Link>
@@ -918,14 +1002,13 @@ function RenameButton({ detail, onRenamed }: { detail: ContainerDetail; onRename
  *
  * So the path inside the container leads — that is the one the application's
  * own configuration refers to — the kind of storage is stated in words rather
- * than as a Docker noun, and where it actually lives is the second line. The
+ * than as a Docker noun, and where it actually lives follows it. The
  * consequence, which is the whole point, is one sentence per kind and one
  * hover card away.
  */
 const MOUNT_KIND: Record<
   string,
   {
-    icon: React.ComponentType<{ className?: string }>
     label: string
     term: string
     /** Where the data really is, in the form a person would go looking for it. */
@@ -935,7 +1018,6 @@ const MOUNT_KIND: Record<
   }
 > = {
   volume: {
-    icon: Servers,
     label: "Managed volume",
     term: "volume",
     // The volume's name, not the directory Docker keeps it in. `_data` under
@@ -945,14 +1027,12 @@ const MOUNT_KIND: Record<
     survives: true,
   },
   bind: {
-    icon: FolderClosed,
     label: "Folder on this server",
     term: "bind",
     where: (mount) => mount.source,
     survives: true,
   },
   tmpfs: {
-    icon: Clock,
     label: "Temporary memory",
     term: "tmpfs",
     where: () => "in RAM",
@@ -960,64 +1040,133 @@ const MOUNT_KIND: Record<
   },
 }
 
-function MountList({ mounts }: { mounts: ContainerDetail["mounts"] }) {
-  const kept = mounts.filter((mount) => MOUNT_KIND[mount.type]?.survives).length
+/**
+ * Only a volume or a bind has somewhere to look. A tmpfs mount is memory: it
+ * exists in the container's namespace and nowhere on this filesystem, so its
+ * row never grows a control that could only fail.
+ */
+function browsable(mount: ContainerDetail["mounts"][number]) {
+  return (mount.type === "volume" || mount.type === "bind") && Boolean(mount.source)
+}
+
+/**
+ * The mounts, and what is in one of them — already open.
+ *
+ * Each mount was a row that had to be expanded before it showed anything, and
+ * what it expanded into was a browser indented under the row, capped at a
+ * third of the screen, with the rest of the tab empty below it. The question
+ * somebody opens this tab with — did the backup land, is this the volume with
+ * the database in it — was a click and a scroll away on every visit.
+ *
+ * So the first mount there is something to look in is open when the tab is,
+ * and the browser takes the height the tab has. The mounts sit above it as one
+ * line each; with more than one to look in, picking a line is what changes the
+ * listing, the way the file manager's sidebar does.
+ */
+function MountList({ detail }: { detail: ContainerDetail }) {
+  const mounts = detail.mounts
+  const [selected, setSelected] = useState(() => mounts.findIndex(browsable))
+  const choosing = mounts.filter(browsable).length > 1
+  const mount = mounts[selected]
+
+  if (mounts.length === 0) {
+    return (
+      <EmptyNote>
+        Nothing is attached, so everything this container writes is destroyed when it is replaced.
+      </EmptyNote>
+    )
+  }
+
+  // Writing into a live database's own files is how a volume stops being
+  // restorable. A stopped container is not running that database, and telling
+  // somebody to stop what is already stopped is noise.
+  const databaseFiles =
+    mount &&
+    detail.state === "running" &&
+    looksLikeDatabase(mount.name, mount.destination, mount.source, detail.image)
 
   return (
-    // Plain: the side panel is the frame, and the mount rows are the whole of
-    // this tab.
-    <Panel plain>
-      <PanelHeader
-        title={
-          <span className="inline-flex items-center gap-1.5">
-            Storage
-            <ExplainIcon name="containerStorage" />
-          </span>
-        }
-        actions={
-          mounts.length > 0 && (
-            <span className="numeric text-hint text-muted-foreground">
-              Persistent mounts {kept} / {mounts.length}
-            </span>
-          )
-        }
-      />
-      <PanelBody flush>
-        {mounts.length === 0 ? (
-          <EmptyNote>
-            Nothing is attached, so everything this container writes is destroyed when it is
-            replaced.
-          </EmptyNote>
-        ) : (
-          <ul className="divide-y divide-hairline">
-            {mounts.map((mount, i) => {
-              const kind = MOUNT_KIND[mount.type]
-              const Icon = kind?.icon ?? Servers
-              return (
-                <li key={i} className={cn("flex min-w-0 items-start gap-3 px-4 py-2.5", ROW_BLEED)}>
-                  <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1">
-                    {/* The path the application inside was configured with. */}
-                    <span className="block font-mono text-body break-all">{mount.destination}</span>
-                    <span className="mt-0.5 block text-hint break-all text-muted-foreground">
-                      {kind ? kind.where(mount) : mount.source}
-                      {" · "}
-                      {mount.rw ? "the container can write to it" : "read-only"}
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    <Tag tone={kind?.survives === false ? "warning" : "default"}>
-                      {kind?.label ?? mount.type}
-                    </Tag>
-                    {kind && <ExplainIcon name={kind.term} />}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </PanelBody>
-    </Panel>
+    <>
+      <ul aria-label="Mounts" className="shrink-0 space-y-0.5">
+        {mounts.map((m, i) => (
+          <MountRow
+            key={i}
+            mount={m}
+            selected={choosing && i === selected}
+            onSelect={choosing && browsable(m) ? () => setSelected(i) : undefined}
+          />
+        ))}
+      </ul>
+      {databaseFiles && <DatabaseStorageWarning />}
+      {mount && (
+        <FileBrowser
+          fill
+          className="min-h-80"
+          root={mount.source}
+          label={mount.type === "volume" ? MOUNT_KIND.volume.where(mount) : undefined}
+          emptyNote={
+            mount.type === "volume"
+              ? "Nothing has been written to this volume yet."
+              : "This folder is empty."
+          }
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * One mount on one line: the path the application inside was configured with,
+ * where that really is, and what kind of storage it is at the edge.
+ */
+function MountRow({
+  mount,
+  selected,
+  onSelect,
+}: {
+  mount: ContainerDetail["mounts"][number]
+  selected: boolean
+  /** Set when there is more than one mount to look in and this is one of them. */
+  onSelect?: () => void
+}) {
+  const kind = MOUNT_KIND[mount.type]
+  const where = kind ? kind.where(mount) : mount.source
+
+  const facts = (
+    <>
+      <span className="min-w-0 truncate font-mono text-body" title={mount.destination}>
+        {mount.destination}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-hint text-muted-foreground" title={where}>
+        {where}
+      </span>
+      {!mount.rw && <Tag>read-only</Tag>}
+      <Tag tone={kind?.survives === false ? "warning" : "default"}>{kind?.label ?? mount.type}</Tag>
+    </>
+  )
+  const row = "flex min-w-0 flex-1 items-baseline gap-3 px-2.5 py-1.5"
+
+  return (
+    <li
+      className={cn(
+        "flex min-w-0 items-center rounded-md pr-2.5 transition-colors",
+        selected ? "bg-accent text-accent-foreground" : onSelect && "hover:bg-row-hover",
+      )}
+    >
+      {onSelect ? (
+        <button
+          type="button"
+          aria-pressed={selected}
+          onClick={onSelect}
+          className={cn(row, "rounded-md text-left focus-ring-inset")}
+        >
+          {facts}
+        </button>
+      ) : (
+        <span className={row}>{facts}</span>
+      )}
+      {kind && <ExplainIcon name={kind.term} />}
+    </li>
   )
 }
 
@@ -1461,13 +1610,14 @@ function Reachability({ containerId }: { containerId: string }) {
  * it"; everybody else reads three numbers. This is the assembly — and because
  * it is an assembly rather than a reading, the conclusion says "likely".
  */
-function FailurePanel({ containerId }: { containerId: string }) {
-  const { data } = usePoll<FailureDiagnosis>(
-    (signal) =>
-      get<FailureDiagnosis>(`/docker/containers/${containerId}/failure`, undefined, signal),
-    0,
-    [containerId],
-  )
+function FailurePanel({
+  data,
+  onReadLogs,
+}: {
+  data?: FailureDiagnosis
+  /** Opens the Logs tab on the diagnosis's window. */
+  onReadLogs: () => void
+}) {
   if (!data) return null
 
   // A container that has been up for a week with nothing to say deserves to be
@@ -1510,25 +1660,20 @@ function FailurePanel({ containerId }: { containerId: string }) {
       )}
 
       {data.logWindow && (
-        <p className="mt-2 text-hint text-muted-foreground">
-          The logs worth reading are {data.logWindow.reason} — {timestamp(data.logWindow.since)} to{" "}
-          {timestamp(data.logWindow.until)}. By the time you look, the tail is the next attempt
-          starting up.
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <p className="min-w-0 flex-1 basis-64 text-hint text-muted-foreground">
+            The logs worth reading are {data.logWindow.reason} — {timestamp(data.logWindow.since)}{" "}
+            to {timestamp(data.logWindow.until)}. By the time you look, the tail is the next attempt
+            starting up.
+          </p>
+          <Button size="xs" variant="outline" onClick={onReadLogs}>
+            <ClockRewind className="size-3" />
+            Read those lines
+          </Button>
+        </div>
       )}
     </Notice>
   )
-}
-
-/** Saves the lines currently on screen as a text file. */
-function downloadLines(containerId: string, lines: LogLine[]) {
-  const blob = new Blob([lines.map((l) => l.text).join("\n")], { type: "text/plain" })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement("a")
-  anchor.href = url
-  anchor.download = `${containerId.slice(0, 12)}-logs.txt`
-  anchor.click()
-  URL.revokeObjectURL(url)
 }
 
 /**

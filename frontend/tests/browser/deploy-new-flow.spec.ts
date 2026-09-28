@@ -140,16 +140,20 @@ test.describe("A stage that fails /preflight", () => {
     )
 
     await page.goto("/deploy/new?draft=fail-preflight-draft")
-    await expect(page.getByRole("heading", { name: "New project" })).toBeVisible()
+    // Everything this draft asks was already answered, so it resumes on the
+    // last of the four configure screens with Deploy under the plan.
+    await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
     const deploy = page.getByRole("button", { name: "Deploy", exact: true })
 
-    // First press: the save succeeds (revision 5 -> 6) but preflight 500s.
-    await deploy.click()
+    // Arriving checks the plan: the save succeeds (revision 5 -> 6) but
+    // preflight 500s — and a failed check is not asked again on its own.
     await expect(page.getByText("preflight exploded")).toBeVisible()
+    await page.waitForTimeout(500)
     expect(saveCount).toBe(1)
+    expect(preflightCount).toBe(1)
 
-    // Second press must save with the revision the first save already
-    // produced, not the one the draft opened with — otherwise this 409s.
+    // Deploy must save with the revision the failed check already produced,
+    // not the one the draft opened with — otherwise this 409s.
     await deploy.click()
     await page.waitForURL(/\/deploy\/501\/runs\/999$/)
     expect(saveCount).toBe(2)
@@ -212,6 +216,12 @@ test.describe("An ambiguous detection", () => {
     const detectBodies: { selectedId?: string }[] = []
 
     await page.route("**/api/v1/deploy/drafts/candidate-draft", async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON()
+        const draft = draftPayload("worker-candidate", 6)
+        draft.data.intent = body.intent
+        return json(route, draft)
+      }
       if (route.request().method() !== "GET") return route.fallback()
       return json(route, draftPayload("", 4))
     })
@@ -222,7 +232,9 @@ test.describe("An ambiguous detection", () => {
     })
 
     await page.goto("/deploy/new?draft=candidate-draft")
-    await expect(page.getByRole("heading", { name: "New project" })).toBeVisible()
+    // Two equally strong candidates is a question only the operator can
+    // answer, so the sequence opens on the screen that asks it.
+    await expect(page.getByRole("heading", { name: "What are you building?" })).toBeVisible()
     const picker = page.getByRole("group", { name: "Detected candidates" })
     await expect(picker.getByText("Next.js web application")).toBeVisible()
     await expect(picker.getByText("Background worker")).toBeVisible()
@@ -232,5 +244,8 @@ test.describe("An ambiguous detection", () => {
 
     await expect.poll(() => detectBodies.at(-1)?.selectedId).toBe("worker-candidate")
     await expect(picker.getByRole("switch", { name: /Background worker/ })).toBeChecked()
+    await expect(page.getByRole("combobox", { name: "Project type" })).toContainText(
+      "Worker or bot",
+    )
   })
 })

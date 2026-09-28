@@ -170,8 +170,13 @@ func TestSchemaStepConfiguredReadsStartCommandAndReleaseTasks(t *testing.T) {
 	if !schemaStepConfigured(candidate, BuildPlanConfig{StartCommand: "bunx prisma migrate deploy && bun run start"}) {
 		t.Fatal("start command schema step not recognised")
 	}
-	if !schemaStepConfigured(candidate, BuildPlanConfig{StartCommand: "bun run start", ReleaseTasks: []ReleaseTaskConfig{{Name: "migrate", Command: "bunx prisma db push"}}}) {
+	if !schemaStepConfigured(candidate, BuildPlanConfig{StartCommand: "bun run start", ReleaseTasks: []ReleaseTaskConfig{{Name: "migrate", Command: "bunx prisma db push", Runner: ReleaseTaskRunnerImage}}}) {
 		t.Fatal("release task schema step not recognised")
+	}
+	// The host shell runs over the unbuilt checkout, where bunx has nothing to
+	// run: that task fails, so it cannot be what applies the schema.
+	if schemaStepConfigured(candidate, BuildPlanConfig{StartCommand: "bun run start", ReleaseTasks: []ReleaseTaskConfig{{Name: "migrate", Command: "bunx prisma db push"}}}) {
+		t.Fatal("a host release task that needs the application's toolchain counted as the schema step")
 	}
 	if !schemaStepConfigured(&DetectedCandidate{SchemaTool: "typeorm", SchemaInStart: true}, BuildPlanConfig{StartCommand: "npm run start"}) {
 		t.Fatal("package start script schema step not recognised")
@@ -211,13 +216,26 @@ func TestPreflightWarnsWhenALinkedDatabaseGetsNoSchema(t *testing.T) {
 		}
 	}
 
+	draft.Data.Configuration.Build.StartCommand = "bunx prisma migrate deploy && bun run start"
+	result, err = PreflightDraft(context.Background(), draft, &preflightObserverFake{observation: observation}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findingSeverity(result.Findings, "schema_step") != PreflightPass || findingSeverity(result.Findings, "schema_step_missing") != "" ||
+		findingSeverity(result.Findings, "schema_push_unversioned") != "" {
+		t.Fatalf("configured schema step findings = %#v", result.Findings)
+	}
+
+	// A push is configured, but it is not a pass: the first deploy that drops
+	// a column stops the application from starting.
 	draft.Data.Configuration.Build.StartCommand = candidate.StartCommand
 	result, err = PreflightDraft(context.Background(), draft, &preflightObserverFake{observation: observation}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if findingSeverity(result.Findings, "schema_step") != PreflightPass || findingSeverity(result.Findings, "schema_step_missing") != "" {
-		t.Fatalf("configured schema step findings = %#v", result.Findings)
+	if findingSeverity(result.Findings, "schema_push_unversioned") != PreflightWarning || findingSeverity(result.Findings, "schema_step") != "" ||
+		findingSeverity(result.Findings, "schema_step_missing") != "" {
+		t.Fatalf("pushed schema step findings = %#v", result.Findings)
 	}
 
 	draft.Data.Configuration.Build.StartCommand = "bun run start"

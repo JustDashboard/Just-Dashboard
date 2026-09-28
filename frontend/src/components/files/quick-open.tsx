@@ -5,7 +5,7 @@ import { CornerDownLeft, FolderOpen, MagnifyingGlass, TextFormat } from "@/compo
 import { get } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { FileFindResult, FileEntry } from "@/lib/types"
+import type { FileFindResult } from "@/lib/types"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/state"
 import { FileIcon } from "@/components/files/file-icon"
@@ -160,8 +160,8 @@ function QuickOpenBody({
             onClick={() => onChoose(hit.path, hit.isDir)}
           >
             <FileIcon
-              entry={{ name: hit.name, isDir: hit.isDir, isSymlink: false } as FileEntry}
-              className="size-4"
+              entry={{ name: hit.name, path: hit.path, isDir: hit.isDir, isSymlink: false }}
+              className="size-5"
             />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-body">

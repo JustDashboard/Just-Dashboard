@@ -126,7 +126,7 @@ export function ProfilePanel({ user }: { user: DashboardUser }) {
   return (
     <div className="grid gap-6 md:grid-cols-[auto_minmax(0,1fr)] md:gap-10">
       <div className="flex items-start gap-4">
-        <UserAvatar key={user.avatarVersion} user={user} size="lg" />
+        <UserAvatar key={user.avatarVersion} user={user} size="xl" />
         <div className="space-y-2">
           <div className="flex flex-wrap gap-2">
             <Button
@@ -145,8 +145,8 @@ export function ProfilePanel({ user }: { user: DashboardUser }) {
             )}
           </div>
           <p className="max-w-56 text-hint leading-relaxed text-muted-foreground">
-            Any image. It is cropped to a square and shrunk to {AVATAR_EDGE} px before it leaves
-            the browser.
+            Any image. It is cropped to a square and shrunk to {AVATAR_EDGE} px before it leaves the
+            browser.
           </p>
           <input
             ref={fileInput}
@@ -160,7 +160,11 @@ export function ProfilePanel({ user }: { user: DashboardUser }) {
 
       <div className="max-w-xl space-y-4">
         <FieldRow>
-          <Field label="Name" htmlFor="profile-name" hint="How you appear in the rail and the users list.">
+          <Field
+            label="Name"
+            htmlFor="profile-name"
+            hint="How you appear in the rail and the users list."
+          >
             <Input
               id="profile-name"
               value={displayName}

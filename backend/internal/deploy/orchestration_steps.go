@@ -28,7 +28,7 @@ func scanRunStep(row scanner) (*RunStep, error) {
 	step.EndedAt = unixTimePtr(ended)
 	step.Evidence = validRawJSON(evidence)
 	step.Cleanup = validRawJSON(cleanup)
-	if step.ErrorCode == "health_gate_failed" {
+	if step.ErrorCode == "health_gate_failed" || outputCauseCode(step.ErrorCode) {
 		var health checkStepEvidence
 		var wrapped struct {
 			Health      checkStepEvidence           `json:"health"`

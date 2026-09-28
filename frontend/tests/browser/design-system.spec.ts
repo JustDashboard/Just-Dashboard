@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { mockProject } from "./deploy-fixture"
 
 /**
  * The design system's rules, checked in a browser rather than in a document.
@@ -58,12 +59,25 @@ async function json(route: Route, body: unknown) {
  * Just enough of the API to get a signed-in shell with some rows in it. Anything
  * not named answers with an empty list, because a page that renders an empty
  * state is still a page whose controls have to be reachable and labelled.
+ *
+ * The deployment fleet is the one read that cannot be a list: it is an object,
+ * and an empty list in its place is a page that throws rather than one that is
+ * empty. The GitHub App's status on Credentials is the other.
  */
 async function mockShell(page: Page) {
   await page.route("**/api/v1/**", async (route) => {
-    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    const url = new URL(route.request().url())
+    const path = url.pathname.replace(/^\/api\/v1/, "")
     if (path === "/auth/session") return json(route, user)
     if (path === "/updates/self") return json(route, { current: "0.6.7", latest: "0.6.7" })
+    if (path === "/deploy/" && url.searchParams.get("view") === "fleet") {
+      return json(route, {
+        deployments: [],
+        activeWork: [],
+        slots: { heavyUsed: 0, heavyCapacity: 2, lightUsed: 0, lightCapacity: 4 },
+      })
+    }
+    if (path === "/deploy/github-app/") return json(route, { configured: false, installations: [] })
     if (path.startsWith("/audit")) {
       return json(route, {
         entries: [
@@ -92,10 +106,152 @@ const SURFACES = [
   "/packages",
   "/security",
   "/backups",
+  "/deploy",
+  "/deploy?view=archived",
   "/deploy/notifications",
   "/deploy/credentials",
   "/deploy/new",
+  "/account",
+  "/account/security",
+  "/account/sessions",
+  "/account/keys",
+  "/account/users",
 ] as const
+
+/**
+ * The deployment pages that need a project to draw anything: the fleet and the
+ * archive with rows in them, and every settings page. They are served by the
+ * deployment fixture's showcase rather than by `mockShell`, whose empty lists
+ * would leave a settings page as a skeleton and a fleet as its empty state —
+ * and the controls these checks are about are the ones on the rows: a card's
+ * menu, a remove button on a domain, a glyph-only toggle on a variable.
+ */
+const PROJECT_SURFACES = [
+  "/deploy",
+  "/deploy?view=archived",
+  "/deploy/7/settings/general",
+  "/deploy/7/settings/build",
+  "/deploy/7/settings/runtime",
+  "/deploy/7/settings/variables",
+  "/deploy/7/settings/domains",
+  "/deploy/7/settings/storage",
+  "/deploy/7/settings/databases",
+  "/deploy/7/settings/automation",
+  "/deploy/7/settings/danger",
+] as const
+
+test("reading pages begin with content while retaining an accessible page name", async ({
+  page,
+}) => {
+  await mockShell(page)
+
+  for (const path of ["/audit", "/account", "/deploy"]) {
+    await page.goto(path)
+    const surface = page.locator("[data-slot=page]").first()
+    await expect(surface).toBeVisible()
+    await expect(surface.locator("[data-slot=page-header]")).toHaveCount(0)
+    await expect(surface.locator("[data-slot=page-context]")).toHaveCount(0)
+    await expect(surface.getByRole("heading", { level: 1 })).toHaveClass(/sr-only/)
+    if (path === "/deploy") {
+      await page.screenshot({ path: "test-results/page-context-deploy-1280.png", fullPage: true })
+    }
+  }
+})
+
+/** Every visible button with no text of its own and no name from anywhere else. */
+function unnamedControls(page: Page) {
+  return page.evaluate(() => {
+    const bad: string[] = []
+    for (const el of document.querySelectorAll<HTMLElement>("button, [role='button']")) {
+      if (el.offsetParent === null && el.getAttribute("aria-hidden") !== "true") continue
+      const text = (el.textContent ?? "").trim()
+      if (text.length > 0) continue
+      const named =
+        el.getAttribute("aria-label") ||
+        el.getAttribute("aria-labelledby") ||
+        el.querySelector(".sr-only")
+      if (!named) bad.push(el.outerHTML.slice(0, 160))
+    }
+    return bad
+  })
+}
+
+/** Every fully rounded, filled element with text in it — the pill §4 deleted. */
+function filledPills(page: Page) {
+  return page.evaluate(() => {
+    const bad: string[] = []
+    for (const el of document.querySelectorAll<HTMLElement>("span, div")) {
+      const s = getComputedStyle(el)
+      const r = parseFloat(s.borderTopLeftRadius)
+      const h = el.getBoundingClientRect().height
+      if (!h || h > 32 || r < h / 2) continue
+      const filled = s.backgroundColor !== "rgba(0, 0, 0, 0)" && s.backgroundColor !== "transparent"
+      const text = (el.textContent ?? "").trim()
+      // A status dot is a filled circle with no text in it, and is the point.
+      if (filled && text.length > 0) bad.push(el.outerHTML.slice(0, 140))
+    }
+    return bad
+  })
+}
+
+/**
+ * Text a centred row sets off its own centre line. A bare span, link or cell in
+ * a flex row is a block that keeps the line box it inherits — the page's 16px
+ * one where nothing set another — so a 12px status inside it rests on that
+ * box's baseline, three pixels below the button beside it. The database strip,
+ * a deployment's route and certificate columns and the pending-changes link
+ * all shipped that way; the box has to be a flex box, or carry its content's
+ * own type size.
+ */
+function offCentreText(page: Page) {
+  return page.evaluate(() => {
+    const bad: string[] = []
+    for (const item of document.querySelectorAll<HTMLElement>("body *")) {
+      const row = item.parentElement
+      if (!row) continue
+      const rowStyle = getComputedStyle(row)
+      if (!rowStyle.display.endsWith("flex") || !rowStyle.flexDirection.startsWith("row")) continue
+      const style = getComputedStyle(item)
+      const align = ["auto", "normal"].includes(style.alignSelf)
+        ? rowStyle.alignItems
+        : style.alignSelf
+      if (align !== "center" || style.display !== "block" || style.position === "absolute") continue
+      const box = item.getBoundingClientRect()
+      if (box.height < 2 || box.width < 2) continue
+      const blocks = [...item.children].some((child) => {
+        const display = getComputedStyle(child).display
+        return display !== "none" && !display.startsWith("inline")
+      })
+      if (blocks) continue
+      const range = document.createRange()
+      range.selectNodeContents(item)
+      const ink = [...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0)
+      if (ink.length === 0) continue
+      const top = Math.min(...ink.map((r) => r.top))
+      const bottom = Math.max(...ink.map((r) => r.bottom))
+      const offset = (top + bottom) / 2 - (box.top + box.bottom) / 2
+      if (Math.abs(offset) >= 1.5) {
+        bad.push(`${offset.toFixed(1)}px ${item.outerHTML.slice(0, 140)}`)
+      }
+    }
+    return bad
+  })
+}
+
+/** The registers the page elements declare, and how many flow panels are drawn. */
+async function registers(page: Page) {
+  // networkidle says the requests are done, not that React has committed the
+  // page that the last answer unlocked; on a loaded runner the walk read the
+  // DOM a beat too early and reported a page that was there a moment later.
+  await page.waitForSelector("[data-slot='page']", { timeout: 5_000 }).catch(() => undefined)
+  return page.evaluate(() => {
+    const pages = [...document.querySelectorAll<HTMLElement>("[data-slot='page']")]
+    return {
+      registers: pages.map((el) => el.dataset.register ?? "(unset)"),
+      panels: document.querySelectorAll("[data-slot='flow-panel']").length,
+    }
+  })
+}
 
 /**
  * Rule 5: selection, hover and focus are three different mechanisms, so a
@@ -220,23 +376,43 @@ for (const path of SURFACES) {
     await page.goto(path)
     await page.waitForLoadState("networkidle")
 
-    const unnamed = await page.evaluate(() => {
-      const bad: string[] = []
-      for (const el of document.querySelectorAll<HTMLElement>("button, [role='button']")) {
-        if (el.offsetParent === null && el.getAttribute("aria-hidden") !== "true") continue
-        const text = (el.textContent ?? "").trim()
-        if (text.length > 0) continue
-        const named =
-          el.getAttribute("aria-label") ||
-          el.getAttribute("aria-labelledby") ||
-          el.querySelector(".sr-only")
-        if (!named) bad.push(el.outerHTML.slice(0, 160))
-      }
-      return bad
-    })
+    const unnamed = await unnamedControls(page)
     expect(unnamed, `unlabelled icon-only controls on ${path}`).toEqual([])
   })
 }
+
+for (const path of PROJECT_SURFACES) {
+  test(`every icon-only control on ${path} has an accessible name, with a project`, async ({
+    page,
+  }) => {
+    await mockProject(page, { showcase: true })
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+
+    const unnamed = await unnamedControls(page)
+    expect(unnamed, `unlabelled icon-only controls on ${path}`).toEqual([])
+  })
+}
+
+/**
+ * The same rule at a phone's width, where the deployment pages trade words
+ * for glyphs: a toggle that reads "HTTPS" at 1280 is a padlock at 390, and a
+ * padlock with no name is a button a screen reader calls "button".
+ */
+test.describe("at a phone's width", () => {
+  test.use({ viewport: { width: 390, height: 844 } })
+
+  for (const path of PROJECT_SURFACES) {
+    test(`every icon-only control on ${path} has an accessible name`, async ({ page }) => {
+      await mockProject(page, { showcase: true })
+      await page.goto(path)
+      await page.waitForLoadState("networkidle")
+
+      const unnamed = await unnamedControls(page)
+      expect(unnamed, `unlabelled icon-only controls on ${path} at 390`).toEqual([])
+    })
+  }
+})
 
 /**
  * The reveal rule's touch clause. A cluster shown only on `group-hover` is
@@ -268,6 +444,31 @@ test.describe("with no hover available", () => {
   }
 })
 
+test("a centred row sets every item's text on its centre line", async ({ page }) => {
+  test.setTimeout(SURFACES.length * 5_000)
+  await mockShell(page)
+
+  for (const path of SURFACES) {
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+    expect(await offCentreText(page), `text off its row's centre line on ${path}`).toEqual([])
+  }
+})
+
+test("a centred row sets every item's text on its centre line, with a project", async ({
+  page,
+}) => {
+  test.setTimeout(PROJECT_SURFACES.length * 5_000)
+  await mockProject(page, { showcase: true })
+
+  for (const path of PROJECT_SURFACES) {
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+    await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
+    expect(await offCentreText(page), `text off its row's centre line on ${path}`).toEqual([])
+  }
+})
+
 /**
  * Rule 2: there is no pill. The one status indicator is a dot and a word, and a
  * fixed property is a squared hairline `Tag`. A fully rounded filled chip is the
@@ -278,22 +479,42 @@ test("no page renders a filled pill", async ({ page }) => {
   await page.goto("/audit")
   await page.waitForLoadState("networkidle")
 
-  const pills = await page.evaluate(() => {
-    const bad: string[] = []
-    for (const el of document.querySelectorAll<HTMLElement>("span, div")) {
-      const s = getComputedStyle(el)
-      const r = parseFloat(s.borderTopLeftRadius)
-      const h = el.getBoundingClientRect().height
-      if (!h || h > 32 || r < h / 2) continue
-      const filled = s.backgroundColor !== "rgba(0, 0, 0, 0)" && s.backgroundColor !== "transparent"
-      const text = (el.textContent ?? "").trim()
-      // A status dot is a filled circle with no text in it, and is the point.
-      if (filled && text.length > 0) bad.push(el.outerHTML.slice(0, 140))
-    }
-    return bad
-  })
+  const pills = await filledPills(page)
   expect(pills, "fully rounded filled chips").toEqual([])
 })
+
+/**
+ * The deployment pages are where a pill is most tempting — a run's state, a
+ * change's kind, a count of pending changes, a strip of outcomes — so each is
+ * checked with the rows that would carry one.
+ */
+for (const path of PROJECT_SURFACES) {
+  test(`${path} renders no filled pill`, async ({ page }) => {
+    await mockProject(page, { showcase: true })
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+
+    const pills = await filledPills(page)
+    expect(pills, `fully rounded filled chips on ${path}`).toEqual([])
+  })
+}
+
+/**
+ * Credentials drew the GitHub App's setup as numbered filled circles and an
+ * installed account as a letter in one, and Notifications drew each channel as
+ * a monogram disc — the pill three times over — so both are checked with the
+ * showcase's App, accounts and channels in them.
+ */
+for (const path of ["/deploy/credentials", "/deploy/notifications"]) {
+  test(`${path} renders no filled pill`, async ({ page }) => {
+    await mockProject(page, { showcase: true })
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+
+    const pills = await filledPills(page)
+    expect(pills, `fully rounded filled chips on ${path}`).toEqual([])
+  })
+}
 
 /**
  * Motion is a preference, not a per-component decision. The rule lives once at
@@ -316,3 +537,68 @@ test("reduced motion is honoured globally", async ({ page }) => {
   })
   expect(moving, "animations still running under prefers-reduced-motion").toEqual([])
 })
+
+/**
+ * §16: a page is in exactly one register, and register B's affordances belong
+ * only to the pages that declared it.
+ *
+ * The section promises this check by name, so it exists rather than being a
+ * sentence — an unenforced rule in this document is the drift the whole file
+ * was written to stop. Three properties, each of which is a way the register
+ * could rot back into the thing it replaced:
+ *
+ *   a page declares a register, and it is one of the two;
+ *   at most one surface per screen carries depth, because a second foreground
+ *   is no foreground (§16) — the rule the rollout was most likely to break;
+ *   no reading page grows a `FlowPanel`, which is how "just this once" becomes
+ *   forty-nine raised surfaces again.
+ */
+test("every page declares one register, and only a flow page has a foreground", async ({
+  page,
+}) => {
+  // One test walks every surface, so its budget grows with the list: at the
+  // default thirty seconds, thirteen pages under a parallel run timed out.
+  test.setTimeout(SURFACES.length * 5_000)
+  await mockShell(page)
+
+  for (const path of SURFACES) {
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+    await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
+    expectOneRegister(path, await registers(page))
+  }
+})
+
+/**
+ * The deployment settings are §16's named example of a reading page that
+ * happens to be editable, and the fleet is one you read — so none of them may
+ * grow a foreground, however many lit choices the redesign gives them.
+ */
+test("the deployment pages are reading pages with no foreground", async ({ page }) => {
+  test.setTimeout(PROJECT_SURFACES.length * 5_000)
+  await mockProject(page, { showcase: true })
+
+  for (const path of PROJECT_SURFACES) {
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+    await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
+    const seen = await registers(page)
+    expectOneRegister(path, seen)
+    expect(seen.registers, `${path} is not a reading page`).not.toContain("flow")
+  }
+})
+
+function expectOneRegister(path: string, seen: { registers: string[]; panels: number }) {
+  expect(seen.registers.length, `no page element rendered on ${path}`).toBeGreaterThan(0)
+  for (const register of seen.registers) {
+    expect(["reading", "flow"], `${path} declares an unknown register`).toContain(register)
+  }
+
+  const isFlow = seen.registers.includes("flow")
+  // One is the contract; zero is fine, because a flow screen may be a
+  // question with a grid of choices under it and no focused surface at all.
+  expect(seen.panels, `more than one foreground on ${path}`).toBeLessThanOrEqual(1)
+  if (!isFlow) {
+    expect(seen.panels, `a reading page drew a flow panel on ${path}`).toBe(0)
+  }
+}

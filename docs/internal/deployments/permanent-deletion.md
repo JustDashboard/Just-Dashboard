@@ -27,7 +27,11 @@ routes, database networks, persistent storage, checkouts, and on-disk artifacts 
 reconciliation ends when its binding records are deleted. Their deployment ownership and
 rollback history are forgotten. Operators wanting managed resources removed must use the existing
 previewed Configuration removal flow first; it retains its per-target capability and typed-phrase
-rules. The permanent-delete dialog explicitly explains both the record loss and retained resources.
+rules. The permanent-delete dialog explicitly explains both the record loss and retained resources, as
+two lists — what is deleted for good and what stays on the server — under the project it names, and
+it asks for the project's name to be typed before its button is live. That is the dialog's own guard
+against a slip in an act that is rare and cannot be undone: the name is not sent, and the route keeps
+the ordinary confirmation above rather than joining the server-side typed-phrase set.
 
 `GET /deploy/?view=archived` lists archived projects without inspecting their Git checkouts. The
 archive page provides search, links to retained configuration/history, and permanent deletion. The

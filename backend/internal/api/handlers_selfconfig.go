@@ -103,6 +103,14 @@ func (s *Server) handleSelfConfigCertificate(w http.ResponseWriter, r *http.Requ
 	return nil
 }
 
+// handleSelfConfigLog answers the whole transcript of the last restart as
+// plain text — a rebuild's every BuildKit step, where the report has room for
+// only the last 64 KB of them.
+func (s *Server) handleSelfConfigLog(w http.ResponseWriter, r *http.Request) error {
+	writeTranscript(w, s.modules.selfConfig.Transcript())
+	return nil
+}
+
 // handleSelfConfigDismiss forgets a finished run, which is what clears the
 // card once it has been read.
 func (s *Server) handleSelfConfigDismiss(w http.ResponseWriter, r *http.Request) error {

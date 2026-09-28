@@ -49,6 +49,18 @@ func RenderBlueprintPlan(source DraftSourceConfig, name string) (*BlueprintPlan,
 			candidate.Port = port.Internal
 		}
 	}
+	for _, input := range definition.Inputs {
+		if input.Kind == blueprint.InputSecret {
+			candidate.Variables = append(candidate.Variables, DetectedVariable{
+				Name: input.Variable, Sources: []string{definition.ID + " blueprint"},
+			})
+		}
+	}
+	if definition.ID == "mongo-express" {
+		candidate.Databases = []DetectedDatabase{{
+			Engine: "mongodb", Variable: "ME_CONFIG_MONGODB_URL", Evidence: "Mongo Express requires a MongoDB connection",
+		}}
+	}
 	// The identity names three immutable things: the image reference the
 	// release pulls (its digest is resolved by detection), the reviewed
 	// definition, and the digest of this exact render. Digest stays empty here
@@ -73,11 +85,11 @@ func RenderBlueprintPlan(source DraftSourceConfig, name string) (*BlueprintPlan,
 
 func blueprintWorkloadProfile(profile blueprint.Profile) WorkloadProfile {
 	switch profile {
-	case blueprint.ProfileWeb:
+	case blueprint.ProfileWeb, blueprint.ProfileTool:
 		return ProfileWeb
 	case blueprint.ProfileGame:
 		return ProfileGame
-	case blueprint.ProfileDatabase, blueprint.ProfileTool, blueprint.ProfileWorker:
+	case blueprint.ProfileDatabase, blueprint.ProfileWorker:
 		return ProfileService
 	default:
 		return ProfileService
@@ -184,9 +196,11 @@ func blueprintConfiguration(
 	}
 
 	for _, variable := range rendered.Variables {
+		domainTemplate, domainRequired := blueprintDomainTemplate(definition, variable.Name)
 		planned := PlannedVariable{
 			Name: variable.Name, Sensitivity: variable.Sensitivity,
-			Scopes: []string{"runtime"}, Required: variable.Generated,
+			Scopes: []string{"runtime"}, Required: variable.Generated || variable.Required || domainRequired,
+			DomainTemplate: domainTemplate,
 		}
 		switch {
 		case variable.Generated:
@@ -241,6 +255,35 @@ func blueprintConfiguration(
 		return configuration.Dependencies[i].ResourceID < configuration.Dependencies[j].ResourceID
 	})
 	return configuration, nil
+}
+
+// The primary public address can change after detection. Keep the reviewed
+// relationship with its default environment values so the form can update
+// untouched defaults without overwriting an operator's explicit override.
+func blueprintDomainTemplate(definition *blueprint.Blueprint, variable string) (string, bool) {
+	for _, input := range definition.Inputs {
+		if input.Kind != blueprint.InputDomain {
+			continue
+		}
+		if input.Variable == variable {
+			return "{{hostname}}", input.Required
+		}
+		placeholder := "{{input." + input.Name + "}}"
+		for _, operation := range definition.Operations.Startup {
+			if operation.Kind != blueprint.OperationSetVariable || operation.Name != variable || !strings.Contains(operation.Value, placeholder) {
+				continue
+			}
+			template := strings.ReplaceAll(operation.Value, placeholder, "{{hostname}}")
+			if strings.Contains(template, "{{input.") {
+				return "", false
+			}
+			template = strings.ReplaceAll(template, "https://", "{{scheme}}://")
+			template = strings.ReplaceAll(template, "http://", "{{scheme}}://")
+			return template, input.Required
+		}
+		return "", false
+	}
+	return "", false
 }
 
 // blueprintVolumePrefix keeps one deployment's volumes recognisable on a host
@@ -374,6 +417,67 @@ func (c DraftSourceConfig) ValidateForDeployment() error {
 		}
 		if supported, reason := blueprint.DeploymentSupport(definition); !supported {
 			return fmt.Errorf("%w: %s", ErrUnsupportedSource, reason)
+		}
+	}
+	return nil
+}
+
+func (c DraftSourceConfig) validateBlueprintSecretInputs() error {
+	if c.Kind != SourceBlueprint {
+		return nil
+	}
+	definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidSource, err)
+	}
+	for _, input := range definition.Inputs {
+		if input.Kind == blueprint.InputSecret && c.BlueprintInputs[input.Name] != "" {
+			return fmt.Errorf("%w: %q must be supplied through encrypted variables, not blueprint inputs", ErrInvalidSource, input.Name)
+		}
+	}
+	return nil
+}
+
+// Historical Mongo Express sources held the connection in plain inputs. A
+// committed run already has its sealed variable revisions; materialization
+// must neither re-read this old value nor copy it into another source marker.
+func (c DraftSourceConfig) withoutBlueprintSecretInputs() (DraftSourceConfig, error) {
+	if c.Kind != SourceBlueprint {
+		return c, nil
+	}
+	definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+	if err != nil {
+		return c, fmt.Errorf("%w: %v", ErrInvalidSource, err)
+	}
+	inputs := make(map[string]string, len(c.BlueprintInputs))
+	for key, value := range c.BlueprintInputs {
+		inputs[key] = value
+	}
+	for _, input := range definition.Inputs {
+		if input.Kind == blueprint.InputSecret {
+			delete(inputs, input.Name)
+		}
+	}
+	c.BlueprintInputs = inputs
+	return c, nil
+}
+
+// Retirement stops new installations without stranding releases that already
+// depend on the retained definition for redeploys and recovery.
+func (c DraftSourceConfig) validateForNewDeployment() error {
+	if err := c.ValidateForDeployment(); err != nil {
+		return err
+	}
+	if err := c.validateBlueprintSecretInputs(); err != nil {
+		return err
+	}
+	if c.Kind == SourceBlueprint {
+		definition, err := blueprint.GetVersion(c.BlueprintID, c.BlueprintVersion)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrUnsupportedSource, err)
+		}
+		if definition.Retired != "" {
+			return fmt.Errorf("%w: %s", ErrUnsupportedSource, definition.Retired)
 		}
 	}
 	return nil

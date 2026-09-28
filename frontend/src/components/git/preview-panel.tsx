@@ -2,19 +2,18 @@
 
 import { useEffect, useState } from "react"
 import {
-  BranchPlus,
   ClockRewind,
   Copy,
   CornerUpLeft,
   Cross,
   External,
   FloppyDisk,
-  GitMerge,
   RotateCounterClockwise,
   GitTag,
+  PaperAirplane,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post, put } from "@/lib/api"
+import { errorMessage, get, post, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -25,6 +24,7 @@ import type {
   GitCommit,
   GitCommitDetail,
   GitComparison,
+  GitHubCheckRun,
   GitPullRequest,
   GitResult,
   GitStash,
@@ -34,19 +34,31 @@ import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
 import { DiffView } from "@/components/files/diff-view"
 import type { GitRun } from "@/components/git/run"
+import { CommentDialog } from "@/components/git/comment-dialog"
+import { PreviewHeader } from "@/components/git/preview-header"
+import { ConflictPreview } from "@/components/git/conflict-preview"
+import { PartialPreview } from "@/components/git/partial-preview"
+import { PullReview, WorkflowPreview } from "@/components/git/github-review"
+import { RebasePreview } from "@/components/git/rebase-preview"
+import { SubmodulePreview, LFSPreview, PatchPreview } from "@/components/git/extras-preview"
+import { ForgePreview } from "@/components/git/forge-preview"
+import { BlamePreview, RecoveryPreview, CommitSignature } from "@/components/git/inspect-panels"
 import { NameDialog } from "@/components/git/name-dialog"
 import { MergePullDialog } from "@/components/git/merge-pull-dialog"
+import { SourceBranch, SourceMerge } from "@/components/git/glyphs"
 import { RefTags } from "@/components/git/ref-tags"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { Status } from "@/components/status-dot"
+import { IconAction } from "@/components/icon-action"
+import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { PaneHeader } from "@/components/panel"
 import { VerbBar, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 /** What the preview column is showing. */
 export type GitPreview =
+  | { kind: "partial"; file: string; staged: boolean }
+  | { kind: "conflict"; file: string }
   | {
       kind: "diff"
       title: string
@@ -56,11 +68,17 @@ export type GitPreview =
        *  header rather than repeat it. */
       singleFile?: boolean
     }
+  | { kind: "recovery" }
+  | { kind: "rebase" }
+  | { kind: "submodules" | "lfs" | "exchange" }
+  | { kind: "forge" }
+  | { kind: "blame"; file: string; ref?: string }
   | { kind: "file"; path: string }
   | { kind: "commit"; sha: string; subject?: string; file?: string }
   | { kind: "stash"; stash: GitStash }
   | { kind: "compare"; base: string; head: string }
   | { kind: "pull"; number: number; title?: string }
+  | { kind: "workflow"; id: number }
 
 /** What every preview gets from the workspace. */
 export type PreviewContext = {
@@ -69,6 +87,7 @@ export type PreviewContext = {
   canWrite: boolean
   canControl: boolean
   canDestruct: boolean
+  canAdmin?: boolean
   busy?: string
   run: GitRun
   confirm: (req: ConfirmRequest) => void
@@ -101,7 +120,7 @@ export function PreviewPanel({
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <EmptyState
-          icon={GitMerge}
+          icon={SourceMerge}
           title="Nothing selected"
           description="Click a changed file to see what changed, a commit to see what it did, or a file in the tree to open it here."
         />
@@ -109,11 +128,36 @@ export function PreviewPanel({
     )
   }
   switch (preview.kind) {
+    case "partial":
+      return (
+        <PartialPreview
+          key={`${preview.file}:${preview.staged}`}
+          file={preview.file}
+          staged={preview.staged}
+          ctx={ctx}
+          onClose={onClose}
+        />
+      )
+    case "conflict":
+      return <ConflictPreview key={preview.file} file={preview.file} ctx={ctx} onClose={onClose} />
+    case "recovery":
+      return <RecoveryPreview key={ctx.repoPath} ctx={ctx} onClose={onClose} />
+    case "blame":
+      return (
+        <BlamePreview
+          key={`${preview.file}:${preview.ref}`}
+          ctx={ctx}
+          file={preview.file}
+          refName={preview.ref}
+          onClose={onClose}
+        />
+      )
     case "diff":
       return (
         <div className="flex min-h-0 flex-1 flex-col">
           <PreviewHeader title={preview.title} subtitle={preview.subtitle} onClose={onClose} />
           <DiffView
+            lineNumbers
             body={preview.body}
             singleFile={preview.singleFile}
             className="min-h-0 flex-1 animate-rise"
@@ -125,6 +169,7 @@ export function PreviewPanel({
         <FilePreview
           key={preview.path}
           path={preview.path}
+          ctx={ctx}
           canWrite={ctx.canWrite}
           onClose={onClose}
           onChanged={ctx.onChanged}
@@ -165,59 +210,29 @@ export function PreviewPanel({
           onClose={onClose}
         />
       )
+    case "workflow":
+      return <WorkflowPreview key={preview.id} id={preview.id} ctx={ctx} onClose={onClose} />
+    case "rebase":
+      return <RebasePreview ctx={ctx} onClose={onClose} />
+    case "submodules":
+      return <SubmodulePreview ctx={ctx} onClose={onClose} />
+    case "lfs":
+      return <LFSPreview ctx={ctx} onClose={onClose} />
+    case "exchange":
+      return <PatchPreview ctx={ctx} onClose={onClose} />
+    case "forge":
+      return <ForgePreview ctx={ctx} onClose={onClose} />
   }
 }
 
-/**
- * The strip a preview opens with: its name, a line under it, and the close
- * button. No glyph — the content beneath says what kind of thing it is.
- */
-function PreviewHeader({
-  title,
-  subtitle,
-  trailing,
-  mono = true,
-  onClose,
-}: {
-  title: string
-  subtitle?: React.ReactNode
-  trailing?: React.ReactNode
-  mono?: boolean
-  onClose: () => void
-}) {
-  return (
-    <PaneHeader className="gap-2 px-3">
-      <div className="min-w-0 flex-1">
-        <p className={cn("truncate text-body font-medium", mono && "font-mono")} title={title}>
-          {title}
-        </p>
-        {subtitle && <p className="truncate text-hint text-muted-foreground">{subtitle}</p>}
-      </div>
-      {trailing}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-            aria-label="Close"
-            onClick={onClose}
-          >
-            <Cross className="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Close the preview</TooltipContent>
-      </Tooltip>
-    </PaneHeader>
-  )
-}
-
 function FilePreview({
+  ctx,
   path,
   canWrite,
   onClose,
   onChanged,
 }: {
+  ctx: PreviewContext
   path: string
   canWrite: boolean
   onClose: () => void
@@ -266,6 +281,27 @@ function FilePreview({
         onClose={onClose}
         trailing={
           <>
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() =>
+                ctx.onFileHistory(path.slice(ctx.repoPath.replace(/\/$/, "").length + 1))
+              }
+            >
+              History
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() =>
+                ctx.onSelect({
+                  kind: "blame",
+                  file: path.slice(ctx.repoPath.replace(/\/$/, "").length + 1),
+                })
+              }
+            >
+              Blame
+            </Button>
             {dirty && <Tag tone="warning">unsaved</Tag>}
             {file && !file.binary && canWrite && (
               <Button size="xs" onClick={save} disabled={!dirty || saving} pending={saving}>
@@ -367,7 +403,6 @@ function CommitPreview({
   verbs.push({
     key: "copy",
     label: "Copy SHA",
-    detail: "Put the full commit id on the clipboard.",
     icon: Copy,
     inline: true,
     run: () => void copyText(sha, "Commit id copied"),
@@ -376,32 +411,34 @@ function CommitPreview({
     verbs.push({
       key: "branch",
       label: "Branch here",
-      detail: "Start a new branch from this commit and switch to it.",
-      icon: BranchPlus,
+      icon: SourceBranch,
       run: () => setNaming("branch"),
     })
     verbs.push({
       key: "tag",
       label: "Tag this commit",
-      detail: "Pin a name to this commit — a release, a point to come back to.",
       icon: GitTag,
       run: () => setNaming("tag"),
     })
     verbs.push({
       key: "cherry",
       label: "Cherry-pick onto " + ctx.branch,
-      detail: "Copy this one commit onto the current branch.",
       icon: CornerUpLeft,
       disabled: !!ctx.busy,
       run: () =>
         void ctx
-          .run("Cherry-picked", () => post<GitResult>("/git/cherry-pick", { ref: sha }, { query: q }))
+          .run("Cherry-picked", () =>
+            post<GitResult>(
+              "/git/operation/start",
+              { operation: "cherry-pick", ref: sha },
+              { query: q },
+            ),
+          )
           .catch(() => undefined),
     })
     verbs.push({
       key: "revert",
       label: "Revert this commit",
-      detail: "Record a new commit that undoes this one. History keeps both, so it is safe after a push.",
       icon: RotateCounterClockwise,
       disabled: !!ctx.busy,
       run: () =>
@@ -411,13 +448,17 @@ function CommitPreview({
           description: (
             <p>
               A new commit is recorded that undoes “{c?.subject ?? subject ?? sha.slice(0, 7)}”.
-              Nothing is rewritten; if the undo clashes with later changes, git gives up cleanly and
-              says which files.
+              Nothing is rewritten. If the undo clashes with later changes, resolve the conflicts in
+              Changes and continue.
             </p>
           ),
           action: async () => {
             await ctx.run("Reverted", () =>
-              post<GitResult>("/git/revert", { ref: sha }, { query: q }),
+              post<GitResult>(
+                "/git/operation/start",
+                { operation: "revert", ref: sha },
+                { query: q },
+              ),
             )
           },
         }),
@@ -478,6 +519,7 @@ function CommitPreview({
                   </span>
                 )}
               </div>
+              <CommitSignature repoPath={ctx.repoPath} sha={sha} />
               <VerbBar verbs={verbs} />
             </div>
 
@@ -521,6 +563,7 @@ function CommitPreview({
                 {current?.error && <p className="p-3 text-xs text-destructive">{current.error}</p>}
                 {current?.body !== undefined && (
                   <DiffView
+                    lineNumbers
                     body={current.body || "No textual diff (binary file, or no line changes)."}
                     singleFile={file !== ""}
                     className="animate-rise"
@@ -652,11 +695,7 @@ function StashPreview({
 }) {
   const diff = usePoll(
     (signal) =>
-      get<{ diff: string }>(
-        "/git/stash/diff",
-        { path: ctx.repoPath, index: stash.index },
-        signal,
-      ),
+      get<{ diff: string }>("/git/stash/diff", { path: ctx.repoPath, index: stash.index }, signal),
     0,
     [ctx.repoPath, stash.sha],
   )
@@ -666,7 +705,6 @@ function StashPreview({
     verbs.push({
       key: "apply",
       label: "Apply",
-      detail: "Bring these changes back into the working tree and keep the stash.",
       icon: CornerUpLeft,
       inline: true,
       disabled: !!ctx.busy,
@@ -681,7 +719,6 @@ function StashPreview({
     verbs.push({
       key: "pop",
       label: "Pop",
-      detail: "Bring the changes back and drop the stash once they have applied cleanly.",
       icon: RotateCounterClockwise,
       inline: true,
       disabled: !!ctx.busy,
@@ -698,7 +735,6 @@ function StashPreview({
     verbs.push({
       key: "drop",
       label: "Drop",
-      detail: "Throw the stash away. The changes in it exist nowhere else.",
       icon: Cross,
       danger: true,
       disabled: !!ctx.busy,
@@ -743,6 +779,7 @@ function StashPreview({
       {diff.loading && !diff.data && <LoadingRows className="p-3" rows={6} />}
       {diff.data && (
         <DiffView
+          lineNumbers
           body={diff.data.diff || "This stash holds no textual changes."}
           className="min-h-0 flex-1 animate-rise"
         />
@@ -769,6 +806,23 @@ function ComparePreview({
     [ctx.repoPath, base, head],
   )
   const d = cmp.data
+  const [file, setFile] = useState<string | null>(null)
+  const diff = usePoll(
+    (signal) =>
+      get<{ diff: string }>(
+        "/git/compare/diff",
+        {
+          path: ctx.repoPath,
+          base: d?.baseSha ?? base,
+          head: d?.headSha ?? head,
+          file: file || undefined,
+        },
+        signal,
+      ),
+    0,
+    [ctx.repoPath, d?.baseSha, d?.headSha, base, head, file],
+    { enabled: !!d && file !== null },
+  )
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PreviewHeader
@@ -793,10 +847,43 @@ function ComparePreview({
       <div className="min-h-0 flex-1 overflow-auto">
         {cmp.error && <ErrorState error={cmp.error} className="m-3" />}
         {cmp.loading && !d && <LoadingRows className="p-3" rows={5} />}
+        {d && (d.changes?.length ?? 0) > 0 && (
+          <>
+            <div className="flex items-center gap-2 border-b border-hairline px-3 py-2">
+              <span className="eyebrow min-w-0 flex-1">Files</span>
+              <Button
+                size="xs"
+                variant="ghost"
+                aria-pressed={file === ""}
+                onClick={() => setFile(file === "" ? null : "")}
+              >
+                All files
+              </Button>
+            </div>
+            <ul className="divide-y divide-hairline">
+              {d.changes?.map((f) => (
+                <ChangedFileRow
+                  key={f.path}
+                  file={f}
+                  active={file === f.path}
+                  onClick={() => setFile(file === f.path ? null : f.path)}
+                  onHistory={() => ctx.onFileHistory(f.path)}
+                />
+              ))}
+            </ul>
+            {file !== null && (
+              <div className="border-y border-hairline">
+                {diff.error && <ErrorState error={diff.error} className="m-3" />}
+                {diff.loading && <LoadingRows className="p-3" rows={4} />}
+                {diff.data && <DiffView lineNumbers body={diff.data.diff} singleFile={!!file} />}
+              </div>
+            )}
+          </>
+        )}
         {d && d.commits.length === 0 && (
           <EmptyState
             className="m-3"
-            icon={GitMerge}
+            icon={SourceMerge}
             title={`${base} already has everything on ${head}`}
           />
         )}
@@ -848,7 +935,31 @@ const REVIEW_LABEL: Record<string, string> = {
   review_required: "review required",
 }
 
-/** A pull request: its state on GitHub, its description, and the merge. */
+/** The dot for one check run: GitHub's status/conclusion pair folded to a word. */
+function checkReading(check: GitHubCheckRun): { tone: DotTone; label: string } {
+  if (check.status !== "completed")
+    return { tone: "warning", label: check.status.replace("_", " ") }
+  switch (check.conclusion) {
+    case "success":
+      return { tone: "running", label: "passed" }
+    case "failure":
+    case "timed_out":
+    case "action_required":
+      return { tone: "danger", label: check.conclusion.replace("_", " ") }
+    case "cancelled":
+    case "skipped":
+    case "neutral":
+      return { tone: "stopped", label: check.conclusion }
+    default:
+      return { tone: "unknown", label: check.conclusion || "completed" }
+  }
+}
+
+/**
+ * A pull request: its state on GitHub, its description, the checks on its
+ * head commit, and the merge — pinned to that commit, so what was reviewed
+ * is what lands.
+ */
 function PullPreview({
   number,
   title,
@@ -861,31 +972,52 @@ function PullPreview({
   onClose: () => void
 }) {
   const pull = usePoll(
-    (signal) =>
-      get<GitPullRequest>(`/git/github/pulls/${number}`, { path: ctx.repoPath }, signal),
+    (signal) => get<GitPullRequest>(`/git/github/pulls/${number}`, { path: ctx.repoPath }, signal),
     30_000,
     [ctx.repoPath, number],
   )
   const [merging, setMerging] = useState(false)
+  const [commenting, setCommenting] = useState(false)
   const p = pull.data
   const q = { path: ctx.repoPath }
+  // Read against the head the detail reported, never a bare number: the
+  // route wants the sha, and a listing's checks for an older head would be a
+  // verdict on code that is no longer on the request.
+  const checks = usePoll(
+    (signal) =>
+      get<GitHubCheckRun[]>(
+        `/git/github/pulls/${number}/checks`,
+        { path: ctx.repoPath, head: p?.headSha },
+        signal,
+      ),
+    60_000,
+    [ctx.repoPath, number, p?.headSha],
+    { enabled: Boolean(p?.headSha) },
+  )
 
   const verbs: Verb[] = [
     {
       key: "open",
       label: "Open on GitHub",
-      detail: "The request's own page, with the conversation and the review.",
       icon: External,
       inline: true,
       run: () => window.open(p?.url, "_blank", "noopener"),
     },
   ]
+  if (ctx.canControl && p) {
+    verbs.push({
+      key: "comment",
+      label: "Comment",
+      icon: PaperAirplane,
+      inline: true,
+      run: () => setCommenting(true),
+    })
+  }
   if (ctx.canControl && p && p.state === "open") {
     verbs.unshift({
       key: "merge",
       label: "Merge",
-      detail: "Merge it into its base branch on GitHub, the way the button on its page does.",
-      icon: GitMerge,
+      icon: SourceMerge,
       inline: true,
       disabled: !!ctx.busy || p.draft || p.mergeable === "conflicting",
       run: () => setMerging(true),
@@ -893,8 +1025,7 @@ function PullPreview({
     verbs.push({
       key: "checkout",
       label: "Check out the branch",
-      detail: `Fetch ${p.head} and switch this working tree to it, to try the change here.`,
-      icon: BranchPlus,
+      icon: SourceBranch,
       disabled: !!ctx.busy,
       run: () =>
         void ctx
@@ -947,7 +1078,11 @@ function PullPreview({
               {p.checks && (
                 <Status
                   tone={
-                    p.checks === "success" ? "running" : p.checks === "failure" ? "danger" : "warning"
+                    p.checks === "success"
+                      ? "running"
+                      : p.checks === "failure"
+                        ? "danger"
+                        : "warning"
                   }
                   label={
                     p.checks === "success"
@@ -989,13 +1124,78 @@ function PullPreview({
             )}
           </div>
         )}
+        {p?.headSha && (
+          <div className="border-t border-hairline">
+            <div className="flex h-8 items-center gap-1.5 px-3">
+              <span className="eyebrow">Checks</span>
+              {checks.data && (
+                <span className="numeric text-hint text-muted-foreground">
+                  {checks.data.length}
+                </span>
+              )}
+            </div>
+            {checks.error && (
+              <p className="px-3 pb-2 text-hint text-muted-foreground">
+                Could not list checks: {errorMessage(checks.error)}
+              </p>
+            )}
+            {checks.loading && !checks.data && <LoadingRows className="px-3 pb-2" rows={2} />}
+            {checks.data && checks.data.length === 0 && (
+              <p className="px-3 pb-3 text-hint text-muted-foreground">No checks on this commit.</p>
+            )}
+            {checks.data && checks.data.length > 0 && (
+              <ul className="divide-y divide-hairline">
+                {checks.data.map((check, i) => {
+                  const reading = checkReading(check)
+                  return (
+                    <li
+                      key={`${check.app ?? ""}:${check.name}:${i}`}
+                      className="group flex min-w-0 items-center gap-2 px-3 py-1.5"
+                    >
+                      <Status
+                        tone={reading.tone}
+                        label={reading.label}
+                        className="w-24 shrink-0 text-hint"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-xs">{check.name}</span>
+                      {check.app && (
+                        <span className="truncate text-micro text-muted-foreground">
+                          {check.app}
+                        </span>
+                      )}
+                      {check.url && (
+                        <IconAction
+                          label={`Open ${check.name}`}
+                          reveal
+                          onClick={() => window.open(check.url, "_blank", "noopener")}
+                        >
+                          <External />
+                        </IconAction>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+        {p && <PullReview key={p.number} pull={p} ctx={ctx} onChanged={pull.refresh} />}
       </div>
+      <CommentDialog
+        open={commenting}
+        onOpenChange={setCommenting}
+        repoPath={ctx.repoPath}
+        number={number}
+        title={p?.title}
+        onCommented={pull.refresh}
+      />
       {p && (
         <MergePullDialog
           open={merging}
           onOpenChange={setMerging}
           repoPath={ctx.repoPath}
           pull={p}
+          headSha={p.headSha}
           onMerged={() => {
             pull.refresh()
             ctx.onChanged()

@@ -35,6 +35,8 @@ every path segment except the last) and the sealed configuration holds the real 
 update responses never include a credential. Editing a channel with a blank credential field keeps
 the stored value; a channel's kind cannot change after creation.
 
+Two more events reach a channel without being selected on it: `traffic.firing` and `traffic.recovered`, sent by a traffic alert rule to the channels the rule names (see [`request-observability.md`](request-observability.md)); a webhook receives the envelope with an `alert` block, the providers a rendered sentence with the reading and the limit. Its `url` opens the project's Logs page on the requests around the moment the rule changed state (`?view=requests&moment=`), not on whatever the last hour holds when it is read.
+
 Events are a closed vocabulary: `run.started`, `run.succeeded`, `run.failed` (includes
 `failed_activation` and `rolled_back`), `run.cancelled` (includes `superseded`). An empty list
 selects everything. The historical `run.finished` value remains valid as "every terminal outcome",
@@ -51,20 +53,42 @@ restart cannot send the same message twice.
 The signed webhook body keeps its six historical fields (`event`, `runId`, `projectId`,
 `environmentId`, `state`, `sentAt`) and adds `projectName`, `environmentName`, `runNumber`,
 `operation`, `trigger`, `actor`, `sourceRef`, `sourceRevision`, `endpoint`, `terminalCode`,
-`terminalReason`, `durationSeconds` and `url`. Provider kinds render the same facts. `url` points
+`terminalReason`, `durationSeconds` and `url`. Provider kinds render the same facts; a failure whose
+terminal code is a named cause (a build, runtime, release-task or source cause rather than a code
+that only says where, such as `build_failed`) adds a Cause field with its title before the reason,
+which is the cause's sentence. A GitHub commit status, with room for a few words, carries the title. `url` points
 at the run page under the dashboard's own endpoint, read from the self-configuration report and
 cached for five minutes.
 
 ### API
 
-- `GET /deploy/notifications` lists channels (id, name, kind, masked url/target, events, enabled).
+- `GET /deploy/notifications` lists channels (id, name, kind, masked url/target, events, enabled),
+  each with its history as the page draws it: `lastDelivery`, the newest attempt (status, event,
+  response class, when, and `nextAttemptAt` while a retry is ahead — `failed` with one is retrying,
+  without one given up), and `recent`, the last fourteen outcomes oldest first, each marked `test`
+  when it was sent from the page. An e-mail channel also carries `via`, the mail server it hands
+  messages to: the host is not a credential — the sign-in beside it is — so it alone is read back out
+  of the sealed configuration, and a configuration the key cannot open leaves it unnamed rather than
+  failing the list.
 - `GET /deploy/notifications/options` returns the kinds, events and SMTP security modes.
 - `POST /deploy/notifications` creates one; `secret` is returned only for the webhook kind.
 - `PUT /deploy/notifications/{channel}` edits name, events, enabled and configuration.
 - `PUT /deploy/notifications/{channel}/enabled` pauses or resumes without the configuration.
 - `POST /deploy/notifications/{channel}/test` sends a rendered test message and answers 502 with
   the provider's status class on failure.
-- `GET /deploy/notifications/{channel}/deliveries` lists recent attempts; `DELETE` removes.
+- `GET /deploy/notifications/{channel}/deliveries` lists recent attempts, the last 50 or `?limit=`
+  of them (1 to 200; anything else reads 50), each naming the run it announced — `projectId`,
+  `projectName` (an archived project's own name) and `runNumber`, so a row can say "api · run #12"
+  and link to it; a test message and a run since purged have none. `DELETE` removes.
+
+The history rides the list rather than a request per channel: `NotificationChannelsWithHistory` reads
+every channel's newest fourteen attempts in one windowed statement, and one more for the e-mail
+channels' servers. Create, update and enable responses do not carry it, so the page reads the list
+again after a change. The dispatcher reads channels on every run through `ListNotificationChannels`,
+which stays without it. Unlike a webhook trigger's summary (see
+[implementation](implementation.md)), a channel's history is not an administrator's reading: the list
+and the delivery log it summarises are both open to any signed-in account, and only the mutations
+below need `system.admin`.
 
 All mutations require `system.admin` and are audited as `deploy.notification.*`.
 
@@ -92,9 +116,9 @@ cannot be posted is a logged warning. `github_comments_test.go` covers the state
 per-run deduplication and the refusals.
 
 The per-environment policy row gained an additive `commit_statuses` column (default on), exposed as
-`commitStatuses` on `GET …/git-watch` and `PUT …/git-policy` and as **Report deployment status to
-GitHub commits** in the Deployment policy editor. It is excluded from the policy decision key, so
-toggling it cannot invalidate cached polling decisions.
+`commitStatuses` on `GET …/git-watch` and `PUT …/git-policy` and as **Report each release as a
+GitHub commit status** in Settings → General's Automatic deployment section (and on `/deploy/new`). It
+is excluded from the policy decision key, so toggling it cannot invalidate cached polling decisions.
 
 ## Verification
 
@@ -104,10 +128,17 @@ toggling it cannot invalidate cached polling decisions.
   captured mailer, credential masking in listings, and the notify step's new contract.
 - `run_observer_test.go`: observers hear about failed, successful and queued-cancelled runs; a slow
   observer changes nothing about the run.
+- `automation_readings_test.go`: each channel carries its newest attempt and last fourteen outcomes
+  oldest first, an e-mail channel its mail server, and each delivery the project and run it
+  announced (none for a test message).
 - `github_status_test.go`: pending/failure/success posting with deduplication, policy opt-out,
   restart and foreign-remote suppression, remote parsing, and the decision key staying stable.
-- Browser: channel creation for signed webhooks and Discord, pause/resume, test delivery, delivery
-  history, removal, and the commit-status toggle in the policy editor.
+- Browser (`deploy-projects.spec.ts`, `deploy-notifications.spec.ts`, `deploy-settings-a.spec.ts`):
+  a Discord channel's creation, pause/resume, test delivery, delivery history and removal; each
+  channel saying how its last message went and its sheet reading every attempt; an e-mail edit that
+  waits for its host, sender and recipients, and a Discord edit that keeps its webhook hidden until
+  *Replace delivery settings* is opened; and the GitHub commit-status switch in Settings → General's
+  Automatic deployment section.
 - `notifications_reliability_test.go`: eight concurrent observers deliver exactly once; a failed
   delivery schedules a retry, a repeated observer call cannot jump the backoff, the sweeper re-sends
   when due and stops after the third attempt; Slack escaping and Discord length caps.

@@ -1,12 +1,13 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Crosshair, Information } from "@/components/icons"
-import { PageHeader, SearchInput, Section, Toolbar } from "@/components/page"
-import { EmptyState, Notice } from "@/components/state"
-import { FilterChip } from "@/components/tabs"
+import { Crosshair, Globe, NetworkDevice, SecureConnection, Servers } from "@/components/icons"
+import { PageContext, SearchInput } from "@/components/page"
+import { Pane, PaneHeader } from "@/components/panel"
+import { StatGrid, StatTile } from "@/components/stat-tile"
+import { ChoiceCard } from "@/components/choice-card"
+import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/hooks/use-auth"
 import { SubnetTool } from "./tools/subnet-panel"
@@ -14,150 +15,171 @@ import { TOOL_GROUPS } from "./tools/tool-defs"
 import { ToolPanel } from "./tools/tool-panel"
 import type { ToolPrefill } from "./tools/use-tool-run"
 
-/**
- * The tools an operator opens a terminal for, on the page where the question
- * arose.
- *
- * One independent block per tool: each keeps its own target, port and answer,
- * and several can run at once. Twenty blocks is more than fits on a screen, so
- * the page opens with a filter rather than with scrolling: the group chips and
- * the search box narrow the grid to the tool that answers the question you
- * arrived with. And the warning that three of the blocks each printed in full
- * — that an outward probe proves nothing about what can reach *in* — is stated
- * once, at the top, where it applies to all of them.
- *
- * Another page can arrive here with the question already asked: an address in
- * the ban log or the connection table links to `?tool=asn&target=…`, which
- * narrows the page to that one tool with the address filled in. The run is
- * still a press.
- */
+const tools = TOOL_GROUPS.flatMap((group) => group.tools)
+const GROUP_MARK = [NetworkDevice, Crosshair, SecureConnection, Globe, Servers]
+
+/** One diagnostic in focus. Hidden tools stay mounted so their work and drafts survive a switch. */
 export function ToolsPanel() {
   const { can } = useAuth()
   const params = useSearchParams()
-  const arrival = useMemo<{ tool: string; prefill: ToolPrefill } | null>(() => {
+  const arrival = useMemo(() => {
     const tool = params.get("tool")
-    const target = params.get("target")
-    if (!tool || !TOOL_GROUPS.some((g) => g.tools.some((t) => t.key === tool))) return null
-    return { tool, prefill: { target: target ?? undefined, record: params.get("record") ?? undefined } }
+    if (!tools.some((entry) => entry.key === tool)) return null
+    return {
+      tool: tool!,
+      prefill: {
+        target: params.get("target") ?? undefined,
+        record: params.get("record") ?? undefined,
+      } satisfies ToolPrefill,
+    }
   }, [params])
+  const [choice, setChoice] = useState<{ arrival: typeof arrival; key: string } | null>(null)
+  const active = choice?.arrival === arrival ? choice.key : (arrival?.tool ?? "dns")
   const [query, setQuery] = useState("")
-  const [group, setGroup] = useState<string | null>(null)
-  // The arrival the reader has widened away from. Kept as the object rather
-  // than a flag so a fresh arrival — a new query string, hence a new object —
-  // narrows the page again without an effect to reset anything.
-  const [widened, setWidened] = useState<typeof arrival>(null)
-  const focused = arrival && widened !== arrival ? arrival.tool : null
-  const setFocused = (tool: string | null) => setWidened(tool ? null : arrival)
+  const selectedGroup = TOOL_GROUPS.find((group) => group.tools.some((tool) => tool.key === active))
+  const groups = TOOL_GROUPS.map((group, index) => ({
+    ...group,
+    mark: GROUP_MARK[index],
+    tools: group.tools.filter((tool) =>
+      `${tool.label} ${tool.hint}`.toLowerCase().includes(query.trim().toLowerCase()),
+    ),
+  }))
+  const choose = (key: string) => setChoice({ arrival, key })
 
-  const groups = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return TOOL_GROUPS.map((g) => ({
-      ...g,
-      tools: g.tools.filter(
-        (t) =>
-          (!focused || t.key === focused) &&
-          (!q || `${t.label} ${t.hint} ${t.key}`.toLowerCase().includes(q)),
-      ),
-    })).filter((g) => (!group || g.title === group) && g.tools.length > 0)
-  }, [query, group, focused])
-
-  const header = <PageHeader eyebrow="Security" title="Tools" />
-
-  if (!can("system.admin")) {
+  if (!can("system.admin"))
     return (
       <>
-        {header}
+        <PageContext eyebrow="Security" title="Tools" />
         <EmptyState
           icon={Crosshair}
           title="Diagnostics need the admin capability"
-          description="A probe makes the server send traffic to an address the caller chose, which is a scanner if it is handed to everybody."
+          description="These probes send traffic from this server to the target you choose."
         />
       </>
     )
-  }
-
-  const showSubnet = !focused && groups.some((g) => g.title === "This host")
 
   return (
     <>
-      {header}
+      <PageContext eyebrow="Security" title="Tools" />
+      <StatGrid columns={4}>
+        <StatTile
+          label="Diagnostics"
+          value={tools.length}
+          hint="network, services, TLS and reputation"
+        />
+        <StatTile
+          label="Categories"
+          value={TOOL_GROUPS.length}
+          hint="choose the question you want answered"
+        />
+        <StatTile
+          label="Local tools"
+          value={tools.filter((tool) => !tool.needsTarget).length}
+          hint="inspect this host without a target"
+        />
+        <StatTile
+          label="Probe origin"
+          value="This server"
+          hint="outward results do not prove inbound access"
+        />
+      </StatGrid>
 
-      <Notice icon={Information} title="A probe answers outward, not inward">
-        Everything marked <span className="font-medium text-warning">outward</span> proves what{" "}
-        <b>this server</b> can reach, not what can reach it. Pointed at your own public address the
-        traffic can hairpin or be admitted by rules that never apply to an outside visitor, so an
-        open port here is not proof of exposure — the{" "}
-        <Link href="/security/connections" className="underline underline-offset-4">
-          Connections
-        </Link>{" "}
-        page and the exposure grade are.
-      </Notice>
-
-      <Toolbar>
-        <FilterChip
-          selected={group === null && !focused}
-          onClick={() => {
-            setGroup(null)
-            setFocused(null)
-          }}
+      {/* The chooser and result own their scrolling; this is one framed workbench. */}
+      <div
+        data-slot="security-tools"
+        className="grid min-w-0 overflow-hidden rounded-xl border bg-card lg:h-[min(46rem,calc(100svh-16rem))] lg:min-h-[30rem] lg:grid-cols-[17rem_minmax(0,1fr)]"
+      >
+        <Pane
+          flush
+          className="max-h-80 border-b border-hairline lg:max-h-none lg:border-r lg:border-b-0"
         >
-          All
-        </FilterChip>
-        {TOOL_GROUPS.map((g) => (
-          <FilterChip
-            key={g.title}
-            selected={group === g.title}
-            onClick={() => {
-              setFocused(null)
-              setGroup(group === g.title ? null : g.title)
-            }}
-          >
-            {g.title}
-          </FilterChip>
-        ))}
-        <span className="flex-1" />
-        {focused && (
-          <Button size="sm" variant="ghost" onClick={() => setFocused(null)}>
-            Every tool
-          </Button>
-        )}
-        <SearchInput
-          dense
-          aria-label="Filter tools"
-          placeholder="Filter tools"
-          value={query}
-          onChange={(e) => {
-            setFocused(null)
-            setQuery(e.target.value)
-          }}
-          containerClassName="sm:w-64"
-        />
-      </Toolbar>
-
-      {groups.length === 0 && (
-        <EmptyState
-          icon={Crosshair}
-          title="No tool matches"
-          description={`Nothing in these twenty probes is called “${query.trim()}”.`}
-        />
-      )}
-
-      {groups.map((g) => (
-        <Section key={g.title} title={g.title}>
-          {/* items-start so a block holding two hundred lines of traceroute
-              output does not stretch the empty block beside it to match. */}
-          <div className="grid min-w-0 items-start gap-x-8 gap-y-6 xl:grid-cols-2 2xl:grid-cols-3">
-            {g.tools.map((def) => (
-              <ToolPanel
-                key={def.key}
-                def={def}
-                prefill={arrival && arrival.tool === def.key ? arrival.prefill : undefined}
-              />
+          <PaneHeader>
+            <SearchInput
+              dense
+              aria-label="Filter tools"
+              placeholder="Find a diagnostic"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              containerClassName="w-full"
+            />
+          </PaneHeader>
+          <nav aria-label="Diagnostics" className="min-h-0 space-y-5 overflow-y-auto p-3">
+            {groups.map(
+              (group) =>
+                group.tools.length > 0 && (
+                  <div key={group.title} className="space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                      <h2 className="eyebrow">{group.title}</h2>
+                      <span className="numeric text-micro text-muted-foreground">
+                        {group.tools.length}
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {group.tools.map((tool) => (
+                        <ChoiceCard
+                          key={tool.key}
+                          selected={active === tool.key}
+                          onClick={() => choose(tool.key)}
+                          className="min-h-0 flex-row items-center gap-2.5 px-3 py-2"
+                        >
+                          <group.mark
+                            aria-hidden
+                            className="size-3.5 shrink-0 text-muted-foreground"
+                          />
+                          <span className="text-body font-medium">{tool.label}</span>
+                        </ChoiceCard>
+                      ))}
+                    </div>
+                  </div>
+                ),
+            )}
+            {"subnet calculator".includes(query.trim().toLowerCase()) && (
+              <ChoiceCard
+                selected={active === "subnet"}
+                onClick={() => choose("subnet")}
+                className="min-h-0 flex-row items-center gap-2.5 px-3 py-2"
+              >
+                <NetworkDevice aria-hidden className="size-3.5 text-muted-foreground" />
+                <span className="text-body font-medium">Subnet calculator</span>
+              </ChoiceCard>
+            )}
+            {groups.every((group) => group.tools.length === 0) &&
+              !"subnet calculator".includes(query.trim().toLowerCase()) && (
+                <p className="p-2 text-body text-muted-foreground">No matching diagnostics.</p>
+              )}
+          </nav>
+        </Pane>
+        <Pane flush className="min-h-80">
+          <PaneHeader className="justify-between">
+            <span className="text-body font-medium">
+              {selectedGroup?.title ?? "Address planning"}
+            </span>
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => {
+                setQuery("")
+                document.querySelector<HTMLInputElement>('[aria-label="Filter tools"]')?.focus()
+              }}
+            >
+              Every tool
+            </Button>
+          </PaneHeader>
+          <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
+            {tools.map((tool) => (
+              <div key={tool.key} hidden={active !== tool.key}>
+                <ToolPanel
+                  def={tool}
+                  prefill={arrival?.tool === tool.key ? arrival.prefill : undefined}
+                />
+              </div>
             ))}
-            {g.title === "This host" && showSubnet && !query.trim() && <SubnetTool />}
+            <div hidden={active !== "subnet"}>
+              <SubnetTool />
+            </div>
           </div>
-        </Section>
-      ))}
+        </Pane>
+      </div>
     </>
   )
 }

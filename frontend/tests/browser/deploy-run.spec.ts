@@ -26,7 +26,7 @@ function snapshot(
   return { run: { ...run, ...overrides }, steps: stepList }
 }
 
-test("renders the header, facts and release path for an active run", async ({ page }) => {
+test("renders the run identity, facts and release path for an active run", async ({ page }) => {
   await mockProject(page)
   await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
     socket.send(JSON.stringify({ type: "snapshot", data: snapshot(), ts: Date.now() }))
@@ -34,21 +34,37 @@ test("renders the header, facts and release path for an active run", async ({ pa
   await page.goto("/deploy/7/runs/84")
 
   await expect(page.getByRole("heading", { name: "Deployment #1" })).toBeVisible()
-  const header = page.locator('[data-slot="page-header"]')
-  await expect(header.getByText("Verifying", { exact: true })).toBeVisible()
-  await expect(page.getByRole("link", { name: /api-production/ })).toHaveAttribute(
-    "href",
-    "/deploy/7",
-  )
+  const identity = page.locator('[data-slot="run-identity"]')
+  await expect(identity.getByText("Verifying", { exact: true })).toBeVisible()
+  // Nothing stands above the identity line: the run's verbs sit on it beside
+  // the state, and the way back to the project is the rail's panel and the
+  // menu's Open project rather than an eyebrow.
+  await expect(page.locator("[data-slot=page-context]")).toHaveCount(0)
+  await expect(
+    identity.getByRole("button", { name: "More actions for Deployment #1", exact: true }),
+  ).toBeVisible()
 
+  // The identity line: the source as its forge, the repository as the title
+  // (the run recorded no commit), and the run as a sentence of facts.
+  await expect(identity.getByText("acme/api", { exact: true })).toBeVisible()
   await expect(page.getByText("Production", { exact: true })).toBeVisible()
-  await expect(page.getByText("Deploy", { exact: true })).toBeVisible()
+  await expect(identity.getByText("Deploy", { exact: true })).toBeVisible()
   await expect(page.getByText("by operator", { exact: true })).toBeVisible()
   await expect(page.getByText(/Sep 0?3, 2026/)).toBeVisible()
   await expect(page.getByText("main", { exact: true })).toBeVisible()
+  await expect(identity.getByText("Running for", { exact: true })).toBeVisible()
 
-  await expect(page.getByRole("list", { name: "Release path" })).toBeVisible()
-  await expect(page.getByRole("status")).toHaveText("Verify Readiness…")
+  const path = page.getByRole("list", { name: "Release path" })
+  await expect(path).toBeVisible()
+  // The fixture's run plans no certificate: that stage is not part of it,
+  // rather than waiting on it for ever.
+  await expect(path.getByText("Not part of this run", { exact: true })).toHaveCount(1)
+  // The sequence on /deploy/new ended when the project was created: a first
+  // run is read like any other, with no spine claiming the screens before it.
+  await expect(page.getByRole("list", { name: "Progress" })).toHaveCount(0)
+  // The path lights the stage at work; no second caption names it again.
+  await expect(path.locator('[aria-current="step"]')).toContainText("Verify")
+  await expect(page.getByRole("status")).toHaveCount(0)
 })
 
 test("the run's own frozen commit renders beside its branch, sha and subject", async ({ page }) => {
@@ -99,8 +115,14 @@ test("build transcript formats chunks, dedupes by sequence, filters and copies",
   })
   await page.goto("/deploy/7/runs/84")
 
-  const transcript = page.getByRole("list", { name: "Deployment transcript" })
+  const transcript = page.getByRole("group", { name: "Deployment transcript" })
   await expect(transcript.getByRole("listitem")).toHaveCount(5)
+  // Each step's lines are a list of their own, under a rule naming the step
+  // as the engine's read model names it.
+  await expect(transcript.getByRole("list", { name: "Build", exact: true })).toBeVisible()
+  await expect(
+    transcript.getByRole("list", { name: "Readiness checks", exact: true }),
+  ).toBeVisible()
   await expect(transcript).not.toContainText("")
   await expect(page.getByRole("combobox", { name: "Build log stage" })).toHaveText("All stages")
 
@@ -108,10 +130,13 @@ test("build transcript formats chunks, dedupes by sequence, filters and copies",
   await expect(transcript.getByRole("listitem")).toHaveCount(1)
   await page.getByRole("textbox", { name: "Search build logs" }).fill("")
 
-  await page.getByRole("button", { name: "Errors", exact: true }).click()
+  // The chip carries its count: "Errors 1".
+  const errors = page.getByRole("button", { name: /^Errors/ })
+  await expect(errors).toHaveText(/Errors\s*1/)
+  await errors.click()
   await expect(transcript.getByRole("listitem")).toHaveCount(1)
   await expect(transcript).toContainText("Cache restore failed; continuing")
-  await page.getByRole("button", { name: "Errors", exact: true }).click()
+  await errors.click()
 
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
   await page.getByRole("button", { name: "Copy build logs" }).click()
@@ -208,32 +233,101 @@ test("a resync event replaces the snapshot instead of merging into it", async ({
   // Only reachable by replacing state wholesale: applyEvent's incremental path
   // has no case for "resync" and would have left the run "running".
   await expect(page.getByText("Your release is ready", { exact: true })).toBeVisible()
-  const header = page.locator('[data-slot="page-header"]')
-  await expect(header.getByText("Ready", { exact: true })).toBeVisible()
+  const identity = page.locator('[data-slot="run-identity"]')
+  await expect(identity.getByText("Ready", { exact: true })).toBeVisible()
 })
 
-test("selecting a step in Details focuses that stage in the build console", async ({ page }) => {
+test("a step in Details opens to its evidence, and only a step with output leads to the console", async ({
+  page,
+}) => {
   await mockProject(page)
+  const withEvidence = steps.map((step) =>
+    step.key === "backup_gate"
+      ? { ...step, evidence: { reason: "no backup gate configured", routeRemoved: true } }
+      : step,
+  )
   await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
-    socket.send(JSON.stringify({ type: "snapshot", data: snapshot(), ts: Date.now() }))
+    socket.send(
+      JSON.stringify({ type: "snapshot", data: snapshot({}, withEvidence), ts: Date.now() }),
+    )
+    socket.send(
+      JSON.stringify({
+        type: "events",
+        data: [
+          {
+            seq: 30,
+            type: "step.log",
+            runId: 84,
+            stepId: 111,
+            ts: now,
+            data: { stream: "stdout", text: "smoke: GET / 200\n", truncated: false },
+          },
+        ],
+        ts: Date.now(),
+      }),
+    )
   })
   await page.goto("/deploy/7/runs/84")
 
   const views = page.getByRole("group", { name: "Run views" })
   await views.getByRole("button", { name: "Details", exact: true }).click()
-  await expect(page.getByRole("list", { name: "Deployment steps" })).toBeVisible()
+  const list = page.getByRole("list", { name: "Deployment steps" })
+  await expect(list).toBeVisible()
+  await expect(page.getByText("15 steps · 8 passed · 1 skipped", { exact: true })).toBeVisible()
 
-  const smoke = page.getByRole("button", { name: /Verify Smoke/ })
+  // The skipped gate's reason is its second line; open, its evidence is rows.
+  const gate = page.getByRole("button", { name: /Backup check/ })
+  await expect(gate).toContainText("no backup gate configured")
+  await gate.click()
+  await expect(page.getByText("Route removed", { exact: true })).toBeVisible()
+  await expect(page.getByText("yes", { exact: true })).toBeVisible()
+  // Nothing was written to the build log for it, so nothing offers the console.
+  await expect(page.getByRole("button", { name: "Build output", exact: true })).toHaveCount(0)
+
+  // A step that passed with no end recorded reads as done, not as a
+  // duration measured to the present.
+  await expect(page.getByRole("button", { name: /Resolve source/ })).toContainText("Done")
+
+  const smoke = page.getByRole("button", { name: /Smoke checks/ })
   await smoke.focus()
   await page.keyboard.press("Enter")
+  await page.getByRole("button", { name: "Build output", exact: true }).click()
 
   await expect(views.getByRole("button", { name: "Build logs", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   )
   const stage = page.getByRole("combobox", { name: "Build log stage" })
-  await expect(stage).toHaveText("Verify Smoke")
+  await expect(stage).toHaveText("Smoke checks")
   await expect(stage).toBeFocused()
+  await expect(page.getByText("smoke: GET / 200", { exact: true })).toBeVisible()
+})
+
+test("a stage with no output says so instead of reporting a failed search", async ({ page }) => {
+  await mockProject(page)
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(JSON.stringify({ type: "snapshot", data: snapshot(), ts: Date.now() }))
+    socket.send(
+      JSON.stringify({
+        type: "events",
+        data: [
+          {
+            seq: 31,
+            type: "step.log",
+            runId: 84,
+            stepId: 105,
+            ts: now,
+            data: { stream: "stdout", text: "built\n", truncated: false },
+          },
+        ],
+        ts: Date.now(),
+      }),
+    )
+  })
+  await page.goto("/deploy/7/runs/84")
+  await page.getByRole("combobox", { name: "Build log stage" }).click()
+  await page.getByRole("option", { name: "Check plan" }).click()
+  await expect(page.getByText("Check plan wrote nothing to the build log.")).toBeVisible()
 })
 
 test("cancel requests cancellation and shows the toast and notice", async ({ page }) => {
@@ -251,8 +345,8 @@ test("cancel requests cancellation and shows the toast and notice", async ({ pag
   await expect(
     page.getByText("The current operation will stop safely and run its cleanup."),
   ).toBeVisible()
-  const header = page.locator('[data-slot="page-header"]')
-  await expect(header.getByText("Cancelling", { exact: true })).toBeVisible()
+  const identity = page.locator('[data-slot="run-identity"]')
+  await expect(identity.getByText("Cancelling", { exact: true })).toBeVisible()
 })
 
 test("retry navigates to the run it created", async ({ page }) => {
@@ -377,7 +471,10 @@ test("run runtime logs open the server-provided activation window and withhold u
     page.getByText("This run has no completed activation evidence.", { exact: true }),
   ).toBeVisible()
   await expect(page.getByRole("button", { name: "Around activation", exact: true })).toHaveCount(0)
-  await expect(page.getByRole("combobox", { name: "Runtime log source" })).toHaveText("preview-web")
+  // One container: the workspace's own strip names it, and there is nothing
+  // to pick between.
+  await expect(page.getByText("preview-web", { exact: true })).toBeVisible()
+  await expect(page.getByRole("combobox", { name: "Runtime log source" })).toHaveCount(0)
 })
 
 test("metrics compares the release before and after activation", async ({ page }) => {
@@ -447,8 +544,105 @@ test("a terminal reason renders as a danger notice", async ({ page }) => {
     socket.send(JSON.stringify({ type: "snapshot", data: snapshot(failed), ts: Date.now() }))
   })
   await page.goto("/deploy/7/runs/84")
+  // The reader's words first, the engine's code beside them as a literal.
+  await expect(page.getByText("Health gate failed", { exact: true })).toBeVisible()
   await expect(page.getByText("health_gate_failed", { exact: true })).toBeVisible()
   await expect(page.getByText("could not connect after 20 attempts", { exact: true })).toBeVisible()
+})
+
+test("a failure leads to the step that failed", async ({ page }) => {
+  await mockProject(page)
+  const failed = {
+    state: "failed" as const,
+    terminalCode: "build_failed",
+    terminalReason: "bun run build exited with status 1",
+    endedAt: now,
+  }
+  const failedSteps = steps.map((step) =>
+    step.key === "build_artifact" ? { ...step, state: "failed" as const } : step,
+  )
+  await page.route("**/api/v1/deploy/7/runs/84", (route) =>
+    json(route, snapshot(failed, failedSteps)),
+  )
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(
+      JSON.stringify({ type: "snapshot", data: snapshot(failed, failedSteps), ts: Date.now() }),
+    )
+  })
+  await page.goto("/deploy/7/runs/84")
+  await page
+    .getByRole("group", { name: "Run views" })
+    .getByRole("button", { name: "Details", exact: true })
+    .click()
+  await page.getByRole("button", { name: "Show the failing step", exact: true }).click()
+  const views = page.getByRole("group", { name: "Run views" })
+  await expect(views.getByRole("button", { name: "Build logs", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.getByRole("combobox", { name: "Build log stage" })).toHaveText("Build")
+})
+
+test("a rolled-back run names the release that stayed live then, not the one live now", async ({
+  page,
+}) => {
+  await mockProject(page)
+  // Its candidate was release #2, which replaced #1; #2 has gone live since
+  // by another run, and the sentence is about this run's moment.
+  const rolledBack = {
+    state: "rolled_back" as const,
+    candidateReleaseId: 20,
+    terminalCode: "activation_failed",
+    terminalReason: "The new release stopped answering during the switch.",
+    endedAt: now,
+  }
+  await page.route("**/api/v1/deploy/7/runs/84", (route) => json(route, snapshot(rolledBack)))
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(JSON.stringify({ type: "snapshot", data: snapshot(rolledBack), ts: Date.now() }))
+  })
+  await page.goto("/deploy/7/runs/84")
+  await expect(
+    page.getByText("Rolled back — release #1 stayed live", { exact: true }),
+  ).toBeVisible()
+})
+
+test("a cancelled run says why it stopped, and one never claimed was only queued", async ({
+  page,
+}) => {
+  await mockProject(page)
+  const cancelled = {
+    state: "cancelled" as const,
+    claimedAt: undefined,
+    terminalReason: "Cancelled by operator",
+    endedAt: "2026-09-03T12:00:40Z",
+  }
+  await page.route("**/api/v1/deploy/7/runs/84", (route) => json(route, snapshot(cancelled, [])))
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(JSON.stringify({ type: "snapshot", data: snapshot(cancelled, []), ts: Date.now() }))
+  })
+  await page.goto("/deploy/7/runs/84")
+  await expect(page.getByText("Cancelled by operator", { exact: true })).toBeVisible()
+  const identity = page.locator('[data-slot="run-identity"]')
+  await expect(identity.getByText("Queued for", { exact: true })).toBeVisible()
+  await expect(identity.getByText("never reached a build slot", { exact: true })).toBeVisible()
+  await expect(identity.getByText("Took", { exact: true })).toHaveCount(0)
+})
+
+test("a finished run's release can be rolled back to from its own page", async ({ page }) => {
+  await mockProject(page)
+  const retained = { state: "succeeded" as const, releaseId: 19, endedAt: now }
+  await page.route("**/api/v1/deploy/7/runs/84", (route) => json(route, snapshot(retained)))
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(JSON.stringify({ type: "snapshot", data: snapshot(retained), ts: Date.now() }))
+  })
+  await page.goto("/deploy/7/runs/84")
+  await expect(page.getByText("Superseded — release #2 is live now", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "More actions for Deployment #1", exact: true }).click()
+  await expect(page.getByRole("menuitem", { name: /Compare with live/ })).toBeVisible()
+  await page.getByRole("menuitem", { name: /Roll back to this release/ }).click()
+  const dialog = page.getByRole("dialog", { name: "Roll back to release #1" })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Roll back", exact: true })).toBeEnabled()
 })
 
 test("visit and the ready block appear only when this run's release is the live one", async ({

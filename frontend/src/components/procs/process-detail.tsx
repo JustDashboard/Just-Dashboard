@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useViewState } from "@/lib/view-state"
 import type { Tone } from "@/components/tone"
 import Link from "next/link"
 import { Cpu, Minus, Plus } from "@/components/icons"
@@ -13,6 +14,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { ProductLogo, processProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, ErrorState, LoadingRows, Spinner } from "@/components/state"
@@ -60,7 +62,13 @@ export function ProcessDetailSheet({
     <SidePanel
       open={pid !== null}
       onOpenChange={onOpenChange}
-      title={row?.name ?? `PID ${pid ?? ""}`}
+      // The sheet opens on the thing itself: its mark, then its name.
+      title={
+        <>
+          <ProductLogo id={row ? processProduct(row.name) : undefined} size="sm" fallback={Cpu} />
+          <span className="min-w-0 truncate">{row?.name ?? `PID ${pid ?? ""}`}</span>
+        </>
+      }
       description={row ? `PID ${row.pid} · ${row.username || "unknown user"}` : "Process detail"}
       width="md"
       actions={
@@ -127,7 +135,8 @@ function ProcessDetail({
   onSelect: (pid: number) => void
   onChanged: () => void
 }) {
-  const [tab, setTab] = useState("overview")
+  // Which tab a process opens on, remembered the way a container's is.
+  const [tab, setTab] = useViewState("processes.detail.tab", "overview")
   // Read once when the sheet opens: uptime is a fact about the process, and
   // a clock that ticks during render is a render that never settles.
   const [openedAt] = useState(() => Date.now())

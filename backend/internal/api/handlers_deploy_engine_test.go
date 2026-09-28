@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/gorilla/websocket"
 )
 
@@ -332,6 +334,37 @@ func TestNormalizedStopAndStartActionsUseTheLiveRuntimeState(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A runtime recorded live is startable only when Docker reports its
+	// containers down. This Engine stands in for the host's daemon, so the
+	// fixture's ids never meet a real container.
+	var containerRunning atomic.Bool
+	containerRunning.Store(true)
+	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("API-Version", "1.47")
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/json"):
+			state := "exited"
+			if containerRunning.Load() {
+				state = "running"
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"Id": "stop-start-runtime", "Names": []string{"/stop-start-runtime"}, "State": state,
+				"Labels": map[string]string{
+					"io.just-dashboard.managed":        "true",
+					"io.just-dashboard.environment-id": strconv.FormatInt(environmentID, 10),
+					"io.just-dashboard.release-id":     strconv.FormatInt(live.Release.ID, 10),
+				},
+			}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(engine.Close)
+	s.modules.docker = dockerx.New(engine.URL)
+	t.Cleanup(func() { _ = s.modules.docker.Close() })
+
 	if _, err := s.Store.DB.Exec("UPDATE deploy_release_runtimes SET state='live' WHERE release_id=?", live.Release.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -339,6 +372,20 @@ func TestNormalizedStopAndStartActionsUseTheLiveRuntimeState(t *testing.T) {
 		map[string]string{"Idempotency-Key": "stop-start-not-stopped"})
 	if notStoppedResponse.Code != http.StatusConflict || !strings.Contains(notStoppedResponse.Body.String(), "not_stopped") {
 		t.Fatalf("start over a running runtime = %d %s", notStoppedResponse.Code, notStoppedResponse.Body.String())
+	}
+
+	containerRunning.Store(false)
+	downResponse := c.do(http.MethodPost, path, `{"operation":"start"}`,
+		map[string]string{"Idempotency-Key": "stop-start-live-but-down"})
+	if downResponse.Code != http.StatusAccepted {
+		t.Fatalf("start over a live runtime Docker reports down = %d %s", downResponse.Code, downResponse.Body.String())
+	}
+	var downRun deploy.EngineRun
+	if err := json.Unmarshal(downResponse.Body.Bytes(), &downRun); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec("UPDATE deploy_runs SET state = 'cancelled', status = 'cancelled', ended_at = ? WHERE id = ?", time.Now().Unix(), downRun.ID); err != nil {
+		t.Fatal(err)
 	}
 
 	legacyProject := createLegacyDeploymentFixture(t, s, "stop-start-legacy")

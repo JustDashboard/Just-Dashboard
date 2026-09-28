@@ -7,11 +7,15 @@
   "description": "A Minecraft Java Edition server. Vanilla, Paper, Purpur, Fabric, Forge and NeoForge are the same blueprint with a different server build, so the world, backups and schedules survive changing your mind.",
   "iconId": "game",
   "docsUrl": "https://docker-minecraft-server.readthedocs.io/en/latest/",
+  "access": {
+    "kind": "open",
+    "note": "A Minecraft server has no web sign-in: players join with the Java Edition client at your host on port 25565. As shipped the whitelist is off and nobody is a server operator, so any Mojang-authenticated account that learns the address can join and build in your world."
+  },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "Apache-2.0",
     "upstreamUrl": "https://github.com/itzg/docker-minecraft-server",
-    "reviewedAt": "2026-09-11",
+    "reviewedAt": "2026-09-22",
     "minimumDashboard": "0.6.7",
     "updateNotes": "The image is pinned; the Minecraft server build is resolved at deployment from the upstream version API and recorded on the release."
   },
@@ -199,7 +203,6 @@
       "kind": "accept",
       "label": "I accept the Minecraft EULA",
       "required": true,
-      "variable": "EULA",
       "acceptUrl": "https://aka.ms/MinecraftEULA",
       "description": "The server refuses to start without this, and the acceptance is recorded with your name and the time."
     }
@@ -230,6 +233,15 @@
       "backup": true
     }
   ],
+  "secrets": [
+    {
+      "name": "rcon-password",
+      "variable": "RCON_PASSWORD",
+      "label": "Console password",
+      "length": 32,
+      "description": "How the dashboard's console and the graceful stop sequence reach the server. The image would otherwise generate one inside the container and write it only into server.properties."
+    }
+  ],
   "resources": {
     "memoryMb": 2048,
     "minMemoryMb": 1024
@@ -253,6 +265,11 @@
   ],
   "operations": {
     "startup": [
+      {
+        "kind": "set_variable",
+        "name": "EULA",
+        "value": "TRUE"
+      },
       {
         "kind": "set_variable",
         "name": "MEMORY",
@@ -419,7 +436,7 @@
       "inputs": {
         "eula": "true"
       },
-      "digest": "sha256:3a19f4e11423e3c8e545bafda2a1ee380cbfa4f601be98a8af17e8c9778ad241"
+      "digest": "sha256:dec98405b9a428bfe7e8b2dd77660afb80cda92e2494578f3e9ecb4f667090fa"
     },
     {
       "name": "modded",
@@ -429,7 +446,7 @@
         "version": "1.21.4",
         "memory": "6144"
       },
-      "digest": "sha256:0364e63262807a4ed3a544c5ccbbca3ac8fdb9ab4318b3eaae139b6d5b8bbf73"
+      "digest": "sha256:3fc8f09168ead955888d07d4ad05dd27c2aa88bae7c72e6d10444ae7b19323bd"
     }
   ]
 }

@@ -117,5 +117,70 @@ fi
         self.assertIn('No supported package manager', result.stderr)
 
 
+    # Host tools go through the same manager into a fake root: /etc/apt is
+    # substituted like /usr/share above, and the two coreutils the gh
+    # repository setup needs are linked in beside the fake commands.
+    def run_host_tools(self, present, fail=()):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            etc = root / 'etc-apt'
+            for name in present:
+                path = root / name
+                path.write_text('#!/bin/bash\n')
+                path.chmod(0o755)
+            for tool in ('mkdir', 'chmod'):
+                real = next(p for p in (pathlib.Path('/usr/bin') / tool, pathlib.Path('/bin') / tool) if p.exists())
+                (root / tool).symlink_to(real)
+            fakes = {
+                'dpkg': '#!/bin/bash\necho amd64\n',
+                'curl': '#!/bin/bash\n'
+                        'for arg in "$@"; do [[ $arg == https://* ]] && printf "curl %s\\n" "$arg" >> "$TEST_ROOT/calls"; done\n'
+                        'while [[ $# -gt 0 ]]; do [[ $1 == -o ]] && : > "$2"; shift; done\n',
+                'apt-get': '#!/bin/bash\n'
+                           'printf "%s\\n" "$*" >> "$TEST_ROOT/calls"\n'
+                           'if [[ "$1" == install ]]; then\n'
+                           'shift; while [[ $1 == -* ]]; do shift; done\n'
+                           'for pkg in "$@"; do\n'
+                           'for bad in $TEST_FAIL; do [[ $pkg == "$bad" ]] && exit 100; done\n'
+                           'printf "#!/bin/bash\\n" > "$TEST_ROOT/$pkg"; /bin/chmod 755 "$TEST_ROOT/$pkg"\n'
+                           'done\n'
+                           'fi\n',
+            }
+            for name, body in fakes.items():
+                (root / name).write_text(body)
+                (root / name).chmod(0o755)
+            script = SCRIPT.read_text().replace('/etc/apt/', str(etc) + '/')
+            env = {**os.environ, 'PATH': directory, 'TEST_ROOT': directory, 'TEST_FAIL': ' '.join(fail)}
+            result = subprocess.run(['/bin/bash', '-c', 'eval "$1"; jd_install_host_tools', 'test', script],
+                                    env=env, capture_output=True, text=True)
+            calls = (root / 'calls').read_text() if (root / 'calls').exists() else ''
+            source = etc / 'sources.list.d' / 'github-cli.list'
+            return result, calls, source.read_text() if source.exists() else ''
+
+    def test_host_tools_install_what_is_missing_and_gh_from_github(self):
+        result, calls, source = self.run_host_tools(['git', 'whois'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, 'update\n'
+                         'install -y --no-install-recommends git-lfs\n'
+                         'install -y --no-install-recommends traceroute\n'
+                         'curl https://cli.github.com/packages/githubcli-archive-keyring.gpg\n'
+                         'update\n'
+                         'install -y --no-install-recommends gh\n')
+        self.assertIn('arch=amd64 signed-by=', source)
+        self.assertIn('https://cli.github.com/packages stable main', source)
+
+    def test_host_tools_present_do_not_touch_the_manager(self):
+        result, calls, source = self.run_host_tools(['git', 'git-lfs', 'whois', 'traceroute', 'gh'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, '')
+        self.assertEqual(source, '')
+
+    def test_one_unavailable_host_tool_does_not_cost_the_others(self):
+        result, calls, _ = self.run_host_tools(['git'], fail=('whois',))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Could not install: whois', result.stderr)
+        self.assertIn('install -y --no-install-recommends traceroute\n', calls)
+        self.assertIn('install -y --no-install-recommends gh\n', calls)
+
 if __name__ == '__main__':
     unittest.main()

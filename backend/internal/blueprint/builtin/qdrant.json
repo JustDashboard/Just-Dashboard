@@ -1,0 +1,131 @@
+{
+  "id": "qdrant",
+  "version": "1.0.0",
+  "name": "Qdrant",
+  "category": "database",
+  "profile": "web",
+  "description": "A vector database for similarity search: collections of embeddings written and queried over HTTP or gRPC, with a web dashboard of its own. Everything it stores lives in one directory on the data volume.",
+  "iconId": "database",
+  "docsUrl": "https://qdrant.tech/documentation/",
+  "access": {
+    "kind": "token",
+    "secretVariable": "QDRANT__SERVICE__API_KEY",
+    "path": "/dashboard",
+    "note": "Qdrant serves its own dashboard at /dashboard, and opening it asks for one thing: an API key. Paste the generated key from the Variables tab — there is no account name, that key is the whole credential. Programs send the same key as an \"api-key\" header (or an \"Authorization: Bearer <key>\" one) on every call. Without it /collections, /telemetry, /metrics and /cluster all answer 401; only /healthz, /livez, /readyz and the root path stay open, and the root path returns nothing but the version string."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "Apache-2.0",
+    "upstreamUrl": "https://github.com/qdrant/qdrant",
+    "reviewedAt": "2026-09-22",
+    "minimumDashboard": "0.6.7"
+  },
+  "image": {
+    "reference": "qdrant/qdrant:v1.19.1",
+    "tagPolicy": "pinned",
+    "pullPolicy": "missing"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Public domain",
+      "required": false,
+      "description": "Optional; applications on this host reach it over the Docker network without one. Qdrant builds no absolute URLs, so nothing else here changes when it is set."
+    }
+  ],
+  "ports": [
+    {
+      "name": "http",
+      "internal": 6333,
+      "protocol": "tcp",
+      "purpose": "The REST API and the dashboard",
+      "exposure": "proxy",
+      "primary": true
+    },
+    {
+      "name": "grpc",
+      "internal": 6334,
+      "protocol": "tcp",
+      "purpose": "The gRPC API, for clients on this host's Docker network",
+      "exposure": "internal"
+    }
+  ],
+  "volumes": [
+    {
+      "name": "storage",
+      "target": "/qdrant/storage",
+      "purpose": "Collections, vectors and payloads",
+      "data": true,
+      "backup": true
+    },
+    {
+      "name": "snapshots",
+      "target": "/qdrant/snapshots",
+      "purpose": "Collection snapshots, written only when one is requested",
+      "data": true,
+      "backup": false
+    }
+  ],
+  "resources": {
+    "memoryMb": 1024,
+    "minMemoryMb": 256
+  },
+  "checks": [
+    {
+      "name": "Readiness endpoint answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/readyz",
+      "timeoutSeconds": 60
+    }
+  ],
+  "operations": {
+    "startup": [
+      {
+        "kind": "set_variable",
+        "name": "QDRANT__STORAGE__STORAGE_PATH",
+        "value": "/qdrant/storage"
+      },
+      {
+        "kind": "set_variable",
+        "name": "QDRANT__STORAGE__SNAPSHOTS_PATH",
+        "value": "/qdrant/snapshots"
+      },
+      {
+        "kind": "set_variable",
+        "name": "QDRANT__TELEMETRY_DISABLED",
+        "value": "true"
+      }
+    ],
+    "stop": [
+      {
+        "kind": "stop_signal",
+        "signal": "SIGTERM"
+      }
+    ]
+  },
+  "update": {
+    "detector": "registry",
+    "notes": "Qdrant reads the storage directory a previous patch release wrote; downgrading across a minor version does not.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:7d85144c2e69c555a4ebd30007b6f267935877d3b542f9a2be63b63190521401"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "api-key",
+      "variable": "QDRANT__SERVICE__API_KEY",
+      "label": "API key",
+      "length": 32,
+      "description": "Reveal it from the Variables tab; it is both the dashboard sign-in and the key every client sends."
+    }
+  ]
+}

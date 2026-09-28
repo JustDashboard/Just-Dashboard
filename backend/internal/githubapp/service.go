@@ -326,6 +326,71 @@ func (s *Service) UpsertPullRequestComment(ctx context.Context, nameWithOwner st
 	return client.UpsertPullRequestComment(ctx, installation, nameWithOwner, number, marker, body)
 }
 
+// Installed says whether some installation grants the repository, so a
+// caller can pick the App over a personal login before reading anything.
+func (s *Service) Installed(ctx context.Context, nameWithOwner string) bool {
+	client, err := s.Client(ctx)
+	if err != nil {
+		return false
+	}
+	_, err = client.RepositoryInstallation(ctx, nameWithOwner)
+	return err == nil
+}
+
+// PullRequests lists a repository's pull requests through the installation
+// that grants it.
+func (s *Service) PullRequests(ctx context.Context, nameWithOwner, state string) ([]PullRequest, error) {
+	client, err := s.Client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	installation, err := client.RepositoryInstallation(ctx, nameWithOwner)
+	if err != nil {
+		return nil, err
+	}
+	return client.ListPullRequests(ctx, installation, nameWithOwner, state)
+}
+
+// PullRequest reads one pull request through the installation that grants
+// its repository.
+func (s *Service) PullRequest(ctx context.Context, nameWithOwner string, number int) (*PullRequest, error) {
+	client, err := s.Client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	installation, err := client.RepositoryInstallation(ctx, nameWithOwner)
+	if err != nil {
+		return nil, err
+	}
+	return client.GetPullRequest(ctx, installation, nameWithOwner, number)
+}
+
+// PullRequestChecks lists everything reported on a commit: check runs and
+// commit statuses in one list, failures first. An App the owner has not yet
+// granted checks:read still gets the statuses, with ErrPermission beside
+// them so the page can say what is missing rather than show an empty list.
+func (s *Service) PullRequestChecks(ctx context.Context, nameWithOwner, sha string) ([]CheckRun, error) {
+	client, err := s.Client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	installation, err := client.RepositoryInstallation(ctx, nameWithOwner)
+	if err != nil {
+		return nil, err
+	}
+	runs, runsErr := client.ListCheckRuns(ctx, installation, nameWithOwner, sha)
+	if runsErr != nil && !errors.Is(runsErr, ErrPermission) {
+		return nil, runsErr
+	}
+	statuses, err := client.CombinedStatus(ctx, installation, nameWithOwner, sha)
+	if err != nil {
+		return nil, err
+	}
+	checks := append(append([]CheckRun{}, runs...), statuses...)
+	sortCheckRuns(checks)
+	return checks, runsErr
+}
+
 func randomToken(bytes int) (string, error) {
 	raw := make([]byte, bytes)
 	if _, err := rand.Read(raw); err != nil {

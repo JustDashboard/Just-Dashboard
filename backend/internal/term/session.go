@@ -7,6 +7,7 @@
 package term
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -19,7 +20,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
-	"github.com/creack/pty"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/ptyhold"
 )
 
 var (
@@ -38,7 +39,7 @@ type Session struct {
 	ID string `json:"id"`
 	// WorkspaceID groups direct PTYs into the session/window model exposed by
 	// the dashboard. Direct mode deliberately has no multiplexer: every window
-	// is its own real PTY and closing the dashboard ends it.
+	// is its own real PTY.
 	WorkspaceID string `json:"workspaceId"`
 	WindowName  string `json:"windowName"`
 	WindowOrder int    `json:"windowOrder"`
@@ -64,9 +65,14 @@ type Session struct {
 	favourite bool
 	colour    string
 
-	mu          sync.Mutex
-	pty         *os.File
-	cmd         *exec.Cmd
+	mu  sync.Mutex
+	pty *os.File
+	cmd *exec.Cmd
+	// holder is set when a holder owns the PTY (held.go). pty is then this
+	// process's copy of the master, for input, size and the foreground group,
+	// and the output arrives from the holder; cmd is nil, because the shell is
+	// not this process's child.
+	holder      *ptyhold.Conn
 	subscribers map[int64]chan []byte
 	// events carries activity changes to the subscribers that asked for them,
 	// beside their output channel rather than inside it: the output stream is
@@ -213,7 +219,7 @@ func (s *Session) Resize(rows, cols uint16) (changed bool, err error) {
 	if !changed {
 		return false, nil
 	}
-	if err := pty.Setsize(s.pty, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+	if err := ptyhold.SetSize(s.pty, rows, cols); err != nil {
 		return false, err
 	}
 	s.Rows, s.Cols = rows, cols
@@ -232,7 +238,7 @@ func (s *Session) SynchronizeSize(rows, cols uint16) error {
 	if rows == 0 || cols == 0 {
 		return nil
 	}
-	if err := pty.Setsize(s.pty, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+	if err := ptyhold.SetSize(s.pty, rows, cols); err != nil {
 		return err
 	}
 	s.Rows, s.Cols = rows, cols
@@ -330,9 +336,39 @@ func (s *Session) readLoop(onExit func()) {
 	}
 }
 
-// Close tears down the PTY. A tmux-backed session keeps running inside tmux;
-// closing here only detaches this dashboard's view of it, which is what makes
-// a session survive a browser reload or a dashboard restart.
+// readHolder is readLoop for a held session: the holder reads the PTY and
+// this reads the holder.
+func (s *Session) readHolder(onExit func()) {
+	defer onExit()
+	buf := make([]byte, ptyhold.MaxPacket)
+	for {
+		kind, data, err := s.holder.Read(buf)
+		if err != nil || kind == ptyhold.Exit {
+			return
+		}
+		chunk := bytes.Clone(data)
+		s.broadcast(chunk)
+		s.noteOutput(chunk)
+	}
+}
+
+// seed takes the output a holder kept from before this process attached. It
+// goes into the scrollback a reconnecting browser is sent, and past the title
+// scanner so the tab is named as it was, but it is not output now: nobody is
+// attached yet to be sent it twice, and it does not count as work.
+func (s *Session) seed(past []byte) {
+	for _, title := range s.titles.feed(past) {
+		s.setTitle(title)
+	}
+	s.mu.Lock()
+	s.scrollback.Write(past)
+	s.mu.Unlock()
+}
+
+// Close tears down this process's hold on the PTY. A PTY this process owns ends
+// with it; a tmux-backed session keeps running inside tmux and a held one
+// inside its holder, so closing either only lets go of it, which is what makes
+// a session survive a dashboard restart. Ending one is Manager.Kill.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -349,9 +385,12 @@ func (s *Session) Close() error {
 		s.tick.Stop()
 		s.tick = nil
 	}
-	f, cmd := s.pty, s.cmd
+	f, cmd, link := s.pty, s.cmd, s.holder
 	s.mu.Unlock()
 
+	if link != nil {
+		link.Close()
+	}
 	if f != nil {
 		f.Close()
 	}

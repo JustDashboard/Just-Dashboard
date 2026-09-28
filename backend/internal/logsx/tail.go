@@ -152,6 +152,10 @@ func (s *Service) TailLines(ctx context.Context, path string, n int, f *Filter) 
 		seed   []Line
 		offset int64
 	)
+	// One stream for the prefill and the follow: the follow starts exactly
+	// where the prefill stopped, so a record that straddles the two is still
+	// one record to the lens and to the filter.
+	st := f.Stream("")
 	if f.Empty() {
 		off, err := seekBackLines(path, n)
 		if err != nil {
@@ -160,11 +164,10 @@ func (s *Service) TailLines(ctx context.Context, path string, n int, f *Filter) 
 		offset = off
 	} else {
 		var err error
-		seed, offset, pre.Complete, err = scanBack(path, n, name, f)
+		seed, offset, pre.Complete, pre.Lines, err = scanBack(path, n, name, st)
 		if err != nil {
 			return nil, nil, err
 		}
-		pre.Lines = len(seed)
 	}
 
 	raw, err := s.follow(ctx, path, offset)
@@ -181,12 +184,14 @@ func (s *Service) TailLines(ctx context.Context, path string, n int, f *Filter) 
 			case out <- l:
 			}
 		}
+		var line Line
 		for text := range raw {
-			if !f.MatchText(text) {
+			if st.Skip(text) {
 				continue
 			}
-			line := ParseLine(text, name)
-			if !f.MatchLevel(line.Level) {
+			line = ParseLine(text, name)
+			st.Read(&line)
+			if keep, _ := st.Keep(&line, true); !keep {
 				continue
 			}
 			select {
@@ -212,26 +217,27 @@ type Prefill struct {
 // scanBack reads the tail end of a file forwards — seeking backwards line by
 // line would be one syscall per line — collecting matches into a ring of n,
 // and returns the offset it stopped at so the follow starts exactly there and
-// no line is shown twice or missed.
-func scanBack(path string, n int, name string, f *Filter) ([]Line, int64, bool, error) {
+// no line is shown twice or missed. The ring holds the continuation lines a
+// kept record brings with it; matches counts only the lines that matched.
+func scanBack(path string, n int, name string, st *Stream) (ring []Line, end int64, complete bool, matches int, err error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, 0, err
 	}
 	defer file.Close()
-	st, err := file.Stat()
+	info, err := file.Stat()
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, 0, err
 	}
-	size := st.Size()
+	size := info.Size()
 	start := int64(0)
-	complete := true
+	complete = true
 	if size > prefillCap {
 		start = size - prefillCap
 		complete = false
 	}
 	if _, err := file.Seek(start, io.SeekStart); err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, 0, err
 	}
 	sc := bufio.NewScanner(file)
 	sc.Buffer(make([]byte, 0, 64*1024), maxLine)
@@ -240,29 +246,39 @@ func scanBack(path string, n int, name string, f *Filter) ([]Line, int64, bool, 
 		// before the window; drop it rather than parse half a line.
 		sc.Scan()
 	}
-	ring := make([]Line, 0, n)
+	ring = make([]Line, 0, n)
+	own := make([]bool, 0, n)
+	var line Line
 	for sc.Scan() {
 		text := sc.Text()
-		if !f.MatchText(text) {
+		if st.Skip(text) {
 			continue
 		}
-		line := ParseLine(text, name)
-		if !f.MatchLevel(line.Level) {
+		line = ParseLine(text, name)
+		st.Read(&line)
+		keep, match := st.Keep(&line, true)
+		if !keep {
 			continue
 		}
 		if len(ring) == n {
-			ring = ring[1:]
+			if own[0] {
+				matches--
+			}
+			ring, own = ring[1:], own[1:]
 		}
-		ring = append(ring, line)
+		ring, own = append(ring, line), append(own, match)
+		if match {
+			matches++
+		}
 	}
 	// Whatever the scanner consumed is where the follow picks up. Using the
 	// size read before the scan instead would replay anything appended while
 	// it ran.
-	end, err := file.Seek(0, io.SeekCurrent)
+	end, err = file.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, 0, err
 	}
-	return ring, end, complete, sc.Err()
+	return ring, end, complete, matches, sc.Err()
 }
 
 // seekBackLines finds the byte offset n lines from the end, so tailing a
@@ -330,6 +346,31 @@ type Line struct {
 	// Match holds the byte ranges of the search term, computed here because
 	// the browser cannot faithfully re-run a Go regular expression.
 	Match [][2]int `json:"match,omitempty"`
+	// Message is the human sentence out of a structured line, and Fields the
+	// context around it. Both are empty for the plain text that is most of a
+	// host's logs; where they are set, the viewer can show the sentence and
+	// keep the request id, the trace id and the status code a keystroke away
+	// rather than making the reader parse JSON by eye.
+	Message string            `json:"message,omitempty"`
+	Fields  map[string]string `json:"fields,omitempty"`
+	// Event is the lens's name for what the line records ("auth_failed",
+	// "slow", "ban"), empty when the lens has no name for it.
+	Event string `json:"event,omitempty"`
+	// Attrs are the values a lens read out of the line's text — user, client
+	// address, duration, status. They are kept apart from Fields, a structured
+	// line's own keys, so a plain line keeps being drawn as the text it is
+	// while its values stay filterable.
+	Attrs map[string]string `json:"attrs,omitempty"`
+	// Cont marks a line that continues the record above it: a Postgres DETAIL
+	// or STATEMENT, a stack frame, an indented SQL line. It takes its head's
+	// verdict under a filter and is folded under it in the viewer.
+	Cont bool `json:"cont,omitempty"`
+	// Lens names the lens that set Event when it is not the stream's own — a
+	// stack mixes a database's lines with an app's, and the whole journal
+	// hands sshd's lines to the auth lens.
+	Lens string `json:"lens,omitempty"`
+
+	levelFrom uint8
 }
 
 // maxLine bounds one record. A binary blob written into a log file with no
@@ -432,8 +473,52 @@ func LevelFromPriority(p int) string {
 	}
 }
 
+// ApplyPriority gives a journal line its PRIORITY as the level. A level key in
+// the message's own JSON or logfmt wins over it — a program that logs
+// structured knows what it meant better than the priority its stdout was filed
+// at, which for every service writing to stdout is 6 — and a lens's reading
+// wins over both. The free-text word scan does not: the program chose its
+// priority deliberately, and "error-reporting enabled" in a priority-6 line
+// is not an error.
+func (l *Line) ApplyPriority(p int) {
+	if l.levelFrom == levelFromStructured || l.levelFrom == levelFromLens {
+		return
+	}
+	l.Level = LevelFromPriority(p)
+	l.levelFrom = levelFromPriority
+}
+
+// ParseLine turns one raw record into a Line. It strips terminal control
+// first, because every later step — the level scan, the timestamp scan, the
+// operator's search — reads the text, and none of them should be matching
+// against a cursor-movement sequence.
 func ParseLine(text, source string) Line {
-	l := Line{Text: text, Source: source, Level: detectLevel(text)}
+	text = StripANSI(text)
+	l := Line{Text: text, Source: source}
+	if level, message, at, fields, ok := parseStructured(text); ok {
+		l.Level, l.Message, l.Fields, l.Timestamp = level, message, fields, at
+		if l.Level != "" {
+			l.levelFrom = levelFromStructured
+		} else {
+			// A structured line with no level of its own still has a sentence
+			// worth scanning, and scanning the whole JSON would find the word
+			// "error" inside a field name.
+			l.Level = detectLevel(message)
+			if l.Level != "" {
+				l.levelFrom = levelFromWord
+			}
+		}
+		if l.Timestamp == nil {
+			if ts, ok := parseTimestamp(text); ok {
+				l.Timestamp = &ts
+			}
+		}
+		return l
+	}
+	l.Level = detectLevel(text)
+	if l.Level != "" {
+		l.levelFrom = levelFromWord
+	}
 	if ts, ok := parseTimestamp(text); ok {
 		l.Timestamp = &ts
 	}
@@ -449,6 +534,13 @@ func ParseLine(text, source string) Line {
 // and the remainder parsed as naive UTC. Every line on a host that does not
 // log in UTC was therefore filed under the wrong hour — invisible on a UTC
 // server, and an hour of confusion on any other.
+//
+// A stamp with no zone at all is read in the host's zone, not as UTC. That is
+// what the program that wrote it meant — syslog and a naive "2006-01-02
+// 15:04:05" are local time — and it is how the Intrusion and Logins pages
+// already read the same files, so /logs and those pages no longer disagree by
+// the zone offset. The shipped container mounts the host's /etc, so its local
+// zone is the host's.
 var syslogLayouts = []struct {
 	layout string
 	length int
@@ -478,7 +570,7 @@ func parseTimestamp(text string) (time.Time, bool) {
 		}
 		if end >= 19 && end <= 40 {
 			for _, layout := range isoLayouts {
-				if t, err := time.Parse(layout, text[:end]); err == nil {
+				if t, err := time.ParseInLocation(layout, text[:end], time.Local); err == nil {
 					return t.UTC(), true
 				}
 			}
@@ -486,7 +578,7 @@ func parseTimestamp(text string) (time.Time, bool) {
 		// "2006-01-02 15:04:05" has a space inside it, so it is the one ISO
 		// spelling the token above cannot reach.
 		if len(text) >= 19 {
-			if t, err := time.Parse("2006-01-02 15:04:05", text[:19]); err == nil {
+			if t, err := time.ParseInLocation("2006-01-02 15:04:05", text[:19], time.Local); err == nil {
 				return t.UTC(), true
 			}
 		}
@@ -502,14 +594,14 @@ func parseTimestamp(text string) (time.Time, bool) {
 			if len(text) < l.length {
 				continue
 			}
-			t, err := time.Parse(l.layout, strings.TrimSpace(text[:l.length]))
+			t, err := time.ParseInLocation(l.layout, strings.TrimSpace(text[:l.length]), time.Local)
 			if err != nil {
 				continue
 			}
 			// Syslog omits the year; assume the current one, correcting
 			// backwards when that would place the entry in the future.
 			now := time.Now()
-			t = t.AddDate(now.Year(), 0, 0)
+			t = time.Date(now.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), 0, time.Local)
 			if t.After(now.Add(24 * time.Hour)) {
 				t = t.AddDate(-1, 0, 0)
 			}

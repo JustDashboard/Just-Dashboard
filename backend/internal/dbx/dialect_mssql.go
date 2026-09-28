@@ -87,7 +87,7 @@ func (mssqlDialect) Tables(ctx context.Context, db *sql.DB, schema string) ([]Ta
 	         ON ep.major_id = t.object_id AND ep.minor_id = 0 AND ep.name = 'MS_Description'
 	  WHERE (@p1 = '' OR s.name = @p1)
 	  UNION ALL
-	  SELECT s.name, v.name, 'view', 0, 0, ''
+	  SELECT s.name, v.name, 'view', -1, 0, ''
 	  FROM sys.views v
 	  JOIN sys.schemas s ON s.schema_id = v.schema_id
 	  WHERE (@p1 = '' OR s.name = @p1)

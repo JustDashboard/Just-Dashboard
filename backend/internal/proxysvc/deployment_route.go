@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,7 +28,20 @@ type DeploymentRoute struct {
 	// BasicAuth puts a password in front of the route. Each entry is a user
 	// and a bcrypt hash, which is what both proxies read.
 	BasicAuth []BasicAuthUser `json:"basicAuth,omitempty"`
+	// AccessLog asks the ingress to record what this route served. nginx has
+	// always done it; the Docker Caddy driver did not, which is why a
+	// deployment behind Caddy could not answer "is anyone using it" at all.
+	AccessLog bool `json:"accessLog,omitempty"`
+	// MaxBodyMB is the largest request body the route lets through, in
+	// megabytes. Zero keeps each proxy's deployment default: nginx's own is
+	// 1 MB, which refused a phone photo before the application saw it, so
+	// its routes get DefaultDeploymentMaxBodyMB; Caddy sets no limit.
+	MaxBodyMB int `json:"maxBodyMb,omitempty"`
 }
+
+// DefaultDeploymentMaxBodyMB is the request-body ceiling an nginx
+// deployment route gets when the plan names none.
+const DefaultDeploymentMaxBodyMB = 64
 
 type BasicAuthUser struct {
 	Username string `json:"username"`
@@ -204,6 +218,10 @@ func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error 
 			defer cancel()
 			return errors.Join(err, edge.restore(recovery, snapshot))
 		}
+		// The request record goes with the route. It holds client addresses,
+		// so leaving it behind after the deployment it described is gone would
+		// keep personal data on the host with nothing left to read it.
+		edge.removeAccessLog(ctx, name)
 		return nil
 	}
 	s.mu.Lock()
@@ -348,11 +366,21 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		HTTP2:       route.TLS,
 		WebSockets:  true, Gzip: true, SecurityHeaders: true, AccessLog: true,
 		AllowFrom: []string{}, DenyFrom: []string{}, Locations: []SiteLocation{},
+		ClientMaxBody: deploymentBodyLimit(route),
 	}
 	if authFile != "" {
 		spec.BasicAuthFile, spec.BasicAuthRealm = authFile, "Protected deployment"
 	}
 	return spec
+}
+
+// deploymentBodyLimit is the route's nginx client_max_body_size.
+func deploymentBodyLimit(route DeploymentRoute) string {
+	limit := route.MaxBodyMB
+	if limit <= 0 {
+		limit = DefaultDeploymentMaxBodyMB
+	}
+	return strconv.Itoa(limit) + "m"
 }
 
 func (s *Service) snapshotDeploymentRouteLocked(name string) (DeploymentRouteSnapshot, error) {
