@@ -39,6 +39,7 @@ type proxyExtras struct {
 	ct *proxysvc.CTMonitor
 
 	// --- lane G: TLS report & monitoring ---
+	tlsMonitor *proxysvc.TLSMonitor
 }
 
 // initProxyExtras runs last in initModules, so the proxy service and every
@@ -64,6 +65,7 @@ func (s *Server) initProxyExtras() {
 	s.modules.proxyExtras.ct = proxysvc.NewCTMonitor()
 
 	// --- lane G: TLS report & monitoring ---
+	s.modules.proxyExtras.tlsMonitor = proxysvc.NewTLSMonitor(watchStore{s})
 }
 
 // startProxyExtras starts the proxy's background work from Start. Nothing
@@ -89,6 +91,7 @@ func (s *Server) startProxyExtras(ctx context.Context) error {
 	s.modules.proxyExtras.localCA.Start(ctx)
 
 	// --- lane G: TLS report & monitoring ---
+	s.modules.proxyExtras.tlsMonitor.Start(ctx)
 
 	return nil
 }
@@ -113,4 +116,5 @@ func (s *Server) stopProxyExtras() {
 	s.modules.proxyExtras.localCA.Stop()
 
 	// --- lane G: TLS report & monitoring ---
+	s.modules.proxyExtras.tlsMonitor.Stop()
 }

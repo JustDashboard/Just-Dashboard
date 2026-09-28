@@ -714,10 +714,10 @@ test("a read-only account reads the last check and cannot ask for another", asyn
   await page.goto("/proxy/certificates")
   const watched = page.getByRole("list", { name: "Watched domains" })
   await expect(watched.getByText(/checked 3m( \d+s)? ago/)).toBeVisible()
-  await expect(watched.getByText("not checked yet")).toBeVisible()
+  await expect(watched.getByText("waiting for its first check")).toBeVisible()
   await expect(page.getByRole("button", { name: "Re-check now" })).toHaveCount(0)
   await expect(page.getByLabel("Domain to watch")).toHaveCount(0)
-  await expect(page.getByText("checked while an administrator has this page open")).toBeVisible()
+  await expect(page.getByText("checked by the server every 5 minutes")).toBeVisible()
   expect(lists.length).toBeGreaterThan(0)
 })
 
@@ -826,19 +826,28 @@ const mailRow = () => ({
 
 test("re-checking the watch list says so until the new checks arrive", async ({ page }) => {
   await mockShowcase(page)
-  const { lists, hold } = await watchList(page, [mailRow()])
+  const { lists } = await watchList(page, [mailRow()])
+  let release: () => void = () => {}
+  const checks: string[] = []
+  await page.route("**/api/v1/certificates/watched/check", async (route) => {
+    checks.push(route.request().method())
+    await new Promise<void>((resolve) => (release = resolve))
+    return json(route, [mailRow()])
+  })
   await page.goto("/proxy/certificates")
   const recheck = page.getByRole("button", { name: "Re-check now" })
   await expect(recheck).toBeVisible()
-  hold.next = true
+  const loaded = lists.length
   await recheck.click()
   const busy = page.getByRole("button", { name: "Re-checking…" })
   await expect(busy).toHaveAttribute("aria-busy", "true")
   await expect(busy).toBeDisabled()
-  await expect.poll(() => lists.length).toBe(2)
-  hold.release?.()
+  await expect.poll(() => checks).toEqual(["POST"])
+  release()
   await expect(page.getByRole("button", { name: "Re-check now" })).toBeEnabled()
   await expect(busy).toHaveCount(0)
+  // The list is read again once the checks are stored.
+  await expect.poll(() => lists.length).toBe(loaded + 1)
 })
 
 test("stopping a watch says what happened, and a failure keeps the row", async ({ page }) => {
@@ -928,23 +937,18 @@ test("on a phone every watched row keeps how old its check is in full", async ({
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
 
-test("a new watch shows its row being checked until its first check arrives", async ({ page }) => {
+test("a new watch shows its row waiting for the server's first check", async ({ page }) => {
   await mockShowcase(page)
   const rows: object[] = []
   const posted: unknown[] = []
   let lists = 0
-  let hold = false
-  let release: () => void = () => {}
   await page.route("**/api/v1/certificates/watched", async (route) => {
     const request = route.request()
     if (request.method() === "POST") {
       posted.push(request.postDataJSON())
       const existing = rows.length > 0
       const row = { id: 7, ...request.postDataJSON(), createdAt: now }
-      if (!existing) {
-        rows.push({ ...row, checkedAt: new Date().toISOString(), certificate: certs[0] })
-        hold = true
-      }
+      if (!existing) rows.push(row)
       return route.fulfill({
         status: existing ? 200 : 201,
         contentType: "application/json",
@@ -952,10 +956,6 @@ test("a new watch shows its row being checked until its first check arrives", as
       })
     }
     lists++
-    if (hold) {
-      hold = false
-      await new Promise<void>((resolve) => (release = resolve))
-    }
     return json(route, rows)
   })
   await page.goto("/proxy/certificates")
@@ -969,27 +969,14 @@ test("a new watch shows its row being checked until its first check arrives", as
   await expect(
     page.locator("[data-sonner-toast]").filter({ hasText: "Watching new.example.com" }),
   ).toBeVisible()
-  // The row is there at once, and everything says the check is running.
+  // Adding sends no handshake: the row waits for the server's schedule.
   const row = list.getByRole("listitem").filter({ hasText: "new.example.com" })
-  await expect(row).toContainText("checking…")
-  await expect(page.getByText("1 watched, checked while")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Re-checking…" })).toHaveAttribute(
-    "aria-busy",
-    "true",
-  )
-  await expect(watch).toHaveAttribute("aria-busy", "true")
-  await field.fill("other.example.com")
-  await field.press("Enter")
-  await expect.poll(() => lists).toBe(2)
-  expect(posted).toHaveLength(1)
+  await expect(row).toContainText("waiting for its first check")
+  await expect(page.getByText("1 watched, checked by the server every 5 minutes")).toBeVisible()
+  expect(posted).toEqual([{ domain: "new.example.com", port: 443 }])
+  const read = lists
 
-  release()
-  await expect(row).toContainText("checked just now")
-  await expect(list.getByRole("listitem")).toHaveCount(1)
-  await expect(page.getByRole("button", { name: "Re-check now" })).toBeEnabled()
-  await expect(watch).not.toHaveAttribute("aria-busy", "true")
-
-  // Watching it again says so and does not check the whole list for nothing.
+  // Watching it again says so and does not read the list for nothing.
   await field.fill("new.example.com")
   await watch.click()
   await expect(
@@ -997,7 +984,7 @@ test("a new watch shows its row being checked until its first check arrives", as
   ).toBeVisible()
   await expect(field).toHaveValue("")
   expect(posted).toHaveLength(2)
-  expect(lists).toBe(2)
+  expect(lists).toBe(read)
 })
 
 /** A scan that never completed a handshake, stopped at `failure` with `finding`. */

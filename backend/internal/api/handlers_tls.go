@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -13,9 +14,14 @@ import (
 // mountTLSRoutes is what a domain actually serves, as opposed to what is on
 // disk: the live certificate check, the TLS report, DNS, and the watched
 // domains checked on a schedule. The watch list itself is in
-// handlers_domains.go.
+// handlers_domains.go, and the stored reports and the schedule's history in
+// handlers_tls_history.go.
 func (s *Server) mountTLSRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/watched", s.handle(s.handleWatchedDomains))
+	r.Method(http.MethodGet, "/watch-schedule", s.handle(s.handleWatchSettings))
+	r.Method(http.MethodGet, "/watched/{id}/history", s.handle(s.handleWatchedHistory))
+	r.Method(http.MethodGet, "/reports", s.handle(s.handleTLSScans))
+	r.Method(http.MethodGet, "/reports/{id}", s.handle(s.handleTLSStoredScan))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// These checks emit traffic to caller-chosen destinations. Keeping
@@ -26,6 +32,12 @@ func (s *Server) mountTLSRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/dns", s.handle(s.handleDomainDNS))
 		r.Method(http.MethodPost, "/watched", s.handle(s.handleWatchDomain))
 		r.Method(http.MethodDelete, "/watched/{id}", s.handle(s.handleUnwatchDomain))
+		r.Method(http.MethodGet, "/scan/deep", s.handle(s.handleTLSDeepScan))
+		r.Method(http.MethodPost, "/watched/check", s.handle(s.handleCheckWatchedNow))
+		r.Method(http.MethodPut, "/watch-schedule", s.handle(s.handleSetWatchSettings))
+		s.destructive(r, func(r chi.Router) {
+			r.Method(http.MethodDelete, "/reports", s.handle(s.handleClearTLSScans))
+		})
 	})
 }
 
@@ -74,6 +86,13 @@ func (s *Server) handleTLSScan(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
 	scan := proxysvc.ScanTLS(ctx, target.Host, target.Port)
+	// A scan cut short by its caller is not what the target serves, so only
+	// one that ran to its end is kept for the history.
+	if r.Context().Err() == nil {
+		if _, err := s.storeScan(context.WithoutCancel(r.Context()), scan); err != nil {
+			return httpx.Internal(err)
+		}
+	}
 	httpx.JSON(w, http.StatusOK, scan)
 	return nil
 }

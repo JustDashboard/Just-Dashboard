@@ -136,6 +136,8 @@ export const scan = {
 
 export const routes: ProxyRoutes = {
   "/certificates/watched": (route) => json(route, []),
+  "/certificates/watch-schedule": (route) => json(route, { intervalSeconds: 300 }),
+  "/certificates/reports": (route) => json(route, []),
 }
 
 export const showcase: ProxyRoutes = {

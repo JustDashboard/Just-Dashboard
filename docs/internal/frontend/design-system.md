@@ -68,8 +68,8 @@ taking a frame:
   streams inventories and the ports table with their toolbars; the Renewals section on
   Certificates; a site's own page, its readings on the page's ground and its logs one `Pane` under
   its identity line; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
-  preload
-  rows; the password files and DNS provider lists),
+  preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
+  connection rows; the password files and DNS provider lists),
   health findings, the runtime-health bar, and every block of the deployment section — the fleet
   and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
   and Console, the run page, the nine settings pages and the create flow — are plain, with every

@@ -204,9 +204,12 @@ func TestReadOnlyAccountsReadTheLastCheckWithoutAHandshake(t *testing.T) {
 		t.Fatal("a read-only account's visit sent a handshake")
 	}
 
+	if w := admin.do(http.MethodPost, "/api/v1/certificates/watched/check", "", nil); w.Code != http.StatusOK {
+		t.Fatalf("check: %d %s", w.Code, w.Body.String())
+	}
 	checked := list(admin)
 	if handshakes.Load() == 0 || checked.Cert == nil || checked.Cert.Fingerprint == "" || checked.CheckedAt == nil {
-		t.Fatalf("an administrator's visit should check: %d handshakes, %+v", handshakes.Load(), checked)
+		t.Fatalf("an administrator's check should handshake: %d handshakes, %+v", handshakes.Load(), checked)
 	}
 	before := handshakes.Load()
 
@@ -272,7 +275,7 @@ func TestTheWatchCheckKeepsToItsBudget(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/certificates/watched", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/watched/check", nil).WithContext(ctx)
 	req.RemoteAddr = "127.0.0.1:5555"
 	req.Header.Set("Cookie", admin.cookie)
 	w := httptest.NewRecorder()
