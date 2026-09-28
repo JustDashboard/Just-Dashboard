@@ -188,7 +188,7 @@ func importCertificate(name, certPEM, keyPEM string, opts importOptions) (*Impor
 	defer os.Remove(keyTmp)
 	if res.Replaced && opts.keepPrevious {
 		for _, path := range []string{res.CertPath, res.KeyPath} {
-			if err := keepBackup(path); err != nil {
+			if err := keepImportBackup(path); err != nil {
 				return nil, err
 			}
 		}
@@ -225,9 +225,9 @@ func stageFile(dir string, content []byte, mode os.FileMode) (string, error) {
 	return tmp.Name(), nil
 }
 
-// keepBackup leaves path's current content at path.bak, as a hard link so the
+// keepImportBackup leaves path's current content at path.bak, as a hard link so the
 // original stays where it is until the new file is renamed over it.
-func keepBackup(path string) error {
+func keepImportBackup(path string) error {
 	backup := path + ".bak"
 	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
 		return err

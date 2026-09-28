@@ -155,13 +155,6 @@ func useCertbotLogs(t *testing.T, dir string) {
 	t.Cleanup(func() { certbotLogsDir = previous })
 }
 
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // failingHost is systemd as it stood on the host: the timer active and due at
 // 09:12, the service's last run failed at 21:13.
 func failingHost(t *testing.T) string {

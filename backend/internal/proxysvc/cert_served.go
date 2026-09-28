@@ -108,16 +108,16 @@ func (s *Service) servedCertificates(ctx context.Context, path string) ([]Served
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			served[i] = servedBy(ctx, site, cert)
+			served[i] = certServedBy(ctx, site, cert)
 		}()
 	}
 	wg.Wait()
 	return served, nil
 }
 
-// servedBy asks one site, at its first TLS listener, for a name the
+// certServedBy asks one site, at its first TLS listener, for a name the
 // certificate covers.
-func servedBy(ctx context.Context, site VHost, cert Certificate) ServedCertificate {
+func certServedBy(ctx context.Context, site VHost, cert Certificate) ServedCertificate {
 	out := ServedCertificate{Site: site.Name, Name: serverNameFor(site.ServerNames, cert.Domains)}
 	if out.Name == "" {
 		out.Error = "the certificate names no host to ask for"
