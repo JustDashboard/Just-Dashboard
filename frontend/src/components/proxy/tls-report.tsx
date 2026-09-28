@@ -40,6 +40,8 @@ import {
   reportFileName,
   reportToMarkdown,
   reproduceCommands,
+  STARTTLS_NAMES,
+  STARTTLS_PORTS,
   termLeft,
   termText,
 } from "@/lib/tls-report"
@@ -52,6 +54,7 @@ import type {
   HTTPScan,
   PreloadCheck,
   ScanFinding,
+  StartTLS,
   TLSScan,
   TrustLink,
   VHost,
@@ -124,8 +127,10 @@ function TLSReport() {
   const linkedPort = params.get("port")
   // ?connect= dials that address in place of the name's records and ?all=1
   // handshakes with every record too; ?method=, ?path= and ?host= shape the
-  // HTTPS request. All are part of the question, so a link carries them.
+  // HTTPS request; ?proto= is the dialogue before the handshake, by port when
+  // absent. All are part of the question, so a link carries them.
   const linkedAdvanced: AdvancedFields = {
+    proto: params.get("proto") ?? "",
     connect: params.get("connect") ?? "",
     all: params.get("all") === "1",
     method: params.get("method") ?? "GET",
@@ -181,6 +186,7 @@ function TLSReport() {
         {
           domain: target?.host,
           port: target?.port,
+          proto: linkedAdvanced.proto || undefined,
           connect: linkedAdvanced.connect || undefined,
           all: linkedAdvanced.all ? 1 : undefined,
           method: linkedAdvanced.method !== "GET" ? linkedAdvanced.method : undefined,
@@ -296,6 +302,7 @@ function TLSReport() {
     setFieldError(undefined)
     setCancelled(undefined)
     const next = {
+      proto: advanced.proto,
       connect: advanced.connect.trim(),
       all: advanced.all && !advanced.connect.trim(),
       method: advanced.method,
@@ -485,6 +492,7 @@ function TLSReport() {
           </Field>
           <AdvancedScan
             key={address}
+            port={typed.target?.port}
             value={advanced}
             error={connectError}
             requestError={requestError}
@@ -629,11 +637,13 @@ function TLSReport() {
                       <ReportRow
                         title="HTTPS"
                         subtitle={
-                          scan.http.serviceName
-                            ? `Port ${scan.port} is registered to ${scan.http.serviceName}, so no web request was sent.`
-                            : scan.http.banner
-                              ? `Answered: ${scan.http.banner}`
-                              : "It answered the web request in a protocol other than HTTP."
+                          scan.starttls
+                            ? `Scanned as ${STARTTLS_NAMES[scan.starttls]} with STARTTLS, so no web request was sent.`
+                            : scan.http.serviceName
+                              ? `Port ${scan.port} is registered to ${scan.http.serviceName}, so no web request was sent.`
+                              : scan.http.banner
+                                ? `Answered: ${scan.http.banner}`
+                                : "It answered the web request in a protocol other than HTTP."
                         }
                         mono={!scan.http.serviceName && Boolean(scan.http.banner)}
                         trailing={<Status verdict="notice" label="not an HTTP service" />}
@@ -1245,7 +1255,22 @@ function reportHref(params: { toString(): string }, target: ScanTarget) {
  * How the scan reaches the target — another address, or every one it has —
  * and what its HTTPS request asks for.
  */
-type AdvancedFields = { connect: string; all: boolean; method: string; path: string; host: string }
+type AdvancedFields = {
+  /** "" picks by port, "tls" speaks TLS from the first byte, else a STARTTLS service. */
+  proto: string
+  connect: string
+  all: boolean
+  method: string
+  path: string
+  host: string
+}
+
+/** The STARTTLS service a scan will upgrade with, if any, as the backend's ParseStartTLS picks it. */
+function upgradeFor(proto: string, port: number | undefined): StartTLS | undefined {
+  if (proto === "tls") return undefined
+  if (proto) return proto as StartTLS
+  return port === undefined ? undefined : STARTTLS_PORTS[port]
+}
 
 /** The methods a scan sends: reads only, as the backend's ParseRequestShape allows. */
 const SCAN_METHODS = ["GET", "HEAD", "OPTIONS"]
@@ -1253,6 +1278,8 @@ const SCAN_METHODS = ["GET", "HEAD", "OPTIONS"]
 /** The page's address with the advanced fields set, or cleared when unused. */
 function withAdvanced(params: { toString(): string }, advanced: AdvancedFields) {
   const next = new URLSearchParams(params.toString())
+  if (advanced.proto) next.set("proto", advanced.proto)
+  else next.delete("proto")
   if (advanced.connect) next.set("connect", advanced.connect)
   else next.delete("connect")
   if (advanced.all) next.set("all", "1")
@@ -1300,11 +1327,13 @@ function connectToError(raw: string, target: ScanTarget | undefined) {
  * want neither, and a link that uses one opens with the fold open.
  */
 function AdvancedScan({
+  port,
   value,
   error,
   requestError,
   onChange,
 }: {
+  port?: number
   value: AdvancedFields
   error?: string
   requestError?: string
@@ -1312,8 +1341,21 @@ function AdvancedScan({
 }) {
   const connecting = value.connect.trim() !== ""
   const shaped = value.method !== "GET" || value.path.trim() !== "" || value.host.trim() !== ""
+  // A service upgraded with STARTTLS is not sent a web request, so the
+  // request's fields have nothing to shape.
+  const upgrade = upgradeFor(value.proto, port)
+  const byPort = port === undefined ? undefined : STARTTLS_PORTS[port]
+  const autoLabel =
+    port === undefined
+      ? "Auto, by port"
+      : `Auto: ${byPort ? `${STARTTLS_NAMES[byPort]} STARTTLS` : "TLS"} on ${port}`
   const facts =
     [
+      value.proto === "tls"
+        ? "TLS"
+        : value.proto
+          ? `${STARTTLS_NAMES[value.proto as StartTLS]} STARTTLS`
+          : "",
       connecting ? `to ${value.connect.trim()}` : value.all ? "every address" : "",
       shaped ? `${value.method} ${value.path.trim() || "/"}` : "",
     ]
@@ -1324,10 +1366,33 @@ function AdvancedScan({
       quiet
       summary="Advanced"
       facts={facts}
-      open={connecting || value.all || shaped}
+      open={value.proto !== "" || connecting || value.all || shaped}
       className="pt-2"
     >
       <div className="space-y-3">
+        <Field
+          label="Protocol"
+          htmlFor="tls-proto"
+          hint="Mail, FTP and PostgreSQL start in plain text and upgrade with STARTTLS. Auto does that on 21, 25, 110, 143, 587 and 5432, and speaks TLS from the first byte everywhere else."
+        >
+          <Select
+            value={value.proto || "auto"}
+            onValueChange={(proto) => onChange({ proto: proto === "auto" ? "" : proto })}
+          >
+            <SelectTrigger id="tls-proto" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">{autoLabel}</SelectItem>
+              <SelectItem value="tls">TLS from the first byte</SelectItem>
+              {Object.entries(STARTTLS_NAMES).map(([proto, name]) => (
+                <SelectItem key={proto} value={proto}>
+                  {name} STARTTLS
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
         <Field
           label="Connect to"
           htmlFor="tls-connect"
@@ -1365,7 +1430,11 @@ function AdvancedScan({
             scanned name, so the certificate is the one its visitors get. */}
         <FieldRow columns={3}>
           <Field label="Method" htmlFor="tls-method">
-            <Select value={value.method} onValueChange={(method) => onChange({ method })}>
+            <Select
+              value={value.method}
+              onValueChange={(method) => onChange({ method })}
+              disabled={upgrade !== undefined}
+            >
               <SelectTrigger id="tls-method" className="w-full font-mono">
                 <SelectValue />
               </SelectTrigger>
@@ -1383,6 +1452,7 @@ function AdvancedScan({
               id="tls-path"
               value={value.path}
               onChange={(event) => onChange({ path: event.target.value })}
+              disabled={upgrade !== undefined}
               placeholder="/"
               aria-invalid={requestError?.startsWith("Path") ? true : undefined}
               autoComplete="off"
@@ -1397,6 +1467,7 @@ function AdvancedScan({
               id="tls-host"
               value={value.host}
               onChange={(event) => onChange({ host: event.target.value })}
+              disabled={upgrade !== undefined}
               placeholder="the scanned name"
               aria-invalid={requestError?.startsWith("Host") ? true : undefined}
               autoComplete="off"
@@ -1410,6 +1481,8 @@ function AdvancedScan({
         <p className="text-hint leading-relaxed text-muted-foreground">
           {requestError ? (
             <span className="wrap-anywhere text-destructive">{requestError}</span>
+          ) : upgrade ? (
+            `A ${STARTTLS_NAMES[upgrade]} service is sent no web request, so only its TLS is checked.`
           ) : (
             "The HTTPS request whose headers are listed and audited. SNI still names the domain; the plain-HTTP redirect is always checked at / with the domain as Host."
           )}

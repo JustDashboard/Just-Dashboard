@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -54,6 +55,10 @@ type TLSScan struct {
 	// curl --resolve does, when the scan was asked to: the origin behind a
 	// CDN, or a new server before its records move.
 	ConnectTo string `json:"connectTo,omitempty"`
+	// StartTLS is the plain-text dialogue held before the handshake, as
+	// ?proto= names it ("smtp", "imap", "pop3", "ftp" or "postgres"), when
+	// the service upgrades rather than speaking TLS from the first byte.
+	StartTLS string `json:"starttls,omitempty"`
 	// Address is the ip:port the handshake reached, and AddressKind whose it
 	// is: "here", "cloudflare", "elsewhere" or "unknown" (whereConnected).
 	// A name with several records is only as good as the one it happened to
@@ -300,11 +305,13 @@ const hstsStrongMaxAge = 15552000
 // ScanOptions change where a scan connects. ConnectTo is an IP address to
 // dial in place of the name's records, with the name still sent in SNI and
 // Host; AllAddresses handshakes with every A and AAAA record as well; Request
-// is the method, path and Host of the HTTPS request.
+// is the method, path and Host of the HTTPS request; StartTLS is the dialogue
+// every connection holds before its handshake (ParseStartTLS).
 type ScanOptions struct {
 	ConnectTo    string
 	AllAddresses bool
 	Request      RequestShape
+	StartTLS     string
 }
 
 // ScanTLS runs the whole examination: a handshake, a version probe, the chain,
@@ -321,7 +328,7 @@ func ScanTLSWith(ctx context.Context, domain string, port int, opts ScanOptions)
 	scan := &TLSScan{
 		Domain: domain, Port: port, CheckedAt: time.Now().UTC(),
 		Protocols: []ProtocolResult{}, Chain: []ChainLink{}, Findings: []ScanFinding{},
-		Checks: []GradeCheck{},
+		Checks: []GradeCheck{}, StartTLS: opts.StartTLS,
 	}
 	dialHost := domain
 	if opts.ConnectTo != "" {
@@ -333,10 +340,10 @@ func ScanTLSWith(ctx context.Context, domain string, port int, opts ScanOptions)
 	var addresses chan addressesResult
 	if opts.AllAddresses && opts.ConnectTo == "" && net.ParseIP(domain) == nil {
 		addresses = make(chan addressesResult, 1)
-		go func() { addresses <- scanAddresses(ctx, domain, port, net.DefaultResolver.LookupIPAddr) }()
+		go func() { addresses <- scanAddresses(ctx, domain, port, opts.StartTLS, net.DefaultResolver.LookupIPAddr) }()
 	}
 
-	conn, legacy, err := handshake(ctx, addr, domain)
+	conn, legacy, err := handshake(ctx, addr, domain, opts.StartTLS)
 	if err != nil {
 		unanswered(ctx, scan, err)
 		if scan.Failure != nil && scan.Failure.Address != "" {
@@ -370,15 +377,18 @@ func ScanTLSWith(ctx context.Context, domain string, port int, opts ScanOptions)
 	// The preload list is for names served on 443. Its www rule is a
 	// handshake of its own, so it runs beside the probes rather than after
 	// them.
-	preloadable := port == 443 && net.ParseIP(domain) == nil
+	preloadable := port == 443 && opts.StartTLS == "" && net.ParseIP(domain) == nil
 	var www chan PreloadRule
 	if preloadable && registrableDomain(domain) == domain {
 		www = make(chan PreloadRule, 1)
 		go func() { www <- checkWWW(ctx, domain, "443", net.DefaultResolver.LookupIPAddr) }()
 	}
 
-	scan.Protocols = probeProtocols(ctx, addr, domain)
-	if name, registered := implicitTLSServices[port]; registered {
+	scan.Protocols = probeProtocols(ctx, addr, domain, opts.StartTLS)
+	if name, registered := implicitTLSServices[port]; registered || opts.StartTLS != "" {
+		if opts.StartTLS != "" {
+			name = startTLSNames[opts.StartTLS]
+		}
 		scan.HTTP = &HTTPScan{Service: "other", ServiceName: name, Headers: []HeaderCheck{}, RedirectChain: []RedirectHop{}}
 	} else {
 		// The HTTPS request offers what the handshake got an answer to. The
@@ -444,16 +454,16 @@ var implicitTLSServices = map[int]string{
 // this library has, and when that is taken the current offer is made once
 // more: legacy is true only when it is refused again, so a passing fault is
 // not reported as the server's policy.
-func handshake(ctx context.Context, addr, serverName string) (conn *tls.Conn, legacy bool, err error) {
-	conn, err = dialTLS(ctx, addr, serverName, 0, 0)
+func handshake(ctx context.Context, addr, serverName, starttls string) (conn *tls.Conn, legacy bool, err error) {
+	conn, err = dialTLS(ctx, addr, serverName, starttls, 0, 0)
 	if _, alerted := remoteAlert(err); !alerted {
 		return conn, false, err
 	}
-	old, oldErr := dialTLS(ctx, addr, serverName, oldestVersion, newestVersion)
+	old, oldErr := dialTLS(ctx, addr, serverName, starttls, oldestVersion, newestVersion)
 	if oldErr != nil {
 		return nil, false, err
 	}
-	if again, againErr := dialTLS(ctx, addr, serverName, 0, 0); againErr == nil {
+	if again, againErr := dialTLS(ctx, addr, serverName, starttls, 0, 0); againErr == nil {
 		old.Close()
 		return again, false, nil
 	}
@@ -479,11 +489,13 @@ func remoteAlert(err error) (string, bool) {
 // short the budget. This handshake ends when ctx does, and then returns ctx's
 // error and no certificate — the budget ran out, which says nothing about the
 // endpoint. Every other failure is the endpoint's answer, on the certificate.
+// An endpoint on a port whose service upgrades with STARTTLS is asked that way,
+// as a scan's Auto does: a watched mail server on 587 has no other answer.
 func CheckEndpoint(ctx context.Context, domain string, port int) (*Certificate, error) {
 	failed := func(reason string) *Certificate {
 		return &Certificate{Name: domain, Domains: []string{domain}, Source: "live", UsedBy: []string{}, Error: reason}
 	}
-	conn, err := dialTLS(ctx, net.JoinHostPort(domain, strconv.Itoa(port)), domain, 0, 0)
+	conn, err := dialTLS(ctx, net.JoinHostPort(domain, strconv.Itoa(port)), domain, startTLSPorts[port], 0, 0)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -512,15 +524,29 @@ func CheckEndpoint(ctx context.Context, domain string, port int) (*Certificate, 
 	return cert, nil
 }
 
-// dialTLS handshakes with addr, offering tlsOffer's versions and suites. The
-// connection and the handshake are two steps so a handshake that fails says
-// where it was connected (handshakeError).
-func dialTLS(ctx context.Context, addr, serverName string, minVer, maxVer uint16) (*tls.Conn, error) {
+// dialTLS handshakes with addr, offering tlsOffer's versions and suites,
+// after starttls's dialogue when it names one. The connection and the
+// handshake are two steps so a handshake that fails says where it was
+// connected (handshakeError).
+func dialTLS(ctx context.Context, addr, serverName, starttls string, minVer, maxVer uint16) (*tls.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	raw, err := (&net.Dialer{Timeout: 8 * time.Second}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
+	}
+	if starttls != "" {
+		// The dialogue reads the socket itself, so the deadline and a
+		// cancelled request reach it through the connection.
+		deadline, _ := ctx.Deadline()
+		raw.SetDeadline(deadline)
+		stop := context.AfterFunc(ctx, func() { raw.SetDeadline(time.Unix(1, 0)) })
+		err := startTLS(raw, starttls)
+		if !stop() || err != nil {
+			raw.Close()
+			return nil, &handshakeError{addr: raw.RemoteAddr().String(), err: cmp.Or(err, ctx.Err())}
+		}
+		raw.SetDeadline(time.Time{})
 	}
 	conn := tls.Client(raw, tlsOffer(serverName, minVer, maxVer))
 	if err := conn.HandshakeContext(ctx); err != nil {
@@ -580,14 +606,14 @@ var probedVersions = []struct {
 // Concurrently, because they are independent and a host that black-holes
 // refused versions would otherwise cost one dial timeout each — four of them
 // in series is most of the request's budget spent proving nothing.
-func probeProtocols(ctx context.Context, addr, serverName string) []ProtocolResult {
+func probeProtocols(ctx context.Context, addr, serverName, starttls string) []ProtocolResult {
 	out := make([]ProtocolResult, len(probedVersions))
 	var wg sync.WaitGroup
 	for i, v := range probedVersions {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			conn, err := dialTLS(ctx, addr, serverName, v.version, v.version)
+			conn, err := dialTLS(ctx, addr, serverName, starttls, v.version, v.version)
 			if err == nil {
 				conn.Close()
 				out[i] = ProtocolResult{Name: v.name, Status: "offered"}
@@ -620,7 +646,12 @@ func probeProtocols(ctx context.Context, addr, serverName string) []ProtocolResu
 // "unknown" with both readings, never "refused".
 func protocolAnswer(err error) (status, detail string) {
 	var op *net.OpError
+	var dialogue *startTLSError
 	switch {
+	case errors.As(err, &dialogue):
+		// The dialogue before the handshake failed, so this version was
+		// never asked about.
+		return "unknown", "The STARTTLS dialogue before the handshake failed: " + dialogue.Error() + "."
 	case strings.Contains(err.Error(), "no supported versions satisfy"):
 		return "unknown", "This dashboard's TLS library will not ask for it, so the server was never asked."
 	case errors.As(err, &op) && op.Op == "remote error":

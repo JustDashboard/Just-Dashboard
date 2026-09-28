@@ -215,7 +215,7 @@ func checkWWW(ctx context.Context, domain, port string, lookup lookupFunc) Prelo
 		return rule
 	}
 	address := net.JoinHostPort(addrs[0].IP.String(), port)
-	conn, err := dialTLS(ctx, address, name, 0, 0)
+	conn, err := dialTLS(ctx, address, name, "", 0, 0)
 	if err != nil {
 		rule.Detail = "It resolves to " + addrs[0].IP.String() + " and no TLS handshake completed there: " + err.Error() + "."
 		return rule

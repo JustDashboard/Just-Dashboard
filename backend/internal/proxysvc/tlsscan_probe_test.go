@@ -126,7 +126,7 @@ func TestProbeProtocolsReportsTheServersRefusal(t *testing.T) {
 		func(*tls.Conn) {})
 
 	got := map[string]ProtocolResult{}
-	for _, p := range probeProtocols(context.Background(), addr, "scan.test") {
+	for _, p := range probeProtocols(context.Background(), addr, "scan.test", "") {
 		got[p.Name] = p
 	}
 	for name, want := range map[string]string{
@@ -147,7 +147,7 @@ func TestProbeProtocolsFindsAMissingTLS13(t *testing.T) {
 		MinVersion: tls.VersionTLS12, MaxVersion: tls.VersionTLS12}, func(*tls.Conn) {})
 
 	scan := goodScan()
-	scan.Protocols = probeProtocols(context.Background(), addr, "scan.test")
+	scan.Protocols = probeProtocols(context.Background(), addr, "scan.test", "")
 	if status := protocolStatus(scan.Protocols, "TLS 1.3"); status != "refused" {
 		t.Fatalf("TLS 1.3 = %s: %+v", status, scan.Protocols)
 	}
@@ -468,7 +468,7 @@ func TestProbeProtocolsOffersEverySuiteGoHas(t *testing.T) {
 	defer srv.Close()
 
 	scan := goodScan()
-	scan.Protocols = probeProtocols(context.Background(), srv.Listener.Addr().String(), "example.com")
+	scan.Protocols = probeProtocols(context.Background(), srv.Listener.Addr().String(), "example.com", "")
 	for name, want := range map[string]string{
 		"TLS 1.0": "offered", "TLS 1.1": "offered", "TLS 1.2": "offered", "TLS 1.3": "refused",
 	} {
@@ -636,7 +636,7 @@ func TestAPassingAlertIsNotReportedAsLegacyOnly(t *testing.T) {
 		},
 	}, func(*tls.Conn) {})
 
-	conn, legacy, err := handshake(context.Background(), addr, "scan.test")
+	conn, legacy, err := handshake(context.Background(), addr, "scan.test", "")
 	if err != nil {
 		t.Fatal(err)
 	}
