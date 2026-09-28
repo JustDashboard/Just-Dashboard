@@ -20,8 +20,31 @@ export type StreamSpec = {
   timeout?: number
   /** Seconds to wait for the upstream to accept. Absent is nginx's minute. */
   connectTimeout?: number
+  /** An allow list: these sources, and everyone else turned away. */
   allowFrom: string[]
+  /**
+   * The ordered access list, for what an allow list cannot say: the first
+   * rule a client matches decides, and `defaultAllow` is everyone no rule
+   * matches. The server folds rules that only allow, with everyone else
+   * turned away, into `allowFrom`, so a stream reads back one way.
+   */
+  rules?: StreamRule[]
+  defaultAllow?: boolean
+  /** Connections (UDP sessions) open at once from one client address. Absent is no cap. */
+  maxConnPerIp?: number
+  /** Connections (UDP sessions) open at once in all. Absent is no cap. */
+  maxConnTotal?: number
+  /** Each connection's speed from the client, in KiB/s. Absent is no limit. */
+  uploadRate?: number
+  /** Each connection's speed to the client, in KiB/s. Absent is no limit. */
+  downloadRate?: number
 }
+
+/** One line of a stream's ordered access list. */
+export type StreamRule = { action: "allow" | "deny"; source: string }
+
+/** The form's access list: every rule in order, then what happens to everyone else. */
+export type StreamAccess = { rules: StreamRule[]; defaultAllow: boolean }
 
 /**
  * What nginx does with a stream now: holds its port (`live`), reads it and

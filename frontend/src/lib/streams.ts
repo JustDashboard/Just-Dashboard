@@ -2,6 +2,7 @@ import type {
   Container,
   Job,
   PortOwner,
+  StreamAccess,
   StreamAppendReason,
   StreamEntry,
   StreamIncludeMode,
@@ -14,6 +15,7 @@ import type {
 } from "@/lib/types"
 import type { DotTone, Verdict } from "@/components/status-dot"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
+import { sourceError } from "@/lib/cidr"
 
 /**
  * The spec fields of a listed stream: what the form edits and the API takes
@@ -32,6 +34,12 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     timeout,
     connectTimeout,
     allowFrom,
+    rules,
+    defaultAllow,
+    maxConnPerIp,
+    maxConnTotal,
+    uploadRate,
+    downloadRate,
   } = stream
   return {
     name,
@@ -44,18 +52,61 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     timeout,
     connectTimeout,
     allowFrom,
+    rules,
+    defaultAllow,
+    maxConnPerIp,
+    maxConnTotal,
+    uploadRate,
+    downloadRate,
   }
 }
 
 /**
- * What a preview or a save posts: the allow list as typed, split, and a UDP
- * mode only where there is UDP.
+ * A stream's access as the form edits it: an allow list is its rules with
+ * everyone else turned away, and no rules at all lets everyone in.
  */
-export function streamBody(spec: StreamSpec, allow: string): StreamSpec {
+export function accessOf(
+  spec: Pick<StreamSpec, "allowFrom" | "rules" | "defaultAllow">,
+): StreamAccess {
+  if (spec.rules && spec.rules.length > 0) {
+    return { rules: spec.rules, defaultAllow: spec.defaultAllow ?? true }
+  }
+  if (spec.allowFrom.length > 0) {
+    return {
+      rules: spec.allowFrom.map((source) => ({ action: "allow", source })),
+      defaultAllow: false,
+    }
+  }
+  return { rules: [], defaultAllow: true }
+}
+
+/**
+ * Why the access list cannot be saved, or "" — said on the form before the
+ * server refuses it the same way.
+ */
+export function accessError(access: StreamAccess): string {
+  for (const rule of access.rules) {
+    const problem = sourceError(rule.source)
+    if (problem) return problem
+  }
+  if (!access.defaultAllow && access.rules.length === 0) {
+    return "Turning everyone away with no rule letting anyone in closes the port to all. Pause the stream instead."
+  }
+  return ""
+}
+
+/**
+ * What a preview or a save posts: the access list as ordered rules, which
+ * the server folds back into an allow list where that says the same, and a
+ * UDP mode only where there is UDP.
+ */
+export function streamBody(spec: StreamSpec, access: StreamAccess): StreamSpec {
   return {
     ...streamSpecOf(spec),
     udpMode: spec.protocol === "tcp" ? undefined : (spec.udpMode ?? "session"),
-    allowFrom: allow.split(/[\s,]+/).filter(Boolean),
+    allowFrom: [],
+    rules: access.rules.map((rule) => ({ ...rule, source: rule.source.trim() })),
+    defaultAllow: access.defaultAllow,
   }
 }
 
@@ -498,7 +549,8 @@ export function streamFilterCounts(streams: StreamEntry[]): Record<StreamFilter,
 export function streamMatchesQuery(stream: StreamEntry, query: string): boolean {
   const needle = query.trim().toLowerCase()
   if (!needle) return true
-  return [stream.name, listenLabel(stream), stream.upstream, ...stream.allowFrom]
+  const sources = [...stream.allowFrom, ...(stream.rules ?? []).map((rule) => rule.source)]
+  return [stream.name, listenLabel(stream), stream.upstream, ...sources]
     .filter(Boolean)
     .some((field) => field.toLowerCase().includes(needle))
 }
