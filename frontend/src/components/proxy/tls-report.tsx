@@ -1,10 +1,21 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { CheckCircle, CrossCircle, External, Inspect } from "@/components/icons"
+import {
+  CheckCircle,
+  Copy,
+  CrossCircle,
+  Download,
+  External,
+  Inspect,
+  Linked,
+  Minus,
+} from "@/components/icons"
 import { get } from "@/lib/api"
+import { copyText } from "@/lib/clipboard"
+import { downloadText } from "@/lib/metrics-export"
 import { duration, relativeTime, timestamp } from "@/lib/format"
 import {
   parseScanQuery,
@@ -17,15 +28,29 @@ import {
 } from "@/lib/scan-target"
 import {
   certificateLeft,
+  chainPem,
+  checkOutcome,
   diagnosisLinks,
   failureSteps,
+  findingAnchor,
   plainVerdict,
+  reportFileName,
+  reportToMarkdown,
+  reproduceCommands,
   termLeft,
   termText,
 } from "@/lib/tls-report"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
-import type { Certificate, HTTPScan, PreloadCheck, TLSScan, VHost } from "@/lib/types"
+import type {
+  Certificate,
+  GradeCheck,
+  HTTPScan,
+  PreloadCheck,
+  ScanFinding,
+  TLSScan,
+  VHost,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Detail, DetailList, Page, PageContext } from "@/components/page"
@@ -44,6 +69,7 @@ import { TLSDNSPanel } from "@/components/proxy/tls-dns"
 import { TLSServedBy } from "@/components/proxy/tls-served-by"
 import { RequestTester, TLSTools } from "@/components/proxy/request-tester"
 import { Button } from "@/components/ui/button"
+import { IconAction } from "@/components/icon-action"
 import { Field } from "@/components/form"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 
@@ -156,6 +182,17 @@ function TLSReport() {
   const scan = report.data ?? null
   const busy = report.loading || rescanning
   const scanned = scan ? targetLabel({ host: scan.domain, port: scan.port }) : ""
+
+  // A #finding-… link opens that finding and brings it into view once the
+  // report it belongs to is on screen.
+  const hash = useSyncExternalStore(subscribeHash, readHash, () => "")
+  const linkedFinding = scan?.reachable
+    ? scan.findings.find((finding) => `#${findingAnchor(finding.id)}` === hash)?.id
+    : undefined
+  useEffect(() => {
+    if (linkedFinding)
+      document.getElementById(findingAnchor(linkedFinding))?.scrollIntoView({ block: "start" })
+  }, [linkedFinding])
 
   // The field offers what was scanned here before and the names this server
   // knows: its sites, its watched endpoints and its certificates. They are
@@ -451,10 +488,20 @@ function TLSReport() {
           <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_24rem] [&>*]:min-w-0">
             <div className="min-w-0 space-y-8">
               <Panel plain>
-                <PanelHeader title="Findings" />
+                <PanelHeader
+                  title="Findings"
+                  actions={<SeverityCounts findings={scan.findings} />}
+                />
                 <PanelBody>
+                  {/* Worst first, as the backend sorts them, so each severity
+                      reads as one group under the counts above. */}
                   <FindingList
-                    findings={scan.findings}
+                    findings={scan.findings.map((finding) => ({
+                      ...finding,
+                      extra: <FindingLink id={finding.id} />,
+                    }))}
+                    anchor={findingAnchor}
+                    defaultOpen={linkedFinding ? [linkedFinding] : undefined}
                     // Headers are only vouched for where an HTTP answer was read.
                     emptyLabel={
                       scan.http?.service === "http"
@@ -464,6 +511,7 @@ function TLSReport() {
                   />
                 </PanelBody>
               </Panel>
+              {scan.checks.length > 0 && <GradeChecks checks={scan.checks} />}
               <div>
                 <Panel plain>
                   <PanelHeader title="Protocol versions" />
@@ -635,26 +683,37 @@ function TLSReport() {
                 <PanelHeader title="Live certificate" />
                 <PanelBody>
                   <DetailList>
-                    <Detail label="Subject">{scan.certificate?.name ?? "—"}</Detail>
-                    <Detail label="Names">{scan.certificate?.domains.join(", ") || "—"}</Detail>
-                    <Detail label="Issuer">
-                      {scan.certificate ? <IssuerFact issuer={scan.certificate.issuer} /> : "—"}
-                    </Detail>
-                    <Detail label="Valid from">
-                      {scan.certificate ? timestamp(scan.certificate.notBefore) : "—"}
-                    </Detail>
-                    <Detail label="Valid until">
-                      {scan.certificate ? timestamp(scan.certificate.notAfter) : "—"}
-                    </Detail>
-                    <Detail label="Lifetime">{termText(scan) ?? "—"}</Detail>
-                    <Detail label="Key">
-                      {scan.keyType}
-                      {scan.keyBits ? ` ${scan.keyBits} bits` : ""}
-                    </Detail>
-                    <Detail label="Signature">{scan.signatureAlgorithm ?? "—"}</Detail>
-                    <Detail label="Serial" className="font-mono break-all">
-                      {scan.serial ?? "—"}
-                    </Detail>
+                    <CopyDetail label="Subject" value={scan.certificate?.name} />
+                    <CopyDetail label="Names" value={scan.certificate?.domains.join(", ")} />
+                    <CopyDetail
+                      label="Issuer"
+                      value={scan.certificate?.issuer}
+                      shown={scan.certificate && <IssuerFact issuer={scan.certificate.issuer} />}
+                    />
+                    <CopyDetail
+                      label="Valid from"
+                      value={scan.certificate?.notBefore}
+                      shown={scan.certificate && timestamp(scan.certificate.notBefore)}
+                    />
+                    <CopyDetail
+                      label="Valid until"
+                      value={scan.certificate?.notAfter}
+                      shown={scan.certificate && timestamp(scan.certificate.notAfter)}
+                    />
+                    <CopyDetail label="Lifetime" value={termText(scan)} />
+                    <CopyDetail
+                      label="Key"
+                      value={
+                        scan.keyType &&
+                        `${scan.keyType}${scan.keyBits ? ` ${scan.keyBits} bits` : ""}`
+                      }
+                    />
+                    <CopyDetail label="Signature" value={scan.signatureAlgorithm} />
+                    <CopyDetail
+                      label="Serial"
+                      value={scan.serial}
+                      className="font-mono break-all"
+                    />
                     <Detail label="OCSP stapled">
                       {scan.ocspStapled
                         ? "yes"
@@ -663,21 +722,29 @@ function TLSReport() {
                           : "not applicable, the certificate names no OCSP responder"}
                     </Detail>
                     {scan.ocspServers?.length ? (
-                      <Detail label="OCSP" className="font-mono text-micro wrap-anywhere">
-                        {scan.ocspServers.join(" ")}
-                      </Detail>
+                      <CopyDetail
+                        label="OCSP"
+                        value={scan.ocspServers.join(" ")}
+                        className="font-mono text-micro wrap-anywhere"
+                      />
                     ) : null}
                     {scan.crlUrls?.length ? (
-                      <Detail label="CRL" className="font-mono text-micro wrap-anywhere">
-                        {scan.crlUrls.join(" ")}
-                      </Detail>
+                      <CopyDetail
+                        label="CRL"
+                        value={scan.crlUrls.join(" ")}
+                        className="font-mono text-micro wrap-anywhere"
+                      />
                     ) : null}
-                    <Detail label="SHA-256" className="font-mono text-micro break-all">
-                      {scan.fingerprint}
-                    </Detail>
-                    <Detail label="SPKI pin" className="font-mono text-micro break-all">
-                      {scan.spkiPin ?? "—"}
-                    </Detail>
+                    <CopyDetail
+                      label="SHA-256"
+                      value={scan.fingerprint}
+                      className="font-mono text-micro break-all"
+                    />
+                    <CopyDetail
+                      label="SPKI pin"
+                      value={scan.spkiPin}
+                      className="font-mono text-micro break-all"
+                    />
                   </DetailList>
                 </PanelBody>
               </Panel>
@@ -716,6 +783,7 @@ function TLSReport() {
                   </ol>
                 </PanelBody>
               </Panel>
+              <ReportExport scan={scan} />
             </div>
           </div>
         </div>
@@ -735,6 +803,209 @@ function TLSReport() {
 
 function isAddress(host: string) {
   return host.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)
+}
+
+function subscribeHash(onChange: () => void) {
+  window.addEventListener("hashchange", onChange)
+  return () => window.removeEventListener("hashchange", onChange)
+}
+
+function readHash() {
+  return window.location.hash
+}
+
+const LEVELS: { level: ScanFinding["level"]; tone: Tone }[] = [
+  { level: "critical", tone: "danger" },
+  { level: "warning", tone: "warning" },
+  { level: "notice", tone: "default" },
+]
+
+/** How many findings there are of each severity, the groups the list reads in. */
+function SeverityCounts({ findings }: { findings: ScanFinding[] }) {
+  return LEVELS.map(({ level, tone }) => {
+    const count = findings.filter((finding) => finding.level === level).length
+    return count ? (
+      <Tag key={level} tone={tone}>
+        {count} {level}
+      </Tag>
+    ) : null
+  })
+}
+
+/**
+ * Puts the finding's own address in the bar and on the clipboard: the report's
+ * link with #finding-… opens the scan with that finding open.
+ */
+function FindingLink({ id }: { id: string }) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="xs"
+      className="mt-0.5"
+      onClick={() => {
+        window.history.replaceState(null, "", `#${findingAnchor(id)}`)
+        void copyText(window.location.href, "Link to the finding copied")
+      }}
+    >
+      <Linked className="size-3" />
+      Copy link
+    </Button>
+  )
+}
+
+/**
+ * Every rule the grade applies and the letter each caps it at, passed or not:
+ * the letter is the lowest cap among the rules that failed, so this is its
+ * whole working rather than only the parts that went wrong.
+ */
+function GradeChecks({ checks }: { checks: GradeCheck[] }) {
+  return (
+    <Panel plain>
+      <PanelHeader title="How this grade was reached" />
+      <PanelBody flush>
+        <RowList aria-label="Grade rules">
+          {checks.map((check) => (
+            <ReportRow
+              key={check.id}
+              leading={
+                check.na ? (
+                  <Minus className="size-3.5 text-muted-foreground" />
+                ) : check.passed ? (
+                  <CheckCircle className="size-3.5 text-success" />
+                ) : (
+                  <CrossCircle className="size-3.5 text-destructive" />
+                )
+              }
+              title={
+                <>
+                  <span className="sr-only">{checkOutcome(check)}: </span>
+                  {check.title}
+                </>
+              }
+              trailing={
+                <Tag tone={check.passed || check.na ? "default" : capTone(check.cap)}>
+                  {check.na ? "not judged" : `caps at ${check.cap}`}
+                </Tag>
+              }
+              className="py-2"
+            />
+          ))}
+        </RowList>
+        <p className="pt-3 text-hint leading-relaxed text-muted-foreground">
+          The grade is the lowest cap among the rules that failed, and A+ when none did. A rule the
+          scan could not judge caps nothing. Notices such as a missing security header are findings
+          only: they never lower the letter.
+        </p>
+      </PanelBody>
+    </Panel>
+  )
+}
+
+function capTone(cap: string): Tone {
+  return cap === "F" ? "danger" : "warning"
+}
+
+/** A certificate fact with a way to copy it exactly, however it is shown. */
+function CopyDetail({
+  label,
+  value,
+  shown,
+  className,
+}: {
+  label: string
+  value?: string
+  shown?: React.ReactNode
+  className?: string
+}) {
+  return (
+    <Detail label={label} className={cn("group flex items-start gap-1", className)}>
+      <span className="min-w-0 flex-1">{shown ?? (value || "—")}</span>
+      {value && (
+        <IconAction
+          label={`Copy ${label}`}
+          reveal
+          className="-my-1 size-5"
+          onClick={() => void copyText(value, `${label} copied`)}
+        >
+          <Copy />
+        </IconAction>
+      )}
+    </Detail>
+  )
+}
+
+/**
+ * The report taken elsewhere — Markdown for a ticket, the scan as JSON, the
+ * chain as sent — and the commands that repeat what the scan saw from a shell.
+ */
+function ReportExport({ scan }: { scan: TLSScan }) {
+  return (
+    <Panel plain>
+      <PanelHeader title="Reproduce and export" />
+      <PanelBody className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={() => void copyText(reportToMarkdown(scan), "Report copied as Markdown")}
+          >
+            <Copy className="size-3" />
+            Copy as Markdown
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={() =>
+              downloadText(
+                reportFileName(scan, "tls.json"),
+                JSON.stringify(scan, null, 2),
+                "application/json",
+              )
+            }
+          >
+            <Download className="size-3" />
+            JSON
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={() =>
+              downloadText(
+                reportFileName(scan, "chain.pem"),
+                chainPem(scan),
+                "application/x-pem-file",
+              )
+            }
+          >
+            <Download className="size-3" />
+            chain.pem
+          </Button>
+        </div>
+        <ul className="space-y-3">
+          {reproduceCommands(scan).map((command) => (
+            <li key={command.label} className="group min-w-0 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-hint text-muted-foreground">{command.label}</span>
+                <IconAction
+                  label={`Copy ${command.label.toLowerCase()} command`}
+                  reveal
+                  className="-my-1 size-6"
+                  onClick={() => void copyText(command.command, "Command copied")}
+                >
+                  <Copy />
+                </IconAction>
+              </div>
+              <code className="block font-mono text-micro wrap-anywhere">{command.command}</code>
+            </li>
+          ))}
+        </ul>
+      </PanelBody>
+    </Panel>
+  )
 }
 
 /**

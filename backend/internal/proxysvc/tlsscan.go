@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -106,6 +107,21 @@ type TLSScan struct {
 	// handler, which has the host's sites (see TraceOrigin).
 	Origin   *Origin       `json:"origin,omitempty"`
 	Findings []ScanFinding `json:"findings"`
+	// Checks are every rule grade applies, passed or not, so the page can
+	// show how the letter was reached rather than only what went wrong.
+	Checks []GradeCheck `json:"checks"`
+}
+
+// GradeCheck is one of grade's rules as it applied to this scan. Cap is the
+// best letter the scan can get while the rule fails; NA is a rule the scan
+// gave no means to judge, which then caps nothing.
+type GradeCheck struct {
+	ID       string `json:"id"`
+	Category string `json:"category"`
+	Title    string `json:"title"`
+	Passed   bool   `json:"passed"`
+	NA       bool   `json:"na"`
+	Cap      string `json:"cap"`
 }
 
 type ProtocolResult struct {
@@ -125,6 +141,9 @@ type ChainLink struct {
 	KeyType    string    `json:"keyType,omitempty"`
 	KeyBits    int       `json:"keyBits,omitempty"`
 	SelfIssued bool      `json:"selfIssued"`
+	// PEM is the certificate as sent, so the chain can be saved and checked
+	// with openssl; certificates are public, so this reveals nothing.
+	PEM string `json:"pem"`
 }
 
 // HTTPScan is what the site says about itself over HTTP.
@@ -226,6 +245,7 @@ func ScanTLS(ctx context.Context, domain string, port int) *TLSScan {
 	scan := &TLSScan{
 		Domain: domain, Port: port, CheckedAt: time.Now().UTC(),
 		Protocols: []ProtocolResult{}, Chain: []ChainLink{}, Findings: []ScanFinding{},
+		Checks: []GradeCheck{},
 	}
 	addr := net.JoinHostPort(domain, strconv.Itoa(port))
 
@@ -542,6 +562,7 @@ func describeChain(scan *TLSScan, chain []*x509.Certificate, domain string) {
 			NotAfter: c.NotAfter.UTC(), IsCA: c.IsCA,
 			KeyType: keyType, KeyBits: keyBits,
 			SelfIssued: c.Issuer.String() == c.Subject.String(),
+			PEM:        string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})),
 		})
 	}
 	// A chain of one is only complete if that one is self-signed; otherwise
@@ -919,12 +940,22 @@ func grade(scan *TLSScan) {
 			worst = to
 		}
 	}
+	// Each rule is recorded whether it passed or not, beside the finding it
+	// raises, so the checklist and the letter cannot drift apart.
+	checks := []GradeCheck{}
+	check := func(id, category, title, cap string, passed, na bool) {
+		checks = append(checks, GradeCheck{ID: id, Category: category, Title: title,
+			Passed: passed && !na, NA: na, Cap: cap})
+	}
 
 	if !scan.Reachable {
+		check("tls.handshake", "connection", "A TLS handshake completes", "F", false, false)
 		scan.Grade, scan.Summary = "F", "Nothing answered a TLS handshake."
 		scan.Findings = findings
+		scan.Checks = checks
 		return
 	}
+	check("tls.legacy-only", "protocol", "The handshake a current client makes is accepted", "F", !scan.LegacyOnly, false)
 	if scan.LegacyOnly {
 		demote(gradeF, ScanFinding{ID: "tls.legacy-only", Level: "critical",
 			Title:  "The handshake a current client makes is refused",
@@ -932,6 +963,7 @@ func grade(scan *TLSScan) {
 			Advice: "Clients that no longer offer those — this dashboard's own TLS library among them — cannot connect. In nginx set ssl_protocols TLSv1.2 TLSv1.3 and an ssl_ciphers list with ECDHE suites, such as Mozilla's intermediate profile."})
 	}
 	cert := scan.Certificate
+	overdue := false
 	switch {
 	case cert == nil:
 		demote(gradeF, ScanFinding{ID: "tls.no-cert", Level: "critical",
@@ -949,6 +981,7 @@ func grade(scan *TLSScan) {
 		window := renewalWindow(cert.NotBefore, cert.NotAfter)
 		term := termShare(window, cert.NotAfter.Sub(cert.NotBefore))
 		if left <= window/2 {
+			overdue = true
 			demote(gradeB, ScanFinding{ID: "tls.expiring", Level: "warning",
 				Title:  "The certificate expires in " + timeLeft(left),
 				Detail: "Renewal is due in " + term + ", and half of that has passed with this certificate still served.",
@@ -960,6 +993,12 @@ func grade(scan *TLSScan) {
 				Advice: "Nothing to do yet if renewal is automatic. If this certificate is still served when half of that time has gone, renewal is not working."})
 		}
 	}
+	check("tls.no-cert", "certificate", "A certificate is presented", "F", cert != nil, false)
+	check("tls.expired", "certificate", "The certificate has not expired", "F", cert != nil && !cert.Expired, cert == nil)
+	check("tls.expiring", "certificate", "Renewal is not overdue", "B", !overdue, cert == nil || cert.Expired)
+	check("tls.name-mismatch", "certificate", "The certificate covers the name", "F", scan.NameMatches, cert == nil)
+	check("tls.untrusted", "certificate", "The chain is trusted", "F", scan.Trusted, false)
+	check("tls.incomplete-chain", "certificate", "The intermediate certificates are sent", "B", scan.ChainComplete, false)
 	if !scan.NameMatches && cert != nil {
 		demote(gradeF, ScanFinding{ID: "tls.name-mismatch", Level: "critical",
 			Title:  "The certificate is for a different name",
@@ -982,25 +1021,35 @@ func grade(scan *TLSScan) {
 			Advice: "Point the proxy at fullchain.pem rather than cert.pem. Desktop browsers paper over this from cache; phones, curl and payment gateways do not."})
 	}
 
+	oldOffered := false
 	for _, p := range scan.Protocols {
 		if p.Status != "offered" {
 			continue
 		}
 		switch p.Name {
 		case "TLS 1.0", "TLS 1.1":
+			oldOffered = true
 			demote(gradeC, ScanFinding{ID: "tls.old-protocol." + p.Name, Level: "warning",
 				Title:  p.Name + " is still offered",
 				Detail: "Deprecated since 2021 and disabled in every current browser.",
 				Advice: "Set ssl_protocols to TLSv1.2 TLSv1.3. Nothing that can reach this site today needs the older ones."})
 		}
 	}
-	if protocolStatus(scan.Protocols, "TLS 1.3") == "refused" {
+	// A version the probe could not ask about is neither passed nor failed.
+	oldUnknown := protocolStatus(scan.Protocols, "TLS 1.0") != "refused" ||
+		protocolStatus(scan.Protocols, "TLS 1.1") != "refused"
+	check("tls.old-protocol", "protocol", "TLS 1.0 and 1.1 are refused", "C", !oldOffered, !oldOffered && oldUnknown)
+	tls13 := protocolStatus(scan.Protocols, "TLS 1.3")
+	check("tls.no-13", "protocol", "TLS 1.3 is offered", "B", tls13 == "offered", tls13 == "unknown")
+	if tls13 == "refused" {
 		demote(gradeB, ScanFinding{ID: "tls.no-13", Level: "notice",
 			Title:  "TLS 1.3 is not offered",
 			Detail: "The server negotiated " + scan.Negotiated + " at best.",
 			Advice: "Add TLSv1.3 to ssl_protocols. It is faster and removes a whole category of downgrade problem."})
 	}
-	if scan.KeyType == "RSA" && scan.KeyBits > 0 && scan.KeyBits < 2048 {
+	weakKey := scan.KeyType == "RSA" && scan.KeyBits > 0 && scan.KeyBits < 2048
+	check("tls.weak-key", "certificate", "An RSA key has at least 2048 bits", "F", !weakKey, scan.KeyType != "RSA" || scan.KeyBits == 0)
+	if weakKey {
 		demote(gradeF, ScanFinding{ID: "tls.weak-key", Level: "critical",
 			Title:  fmt.Sprintf("The key is only %d bits", scan.KeyBits),
 			Detail: "Below the 2048-bit minimum every authority has enforced for a decade.",
@@ -1013,6 +1062,9 @@ func grade(scan *TLSScan) {
 			Advice: "Optional: browsers work without it. In nginx it is ssl_stapling on and ssl_stapling_verify on, with a resolver set so nginx can reach the responder."})
 	}
 
+	// A redirect that was followed and never reached HTTPS caps the grade at
+	// B; one that could not be judged still keeps A+ out of reach.
+	redirectCap := "A"
 	// Only an HTTP answer is graded on HTTP: a service known to be something
 	// else has nothing to fix there, and a request that got no answer says
 	// nothing about headers it never received.
@@ -1047,6 +1099,7 @@ func grade(scan *TLSScan) {
 				Detail: describePlainChain(chain),
 				Advice: "Whether plain HTTP reaches HTTPS was not checked. For a public site, point the redirect at its public name."})
 		default:
+			redirectCap = "B"
 			demote(gradeB, ScanFinding{ID: "tls.no-redirect", Level: "warning",
 				Title:  "Plain HTTP does not redirect to HTTPS",
 				Detail: describePlainChain(chain),
@@ -1061,8 +1114,14 @@ func grade(scan *TLSScan) {
 		}
 	}
 
+	http := scan.HTTP
+	check("tls.no-redirect", "http", "Plain HTTP is sent to HTTPS", redirectCap, http != nil && http.PlainRedirects, false)
+	check("tls.hsts", "http", "HSTS is set for at least six months", "A",
+		http != nil && http.HSTS != nil && http.HSTS.MaxAge >= hstsStrongMaxAge, false)
+
 	SortFindings(findings)
 	scan.Findings = findings
+	scan.Checks = checks
 	scan.Grade, scan.Summary = letterFor(worst, scan)
 }
 

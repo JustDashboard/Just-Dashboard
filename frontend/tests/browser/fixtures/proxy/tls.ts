@@ -98,6 +98,32 @@ export const scan = {
       advice: "Enable HSTS after verifying HTTPS for all covered domains.",
     },
   ],
+  checks: [
+    {
+      id: "tls.untrusted",
+      category: "certificate",
+      title: "The chain is trusted",
+      passed: true,
+      na: false,
+      cap: "F",
+    },
+    {
+      id: "tls.old-protocol",
+      category: "protocol",
+      title: "TLS 1.0 and 1.1 are refused",
+      passed: false,
+      na: true,
+      cap: "C",
+    },
+    {
+      id: "tls.hsts",
+      category: "http",
+      title: "HSTS is set for at least six months",
+      passed: false,
+      na: false,
+      cap: "A",
+    },
+  ],
   http: {
     service: "http",
     statusCode: 200,
