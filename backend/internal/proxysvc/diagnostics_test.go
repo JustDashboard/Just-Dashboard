@@ -59,6 +59,39 @@ nginx: configuration file /tmp/jd-nginx-test/nginx.conf test failed`,
 			want: []Diagnostic{{Level: "emerg", Message: `unknown directive "frobnicate"`, File: "/tmp/jd-nginx-test/sites/b.conf", Line: 3}},
 		},
 		{
+			// conf.d/*.conf includes it, and a position cut at the space
+			// left the path in the message and no line to open.
+			name: "a file whose name has a space is placed whole",
+			output: `nginx: [emerg] unknown directive "frobnicate" in /tmp/jd-nginx-test/conf.d/zz spaced name.conf:3
+nginx: configuration file /tmp/jd-nginx-test/nginx.conf test failed`,
+			want: []Diagnostic{{Level: "emerg", Message: `unknown directive "frobnicate"`, File: "/tmp/jd-nginx-test/conf.d/zz spaced name.conf", Line: 3}},
+		},
+		{
+			name:   "a timestamped line places a spaced file whole too",
+			output: `2026/09/28 00:49:55 [emerg] 3411286#3411286: unknown directive "frobnicate" in /tmp/jd-nginx-test/conf.d/zz spaced name.conf:3`,
+			want:   []Diagnostic{{Level: "emerg", Message: `unknown directive "frobnicate"`, File: "/tmp/jd-nginx-test/conf.d/zz spaced name.conf", Line: 3}},
+		},
+		{
+			name:   "a directory named with ' in' keeps its whole path",
+			output: `nginx: [emerg] unknown directive "frobnicate" in /tmp/jd-nginx-test/sites in/b.conf:3`,
+			want:   []Diagnostic{{Level: "emerg", Message: `unknown directive "frobnicate"`, File: "/tmp/jd-nginx-test/sites in/b.conf", Line: 3}},
+		},
+		{
+			name:   "an ' in /' the message quotes is not the position",
+			output: `nginx: [emerg] open() "/nowhere/a in /b.conf" failed (2: No such file or directory) in /tmp/jd-nginx-test/conf.d/q.conf:3`,
+			want:   []Diagnostic{{Level: "emerg", Message: `open() "/nowhere/a in /b.conf" failed (2: No such file or directory)`, File: "/tmp/jd-nginx-test/conf.d/q.conf", Line: 3}},
+		},
+		{
+			name:   "a directive quoting ' in /' is not the position either",
+			output: `nginx: [emerg] unknown directive "fr in /ob" in /tmp/jd-nginx-test/conf.d/odd.conf:3`,
+			want:   []Diagnostic{{Level: "emerg", Message: `unknown directive "fr in /ob"`, File: "/tmp/jd-nginx-test/conf.d/odd.conf", Line: 3}},
+		},
+		{
+			name:   "quotes that do not pair still leave the position at the end",
+			output: `nginx: [emerg] unknown directive "frob"x" in /tmp/jd-nginx-test/conf.d/odd.conf:3`,
+			want:   []Diagnostic{{Level: "emerg", Message: `unknown directive "frob"x"`, File: "/tmp/jd-nginx-test/conf.d/odd.conf", Line: 3}},
+		},
+		{
 			name:   "a clean test has nothing to say",
 			output: "nginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful",
 			want:   []Diagnostic{},
@@ -175,6 +208,24 @@ func TestValidationPlacesADiagnosticInTheLinkedSiteFile(t *testing.T) {
 	want := []Diagnostic{{Level: "emerg", Message: `unknown directive "frobnicate"`, File: site, Line: 3}}
 	if res.Valid || !reflect.DeepEqual(res.Diagnostics, want) {
 		t.Fatalf("got %+v, want the emergency placed at %s:3", res.Diagnostics, site)
+	}
+}
+
+// nginx includes a conf.d file whose name has a space, and names it whole in
+// its message; the diagnostic has to carry that name and line, or a refusal
+// offers no way to the file.
+func TestValidationPlacesADiagnosticInAFileWithASpaceInItsName(t *testing.T) {
+	root := liveNginx(t)
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	broken := filepath.Join(root, "conf.d", "zz spaced name.conf")
+	res, err := service.Validate(context.Background(), KindNginx, broken,
+		"server {\n    listen 127.0.0.1:18096;\n    frobnicate on;\n}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Diagnostic{{Level: "emerg", Message: `unknown directive "frobnicate"`, File: broken, Line: 3}}
+	if res.Valid || !reflect.DeepEqual(res.Diagnostics, want) {
+		t.Fatalf("got %+v, want the emergency placed at %s:3", res.Diagnostics, broken)
 	}
 }
 

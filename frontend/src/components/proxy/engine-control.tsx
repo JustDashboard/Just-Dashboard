@@ -50,7 +50,10 @@ export type EngineControl = {
   run: (action: EngineAction) => void
   /** Restart and stop, which say what they interrupt before they run. */
   ask: (action: "restart" | "stop") => void
-  /** The confirmation, a refusal's diagnostics, and the file one of them opens. */
+  /**
+   * The confirmation, a refusal's diagnostics, and the file one of them opens,
+   * which closes back into the refusal it came from.
+   */
   dialog: React.ReactNode
 }
 
@@ -77,7 +80,11 @@ export function useEngineControl({
   // under the fade.
   const [asked, setAsked] = useState<{ action: Asked; refusal?: Refusal }>()
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editing, setEditing] = useState<{ path: string; line?: number } | null>(null)
+  // The line whose file the editor opened, kept once it closes: closing it
+  // brings its refusal back with the keyboard on that line's button, so the
+  // dialog's Start or Restart is a press away from the file just fixed.
+  const [opened, setOpened] = useState<ProxyDiagnostic>()
+  const [editing, setEditing] = useState(false)
 
   const run = async (action: EngineAction) => {
     if (busy) return
@@ -115,7 +122,8 @@ export function useEngineControl({
   const open = (d: ProxyDiagnostic) => {
     if (!d.file) return
     setDialogOpen(false)
-    setEditing({ path: d.file, line: d.line })
+    setOpened(d)
+    setEditing(true)
   }
 
   const dialog = (
@@ -126,17 +134,22 @@ export function useEngineControl({
         asked={asked}
         busy={busy !== undefined}
         roots={roots}
+        opened={opened}
         onOpenFile={open}
         onRun={(action) => void run(action)}
         onClose={() => setDialogOpen(false)}
       />
       <ConfigEditor
-        open={editing !== null}
-        onOpenChange={(next) => !next && setEditing(null)}
-        path={editing?.path ?? ""}
+        open={editing}
+        onOpenChange={(next) => {
+          if (next) return
+          setEditing(false)
+          setDialogOpen(true)
+        }}
+        path={opened?.file ?? ""}
         kind={status?.nginx ? "nginx" : "caddy"}
-        title={editing?.path.split("/").pop() ?? "Configuration"}
-        initialLine={editing?.line}
+        title={opened?.file?.split("/").pop() ?? "Configuration"}
+        initialLine={opened?.line}
       />
     </>
   )
@@ -156,7 +169,8 @@ export function useEngineControl({
 /**
  * Restart or stop, said before it happens; or a start or restart the config
  * test refused, said after. The command stays at the dialog's foot either way,
- * so a file fixed in another window is one press from being tried again.
+ * so a file fixed in another window, or in the editor a line opened, is one
+ * press from being tried again.
  */
 function EngineDialog({
   engine,
@@ -164,6 +178,7 @@ function EngineDialog({
   asked,
   busy,
   roots,
+  opened,
   onOpenFile,
   onRun,
   onClose,
@@ -173,6 +188,8 @@ function EngineDialog({
   asked: { action: Asked; refusal?: Refusal } | undefined
   busy: boolean
   roots: string[]
+  /** The line whose file the editor last opened, which takes the keyboard back. */
+  opened: ProxyDiagnostic | undefined
   onOpenFile: (diagnostic: ProxyDiagnostic) => void
   onRun: (action: Asked) => void
   onClose: () => void
@@ -213,6 +230,7 @@ function EngineDialog({
           action={action}
           refusal={refusal}
           roots={roots}
+          opened={opened}
           onOpenFile={onOpenFile}
         />
       ) : action === "stop" ? (
@@ -245,12 +263,14 @@ function RefusalView({
   action,
   refusal,
   roots,
+  opened,
   onOpenFile,
 }: {
   engine: string
   action: Asked
   refusal: Refusal
   roots: string[]
+  opened: ProxyDiagnostic | undefined
   onOpenFile: (diagnostic: ProxyDiagnostic) => void
 }) {
   const diagnostics = refusal.validation?.diagnostics ?? []
@@ -267,6 +287,7 @@ function RefusalView({
           <DiagnosticList
             diagnostics={diagnostics}
             canOpen={(file) => openableFile(file, roots)}
+            returnTo={opened}
             onOpen={onOpenFile}
           />
           {output && (

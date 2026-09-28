@@ -63,6 +63,27 @@ export const failedJournal = [
   },
 ]
 
+const RELOAD_CYCLE = [
+  "Reloading nginx.service - A high performance web server and a reverse proxy server...",
+  "nginx.service: Sent signal SIGHUP to main process 1187 (nginx) on client request.",
+  "Reloaded nginx.service - A high performance web server and a reverse proxy server.",
+]
+
+/**
+ * All thirty lines the fold reads, oldest first as journalctl gives them: a
+ * week of reloads, then the start that could not bind, whose reason is the
+ * third line from the bottom.
+ */
+export const longJournal = [
+  ...Array.from({ length: 27 }, (_, index) => ({
+    timestamp: new Date(Date.parse("2026-09-20T08:00:00Z") + index * 6 * 3_600_000).toISOString(),
+    message: RELOAD_CYCLE[index % RELOAD_CYCLE.length],
+    priority: 6,
+    unit: "nginx.service",
+  })),
+  ...failedJournal,
+]
+
 export const routes: ProxyRoutes = {
   "/proxy/status": (route) => json(route, availability),
   "/systemd/nginx.service": (route) => json(route, { unit: nginxUnit, properties: {} }),

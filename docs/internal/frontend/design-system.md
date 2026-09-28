@@ -1138,9 +1138,11 @@ runs, Start once it is stopped or failed, with Reload beside it disabled and its
 (a disabled button takes no hover, so the reason hangs on a focusable wrapper). Whether it starts at
 boot is a fact on the line, a warning with an inline Start at boot where `systemctl enable` would fix
 it. A failed unit is the one `Notice` the overview draws under the line — the reader has to act on it
-— holding systemd's reason in words, a fold that reads the journal when opened, and its two verbs. A
-start or restart the config test refuses keeps its dialog open on the test's diagnostics as rows
-(level as a `Status` verdict, file:line in mono, Open at line N), not a toast of nginx's output.
+— holding systemd's reason in words, a fold that reads the journal when opened and opens scrolled to
+its newest line, and its two verbs. A start or restart the config test refuses keeps its dialog
+open on the test's diagnostics as rows (level as a `Status` verdict, file:line in mono, Open at line
+N), not a toast of nginx's output; the editor a row opens closes back into that dialog, with the
+keyboard on the row's button.
 Its routes are ordered worst first like the Sites cards, eight with "Showing 8 of N". An
 administrator's route opens the site on Sites and a Docker ingress route its live TLS report; a
 reader's route opens its file read-only in place rather than the site form — skeleton rows while it

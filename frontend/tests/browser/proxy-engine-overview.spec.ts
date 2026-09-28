@@ -1,6 +1,6 @@
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 import { availability, json, mockProxy, user, vhosts } from "./proxy-fixtures"
-import { nginxUnit } from "./fixtures/proxy/engine"
+import { longJournal, nginxUnit } from "./fixtures/proxy/engine"
 
 /**
  * The overview and the engine it drives, for the ways they told an operator
@@ -183,8 +183,26 @@ const brokenTest = {
   warnings: 0,
 }
 
+/** A deprecation nginx places in one site ahead of the emergency in another. */
+const twoFindings = {
+  ...brokenTest,
+  output:
+    'nginx: [warn] the "listen ... http2" directive is deprecated, use the "http2" directive instead in /etc/nginx/sites-enabled/legacy:2\n' +
+    brokenTest.output,
+  diagnostics: [
+    {
+      level: "warn",
+      message: 'the "listen ... http2" directive is deprecated, use the "http2" directive instead',
+      file: "/etc/nginx/sites-available/legacy",
+      line: 2,
+    },
+    ...brokenTest.diagnostics,
+  ],
+  warnings: 1,
+}
+
 /** A start or restart the config test turned down, as the engine route answers it. */
-function refusedBy(action: "started" | "restarted") {
+function refusedBy(action: "started" | "restarted", validation = brokenTest) {
   return (route: Route) =>
     route.fulfill({
       status: 422,
@@ -192,9 +210,9 @@ function refusedBy(action: "started" | "restarted") {
       body: JSON.stringify({
         error: {
           code: "invalid_config",
-          message: `nginx was not ${action}: its configuration test failed.\n${brokenTest.output}`,
+          message: `nginx was not ${action}: its configuration test failed.\n${validation.output}`,
         },
-        validation: brokenTest,
+        validation,
       }),
     })
 }
@@ -346,6 +364,56 @@ test("a start the config test refuses opens on what it said, and Start tries aga
   const again = dialog.getByRole("button", { name: "Start", exact: true })
   await expect(again).toHaveAttribute("data-variant", "default")
   await again.click()
+  await expect(page.getByText("nginx started")).toBeVisible()
+  await expect(dialog).toHaveCount(0)
+  expect(started).toEqual(["POST", "POST"])
+})
+
+test("a file opened from a refusal closes back into it, with the keyboard on its line", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockUnit(page, stopped)
+  let broken = true
+  const started: string[] = []
+  await page.route("**/api/v1/proxy/engine/start", (route) => {
+    started.push(route.request().method())
+    return broken
+      ? refusedBy("started", twoFindings)(route)
+      : json(route, { action: "start", unit: "nginx.service", output: "" })
+  })
+  const reads: string[] = []
+  await page.route("**/api/v1/proxy/config?**", (route) => {
+    reads.push(new URL(route.request().url()).searchParams.get("path") ?? "")
+    return json(route, { content: "server {\n    listen 80;\n    frobnicate on;\n}\n" })
+  })
+  await page.goto("/proxy")
+
+  await page.getByRole("button", { name: "Start nginx" }).click()
+  const dialog = page.getByRole("dialog", { name: "Start nginx" })
+  await expect(dialog.getByRole("button", { name: "Open at line 2" })).toBeVisible()
+  // The second line's file, by keyboard: the first is not the one to fix.
+  await dialog.getByRole("button", { name: "Open at line 3" }).focus()
+  await page.keyboard.press("Enter")
+  await expect(dialog).toHaveCount(0)
+  const editor = page.getByRole("dialog", { name: /app/ })
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("frobnicate on;", {
+    timeout: 20_000,
+  })
+  await page.keyboard.press("Escape")
+  await expect(editor).toHaveCount(0)
+
+  // Closing the file used to close the refusal for good and leave the
+  // keyboard on the page's body; it comes back where the reader left it.
+  await expect(
+    dialog.getByText("nginx was not started: its configuration test failed."),
+  ).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Open at line 3" })).toBeFocused()
+  expect(reads).toEqual(["/etc/nginx/sites-available/app"])
+
+  // Fixed there, the dialog's own Start tries again.
+  broken = false
+  await dialog.getByRole("button", { name: "Start", exact: true }).click()
   await expect(page.getByText("nginx started")).toBeVisible()
   await expect(dialog).toHaveCount(0)
   expect(started).toEqual(["POST", "POST"])
@@ -529,6 +597,45 @@ test("a failed engine says why, with its journal and a way to clear it", async (
   await expect(page.getByText("nginx exited with an error")).toHaveCount(0)
   await expect(identity.getByText("not running", { exact: true })).toBeVisible()
   expect(cleared).toEqual(["POST"])
+})
+
+test("the journal opens on its newest lines, where the reason is", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockUnit(page, failed)
+  await page.route("**/api/v1/systemd/nginx.service/journal?**", (route) =>
+    json(route, longJournal),
+  )
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto("/proxy")
+    await page.getByRole("button", { name: "Last 30 journal lines" }).click()
+    const journal = page.getByLabel("Journal")
+    const lines = journal.locator("p")
+    await expect(lines).toHaveCount(30)
+    // Thirty lines overflow the box at either width, so where it opens matters.
+    expect(await journal.evaluate((well) => well.scrollHeight > well.clientHeight)).toBe(true)
+    // toBeVisible ignores clipping inside a scroll box: compare the boxes.
+    const inside = async (line: Locator) => {
+      const [outer, inner] = await Promise.all([journal.boundingBox(), line.boundingBox()])
+      return (
+        outer !== null &&
+        inner !== null &&
+        inner.y >= outer.y - 1 &&
+        inner.y + inner.height <= outer.y + outer.height + 1
+      )
+    }
+    const failedWith = journal.getByText(/Failed with result 'exit-code'/)
+    await expect.poll(() => inside(failedWith)).toBe(true)
+    expect(await inside(journal.getByText(/bind\(\) to 0\.0\.0\.0:80 failed/))).toBe(true)
+    expect(await inside(lines.first())).toBe(false)
+
+    // Read again opens on the newest lines too.
+    await journal.evaluate((well) => (well.scrollTop = 0))
+    expect(await inside(failedWith)).toBe(false)
+    await page.getByRole("button", { name: "Read again" }).click()
+    await expect.poll(() => inside(failedWith)).toBe(true)
+  }
 })
 
 test("a journal that cannot be read says so and can be read again", async ({ page }) => {

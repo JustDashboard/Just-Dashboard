@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import type { ProxyDiagnostic } from "@/lib/types"
 import { RowList } from "@/components/row-list"
 import { Status } from "@/components/status-dot"
@@ -15,13 +16,23 @@ import { diagnosticVerdict } from "@/components/proxy/engine-lifecycle"
 export function DiagnosticList({
   diagnostics,
   canOpen,
+  returnTo,
   onOpen,
 }: {
   diagnostics: ProxyDiagnostic[]
   /** Whether the editor may open this file; a file outside the proxy's directories is only named. */
   canOpen: (file: string | undefined) => boolean
+  /** The line whose file was just open, whose button takes the keyboard back. */
+  returnTo?: ProxyDiagnostic
   onOpen: (diagnostic: ProxyDiagnostic) => void
 }) {
+  const returned = useRef<HTMLButtonElement>(null)
+  // A child's effect runs before its dialog's, and the dialog's focus scope
+  // leaves focus where it finds it inside; otherwise it takes the first
+  // control, which need not be the line the reader left from.
+  useEffect(() => {
+    returned.current?.focus()
+  }, [])
   return (
     <RowList aria-label="What the test said">
       {diagnostics.map((d, index) => (
@@ -44,7 +55,12 @@ export function DiagnosticList({
             )}
           </div>
           {canOpen(d.file) && (
-            <Button size="xs" variant="outline" onClick={() => onOpen(d)}>
+            <Button
+              ref={d === returnTo ? returned : undefined}
+              size="xs"
+              variant="outline"
+              onClick={() => onOpen(d)}
+            >
               {d.line ? `Open at line ${d.line}` : "Open file"}
             </Button>
           )}

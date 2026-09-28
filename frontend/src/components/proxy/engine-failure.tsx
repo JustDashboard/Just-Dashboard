@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Warning } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -26,7 +26,9 @@ const JOURNAL_LINES = 30
  *
  * The journal is read when the fold opens, afresh each time it does and on
  * Read again, with the old lines cleared first so what shows is never an
- * earlier read passed off as the latest.
+ * earlier read passed off as the latest. It reads oldest first, as journalctl
+ * does, and opens scrolled to its newest line: the reason is among the last,
+ * and thirty lines stand several times the box's height, on a phone seven.
  */
 export function EngineFailure({
   engine,
@@ -55,6 +57,10 @@ export function EngineFailure({
     [unit.name, reads],
     { enabled: open },
   )
+  const well = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (well.current) well.current.scrollTop = well.current.scrollHeight
+  }, [journal.data])
 
   return (
     <Notice tone="danger" icon={Warning} title={summary.title}>
@@ -75,7 +81,11 @@ export function EngineFailure({
             ) : journal.error ? (
               <ErrorState error={journal.error} />
             ) : journal.data && journal.data.length > 0 ? (
-              <Well className="max-h-72 space-y-0.5 text-foreground" aria-label="Journal">
+              <Well
+                ref={well}
+                className="max-h-72 space-y-0.5 text-foreground"
+                aria-label="Journal"
+              >
                 {journal.data.map((entry, index) => (
                   <p
                     key={`${entry.timestamp}:${index}`}
