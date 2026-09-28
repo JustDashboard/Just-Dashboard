@@ -44,7 +44,24 @@ If that trade is not one you want to make, please open an issue describing the
 change instead of a pull request — a good bug report is worth as much, and it
 carries no licensing question at all.
 
+## Reporting bugs and requesting features
+
+Use the [issue chooser](https://github.com/JustDashboard/Just-Dashboard/issues/new/choose) to open a
+bug report or feature request. Search existing issues first and keep each report focused on one problem.
+For bugs, include reproduction steps, expected and actual behavior, the dashboard version, and your
+Linux host, Docker/Compose, and browser details. Logs and screenshots help, but remove credentials and
+private information; never attach your `.env` file or the bootstrap admin password.
+
+Feature requests should explain the task you want to complete, the proposed improvement, and any
+workaround. Report vulnerabilities [privately](https://github.com/JustDashboard/Just-Dashboard/security/advisories/new),
+as described under [Security issues](#security-issues).
+
 ## Before you open a pull request
+
+Keep the PR focused and use the template to explain what changed, why, and how you verified it. Link
+related issues and include before/after screenshots for visual changes or a recording for interaction
+changes. Record validation limits and whether documentation needed updating; submitting the PR agrees
+to the contribution terms above, including the additional licence grant to the project owner.
 
 - Run the checks with `scripts/test-changed.sh`. It runs only what your diff can reach: Prettier and
   ESLint on the changed frontend files, `tsc --noEmit`, `bun test src`, `go build`/`go vet` and the
