@@ -48,6 +48,7 @@ type proxyExtras struct {
 func (s *Server) initProxyExtras() {
 	// --- lane A: engine & insights ---
 	s.modules.proxyExtras.statusMetrics = proxysvc.NewStatusSampler(s.modules.proxy)
+	s.modules.proxy.SetRecorder(&proxyRevisions{db: s.Store.DB})
 
 	// --- lane B: sites list & lifecycle ---
 

@@ -1698,7 +1698,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `WithActor` put on the context (empty for a deployment or a background loop). Password files are never
   recorded, a site file that resolves outside the proxy's directories is recorded without content, and
   the htpasswd writers do not call it; a recorder that fails is logged and the change stands.
-  No recorder is attached yet.
+- **Config history** (`api/proxy_revisions.go`) is that recorder: `proxy_config_revisions` keeps each
+  file as a change left it (`existed = 0` for a removal), the newest 50 per path, nothing over 1 MiB.
+  When the before-state differs from the newest revision kept, it is stored first as `outside` (changed
+  outside the dashboard); a file with no history keeps its before-state as `baseline`. Toggles record
+  the site file's content under `enable`/`disable`; the recorder cannot tell the site form from the raw
+  editor, since both reach it as a `write`. Routes, all `system.admin` because a revision is a file's
+  full content: `GET /proxy/history/files` (each file's newest revision, and `drift` against disk),
+  `GET /proxy/history?path=`, `GET /proxy/history/{id}` (with the previous revision and the file now),
+  and `POST /proxy/history/{id}/restore {reload}`, which goes through `WriteConfig` — tested in place,
+  a 422 with the test on refusal, the file untouched — after `ReadConfig` refuses a password file or a
+  path outside the roots; audited `proxy.history.restore`, recorded as `restore`. A removed site's file
+  is restorable from the revision before its removal; its sites-enabled link is not recreated.
 - **Live request metrics come from nginx's stub_status** (`stubstatus.go`, `api/handlers_proxy_metrics.go`).
   `GET /proxy/metrics` is open to every signed-in account — nginx's counters are no secret, and the
   sampler reads only the address in the dashboard's own file, so no caller can aim it — and

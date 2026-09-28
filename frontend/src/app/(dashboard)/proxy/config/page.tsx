@@ -20,13 +20,14 @@ import { useNow } from "@/components/deploy/vocabulary"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { ConfigFilesView } from "@/components/proxy/config-files"
+import { ConfigHistorySheet, ConfigHistoryView } from "@/components/proxy/config-history"
 import { EffectiveConfigView } from "@/components/proxy/config-search"
 import { useConfigTest } from "@/components/proxy/test-result"
 import { testedLabel, warningCount } from "@/components/proxy/config-test"
 import { authorship, folderOf, readCount, unreadCount } from "@/components/proxy/config-tree"
 import { plural } from "@/lib/format"
 
-type View = "files" | "effective"
+type View = "files" | "effective" | "history"
 
 export default function ProxyConfigPage() {
   return (
@@ -69,6 +70,9 @@ function ConfigurationPage() {
   // The file open in the editor is in the address bar, so a link can name
   // one and Back closes it; the line it opened at is kept beside it.
   const [selected, select] = useQuerySelection("file")
+  // A file's history is in the address bar too, so a site's History verb
+  // can link straight to it.
+  const [historyOf, showHistory] = useQuerySelection("history")
   const params = useSearchParams()
   const [line, setLine] = useState<number | undefined>(
     () => Number(params.get("line")) || undefined,
@@ -157,6 +161,7 @@ function ConfigurationPage() {
             [
               ["files", "Files"],
               ["effective", "What nginx loads"],
+              ["history", "History"],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -174,6 +179,8 @@ function ConfigurationPage() {
 
       {shownView === "effective" ? (
         <EffectiveConfigView effective={effective} root={status.nginxDir} onOpen={openFile} />
+      ) : shownView === "history" ? (
+        <ConfigHistoryView root={status.nginxDir} onOpen={showHistory} />
       ) : files.error ? (
         <ErrorState error={files.error} onRetry={files.refresh} />
       ) : !tree ? (
@@ -196,6 +203,18 @@ function ConfigurationPage() {
           configTest.refreshLast()
         }}
       />
+      {admin && (
+        <ConfigHistorySheet
+          path={historyOf}
+          root={status.nginxDir}
+          onOpenChange={(open) => !open && showHistory(null)}
+          onRestored={() => {
+            files.refresh()
+            effective.refresh()
+            configTest.refreshLast()
+          }}
+        />
+      )}
       {configTest.panel}
     </Page>
   )

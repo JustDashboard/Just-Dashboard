@@ -45,6 +45,9 @@ func (s *Server) mountEngineRoutes(r chi.Router) {
 		// on request, gated with the test that runs it.
 		r.Method(http.MethodGet, "/effective", s.handle(s.handleProxyEffective))
 		r.Method(http.MethodPost, "/reload", s.handle(s.handleProxyReload))
+		// Every file the dashboard changed, as each change left it, and a
+		// restore of any of them through the same tested write.
+		r.Route("/history", s.mountConfigHistoryRoutes)
 		// The engine's own service, resolved here rather than named by the
 		// caller. Start and restart run the config test first; stop and
 		// restart take every site offline, so they sit behind destructive.

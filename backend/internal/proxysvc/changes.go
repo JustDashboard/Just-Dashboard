@@ -3,6 +3,8 @@ package proxysvc
 import (
 	"context"
 	"log/slog"
+	"os"
+	"strings"
 )
 
 // ChangeAction is what happened to a configuration file.
@@ -79,4 +81,15 @@ func (s *Service) recordChange(ctx context.Context, c Change) {
 		slog.Warn("proxy configuration change was not recorded",
 			"path", c.Path, "action", c.Action, "error", err)
 	}
+}
+
+// KindOf is the engine that reads a recorded file, so a revision can be
+// restored through WriteConfig and tested by the server it belongs to. A
+// file in nginx's directory is nginx's even when the Caddyfile sits beside
+// it; anything else the service records is the Caddyfile's.
+func (s *Service) KindOf(full string) Kind {
+	if full == s.nginxDir || strings.HasPrefix(full, s.nginxDir+string(os.PathSeparator)) {
+		return KindNginx
+	}
+	return KindCaddy
 }
