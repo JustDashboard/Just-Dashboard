@@ -28,6 +28,7 @@ type proxyExtras struct {
 // already exist.
 func (s *Server) initProxyExtras() {
 	// --- lane A: engine & insights ---
+	s.modules.proxy.SetRecorder(&proxyRevisions{db: s.Store.DB})
 
 	// --- lane B: sites list & lifecycle ---
 

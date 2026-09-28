@@ -14,6 +14,22 @@ package store
 const proxySchema = `
 -- --- lane A: engine & insights ---
 
+-- Every configuration file the proxy service changed, as it was after the
+-- change, and as it was before whenever that differs from the last revision
+-- kept: the file was changed outside the dashboard in between. existed = 0
+-- is a file the change removed. The recorder keeps the newest 50 per path.
+CREATE TABLE IF NOT EXISTS proxy_config_revisions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    path       TEXT NOT NULL,
+    sha256     TEXT NOT NULL,
+    content    BLOB NOT NULL,
+    existed    INTEGER NOT NULL DEFAULT 1,
+    action     TEXT NOT NULL,
+    actor      TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_proxy_config_revisions_path ON proxy_config_revisions(path, created_at);
+
 -- --- lane B: sites list & lifecycle ---
 
 -- --- lane C: site builder ---

@@ -148,3 +148,51 @@ export type ProxyEffectiveConfig = {
   treeError?: string
   checkedAt: string
 }
+
+/**
+ * One kept state of a configuration file. `action` is what the dashboard did
+ * — write, delete, enable, disable, rename, restore — or `outside` for a
+ * state found on disk that the dashboard did not write, and `baseline` for
+ * the file as the first recorded change found it. `existed` false is the
+ * file being removed.
+ */
+export type ProxyRevision = {
+  id: number
+  path: string
+  sha256: string
+  size: number
+  existed: boolean
+  action: string
+  actor: string
+  /** Unix seconds. */
+  createdAt: number
+}
+
+/** A recorded file as it is now; `drift` when it no longer holds its newest revision. */
+export type ProxyRevisionDisk = {
+  exists: boolean
+  sha256?: string
+  drift: boolean
+  unreadable?: string
+}
+
+/** GET /proxy/history/files: every file with a history, newest change first. */
+export type ProxyHistoryFiles = {
+  files: { path: string; revisions: number; latest: ProxyRevision; current: ProxyRevisionDisk }[]
+}
+
+/** GET /proxy/history?path=: one file's revisions, newest first. */
+export type ProxyHistory = {
+  path: string
+  revisions: ProxyRevision[]
+  current: ProxyRevisionDisk
+}
+
+/** GET /proxy/history/{id}: a revision beside the one before it and the file now. */
+export type ProxyRevisionDetail = {
+  revision: ProxyRevision
+  content: string
+  previous: { revision: ProxyRevision; content: string } | null
+  current: ProxyRevisionDisk
+  currentContent: string
+}
