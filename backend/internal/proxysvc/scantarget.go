@@ -115,6 +115,24 @@ func ParseScanTarget(raw string, port int) (ScanTarget, error) {
 	return t, nil
 }
 
+// ParseScanQuery reads a target given as two texts: ?domain= and ?port= in a
+// link, or the report's name and port fields. An empty port is no port; one
+// that is given must be a port, so "0" and "+993" are refused rather than read
+// as 443 and 993.
+func ParseScanQuery(domain, port string) (ScanTarget, error) {
+	if port == "" {
+		return ParseScanTarget(domain, 0)
+	}
+	if strings.Trim(port, "0123456789") != "" {
+		return ScanTarget{}, fmt.Errorf("port %q is not a number", port)
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return ScanTarget{}, fmt.Errorf("port %s is outside 1–65535", port)
+	}
+	return ParseScanTarget(domain, n)
+}
+
 // splitScanHostPort separates a port written after the host. An IPv6 address
 // takes one only inside brackets, as in a URL; bare, its colons are its own.
 func splitScanHostPort(s string) (host string, port int, err error) {

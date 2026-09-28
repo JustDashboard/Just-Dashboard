@@ -1,14 +1,22 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { useSessionState } from "@/lib/view-state"
-import { useSearchParams } from "next/navigation"
+import { useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { CheckCircle, CrossCircle, Inspect } from "@/components/icons"
 import { get } from "@/lib/api"
-import { relativeTime, timestamp } from "@/lib/format"
-import { parseScanQuery, parseScanTarget, targetLabel } from "@/lib/scan-target"
+import { duration, relativeTime, timestamp } from "@/lib/format"
+import {
+  parseScanQuery,
+  parseScanTarget,
+  scanSuggestions,
+  targetHint,
+  targetLabel,
+  withRecent,
+  type ScanTarget,
+} from "@/lib/scan-target"
 import { cn } from "@/lib/utils"
-import type { HTTPScan, TLSScan } from "@/lib/types"
+import { useViewState } from "@/lib/view-state"
+import type { Certificate, HTTPScan, TLSScan, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Detail, DetailList, Page, PageContext } from "@/components/page"
@@ -21,9 +29,10 @@ import { EmptyState, ErrorState, Notice, Spinner } from "@/components/state"
 import { Status, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import type { Tone } from "@/components/tone"
+import { useNow } from "@/components/deploy/vocabulary"
 import { Button } from "@/components/ui/button"
 import { Field } from "@/components/form"
-import { Input } from "@/components/ui/input"
+import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 
 /**
  * What a visitor actually gets, graded.
@@ -43,36 +52,57 @@ import { Input } from "@/components/ui/input"
  */
 export function TLSReportPage() {
   const { can } = useAuth()
-  const params = useSearchParams()
-  // A link says host:port in ?domain= (a watched mail server on 993) or
-  // splits it into ?port=; both are read the way the field is, so the link
-  // scans the port it names instead of that text on 443.
-  const linked = params.get("domain")
-  const arrival = linked === null ? undefined : parseScanQuery(linked, params.get("port"))
-  const [domain, setDomain] = useSessionState(
-    "proxy.tls.domain",
-    "",
-    arrival && (arrival.target ? targetLabel(arrival.target) : linked),
-  )
-  // The target being reported on, as its label. A ?domain= link from a site
-  // or a certificate runs the report on arrival: the link is the question,
-  // and a page that then waits for a second click to ask it is a page that
-  // forgot why it was opened. The scan is a one-shot poll keyed on the
-  // target, so arriving with one and pressing Scan are the same path.
-  const [target, setTarget] = useSessionState(
-    "proxy.tls.target",
-    "",
-    arrival && (arrival.target ? targetLabel(arrival.target) : ""),
-  )
-  const [fieldError, setFieldError] = useState(arrival?.error)
-  const scanning = useMemo(() => parseScanTarget(target).target, [target])
   const admin = can("system.admin")
+  const router = useRouter()
+  const params = useSearchParams()
+  // The address bar holds the question — ?domain= with a name, host:port or a
+  // URL, and ?port= — read the way the field is, so a watched mail server's
+  // link scans 993 and reload, a shared link and Back each ask it again. A
+  // link is the question, and a page that then waited for a second click to
+  // ask it would be a page that forgot why it was opened.
+  const linked = params.get("domain")
+  const linkedPort = params.get("port")
+  const asked = linked === null ? undefined : parseScanQuery(linked, linkedPort)
+  const target = asked?.target
+  const targetKey = target ? targetLabel(target) : ""
+  // Another spelling of the same target — ?port= beside the name, a pasted
+  // URL — becomes the one every link uses, so a copied address reads the same.
+  const respelled =
+    target && (linked !== targetKey || linkedPort !== null) ? reportHref(params, target) : undefined
+  useEffect(() => {
+    if (respelled) router.replace(respelled, { scroll: false })
+  }, [respelled, router])
+
+  // The fields show the target the address asks for, and change with it on
+  // Back or a link; what is typed over them is kept until then.
+  const address = JSON.stringify([linked, linkedPort])
+  const fromAddress: ScanFields = target
+    ? targetFields(target)
+    : { domain: linked ?? "", port: linkedPort ?? "" }
+  const [fields, setFields] = useState(fromAddress)
+  const [fieldError, setFieldError] = useState(asked?.error)
+  const [shownFor, setShownFor] = useState(address)
+  if (shownFor !== address) {
+    setShownFor(address)
+    setFields(fromAddress)
+    setFieldError(asked?.error)
+  }
+  const typed = parseScanQuery(fields.domain, fields.port.trim())
+  const edit = (next: Partial<ScanFields>) => {
+    setFields((current) => ({ ...current, ...next }))
+    setFieldError(undefined)
+  }
+
+  // Cancel stops waiting and aborts the request, which ends the scan on the
+  // server too. It holds for this target until Scan is pressed again.
+  const [cancelled, setCancelled] = useState<{ key: string; after: number; over: boolean }>()
+  if (cancelled && cancelled.key !== targetKey) setCancelled(undefined)
   const report = usePoll(
     (signal) =>
-      get<TLSScan>("/certificates/scan", { domain: scanning?.host, port: scanning?.port }, signal),
+      get<TLSScan>("/certificates/scan", { domain: target?.host, port: target?.port }, signal),
     0,
-    [target],
-    { enabled: admin && scanning !== undefined },
+    [targetKey],
+    { enabled: admin && target !== undefined && cancelled === undefined },
   )
   // usePoll reports loading only while there is nothing to show, so a scan
   // asked for again over a report already on screen is tracked here: busy
@@ -84,21 +114,71 @@ export function TLSReportPage() {
     setRescanOver({ data: report.data, error: report.error })
     report.refresh()
   }
+  const cancel = (after: number) => {
+    setCancelled({ key: targetKey, after, over: report.data !== undefined })
+    setRescanOver(undefined)
+  }
   const scan = report.data ?? null
   const busy = report.loading || rescanning
   const scanned = scan ? targetLabel({ host: scan.domain, port: scan.port }) : ""
 
+  // The field offers what was scanned here before and the names this server
+  // knows: its sites, its watched endpoints and its certificates. They are
+  // fetched the first time the field is used, not on every visit.
+  const [recent, setRecent] = useViewState<string[]>("proxy.tls.recent", [])
+  useEffect(() => {
+    if (scan?.reachable) {
+      const label = targetLabel({ host: scan.domain, port: scan.port })
+      setRecent((list) => withRecent(list, label))
+    }
+  }, [scan, setRecent])
+  const [offering, setOffering] = useState(false)
+  const offered = { enabled: admin && offering }
+  const sites = usePoll(
+    (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
+    0,
+    [],
+    offered,
+  )
+  const certificates = usePoll(
+    (signal) => get<Certificate[]>("/certificates/", undefined, signal),
+    0,
+    [],
+    offered,
+  )
+  // check=false reads the stored results: suggesting a name is no reason to
+  // handshake with every watched endpoint.
+  const watched = usePoll(
+    (signal) =>
+      get<{ domain: string; port: number }[]>("/certificates/watched", { check: false }, signal),
+    0,
+    [],
+    offered,
+  )
+  const suggestions = useMemo(
+    () =>
+      admin
+        ? scanSuggestions({
+            recent,
+            sites: sites.data,
+            certificates: certificates.data,
+            watched: watched.data,
+          })
+        : [],
+    [admin, recent, sites.data, certificates.data, watched.data],
+  )
+
   const run = () => {
-    const parsed = parseScanTarget(domain)
-    if (!parsed.target) {
-      setFieldError(parsed.error)
+    if (!typed.target) {
+      setFieldError(typed.error)
       return
     }
-    const label = targetLabel(parsed.target)
+    setFields(targetFields(typed.target))
     setFieldError(undefined)
-    setDomain(label)
-    if (label === target) rescan()
-    else setTarget(label)
+    setCancelled(undefined)
+    // A new target is a new address, so Back returns to the last report.
+    if (targetLabel(typed.target) === targetKey) rescan()
+    else router.push(reportHref(params, typed.target), { scroll: false })
   }
 
   return (
@@ -176,7 +256,9 @@ export function TLSReportPage() {
             fallback={Inspect}
           />
           <div className="min-w-0">
-            <h2 className="text-section font-semibold break-all">{scanned || "Live TLS report"}</h2>
+            <h2 className="text-base font-semibold tracking-tight break-all">
+              {scanned || targetKey || "Live TLS report"}
+            </h2>
             {scan && (
               <p className="text-hint text-muted-foreground">
                 Checked {relativeTime(scan.checkedAt)}
@@ -192,34 +274,67 @@ export function TLSReportPage() {
           className="w-full min-w-0 sm:w-auto"
         >
           {/* The button sits in the field's row so an error line under the
-              input does not pull it down with it. */}
-          <Field label="Domain to scan" htmlFor="tls-domain" error={fieldError}>
+              input does not pull it down with it. The hint says what the
+              scan will reach, so a pasted URL or imaps:// shows its port
+              before anything is sent. */}
+          <Field
+            label="Domain to scan"
+            htmlFor="tls-domain"
+            hint={typed.target ? `Scans ${targetHint(typed.target)}` : "A name, host:port or URL"}
+            error={fieldError}
+          >
             <div className="flex min-w-0 items-center gap-2">
-              <Input
-                id="tls-domain"
-                value={domain}
-                onChange={(event) => {
-                  setDomain(event.target.value)
-                  setFieldError(undefined)
-                }}
-                placeholder="app.example.com"
-                aria-invalid={fieldError ? true : undefined}
-                spellCheck={false}
-                autoCapitalize="none"
-                autoCorrect="off"
-                inputMode="url"
-                className="w-full sm:w-72"
-              />
+              <InputGroup className="w-full sm:w-96">
+                <InputGroupInput
+                  id="tls-domain"
+                  list={admin ? "tls-targets" : undefined}
+                  value={fields.domain}
+                  onChange={(event) => edit({ domain: event.target.value })}
+                  onFocus={() => setOffering(true)}
+                  placeholder="app.example.com"
+                  aria-invalid={fieldError ? true : undefined}
+                  autoComplete="off"
+                  spellCheck={false}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  inputMode="url"
+                />
+                {/* The port is part of the address, so it sits inside the
+                    same edge; empty, it shows the port the address implies. */}
+                <label
+                  htmlFor="tls-port"
+                  className="flex shrink-0 cursor-text items-center border-l border-hairline pl-2.5 text-hint text-muted-foreground select-none"
+                >
+                  port
+                </label>
+                <InputGroupInput
+                  id="tls-port"
+                  value={fields.port}
+                  onChange={(event) => edit({ port: event.target.value })}
+                  placeholder={String(parseScanTarget(fields.domain).target?.port ?? 443)}
+                  aria-invalid={fieldError ? true : undefined}
+                  autoComplete="off"
+                  inputMode="numeric"
+                  className="w-16 flex-none pl-1.5 font-mono sm:text-xs"
+                />
+              </InputGroup>
               <Button
                 type="submit"
                 size="sm"
-                disabled={busy || !domain.trim() || !admin}
+                disabled={busy || !fields.domain.trim() || !admin}
                 pending={busy}
               >
                 Scan
               </Button>
             </div>
           </Field>
+          {admin && (
+            <datalist id="tls-targets">
+              {suggestions.map((suggestion) => (
+                <option key={suggestion.value} value={suggestion.value} label={suggestion.source} />
+              ))}
+            </datalist>
+          )}
         </form>
       </div>
       <div>
@@ -229,17 +344,19 @@ export function TLSReportPage() {
             account level as the network probes.
           </Notice>
         )}
-        {admin && !scan && !busy && !report.error && (
+        {admin && !scan && !busy && !report.error && !cancelled && (
           <EmptyState
             icon={Inspect}
             title="Nothing scanned yet"
-            description="Enter a domain, host:port or URL. The scan connects to it from this server and grades what it serves."
+            description="Enter a domain, host:port or URL, or pick one this server knows. The scan connects to it from this server and grades what it serves."
           />
         )}
-        {busy && (
-          <p className="flex items-center gap-2 text-body text-muted-foreground">
-            <Spinner className="size-3.5" />
-            Handshaking, probing each TLS version separately, and fetching the headers…
+        {busy && <ScanProgress key={targetKey} onCancel={cancel} />}
+        {cancelled && (
+          <p className="text-body text-muted-foreground">
+            {cancelled.over
+              ? `The new scan was cancelled after ${duration(cancelled.after)}. The report below is the one from before.`
+              : `The scan was cancelled after ${duration(cancelled.after)}. Scan to run it again.`}
           </p>
         )}
         {report.error && !busy && <ErrorState error={report.error} onRetry={rescan} />}
@@ -473,6 +590,58 @@ export function TLSReportPage() {
         </div>
       )}
     </Page>
+  )
+}
+
+/**
+ * The scan form's two fields: the address as typed, and a port for one that
+ * does not say its own.
+ */
+type ScanFields = { domain: string; port: string }
+
+/**
+ * A target as the fields show it: the whole address in the first, as links
+ * spell it, and the port field left empty. A port left in it would outvote the
+ * next name typed or picked — imaps:// would scan the old port, and a picked
+ * host:port would be refused for disagreeing with it.
+ */
+function targetFields(target: ScanTarget): ScanFields {
+  return { domain: targetLabel(target), port: "" }
+}
+
+/**
+ * This page's address for a target, in the spelling every link to it uses
+ * (`tlsReportHref`), keeping whatever else the address says.
+ */
+function reportHref(params: { toString(): string }, target: ScanTarget) {
+  const next = new URLSearchParams(params.toString())
+  next.set("domain", targetLabel(target))
+  next.delete("port")
+  return `/proxy/tls?${next}`
+}
+
+/**
+ * A scan in flight: how long it has run, and the way out of it. A scan is
+ * allowed a minute, and a spinner with no clock and no way out of it is
+ * indistinguishable from a page that has hung.
+ */
+function ScanProgress({ onCancel }: { onCancel: (seconds: number) => void }) {
+  const [started] = useState(() => Date.now())
+  const now = useNow(1000)
+  const seconds = Math.max(0, Math.floor((now - started) / 1000))
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+      <p className="flex min-w-0 items-center gap-2 text-body text-muted-foreground">
+        <Spinner className="size-3.5 shrink-0" />
+        <span>
+          Handshaking, probing each TLS version separately, and fetching the headers…{" "}
+          <span className="numeric">{duration(seconds)}</span>
+        </span>
+      </p>
+      <Button type="button" variant="outline" size="xs" onClick={() => onCancel(seconds)}>
+        Cancel
+      </Button>
+    </div>
   )
 }
 

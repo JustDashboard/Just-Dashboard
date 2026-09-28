@@ -10,6 +10,9 @@
  * table both are tested against.
  */
 
+import type { Certificate } from "./proxy/types-certs"
+import type { VHost } from "./proxy/types-sites"
+
 export type ScanTarget = { host: string; port: number }
 
 export type ParsedTarget =
@@ -95,10 +98,23 @@ export function parseScanTarget(raw: string, port = 0): ParsedTarget {
   return { target: { host, port: chosen } }
 }
 
-/** ?domain= and ?port= from a link, read the way the scan field is. */
+/**
+ * A target given as two texts: ?domain= and ?port= in a link, or the report's
+ * name and port fields. An empty port is no port; one that is given must be a
+ * port, so "0" and "+993" are refused rather than read as 443 and 993. The
+ * backend's ParseScanQuery.
+ */
 export function parseScanQuery(domain: string, port: string | null): ParsedTarget {
-  if (port && !/^\d+$/.test(port)) return fail(`port "${port}" is not a number`)
-  return parseScanTarget(domain, port ? Number(port) : 0)
+  if (!port) return parseScanTarget(domain, 0)
+  if (!/^\d+$/.test(port)) return fail(`port "${port}" is not a number`)
+  const n = Number(port)
+  if (n < 1 || n > 65535) return fail(`port ${port} is outside 1–65535`)
+  return parseScanTarget(domain, n)
+}
+
+/** What a scan will reach, said while it is being typed: "mail.example.com, port 993". */
+export function targetHint({ host, port }: ScanTarget): string {
+  return `${host}, port ${port}`
 }
 
 /**
@@ -113,6 +129,97 @@ export function targetLabel({ host, port }: ScanTarget): string {
 /** The TLS report for a target. */
 export function tlsReportHref(target: ScanTarget): string {
   return `/proxy/tls?domain=${encodeURIComponent(targetLabel(target))}`
+}
+
+/** A target the report's field offers, and where it was found. */
+export type ScanSuggestion = { value: string; source: string }
+
+/** How many scanned targets the field remembers. */
+export const RECENT_TARGETS = 8
+
+/** The remembered targets with `label` first. */
+export function withRecent(recent: string[], label: string): string[] {
+  return [label, ...recent.filter((entry) => entry !== label)].slice(0, RECENT_TARGETS)
+}
+
+/**
+ * The targets the report's field offers: what was scanned recently, then the
+ * names this server's sites answer, the endpoints on the watch list and the
+ * names on its certificates. Each target once, under the first place it was
+ * found, and only what can be dialled — a wildcard, a regex server_name, a
+ * variable or the catch-all "_" names no host.
+ */
+export function scanSuggestions({
+  recent,
+  sites = [],
+  certificates = [],
+  watched = [],
+}: {
+  /** Targets scanned before, newest first, as `targetLabel` wrote them. */
+  recent: string[]
+  sites?: Pick<VHost, "name" | "kind" | "enabled" | "serverNames" | "listen">[]
+  certificates?: Pick<Certificate, "name" | "domains">[]
+  watched?: { domain: string; port: number }[]
+}): ScanSuggestion[] {
+  const out: ScanSuggestion[] = []
+  const seen = new Set<string>()
+  const offer = (group: ScanSuggestion[], raw: string, port: number, source: string) => {
+    if (raw === "_") return
+    const target = parseScanTarget(raw, port).target
+    if (!target) return
+    const value = targetLabel(target)
+    if (seen.has(value)) return
+    seen.add(value)
+    group.push({ value, source })
+  }
+  // Recent keeps its order; every other source is one alphabetical group.
+  const add = (fill: (group: ScanSuggestion[]) => void) => {
+    const group: ScanSuggestion[] = []
+    fill(group)
+    out.push(...group.sort((a, b) => a.value.localeCompare(b.value)))
+  }
+  for (const label of recent) offer(out, label, 0, "Scanned recently")
+  add((group) => {
+    for (const site of sites) {
+      if (!site.enabled) continue
+      // A Caddy site address carries its own scheme and port; an nginx
+      // server_name never does, and its port is in the listen lines.
+      const ports = site.kind === "caddy" ? [] : tlsListenPorts(site.listen)
+      for (const name of site.serverNames) {
+        // `.example.com` is nginx for the name and every name under it.
+        const host = site.kind === "caddy" ? name : name.replace(/^\./, "")
+        for (const port of ports.length ? ports : [0]) offer(group, host, port, `Site ${site.name}`)
+      }
+    }
+  })
+  add((group) => {
+    for (const row of watched) offer(group, row.domain, row.port, "Watched")
+  })
+  add((group) => {
+    for (const cert of certificates) {
+      // A certificate's own name is often a hash (Caddy's are); the name it
+      // covers is the part worth reading.
+      for (const name of cert.domains) offer(group, name, 0, "Certificate")
+    }
+  })
+  return out
+}
+
+/**
+ * The ports an nginx site's listen lines serve TLS on: those with `ssl` or
+ * `quic`, where a bare address listens on 80 as nginx reads it.
+ */
+export function tlsListenPorts(listen: string[]): number[] {
+  const ports: number[] = []
+  for (const line of listen) {
+    const [address = "", ...params] = line.trim().split(/\s+/)
+    if (!params.includes("ssl") && !params.includes("quic")) continue
+    if (address.startsWith("unix:")) continue
+    const written = /^\d+$/.test(address) ? address : /:(\d+)$/.exec(address)?.[1]
+    const port = written ? Number(written) : 80
+    if (!ports.includes(port)) ports.push(port)
+  }
+  return ports
 }
 
 function splitHostPort(s: string): { host: string; port: number } | { error: string } {

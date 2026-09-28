@@ -35,5 +35,17 @@
   { "input": "[app.example.com]:443", "error": true },
   { "input": "2001:db8::zz", "error": true },
   { "input": "-app.example.com", "error": true },
-  { "input": "app..example.com", "error": true }
+  { "input": "app..example.com", "error": true },
+  { "input": "mail.example.com", "portText": "993", "host": "mail.example.com", "want": 993 },
+  { "input": "mail.example.com:993", "portText": "", "host": "mail.example.com", "want": 993 },
+  { "input": "2001:db8::1", "portText": "8443", "host": "2001:db8::1", "want": 8443 },
+  { "input": "imaps://mail.example.com", "portText": "", "host": "mail.example.com", "want": 993 },
+  { "input": "app.example.com", "portText": "0", "error": true },
+  { "input": "app.example.com", "portText": "+993", "error": true },
+  { "input": "app.example.com", "portText": "-1", "error": true },
+  { "input": "app.example.com", "portText": " 993", "error": true },
+  { "input": "app.example.com", "portText": "imap", "error": true },
+  { "input": "app.example.com", "portText": "65536", "error": true },
+  { "input": "app.example.com", "portText": "99999999999999999999", "error": true },
+  { "input": "mail.example.com:993", "portText": "443", "error": true }
 ]

@@ -40,15 +40,270 @@ test("a watched endpoint's link scans the port it names", async ({ page }) => {
   expect(seen[0].searchParams.get("domain")).toBe("mail.example.com")
   expect(seen[0].searchParams.get("port")).toBe("993")
   await expect(page.getByLabel("Domain to scan")).toHaveValue("mail.example.com:993")
+  // The port is in the address, and the port field shows it without holding it.
+  await expect(page.getByLabel("port", { exact: true })).toHaveValue("")
+  await expect(page.getByLabel("port", { exact: true })).toHaveAttribute("placeholder", "993")
 })
 
-test("a link may give the port beside the name", async ({ page }) => {
+test("a link may give the port beside the name, and is rewritten the way links spell it", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const seen = await scans(page, (url) => ({
+    ...scan,
+    domain: url.searchParams.get("domain"),
+    port: Number(url.searchParams.get("port")),
+  }))
+  await page.goto("/proxy/tls?domain=mail.example.com&port=993")
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=mail\.example\.com%3A993$/)
+  await expect(page.getByRole("heading", { name: "mail.example.com:993" })).toBeVisible()
+  await page.waitForLoadState("networkidle")
+  // The same target in another spelling is not a second scan.
+  expect(seen).toHaveLength(1)
+  expect(seen[0].searchParams.get("domain")).toBe("mail.example.com")
+  expect(seen[0].searchParams.get("port")).toBe("993")
+
+  await page.goto(`/proxy/tls?domain=${encodeURIComponent("https://App.Example.com/login")}`)
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=app\.example\.com$/)
+  await page.waitForLoadState("networkidle")
+  expect(seen).toHaveLength(2)
+  expect(seen[1].searchParams.get("domain")).toBe("app.example.com")
+})
+
+test("the address follows each scan, so Back and reload ask again", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const seen = await scans(page, (url) => ({
+    ...scan,
+    domain: url.searchParams.get("domain"),
+    port: Number(url.searchParams.get("port")),
+  }))
+  await page.goto("/proxy/tls")
+  const field = page.getByLabel("Domain to scan")
+  const port = page.getByLabel("port", { exact: true })
+  const button = page.getByRole("button", { name: "Scan", exact: true })
+
+  await field.fill("app.example.com")
+  await button.click()
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=app\.example\.com$/)
+  await expect(page.getByRole("heading", { name: "app.example.com" })).toBeVisible()
+
+  await field.fill("mail.example.com")
+  await port.fill("993")
+  await button.click()
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=mail\.example\.com%3A993$/)
+  await expect(page.getByRole("heading", { name: "mail.example.com:993" })).toBeVisible()
+  await expect(field).toHaveValue("mail.example.com:993")
+  await expect(port).toHaveValue("")
+  expect(
+    seen.map((url) => `${url.searchParams.get("domain")}:${url.searchParams.get("port")}`),
+  ).toEqual(["app.example.com:443", "mail.example.com:993"])
+
+  // Back is the last report, asked again, with its target in the fields.
+  await page.goBack()
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=app\.example\.com$/)
+  await expect(page.getByRole("heading", { name: "app.example.com" })).toBeVisible()
+  await expect(field).toHaveValue("app.example.com")
+  await expect(port).toHaveValue("")
+  await expect.poll(() => seen.length).toBe(3)
+  expect(seen[2].searchParams.get("domain")).toBe("app.example.com")
+
+  await page.goForward()
+  await expect(field).toHaveValue("mail.example.com:993")
+  await expect(port).toHaveValue("")
+  await expect.poll(() => seen.length).toBe(4)
+
+  await page.reload()
+  await expect(page.getByRole("heading", { name: "mail.example.com:993" })).toBeVisible()
+  await expect.poll(() => seen.length).toBe(5)
+  expect(seen[4].searchParams.get("port")).toBe("993")
+
+  // A bare visit asks nothing.
+  await page.goto("/proxy/tls")
+  await expect(page.getByText("Nothing scanned yet")).toBeVisible()
+  await page.waitForLoadState("networkidle")
+  expect(seen).toHaveLength(5)
+})
+
+test("the field says what it will scan, and a port that disagrees is refused before sending", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
   await mockProxy(page, { included: true })
   const seen = await scans(page)
-  await page.goto("/proxy/tls?domain=mail.example.com&port=993")
+  await page.goto("/proxy/tls")
+  const field = page.getByLabel("Domain to scan")
+  const port = page.getByLabel("port", { exact: true })
+  const button = page.getByRole("button", { name: "Scan", exact: true })
+  await expect(page.getByText("A name, host:port or URL")).toBeVisible()
+
+  await field.fill("imaps://Mail.Example.com/")
+  await expect(page.getByText("Scans mail.example.com, port 993")).toBeVisible()
+  // An empty port field shows the port the name implies.
+  await expect(port).toHaveAttribute("placeholder", "993")
+  await port.fill("995")
+  await expect(page.getByText("Scans mail.example.com, port 995")).toBeVisible()
+  await field.fill("[2001:db8::1]")
+  await expect(page.getByText("Scans 2001:db8::1, port 995")).toBeVisible()
+
+  await field.fill("mail.example.com:993")
+  await expect(page.getByText("A name, host:port or URL")).toBeVisible()
+  await button.click()
+  await expect(
+    page
+      .getByRole("alert")
+      .filter({ hasText: "the address says port 993 and the port field says 995" }),
+  ).toBeVisible()
+  await expect(port).toHaveAttribute("aria-invalid", "true")
+  await port.fill("0")
+  await button.click()
+  await expect(
+    page.getByRole("alert").filter({ hasText: "port 0 is outside 1–65535" }),
+  ).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  await page.waitForLoadState("networkidle")
+  expect(seen).toHaveLength(0)
+
+  // Mended, it scans what the hint said.
+  await port.fill("")
+  await button.click()
   await expect.poll(() => seen.length).toBe(1)
   expect(seen[0].searchParams.get("domain")).toBe("mail.example.com")
   expect(seen[0].searchParams.get("port")).toBe("993")
+  await expect(field).toHaveValue("mail.example.com:993")
+  await expect(port).toHaveValue("")
+
+  // So the next address typed is not outvoted by the port just scanned.
+  await field.fill("imaps://mail.example.com")
+  await expect(page.getByText("Scans mail.example.com, port 993")).toBeVisible()
+})
+
+/** Scans that wait for the test to answer them; each request is kept with how it ended. */
+async function heldScans(page: Page) {
+  const held: {
+    request: Request
+    url: URL
+    answer: (report: object) => Promise<void>
+    aborted: boolean
+  }[] = []
+  page.on("requestfailed", (request) => {
+    const entry = held.find((item) => item.request === request)
+    if (entry && /abort/i.test(request.failure()?.errorText ?? "")) entry.aborted = true
+  })
+  await page.route("**/api/v1/certificates/scan**", (route) => {
+    return new Promise<void>((resolve) => {
+      held.push({
+        request: route.request(),
+        url: new URL(route.request().url()),
+        aborted: false,
+        answer: async (report) => {
+          await json(route, report).catch(() => {})
+          resolve()
+        },
+      })
+    })
+  })
+  return held
+}
+
+test("Cancel stops a scan in flight, with a clock until then", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const held = await heldScans(page)
+  await page.goto("/proxy/tls?domain=slow.example.com")
+  const progress = page.getByText(/Handshaking, probing each TLS version/)
+  await expect(progress).toBeVisible()
+  await expect(page.getByRole("heading", { name: "slow.example.com" })).toBeVisible()
+  // The clock moves.
+  await expect(progress.locator(".numeric")).toHaveText(/^[1-9]\d*s$/, { timeout: 5000 })
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(progress).toHaveCount(0)
+  await expect(
+    page.getByText(/^The scan was cancelled after \d+s\. Scan to run it again\.$/),
+  ).toBeVisible()
+  await expect(page.getByText("Nothing scanned yet")).toHaveCount(0)
+  await expect.poll(() => held[0]?.aborted).toBe(true)
+  const button = page.getByRole("button", { name: "Scan", exact: true })
+  await expect(button).toBeEnabled()
+
+  // Scan asks again, and its answer is the report.
+  await button.click()
+  await expect(progress).toBeVisible()
+  await expect.poll(() => held.length).toBe(2)
+  await expect(page.getByText(/cancelled after/)).toHaveCount(0)
+  await held[1].answer({ ...scan, domain: "slow.example.com", summary: "The answer after all" })
+  await expect(page.getByText("The answer after all")).toBeVisible()
+  await expect(progress).toHaveCount(0)
+})
+
+test("Cancelling a scan asked for again keeps the report it was asked over", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const held = await heldScans(page)
+  await page.goto("/proxy/tls?domain=app.example.com")
+  await expect.poll(() => held.length).toBe(1)
+  await held[0].answer({ ...scan, summary: "The first answer" })
+  await expect(page.getByText("The first answer")).toBeVisible()
+
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
+  await expect.poll(() => held.length).toBe(2)
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(
+    page.getByText(
+      /^The new scan was cancelled after \d+s\. The report below is the one from before\.$/,
+    ),
+  ).toBeVisible()
+  await expect(page.getByText("The first answer")).toBeVisible()
+  await expect(page.getByText(/Handshaking, probing each TLS version/)).toHaveCount(0)
+  await expect.poll(() => held[1].aborted).toBe(true)
+  await expect(page.getByRole("button", { name: "Scan", exact: true })).toBeEnabled()
+})
+
+test("the field offers recent scans and the names this server knows", async ({ page }) => {
+  await mockShowcase(page)
+  await scans(page)
+  const lists: URL[] = []
+  page.on("request", (request) => {
+    const url = new URL(request.url())
+    if (/\/api\/v1\/(proxy\/vhosts|certificates\/|certificates\/watched)$/.test(url.pathname))
+      lists.push(url)
+  })
+  await page.goto("/proxy/tls?domain=app.example.com")
+  await expect(page.getByRole("heading", { name: "app.example.com" })).toBeVisible()
+  await page.waitForLoadState("networkidle")
+  // Nothing is fetched for the suggestions until the field is used.
+  expect(lists).toHaveLength(0)
+
+  const field = page.getByLabel("Domain to scan")
+  await expect(field).toHaveAttribute("list", "tls-targets")
+  await field.focus()
+  const options = page.locator("#tls-targets option")
+  await expect.poll(() => options.count()).toBeGreaterThan(3)
+  const offered = await options.evaluateAll((items) =>
+    items.map(
+      (item) => `${(item as HTMLOptionElement).value} | ${(item as HTMLOptionElement).label}`,
+    ),
+  )
+  expect(offered).toEqual([
+    "app.example.com | Scanned recently",
+    "legacy.example.com | Site legacy.example.com",
+    "shop.example.com | Site just-dashboard-shop",
+    "mail.example.com:993 | Watched",
+    "old.example.com | Certificate",
+  ])
+  // The watch list is read as stored; offering a name sends no handshake.
+  const watched = lists.find((url) => url.pathname.endsWith("/certificates/watched"))
+  expect(watched?.searchParams.get("check")).toBe("false")
+})
+
+test("a read-only account is offered nothing and scans nothing", async ({ page }) => {
+  await mockShowcase(page)
+  await page.route("**/api/v1/auth/session", (route) => json(route, readOnly))
+  const seen = await scans(page)
+  await page.goto("/proxy/tls?domain=app.example.com")
+  await expect(page.getByText("Scanning needs an administrator")).toBeVisible()
+  const field = page.getByLabel("Domain to scan")
+  await expect(field).not.toHaveAttribute("list", /.*/)
+  await expect(page.locator("#tls-targets")).toHaveCount(0)
+  await page.waitForLoadState("networkidle")
+  expect(seen).toHaveLength(0)
 })
 
 test("a pasted URL scans its host, and what is not an address is refused before sending", async ({

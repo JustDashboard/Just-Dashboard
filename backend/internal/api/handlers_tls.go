@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -42,15 +41,7 @@ func (s *Server) mountProxyToolRoutes(r chi.Router) {
 // URL or host:port reaches the host it names, and anything that is not an
 // address is refused with the reason before a packet leaves.
 func scanTarget(r *http.Request) (proxysvc.ScanTarget, error) {
-	port := 0
-	if raw := r.URL.Query().Get("port"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil {
-			return proxysvc.ScanTarget{}, httpx.BadRequest("port %q is not a number", raw)
-		}
-		port = n
-	}
-	target, err := proxysvc.ParseScanTarget(r.URL.Query().Get("domain"), port)
+	target, err := proxysvc.ParseScanQuery(r.URL.Query().Get("domain"), r.URL.Query().Get("port"))
 	if err != nil {
 		return proxysvc.ScanTarget{}, httpx.BadRequest("%v", err)
 	}

@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 )
@@ -18,9 +19,12 @@ func TestParseScanTarget(t *testing.T) {
 	var cases []struct {
 		Input string `json:"input"`
 		Port  int    `json:"port"`
-		Host  string `json:"host"`
-		Want  int    `json:"want"`
-		Error bool   `json:"error"`
+		// PortText, when present, is a port given as text — ?port= or the
+		// report's port field — and the case goes through ParseScanQuery.
+		PortText *string `json:"portText"`
+		Host     string  `json:"host"`
+		Want     int     `json:"want"`
+		Error    bool    `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &cases); err != nil {
 		t.Fatal(err)
@@ -29,20 +33,24 @@ func TestParseScanTarget(t *testing.T) {
 		t.Fatalf("only %d cases in the shared table", len(cases))
 	}
 	for _, c := range cases {
+		call := fmt.Sprintf("ParseScanTarget(%q, %d)", c.Input, c.Port)
 		got, err := ParseScanTarget(c.Input, c.Port)
+		if c.PortText != nil {
+			call = fmt.Sprintf("ParseScanQuery(%q, %q)", c.Input, *c.PortText)
+			got, err = ParseScanQuery(c.Input, *c.PortText)
+		}
 		if c.Error {
 			if err == nil {
-				t.Errorf("ParseScanTarget(%q, %d) = %+v, want an error", c.Input, c.Port, got)
+				t.Errorf("%s = %+v, want an error", call, got)
 			}
 			continue
 		}
 		if err != nil {
-			t.Errorf("ParseScanTarget(%q, %d): %v", c.Input, c.Port, err)
+			t.Errorf("%s: %v", call, err)
 			continue
 		}
 		if got.Host != c.Host || got.Port != c.Want {
-			t.Errorf("ParseScanTarget(%q, %d) = %s port %d, want %s port %d",
-				c.Input, c.Port, got.Host, got.Port, c.Host, c.Want)
+			t.Errorf("%s = %s port %d, want %s port %d", call, got.Host, got.Port, c.Host, c.Want)
 		}
 	}
 }

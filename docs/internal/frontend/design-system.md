@@ -1143,7 +1143,9 @@ A watched domain opens a live report and preserves its nonstandard port. Passwor
 watched-domain setup use the deployment settings' rail sections. Certificate renewal lineages and
 DNS providers remain readings with their own actions, laid out to fit the management column. The TLS
 report keeps findings, protocol checks and HTTP readings beside the live certificate and its
-vertical chain; long header values wrap instead of hiding the verdict. Listening sockets stay a
+vertical chain; long header values wrap instead of hiding the verdict. Its scan field is one input
+group, the address and its port, with a hint naming what will be scanned and a native datalist of
+known names; a scan in flight is a line with its elapsed time and an outline Cancel. Listening sockets stay a
 table of readings, with fixed endpoint, application, reach and action columns and a stacked phone
 layout. Tables retain their scrolling boundary; forms and sections remain plain.
 `tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail

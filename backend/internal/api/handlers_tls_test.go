@@ -41,6 +41,8 @@ func TestTLSScanReadsTheTargetTheWayThePageDoes(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/certificates/scan?domain=" + url.QueryEscape("exa mple.com"),
 		"/api/v1/certificates/scan?domain=127.0.0.1&port=abc",
+		"/api/v1/certificates/scan?domain=127.0.0.1&port=0",
+		"/api/v1/certificates/scan?domain=127.0.0.1&port=%2B993",
 		"/api/v1/certificates/scan?domain=127.0.0.1:993&port=443",
 		"/api/v1/certificates/scan?domain=",
 		"/api/v1/certificates/check?domain=" + url.QueryEscape("user@127.0.0.1"),
@@ -48,6 +50,58 @@ func TestTLSScanReadsTheTargetTheWayThePageDoes(t *testing.T) {
 		if w := c.do(http.MethodGet, path, "", nil); w.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d, want 400: %s", path, w.Code, w.Body.String())
 		}
+	}
+}
+
+// Cancel on the report aborts its request. The scan has to end with it:
+// against a host that accepts and never speaks, it would otherwise hold three
+// ten-second handshakes and then probe every version, for nobody.
+func TestATLSScanEndsWhenItsCallerLeaves(t *testing.T) {
+	c, s := newClient(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	accepted := make(chan struct{}, 16)
+	go func() {
+		var held []net.Conn
+		defer func() {
+			for _, conn := range held {
+				conn.Close()
+			}
+		}()
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			held = append(held, conn)
+			accepted <- struct{}{}
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/certificates/scan?domain=127.0.0.1&port="+port, nil).WithContext(ctx)
+	req.RemoteAddr = "127.0.0.1:5555"
+	req.Header.Set("Cookie", c.cookie)
+	done := make(chan struct{})
+	go func() {
+		s.Routes().ServeHTTP(httptest.NewRecorder(), req)
+		close(done)
+	}()
+	select {
+	case <-accepted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the scan never connected")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the scan was still running 3s after its caller left")
 	}
 }
 

@@ -342,7 +342,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `/network/probe`. What reaches them is `ParseScanTarget` (`scantarget.go`): a URL, host:port, a
   bracketed IPv6 address or a name in its own script become a host and port, and anything else is a 400
   with the reason; `frontend/src/lib/scan-target.ts` is the same parser, and both are tested against
-  `frontend/src/lib/scan-target-cases.json`.
+  `frontend/src/lib/scan-target-cases.json`. `ParseScanQuery` reads `?domain=` and `?port=` as text:
+  a port that is given must be 1–65535 in digits, so `0` or `+993` is a 400 rather than 443 or 993.
+  A scan runs on its request's context, so a caller that leaves (the report's Cancel) ends its
+  handshakes and probes at once.
 - **The watch list is endpoints.** `watched_endpoints` (lane G in `proxySchema`) is a name, a port and
   an address, unique together, so a mail server can be watched on 443 and 993; `watched_domains` held
   one row per name and a second port replaced the first. Its rows are copied in on every boot with
