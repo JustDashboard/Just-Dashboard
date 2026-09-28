@@ -1751,6 +1751,20 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     `stream_preread_missing`). The parser reads the map, the route blocks and `ssl_preread` back and names
     any other shape. A site already on the port (443) is refused by the port check like any other holder.
     The upstream Test dials the pool only, not the routes' backends. Audited as `routes` in `proxy.stream.apply`.
+  - **Listen options** (`stream_listen.go`). `ListenEnd` makes `listen <first>-<last>` (at most 100 ports;
+    `streamBinds`, `freePort`, the session list and `configClaims` via `listenBinds` all cover every port of a
+    range). A range refuses `MaxConnTotal`, whose zone is keyed on `$server_port` and would cap each port
+    apart. `SamePort` (range only) writes `proxy_pass <ip>:$server_port` with no upstream block: `Upstream` is
+    then an IP address alone (a name would need a `resolver`), one server, no routes. `AcceptProxy` with
+    `TrustedProxies` (TCP only, 1–32 addresses/CIDRs, never `all` or a /0) puts `proxy_protocol` on every
+    listen and writes `set_real_ip_from` per entry; `StreamModule.RealIP` reads `--with-stream_realip_module`
+    and `ApplyStream` refuses without it (`ErrNoStreamRealIP`, 409 `stream_realip_missing`). All three parse
+    back; a proxy_protocol listen without `set_real_ip_from`, or on some listens only, is named. `Address` is
+    checked against the host's interfaces (`StreamAddressError`; the backend shares the host network
+    namespace) unless `ip_nonlocal_bind` is on — refused with 422 `address_not_local` on `spec.address`, and a
+    warning in the preview. `GET /proxy/streams` returns the addresses as `addresses [{address, interface}]`
+    for the form's picker (link-local IPv6 left out: a listen line cannot name its zone). Audited as
+    `listenEnd`/`samePort`, `address` and `trustedProxies`.
   - **Testing a stream** (`stream_dial.go`). `POST /proxy/streams/test {target, port, protocol, mode,
     query?}` (system.admin — it dials an address the caller chose — and audited `proxy.stream.test`) dials
     from the host's network namespace inside 5 s: `mode: upstream` the forward's target, `mode: nginx` the

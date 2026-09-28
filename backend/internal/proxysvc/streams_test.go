@@ -476,11 +476,12 @@ server { listen 5432; proxy_pass pool; allow 10.0.0.0/8; deny all; }`,
 			unsupported: []string{"TCP and UDP on different addresses"},
 		},
 		{
-			name:        "port range",
-			content:     "server { listen 27015-27030 udp; proxy_pass 10.0.0.9:$server_port; }",
-			want:        StreamSpec{Name: "x", Protocol: "tcp", AllowFrom: []string{}},
-			open:        true,
-			unsupported: []string{"a port range", "proxy_pass with a variable", "no proxy_pass", "no listen"},
+			// A block of game ports, each to the same port on the backend.
+			name:    "port range",
+			content: "server { listen 27015-27030 udp; proxy_pass 10.0.0.9:$server_port; }",
+			want: StreamSpec{Name: "x", Listen: 27015, ListenEnd: 27030, Address: "0.0.0.0", Protocol: "udp", UDPMode: "session",
+				Upstream: "10.0.0.9", SamePort: true, AllowFrom: []string{}},
+			open: true,
 		},
 	}
 	for _, tc := range cases {

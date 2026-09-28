@@ -51,6 +51,7 @@ import {
   includedPlace,
   listenFamily,
   listenLabel,
+  listensOn,
   moduleMissing,
   moduleRemedy,
   parseDuration,
@@ -96,6 +97,7 @@ import { StreamSetup } from "@/components/proxy/stream-setup"
 import { AccessRules } from "@/components/proxy/access-rules"
 import { StreamRoutes } from "@/components/proxy/stream-routes"
 import { StreamServers } from "@/components/proxy/stream-servers"
+import { StreamListen } from "@/components/proxy/stream-listen"
 import { StreamTLS } from "@/components/proxy/stream-tls"
 import { StreamTrafficPanel } from "@/components/proxy/stream-traffic"
 import { useProxy } from "@/components/proxy/proxy-context"
@@ -1169,7 +1171,6 @@ function StreamForm({
   const readOnly = locked || blocked !== null
   const renaming = stream !== null && spec.name !== stream.name
   const service = DANGEROUS_PORTS[spec.listen]
-  const family = listenFamily(spec.address)
   const edit = (change: Partial<StreamSpec>, field?: string) => {
     setSpec((s) => ({ ...s, ...change }))
     if (field && refused?.field === field) setRefused(null)
@@ -1177,8 +1178,14 @@ function StreamForm({
   // The preview asks what the save would: a port something holds is said on
   // the field before the save is pressed, with the next one free. It is the
   // preview of this very spec only while nothing has been typed since.
-  const conflict = preview?.conflict?.port === spec.listen ? preview.conflict : undefined
-  const takePort = (port: number) => edit({ listen: port }, "spec.listen")
+  const conflict =
+    preview?.conflict && listensOn(spec, preview.conflict.port) ? preview.conflict : undefined
+  // A range moves as a whole: the suggestion is the first port of one as wide.
+  const takePort = (port: number) =>
+    edit(
+      { listen: port, listenEnd: spec.listenEnd && port + (spec.listenEnd - spec.listen) },
+      "spec.listen",
+    )
   const pickPreset = (id: string) => {
     const chosen = STREAM_PRESETS.find((p) => p.id === id)
     if (!chosen) return
@@ -1308,7 +1315,9 @@ function StreamForm({
               busy ||
               !spec.name ||
               !spec.listen ||
+              spec.listenEnd === 0 ||
               !spec.upstream ||
+              (spec.acceptProxy && !spec.trustedProxies?.some((entry) => entry.trim())) ||
               spec.servers?.some((server) => !server.address.trim()) ||
               spec.routes?.some((route) => !route.name.trim() || !route.upstream.trim()) ||
               !timed ||
@@ -1401,13 +1410,11 @@ function StreamForm({
               label="Listen on"
               htmlFor="stream-listen"
               hint={
-                family
-                  ? `Every ${family} address, as the file has it — it has no ${family === "IPv4" ? "IPv6" : "IPv4"} listen.`
-                  : spec.address
-                    ? `Only on ${spec.address}, as the file has it.`
-                    : service
-                      ? `${service}'s usual port — restrict who may connect.`
-                      : "The port on this host."
+                service
+                  ? `${service}'s usual port — restrict who may connect.`
+                  : spec.listenEnd !== undefined
+                    ? "The first port of the range."
+                    : "The port on this host."
               }
               error={
                 refused?.field === "spec.listen" ? (
@@ -1452,6 +1459,14 @@ function StreamForm({
             </Field>
           </FieldRow>
 
+          <StreamListen
+            spec={spec}
+            addresses={status.addresses ?? []}
+            module={status.module}
+            error={refused?.field === "spec.address" ? refused.message : undefined}
+            onChange={edit}
+          />
+
           {spec.protocol !== "tcp" && (
             <Field
               label="UDP sessions"
@@ -1486,11 +1501,13 @@ function StreamForm({
             hint={
               spec.routes
                 ? "The default: host:port or unix:/path for any TLS name no route below matches."
-                : target?.exposed
-                  ? `${target.container} publishes this port on every address, so it is reachable around the stream, where these rules do not apply. Publish it on 127.0.0.1 instead.`
-                  : "host:port of the service behind it, or unix:/path for a local socket."
+                : spec.samePort
+                  ? "The backend's IP address alone: each port of the range goes to the same port there."
+                  : target?.exposed
+                    ? `${target.container} publishes this port on every address, so it is reachable around the stream, where these rules do not apply. Publish it on 127.0.0.1 instead.`
+                    : "host:port of the service behind it, or unix:/path for a local socket."
             }
-            placeholder={`10.0.0.5:${presetPort ?? 5432}`}
+            placeholder={spec.samePort ? "10.0.0.5" : `10.0.0.5:${presetPort ?? 5432}`}
             picker={
               targets.length > 0 && (
                 <Select
@@ -1598,10 +1615,15 @@ function StreamForm({
             <Field
               label="Connections in total"
               htmlFor="stream-conn-total"
-              hint="nginx closes one over either cap as soon as it is accepted."
+              hint={
+                spec.listenEnd !== undefined
+                  ? "Not with a port range: nginx would count each port on its own."
+                  : "nginx closes one over either cap as soon as it is accepted."
+              }
             >
               <Input
                 id="stream-conn-total"
+                disabled={spec.listenEnd !== undefined}
                 value={spec.maxConnTotal ?? ""}
                 inputMode="numeric"
                 onChange={(e) => edit({ maxConnTotal: positive(e.target.value) })}

@@ -3,7 +3,15 @@ import type { ProxyValidation } from "./types-engine"
 /** One forwarded port for something that does not speak HTTP. */
 export type StreamSpec = {
   name: string
+  /** The port on this host, or the first of a range. */
   listen: number
+  /** The last port of a range nginx listens on as one, at most 100 ports. Absent is `listen` alone. */
+  listenEnd?: number
+  /**
+   * Each port of the range goes to the same port on the backend, so `upstream`
+   * is the backend's IP address alone. One server, no routes.
+   */
+  samePort?: boolean
   /** The one address to listen on. Absent is every address of both families. */
   address?: string
   /** One port taking TCP, UDP, or both to the same upstream, as DNS does. */
@@ -25,6 +33,14 @@ export type StreamSpec = {
   /** Stop nginx trying the next server when one fails to accept. Only a pool carries it. */
   noRetry?: boolean
   proxyProtocol: boolean
+  /**
+   * Behind a load balancer that sends the PROXY header: every client must
+   * send it, and one from `trustedProxies` is taken as the client it names.
+   * TCP only, and nginx needs stream_realip_module.
+   */
+  acceptProxy?: boolean
+  /** The load balancers whose PROXY header is believed: addresses or CIDRs. */
+  trustedProxies?: string[]
   /** The idle timeout: seconds a connection may sit silent. Absent is nginx's ten minutes. */
   timeout?: number
   /** Seconds to wait for the upstream to accept. Absent is nginx's minute. */
@@ -118,6 +134,9 @@ export type PortOwner = {
   pid?: number
 }
 
+/** One of this host's addresses, with the interface holding it: lo, eth0, tailscale0. */
+export type StreamAddress = { address: string; interface: string }
+
 /** A file in the stream directory, as the page lists it. */
 export type StreamEntry = StreamSpec & {
   path: string
@@ -167,6 +186,8 @@ export type StreamModule = {
   ssl?: boolean
   /** Built with stream_ssl_preread_module, which routing by TLS name needs. */
   preread?: boolean
+  /** Built with stream_realip_module, which taking the client from a PROXY header needs. */
+  realip?: boolean
 }
 
 /**
@@ -196,6 +217,8 @@ export type StreamStatus = {
   streamBlock?: string
   snippet: string
   dir: string
+  /** This host's addresses, to offer as a listening address. Absent from an older server. */
+  addresses?: StreamAddress[]
   streams: StreamEntry[]
   /**
    * The streams kept in paused/, apart from `streams` so nothing counting what

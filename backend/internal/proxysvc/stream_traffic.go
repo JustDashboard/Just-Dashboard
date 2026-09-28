@@ -497,7 +497,7 @@ func (s *Service) StreamSessions(ctx context.Context, name string) (*StreamSessi
 	}
 	nginx := map[int32]bool{}
 	for _, c := range conns {
-		if c.Status != "ESTABLISHED" || c.Laddr.Port != uint32(spec.Listen) {
+		if c.Status != "ESTABLISHED" || c.Laddr.Port < uint32(spec.Listen) || c.Laddr.Port > uint32(streamLastPort(spec)) {
 			continue
 		}
 		if address != nil && !address.Equal(net.ParseIP(c.Laddr.IP)) {

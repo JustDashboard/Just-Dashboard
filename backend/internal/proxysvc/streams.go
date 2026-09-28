@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,8 +38,19 @@ import (
 // StreamSpec is one forwarded port.
 type StreamSpec struct {
 	Name string `json:"name"`
-	// Listen is the port on this host.
+	// Listen is the port on this host, or the first of a range.
 	Listen int `json:"listen"`
+	// ListenEnd is the last port of a range nginx listens on as one
+	// (listen 27015-27030), as a game server's block of ports needs. Zero is
+	// the one port Listen.
+	ListenEnd int `json:"listenEnd,omitempty"`
+	// SamePort forwards each port of the range to the same port on the
+	// backend (proxy_pass host:$server_port), so Upstream is then the
+	// backend's IP address alone. nginx resolves a name in a proxy_pass
+	// holding a variable only through a resolver this file does not set,
+	// so it takes an address, and one server: an upstream block cannot
+	// carry the variable.
+	SamePort bool `json:"samePort,omitempty"`
 	// Address is the one address to listen on. Empty is every address of
 	// both families; 0.0.0.0 or :: is every address of one. It is kept so a
 	// file listening on 127.0.0.1 alone is never saved back listening on
@@ -76,6 +88,14 @@ type StreamSpec struct {
 	// reads the header as the first bytes of the connection and fails in a
 	// way that looks like a protocol mismatch.
 	ProxyProtocol bool `json:"proxyProtocol"`
+	// AcceptProxy is for a stream behind a load balancer that sends the
+	// PROXY header itself: every listen takes proxy_protocol, and a
+	// connection from one of TrustedProxies is taken as coming from the
+	// client the header names (set_real_ip_from), so access rules, caps and
+	// the traffic log see the client rather than the balancer. A peer not
+	// in the list keeps its own address. TCP only.
+	AcceptProxy    bool     `json:"acceptProxy,omitempty"`
+	TrustedProxies []string `json:"trustedProxies,omitempty"`
 	// Timeout is the idle timeout: how long a connection may sit silent, in
 	// seconds (proxy_timeout). Zero leaves nginx's ten minutes.
 	Timeout int `json:"timeout,omitempty"`
@@ -228,9 +248,12 @@ type StreamStatus struct {
 	// so the snippet is then the include line that goes inside this one.
 	StreamBlock string `json:"streamBlock,omitempty"`
 	// Snippet is what to add to nginx.conf when it is not included.
-	Snippet string        `json:"snippet"`
-	Dir     string        `json:"dir"`
-	Streams []StreamEntry `json:"streams"`
+	Snippet string `json:"snippet"`
+	Dir     string `json:"dir"`
+	// Addresses are this host's own, for the form to offer as a listening
+	// address. Empty when the interfaces could not be read.
+	Addresses []StreamAddress `json:"addresses"`
+	Streams   []StreamEntry   `json:"streams"`
 	// Paused are the streams kept in paused/ (stream_pause.go), apart from
 	// Streams so nothing counting what nginx reads counts them.
 	Paused []StreamEntry `json:"paused"`
@@ -323,7 +346,14 @@ func ValidateStream(spec *StreamSpec) error {
 	case spec.UDPMode != "session" && spec.UDPMode != "request":
 		return fmt.Errorf("the UDP mode must be session or request")
 	}
-	if err := validStreamServers(spec); err != nil {
+	if err := validStreamListen(spec); err != nil {
+		return err
+	}
+	if spec.SamePort {
+		if err := validStreamSamePort(spec); err != nil {
+			return err
+		}
+	} else if err := validStreamServers(spec); err != nil {
 		return err
 	}
 	if spec.Timeout < 0 || spec.Timeout > 86400 {
@@ -666,31 +696,46 @@ func RenderStream(spec *StreamSpec) (string, error) {
 	if len(spec.Routes) > 0 {
 		renderStreamRoutes(l, spec)
 	}
-	l.add("upstream %s {", upstream)
-	if method := streamBalances[spec.Balance]; method != "" {
-		l.add("    %s;", method)
+	if !spec.SamePort {
+		l.add("upstream %s {", upstream)
+		if method := streamBalances[spec.Balance]; method != "" {
+			l.add("    %s;", method)
+		}
+		if len(spec.Servers) == 0 {
+			l.add("    server %s;", spec.Upstream)
+		}
+		for _, srv := range spec.Servers {
+			l.add("    server %s;", serverLine(srv))
+		}
+		l.add("}")
+		l.blank()
 	}
-	if len(spec.Servers) == 0 {
-		l.add("    server %s;", spec.Upstream)
-	}
-	for _, srv := range spec.Servers {
-		l.add("    server %s;", serverLine(srv))
-	}
-	l.add("}")
-	l.blank()
 	l.add("server {")
+	ports := streamPorts(spec)
 	for _, suffix := range streamListenSuffixes(spec.Protocol) {
 		if spec.TLS {
 			suffix += " ssl"
 		}
+		if spec.AcceptProxy {
+			suffix += " proxy_protocol"
+		}
 		switch ip := net.ParseIP(spec.Address); {
 		case spec.Address == "":
-			l.add("    listen %d%s;", spec.Listen, suffix)
-			l.add("    listen [::]:%d%s;", spec.Listen, suffix)
+			l.add("    listen %s%s;", ports, suffix)
+			l.add("    listen [::]:%s%s;", ports, suffix)
 		case ip.To4() == nil:
-			l.add("    listen [%s]:%d%s;", spec.Address, spec.Listen, suffix)
+			l.add("    listen [%s]:%s%s;", spec.Address, ports, suffix)
 		default:
-			l.add("    listen %s:%d%s;", spec.Address, spec.Listen, suffix)
+			l.add("    listen %s:%s%s;", spec.Address, ports, suffix)
+		}
+	}
+	if spec.AcceptProxy {
+		l.blank()
+		l.add("    # Every client must send the PROXY header. From these load balancers")
+		l.add("    # the client it names is taken as the one connecting; access rules,")
+		l.add("    # caps and the log see that client. Any other peer keeps its address.")
+		for _, entry := range spec.TrustedProxies {
+			l.add("    set_real_ip_from %s;", entry)
 		}
 	}
 	if spec.TLS {
@@ -742,6 +787,9 @@ func RenderStream(spec *StreamSpec) (string, error) {
 		l.add("    # TLS through unopened: each backend presents its own certificate.")
 		l.add("    ssl_preread on;")
 		l.add("    proxy_pass %s;", streamSNIVar(spec.Name))
+	} else if spec.SamePort {
+		l.add("    # Each port of the range goes to the same port on the backend.")
+		l.add("    proxy_pass %s;", samePortTarget(spec.Upstream))
 	} else {
 		l.add("    proxy_pass %s;", upstream)
 	}
@@ -828,6 +876,9 @@ type parsedStream struct {
 	// sslListens and plainListens count the listens with and without ssl:
 	// the form puts ssl on every one or none.
 	sslListens, plainListens int
+	// proxyListens and directListens count the listens with and without
+	// proxy_protocol, which the form likewise puts on every one or none.
+	proxyListens, directListens int
 	// sni is whether proxy_ssl_server_name is on, which the form writes
 	// exactly when it writes proxy_ssl_name.
 	sni bool
@@ -929,6 +980,8 @@ func parseStreamFile(fileName, content string) parsedStream {
 				continue
 			}
 			p.readProxyPass(d.Args[0], upstreams, used)
+		case "set_real_ip_from":
+			p.readTrustedProxy(d.Args)
 		case "ssl_preread":
 			on, ok := readOnOff(d.Args)
 			if !ok {
@@ -1028,6 +1081,7 @@ func parseStreamFile(fileName, content string) parsedStream {
 		p.cannot("no proxy_pass")
 	}
 	p.reduceBinds()
+	p.checkListenOptions()
 	p.checkTLS()
 	p.checkSNI()
 	if p.spec.UDPMode == "request" && p.spec.Protocol == "tcp" {
@@ -1125,21 +1179,23 @@ func (p *parsedStream) readLimitConn(args []string, zones map[string]bool, perIP
 }
 
 // readListen takes one listen line. Only the shapes RenderStream writes are
-// the form's; anything else — a port range, a host name, reuseport — is
-// named, and its socket is still read so a port check sees it.
+// the form's; anything else — a host name, reuseport — is named, and its
+// sockets are still read so a port check sees them.
 func (p *parsedStream) readListen(args []string) {
 	if len(args) == 0 {
 		p.cannot("listen")
 		return
 	}
 	b := bind{}
-	ssl := false
+	ssl, proxied := false, false
 	for _, param := range args[1:] {
 		switch param {
 		case "udp":
 			b.udp = true
 		case "ssl":
 			ssl = true
+		case "proxy_protocol":
+			proxied = true
 		default:
 			p.cannot("listen option " + param)
 		}
@@ -1148,6 +1204,11 @@ func (p *parsedStream) readListen(args []string) {
 		p.sslListens++
 	} else {
 		p.plainListens++
+	}
+	if proxied {
+		p.proxyListens++
+	} else {
+		p.directListens++
 	}
 	addr, port := "", args[0]
 	switch {
@@ -1168,48 +1229,64 @@ func (p *parsedStream) readListen(args []string) {
 	if addr == "" || addr == "*" {
 		addr = "0.0.0.0"
 	}
-	if strings.Contains(port, "-") {
-		p.cannot("a port range")
-		return
-	}
-	n, err := strconv.Atoi(port)
-	if err != nil || n < 1 || n > 65535 {
+	lo, hi, ok := readListenPorts(port)
+	if !ok {
 		p.cannot("listen " + args[0])
 		return
+	}
+	if hi-lo+1 > maxStreamRange {
+		// Its first ports are still read, for the port check.
+		p.cannot(fmt.Sprintf("a port range of more than %d ports", maxStreamRange))
+		hi = lo + maxStreamRange - 1
 	}
 	ip := net.ParseIP(addr)
 	if ip == nil {
 		p.cannot("a host name in listen")
 		return
 	}
-	b.addr, b.port = ip.String(), n
-	for _, have := range p.binds {
-		if have == b {
-			return
+	b.addr = ip.String()
+	for n := lo; n <= hi; n++ {
+		b.port = n
+		if !slices.Contains(p.binds, b) {
+			p.binds = append(p.binds, b)
 		}
 	}
-	p.binds = append(p.binds, b)
 }
 
-// reduceBinds folds the sockets into the spec's one port, one protocol and
-// one address — the dashboard's pair of wildcards reading as "every address",
-// and TCP and UDP listens on the same addresses reading as both.
+// reduceBinds folds the sockets into the spec's one port or range, one
+// protocol and one address — the dashboard's pair of wildcards reading as
+// "every address", and TCP and UDP listens on the same addresses reading as
+// both. Every address and protocol has to take the same whole range.
 func (p *parsedStream) reduceBinds() {
 	if len(p.binds) == 0 {
 		p.cannot("no listen")
 		return
 	}
 	first := p.binds[0]
-	p.spec.Listen, p.spec.Address = first.port, first.addr
-	addrs := map[bool]map[string]bool{}
+	lo, hi := first.port, first.port
 	for _, b := range p.binds {
-		if b.port != first.port {
-			p.cannot("several listen ports")
-		}
+		lo, hi = min(lo, b.port), max(hi, b.port)
+	}
+	p.spec.Listen, p.spec.Address = lo, first.addr
+	if hi > lo {
+		p.spec.ListenEnd = hi
+	}
+	addrs := map[bool]map[string]bool{}
+	ports := map[bind]int{}
+	for _, b := range p.binds {
+		ports[bind{addr: b.addr, udp: b.udp}]++
 		if addrs[b.udp] == nil {
 			addrs[b.udp] = map[string]bool{}
 		}
 		addrs[b.udp][b.addr] = true
+	}
+	for _, n := range ports {
+		// The binds hold no duplicates, so as many ports as the range is
+		// wide is the whole range.
+		if n != hi-lo+1 {
+			p.cannot("several listen ports")
+			break
+		}
 	}
 	tcp, udp := addrs[false], addrs[true]
 	switch {
@@ -1234,6 +1311,10 @@ func (p *parsedStream) reduceBinds() {
 // whose servers and balancing method are the form's pool, or as an address
 // written straight into proxy_pass, which is a pool of one.
 func (p *parsedStream) readProxyPass(target string, upstreams map[string]Directive, used map[string]bool) {
+	if host, ok := readSamePort(target); ok {
+		p.spec.Upstream, p.spec.SamePort = host, true
+		return
+	}
 	if strings.Contains(target, "$") {
 		p.cannot("proxy_pass with a variable")
 		return
@@ -1483,6 +1564,10 @@ func (s *Service) Streams(ctx context.Context) (*StreamStatus, error) {
 		Paused:  []StreamEntry{},
 		Snippet: "stream {\n    " + streamIncludeDirective(dir) + "\n}",
 	}
+	status.Addresses, _ = streamHostAddresses()
+	if status.Addresses == nil {
+		status.Addresses = []StreamAddress{}
+	}
 	include := readStreamInclude(s.nginxDir, dir)
 	status.Included, status.IncludedIn = include.included, include.misplaced
 	if include.err != nil {
@@ -1630,6 +1715,14 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous st
 		if m := s.StreamModule(ctx); m.State != ModuleUnknown && !m.Preread {
 			return nil, ErrNoStreamPreread
 		}
+	}
+	if spec.AcceptProxy {
+		if m := s.StreamModule(ctx); m.State != ModuleUnknown && !m.RealIP {
+			return nil, ErrNoStreamRealIP
+		}
+	}
+	if err := StreamAddressError(spec); err != nil {
+		return nil, err
 	}
 	// Read before the lock: finding the running nginx walks /proc, and the
 	// lock holds up every other save on the host.
@@ -1834,6 +1927,10 @@ func StreamWarnings(spec *StreamSpec) []string {
 	}
 	if preset, ok := streamDanger(spec.Listen); ok && open {
 		warnings = append(warnings, preset)
+	}
+	if spec.AcceptProxy {
+		warnings = append(warnings,
+			"With the PROXY header accepted, every client has to send it: one connecting straight to this port, not through the load balancer, is closed.")
 	}
 	if spec.Protocol != "tcp" && spec.ProxyProtocol {
 		warnings = append(warnings,
