@@ -66,6 +66,8 @@ type moduleSet struct {
 	selfConfig    *selfcfg.Service
 	certKeeper    *selfcfg.CertKeeper
 	proxy         *proxysvc.Service
+	// proxyExtras is the proxy pages' own state; see modules_proxy.go.
+	proxyExtras proxyExtras
 	// requests holds what every deployment's ingress and every proxy site
 	// served, read once and advanced by what was appended since; every poll
 	// and live tail on a project's Logs page and a site's page is answered
@@ -308,6 +310,8 @@ func (s *Server) initModules() {
 	s.modules.deployGit = deploy.NewGitWatcher(s.modules.deployRuns, s.modules.deploySources, s.dispatchGitDeployment)
 	s.modules.pullRequests = newPullRequests(s.modules.github, s.modules.githubApp, s.modules.git)
 	s.modules.previewReconciler = deploy.NewPreviewReconciler(s.modules.deployAutomation, s.modules.pullRequests, s.closePreviewTarget, s.Log)
+
+	s.initProxyExtras()
 }
 
 // tailnetPublisher adapts selfcfg's `tailscale serve` driver to the deploy

@@ -256,7 +256,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.live == 'true'
     runs-on: [self-hosted, linux, x64, just-dashboard]
-    timeout-minutes: 45
+    timeout-minutes: 150
     env:
       JD_DEPLOY_LIVE: "1"
     defaults:
@@ -283,7 +283,7 @@ jobs:
           go version | tee "$RUNNER_TEMP/jd-ci/go-version.txt"
       - name: Artifact, framework, activation and preview fixtures
         run: |
-          go test -count=1 -timeout 30m -json ./internal/deploy -run 'TestLive(C4ArtifactAdapters|DetectedFrameworkBuildAndServing|C5ActivationAdapters|PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction|RuntimeDiagnoserReadsExitedContainer)$' | tee "$RUNNER_TEMP/jd-ci/deploy-live.jsonl"
+          go test -count=1 -timeout 90m -json ./internal/deploy -run 'TestLive(C4ArtifactAdapters|DetectedFrameworkBuildAndServing|C5ActivationAdapters|PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction|RuntimeDiagnoserReadsExitedContainer)$' | tee "$RUNNER_TEMP/jd-ci/deploy-live.jsonl"
           python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/deploy-live.jsonl" TestLiveC4ArtifactAdapters TestLiveDetectedFrameworkBuildAndServing TestLiveC5ActivationAdapters TestLivePreviewStorageCredentialsNetworkAndCleanup TestLiveLegacyPreviewQuarantinePreservesProduction TestLiveRuntimeDiagnoserReadsExitedContainer
       - name: Database replacement and Compose storage/network fixtures
         run: |

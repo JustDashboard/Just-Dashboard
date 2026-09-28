@@ -1274,6 +1274,9 @@ export function CertificateReading({
           {plural(days, "day")} left
         </span>
       )}
+      {domain.certificateRenewedBy === "caddy" && (
+        <span className="shrink-0 text-hint text-muted-foreground">Renewed by Caddy</span>
+      )}
     </span>
   )
 }

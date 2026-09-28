@@ -986,6 +986,12 @@
   background-color: transparent !important;
 }
 
+/* The line a config test's message points at, revealed when the editor opens
+   on it: a transient mark that has to be seen, like a search match. */
+.monaco-host .monaco-line-mark {
+  background-color: var(--mark);
+}
+
 /* The ground behind a picture with an alpha channel.
  *
  * A transparent PNG drawn on a card is indistinguishable from one with a

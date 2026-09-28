@@ -131,6 +131,11 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   reuses the inventory it already collected and samples those IDs without another listing.
   `ListStacks` builds on `ListContainers` so it inherits resolved health and uptime;
   `Diagnose` inspects each container once, reusing that payload for enrichment and every rule.
+  already has them, and "what uses this volume" for every volume at once is otherwise an inspect per
+  container per poll); `ListStacks` builds on `ListContainers` so it inherits resolved health and uptime;
+  `Diagnose` inspects each container once and runs every rule against that payload.
+  `ListRunning` is the Engine's list of running containers mapped with no inspect at all, for the ports
+  page, which asks every fifteen seconds only which container a published port belongs to.
   `ListContainersWithLabels` applies exact label filters in the Engine list call before health/uptime
   enrichment, so a deployment detail read inspects only its matching running containers. The uptime pass
   also collects limits, health-check presence and restart policy from the inspect it was already making,

@@ -130,6 +130,64 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   is a lockout, not advice.
 - `ExposedPort` and `CertSummary` are declared *in* netsec rather than imported from `proxysvc`, so the
   audit has no dependency on how ports or certificates are discovered.
+- A database or control port is judged by the **address it is bound to and the interface that address
+  is on** (`reach.go`), since `ExposedPort.Exposed` is any bind but loopback. `ReadHostNetwork` places
+  each address on its interface (Go's interface list) and marks the interfaces carrying a default route
+  (`/proc/net/{route,ipv6_route}`, the namespace the sockets are read in). A bridge is told by the
+  kernel's link table (an `RTM_GETLINK` dump: each device's kind and master, `classifyLinks`), not by
+  its name: a Linux bridge whose every port is a veth, tap or dummy is `bridge` whatever it is called
+  (Docker, libvirt, LXD's `lxdbr0`, Incus's `incusbr0`, Podman's `podman1`, a Proxmox internal
+  `vmbr1`), and one that enslaves a NIC, bond, VLAN or VXLAN is that network and `physical`, as is a
+  device named like a bridge that the kernel does not call one (Open vSwitch). `NetworkInfo` classifies
+  the Network page's devices the same way; names (`classifyInterface`) are only the fallback when the
+  table cannot be read. `HostNetwork.Reach` grades a bind: `all` and `public` are critical; `network` (a
+  tailnet — Tailscale's ranges or a `tailscale*` tunnel —, another tunnel, a link-local address on the
+  uplink, or a private address on a physical or default-route interface) and `host` (an address,
+  link-local included, on such a bridge or a veth that carries no default route) are warnings. Only the private address
+  on the uplink, or one on no interface the host listed, gets the clause that a provider mapping a public
+  address onto it makes it the internet's too; a bridge or link-local address cannot be mapped. Every
+  level keeps the catalogue's `Danger` in the advice. A preset marked `InternetOnly` (DNS as an open
+  resolver, RDP, VNC — their danger is strangers, their advice a VPN) is not a finding at a reach the
+  internet cannot share, so libvirt's dnsmasq on `virbr0` raises nothing. A port bound to several
+  addresses is one finding at its widest, as its ID is per port, and its detail names the interface the
+  address is on ("TCP/6379 is bound to 100.110.34.31 on tailscale0"). `HostNetwork.Place` returns the
+  grade with the network it is made of — `tailnet`, `vpn`, `uplink` (a private address on an interface
+  carrying a default route), `private` (one on another NIC, or on no interface the host listed),
+  `docker` (Docker's `docker0` or `br-<network id>`), another `bridge`, `link-local` — and the interface,
+  and `GET /ports` returns all three as `Listener.Reach`, `Network` and `Interface`, so the ports page
+  words a socket as the posture judges it. A firewall that is on and does not allow inbound by default
+  holds a port finding to a warning and is named in its detail — unless the default is not what the
+  socket's traffic meets. A socket `docker-proxy` holds, or one `ExposedPort.Published` marks (a
+  container's published binding names it, whatever holds it, or no socket at all where Docker's NAT
+  alone publishes it), is Docker's published port, forwarded by its NAT rules before the input chain
+  the default belongs to, so it keeps its reach's level and the detail says it is "published by Docker
+  past the firewall's inbound default". A socket an inbound rule admits from
+  anywhere keeps it too, and the detail names the rule ("firewall rule 10 admits it from anywhere"):
+  `admittingRule` walks the rules in order, first match deciding as ufw and iptables do — ufw's and
+  firewalld's `ALLOW`/`LIMIT` or iptables' `ACCEPT` in `INPUT` (its port read from the match text by
+  `iptablesPort`), by a port, list or range, a firewalld service the catalogue names (`Firewalld`), or
+  no port at all; a refusal from anywhere to any address met first ends the walk (not for iptables,
+  whose interface column is not read). A rule limited to an interface, to a tailnet's or bridge's
+  destination address, or naming a ufw application profile is not weighed, so an allow on
+  `tailscale0` still leaves the internet to the default. One whose inbound default could not be read
+  is not counted on. `GradePort` levels one socket by exactly these rules — the same `dangerAt` and
+  `portLevel` `assessPorts` uses — and `GET /ports` returns its result as `Listener.Level`,
+  `InboundDefault`, `PastFirewall` (`docker` or `rule`) and `FirewallRule`, reading the firewall status
+  the posture reads, so the ports page and the proxy overview colour a database as the posture levels
+  it.
+- **One dangerous-service catalogue.** `netsec.ServiceOf` names a socket from `ServiceCatalogue` on
+  port *and* protocol (DNS is 53/udp; a TCP socket on 53 is not flagged), and `GET /ports` returns it
+  as `Listener.Service` and `Danger`. The frontend no longer keeps its own port list for sockets: the
+  ports page, its "Dangerous services exposed" tile and the proxy overview's finding flag whatever
+  carries `danger` and a posture `level`, so RDP, VNC, FTP and an open resolver are flagged there as
+  the posture flags them. (The streams page still judges a stream's listen port by
+  `DANGEROUS_PORTS`, since a stream has no socket to read `danger` from.)
+- **The dashboard's own sockets stay on loopback.** `ExposedPort.Dashboard` marks a `Self` socket
+  other than the dashboard's Caddy (process `caddy`, or compose service `proxy`); `ServiceOf` names it
+  "Just Dashboard", an `InternetOnly` danger, so a backend or web app bound where the internet or the
+  private uplink reaches raises `ports.self.<proto>.<port>` — critical, or a warning where the
+  firewall's inbound default holds it, by the same `portLevel` — and a tailnet or bridge bind raises
+  nothing.
 - **A check that could not run is not a pass.** `Posture.Skipped` says which is which, because a zero and
   an unanswerable question look identical: `SecurityFiltering` is false on Alpine/Arch (no advisory
   data), `LoginRecordRead` false wherever `last`/`lastb` are missing (util-linux-extra, absent from

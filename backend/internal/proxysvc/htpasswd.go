@@ -48,6 +48,10 @@ type AuthFile struct {
 	Name  string   `json:"name"`
 	Path  string   `json:"path"`
 	Users []string `json:"users"`
+	// UsedBy are the nginx sites whose blocks name this file, enabled or
+	// not: a disabled site still refuses every login once it is enabled
+	// again without its file.
+	UsedBy []string `json:"usedBy"`
 }
 
 // ListAuthFiles enumerates the password files this dashboard manages.
@@ -58,6 +62,7 @@ func (s *Service) ListAuthFiles() []AuthFile {
 	if err != nil {
 		return out
 	}
+	used := s.authFileUsers()
 	for _, e := range entries {
 		if e.IsDir() || !authFileRe.MatchString(e.Name()) {
 			continue
@@ -66,12 +71,84 @@ func (s *Service) ListAuthFiles() []AuthFile {
 		if err != nil {
 			continue
 		}
+		path := filepath.Join(dir, e.Name())
 		out = append(out, AuthFile{
-			Name: e.Name(), Path: filepath.Join(dir, e.Name()), Users: users,
+			Name: e.Name(), Path: path, Users: users, UsedBy: usedBy(used, path),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// AuthFileUsedBy is the sites that name one password file.
+func (s *Service) AuthFileUsedBy(file string) []string {
+	return usedBy(s.authFileUsers(), filepath.Join(s.authDir(), file))
+}
+
+func usedBy(used map[string][]string, path string) []string {
+	if sites := used[path]; sites != nil {
+		return sites
+	}
+	return []string{}
+}
+
+// authFileUsers maps every password file an nginx site names to the sites
+// naming it. It reads the site files themselves, and the snippets they
+// include, rather than anything the dashboard remembers: a file wired in by
+// hand, or by a deployment's route, is as much in use as one chosen in the
+// site form, and the delete guard is only worth having if it sees all three.
+// Caddy is not read: its basic_auth carries the hashes inline and names no
+// file.
+func (s *Service) authFileUsers() map[string][]string {
+	used := map[string][]string{}
+	seen := map[string]bool{}
+	for _, sub := range []string{"sites-available", "sites-enabled", "conf.d"} {
+		dir := filepath.Join(s.nginxDir, sub)
+		for _, name := range siteFiles(dir) {
+			full := filepath.Join(dir, name)
+			real := resolvedFile(full)
+			// A link in sites-enabled is the site sites-available already
+			// counted, not a second one.
+			if seen[real] {
+				continue
+			}
+			seen[real] = true
+			b, err := os.ReadFile(full)
+			if err != nil {
+				continue
+			}
+			directives, err := ParseNginxFile(full, string(b), []string{"http"})
+			if err != nil {
+				continue
+			}
+			walk := siteWalk{s: s, path: full, self: real, features: map[string]bool{}}
+			for _, d := range directives {
+				if d.Name == "server" && d.Block != nil {
+					walk.block(walk.expand(d.Block), true)
+				}
+			}
+			for _, file := range walk.authFiles {
+				used[file] = appendNew(used[file], name)
+			}
+		}
+	}
+	for _, sites := range used {
+		sort.Strings(sites)
+	}
+	return used
+}
+
+// confPath is a path from a directive as nginx resolves it: a relative one
+// is taken from the directory nginx.conf is in. A path built from variables
+// cannot be resolved here and comes back empty.
+func (s *Service) confPath(value string) string {
+	if value == "" || strings.Contains(value, "$") {
+		return ""
+	}
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(s.nginxDir, value)
+	}
+	return filepath.Clean(value)
 }
 
 func readAuthUsers(path string) ([]string, error) {
@@ -137,12 +214,15 @@ func (s *Service) SetAuthUser(file, user, password string) (*AuthFile, error) {
 		return nil, err
 	}
 	users, _ := readAuthUsers(path)
-	return &AuthFile{Name: file, Path: path, Users: users}, nil
+	return &AuthFile{Name: file, Path: path, Users: users, UsedBy: s.AuthFileUsedBy(file)}, nil
 }
 
 // RemoveAuthUser deletes one entry. Removing the last one leaves an empty
-// file rather than deleting it: a site whose auth_basic_user_file has vanished
-// stops nginx from starting, and an empty file simply admits nobody.
+// file rather than deleting it. Neither stops nginx — `nginx -t` does not open
+// the file, and passes with it missing — but a site whose file has vanished
+// answers every login with a 403 and an error line per request, which reads
+// as a server fault, while an empty file asks for credentials again like any
+// wrong password (both checked on nginx 1.26.3).
 func (s *Service) RemoveAuthUser(file, user string) (*AuthFile, error) {
 	if !authFileRe.MatchString(file) {
 		return nil, fmt.Errorf("invalid file name")
@@ -168,13 +248,19 @@ func (s *Service) RemoveAuthUser(file, user string) (*AuthFile, error) {
 		return nil, err
 	}
 	users, _ := readAuthUsers(path)
-	return &AuthFile{Name: file, Path: path, Users: users}, nil
+	return &AuthFile{Name: file, Path: path, Users: users, UsedBy: s.AuthFileUsedBy(file)}, nil
 }
 
-// DeleteAuthFile removes a password file entirely.
+// DeleteAuthFile removes a password file entirely. nginx does not notice at
+// its next test or reload: a site still pointing at the file keeps running
+// and refuses every login. The API refuses a file in use unless told to go
+// ahead, through AuthFileUsedBy.
 func (s *Service) DeleteAuthFile(file string) error {
 	if !authFileRe.MatchString(file) {
 		return fmt.Errorf("invalid file name")
+	}
+	if err := s.RefuseListedAuthFile(file); err != nil {
+		return err
 	}
 	if err := os.Remove(filepath.Join(s.authDir(), file)); err != nil {
 		if os.IsNotExist(err) {

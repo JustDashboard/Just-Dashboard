@@ -1,0 +1,7 @@
+{
+  "kind": "proxy",
+  "upstream": "http://127.0.0.1:8096",
+  "webSockets": true,
+  "clientMaxBody": "20m",
+  "proxyTimeout": 300
+}

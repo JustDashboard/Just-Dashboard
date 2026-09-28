@@ -5,6 +5,7 @@ import { CheckCircle, CrossCircle, Slash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
+import { recentLabels } from "@/lib/recent-jobs"
 import { cn } from "@/lib/utils"
 import type { Job, JobLine } from "@/lib/types"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
@@ -238,10 +239,12 @@ function JobIcon({ status }: { status: Job["status"] }) {
 export function RecentJobs({
   kinds,
   onOpen,
+  className,
 }: {
   /** Only these kinds, so the Proxy page does not list package upgrades. */
   kinds: string[]
   onOpen: (id: string) => void
+  className?: string
 }) {
   const [jobs, setJobs] = useState<Job[]>([])
   const key = kinds.join(",")
@@ -265,11 +268,13 @@ export function RecentJobs({
   }, [key])
 
   if (jobs.length === 0) return null
+  const shown = jobs.slice(0, 6)
+  const labels = recentLabels(shown)
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
       <span className="eyebrow">recent</span>
-      {jobs.slice(0, 6).map((job) => (
+      {shown.map((job, i) => (
         <button
           key={job.id}
           onClick={() => onOpen(job.id)}
@@ -280,14 +285,7 @@ export function RecentJobs({
           )}
         >
           <JobIcon status={job.status} />
-          {/* The target makes the better label when it is a domain or a
-              package set: it is short, and it is the thing that differs
-              between runs. A file path is neither — every SSH apply writes
-              the same drop-in, so a row of chips all read as the same
-              truncated path and the list stops being a way to find a run. */}
-          <span className="truncate">
-            {job.target && !job.target.startsWith("/") ? job.target : job.title}
-          </span>
+          <span className="truncate">{labels[i]}</span>
         </button>
       ))}
     </div>

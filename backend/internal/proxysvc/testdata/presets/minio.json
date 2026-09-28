@@ -1,0 +1,8 @@
+{
+  "kind": "proxy",
+  "upstream": "http://127.0.0.1:9000",
+  "webSockets": false,
+  "clientMaxBody": "0",
+  "proxyTimeout": 300,
+  "custom": "# Uploads stream through to MinIO as they arrive instead of being\n# spooled to disk first.\nproxy_request_buffering off;"
+}

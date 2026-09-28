@@ -67,8 +67,9 @@ taking a frame:
   facts, attention list, sites, certificate expiry and Engine log; the sites, certificates and
   streams inventories and the ports table with their toolbars; the Renewals section on
   Certificates; a site's own page, its readings on the page's ground and its logs one `Pane` under
-  its identity line; the TLS report's readings, findings, protocol, certificate, chain and HTTP
-  rows; the password files and DNS provider lists),
+  its identity line; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
+  preload rows, and its deep scan's findings, suite list with its chip filters, key exchange and
+  connection rows; the password files and DNS provider lists),
   health findings, the runtime-health bar, and every block of the deployment section — the fleet
   and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
   and Console, the run page, the nine settings pages and the create flow — are plain, with every
@@ -1147,16 +1148,56 @@ process and interface marks. A product is named only when it can be identified; 
 for ufw, sshd or an unknown interface. Source choices in the firewall dialog use the same lit
 `ChoiceCard` as deployment choices, with Tailscale's own mark for the tailnet.
 
-**The proxy section draws routes, engines and authorities.** All six pages stay in the reading
-register and begin with four `StatTile` readings, two per row on phones. On the overview the engine
+**The proxy section draws routes, engines and authorities.** All seven pages stay in the reading
+register and begin with four `StatTile` readings, two per row on phones; on Sites, what the reader
+has to act on first — a failed read, nginx not running, changes on disk nginx has not loaded, with
+Test config and Reload nginx — stands above them as a `Notice`. On the overview the engine
 identity and service commands sit below them, with the routes in the main column and attention and
-expiry in a narrower column. A site's and a stream's card separates identity, route and named
+expiry in a narrower column. On an nginx host Live traffic sits between the engine line and the routes: two readings
+(requests a second, open connections) each carrying its hour as a `TileTrend`, and a hint line naming
+where the counters come from. Its switch is a `Switch` beside a `Status` in the panel header rather
+than a button, because whether nginx is counting is a state of the engine; a switch in flight reads
+"Switching on…", readings that stop keep their hour and lose their figures, and nothing on it breathes
+as live, since it is a poll. A source the overview could not read is never drawn as an empty or
+healthy one: its tile's hint reads "couldn't read", its panel shows the `ErrorState`, and attention
+carries it as a finding whose button is Try again, so the all-clear line cannot appear over it. The
+overview's context row is its age and one ghost Refresh: "Updated 14s ago" is the oldest reading on
+the page, and while a refresh is out the line reads "Refreshing…" until every source has answered,
+or, after twenty seconds, names the source that has not ("No answer from sites") and Refresh can be
+pressed again. A status that fails after answering keeps its age in the line, since the engine
+identity still draws it. The engine line's one brand command follows the unit: Reload while it
+runs, Start once it is stopped or failed, with Reload beside it disabled and its reason on a tooltip
+(a disabled button takes no hover, so the reason hangs on a focusable wrapper). Whether it starts at
+boot is a fact on the line, a warning with an inline Start at boot where `systemctl enable` would fix
+it. A failed unit is the one `Notice` the overview draws under the line — the reader has to act on it
+— holding systemd's reason in words, a fold that reads the journal when opened and opens scrolled to
+its newest line, and its two verbs. A start or restart the config test refuses keeps its dialog
+open on the test's diagnostics as rows (level as a `Status` verdict, file:line in mono, Open at line
+N), not a toast of nginx's output; the editor a row opens closes back into that dialog, with the
+keyboard on the row's button. Test config is a `SidePanel` of the same rows under a verdict `Notice`
+(success, warning or danger: "Valid", "Valid with 1 warning", "Fails"), with the output in a quiet
+fold, Copy output and Test again in the footer beside how long ago it ran, and a conflicting server
+name's claimants as rows indented under it behind a rule, "served by" and "ignored in" each with its
+own button (a name taken from a shared snippet adds "server_name in" the snippet's line under the
+site's); while it runs it says "Testing…" rather than keep the last verdict under a new run, and a
+test that gives no verdict is the panel's `ErrorState` with Try again, never a "Fails" `Notice`. The
+last test's warnings and failure stay in attention as one finding whose button, Open test, shows it.
+Its routes are ordered worst first like the Sites cards, eight with "Showing 8 of N". An
+administrator's route opens the site on Sites and a Docker ingress route its live TLS report; a
+reader's route opens its file read-only in place rather than the site form — skeleton rows while it
+is read and an `ErrorState` with Try again when it cannot be, never an empty editor — and a route with
+nothing a role may open is a disabled row. A site's and a stream's card separates identity, route and named
 actions into three bands: `components/proxy/route-path.tsx` gives the source and destination their
 own labelled columns (stacked on phones), so a hostname and its upstream do not compete for the same
 truncated line. Sites and streams use a two-column grid on wide screens and a single column on
 smaller ones. The nginx or Caddy mark names a site's engine, the stream's port names its product
 where known, and the TLS reading carries Let's Encrypt's mark only where the certificate path
-supports it. Unknown products keep a glyph.
+supports it. Unknown products keep a glyph. Until streams can forward, the Streams page puts a plain
+block of two numbered steps above its list — the stream module, then connecting the directory — each
+with its `Status`, a line of meaning and the button that does it where the page can; the step that
+needs doing carries the page's one brand command, so "Prepare a stream" stays outline, and the
+connect opens a sheet showing the file before anything is written. The install step keeps the recent
+installs beside its button, the list its job console says a run is reopened from. A stream card's Status is nginx's own state for it — live, not listening, shadowed, not read — and a card that is not live says why in a hint line under its route, nginx's logged error in mono beneath; the first tile counts the live streams and chips filter by state.
 Every site card, the overview's route rows and a certificate's links to the sites using it open the
 site's own page (`/proxy/sites/<name>`): the same marks as an identity line, its readings on the
 page's ground, and its requests and errors read there in one log `Pane`, so a site's Logs verb goes to
@@ -1167,18 +1208,52 @@ Certificates has a searchable inventory beside renewal and DNS management. Each 
 its details — all names, dates, the full path and links to the sites using it — so it takes the lit
 edge; its issuer, expiry and lifetime meter remain on the card. An unreadable certificate carries a
 short verdict on the card and its complete error in the detail sheet; unavailable dates and signing
-status stay unknown, and it draws no invented lifetime.
-A watched domain opens a live report and preserves its nonstandard port. Password files and
-watched-domain setup use the deployment settings' rail sections. Certificate renewal lineages and
+status stay unknown, and it draws no invented lifetime. A test certificate — a staging authority's —
+draws no issuer mark, reads "test certificate" and a red meter whatever its days, and carries its
+sentence and its one verb, the real issuance, on a line of its own under the card.
+The panel's command is split rather than doubled: "Issue certificate" is Let's Encrypt on the brand
+face, and a chevron joined to it opens every other way to get one — the local CA, self-signed, a
+signing request — as words in a menu; without certbot the menu is the whole command. What the server
+makes itself is said where it is read: the local CA's certificates carry a `local CA` Tag, and the
+details of one nothing trusts by default say where it is trusted in a hint line, not a Notice. The
+rail adds Signing requests at its head only while one waits — what the operator owes an answer to —
+and a Local CA panel after DNS providers, which is an administrator's offer to create one and nothing
+to a reader until it exists.
+A watched domain opens a live report and preserves its nonstandard port. Password files, access
+lists and watched-domain setup use the deployment settings' rail sections; an access list is a row
+you read (its addresses as mono tags, its sites as links, its include line with Copy) with Edit
+inline and Delete in its menu. Certificate renewal lineages and
 DNS providers remain readings with their own actions, laid out to fit the management column; every
 run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
-page's width, which a log needs and the management column does not have. The TLS
+page's width, which a log needs and the management column does not have. The
+renewal column opens on its recent certbot runs (in the body, where they wrap, not in the narrow
+column's header), then what the timer's last run did — a failed run is a danger Notice naming each
+certificate and certbot's reason, a passing run whose hook failed a warning Notice with the hook's
+own words, each with Run now and Show log; otherwise a Status and the next run — then the "Reload
+nginx after every renewal" OptionRow; a lineage's last failure is a line in its row, its webroot
+folders wrapping mono paths rather than tags, and a certain next failure a warning Notice. The TLS
 report keeps findings, protocol checks and HTTP readings beside the live certificate and its
-vertical chain; long header values wrap instead of hiding the verdict. Listening sockets stay a
+vertical chain; long header values wrap instead of hiding the verdict. Its scan field is one input
+group, the address and its port, with a hint naming what will be scanned and a native datalist of
+known names; a scan in flight is a line with its elapsed time and an outline Cancel. Listening sockets stay a
 table of readings, with fixed endpoint, application, reach and action columns and a stacked phone
-layout. Tables retain their scrolling boundary; forms and sections remain plain.
+layout chosen once by `useMediaQuery`; the three named columns sort from their headings, which carry
+`aria-sort`, and a phone gets the same orders as one Sort menu. The application cell is the owner
+drawn as its product (a container as its image's), its name with a "This dashboard" `Tag` on the
+dashboard's own, how it runs as one hint line, then the command and the account; the owner's page is
+the row's first inline verb. Grouped by application, one owner's sockets are a line whose name is the
+disclosure button, unfolding its sockets indented beneath it. How old the list is sits in the panel header beside Refresh, Pause and Export; a failed
+poll is a warning `Notice` over the rows it kept. A socket first seen in the last day carries a `New`
+tag beside its protocol, a property of the row rather than a state. Below the table, Changes is a
+plain panel of lines grouped under day headings — the minute, the change as a `Status` word coloured
+as the table colours that socket, the port, its addresses, the program and where it answered — with
+its window as `Segments` in the header and the reach chips under it. Tables retain their scrolling
+boundary; forms and sections remain plain.
 `tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
-navigation, site-kind choices and read-only access.
+navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
+overview's failure states, its freshness and Refresh, its routes by role and the engine controls,
+including a stopped, failed, masked and boot-disabled unit, a refused start, restart or reload, and
+the config test panel; `proxy-insights.spec.ts` covers Live traffic, its switch and a phone.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:

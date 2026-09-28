@@ -1,0 +1,755 @@
+import { json, type ProxyRoutes } from "./shared"
+
+/**
+ * GET /ports names each socket from netsec's catalogue, on port and protocol,
+ * with the catalogue's reason it should not face the internet.
+ */
+const CATALOGUE: Record<string, { service: string; danger: string }> = {
+  "tcp/5432": {
+    service: "PostgreSQL",
+    danger:
+      "A database open to the internet is scanned and brute-forced within hours. Set a source.",
+  },
+  "tcp/3306": {
+    service: "MySQL / MariaDB",
+    danger:
+      "A database open to the internet is scanned and brute-forced within hours. Set a source.",
+  },
+  "tcp/6379": {
+    service: "Redis",
+    danger:
+      "Unauthenticated by default: an exposed Redis is a remote shell, not a data leak. Never open this to the world.",
+  },
+  "tcp/27017": {
+    service: "MongoDB",
+    danger: "Exposed MongoDB instances are the classic ransom target. Set a source.",
+  },
+  "tcp/9200": {
+    service: "Elasticsearch",
+    danger: "No authentication in the default configuration. Do not expose.",
+  },
+  "tcp/2375": {
+    service: "Docker API",
+    danger: "Reaching the Docker API is equivalent to being root on this host. Never open it.",
+  },
+  "udp/53": {
+    service: "DNS",
+    danger:
+      "An open resolver is used to amplify attacks against other people. Restrict the source.",
+  },
+  "tcp/22": { service: "SSH", danger: "" },
+  "tcp/80": { service: "HTTP", danger: "" },
+  "tcp/443": { service: "HTTPS", danger: "" },
+}
+
+function catalogued<T extends { protocol: string; port: number }>(listeners: T[]) {
+  return listeners.map((l) => {
+    const entry = CATALOGUE[`${l.protocol}/${l.port}`]
+    if (!entry) return l
+    return { ...l, service: entry.service, ...(entry.danger ? { danger: entry.danger } : {}) }
+  })
+}
+
+export const ports = catalogued([
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 443,
+    pid: 812,
+    process: "nginx",
+    cmdline: "nginx: master process",
+    user: "root",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "127.0.0.1",
+    port: 3000,
+    pid: 1400,
+    process: "node",
+    cmdline: "node server.js",
+    user: "app",
+    scope: "loopback",
+    reach: "loopback",
+    network: "loopback",
+    exposed: false,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 5432,
+    pid: 900,
+    process: "postgres",
+    cmdline: "postgres -D /var/lib/postgresql",
+    user: "postgres",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "critical",
+  },
+])
+
+/**
+ * Sockets as a real host lists them: sshd on every interface in both
+ * families, caddy on the tailnet's IPv4 and IPv6 addresses, the DHCP client
+ * on the public address, Redis on a public address of its own, a metrics
+ * exporter on Docker's bridge, and two on loopback — nine sockets, seven
+ * services.
+ */
+export const hostPorts = catalogued([
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 22,
+    pid: 2450808,
+    process: "sshd",
+    cmdline: "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups",
+    user: "root",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv6",
+    address: "::",
+    port: 22,
+    pid: 2450808,
+    process: "sshd",
+    cmdline: "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups",
+    user: "root",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+  },
+  {
+    protocol: "udp",
+    family: "ipv4",
+    address: "127.0.0.53",
+    port: 53,
+    pid: 4412,
+    process: "systemd-resolve",
+    cmdline: "/usr/lib/systemd/systemd-resolved",
+    user: "systemd-resolve",
+    scope: "loopback",
+    reach: "loopback",
+    network: "loopback",
+    exposed: false,
+  },
+  {
+    protocol: "udp",
+    family: "ipv4",
+    address: "57.131.21.87",
+    port: 68,
+    pid: 998,
+    process: "systemd-network",
+    cmdline: "/usr/lib/systemd/systemd-networkd",
+    user: "systemd-network",
+    scope: "interface",
+    reach: "public",
+    network: "public",
+    interface: "ens3",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "127.0.0.1",
+    port: 5432,
+    pid: 3100,
+    process: "postgres",
+    cmdline: "postgres -D /var/lib/postgresql/17/main",
+    user: "postgres",
+    scope: "loopback",
+    reach: "loopback",
+    network: "loopback",
+    exposed: false,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "203.0.113.5",
+    port: 6379,
+    pid: 3200,
+    process: "redis-server",
+    cmdline: "/usr/bin/redis-server 203.0.113.5:6379",
+    user: "redis",
+    scope: "interface",
+    reach: "public",
+    network: "public",
+    interface: "ens3",
+    exposed: true,
+    level: "critical",
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "100.110.34.31",
+    port: 8443,
+    pid: 2066,
+    process: "caddy",
+    cmdline: "/usr/bin/caddy run --config /etc/caddy/Caddyfile",
+    user: "caddy",
+    scope: "interface",
+    reach: "network",
+    network: "tailnet",
+    interface: "tailscale0",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv6",
+    address: "fd7a:115c:a1e0::9e37:2220",
+    port: 8443,
+    pid: 2066,
+    process: "caddy",
+    cmdline: "/usr/bin/caddy run --config /etc/caddy/Caddyfile",
+    user: "caddy",
+    scope: "interface",
+    reach: "network",
+    network: "tailnet",
+    interface: "tailscale0",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "10.0.0.1",
+    port: 9100,
+    pid: 5120,
+    process: "node_exporter",
+    cmdline: "/usr/bin/node_exporter --web.listen-address=10.0.0.1:9100",
+    user: "prometheus",
+    scope: "interface",
+    reach: "host",
+    network: "docker",
+    interface: "docker0",
+    exposed: true,
+  },
+])
+
+/**
+ * Databases as a Docker host binds them: Redis for the containers on two
+ * bridges, MongoDB on docker0's link-local address, and Postgres on every
+ * interface in both families — three databases on five sockets, and only
+ * Postgres within the internet's reach.
+ */
+export const bridgedDatabases = catalogued([
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 5432,
+    pid: 3100,
+    process: "postgres",
+    cmdline: "postgres -D /var/lib/postgresql/17/main",
+    user: "postgres",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "critical",
+  },
+  {
+    protocol: "tcp",
+    family: "ipv6",
+    address: "::",
+    port: 5432,
+    pid: 3100,
+    process: "postgres",
+    cmdline: "postgres -D /var/lib/postgresql/17/main",
+    user: "postgres",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "critical",
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "10.0.0.1",
+    port: 6379,
+    pid: 3200,
+    process: "redis-server",
+    cmdline: "/usr/bin/redis-server /etc/redis/redis.conf",
+    user: "redis",
+    scope: "interface",
+    reach: "host",
+    network: "docker",
+    interface: "docker0",
+    exposed: true,
+    level: "warning",
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "10.0.2.1",
+    port: 6379,
+    pid: 3200,
+    process: "redis-server",
+    cmdline: "/usr/bin/redis-server /etc/redis/redis.conf",
+    user: "redis",
+    scope: "interface",
+    reach: "host",
+    network: "docker",
+    interface: "br-b05f8e098ad7",
+    exposed: true,
+    level: "warning",
+  },
+  {
+    protocol: "tcp",
+    family: "ipv6",
+    address: "fe80::b482:4dff:fe92:4281",
+    port: 27017,
+    pid: 3300,
+    process: "mongod",
+    cmdline: "/usr/bin/mongod --bind_ip fe80::b482:4dff:fe92:4281%docker0",
+    user: "mongodb",
+    scope: "interface",
+    reach: "host",
+    network: "docker",
+    interface: "docker0",
+    exposed: true,
+    level: "warning",
+  },
+])
+
+/**
+ * The longest reach a row can read, on a cloud host's private uplink: the
+ * Docker API on the private address the provider maps the public one onto,
+ * and Elasticsearch on a VPN — for the phone width, where the label must not
+ * push the page wider.
+ */
+export const privateUplink = catalogued([
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "172.31.5.9",
+    port: 2375,
+    pid: 700,
+    process: "dockerd",
+    cmdline: "/usr/bin/dockerd -H tcp://172.31.5.9:2375",
+    user: "root",
+    scope: "interface",
+    reach: "network",
+    network: "uplink",
+    interface: "enp0s31f6",
+    exposed: true,
+    level: "warning",
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "10.8.0.1",
+    port: 9200,
+    pid: 710,
+    process: "java",
+    cmdline:
+      "/usr/share/elasticsearch/jdk/bin/java -Xms1g -Xmx1g org.elasticsearch.bootstrap.Elasticsearch",
+    user: "elasticsearch",
+    scope: "interface",
+    reach: "network",
+    network: "vpn",
+    interface: "wg0",
+    exposed: true,
+    level: "warning",
+  },
+])
+
+const dockerProxy = (port: number, family: string, hostIp: string, pid: number) => ({
+  protocol: "tcp",
+  family,
+  address: hostIp,
+  port,
+  pid,
+  ppid: 1755428,
+  process: "docker-proxy",
+  cmdline: `/usr/bin/docker-proxy -proto tcp -host-ip ${hostIp} -host-port ${port} -container-ip 10.0.0.3 -container-port ${port} -use-listen-fd`,
+  user: "root",
+  scope: "all",
+  reach: "all",
+  network: "all",
+  exposed: true,
+})
+
+/**
+ * Docker's Caddy ingress as this host publishes it: one docker-proxy per
+ * family for each of 80 and 443, four processes and two services.
+ */
+export const dockerIngress = [
+  dockerProxy(80, "ipv4", "0.0.0.0", 1883643),
+  dockerProxy(80, "ipv6", "::", 1883650),
+  dockerProxy(443, "ipv4", "0.0.0.0", 1883666),
+  dockerProxy(443, "ipv6", "::", 1883672),
+]
+
+/**
+ * Databases on a host whose firewall denies inbound by default: Redis on
+ * every interface in both families and Postgres on the public address, which
+ * the posture levels warnings, with the firewall's default named.
+ */
+export const firewalledDatabases = catalogued([
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 6379,
+    pid: 3200,
+    process: "redis-server",
+    cmdline: "/usr/bin/redis-server *:6379",
+    user: "redis",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "warning",
+    inboundDefault: "deny",
+  },
+  {
+    protocol: "tcp",
+    family: "ipv6",
+    address: "::",
+    port: 6379,
+    pid: 3200,
+    process: "redis-server",
+    cmdline: "/usr/bin/redis-server *:6379",
+    user: "redis",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "warning",
+    inboundDefault: "deny",
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "57.131.21.87",
+    port: 5432,
+    pid: 3100,
+    process: "postgres",
+    cmdline: "postgres -D /var/lib/postgresql/17/main",
+    user: "postgres",
+    scope: "interface",
+    reach: "public",
+    network: "public",
+    interface: "ens3",
+    exposed: true,
+    level: "warning",
+    inboundDefault: "deny",
+  },
+])
+
+/**
+ * Databases on a host whose ufw denies inbound by default, two of which get
+ * past it: Postgres Docker publishes on every interface in both families,
+ * which Docker forwards before ufw's default is met, and Redis, which ufw's
+ * rule 10 admits from anywhere. Both are the posture's critical; MongoDB,
+ * which nothing admits, is the warning the default holds it to.
+ */
+export const pastFirewallDatabases = catalogued([
+  { ...dockerProxy(5432, "ipv4", "0.0.0.0", 1883700), level: "critical", pastFirewall: "docker" },
+  { ...dockerProxy(5432, "ipv6", "::", 1883706), level: "critical", pastFirewall: "docker" },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 6379,
+    pid: 3200,
+    process: "redis-server",
+    cmdline: "/usr/bin/redis-server *:6379",
+    user: "redis",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "critical",
+    pastFirewall: "rule",
+    firewallRule: 10,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 27017,
+    pid: 3300,
+    process: "mongod",
+    cmdline: "/usr/bin/mongod --config /etc/mongod.conf",
+    user: "mongodb",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "warning",
+    inboundDefault: "deny",
+  },
+])
+
+/**
+ * A service on docker0 in both families, its IPv6 half on the bridge's
+ * link-local address: the longest pair of addresses a row folds.
+ */
+export const bridgePair = [
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "10.0.0.1",
+    port: 46505,
+    pid: 3053394,
+    process: "node",
+    cmdline: "node /srv/metrics/server.js",
+    user: "ubuntu",
+    scope: "interface",
+    reach: "host",
+    network: "docker",
+    interface: "docker0",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv6",
+    address: "fe80::b482:4dff:fe92:4281",
+    port: 46505,
+    pid: 3053394,
+    process: "node",
+    cmdline: "node /srv/metrics/server.js",
+    user: "ubuntu",
+    scope: "interface",
+    reach: "host",
+    network: "docker",
+    interface: "docker0",
+    exposed: true,
+  },
+]
+
+/**
+ * Twenty git-daemon sockets on loopback, each on a port the kernel handed
+ * out, as a host running a code-review tool lists them: the rows that buried
+ * the few facing off the machine.
+ */
+export const gitDaemons = Array.from({ length: 20 }, (_, i) => ({
+  protocol: "tcp",
+  family: "ipv4",
+  address: "127.0.0.1",
+  port: 33012 + i * 1321,
+  pid: 7100 + i,
+  ppid: 7000,
+  process: "git-daemon",
+  cmdline: `/usr/lib/git-core/git-daemon --listen=127.0.0.1 --port=${33012 + i * 1321} --base-path=/srv/git`,
+  user: "ubuntu",
+  scope: "loopback",
+  reach: "loopback",
+  network: "loopback",
+  exposed: false,
+}))
+
+const ingressContainer = {
+  id: "5e3ac6b0d3f1",
+  name: "just-dashboard-ingress",
+  image: "caddy:2-alpine",
+  published: true,
+}
+
+/**
+ * Sockets with their owners named, as a host running the dashboard lists
+ * them: Docker's Caddy ingress on 80 in both families, a Postgres Docker's
+ * NAT alone publishes (the userland proxy off) in both families, a
+ * deployment's container, socket-activated sshd with systemd its only holder
+ * the dashboard can see, nginx under systemd, a PM2 app whose node names its
+ * main thread MainThread, a node server started by hand, and the dashboard's
+ * own backend and proxy — twelve sockets, nine services.
+ */
+export const ownedPorts = catalogued([
+  {
+    ...dockerProxy(80, "ipv4", "0.0.0.0", 1883643),
+    manager: "systemd",
+    managerName: "docker.service",
+    container: ingressContainer,
+  },
+  {
+    ...dockerProxy(80, "ipv6", "::", 1883650),
+    manager: "systemd",
+    managerName: "docker.service",
+    container: ingressContainer,
+  },
+  ...(["ipv4", "ipv6"] as const).map((family) => ({
+    protocol: "tcp",
+    family,
+    address: family === "ipv4" ? "0.0.0.0" : "::",
+    port: 5432,
+    pid: 0,
+    process: "",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "critical",
+    pastFirewall: "docker",
+    source: "docker-nat",
+    container: {
+      id: "cf78e76683b9",
+      name: "epgjauto-db-1",
+      image: "postgres:16-alpine",
+      project: "epgjauto",
+      service: "db",
+      published: true,
+    },
+  })),
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "127.0.0.1",
+    port: 39069,
+    pid: 3012,
+    ppid: 1755428,
+    process: "docker-proxy",
+    cmdline:
+      "/usr/bin/docker-proxy -proto tcp -host-ip 127.0.0.1 -host-port 39069 -container-ip 10.0.0.12 -container-port 3000 -use-listen-fd",
+    user: "root",
+    manager: "systemd",
+    managerName: "docker.service",
+    scope: "loopback",
+    reach: "loopback",
+    network: "loopback",
+    exposed: false,
+    container: {
+      id: "e175e175e175",
+      name: "jd-e175-r4",
+      image: "c9051a2ac152",
+      published: true,
+      deployment: { projectId: 12, project: "shop", environment: "Production" },
+    },
+  },
+  ...(["ipv4", "ipv6"] as const).map((family) => ({
+    protocol: "tcp",
+    family,
+    address: family === "ipv4" ? "0.0.0.0" : "::",
+    port: 22,
+    pid: 1,
+    process: "systemd",
+    cmdline: "/sbin/init",
+    user: "root",
+    manager: "unmanaged",
+    socketUnit: "ssh.socket",
+    activates: "ssh.service",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+  })),
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 443,
+    pid: 812,
+    process: "nginx",
+    cmdline: "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+    user: "root",
+    manager: "systemd",
+    managerName: "nginx.service",
+    startedAt: "2026-09-20T08:14:02.31Z",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "127.0.0.1",
+    port: 3773,
+    pid: 4242,
+    process: "MainThread",
+    displayName: "node",
+    cmdline: "node /srv/api/server.js",
+    user: "app",
+    manager: "pm2",
+    managerName: "api",
+    scope: "loopback",
+    reach: "loopback",
+    network: "loopback",
+    exposed: false,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "127.0.0.1",
+    port: 3222,
+    pid: 2462360,
+    process: "MainThread",
+    displayName: "node",
+    cmdline: "/home/ubuntu/.nvm/versions/node/v24.12.0/bin/node dist/server.js",
+    user: "ubuntu",
+    manager: "session",
+    managerName: "session-c521.scope",
+    scope: "loopback",
+    reach: "loopback",
+    network: "loopback",
+    exposed: false,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "127.0.0.1",
+    port: 8080,
+    pid: 1790,
+    process: "jd-server",
+    cmdline: "/usr/local/bin/jd-server",
+    user: "root",
+    scope: "loopback",
+    reach: "loopback",
+    network: "loopback",
+    exposed: false,
+    self: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "100.110.34.31",
+    port: 8443,
+    pid: 1802112,
+    process: "caddy",
+    cmdline: "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",
+    user: "root",
+    manager: "container",
+    managerName: "c13e58c8f7b4",
+    scope: "interface",
+    reach: "network",
+    network: "tailnet",
+    interface: "tailscale0",
+    exposed: true,
+    container: {
+      id: "c13e58c8f7b4",
+      name: "just-dashboard-proxy-1",
+      image: "caddy:2-alpine",
+      project: "just-dashboard",
+      service: "proxy",
+    },
+    self: true,
+  },
+])
+
+/** The kernel's own range on the host these fixtures are copied from. */
+export const portsMeta = { ephemeralRange: { low: 32768, high: 60999 } }
+
+export const routes: ProxyRoutes = {
+  "/ports": (route) => json(route, ports),
+  "/ports/meta": (route) => json(route, portsMeta),
+}
+
+export const showcase: ProxyRoutes = {
+  "/ports": (route) => json(route, hostPorts),
+  "/ports/meta": (route) => json(route, portsMeta),
+}

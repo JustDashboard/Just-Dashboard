@@ -1,4 +1,15 @@
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
+import {
+  availability,
+  certs,
+  json,
+  mockProxy,
+  mockShowcase,
+  now,
+  PROXY_PAGES,
+  snippet,
+  user,
+} from "./proxy-fixtures"
 
 /**
  * The proxy pages, checked for the things a screenshot cannot.
@@ -11,225 +22,6 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  * from every exposed socket, a Docker Caddy route is not offered an editor it
  * cannot use, and the ports page filters what it lists.
  */
-
-const now = new Date().toISOString()
-
-const user = {
-  authenticated: true,
-  needsTotp: false,
-  needsEnrollment: false,
-  require2fa: false,
-  capabilities: [
-    "read",
-    "service.control",
-    "file.write",
-    "terminal",
-    "destructive",
-    "system.admin",
-  ],
-  user: {
-    id: 1,
-    username: "operator",
-    role: "admin",
-    totpEnabled: true,
-    disabled: false,
-    mustChangePassword: false,
-    lastLoginAt: now,
-    createdAt: now,
-  },
-}
-
-/** What the backend answers once it parses `nginx -v` rather than storing it. */
-const availability = {
-  nginx: true,
-  nginxVersion: "nginx/1.26.3",
-  caddy: false,
-  caddyVersion: "",
-  nginxDir: "/etc/nginx",
-  caddyFile: "/etc/caddy/Caddyfile",
-  certbot: true,
-}
-
-const snippet = "stream {\n    include /etc/nginx/streams/*.conf;\n}"
-
-const inThirtyDays = new Date(Date.now() + 30 * 86_400_000).toISOString()
-const yesterday = new Date(Date.now() - 86_400_000).toISOString()
-
-const vhosts = [
-  {
-    name: "app.example.com",
-    kind: "nginx",
-    path: "/etc/nginx/sites-available/app.example.com",
-    enabledPath: "/etc/nginx/sites-enabled/app.example.com",
-    enabled: true,
-    serverNames: ["app.example.com"],
-    listen: ["443 ssl"],
-    upstreams: ["http://127.0.0.1:3000"],
-    tls: true,
-    certPath: "/etc/letsencrypt/live/app.example.com/fullchain.pem",
-    modified: now,
-    size: 1200,
-  },
-  {
-    name: "legacy.example.com",
-    kind: "nginx",
-    path: "/etc/nginx/sites-available/legacy.example.com",
-    enabledPath: "/etc/nginx/sites-enabled/legacy.example.com",
-    enabled: true,
-    serverNames: ["legacy.example.com"],
-    listen: ["80"],
-    upstreams: ["http://127.0.0.1:8080"],
-    tls: false,
-    modified: now,
-    size: 400,
-  },
-  {
-    // A shared Docker Caddy route: no file on the host to edit.
-    name: "just-dashboard-shop",
-    kind: "caddy",
-    path: "",
-    enabled: true,
-    serverNames: ["shop.example.com"],
-    listen: ["80", "443"],
-    upstreams: ["http://172.18.0.4:3000"],
-    tls: true,
-    modified: now,
-    size: 0,
-  },
-]
-
-const certs = [
-  {
-    name: "app.example.com",
-    path: "/etc/letsencrypt/live/app.example.com/fullchain.pem",
-    domains: ["app.example.com"],
-    issuer: "R11",
-    notBefore: yesterday,
-    notAfter: inThirtyDays,
-    daysLeft: 29,
-    expired: false,
-    expiring: true,
-    selfSigned: false,
-    source: "certbot",
-    usedBy: ["app.example.com"],
-  },
-  {
-    name: "old.example.com",
-    path: "/etc/ssl/just-dashboard/old.example.com/fullchain.pem",
-    domains: ["old.example.com"],
-    issuer: "R11",
-    notBefore: yesterday,
-    notAfter: yesterday,
-    daysLeft: -1,
-    expired: true,
-    expiring: false,
-    selfSigned: false,
-    source: "imported",
-    usedBy: [],
-  },
-]
-
-const ports = [
-  {
-    protocol: "tcp",
-    address: "0.0.0.0",
-    port: 443,
-    pid: 812,
-    process: "nginx",
-    cmdline: "nginx: master process",
-    user: "root",
-    exposed: true,
-  },
-  {
-    protocol: "tcp",
-    address: "127.0.0.1",
-    port: 3000,
-    pid: 1400,
-    process: "node",
-    cmdline: "node server.js",
-    user: "app",
-    exposed: false,
-  },
-  {
-    protocol: "tcp",
-    address: "0.0.0.0",
-    port: 5432,
-    pid: 900,
-    process: "postgres",
-    cmdline: "postgres -D /var/lib/postgresql",
-    user: "postgres",
-    exposed: true,
-  },
-]
-
-async function json(route: Route, body: unknown) {
-  await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
-}
-
-async function mockProxy(page: Page, { included }: { included: boolean }) {
-  await page.routeWebSocket("**/api/v1/system/stream**", () => {})
-  await page.route("**/api/v1/**", async (route) => {
-    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
-    switch (path) {
-      case "/auth/session":
-        return json(route, user)
-      case "/dashboard/update":
-        return json(route, { current: "0.6.7", latest: "0.6.7" })
-      case "/proxy/status":
-        return json(route, availability)
-      case "/proxy/streams/":
-        return json(route, { included, snippet, dir: "/etc/nginx/streams", streams: [] })
-      case "/proxy/vhosts":
-        return json(route, vhosts)
-      case "/proxy/auth-files/":
-        return json(route, [])
-      case "/certificates/":
-        return json(route, certs)
-      case "/certificates/certbot":
-        return json(route, {
-          available: true,
-          version: "certbot 2.9.0",
-          certs: [
-            {
-              name: "app.example.com",
-              domains: ["app.example.com"],
-              expiry: inThirtyDays,
-              daysLeft: 29,
-              valid: true,
-            },
-          ],
-          autoRenew: false,
-          renewUnit: "certbot.timer",
-        })
-      case "/certificates/watched":
-        return json(route, [])
-      case "/certificates/dns-providers":
-        return json(route, [])
-      case "/systemd/nginx.service":
-        return json(route, {
-          unit: {
-            name: "nginx.service",
-            description: "A high performance web server",
-            loadState: "loaded",
-            activeState: "active",
-            subState: "running",
-            unitFileState: "enabled",
-            enabled: true,
-            activeSince: Math.floor(Date.now() / 1000) - 7200,
-          },
-          properties: {},
-        })
-      case "/ports":
-        return json(route, ports)
-      default:
-        return route.fulfill({
-          status: 503,
-          contentType: "application/json",
-          body: JSON.stringify({ error: { code: "not_available", message: "Not mocked" } }),
-        })
-    }
-  })
-}
 
 test("the reverse proxy is named once, in the identity line", async ({ page }) => {
   await mockProxy(page, { included: true })
@@ -318,6 +110,39 @@ test("a Docker Caddy route is listed without an editor it cannot use", async ({ 
   await expect(page.getByText("Plain HTTP", { exact: true }).first()).toBeVisible()
 })
 
+test("the raw editor reads its file afresh on every opening", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  // A new revision on every read, so a reopened editor showing the first one
+  // is a buffer kept across the close rather than the file on disk.
+  let reads = 0
+  await page.route("**/api/v1/proxy/config?**", (route) => {
+    reads += 1
+    return json(route, { content: `# revision-${reads}\n` })
+  })
+  await page.goto("/proxy/sites")
+  const card = page.locator("[data-slot='choice-row']").filter({ hasText: "app.example.com" })
+  await expect(card).toBeVisible()
+  expect(reads).toBe(0)
+
+  await card.getByRole("button", { name: "Raw config" }).click()
+  const sheet = page.getByRole("dialog")
+  const lines = sheet.locator(".monaco-editor .view-lines")
+  await expect(lines).toContainText("revision-1")
+  await lines.click()
+  await page.keyboard.press("End")
+  await page.keyboard.type("typed-then-closed")
+  await expect(sheet.getByRole("button", { name: "Discard" })).toBeEnabled()
+  await sheet.getByRole("button", { name: "Close", exact: true }).click()
+  await page.getByRole("button", { name: "Close and discard" }).click()
+  await expect(sheet).toHaveCount(0)
+
+  await card.getByRole("button", { name: "Raw config" }).click()
+  await expect(lines).toContainText("revision-2")
+  await expect(lines).not.toContainText("typed-then-closed")
+  await expect(sheet.getByRole("button", { name: "Discard" })).toBeDisabled()
+  expect(reads).toBe(2)
+})
+
 test("the ports page filters what it lists and names a database on a public address", async ({
   page,
 }) => {
@@ -325,8 +150,8 @@ test("the ports page filters what it lists and names a database on a public addr
   await page.goto("/proxy/ports")
 
   const table = page.getByRole("table")
-  await expect(table.getByText("PostgreSQL exposed")).toBeVisible()
-  await page.getByRole("button", { name: /^Loopback/ }).click()
+  await expect(table.getByText("PostgreSQL · Every interface")).toBeVisible()
+  await page.getByRole("button", { name: /^This server/ }).click()
   await expect(table.getByText("node server.js")).toBeVisible()
   await expect(table.getByText("nginx: master process")).toHaveCount(0)
   await page.getByPlaceholder("Port, process, user or address").fill("5432")
@@ -347,7 +172,7 @@ test("a stream cannot be created as though nginx were reading it", async ({ page
 
   // And the form repeats it at the point of commit, with the fix to hand.
   await expect(page.getByText("This will not forward anything yet")).toBeVisible()
-  await expect(page.getByText(/include/).first()).toBeVisible()
+  await expect(page.getByRole("dialog").getByText(/include/)).toBeVisible()
   await expect(page.getByRole("button", { name: "Save for later" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Save and reload" })).toHaveCount(0)
 })
@@ -377,7 +202,7 @@ test("the certificates page offers to turn the renewal timer on", async ({ page 
     .getByRole("list", { name: "Installed certificates" })
     .locator("[data-slot='choice-row']")
   const row = installed.filter({ hasText: "old.example.com" })
-  await expect(row.getByText("Used by no site")).toBeVisible()
+  await expect(row.getByText("Used by nothing")).toBeVisible()
   await expect(row.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
   // And the expired one is first, over a meter with nothing left in it.
   await expect(installed.first()).toContainText("old.example.com")
@@ -390,6 +215,7 @@ test("a stream is drawn as the service its port is", async ({ page }) => {
   await page.route("**/api/v1/proxy/streams/", (route) =>
     json(route, {
       included: true,
+      module: { state: "loaded", usable: true },
       snippet,
       dir: "/etc/nginx/streams",
       streams: [
@@ -400,6 +226,9 @@ test("a stream is drawn as the service its port is", async ({ page }) => {
           upstream: "10.0.0.5:5432",
           proxyProtocol: false,
           allowFrom: [],
+          open: true,
+          managed: true,
+          unsupported: [],
         },
         {
           name: "bastion",
@@ -408,6 +237,9 @@ test("a stream is drawn as the service its port is", async ({ page }) => {
           upstream: "10.0.0.9:22",
           proxyProtocol: false,
           allowFrom: ["10.0.0.0/8"],
+          open: false,
+          managed: true,
+          unsupported: [],
         },
       ],
     }),
@@ -425,149 +257,6 @@ test("a stream is drawn as the service its port is", async ({ page }) => {
   await expect(cards.last().getByText("10.0.0.0/8")).toBeVisible()
 })
 
-const scan = {
-  domain: "app.example.com",
-  port: 443,
-  checkedAt: now,
-  reachable: true,
-  grade: "B",
-  summary: "A trusted certificate with headers to improve",
-  negotiated: "TLS 1.3",
-  cipherSuite: "TLS_AES_128_GCM_SHA256",
-  certificate: certs[0],
-  trusted: true,
-  chainComplete: true,
-  nameMatches: true,
-  keyType: "ECDSA",
-  keyBits: 256,
-  signatureAlgorithm: "ECDSA-SHA256",
-  serial: "04:D3:51:AA:12:FE:90:81",
-  fingerprint: "ab:cd:".repeat(31) + "ef",
-  ocspStapled: false,
-  protocols: [
-    { name: "TLS 1.0", status: "unknown", detail: "This client cannot test this version" },
-    { name: "TLS 1.1", status: "refused" },
-    { name: "TLS 1.2", status: "offered" },
-    { name: "TLS 1.3", status: "offered" },
-  ],
-  chain: [
-    {
-      subject: "app.example.com",
-      issuer: "R11",
-      notAfter: inThirtyDays,
-      isCa: false,
-      selfIssued: false,
-      keyType: "ECDSA",
-      keyBits: 256,
-    },
-    {
-      subject: "R11",
-      issuer: "ISRG Root X1",
-      notAfter: inThirtyDays,
-      isCa: true,
-      selfIssued: false,
-      keyType: "RSA",
-      keyBits: 2048,
-    },
-  ],
-  findings: [
-    {
-      id: "hsts",
-      level: "warning",
-      title: "HSTS is not set",
-      detail: "The endpoint does not send Strict-Transport-Security.",
-      advice: "Enable HSTS after verifying HTTPS for all covered domains.",
-    },
-  ],
-  http: {
-    statusCode: 200,
-    plainRedirects: true,
-    plainStatus: 301,
-    plainLocation: "https://app.example.com/",
-    headers: [
-      {
-        name: "X-Content-Type-Options",
-        present: true,
-        value: "nosniff",
-        level: "important",
-        detail: "Prevents MIME sniffing",
-      },
-      {
-        name: "Content-Security-Policy",
-        present: false,
-        level: "important",
-        detail: "No content security policy was sent",
-      },
-      {
-        name: "Referrer-Policy",
-        present: true,
-        value: "strict-origin-when-cross-origin",
-        level: "optional",
-        detail: "Controls referrers",
-      },
-    ],
-  },
-}
-
-async function mockShowcase(page: Page) {
-  await mockProxy(page, { included: true })
-  await page.route("**/api/v1/certificates/scan?*", (route) => json(route, scan))
-  await page.route("**/api/v1/certificates/watched", (route) =>
-    json(route, [{ id: 1, domain: "mail.example.com", port: 993, certificate: certs[0] }]),
-  )
-  await page.route("**/api/v1/certificates/dns-providers", (route) =>
-    json(route, [
-      {
-        key: "cloudflare",
-        name: "Cloudflare",
-        plugin: "dns-cloudflare",
-        installed: true,
-        hasCredentials: true,
-        defaultWait: 30,
-      },
-    ]),
-  )
-  await page.route("**/api/v1/proxy/auth-files/", (route) =>
-    json(route, [
-      { name: "staging", path: "/etc/nginx/auth/staging", users: ["operator", "reviewer"] },
-    ]),
-  )
-  await page.route("**/api/v1/proxy/streams/", (route) =>
-    json(route, {
-      included: true,
-      snippet,
-      dir: "/etc/nginx/streams",
-      streams: [
-        {
-          name: "postgres-replica",
-          listen: 5432,
-          protocol: "tcp",
-          upstream: "10.0.0.5:5432",
-          proxyProtocol: false,
-          allowFrom: [],
-        },
-        {
-          name: "private-redis",
-          listen: 6379,
-          protocol: "tcp",
-          upstream: "10.0.0.9:6379",
-          proxyProtocol: false,
-          allowFrom: ["10.0.0.0/8"],
-          timeout: 600,
-        },
-        {
-          name: "minecraft",
-          listen: 25565,
-          protocol: "tcp",
-          upstream: "10.0.0.6:25565",
-          proxyProtocol: true,
-          allowFrom: [],
-        },
-      ],
-    }),
-  )
-}
-
 for (const width of [390, 1280, 1720]) {
   test(`every proxy page has readable content and contained controls at ${width}`, async ({
     page,
@@ -576,16 +265,9 @@ for (const width of [390, 1280, 1720]) {
     await mockShowcase(page)
     const failures: string[] = []
     page.on("pageerror", (error) => failures.push(error.message))
-    for (const path of [
-      "/proxy",
-      "/proxy/sites",
-      "/proxy/certificates",
-      "/proxy/tls?domain=app.example.com",
-      "/proxy/streams",
-      "/proxy/ports",
-    ]) {
+    for (const path of PROXY_PAGES) {
       await page.goto(path)
-      await expect(page.locator("[data-slot='stat-grid']")).toBeVisible()
+      await expect(page.locator("[data-slot='stat-grid']").first()).toBeVisible()
       await page.waitForLoadState("networkidle")
       const overflow = await page
         .locator("[data-slot='page']")
@@ -628,7 +310,7 @@ test("certificate cards filter, reveal complete details and link to their owning
 }) => {
   await mockProxy(page, { included: true })
   await page.goto("/proxy/certificates")
-  await page.getByPlaceholder("Certificate, domain or issuer").fill("app.example.com")
+  await page.getByPlaceholder("Name, a host it covers, or issuer").fill("app.example.com")
   const list = page.getByRole("list", { name: "Installed certificates" })
   await expect(list.locator("[data-slot='choice-row']")).toHaveCount(1)
   await list.getByRole("button", { name: "Inspect app.example.com" }).click()
@@ -639,11 +321,11 @@ test("certificate cards filter, reveal complete details and link to their owning
     "href",
     "/proxy/sites/app.example.com",
   )
-  await expect(detail.getByRole("link", { name: "TLS report" })).toHaveAttribute(
-    "href",
-    "/proxy/tls?domain=app.example.com",
-  )
-  await expect(detail.getByRole("button", { name: "Copy path" })).toBeVisible()
+  await detail.getByRole("button", { name: "More actions for app.example.com" }).click()
+  const menu = page.getByRole("menu")
+  await expect(menu.getByRole("menuitem", { name: "Copy path" })).toBeVisible()
+  await menu.getByRole("menuitem", { name: "TLS report for app.example.com" }).click()
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=app\.example\.com$/)
 })
 
 test("a watched service retains its port when opening the live report", async ({ page }) => {
@@ -682,7 +364,11 @@ test("read-only users can inspect certificates without proxy mutation controls o
   await page.goto("/proxy/certificates")
   await expect(page.getByRole("button", { name: "Issue certificate", exact: true })).toHaveCount(0)
   await page.getByRole("button", { name: "Inspect app.example.com", exact: true }).click()
-  await expect(page.getByRole("dialog").getByRole("link", { name: "TLS report" })).toHaveCount(0)
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "More actions for app.example.com" })
+    .click()
+  await expect(page.getByRole("menu").getByRole("menuitem", { name: /TLS report/ })).toHaveCount(0)
   await page.goto("/proxy/tls")
   await expect(page.getByRole("button", { name: "Scan", exact: true })).toBeDisabled()
   await expect(page.getByText("Scanning needs an administrator")).toBeVisible()

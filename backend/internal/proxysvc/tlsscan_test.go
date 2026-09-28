@@ -40,7 +40,7 @@ func goodScan() *TLSScan {
 		Negotiated: "TLS 1.3",
 		Certificate: &Certificate{
 			Name: "example.com", Domains: []string{"example.com"},
-			DaysLeft: 60, NotAfter: time.Now().Add(60 * 24 * time.Hour),
+			DaysLeft: 60, NotBefore: time.Now().Add(-30 * 24 * time.Hour), NotAfter: time.Now().Add(60 * 24 * time.Hour),
 		},
 		Protocols: []ProtocolResult{
 			{Name: "TLS 1.0", Status: "refused"},
@@ -49,7 +49,7 @@ func goodScan() *TLSScan {
 			{Name: "TLS 1.3", Status: "offered"},
 		},
 		HTTP: &HTTPScan{
-			StatusCode: 200, PlainRedirects: true,
+			Service: "http", StatusCode: 200, PlainRedirects: true, RedirectVerdict: "same-host",
 			HSTS:    &HSTS{MaxAge: hstsStrongMaxAge, IncludeSubDomains: true},
 			Headers: []HeaderCheck{{Name: "X-Frame-Options", Present: true, Level: "important"}},
 		},
@@ -137,6 +137,7 @@ func TestGradeMissingIntermediateIsB(t *testing.T) {
 func TestGradeNoRedirectIsB(t *testing.T) {
 	scan := goodScan()
 	scan.HTTP.PlainRedirects = false
+	scan.HTTP.RedirectChain = []RedirectHop{{URL: "http://example.com/", Status: 200}}
 	grade(scan)
 	if scan.Grade != "B" {
 		t.Fatalf("grade = %q", scan.Grade)
@@ -209,15 +210,6 @@ func TestUnknownProtocolStatusIsNotTreatedAsRefused(t *testing.T) {
 	grade(scan)
 	if hasFinding(scan, "tls.no-13") {
 		t.Error("reported TLS 1.3 as missing when it was never tested")
-	}
-}
-
-func TestIsLocalVersionRefusal(t *testing.T) {
-	if !isLocalVersionRefusal(errString("tls: no supported versions satisfy MinVersion and MaxVersion")) {
-		t.Error("a local refusal should be recognised")
-	}
-	if isLocalVersionRefusal(errString("dial tcp: connection refused")) {
-		t.Error("a network failure is not a local refusal")
 	}
 }
 

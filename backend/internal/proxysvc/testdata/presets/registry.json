@@ -1,0 +1,8 @@
+{
+  "kind": "proxy",
+  "upstream": "http://127.0.0.1:5000",
+  "webSockets": false,
+  "clientMaxBody": "0",
+  "proxyTimeout": 900,
+  "custom": "# Pushes stream through to the registry as they arrive instead of\n# being spooled to disk first.\nproxy_request_buffering off;"
+}

@@ -8,7 +8,6 @@
 package proxysvc
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,9 +15,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
@@ -39,7 +38,16 @@ type Kind string
 const (
 	KindNginx Kind = "nginx"
 	KindCaddy Kind = "caddy"
+	// KindCaddyIngress is the Docker Caddy that deployments share. It is
+	// tested and reloaded inside its container, against the Caddyfile the
+	// container serves; the host may have no caddy binary at all.
+	KindCaddyIngress Kind = "caddy-ingress"
 )
+
+// Known reports whether k is an engine the config test and reload can drive.
+func (k Kind) Known() bool {
+	return k == KindNginx || k == KindCaddy || k == KindCaddyIngress
+}
 
 type Service struct {
 	dockerIngress bool
@@ -51,6 +59,11 @@ type Service struct {
 	// Serialising every validate and write keeps two operators from having
 	// their candidates interleaved on the same file.
 	mu sync.Mutex
+
+	recorder  ChangeRecorder
+	effective effectiveCache
+	pending   pendingTracker
+	tested    testMemory
 }
 
 func New(nginxDir, caddyFile string) *Service {
@@ -72,8 +85,26 @@ func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
 	return discoverDockerCaddy(ctx)
 }
 
+// IngressState says whether the shared Docker Caddy exists yet.
+const (
+	// IngressRunning is a Caddy container found publishing 80 and 443.
+	IngressRunning = "running"
+	// IngressProvisionable is none running, with Docker here and 80 and 443
+	// free: the first deployment that routes a domain starts one.
+	IngressProvisionable = "provisionable"
+)
+
 type Availability struct {
+	// IngressContainer is the running Docker Caddy's name; never set for one
+	// that would only be started later.
 	IngressContainer string `json:"ingressContainer,omitempty"`
+	// IngressID is that container's ID, which the page's Restart container
+	// and Container logs act on through the Docker routes and their own
+	// gates; a name can be reused by another container between two reads.
+	IngressID string `json:"ingressId,omitempty"`
+	// IngressStartedAt is when that container last started (RFC 3339).
+	IngressStartedAt string `json:"ingressStartedAt,omitempty"`
+	IngressState     string `json:"ingressState,omitempty"`
 	Nginx            bool   `json:"nginx"`
 	Caddy            bool   `json:"caddy"`
 	NginxVer         string `json:"nginxVersion,omitempty"`
@@ -103,14 +134,51 @@ func (s *Service) Availability(ctx context.Context) Availability {
 	if hostexec.Available("certbot") {
 		a.Certbot = true
 	}
-	if edge, err := s.dockerCaddy(ctx); err == nil && edge != nil {
+	edge, err := s.dockerCaddy(ctx)
+	a.setIngress(edge, err == nil && edge == nil && s.canProvisionIngress(ctx))
+	return a
+}
+
+// setIngress records the Docker Caddy: the one found running, or that the
+// first deployment would start one. The second is neither Caddy nor a
+// container — nothing serves yet — and naming the container it would be put
+// Test and Reload buttons on the overview for a Caddy that did not exist.
+func (a *Availability) setIngress(edge *dockerCaddy, provisionable bool) {
+	switch {
+	case edge != nil:
 		a.Caddy = true
 		a.IngressContainer = edge.Name
-	} else if err == nil && s.canProvisionIngress(ctx) {
-		a.Caddy = true
-		a.IngressContainer = managedIngressName
+		a.IngressID = edge.ID
+		a.IngressStartedAt = edge.StartedAt
+		a.IngressState = IngressRunning
+	case provisionable:
+		a.IngressState = IngressProvisionable
 	}
-	return a
+}
+
+// ErrNoEngineUnit is a proxy the dashboard cannot start or stop as a service:
+// the Docker Caddy ingress, whose lifecycle is its container's, or none.
+var ErrNoEngineUnit = errors.New("this host's proxy is not run by a systemd unit")
+
+// EngineUnit is the service behind the engine the overview shows: its unit,
+// the kind its config test takes, and its name for a sentence.
+type EngineUnit struct {
+	Unit string
+	Kind Kind
+	Name string
+}
+
+// Engine resolves the unit on the server — nginx where it is installed, else a
+// host Caddy — so a request can only ever start or stop the proxy, never a
+// unit named by the caller.
+func (s *Service) Engine() (EngineUnit, error) {
+	if hostexec.Available("nginx") {
+		return EngineUnit{Unit: "nginx.service", Kind: KindNginx, Name: "nginx"}, nil
+	}
+	if hostexec.Available("caddy") {
+		return EngineUnit{Unit: "caddy.service", Kind: KindCaddy, Name: "Caddy"}, nil
+	}
+	return EngineUnit{}, ErrNoEngineUnit
 }
 
 // nginxVersionLine matches what `nginx -v` writes to stderr:
@@ -147,213 +215,6 @@ func parseCaddyVersion(out string) string {
 
 func firstLine(s string) string {
 	return strings.TrimSpace(strings.SplitN(strings.TrimSpace(s), "\n", 2)[0])
-}
-
-// VHost is one virtual host. For nginx the enabled state is the presence of a
-// symlink in sites-enabled, which is the convention Debian-family packages use
-// and the one operators expect the toggle to drive.
-type VHost struct {
-	Name        string   `json:"name"`
-	Kind        Kind     `json:"kind"`
-	Path        string   `json:"path"`
-	EnabledPath string   `json:"enabledPath,omitempty"`
-	Enabled     bool     `json:"enabled"`
-	ServerNames []string `json:"serverNames"`
-	Listen      []string `json:"listen"`
-	Upstreams   []string `json:"upstreams"`
-	TLS         bool     `json:"tls"`
-	CertPath    string   `json:"certPath,omitempty"`
-	// AccessLogPath and ErrorLogPath are where an nginx site writes, read as
-	// its page reads them (ParseSiteSpec), so a listing of the sites can say
-	// which keep a request record of their own without one read per site.
-	AccessLogPath string    `json:"accessLogPath,omitempty"`
-	ErrorLogPath  string    `json:"errorLogPath,omitempty"`
-	Modified      time.Time `json:"modified"`
-	Size          int64     `json:"size"`
-}
-
-var (
-	serverNameRe = regexp.MustCompile(`(?m)^\s*server_name\s+([^;]+);`)
-	listenRe     = regexp.MustCompile(`(?m)^\s*listen\s+([^;]+);`)
-	proxyPassRe  = regexp.MustCompile(`(?m)^\s*proxy_pass\s+([^;]+);`)
-	certRe       = regexp.MustCompile(`(?m)^\s*ssl_certificate\s+([^;]+);`)
-)
-
-func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
-	out := []VHost{}
-	out = append(out, s.nginxVHosts()...)
-	if caddy, err := s.caddySites(); err == nil {
-		out = append(out, caddy...)
-	}
-	if edge, err := s.dockerCaddy(ctx); err != nil {
-		return nil, err
-	} else if edge != nil {
-		sites, err := edge.vhosts(ctx)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, sites...)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
-// backupSuffixes are the files that live beside a configuration and are not
-// one. nginx reads none of them — sites-enabled is a directory of symlinks and
-// conf.d is included as *.conf — but the listing used to show every one as a
-// site in its own right. That made deleting a site produce a second site
-// called <name>.bak, deleting *that* produce <name>.bak.bak, and a host where
-// the package manager had ever written an .dpkg-old show a duplicate of every
-// site it had touched.
-var backupSuffixes = []string{
-	".bak", ".old", ".orig", ".save", ".swp", ".tmp",
-	".rpmsave", ".rpmnew", ".dpkg-old", ".dpkg-new", ".dpkg-dist",
-	".ucf-old", ".ucf-new", ".ucf-dist",
-}
-
-// isBackupFile reports a file nginx will never read and the operator never
-// asked for. The trailing tilde is every editor's own backup.
-func isBackupFile(name string) bool {
-	if strings.HasSuffix(name, "~") {
-		return true
-	}
-	lower := strings.ToLower(name)
-	for _, suffix := range backupSuffixes {
-		if strings.HasSuffix(lower, suffix) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Service) nginxVHosts() []VHost {
-	available := filepath.Join(s.nginxDir, "sites-available")
-	enabled := filepath.Join(s.nginxDir, "sites-enabled")
-	entries, err := os.ReadDir(available)
-	if err != nil {
-		// Hosts without the Debian layout keep everything in conf.d. That is
-		// every RPM distribution, Alpine and Arch — most of the servers this
-		// runs on.
-		available = filepath.Join(s.nginxDir, "conf.d")
-		entries, err = os.ReadDir(available)
-		if err != nil {
-			return nil
-		}
-		enabled = ""
-	}
-	out := []VHost{}
-	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") || isBackupFile(e.Name()) {
-			continue
-		}
-		full := filepath.Join(available, e.Name())
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		v := VHost{
-			Name: e.Name(), Kind: KindNginx, Path: full,
-			Modified: info.ModTime().UTC(), Size: info.Size(),
-			ServerNames: []string{}, Listen: []string{}, Upstreams: []string{},
-		}
-		if enabled == "" {
-			// conf.d is included as *.conf, so the suffix is the whole
-			// difference between a file nginx reads and one it ignores.
-			// There is no symlink to toggle either way, which EnabledPath
-			// staying empty is what tells the UI.
-			v.Enabled = strings.HasSuffix(e.Name(), ".conf")
-		} else {
-			link := filepath.Join(enabled, e.Name())
-			if _, err := os.Lstat(link); err == nil {
-				v.Enabled = true
-				v.EnabledPath = link
-			} else {
-				v.EnabledPath = link
-			}
-		}
-		if b, err := os.ReadFile(full); err == nil {
-			text := string(b)
-			for _, m := range serverNameRe.FindAllStringSubmatch(text, -1) {
-				v.ServerNames = append(v.ServerNames, strings.Fields(m[1])...)
-			}
-			for _, m := range listenRe.FindAllStringSubmatch(text, -1) {
-				v.Listen = append(v.Listen, strings.TrimSpace(m[1]))
-			}
-			for _, m := range proxyPassRe.FindAllStringSubmatch(text, -1) {
-				v.Upstreams = append(v.Upstreams, strings.TrimSpace(m[1]))
-			}
-			if m := certRe.FindStringSubmatch(text); m != nil {
-				v.TLS = true
-				v.CertPath = strings.TrimSpace(m[1])
-			}
-			spec, _ := ParseSiteSpec(e.Name(), text)
-			v.AccessLogPath, v.ErrorLogPath = spec.AccessLogPath, spec.ErrorLogPath
-		}
-		out = append(out, v)
-	}
-	return out
-}
-
-// caddySites treats the Caddyfile as a single vhost entry. Caddy's config is
-// one file with site blocks rather than a directory of them, so "enable/disable
-// a site" has no filesystem equivalent — the editor is the interface.
-func (s *Service) caddySites() ([]VHost, error) {
-	info, err := os.Stat(s.caddyFile)
-	if err != nil {
-		return nil, err
-	}
-	v := VHost{
-		Name: filepath.Base(s.caddyFile), Kind: KindCaddy, Path: s.caddyFile,
-		Enabled: true, Modified: info.ModTime().UTC(), Size: info.Size(),
-		ServerNames: []string{}, Listen: []string{}, Upstreams: []string{},
-	}
-	if b, err := os.ReadFile(s.caddyFile); err == nil {
-		v.ServerNames, v.Upstreams = parseCaddyfile(string(b))
-	}
-	return []VHost{v}, nil
-}
-
-// parseCaddyfile pulls the site addresses and the reverse_proxy targets out
-// of a Caddyfile without being a Caddyfile parser.
-//
-// Only a block opened at the top level is a site address. Every directive
-// that takes a block — handle, route, tls, header, encode, log — opens one
-// too, and reading those as names put "header" and "handle" in the server
-// list of every Caddyfile that used them. Brace depth is tracked line by
-// line, which is enough for the files Caddy's own formatter produces; a
-// global options block, which opens with a bare `{`, is skipped by the same
-// rule since it has no name.
-func parseCaddyfile(content string) (names, upstreams []string) {
-	names, upstreams = []string{}, []string{}
-	depth := 0
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		if after, ok := strings.CutPrefix(trimmed, "reverse_proxy "); ok {
-			target := strings.TrimSpace(strings.TrimSuffix(after, "{"))
-			if target != "" {
-				upstreams = append(upstreams, target)
-			}
-		}
-		opens := strings.HasSuffix(trimmed, "{")
-		if opens && depth == 0 {
-			name := strings.TrimSpace(strings.TrimSuffix(trimmed, "{"))
-			if name != "" && !strings.ContainsAny(name, "()") {
-				for _, field := range strings.Split(name, ",") {
-					names = append(names, strings.Fields(field)...)
-				}
-			}
-		}
-		if opens {
-			depth++
-		}
-		if trimmed == "}" && depth > 0 {
-			depth--
-		}
-	}
-	return names, upstreams
 }
 
 // allowedPath keeps the config editor pointed at the proxy's own directories.
@@ -424,7 +285,7 @@ func (s *Service) nginxIncluded(full string) (included, known bool) {
 	case filepath.Join(s.nginxDir, "conf.d"):
 		return strings.HasSuffix(name, ".conf"), true
 	case s.streamDir():
-		return strings.HasSuffix(name, ".conf") && streamIncludeFound(s.nginxDir, s.streamDir()), true
+		return strings.HasSuffix(name, ".conf") && streamDirRead(s.nginxDir, s.streamDir()), true
 	}
 	return false, false
 }
@@ -462,6 +323,11 @@ type ValidationResult struct {
 	// passes `nginx -t` without being read, and saying so is the difference
 	// between a dry run and a false reassurance.
 	Note string `json:"note,omitempty"`
+	// Diagnostics are the leveled lines of Output, placed where they name a
+	// file and line. Warnings counts the warn-level ones, because nginx passes
+	// a config it is quietly ignoring part of.
+	Diagnostics []Diagnostic `json:"diagnostics"`
+	Warnings    int          `json:"warnings"`
 }
 
 // Validate runs the server's own config test and leaves the host exactly as it
@@ -473,7 +339,18 @@ type ValidationResult struct {
 // the result was Valid and the rollback never ran.
 func (s *Service) Validate(ctx context.Context, kind Kind, path, content string) (*ValidationResult, error) {
 	if kind == KindCaddy {
-		return s.validateCaddy(ctx, content)
+		// The path only names the file in the result, but it is still held
+		// to the proxy's directories: a name the editor could never save to
+		// is not one to resolve on a caller's say-so.
+		target := s.caddyFile
+		if path != "" {
+			full, err := s.allowedPath(path)
+			if err != nil {
+				return nil, err
+			}
+			target = full
+		}
+		return s.validateCaddy(ctx, target, content)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -490,10 +367,13 @@ func (s *Service) validateNginx(ctx context.Context, path, content string) (*Val
 	if err != nil {
 		return nil, err
 	}
-	res := runValidator(ctx, "nginx", "-t")
+	res, err := runTest(ctx, "nginx", "-t")
 	// Unconditional: the caller asked whether this content would be accepted,
 	// not for it to be installed.
 	restore()
+	if err != nil {
+		return nil, err
+	}
 	res.Note = s.includeNote(full)
 	return res, nil
 }
@@ -502,6 +382,7 @@ func (s *Service) validateNginx(ctx context.Context, path, content string) (*Val
 // unavoidable for nginx and is why validation requires system.admin — the same
 // capability as writing the file outright.
 func (s *Service) stageNginx(full, content string) (func(), error) {
+	s.keepLoaded(full)
 	original, readErr := os.ReadFile(full)
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return nil, readErr
@@ -524,33 +405,73 @@ func (s *Service) stageNginx(full, content string) (func(), error) {
 	}, nil
 }
 
-func (s *Service) validateCaddy(ctx context.Context, content string) (*ValidationResult, error) {
-	tmp, err := os.CreateTemp("", "vpsd-caddy-*")
+// caddyScratchRoot is where a Caddyfile candidate is copied for `caddy
+// validate`. caddy is not in the dashboard's image and runs on the host
+// through nsenter, where the container's /tmp is a different directory: a
+// copy there was a file the host's caddy could not open, so every check of an
+// edit failed. docker-compose.yml mounts this one directory at the same path
+// on both sides. A variable so tests can use their own.
+var caddyScratchRoot = "/tmp/just-dashboard"
+
+// caddyScratch makes a private directory for one candidate and returns it
+// with its removal. The root is shared with every account on the host, so it
+// must be a real directory the dashboard owns and nobody else can write to,
+// the check the terminal's clipboard makes of the same root: a directory
+// another account planted could read the candidate — a Caddyfile can hold
+// credentials — or swap it between the write and the test.
+func caddyScratch() (string, func(), error) {
+	if err := os.Mkdir(caddyScratchRoot, 0o711); err != nil && !errors.Is(err, os.ErrExist) {
+		return "", nil, err
+	}
+	info, err := os.Lstat(caddyScratchRoot)
+	if err != nil {
+		return "", nil, err
+	}
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	if !info.IsDir() || !ok || owner.Uid != uint32(os.Geteuid()) || info.Mode().Perm()&0o022 != 0 {
+		return "", nil, fmt.Errorf("%s is not a directory only the dashboard can write to, so a Caddyfile cannot be checked there", caddyScratchRoot)
+	}
+	dir, err := os.MkdirTemp(caddyScratchRoot, "caddy-validate-")
+	if err != nil {
+		return "", nil, err
+	}
+	return dir, func() { os.RemoveAll(dir) }, nil
+}
+
+// validateCaddy tests content as the file at target. Caddy can be pointed at
+// a copy, so nothing is staged, but it names the copy in every message it
+// writes: a file the caller never saw, and one that is gone by the time the
+// result is read. The copy's name is replaced by target's throughout.
+func (s *Service) validateCaddy(ctx context.Context, target, content string) (*ValidationResult, error) {
+	dir, remove, err := caddyScratch()
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
+	defer remove()
+	copied := filepath.Join(dir, "Caddyfile")
+	if err := os.WriteFile(copied, []byte(content), 0o600); err != nil {
 		return nil, err
 	}
-	tmp.Close()
-	return runValidator(ctx, "caddy", "validate", "--config", tmp.Name(), "--adapter", "caddyfile"), nil
+	res, err := runTest(ctx, "caddy", "validate", "--config", copied, "--adapter", "caddyfile")
+	if err != nil {
+		return nil, err
+	}
+	staged, target := resolvedFile(copied), resolvedFile(target)
+	res.Output = strings.ReplaceAll(res.Output, copied, target)
+	for i, d := range res.Diagnostics {
+		if d.File == staged {
+			res.Diagnostics[i].File = target
+		}
+		res.Diagnostics[i].Message = strings.ReplaceAll(d.Message, copied, target)
+	}
+	return res, nil
 }
 
+// runValidator is runTest for a caller that only acts on a pass: a test that
+// did not finish reads as a failure, which refuses whatever it guards.
 func runValidator(ctx context.Context, name string, args ...string) *ValidationResult {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	cmd := hostexec.Command(ctx, name, args...)
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	err := cmd.Run()
-	return &ValidationResult{
-		Valid:   err == nil,
-		Output:  strings.TrimSpace(buf.String()),
-		Command: name + " " + strings.Join(args, " "),
-	}
+	res, _ := runTest(ctx, name, args...)
+	return res
 }
 
 // WriteConfig saves a configuration only after it validates. The order here is
@@ -563,16 +484,19 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 		return nil, err
 	}
 	if kind == KindCaddy {
-		res, err := s.validateCaddy(ctx, content)
+		res, err := s.validateCaddy(ctx, full, content)
 		if err != nil {
 			return nil, err
 		}
 		if !res.Valid {
 			return res, ErrInvalidConf
 		}
+		original, existed := readIfPresent(full)
 		if err := writeAtomic(full, content); err != nil {
 			return nil, err
 		}
+		s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
+			Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
 		return res, nil
 	}
 	// Validation now restores the original unconditionally, so the write has
@@ -587,14 +511,25 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 	if !res.Valid {
 		return res, ErrInvalidConf
 	}
+	original, existed := readIfPresent(full)
 	restore, err := s.stageNginx(full, content)
 	if err != nil {
 		return nil, err
 	}
-	if after := runValidator(ctx, "nginx", "-t"); !after.Valid {
+	started := time.Now()
+	after, err := runTest(ctx, "nginx", "-t")
+	if err != nil {
+		restore()
+		return nil, err
+	}
+	if !after.Valid {
 		restore()
 		return after, ErrInvalidConf
 	}
+	// The file stays, so this is a test of the configuration as it now is.
+	s.remember(KindNginx, started, after)
+	s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
+		Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
 	return res, nil
 }
 
@@ -624,12 +559,58 @@ func writeAtomic(path, content string) error {
 
 // Test runs the server's own config test against what is on disk right now.
 // It stages nothing and reloads nothing: it is the answer to "would a reload
-// succeed", asked before pressing the button that finds out the hard way.
-func (s *Service) Test(ctx context.Context, kind Kind) *ValidationResult {
-	if kind == KindCaddy {
-		return runValidator(ctx, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
+// succeed", asked before pressing the button that finds out the hard way. The
+// ingress is tested inside its container, and there is nothing to test until
+// one runs.
+//
+// Every test that gives a verdict is kept as the engine's last (see
+// TestRecord); one that does not is ErrTestUnfinished and kept nowhere.
+func (s *Service) Test(ctx context.Context, kind Kind) (*ValidationResult, error) {
+	started := time.Now()
+	// Once begun, a test runs to its verdict: a tab closed or refreshed while
+	// it runs would otherwise stop it, and a stopped test says nothing.
+	run := context.WithoutCancel(ctx)
+	var res *ValidationResult
+	var err error
+	switch kind {
+	case KindCaddyIngress:
+		var edge *dockerCaddy
+		if edge, err = s.ingress(ctx); err != nil {
+			return nil, err
+		}
+		res, err = edge.validate(run)
+	case KindCaddy:
+		res, err = runTest(run, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
+	default:
+		kind = KindNginx
+		res, err = runTest(run, "nginx", "-t")
 	}
-	return runValidator(ctx, "nginx", "-t")
+	if err != nil {
+		return nil, err
+	}
+	s.remember(kind, started, res)
+	return res, nil
+}
+
+// WithTestedConfig runs start only when the engine's config test passes, and
+// holds the service lock across both, so no candidate can be staged between
+// the test and what it guards. It exists for starting and restarting the
+// engine's service: this host's nginx.service runs `nginx -t` before it
+// starts, so a restart over a broken file stops nginx and then cannot bring it
+// back — every site down until someone logs in. A failing test returns the
+// result with ErrInvalidConf and start is never called; start must not call
+// back into the Service.
+func (s *Service) WithTestedConfig(ctx context.Context, kind Kind, start func() error) (*ValidationResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.Test(ctx, kind)
+	if err != nil {
+		return nil, err
+	}
+	if !res.Valid {
+		return res, ErrInvalidConf
+	}
+	return res, start()
 }
 
 type ReloadResult struct {
@@ -639,18 +620,33 @@ type ReloadResult struct {
 }
 
 // Reload tests first and refuses to reload a config that does not pass. This
-// is the guard rail that makes a config editor safe to expose at all.
+// is the guard rail that makes a config editor safe to expose at all. Its test
+// is kept as the engine's last, passed or not; one that gives no verdict is
+// ErrTestUnfinished, and nothing is reloaded or kept.
 func (s *Service) Reload(ctx context.Context, kind Kind) (*ReloadResult, error) {
+	s.forgetEffective()
+	if kind == KindCaddyIngress {
+		return s.reloadIngress(ctx)
+	}
 	var validation *ValidationResult
+	var err error
 	var reload *exec.Cmd
+	started := time.Now()
+	// As Test's: a closed tab does not stop the test once begun.
+	run := context.WithoutCancel(ctx)
 	switch kind {
 	case KindCaddy:
-		validation = runValidator(ctx, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
+		validation, err = runTest(run, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
 		reload = hostexec.Command(ctx, "caddy", "reload", "--config", s.caddyFile)
 	default:
-		validation = runValidator(ctx, "nginx", "-t")
+		kind = KindNginx
+		validation, err = runTest(run, "nginx", "-t")
 		reload = hostexec.Command(ctx, "nginx", "-s", "reload")
 	}
+	if err != nil {
+		return nil, err
+	}
+	s.remember(kind, started, validation)
 	res := &ReloadResult{Validation: validation}
 	if !validation.Valid {
 		return res, ErrInvalidConf
@@ -662,35 +658,4 @@ func (s *Service) Reload(ctx context.Context, kind Kind) (*ReloadResult, error) 
 		return res, fmt.Errorf("reload failed: %s", res.Output)
 	}
 	return res, nil
-}
-
-// SetVHostEnabled toggles the sites-enabled symlink. Only nginx has this
-// notion; Caddy has no per-site enable, and saying so is better than pretending.
-func (s *Service) SetVHostEnabled(ctx context.Context, name string, enabled bool) error {
-	if strings.ContainsAny(name, "/\\") || name == "" || name == "." || name == ".." {
-		return fmt.Errorf("invalid vhost name %q", name)
-	}
-	available := filepath.Join(s.nginxDir, "sites-available", name)
-	link := filepath.Join(s.nginxDir, "sites-enabled", name)
-	if _, err := os.Stat(filepath.Dir(available)); err != nil {
-		// Saying which of the two layouts this host uses, rather than "no
-		// such vhost": on a conf.d host the site is there and it is the
-		// toggle that does not exist.
-		return fmt.Errorf("this host keeps its nginx sites in conf.d, where every file is active — there is no enable or disable to set. Delete the site, or rename its file so it no longer ends in .conf")
-	}
-	if _, err := os.Stat(available); err != nil {
-		return fmt.Errorf("no such vhost: %s", name)
-	}
-	if enabled {
-		// linkEnabled rather than a bare Symlink: a link already present but
-		// pointing somewhere else — the previous file of a renamed site, a
-		// dangling target — used to be reported as "enabled" and left as it
-		// was, so the switch said on while nginx read nothing.
-		_, err := linkEnabled(link, available)
-		return err
-	}
-	if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
 }

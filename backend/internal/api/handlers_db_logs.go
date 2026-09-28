@@ -90,11 +90,13 @@ var hostSystemd = procs.NewSystemd()
 
 var hostLogProbe = dbHostProbe{
 	listeners: proxysvc.ListListeners,
-	managerOf: procs.ManagerOf,
-	systemd:   hostSystemd.Available,
-	units:     hostSystemd.List,
-	proc:      "/proc",
-	logDir:    "/var/log",
+	managerOf: func(pid int32, cmdline string) (string, string) {
+		return procs.ManagerOf("/proc", pid, cmdline)
+	},
+	systemd: hostSystemd.Available,
+	units:   hostSystemd.List,
+	proc:    "/proc",
+	logDir:  "/var/log",
 }
 
 // dbLogSourcesFresh is how long one resolution answers for a connection. The

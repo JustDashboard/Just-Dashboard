@@ -47,6 +47,32 @@ func TestIsKnownProxyAddress(t *testing.T) {
 	}
 }
 
+// Every range Cloudflare publishes, as cloudflare.com/ips-v4 and /ips-v6 list
+// them. 104.24.0.0/14 and five of the seven IPv6 ranges were missing, and a
+// domain proxied from one of them was told it did not point here and that
+// issuance would fail.
+func TestEveryPublishedCloudflareRangeIsRecognised(t *testing.T) {
+	for _, address := range []string{
+		"173.245.48.1", "103.21.244.1", "103.22.200.1", "103.31.4.1", "141.101.64.1",
+		"108.162.192.1", "190.93.240.1", "188.114.96.1", "197.234.240.1", "198.41.128.1",
+		"162.158.0.1", "104.16.0.1", "104.24.0.1", "104.27.255.254", "172.64.0.1", "131.0.72.1",
+		"2400:cb00::1", "2606:4700::1", "2803:f800::1", "2405:b500::1", "2405:8100::1",
+		"2a06:98c0::1", "2a06:98c7:ffff::1", "2c0f:f248::1",
+	} {
+		if !isKnownProxyAddress(net.ParseIP(address)) {
+			t.Errorf("%s is Cloudflare's", address)
+		}
+	}
+	for _, address := range []string{"104.28.0.1", "2a06:98c8::1", "2405:8101::1"} {
+		if isKnownProxyAddress(net.ParseIP(address)) {
+			t.Errorf("%s is just outside Cloudflare's ranges", address)
+		}
+	}
+	if _, proxied := compareAddresses([]string{"104.26.1.1"}, []string{"203.0.113.9"}); !proxied {
+		t.Error("a domain behind 104.24.0.0/14 should get the CDN explanation")
+	}
+}
+
 func TestDescribeDomainCheck(t *testing.T) {
 	here := describeDomainCheck(&DomainCheck{PointsHere: true})
 	if !strings.Contains(here, "this server") {

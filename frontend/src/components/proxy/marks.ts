@@ -25,12 +25,14 @@ export function siteProduct(vhost: Pick<VHost, "kind">): string {
  * the file; certbot's live directory says it when the file has not been read
  * yet — a watched domain, a site's `certPath`. Anything else is unnamed: an
  * imported certificate from a company CA has no mark this product could
- * honestly draw.
+ * honestly draw, and neither has a test certificate — a staging authority
+ * signed it, and the Let's Encrypt mark on it read as a certificate browsers
+ * trust.
  */
 export function certificateProduct(
-  cert: Partial<Pick<Certificate, "issuer" | "source" | "path">> | undefined,
+  cert: Partial<Pick<Certificate, "issuer" | "source" | "path" | "staging">> | undefined,
 ): string | undefined {
-  if (!cert) return undefined
+  if (!cert || cert.staging) return undefined
   return (
     issuerProduct(cert.issuer) ??
     (cert.source === "certbot" || certPathProduct(cert.path) ? "lets-encrypt" : undefined)

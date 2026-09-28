@@ -2,13 +2,23 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { CloudUpload, Logout, Plus } from "@/components/icons"
-import { get } from "@/lib/api"
-import type { Capability, DeploymentFleet } from "@/lib/types"
+import { CheckCircle, CloudUpload, Globe, Logout, Plus, RefreshClockwise } from "@/components/icons"
+import { get, post } from "@/lib/api"
+import { plural } from "@/lib/format"
+import { notify } from "@/lib/toast"
+import type {
+  Capability,
+  DeploymentFleet,
+  ProxyReloadResult,
+  ProxyValidation,
+  VHost,
+} from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { NAV, PERSONAL_NAV, type NavEntry, type NavItem } from "@/components/nav"
 import { PaletteModal } from "@/components/modal"
+import type { ProxyStatus } from "@/components/proxy/proxy-context"
+import { warningCount } from "@/components/proxy/config-test"
 import {
   Command,
   CommandEmpty,
@@ -102,6 +112,22 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
     { enabled: open },
   )
   const projects = fleet.data?.deployments ?? []
+  // The proxy's commands and sites, for whoever can open the proxy pages at
+  // all; the two commands only for an account that may run them.
+  const proxyVisible = NAV.some((group) =>
+    group.items.some((item) => pagesUnder(item, can).some(({ page }) => page.href === "/proxy")),
+  )
+  const proxyStatus = usePoll(
+    (signal) => get<ProxyStatus>("/proxy/status", undefined, signal),
+    0,
+    [],
+    { enabled: open && proxyVisible },
+  )
+  const nginx = !proxyStatus.error && proxyStatus.data?.nginx === true
+  const vhosts = usePoll((signal) => get<VHost[]>("/proxy/vhosts", undefined, signal), 0, [], {
+    enabled: open && proxyVisible,
+  })
+  const sites = vhosts.error ? [] : (vhosts.data ?? [])
 
   const run = useCallback(
     (action: () => void) => {
@@ -174,6 +200,42 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
             </CommandGroup>
           )}
 
+          {proxyVisible && ((nginx && can("system.admin")) || sites.length > 0) && (
+            <CommandGroup heading="Proxy">
+              {nginx && can("system.admin") && (
+                <>
+                  <CommandItem
+                    value="proxy reload nginx"
+                    onSelect={() => run(() => void reloadNginx())}
+                  >
+                    <RefreshClockwise className="size-4" />
+                    Reload nginx
+                  </CommandItem>
+                  <CommandItem
+                    value="proxy test nginx config"
+                    onSelect={() => run(() => void testNginx())}
+                  >
+                    <CheckCircle className="size-4" />
+                    Test nginx config
+                  </CommandItem>
+                </>
+              )}
+              {sites.map((site) => (
+                <CommandItem
+                  key={`${site.kind}:${site.name}:${site.path}`}
+                  value={`site ${site.name} ${site.serverNames.join(" ")}`}
+                  onSelect={() =>
+                    run(() => router.push(`/proxy/sites?site=${encodeURIComponent(site.name)}`))
+                  }
+                >
+                  <Globe className="size-4" />
+                  <span className="text-muted-foreground">Site</span>
+                  {site.name}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+
           <CommandSeparator />
           <CommandGroup heading="Account">
             {PERSONAL_NAV.filter((item) => !item.capability || can(item.capability)).map((item) => (
@@ -195,4 +257,42 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
       </Command>
     </PaletteModal>
   )
+}
+
+/**
+ * The palette's reload goes through the same route as the overview's
+ * Reload, which tests the config first and refuses a broken one.
+ */
+async function reloadNginx() {
+  try {
+    const res = await post<ProxyReloadResult>("/proxy/reload", { kind: "nginx" })
+    const warnings = warningCount(res.validation)
+    notify.success(
+      "nginx reloaded",
+      warnings > 0
+        ? { description: `Its config test has ${plural(warnings, "warning")}.` }
+        : undefined,
+    )
+  } catch (err) {
+    notify.error("nginx did not reload", err)
+  }
+}
+
+async function testNginx() {
+  try {
+    const validation = await post<ProxyValidation>("/proxy/test", { kind: "nginx" })
+    const warnings = warningCount(validation)
+    if (!validation.valid) {
+      notify.error("nginx's config test failed", undefined, {
+        description: "Needs attention on the proxy overview names the lines it failed on.",
+      })
+    } else {
+      notify.success(
+        "nginx's config test passed",
+        warnings > 0 ? { description: `With ${plural(warnings, "warning")}.` } : undefined,
+      )
+    }
+  } catch (err) {
+    notify.error("Couldn't test nginx's config", err)
+  }
 }

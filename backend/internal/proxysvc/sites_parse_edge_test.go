@@ -1,6 +1,7 @@
 package proxysvc
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -107,5 +108,26 @@ func TestSplitInlineStatements(t *testing.T) {
 	}
 	if got := splitInline(`return 301 "{not a block}";`); len(got) != 1 {
 		t.Fatalf("a brace inside quotes is not a block: %q", got)
+	}
+}
+
+// Statements share a line without any brace too, and a ${variable}'s braces
+// open no block: read whole, `gzip on; gzip_vary on;` was gzip set to
+// "on; gzip_vary on", which is not on, and a save wrote `gzip off;`.
+func TestSplitInlineWithoutABlock(t *testing.T) {
+	cases := map[string][]string{
+		"gzip on; gzip_vary on;":                  {"gzip on;", "gzip_vary on;"},
+		"proxy_pass http://127.0.0.1:3000; }":     {"proxy_pass http://127.0.0.1:3000;", "}"},
+		"return 301 https://${host}$request_uri;": {"return 301 https://${host}$request_uri;"},
+		"server_name app.example.com":             {"server_name app.example.com"},
+	}
+	for line, want := range cases {
+		if got := splitInline(line); !reflect.DeepEqual(got, want) {
+			t.Errorf("splitInline(%q) = %q, want %q", line, got, want)
+		}
+	}
+	spec, _ := ParseSiteSpec("app", "server {\n    server_name app.example.com;\n    gzip on; gzip_vary on;\n    location / {\n        proxy_pass http://127.0.0.1:3000; }\n    access_log off;\n}\n")
+	if !spec.Gzip || spec.Upstream != "http://127.0.0.1:3000" || spec.AccessLog {
+		t.Fatalf("read as %+v", spec)
 	}
 }

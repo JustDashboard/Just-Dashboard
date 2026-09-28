@@ -47,8 +47,13 @@ export type ConfirmRequest = {
    */
   phrase?: string
   confirmLabel?: string
-  /** Runs the action; the typed phrase is passed through to the API call. */
-  action: (confirm: string) => Promise<void>
+  /**
+   * Runs the action; the typed phrase is passed through to the API call. An
+   * action whose outcome is not simply "done" — deleted, but not reloaded —
+   * announces it itself and resolves to "reported", and the dialog then adds
+   * no "completed" of its own.
+   */
+  action: (confirm: string) => Promise<void | "reported">
   onDone?: () => void
 }
 
@@ -95,8 +100,7 @@ function ConfirmBody({
     if (!matches || busy) return
     setBusy(true)
     try {
-      await request.action(typed)
-      notify.success(`${request.title} completed`)
+      if ((await request.action(typed)) !== "reported") notify.success(`${request.title} completed`)
       onOpenChange(false)
       request.onDone?.()
     } catch (err) {

@@ -166,6 +166,17 @@ func CommandOnHostInDir(ctx context.Context, dir, name string, args ...string) *
 	return exec.CommandContext(ctx, "nsenter", hostArgv(dir, name, args)...)
 }
 
+// HostPath names a host path as this process can open it. Only the mounts
+// listed in the deployment are shared with the container, so a socket under
+// the host's /run is reached through PID 1's root instead; that is the same
+// namespace nsenter enters, and the same privilege.
+func HostPath(path string) string {
+	if !hostReachable() {
+		return path
+	}
+	return "/proc/1/root" + path
+}
+
 // RunGroup runs cmd as a new Unix process group. Cancellation signals the
 // entire tree with TERM, waits for grace, then signals any survivors with
 // KILL. A direct Process.Kill is insufficient for shell hooks and tools such

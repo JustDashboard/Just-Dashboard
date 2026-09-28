@@ -9,7 +9,6 @@ import { forgetSessionState } from "@/lib/view-state"
 import type { SiteSpec, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useConfirm } from "@/components/confirm-dialog"
 import { Page, PageContext, PageState } from "@/components/page"
 import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
@@ -21,9 +20,11 @@ import { useProxy } from "@/components/proxy/proxy-context"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { siteLogPlan } from "@/components/proxy/site-log-plan"
 import { SiteLogs } from "@/components/proxy/site-logs"
+import { activeOwner } from "@/components/proxy/site-details"
 import { SiteForm } from "@/components/proxy/site-form"
 import { useSiteVerbs } from "@/components/proxy/site-verbs"
-import { ConfigEditor } from "@/components/proxy/vhosts-panel"
+import { ConfigEditor } from "@/components/proxy/config-editor"
+import { SiteFileVerbs } from "@/components/proxy/vhosts-panel"
 
 /** The site's file read back: the form's fields, and where it logs. */
 type SiteRead = { spec: SiteSpec; managed: boolean; warnings: string[] }
@@ -62,7 +63,6 @@ function SiteBody({ name }: { name: string }) {
   const { can } = useAuth()
   const admin = can("system.admin")
   const { status, loading, refresh: refreshStatus } = useProxy()
-  const { confirm, dialog } = useConfirm()
   const [form, setForm] = useState({ open: false, session: 0 })
   const [raw, setRaw] = useState(false)
 
@@ -86,9 +86,13 @@ function SiteBody({ name }: { name: string }) {
     admin,
     onEdit: openForm,
     onRaw: () => setRaw(true),
+    onServed: () => {},
     onDuplicate: () => {},
     onToggle: () => {},
     onDelete: () => {},
+    onUnlink: () => {},
+    onOverride: () => {},
+    onRename: () => {},
   }).filter((verb) => PAGE_VERBS.includes(verb.key))
 
   // A route on the Docker Caddy ingress is read through the ingress the
@@ -241,18 +245,29 @@ function SiteBody({ name }: { name: string }) {
         onSaved={refresh}
       />
       <ConfigEditor
-        vhost={raw ? vhost : null}
-        admin={admin}
-        confirm={confirm}
+        open={raw && Boolean(vhost)}
         onOpenChange={(open) => !open && setRaw(false)}
+        path={vhost?.path ?? ""}
+        kind={vhost?.kind ?? "nginx"}
+        title={vhost?.name ?? "Configuration"}
+        readOnly={!admin || Boolean(vhost && activeOwner(vhost))}
+        siteDisabled={vhost?.kind === "nginx" && Boolean(vhost.enabledPath) && !vhost.enabled}
         onSaved={refresh}
-        onEdit={() => {
-          setRaw(false)
-          openForm()
-        }}
-        verbs={["open", "scan", "edit"]}
+        actions={(busy) =>
+          vhost && (
+            <SiteFileVerbs
+              vhost={vhost}
+              admin={admin}
+              busy={busy}
+              onEdit={() => {
+                setRaw(false)
+                openForm()
+              }}
+              verbs={["open", "scan", "edit"]}
+            />
+          )
+        }
       />
-      {dialog}
     </Page>
   )
 }
@@ -290,6 +305,7 @@ const PLACEHOLDER: VHost = {
   kind: "nginx",
   path: "",
   enabled: false,
+  formEditable: false,
   serverNames: [],
   listen: [],
   upstreams: [],

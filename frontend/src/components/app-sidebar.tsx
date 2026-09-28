@@ -22,7 +22,12 @@ import {
   sectionsFor,
   type NavEntry,
 } from "@/components/nav"
-import { useNavScopeValue, type NavScope, type NavScopeEntry } from "@/components/nav-scope"
+import {
+  useNavMarksValue,
+  useNavScopeValue,
+  type NavScope,
+  type NavScopeEntry,
+} from "@/components/nav-scope"
 import {
   Sidebar,
   SidebarContent,
@@ -188,6 +193,7 @@ export function AppSidebar() {
   const { state } = useSidebar()
   const collapsed = state === "collapsed"
   const scope = useNavScopeValue()
+  const marks = useNavMarksValue()
 
   const levels = levelsFor(pathname, scope)
   const chain = sectionsFor(pathname)
@@ -327,6 +333,7 @@ export function AppSidebar() {
                         <NavRow
                           key={item.href}
                           item={item}
+                          marked={marks[item.href]}
                           // A section's own landing page is the first row in
                           // its panel and shares the section's href, so a
                           // prefix match would light it up on every page of the
@@ -463,10 +470,13 @@ function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onB
 function NavRow({
   item,
   active,
+  marked,
   enter,
 }: {
   item: Row
   active: boolean
+  /** Something on this page needs attention; see useNavMarks. */
+  marked?: boolean
   /** Opens the row's panel instead of following its link; see `enter`. */
   enter?: () => void
 }) {
@@ -475,10 +485,10 @@ function NavRow({
     <>
       <Icon className="size-4" />
       <span className="flex-1 truncate">{item.title}</span>
-      {item.pending && (
+      {(item.pending || marked) && (
         <span
           role="img"
-          aria-label="Changes pending"
+          aria-label={item.pending ? "Changes pending" : "Needs attention"}
           className="size-1.5 shrink-0 rounded-full bg-warning"
         />
       )}

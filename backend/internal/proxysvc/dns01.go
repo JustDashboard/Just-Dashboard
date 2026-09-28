@@ -1,10 +1,13 @@
 package proxysvc
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -97,48 +100,205 @@ func DNSProviderFor(key string) (DNSProvider, bool) {
 // dnsCredentialsDir is where credential files are kept. Inside certbot's own
 // tree because that is the directory an operator already treats as secret and
 // already backs up with the certificates it protects.
-const dnsCredentialsDir = "/etc/letsencrypt/jd-dns"
+func dnsCredentialsDir() string {
+	return filepath.Join(letsencryptDir, "jd-dns")
+}
 
 // credentialsPath is the file for one provider. One per provider rather than
 // one per certificate: the credentials belong to the DNS account, and a
 // certificate that later covers another domain in the same zone should not
 // need them pasted again.
 func credentialsPath(key string) string {
-	return filepath.Join(dnsCredentialsDir, key+".ini")
+	return filepath.Join(dnsCredentialsDir(), key+".ini")
 }
 
-// WriteDNSCredentials stores a provider's credentials at 0600.
-//
-// certbot refuses to use a credentials file that is group- or world-readable,
-// which is the one piece of file hygiene it enforces and the one people get
-// wrong when they create the file by hand.
-func WriteDNSCredentials(key, content string) (string, error) {
+// DNSCredentials are a provider's credentials, checked and ready to save.
+// Checking and saving are separate so an issuance can refuse a request
+// without having written a token first.
+type DNSCredentials struct {
+	provider DNSProvider
+	content  string
+}
+
+// CheckDNSCredentials validates what would be saved for a provider, writing
+// nothing.
+func CheckDNSCredentials(key, content string) (DNSCredentials, error) {
 	provider, ok := DNSProviderFor(key)
 	if !ok {
-		return "", fmt.Errorf("%q is not a DNS provider this dashboard supports", key)
+		return DNSCredentials{}, fmt.Errorf("%q is not a DNS provider this dashboard supports", key)
 	}
 	if strings.TrimSpace(content) == "" {
-		return "", fmt.Errorf("%s needs its credentials before it can answer a challenge", provider.Name)
+		return DNSCredentials{}, fmt.Errorf("%s needs its credentials before it can answer a challenge", provider.Name)
 	}
 	if len(content) > 64*1024 {
-		return "", fmt.Errorf("credentials are unexpectedly large")
+		return DNSCredentials{}, fmt.Errorf("credentials are unexpectedly large")
 	}
 	if key == "route53" {
 		var err error
 		content, err = normalizeRoute53Credentials(content)
 		if err != nil {
-			return "", err
+			return DNSCredentials{}, err
+		}
+	} else if err := ValidateDNSCredentials(provider, content); err != nil {
+		return DNSCredentials{}, err
+	}
+	return DNSCredentials{provider: provider, content: content}, nil
+}
+
+// dnsCredentialKeys is what each plugin reads from its credentials file: every
+// group of keys is one way to authenticate, and one group must be complete.
+// A token pasted under the wrong name is saved happily and fails the first
+// challenge as "missing credential", minutes and a rate-limited attempt later.
+var dnsCredentialKeys = map[string]struct {
+	accepted []string
+	groups   [][]string
+}{
+	"cloudflare": {
+		accepted: []string{"dns_cloudflare_api_token", "dns_cloudflare_email", "dns_cloudflare_api_key"},
+		groups:   [][]string{{"dns_cloudflare_api_token"}, {"dns_cloudflare_email", "dns_cloudflare_api_key"}},
+	},
+	"digitalocean": {
+		accepted: []string{"dns_digitalocean_token"},
+		groups:   [][]string{{"dns_digitalocean_token"}},
+	},
+	"linode": {
+		accepted: []string{"dns_linode_key", "dns_linode_version"},
+		groups:   [][]string{{"dns_linode_key"}},
+	},
+	"ovh": {
+		accepted: []string{"dns_ovh_endpoint", "dns_ovh_application_key", "dns_ovh_application_secret", "dns_ovh_consumer_key"},
+		groups:   [][]string{{"dns_ovh_endpoint", "dns_ovh_application_key", "dns_ovh_application_secret", "dns_ovh_consumer_key"}},
+	},
+	"gandi": {
+		// certbot-plugin-gandi reads a personal access token, or the
+		// LiveDNS API key it replaced.
+		accepted: []string{"dns_gandi_token", "dns_gandi_api_key", "dns_gandi_sharing_id"},
+		groups:   [][]string{{"dns_gandi_token"}, {"dns_gandi_api_key"}},
+	},
+	"rfc2136": {
+		accepted: []string{"dns_rfc2136_server", "dns_rfc2136_port", "dns_rfc2136_name", "dns_rfc2136_secret", "dns_rfc2136_algorithm", "dns_rfc2136_sign_query"},
+		groups:   [][]string{{"dns_rfc2136_server", "dns_rfc2136_name", "dns_rfc2136_secret"}},
+	},
+}
+
+// ValidateDNSCredentials checks content against what the provider's plugin
+// reads: Google's service-account JSON key, or an ini file of the plugin's
+// own keys. Route 53 is normalizeRoute53Credentials'.
+func ValidateDNSCredentials(provider DNSProvider, content string) error {
+	if provider.Key == "google" {
+		var key struct {
+			Type        string `json:"type"`
+			ClientEmail string `json:"client_email"`
+			PrivateKey  string `json:"private_key"`
+		}
+		if err := json.Unmarshal([]byte(content), &key); err != nil {
+			return fmt.Errorf("Google Cloud DNS needs the service account's JSON key file, pasted whole: %v", err)
+		}
+		if key.Type != "service_account" || key.ClientEmail == "" || key.PrivateKey == "" {
+			return fmt.Errorf("Google Cloud DNS needs a service account key: the JSON has no type \"service_account\", client_email or private_key")
+		}
+		return nil
+	}
+	spec, ok := dnsCredentialKeys[provider.Key]
+	if !ok {
+		return nil
+	}
+	values := map[string]string{}
+	for _, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		name, value, found := strings.Cut(line, "=")
+		name, value = strings.TrimSpace(name), strings.TrimSpace(value)
+		if !found || name == "" {
+			return fmt.Errorf("%s credentials are lines of key = value; %q is not one", provider.Name, line)
+		}
+		if !slices.Contains(spec.accepted, name) {
+			return fmt.Errorf("%s's plugin does not read %s; it reads %s", provider.Name, name, strings.Join(spec.accepted, ", "))
+		}
+		if _, dup := values[name]; dup {
+			return fmt.Errorf("%s is given twice", name)
+		}
+		values[name] = value
+	}
+	for _, group := range spec.groups {
+		complete := true
+		for _, name := range group {
+			if values[name] == "" {
+				complete = false
+			}
+		}
+		if complete {
+			return nil
 		}
 	}
-	if err := os.MkdirAll(dnsCredentialsDir, 0o700); err != nil {
-		return "", err
+	ways := make([]string, 0, len(spec.groups))
+	for _, group := range spec.groups {
+		ways = append(ways, strings.Join(group, " + "))
 	}
-	path := credentialsPath(key)
-	if err := persistDNSCredentials(path, content); err != nil {
-		return "", err
-	}
+	return fmt.Errorf("%s needs %s", provider.Name, strings.Join(ways, ", or "))
+}
 
+// DNSTestArgs is a DNS-01 dry run for domain through a provider's saved
+// credentials: the whole exchange with the staging authority (or the
+// configured one), nothing saved. It is the only way to learn a token works
+// short of issuing with it.
+func DNSTestArgs(ctx context.Context, key, domain string) ([]string, error) {
+	provider, ok := DNSProviderFor(key)
+	if !ok {
+		return nil, fmt.Errorf("%q is not a DNS provider this dashboard supports", key)
+	}
+	if !certDomainRe.MatchString(domain) {
+		return nil, fmt.Errorf("%q is not a valid domain name", domain)
+	}
+	if provider.Key != "route53" && !HasDNSCredentials(provider.Key) {
+		return nil, fmt.Errorf("%s has no credentials saved yet", provider.Name)
+	}
+	rt, err := loadCertbotRuntime(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if rt == nil {
+		return nil, fmt.Errorf("certbot is not installed on this host")
+	}
+	if !rt.authenticators[provider.Plugin] {
+		return nil, fmt.Errorf("the certbot that runs here (%s) has no %s plugin", rt.where(), provider.Plugin)
+	}
+	args := append([]string{"certonly"}, dnsIssueArgs(provider, provider.DefaultWait)...)
+	// An account already registered with the authority is used as it is;
+	// without one, a dry run needs no contact address to rehearse with.
+	args = append(args, "--non-interactive", "--agree-tos", "--register-unsafely-without-email", "--dry-run")
+	args = append(args, acmeDirectory().certbotArgs()...)
+	return append(args, "-d", domain), nil
+}
+
+// Provider is whose credentials these are.
+func (c DNSCredentials) Provider() DNSProvider { return c.provider }
+
+// Save stores the credentials at 0600 and returns where.
+//
+// certbot refuses to use a credentials file that is group- or world-readable,
+// which is the one piece of file hygiene it enforces and the one people get
+// wrong when they create the file by hand.
+func (c DNSCredentials) Save() (string, error) {
+	if err := os.MkdirAll(dnsCredentialsDir(), 0o700); err != nil {
+		return "", err
+	}
+	path := credentialsPath(c.provider.Key)
+	if err := persistDNSCredentials(path, c.content); err != nil {
+		return "", err
+	}
 	return path, nil
+}
+
+// WriteDNSCredentials checks and stores a provider's credentials.
+func WriteDNSCredentials(key, content string) (string, error) {
+	credentials, err := CheckDNSCredentials(key, content)
+	if err != nil {
+		return "", err
+	}
+	return credentials.Save()
 }
 
 // HasDNSCredentials reports whether a provider is ready to use.
@@ -167,10 +327,16 @@ func RemoveDNSCredentials(key string) error {
 }
 
 // ListDNSProviders reports the closed set with per-host detail filled in.
-func (s *Service) ListDNSProviders() []DNSProvider {
+// Installed is read from the certbot that runs the jobs, so a plugin reported
+// here is one an issuance can use; with no certbot at all, none is.
+func (s *Service) ListDNSProviders(ctx context.Context) ([]DNSProvider, error) {
+	rt, err := loadCertbotRuntime(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]DNSProvider, 0, len(dnsProviders))
 	for _, p := range dnsProviders {
-		p.Installed = certbotPluginInstalled(p.Plugin)
+		p.Installed = rt != nil && rt.authenticators[p.Plugin]
 		p.HasCredentials = HasDNSCredentials(p.Key)
 		out = append(out, p)
 	}
@@ -182,46 +348,7 @@ func (s *Service) ListDNSProviders() []DNSProvider {
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out
-}
-
-// certbotPluginInstalled looks for the plugin's own directory rather than
-// asking certbot, which costs a subprocess per provider and would make the
-// list a second slow.
-//
-// The interpreter directory is globbed rather than listed. Naming versions
-// meant the check only ever worked on the two this was written against —
-// RHEL 9 ships python3.9, Debian 13 and Fedora ship 3.13, and every one of
-// those hosts was told a plugin it had installed was missing, which is a
-// refusal in front of a certificate that would have been issued.
-func certbotPluginInstalled(plugin string) bool {
-	suffix := strings.TrimPrefix(plugin, "dns-")
-	names := map[string]bool{
-		"certbot_" + strings.ReplaceAll(suffix, "-", "_"):     true,
-		"certbot_dns_" + suffix:                               true,
-		"certbot_dns_" + strings.ReplaceAll(suffix, "-", "_"): true,
-	}
-	patterns := []string{
-		// Debian and Ubuntu, which put every distribution package in one
-		// unversioned tree.
-		"/usr/lib/python3/dist-packages/*",
-		// The RPM world and Alpine, versioned; pip --user and pipx too.
-		"/usr/lib/python3*/site-packages/*",
-		"/usr/lib64/python3*/site-packages/*",
-		"/usr/local/lib/python3*/*-packages/*",
-		// The snap and the pip-in-a-venv install certbot's own installer uses.
-		"/snap/certbot/current/lib/python3*/site-packages/*",
-		"/opt/certbot/lib/python3*/site-packages/*",
-	}
-	for _, pattern := range patterns {
-		matches, _ := filepath.Glob(pattern)
-		for _, m := range matches {
-			if names[filepath.Base(m)] {
-				return true
-			}
-		}
-	}
-	return false
+	return out, nil
 }
 
 // dnsIssueArgs builds the plugin half of a certbot invocation.
