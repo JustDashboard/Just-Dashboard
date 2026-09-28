@@ -8,6 +8,7 @@ import {
   Code,
   Connection,
   Copy,
+  Lightning,
   Pause,
   Pencil,
   Play,
@@ -31,6 +32,7 @@ import type {
   StreamResult,
   StreamSpec,
   StreamStatus,
+  StreamTestResult,
 } from "@/lib/types"
 import {
   STREAM_FILTERS,
@@ -62,7 +64,11 @@ import {
   streamMatchesQuery,
   streamOutage,
   streamSpecOf,
+  streamTests,
   streamsLive,
+  testPlace,
+  testStatus,
+  testSummary,
   type StreamFilter,
 } from "@/lib/streams"
 import { STREAM_PRESETS, applyPreset } from "@/lib/stream-presets"
@@ -90,6 +96,7 @@ import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -408,6 +415,39 @@ export function StreamsPage() {
     }
   }
 
+  // A test's results stay on the card until the next test or a reload of
+  // the page: they are a reading of that moment, not of the stream.
+  const [tests, setTests] = useState<Record<string, StreamTestResult[] | "running">>({})
+  const test = async (stream: StreamEntry) => {
+    setTests((t) => ({ ...t, [stream.name]: "running" }))
+    try {
+      const results = await Promise.all(
+        streamTests(stream).map((req) => post<StreamTestResult>("/proxy/streams/test", req)),
+      )
+      setTests((t) => ({ ...t, [stream.name]: results }))
+    } catch (err) {
+      setTests((t) => {
+        const rest = { ...t }
+        delete rest[stream.name]
+        return rest
+      })
+      notify.error(`${stream.name} not tested`, err)
+    }
+  }
+  // Dialling an address is the scanner boundary, so only an admin tests.
+  const testVerb = (stream: StreamEntry): Verb[] =>
+    stream.error || streamTests(stream).length === 0
+      ? []
+      : [
+          {
+            key: "test",
+            label: tests[stream.name] === "running" ? "Testing…" : "Test",
+            icon: Lightning,
+            disabled: tests[stream.name] === "running",
+            run: () => void test(stream),
+          },
+        ]
+
   const pageVerbs: Verb[] = connection
     ? [{ key: "disconnect", label: "Disconnect", icon: Slash, danger: true, run: disconnect }]
     : []
@@ -486,6 +526,7 @@ export function StreamsPage() {
               disabled: resuming !== "" || Boolean(stream.error),
               run: () => void resume(stream),
             },
+            ...testVerb(stream),
             rawVerb(stream),
             ...duplicateVerb(stream),
             ...copyVerbs(stream),
@@ -501,6 +542,7 @@ export function StreamsPage() {
               run: () => open(stream),
             },
             ...recheckVerb(stream),
+            ...testVerb(stream),
             rawVerb(stream),
             ...duplicateVerb(stream),
             ...copyVerbs(stream),
@@ -720,6 +762,12 @@ export function StreamsPage() {
                       <span className="block text-hint text-muted-foreground">Allowed sources</span>
                       <Restriction stream={stream} />
                     </div>
+                    {Array.isArray(tests[stream.name]) && (
+                      <TestResults
+                        name={stream.name}
+                        results={tests[stream.name] as StreamTestResult[]}
+                      />
+                    )}
                     {verbsFor(stream).length > 0 && (
                       <VerbBar
                         verbs={verbsFor(stream)}
@@ -894,6 +942,47 @@ function Restriction({ stream }: { stream: StreamEntry }) {
     )
   }
   return <span className="block text-hint text-muted-foreground">set in the file</span>
+}
+
+/** A test's outcome on its card, and every dial's answer in a popover under it. */
+function TestResults({ name, results }: { name: string; results: StreamTestResult[] }) {
+  const summary = testSummary(results)
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="ghost" aria-label={`Test of ${name}: ${summary.label}`}>
+          <Status tone={summary.tone} label={summary.label} />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 space-y-3">
+        {results.map((result) => (
+          <div key={`${result.mode}/${result.protocol}`} className="min-w-0 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3">
+              <span className="text-hint font-medium">{testPlace(result)}</span>
+              <Status {...testStatus(result)} />
+            </div>
+            {result.address && (
+              <span className="block font-mono text-hint break-all text-muted-foreground">
+                {result.address}
+              </span>
+            )}
+            {result.banner && (
+              <pre className="max-h-24 overflow-auto font-mono text-hint break-all whitespace-pre-wrap">
+                {result.banner}
+              </pre>
+            )}
+            {result.answer && <p className="text-hint">{result.answer}</p>}
+            <p className="text-hint text-muted-foreground">{result.detail}</p>
+            {result.warnings.map((warning) => (
+              <p key={warning} className="text-hint text-warning">
+                {warning}
+              </p>
+            ))}
+          </div>
+        ))}
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 /**
