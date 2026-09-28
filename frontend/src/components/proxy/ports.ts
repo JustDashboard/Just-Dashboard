@@ -11,6 +11,7 @@ const NETWORK_WORDS: Record<ListenerNetwork, string> = {
   public: "Public address",
   tailnet: "Tailnet only",
   vpn: "VPN only",
+  uplink: "Private uplink",
   private: "Private network",
   docker: "Docker bridge",
   bridge: "Bridge",
@@ -34,6 +35,19 @@ export function internetFacing(listener: Pick<Listener, "reach">): boolean {
 }
 
 /**
+ * A private address on the interface carrying the default route. Whether the
+ * internet reaches it is decided off this host: a cloud provider maps the
+ * instance's public address onto it, and a router may forward a port to it.
+ */
+export function onUplink(listener: Pick<Listener, "network">): boolean {
+  return listener.network === "uplink"
+}
+
+/** What a socket on the private uplink may also answer, for its reach's tooltip. */
+export const UPLINK_CAVEAT =
+  "A private address on the interface with the default route. If the provider maps a public address onto it, or a router forwards a port to it, the internet reaches it too."
+
+/**
  * Who can connect, in three answers: the internet, one private network (a
  * tailnet, VPN, LAN or bridge), or this server alone. "Interface-bound" would
  * also describe a database on a public IP, which is the internet's.
@@ -52,33 +66,73 @@ export type Socket = Listener & { twin?: Listener }
  * One row per service and network. sshd on 0.0.0.0 and on :: is one service
  * on every interface, as is a server on 127.0.0.1 and ::1 or on a tailnet's
  * IPv4 and IPv6 addresses; listed apart, every count on the page was nearly
- * double the services behind it. Sockets fold only when the owner, protocol,
- * port and network all agree and the families differ, so two programs on
- * one port, or one program on two bridges, stay apart.
+ * double the services behind it. Sockets fold only when the protocol, port
+ * and network agree, the families differ and one service holds both (see
+ * `oneService`), so two programs on one port, or one program on two bridges,
+ * stay apart.
  */
 export function foldDualStack(listeners: Listener[]): Socket[] {
   const out: Socket[] = []
-  const unpaired = new Map<string, Socket>()
+  const unpaired = new Map<string, Socket[]>()
   for (const listener of listeners) {
-    const key = [
+    const key = JSON.stringify([
       listener.protocol,
       listener.port,
-      listener.pid,
       listener.reach,
       listener.network,
       listener.interface ?? "",
-    ].join("|")
-    const first = unpaired.get(key)
-    if (first && first.family !== listener.family) {
+      listener.pid > 0 ? [listener.process, listener.user ?? ""] : [],
+    ])
+    const waiting = unpaired.get(key) ?? []
+    const first = waiting.find((s) => s.family !== listener.family && oneService(s, listener))
+    if (first) {
       first.twin = listener
-      unpaired.delete(key)
+      unpaired.set(
+        key,
+        waiting.filter((s) => s !== first),
+      )
       continue
     }
     const socket: Socket = { ...listener }
     out.push(socket)
-    if (!first) unpaired.set(key, socket)
+    unpaired.set(key, [...waiting, socket])
   }
   return out
+}
+
+/**
+ * Whether two sockets of one program, run by one account, are one service.
+ * One process is. So are two started by one parent, or started the same way
+ * but for the address: Docker publishes a port with one docker-proxy per
+ * family, dockerd's children both, each told its own -host-ip (and on a
+ * dual-stack network its own -container-ip). Init is everybody's parent and
+ * says nothing. Two sockets whose holders this account cannot see (PID 0)
+ * are taken as one, as they always were.
+ */
+function oneService(a: Listener, b: Listener): boolean {
+  if (a.pid === b.pid) return true
+  if (a.ppid && a.ppid > 1 && a.ppid === b.ppid) return true
+  return withoutAddresses(a.cmdline ?? "") === withoutAddresses(b.cmdline ?? "")
+}
+
+const BRACKETED_IPV6 = /\[[0-9a-f:.]+(?:%[\w.-]+)?\]/gi
+// Two colons at least, which every IPv6 address has and a host:port has not.
+const BARE_IPV6 = /(?<![\w:.])[0-9a-f]*:[0-9a-f]*:[0-9a-f:.]*(?:%[\w.-]+)?(?![\w:.%])/gi
+const IPV4 = /(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])/g
+
+/** A command line with every IP address in it replaced by one placeholder. */
+export function withoutAddresses(cmdline: string): string {
+  return cmdline
+    .replace(BRACKETED_IPV6, "<address>")
+    .replace(BARE_IPV6, "<address>")
+    .replace(IPV4, "<address>")
+}
+
+/** The PIDs a folded socket stands for: two when Docker holds each family in its own proxy. */
+export function socketPids(socket: Socket): number[] {
+  const pids = [socket.pid]
+  if (socket.twin && socket.twin.pid !== socket.pid) pids.push(socket.twin.pid)
+  return pids.filter((pid) => pid > 0)
 }
 
 /** A folded socket's addresses, IPv4 first as the listing orders them. */
@@ -103,12 +157,17 @@ export function tallyReach(sockets: Socket[]): ReachTally {
 /**
  * The Internet-facing tile's hint: whether the count is binds to every
  * interface, to a public address, or both. It has to fit half a phone's
- * width, about thirty characters, where the tile truncates it.
+ * width, about thirty characters, where the tile truncates it. With nothing
+ * the internet is sure to reach, a socket on the private uplink still keeps
+ * it from saying nothing can: the provider may map a public address onto it.
  */
-export function internetHint(sockets: Pick<Listener, "reach">[]): string {
+export function internetHint(sockets: Pick<Listener, "reach" | "network">[]): string {
   const every = sockets.filter((l) => l.reach === "all").length
   const one = sockets.filter((l) => l.reach === "public").length
-  if (every + one === 0) return "nothing the internet can reach"
+  const uplink = sockets.filter(onUplink).length
+  if (every + one === 0) {
+    return uplink > 0 ? `+${uplink} if the uplink is mapped` : "nothing the internet can reach"
+  }
   if (one === 0) return "on every interface"
   if (every === 0) return one === 1 ? "on a public address" : "on public addresses"
   return `${every} on all · ${one} on a public IP`
@@ -120,6 +179,7 @@ const NETWORK_HINT: Record<ListenerNetwork, string> = {
   public: "public",
   tailnet: "tailnet",
   vpn: "VPN",
+  uplink: "uplink",
   private: "LAN",
   docker: "Docker",
   bridge: "bridge",
@@ -144,53 +204,72 @@ export function privateHint(sockets: Pick<Listener, "reach" | "network">[]): str
 }
 
 /**
- * A database or control port answering off the machine, once per protocol
- * and port however many addresses it is bound to — Postgres on 0.0.0.0 and
- * on :: is one database, as the posture's finding for it is one finding.
+ * The overview's hint beside the Internet-facing figure: the rest of what
+ * answers off the machine, as the ports page's Private networks tile counts
+ * it, so both numbers a reader clicks through to are on the page.
+ */
+export function privateNetworksHint(tally: ReachTally): string {
+  if (tally.private > 0) return `${tally.private} on private networks`
+  return tally.internet > 0 ? "none on private networks" : "everything on this server"
+}
+
+/**
+ * A database or control port the security posture raises a finding for,
+ * once per protocol and port however many addresses it is bound to —
+ * Postgres on 0.0.0.0 and on :: is one database, as the posture's finding for
+ * it is one finding.
  */
 export type DangerousPort = {
   protocol: string
   port: number
   service: string
-  /** Every exposed socket on the port, in listing order. */
+  /** Every socket on the port the posture levels, in listing order. */
   sockets: Listener[]
-  /** Any of them faces the internet, which the posture calls critical. */
-  internet: boolean
+  /** The port's level: its highest socket's, as the posture's one finding is at its widest bind. */
+  level: "critical" | "warning"
+  /** The firewall's inbound default, when it holds the port to a warning. */
+  inboundDefault?: string
+}
+
+/** The service a socket is a database or control port for, when the posture levels it. */
+export function dangerousService(listener: Pick<Listener, "port" | "level">): string | undefined {
+  return listener.level ? DANGEROUS_PORTS[listener.port] : undefined
 }
 
 export function dangerousPorts(listeners: Listener[]): DangerousPort[] {
   const byPort = new Map<string, DangerousPort>()
   for (const l of listeners) {
     const service = DANGEROUS_PORTS[l.port]
-    if (!l.exposed || !service) continue
+    if (!service || !l.level) continue
     const key = `${l.protocol}/${l.port}`
     const entry = byPort.get(key) ?? {
       protocol: l.protocol,
       port: l.port,
       service,
       sockets: [],
-      internet: false,
+      level: l.level,
     }
     entry.sockets.push(l)
-    entry.internet ||= internetFacing(l)
+    if (l.level === "critical") entry.level = "critical"
+    entry.inboundDefault ??= l.inboundDefault
     byPort.set(key, entry)
   }
   return [...byPort.values()]
 }
 
 /**
- * The verdict a listening socket is drawn with, graded by who can connect as
- * the posture grades it and by what answers. A database or control port the
- * internet can reach is critical and one on a private network a warning, as
- * the posture levels them; any other socket the internet can reach is a
- * warning, and one only a private network reaches a notice — sshd on the
- * tailnet is not an alarm. Loopback has none.
+ * The verdict a listening socket is drawn with. A database or control port
+ * takes the security posture's level for it, from the same rules and the same
+ * firewall: critical where the internet can reach it, a warning where only a
+ * tailnet, a LAN or a bridge can, or where the firewall denies inbound by
+ * default. Any other socket the internet can reach, or may through the
+ * private uplink, is a warning, and one only a private network reaches a
+ * notice — sshd on the tailnet is not an alarm. Loopback has none.
  */
 export function reachVerdict(
-  listener: Pick<Listener, "port" | "exposed" | "reach">,
+  listener: Pick<Listener, "port" | "exposed" | "reach" | "network" | "level">,
 ): "critical" | "warning" | "notice" | undefined {
   if (!listener.exposed) return undefined
-  const dangerous = Boolean(DANGEROUS_PORTS[listener.port])
-  if (internetFacing(listener)) return dangerous ? "critical" : "warning"
-  return dangerous ? "warning" : "notice"
+  if (listener.level && DANGEROUS_PORTS[listener.port]) return listener.level
+  return internetFacing(listener) || onUplink(listener) ? "warning" : "notice"
 }

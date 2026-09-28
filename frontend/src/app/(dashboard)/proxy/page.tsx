@@ -23,7 +23,7 @@ import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { RoutePath } from "@/components/proxy/route-path"
 import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { foldProxyFindings } from "@/components/proxy/attention"
-import { foldDualStack } from "@/components/proxy/ports"
+import { foldDualStack, privateNetworksHint, tallyReach } from "@/components/proxy/ports"
 
 /**
  * Readings first, then the engine and its commands. Routes own the wide column;
@@ -56,10 +56,8 @@ export default function ProxyOverviewPage() {
   const hosts = vhosts.data ?? []
   const onTls = hosts.filter((v) => v.tls).length
   const disabled = hosts.filter((v) => v.kind === "nginx" && !v.enabled && v.enabledPath).length
-  const exposed = useMemo(
-    () => foldDualStack(ports.data ?? []).filter((l) => l.exposed),
-    [ports.data],
-  )
+  // The ports page's own split, so the figure clicked through is on that page.
+  const reach = useMemo(() => tallyReach(foldDualStack(ports.data ?? [])), [ports.data])
   const badCerts = useMemo(
     () => (certs.data ?? []).filter((c) => c.expired || c.expiring || c.error),
     [certs.data],
@@ -198,20 +196,14 @@ export default function ProxyOverviewPage() {
             }
           />
         </StatLink>
-        <StatLink href="/proxy/ports" label="Exposed ports">
+        <StatLink href="/proxy/ports" label="Internet-facing ports">
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
-            label="Exposed ports"
+            label="Internet-facing"
             value={
-              <Figure settled={!ports.loading}>{ports.data ? exposed.length : undefined}</Figure>
+              <Figure settled={!ports.loading}>{ports.data ? reach.internet : undefined}</Figure>
             }
-            hint={
-              ports.data
-                ? exposed.length
-                  ? `of ${foldDualStack(ports.data).length} listening, off the machine`
-                  : "everything on loopback"
-                : undefined
-            }
+            hint={ports.data ? privateNetworksHint(reach) : undefined}
           />
         </StatLink>
       </StatGrid>

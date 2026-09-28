@@ -42,6 +42,7 @@ export const ports = [
     reach: "all",
     network: "all",
     exposed: true,
+    level: "critical",
   },
 ]
 
@@ -138,6 +139,7 @@ export const hostPorts = [
     network: "public",
     interface: "ens3",
     exposed: true,
+    level: "critical",
   },
   {
     protocol: "tcp",
@@ -206,6 +208,7 @@ export const bridgedDatabases = [
     reach: "all",
     network: "all",
     exposed: true,
+    level: "critical",
   },
   {
     protocol: "tcp",
@@ -220,6 +223,7 @@ export const bridgedDatabases = [
     reach: "all",
     network: "all",
     exposed: true,
+    level: "critical",
   },
   {
     protocol: "tcp",
@@ -235,6 +239,7 @@ export const bridgedDatabases = [
     network: "docker",
     interface: "docker0",
     exposed: true,
+    level: "warning",
   },
   {
     protocol: "tcp",
@@ -250,6 +255,7 @@ export const bridgedDatabases = [
     network: "docker",
     interface: "br-b05f8e098ad7",
     exposed: true,
+    level: "warning",
   },
   {
     protocol: "tcp",
@@ -265,13 +271,15 @@ export const bridgedDatabases = [
     network: "docker",
     interface: "docker0",
     exposed: true,
+    level: "warning",
   },
 ]
 
 /**
  * The longest reach a row can read, on a cloud host's private uplink: the
- * Docker API on a private address a provider may map, and Elasticsearch on a
- * VPN — for the phone width, where the label must not push the page wider.
+ * Docker API on the private address the provider maps the public one onto,
+ * and Elasticsearch on a VPN — for the phone width, where the label must not
+ * push the page wider.
  */
 export const privateUplink = [
   {
@@ -285,9 +293,10 @@ export const privateUplink = [
     user: "root",
     scope: "interface",
     reach: "network",
-    network: "private",
+    network: "uplink",
     interface: "enp0s31f6",
     exposed: true,
+    level: "warning",
   },
   {
     protocol: "tcp",
@@ -303,6 +312,128 @@ export const privateUplink = [
     reach: "network",
     network: "vpn",
     interface: "wg0",
+    exposed: true,
+    level: "warning",
+  },
+]
+
+const dockerProxy = (port: number, family: string, hostIp: string, pid: number) => ({
+  protocol: "tcp",
+  family,
+  address: hostIp,
+  port,
+  pid,
+  ppid: 1755428,
+  process: "docker-proxy",
+  cmdline: `/usr/bin/docker-proxy -proto tcp -host-ip ${hostIp} -host-port ${port} -container-ip 10.0.0.3 -container-port ${port} -use-listen-fd`,
+  user: "root",
+  scope: "all",
+  reach: "all",
+  network: "all",
+  exposed: true,
+})
+
+/**
+ * Docker's Caddy ingress as this host publishes it: one docker-proxy per
+ * family for each of 80 and 443, four processes and two services.
+ */
+export const dockerIngress = [
+  dockerProxy(80, "ipv4", "0.0.0.0", 1883643),
+  dockerProxy(80, "ipv6", "::", 1883650),
+  dockerProxy(443, "ipv4", "0.0.0.0", 1883666),
+  dockerProxy(443, "ipv6", "::", 1883672),
+]
+
+/**
+ * Databases on a host whose firewall denies inbound by default: Redis on
+ * every interface in both families and Postgres on the public address, which
+ * the posture levels warnings, with the firewall's default named.
+ */
+export const firewalledDatabases = [
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "0.0.0.0",
+    port: 6379,
+    pid: 3200,
+    process: "redis-server",
+    cmdline: "/usr/bin/redis-server *:6379",
+    user: "redis",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "warning",
+    inboundDefault: "deny",
+  },
+  {
+    protocol: "tcp",
+    family: "ipv6",
+    address: "::",
+    port: 6379,
+    pid: 3200,
+    process: "redis-server",
+    cmdline: "/usr/bin/redis-server *:6379",
+    user: "redis",
+    scope: "all",
+    reach: "all",
+    network: "all",
+    exposed: true,
+    level: "warning",
+    inboundDefault: "deny",
+  },
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "57.131.21.87",
+    port: 5432,
+    pid: 3100,
+    process: "postgres",
+    cmdline: "postgres -D /var/lib/postgresql/17/main",
+    user: "postgres",
+    scope: "interface",
+    reach: "public",
+    network: "public",
+    interface: "ens3",
+    exposed: true,
+    level: "warning",
+    inboundDefault: "deny",
+  },
+]
+
+/**
+ * A service on docker0 in both families, its IPv6 half on the bridge's
+ * link-local address: the longest pair of addresses a row folds.
+ */
+export const bridgePair = [
+  {
+    protocol: "tcp",
+    family: "ipv4",
+    address: "10.0.0.1",
+    port: 46505,
+    pid: 3053394,
+    process: "node",
+    cmdline: "node /srv/metrics/server.js",
+    user: "ubuntu",
+    scope: "interface",
+    reach: "host",
+    network: "docker",
+    interface: "docker0",
+    exposed: true,
+  },
+  {
+    protocol: "tcp",
+    family: "ipv6",
+    address: "fe80::b482:4dff:fe92:4281",
+    port: 46505,
+    pid: 3053394,
+    process: "node",
+    cmdline: "node /srv/metrics/server.js",
+    user: "ubuntu",
+    scope: "interface",
+    reach: "host",
+    network: "docker",
+    interface: "docker0",
     exposed: true,
   },
 ]

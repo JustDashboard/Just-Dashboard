@@ -8,9 +8,10 @@ export type PortFindingInput = { ports?: Listener[] }
  * A database or control port answering off this machine — on every
  * interface, or on one address, which reaches as far as that address does.
  * Counted per port, not per socket: a database bound to two addresses, or to
- * 0.0.0.0 and ::, is one database. Levelled as the security posture levels
- * the same sockets: critical where the internet can reach one, a warning
- * where only a tailnet, a LAN or a bridge can.
+ * 0.0.0.0 and ::, is one database. Levelled by the security posture's own
+ * grade of each socket, which GET /ports carries: critical where the
+ * internet can reach one, a warning where only a tailnet, a LAN or a bridge
+ * can, or where the firewall denies inbound by default.
  */
 export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
   const out: ProxyFinding[] = []
@@ -18,9 +19,11 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
   const dangerous = dangerousPorts(ports ?? [])
   if (dangerous.length > 0) {
     const everywhere = dangerous.every(onEveryInterface)
+    // The firewall's default is the host's, so one port carrying it is all of them.
+    const inbound = dangerous.find((d) => d.inboundDefault)?.inboundDefault
     out.push({
       id: "ports.dangerous",
-      level: dangerous.some((d) => d.internet) ? "critical" : "warning",
+      level: dangerous.some((d) => d.level === "critical") ? "critical" : "warning",
       title:
         dangerous.length === 1
           ? `${dangerous[0].service} answers on ${where(dangerous[0])}`
@@ -30,7 +33,8 @@ export function portFindings({ ports }: PortFindingInput): ProxyFinding[] {
           (d) =>
             `${d.port}/${d.protocol} ${d.sockets[0].process || "unknown"}${onEveryInterface(d) ? "" : ` on ${placed(d.sockets)}`}`,
         )
-        .join(", "),
+        .join(", ")
+        .concat(inbound ? `, though the firewall's inbound default is ${inbound}` : ""),
       // A socket already on one address is not fixed by binding it to "a
       // private address"; it may be on one.
       advice: everywhere

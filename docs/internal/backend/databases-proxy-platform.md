@@ -283,14 +283,21 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   netsec's grade of the address (`loopback`, `host` for a bridge, `network`, `public`, `all`, see
   observability-security.md), and `Listener.Network` and `Listener.Interface` name what it is made of
   (`tailnet` on `tailscale0`, `docker` on `docker0` or a `br-<network id>`, `public` on `ens3`, `vpn`,
-  `private`, another `bridge`, `link-local`, `loopback`, `all`); all three come from one
-  `HostNetwork.Place`, which needs the interfaces, so `GET /ports` fills them and `ListListeners` leaves
-  them empty. The ports page colours and words a socket by them ("Tailnet only · tailscale0"), so it
-  cannot call critical what the posture calls a warning. `Listener.Family` (`ipv4`/`ipv6`) is the kernel
-  table the socket is in; the page folds a service's two families on one network into one row and one
-  count, and the overview's Exposed ports tile counts the same folded rows. A UDP socket on port 0 is not
-  listed, and `GET /ports` gives the walk ten seconds before a retryable 504, which the page offers to
-  try again.
+  `uplink` for a private address on the default-route interface, `private`, another `bridge`,
+  `link-local`, `loopback`, `all`); all three come from one `HostNetwork.Place`, which needs the
+  interfaces, so `GET /ports` fills them and `ListListeners` leaves them empty. `GET /ports` also fills
+  `Listener.Level` and `InboundDefault` from `netsec.GradePort`, with the firewall status read beside the
+  walk: the posture's level for a finding on that socket (empty where it raises none) and the firewall's
+  inbound default when that is what holds it to a warning. The ports page words a socket by its network
+  ("Tailnet only · tailscale0") and colours a database by `Level`, and the overview's attention finding
+  is levelled by it, so neither can call critical what the posture calls a warning. `Listener.Family`
+  (`ipv4`/`ipv6`) is the kernel table the socket is in, and `Listener.PPID` the owner's parent; the page
+  folds a service's two families on one network into one row and one count when one process holds both,
+  or one program run by one account was started by one parent (not init) or with the same command line
+  but for its addresses — Docker holds a published port's two families in two docker-proxy processes,
+  dockerd's children, each told its own `-host-ip`. The overview's Internet-facing tile counts the same
+  folded rows. A UDP socket on port 0 is not listed, and `GET /ports` gives the walk ten seconds before
+  a retryable 504, which the page offers to try again.
   `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
   root; it reads `/proc` and changes nothing.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our

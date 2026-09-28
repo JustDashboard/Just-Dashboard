@@ -116,8 +116,8 @@ const inputs = {
       ],
     },
     ports: [
-      listener({ port: 5432, process: "postgres" }),
-      listener({ port: 6379, process: "", protocol: "tcp6" }),
+      listener({ port: 5432, process: "postgres", level: "warning" }),
+      listener({ port: 6379, process: "", protocol: "tcp6", level: "warning" }),
       listener({ port: 3306, exposed: false }),
       listener({}),
     ],
@@ -129,7 +129,7 @@ const inputs = {
       dir: "/etc/nginx/stream.d",
       streams: [stream({ allowFrom: ["1.2.3.4"] })],
     },
-    ports: [listener({ port: 27017, process: "mongod" })],
+    ports: [listener({ port: 27017, process: "mongod", level: "warning" })],
     certbot: {
       available: true,
       certs: [{ name: "a", domains: [], expiry: "", daysLeft: 60, valid: true }],

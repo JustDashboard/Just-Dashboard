@@ -124,10 +124,11 @@ func TestListenersFromKeepsWhatAcceptsAndSaysHowFarItReaches(t *testing.T) {
 	// The two port-80 workers are siblings forked by 900.
 	got := listenersFrom(sockets, holders, map[int32]int32{2450808: 1, 900: 1, 901: 900})
 	want := []Listener{
-		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 22, PID: 2450808, Scope: ScopeAll, Exposed: true},
-		{Protocol: "tcp", Family: "ipv6", Address: "::", Port: 22, PID: 2450808, Scope: ScopeAll, Exposed: true},
+		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 22, PID: 2450808, PPID: 1, Scope: ScopeAll, Exposed: true},
+		{Protocol: "tcp", Family: "ipv6", Address: "::", Port: 22, PID: 2450808, PPID: 1, Scope: ScopeAll, Exposed: true},
+		// A parent that could not be read is none.
 		{Protocol: "udp", Family: "ipv4", Address: "57.131.21.87", Port: 68, PID: 998, Scope: ScopeInterface, Exposed: true},
-		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 80, PID: 900, Scope: ScopeAll, Exposed: true},
+		{Protocol: "tcp", Family: "ipv4", Address: "0.0.0.0", Port: 80, PID: 900, PPID: 1, Scope: ScopeAll, Exposed: true},
 		{Protocol: "tcp", Family: "ipv4", Address: "127.0.0.1", Port: 5432, PID: 0, Scope: ScopeLoopback, Exposed: false},
 		{Protocol: "tcp", Family: "ipv4", Address: "100.110.34.31", Port: 8443, PID: 2066, Scope: ScopeInterface, Exposed: true},
 	}
@@ -325,6 +326,44 @@ func TestListListenersNamesTheMasterAboveItsWorkers(t *testing.T) {
 		return
 	}
 	t.Fatalf("port 22 was not listed: %+v", listeners)
+}
+
+// Docker publishes a port with one docker-proxy per family: here port 22's
+// IPv4 socket is one proxy's and its IPv6 socket another's, both dockerd's
+// children. Each is listed with its own PID and the parent they share, which
+// is what the page folds them into one service by. The test process and its
+// parent stand in for the proxies, as gopsutil names only a PID that exists.
+func TestListListenersNamesEachDockerProxyAndItsParent(t *testing.T) {
+	proxy4, proxy6, dockerd := os.Getpid(), os.Getppid(), 1755428
+	cmdline := func(hostIP string) []string {
+		return []string{"/usr/bin/docker-proxy", "-proto", "tcp", "-host-ip", hostIP, "-host-port", "22",
+			"-container-ip", "10.0.0.3", "-container-port", "22", "-use-listen-fd"}
+	}
+	root := fakeProc(t,
+		map[string]string{"tcp": hostTCP, "tcp6": hostTCP6, "udp": hostUDP},
+		map[int]fakeProcess{
+			proxy4: {name: "docker-proxy", cmdline: cmdline("0.0.0.0"), parent: dockerd, sockets: map[int]uint64{3: 127916755}},
+			proxy6: {name: "docker-proxy", cmdline: cmdline("::"), parent: dockerd, sockets: map[int]uint64{3: 127915939}},
+		})
+	t.Setenv("HOST_PROC", root)
+
+	listeners, err := ListListeners(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners := map[string][2]int32{}
+	for _, l := range listeners {
+		if l.Port == 22 {
+			if l.Process != "docker-proxy" {
+				t.Errorf("port 22 on %s is %q, want docker-proxy", l.Address, l.Process)
+			}
+			owners[l.Family] = [2]int32{l.PID, l.PPID}
+		}
+	}
+	want := map[string][2]int32{"ipv4": {int32(proxy4), int32(dockerd)}, "ipv6": {int32(proxy6), int32(dockerd)}}
+	if fmt.Sprint(owners) != fmt.Sprint(want) {
+		t.Errorf("port 22's owners (PID, parent) = %v, want %v", owners, want)
+	}
 }
 
 // A kernel booted without IPv6 has no tcp6 or udp6; that is four sockets

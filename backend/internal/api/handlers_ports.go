@@ -27,6 +27,16 @@ func (s *Server) mountPortRoutes(r chi.Router) {
 func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, portListTimeout)
 	defer cancel()
+	// The firewall's status is the posture's other input to a port's level,
+	// read beside the walk rather than after it.
+	firewall := make(chan *netsec.FirewallStatus, 1)
+	go func() {
+		status, err := s.modules.netsec.Status(ctx)
+		if err != nil {
+			status = nil
+		}
+		firewall <- status
+	}()
 	listeners, err := proxysvc.ListListeners(ctx)
 	if errors.Is(err, context.DeadlineExceeded) {
 		return httpx.Err(http.StatusGatewayTimeout, "timeout",
@@ -39,11 +49,18 @@ func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
 	// database critical that the posture calls a warning, and named by it:
 	// the tailnet on tailscale0, Docker's bridge docker0.
 	network := netsec.ReadHostNetwork(ctx)
+	status := <-firewall
 	for i := range listeners {
-		place := network.Place(listeners[i].Address)
-		listeners[i].Reach = string(place.Reach)
-		listeners[i].Network = string(place.Network)
-		listeners[i].Interface = place.Interface
+		l := &listeners[i]
+		place := network.Place(l.Address)
+		l.Reach = string(place.Reach)
+		l.Network = string(place.Network)
+		l.Interface = place.Interface
+		grade := netsec.GradePort(netsec.ExposedPort{
+			Port: l.Port, Protocol: l.Protocol, Address: l.Address, Process: l.Process, Exposed: l.Exposed,
+		}, network, status)
+		l.Level = grade.Level
+		l.InboundDefault = grade.InboundDefault
 	}
 	httpx.JSON(w, http.StatusOK, listeners)
 	return nil

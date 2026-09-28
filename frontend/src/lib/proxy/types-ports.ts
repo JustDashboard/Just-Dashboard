@@ -14,14 +14,25 @@ export type ListenerScope = "loopback" | "interface" | "all"
 export type ListenerReach = "loopback" | "host" | "network" | "public" | "all"
 
 /**
- * What a reach is made of, as the posture names it: `private` is a LAN or a
- * cloud's private address on the uplink (which a provider may map a public
- * address onto), `docker` Docker's own bridge (docker0, br-<network id>),
- * `bridge` any other bridge or veth only this host's guests are on, and
- * `link-local` a link-local address on a link to other machines.
+ * What a reach is made of, as the posture names it: `uplink` is a private
+ * address on the interface carrying the default route (a cloud instance's
+ * own, which its provider maps a public address onto, or a server's behind a
+ * router that may forward to it), `private` one on another NIC or on no
+ * interface the host listed, `docker` Docker's own bridge (docker0,
+ * br-<network id>), `bridge` any other bridge or veth only this host's guests
+ * are on, and `link-local` a link-local address on a link to other machines.
  */
 export type ListenerNetwork =
-  "loopback" | "all" | "public" | "tailnet" | "vpn" | "private" | "docker" | "bridge" | "link-local"
+  | "loopback"
+  | "all"
+  | "public"
+  | "tailnet"
+  | "vpn"
+  | "uplink"
+  | "private"
+  | "docker"
+  | "bridge"
+  | "link-local"
 
 export type Listener = {
   protocol: string
@@ -30,6 +41,8 @@ export type Listener = {
   address: string
   port: number
   pid: number
+  /** The owner's parent; absent where it could not be read. */
+  ppid?: number
   process: string
   cmdline?: string
   user?: string
@@ -40,4 +53,11 @@ export type Listener = {
   interface?: string
   /** Every scope but loopback: reachable from off this machine. */
   exposed: boolean
+  /**
+   * The security posture's level for a finding on this socket, graded by the
+   * same rules with the same firewall; absent where it raises none.
+   */
+  level?: "critical" | "warning"
+  /** The firewall's inbound default ("deny"), when it is what holds `level` to a warning. */
+  inboundDefault?: string
 }

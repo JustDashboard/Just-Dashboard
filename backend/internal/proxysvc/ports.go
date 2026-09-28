@@ -27,6 +27,10 @@ type Listener struct {
 	Address string `json:"address"`
 	Port    uint32 `json:"port"`
 	PID     int32  `json:"pid"`
+	// PPID is the owner's parent, 0 where it could not be read. Docker holds
+	// a published port's two families in two docker-proxy processes, one
+	// dockerd's children, and the page counts them as the one service.
+	PPID    int32  `json:"ppid,omitempty"`
 	Process string `json:"process"`
 	Cmdline string `json:"cmdline,omitempty"`
 	User    string `json:"user,omitempty"`
@@ -48,6 +52,13 @@ type Listener struct {
 	// loopback bind and an address on no interface the host listed.
 	Network   string `json:"network,omitempty"`
 	Interface string `json:"interface,omitempty"`
+	// Level is the security posture's for a finding on this socket —
+	// critical or warning, empty where it raises none — and InboundDefault
+	// the firewall's inbound default when that is what holds it to a
+	// warning. GET /ports fills both from netsec.GradePort, so the ports
+	// page and the proxy overview level a database as the posture does.
+	Level          string `json:"level,omitempty"`
+	InboundDefault string `json:"inboundDefault,omitempty"`
 }
 
 // BindScope is where a socket can be reached from, judged from the address it
@@ -157,12 +168,14 @@ func listenersFrom(sockets []socketRow, holders map[uint64][]int32, parents map[
 	out := make([]Listener, 0, len(order))
 	for _, key := range order {
 		scope := bindScope(key.address)
+		owner := ownerOf(held[key], parents)
 		out = append(out, Listener{
 			Protocol: key.proto,
 			Family:   key.family,
 			Address:  key.address,
 			Port:     key.port,
-			PID:      ownerOf(held[key], parents),
+			PID:      owner,
+			PPID:     parents[owner],
 			Scope:    scope,
 			Exposed:  scope != ScopeLoopback,
 		})

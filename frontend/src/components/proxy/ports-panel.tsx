@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { Fragment, useMemo } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
 import { ListOrdered, Router, Shield } from "@/components/icons"
@@ -17,18 +17,21 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbBar, type Verb } from "@/components/verbs"
-import { DANGEROUS_PORTS } from "@/components/proxy/attention"
 import {
   dangerousPorts,
+  dangerousService,
   foldDualStack,
   internetHint,
   networkWords,
+  onUplink,
   privateHint,
   reachGroup,
   reachVerdict,
   reachWords,
   socketAddresses,
+  socketPids,
   tallyReach,
+  UPLINK_CAVEAT,
   type Socket,
 } from "@/components/proxy/ports"
 import {
@@ -75,6 +78,7 @@ export function PortsPage() {
   // A service on 0.0.0.0 and :: is one row and one count.
   const all = useMemo(() => foldDualStack(listeners), [listeners])
   const counts = useMemo(() => tallyReach(all), [all])
+  const onTheUplink = useMemo(() => all.filter(onUplink).length, [all])
   const dangerous = useMemo(() => dangerousPorts(listeners), [listeners])
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -160,7 +164,9 @@ export function PortsPage() {
         <StatTile
           label="Internet-facing"
           value={counts.internet}
-          tone={counts.internet > 0 ? "warning" : "success"}
+          // Nothing is sure to face the internet while a socket is on the
+          // private uplink, but nothing is sure not to either.
+          tone={counts.internet > 0 ? "warning" : onTheUplink > 0 ? "default" : "success"}
           hint={internetHint(all)}
         />
         <StatTile label="Private networks" value={counts.private} hint={privateHint(all)} />
@@ -168,7 +174,7 @@ export function PortsPage() {
           label="Databases exposed"
           value={dangerous.length}
           tone={
-            dangerous.some((d) => d.internet)
+            dangerous.some((d) => d.level === "critical")
               ? "danger"
               : dangerous.length > 0
                 ? "warning"
@@ -235,11 +241,8 @@ export function PortsPage() {
                               {listener.protocol}
                             </span>
                           </div>
-                          <p
-                            className="mt-1 truncate font-mono text-hint text-muted-foreground"
-                            title={socketAddresses(listener).join(", ")}
-                          >
-                            {socketAddresses(listener).join(", ")}
+                          <p className="mt-1 font-mono text-hint wrap-anywhere text-muted-foreground">
+                            <Addresses socket={listener} />
                           </p>
                         </TableCell>
                         <TableCell>
@@ -257,7 +260,7 @@ export function PortsPage() {
                               </p>
                               <p className="mt-1 text-hint text-muted-foreground">
                                 {listener.user || "unknown user"}
-                                {listener.pid > 0 && ` · PID ${listener.pid}`}
+                                <Pids socket={listener} />
                               </p>
                             </div>
                           </div>
@@ -285,21 +288,29 @@ export function PortsPage() {
                       ROW_BLEED,
                     )}
                   >
-                    <span className="numeric w-14 shrink-0 font-mono text-title font-semibold">
-                      {listener.port}
-                    </span>
+                    {/* The protocol under the port, as the table pairs them:
+                        a line of its own that nothing can push off the row. */}
+                    <div className="w-14 shrink-0">
+                      <p className="numeric font-mono text-title font-semibold">{listener.port}</p>
+                      <p className="text-hint text-muted-foreground uppercase">
+                        {listener.protocol}
+                      </p>
+                    </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2 text-body">
                         <ProcessMark listener={listener} />
                         <span className="truncate">{listener.process || "unknown"}</span>
+                        {listener.user && (
+                          <span className="max-w-[45%] shrink-0 truncate text-hint text-muted-foreground">
+                            · {listener.user}
+                          </span>
+                        )}
                       </div>
                       {/* Which address a port is bound to is the whole reason
                           this page exists — it must not be the line that gets
-                          dropped on a narrow screen. */}
-                      <p className="truncate font-mono text-hint text-muted-foreground">
-                        {socketAddresses(listener).join(", ")}
-                        <span className="uppercase"> · {listener.protocol}</span>
-                        {listener.user && ` · ${listener.user}`}
+                          cut on a narrow screen. */}
+                      <p className="font-mono text-hint wrap-anywhere text-muted-foreground">
+                        <Addresses socket={listener} />
                       </p>
                       <div className="mt-1.5">
                         <ReachStatus socket={listener} />
@@ -329,18 +340,45 @@ function ProcessMark({ listener }: { listener: Listener }) {
 }
 
 /**
+ * A socket's addresses one to a line, for its parent to wrap rather than cut:
+ * the address is what says where the port answers. The comma between them
+ * stays for a screen reader and a search of the page.
+ */
+function Addresses({ socket }: { socket: Socket }) {
+  return socketAddresses(socket).map((address, i) => (
+    <Fragment key={address}>
+      {i > 0 && (
+        <>
+          <span className="sr-only">, </span>
+          <br />
+        </>
+      )}
+      {address}
+    </Fragment>
+  ))
+}
+
+/** The process behind a row, or both when Docker holds each family in its own proxy. */
+function Pids({ socket }: { socket: Socket }) {
+  const pids = socketPids(socket)
+  if (pids.length === 0) return null
+  return <>{` · ${pids.length > 1 ? "PIDs" : "PID"} ${pids.join(", ")}`}</>
+}
+
+/**
  * Where the socket answers, coloured by who can connect as the posture levels
  * the same socket, with the interface the address is on beneath it. The
  * label wraps rather than running into the next column: "the Docker API ·
- * Private network" is wider than the column.
+ * Private uplink" is wider than the column. A database the firewall's
+ * inbound default holds to a warning says so, as the posture's finding does.
  */
 function ReachStatus({ socket }: { socket: Socket }) {
   const verdict = reachVerdict(socket)
-  if (!verdict) return <span className="text-xs text-muted-foreground">{networkWords(socket)}</span>
-  const service = DANGEROUS_PORTS[socket.port]
   const words = networkWords(socket)
+  if (!verdict) return <span className="text-xs text-muted-foreground">{words}</span>
+  const service = dangerousService(socket)
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" title={onUplink(socket) ? UPLINK_CAVEAT : undefined}>
       <Status
         verdict={verdict}
         label={service ? `${service} · ${words}` : words}
@@ -353,6 +391,11 @@ function ReachStatus({ socket }: { socket: Socket }) {
           title={socket.interface}
         >
           {socket.interface}
+        </p>
+      )}
+      {service && socket.inboundDefault && (
+        <p className="mt-0.5 pl-5 text-hint text-muted-foreground">
+          Firewall&apos;s inbound default: {socket.inboundDefault}
         </p>
       )}
     </div>

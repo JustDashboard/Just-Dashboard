@@ -104,7 +104,7 @@ var reachForScope = map[proxysvc.BindScope]map[string]bool{
 var networksForReach = map[string]map[string]bool{
 	"loopback": {"loopback": true},
 	"host":     {"docker": true, "bridge": true},
-	"network":  {"tailnet": true, "vpn": true, "private": true, "link-local": true},
+	"network":  {"tailnet": true, "vpn": true, "uplink": true, "private": true, "link-local": true},
 	"public":   {"public": true},
 	"all":      {"all": true},
 }
@@ -225,4 +225,89 @@ func TestPortListGradesABridgeAddressAsThisHosts(t *testing.T) {
 		}
 	}
 	t.Errorf("the socket on %s:%d was not listed", bridge, port)
+}
+
+// A database's level on the ports page is the posture's, graded by the same
+// rules with the same firewall: on a host whose firewall denies inbound by
+// default the page used to draw red what the posture drew amber. The socket
+// is a database port on a bridge address, which the posture levels a warning
+// whatever the firewall says; beside it, a socket on no catalogued port has
+// no level at all.
+func TestPortListLevelsADatabaseAsThePostureDoes(t *testing.T) {
+	var bridge net.IP
+	for _, a := range netsec.ReadHostNetwork(context.Background()).Addresses {
+		if a.Kind == "bridge" && !a.DefaultRoute && a.IP.To4() != nil {
+			bridge = a.IP
+			break
+		}
+	}
+	if bridge == nil {
+		t.Skip("no bridge address on this host")
+	}
+	var database net.Listener
+	for _, port := range []string{"6379", "27017", "11211", "9200", "5432"} {
+		if l, err := net.Listen("tcp", net.JoinHostPort(bridge.String(), port)); err == nil {
+			database = l
+			break
+		}
+	}
+	if database == nil {
+		t.Skipf("no database port is free on %s", bridge)
+	}
+	defer database.Close()
+	plain, err := net.Listen("tcp", net.JoinHostPort(bridge.String(), "0"))
+	if err != nil {
+		t.Skipf("cannot listen on %s: %v", bridge, err)
+	}
+	defer plain.Close()
+
+	dbPort := uint32(database.Addr().(*net.TCPAddr).Port)
+	plainPort := uint32(plain.Addr().(*net.TCPAddr).Port)
+	seen := 0
+	// The port's level on the page is its highest socket's, as the posture's
+	// one finding for it is at its widest bind.
+	portLevel := ""
+	for _, l := range listedPorts(t) {
+		if l.Protocol == "tcp" && l.Port == dbPort && l.Level != "" && portLevel != "critical" {
+			portLevel = l.Level
+		}
+		if l.Protocol != "tcp" || l.Address != bridge.String() {
+			continue
+		}
+		switch l.Port {
+		case dbPort:
+			seen++
+			if l.Level != "warning" {
+				t.Errorf("the database on %s:%d = %+v, want the posture's warning", bridge, dbPort, l)
+			}
+		case plainPort:
+			seen++
+			if l.Level != "" || l.InboundDefault != "" {
+				t.Errorf("the socket on %s:%d = %+v, want no level", bridge, plainPort, l)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("listed %d of this test's 2 sockets on %s", seen, bridge)
+	}
+
+	c, _ := newClient(t)
+	w := c.do(http.MethodGet, "/api/v1/security/posture", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /security/posture = %d: %s", w.Code, w.Body.String())
+	}
+	var posture netsec.Posture
+	if err := json.Unmarshal(w.Body.Bytes(), &posture); err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprintf("ports.exposed.tcp.%d", dbPort)
+	for _, f := range posture.Findings {
+		if f.ID == id {
+			if f.Level != portLevel {
+				t.Errorf("the posture levels %s %q, the ports page %q", id, f.Level, portLevel)
+			}
+			return
+		}
+	}
+	t.Errorf("the posture raised no %s", id)
 }

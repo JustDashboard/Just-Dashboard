@@ -115,10 +115,16 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   internet cannot share, so libvirt's dnsmasq on `virbr0` raises nothing. A port bound to several
   addresses is one finding at its widest, as its ID is per port, and its detail names the interface the
   address is on ("TCP/6379 is bound to 100.110.34.31 on tailscale0"). `HostNetwork.Place` returns the
-  grade with the network it is made of — `tailnet`, `vpn`, `private`, `docker` (Docker's `docker0` or
-  `br-<network id>`), another `bridge`, `link-local` — and the interface, and `GET /ports` returns all
-  three as `Listener.Reach`, `Network` and `Interface`, so the ports page words a socket as the posture
-  judges it.
+  grade with the network it is made of — `tailnet`, `vpn`, `uplink` (a private address on an interface
+  carrying a default route), `private` (one on another NIC, or on no interface the host listed),
+  `docker` (Docker's `docker0` or `br-<network id>`), another `bridge`, `link-local` — and the interface,
+  and `GET /ports` returns all three as `Listener.Reach`, `Network` and `Interface`, so the ports page
+  words a socket as the posture judges it. A firewall that is on and does not allow inbound by default
+  holds every port finding to a warning and is named in its detail; one whose inbound default could not
+  be read is not counted on. `GradePort` levels one socket by exactly these rules — the same
+  `dangerAt` and `portLevel` `assessPorts` uses — and `GET /ports` returns its result as
+  `Listener.Level` and `InboundDefault`, reading the firewall status the posture reads, so the ports
+  page and the proxy overview colour a database as the posture levels it.
 - **A check that could not run is not a pass.** `Posture.Skipped` says which is which, because a zero and
   an unanswerable question look identical: `SecurityFiltering` is false on Alpine/Arch (no advisory
   data), `LoginRecordRead` false wherever `last`/`lastb` are missing (util-linux-extra, absent from

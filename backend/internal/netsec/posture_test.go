@@ -575,12 +575,15 @@ func TestPlaceNamesTheNetworkAndItsInterface(t *testing.T) {
 		{"fe80::4047:75ff:fe8e:bb04", Placement{ReachHost, NetworkBridge, "vethba736b3"}},
 		{"fe80::f816:3eff:fee3:1a48", Placement{ReachNetwork, NetworkLinkLocal, "ens3"}},
 		{"fe80::1890:7917:9cdb:1fa5", Placement{ReachNetwork, NetworkLinkLocal, "tailscale0"}},
-		{"172.31.5.9", Placement{ReachNetwork, NetworkPrivate, "eth0"}},
+		// A cloud instance's private address on the interface carrying the
+		// default route: the uplink, which its provider may map the public
+		// address onto.
+		{"172.31.5.9", Placement{ReachNetwork, NetworkUplink, "eth0"}},
 		// A second NIC on an ISP's CGNAT, which shares Tailscale's range, is
 		// that ISP's network and not the tailnet.
 		{"100.72.0.5", Placement{ReachNetwork, NetworkPrivate, "eth1"}},
 		// A bridge that carries the default route is the uplink.
-		{"192.168.1.20", Placement{ReachNetwork, NetworkPrivate, "br-lan"}},
+		{"192.168.1.20", Placement{ReachNetwork, NetworkUplink, "br-lan"}},
 		// On no interface the host listed: graded by the address alone.
 		{"10.99.0.1", Placement{ReachNetwork, NetworkPrivate, ""}},
 		{"203.0.113.5", Placement{ReachPublic, NetworkPublic, ""}},
@@ -626,6 +629,83 @@ func TestAssessNamesTheInterfaceADatabaseIsBoundOn(t *testing.T) {
 		if !ok || f.Level != c.level || f.Detail != c.detail {
 			t.Errorf("Redis on %s = %+v (found %v), want %s %q", c.address, f, ok, c.level, c.detail)
 		}
+	}
+}
+
+// A socket's grade is the level of the posture's finding for it, from the
+// same rules: the ports page and the proxy overview colour a database by it,
+// and on a host whose firewall denies inbound by default they used to call
+// critical what the posture called a warning.
+func TestGradePortIsThePosturesLevel(t *testing.T) {
+	firewalls := map[string]*FirewallStatus{
+		"none":         nil,
+		"deny":         {Available: true, Enabled: true, Policy: DefaultPolicy{Incoming: "deny"}},
+		"reject":       {Available: true, Enabled: true, Policy: DefaultPolicy{Incoming: "reject"}},
+		"allow":        {Available: true, Enabled: true, Policy: DefaultPolicy{Incoming: "allow"}},
+		"inactive":     {Available: true, Enabled: false, Policy: DefaultPolicy{Incoming: "deny"}},
+		"policy unset": {Available: true, Enabled: true},
+	}
+	sockets := []ExposedPort{
+		{Port: 6379, Protocol: "tcp", Address: "0.0.0.0", Process: "redis-server", Exposed: true},
+		{Port: 6379, Protocol: "tcp", Address: "::", Process: "redis-server", Exposed: true},
+		{Port: 5432, Protocol: "tcp", Address: "57.131.21.87", Process: "postgres", Exposed: true},
+		{Port: 5432, Protocol: "tcp", Address: "100.110.34.31", Process: "postgres", Exposed: true},
+		{Port: 27017, Protocol: "tcp", Address: "10.0.0.1", Process: "mongod", Exposed: true},
+		{Port: 2375, Protocol: "tcp", Address: "172.31.5.9", Process: "dockerd", Exposed: true},
+		{Port: 53, Protocol: "udp", Address: "0.0.0.0", Process: "dnsmasq", Exposed: true},
+		{Port: 3389, Protocol: "tcp", Address: "172.31.5.9", Process: "xrdp", Exposed: true},
+		// What the posture raises nothing for grades as nothing.
+		{Port: 53, Protocol: "udp", Address: "192.168.122.1", Process: "dnsmasq", Exposed: true},
+		{Port: 5432, Protocol: "tcp", Address: "127.0.0.1", Process: "postgres", Exposed: false},
+		{Port: 443, Protocol: "tcp", Address: "0.0.0.0", Process: "nginx", Exposed: true},
+		{Port: 6379, Protocol: "udp", Address: "0.0.0.0", Process: "redis-server", Exposed: true},
+	}
+	for name, firewall := range firewalls {
+		for _, l := range sockets {
+			grade := GradePort(l, thisHost, firewall)
+			p := Assess(AssessInput{Network: thisHost, Firewall: firewall, Listeners: []ExposedPort{l}})
+			f, found := findingByID(p, fmt.Sprintf("ports.exposed.%s.%d", l.Protocol, l.Port))
+			where := fmt.Sprintf("%s/%d on %s behind %s", l.Protocol, l.Port, l.Address, name)
+			if !found {
+				if grade != (PortGrade{}) {
+					t.Errorf("%s: graded %+v, the posture raises nothing", where, grade)
+				}
+				continue
+			}
+			if grade.Level != f.Level {
+				t.Errorf("%s: graded %q, the posture says %q", where, grade.Level, f.Level)
+			}
+			clause := ", though the firewall's inbound default is " + grade.InboundDefault
+			if (grade.InboundDefault != "") != strings.HasSuffix(f.Detail, clause) {
+				t.Errorf("%s: inbound default %q, the posture's detail %q", where, grade.InboundDefault, f.Detail)
+			}
+		}
+	}
+
+	// The reviewer's case: Redis on every interface behind ufw's deny.
+	redis := GradePort(sockets[0], thisHost, firewalls["deny"])
+	if redis != (PortGrade{Level: "warning", InboundDefault: "deny"}) {
+		t.Errorf("Redis on 0.0.0.0 behind deny = %+v, want a warning naming deny", redis)
+	}
+	if got := GradePort(sockets[0], thisHost, nil); got != (PortGrade{Level: "critical"}) {
+		t.Errorf("Redis on 0.0.0.0 with no firewall = %+v, want critical", got)
+	}
+	if got := GradePort(sockets[3], thisHost, nil); got != (PortGrade{Level: "warning"}) {
+		t.Errorf("Postgres on the tailnet = %+v, want a warning", got)
+	}
+}
+
+// A firewall whose inbound default could not be read is not counted on: the
+// verbose status is a second call that can fail on its own, and the detail
+// then promised a policy it did not name.
+func TestAssessDoesNotLeanOnAnUnreadInboundDefault(t *testing.T) {
+	p := Assess(AssessInput{
+		Firewall:  &FirewallStatus{Available: true, Enabled: true, Capabilities: writableFirewall},
+		Listeners: []ExposedPort{{Port: 6379, Protocol: "tcp", Address: "0.0.0.0", Exposed: true}},
+	})
+	f, ok := findingByID(p, "ports.exposed.tcp.6379")
+	if !ok || f.Level != "critical" || strings.Contains(f.Detail, "firewall") {
+		t.Errorf("finding = %+v (found %v), want critical with no word about the firewall", f, ok)
 	}
 }
 

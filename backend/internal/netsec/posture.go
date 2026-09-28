@@ -468,15 +468,8 @@ func assessPorts(in AssessInput) []SecurityFinding {
 	widest := map[string]exposure{}
 	order := []string{}
 	for _, l := range in.Listeners {
-		if !l.Exposed {
-			continue
-		}
-		preset, ok := PresetFor(strconv.FormatUint(uint64(l.Port), 10), l.Protocol)
-		if !ok || preset.Danger == "" {
-			continue
-		}
-		reach := in.Network.reachOf(l.Address)
-		if !reach.matters(preset) {
+		preset, reach, ok := in.Network.dangerAt(l)
+		if !ok {
 			continue
 		}
 		id := fmt.Sprintf("ports.exposed.%s.%d", l.Protocol, l.Port)
@@ -500,18 +493,9 @@ func assessPorts(in AssessInput) []SecurityFinding {
 		if l.Process != "" {
 			detail += " by " + l.Process
 		}
-		// A socket only one network can reach is worth knowing about, not
-		// an emergency: a database for the containers on a bridge, or for the
-		// operator's own devices on a tailnet, is often the design.
-		level := "warning"
-		if e.reach.class.InternetFacing() {
-			level = "critical"
-		}
-		// The firewall may be refusing it anyway, and saying so is the
-		// difference between a finding and a false alarm.
-		if in.Firewall != nil && in.Firewall.Enabled && in.Firewall.Policy.Incoming != "allow" {
-			level = "warning"
-			detail += ", though the firewall's inbound default is " + in.Firewall.Policy.Incoming
+		level, inbound := portLevel(e.reach, in.Firewall)
+		if inbound != "" {
+			detail += ", though the firewall's inbound default is " + inbound
 		}
 		out = append(out, SecurityFinding{
 			ID: id, Level: level, Area: "ports",
@@ -521,6 +505,64 @@ func assessPorts(in AssessInput) []SecurityFinding {
 		})
 	}
 	return out
+}
+
+// PortGrade is the posture's judgement of one listening socket, which the
+// ports page colours the socket by and the proxy overview levels its
+// finding by, so neither can call critical what the posture calls a warning.
+type PortGrade struct {
+	// Level is "critical" or "warning", or empty where the posture raises
+	// nothing: a port with no danger in the catalogue, a loopback bind, or a
+	// danger only strangers pose on a bind the internet cannot reach.
+	Level string
+	// InboundDefault is the firewall's inbound default when it is what holds
+	// Level to a warning, and empty otherwise.
+	InboundDefault string
+}
+
+// GradePort levels one socket by the rules Assess levels a port's finding
+// by. A port bound several times is one finding, at the highest of its
+// sockets' levels.
+func GradePort(l ExposedPort, network HostNetwork, firewall *FirewallStatus) PortGrade {
+	_, reach, ok := network.dangerAt(l)
+	if !ok {
+		return PortGrade{}
+	}
+	level, inbound := portLevel(reach, firewall)
+	return PortGrade{Level: level, InboundDefault: inbound}
+}
+
+// dangerAt is the catalogue's entry for a socket and how far its address
+// reaches, when the posture raises a finding for it.
+func (n HostNetwork) dangerAt(l ExposedPort) (ServicePreset, bindReach, bool) {
+	if !l.Exposed {
+		return ServicePreset{}, bindReach{}, false
+	}
+	preset, ok := PresetFor(strconv.FormatUint(uint64(l.Port), 10), l.Protocol)
+	if !ok || preset.Danger == "" {
+		return ServicePreset{}, bindReach{}, false
+	}
+	reach := n.reachOf(l.Address)
+	if !reach.matters(preset) {
+		return ServicePreset{}, bindReach{}, false
+	}
+	return preset, reach, true
+}
+
+// portLevel is a dangerous port's level at a reach. A socket only one
+// network can reach is worth knowing about, not an emergency: a database for
+// the containers on a bridge, or for the operator's own devices on a
+// tailnet, is often the design. A firewall refusing inbound by default may
+// be refusing it anyway, and saying so is the difference between a finding
+// and a false alarm; one whose default could not be read is not counted on.
+func portLevel(reach bindReach, firewall *FirewallStatus) (level, inboundDefault string) {
+	if firewall != nil && firewall.Enabled && firewall.Policy.Incoming != "" && firewall.Policy.Incoming != "allow" {
+		return "warning", firewall.Policy.Incoming
+	}
+	if reach.class.InternetFacing() {
+		return "critical", ""
+	}
+	return "warning", ""
 }
 
 func addressLabel(addr string) string {

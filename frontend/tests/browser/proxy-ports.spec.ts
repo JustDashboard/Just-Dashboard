@@ -1,5 +1,12 @@
 import { expect, test, type Page } from "@playwright/test"
-import { bridgedDatabases, hostPorts, privateUplink } from "./fixtures/proxy/ports"
+import {
+  bridgePair,
+  bridgedDatabases,
+  dockerIngress,
+  firewalledDatabases,
+  hostPorts,
+  privateUplink,
+} from "./fixtures/proxy/ports"
 import { json, mockProxy } from "./proxy-fixtures"
 
 /**
@@ -131,9 +138,11 @@ test("the overview counts services and names a public database critical", async 
   await mockHost(page)
   await page.goto("/proxy")
 
-  const exposed = page.locator('[data-slot="stat-tile"]').filter({ hasText: "Exposed ports" })
-  await expect(exposed.getByText("5", { exact: true })).toBeVisible()
-  await expect(exposed.getByText("of 7 listening, off the machine")).toBeVisible()
+  // The ports page's own split: Internet-facing, with the private networks
+  // in the hint, both figures the page it links to shows.
+  const internet = page.getByRole("link", { name: "Internet-facing ports" })
+  await expect(internet.getByText("3", { exact: true })).toBeVisible()
+  await expect(internet.getByText("2 on private networks")).toBeVisible()
 
   const finding = page.getByRole("button", { name: /^Redis answers on 203\.0\.113\.5/ })
   await expect(finding.locator(".bg-destructive")).toHaveCount(1)
@@ -142,6 +151,145 @@ test("the overview counts services and names a public database critical", async 
     page.getByText("6379/tcp redis-server on 203.0.113.5 (Public address · ens3)"),
   ).toBeVisible()
   await expect(page.getByText(/answers on every interface/)).toHaveCount(0)
+
+  await internet.click()
+  await expect(page).toHaveURL(/\/proxy\/ports$/)
+  await expect(tile(page, "Internet-facing").getByText("3", { exact: true })).toBeVisible()
+  await expect(tile(page, "Private networks").getByText("2", { exact: true })).toBeVisible()
+})
+
+test("a port Docker publishes in both families is one row and one count", async ({ page }) => {
+  // One docker-proxy per family holds each of 80 and 443, as on this host.
+  await mockHost(page, [...hostPorts, ...dockerIngress])
+  await page.goto("/proxy/ports")
+
+  const rows = page.getByRole("table").locator("tbody tr")
+  await expect(rows).toHaveCount(9)
+  const http = rows.filter({ hasText: "PIDs 1883643, 1883650" })
+  await expect(http).toHaveCount(1)
+  await expect(http.locator("td").first().locator("p.font-mono")).toHaveText("0.0.0.0, ::")
+  await expect(rows.filter({ hasText: "PIDs 1883666, 1883672" })).toHaveCount(1)
+  await expect(tile(page, "Internet-facing").getByText("5", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Internet-facing 5" })).toBeVisible()
+
+  await page.goto("/proxy")
+  const internet = page.getByRole("link", { name: "Internet-facing ports" })
+  await expect(internet.getByText("5", { exact: true })).toBeVisible()
+})
+
+test("a database behind a firewall denying inbound is the posture's warning everywhere", async ({
+  page,
+}) => {
+  await mockHost(page, firewalledDatabases)
+  await page.goto("/proxy/ports")
+
+  const rows = page.getByRole("table").locator("tbody tr")
+  await expect(rows).toHaveCount(2)
+  for (const label of ["Redis · Every interface", "PostgreSQL · Public address"]) {
+    const status = rows.getByText(label)
+    await expect(status).toHaveClass(/text-warning/)
+    await expect(status).not.toHaveClass(/text-destructive/)
+  }
+  await expect(rows.getByText("Firewall's inbound default: deny")).toHaveCount(2)
+  await expect(tile(page, "Databases exposed").getByText("2", { exact: true })).toHaveClass(
+    /text-warning/,
+  )
+
+  await page.goto("/proxy")
+  const finding = page.getByRole("button", {
+    name: /^2 database or control ports answer off this machine/,
+  })
+  await expect(finding.locator(".bg-warning")).toHaveCount(1)
+  await expect(finding.locator(".bg-destructive")).toHaveCount(0)
+  await finding.click()
+  await expect(
+    page.getByText(
+      "6379/tcp redis-server, 5432/tcp postgres on 57.131.21.87 (Public address · ens3), though the firewall's inbound default is deny",
+    ),
+  ).toBeVisible()
+})
+
+test("a socket on the private uplink is not said to be out of the internet's reach", async ({
+  page,
+}) => {
+  await mockHost(page, [
+    ...hostPorts.filter((l) => l.reach !== "all" && l.reach !== "public"),
+    privateUplink[0],
+  ])
+  await page.goto("/proxy/ports")
+
+  const internet = tile(page, "Internet-facing")
+  await expect(internet.getByText("+1 if the uplink is mapped")).toBeVisible()
+  await expect(internet.getByText("nothing the internet can reach")).toHaveCount(0)
+  await expect(internet.getByText("0", { exact: true })).not.toHaveClass(/text-success/)
+
+  const row = page.getByRole("table").locator("tbody tr").filter({ hasText: "172.31.5.9" })
+  const status = row.getByText("the Docker API · Private uplink")
+  await expect(status).toHaveClass(/text-warning/)
+  await expect(
+    row.locator("[title^='A private address on the interface with the default route']"),
+  ).toHaveCount(1)
+  await expect(row.getByText("enp0s31f6", { exact: true })).toBeVisible()
+  // It is counted with the private networks, which the internet may not reach.
+  await expect(tile(page, "Private networks").getByText("3", { exact: true })).toBeVisible()
+})
+
+test("a folded pair's addresses, protocol and user are whole on a phone and a desktop", async ({
+  page,
+}) => {
+  await mockHost(page, [...hostPorts, ...bridgePair])
+  const whole = async (el: import("@playwright/test").Locator) => {
+    await expect(el).toBeVisible()
+    return el.evaluate((node) => node.scrollWidth <= node.clientWidth)
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/proxy/ports")
+  const item = page.getByRole("list").locator("li").filter({ hasText: "46505" })
+  await expect(item).toHaveCount(1)
+  const line = item.locator("p.font-mono", { hasText: "10.0.0.1" })
+  await expect(line).toContainText("10.0.0.1")
+  await expect(line).toContainText("fe80::b482:4dff:fe92:4281")
+  expect(await whole(line)).toBe(true)
+  // The protocol, under the port, and the user, beside the process, are
+  // whole and on the screen.
+  const protocol = item.getByText("tcp", { exact: true })
+  await expect(protocol).toBeVisible()
+  const box = await protocol.boundingBox()
+  expect(box && box.x + box.width).toBeLessThanOrEqual(390)
+  await expect(item.getByText("· ubuntu")).toBeVisible()
+  // The caddy pair's long IPv6 address is whole too.
+  const caddy = page
+    .getByRole("list")
+    .locator("li")
+    .filter({ hasText: "caddy" })
+    .locator("p.font-mono", { hasText: "100.110.34.31" })
+  expect(await whole(caddy)).toBe(true)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    ),
+  ).toBe(false)
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const cell = page
+    .getByRole("table")
+    .locator("tbody tr")
+    .filter({ hasText: "46505" })
+    .locator("td")
+    .first()
+  const addresses = cell.locator("p.font-mono")
+  // One address a line, both whole and inside the Endpoint column.
+  await expect(addresses).toHaveText("10.0.0.1, fe80::b482:4dff:fe92:4281")
+  expect(await whole(addresses)).toBe(true)
+  const fits = await addresses.evaluate((node) => {
+    const td = node.closest("td")!.getBoundingClientRect()
+    const own = node.getBoundingClientRect()
+    const lines = Math.round(own.height / parseFloat(getComputedStyle(node).lineHeight))
+    return { inside: own.right <= td.right && own.left >= td.left, lines }
+  })
+  expect(fits.inside).toBe(true)
+  expect(fits.lines).toBeGreaterThanOrEqual(2)
 })
 
 test("a database is coloured by who can connect, and counted once however it is bound", async ({
@@ -219,7 +367,7 @@ test("the tiles' hints and the longest reach fit a phone", async ({ page }) => {
   }
   // The phone's rows draw the longest labels whole and inside the screen.
   const rows = page.getByRole("list")
-  for (const label of ["the Docker API · Private network", "Elasticsearch · VPN only"]) {
+  for (const label of ["the Docker API · Private uplink", "Elasticsearch · VPN only"]) {
     const status = rows.getByText(label)
     await expect(status).toBeVisible()
     const box = await status.boundingBox()

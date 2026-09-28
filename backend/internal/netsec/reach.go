@@ -76,9 +76,13 @@ const (
 	NetworkTailnet Network = "tailnet"
 	// NetworkVPN is any other tunnel: WireGuard, OpenVPN, ZeroTier.
 	NetworkVPN Network = "vpn"
-	// NetworkPrivate is a private address on the uplink or a LAN, or on no
-	// interface the host listed: the one a provider may map a public
-	// address onto.
+	// NetworkUplink is a private address on an interface carrying a default
+	// route: a cloud instance's own address, which its provider maps the
+	// public one onto, or a LAN server's behind a router that may forward a
+	// port to it. Whether the internet reaches it is decided off the host.
+	NetworkUplink Network = "uplink"
+	// NetworkPrivate is a private address on another physical interface (a
+	// LAN, a second NIC), or on no interface the host listed.
 	NetworkPrivate Network = "private"
 	// NetworkDocker is Docker's own bridge: docker0, or br-<network id>.
 	NetworkDocker Network = "docker"
@@ -191,7 +195,11 @@ func (n HostNetwork) reachOf(address string) bindReach {
 	}
 	// A cloud instance sees only its private address on the uplink, and the
 	// provider forwards the public one onto it.
-	return bindReach{class: ReachNetwork, network: NetworkPrivate, iface: iface.Interface,
+	network := NetworkPrivate
+	if known && iface.DefaultRoute {
+		network = NetworkUplink
+	}
+	return bindReach{class: ReachNetwork, network: network, iface: iface.Interface,
 		where: "a private address", forwarded: true,
 		who: "the machines on that network, and the internet if the provider maps a public address onto it"}
 }
