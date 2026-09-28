@@ -166,6 +166,26 @@ export type CertbotState = {
   reloadHook?: RenewalHook
   /** certbot here reloads nginx itself for a lineage its nginx plugin installed. */
   nginxReloads?: boolean
+  /** The certbot everything above was read from and every job runs. */
+  runtime: CertbotRuntime
+  /** For each plugin the runtime lacks: the package that brings it, or why none can. */
+  installs?: Record<string, CertbotInstall>
+}
+
+export type CertbotRuntime = {
+  /** The host's certbot; false is the dashboard's own. */
+  onHost: boolean
+  /** The authenticators it lists: the methods it can prove control with. */
+  plugins: string[]
+  /** Why it could not list them. */
+  pluginsError?: string
+  /** The host's certbot is the snap, whose plugins no package manager installs. */
+  snap?: boolean
+}
+
+export type CertbotInstall = {
+  package?: string
+  reason?: string
 }
 
 /** What one enabled nginx site that names a certificate serves, asked over a handshake. */

@@ -3,8 +3,11 @@
 import { useState } from "react"
 import {
   Clock,
+  Download,
   Key,
   Logs,
+  Pencil,
+  Play,
   RefreshClockwise,
   ShieldCheck,
   ShieldOff,
@@ -408,35 +411,140 @@ export function RenewalNotice({
 }
 
 /**
+ * Which certbot the page read and every job runs, and what it can prove
+ * control with: "certbot 2.11.0 on the host · nginx, standalone, webroot".
+ * The two used to be different certbots, which is how a plugin installed on
+ * the host read as missing.
+ */
+export function CertbotRuntimeLine({ state }: { state: CertbotState }) {
+  const { runtime } = state
+  return (
+    <p className="pt-3 text-hint break-words text-muted-foreground">
+      {state.version || "certbot"} {runtime.onHost ? "on the host" : "in the dashboard's image"}
+      {runtime.snap && " (snap)"}
+      {runtime.pluginsError
+        ? ` · its plugins could not be listed: ${runtime.pluginsError}`
+        : runtime.plugins.length > 0 && ` · ${runtime.plugins.join(", ")}`}
+    </p>
+  )
+}
+
+/**
  * The DNS plugins certbot can drive from here, and whether each can: the
- * plugin installed, a token saved. The token is never shown — that a
- * credential for a whole DNS zone exists on disk is the whole of what the
- * page says about it, and the reason it can be removed from here too.
+ * plugin installed, a token saved, and which lineages renew through it. The
+ * token is never shown — that a credential for a whole DNS zone exists on
+ * disk is the whole of what the page says about it — but it can be replaced,
+ * tried with a dry run, and removed, the removal naming what stops renewing.
  */
 export function DnsProvidersPanel({
   providers,
   admin,
+  certs,
+  installs,
+  certbotBusy,
+  onJob,
   onChanged,
 }: {
   providers: DNSProvider[]
   admin: boolean
+  /** certbot's lineages, for which of them renew through each provider. */
+  certs: CertbotCert[]
+  installs?: CertbotState["installs"]
+  /** A certbot run is on screen: a test or an install would wait on its lock. */
+  certbotBusy: boolean
+  onJob: (job: Job) => void
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
-  const relevant = providers.filter((p) => p.installed || p.hasCredentials)
+  const [editing, setEditing] = useState<DNSProvider | null>(null)
+  const [testing, setTesting] = useState<DNSProvider | null>(null)
+  const [installing, setInstalling] = useState("")
+  const install = async (p: DNSProvider) => {
+    setInstalling(p.plugin)
+    try {
+      onJob(await post<Job>("/certificates/certbot/install", { plugin: p.plugin }))
+    } catch (err) {
+      notify.error(`Could not install the ${p.name} plugin`, err)
+    } finally {
+      setInstalling("")
+    }
+  }
   return (
     <Panel plain>
       <PanelHeader title="DNS challenge providers" />
       <PanelBody flush>
-        {relevant.length === 0 ? (
-          <p className="py-2 text-body text-muted-foreground">
-            No certbot DNS plugin is installed. A wildcard, or a domain behind a CDN, needs one:
-            install <code className="font-mono">python3-certbot-dns-&lt;provider&gt;</code> and it
-            appears here.
-          </p>
-        ) : (
-          <ul className="divide-y divide-hairline">
-            {relevant.map((p) => (
+        <ul className="divide-y divide-hairline">
+          {providers.map((p) => {
+            const users = certs.filter((c) => c.dnsProvider === p.name).map((c) => c.name)
+            const route = installs?.[p.plugin]
+            // Route 53 without a saved profile reads the machine's IAM role.
+            const testable = p.installed && (p.hasCredentials || p.key === "route53")
+            const verbs: Verb[] = [
+              ...(!p.installed && route?.package
+                ? [
+                    {
+                      key: "install",
+                      label: "Install plugin",
+                      icon: Download,
+                      inline: true,
+                      disabled: certbotBusy || installing !== "",
+                      run: () => void install(p),
+                    },
+                  ]
+                : []),
+              ...(testable
+                ? [
+                    {
+                      key: "test",
+                      label: "Test credentials",
+                      icon: Play,
+                      inline: true,
+                      disabled: certbotBusy,
+                      run: () => setTesting(p),
+                    },
+                  ]
+                : []),
+              {
+                key: "save",
+                label: p.hasCredentials ? "Replace credentials" : "Save credentials",
+                icon: Pencil,
+                inline: !p.hasCredentials && p.installed,
+                run: () => setEditing(p),
+              },
+              ...(p.hasCredentials
+                ? [
+                    {
+                      key: "remove",
+                      label: "Remove credentials",
+                      icon: Trash,
+                      danger: true,
+                      run: () =>
+                        confirm({
+                          title: `Remove ${p.name} credentials`,
+                          confirmLabel: "Remove",
+                          description:
+                            users.length > 0 ? (
+                              <p className="text-destructive">
+                                The saved token is deleted from disk, and{" "}
+                                {users.length === 1 ? "this lineage stops" : "these lineages stop"}{" "}
+                                renewing until credentials are saved again: {users.join(", ")}.
+                              </p>
+                            ) : (
+                              <p>
+                                The saved token is deleted from disk. No certbot lineage renews
+                                through {p.name}.
+                              </p>
+                            ),
+                          action: async () => {
+                            await del(`/certificates/dns-credentials/${p.key}`)
+                            onChanged()
+                          },
+                        }),
+                    },
+                  ]
+                : []),
+            ]
+            return (
               <li
                 key={p.key}
                 className={cn(
@@ -458,51 +566,186 @@ export function DnsProvidersPanel({
                       : `Waits ${p.defaultWait}s for the record to propagate.`}
                   </p>
                 </div>
-                {admin && p.hasCredentials && (
-                  <VerbActions
-                    dim
-                    verbs={[
-                      {
-                        key: "remove",
-                        label: "Remove credentials",
-                        icon: Trash,
-                        danger: true,
-                        run: () =>
-                          confirm({
-                            title: `Remove ${p.name} credentials`,
-                            confirmLabel: "Remove",
-                            description: (
-                              <p>
-                                The saved token is deleted from disk. Any certificate issued through{" "}
-                                {p.name} stops renewing until credentials are saved again.
-                              </p>
-                            ),
-                            action: async () => {
-                              await del(`/certificates/dns-credentials/${p.key}`)
-                              onChanged()
-                            },
-                          }),
-                      },
-                    ]}
-                  />
-                )}
+                {admin && <VerbActions dim verbs={verbs} />}
                 <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
                   <Status
                     verdict={p.installed ? "ok" : "warning"}
-                    label={p.installed ? "plugin installed" : "plugin missing"}
+                    label={
+                      p.installed
+                        ? "plugin installed"
+                        : route?.package
+                          ? `plugin missing · ${route.package}`
+                          : "plugin missing"
+                    }
                   />
                   <Status
                     tone={p.hasCredentials ? "running" : "stopped"}
                     label={p.hasCredentials ? "credentials saved" : "no credentials"}
                   />
                 </div>
+                {!p.installed && route?.reason && (
+                  <p className="w-full text-hint break-words text-muted-foreground">
+                    {route.reason}
+                  </p>
+                )}
+                {users.length > 0 && (
+                  <p className="w-full text-hint break-words text-muted-foreground">
+                    Renews {users.join(", ")}
+                  </p>
+                )}
               </li>
-            ))}
-          </ul>
-        )}
+            )
+          })}
+        </ul>
       </PanelBody>
+      {editing && (
+        <DnsCredentialsModal
+          provider={editing}
+          onOpenChange={(open) => !open && setEditing(null)}
+          onSaved={onChanged}
+        />
+      )}
+      {testing && (
+        <DnsTestModal
+          provider={testing}
+          certbotBusy={certbotBusy}
+          onOpenChange={(open) => !open && setTesting(null)}
+          onStarted={onJob}
+        />
+      )}
       {dialog}
     </Panel>
+  )
+}
+
+/**
+ * Saves a provider's credentials, checked against the keys its plugin reads,
+ * so a token pasted under the wrong name is refused here rather than by the
+ * first challenge.
+ */
+function DnsCredentialsModal({
+  provider,
+  onOpenChange,
+  onSaved,
+}: {
+  provider: DNSProvider
+  onOpenChange: (open: boolean) => void
+  onSaved: () => void
+}) {
+  const [credentials, setCredentials] = useState("")
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    setBusy(true)
+    try {
+      await post("/certificates/dns-credentials", { provider: provider.key, credentials })
+      notify.success(`${provider.name} credentials saved`)
+      onSaved()
+      onOpenChange(false)
+    } catch (err) {
+      notify.error("The credentials were not saved", err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal
+      open
+      onOpenChange={onOpenChange}
+      title={`${provider.hasCredentials ? "Replace" : "Save"} ${provider.name} credentials`}
+      description="Saved to a file only root can read, and never shown again."
+      footer={
+        <Button onClick={save} disabled={busy || !credentials.trim()} pending={busy}>
+          Save
+        </Button>
+      }
+    >
+      <Field
+        label="Credentials"
+        htmlFor="dns-provider-credentials"
+        hint={
+          provider.hasCredentials
+            ? "Replaces what is saved. Saved to a file only root can read, and never shown again."
+            : "Saved to a file only root can read, and never shown again."
+        }
+      >
+        <Textarea
+          id="dns-provider-credentials"
+          value={credentials}
+          onChange={(e) => setCredentials(e.target.value)}
+          rows={5}
+          className="font-mono text-hint"
+          placeholder={provider.credentials}
+        />
+      </Field>
+    </Modal>
+  )
+}
+
+/**
+ * A DNS-01 dry run through the saved credentials: certbot writes the record,
+ * the authority checks it, and nothing is saved.
+ */
+function DnsTestModal({
+  provider,
+  certbotBusy,
+  onOpenChange,
+  onStarted,
+}: {
+  provider: DNSProvider
+  certbotBusy: boolean
+  onOpenChange: (open: boolean) => void
+  onStarted: (job: Job) => void
+}) {
+  const [domain, setDomain] = useState("")
+  const [busy, setBusy] = useState(false)
+  const start = async () => {
+    setBusy(true)
+    try {
+      onStarted(
+        await post<Job>(`/certificates/dns-credentials/${provider.key}/test`, {
+          domain: domain.trim(),
+        }),
+      )
+      onOpenChange(false)
+    } catch (err) {
+      notify.error("The test did not start", err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal
+      open
+      onOpenChange={onOpenChange}
+      title={`Test ${provider.name} credentials`}
+      description="A dry run of a DNS challenge through the saved credentials. Nothing is saved."
+      footer={
+        <>
+          {certbotBusy && (
+            <span className="mr-auto text-hint text-muted-foreground">
+              certbot is running. Wait for it to finish.
+            </span>
+          )}
+          <Button onClick={start} disabled={busy || certbotBusy || !domain.trim()} pending={busy}>
+            Run the test
+          </Button>
+        </>
+      }
+    >
+      <Field
+        label="Domain"
+        htmlFor="dns-test-domain"
+        hint={`A name in a zone ${provider.name} serves. certbot writes a challenge record there, the staging authority checks it, and the record is removed.`}
+      >
+        <Input
+          id="dns-test-domain"
+          value={domain}
+          onChange={(e) => setDomain(e.target.value)}
+          placeholder="example.com"
+          className="font-mono text-xs"
+        />
+      </Field>
+    </Modal>
   )
 }
 
@@ -522,6 +765,7 @@ export function IssueDialog({
   initialDomains,
   initialStaging = true,
   hasNginx,
+  plugins,
   providers,
   directory,
   testAuthority = false,
@@ -533,6 +777,8 @@ export function IssueDialog({
   initialDomains?: string
   initialStaging?: boolean
   hasNginx: boolean
+  /** The authenticators the certbot that runs the job lists; absent while unknown. */
+  plugins?: string[]
   providers: DNSProvider[]
   /** The ACME directory certbot orders from when it is not one of Let's Encrypt's. */
   directory?: string
@@ -550,6 +796,7 @@ export function IssueDialog({
       initialDomains={initialDomains}
       initialStaging={initialStaging}
       hasNginx={hasNginx}
+      plugins={plugins}
       providers={providers}
       directory={directory}
       testAuthority={testAuthority}
@@ -565,6 +812,7 @@ function IssueDialogBody({
   initialDomains,
   initialStaging,
   hasNginx,
+  plugins,
   providers,
   directory,
   testAuthority,
@@ -576,6 +824,7 @@ function IssueDialogBody({
   initialDomains?: string
   initialStaging: boolean
   hasNginx: boolean
+  plugins?: string[]
   providers: DNSProvider[]
   directory?: string
   testAuthority: boolean
@@ -589,9 +838,29 @@ function IssueDialogBody({
   const authority = directory ? authorityName(directory) : undefined
   const [domains, setDomains] = useState(initialDomains ?? "")
   const [email, setEmail] = useState("")
+  // A method the certbot that runs the job cannot use is drawn disabled with
+  // the reason, rather than offered and refused by certbot a minute later.
+  const unavailable: Record<string, string | undefined> = {
+    nginx:
+      plugins && !plugins.includes("nginx")
+        ? "The certbot that runs here has no nginx plugin."
+        : undefined,
+    webroot:
+      plugins && !plugins.includes("webroot")
+        ? "The certbot that runs here lists no webroot plugin."
+        : undefined,
+    standalone:
+      plugins && !plugins.includes("standalone")
+        ? "The certbot that runs here lists no standalone plugin."
+        : undefined,
+    dns:
+      providers.length > 0 && !providers.some((p) => p.installed)
+        ? "No DNS plugin is installed for the certbot that runs here."
+        : undefined,
+  }
   // Through nginx where there is one to answer the challenge; standalone
   // binds port 80 itself and fails wherever nginx is already holding it.
-  const [chosenMethod, setMethod] = useState(hasNginx ? "nginx" : "webroot")
+  const [chosenMethod, setMethod] = useState(hasNginx && !unavailable.nginx ? "nginx" : "webroot")
   const [webRoot, setWebRoot] = useState("/var/www/html")
   const [staging, setStaging] = useState(initialStaging)
   const [busy, setBusy] = useState(false)
@@ -662,6 +931,7 @@ function IssueDialogBody({
             disabled={
               busy ||
               certbotBusy ||
+              Boolean(unavailable[method]) ||
               !domains.trim() ||
               !email.trim() ||
               (method === "dns" && !dnsProvider) ||
@@ -724,21 +994,50 @@ function IssueDialogBody({
             className="w-full"
           >
             {hasNginx && (
-              <ToggleGroupItem value="nginx" className="flex-1 text-hint">
+              <ToggleGroupItem
+                value="nginx"
+                disabled={Boolean(unavailable.nginx)}
+                className="flex-1 text-hint"
+              >
                 Through nginx
               </ToggleGroupItem>
             )}
-            <ToggleGroupItem value="webroot" className="flex-1 text-hint">
+            <ToggleGroupItem
+              value="webroot"
+              disabled={Boolean(unavailable.webroot)}
+              className="flex-1 text-hint"
+            >
               A folder
             </ToggleGroupItem>
-            <ToggleGroupItem value="standalone" className="flex-1 text-hint">
+            <ToggleGroupItem
+              value="standalone"
+              disabled={Boolean(unavailable.standalone)}
+              className="flex-1 text-hint"
+            >
               Standalone
             </ToggleGroupItem>
-            <ToggleGroupItem value="dns" className="flex-1 text-hint">
+            <ToggleGroupItem
+              value="dns"
+              disabled={Boolean(unavailable.dns)}
+              className="flex-1 text-hint"
+            >
               DNS
             </ToggleGroupItem>
           </ToggleGroup>
         </Field>
+        {Object.entries(unavailable).some(([m, why]) => why && (m !== "nginx" || hasNginx)) && (
+          <ul className="-mt-2 space-y-1 text-hint text-muted-foreground">
+            {Object.entries(unavailable).map(
+              ([m, why]) =>
+                why &&
+                (m !== "nginx" || hasNginx) && (
+                  <li key={m} className="break-words">
+                    {why}
+                  </li>
+                ),
+            )}
+          </ul>
+        )}
         {wantsWildcard && method !== "dns" && (
           <Notice tone="warning" icon={Warning} title="A wildcard needs the DNS challenge">
             Let&rsquo;s Encrypt will not sign <code className="font-mono">*.example.com</code>{" "}
@@ -755,7 +1054,7 @@ function IssueDialogBody({
                 </SelectTrigger>
                 <SelectContent>
                   {providers.map((p) => (
-                    <SelectItem key={p.key} value={p.key}>
+                    <SelectItem key={p.key} value={p.key} disabled={!p.installed}>
                       {p.name}
                       {!p.installed && " · plugin not installed"}
                     </SelectItem>
@@ -763,13 +1062,6 @@ function IssueDialogBody({
                 </SelectContent>
               </Select>
             </Field>
-            {provider && !provider.installed && (
-              <Notice tone="warning" icon={Warning} title="The plugin is missing">
-                Install <code className="font-mono">python3-certbot-{provider.plugin}</code> (or{" "}
-                <code className="font-mono">certbot plugin install certbot-{provider.plugin}</code>{" "}
-                on a snap install) before issuing.
-              </Notice>
-            )}
             {fileProvider && (
               <Field
                 label="Credentials"
@@ -852,13 +1144,37 @@ function IssueDialogBody({
   )
 }
 
-/** The certbot-is-missing state, shared by the page's two places that need it. */
-export function CertbotMissing() {
+/**
+ * The certbot-is-missing state, shared by the page's two places that need it.
+ * An admin can install it with the host's package manager from here; a host
+ * without one says why in the refusal.
+ */
+export function CertbotMissing({ onInstall }: { onInstall?: (job: Job) => void }) {
+  const [busy, setBusy] = useState(false)
+  const install = async () => {
+    if (!onInstall) return
+    setBusy(true)
+    try {
+      onInstall(await post<Job>("/certificates/certbot/install", { plugin: "" }))
+    } catch (err) {
+      notify.error("Could not install certbot", err)
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <EmptyState
       icon={ShieldOff}
       title="certbot is not installed"
       description="Install it to issue and renew Let's Encrypt certificates from here. A certificate placed on disk by any other means still shows up in the list below."
+      action={
+        onInstall && (
+          <Button size="sm" variant="outline" onClick={install} pending={busy}>
+            <Download className="size-3.5" />
+            Install certbot
+          </Button>
+        )
+      }
       className="mt-2"
     />
   )

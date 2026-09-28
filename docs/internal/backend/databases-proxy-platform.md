@@ -1599,7 +1599,17 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   way, and a job whose certbot exited 0 without changing any lineage's serial says the certificate was
   kept rather than reading as done. DNS credentials sent with an issuance are checked with the request
   (`CheckDNSCredentials`) and saved by the job as its first step, so a refused or busy request leaves no
-  token on disk. **Renewal is read, not assumed** (`renewal_health.go`): an active timer says nothing
+  token on disk. `CheckDNSCredentials` also checks each provider's file against the keys its plugin
+  reads (`ValidateDNSCredentials`: an ini of the plugin's own keys with one complete way to
+  authenticate, Google's service-account JSON). `CertbotState.Runtime` names the certbot (host or
+  image, snap) and its authenticators, which the issuance form uses to disable methods with the reason;
+  `Installs` maps each missing nginx/DNS plugin to the host package manager's package (apt/dnf/yum
+  `python3-certbot-*`, pacman `certbot-*`; none for a snap certbot, apk, zypper or Gandi). `POST
+  /certificates/certbot/install {plugin}` (system.admin, audited, job `certbot.install`) installs it —
+  or certbot itself with `plugin: ""` — and then fails the job unless the certbot that runs jobs now
+  lists the plugin. `POST /certificates/dns-credentials/{provider}/test {domain}` (system.admin: it
+  writes to a caller-named zone and talks to the authority) streams a `certonly --dry-run` through the
+  saved credentials as job `certbot.dns-test`. **Renewal is read, not assumed** (`renewal_health.go`): an active timer says nothing
   about whether its runs pass — this host's certbot.timer was active while every run failed and the page
   said "Scheduled". `CertbotState.Health` is the last run of the service the timer starts (its `Unit`),
   from `systemctl show` asked in UTC (`Result`, `ExecMainStatus`, `ExecMainStartTimestamp`,

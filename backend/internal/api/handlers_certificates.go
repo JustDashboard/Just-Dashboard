@@ -36,6 +36,12 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		// a certificate names, which is why it sits behind admin too.
 		r.Method(http.MethodPost, "/import/inspect", s.handle(s.handleCertImportInspect))
 		r.Method(http.MethodPost, "/dns-credentials", s.handle(s.handleDNSCredentials))
+		// A DNS-01 dry run against a domain the caller names: an outbound
+		// exchange with the authority and a write to that zone's DNS.
+		r.Method(http.MethodPost, "/dns-credentials/{provider}/test", s.handle(s.handleDNSCredentialsTest))
+		// Installing a package runs its maintainer's scripts as root, the
+		// same tier as /packages/install.
+		r.Method(http.MethodPost, "/certbot/install", s.handle(s.handleCertbotInstall))
 		r.Method(http.MethodPost, "/renew", s.handle(s.handleCertRenew))
 		// The renewal schedule's own record: the timer's service journal,
 		// or certbot's log on a host that renews from cron, which holds
@@ -110,6 +116,7 @@ func (s *Server) handleCertbot(w http.ResponseWriter, r *http.Request) error {
 		return httpx.Err(http.StatusServiceUnavailable, "certbot_unavailable",
 			"certbot is not installed on this host")
 	}
+	state.FillInstalls(ctx, s.modules.updates.Manager())
 	httpx.JSON(w, http.StatusOK, state)
 	return nil
 }
@@ -589,6 +596,95 @@ func (s *Server) handleDNSCredentials(w http.ResponseWriter, r *http.Request) er
 	httpx.SetAudit(r, "certificates.dns.credentials", req.Provider, map[string]any{"file": path})
 	httpx.JSON(w, http.StatusOK, map[string]any{"provider": req.Provider, "saved": true})
 	return nil
+}
+
+type dnsTestRequest struct {
+	Domain string `json:"domain"`
+}
+
+// handleDNSCredentialsTest rehearses a DNS-01 challenge through a provider's
+// saved credentials: certbot's --dry-run, streamed as a job, nothing saved.
+func (s *Server) handleDNSCredentialsTest(w http.ResponseWriter, r *http.Request) error {
+	var req dnsTestRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	provider := chi.URLParam(r, "provider")
+	ctx, cancel := timeoutCtx(r, 90*time.Second)
+	defer cancel()
+	args, err := proxysvc.DNSTestArgs(ctx, provider, req.Domain)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	name := provider
+	if p, ok := proxysvc.DNSProviderFor(provider); ok {
+		name = p.Name
+	}
+	httpx.SetAudit(r, "certificates.dns.credentials.test", provider, map[string]any{"domain": req.Domain, "streamed": true})
+	return s.startCertbotJob(w, r, jobs.Spec{
+		Kind: "certbot.dns-test", Title: "Testing the " + name + " credentials on " + req.Domain,
+		Target: req.Domain, Timeout: 10 * time.Minute,
+	}, func(ctx context.Context, out jobs.Emitter) error {
+		out.Status("A dry run: certbot writes the challenge record through %s, has the authority check it, and saves no certificate.", name)
+		_, err := certbotJob(ctx, out, args, "")
+		if err == nil {
+			out.Status("The %s credentials work for %s.", name, req.Domain)
+		}
+		return err
+	})
+}
+
+type certbotInstallRequest struct {
+	// Plugin is the certbot plugin to install, or empty for certbot itself.
+	Plugin string `json:"plugin"`
+}
+
+// handleCertbotInstall installs certbot, or one of its plugins, with the
+// host's package manager, then asks certbot whether it now has it: a package
+// can install beside a certbot that never loads it, and the job says so
+// rather than succeeding.
+func (s *Server) handleCertbotInstall(w http.ResponseWriter, r *http.Request) error {
+	var req certbotInstallRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 90*time.Second)
+	defer cancel()
+	manager := s.modules.updates.Manager()
+	pkg, err := proxysvc.CertbotPackage(ctx, manager, req.Plugin)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	name, args, env, err := s.modules.updates.InstallCommand([]string{pkg})
+	if err != nil {
+		if e := notSupported(err); e != nil {
+			return e
+		}
+		return httpx.BadRequest("%v", err)
+	}
+	what := "certbot"
+	if req.Plugin != "" {
+		what = "certbot's " + req.Plugin + " plugin"
+	}
+	httpx.SetAudit(r, "certificates.certbot.install", pkg, map[string]any{"manager": name, "plugin": req.Plugin})
+	return s.startCertbotJob(w, r, jobs.Spec{
+		Kind: "certbot.install", Title: "Installing " + what, Target: pkg, Timeout: time.Hour,
+	}, func(ctx context.Context, out jobs.Emitter) error {
+		defer s.modules.updates.Invalidate()
+		code, err := out.RunEnv(ctx, env, name, args...)
+		if err != nil {
+			return err
+		}
+		if code != 0 {
+			return fmt.Errorf("%s exited %d — the last lines above say why", name, code)
+		}
+		ready, err := proxysvc.CertbotInstalled(ctx, req.Plugin)
+		if err != nil {
+			return err
+		}
+		out.Status("%s", ready)
+		return nil
+	})
 }
 
 func (s *Server) handleDNSCredentialsRemove(w http.ResponseWriter, r *http.Request) error {

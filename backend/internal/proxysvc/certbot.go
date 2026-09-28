@@ -97,16 +97,58 @@ type CertbotState struct {
 	// NginxReloads says whether the certbot here can reload nginx itself
 	// after renewing a lineage installed with its nginx plugin.
 	NginxReloads bool `json:"nginxReloads,omitempty"`
+	// Runtime is the certbot all of the above was read from and every job
+	// runs: which side, and the methods it can prove control with.
+	Runtime CertbotRuntimeView `json:"runtime"`
+	// Installs is, for each plugin this dashboard drives that the runtime
+	// lacks, the package that brings it or why none can; filled by
+	// FillInstalls, which needs the host's package manager.
+	Installs map[string]CertbotInstall `json:"installs,omitempty"`
+}
+
+// CertbotInstall is how a missing plugin gets onto the host.
+type CertbotInstall struct {
+	Package string `json:"package,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// FillInstalls fills Installs for manager, the host's package manager.
+func (state *CertbotState) FillInstalls(ctx context.Context, manager string) {
+	have := map[string]bool{}
+	for _, plugin := range state.Runtime.Plugins {
+		have[plugin] = true
+	}
+	// With the list unreadable nothing is known to be missing.
+	if state.Runtime.PluginsError != "" {
+		return
+	}
+	plugins := []string{"nginx"}
+	for _, p := range dnsProviders {
+		plugins = append(plugins, p.Plugin)
+	}
+	state.Installs = map[string]CertbotInstall{}
+	for _, plugin := range plugins {
+		if have[plugin] {
+			continue
+		}
+		pkg, err := CertbotPackage(ctx, manager, plugin)
+		if err != nil {
+			state.Installs[plugin] = CertbotInstall{Reason: err.Error()}
+			continue
+		}
+		state.Installs[plugin] = CertbotInstall{Package: pkg}
+	}
 }
 
 func (s *Service) CertbotState(ctx context.Context) *CertbotState {
 	state := &CertbotState{Certs: []CertbotCert{}}
-	rt, _ := loadCertbotRuntime(ctx)
+	rt, rtErr := loadCertbotRuntime(ctx)
 	if rt == nil {
 		return state
 	}
 	state.Available = true
 	state.Version = rt.version
+	state.Runtime = certbotRuntimeView(rt, rtErr)
 	authority := CertbotAuthorityInUse()
 	state.Directory, state.TestAuthority = authority.Directory, authority.Staging
 	// Before the lineages, and whatever they say: whether anything renews
