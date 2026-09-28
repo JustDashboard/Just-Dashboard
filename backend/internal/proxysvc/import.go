@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -206,6 +207,38 @@ func importCertificate(name, certPEM, keyPEM string, opts importOptions) (*Impor
 	}
 	return res, nil
 }
+
+// DeleteImportedCertificate removes an import: its certificate, its key and
+// the copies a replacement kept. An enabled site naming it refuses the
+// delete unless force. Caddy's release copies share the directory and are
+// pruned from their own list, which checks the releases that name them.
+func (s *Service) DeleteImportedCertificate(name string, force bool) error {
+	if !importNameRe.MatchString(name) {
+		return fmt.Errorf("invalid certificate name")
+	}
+	if isCaddyEvidence(name) {
+		return fmt.Errorf("%s is a Caddy release copy: remove it from the release copies no route names", name)
+	}
+	dir := filepath.Join(importedDir, name)
+	info, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return ErrImportNotFound
+	}
+	if err != nil {
+		return err
+	}
+	// A link here leads outside the directory this route may remove from.
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not an imported certificate's directory", dir)
+	}
+	if sites := s.enabledCertSites().within(dir); len(sites) > 0 && !force {
+		return &CertificateInUseError{Name: name, Sites: sites}
+	}
+	return os.RemoveAll(dir)
+}
+
+// ErrImportNotFound is a delete of an import that is not there.
+var ErrImportNotFound = errors.New("no imported certificate has that name")
 
 // stageFile writes content to a new file in dir with the given mode and
 // returns its path.

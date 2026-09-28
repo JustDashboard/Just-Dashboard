@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, CloudUpload, RefreshClockwise, ShieldOff } from "@/components/icons"
-import { ApiError, errorMessage, get, post } from "@/lib/api"
+import { ApiError, del, errorMessage, get, post } from "@/lib/api"
 import {
   afterReload,
   certbotRunning,
@@ -44,6 +44,7 @@ import {
 } from "@/components/proxy/certbot-panel"
 import { CertTransparency } from "@/components/proxy/cert-transparency"
 import { CaddyEvidencePrune } from "@/components/proxy/caddy-evidence"
+import { ExpiredCleanup } from "@/components/proxy/certificate-cleanup"
 import { CertificateInventory } from "@/components/proxy/certificate-inventory"
 import { CsrDialog } from "@/components/proxy/csr-dialog"
 import { ImportDialog } from "@/components/proxy/import-dialog"
@@ -186,6 +187,52 @@ export function CertificatesPage() {
         console_.attach(job)
       },
     })
+
+  // Deleting revokes nothing. A certificate a site names is deleted only once
+  // the dialog has named those sites, and only then is force sent: nginx keeps
+  // serving it until its next reload, which fails for an enabled one.
+  const remove = (source: string, name: string) => {
+    const usedBy = certs.data?.find((c) => c.source === source && c.name === name)?.usedBy ?? []
+    const force = usedBy.length > 0
+    confirm({
+      title: `Delete ${name}`,
+      confirmLabel: force ? "Delete anyway" : "Delete",
+      description: (
+        <div className="space-y-3">
+          <p>
+            {source === "certbot"
+              ? "certbot deletes the certificate, its key and its renewal configuration, so the renewal schedule stops renewing it. Nothing is revoked: a copy elsewhere stays valid until it expires."
+              : "The certificate, its key and the copies kept when it was replaced are deleted. Import the pair again to bring it back."}
+          </p>
+          {force && (
+            <>
+              <p className="text-destructive">
+                {usedBy.length === 1 ? "This site names" : "These sites name"} it. nginx keeps
+                serving it until its next reload, which fails for an enabled site until it names
+                another certificate.
+              </p>
+              <ul className="space-y-1 font-mono text-hint break-all">
+                {usedBy.map((site) => (
+                  <li key={site}>{site}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      ),
+      action: async () => {
+        if (source === "certbot") {
+          console_.attach(await post<Job>("/certificates/delete", { names: [name], force }))
+          return
+        }
+        await del(`/certificates/imported/${encodeURIComponent(name)}`, {
+          query: { force: force ? 1 : undefined },
+        })
+        notify.success(`Deleted ${name}`)
+        certs.refresh()
+      },
+    })
+  }
 
   // ?issue= is a one-shot hand-off from the site form. Left in the address,
   // a reload opened the form again after it had been closed or used.
@@ -389,6 +436,7 @@ export function CertificatesPage() {
                     ? (domains) => setIssue({ open: true, domains, staging: false })
                     : undefined
                 }
+                onDelete={admin ? (cert) => remove(cert.source, cert.name) : undefined}
               />
             ) : (
               <EmptyState
@@ -396,6 +444,14 @@ export function CertificatesPage() {
                 title="No certificates found"
                 description="certbot's live directory, imported certificates, every certificate a site names and what the Docker ingress's Caddy serves are all listed here once one exists."
                 className="mt-2"
+              />
+            )}
+            {admin && certs.data && (
+              <ExpiredCleanup
+                certs={certs.data}
+                certbotBusy={certbotBusy}
+                onJob={console_.attach}
+                onDeleted={certs.refresh}
               />
             )}
             {admin && (
@@ -482,6 +538,7 @@ export function CertificatesPage() {
                         : (domains) => setIssue({ open: true, domains, staging: false })
                     }
                     onRevoke={revoke}
+                    onDelete={(name) => remove("certbot", name)}
                     onShowLog={() => setLogOpen(true)}
                   />
                 </>

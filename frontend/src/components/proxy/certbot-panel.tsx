@@ -120,6 +120,7 @@ export function CertbotLineages({
   onRenew,
   onReplace,
   onRevoke,
+  onDelete,
   onShowLog,
 }: {
   state: CertbotState
@@ -130,6 +131,8 @@ export function CertbotLineages({
   /** Opens the real issuance for a test certificate's names; absent where none can be issued. */
   onReplace?: (domains: string) => void
   onRevoke: (name: string) => void
+  /** Deletes the lineage without revoking it. */
+  onDelete: (name: string) => void
   /** Opens the renewal schedule's log. */
   onShowLog: () => void
 }) {
@@ -163,6 +166,14 @@ export function CertbotLineages({
       disabled: waiting,
       run: () => onRevoke(name),
     }
+    const remove: Verb = {
+      key: "delete",
+      label: "Delete",
+      icon: Trash,
+      danger: true,
+      disabled: waiting,
+      run: () => onDelete(name),
+    }
     if (staging) {
       return onReplace
         ? [
@@ -174,9 +185,10 @@ export function CertbotLineages({
               disabled: waiting,
               run: () => onReplace(domains.join(" ")),
             },
+            remove,
             revoke,
           ]
-        : [revoke]
+        : [remove, revoke]
     }
     return [
       {
@@ -217,6 +229,7 @@ export function CertbotLineages({
             action: async () => onRenew(name, false, true),
           }),
       },
+      remove,
       revoke,
     ]
   }

@@ -230,8 +230,24 @@ func (s *Service) lineageSites(names []string) map[string][]string {
 	if len(names) == 0 {
 		return sites
 	}
-	type site struct{ name, path, resolved string }
-	var enabled []site
+	enabled := s.enabledCertSites()
+	for _, name := range names {
+		if within := enabled.within(
+			filepath.Join(letsencryptDir, "live", name),
+			filepath.Join(letsencryptDir, "archive", name),
+		); len(within) > 0 {
+			sites[name] = within
+		}
+	}
+	return sites
+}
+
+// certSites are the enabled nginx sites that name a certificate, with the
+// path each names and where that path leads.
+type certSites []struct{ name, path, resolved string }
+
+func (s *Service) enabledCertSites() certSites {
+	var enabled certSites
 	for _, v := range s.nginxVHosts() {
 		if !v.Enabled || v.CertPath == "" {
 			continue
@@ -241,23 +257,27 @@ func (s *Service) lineageSites(names []string) map[string][]string {
 		if err != nil {
 			resolved = ""
 		}
-		enabled = append(enabled, site{v.Name, path, resolved})
+		enabled = append(enabled, struct{ name, path, resolved string }{v.Name, path, resolved})
 	}
-	for _, name := range names {
-		dirs := []string{
-			filepath.Join(letsencryptDir, "live", name) + string(filepath.Separator),
-			filepath.Join(letsencryptDir, "archive", name) + string(filepath.Separator),
-		}
-		within := func(path string) bool {
-			return path != "" && slices.ContainsFunc(dirs, func(dir string) bool { return strings.HasPrefix(path, dir) })
-		}
-		for _, v := range enabled {
-			if within(v.path) || within(v.resolved) {
-				sites[name] = appendOnce(sites[name], v.name)
-			}
-		}
-		sort.Strings(sites[name])
+	return enabled
+}
+
+// within names, sorted, the sites whose certificate is inside one of these
+// directories, named directly or through a link.
+func (c certSites) within(dirs ...string) []string {
+	for i, dir := range dirs {
+		dirs[i] = dir + string(filepath.Separator)
 	}
+	inside := func(path string) bool {
+		return path != "" && slices.ContainsFunc(dirs, func(dir string) bool { return strings.HasPrefix(path, dir) })
+	}
+	var sites []string
+	for _, v := range c {
+		if inside(v.path) || inside(v.resolved) {
+			sites = appendOnce(sites, v.name)
+		}
+	}
+	sort.Strings(sites)
 	return sites
 }
 
