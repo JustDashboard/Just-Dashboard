@@ -341,6 +341,11 @@ func (s *Server) handleSiteCertificates(w http.ResponseWriter, r *http.Request) 
 // A failure to keep it costs the operator retyping it next time, which is no
 // reason to refuse the issuance.
 func (s *Server) rememberCertbotEmail(ctx context.Context, email string) {
+	// An issue may now run without an email when certbot already holds an
+	// account; that must not forget the address remembered earlier.
+	if email == "" {
+		return
+	}
 	if err := s.Store.SetSetting(ctx, certbotEmailKey, email); err != nil {
 		s.Log.Warn("could not remember the certbot email", "err", err)
 	}
