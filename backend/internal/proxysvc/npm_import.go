@@ -770,7 +770,7 @@ func (b *npmBuilder) streamRows(row npmRow) {
 				p.item.Skipped = fmt.Sprintf("It does not map onto a stream: %v.", err)
 			} else {
 				p.stream, p.item.Content = spec, content
-				p.item.Notes = streamWarnings(spec)
+				p.item.Notes = StreamWarnings(spec)
 			}
 		}
 		b.add(p)
@@ -788,8 +788,10 @@ func (s *Service) npmConflicts(plan *npmPlan, ids []string) {
 		}
 	}
 	ports := map[string]string{}
-	for _, st := range s.Streams(context.Background()).Streams {
-		ports[fmt.Sprintf("%s/%d", st.Protocol, st.Listen)] = st.Name
+	if status, err := s.Streams(context.Background()); err == nil {
+		for _, st := range status.Streams {
+			ports[fmt.Sprintf("%s/%d", st.Protocol, st.Listen)] = st.Name
+		}
 	}
 	exists := func(path string) bool {
 		_, err := os.Lstat(path)

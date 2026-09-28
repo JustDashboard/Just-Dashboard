@@ -93,7 +93,7 @@ func TestListedStagingCertificateSaysSo(t *testing.T) {
 	certs := listCertificates(filepath.Join(dir, "no-live"), filepath.Join(dir, "no-imports"), []VHost{
 		{Name: "test.example.com", CertPath: testPath},
 		{Name: "app.example.com", CertPath: realPath},
-	})
+	}, nil)
 	byName := map[string]Certificate{}
 	for _, c := range certs {
 		byName[c.Name] = c

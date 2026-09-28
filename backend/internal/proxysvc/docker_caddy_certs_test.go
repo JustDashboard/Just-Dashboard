@@ -59,7 +59,7 @@ func TestCertificateInventoryLeavesOutUnservedCaddyEvidence(t *testing.T) {
 		}
 	}
 	vhosts := []VHost{{Name: "served.conf", CertPath: filepath.Join(imported, served, "fullchain.pem")}}
-	all := listCertificates(filepath.Join(t.TempDir(), "live"), imported, vhosts)
+	all := listCertificates(filepath.Join(t.TempDir(), "live"), imported, vhosts, nil)
 	if len(all) != 4 {
 		t.Fatalf("listed %d, want every certificate on disk: %+v", len(all), all)
 	}

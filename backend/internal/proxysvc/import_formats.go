@@ -131,7 +131,7 @@ func (s *Service) sitesUsing(path string) []string {
 		enabled[v.Name] = v.Enabled
 	}
 	out := []string{}
-	for _, c := range listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, vhosts) {
+	for _, c := range listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, vhosts, nil) {
 		if c.Path != path {
 			continue
 		}

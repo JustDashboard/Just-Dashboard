@@ -86,7 +86,7 @@ func servingAnother(served []ServedCertificate) bool {
 
 func (s *Service) servedCertificates(ctx context.Context, path string) ([]ServedCertificate, error) {
 	vhosts := s.nginxVHosts()
-	certs := listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, vhosts)
+	certs := listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, vhosts, s.tlsStreams())
 	index := slices.IndexFunc(certs, func(c Certificate) bool { return c.Path == path })
 	if index < 0 {
 		return nil, ErrCertificateNotListed

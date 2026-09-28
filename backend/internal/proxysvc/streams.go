@@ -915,7 +915,7 @@ func parseStreamFile(fileName, content string) parsedStream {
 		case "ssl_certificate", "ssl_certificate_key", "proxy_ssl_trusted_certificate", "proxy_ssl_name":
 			p.readTLSValue(d)
 		case "proxy_ssl", "proxy_ssl_server_name", "proxy_ssl_verify":
-			on, ok := onOff(d.Args)
+			on, ok := readOnOff(d.Args)
 			switch {
 			case !ok:
 				p.cannot(d.Name + " " + strings.Join(d.Args, " "))
@@ -966,8 +966,8 @@ func parseStreamFile(fileName, content string) parsedStream {
 	return p
 }
 
-// onOff reads a flag directive's one argument.
-func onOff(args []string) (on, ok bool) {
+// readOnOff reads a flag directive's one argument.
+func readOnOff(args []string) (on, ok bool) {
 	if len(args) != 1 || (args[0] != "on" && args[0] != "off") {
 		return false, false
 	}
