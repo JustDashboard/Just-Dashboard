@@ -875,7 +875,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           const purged = await del<SiteCacheUsage>(path)
           notify.success(`${bytes(purged.bytes)} purged from ${vhost.name}`)
         } finally {
-          setBusy(vhost.name, null)
+          reread(vhost.name, false)
         }
       },
     })
