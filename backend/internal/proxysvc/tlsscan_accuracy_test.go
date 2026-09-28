@@ -289,6 +289,116 @@ func TestWhereConnected(t *testing.T) {
 			t.Errorf("%s: %s, want %s", c.name, got, c.where)
 		}
 	}
+
+	// A dual-stack VM: its IPv6 is on the interface, and its public IPv4
+	// (203.0.113.10) is mapped in front of it by the provider, so an IPv4
+	// address it does not see may still be its own.
+	local = []string{"127.0.0.1", "10.0.0.4", "2001:db8::13"}
+	public = []string{"2001:db8::13"}
+	for _, c := range []struct {
+		name    string
+		address string
+		dns     *DomainCheck
+		where   string
+	}{
+		{"its own IPv6", "[2001:db8::13]:443", nil, "here"},
+		{"another IPv6 address", "[2001:db8::99]:443", nil, "elsewhere"},
+		{"an IPv4 address, perhaps its mapped one", "203.0.113.10:443", nil, "unknown"},
+		{"no address, the name has only an A record", "", &DomainCheck{Addresses: []string{"203.0.113.10"}}, "unknown"},
+		{"no address, the name has only another AAAA", "", &DomainCheck{Addresses: []string{"2001:db8::99"}}, "elsewhere"},
+		{"no address, the name has both", "", &DomainCheck{Addresses: []string{"203.0.113.10", "2001:db8::99"}}, "unknown"},
+	} {
+		if got := whereConnected(c.address, c.dns, local, public); got != c.where {
+			t.Errorf("dual stack, %s: %s, want %s", c.name, got, c.where)
+		}
+	}
+}
+
+// A failed scan's advice is for whoever answered: nginx advice for this
+// server or a named other host, Cloudflare's own ports for its proxy, and no
+// record to point for an address scanned as itself.
+func TestFailureAdviceFollowsWhereTheAnswerCameFrom(t *testing.T) {
+	dns := &DomainCheck{HostAddresses: []string{"198.51.100.4"}, HostAddressesKnown: true}
+	advise := func(domain string, port int, stage, reason, address, where string) string {
+		scan := &TLSScan{Domain: domain, Port: port}
+		f := ScanFailure{Stage: stage, Reason: reason, Address: address, Where: where, DNS: dns, Answer: "HTTP/1.1 400"}
+		return failureFinding(scan, f, errors.New("the error")).Advice
+	}
+	for _, c := range []struct {
+		name          string
+		advice        string
+		want, wantNot []string
+	}{
+		{"plain HTTP on Cloudflare's plain-HTTP port",
+			advise("cloudflare.com", 8080, "handshake", "plain-http", "[2606:4700::6810:84e5]:8080", "cloudflare"),
+			[]string{"[2606:4700::6810:84e5]:8080 is Cloudflare's proxy, not this server.", "Port 8080 is one of the ports its edge serves as plain HTTP", "443, 2053, 2083, 2087, 2096 and 8443"},
+			[]string{"nginx", "listen"}},
+		{"plain HTTP from Cloudflare on another port",
+			advise("example.com", 9000, "handshake", "plain-http", "104.16.1.1:9000", "cloudflare"),
+			[]string{"Cloudflare's proxy, not this server.", cloudflareHandshake},
+			[]string{"nginx", "listen", "is one of the ports"}},
+		{"plain HTTP from another host",
+			advise("example.com", 8443, "handshake", "plain-http", "203.0.113.7:8443", "elsewhere"),
+			[]string{"203.0.113.7:8443 is not this server.", "listen 8443 ssl;", "on that host", "point its record at 198.51.100.4"},
+			[]string{"Cloudflare"}},
+		{"plain HTTP here",
+			advise("example.com", 8443, "handshake", "plain-http", "127.0.0.1:8443", "here"),
+			[]string{"That is this server. In nginx a listen directive without ssl", "listen 8443 ssl;"},
+			[]string{"that host", "Cloudflare"}},
+		{"another protocol on Cloudflare",
+			advise("example.com", 443, "handshake", "not-tls", "104.16.1.1:443", "cloudflare"),
+			[]string{"Cloudflare's proxy, not this server.", cloudflareHandshake},
+			[]string{"STARTTLS"}},
+		{"another protocol on another host",
+			advise("example.com", 443, "handshake", "not-tls", "203.0.113.7:443", "elsewhere"),
+			[]string{"203.0.113.7:443 is not this server. Another service owns this port"},
+			nil},
+		{"a close from Cloudflare",
+			advise("example.com", 443, "handshake", "closed", "104.16.1.1:443", "cloudflare"),
+			[]string{cloudflareHandshake}, []string{"a proxy passing the connection"}},
+		{"silence from Cloudflare",
+			advise("example.com", 443, "handshake", "timeout", "104.16.1.1:443", "cloudflare"),
+			[]string{cloudflareHandshake}, []string{"database"}},
+		{"Cloudflare refusing a name",
+			advise("a.b.example.com", 443, "handshake", "alert", "104.16.1.1:443", "cloudflare"),
+			[]string{"Cloudflare's proxy, not this server.", "Universal certificate"},
+			[]string{"ssl_reject_handshake"}},
+		{"Cloudflare refusing an address",
+			advise("104.16.1.1", 443, "handshake", "alert", "104.16.1.1:443", "cloudflare"),
+			[]string{"scan the name instead"}, []string{"ssl_reject_handshake", "Universal"}},
+		{"a refusal that may be here, said once",
+			advise("example.com", 443, "handshake", "alert", "203.0.113.10:443", "unknown"),
+			[]string{"Whether 203.0.113.10:443 is this server cannot be told from here, because the provider maps this server's public IPv4 address in front of it. Something on port 443"},
+			[]string{"If it is:", "If not:"}},
+		{"a timeout that may be here, both ways",
+			advise("example.com", 443, "connect", "timeout", "203.0.113.10:443", "unknown"),
+			[]string{"public IPv4 address", "If it is: A firewall is most likely dropping it", "If not: A firewall there"},
+			nil},
+		{"a timeout on another host's address scanned as itself",
+			advise("192.0.2.1", 443, "connect", "timeout", "192.0.2.1:443", "elsewhere"),
+			[]string{"192.0.2.1:443 is not this server. A firewall there is dropping it"},
+			[]string{"record"}},
+		{"a timeout on another host a name points at",
+			advise("example.com", 443, "connect", "timeout", "192.0.2.1:443", "elsewhere"),
+			[]string{"If it should be served here, point its record at 198.51.100.4."}, nil},
+		{"a refusal with no address, the name resolving to Cloudflare",
+			advise("example.com", 22, "connect", "refused", "", "cloudflare"),
+			[]string{"example.com resolves to Cloudflare's proxy, not this server. " + cloudflareOtherPorts}, nil},
+		{"a refusal with no address, the name resolving elsewhere",
+			advise("example.com", 443, "connect", "refused", "", "elsewhere"),
+			[]string{"example.com does not resolve to this server. The refusal is that host's."}, nil},
+	} {
+		for _, want := range c.want {
+			if !strings.Contains(c.advice, want) {
+				t.Errorf("%s: %q lacks %q", c.name, c.advice, want)
+			}
+		}
+		for _, not := range c.wantNot {
+			if strings.Contains(c.advice, not) {
+				t.Errorf("%s: %q says %q", c.name, c.advice, not)
+			}
+		}
+	}
 }
 
 // A failed scan names its stage, is graded F and carries advice for that

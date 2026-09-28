@@ -332,10 +332,14 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   with `HTTP/` — nginx's `listen 443;` without `ssl` — `not-tls` with the first bytes another protocol
   sent, closed, or no answer). `dialTLS` connects and then handshakes as two steps so a handshake failure
   carries the address it reached (`handshakeError`). `where` says whose answer it was: `here` (loopback or
-  an address on this machine's interfaces, private ones included), `cloudflare`, `elsewhere`, or
-  `unknown` when the provider maps this server's public address in front of it; the finding's advice
-  follows it (`tcp.refused` here is "nothing here listens on 443", elsewhere it is that host's refusal),
-  and `dns` carries `CheckDomainDNS`. `TestLiveNginxListenWithoutSSLIsDiagnosed` holds the plain-HTTP
+  an address on this machine's interfaces, private ones included), `cloudflare`, `elsewhere` only when
+  this server has a public address of its own in that family, or `unknown` when the provider maps it
+  in front of it — a dual-stack VM with its IPv6 on the interface cannot tell its mapped IPv4 from
+  another host's (`familyKnown`). Every connect and handshake finding's advice follows it
+  (`hereOrThere`): `tcp.refused` here is "nothing here listens on 443", elsewhere it is that host's
+  refusal; a handshake with Cloudflare is its edge's, so plain HTTP on 8080 names its plain-HTTP and
+  HTTPS ports rather than nginx's `listen … ssl`; and an address scanned as itself is never told to
+  point a record. `dns` carries `CheckDomainDNS`. `TestLiveNginxListenWithoutSSLIsDiagnosed` holds the plain-HTTP
   case against a real nginx. **Only an HTTP answer is graded on HTTP** (`service`): a port registered to
   a protocol that speaks TLS from its first byte and is not HTTP (`implicitTLSServices`: 465, 993, 995,
   636, 853, 8883 and the rest) is sent no web request at all (`service: other`, `serviceName`); a
@@ -358,8 +362,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   reported beside them. **Expiry is judged against the certificate's term** (`tlsscan_lifetime.go`):
   renewal is due in the last third of it, the last half for a term of ten days or less — certbot's rule
   since 4.0, and Caddy's — and never more than 30 days out. `summarise` (`certs.go`) sets `expiring`
-  by it, so the Certificates page and the report agree; a 6-day certificate is no longer expiring for its
-  whole life. The report notes a certificate inside that window (`tls.renewal-due`) and grades B once
+  by it, so the certificate inventory, the watch list and the report agree; a 6-day certificate is no
+  longer expiring for its whole life. Not everything reads it yet: the Overview's attention entry still
+  says certbot renews at thirty days and turns critical at 7 days left (`findings/certificates.ts`),
+  certbot's lineage cards and an import's warning still count 30 days (`certbot-panel.tsx`,
+  `import.go`), and the Certificates page's expiring reading counts by the window under a 30-day label
+  (`certs-panel.tsx`). The report notes a certificate inside that window (`tls.renewal-due`) and grades B once
   half of it has passed with the certificate still served (`tls.expiring`); `lifetimeHours` and
   `renewalWindowHours` are in hours because a short-lived term is 160 of them. **HSTS preload** is
   measured for a name on 443 that answered HTTP (`preload`, `tlsscan_preload.go`) against

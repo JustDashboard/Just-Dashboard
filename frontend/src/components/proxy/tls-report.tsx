@@ -653,12 +653,12 @@ export function TLSReportPage() {
                           : "not applicable, the certificate names no OCSP responder"}
                     </Detail>
                     {scan.ocspServers?.length ? (
-                      <Detail label="OCSP" className="font-mono text-micro break-all">
+                      <Detail label="OCSP" className="font-mono text-micro wrap-anywhere">
                         {scan.ocspServers.join(" ")}
                       </Detail>
                     ) : null}
                     {scan.crlUrls?.length ? (
-                      <Detail label="CRL" className="font-mono text-micro break-all">
+                      <Detail label="CRL" className="font-mono text-micro wrap-anywhere">
                         {scan.crlUrls.join(" ")}
                       </Detail>
                     ) : null}
@@ -688,11 +688,13 @@ export function TLSReportPage() {
                           />
                         </span>
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-body font-medium break-all">{link.subject}</span>
+                          <span className="text-body font-medium wrap-anywhere">
+                            {link.subject}
+                          </span>
                           {link.isCa && <Tag>CA</Tag>}
                           {link.selfIssued && <Tag>self-issued</Tag>}
                         </div>
-                        <p className="text-hint break-all text-muted-foreground">
+                        <p className="text-hint wrap-anywhere text-muted-foreground">
                           Issued by {link.issuer}
                         </p>
                         <p className="text-hint text-muted-foreground">
@@ -764,7 +766,11 @@ function ScanProgress({ onCancel }: { onCancel: (seconds: number) => void }) {
   )
 }
 
-/** Findings and header values must wrap, especially on a phone or beside the certificate rail. */
+/**
+ * Findings and header values must wrap, especially on a phone or beside the
+ * certificate rail: prose at its spaces, and only a word too long for the line
+ * — a URL, a header value — anywhere in it.
+ */
 function ReportRow({
   title,
   subtitle,
@@ -790,11 +796,11 @@ function ReportRow({
       <div className="flex min-w-0 items-start gap-2">
         {leading && <span className="mt-0.5 shrink-0">{leading}</span>}
         <div className="min-w-0 space-y-1">
-          <div className="text-body font-medium break-all">{title}</div>
+          <div className="text-body font-medium wrap-anywhere">{title}</div>
           {subtitle && (
             <div
               className={cn(
-                "text-hint leading-relaxed break-all text-muted-foreground",
+                "text-hint leading-relaxed wrap-anywhere text-muted-foreground",
                 mono && "font-mono",
               )}
             >

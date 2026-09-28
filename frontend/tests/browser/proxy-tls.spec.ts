@@ -1344,6 +1344,68 @@ test("the preload checklist gives every rule, and a subdomain the name to scan",
   await expect(submit).toHaveAttribute("target", "_blank")
 })
 
+/**
+ * The words in a list drawn across two lines although they would fit on one:
+ * prose broken mid-word. A word wider than its line, such as a long URL, may
+ * still break, and text only a screen reader reads is left out.
+ */
+function brokenWords(list: Locator) {
+  return list.evaluate((root) => {
+    const broken: string[] = []
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = node.parentElement
+      if (!parent || parent.closest(".sr-only")) continue
+      const line = parent.getBoundingClientRect().width
+      for (const word of (node.textContent ?? "").matchAll(/\S+/g)) {
+        const range = document.createRange()
+        range.setStart(node, word.index)
+        range.setEnd(node, word.index + word[0].length)
+        const rects = [...range.getClientRects()].filter((rect) => rect.width > 0)
+        const lines = new Set(rects.map((rect) => Math.round(rect.top)))
+        const width = rects.reduce((sum, rect) => sum + rect.width, 0)
+        if (lines.size > 1 && width <= line) broken.push(word[0])
+      }
+    }
+    return broken
+  })
+}
+
+test("on a phone the preload checklist wraps its prose between words", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let answer: object = scan
+  await scans(page, () => answer)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/proxy/tls?domain=app.example.com")
+  const rules = page.getByRole("list", { name: "HSTS preload rules" })
+  await expect(rules).toContainText("which preloads every name under it")
+  expect(await brokenWords(rules)).toEqual([])
+
+  const long =
+    "https://www.example.com/a/very/long/path/that/cannot/fit/on/one/line/of/a/phone/screen"
+  answer = {
+    ...scan,
+    domain: "example.com",
+    preload: {
+      domain: "example.com",
+      eligible: false,
+      rules: [
+        {
+          id: "redirect",
+          title: "Plain HTTP redirects to HTTPS on the same host first",
+          passed: false,
+          detail: `http://example.com/ redirects to ${long} first. The first redirect has to go to https://example.com, on the same host, before anywhere else.`,
+        },
+      ],
+    },
+  }
+  await page.getByLabel("Domain to scan").fill("example.com")
+  await page.getByRole("button", { name: "Scan", exact: true }).click()
+  await expect(rules).toContainText("before anywhere else")
+  expect(await brokenWords(rules)).toEqual([])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
 test("the live certificate gives its term, where it came from and its pin", async ({ page }) => {
   await mockProxy(page, { included: true })
   let answer: object = scan
