@@ -542,6 +542,19 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   a 422 with the test on refusal, the file untouched — after `ReadConfig` refuses a password file or a
   path outside the roots; audited `proxy.history.restore`, recorded as `restore`. A removed site's file
   is restorable from the revision before its removal; its sites-enabled link is not recreated.
+- **Upstream health** (`proxysvc/upstreams.go`, `api/handlers_proxy_insights.go`): `UpstreamTargets`
+  reads every `proxy_pass`, `grpc_pass`, `fastcgi_pass`, `uwsgi_pass` and `scgi_pass` from the
+  effective tree (http and stream), expanding a named upstream block server by server (`down` servers
+  left out, unix sockets included); a target with a `$variable` is `dynamic` and not checked.
+  `CheckUpstreams` connects to each distinct address once, eight at a time, 1.5 s each, then sends
+  `HEAD /` to http/https ones (certificate unverified, as nginx does by default). A unix socket is
+  connected to through `hostexec.HostPath` (`/proc/1/root` + path), since the host's `/run` is not
+  mounted in the container. States: up, refused, timeout, unresolvable, missing, error, dynamic; a local
+  TCP port that answers names its process from `ListListeners`. `GET /proxy/upstreams` is open to every
+  signed-in account because destinations come only from the config on disk, and it serves the last check
+  for 15 s with concurrent readers sharing one, so polling cannot amplify outbound traffic.
+  `POST /proxy/upstreams/check` (system.admin, audited `proxy.upstreams.check`) skips the cache. 503
+  `no_nginx` on a host without nginx, 503 `invalid_config` when `nginx -T` refuses.
 - **Certificates carry their fingerprint and serial**, the SHA-256 of the DER and the serial number in
   the uppercase colon form `openssl x509 -fingerprint -sha256` prints, which
   `TestCertificateFingerprintMatchesOpenSSL` checks against openssl itself.

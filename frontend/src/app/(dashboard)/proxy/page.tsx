@@ -4,8 +4,16 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Globe, RefreshClockwise } from "@/components/icons"
-import { ApiError, errorMessage, get } from "@/lib/api"
-import type { Certificate, CertbotState, Listener, StreamStatus, VHost } from "@/lib/types"
+import { ApiError, errorMessage, get, post } from "@/lib/api"
+import { notify } from "@/lib/toast"
+import type {
+  Certificate,
+  CertbotState,
+  Listener,
+  StreamStatus,
+  UpstreamReport,
+  VHost,
+} from "@/lib/types"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
@@ -14,6 +22,7 @@ import { BarList, type BarListItem } from "@/components/bar-list"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { FindingList } from "@/components/finding-list"
+import { Status } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -48,6 +57,7 @@ import {
   type Reading,
 } from "@/components/proxy/freshness"
 import { overviewRoutes, routeKind, routeTarget } from "@/components/proxy/overview-routes"
+import { upstreamLabel, upstreamsOf, upstreamTone } from "@/components/proxy/upstream-health"
 
 /**
  * What a poll last answered, or nothing when its last read failed. A source
@@ -99,6 +109,27 @@ export default function ProxyOverviewPage() {
     60_000,
   )
   const ports = usePoll((signal) => reading(get<Listener[]>("/ports", undefined, signal)), 30_000)
+  // Whether each route's upstream answers. The server checks at most every
+  // fifteen seconds whoever asks; a host it cannot check answers 404 or 503,
+  // and the routes then show no reading rather than a failure of their own.
+  const upstreams = usePoll(
+    (signal) => get<UpstreamReport>("/proxy/upstreams", undefined, signal),
+    30_000,
+    [],
+    { enabled: Boolean(status?.nginx) },
+  )
+  const [checking, setChecking] = useState(false)
+  const checkUpstreams = async () => {
+    setChecking(true)
+    try {
+      await post<UpstreamReport>("/proxy/upstreams/check")
+      upstreams.refresh()
+    } catch (err) {
+      notify.error("Couldn't check the upstreams", err)
+    } finally {
+      setChecking(false)
+    }
+  }
   // The engine's last config test, kept by the server, for an account that
   // may run one: its warnings stay in Needs attention until a test is clean.
   const configTest = useConfigTest({ status, admin })
@@ -165,6 +196,7 @@ export default function ProxyOverviewPage() {
     if (certbotAsked) certbot.refresh()
     streams.refresh()
     ports.refresh()
+    upstreams.refresh()
     configTest.refreshLast()
   }
 
@@ -172,6 +204,7 @@ export default function ProxyOverviewPage() {
   const certificates = readable(certs)?.value
   const streamStatus = readable(streams)?.value
   const listeners = readable(ports)?.value
+  const upstreamReport = upstreams.error ? undefined : upstreams.data
   const hosts = sites ?? []
   const routes = useMemo(() => overviewRoutes(sites ?? []), [sites])
   const onTls = hosts.filter((v) => v.tls).length
@@ -256,6 +289,7 @@ export default function ProxyOverviewPage() {
         ports: listeners,
         unreadable,
         lastTest: lastTest && { engine: testEngine, record: lastTest },
+        upstreams: upstreamReport,
       }),
     [
       certificates,
@@ -267,6 +301,7 @@ export default function ProxyOverviewPage() {
       unreadable,
       lastTest,
       testEngine,
+      upstreamReport,
     ],
   )
   const retry: Record<ProxySource, () => void> = {
@@ -464,6 +499,11 @@ export default function ProxyOverviewPage() {
             actions={
               hosts.length > 0 && (
                 <div className="flex items-center gap-3">
+                  {admin && upstreamReport && (
+                    <Button size="xs" variant="ghost" onClick={checkUpstreams} pending={checking}>
+                      Check upstreams
+                    </Button>
+                  )}
                   {/* The eight that need the reader most, and how many the Sites page has. */}
                   {routes.total > routes.shown.length && (
                     <span className="numeric text-hint text-muted-foreground">
@@ -507,6 +547,7 @@ export default function ProxyOverviewPage() {
               <ChoiceList aria-label="Sites" className="animate-rise">
                 {routes.shown.map((vhost) => {
                   const target = routeTarget(vhost, admin)
+                  const reached = upstreamsOf(upstreamReport, vhost.path)
                   return (
                     <ChoiceRow
                       key={`${vhost.kind}:${vhost.name}:${vhost.path}`}
@@ -528,6 +569,20 @@ export default function ProxyOverviewPage() {
                         <SiteTLS vhost={vhost} />
                         <span className="font-mono">{vhost.listen.join(" · ")}</span>
                       </div>
+                      {reached.length > 0 && (
+                        <ul aria-label="Upstreams" className="space-y-1 text-hint">
+                          {reached.map((t) => (
+                            <li
+                              key={`${t.line}:${t.address}`}
+                              className="flex flex-wrap items-center gap-x-2"
+                            >
+                              <span className="font-mono text-muted-foreground">{t.address}</span>
+                              <Status tone={upstreamTone(t.state)} label={upstreamLabel(t)} />
+                              {t.owner && <span className="text-muted-foreground">{t.owner}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </ChoiceRow>
                   )
                 })}
@@ -563,7 +618,7 @@ export default function ProxyOverviewPage() {
                             : { label: findingAction(f), onClick: () => router.push(f.href) },
                       }
                     })}
-                    emptyLabel="Certificates, renewal, sites, streams and exposed ports all within limits"
+                    emptyLabel="Certificates, renewal, sites, upstreams, streams and exposed ports all within limits"
                   />
                 </div>
               )}
