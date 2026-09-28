@@ -62,8 +62,23 @@ type RenewalHealth struct {
 	// that ends with the last one, as far back as the record reaches; nil
 	// when the last run is the first failure on record.
 	FailingSince *time.Time `json:"failingSince,omitempty"`
+	// HookFailures are the hooks the last run ran that exited with an
+	// error. certbot only warns about one, so a run whose reload hook
+	// refused to reload nginx still passes.
+	HookFailures []HookFailure `json:"hookFailures,omitempty"`
 	// Error is why the runs could not be read.
 	Error string `json:"error,omitempty"`
+}
+
+// HookFailure is one hook certbot ran that exited with an error.
+type HookFailure struct {
+	// Kind is certbot's name for it: pre-hook, deploy-hook, post-hook.
+	Kind string `json:"kind"`
+	// Command is what certbot ran, where its log says.
+	Command string `json:"command,omitempty"`
+	Code    int    `json:"code"`
+	// Output is what the hook wrote to its error output.
+	Output string `json:"output,omitempty"`
 }
 
 // RenewalFailure is one certificate a run failed to renew, in certbot's words.
@@ -107,6 +122,16 @@ var (
 	parseFailureRe = regexp.MustCompile(`^Renewal configuration file \S+ \(cert: (\S+)\) produced an unexpected error: (.+?)\.? Skipping\.$`)
 	// certbot's summary line, which says nothing a failure line did not.
 	renewSummaryRe = regexp.MustCompile(`^\d+ renew failure\(s\), \d+ parse failure\(s\)$`)
+	// A hook starting, and one that exited with an error: certbot 2
+	// (display/ops.py report_executed_command) and certbot 1 (misc.py
+	// execute_command) word it differently. The error output follows on
+	// lines of its own, each indented by a space.
+	hookRunningRe = regexp.MustCompile(`^Running ([\w-]+) command: (.+)$`)
+	hookCodeRe    = regexp.MustCompile(`^Hook '([\w-]+)' reported error code (\d+)$`)
+	hookCodeV1Re  = regexp.MustCompile(`^([\w-]+) command "(.+)" returned error code (\d+)$`)
+	hookOutputRe  = regexp.MustCompile(`^(?:Hook '([\w-]+)' ran with error output|Error output from ([\w-]+) command \S+):$`)
+	// systemd's line on how the service's main process ended.
+	mainExitRe = regexp.MustCompile(`Main process exited, code=\w+, status=(\d+)/`)
 )
 
 // renewalWindow bounds how far back the journal is read, and renewalLines
@@ -186,19 +211,27 @@ func systemdRenewalHealth(ctx context.Context, timer string, written map[string]
 		health.Error = err.Error()
 		return health
 	}
+	// systemd keeps a unit's last run only until the host restarts; after
+	// that the service reads as a unit that never ran, and Result=success
+	// is only systemd's default. A Persistent timer keeps its last trigger
+	// across the restart, so the run it names is judged by the journal.
 	health.LastRun = systemdTime(service["ExecMainStartTimestamp"])
-	if health.LastRun == nil {
+	thisBoot := health.LastRun != nil
+	if !thisBoot {
 		health.LastRun = systemdTime(timerProps["LastTriggerUSec"])
 	}
-	health.ExitStatus, _ = strconv.Atoi(service["ExecMainStatus"])
 	switch {
 	case service["ActiveState"] == "activating" || service["ActiveState"] == "deactivating":
 		health.State = "running"
 	case health.LastRun == nil:
 		health.State = "never"
+	case !thisBoot:
+		judgeRunBeforeRestart(ctx, health, written)
 	case service["Result"] == "success":
 		health.State = "ok"
+		health.HookFailures = runHookFailures(*health.LastRun, nil)
 	default:
+		health.ExitStatus, _ = strconv.Atoi(service["ExecMainStatus"])
 		// Only a failed run needs its lines: which certificates, and why.
 		runs, err := journalRuns(ctx, health.Service)
 		if err != nil {
@@ -212,8 +245,48 @@ func systemdRenewalHealth(ctx context.Context, timer string, written map[string]
 		}
 		judgeFailedRun(health, last, written)
 		health.FailingSince = failingSince(runs, last)
+		var lines []RenewalLine
+		if last != nil {
+			lines = last.lines
+		}
+		health.HookFailures = runHookFailures(*health.LastRun, lines)
 	}
 	return health
+}
+
+// judgeRunBeforeRestart reads the timer's last run from the journal, for a
+// host restarted since: the newest run of the service it holds, judged by
+// systemd's own lines about it. A journal that does not reach the timer's
+// last trigger — kept in memory only, or cleared since — has no record of
+// that run, and the answer is unknown rather than systemd's success.
+func judgeRunBeforeRestart(ctx context.Context, health *RenewalHealth, written map[string]time.Time) {
+	runs, err := journalRuns(ctx, health.Service)
+	if err != nil {
+		health.Error = err.Error()
+		return
+	}
+	if len(runs) == 0 {
+		return
+	}
+	last := &runs[len(runs)-1]
+	if last.start().Before(health.LastRun.Add(-time.Minute)) {
+		return
+	}
+	switch last.result() {
+	case "failed":
+		start := last.start()
+		health.LastRun = &start
+		health.ExitStatus = last.exitStatus
+		judgeFailedRun(health, last, written)
+		health.FailingSince = failingSince(runs, last)
+	case "succeeded":
+		start := last.start()
+		health.LastRun = &start
+		health.State = "ok"
+	default:
+		return
+	}
+	health.HookFailures = runHookFailures(*health.LastRun, last.lines)
 }
 
 // judgeFailedRun fills in a failed run: the certificates it failed on and
@@ -292,6 +365,61 @@ func runFailures(lines []RenewalLine) ([]RenewalFailure, string) {
 	return failures, reason
 }
 
+// hookFailures reads what certbot said about the hooks it ran: each that
+// exited with an error, with what it wrote to its error output. A hook that
+// wrote to it and exited 0 did not fail.
+func hookFailures(lines []RenewalLine) []HookFailure {
+	var failures []HookFailure
+	running := map[string]string{}
+	// The failure whose error output the lines after it carry.
+	collecting := -1
+	for _, line := range lines {
+		if line.Systemd {
+			continue
+		}
+		text := strings.TrimSpace(line.Text)
+		if collecting >= 0 && strings.HasPrefix(line.Text, " ") && text != "" {
+			f := &failures[collecting]
+			f.Output = strings.TrimSpace(f.Output + " " + text)
+			continue
+		}
+		collecting = -1
+		if m := hookRunningRe.FindStringSubmatch(text); m != nil {
+			running[m[1]] = m[2]
+			continue
+		}
+		if m := hookCodeRe.FindStringSubmatch(text); m != nil {
+			code, _ := strconv.Atoi(m[2])
+			failures = append(failures, HookFailure{Kind: m[1], Command: running[m[1]], Code: code})
+			continue
+		}
+		if m := hookCodeV1Re.FindStringSubmatch(text); m != nil {
+			code, _ := strconv.Atoi(m[3])
+			failures = append(failures, HookFailure{Kind: m[1], Command: m[2], Code: code})
+			continue
+		}
+		if m := hookOutputRe.FindStringSubmatch(text); m != nil {
+			kind := m[1] + m[2]
+			// certbot reports the code first, then the output.
+			if n := len(failures) - 1; n >= 0 && failures[n].Kind == kind && failures[n].Output == "" {
+				collecting = n
+			}
+		}
+	}
+	return failures
+}
+
+// runHookFailures is what the hooks of the run that started at start did.
+// certbot's own log keeps it whatever the run printed: the timer's
+// `certbot -q` shows only errors, and a hook's failure is a warning, so the
+// journal's lines have it only from a certbot run without -q.
+func runHookFailures(start time.Time, journal []RenewalLine) []HookFailure {
+	if run, _ := loggedRenewalNear(certbotLogsDir, start); run != nil {
+		return hookFailures(run.Lines)
+	}
+	return hookFailures(journal)
+}
+
 // failingSince walks back from the last run while runs failed, and is nil
 // when the last run is the only failed one the journal holds.
 func failingSince(runs []journalRun, last *journalRun) *time.Time {
@@ -322,8 +450,9 @@ type journalRun struct {
 	id    string
 	lines []RenewalLine
 	// failed and finished are systemd's verdict on the run, when the
-	// journal still has it.
+	// journal still has it, and exitStatus what its main process exited with.
 	failed, finished bool
+	exitStatus       int
 }
 
 func (r journalRun) start() time.Time {
@@ -421,6 +550,9 @@ func parseJournalRuns(out []byte) []journalRun {
 			case strings.HasPrefix(text, "Finished "), strings.HasSuffix(text, "Deactivated successfully."):
 				run.finished = true
 			}
+			if m := mainExitRe.FindStringSubmatch(text); m != nil {
+				run.exitStatus, _ = strconv.Atoi(m[1])
+			}
 		}
 		trimmed := strings.TrimSpace(text)
 		run.lines = append(run.lines, RenewalLine{
@@ -504,6 +636,16 @@ func StartRenewalCommand(ctx context.Context, service string) *exec.Cmd {
 	return cmd
 }
 
+// StopRenewalCommand stops the renewal service and waits until it has
+// stopped: systemd cancels a start still queued and ends certbot's run. The
+// systemctl that waits on a start is only a client, and killing it leaves
+// the run going.
+func StopRenewalCommand(ctx context.Context, service string) *exec.Cmd {
+	cmd := hostexec.CommandOnHost(ctx, "systemctl", "stop", service)
+	cmd.Env = append(cmd.Environ(), "SYSTEMD_IGNORE_CHROOT=1")
+	return cmd
+}
+
 // RenewalInvocation is the service's current run, by systemd's invocation
 // ID, and whether it is running now: what a job that starts the service reads
 // first, so that afterwards it can tell the run it started from the one
@@ -583,6 +725,7 @@ func logRenewalHealth(dir string, written map[string]time.Time) *RenewalHealth {
 	health.Source = path
 	start := run.Start
 	health.LastRun = &start
+	health.HookFailures = hookFailures(run.Lines)
 	if run.Result != "failed" {
 		health.State = "ok"
 		return health
@@ -598,31 +741,11 @@ func logRenewalHealth(dir string, written map[string]time.Time) *RenewalHealth {
 // rotating), appends every invocation to the one file; either way the
 // newest invocation is often not a renewal but an issuance or a listing.
 func lastLoggedRenewal(dir string) (*RenewalRun, string, error) {
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil, "", nil
-	}
+	logs, err := certbotLogs(dir)
 	if err != nil {
-		return nil, "", fmt.Errorf("certbot's logs could not be read: %w", err)
+		return nil, "", err
 	}
-	type logFile struct {
-		path string
-		mod  time.Time
-	}
-	var logs []logFile
-	for _, e := range entries {
-		if e.Name() != "letsencrypt.log" && !strings.HasPrefix(e.Name(), "letsencrypt.log.") {
-			continue
-		}
-		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
-			logs = append(logs, logFile{filepath.Join(dir, e.Name()), info.ModTime()})
-		}
-	}
-	sort.Slice(logs, func(i, j int) bool { return logs[i].mod.After(logs[j].mod) })
-	for i, log := range logs {
-		if i >= maxLogScan {
-			break
-		}
+	for _, log := range logs {
 		runs, err := loggedRenewals(log.path, log.mod)
 		if err != nil {
 			return nil, "", err
@@ -632,6 +755,64 @@ func lastLoggedRenewal(dir string) (*RenewalRun, string, error) {
 		}
 	}
 	return nil, "", nil
+}
+
+// loggedRenewalNear is the renewal certbot logged that began within a
+// minute of at, or two after it: the one a run of the renewal service that
+// started at at made, found among whatever else certbot has logged since.
+func loggedRenewalNear(dir string, at time.Time) (*RenewalRun, error) {
+	logs, err := certbotLogs(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, log := range logs {
+		// Newest first: a log last written before the run began, and every
+		// one after it, holds nothing of the run.
+		if log.mod.Before(at) {
+			break
+		}
+		runs, err := loggedRenewals(log.path, log.mod)
+		if err != nil {
+			return nil, err
+		}
+		for i := len(runs) - 1; i >= 0; i-- {
+			if d := runs[i].Start.Sub(at); d > -time.Minute && d < 2*time.Minute {
+				return &runs[i], nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+type certbotLog struct {
+	path string
+	mod  time.Time
+}
+
+// certbotLogs are certbot's log files, newest first, as many as are worth
+// searching.
+func certbotLogs(dir string) ([]certbotLog, error) {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("certbot's logs could not be read: %w", err)
+	}
+	var logs []certbotLog
+	for _, e := range entries {
+		if e.Name() != "letsencrypt.log" && !strings.HasPrefix(e.Name(), "letsencrypt.log.") {
+			continue
+		}
+		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
+			logs = append(logs, certbotLog{filepath.Join(dir, e.Name()), info.ModTime()})
+		}
+	}
+	sort.Slice(logs, func(i, j int) bool { return logs[i].mod.After(logs[j].mod) })
+	if len(logs) > maxLogScan {
+		logs = logs[:maxLogScan]
+	}
+	return logs, nil
 }
 
 // loggedRenewals reads the renewals one certbot log holds, oldest first.
@@ -666,22 +847,25 @@ func loggedRenewals(path string, modified time.Time) ([]RenewalRun, error) {
 	var invocations []*invocation
 	var current *invocation
 	var lastWall time.Time
-	previousError := false
+	previousLevel, previousError := "", false
 	sc := bufio.NewScanner(file)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
 		text := sc.Text()
 		m := certbotLogLine.FindStringSubmatch(text)
 		if m == nil {
-			// The line after a failure that carries the plugin's error.
-			if current != nil && previousError && strings.HasPrefix(text, "The error was: ") {
-				current.lines = append(current.lines, logged{lastWall, RenewalLine{Text: text, Error: true}})
+			// A message that runs on past its first line: a plugin's
+			// error after a failure ("The error was: …"), a hook's error
+			// output after its warning. A debug record's are tracebacks.
+			if current != nil && previousLevel != "" && previousLevel != "DEBUG" && strings.TrimSpace(text) != "" {
+				current.lines = append(current.lines, logged{lastWall, RenewalLine{Text: text, Error: previousError}})
 			}
 			continue
 		}
 		wall, _ := time.Parse(certbotLogTime, m[1])
 		lastWall = wall
 		level, message := m[2], m[3]
+		previousLevel = level
 		if strings.HasPrefix(message, "certbot version: ") {
 			current = &invocation{first: wall}
 			invocations = append(invocations, current)

@@ -131,9 +131,41 @@ func TestLiveRenewalHookReloadsNginxAndAFailedRenewalIsRead(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	if health := logRenewalHealth(logs, nil); health.State != "ok" {
+	if health := logRenewalHealth(logs, nil); health.State != "ok" || len(health.HookFailures) != 0 {
 		t.Fatalf("after a renewal that passed: %+v", health)
 	}
+
+	// A configuration broken since the last reload: the hook refuses to
+	// reload, certbot only warns, and the quiet run the timer makes passes
+	// with nothing in its output. certbot's log has the hook's failure.
+	nginxConf := filepath.Join(dir, "nginx", "nginx.conf")
+	good, _ := os.ReadFile(nginxConf)
+	writeFile(t, nginxConf, strings.Replace(string(good), "events {}", "events {}\nbroken_directive on;", 1))
+	started := time.Now().UTC()
+	out, err = certbot("-q", "renew", "--force-renewal", "--no-random-sleep-on-renew")
+	if err != nil || strings.TrimSpace(out) != "" {
+		t.Fatalf("a quiet renewal whose hook failed: %v\n%q", err, out)
+	}
+	unreloaded, _ := CertbotSerials()
+	if unreloaded[name] == renewed[name] || served() != renewed[name] {
+		t.Fatalf("renewed to %s, nginx serves %s", unreloaded[name], served())
+	}
+	hookPath := filepath.Join(config, "renewal-hooks", "deploy", renewalHookName)
+	want := "nginx -t failed, so nginx was not reloaded for " + filepath.Join(config, "live", name)
+	health := logRenewalHealth(logs, nil)
+	if health.State != "ok" || len(health.HookFailures) != 1 || health.HookFailures[0].Kind != "deploy-hook" ||
+		health.HookFailures[0].Command != hookPath || health.HookFailures[0].Code != 1 ||
+		!strings.Contains(health.HookFailures[0].Output, `unknown directive "broken_directive"`) ||
+		!strings.HasSuffix(health.HookFailures[0].Output, want) {
+		raw, _ := os.ReadFile(filepath.Join(logs, "letsencrypt.log"))
+		t.Fatalf("health = %+v\n%s", health, raw)
+	}
+	// A timer's run is found in the log by when it started.
+	run, err := loggedRenewalNear(logs, started)
+	if err != nil || run == nil || fmt.Sprint(hookFailures(run.Lines)) != fmt.Sprint(health.HookFailures) {
+		t.Fatalf("the run near %v = %+v, %v", started, run, err)
+	}
+	writeFile(t, nginxConf, string(good))
 
 	// Issued by hand with the manual plugin and no hook: called before the
 	// run, and the run fails exactly so.
@@ -158,7 +190,7 @@ func TestLiveRenewalHookReloadsNginxAndAFailedRenewalIsRead(t *testing.T) {
 	if at, ok := confs[0].written(); ok {
 		written[name] = at
 	}
-	health := logRenewalHealth(logs, written)
+	health = logRenewalHealth(logs, written)
 	if health.State != "failed" || len(health.Failures) != 1 || health.Failures[0].Lineage != name ||
 		!strings.Contains(health.Failures[0].Reason, "--manual-auth-hook") || health.LastRun == nil ||
 		time.Since(*health.LastRun) > time.Minute || time.Since(*health.LastRun) < -time.Minute {

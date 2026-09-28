@@ -218,27 +218,11 @@ describe("a renewal that will fail", () => {
 })
 
 describe("renewals nginx never reloads for", () => {
-  const served = [
-    {
-      path: "/etc/letsencrypt/live/betbots.site/fullchain.pem",
-      usedBy: ["betbots"],
-      daysLeft: 10,
-      expiring: false,
-      expired: false,
-      name: "betbots.site",
-      domains: [],
-      issuer: "R11",
-      notBefore: "",
-      notAfter: "",
-      selfSigned: false,
-      source: "certbot",
-    },
-  ]
-
   test("a webroot lineage a site serves, with no hook, is a warning naming the site", () => {
     const findings = certificateFindings({
-      certs: served,
-      certbot: certbot({ certs: [lineage({ authenticator: "webroot", installer: undefined })] }),
+      certbot: certbot({
+        certs: [lineage({ authenticator: "webroot", installer: undefined, servedBy: ["betbots"] })],
+      }),
     })
     expect(findings).toHaveLength(1)
     expect(findings[0]).toMatchObject({
@@ -249,16 +233,93 @@ describe("renewals nginx never reloads for", () => {
     })
   })
 
-  test("nothing when certbot's nginx plugin or the hook reloads it", () => {
-    expect(certificateFindings({ certs: served, certbot: certbot() })).toEqual([])
+  test("a site that is off serves nothing, so it is not named", () => {
+    // The inventory lists every site that names the file, a disabled one
+    // too; the lineage's servedBy is the enabled ones.
+    const certs = [
+      {
+        path: "/etc/letsencrypt/live/betbots.site/fullchain.pem",
+        usedBy: ["retired-app"],
+        daysLeft: 60,
+        expiring: false,
+        expired: false,
+        name: "betbots.site",
+        domains: [],
+        issuer: "R11",
+        notBefore: "",
+        notAfter: "",
+        selfSigned: false,
+        source: "certbot",
+      },
+    ]
     expect(
       certificateFindings({
-        certs: served,
+        certs,
+        certbot: certbot({ certs: [lineage({ authenticator: "webroot", installer: undefined })] }),
+      }),
+    ).toEqual([])
+  })
+
+  test("a post hook of the lineage's, or one in certbot's directories, claims nothing", () => {
+    const webroot = { authenticator: "webroot", installer: undefined, servedBy: ["betbots"] }
+    expect(
+      certificateFindings({
+        certbot: certbot({ certs: [lineage({ ...webroot, postHook: true })] }),
+      }),
+    ).toEqual([])
+    expect(
+      certificateFindings({
         certbot: certbot({
-          certs: [lineage({ installer: undefined })],
+          certs: [lineage(webroot)],
+          reloadHook: { path: "x", state: "missing", others: ["post/reload-nginx"] },
+        }),
+      }),
+    ).toEqual([])
+  })
+
+  test("nothing when certbot's nginx plugin or the hook reloads it", () => {
+    expect(
+      certificateFindings({ certbot: certbot({ certs: [lineage({ servedBy: ["betbots"] })] }) }),
+    ).toEqual([])
+    expect(
+      certificateFindings({
+        certbot: certbot({
+          certs: [lineage({ installer: undefined, servedBy: ["betbots"] })],
           reloadHook: { path: "x", state: "installed", others: [] },
         }),
       }),
     ).toEqual([])
+  })
+})
+
+describe("a renewal hook that failed", () => {
+  test("is a warning with the hook's own words, though the run passed", () => {
+    const findings = certificateFindings({
+      certbot: certbot({
+        health: {
+          source: "certbot.service",
+          service: "certbot.service",
+          state: "ok",
+          lastRun,
+          failures: [],
+          hookFailures: [
+            {
+              kind: "deploy-hook",
+              command: "/etc/letsencrypt/renewal-hooks/deploy/50-just-dashboard-reload-nginx",
+              code: 1,
+              output:
+                "nginx -t failed, so nginx was not reloaded for /etc/letsencrypt/live/betbots.site",
+            },
+          ],
+        },
+      }),
+    })
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({
+      id: "certbot.hook-failed",
+      level: "warning",
+      title: "A renewal hook failed",
+      detail: `On certbot.service's last run ${runPhrase(lastRun)}: deploy-hook 50-just-dashboard-reload-nginx exited 1: nginx -t failed, so nginx was not reloaded for /etc/letsencrypt/live/betbots.site`,
+    })
   })
 })

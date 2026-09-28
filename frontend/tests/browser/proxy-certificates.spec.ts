@@ -1233,6 +1233,7 @@ test("the overview raises a failing renewal, and renewals no reload reaches", as
       certbotLineage({
         authenticator: "webroot",
         installer: undefined,
+        servedBy: ["app.example.com"],
         lastFailure: { lineage: "app.example.com", reason: "Some challenges have failed." },
       }),
     ],
@@ -1283,7 +1284,7 @@ test("the failing renewal, its lineage and the switch fit a phone", async ({ pag
       certbotLineage({
         authenticator: "webroot",
         installer: undefined,
-        webroots: ["/var/www/a-rather-long-application-name/public"],
+        webroots: ["/var/www/static", "/srv/very/long/path/to/the/public/folder/of/an/application"],
         lastFailure: {
           lineage: "app.example.com",
           reason:
@@ -1305,6 +1306,25 @@ test("the failing renewal, its lineage and the switch fit a phone", async ({ pag
     .evaluate((el) => el.scrollWidth - el.clientWidth)
   expect(overflow).toBeLessThanOrEqual(1)
   const lineages = page.getByRole("list", { name: "certbot lineages" })
+  // Each webroot folder wraps inside the lineage's row: the page not
+  // scrolling sideways says nothing when an ancestor clips what overflows.
+  const folders = lineages.locator("code")
+  await expect(folders).toHaveCount(2)
+  await expect(folders.last()).toHaveText(
+    "/srv/very/long/path/to/the/public/folder/of/an/application",
+  )
+  for (const folder of await folders.all()) {
+    expect(
+      await folder.evaluate((el) => {
+        const row = el.closest("li")!.getBoundingClientRect()
+        const box = el.getBoundingClientRect()
+        return {
+          overflow: el.scrollWidth - el.clientWidth,
+          inside: box.left >= row.left - 1 && box.right <= row.right + 1,
+        }
+      }),
+    ).toEqual({ overflow: 0, inside: true })
+  }
   const showLog = lineages.getByRole("button", { name: "Show log", exact: true })
   await showLog.scrollIntoViewIfNeeded()
   await expect(showLog).toBeInViewport({ ratio: 1 })
@@ -1315,4 +1335,103 @@ test("the failing renewal, its lineage and the switch fit a phone", async ({ pag
   const sheetOverflow = await sheet.evaluate((el) => el.scrollWidth - el.clientWidth)
   expect(sheetOverflow).toBeLessThanOrEqual(1)
   await page.screenshot({ path: testInfo.outputPath("renewal-log-phone.png") })
+})
+
+test("a run that passed while its reload hook failed reads Hook failed, in the hook's own words, and the overview raises it", async ({
+  page,
+}, testInfo) => {
+  await mockProxy(page, { included: true })
+  const output =
+    "nginx -t failed, so nginx was not reloaded for /etc/letsencrypt/live/app.example.com"
+  await mockFailingRenewal(page, {
+    health: renewalHealth({
+      state: "ok",
+      exitStatus: 0,
+      failures: [],
+      hookFailures: [
+        {
+          kind: "deploy-hook",
+          command: "/etc/letsencrypt/renewal-hooks/deploy/50-just-dashboard-reload-nginx",
+          code: 1,
+          output,
+        },
+      ],
+    }),
+    certs: [certbotLineage({ servedBy: ["app.example.com"] })],
+    reloadHook: reloadHook("installed"),
+  })
+  await page.goto("/proxy/certificates")
+  const tiles = page.locator("[data-slot='stat-grid']")
+  await expect(tiles.getByText("Hook failed", { exact: true })).toBeVisible()
+  await expect(tiles.getByText("Healthy", { exact: true })).toHaveCount(0)
+  const notice = page.getByText("A renewal hook failed").locator("..")
+  await expect(notice).toContainText(
+    /certbot\.service passed (yesterday )?at \d\d:\d\d, but certbot only warns when a hook it runs fails\./,
+  )
+  await expect(page.getByRole("list", { name: "Failed hooks" })).toHaveText(
+    `deploy-hook 50-just-dashboard-reload-nginx exited 1: ${output}`,
+  )
+  await expect(page.getByText(/^Last run .* passed$/)).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Run now", exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("renewal-hook-failed.png") })
+
+  // The hook's words are a long line of paths: on a phone they wrap.
+  await page.setViewportSize({ width: 390, height: 844 })
+  const failed = page.getByRole("list", { name: "Failed hooks" })
+  await failed.scrollIntoViewIfNeeded()
+  await expect(failed).toBeInViewport({ ratio: 1 })
+  expect(await failed.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+  const overflow = await page
+    .locator("[data-slot='page']")
+    .evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(1)
+  await page.screenshot({ path: testInfo.outputPath("renewal-hook-failed-phone.png") })
+  await page.setViewportSize({ width: 1280, height: 900 })
+
+  await page.goto("/proxy")
+  const finding = page.getByRole("button", { name: /^A renewal hook failed/ })
+  await expect(finding).toBeVisible()
+  await finding.click()
+  await expect(
+    page.getByText(`deploy-hook 50-just-dashboard-reload-nginx exited 1: ${output}`, {
+      exact: false,
+    }),
+  ).toBeVisible()
+})
+
+test("recent renewal runs wrap in the renewal column, each told apart by its time, and Renew all due stays inside it", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockProxy(page, { included: true })
+  await mockFailingRenewal(page)
+  const run = (hoursAgo: number) =>
+    certbotJob({
+      id: `run-${hoursAgo}`,
+      kind: "certbot.renewal",
+      title: "Running certbot.service",
+      target: "certbot.service",
+      status: "failed",
+      startedAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(),
+    })
+  await page.route("**/api/v1/jobs/", (route) => json(route, [run(1), run(2), run(3), run(4)]))
+  await page.goto("/proxy/certificates")
+
+  const chips = page.getByRole("button", { name: /^certbot\.service \d\d:\d\d$/ })
+  await expect(chips).toHaveCount(4)
+  const labels = await chips.allTextContents()
+  expect(new Set(labels).size).toBe(4)
+  const renewAll = page.getByRole("button", { name: "Renew all due" })
+  await expect(renewAll).toBeVisible()
+  const panel = renewAll.locator("xpath=ancestor::*[@data-slot='panel'][1]")
+  const right = (await panel.boundingBox())!.x + (await panel.boundingBox())!.width
+  for (const element of [renewAll, ...(await chips.all())]) {
+    const box = (await element.boundingBox())!
+    expect(box.x + box.width).toBeLessThanOrEqual(right + 1)
+  }
+  const overflow = await page
+    .locator("[data-slot='page']")
+    .evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(1)
+  await page.screenshot({ path: testInfo.outputPath("renewal-recent-1280.png") })
 })

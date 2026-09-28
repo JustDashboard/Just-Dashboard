@@ -56,10 +56,13 @@ type renewalConf struct {
 	// manual plugin cannot run unattended.
 	ManualAuthHook string
 	// PreHook runs before the renewal (the standard way to stop whatever
-	// holds port 80 for standalone), and DeployHook after a renewed
-	// certificate is saved: --deploy-hook, stored as renew_hook.
+	// holds port 80 for standalone), DeployHook after a renewed certificate
+	// is saved (--deploy-hook, stored as renew_hook), and PostHook once the
+	// renewal run is over (--post-hook): the way `certbot --post-hook
+	// "systemctl reload nginx"` has nginx read what it renewed.
 	PreHook    string
 	DeployHook string
+	PostHook   string
 	// HTTP01Port is where standalone listens; zero is certbot's default, 80.
 	HTTP01Port int
 	// err is why the file could not be read, kept on the lineage so it is
@@ -139,6 +142,7 @@ func readRenewalConf(path string) (renewalConf, error) {
 	conf.ManualAuthHook = param("manual_auth_hook")
 	conf.PreHook = param("pre_hook")
 	conf.DeployHook = param("renew_hook")
+	conf.PostHook = param("post_hook")
 	conf.HTTP01Port, _ = strconv.Atoi(param("http01_port"))
 	if conf.Authenticator != "" {
 		conf.Credentials = param(strings.ReplaceAll(conf.Authenticator, "-", "_") + "_credentials")
@@ -216,7 +220,7 @@ func lineagesFrom(confs []renewalConf) []CertbotCert {
 		cert := CertbotCert{
 			Name: conf.Name, Domains: []string{}, CertPath: conf.FullChain, KeyPath: conf.PrivKey,
 			Authenticator: pluginName(conf.Authenticator), Installer: pluginName(conf.Installer),
-			Webroots: conf.Webroots, DeployHook: conf.DeployHook != "",
+			Webroots: conf.Webroots, DeployHook: conf.DeployHook != "", PostHook: conf.PostHook != "",
 		}
 		if provider, ok := dnsProviderForPlugin(cert.Authenticator); ok {
 			cert.DNSProvider = provider.Name
@@ -475,15 +479,16 @@ func readLeaf(path string) (*x509.Certificate, error) {
 }
 
 // UseCertificateDirsForTest points certbot's directory and the import
-// directory at a test's own and forgets which certbot was found, for handler
-// tests that run as an ordinary user with a certbot of their own on PATH.
-// Production never calls this.
+// directory at a test's own, and certbot's logs at <letsencrypt>/logs, and
+// forgets which certbot was found, for handler tests that run as an
+// ordinary user with a certbot of their own on PATH. Production never calls
+// this.
 func UseCertificateDirsForTest(letsencrypt, imported string) (restore func()) {
-	previousLetsencrypt, previousImported := letsencryptDir, importedDir
-	letsencryptDir, importedDir = letsencrypt, imported
+	previousLetsencrypt, previousImported, previousLogs := letsencryptDir, importedDir, certbotLogsDir
+	letsencryptDir, importedDir, certbotLogsDir = letsencrypt, imported, filepath.Join(letsencrypt, "logs")
 	forgetCertbotRuntime()
 	return func() {
-		letsencryptDir, importedDir = previousLetsencrypt, previousImported
+		letsencryptDir, importedDir, certbotLogsDir = previousLetsencrypt, previousImported, previousLogs
 		forgetCertbotRuntime()
 	}
 }

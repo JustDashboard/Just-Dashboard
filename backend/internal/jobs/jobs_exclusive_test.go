@@ -121,3 +121,54 @@ func TestEmitterRunCmdStreamsACommandTheCallerBuilt(t *testing.T) {
 		t.Fatalf("output = %q", joined)
 	}
 }
+
+// Stopping a certbot job stops the tool, not only the watching: while the
+// runner is still stopping what it started, the job reads as running and
+// keeps its family's lock, so nothing else certbot can start and fail on
+// certbot's own. It ends cancelled once the runner returns, and asking
+// again meanwhile adds nothing.
+func TestACancelledExclusiveJobHoldsItsLockUntilItStops(t *testing.T) {
+	m := testManager(t)
+	stopped := make(chan struct{})
+	job, ok := m.StartExclusive("certbot.", Spec{Kind: "certbot.renewal", Title: "Running certbot.service"},
+		func(ctx context.Context, out Emitter) error {
+			<-ctx.Done()
+			out.Status("Stopping certbot.service.")
+			<-stopped
+			return ctx.Err()
+		})
+	if !ok {
+		t.Fatal("the job was refused")
+	}
+	if !m.Cancel(job.ID) || !m.Cancel(job.ID) {
+		t.Fatal("cancelling a job that is stopping was refused")
+	}
+	waitFor(t, "the runner to start stopping", func() bool {
+		_, lines, _ := m.Get(job.ID)
+		return len(lines) == 2
+	})
+	if j, _, _ := m.Get(job.ID); j.Status != StatusRunning {
+		t.Fatalf("status while stopping = %s", j.Status)
+	}
+	if _, ok := m.StartExclusive("certbot.", Spec{Kind: "certbot.renew"},
+		func(ctx context.Context, out Emitter) error { return nil }); ok {
+		t.Fatal("another certbot job started while the first was still stopping")
+	}
+
+	close(stopped)
+	waitFor(t, "the job to end", func() bool {
+		j, _, _ := m.Get(job.ID)
+		return j.Status == StatusCancelled
+	})
+	_, lines, _ := m.Get(job.ID)
+	if len(lines) != 2 || lines[0].Text != "Cancelled from the dashboard." {
+		t.Fatalf("lines = %+v", lines)
+	}
+	if m.Cancel(job.ID) {
+		t.Fatal("cancelled a job that had ended")
+	}
+	if _, ok := m.StartExclusive("certbot.", Spec{Kind: "certbot.renew"},
+		func(ctx context.Context, out Emitter) error { return nil }); !ok {
+		t.Fatal("refused once the stopped job had ended")
+	}
+}

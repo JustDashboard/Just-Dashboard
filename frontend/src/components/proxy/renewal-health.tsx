@@ -3,7 +3,14 @@
 import { useState } from "react"
 import { Logs, Play, Warning } from "@/components/icons"
 import { del, get, put } from "@/lib/api"
-import { renewalReload, runPhrase, runTime, sinceDay, standingFailures } from "@/lib/certificates"
+import {
+  hookFailureText,
+  renewalReload,
+  runPhrase,
+  runTime,
+  sinceDay,
+  standingFailures,
+} from "@/lib/certificates"
 import { timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { CertbotState, RenewalHealth, RenewalLog, RenewalRun } from "@/lib/types"
@@ -63,6 +70,31 @@ export function RenewalRecord({
       : []),
     { key: "log", label: "Show log", icon: Logs, inline: true, run: onShowLog },
   ]
+  const hooks = health.hookFailures ?? []
+  const actions = admin && (
+    <div className="flex flex-wrap items-center gap-2">
+      {running && <Status state="activating" label="Running…" />}
+      <VerbBar verbs={verbs} menuLabel="More renewal actions" />
+    </div>
+  )
+  if (health.state === "ok" && hooks.length > 0 && !running) {
+    // certbot only warns when a hook fails, so the run passed: the hook's
+    // own words are what says nginx kept the old certificate.
+    return (
+      <Notice tone="warning" icon={Warning} title="A renewal hook failed" className="mt-2">
+        <div className="space-y-2">
+          <p>
+            {health.service ?? "The renewal"} passed
+            {health.lastRun ? ` ${runPhrase(health.lastRun)}` : ""}, but certbot only warns when a
+            hook it runs fails.
+          </p>
+          <HookFailures health={health} />
+          {health.error && <p className="break-words text-muted-foreground">{health.error}</p>}
+          {actions}
+        </div>
+      </Notice>
+    )
+  }
   if (health.state === "failed") {
     const standing = standingFailures(health)
     return (
@@ -85,13 +117,9 @@ export function RenewalRecord({
           ) : (
             health.reason && <p className="break-words">{health.reason}</p>
           )}
+          <HookFailures health={health} />
           {health.error && <p className="break-words text-muted-foreground">{health.error}</p>}
-          {admin && (
-            <div className="flex flex-wrap items-center gap-2">
-              {running && <Status state="activating" label="Running…" />}
-              <VerbBar verbs={verbs} menuLabel="More renewal actions" />
-            </div>
-          )}
+          {actions}
         </div>
       </Notice>
     )
@@ -108,10 +136,30 @@ export function RenewalRecord({
         {reading.hint && <span className="text-hint text-muted-foreground">{reading.hint}</span>}
       </div>
       {admin && <VerbBar verbs={verbs} menuLabel="More renewal actions" />}
+      {hooks.length > 0 && (
+        <div className="w-full text-hint text-warning">
+          <HookFailures health={health} />
+        </div>
+      )}
       {health.error && (
         <p className="w-full text-hint break-words text-muted-foreground">{health.error}</p>
       )}
     </div>
+  )
+}
+
+/** The hooks the last run ran that failed, each in a line. */
+function HookFailures({ health }: { health: RenewalHealth }) {
+  const hooks = health.hookFailures ?? []
+  if (hooks.length === 0) return null
+  return (
+    <ul aria-label="Failed hooks" className="space-y-1">
+      {hooks.map((hook, i) => (
+        <li key={i} className="break-words">
+          {hookFailureText(hook)}
+        </li>
+      ))}
+    </ul>
   )
 }
 

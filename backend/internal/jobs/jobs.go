@@ -144,6 +144,9 @@ type entry struct {
 	first  int // Seq of lines[0], so a dropped prefix is still countable
 	subs   map[chan Line]struct{}
 	cancel context.CancelFunc
+	// exclusive is a job started with StartExclusive, and cancelling that
+	// it was asked to stop.
+	exclusive, cancelling bool
 }
 
 // Manager owns every job.
@@ -198,9 +201,10 @@ func (m *Manager) start(spec Spec, run Runner, exclusive string) (Job, bool) {
 			ID: id, Kind: spec.Kind, Title: spec.Title, Target: spec.Target,
 			Status: StatusRunning, StartedAt: time.Now().UTC(), StartedBy: spec.StartedBy,
 		},
-		lines:  make([]Line, 0, 64),
-		subs:   map[chan Line]struct{}{},
-		cancel: cancel,
+		lines:     make([]Line, 0, 64),
+		subs:      map[chan Line]struct{}{},
+		cancel:    cancel,
+		exclusive: exclusive != "",
 	}
 	m.entries[id] = e
 	m.order = append(m.order, id)
@@ -314,6 +318,11 @@ func (m *Manager) Subscribe(id string, after int) (Job, []Line, <-chan Line, fun
 // Cancel stops a running job. The context cancellation kills the process
 // group the command is in, which is what makes an interrupted apt upgrade stop
 // rather than merely stop being watched.
+//
+// An exclusive job stays running until its runner returns. Its exclusivity
+// exists because the tool cannot run twice, and what the runner is still
+// stopping is still running: a systemd unit it started outlives the
+// systemctl that waits on it. Asking again while it stops changes nothing.
 func (m *Manager) Cancel(id string) bool {
 	m.mu.RLock()
 	e := m.entries[id]
@@ -322,13 +331,21 @@ func (m *Manager) Cancel(id string) bool {
 		return false
 	}
 	e.mu.Lock()
-	running := e.job.Status == StatusRunning
+	running, again := e.job.Status == StatusRunning, e.cancelling
+	if running {
+		e.cancelling = true
+	}
 	e.mu.Unlock()
 	if !running {
 		return false
 	}
+	if again {
+		return true
+	}
 	e.appendLine("status", "Cancelled from the dashboard.")
-	e.markCancelled()
+	if !e.exclusive {
+		e.markCancelled()
+	}
 	e.cancel()
 	return true
 }
@@ -402,6 +419,9 @@ func (e *entry) finish(runErr, ctxErr error) {
 	switch {
 	case e.job.Status == StatusCancelled:
 		// Already recorded by Cancel; the runner's error is the cancellation.
+	case e.cancelling && runErr != nil:
+		// An exclusive job, stopped now.
+		e.job.Status = StatusCancelled
 	case runErr != nil:
 		e.job.Status = StatusFailed
 		e.job.Error = runErr.Error()

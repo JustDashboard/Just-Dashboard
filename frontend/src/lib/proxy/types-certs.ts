@@ -45,6 +45,10 @@ export type CertbotCert = {
   dnsProvider?: string
   /** The lineage has a deploy hook of its own; what it does is not read. */
   deployHook?: boolean
+  /** The lineage has a post hook of its own (--post-hook); what it does is not read. */
+  postHook?: boolean
+  /** The enabled nginx sites whose certificate is this lineage's. */
+  servedBy?: string[]
   /** What will make the next renewal fail, each certain in certbot's code. */
   willFail?: string[]
   /** Why the last renewal run failed on this lineage, when nothing renewed it since. */
@@ -74,8 +78,21 @@ export type RenewalHealth = {
   failures: RenewalFailure[]
   /** The first of an unbroken streak of failed runs ending with the last. */
   failingSince?: string
+  /** Hooks the last run ran that exited with an error; certbot only warns, so the run passes. */
+  hookFailures?: HookFailure[]
   /** Why the record could not be read. */
   error?: string
+}
+
+/** A hook certbot ran that exited with an error. */
+export type HookFailure = {
+  /** certbot's name for it: "pre-hook", "deploy-hook", "post-hook". */
+  kind: string
+  /** What certbot ran, where its log says. */
+  command?: string
+  code: number
+  /** What the hook wrote to its error output. */
+  output?: string
 }
 
 /** A line a renewal run printed; systemd's own about the run are marked. */
@@ -94,7 +111,11 @@ export type RenewalLog = { source: string; runs: RenewalRun[] }
 export type RenewalHook = {
   path: string
   state: "installed" | "missing" | "modified" | "foreign"
-  /** The other hooks certbot runs after a renewal, by name. */
+  /**
+   * The other hooks certbot runs after a renewal: a deploy hook by its name,
+   * "post/<name>" for one in renewal-hooks/post, "cli.ini's post-hook" for
+   * one cli.ini sets.
+   */
   others: string[]
 }
 

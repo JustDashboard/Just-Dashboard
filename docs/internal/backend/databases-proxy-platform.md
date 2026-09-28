@@ -396,7 +396,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   running nginx, and would put the password in a world-readable argv.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real
   story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago;
-  `CertbotState` answers it before reading the lineages, whatever they say. Issuance defaults to a test
+  `CertbotState` answers it before reading the lineages, whatever they say. A cron file whose command
+  tests `! -d /run/systemd/system` (Debian's and Ubuntu's `/etc/cron.d/certbot`) is no schedule where
+  that directory exists: it stands aside for the timer, so a stopped timer there reads as nothing
+  renewing, with the timer to turn on. Issuance defaults to a test
   run in the UI (the real limit is five failures an hour), and a test run is `certonly --dry-run` — the
   whole exchange, nothing saved (`--staging` used to write a lineage holding an untrusted certificate and
   make the real issuance that followed a "no action taken" no-op). A real issuance whose names already
@@ -441,18 +444,27 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   about whether its runs pass — this host's certbot.timer was active while every run failed and the page
   said "Scheduled". `CertbotState.Health` is the last run of the service the timer starts (its `Unit`),
   from `systemctl show` asked in UTC (`Result`, `ExecMainStatus`, `ExecMainStartTimestamp`,
-  `ActiveState`, `InvocationID`, and the timer's `NextElapseUSecRealtime`); only a failed run reads the
+  `ActiveState`, `InvocationID`, and the timer's `NextElapseUSecRealtime`); a failed run reads the
   journal (`journalctl -u <service> --since -14d -n 400 -o json`, grouped by invocation ID) for each
   certificate it failed on in certbot's words — `Failed to renew certificate X with error: …`, a
   renewal configuration it could not use, the `The error was: …` line a plugin error continues on —
-  or else the run's own last line, and for how far back the failed runs go. A failure whose
-  certificate certbot saved after the run is `recovered`, and one for a lineage deleted since is
-  dropped. On a cron host the record is certbot's log: each invocation in
+  or else the run's own last line, and for how far back the failed runs go. systemd forgets a unit's
+  run when the host restarts and then reports `Result=success` with no start; with the timer's
+  `LastTriggerUSec` set (a `Persistent` timer keeps it) the journal's newest run is judged by
+  systemd's own lines about it, and a journal that has no run from that trigger on answers `unknown`.
+  A failure whose certificate certbot saved after the run is `recovered`, and one for a lineage
+  deleted since is dropped. `Health.HookFailures` are the hooks the run ran that exited with an error
+  (`Hook 'deploy-hook' reported error code N` and the error output after it, or certbot 1's wording):
+  certbot only warns, so a run whose reload hook refused to reload still passes, and the timer's
+  `certbot -q` keeps the warning out of the journal — they are read from the renewal certbot's log
+  holds that began with the run (`loggedRenewalNear`), or from the journal's lines where the log
+  cannot be read. On a cron host the record is certbot's log: each invocation in
   `/var/log/letsencrypt/letsencrypt.log*` (Debian's `cli.ini` sets `max-log-backups = 0`, so they are
   appended to one file) starts at its `certbot version:` line, the last `renew` that was not a dry run
   is the run, and the file's time gives the zone of its stamps. Each lineage carries how it renews
-  (`Authenticator`, `Installer`, `Webroots`, `DNSProvider`, a `DeployHook` of its own), its real
-  `NotBefore`, `LastFailure`, and `WillFail`: only failures certain in certbot's code — an
+  (`Authenticator`, `Installer`, `Webroots`, `DNSProvider`, a `DeployHook` or `PostHook` of its own),
+  `ServedBy` (the enabled sites whose certificate is the lineage's), its real `NotBefore`,
+  `LastFailure`, and `WillFail`: only failures certain in certbot's code — an
   authenticator plugin the runtime lacks (manual, null, standalone and webroot are built in, and
   `certbot plugins` hides the first two), a DNS credentials file gone on certbot's side of the
   namespace, the manual plugin without an auth hook, no authenticator, standalone with its port held
@@ -461,12 +473,20 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (system.admin) is the record for the page's log panel; `POST /certificates/renewal/run` (system.admin,
   a `certbot.renewal` job exclusive with every certbot job) runs `systemctl start <service>` — a
   oneshot, so it returns with the run — prints that invocation's lines and ends as the run did; a cron
-  host answers 409 `renewal_not_systemd`. **Reloading after renewal** (`renewal_hooks.go`): nginx
+  host answers 409 `renewal_not_systemd`. Stopping the job runs `systemctl stop <service>`: killing
+  the `systemctl start` client would leave systemd's start and certbot running. An exclusive job
+  cancelled from the dashboard stays `running`, holding the lock, until its runner returns
+  (`jobs.Manager.Cancel`), so nothing else certbot starts while the service stops, and a lineage
+  certbot saved before it stopped is reloaded for as after any run. **Reloading after renewal** (`renewal_hooks.go`): nginx
   serves the certificate it read at its last reload, and certbot reloads it only for a lineage its
   nginx plugin installed. `PUT /certificates/renewal-hook` writes
   `renewal-hooks/deploy/50-just-dashboard-reload-nginx` (0755, staged under a name ending in `~`,
   which certbot never runs, and marked `# Managed by Just Dashboard`): `nginx -t -q`, then
-  `systemctl reload nginx || nginx -s reload`, and exit 0 where there is no nginx. `DELETE`
+  `systemctl reload nginx || nginx -s reload`, and exit 0 where there is no nginx. `RenewalHook.Others`
+  lists what else may reload nginx after a renewal — other files in `renewal-hooks/deploy`, files in
+  `renewal-hooks/post` (as `post/<name>`), and a `deploy-hook`/`renew-hook`/`post-hook` in `cli.ini`
+  — and the page claims nothing about a lineage one of them, or its own deploy or post hook, may
+  reload for. `DELETE`
   (destructive, no phrase) removes it; a copy changed by hand reads `modified`, and a file of somebody
   else's at the name is `foreign` and never replaced or removed (409). The dashboard's own renewal,
   issuance and run-now jobs reload nginx themselves once a lineage's serial changed and an enabled site

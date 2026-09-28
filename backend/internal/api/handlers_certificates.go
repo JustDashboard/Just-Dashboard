@@ -362,7 +362,20 @@ func (s *Server) handleRenewalRun(w http.ResponseWriter, r *http.Request) error 
 			out.Status("%s is already running; waiting for it to finish.", service)
 		}
 		out.Status("%s is the renewal the timer runs: certbot renews every certificate that is due, and systemd records how it went.", service)
-		code, err := out.RunCmd(proxysvc.StartRenewalCommand(ctx, service), []string{"systemctl", "start", service})
+		started := make(chan renewalStart, 1)
+		go func() {
+			code, err := out.RunCmd(proxysvc.StartRenewalCommand(ctx, service), []string{"systemctl", "start", service})
+			started <- renewalStart{code, err}
+		}()
+		var start renewalStart
+		select {
+		case start = <-started:
+		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
+			return s.stopRenewalRun(ctx, out, service, before, started)
+		}
+		code, err := start.code, start.err
 		if err != nil {
 			return err
 		}
@@ -394,6 +407,50 @@ func (s *Server) handleRenewalRun(w http.ResponseWriter, r *http.Request) error 
 		}
 		return renewalRunFailure(service, code, failures, reason, readErr)
 	})
+}
+
+// renewalStart is how the `systemctl start` that waits on a renewal run
+// ended.
+type renewalStart struct {
+	code int
+	err  error
+}
+
+// stopRenewalRun stops the run of the renewal service a stopped or timed-out
+// job started. The systemctl that waits on the run is only a client:
+// killing it leaves systemd's start and certbot running. The job holds
+// certbot's lock until the service has stopped, and a certificate certbot
+// saved before it stopped is renewed all the same, so nginx is reloaded for
+// it as after any run.
+func (s *Server) stopRenewalRun(ctx context.Context, out jobs.Emitter, service string, before map[string]string, started <-chan renewalStart) error {
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	out.Status("Stopping %s: systemd ends certbot's run.", service)
+	output, err := proxysvc.StopRenewalCommand(stopCtx, service).CombinedOutput()
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line != "" {
+			out.Line("stderr", line)
+		}
+	}
+	if err != nil {
+		out.Status("%s could not be stopped (%v), so it keeps running and the page reads it as running until it ends.", service, err)
+		return ctx.Err()
+	}
+	// The start waiting on the run returns once the run is over.
+	select {
+	case <-started:
+	case <-stopCtx.Done():
+	}
+	out.Status("Stopped %s.", service)
+	if after, err := proxysvc.CertbotSerials(); err == nil {
+		if changed := proxysvc.ChangedLineages(before, after); len(changed) > 0 {
+			out.Status("Renewed %s before it stopped.", strings.Join(changed, ", "))
+			if err := s.reloadAfterRenewal(stopCtx, out, changed); err != nil {
+				out.Status("%s", err.Error())
+			}
+		}
+	}
+	return ctx.Err()
 }
 
 // renewalRunFailure is a failed run of the renewal service, in the words its

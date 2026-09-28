@@ -1,7 +1,7 @@
 import type {
   CertbotCert,
   CertbotState,
-  Certificate,
+  HookFailure,
   Job,
   RenewalFailure,
   RenewalHealth,
@@ -271,6 +271,13 @@ export function renewalReading(
         tone: "default",
       }
     case "ok":
+      if (health.hookFailures?.length) {
+        return {
+          value: "Hook failed",
+          hint: last ? `last run ${last}` : "on the last run",
+          tone: "warning",
+        }
+      }
       return {
         value: "Healthy",
         hint: health.nextRun
@@ -303,12 +310,12 @@ export function renewalReading(
  */
 export function renewalMethod(
   cert: Pick<CertbotCert, "authenticator" | "webroots" | "dnsProvider">,
-): { method: string; detail?: string; mono?: boolean } | undefined {
+): { method: string; detail?: string; folders?: string[] } | undefined {
   const auth = cert.authenticator
   if (!auth) return undefined
   if (auth === "webroot") {
     return cert.webroots?.length
-      ? { method: "webroot", detail: cert.webroots.join(", "), mono: true }
+      ? { method: "webroot", folders: cert.webroots }
       : { method: "webroot" }
   }
   if (auth.startsWith("dns-")) {
@@ -320,18 +327,20 @@ export function renewalMethod(
 /**
  * Whether nginx reads a lineage's renewed certificate without anybody
  * reloading it by hand: certbot's nginx plugin reloads it for the lineages it
- * installed, and the dashboard's hook for every lineage. A hook of the
- * lineage's own, or somebody else's in certbot's hooks directory, may — what
- * they do is not read, so nothing is claimed for them.
+ * installed, and the dashboard's hook for every lineage. A deploy or post
+ * hook of the lineage's own, a hook in certbot's hooks directories, or one
+ * cli.ini sets may — what they do is not read, so nothing is claimed for
+ * them.
  */
 export function renewalReload(
-  cert: Pick<CertbotCert, "installer" | "deployHook">,
+  cert: Pick<CertbotCert, "installer" | "deployHook" | "postHook">,
   state: Pick<CertbotState, "nginxReloads" | "reloadHook">,
 ): "certbot" | "hook" | "unknown" | "none" {
   if (cert.installer === "nginx" && state.nginxReloads) return "certbot"
   if (state.reloadHook?.state === "installed") return "hook"
   if (
     cert.deployHook ||
+    cert.postHook ||
     state.reloadHook?.state === "modified" ||
     state.reloadHook?.others.length
   ) {
@@ -341,23 +350,32 @@ export function renewalReload(
 }
 
 /**
- * The lineages a site serves whose renewal nothing reloads nginx for, and
- * those sites: each renewal leaves them on the old certificate until it
- * expires.
+ * The lineages an enabled site serves whose renewal nothing reloads nginx
+ * for, and those sites: each renewal leaves them on the old certificate until
+ * it expires. A disabled site serves nothing.
  */
-export function unreloadedRenewals(
-  state: CertbotState,
-  certs: Certificate[],
-): { lineages: string[]; sites: string[] } {
+export function unreloadedRenewals(state: CertbotState): { lineages: string[]; sites: string[] } {
   const lineages: string[] = []
   const sites = new Set<string>()
   if (!state.autoRenew) return { lineages, sites: [] }
   for (const lineage of state.certs) {
     if (lineage.error || renewalReload(lineage, state) !== "none") continue
-    const served = certs.find((c) => c.path === lineage.certPath)?.usedBy ?? []
+    const served = lineage.servedBy ?? []
     if (served.length === 0) continue
     lineages.push(lineage.name)
     for (const site of served) sites.add(site)
   }
   return { lineages, sites: [...sites] }
+}
+
+/**
+ * A hook that failed, in a line: certbot's name for it and the file it ran,
+ * what it exited with, and what it said.
+ */
+export function hookFailureText(failure: HookFailure): string {
+  const command = failure.command?.startsWith("/")
+    ? failure.command.split(/\s/)[0].split("/").pop()
+    : failure.command
+  const hook = command ? `${failure.kind} ${command}` : failure.kind
+  return `${hook} exited ${failure.code}${failure.output ? `: ${failure.output}` : "."}`
 }

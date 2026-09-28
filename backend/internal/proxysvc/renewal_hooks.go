@@ -63,8 +63,11 @@ type RenewalHook struct {
 	//              executable, so certbot may not run what it says
 	//   foreign    a file of somebody else's has the name; it is left alone
 	State string `json:"state"`
-	// Others are the other hooks certbot runs after a renewal, by name. One
-	// of them may reload nginx already; what each does is not read here.
+	// Others are the other hooks certbot runs after a renewal, by where
+	// they are: a file in renewal-hooks/deploy by its name, one in
+	// renewal-hooks/post as "post/<name>", and a deploy-hook or post-hook
+	// cli.ini sets for every run as "cli.ini's post-hook". One of them may
+	// reload nginx already; what each does is not read here.
 	Others []string `json:"others"`
 }
 
@@ -87,6 +90,14 @@ func RenewalHookStatus() (RenewalHook, error) {
 		hook.Others = []string{}
 	}
 	sort.Strings(hook.Others)
+	post := executablesIn(filepath.Join(letsencryptDir, "renewal-hooks", "post"), "")
+	sort.Strings(post)
+	for _, name := range post {
+		hook.Others = append(hook.Others, "post/"+name)
+	}
+	for _, option := range cliHooks(filepath.Join(letsencryptDir, "cli.ini")) {
+		hook.Others = append(hook.Others, "cli.ini's "+option)
+	}
 	info, err := os.Lstat(hook.Path)
 	if os.IsNotExist(err) {
 		return hook, nil
@@ -111,6 +122,35 @@ func RenewalHookStatus() (RenewalHook, error) {
 		hook.State = "installed"
 	}
 	return hook, nil
+}
+
+// cliHooks are the hooks certbot's cli.ini sets for every run that reach a
+// renewed certificate: deploy-hook (renew-hook is its old name) and
+// post-hook, by the name certbot's documentation gives them. cli.ini is
+// configargparse's: option = value, with the option's dashes or underscores.
+func cliHooks(path string) []string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var hooks []string
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(value) == "" {
+			continue
+		}
+		switch strings.ReplaceAll(strings.TrimSpace(key), "_", "-") {
+		case "deploy-hook", "renew-hook":
+			hooks = appendOnce(hooks, "deploy-hook")
+		case "post-hook":
+			hooks = appendOnce(hooks, "post-hook")
+		}
+	}
+	return hooks
 }
 
 // InstallRenewalHook writes the hook, or restores it over a changed copy of
@@ -173,30 +213,51 @@ func RemoveRenewalHook() (RenewalHook, error) {
 // named directly or through a link. They serve the old certificate until
 // nginx reloads.
 func (s *Service) SitesServingLineages(names []string) []string {
-	if len(names) == 0 {
-		return nil
-	}
-	var dirs []string
-	for _, name := range names {
-		dirs = append(dirs,
-			filepath.Join(letsencryptDir, "live", name)+string(filepath.Separator),
-			filepath.Join(letsencryptDir, "archive", name)+string(filepath.Separator))
-	}
-	within := func(path string) bool {
-		return slices.ContainsFunc(dirs, func(dir string) bool { return strings.HasPrefix(path, dir) })
-	}
 	var sites []string
+	for _, served := range s.lineageSites(names) {
+		for _, site := range served {
+			sites = appendOnce(sites, site)
+		}
+	}
+	sort.Strings(sites)
+	return sites
+}
+
+// lineageSites is SitesServingLineages for each lineage apart, by name. A
+// disabled site serves nothing.
+func (s *Service) lineageSites(names []string) map[string][]string {
+	sites := map[string][]string{}
+	if len(names) == 0 {
+		return sites
+	}
+	type site struct{ name, path, resolved string }
+	var enabled []site
 	for _, v := range s.nginxVHosts() {
 		if !v.Enabled || v.CertPath == "" {
 			continue
 		}
 		path := filepath.Clean(v.CertPath)
 		resolved, err := filepath.EvalSymlinks(path)
-		if within(path) || (err == nil && within(resolved)) {
-			sites = appendOnce(sites, v.Name)
+		if err != nil {
+			resolved = ""
 		}
+		enabled = append(enabled, site{v.Name, path, resolved})
 	}
-	sort.Strings(sites)
+	for _, name := range names {
+		dirs := []string{
+			filepath.Join(letsencryptDir, "live", name) + string(filepath.Separator),
+			filepath.Join(letsencryptDir, "archive", name) + string(filepath.Separator),
+		}
+		within := func(path string) bool {
+			return path != "" && slices.ContainsFunc(dirs, func(dir string) bool { return strings.HasPrefix(path, dir) })
+		}
+		for _, v := range enabled {
+			if within(v.path) || within(v.resolved) {
+				sites[name] = appendOnce(sites[name], v.name)
+			}
+		}
+		sort.Strings(sites[name])
+	}
 	return sites
 }
 

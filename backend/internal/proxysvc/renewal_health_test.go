@@ -141,7 +141,18 @@ echo "journalctl $*" >> "$d/argv.log"
 exit 0
 `, dir))
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// certbot's own log, which the host's is not: none, until a test writes
+	// one in <dir>/logs.
+	useCertbotLogs(t, filepath.Join(dir, "logs"))
 	return dir
+}
+
+// useCertbotLogs points certbot's log directory at dir for the test.
+func useCertbotLogs(t *testing.T, dir string) {
+	t.Helper()
+	previous := certbotLogsDir
+	certbotLogsDir = dir
+	t.Cleanup(func() { certbotLogsDir = previous })
 }
 
 func writeFile(t *testing.T, path, content string) {
@@ -257,22 +268,83 @@ func TestRenewalHealthGivesTheRunsReasonWhenNoCertificateFailed(t *testing.T) {
 }
 
 // The other states the service can be in: its last run succeeded, it is
-// running now, it has never run. None of them needs the journal.
+// running now, it has never run. None of them needs the journal. After the
+// host restarts, systemd reads the service as one that never ran — Result
+// success, no start — while the Persistent timer still names its last
+// trigger: that run is the journal's to judge, and this host's last one
+// failed.
 func TestRenewalHealthReadsEachStateOfTheService(t *testing.T) {
-	for _, c := range []struct{ show, want string }{
-		{"Result=success\nExecMainStatus=0\nExecMainStartTimestamp=Sun 2026-09-27 21:13:11 UTC\nActiveState=inactive\n", "ok"},
-		{"Result=success\nExecMainStatus=0\nExecMainStartTimestamp=Mon 2026-09-28 09:12:44 UTC\nActiveState=activating\n", "running"},
-		{"Result=success\nExecMainStatus=0\nExecMainStartTimestamp=\nActiveState=inactive\n", "never"},
+	restarted := "Result=success\nExecMainStatus=0\nExecMainStartTimestamp=\nActiveState=inactive\nInvocationID=\n"
+	for _, c := range []struct {
+		trigger, show, want string
+		journal             bool
+	}{
+		{"n/a", "Result=success\nExecMainStatus=0\nExecMainStartTimestamp=Sun 2026-09-27 21:13:11 UTC\nActiveState=inactive\n", "ok", false},
+		{"n/a", "Result=success\nExecMainStatus=0\nExecMainStartTimestamp=Mon 2026-09-28 09:12:44 UTC\nActiveState=activating\n", "running", false},
+		{"n/a", "Result=success\nExecMainStatus=0\nExecMainStartTimestamp=\nActiveState=inactive\n", "never", false},
+		{"Sun 2026-09-27 21:13:11 UTC", restarted, "failed", true},
 	} {
 		dir := failingHost(t)
-		writeFile(t, filepath.Join(dir, "certbot.timer.show"), "Unit=certbot.service\nLastTriggerUSec=n/a\nNextElapseUSecRealtime=Mon 2026-09-28 09:12:44 UTC\n")
+		writeFile(t, filepath.Join(dir, "certbot.timer.show"), "Unit=certbot.service\nLastTriggerUSec="+c.trigger+"\nNextElapseUSecRealtime=Mon 2026-09-28 09:12:44 UTC\n")
 		writeFile(t, filepath.Join(dir, "certbot.service.show"), c.show)
-		health := renewalHealth(context.Background(), "certbot.timer", map[string]time.Time{})
-		if health.State != c.want || len(health.Failures) != 0 || health.NextRun == nil {
+		health := renewalHealth(context.Background(), "certbot.timer", map[string]time.Time{"betbots.site": at("2026-07-01T00:00:00Z")})
+		if health.State != c.want || health.NextRun == nil {
 			t.Fatalf("%q: health = %+v", c.show, health)
 		}
-		if raw, _ := os.ReadFile(filepath.Join(dir, "argv.log")); strings.Contains(string(raw), "journalctl") {
-			t.Fatalf("%s read the journal", c.want)
+		raw, _ := os.ReadFile(filepath.Join(dir, "argv.log"))
+		if strings.Contains(string(raw), "journalctl") != c.journal {
+			t.Fatalf("%s: journal read = %v", c.want, !c.journal)
+		}
+		if c.want != "failed" {
+			if len(health.Failures) != 0 {
+				t.Fatalf("%s: failures = %+v", c.want, health.Failures)
+			}
+			continue
+		}
+		if len(health.Failures) != 1 || health.Failures[0].Lineage != "betbots.site" || health.ExitStatus != 1 ||
+			!health.LastRun.Equal(time.UnixMicro(1790543591171306).UTC()) || health.FailingSince == nil {
+			t.Fatalf("after a restart: %+v", health)
+		}
+	}
+}
+
+// After a restart, what the journal holds decides: the last run it has,
+// passed or failed by systemd's own lines, or unknown when it holds no run
+// the timer's last trigger could have started — never systemd's default
+// success.
+func TestRenewalHealthAfterARestartIsTheJournals(t *testing.T) {
+	restarted := func(t *testing.T, journal string) *RenewalHealth {
+		t.Helper()
+		dir := failingHost(t)
+		writeFile(t, filepath.Join(dir, "certbot.service.show"), "Result=success\nExecMainStatus=0\nExecMainStartTimestamp=\nActiveState=inactive\nInvocationID=\n")
+		writeFile(t, filepath.Join(dir, "journal.json"), journal)
+		return renewalHealth(context.Background(), "certbot.timer", map[string]time.Time{})
+	}
+	trigger := at("2026-09-27T21:13:11Z")
+	record := func(id string, pid int, us int64, message string) string {
+		key := "_SYSTEMD_INVOCATION_ID"
+		if pid == 1 {
+			key = "INVOCATION_ID"
+		}
+		return fmt.Sprintf(`{"MESSAGE":%q,"__REALTIME_TIMESTAMP":"%d","%s":"%s","PRIORITY":"6","_PID":"%d"}`+"\n", message, us, key, id, pid)
+	}
+	passed := record("ok-run", 1, trigger.UnixMicro(), "Starting certbot.service - Certbot...") +
+		record("ok-run", 1, trigger.Add(3*time.Second).UnixMicro(), "certbot.service: Deactivated successfully.") +
+		record("ok-run", 1, trigger.Add(3*time.Second).UnixMicro()+1, "Finished certbot.service - Certbot.")
+	if health := restarted(t, hostJournal+passed); health.State != "ok" || !health.LastRun.Equal(trigger) || len(health.Failures) != 0 {
+		t.Fatalf("a run that passed: %+v", health)
+	}
+	for name, journal := range map[string]string{
+		"an empty journal": "",
+		// The journal's newest run is older than the timer's last trigger.
+		"a journal without the run": strings.Join(strings.Split(hostJournal, "\n")[:17], "\n") + "\n",
+		// The host went down during the run: systemd never said how it ended.
+		"a run with no verdict": record("cut", 1, trigger.UnixMicro(), "Starting certbot.service - Certbot...") +
+			record("cut", 4242, trigger.Add(time.Second).UnixMicro(), "Processing /etc/letsencrypt/renewal/betbots.site.conf"),
+	} {
+		health := restarted(t, journal)
+		if health.State != "unknown" || len(health.Failures) != 0 || health.Error != "" {
+			t.Fatalf("%s: %+v", name, health)
 		}
 	}
 }
@@ -442,5 +514,159 @@ func TestCronRenewalHealthReadsCertbotsLog(t *testing.T) {
 	// No renewal logged at all.
 	if health := logRenewalHealth(filepath.Join(dir, "absent"), nil); health.State != "unknown" || health.Error != "" {
 		t.Fatalf("no logs: %+v", health)
+	}
+}
+
+// certbot 2.11's log of a quiet renewal whose reload hook refused to reload
+// nginx, from a real run against Pebble with a configuration that fails
+// nginx -t: its directories renamed to certbot's defaults, and the ACME
+// exchange and the certificates it logged left out. certbot only warns, and
+// the run passes.
+const hookFailedRenewalLog = `2026-09-28 04:19:51,333:DEBUG:certbot._internal.main:certbot version: 2.11.0
+2026-09-28 04:19:51,333:DEBUG:certbot._internal.main:Location of certbot entry point: /usr/bin/certbot
+2026-09-28 04:19:51,334:DEBUG:certbot._internal.main:Arguments: ['-q', '--no-random-sleep-on-renew']
+2026-09-28 04:19:51,362:DEBUG:certbot._internal.display.obj:Notifying user: Processing /etc/letsencrypt/renewal/x.test.conf
+2026-09-28 04:19:51,395:INFO:certbot._internal.plugins.selection:Plugins selected: Authenticator webroot, Installer None
+2026-09-28 04:19:51,494:DEBUG:certbot._internal.display.obj:Notifying user: Renewing an existing certificate for x.test
+2026-09-28 04:19:51,540:INFO:certbot._internal.auth_handler:Performing the following challenges:
+2026-09-28 04:19:51,540:INFO:certbot._internal.auth_handler:http-01 challenge for x.test
+2026-09-28 04:19:51,571:INFO:certbot._internal.auth_handler:Waiting for verification...
+2026-09-28 04:19:52,578:INFO:certbot._internal.auth_handler:Cleaning up challenges
+2026-09-28 04:19:52,580:DEBUG:certbot._internal.client:Will poll for certificate issuance until 2026-09-28 04:21:22.580606
+-----BEGIN CERTIFICATE-----
+MIIBlTCCATqgAwIBAgIIKtNzKmnir7AwCgYIKoZIzj0EAwIwKDEmMCQGA1UEAxMd
+-----END CERTIFICATE-----
+2026-09-28 04:19:53,618:DEBUG:certbot._internal.storage:Writing certificate to /etc/letsencrypt/archive/x.test/cert3.pem.
+2026-09-28 04:19:53,649:INFO:certbot.compat.misc:Running deploy-hook command: /etc/letsencrypt/renewal-hooks/deploy/50-just-dashboard-reload-nginx
+2026-09-28 04:19:53,667:WARNING:certbot.display.ops:Hook 'deploy-hook' reported error code 1
+2026-09-28 04:19:53,667:WARNING:certbot.display.ops:Hook 'deploy-hook' ran with error output:
+ 2026/09/28 04:19:53 [emerg] 67305#67305: unknown directive "broken_directive" in /etc/nginx/nginx.conf:4
+ nginx: configuration file /etc/nginx/nginx.conf test failed
+ nginx -t failed, so nginx was not reloaded for /etc/letsencrypt/live/x.test
+2026-09-28 04:19:53,669:DEBUG:certbot._internal.plugins.selection:Requested authenticator webroot and installer None
+2026-09-28 04:19:53,669:DEBUG:certbot._internal.display.obj:Notifying user: 
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+2026-09-28 04:19:53,669:DEBUG:certbot._internal.display.obj:Notifying user: Congratulations, all renewals succeeded: 
+  /etc/letsencrypt/live/x.test/fullchain.pem (success)
+`
+
+// reloadHookFailure is what the log above says of the hook.
+var reloadHookFailure = HookFailure{
+	Kind:    "deploy-hook",
+	Command: "/etc/letsencrypt/renewal-hooks/deploy/50-just-dashboard-reload-nginx",
+	Code:    1,
+	Output: `2026/09/28 04:19:53 [emerg] 67305#67305: unknown directive "broken_directive" in /etc/nginx/nginx.conf:4 ` +
+		`nginx: configuration file /etc/nginx/nginx.conf test failed ` +
+		`nginx -t failed, so nginx was not reloaded for /etc/letsencrypt/live/x.test`,
+}
+
+// certbot warns about a hook that exits with an error and carries on, so a
+// run whose reload hook refused to reload nginx passes. Its warning, and
+// what the hook wrote, are the only record of it, in either certbot's
+// wording; a hook that only wrote to its error output did not fail.
+func TestHookFailuresReadCertbotsWarnings(t *testing.T) {
+	dir := t.TempDir()
+	ended := at("2026-09-28T02:19:53.669Z")
+	writeLog(t, filepath.Join(dir, "letsencrypt.log"), hookFailedRenewalLog, 2*time.Hour, ended)
+	health := logRenewalHealth(dir, nil)
+	if health.State != "ok" || len(health.HookFailures) != 1 || health.HookFailures[0] != reloadHookFailure {
+		t.Fatalf("health = %+v", health)
+	}
+
+	// The hook that did reload: nginx's notice on its error output, exit 0.
+	passed := strings.NewReplacer(
+		"2026-09-28 04:19:53,667:WARNING:certbot.display.ops:Hook 'deploy-hook' reported error code 1\n", "",
+		` 2026/09/28 04:19:53 [emerg] 67305#67305: unknown directive "broken_directive" in /etc/nginx/nginx.conf:4
+ nginx: configuration file /etc/nginx/nginx.conf test failed
+ nginx -t failed, so nginx was not reloaded for /etc/letsencrypt/live/x.test`, ` 2026/09/28 04:19:53 [notice] 66738#66738: signal process started`,
+	).Replace(hookFailedRenewalLog)
+	writeLog(t, filepath.Join(dir, "letsencrypt.log"), passed, 2*time.Hour, ended)
+	if health := logRenewalHealth(dir, nil); health.State != "ok" || len(health.HookFailures) != 0 {
+		t.Fatalf("a hook that passed: %+v", health)
+	}
+
+	// certbot 1's words, as the journal keeps them one line to a record.
+	lines := []RenewalLine{
+		{Text: "Running post-hook command: systemctl reload nginx"},
+		{Text: `post-hook command "systemctl reload nginx" returned error code 1`},
+		{Text: "Error output from post-hook command systemctl:"},
+		{Text: " Job for nginx.service failed."},
+		{Text: "Hook 'deploy-hook' reported error code 2"},
+		{Text: "certbot.service: Deactivated successfully.", Systemd: true},
+	}
+	want := []HookFailure{
+		{Kind: "post-hook", Command: "systemctl reload nginx", Code: 1, Output: "Job for nginx.service failed."},
+		{Kind: "deploy-hook", Code: 2},
+	}
+	if got := hookFailures(lines); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("hook failures = %+v", got)
+	}
+}
+
+// The timer's `certbot -q` prints nothing of a hook's failure, which is a
+// warning, so a run that passed says nothing of it in the journal. certbot's
+// log has it: the renewal it logged as the service started is the run.
+func TestRenewalHealthReadsAHookFailureFromCertbotsLog(t *testing.T) {
+	dir := failingHost(t)
+	writeFile(t, filepath.Join(dir, "certbot.service.show"), "Result=success\nExecMainStatus=0\nExecMainStartTimestamp=Mon 2026-09-28 02:19:50 UTC\nActiveState=inactive\nInvocationID=run\n")
+	logs := filepath.Join(dir, "logs")
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The run's first line a second after the service started, stamped in
+	// the host's zone two hours east.
+	writeLog(t, filepath.Join(logs, "letsencrypt.log"), hookFailedRenewalLog, 2*time.Hour, at("2026-09-28T02:19:53.336Z"))
+	health := renewalHealth(context.Background(), "certbot.timer", map[string]time.Time{})
+	if health.State != "ok" || len(health.HookFailures) != 1 || health.HookFailures[0] != reloadHookFailure {
+		t.Fatalf("health = %+v", health)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(dir, "argv.log")); strings.Contains(string(raw), "journalctl") {
+		t.Fatal("a run that passed read the journal")
+	}
+	// A renewal logged later — this page's own — is not the timer's run.
+	writeLog(t, filepath.Join(logs, "letsencrypt.log"), hookFailedRenewalLog, 2*time.Hour, at("2026-09-28T02:39:53.336Z"))
+	if health := renewalHealth(context.Background(), "certbot.timer", map[string]time.Time{}); health.State != "ok" || len(health.HookFailures) != 0 {
+		t.Fatalf("a later renewal was read as the run: %+v", health)
+	}
+}
+
+// Debian's and Ubuntu's certbot package installs a cron entry beside the
+// timer that does nothing where systemd is init. With the timer stopped
+// there, nothing renews: the cron file is not a schedule, and the timer is
+// the thing to turn on. Without systemd, and for a cron entry with no such
+// test, the file is the schedule.
+func TestACronEntryThatStandsAsideForSystemdIsNoSchedule(t *testing.T) {
+	fakeSystemd(t)
+	dir := t.TempDir()
+	cron := filepath.Join(dir, "cron.d-certbot")
+	previousFiles, previousRun := certbotCronFiles, systemdRunDir
+	t.Cleanup(func() { certbotCronFiles, systemdRunDir = previousFiles, previousRun })
+	certbotCronFiles = []string{filepath.Join(dir, "absent"), cron}
+	systemdRunDir = dir
+
+	// /etc/cron.d/certbot as the package ships it.
+	writeFile(t, cron, `# /etc/cron.d/certbot: crontab entries for the certbot package
+#
+# Important Note!  This cronjob will NOT be executed if you are
+# running systemd as your init system.  If you are running systemd,
+# the cronjob.timer function takes precedence over this cronjob.  For
+# more details, see the systemd.timer manpage, or use systemctl show
+# certbot.timer.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+0 */12 * * * root test -x /usr/bin/certbot -a \! -d /run/systemd/system && perl -e 'sleep int(rand(43200))' && certbot -q renew --no-random-sleep-on-renew
+`)
+	if scheduled, source := renewalScheduled(context.Background()); scheduled {
+		t.Fatalf("a stopped timer on a systemd host read as scheduled by %s", source)
+	}
+	systemdRunDir = filepath.Join(dir, "absent")
+	if scheduled, source := renewalScheduled(context.Background()); !scheduled || source != cron {
+		t.Fatalf("without systemd: %v %q", scheduled, source)
+	}
+	systemdRunDir = dir
+	writeFile(t, cron, "0 */12 * * * root certbot -q renew\n")
+	if scheduled, source := renewalScheduled(context.Background()); !scheduled || source != cron {
+		t.Fatalf("a cron entry of the operator's own: %v %q", scheduled, source)
 	}
 }

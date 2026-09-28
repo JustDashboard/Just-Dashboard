@@ -48,6 +48,27 @@ func TestRenewalHookInstallsOnceAndIsRecognised(t *testing.T) {
 	if hook, _ = RenewalHookStatus(); strings.Join(hook.Others, ",") != "reload-haproxy" {
 		t.Fatalf("others = %q", hook.Others)
 	}
+	// So are the hooks certbot runs once a renewal run is over, and those
+	// cli.ini sets for every run: any of them may reload nginx already.
+	post := filepath.Join(dir, "renewal-hooks", "post")
+	if err := os.MkdirAll(post, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(post, "reload-nginx"), "#!/bin/sh\nsystemctl reload nginx\n")
+	writeFile(t, filepath.Join(post, "README"), "not a hook\n")
+	writeFile(t, filepath.Join(dir, "cli.ini"), `# Because we are using logrotate for greater flexibility, disable the
+# internal certbot logrotation.
+max-log-backups = 0
+# deploy-hook = commented out
+post_hook = systemctl reload nginx
+renew-hook = /usr/local/bin/notify
+deploy-hook =
+`)
+	if hook, _ = RenewalHookStatus(); strings.Join(hook.Others, ",") != "reload-haproxy,post/reload-nginx,cli.ini's post-hook,cli.ini's deploy-hook" {
+		t.Fatalf("others = %q", hook.Others)
+	}
+	os.Remove(filepath.Join(post, "reload-nginx"))
+	os.Remove(filepath.Join(dir, "cli.ini"))
 
 	// Changed by hand, or no longer executable: certbot may not run what
 	// the switch says. Installing again restores it.

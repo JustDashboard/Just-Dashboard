@@ -312,11 +312,14 @@ function RenewalMethod({ cert }: { cert: CertbotCert }) {
     <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
       <span className="text-hint text-muted-foreground">Renews with</span>
       <Tag>{method.method}</Tag>
-      {method.detail && (
-        <Tag mono={method.mono} className="max-w-full break-all">
-          {method.detail}
-        </Tag>
-      )}
+      {/* A folder is a path of any length: it wraps, where a tag would run
+          past the column on a phone. */}
+      {method.folders?.map((folder) => (
+        <code key={folder} className="min-w-0 font-mono text-hint break-all">
+          {folder}
+        </code>
+      ))}
+      {method.detail && <Tag>{method.detail}</Tag>}
     </p>
   )
 }

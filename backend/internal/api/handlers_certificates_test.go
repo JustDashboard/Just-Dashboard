@@ -839,6 +839,7 @@ show)
 	[ "$2" = certbot.service ] && cat "$d/service"
 	exit 0 ;;
 start) . "$d/start" ;;
+stop) [ -f "$d/stop" ] && . "$d/stop"; exit 0 ;;
 esac
 exit 1
 `, dir)
@@ -992,6 +993,104 @@ exit 1
 	}
 	os.WriteFile(release, nil, 0o600)
 	waitForJob(t, s, running.ID)
+}
+
+// Stopping a Run now job stops the renewal itself: killing the systemctl
+// that waits on the run would leave systemd's start and certbot running
+// while certbot's lock read as free. The job stays running until the
+// service has stopped, and a certificate certbot saved before that still
+// reaches nginx.
+func TestStoppingARenewalRunStopsTheService(t *testing.T) {
+	host := useFakeCertbot(t, "webroot")
+	nginx := useFakeNginx(t)
+	dir := fakeRenewalService(t)
+	s := testServer(t)
+	nginxDir := t.TempDir()
+	s.Cfg.NginxDir = nginxDir
+	s.initModules()
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	certPath := host.lineage(t, "app.example.com", "app.example.com")
+	enabledSite(t, nginxDir, "app", filepath.Join(filepath.Dir(certPath), "fullchain.pem"))
+	replacement := filepath.Join(t.TempDir(), "new.pem")
+	newPEM, _ := testCertificate(t, []string{"app.example.com"})
+	if err := os.WriteFile(replacement, []byte(newPEM), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The run renews the certificate, then waits for its next challenge
+	// until systemd stops it.
+	write("start", fmt.Sprintf(`cp %q %q
+touch "$d/renewed"
+while [ ! -f "$d/stopped" ]; do sleep 0.05; done
+echo "Job for certbot.service canceled." >&2
+exit 1
+`, replacement, certPath))
+	write("stop", `while [ ! -f "$d/release" ]; do sleep 0.05; done
+touch "$d/stopped"
+`)
+	argv := func() string {
+		raw, _ := os.ReadFile(filepath.Join(dir, "argv.log"))
+		return string(raw)
+	}
+	waitUntil := func(what string, ok func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for !ok() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s:\n%s", what, argv())
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+
+	w := c.do(http.MethodPost, "/api/v1/certificates/renewal/run", "", nil)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("run = %d: %s", w.Code, w.Body.String())
+	}
+	job := decodeJob(t, w.Body.Bytes())
+	waitUntil("the renewal", func() bool {
+		_, err := os.Stat(filepath.Join(dir, "renewed"))
+		return err == nil
+	})
+	if w := c.do(http.MethodPost, "/api/v1/jobs/"+job.ID+"/cancel", `{}`, nil); w.Code != http.StatusNoContent {
+		t.Fatalf("cancel = %d: %s", w.Code, w.Body.String())
+	}
+	waitUntil("the stop", func() bool { return strings.Contains(argv(), "systemctl stop certbot.service") })
+	// Still stopping: certbot's lock is held.
+	if current, _, _ := s.modules.jobs.Get(job.ID); current.Status != jobs.StatusRunning {
+		t.Fatalf("status while the service stops = %s", current.Status)
+	}
+	if w := c.do(http.MethodPost, "/api/v1/certificates/renew", `{"name":"app.example.com"}`, nil); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "certbot_busy") {
+		t.Fatalf("renew while the service stops = %d: %s", w.Code, w.Body.String())
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	job = waitForJob(t, s, job.ID)
+	text := jobText(t, s, job.ID)
+	if job.Status != jobs.StatusCancelled {
+		t.Fatalf("stopped run: %+v\n%s", job, text)
+	}
+	for _, want := range []string{
+		"status: Cancelled from the dashboard.",
+		"status: Stopping certbot.service: systemd ends certbot's run.",
+		"status: Stopped certbot.service.",
+		"status: Renewed app.example.com before it stopped.",
+		"status: Reloaded nginx, so app serves the new certificate.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("%q is not in:\n%s", want, text)
+		}
+	}
+	if calls := nginx.calls(t); calls != "nginx -t\nnginx -s reload\n" {
+		t.Fatalf("nginx calls:\n%s", calls)
+	}
 }
 
 // The renewal record's own lines, for the page's log panel, to an admin.

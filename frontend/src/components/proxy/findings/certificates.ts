@@ -1,5 +1,6 @@
 import {
   expiredAgo,
+  hookFailureText,
   runPhrase,
   sinceDay,
   standingFailures,
@@ -16,8 +17,8 @@ export type CertificateFindingInput = {
 
 /**
  * A certificate that cannot be read, is a test certificate, has expired or is
- * about to; a renewal nothing runs, one whose last run failed, one that will
- * fail, and renewals nginx never reloads for.
+ * about to; a renewal nothing runs, one whose last run failed or whose hook
+ * failed, one that will fail, and renewals nginx never reloads for.
  */
 export function certificateFindings({ certs, certbot }: CertificateFindingInput): ProxyFinding[] {
   const out: ProxyFinding[] = []
@@ -95,6 +96,21 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
     })
   }
 
+  if (health?.hookFailures?.length) {
+    // certbot only warns when a hook fails, so the run itself passed.
+    const when = health.lastRun ? ` ${runPhrase(health.lastRun)}` : ""
+    out.push({
+      id: "certbot.hook-failed",
+      level: "warning",
+      title: "A renewal hook failed",
+      detail: `On ${health.service ?? "the renewal"}'s last run${when}: ${health.hookFailures.map(hookFailureText).join(" ")}`,
+      advice:
+        "certbot only warns when a hook fails, so the run still reads as passed. A reload hook that failed left nginx on the old certificate: fix what it reports, then reload nginx.",
+      meta: "renewal",
+      href: "/proxy/certificates",
+    })
+  }
+
   for (const lineage of certbot?.available ? certbot.certs : []) {
     if (!lineage.willFail?.length) continue
     // Inside the renewal window certbot tries at every run; before it, the
@@ -113,8 +129,8 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
     })
   }
 
-  if (certbot?.available && certs) {
-    const { lineages, sites } = unreloadedRenewals(certbot, certs)
+  if (certbot?.available) {
+    const { lineages, sites } = unreloadedRenewals(certbot)
     if (lineages.length > 0) {
       out.push({
         id: "certbot.no-reload",

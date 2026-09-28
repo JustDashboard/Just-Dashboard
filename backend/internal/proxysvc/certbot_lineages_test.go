@@ -234,9 +234,17 @@ func TestReadRenewalConfReadsHowCertbotRenews(t *testing.T) {
 	dir := t.TempDir()
 	root := newAuthority(t, "Test Root", nil)
 	leaf, _, _ := root.issue(t, []string{"x.example.com"}, time.Now().Add(60*24*time.Hour))
-	for _, name := range []string{"betbots.site", "web.example.com", "dns.example.com", "old.example.com", "none.example.com"} {
+	for _, name := range []string{"betbots.site", "web.example.com", "dns.example.com", "old.example.com", "none.example.com", "post.example.com"} {
 		writeLineage(t, dir, name, productionACME, leaf)
 	}
+	// `certbot --post-hook "systemctl reload nginx"`, the usual way to have
+	// nginx read what certbot renewed.
+	setRenewalParams(t, dir, "post.example.com", `authenticator = webroot
+webroot_path = /var/www/html,
+post_hook = systemctl reload nginx
+[[webroot_map]]
+post.example.com = /var/www/html
+`)
 	setRenewalParams(t, dir, "web.example.com", `account = 0123456789abcdef0123456789abcdef
 authenticator = webroot
 webroot_path = /var/www/app,
@@ -283,8 +291,11 @@ http01_port = 8080
 	if c := read("old.example.com"); c.Credentials != "/root/cloudflare.ini" || pluginName(c.Authenticator) != "dns-cloudflare" || c.Installer != "" {
 		t.Fatalf("old = %+v", c)
 	}
-	if c := read("none.example.com"); c.Installer != "" || c.PreHook != "systemctl stop nginx" || c.HTTP01Port != 8080 {
+	if c := read("none.example.com"); c.Installer != "" || c.PreHook != "systemctl stop nginx" || c.HTTP01Port != 8080 || c.PostHook != "" {
 		t.Fatalf("none = %+v", c)
+	}
+	if c := read("post.example.com"); c.PostHook != "systemctl reload nginx" || c.DeployHook != "" {
+		t.Fatalf("post = %+v", c)
 	}
 
 	certs, err := readCertbotLineages(dir)
@@ -301,6 +312,12 @@ http01_port = 8080
 	}
 	if c := byName["old.example.com"]; c.Authenticator != "dns-cloudflare" || c.DNSProvider != "Cloudflare" {
 		t.Fatalf("old lineage = %+v", c)
+	}
+	if c := byName["post.example.com"]; !c.PostHook || c.DeployHook || strings.Join(c.Webroots, " ") != "/var/www/html" {
+		t.Fatalf("post lineage = %+v", c)
+	}
+	if c := byName["dns.example.com"]; c.PostHook {
+		t.Fatalf("dns lineage = %+v", c)
 	}
 }
 
@@ -408,7 +425,26 @@ func TestCertbotStateCarriesTheRenewalRecord(t *testing.T) {
 		}
 	}
 
-	state := New(t.TempDir(), "").CertbotState(context.Background())
+	// betbots.site is what one enabled site serves, and a disabled one
+	// names it too: only the enabled one is left on the old certificate
+	// when nginx is not reloaded.
+	nginx := t.TempDir()
+	for _, sub := range []string{"sites-available", "sites-enabled"} {
+		if err := os.MkdirAll(filepath.Join(nginx, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, enabled := range map[string]bool{"betbots": true, "retired-app": false} {
+		available := filepath.Join(nginx, "sites-available", name)
+		writeFile(t, available, "server {\n    listen 443 ssl;\n    server_name "+name+";\n    ssl_certificate "+filepath.Join(dir, "live", "betbots.site", "fullchain.pem")+";\n}\n")
+		if enabled {
+			if err := os.Symlink(available, filepath.Join(nginx, "sites-enabled", name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	state := New(nginx, "").CertbotState(context.Background())
 	if state.Health == nil || state.Health.State != "failed" || state.Health.Service != "certbot.service" {
 		t.Fatalf("health = %+v", state.Health)
 	}
@@ -425,10 +461,11 @@ func TestCertbotStateCarriesTheRenewalRecord(t *testing.T) {
 		}
 	}
 	if betbots.LastFailure == nil || betbots.LastFailure.Reason != "Some challenges have failed." ||
-		betbots.Authenticator != "nginx" || betbots.Installer != "nginx" || len(betbots.WillFail) != 0 {
+		betbots.Authenticator != "nginx" || betbots.Installer != "nginx" || len(betbots.WillFail) != 0 ||
+		strings.Join(betbots.ServedBy, ",") != "betbots" {
 		t.Fatalf("betbots.site = %+v", betbots)
 	}
-	if app.LastFailure != nil || len(app.WillFail) != 1 || app.DNSProvider != "Cloudflare" {
+	if app.LastFailure != nil || len(app.WillFail) != 1 || app.DNSProvider != "Cloudflare" || len(app.ServedBy) != 0 {
 		t.Fatalf("app.example.com = %+v", app)
 	}
 

@@ -361,31 +361,32 @@ export function CertificatesPage() {
             <PanelHeader
               title="Automatic renewal"
               actions={
-                admin && (
-                  <>
-                    <RecentJobs kinds={["certbot."]} onOpen={console_.open} />
-                    {certbot.data && certbot.data.certs.length > 0 && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy !== "" || certbotBusy}
-                        pending={
-                          busy === ALL_CERTS ||
-                          (certbotBusy &&
-                            job?.kind === "certbot.renew" &&
-                            job.target === "every certificate due")
-                        }
-                        onClick={() => renew(ALL_CERTS, false)}
-                      >
-                        <RefreshClockwise className="size-3.5" />
-                        Renew all due
-                      </Button>
-                    )}
-                  </>
+                admin &&
+                certbot.data &&
+                certbot.data.certs.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy !== "" || certbotBusy}
+                    pending={
+                      busy === ALL_CERTS ||
+                      (certbotBusy &&
+                        job?.kind === "certbot.renew" &&
+                        job.target === "every certificate due")
+                    }
+                    onClick={() => renew(ALL_CERTS, false)}
+                  >
+                    <RefreshClockwise className="size-3.5" />
+                    Renew all due
+                  </Button>
                 )
               }
             />
             <PanelBody flush>
+              {/* In the body, not the header: the column is narrow beside the
+                  inventory, and a row of runs there pushed the header's
+                  button out of it. Here they wrap. */}
+              {admin && <RecentJobs kinds={["certbot."]} onOpen={console_.open} className="pt-3" />}
               {certbot.data && (
                 <RenewalNotice state={certbot.data} admin={admin} onChanged={certbot.refresh} />
               )}

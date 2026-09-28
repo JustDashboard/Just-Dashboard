@@ -48,8 +48,13 @@ type CertbotCert struct {
 	Webroots      []string `json:"webroots,omitempty"`
 	DNSProvider   string   `json:"dnsProvider,omitempty"`
 	// DeployHook is a hook of the lineage's own that certbot runs after
-	// renewing it (--deploy-hook); what it does is not read here.
+	// renewing it (--deploy-hook), and PostHook one it runs once the whole
+	// renewal run is over (--post-hook); what they do is not read here.
 	DeployHook bool `json:"deployHook,omitempty"`
+	PostHook   bool `json:"postHook,omitempty"`
+	// ServedBy are the enabled nginx sites whose certificate is this
+	// lineage's: the ones left on the old certificate until nginx reloads.
+	ServedBy []string `json:"servedBy,omitempty"`
 	// WillFail is what will make the next renewal fail, each a certainty in
 	// certbot's code, found before the run that would find it.
 	WillFail []string `json:"willFail,omitempty"`
@@ -132,8 +137,14 @@ func (s *Service) CertbotState(ctx context.Context) *CertbotState {
 	}
 	state.Certs = lineagesFrom(confs)
 	problems := s.renewalProblems(ctx, rt, confs)
+	names := make([]string, 0, len(state.Certs))
+	for _, cert := range state.Certs {
+		names = append(names, cert.Name)
+	}
+	served := s.lineageSites(names)
 	for i := range state.Certs {
 		state.Certs[i].WillFail = problems[state.Certs[i].Name]
+		state.Certs[i].ServedBy = served[state.Certs[i].Name]
 	}
 	if state.AutoRenew {
 		state.Health = renewalHealth(ctx, state.RenewSource, written)
@@ -172,10 +183,32 @@ func renewalCandidate(ctx context.Context) string {
 	return ""
 }
 
+// certbotCronFiles are where certbot's packages schedule it without systemd.
+// Alpine has no systemd and no /etc/cron.daily either: busybox crond runs
+// /etc/periodic, and a host renewing perfectly well there used to be told
+// nothing was scheduled. A variable for tests.
+var certbotCronFiles = []string{
+	"/etc/cron.d/certbot", "/etc/cron.daily/certbot", "/etc/cron.weekly/certbot",
+	"/etc/periodic/daily/certbot", "/etc/periodic/weekly/certbot",
+}
+
+// systemdRunDir exists when systemd is the init system (sd_booted). A
+// variable for tests.
+var systemdRunDir = "/run/systemd/system"
+
+// systemdGuardRe is the test Debian's and Ubuntu's cron entry runs before
+// certbot, `test -x /usr/bin/certbot -a \! -d /run/systemd/system`: the
+// entry stands aside wherever systemd is init, for the timer to renew.
+var systemdGuardRe = regexp.MustCompile(`(?m)^[^#\n]*\\?!\s*-d\s+/run/systemd/system\b`)
+
 // renewalScheduled looks for whatever is meant to be renewing. certbot ships
 // as a systemd timer on most distributions and as a cron entry on the rest,
 // and a snap install has its own; all three are worth finding, because the
 // answer the operator needs is yes or no rather than which.
+//
+// Debian and Ubuntu install both, and their cron entry does nothing on a host
+// that runs systemd. With the timer stopped there, nothing renews, and the
+// cron file is not a schedule.
 func renewalScheduled(ctx context.Context) (bool, string) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -185,16 +218,20 @@ func renewalScheduled(ctx context.Context) (bool, string) {
 			return true, unit
 		}
 	}
-	for _, path := range []string{
-		"/etc/cron.d/certbot", "/etc/cron.daily/certbot", "/etc/cron.weekly/certbot",
-		// Alpine has no systemd and no /etc/cron.daily either: busybox crond
-		// runs /etc/periodic, and a host renewing perfectly well there used
-		// to be told nothing was scheduled.
-		"/etc/periodic/daily/certbot", "/etc/periodic/weekly/certbot",
-	} {
-		if _, err := os.Stat(path); err == nil {
-			return true, path
+	_, err := os.Stat(systemdRunDir)
+	systemd := err == nil
+	for _, path := range certbotCronFiles {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			// There, but unreadable, is still a schedule.
+			if _, statErr := os.Stat(path); statErr != nil {
+				continue
+			}
 		}
+		if systemd && systemdGuardRe.Match(content) {
+			continue
+		}
+		return true, path
 	}
 	return false, ""
 }

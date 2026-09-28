@@ -4,6 +4,7 @@ import {
   authorityName,
   certbotRunning,
   expiredAgo,
+  hookFailureText,
   lineageActivity,
   parseDomains,
   renewalMethod,
@@ -319,6 +320,31 @@ describe("the Renewal tile", () => {
     expect(renewalReading(undefined, true).value).toBe("No certbot")
   })
 
+  test("a run that passed while a hook failed reads the hook, not healthy", () => {
+    const hooked = health({
+      hookFailures: [
+        {
+          kind: "deploy-hook",
+          command: "/etc/letsencrypt/renewal-hooks/deploy/50-just-dashboard-reload-nginx",
+          code: 1,
+          output: "nginx -t failed, so nginx was not reloaded for /etc/letsencrypt/live/x.test",
+        },
+      ],
+    })
+    expect(renewalReading(certbotState({ health: hooked }), false, localNow)).toEqual({
+      value: "Hook failed",
+      hint: "last run yesterday 21:13",
+      tone: "warning",
+    })
+    expect(hookFailureText(hooked.hookFailures[0])).toBe(
+      "deploy-hook 50-just-dashboard-reload-nginx exited 1: nginx -t failed, so nginx was not reloaded for /etc/letsencrypt/live/x.test",
+    )
+    expect(hookFailureText({ kind: "post-hook", command: "systemctl reload nginx", code: 1 })).toBe(
+      "post-hook systemctl reload nginx exited 1.",
+    )
+    expect(hookFailureText({ kind: "deploy-hook", code: 2 })).toBe("deploy-hook exited 2.")
+  })
+
   test("only the failures nothing has renewed since still stand", () => {
     expect(
       standingFailures(
@@ -339,8 +365,7 @@ describe("how a lineage renews", () => {
       renewalMethod({ authenticator: "webroot", webroots: ["/var/www/app", "/srv/static"] }),
     ).toEqual({
       method: "webroot",
-      detail: "/var/www/app, /srv/static",
-      mono: true,
+      folders: ["/var/www/app", "/srv/static"],
     })
     expect(renewalMethod({ authenticator: "dns-cloudflare", dnsProvider: "Cloudflare" })).toEqual({
       method: "DNS",
@@ -375,7 +400,15 @@ describe("whether nginx reads a renewed certificate", () => {
 
   test("hooks whose work is not read claim nothing either way", () => {
     expect(renewalReload({ deployHook: true }, { reloadHook: hook("missing") })).toBe("unknown")
+    // `certbot --post-hook "systemctl reload nginx"`, the usual way.
+    expect(renewalReload({ postHook: true }, { reloadHook: hook("missing") })).toBe("unknown")
     expect(renewalReload({}, { reloadHook: hook("missing", ["reload-haproxy"]) })).toBe("unknown")
+    expect(renewalReload({}, { reloadHook: hook("missing", ["post/reload-nginx"]) })).toBe(
+      "unknown",
+    )
+    expect(renewalReload({}, { reloadHook: hook("missing", ["cli.ini's post-hook"]) })).toBe(
+      "unknown",
+    )
     expect(renewalReload({}, { reloadHook: hook("modified") })).toBe("unknown")
   })
 
@@ -390,28 +423,26 @@ describe("whether nginx reads a renewed certificate", () => {
       authenticator: "webroot",
       ...overrides,
     })
-    const cert = (name, usedBy) => ({ path: `/etc/letsencrypt/live/${name}/fullchain.pem`, usedBy })
+    // servedBy is the enabled sites only: a disabled one that names
+    // idle.example.com serves nothing, so it is not here.
     const state = certbotState({
       reloadHook: hook("missing"),
       nginxReloads: true,
       certs: [
-        lineage("app.example.com"),
+        lineage("app.example.com", { servedBy: ["app", "www"] }),
         lineage("idle.example.com"),
-        lineage("nginx.example.com", { installer: "nginx" }),
+        lineage("nginx.example.com", { installer: "nginx", servedBy: ["n"] }),
+        lineage("post.example.com", { postHook: true, servedBy: ["post"] }),
       ],
     })
-    const certs = [
-      cert("app.example.com", ["app", "www"]),
-      cert("idle.example.com", []),
-      cert("nginx.example.com", ["n"]),
-    ]
-    expect(unreloadedRenewals(state, certs)).toEqual({
+    expect(unreloadedRenewals(state)).toEqual({
       lineages: ["app.example.com"],
       sites: ["app", "www"],
     })
-    expect(unreloadedRenewals({ ...state, reloadHook: hook("installed") }, certs).lineages).toEqual(
-      [],
-    )
-    expect(unreloadedRenewals({ ...state, autoRenew: false }, certs).lineages).toEqual([])
+    expect(unreloadedRenewals({ ...state, reloadHook: hook("installed") }).lineages).toEqual([])
+    expect(
+      unreloadedRenewals({ ...state, reloadHook: hook("missing", ["post/reload-nginx"]) }).lineages,
+    ).toEqual([])
+    expect(unreloadedRenewals({ ...state, autoRenew: false }).lineages).toEqual([])
   })
 })
