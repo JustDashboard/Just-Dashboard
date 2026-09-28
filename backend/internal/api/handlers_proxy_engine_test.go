@@ -59,14 +59,43 @@ func TestEngineStartAndRestartAreRefusedOverABrokenConfiguration(t *testing.T) {
 
 	for _, action := range []string{"restart", "start"} {
 		w := c.do(http.MethodPost, "/api/v1/proxy/engine/"+action, "", nil)
-		if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), `"invalid_config"`) ||
-			!strings.Contains(w.Body.String(), `unknown directive \"frobnicate\" in /etc/nginx/sites-enabled/app:3`) ||
-			!strings.Contains(w.Body.String(), "nginx was not "+action+"ed") {
+		// The error every client reads, and beside it the test itself, whose
+		// diagnostics the overview places at their file and line.
+		var body struct {
+			Error struct {
+				Code, Message string
+			}
+			Validation struct {
+				Valid       bool
+				Output      string
+				Diagnostics []struct {
+					Level, Message, File string
+					Line                 int
+				}
+			}
+		}
+		if w.Code != http.StatusUnprocessableEntity || json.Unmarshal(w.Body.Bytes(), &body) != nil ||
+			body.Error.Code != "invalid_config" ||
+			!strings.HasPrefix(body.Error.Message, "nginx was not "+action+"ed: its configuration test failed.") ||
+			!strings.Contains(body.Error.Message, `unknown directive "frobnicate" in /etc/nginx/sites-enabled/app:3`) ||
+			body.Validation.Valid || !strings.Contains(body.Validation.Output, "test failed") {
 			t.Fatalf("%s over a broken file: %d %s", action, w.Code, w.Body.String())
+		}
+		if len(body.Validation.Diagnostics) != 1 {
+			t.Fatalf("%s: diagnostics %+v, want nginx's one emerg", action, body.Validation.Diagnostics)
+		}
+		if d := body.Validation.Diagnostics[0]; d.Level != "emerg" || d.File != "/etc/nginx/sites-enabled/app" ||
+			d.Line != 3 || d.Message != `unknown directive "frobnicate"` {
+			t.Fatalf("%s: diagnostic %+v", action, d)
 		}
 	}
 	if got := shimLog(t, bin, "systemctl"); got != "" {
 		t.Fatalf("systemctl was run over a configuration nginx refuses: %q", got)
+	}
+	var refused int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action IN ('proxy.engine.start', 'proxy.engine.restart')
+		AND target = 'nginx.service' AND success = 0 AND status = 422 AND detail LIKE '%refused%'`).Scan(&refused); err != nil || refused != 2 {
+		t.Fatalf("refusals audited %d times (%v), want 2", refused, err)
 	}
 
 	t.Setenv("JD_TEST_NGINX_OK", "1")
@@ -87,17 +116,67 @@ func TestEngineStartAndRestartAreRefusedOverABrokenConfiguration(t *testing.T) {
 	}
 }
 
+// Starting at boot and clearing a failed state start nothing, so neither runs
+// the config test: an engine whose file is broken can still be set to come
+// back after a reboot, and a failed state cleared once it has been fixed by
+// hand. Both are the engine's own unit and are audited as the others are.
+func TestEngineEnableAndResetFailedRunNoConfigTest(t *testing.T) {
+	s, bin := engineHost(t, map[string]string{"nginx": brokenNginx, "systemctl": "echo 'Created symlink /etc/systemd/system/multi-user.target.wants/nginx.service.' >&2\n"})
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	for _, action := range []string{"enable", "reset-failed"} {
+		w := c.do(http.MethodPost, "/api/v1/proxy/engine/"+action, "", nil)
+		var body struct{ Action, Unit, Output string }
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil ||
+			body.Action != action || body.Unit != "nginx.service" || !strings.Contains(body.Output, "Created symlink") {
+			t.Fatalf("%s: %d %s", action, w.Code, w.Body.String())
+		}
+	}
+	if got, want := shimLog(t, bin, "systemctl"), "enable nginx.service\nreset-failed nginx.service\n"; got != want {
+		t.Fatalf("systemctl ran %q, want %q", got, want)
+	}
+	if got := shimLog(t, bin, "nginx"); got != "" {
+		t.Fatalf("a verb that starts nothing ran the config test: %q", got)
+	}
+	var audited string
+	if err := s.Store.DB.QueryRow(`SELECT group_concat(action, ' ') FROM (SELECT action FROM audit_log
+		WHERE target = 'nginx.service' AND success = 1 ORDER BY id)`).Scan(&audited); err != nil ||
+		audited != "proxy.engine.enable proxy.engine.reset-failed" {
+		t.Fatalf("audited %q (%v)", audited, err)
+	}
+}
+
+// systemctl refusing an action is the host's answer, not a crash: it is a
+// command failure carrying systemd's own words, and audited as failed.
+func TestEngineActionSystemdRefusesIsReportedInItsWords(t *testing.T) {
+	s, _ := engineHost(t, map[string]string{
+		"nginx":     "exit 0\n",
+		"systemctl": "echo 'Failed to enable unit: Unit file nginx.service is masked.' >&2\nexit 1\n",
+	})
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	w := c.do(http.MethodPost, "/api/v1/proxy/engine/enable", "", nil)
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), `"command_failed"`) ||
+		!strings.Contains(w.Body.String(), "nginx.service is masked") {
+		t.Fatalf("got %d %s", w.Code, w.Body.String())
+	}
+	var failed int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'proxy.engine.enable'
+		AND success = 0 AND detail LIKE '%failed%'`).Scan(&failed); err != nil || failed != 1 {
+		t.Fatalf("failure audited %d times (%v)", failed, err)
+	}
+}
+
 // The unit is the server's own choice, the gates are the ones the Services
-// page puts on the same verbs plus system.admin, and only the three verbs
-// exist.
+// page puts on the same verbs plus system.admin, and only these verbs exist.
 func TestEngineRoutesAreGatedAndControlOnlyTheProxy(t *testing.T) {
 	s, bin := engineHost(t, map[string]string{"nginx": "exit 0\n", "systemctl": ""})
 	h := s.Routes()
 	gates := routeGates(t, h)
 	for path, want := range map[string][2]int{
-		"POST /api/v1/proxy/engine/start":   {1, 1},
-		"POST /api/v1/proxy/engine/restart": {2, 2},
-		"POST /api/v1/proxy/engine/stop":    {2, 2},
+		"POST /api/v1/proxy/engine/start":        {1, 1},
+		"POST /api/v1/proxy/engine/enable":       {1, 1},
+		"POST /api/v1/proxy/engine/reset-failed": {1, 1},
+		"POST /api/v1/proxy/engine/restart":      {2, 2},
+		"POST /api/v1/proxy/engine/stop":         {2, 2},
 	} {
 		if got := gates[path]; got != want {
 			t.Errorf("%s: %d capability checks and %d rate budgets, want %d and %d", path, got[0], got[1], want[0], want[1])
@@ -105,14 +184,14 @@ func TestEngineRoutesAreGatedAndControlOnlyTheProxy(t *testing.T) {
 	}
 	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited} {
 		c := &client{t: t, h: h, cookie: signInAs(t, s, "user-"+string(role), role)}
-		for _, action := range []string{"start", "restart", "stop"} {
+		for _, action := range []string{"start", "restart", "stop", "enable", "reset-failed"} {
 			if w := c.do(http.MethodPost, "/api/v1/proxy/engine/"+action, "", nil); w.Code != http.StatusForbidden {
 				t.Errorf("a %s account got %d for %s", role, w.Code, action)
 			}
 		}
 	}
 	admin := &client{t: t, h: h, cookie: signIn(t, s)}
-	for _, path := range []string{"/api/v1/proxy/engine/reload", "/api/v1/proxy/engine/ssh.service"} {
+	for _, path := range []string{"/api/v1/proxy/engine/reload", "/api/v1/proxy/engine/disable", "/api/v1/proxy/engine/ssh.service"} {
 		if w := admin.do(http.MethodPost, path, "", nil); w.Code != http.StatusNotFound && w.Code != http.StatusMethodNotAllowed {
 			t.Errorf("POST %s answered %d", path, w.Code)
 		}

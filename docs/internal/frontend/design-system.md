@@ -1133,7 +1133,14 @@ overview's context row is its age and one ghost Refresh: "Updated 14s ago" is th
 the page, and while a refresh is out the line reads "Refreshing…" until every source has answered,
 or, after twenty seconds, names the source that has not ("No answer from sites") and Refresh can be
 pressed again. A status that fails after answering keeps its age in the line, since the engine
-identity still draws it.
+identity still draws it. The engine line's one brand command follows the unit: Reload while it
+runs, Start once it is stopped or failed, with Reload beside it disabled and its reason on a tooltip
+(a disabled button takes no hover, so the reason hangs on a focusable wrapper). Whether it starts at
+boot is a fact on the line, a warning with an inline Start at boot where `systemctl enable` would fix
+it. A failed unit is the one `Notice` the overview draws under the line — the reader has to act on it
+— holding systemd's reason in words, a fold that reads the journal when opened, and its two verbs. A
+start or restart the config test refuses keeps its dialog open on the test's diagnostics as rows
+(level as a `Status` verdict, file:line in mono, Open at line N), not a toast of nginx's output.
 Its routes are ordered worst first like the Sites cards, eight with "Showing 8 of N". An
 administrator's route opens the site on Sites and a Docker ingress route its live TLS report; a
 reader's route opens its file read-only in place rather than the site form — skeleton rows while it
@@ -1160,7 +1167,8 @@ table of readings, with fixed endpoint, application, reach and action columns an
 layout. Tables retain their scrolling boundary; forms and sections remain plain.
 `tests/browser/proxy-ui.spec.ts` covers all six populated pages at 390, 1280 and 1720, detail
 navigation, site-kind choices and read-only access; `proxy-engine-overview.spec.ts` covers the
-overview's failure states, its freshness and Refresh, its routes by role and the engine controls.
+overview's failure states, its freshness and Refresh, its routes by role and the engine controls,
+including a stopped, failed, masked and boot-disabled unit and a refused start or restart.
 
 **What a host has installed, who is on it and what they changed are products too.** Packages
 draws a package as the software its name says it is (`packageProduct`, `components/packages/marks.tsx`:

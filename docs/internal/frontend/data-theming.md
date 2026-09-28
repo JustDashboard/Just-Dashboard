@@ -3,7 +3,8 @@
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
   `X-Confirm-Encoding: uri` (including Unicode and surrounding whitespace), `ApiError` with
-  `needsConfirmation`/`isAuthProblem`/`needsTotp`; `wsUrl()` and
+  `needsConfirmation`/`isAuthProblem`/`needsTotp` and the whole parsed `body`, for a refusal that
+  carries more than the error (the proxy engine's config-test refusal carries the test); `wsUrl()` and
   `downloadUrl()` build the non-JSON URLs.
 - `usePoll` schedules the next request only after the previous one settles and pauses scheduled
   requests on hidden tabs. Its fixed-length dependency list identifies the resource: changing it

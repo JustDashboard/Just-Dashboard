@@ -85,6 +85,11 @@ export class ApiError extends Error {
   raw?: string
   retryable?: boolean
   field?: string
+  /**
+   * The whole parsed body, for a route that answers a refusal with more than
+   * the error: a start the config test turned down carries the test beside it.
+   */
+  body?: unknown
 
   constructor(
     status: number,
@@ -92,7 +97,7 @@ export class ApiError extends Error {
     message: string,
     phrase?: string,
     detail?: Partial<
-      Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable" | "field">
+      Pick<ApiError, "resource" | "operation" | "reason" | "raw" | "retryable" | "field" | "body">
     >,
   ) {
     super(message)
@@ -211,6 +216,7 @@ async function readResponse<T>(res: Response): Promise<T> {
         raw: body?.error?.raw,
         retryable: body?.error?.retryable,
         field: body?.error?.field,
+        body: parsed,
       },
     )
   }

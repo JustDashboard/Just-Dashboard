@@ -346,15 +346,23 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   write. `Availability` names an ingress only once it runs (`ingressState:
   "running"`); one the first deployment would start is `ingressState: "provisionable"` with neither
   `caddy` nor `ingressContainer` set, and deploy preflight counts either state as a proxy that can
-  serve and certify the domain. Start, restart and stop go through `POST /proxy/engine/{start|
-  restart|stop}`, which resolves the unit itself (`Service.Engine`: `nginx.service` where nginx is
-  installed, else `caddy.service`; 409 `no_engine_unit` otherwise) and runs start and restart through
-  `WithTestedConfig` — the config test under the service lock, then systemctl only if it passed.
-  This host's `nginx.service` runs `nginx -t` before it starts, so a restart over a broken file used
-  to stop nginx and leave every site down; now it is a 422 `invalid_config` carrying nginx's output
-  and systemctl never runs. Start needs `system.admin`; restart and stop are destructive as well;
-  each is audited as `proxy.engine.<action>`. The unit's state is still read from `/systemd/{unit}`,
-  so the Services page and the overview never disagree about it.
+  serve and certify the domain. Start, restart, stop, enable at boot and clearing a failed state go
+  through `POST /proxy/engine/{start|restart|stop|enable|reset-failed}`, which resolves the unit
+  itself (`Service.Engine`: `nginx.service` where nginx is installed, else `caddy.service`; 409
+  `no_engine_unit` otherwise) and runs start and restart through `WithTestedConfig` — the config
+  test under the service lock, then systemctl only if it passed. This host's `nginx.service` runs
+  `nginx -t` before it starts, so a restart over a broken file used to stop nginx and leave every
+  site down; now it is a 422 whose body is `{error: {code: "invalid_config", message}, validation}`
+  — the message is the sentence plus nginx's output, and `validation` is the test itself with its
+  parsed `diagnostics`, which the overview places at their file and line — and systemctl never runs.
+  Stop, enable and reset-failed start nothing and run no test, so an engine whose file is broken can
+  still be set to start at boot or have a hand-fixed failure cleared. A systemctl that refuses (a
+  masked unit, a start that fails) is a 502 `command_failed` in systemd's words. Start, enable and
+  reset-failed need `system.admin`; restart and stop are destructive as well; each is audited as
+  `proxy.engine.<action>`, a refusal with `result: refused` and the 422. There is no disable: taking
+  the proxy out of the boot sequence is the Services page's. The unit's state, `UnitFileState`,
+  `Result` and `NRestarts` are still read from `/systemd/{unit}`, and a failed unit's last lines from
+  `/systemd/{unit}/journal?lines=30`, so the Services page and the overview never disagree about it.
 - **`ParseSiteSpec` reads what hand-written files actually look like.** A line holding a whole
   block — `location / { proxy_pass http://x; }` — is split into statements before it is read
   (`splitInline`, quote-aware, since a Content-Security-Policy value carries semicolons of its

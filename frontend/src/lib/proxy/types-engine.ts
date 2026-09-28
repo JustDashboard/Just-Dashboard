@@ -24,3 +24,12 @@ export type ProxyValidation = {
   diagnostics?: ProxyDiagnostic[]
   warnings?: number
 }
+
+/**
+ * What POST /proxy/engine/{action} does to the engine's own service. The
+ * server picks the unit; start and restart run the config test first.
+ */
+export type EngineAction = "start" | "restart" | "stop" | "enable" | "reset-failed"
+
+/** What the engine's service route answers: the verb, the unit the server chose, systemctl's words. */
+export type EngineControlResult = { action: EngineAction; unit: string; output: string }

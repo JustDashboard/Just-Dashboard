@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { availability, json, mockProxy, user, vhosts } from "./proxy-fixtures"
+import { nginxUnit } from "./fixtures/proxy/engine"
 
 /**
  * The overview and the engine it drives, for the ways they told an operator
@@ -165,65 +166,445 @@ test("a finding's button names where it leads", async ({ page }) => {
   await expect(page).toHaveURL(/\/proxy\/sites\?site=legacy\.example\.com$/)
 })
 
+/** What nginx 1.26 prints for a directive it does not know, and the test's reading of it. */
+const brokenTest = {
+  valid: false,
+  output:
+    'nginx: [emerg] unknown directive "frobnicate" in /etc/nginx/sites-enabled/app:3\nnginx: configuration file /etc/nginx/nginx.conf test failed',
+  command: "nginx -t",
+  diagnostics: [
+    {
+      level: "emerg",
+      message: 'unknown directive "frobnicate"',
+      file: "/etc/nginx/sites-available/app",
+      line: 3,
+    },
+  ],
+  warnings: 0,
+}
+
+/** A start or restart the config test turned down, as the engine route answers it. */
+function refusedBy(action: "started" | "restarted") {
+  return (route: Route) =>
+    route.fulfill({
+      status: 422,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "invalid_config",
+          message: `nginx was not ${action}: its configuration test failed.\n${brokenTest.output}`,
+        },
+        validation: brokenTest,
+      }),
+    })
+}
+
+/** nginx.service in the given state, answered in place of the running one. */
+async function mockUnit(page: Page, overrides: Record<string, unknown>) {
+  await page.route("**/api/v1/systemd/nginx.service", (route) =>
+    json(route, { unit: { ...nginxUnit, activeSince: undefined, ...overrides }, properties: {} }),
+  )
+}
+
+const stopped = { activeState: "inactive", subState: "dead" }
+const failed = { activeState: "failed", subState: "failed", result: "exit-code", restarts: 3 }
+
+/** Posts to the Services page's own routes, which the engine's controls must never use. */
+async function watchSystemd(page: Page) {
+  const posted: string[] = []
+  await page.route("**/api/v1/systemd/nginx.service/*", (route) => {
+    if (route.request().method() !== "POST") return route.fallback()
+    posted.push(route.request().url())
+    return json(route, {})
+  })
+  return posted
+}
+
 test("restart is refused with nginx's own reason when its configuration fails", async ({
   page,
 }) => {
   await mockProxy(page, { included: true })
-  const systemd: string[] = []
-  await page.route("**/api/v1/systemd/nginx.service/*", (route) => {
-    systemd.push(route.request().url())
-    return json(route, {})
-  })
+  const systemd = await watchSystemd(page)
   const engine: string[] = []
   await page.route("**/api/v1/proxy/engine/restart", (route) => {
     engine.push(route.request().method())
-    return failWith(422, {
-      code: "invalid_config",
-      message:
-        'nginx was not restarted: its configuration test failed.\nnginx: [emerg] unknown directive "frobnicate" in /etc/nginx/sites-enabled/app:3\nnginx: configuration file /etc/nginx/nginx.conf test failed',
-    })(route)
+    return refusedBy("restarted")(route)
+  })
+  const reads: string[] = []
+  await page.route("**/api/v1/proxy/config?**", (route) => {
+    reads.push(new URL(route.request().url()).searchParams.get("path") ?? "")
+    return json(route, { content: "server {\n    listen 80;\n    frobnicate on;\n}\n" })
   })
   await page.goto("/proxy")
 
   await page.getByRole("button", { name: "More nginx actions" }).click()
   await page.getByRole("menuitem", { name: "Restart nginx", exact: true }).click()
-  const dialog = page.getByRole("dialog")
+  const dialog = page.getByRole("dialog", { name: "Restart nginx" })
   await expect(dialog.getByText(/configuration is tested first/)).toBeVisible()
   await dialog.getByRole("button", { name: "Restart", exact: true }).click()
 
-  await expect(page.getByText(/unknown directive "frobnicate"/)).toBeVisible()
-  await expect(dialog).toBeVisible()
+  // The dialog stays, on nginx's own line placed at its file and line; the
+  // toast of the whole output it used to be is gone in twelve seconds.
+  await expect(
+    dialog.getByText("nginx was not restarted: its configuration test failed."),
+  ).toBeVisible()
+  await expect(dialog.getByText(/Nothing nginx serves was interrupted/)).toBeVisible()
+  const said = dialog.getByRole("list", { name: "What the test said" })
+  await expect(said.getByText('unknown directive "frobnicate"')).toBeVisible()
+  await expect(said.getByText("emerg", { exact: true })).toBeVisible()
+  await expect(said.getByText("/etc/nginx/sites-available/app:3")).toBeVisible()
+  // The whole output is there too, folded.
+  await dialog.getByText("nginx -t output", { exact: true }).click()
+  await expect(
+    dialog.getByText(/configuration file \/etc\/nginx\/nginx.conf test failed/),
+  ).toBeVisible()
   expect(engine).toEqual(["POST"])
   expect(systemd).toEqual([])
+
+  // The file is one press away, at the line nginx named.
+  await said.getByRole("button", { name: "Open at line 3" }).click()
+  await expect(page.getByRole("dialog", { name: "Restart nginx" })).toHaveCount(0)
+  const editor = page.getByRole("dialog", { name: /app/ })
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("frobnicate on;", {
+    timeout: 20_000,
+  })
+  expect(reads).toEqual(["/etc/nginx/sites-available/app"])
+  await expect(editor.getByRole("button", { name: "Save and reload" })).toBeVisible()
 })
 
-test("a stopped nginx is started through the tested route", async ({ page }) => {
+test("a stopped nginx leads with Start, and Reload says why it cannot run", async ({ page }) => {
   await mockProxy(page, { included: true })
-  await page.route("**/api/v1/systemd/nginx.service", (route) =>
-    json(route, {
-      unit: {
-        name: "nginx.service",
-        description: "A high performance web server",
-        loadState: "loaded",
-        activeState: "inactive",
-        subState: "dead",
-        unitFileState: "enabled",
-        enabled: true,
-      },
-      properties: {},
-    }),
-  )
+  await mockUnit(page, stopped)
+  const systemd = await watchSystemd(page)
   const started: string[] = []
-  await page.route("**/api/v1/proxy/engine/start", (route) => {
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/proxy/engine/start", async (route) => {
     started.push(route.request().method())
+    await held
+    // Once started, the unit reads as running.
+    await mockUnit(page, { activeState: "active", subState: "running" })
     return json(route, { action: "start", unit: "nginx.service", output: "" })
   })
   await page.goto("/proxy")
 
-  await page.getByRole("button", { name: "More nginx actions" }).click()
-  await page.getByRole("menuitem", { name: "Start nginx", exact: true }).click()
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("not running", { exact: true })).toBeVisible()
+  await expect(identity.getByText("inactive (dead)")).toHaveCount(0)
+  const reload = identity.getByRole("button", { name: "Reload" })
+  await expect(reload).toBeDisabled()
+  await reload.hover({ force: true })
+  await expect(page.getByRole("tooltip")).toHaveText("nginx is not running")
+  // Stopped, it has nothing to restart or stop.
+  await identity.getByRole("button", { name: "More nginx actions" }).click()
+  await expect(page.getByRole("menuitem", { name: /Restart|Stop/ })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Service details" })).toBeVisible()
+  await page.keyboard.press("Escape")
+
+  const start = identity.getByRole("button", { name: "Start nginx" })
+  // The one brand command on the line.
+  await expect(start).toHaveAttribute("data-variant", "default")
+  await start.click()
+  await expect(identity.getByText("Starting…").first()).toBeVisible()
+  release()
   await expect(page.getByText("nginx started")).toBeVisible()
+  await expect(identity.getByText("running", { exact: true })).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Reload" })).toBeEnabled()
+  await expect(identity.getByRole("button", { name: "Start nginx" })).toHaveCount(0)
   expect(started).toEqual(["POST"])
+  expect(systemd).toEqual([])
+})
+
+test("a start the config test refuses opens on what it said, and Start tries again", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockUnit(page, stopped)
+  let broken = true
+  const started: string[] = []
+  await page.route("**/api/v1/proxy/engine/start", (route) => {
+    started.push(route.request().method())
+    return broken
+      ? refusedBy("started")(route)
+      : json(route, { action: "start", unit: "nginx.service", output: "" })
+  })
+  await page.goto("/proxy")
+
+  await page.getByRole("button", { name: "Start nginx" }).click()
+  const dialog = page.getByRole("dialog", { name: "Start nginx" })
+  await expect(
+    dialog.getByText("nginx was not started: its configuration test failed."),
+  ).toBeVisible()
+  await expect(dialog.getByText("Fix what the test found, then start nginx again.")).toBeVisible()
+  await expect(dialog.getByText("/etc/nginx/sites-available/app:3")).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Open at line 3" })).toBeVisible()
+  // No toast carries the refusal: the dialog does.
+  await expect(page.getByText("nginx did not start")).toHaveCount(0)
+
+  // Fixed in another window, the dialog's own Start tries again.
+  broken = false
+  const again = dialog.getByRole("button", { name: "Start", exact: true })
+  await expect(again).toHaveAttribute("data-variant", "default")
+  await again.click()
+  await expect(page.getByText("nginx started")).toBeVisible()
+  await expect(dialog).toHaveCount(0)
+  expect(started).toEqual(["POST", "POST"])
+})
+
+test("a fix saved while nginx is stopped is saved, and says it was not reloaded", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockUnit(page, stopped)
+  await page.route("**/api/v1/proxy/engine/start", refusedBy("started"))
+  await page.route("**/api/v1/proxy/config?**", (route) =>
+    json(route, { content: "server {\n    listen 80;\n    frobnicate on;\n}\n" }),
+  )
+  const saved: { reload: boolean; content: string }[] = []
+  await page.route("**/api/v1/proxy/config", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    saved.push(route.request().postDataJSON())
+    // The file passed its test and was written; the reload had no nginx to signal.
+    return failWith(502, {
+      code: "reload_failed",
+      message:
+        'reload failed: nginx: [error] open() "/run/nginx.pid" failed (2: No such file or directory)',
+    })(route)
+  })
+  await page.goto("/proxy")
+
+  await page.getByRole("button", { name: "Start nginx" }).click()
+  await page.getByRole("button", { name: "Open at line 3" }).click()
+  const editor = page.getByRole("dialog", { name: /app/ })
+  const lines = editor.locator(".monaco-editor .view-lines")
+  await expect(lines).toContainText("frobnicate on;", { timeout: 20_000 })
+  await lines.click()
+  // Keys sent before Monaco has focus are lost on a busy machine.
+  await expect(editor.locator(".monaco-editor.focused")).toBeVisible()
+  await page.keyboard.press("End")
+  await page.keyboard.type("fixed")
+  await expect(lines).toContainText("fixed")
+  await editor.getByRole("button", { name: "Save and reload" }).click()
+
+  // It was "Not applied" over a file that had been written, with the buffer
+  // still marked unsaved.
+  await expect(page.getByText("Saved, not reloaded")).toBeVisible()
+  await expect(page.getByText(/\/run\/nginx\.pid" failed/)).toBeVisible()
+  await expect(page.getByText("Not applied")).toHaveCount(0)
+  await expect(editor.getByRole("button", { name: "Save and reload" })).toBeDisabled()
+  expect(saved).toHaveLength(1)
+  expect(saved[0].reload).toBe(true)
+  expect(saved[0].content).toContain("fixed")
+})
+
+test("a start systemd itself fails is said in its words", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockUnit(page, stopped)
+  await page.route(
+    "**/api/v1/proxy/engine/start",
+    failWith(502, {
+      code: "command_failed",
+      message:
+        "systemctl exited 1: Job for nginx.service failed because the control process exited with error code.",
+    }),
+  )
+  await page.goto("/proxy")
+  await page.getByRole("button", { name: "Start nginx" }).click()
+  await expect(page.getByText("nginx did not start")).toBeVisible()
+  await expect(page.getByText(/Job for nginx.service failed/)).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+})
+
+test("stop says what it takes offline and goes through the engine route", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const systemd = await watchSystemd(page)
+  const stops: string[] = []
+  await page.route("**/api/v1/proxy/engine/stop", (route) => {
+    stops.push(route.request().method())
+    return json(route, { action: "stop", unit: "nginx.service", output: "" })
+  })
+  await page.goto("/proxy")
+
+  await page.getByRole("button", { name: "More nginx actions" }).click()
+  await page.getByRole("menuitem", { name: "Stop nginx", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Stop nginx" })
+  await expect(dialog.getByText(/goes offline until it is started again/)).toBeVisible()
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(stops).toEqual([])
+
+  await page.getByRole("button", { name: "More nginx actions" }).click()
+  await page.getByRole("menuitem", { name: "Stop nginx", exact: true }).click()
+  await dialog.getByRole("button", { name: "Stop", exact: true }).click()
+  await expect(page.getByText("nginx stopped")).toBeVisible()
+  await expect(dialog).toHaveCount(0)
+  expect(stops).toEqual(["POST"])
+  expect(systemd).toEqual([])
+})
+
+test("an engine that won't start at boot says so, and Start at boot enables it", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockUnit(page, { unitFileState: "disabled", enabled: false })
+  const enabled: string[] = []
+  await page.route("**/api/v1/proxy/engine/enable", async (route) => {
+    enabled.push(route.request().method())
+    await mockUnit(page, { unitFileState: "enabled", enabled: true })
+    return json(route, { action: "enable", unit: "nginx.service", output: "" })
+  })
+  await page.goto("/proxy")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("won't start at boot")).toBeVisible()
+  await identity.getByRole("button", { name: "Start at boot" }).click()
+  await expect(page.getByText("nginx starts at boot")).toBeVisible()
+  await expect(identity.getByText("starts at boot", { exact: true })).toBeVisible()
+  await expect(identity.getByText("won't start at boot")).toHaveCount(0)
+  await expect(identity.getByRole("button", { name: "Start at boot" })).toHaveCount(0)
+  expect(enabled).toEqual(["POST"])
+})
+
+test("a masked engine is not offered a start or a boot setting that cannot work", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockUnit(page, { ...stopped, unitFileState: "masked", enabled: false })
+  const posted: string[] = []
+  await page.route("**/api/v1/proxy/engine/*", (route) => {
+    posted.push(route.request().url())
+    return route.fallback()
+  })
+  await page.goto("/proxy")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("masked, so it cannot start")).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Start at boot" })).toHaveCount(0)
+  const start = identity.getByRole("button", { name: "Start nginx" })
+  await expect(start).toBeDisabled()
+  await start.hover({ force: true })
+  await expect(page.getByRole("tooltip")).toHaveText("nginx.service is masked")
+  expect(posted).toEqual([])
+})
+
+test("a failed engine says why, with its journal and a way to clear it", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockUnit(page, failed)
+  const journals: string[] = []
+  await page.route("**/api/v1/systemd/nginx.service/journal?**", (route) => {
+    journals.push(new URL(route.request().url()).searchParams.get("lines") ?? "")
+    return route.fallback()
+  })
+  const cleared: string[] = []
+  await page.route("**/api/v1/proxy/engine/reset-failed", async (route) => {
+    cleared.push(route.request().method())
+    await mockUnit(page, { ...stopped, result: "success", restarts: 0 })
+    return json(route, { action: "reset-failed", unit: "nginx.service", output: "" })
+  })
+  await page.goto("/proxy")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("failed", { exact: true })).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Start nginx" })).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Reload" })).toBeDisabled()
+
+  await expect(page.getByText("nginx exited with an error")).toBeVisible()
+  await expect(page.getByText("result exit-code · restarted 3 times by systemd")).toBeVisible()
+  // The journal is read when the fold opens, not with the page.
+  expect(journals).toEqual([])
+  await page.getByRole("button", { name: "Last 30 journal lines" }).click()
+  const journal = page.getByLabel("Journal")
+  await expect(journal.getByText(/bind\(\) to 0\.0\.0\.0:80 failed/)).toBeVisible()
+  await expect(journal.getByText(/Failed with result 'exit-code'/)).toBeVisible()
+  expect(journals).toEqual(["30"])
+  await page.getByRole("button", { name: "Read again" }).click()
+  await expect.poll(() => journals.length).toBe(2)
+
+  await expect(page.getByRole("link", { name: "Service details" })).toHaveAttribute(
+    "href",
+    "/processes/services?unit=nginx.service",
+  )
+  await page.getByRole("button", { name: "Clear failed state" }).click()
+  await expect(page.getByText("nginx's failed state cleared")).toBeVisible()
+  await expect(page.getByText("nginx exited with an error")).toHaveCount(0)
+  await expect(identity.getByText("not running", { exact: true })).toBeVisible()
+  expect(cleared).toEqual(["POST"])
+})
+
+test("a journal that cannot be read says so and can be read again", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockUnit(page, failed)
+  let unreadable = true
+  await page.route("**/api/v1/systemd/nginx.service/journal?**", (route) =>
+    unreadable
+      ? failWith(502, { code: "command_failed", message: "journalctl exited 1: access denied" })(
+          route,
+        )
+      : route.fallback(),
+  )
+  await page.goto("/proxy")
+  await page.getByRole("button", { name: "Last 30 journal lines" }).click()
+  const failure = page.getByRole("alert").filter({ hasText: "journalctl exited 1: access denied" })
+  await expect(failure).toBeVisible()
+  unreadable = false
+  await page.getByRole("button", { name: "Read again" }).click()
+  await expect(
+    page.getByLabel("Journal").getByText(/bind\(\) to 0\.0\.0\.0:80 failed/),
+  ).toBeVisible()
+  await expect(failure).toHaveCount(0)
+})
+
+test("a reader sees a failed engine's reason and journal, and none of its controls", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await mockUnit(page, { ...failed, unitFileState: "disabled", enabled: false })
+  await page.goto("/proxy")
+
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("won't start at boot")).toBeVisible()
+  await expect(identity.getByRole("button")).toHaveCount(0)
+  await expect(page.getByText("nginx exited with an error")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Clear failed state" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Last 30 journal lines" }).click()
+  await expect(
+    page.getByLabel("Journal").getByText(/bind\(\) to 0\.0\.0\.0:80 failed/),
+  ).toBeVisible()
+  await expect(page.getByRole("link", { name: "Service details" })).toBeVisible()
+  const overflow = await page
+    .locator("[data-slot='page']")
+    .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
+  expect(overflow).toBe(false)
+})
+
+test("the stopped engine's controls and a refusal fit a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await mockUnit(page, { ...failed, unitFileState: "disabled", enabled: false })
+  await page.route("**/api/v1/proxy/engine/start", refusedBy("started"))
+  await page.goto("/proxy")
+
+  await page.getByRole("button", { name: "Last 30 journal lines" }).click()
+  await expect(page.getByLabel("Journal")).toBeVisible()
+  const pageOverflow = await page
+    .locator("[data-slot='page']")
+    .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
+  expect(pageOverflow).toBe(false)
+
+  await page.getByRole("button", { name: "Start nginx" }).click()
+  const dialog = page.getByRole("dialog", { name: "Start nginx" })
+  await expect(dialog.getByText("/etc/nginx/sites-available/app:3")).toBeVisible()
+  await expect(dialog).toBeInViewport({ ratio: 1 })
+  const dialogOverflow = await dialog.evaluate(
+    (element) => element.scrollWidth > element.clientWidth + 1,
+  )
+  expect(dialogOverflow).toBe(false)
+  await page.keyboard.press("Escape")
+  await expect(dialog).toHaveCount(0)
 })
 
 test("a running Docker Caddy ingress is tested and reloaded inside its container", async ({

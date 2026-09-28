@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { ShieldCheck, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post, put } from "@/lib/api"
+import { ApiError, errorMessage, get, post, put } from "@/lib/api"
 import type { ProxyValidation, VHost } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
@@ -110,7 +110,16 @@ function ConfigEditorBody({
       setOriginal(content)
       onSaved?.()
     } catch (err) {
-      notify.error("Not applied", err)
+      // The file passed the test and was written before the reload was
+      // tried; a reload that failed — an engine that is stopped, say — leaves
+      // it saved, which "Not applied" and a buffer still marked unsaved hid.
+      if (err instanceof ApiError && err.code === "reload_failed") {
+        notify.warning("Saved, not reloaded", { description: errorMessage(err) })
+        setOriginal(content)
+        onSaved?.()
+      } else {
+        notify.error("Not applied", err)
+      }
     } finally {
       setBusy(false)
     }

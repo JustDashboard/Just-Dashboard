@@ -20,6 +20,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/components/deploy/vocabulary"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { EngineActions, EngineIdentity, useEngineUnit } from "@/components/proxy/engine"
+import { useEngineControl } from "@/components/proxy/engine-control"
+import { EngineFailure } from "@/components/proxy/engine-failure"
+import { PARTICIPLE } from "@/components/proxy/engine-lifecycle"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
@@ -94,6 +97,14 @@ export default function ProxyOverviewPage() {
     60_000,
   )
   const ports = usePoll((signal) => reading(get<Listener[]>("/ports", undefined, signal)), 30_000)
+  // A reload or a service verb changes what the engine line, the status and
+  // the sites say; each reads all three again once it lands.
+  const refreshAll = () => {
+    refreshStatus()
+    engine.refresh()
+    vhosts.refresh()
+  }
+  const control = useEngineControl({ status, unit: engine, onChanged: refreshAll })
 
   // certbot being absent is a fact about the host, not a failure to report.
   const certbotGone =
@@ -263,11 +274,11 @@ export default function ProxyOverviewPage() {
   }
 
   const hasEngine = status.nginx || status.caddy
-  const refreshAll = () => {
-    refreshStatus()
-    engine.refresh()
-    vhosts.refresh()
-  }
+  // Only the verbs that change whether it runs are said in place of its state.
+  const underWay =
+    control.pending === "start" || control.pending === "restart" || control.pending === "stop"
+      ? PARTICIPLE[control.pending]
+      : undefined
 
   return (
     <Page className="animate-rise">
@@ -394,6 +405,9 @@ export default function ProxyOverviewPage() {
         unitName={engine.name}
         unitError={engine.error}
         fetchedAt={engine.fetchedAt}
+        pending={underWay}
+        onStartAtBoot={admin ? () => control.run("enable") : undefined}
+        serviceBusy={control.pending}
         certbotVersion={renewal?.version}
         renewSource={renewal ? (renewal.renewSource ?? null) : undefined}
         actions={
@@ -403,11 +417,21 @@ export default function ProxyOverviewPage() {
               status={status}
               unitName={engine.name}
               unit={engine.unit}
+              control={control}
               onChanged={refreshAll}
             />
           )
         }
       />
+
+      {engine.unit?.activeState === "failed" && !underWay && (
+        <EngineFailure
+          engine={control.engine}
+          unit={engine.unit}
+          onClear={admin ? () => control.run("reset-failed") : undefined}
+          busy={control.pending}
+        />
+      )}
 
       {/* Route destinations need room for both ends; verdicts fit in the rail. */}
       <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_20rem] [&>*]:min-w-0">
@@ -572,6 +596,7 @@ export default function ProxyOverviewPage() {
         title={viewing?.name ?? "Configuration"}
         readOnly
       />
+      {control.dialog}
     </Page>
   )
 }

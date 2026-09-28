@@ -35,7 +35,10 @@ func (s *Server) mountEngineRoutes(r chi.Router) {
 		// The engine's own service, resolved here rather than named by the
 		// caller. Start and restart run the config test first; stop and
 		// restart take every site offline, so they sit behind destructive.
+		// Enabling at boot and clearing a failed state start nothing.
 		r.Method(http.MethodPost, "/engine/start", s.handle(s.handleProxyEngine(procs.UnitStart)))
+		r.Method(http.MethodPost, "/engine/enable", s.handle(s.handleProxyEngine(procs.UnitEnable)))
+		r.Method(http.MethodPost, "/engine/reset-failed", s.handle(s.handleProxyEngine(procs.UnitResetFailed)))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/engine/restart", s.handle(s.handleProxyEngine(procs.UnitRestart)))
 			r.Method(http.MethodPost, "/engine/stop", s.handle(s.handleProxyEngine(procs.UnitStop)))
@@ -204,16 +207,18 @@ func (s *Server) handleProxyReload(w http.ResponseWriter, r *http.Request) error
 
 // engineDone is what a refused action did not do, for its sentence.
 var engineDone = map[procs.UnitAction]string{
-	procs.UnitStart: "started", procs.UnitRestart: "restarted", procs.UnitStop: "stopped",
+	procs.UnitStart: "started", procs.UnitRestart: "restarted",
 }
 
-// handleProxyEngine starts, restarts or stops the engine's systemd unit.
+// handleProxyEngine starts, restarts, stops, enables at boot or clears the
+// failed state of the engine's systemd unit.
 //
 // The overview used to post to /systemd/{unit}/restart, which ran systemctl
 // straight away. This host's nginx.service tests its configuration before it
 // starts, so a restart over a broken file stopped nginx and could not bring
 // it back, where Reload had always refused. Start and restart are refused
-// with nginx's own words when the test fails, and systemctl never runs.
+// with nginx's own words when the test fails, and systemctl never runs; the
+// verbs that start nothing run no test.
 func (s *Server) handleProxyEngine(action procs.UnitAction) httpx.Handler {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		engine, err := s.modules.proxy.Engine()
@@ -227,15 +232,15 @@ func (s *Server) handleProxyEngine(action procs.UnitAction) httpx.Handler {
 			out, err = s.modules.systemd.Control(r.Context(), engine.Unit, action)
 			return err
 		}
-		if action == procs.UnitStop {
+		if _, tested := engineDone[action]; !tested {
 			err = control()
 		} else {
 			var res *proxysvc.ValidationResult
 			res, err = s.modules.proxy.WithTestedConfig(r.Context(), engine.Kind, control)
 			if errors.Is(err, proxysvc.ErrInvalidConf) {
 				httpx.SetAudit(r, event, engine.Unit, map[string]any{"result": "refused", "valid": false})
-				return httpx.Err(http.StatusUnprocessableEntity, "invalid_config",
-					fmt.Sprintf("%s was not %s: its configuration test failed.\n%s", engine.Name, engineDone[action], res.Output))
+				return refuseInvalidConfig(w, r, httpx.Err(http.StatusUnprocessableEntity, "invalid_config",
+					fmt.Sprintf("%s was not %s: its configuration test failed.\n%s", engine.Name, engineDone[action], res.Output)), res)
 			}
 		}
 		if err != nil {
@@ -249,4 +254,17 @@ func (s *Server) handleProxyEngine(action procs.UnitAction) httpx.Handler {
 		})
 		return nil
 	}
+}
+
+// refuseInvalidConfig answers a start or restart the config test turned down:
+// the error every client reads, and beside it the test itself, so the page can
+// put each of nginx's lines at the file and line it names rather than print
+// the output as one block. The error's message is kept for the audit trail
+// the way the central error writer keeps it.
+func refuseInvalidConfig(w http.ResponseWriter, r *http.Request, refusal *httpx.APIError, res *proxysvc.ValidationResult) error {
+	if p, ok := httpx.PrincipalFrom(r.Context()); ok {
+		p.FailureReason = refusal.Message
+	}
+	httpx.JSON(w, refusal.Status, map[string]any{"error": refusal, "validation": res})
+	return nil
 }
