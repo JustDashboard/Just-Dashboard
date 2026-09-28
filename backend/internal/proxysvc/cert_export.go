@@ -44,7 +44,7 @@ const minPFXPassword = 8
 // the file holds in file order.
 func (s *Service) listedCertificate(path string) (Certificate, []byte, error) {
 	vhosts := s.nginxVHosts()
-	certs := listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, vhosts)
+	certs := listCertificates(filepath.Join(letsencryptDir, "live"), importedDir, vhosts, s.tlsStreams())
 	index := slices.IndexFunc(certs, func(c Certificate) bool { return c.Path == path })
 	if index < 0 {
 		return Certificate{}, nil, ErrCertificateNotListed
