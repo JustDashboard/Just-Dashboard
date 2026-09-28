@@ -72,11 +72,12 @@ export type VHostOwner = {
   archived?: boolean
 }
 
-/** An htpasswd file and who is in it. */
+/** An htpasswd file, who is in it, and the nginx sites that name it. */
 export type AuthFile = {
   name: string
   path: string
   users: string[]
+  usedBy: string[]
 }
 
 /** nginx's test and reload, as POST /proxy/reload and the site verbs report them. */

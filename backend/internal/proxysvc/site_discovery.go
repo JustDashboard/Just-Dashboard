@@ -143,6 +143,9 @@ type siteWalk struct {
 	features   map[string]bool
 	roots      []string
 	redirects  []string
+	// authFiles are the password files the site's blocks name, resolved
+	// the way nginx resolves them.
+	authFiles []string
 }
 
 // siteDetails fills in the site's logs, pools and features from its file,
@@ -274,6 +277,8 @@ func (w *siteWalk) block(block []Directive, serverLevel bool) {
 			if first != "off" {
 				on("auth")
 			}
+		case "auth_basic_user_file":
+			w.authFiles = appendNew(w.authFiles, w.s.confPath(unquote(first)))
 		case "auth_request":
 			if first != "off" {
 				on("sso")

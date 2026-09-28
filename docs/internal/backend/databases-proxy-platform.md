@@ -551,6 +551,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   hang off `JD_NGINX_DIR`, which exists precisely for hosts whose nginx is elsewhere. A missing file is
   not an nginx error: `nginx -t` passes, reloads succeed, and the site answers every login with 403 and
   an error line per request (checked on 1.26.3), so deleting a password file a site uses fails silently.
+  That is why `ListAuthFiles` carries `usedBy` — every nginx site (sites-available, sites-enabled,
+  conf.d, enabled or not, one include level deep, relative paths from the nginx directory) whose blocks
+  name the file — and why `DELETE /proxy/auth-files/{file}` answers 409 `in_use` for such a file unless
+  `?force=1`, auditing the sites it named. Caddy's `basic_auth` inlines its hashes and is not counted.
   Removing a file's last login keeps it empty, which asks for credentials again like a wrong password.
 - **`import.go`** checks the key against the certificate **before** writing either: a mismatched pair is
   accepted by every text editor and refused by nginx at reload, which on a live server means finding out
@@ -560,7 +564,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   sites-available. They go in `/etc/nginx/stream.d`, and the page says plainly when `nginx.conf` does not
   include it. nginx.conf itself is never edited from here: everything else on the host depends on it.
 - **`htpasswd.go`** does bcrypt in process — `htpasswd` lives in apache2-utils, is not installed on a host
-  running nginx, and would put the password in a world-readable argv.
+  running nginx, and would put the password in a world-readable argv. Changing a password is the same
+  POST as adding a login (it replaces the user's line); the panel's 20-character generator runs in the
+  browser, so the password crosses the wire once, in that POST body, and is never stored or audited.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real
   story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago.
   Issuance defaults to `--staging` in the UI (the real limit is five failures an hour). `dns.go` answers
