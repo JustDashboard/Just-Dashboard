@@ -1368,26 +1368,64 @@ test("a test that fails offers the file at the line nginx names, and Test again 
   expect(runs).toEqual(["POST", "POST"])
 })
 
-test("a test that cannot run says why, and Test again runs it", async ({ page }) => {
+/** What the server answers for a test that gave no verdict: an error, never "valid: false". */
+const unfinished = (message: string) =>
+  failWith(504, {
+    code: "test_unfinished",
+    message,
+    reason:
+      "A test that did not finish says nothing about the configuration either way, and nothing was changed.",
+    retryable: true,
+  })
+
+test("a test that does not finish says so rather than Fails, and Try again runs it", async ({
+  page,
+}) => {
   await mockProxy(page, { included: true })
   let fail = true
-  await page.route("**/api/v1/proxy/test", (route) =>
-    fail
-      ? failWith(504, { code: "timeout", message: "nginx -t did not finish in 30s" })(route)
-      : json(route, passingTest),
-  )
+  const runs: string[] = []
+  await page.route("**/api/v1/proxy/test", (route) => {
+    runs.push("POST")
+    return fail
+      ? unfinished("nginx -t took longer than 30s and was stopped")(route)
+      : json(route, passingTest)
+  })
   await page.goto("/proxy")
 
   await page.getByRole("button", { name: "Test config" }).click()
   const panel = page.getByRole("dialog", { name: "nginx config test" })
-  await expect(
-    panel.getByRole("alert").filter({ hasText: "nginx -t did not finish in 30s" }),
-  ).toBeVisible()
+  const alert = panel.getByRole("alert")
+  await expect(alert.getByText("nginx -t took longer than 30s and was stopped")).toBeVisible()
+  await expect(alert.getByText(/says nothing about the configuration either way/)).toBeVisible()
+  // Not a verdict: nothing reads as nginx refusing its files.
+  await expect(panel.getByText("Fails", { exact: true })).toHaveCount(0)
+  await expect(panel.getByText(/refuses this configuration/)).toHaveCount(0)
   await expect(panel.getByRole("button", { name: "Copy output" })).toBeDisabled()
+  await expect(page.getByText("nginx's configuration fails its test")).toHaveCount(0)
   fail = false
-  await panel.getByRole("button", { name: "Test again" }).click()
+  await alert.getByRole("button", { name: "Try again" }).click()
   await expect(panel.getByText("Valid", { exact: true })).toBeVisible()
   await expect(panel.getByRole("alert")).toHaveCount(0)
+  expect(runs).toEqual(["POST", "POST"])
+})
+
+test("a reload whose test does not finish says nothing was reloaded, not that nginx refused", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.route(
+    "**/api/v1/proxy/reload",
+    unfinished("nginx -t took longer than 30s and was stopped, so nothing was reloaded"),
+  )
+  await page.goto("/proxy")
+
+  await page.locator("[data-slot='host-identity']").getByRole("button", { name: "Reload" }).click()
+  await expect(page.getByText("Reload failed")).toBeVisible()
+  await expect(
+    page.getByText("nginx -t took longer than 30s and was stopped, so nothing was reloaded"),
+  ).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "nginx config test" })).toHaveCount(0)
+  await expect(page.getByText("nginx's configuration fails its test")).toHaveCount(0)
 })
 
 test("the last test's warning stays in Needs attention until a test comes back clean", async ({
@@ -1531,6 +1569,80 @@ test("a reload that passes with a warning says so, and Show opens it", async ({ 
       "nginx reloaded. nginx accepts this configuration, but a warning can mean part of it is ignored.",
     ),
   ).toBeVisible()
+  // The reload's own test is placed as Test config's is: each site that
+  // claims the name, a press away.
+  const claims = panel.getByRole("list", { name: "Sites that claim this name" })
+  await expect(claims.getByRole("listitem")).toHaveCount(2)
+  await expect(
+    claims.getByRole("button", { name: "Open at line 3 of app.example.com" }),
+  ).toBeVisible()
+  await expect(claims.getByRole("button", { name: "Open at line 3 of app-copy" })).toBeVisible()
+})
+
+/**
+ * Two sites taking their server_name from one snippet, as the server places
+ * them: at each site's server block, with the snippet's line under it.
+ */
+const sharedName = {
+  valid: true,
+  output:
+    'nginx: [warn] conflicting server name "shared.example.com" on 0.0.0.0:80, ignored\n' +
+    "nginx: configuration file /etc/nginx/nginx.conf test is successful",
+  command: "nginx -t",
+  diagnostics: [
+    {
+      level: "warn",
+      message: 'conflicting server name "shared.example.com" on 0.0.0.0:80, ignored',
+      claims: [
+        {
+          file: "/etc/nginx/sites-available/shop",
+          line: 1,
+          nameFile: "/etc/nginx/snippets/shared-name.conf",
+          nameLine: 1,
+          ignored: false,
+        },
+        {
+          file: "/etc/nginx/sites-available/shop-staging",
+          line: 2,
+          nameFile: "/etc/nginx/snippets/shared-name.conf",
+          nameLine: 1,
+          ignored: true,
+        },
+      ],
+    },
+  ],
+  warnings: 1,
+}
+
+test("sites sharing a server_name snippet are each placed at their own server block", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockTests(page, [sharedName])
+  const reads = await watchConfigReads(page)
+  await page.goto("/proxy")
+
+  await page.getByRole("button", { name: "Test config" }).click()
+  const panel = page.getByRole("dialog", { name: "nginx config test" })
+  const claims = panel.getByRole("list", { name: "Sites that claim this name" })
+  const [served, ignored] = [
+    claims.getByRole("listitem").first(),
+    claims.getByRole("listitem").last(),
+  ]
+  await expect(claims.getByRole("listitem")).toHaveCount(2)
+  await expect(served).toContainText("served by /etc/nginx/sites-available/shop:1")
+  await expect(served).toContainText("server_name in /etc/nginx/snippets/shared-name.conf:1")
+  await expect(ignored).toContainText("ignored in /etc/nginx/sites-available/shop-staging:2")
+  await expect(ignored).toContainText("server_name in /etc/nginx/snippets/shared-name.conf:1")
+
+  await ignored.getByRole("button", { name: "Open at line 2 of shop-staging" }).click()
+  const editor = page.getByRole("dialog", { name: "shop-staging" })
+  await expect(editor).toBeVisible()
+  expect(reads).toEqual(["/etc/nginx/sites-available/shop-staging"])
+  await editor.getByRole("button", { name: "Close" }).click()
+  await expect(
+    ignored.getByRole("button", { name: "Open at line 2 of shop-staging" }),
+  ).toBeFocused()
 })
 
 test("a file saved from the test's editor is tested again when it closes", async ({ page }) => {
@@ -1577,7 +1689,11 @@ test("the config test and the sites claiming a name fit a phone", async ({ page 
       ...claimedTwice,
       valid: false,
       output: `${claimedTwice.output}\n${brokenTest.output}`,
-      diagnostics: [...claimedTwice.diagnostics, ...brokenTest.diagnostics],
+      diagnostics: [
+        ...claimedTwice.diagnostics,
+        ...sharedName.diagnostics,
+        ...brokenTest.diagnostics,
+      ],
     },
   ])
   await page.goto("/proxy")
@@ -1586,6 +1702,9 @@ test("the config test and the sites claiming a name fit a phone", async ({ page 
   const panel = page.getByRole("dialog", { name: "nginx config test" })
   await expect(panel.getByText("/etc/nginx/sites-available/app-copy:3")).toBeVisible()
   await expect(panel.getByText("/etc/nginx/sites-available/app:3")).toBeVisible()
+  await expect(
+    panel.getByText("/etc/nginx/snippets/shared-name.conf:1", { exact: true }).last(),
+  ).toBeVisible()
   await expect(panel).toBeInViewport({ ratio: 1 })
   // The sheet and the body that scrolls inside it.
   const wide = await panel.evaluate((element) =>

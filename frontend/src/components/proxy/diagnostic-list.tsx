@@ -75,9 +75,9 @@ export function DiagnosticList({
               aria-label="Sites that claim this name"
               className="space-y-1.5 border-l border-hairline pl-3"
             >
-              {d.claims.map((claim) => (
+              {d.claims.map((claim, index) => (
                 <Claim
-                  key={`${claim.file}:${claim.line}`}
+                  key={index}
                   claim={claim}
                   canOpen={canOpen(claim.file)}
                   buttonRef={claim === returnTo ? returned : undefined}
@@ -95,7 +95,8 @@ export function DiagnosticList({
 /**
  * One site claiming a conflicting name. Its button says the same words as a
  * diagnostic's, and its name says whose line, since two claims are often on
- * the same line of two files.
+ * the same line of two files. A name the site takes from a shared snippet is
+ * placed at the site's server block, with the snippet's line under it.
  */
 function Claim({
   claim,
@@ -118,6 +119,14 @@ function Claim({
         <span className="font-mono break-all text-muted-foreground">
           {claim.file}:{claim.line}
         </span>
+        {claim.nameFile && (
+          <span className="block text-muted-foreground">
+            server_name in{" "}
+            <span className="font-mono break-all">
+              {claim.nameFile}:{claim.nameLine}
+            </span>
+          </span>
+        )}
       </p>
       {canOpen && (
         <Button

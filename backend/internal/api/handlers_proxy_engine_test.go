@@ -1,17 +1,20 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
 // engineHost is a host whose only binaries are the given shims, each of which
@@ -472,4 +475,124 @@ func TestTheLastConfigTestIsForAdministrators(t *testing.T) {
 			t.Errorf("a %s account got %d", role, w.Code)
 		}
 	}
+}
+
+// An nginx whose config test gives no verdict: killed by a signal, or, with
+// JD_TEST_NGINX_SLOW set, still running when its caller gives up.
+const unfinishingNginx = `if [ "$1" = "-t" ]; then
+	[ -n "$JD_TEST_NGINX_SLOW" ] && exec /bin/sleep 5
+	kill -9 $$
+fi
+exit 0
+`
+
+type unfinishedBody struct {
+	Error struct {
+		Code, Message, Reason string
+		Retryable             bool
+	}
+	Validation any
+}
+
+// A test that gave no verdict was answered 200 valid:false and kept, so the
+// panel said "Fails" and the overview raised a critical finding about files
+// nginx passes. It is an error the page shows as one, worth trying again,
+// with no test beside it: nothing is kept, reloaded or started.
+func TestAConfigTestThatDoesNotFinishIsAnErrorNotAVerdict(t *testing.T) {
+	dir := t.TempDir()
+	s, bin := engineHost(t, map[string]string{"nginx": unfinishingNginx, "systemctl": ""})
+	s.Cfg.NginxDir = dir
+	s.initModules()
+	admin := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	for _, tc := range []struct{ method, path, body, message string }{
+		{http.MethodPost, "/api/v1/proxy/test", `{"kind":"nginx"}`, "nginx -t was ended by a signal (killed)"},
+		{http.MethodPost, "/api/v1/proxy/reload", `{"kind":"nginx"}`, "nginx -t was ended by a signal (killed), so nothing was reloaded"},
+		{http.MethodPost, "/api/v1/proxy/engine/restart", "", "nginx -t was ended by a signal (killed), so nginx was not restarted"},
+		{http.MethodPost, "/api/v1/proxy/engine/start", "", "nginx -t was ended by a signal (killed), so nginx was not started"},
+	} {
+		w := admin.do(tc.method, tc.path, tc.body, nil)
+		var body unfinishedBody
+		if w.Code != http.StatusBadGateway || json.Unmarshal(w.Body.Bytes(), &body) != nil ||
+			body.Error.Code != "test_unfinished" || body.Error.Message != tc.message || !body.Error.Retryable ||
+			!strings.Contains(body.Error.Reason, "says nothing about the configuration") || body.Validation != nil {
+			t.Fatalf("%s: %d %s", tc.path, w.Code, w.Body.String())
+		}
+	}
+	if w := admin.do(http.MethodGet, "/api/v1/proxy/test/last?kind=nginx", "", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("an unfinished test was kept: %d %s", w.Code, w.Body.String())
+	}
+	if got := shimLog(t, bin, "nginx"); strings.Contains(got, "-s") {
+		t.Fatalf("nginx was reloaded over a test that did not finish: %q", got)
+	}
+	if got := shimLog(t, bin, "systemctl"); got != "" {
+		t.Fatalf("systemctl ran over a test that did not finish: %q", got)
+	}
+
+	// The config editor's check of a candidate its request stopped waiting
+	// for: out of time, and the file put back.
+	t.Setenv("JD_TEST_NGINX_SLOW", "1")
+	file := filepath.Join(dir, "app.conf")
+	if err := os.WriteFile(file, []byte("server { listen 80; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/proxy/validate",
+		strings.NewReader(`{"kind":"nginx","path":`+strconv.Quote(file)+`,"content":"server { listen 81; }\n"}`)).WithContext(ctx)
+	req.RemoteAddr = "127.0.0.1:5555"
+	req.Header.Set("Cookie", admin.cookie)
+	req.Header.Set(httpx.CSRFHeader, "1")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	admin.h.ServeHTTP(w, req)
+	var body unfinishedBody
+	if w.Code != http.StatusGatewayTimeout || json.Unmarshal(w.Body.Bytes(), &body) != nil ||
+		body.Error.Code != "test_unfinished" || !strings.HasPrefix(body.Error.Message, "nginx -t was stopped before it finished") {
+		t.Fatalf("a validation out of time: %d %s", w.Code, w.Body.String())
+	}
+	if b, _ := os.ReadFile(file); string(b) != "server { listen 80; }\n" {
+		t.Fatalf("the candidate was left on disk: %q", b)
+	}
+}
+
+// Test config placed a conflicting server name at the sites that claim it,
+// and a reload's own test, which the toast's Show opens, did not: its
+// warnings had no file to open. A reload places them as the test does,
+// passed or refused.
+func TestAReloadsTestPlacesAConflictingName(t *testing.T) {
+	dir := t.TempDir()
+	// The refusal warns about the name too, before the line it fails on.
+	nginx := strings.Replace(warningNginx(dir), `if [ -n "$JD_TEST_NGINX_BROKEN" ]; then
+`, `if [ -n "$JD_TEST_NGINX_BROKEN" ]; then
+	echo 'nginx: [warn] conflicting server name "a.test" on 0.0.0.0:80, ignored' >&2
+`, 1)
+	s, _ := engineHost(t, map[string]string{"nginx": nginx})
+	s.Cfg.NginxDir = dir
+	s.initModules()
+	admin := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	placed := func(what string, w *httptest.ResponseRecorder, validation *lastTestBody) {
+		t.Helper()
+		d := validation.Validation.Diagnostics
+		if len(d) == 0 || len(d[0].Claims) != 2 ||
+			d[0].Claims[0].File != dir+"/conf.d/a.conf" || d[0].Claims[0].Ignored ||
+			d[0].Claims[1].File != dir+"/conf.d/b.conf" || !d[0].Claims[1].Ignored {
+			t.Fatalf("%s: the name was not placed: %d %s", what, w.Code, w.Body.String())
+		}
+	}
+	w := admin.do(http.MethodPost, "/api/v1/proxy/reload", `{"kind":"nginx"}`, nil)
+	var reloaded lastTestBody
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &reloaded) != nil {
+		t.Fatalf("a reload that passes: %d %s", w.Code, w.Body.String())
+	}
+	placed("a reload that passes", w, &reloaded)
+
+	t.Setenv("JD_TEST_NGINX_BROKEN", "1")
+	w = admin.do(http.MethodPost, "/api/v1/proxy/reload", `{"kind":"nginx"}`, nil)
+	var refused lastTestBody
+	if w.Code != http.StatusUnprocessableEntity || json.Unmarshal(w.Body.Bytes(), &refused) != nil {
+		t.Fatalf("a reload the test refuses: %d %s", w.Code, w.Body.String())
+	}
+	placed("a refused reload", w, &refused)
 }

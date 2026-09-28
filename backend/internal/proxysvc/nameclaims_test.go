@@ -203,3 +203,80 @@ func TestLiveConflictingServerNameIsPlacedAtBothSites(t *testing.T) {
 		t.Fatalf("placed at %+v, want %+v", placed.Diagnostics[0].Claims, want)
 	}
 }
+
+// Two sites that take their server_name from one shared snippet were both
+// placed at the snippet's line, as "served by" and "ignored in" the same
+// place: each claim is now at its own site's server block, with the
+// snippet's line beside it. A name written in the site itself stays at its
+// server_name line.
+func TestNameClaimsFromASharedSnippetAreAtEachSite(t *testing.T) {
+	tree := parsedTree(t,
+		ConfigFile{Path: "/etc/nginx/nginx.conf", Content: "http {\n    include /etc/nginx/conf.d/*.conf;\n}\n"},
+		ConfigFile{Path: "/etc/nginx/conf.d/a.conf", Content: "server {\n    listen 80;\n    include /etc/nginx/snippets/name.conf;\n}\n"},
+		ConfigFile{Path: "/etc/nginx/conf.d/b.conf", Content: "# b\nserver {\n    listen 80;\n    include /etc/nginx/snippets/name.conf;\n}\n"},
+		ConfigFile{Path: "/etc/nginx/conf.d/c.conf", Content: "server {\n    listen 80;\n    server_name shared.test;\n}\n"},
+		ConfigFile{Path: "/etc/nginx/snippets/name.conf", Content: "server_name shared.test;\n"},
+	)
+	claims, known := nameClaims(tree, "shared.test", "0.0.0.0:80")
+	want := []NameClaim{
+		{File: "/etc/nginx/conf.d/a.conf", Line: 1, NameFile: "/etc/nginx/snippets/name.conf", NameLine: 1},
+		{File: "/etc/nginx/conf.d/b.conf", Line: 2, NameFile: "/etc/nginx/snippets/name.conf", NameLine: 1, Ignored: true},
+		{File: "/etc/nginx/conf.d/c.conf", Line: 3, Ignored: true},
+	}
+	if !known || !reflect.DeepEqual(claims, want) {
+		t.Fatalf("got %+v (known %v), want %+v", claims, known, want)
+	}
+}
+
+// One file read twice — enabled under two names, or included twice — gives
+// two claims at one place, which cannot say which of them nginx serves the
+// name from; the warning is left as nginx wrote it.
+func TestPlaceNameConflictsLeavesClaimsAtOnePlace(t *testing.T) {
+	root := t.TempDir()
+	fakeNginx(t, "# configuration file "+root+"/nginx.conf:\n"+
+		"http {\n    include "+root+"/conf.d/a.conf;\n    include "+root+"/conf.d/a.conf;\n}\n\n"+
+		"# configuration file "+root+"/conf.d/a.conf:\n"+
+		"server {\n    listen 80;\n    server_name a.test;\n}\n\n")
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	res := &ValidationResult{Valid: true, Warnings: 1, Diagnostics: []Diagnostic{
+		{Level: "warn", Message: `conflicting server name "a.test" on 0.0.0.0:80, ignored`},
+	}}
+	if placed := service.PlaceNameConflicts(context.Background(), res); placed.Diagnostics[0].Claims != nil {
+		t.Fatalf("placed two claims at one place: %+v", placed.Diagnostics[0].Claims)
+	}
+}
+
+// The real binary: two sites including one server_name snippet warn with no
+// file, and are placed at each site's server block with the snippet beside
+// it, the one nginx read first serving the name.
+func TestLiveSharedSnippetConflictIsPlacedAtEachSite(t *testing.T) {
+	root := liveNginx(t)
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	snippet := filepath.Join(root, "snippets", "shared-name.conf")
+	if err := os.MkdirAll(filepath.Dir(snippet), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snippet, []byte("server_name shared.example.test;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	site := "server {\n    listen 127.0.0.1:18098;\n    include " + snippet + ";\n}\n"
+	first, second := filepath.Join(root, "conf.d", "a.conf"), filepath.Join(root, "conf.d", "b.conf")
+	if err := os.WriteFile(first, []byte(site), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(second, []byte("# b\n"+site), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := service.Test(context.Background(), KindNginx)
+	if err != nil || !res.Valid || res.Warnings != 1 || res.Diagnostics[0].File != "" {
+		t.Fatalf("two sites sharing a name snippet: %+v, %v", res, err)
+	}
+	placed := service.PlaceNameConflicts(context.Background(), res)
+	want := []NameClaim{
+		{File: first, Line: 1, NameFile: snippet, NameLine: 1},
+		{File: second, Line: 2, NameFile: snippet, NameLine: 1, Ignored: true},
+	}
+	if !reflect.DeepEqual(placed.Diagnostics[0].Claims, want) {
+		t.Fatalf("placed at %+v, want %+v", placed.Diagnostics[0].Claims, want)
+	}
+}

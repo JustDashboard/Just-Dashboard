@@ -1146,7 +1146,9 @@ keyboard on the row's button. Test config is a `SidePanel` of the same rows unde
 (success, warning or danger: "Valid", "Valid with 1 warning", "Fails"), with the output in a quiet
 fold, Copy output and Test again in the footer beside how long ago it ran, and a conflicting server
 name's claimants as rows indented under it behind a rule, "served by" and "ignored in" each with its
-own button; while it runs it says "Testing…" rather than keep the last verdict under a new run. The
+own button (a name taken from a shared snippet adds "server_name in" the snippet's line under the
+site's); while it runs it says "Testing…" rather than keep the last verdict under a new run, and a
+test that gives no verdict is the panel's `ErrorState` with Try again, never a "Fails" `Notice`. The
 last test's warnings and failure stay in attention as one finding whose button, Open test, shows it.
 Its routes are ordered worst first like the Sites cards, eight with "Showing 8 of N". An
 administrator's route opens the site on Sites and a Docker ingress route its live TLS report; a

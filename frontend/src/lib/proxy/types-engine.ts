@@ -17,10 +17,19 @@ export type ProxyDiagnostic = {
 }
 
 /**
- * A server block claiming a server name, at its server_name line. The first
- * nginx read serves the name on that address; `ignored` is each one after it.
+ * A server block claiming a server name. The first nginx read serves the name
+ * on that address; `ignored` is each one after it. `file` and `line` are the
+ * block's server_name line, or its `server` line when the name comes from a
+ * file it includes — a snippet several sites share, named by `nameFile` and
+ * `nameLine`, whose one line could not say which site is which.
  */
-export type ProxyNameClaim = { file: string; line: number; ignored: boolean }
+export type ProxyNameClaim = {
+  file: string
+  line: number
+  nameFile?: string
+  nameLine?: number
+  ignored: boolean
+}
 
 /**
  * The server's own config test. `note` qualifies a verdict nginx could not

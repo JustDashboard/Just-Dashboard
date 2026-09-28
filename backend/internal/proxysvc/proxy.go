@@ -8,7 +8,6 @@
 package proxysvc
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -359,10 +358,13 @@ func (s *Service) validateNginx(ctx context.Context, path, content string) (*Val
 	if err != nil {
 		return nil, err
 	}
-	res := runValidator(ctx, "nginx", "-t")
+	res, err := runTest(ctx, "nginx", "-t")
 	// Unconditional: the caller asked whether this content would be accepted,
 	// not for it to be installed.
 	restore()
+	if err != nil {
+		return nil, err
+	}
 	res.Note = s.includeNote(full)
 	return res, nil
 }
@@ -440,7 +442,10 @@ func (s *Service) validateCaddy(ctx context.Context, target, content string) (*V
 	if err := os.WriteFile(copied, []byte(content), 0o600); err != nil {
 		return nil, err
 	}
-	res := runValidator(ctx, "caddy", "validate", "--config", copied, "--adapter", "caddyfile")
+	res, err := runTest(ctx, "caddy", "validate", "--config", copied, "--adapter", "caddyfile")
+	if err != nil {
+		return nil, err
+	}
 	staged, target := resolvedFile(copied), resolvedFile(target)
 	res.Output = strings.ReplaceAll(res.Output, copied, target)
 	for i, d := range res.Diagnostics {
@@ -452,20 +457,10 @@ func (s *Service) validateCaddy(ctx context.Context, target, content string) (*V
 	return res, nil
 }
 
+// runValidator is runTest for a caller that only acts on a pass: a test that
+// did not finish reads as a failure, which refuses whatever it guards.
 func runValidator(ctx context.Context, name string, args ...string) *ValidationResult {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	cmd := hostexec.Command(ctx, name, args...)
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	err := cmd.Run()
-	res := &ValidationResult{
-		Valid:   err == nil,
-		Output:  strings.TrimSpace(buf.String()),
-		Command: name + " " + strings.Join(args, " "),
-	}
-	res.diagnose(name)
+	res, _ := runTest(ctx, name, args...)
 	return res
 }
 
@@ -512,7 +507,11 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 		return nil, err
 	}
 	started := time.Now()
-	after := runValidator(ctx, "nginx", "-t")
+	after, err := runTest(ctx, "nginx", "-t")
+	if err != nil {
+		restore()
+		return nil, err
+	}
 	if !after.Valid {
 		restore()
 		return after, ErrInvalidConf
@@ -554,22 +553,30 @@ func writeAtomic(path, content string) error {
 // ingress is tested inside its container, and there is nothing to test until
 // one runs.
 //
-// Every test is kept as the engine's last (see TestRecord).
+// Every test that gives a verdict is kept as the engine's last (see
+// TestRecord); one that does not is ErrTestUnfinished and kept nowhere.
 func (s *Service) Test(ctx context.Context, kind Kind) (*ValidationResult, error) {
 	started := time.Now()
+	// Once begun, a test runs to its verdict: a tab closed or refreshed while
+	// it runs would otherwise stop it, and a stopped test says nothing.
+	run := context.WithoutCancel(ctx)
 	var res *ValidationResult
+	var err error
 	switch kind {
 	case KindCaddyIngress:
-		edge, err := s.ingress(ctx)
-		if err != nil {
+		var edge *dockerCaddy
+		if edge, err = s.ingress(ctx); err != nil {
 			return nil, err
 		}
-		res = edge.validate(ctx)
+		res, err = edge.validate(run)
 	case KindCaddy:
-		res = runValidator(ctx, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
+		res, err = runTest(run, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
 	default:
 		kind = KindNginx
-		res = runValidator(ctx, "nginx", "-t")
+		res, err = runTest(run, "nginx", "-t")
+	}
+	if err != nil {
+		return nil, err
 	}
 	s.remember(kind, started, res)
 	return res, nil
@@ -604,23 +611,30 @@ type ReloadResult struct {
 
 // Reload tests first and refuses to reload a config that does not pass. This
 // is the guard rail that makes a config editor safe to expose at all. Its test
-// is kept as the engine's last, passed or not.
+// is kept as the engine's last, passed or not; one that gives no verdict is
+// ErrTestUnfinished, and nothing is reloaded or kept.
 func (s *Service) Reload(ctx context.Context, kind Kind) (*ReloadResult, error) {
 	s.forgetEffective()
 	if kind == KindCaddyIngress {
 		return s.reloadIngress(ctx)
 	}
 	var validation *ValidationResult
+	var err error
 	var reload *exec.Cmd
 	started := time.Now()
+	// As Test's: a closed tab does not stop the test once begun.
+	run := context.WithoutCancel(ctx)
 	switch kind {
 	case KindCaddy:
-		validation = runValidator(ctx, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
+		validation, err = runTest(run, "caddy", "validate", "--config", s.caddyFile, "--adapter", "caddyfile")
 		reload = hostexec.Command(ctx, "caddy", "reload", "--config", s.caddyFile)
 	default:
 		kind = KindNginx
-		validation = runValidator(ctx, "nginx", "-t")
+		validation, err = runTest(run, "nginx", "-t")
 		reload = hostexec.Command(ctx, "nginx", "-s", "reload")
+	}
+	if err != nil {
+		return nil, err
 	}
 	s.remember(kind, started, validation)
 	res := &ReloadResult{Validation: validation}

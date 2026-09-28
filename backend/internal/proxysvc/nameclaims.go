@@ -8,8 +8,7 @@ import (
 	"strings"
 )
 
-// NameClaim is a server block that claims a server name nginx warned about,
-// at its server_name line.
+// NameClaim is a server block that claims a server name nginx warned about.
 //
 // nginx's commonest warning names no file: `conflicting server name "a.test"
 // on 0.0.0.0:80, ignored` is all it says when a second site claims a name the
@@ -18,8 +17,16 @@ import (
 // address, in the order nginx read them: the first holds it, and each after
 // it is where nginx ignored it.
 type NameClaim struct {
+	// File and Line are where the site claims the name: its server_name
+	// line, or the block's own `server` line when the server_name is in a
+	// file the block includes. A snippet several sites share names them all
+	// at the same line, which could not say which site nginx serves.
 	File string `json:"file"`
 	Line int    `json:"line"`
+	// NameFile and NameLine are that included server_name line, given only
+	// when File and Line are the block's.
+	NameFile string `json:"nameFile,omitempty"`
+	NameLine int    `json:"nameLine,omitempty"`
 	// Ignored is a block read after another had claimed the name on the same
 	// address, whose claim nginx set aside.
 	Ignored bool `json:"ignored"`
@@ -68,10 +75,31 @@ func (s *Service) PlaceNameConflicts(ctx context.Context, res *ValidationResult)
 		}
 		for j := range claims {
 			claims[j].File = resolvedFile(claims[j].File)
+			if claims[j].NameFile != "" {
+				claims[j].NameFile = resolvedFile(claims[j].NameFile)
+			}
+		}
+		// One file enabled under two names, or a whole server block in a
+		// file included twice: two claims at one place cannot say which
+		// is served.
+		if !distinctPlaces(claims) {
+			continue
 		}
 		placed.Diagnostics[i].Claims = claims
 	}
 	return placed
+}
+
+func distinctPlaces(claims []NameClaim) bool {
+	seen := map[NameClaim]bool{}
+	for _, c := range claims {
+		place := NameClaim{File: c.File, Line: c.Line}
+		if seen[place] {
+			return false
+		}
+		seen[place] = true
+	}
+	return true
 }
 
 func hasUnplacedConflict(res *ValidationResult) bool {
@@ -101,7 +129,11 @@ func nameClaims(tree []Directive, name, addr string) (claims []NameClaim, known 
 					known = false
 				}
 				if on[addr] {
-					claims = append(claims, NameClaim{File: line.File, Line: line.Line, Ignored: len(claims) > 0})
+					claim := NameClaim{File: line.File, Line: line.Line, Ignored: len(claims) > 0}
+					if line.File != d.File {
+						claim.File, claim.Line, claim.NameFile, claim.NameLine = d.File, d.Line, line.File, line.Line
+					}
+					claims = append(claims, claim)
 				}
 				continue
 			}

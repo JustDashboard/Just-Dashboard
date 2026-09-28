@@ -235,13 +235,19 @@ func (s *Server) handleProxyReload(w http.ResponseWriter, r *http.Request) error
 		case errors.Is(err, proxysvc.ErrInvalidConf):
 			// The test comes back beside the error, as a refused start's
 			// does, so the page can place each line at its file.
-			return refuseInvalidConfig(w, r, httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output), res.Validation)
+			return refuseInvalidConfig(w, r, httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output),
+				s.placeNameConflicts(r, req.Kind, res.Validation))
+		case errors.Is(err, proxysvc.ErrTestUnfinished):
+			return mapProxyError(fmt.Errorf("%w, so nothing was reloaded", err))
 		case errors.Is(err, proxysvc.ErrNoIngress):
 			return mapProxyError(err)
 		}
 		return httpx.Err(http.StatusBadGateway, "reload_failed", err.Error())
 	}
 	httpx.SetAudit(r, "proxy.reload", string(req.Kind), nil)
+	// The reload's toast opens its test, which places a conflicting name as
+	// Test config's does.
+	res.Validation = s.placeNameConflicts(r, req.Kind, res.Validation)
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
@@ -278,10 +284,15 @@ func (s *Server) handleProxyEngine(action procs.UnitAction) httpx.Handler {
 		} else {
 			var res *proxysvc.ValidationResult
 			res, err = s.modules.proxy.WithTestedConfig(r.Context(), engine.Kind, control)
-			if errors.Is(err, proxysvc.ErrInvalidConf) {
+			switch {
+			case errors.Is(err, proxysvc.ErrInvalidConf):
 				httpx.SetAudit(r, event, engine.Unit, map[string]any{"result": "refused", "valid": false})
 				return refuseInvalidConfig(w, r, httpx.Err(http.StatusUnprocessableEntity, "invalid_config",
-					fmt.Sprintf("%s was not %s: its configuration test failed.\n%s", engine.Name, engineDone[action], res.Output)), res)
+					fmt.Sprintf("%s was not %s: its configuration test failed.\n%s", engine.Name, engineDone[action], res.Output)),
+					s.placeNameConflicts(r, engine.Kind, res))
+			case errors.Is(err, proxysvc.ErrTestUnfinished):
+				httpx.SetAudit(r, event, engine.Unit, map[string]any{"result": "failed"})
+				return mapProxyError(fmt.Errorf("%w, so %s was not %s", err, engine.Name, engineDone[action]))
 			}
 		}
 		if err != nil {

@@ -432,7 +432,7 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   after `applyAddedColumns` and `TestProxySchemaIsAdditive` holds to `CREATE … IF NOT EXISTS`. A table
   created there that later gains a column through `addedColumns` has to move into `schema` in the same
   change, since `applyAddedColumns` runs first on a fresh install.
-- **What the engine's own test says, not only whether it passed.** `runValidator` fills
+- **What the engine's own test says, not only whether it passed.** `runTest` (`testrun.go`) fills
   `ValidationResult.Diagnostics` (`diagnostics.go`: level, message, and file and line where nginx names
   them) and `Warnings`, the warn-level count — nginx exits 0 through a conflicting server name it is
   "ignoring", and that site then never serves. nginx writes a test's messages as `nginx: [warn] … in
@@ -451,6 +451,19 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   dashboard's user owns and nobody else can write to, or nothing is written or run. `validateCaddy`
   replaces the copy's name with the file's throughout the result; `Validate` holds a Caddy path to
   the proxy's directories as it does an nginx one.
+- **A test that gives no verdict is not a refusal.** `runTest` tells the engine's answer (exit 0, or
+  the 1 both engines refuse with) from a run that never gave one: out of its 30 seconds, stopped with
+  its caller's context, ended by a signal, not started, or exit 126/127 from nsenter or `docker exec`
+  failing to reach the binary; for the ingress, also docker's own "Error response from daemon".
+  Those are an `*UnfinishedTestError` (`ErrTestUnfinished`, unwrapping to the context's or exec's
+  error), which `mapProxyError` answers as `test_unfinished` — 504 when time ran out, 502 otherwise —
+  retryable, with the output as `raw` and no test beside it; a reload adds "so nothing was reloaded"
+  and a start or restart "so nginx was not started". It is never kept, and a reload, start or save it
+  guards does nothing (a staged candidate is put back). `Test` and `Reload` run their test under
+  `context.WithoutCancel`, so a tab closed mid-test no longer cuts it off; `WaitDelay` stops the wait
+  for a grandchild (nginx under nsenter, a shim's docker) that holds the output open after the kill.
+  `runValidator` is `runTest` for the other callers (sites, streams, deployment routes), where a test
+  that did not finish still reads as a failure and refuses what it guards.
 - **The engine's last test outlives the toast.** Every test of the files on disk is kept per engine
   kind as a `TestRecord` (`lasttest.go`: kind, `checkedAt` — when the test began — and the result):
   `Test`, the test `Reload` runs first (passed or refused, for nginx, a host Caddy and the ingress),
@@ -468,14 +481,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `PlaceNameConflicts` (`nameclaims.go`) reads the effective configuration and gives such a warning
   `claims`: every http server block whose `server_name` names it on that address, in nginx's reading
   order, at its `server_name` line with symlinks resolved — the first serves the name, and each after
-  it is `ignored`. A listen's address is read as nginx prints it (`80`, `*:80` and `0.0.0.0:80` are
+  it is `ignored`. A `server_name` in a file the block includes (a snippet several sites share, whose
+  one line would name every site) places the claim at the block's own `server` line instead, with the
+  snippet's line as `nameFile`/`nameLine`; claims that still land on one file and line (one file
+  enabled under two names, or included twice) cannot say which site is served, and are not given. A listen's address is read as nginx prints it (`80`, `*:80` and `0.0.0.0:80` are
   one; no listen is `*:80`, or `*:8000` for an unprivileged nginx). nginx warns once for each block
   after the first, so claims are given only when there are exactly one more than the warnings about
   that name and address, and not at all when a claimant listens on a host name: a block the tree
-  cannot see would put the wrong site first. `POST /proxy/test` and `GET /proxy/test/last` place
-  against the configuration as it is now, within three seconds (the dump waits for the service lock);
-  the record itself is kept as nginx wrote it, and the start refusal, taken under the lock, is not
-  placed.
+  cannot see would put the wrong site first. `POST /proxy/test`, `GET /proxy/test/last`,
+  `POST /proxy/reload` (passed, which its toast's Show opens, or refused) and a refused start or
+  restart place against the configuration as it is now, within three seconds (the dump waits for the
+  service lock, which the start's test has released by then); the record itself is kept as nginx
+  wrote it.
 - **The configuration nginx actually loads.** `EffectiveConfig` (`effective.go`) runs `nginx -T` through
   `hostexec` under the service lock — so it never dumps a candidate `Validate` has staged — splits it into
   `ConfigFile`s byte for byte (`ParseEffective`, which takes a `# configuration file` line as a file only
