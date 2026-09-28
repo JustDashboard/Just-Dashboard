@@ -7,6 +7,7 @@
 import type { Verdict } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
 import type { HTTPScan, RedirectHop, TLSScan } from "./proxy/types-tls"
+import { tlsReportHref } from "./scan-target"
 
 const PLAIN_ERRORS: Record<NonNullable<HTTPScan["plainErrorKind"]>, string> = {
   refused: "port 80 refused the connection",
@@ -143,11 +144,14 @@ export function failureSteps(scan: TLSScan): FailureStep[] {
 
 /**
  * Where to look next for a failed scan, only where the fault can be here: a
- * refusal from another host is not fixed on this server's ports page.
+ * refusal from another host is not fixed on this server's ports page. Plain
+ * HTTP on port 80 is no fault anywhere, so it is sent to the scan of 443.
  */
 export function diagnosisLinks(scan: TLSScan): { label: string; href: string }[] {
   const failure = scan.failure
   if (!failure || failure.stage === "dns") return []
+  if (scan.port === 80 && failure.reason === "plain-http")
+    return [{ label: "Scan port 443", href: tlsReportHref({ host: scan.domain, port: 443 }) }]
   if (failure.where !== "here" && failure.where !== "unknown") return []
   if (failure.stage === "connect" && failure.reason === "unreachable") return []
   const links = [{ label: "Listening ports", href: `/proxy/ports?q=:${scan.port}` }]

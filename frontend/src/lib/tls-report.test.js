@@ -176,6 +176,19 @@ describe("diagnosisLinks", () => {
       ["Sites", "/proxy/sites"],
     ])
   })
+  test("plain HTTP on port 80 is sent to 443, wherever it answered", () => {
+    for (const where of ["here", "unknown", "elsewhere", "cloudflare"]) {
+      const scan = { ...failed({ stage: "handshake", reason: "plain-http", where }), port: 80 }
+      expect(diagnosisLinks(scan).map((l) => [l.label, l.href])).toEqual([
+        ["Scan port 443", "/proxy/tls?domain=app.example.com"],
+      ])
+    }
+    const address = {
+      ...failed({ stage: "handshake", reason: "plain-http", where: "here" }, "::1"),
+      port: 80,
+    }
+    expect(diagnosisLinks(address)[0].href).toBe("/proxy/tls?domain=%3A%3A1")
+  })
   test("nothing on this server fixes a fault elsewhere, in DNS or with no route", () => {
     expect(links({ stage: "connect", reason: "refused", where: "elsewhere" })).toEqual([])
     expect(links({ stage: "connect", reason: "refused", where: "cloudflare" })).toEqual([])

@@ -338,7 +338,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   another host's (`familyKnown`). Every connect and handshake finding's advice follows it
   (`hereOrThere`): `tcp.refused` here is "nothing here listens on 443", elsewhere it is that host's
   refusal; a handshake with Cloudflare is its edge's, so plain HTTP on 8080 names its plain-HTTP and
-  HTTPS ports rather than nginx's `listen … ssl`; and an address scanned as itself is never told to
+  HTTPS ports rather than nginx's `listen … ssl`; plain HTTP on port 80, from any host, is HTTP's own
+  port answering as it should (`plainHTTPPort`), never told to add `ssl`, which would break http://,
+  the redirect and HTTP-01, and is sent to 443; and an address scanned as itself is never told to
   point a record. `dns` carries `CheckDomainDNS`. `TestLiveNginxListenWithoutSSLIsDiagnosed` holds the plain-HTTP
   case against a real nginx. **Only an HTTP answer is graded on HTTP** (`service`): a port registered to
   a protocol that speaks TLS from its first byte and is not HTTP (`implicitTLSServices`: 465, 993, 995,

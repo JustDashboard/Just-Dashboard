@@ -1269,6 +1269,56 @@ test("plain HTTP on the TLS port is named, with the listen directive to fix", as
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
 
+test("plain HTTP on port 80 is not a fault, and the report sends the scan to 443", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  const seen = await scans(page, (url) =>
+    url.searchParams.get("port") === "80"
+      ? {
+          ...failedScan(
+            {
+              stage: "handshake",
+              reason: "plain-http",
+              answer: "HTTP/",
+              address: "203.0.113.4:80",
+              where: "here",
+              dns: here,
+            },
+            {
+              id: "tls.plain-http",
+              title: "Port 80 answers plain HTTP, not TLS",
+              detail:
+                '203.0.113.4:80 answered the TLS handshake with "HTTP/": an HTTP server without TLS on that port.',
+              advice:
+                "That is this server. Port 80 is HTTP's own port, so a plain HTTP answer there is right: browsers, the redirect to HTTPS and Let's Encrypt's HTTP-01 check all use it, and TLS on it would break them. HTTPS is on 443: scan app.example.com on port 443.",
+            },
+            "203.0.113.4:80 answers plain HTTP, not TLS.",
+          ),
+          port: 80,
+        }
+      : { ...scan, domain: "app.example.com", port: 443 },
+  )
+  await page.goto("/proxy/tls?domain=app.example.com:80")
+  await expect(page.getByText("Port 80 answers plain HTTP, not TLS")).toBeVisible()
+  await expect(page.getByText("Port 80 is HTTP's own port", { exact: false })).toBeVisible()
+  await expect(page.getByText("listen 80 ssl;", { exact: false })).toHaveCount(0)
+  // Nothing on this server is at fault, so no page to fix it on is offered.
+  await expect(page.getByRole("link", { name: "Sites" })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Listening ports" })).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+
+  await page.getByRole("link", { name: "Scan port 443" }).click()
+  await expect(page).toHaveURL(/\/proxy\/tls\?domain=app\.example\.com$/)
+  await expect
+    .poll(() =>
+      seen.map((url) => `${url.searchParams.get("domain")}:${url.searchParams.get("port")}`),
+    )
+    .toEqual(["app.example.com:80", "app.example.com:443"])
+  await expect(page.getByText("Port 80 answers plain HTTP, not TLS")).toHaveCount(0)
+})
+
 test("the preload checklist gives every rule, and a subdomain the name to scan", async ({
   page,
 }) => {

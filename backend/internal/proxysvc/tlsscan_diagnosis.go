@@ -223,11 +223,18 @@ func failureFinding(scan *TLSScan, f ScanFailure, err error) ScanFinding {
 	case "handshake/plain-http":
 		finding.ID, finding.Title = "tls.plain-http", "Port "+port+" answers plain HTTP, not TLS"
 		finding.Detail = fmt.Sprintf("%s answered the TLS handshake with %q: an HTTP server without TLS on that port.", where, f.Answer)
-		finding.Advice = hereOrThere(scan, f, advice{
+		a := advice{
 			here:       "In nginx a listen directive without ssl serves plain HTTP. Write it as listen " + port + " ssl; and give the server block a certificate.",
 			there:      "Its web server serves plain HTTP on " + port + ". If that is nginx, a listen directive without ssl does it: the fix is listen " + port + " ssl; and a certificate in that server block, on that host.",
 			cloudflare: cloudflarePlainHTTP(scan.Port),
-		})
+		}
+		// Port 80 is HTTP's own, so its plain answer is no fault, and
+		// `listen 80 ssl;` would break every http:// visit, the redirect to
+		// HTTPS and HTTP-01 renewal wherever it was followed.
+		if scan.Port == 80 {
+			a.here, a.there = plainHTTPPort(scan.Domain), ""
+		}
+		finding.Advice = hereOrThere(scan, f, a)
 	case "handshake/not-tls":
 		finding.ID, finding.Title = "tls.not-tls", "Port "+port+" does not speak TLS"
 		finding.Detail = fmt.Sprintf("%s answered the TLS handshake with %q, which is not TLS.", where, f.Answer)
@@ -371,6 +378,11 @@ func addressFamily(address string) string {
 		return "IPv4 "
 	}
 	return "IPv6 "
+}
+
+// plainHTTPPort is the advice for plain HTTP on port 80, where it belongs.
+func plainHTTPPort(domain string) string {
+	return "Port 80 is HTTP's own port, so a plain HTTP answer there is right: browsers, the redirect to HTTPS and Let's Encrypt's HTTP-01 check all use it, and TLS on it would break them. HTTPS is on 443: scan " + domain + " on port 443."
 }
 
 // Cloudflare's proxy makes the TLS handshake at its own edge, before the
