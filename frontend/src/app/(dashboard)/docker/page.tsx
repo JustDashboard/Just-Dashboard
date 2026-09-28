@@ -11,7 +11,12 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { ProductLogo, ProductLogos, imageProduct, imageProducts } from "@/components/product-logo"
+import {
+  ProductLogo,
+  ProductLogos,
+  containerProduct,
+  imageProducts,
+} from "@/components/product-logo"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
@@ -410,7 +415,7 @@ function IdleRow({
     <ChoiceRow
       href={href}
       verb={`Open ${container.name}`}
-      leading={<ProductLogo id={imageProduct(container.image)} size="sm" />}
+      leading={<ProductLogo id={containerProduct(container)} size="sm" />}
       title={container.name}
       description={<span className="font-mono">{container.image}</span>}
       trailing={

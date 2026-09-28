@@ -1,13 +1,19 @@
 "use client"
 
 import { useState } from "react"
-import { Cross, LockOpen, SettingsSliders, Shield, Slash } from "@/components/icons"
+import {
+  Cross,
+  LockOpen,
+  SecureConnection,
+  SettingsSliders,
+  Shield,
+  Slash,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { Fail2banJail, JailConfig, JailParamResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
@@ -15,10 +21,13 @@ import { DimActions, IconAction } from "@/components/icon-action"
 import { SidePanel } from "@/components/side-panel"
 import { ProductLogo } from "@/components/product-logo"
 import { jailProduct } from "@/components/security/marks"
+import { Status } from "@/components/status-dot"
+import { Meter } from "@/components/meter"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Field, FieldRow, FormSection } from "@/components/form"
 import { Label } from "@/components/ui/label"
 
 /**
@@ -66,11 +75,6 @@ export function JailsPanel({
   }
 
   const selected = jails.find((j) => j.name === open)
-  // On a phone the readings go under the name, which otherwise had the width
-  // the readings and the verbs left it — none. Chosen once rather than drawn
-  // twice and hidden, so each reading is in the document once.
-  const wide = useMediaQuery("(min-width: 640px)")
-
   // A ban by hand. The route has been on the server since the jail controls
   // shipped and nothing on the page reached it — so the address that kept
   // appearing in the log could be blocked forever at the firewall, or not at
@@ -112,35 +116,35 @@ export function JailsPanel({
                   index={index}
                   verb={jail.name}
                   onSelect={() => setOpen(jail.name)}
-                  leading={<ProductLogo id={jailProduct(jail.name)} size="sm" fallback={Slash} />}
+                  leading={
+                    <ProductLogo
+                      id={jailProduct(jail.name)}
+                      fallback={jail.name === "sshd" ? SecureConnection : Slash}
+                    />
+                  }
                   title={jail.name}
                   description={
                     <span className="font-mono">{jail.fileList.join(", ") || "no log named"}</span>
                   }
                   trailing={
-                    wide ? (
-                      <>
-                        <JailReading
-                          label="banned now"
-                          value={jail.currentlyBanned}
-                          tone="warning"
-                        />
-                        <JailReading label="failing" value={jail.currentlyFailed} />
-                        <JailReading label="bans in total" value={jail.totalBanned} muted />
-                      </>
-                    ) : (
-                      <JailReading label="banned now" value={jail.currentlyBanned} tone="warning" />
-                    )
+                    <Status
+                      tone={jail.currentlyBanned > 0 ? "warning" : "running"}
+                      label={
+                        jail.currentlyBanned > 0 ? `${jail.currentlyBanned} banned now` : "Watching"
+                      }
+                    />
                   }
                   actions={
                     canManage ? (
                       <DimActions>
-                        <IconAction
-                          label={`Tune ${jail.name}`}
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          aria-label={`Tune ${jail.name}`}
                           onClick={() => setTuning(jail.name)}
                         >
-                          <SettingsSliders />
-                        </IconAction>
+                          Tune
+                        </Button>
                         <IconAction
                           label={`Release every ban in ${jail.name}`}
                           disabled={busy || jail.bannedIps.length === 0}
@@ -158,13 +162,22 @@ export function JailsPanel({
                     ) : undefined
                   }
                 >
-                  {!wide && (
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1 text-hint text-muted-foreground">
-                      <JailReading label="failing" value={jail.currentlyFailed} />
-                      <JailReading label="bans in total" value={jail.totalBanned} muted />
-                      <JailReading label="failures in total" value={jail.totalFailed} muted />
+                  <div className="grid grid-cols-2 items-center gap-4 border-t border-hairline pt-3 sm:grid-cols-4">
+                    <JailReading label="failing now" value={jail.currentlyFailed} />
+                    <JailReading label="bans in total" value={jail.totalBanned} muted />
+                    <JailReading label="failures in total" value={jail.totalFailed} muted />
+                    <div className="space-y-1.5">
+                      <span className="text-hint text-muted-foreground">Currently held</span>
+                      <Meter
+                        value={
+                          jail.totalBanned > 0 ? (jail.currentlyBanned / jail.totalBanned) * 100 : 0
+                        }
+                        size="thin"
+                        tone={jail.currentlyBanned > 0 ? "warning" : "default"}
+                        label={`${jail.currentlyBanned} of ${jail.totalBanned} bans still active`}
+                      />
                     </div>
-                  )}
+                  </div>
                 </ChoiceRow>
               ))}
             </ChoiceList>
@@ -207,11 +220,25 @@ export function JailsPanel({
           )
         }
       >
-        <div className="space-y-4">
+        <div className="space-y-5">
+          {selected && (
+            <div className="flex items-center gap-3">
+              <ProductLogo
+                id={jailProduct(selected.name)}
+                fallback={selected.name === "sshd" ? SecureConnection : Slash}
+              />
+              <div>
+                <span className="text-title font-medium">{selected.name}</span>
+                <p className="text-hint text-muted-foreground">
+                  {selected.bannedIps.length} addresses held · {selected.totalBanned} bans in total
+                </p>
+              </div>
+            </div>
+          )}
           {canManage && selected && (
             <div className="space-y-1.5">
               <Label htmlFor="jail-ban-address">Ban an address now</Label>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <Input
                   id="jail-ban-address"
                   value={banning}
@@ -331,17 +358,17 @@ function JailReading({
 }) {
   const active = value > 0 && !muted
   return (
-    <span className="inline-flex min-w-0 items-baseline gap-1 whitespace-nowrap sm:w-28">
+    <span className="flex min-w-0 flex-col gap-1">
       <span
         className={cn(
-          "numeric text-xs",
+          "numeric text-title",
           active ? "font-medium" : "text-muted-foreground",
           active && tone === "warning" && "text-warning",
         )}
       >
         {value}
       </span>
-      <span className="text-micro text-muted-foreground">{label}</span>
+      <span className="text-hint text-muted-foreground">{label}</span>
     </span>
   )
 }
@@ -381,7 +408,7 @@ function JailTuning({
   const [busy, setBusy] = useState(false)
 
   const value = (key: keyof JailConfig, fallback: number) =>
-    pending[key] ?? String((data?.[key] as number | undefined) ?? fallback)
+    pending[key.toLowerCase()] ?? String((data?.[key] as number | undefined) ?? fallback)
 
   const save = async () => {
     setBusy(true)
@@ -432,43 +459,61 @@ function JailTuning({
     <Modal
       open={open}
       onOpenChange={onOpenChange}
-      size="sm"
+      size="md"
       title={<>Tune {jail}</>}
       description="This many failures inside this window earns a ban of this length."
       footer={
         <>
           <span className="flex-1" />
-          <Button onClick={save} disabled={busy || Object.keys(pending).length === 0}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={save}
+            pending={busy}
+            disabled={busy || Object.keys(pending).length === 0}
+          >
             Apply
           </Button>
         </>
       }
     >
       <div className="grid gap-4">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <NumberField
-            label="Failures"
-            hint="before a ban"
-            value={value("maxRetry", 5)}
-            onChange={(v) => setPending((p) => ({ ...p, maxretry: v }))}
+        <div className="flex items-center gap-3">
+          <ProductLogo
+            id={jailProduct(jail)}
+            fallback={jail === "sshd" ? SecureConnection : Slash}
           />
-          <NumberField
-            label="Window"
-            hint="seconds"
-            value={value("findTime", 600)}
-            onChange={(v) => setPending((p) => ({ ...p, findtime: v }))}
-          />
-          <NumberField
-            label="Ban for"
-            hint="seconds"
-            value={value("banTime", 600)}
-            onChange={(v) => setPending((p) => ({ ...p, bantime: v }))}
-          />
+          <div>
+            <span className="text-title font-medium">{jail}</span>
+            <p className="text-hint text-muted-foreground">fail2ban jail</p>
+          </div>
         </div>
+        <FormSection title="Ban policy">
+          <FieldRow columns={3}>
+            <NumberField
+              label="Failures"
+              hint="before a ban"
+              value={value("maxRetry", 5)}
+              onChange={(v) => setPending((p) => ({ ...p, maxretry: v }))}
+            />
+            <NumberField
+              label="Window"
+              hint="seconds"
+              value={value("findTime", 600)}
+              onChange={(v) => setPending((p) => ({ ...p, findtime: v }))}
+            />
+            <NumberField
+              label="Ban for"
+              hint="seconds"
+              value={value("banTime", 600)}
+              onChange={(v) => setPending((p) => ({ ...p, bantime: v }))}
+            />
+          </FieldRow>
+        </FormSection>
 
-        <div className="space-y-1.5">
+        <FormSection title="Never ban">
           <div className="flex items-center justify-between gap-2">
-            <Label>Never ban</Label>
             {/* The address this browser arrived from, by name. Banning
                 yourself is the commonest way to lose a server you were in the
                 middle of hardening, and the allowlist is the control that
@@ -509,7 +554,7 @@ function JailTuning({
               <EmptyNote className="py-2">Nothing allowlisted.</EmptyNote>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <Input
               value={ignore}
               onChange={(e) => setIgnore(e.target.value)}
@@ -527,7 +572,7 @@ function JailTuning({
               Add
             </Button>
           </div>
-        </div>
+        </FormSection>
 
         <Notice title="Applied now, and kept">
           The change goes to the running fail2ban at once and is written to a drop-in under{" "}
@@ -551,15 +596,13 @@ function NumberField({
   onChange: (value: string) => void
 }) {
   return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
+    <Field label={label} hint={hint}>
       <Input
         value={value}
         inputMode="numeric"
         aria-label={label}
         onChange={(e) => onChange(e.target.value)}
       />
-      <p className="text-hint text-muted-foreground">{hint}</p>
-    </div>
+    </Field>
   )
 }

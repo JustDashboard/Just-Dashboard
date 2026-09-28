@@ -38,6 +38,15 @@ func TestContainerIdentityMigrationPreservesUnattributedHistory(t *testing.T) {
 		if err != nil || id != "" || cpu != 42 {
 			t.Fatalf("migration attributed or lost old data: id=%q cpu=%v err=%v", id, cpu, err)
 		}
+		var network, block, limited, total sql.NullInt64
+		var sampleTime sql.NullFloat64
+		if err := st.DB.QueryRow(`SELECT network_available,block_available,mem_limited,cpu_total,sample_time
+			FROM metric_container_samples WHERE name='web' AND ts=123`).Scan(&network, &block, &limited, &total, &sampleTime); err != nil {
+			t.Fatal(err)
+		}
+		if network.Valid || block.Valid || limited.Valid || total.Valid || sampleTime.Valid {
+			t.Fatal("migration invented availability, limits or CPU counters for old history")
+		}
 		var indexes int
 		if err := st.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_container_samples_identity_ts'`).Scan(&indexes); err != nil || indexes != 1 {
 			t.Fatalf("identity index missing after migration: count=%d err=%v", indexes, err)

@@ -6,13 +6,18 @@ import {
   CaptureUpdateAction,
   convertToExcalidrawElements,
   Excalidraw,
+  hashElementsVersion,
   serializeAsJSON,
+  viewportCoordsToSceneCoords,
 } from "@excalidraw/excalidraw"
 import type {
+  AppState,
+  BinaryFiles,
   ExcalidrawImperativeAPI,
   ExcalidrawInitialDataState,
   ExcalidrawProps,
 } from "@excalidraw/excalidraw/types"
+import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types"
 import "@excalidraw/excalidraw/index.css"
 import {
   ArrowLeft,
@@ -28,13 +33,29 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { ErrorState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Modal } from "@/components/modal"
 import { ApiError, del, get, put } from "@/lib/api"
 import type { Board, BoardScene, BoardSummary } from "@/lib/boards"
 import type { DbFleet, DeployProject } from "@/lib/types"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 
-type SaveState = "saved" | "pending" | "saving" | "error" | "conflict"
+type SaveState = "saved" | "pending" | "saving" | "error" | "unnamed" | "conflict" | "missing"
+
+type Snapshot = {
+  elements: readonly OrderedExcalidrawElement[]
+  appState: AppState
+  files: BinaryFiles
+  signature: string
+}
+
+// Excalidraw calls onChange for every pointer move and selection, and a scene
+// can carry megabytes of image data. Element versions and the appState fields
+// a saved file keeps say whether anything worth saving changed; the whole
+// scene is serialized only when it is saved.
+function signature(elements: Snapshot["elements"], appState: AppState) {
+  return `${hashElementsVersion(elements)}:${serializeAsJSON([], appState, {}, "local")}`
+}
 
 declare global {
   interface Window {
@@ -91,88 +112,149 @@ function LoadedBoard({ board }: { board: Board }) {
   const { confirm, dialog } = useConfirm()
   const [name, setName] = useState(board.name)
   const [saveState, setSaveState] = useState<SaveState>("saved")
+  const [leaving, setLeaving] = useState<string | null>(null)
   const [insertOpen, setInsertOpen] = useState(false)
   const [projects, setProjects] = useState<DeployProject[]>([])
   const [databases, setDatabases] = useState<DbFleet["connections"]>([])
   const [catalogError, setCatalogError] = useState<Error | null>(null)
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const nameRef = useRef(board.name)
-  const sceneRef = useRef<BoardScene>(board.scene)
-  const serializedRef = useRef(JSON.stringify(board.scene))
+  const savedNameRef = useRef(board.name)
+  const sceneRef = useRef<Snapshot | null>(null)
+  const savedSignatureRef = useRef<string | null>(null)
   const revisionRef = useRef(board.revision)
-  const dirtyRef = useRef(false)
-  const conflictRef = useRef(false)
+  const stoppedRef = useRef<"conflict" | "missing" | null>(null)
+  const abandonedRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savingRef = useRef<Promise<boolean> | null>(null)
-  const deletedRef = useRef(false)
+  const errorToastRef = useRef<string | number | undefined>(undefined)
   const cardCountRef = useRef(0)
+
+  // sonner's dismiss() with no id clears every toast on the page.
+  const clearSaveError = useCallback(() => {
+    if (errorToastRef.current === undefined) return
+    notify.dismiss(errorToastRef.current)
+    errorToastRef.current = undefined
+  }, [])
+
+  // Dirty is whatever the server does not have yet, so typing a name back to
+  // what it was, or a blank name restored on blur, leaves nothing to save.
+  const isDirty = useCallback(
+    () =>
+      nameRef.current.trim() !== savedNameRef.current ||
+      (sceneRef.current !== null && sceneRef.current.signature !== savedSignatureRef.current),
+    [],
+  )
 
   const flush = useCallback(async (): Promise<boolean> => {
     if (timerRef.current) clearTimeout(timerRef.current)
-    if (savingRef.current) await savingRef.current
-    if (conflictRef.current) return false
-    if (!dirtyRef.current) return true
-    dirtyRef.current = false
+    // A second caller waits out the save in flight and any save queued behind
+    // it; returning early reported success while the latest change was unsent.
+    while (savingRef.current) await savingRef.current
+    if (stoppedRef.current || abandonedRef.current) return false
+    if (!isDirty()) return true
+    const title = nameRef.current.trim()
+    if (!title) {
+      setSaveState("unnamed")
+      return false
+    }
+    const snapshot = sceneRef.current
     setSaveState("saving")
-    const scene = sceneRef.current
-    const title = nameRef.current
     const task = put<BoardSummary>(`/boards/${board.id}`, {
       name: title,
-      scene,
+      // "local" is Excalidraw's file format, and the one that keeps `files`:
+      // "database" drops them for a separate image store this server does not
+      // have, so every save was refused and images would have been lost.
+      scene: snapshot
+        ? (JSON.parse(
+            serializeAsJSON(snapshot.elements, snapshot.appState, snapshot.files, "local"),
+          ) as BoardScene)
+        : board.scene,
       revision: revisionRef.current,
     })
       .then((saved) => {
         revisionRef.current = saved.revision
-        if (!dirtyRef.current) setSaveState("saved")
+        savedNameRef.current = saved.name
+        if (snapshot) savedSignatureRef.current = snapshot.signature
+        clearSaveError()
+        setSaveState(!isDirty() ? "saved" : nameRef.current.trim() ? "pending" : "unnamed")
         return true
       })
       .catch((cause) => {
-        dirtyRef.current = true
         if (cause instanceof ApiError && cause.code === "board_conflict") {
-          conflictRef.current = true
+          stoppedRef.current = "conflict"
           setSaveState("conflict")
+        } else if (cause instanceof ApiError && cause.code === "board_not_found") {
+          stoppedRef.current = "missing"
+          setSaveState("missing")
         } else {
           setSaveState("error")
-          notify.error("Board was not saved", cause)
+          clearSaveError()
+          errorToastRef.current = notify.error("Board was not saved", cause)
         }
         return false
       })
     savingRef.current = task
     const saved = await task
-    savingRef.current = null
+    if (savingRef.current === task) savingRef.current = null
     return saved
-  }, [board.id])
+  }, [board.id, board.scene, clearSaveError, isDirty])
 
   const changed = useCallback(() => {
-    dirtyRef.current = true
-    setSaveState("pending")
     if (timerRef.current) clearTimeout(timerRef.current)
-    if (!conflictRef.current) timerRef.current = setTimeout(() => void flush(), 900)
-  }, [flush])
+    if (stoppedRef.current || abandonedRef.current) return
+    if (!isDirty()) {
+      if (!savingRef.current) setSaveState("saved")
+      return
+    }
+    if (!nameRef.current.trim()) {
+      setSaveState("unnamed")
+      return
+    }
+    setSaveState("pending")
+    timerRef.current = setTimeout(() => void flush(), 900)
+  }, [flush, isDirty])
 
   const onChange: NonNullable<ExcalidrawProps["onChange"]> = useCallback(
     (elements, appState, files) => {
-      if (!canWrite) return
-      const serialized = serializeAsJSON(elements, appState, files, "database")
-      if (serialized === serializedRef.current) return
-      serializedRef.current = serialized
-      sceneRef.current = JSON.parse(serialized) as BoardScene
-      changed()
+      const next = signature(elements, appState)
+      // The first call is the scene as Excalidraw restored it. Comparing with
+      // the stored JSON instead made every visit a save, which bumped the
+      // revision and put anyone else looking at the board into a conflict.
+      if (savedSignatureRef.current === null) savedSignatureRef.current = next
+      const previous = sceneRef.current?.signature ?? savedSignatureRef.current
+      sceneRef.current = { elements, appState, files, signature: next }
+      if (canWrite && next !== previous) changed()
     },
     [canWrite, changed],
   )
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (!dirtyRef.current && !savingRef.current) return
+      if (abandonedRef.current || (!isDirty() && !savingRef.current)) return
       event.preventDefault()
     }
     window.addEventListener("beforeunload", warn)
     return () => {
       window.removeEventListener("beforeunload", warn)
       if (timerRef.current) clearTimeout(timerRef.current)
-      if (!deletedRef.current && dirtyRef.current && !conflictRef.current) void flush()
+      if (isDirty()) void flush()
     }
+  }, [flush, isDirty])
+
+  useEffect(() => {
+    // Excalidraw's own Ctrl+S writes a .excalidraw file to disk (it is turned
+    // off below); on a board the operator means this server. The physical key
+    // stands in on a non-Latin layout, where Russian's S key reports "ы".
+    const save = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
+      const key = event.key.toLowerCase()
+      if (key !== "s" && (/^[a-z]$/.test(key) || event.code !== "KeyS")) return
+      event.preventDefault()
+      void flush()
+    }
+    window.addEventListener("keydown", save)
+    return () => window.removeEventListener("keydown", save)
   }, [flush])
 
   const loadCatalog = useCallback(async () => {
@@ -202,11 +284,17 @@ function LoadedBoard({ board }: { board: Board }) {
     if (!api || !canWrite) return
     const state = api.getAppState()
     const offset = (cardCountRef.current++ % 5) * 34
+    // The middle of what is on screen, in scene units: scroll alone ignored
+    // zoom, so a card inserted while zoomed out landed off to one side.
+    const center = viewportCoordsToSceneCoords(
+      { clientX: state.offsetLeft + state.width / 2, clientY: state.offsetTop + state.height / 2 },
+      state,
+    )
     const elements = convertToExcalidrawElements([
       {
         type: "rectangle",
-        x: -state.scrollX + 120 + offset,
-        y: -state.scrollY + 110 + offset,
+        x: center.x - 140 + offset,
+        y: center.y - 56 + offset,
         width: 280,
         height: 112,
         backgroundColor: "#1e293b",
@@ -225,6 +313,13 @@ function LoadedBoard({ board }: { board: Board }) {
     setInsertOpen(false)
   }
 
+  // A save that cannot go through used to make Back and card links do
+  // nothing at all; now leaving is a choice the operator makes.
+  async function go(href: string) {
+    if (await flush()) router.push(href)
+    else setLeaving(href)
+  }
+
   const onLinkOpen: NonNullable<ExcalidrawProps["onLinkOpen"]> = (element, event) => {
     const link = element.link
     const click = event.detail.nativeEvent
@@ -236,26 +331,41 @@ function LoadedBoard({ board }: { board: Board }) {
       !click.shiftKey
     ) {
       event.preventDefault()
-      void flush().then((saved) => {
-        if (saved) router.push(link)
-      })
+      void go(link)
     }
   }
 
-  async function leave() {
-    if (await flush()) router.push("/boards")
+  function restoreName() {
+    const next = nameRef.current.trim() || savedNameRef.current
+    if (next === nameRef.current) return
+    nameRef.current = next
+    setName(next)
+    changed()
   }
 
-  function remove() {
+  async function remove() {
+    // Best effort: a save that fails must not keep a board from being deleted,
+    // and the phrase is the name the server holds, which is trimmed and may
+    // differ from an unsaved edit in the field.
+    await flush()
+    const title = savedNameRef.current
     confirm({
       title: "Delete board",
-      description: `Delete “${name}” and all its drawings? This cannot be undone.`,
-      phrase: name,
+      description: `Delete “${title}” and all its drawings? This cannot be undone.`,
+      phrase: title,
       confirmLabel: "Delete board",
-      action: async (confirm) => {
-        if (!(await flush())) throw new Error("Save the latest board changes before deleting it")
-        await del(`/boards/${board.id}`, { confirm })
-        deletedRef.current = true
+      action: async (phrase) => {
+        abandonedRef.current = true
+        if (timerRef.current) clearTimeout(timerRef.current)
+        try {
+          await del(`/boards/${board.id}`, { confirm: phrase })
+        } catch (cause) {
+          if (!(cause instanceof ApiError && cause.code === "board_not_found")) {
+            abandonedRef.current = false
+            changed()
+            throw cause
+          }
+        }
         router.push("/boards")
       },
     })
@@ -268,7 +378,7 @@ function LoadedBoard({ board }: { board: Board }) {
           variant="ghost"
           size="icon"
           aria-label="Back to boards"
-          onClick={() => void leave()}
+          onClick={() => void go("/boards")}
         >
           <ArrowLeft />
         </Button>
@@ -282,6 +392,7 @@ function LoadedBoard({ board }: { board: Board }) {
             nameRef.current = event.target.value
             changed()
           }}
+          onBlur={restoreName}
           className="max-w-sm min-w-32 flex-1 border-transparent bg-transparent text-base font-semibold"
         />
         <span role="status" className="mr-auto text-xs text-muted-foreground">
@@ -289,11 +400,18 @@ function LoadedBoard({ board }: { board: Board }) {
           {saveState === "pending" && "Unsaved changes"}
           {saveState === "saving" && "Saving…"}
           {saveState === "error" && "Save failed — try again"}
+          {saveState === "unnamed" && "Name the board to save it"}
           {saveState === "conflict" && "Changed in another tab — reload to review"}
+          {saveState === "missing" && "This board was deleted — changes can’t be saved"}
         </span>
         {canWrite && (
           <>
-            <Button variant="outline" size="sm" onClick={() => void flush()}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={saveState === "conflict" || saveState === "missing"}
+              onClick={() => void flush()}
+            >
               <FloppyDisk /> Save
             </Button>
             <Button
@@ -330,6 +448,7 @@ function LoadedBoard({ board }: { board: Board }) {
             onLinkOpen={onLinkOpen}
             name={name}
             theme="dark"
+            UIOptions={{ canvasActions: { saveToActiveFile: false } }}
             viewModeEnabled={!canWrite}
           />
         </div>
@@ -422,6 +541,32 @@ function LoadedBoard({ board }: { board: Board }) {
         )}
       </div>
       {dialog}
+      <Modal
+        open={leaving !== null}
+        onOpenChange={(open) => !open && setLeaving(null)}
+        title="Leave without saving?"
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setLeaving(null)}>
+              Stay
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                abandonedRef.current = true
+                if (leaving) router.push(leaving)
+              }}
+            >
+              Leave without saving
+            </Button>
+          </>
+        }
+      >
+        <p className="text-body leading-relaxed">
+          Your latest changes to this board are not on the server. Leaving discards them.
+        </p>
+      </Modal>
     </div>
   )
 }

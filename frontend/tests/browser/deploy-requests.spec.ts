@@ -1,5 +1,16 @@
-import { expect, test } from "@playwright/test"
-import { json, mockProject, user } from "./deploy-fixture"
+import { expect, test, type Page } from "@playwright/test"
+import {
+  INGRESS_CONTAINER,
+  deploymentRequests,
+  healthyOperations,
+  json,
+  mockProject,
+  now,
+  showcaseRuntime,
+  steps,
+  user,
+} from "./deploy-fixture"
+import type { DeploymentRuntimeServices, LogLine } from "../../src/lib/types"
 
 /**
  * The project's Logs page, after it stopped being one pane of container output.
@@ -7,10 +18,180 @@ import { json, mockProject, user } from "./deploy-fixture"
  * The page it replaced was not broken — it was answering a question nobody had.
  * A Next.js production server prints a startup banner and then nothing, so a
  * deployment serving a thousand requests a minute showed thirty-nine lines
- * ending at "Ready in 236ms" and never changed. These tests hold the three
+ * ending at "Ready in 236ms" and never changed. These tests hold the
  * readings that fixed it: what the ingress served, what the container printed,
- * and what Docker did to it.
+ * what the builds said, and what Docker did to it — each on this page.
  */
+
+/** The live release's two services, one stack, and a container of the release before it. */
+const WEB = "abc123".padEnd(64, "0")
+const DB = "db4567".padEnd(64, "0")
+const OLD = "0ld789".padEnd(64, "0")
+const stackRuntime: DeploymentRuntimeServices = {
+  status: "available",
+  observedAt: now,
+  services: [
+    {
+      containerId: WEB,
+      name: "api-production-r20",
+      releaseId: 20,
+      liveRelease: true,
+      state: "running",
+      health: "healthy",
+      imageId: `sha256:${"a".repeat(64)}`,
+      image: "ghcr.io/acme/api:2",
+      stack: "api-production",
+      service: "web",
+    },
+    {
+      containerId: DB,
+      name: "api-production-postgres",
+      releaseId: 20,
+      liveRelease: true,
+      state: "running",
+      health: "healthy",
+      imageId: `sha256:${"d".repeat(64)}`,
+      image: "postgres:16-alpine",
+      stack: "api-production",
+      service: "postgres",
+    },
+    {
+      containerId: OLD,
+      name: "api-production-r19",
+      releaseId: 19,
+      liveRelease: false,
+      state: "exited",
+      health: "unavailable",
+      imageId: `sha256:${"e".repeat(64)}`,
+      image: "ghcr.io/acme/api:1",
+      stack: "api-production-r19",
+      service: "web",
+    },
+  ],
+}
+
+/** What the application printed around the failing checkout, through the app lens. */
+const APP_LINES: LogLine[] = [
+  {
+    text: "Error: connect ECONNREFUSED 10.0.4.7:5432",
+    timestamp: "2026-09-03T11:59:30.900Z",
+    level: "error",
+    stream: "stderr",
+    event: "exception",
+    attrs: { error: "Error: connect ECONNREFUSED 10.0.4.7:5432" },
+  },
+  {
+    text: "    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1606:16)",
+    timestamp: "2026-09-03T11:59:30.900Z",
+    level: "error",
+    stream: "stderr",
+    cont: true,
+  },
+  {
+    text: "POST /api/checkout 500 in 2811ms",
+    timestamp: "2026-09-03T11:59:31.100Z",
+    level: "error",
+    stream: "stdout",
+    event: "request",
+    attrs: { method: "POST", path: "/api/checkout", status: "500", class: "5xx" },
+  },
+]
+
+/** Caddy's own line about the same request, through the caddy lens. */
+const CADDY_LINE: LogLine = {
+  text: '{"level":"error","ts":1788436771.2,"logger":"http.log.error","msg":"dial tcp 172.18.0.5:3000: connect: connection refused","request":{"host":"api.example.com","uri":"/api/checkout"},"status":502}',
+  timestamp: "2026-09-03T11:59:31.200Z",
+  level: "error",
+  event: "upstream_refused",
+  message: "dial tcp 172.18.0.5:3000: connect: connection refused",
+  attrs: {
+    upstream: "172.18.0.5:3000",
+    host: "api.example.com",
+    error: "dial tcp 172.18.0.5:3000: connect: connection refused",
+  },
+}
+
+const searchResult = (lines: LogLine[], extra: Record<string, unknown> = {}) => ({
+  lines,
+  scanned: lines.length,
+  matched: lines.length,
+  truncated: false,
+  complete: true,
+  files: [],
+  histogram: [],
+  tookMillis: 2,
+  ...extra,
+})
+
+/** A release of project 7, as the environment's list gives it. */
+const release = (id: number, number: number) => ({
+  id,
+  projectId: 7,
+  environmentId: 12,
+  number,
+  runId: 80 + number,
+  state: id === 20 ? "live" : "retained",
+  planRevision: number,
+  configDigest: `sha256:${"b".repeat(64)}`,
+  variablesDigest: `sha256:${"c".repeat(64)}`,
+  strategy: "blue_green",
+  expectedDowntime: false,
+  createdAt: "2026-09-02T12:00:00Z",
+  pinned: false,
+})
+
+/**
+ * The host's log reads, as this page makes them: every search and every live
+ * socket recorded, so a test can say which question a press sent.
+ */
+async function mockOutput(page: Page) {
+  const searches: URLSearchParams[] = []
+  const sockets: URLSearchParams[] = []
+  await page.route("**/api/v1/logs/**", (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.endsWith("/logs/search")) return json(route, {})
+    searches.push(url.searchParams)
+    const source = url.searchParams.get("source")
+    if (url.searchParams.get("facets") === "error")
+      return json(
+        route,
+        searchResult([], {
+          lens: "app",
+          facets: {
+            error: {
+              values: [
+                {
+                  value: "Error: connect ECONNREFUSED 10.0.4.7:5432",
+                  count: 13,
+                  errors: 13,
+                  last: "2026-09-03T11:59:30.900Z",
+                  samples: { component: "checkout" },
+                },
+              ],
+              distinct: 1,
+              other: 0,
+              missing: 0,
+            },
+          },
+        }),
+      )
+    if (url.searchParams.get("facets") === "event")
+      return json(route, searchResult([], { lens: "app" }))
+    if (source === `docker:${INGRESS_CONTAINER}`)
+      return json(route, searchResult([CADDY_LINE], { lens: "caddy" }))
+    return json(route, searchResult(APP_LINES, { lens: "app" }))
+  })
+  await page.routeWebSocket(/\/api\/v1\/logs\/stream/, (socket) => {
+    const params = new URL(socket.url()).searchParams
+    sockets.push(params)
+    socket.onClose(() => {})
+    socket.send(
+      JSON.stringify({ type: "meta", data: { kind: "docker", lens: "app" }, ts: Date.now() }),
+    )
+    socket.send(JSON.stringify({ type: "logs", data: APP_LINES, ts: Date.now() }))
+  })
+  return { searches, sockets }
+}
 
 test.describe("a deployment's traffic", () => {
   // The readings count up on an overdamped spring that takes seconds to
@@ -214,7 +395,7 @@ test.describe("a deployment's traffic", () => {
     expect(href).toContain("pages=true")
   })
 
-  test("a failing request opens onto the container's output and events around that minute", async ({
+  test("a failing request shows what its container and its proxy wrote, and opens Output there", async ({
     page,
   }) => {
     await mockProject(page, {
@@ -234,18 +415,76 @@ test.describe("a deployment's traffic", () => {
         ],
       },
     })
+    const { searches } = await mockOutput(page)
     await page.goto("/deploy/7/logs")
     await page.getByText("/api/checkout").first().click()
 
-    // The container's lines are one press away, on the host Logs page, for the
-    // minute either side — the one time anybody wants them.
-    const output = page.getByRole("link", { name: "Container output around this moment" })
-    await expect(output).toBeVisible()
-    const href = await output.getAttribute("href")
-    expect(href).toContain("/logs?source=docker%3Aabc123")
-    expect(href).toContain("mode=search")
-    expect(href).toContain("since=2026-09-03T11%3A58%3A31")
+    // The container's own lines while the request was in flight, in the row
+    // that asked — from the moment it arrived (2.84s before it was answered)
+    // to a second after, and said to be approximate, since nothing ties a
+    // line to a request but the time.
+    const lines = page.getByRole("region", { name: "Lines from this request" })
+    await expect(lines.getByText("approximate")).toBeVisible()
+    await expect(lines.getByText("POST /api/checkout 500 in 2811ms")).toBeVisible()
+    const own = searches.find((q) => q.get("source") === "docker:abc123")!
+    expect(own.get("since")).toBe("2026-09-03T11:59:27.160Z")
+    expect(own.get("until")).toBe("2026-09-03T11:59:32.000Z")
+    expect(own.get("order")).toBe("asc")
 
+    // A 5xx also gets what the proxy said: Caddy's error line for the same
+    // host while it was in flight and a second either side, read off the
+    // ingress through the caddy lens.
+    const proxy = page.getByRole("region", { name: "Proxy said" })
+    await expect(proxy.getByText(/connection refused/).first()).toBeVisible()
+    const caddy = searches.find((q) => q.get("source") === `docker:${INGRESS_CONTAINER}`)!
+    expect(caddy.get("lens")).toBe("caddy")
+    expect(caddy.getAll("f")).toEqual([
+      "event:upstream_refused",
+      "event:upstream_timeout",
+      "event:error",
+      "host:api.example.com",
+    ])
+    expect(caddy.get("since")).toBe("2026-09-03T11:59:27.160Z")
+    expect(caddy.get("until")).toBe("2026-09-03T11:59:32.000Z")
+
+    // The redirect to the host Logs page is gone: the full output is a view
+    // of this page, on History at the minute either side.
+    await expect(page.getByRole("link", { name: /Container output/ })).toHaveCount(0)
+    await page.getByRole("button", { name: "Open in Output", exact: true }).click()
+    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await expect
+      .poll(() =>
+        searches.some(
+          (q) =>
+            q.get("source") === "docker:abc123" &&
+            q.get("since") === "2026-09-03T11:58:31.000Z" &&
+            q.get("until") === "2026-09-03T12:00:31.000Z",
+        ),
+      )
+      .toBe(true)
+    const url = new URL(page.url())
+    expect(url.searchParams.get("view")).toBe("output")
+    expect(url.searchParams.get("service")).toBe("abc123")
+    expect(url.searchParams.get("moment")).toBe("2026-09-03T11:59:31Z")
+
+    // The output's own quick view for its request lines is "HTTP", so the
+    // page's Requests view is the one button of that name.
+    await expect(page.getByRole("button", { name: /^HTTP/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Requests", exact: true })).toHaveCount(1)
+
+    // The other question a failure raises: what happened to the container then.
+    await page
+      .getByRole("navigation", { name: "Log view" })
+      .getByRole("button", { name: "Requests", exact: true })
+      .click()
+    await page.getByText("/api/checkout").first().click()
     await page.getByRole("button", { name: "Container events around this moment" }).click()
     await expect(page.getByRole("button", { name: "Events", exact: true })).toHaveAttribute(
       "aria-pressed",
@@ -438,11 +677,207 @@ test.describe("a deployment's traffic", () => {
     ).toBeVisible()
   })
 
-  test("the output tab is gone", async ({ page }) => {
-    await mockProject(page)
+  test("Output reads each service in the page, and the Runtime's Logs lands on its service", async ({
+    page,
+  }) => {
+    await mockProject(page, { runtime: stackRuntime })
+    const { sockets } = await mockOutput(page)
+    // What the Runtime page's and the game console's "Logs" hand over: a
+    // container, and nothing else — which is a request for its output.
+    await page.goto(`/deploy/7/logs?service=${DB}`)
+
+    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    const picker = page.getByRole("combobox", { name: "Service" })
+    await expect(picker).toHaveText(/api-production-postgres/)
+    await expect.poll(() => sockets.map((q) => q.get("source"))).toContain(`docker:${DB}`)
+    await expect(page.getByText("Error: connect ECONNREFUSED 10.0.4.7:5432")).toBeVisible()
+
+    // Live and History inside the page's pane, and no second Insights: the
+    // page has one, the requests', with the output's ranking at its end.
+    await expect(page.getByRole("button", { name: "Live", exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Insights", exact: true })).toHaveCount(1)
+    await expect(
+      page.locator('[data-slot="pane"] [data-slot="pane"]:not([data-flush])'),
+    ).toHaveCount(0)
+
+    // The live release's services one at a time, all of them merged, and the
+    // release before it after them; the address follows the choice.
+    await picker.click()
+    const options = page.getByRole("option")
+    await expect(options).toHaveText([
+      "api-production-r20",
+      "api-production-postgres",
+      "All services",
+      "api-production-r19",
+    ])
+    await page.getByRole("option", { name: "All services" }).click()
+    await expect.poll(() => sockets.map((q) => q.get("source"))).toContain("stack:api-production")
+    await expect.poll(() => new URL(page.url()).searchParams.get("service")).toBe("all")
+
+    // A container that is no longer there is said to be gone, never swapped.
+    await page.goto("/deploy/7/logs?view=output&service=removed")
+    await expect(page.getByText("This log source is no longer available")).toBeVisible()
+  })
+
+  test("the Runtime page's Logs opens this page's Output on that container", async ({ page }) => {
+    await mockProject(page, { runtime: stackRuntime })
+    const { sockets } = await mockOutput(page)
+    await page.routeWebSocket(/\/api\/v1\/docker\/containers\/.*\/stats\/stream/, () => {})
+    await page.goto("/deploy/7/runtime")
+    await page.getByRole("button", { name: "Actions for api-production-postgres" }).click()
+    await page.getByRole("menuitem", { name: "Logs", exact: true }).click()
+
+    await expect(page).toHaveURL(new RegExp(`/deploy/7/logs\\?service=${DB}`))
+    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await expect.poll(() => sockets.map((q) => q.get("source"))).toContain(`docker:${DB}`)
+  })
+
+  test("a deployment nobody routes to opens on its output", async ({ page }) => {
+    await mockProject(page, {
+      runtime: stackRuntime,
+      operations: {
+        ...healthyOperations,
+        domains: { status: "available", domains: [] },
+      },
+    })
+    await mockOutput(page)
     await page.goto("/deploy/7/logs")
-    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveCount(0)
-    await expect(page.getByRole("button", { name: "Insights", exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    // The default is not written into the address: the page at rest is its bare URL.
+    await expect(page).toHaveURL(/\/deploy\/7\/logs$/)
+  })
+
+  test("Builds lists the runs and shows the chosen one's transcript on the page", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+      socket.onClose(() => {})
+      socket.send(
+        JSON.stringify({
+          type: "snapshot",
+          data: {
+            run: {
+              id: 84,
+              runNumber: 1,
+              projectId: 7,
+              environmentId: 12,
+              state: "failed",
+              operation: "deploy",
+              trigger: "manual",
+              actor: "operator",
+              requestedAt: now,
+              claimedAt: now,
+              endedAt: now,
+              planRevision: 3,
+              metadata: {},
+            },
+            steps,
+          },
+          ts: Date.now(),
+        }),
+      )
+      socket.send(
+        JSON.stringify({
+          type: "events",
+          data: [
+            {
+              seq: 20,
+              type: "step.log",
+              runId: 84,
+              stepId: 105,
+              ts: now,
+              data: {
+                stream: "stderr",
+                text: "npm ERR! code ELIFECYCLE\nBuild failed: exit status 1\n",
+                truncated: false,
+              },
+            },
+          ],
+          ts: Date.now(),
+        }),
+      )
+    })
+    await page.goto("/deploy/7/logs")
+    await page.getByRole("button", { name: "Builds", exact: true }).click()
+
+    const rail = page.getByRole("navigation", { name: "Builds" })
+    await expect(rail.getByRole("button", { name: /#1 Deploy/ })).toHaveAttribute(
+      "aria-current",
+      "true",
+    )
+    // The transcript, inline, in the run page's own console.
+    await expect(page.getByText("Build failed: exit status 1")).toBeVisible()
+    await expect(page.getByRole("textbox", { name: "Search build logs" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Open the run" })).toHaveAttribute(
+      "href",
+      "/deploy/7/runs/84",
+    )
+    await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("builds")
+  })
+
+  test("a crash loop is one row, and an exit carries its last lines", async ({ page }) => {
+    // The container is still there, so what it printed is there to read.
+    await mockProject(page, { runtime: showcaseRuntime })
+    const { searches } = await mockOutput(page)
+    const at = (minute: number, second = 0) =>
+      `2026-09-03T11:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}Z`
+    const event = (action: string, time: string, exitCode?: string) => ({
+      time,
+      type: "container",
+      action,
+      name: "api-production-r20",
+      id: "c0ffee",
+      exitCode,
+      message:
+        action === "die"
+          ? `api-production-r20 exited with status ${exitCode}`
+          : "api-production-r20 started",
+      level: action === "die" ? "error" : "info",
+      source: "daemon",
+      owner: { "environment-id": "12" },
+    })
+    await page.route("**/api/v1/deploy/7/lifecycle*", (route) =>
+      json(route, {
+        status: "available",
+        watching: true,
+        since: "2026-09-03T06:00:00Z",
+        events: [
+          event("die", at(9), "1"),
+          event("start", at(8)),
+          event("die", at(7, 50), "1"),
+          event("start", at(6)),
+          event("die", at(5, 55), "1"),
+          event("start", at(4)),
+          event("die", at(3), "1"),
+        ],
+      }),
+    )
+    await page.goto("/deploy/7/logs?view=events")
+
+    const feed = page.getByRole("region", { name: "Container events" })
+    // Three exits and three restarts with one code are one incident.
+    await expect(feed.getByText("Restarted ×3 in 5 min")).toBeVisible()
+    await expect(feed.getByText("· exit 1")).toBeVisible()
+    await expect(feed.getByText("api-production-r20 started")).toHaveCount(0)
+    await feed.getByRole("button", { name: "6 events" }).click()
+    await expect(feed.getByText("api-production-r20 started")).toHaveCount(3)
+
+    // The newest exit opens on the minute before it, read from the container.
+    const last = feed.getByRole("region", { name: "Last lines" }).first()
+    await expect(last.getByText("Error: connect ECONNREFUSED 10.0.4.7:5432")).toBeVisible()
+    const read = searches.find((q) => q.get("source") === "docker:c0ffee")!
+    expect(read.get("since")).toBe("2026-09-03T11:08:00.000Z")
+    expect(read.get("until")).toBe("2026-09-03T11:09:00Z")
   })
 
   test("events name the exit code, and say whether the dashboard or Docker did it", async ({
@@ -556,6 +991,52 @@ test.describe("a deployment's traffic", () => {
     await expect(page.getByText("two minutes either side")).toBeVisible()
   })
 
+  test("a moment sent to Events is not Output's, and Output's own comes back with it", async ({
+    page,
+  }) => {
+    await mockProject(page, { runtime: stackRuntime })
+    const { searches } = await mockOutput(page)
+    await page.goto("/deploy/7/logs")
+    await page.getByText("/api/checkout").first().click()
+    await page.getByRole("button", { name: "Container events around this moment" }).click()
+    await expect(page.getByText("two minutes either side")).toBeVisible()
+
+    // Output was never asked about that minute: it opens live.
+    await page.getByRole("button", { name: "Output", exact: true }).click()
+    await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    expect(new URL(page.url()).searchParams.get("moment")).toBeNull()
+
+    // A moment Output was sent is its own, and stays with it for the tab —
+    // History on those minutes, still named, after a trip away and back.
+    await page
+      .getByRole("navigation", { name: "Log view" })
+      .getByRole("button", { name: "Requests", exact: true })
+      .click()
+    await page.getByText("/api/checkout").first().click()
+    await page.getByRole("button", { name: "Open in Output", exact: true }).click()
+    await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await page.goto("/deploy/7")
+    await page.goto("/deploy/7/logs?view=output")
+    await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("moment"))
+      .toBe("2026-09-03T11:59:31Z")
+    expect(
+      searches.some(
+        (q) => q.get("since") === "2026-09-03T11:58:31.000Z" && q.get("source") === `docker:${WEB}`,
+      ),
+    ).toBe(true)
+  })
+
   test("only an address worth blocking is offered the verb", async ({ page }) => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
@@ -641,6 +1122,367 @@ test.describe("a deployment's traffic", () => {
         ),
       )
       .toBe(true)
+  })
+
+  test("the Agents and Came from lists narrow like every other, and the output's failures close Insights", async ({
+    page,
+  }) => {
+    await mockProject(page, { runtime: stackRuntime })
+    const { searches } = await mockOutput(page)
+    const asked: URL[] = []
+    await page.route("**/api/v1/deploy/7/requests*", async (route) => {
+      asked.push(new URL(route.request().url()))
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/logs?view=insights")
+
+    await page.getByRole("button", { name: "Show every request from Chrome" }).click()
+    await expect
+      .poll(() => asked.some((url) => url.searchParams.get("agent") === "Chrome"))
+      .toBe(true)
+    await expect(page.getByRole("button", { name: "Clear the agent filter" })).toBeVisible()
+    await page
+      .getByRole("button", { name: "Show every request that came from www.google.com" })
+      .click()
+    await expect
+      .poll(() => asked.some((url) => url.searchParams.get("referer") === "www.google.com"))
+      .toBe(true)
+    await page.getByRole("button", { name: "Clear the referer filter" }).click()
+    await page.getByRole("button", { name: "Clear the agent filter" }).click()
+
+    // At the end, what the live release's services threw over the same
+    // window, ranked by what the exception says.
+    const output = page.getByRole("region", { name: "Output" })
+    await expect(output.getByText("Error: connect ECONNREFUSED 10.0.4.7:5432")).toBeVisible()
+    const ranked = searches.find((q) => q.get("facets") === "error")!
+    expect(ranked.get("source")).toBe("stack:api-production")
+    expect(ranked.getAll("f")).toEqual(["event:exception"])
+    expect(ranked.get("since")).toBeTruthy()
+    // A row opens Output around the last time it was thrown.
+    // Each row is named by what it says, so a reader hears which exception
+    // it is — and the tooltip is where a line longer than the column is read.
+    await output
+      .getByRole("button", {
+        name: 'Read the output around the last "Error: connect ECONNREFUSED 10.0.4.7:5432"',
+      })
+      .click()
+    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("moment"))
+      .toBe("2026-09-03T11:59:30.900Z")
+  })
+
+  test("a band of response times is asked for, and the question survives a reload", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    const asked: URL[] = []
+    await page.route("**/api/v1/deploy/7/requests*", async (route) => {
+      asked.push(new URL(route.request().url()))
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/logs")
+
+    // The chip's name is its word at every width (on a phone only the glyph shows).
+    await page.getByRole("button", { name: "Took", exact: true }).click()
+    await page.getByLabel("At least").fill("200")
+    await page.getByLabel("At most").fill("1000")
+    await page.getByRole("button", { name: "Apply" }).click()
+    await expect
+      .poll(() =>
+        asked.some(
+          (url) =>
+            url.searchParams.get("minMs") === "200" && url.searchParams.get("maxMs") === "1000",
+        ),
+      )
+      .toBe(true)
+    await expect(page.getByRole("button", { name: "Clear the fast filter" })).toBeVisible()
+    await page.getByLabel("Filter requests by path").fill("/api")
+
+    // The question is in the address, so a link is the same question…
+    await expect.poll(() => new URL(page.url()).searchParams.get("path")).toBe("/api")
+    const link = new URL(page.url())
+    expect(link.searchParams.get("maxMs")).toBe("1000")
+    // …and in the tab, so a trip to another view and back keeps it.
+    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await expect.poll(() => new URL(page.url()).searchParams.get("path")).toBeNull()
+    await page.getByRole("button", { name: "Requests", exact: true }).click()
+    await expect(page.getByLabel("Filter requests by path")).toHaveValue("/api")
+    await page.goto(link.toString())
+    await expect(page.getByLabel("Filter requests by path")).toHaveValue("/api")
+    await expect(page.getByRole("button", { name: "Clear the slow filter" })).toBeVisible()
+  })
+
+  test("the last hour moves with the clock while the page is open", async ({ page }) => {
+    await page.clock.install({ time: new Date("2026-09-03T12:00:00Z") })
+    await mockProject(page)
+    const asked: string[] = []
+    await page.route("**/api/v1/deploy/7/requests*", async (route) => {
+      const url = new URL(route.request().url())
+      if (url.searchParams.get("limit") === "500") asked.push(url.searchParams.get("since") ?? "")
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/logs")
+    await expect.poll(() => asked.length).toBeGreaterThan(0)
+    // The hour before the page opened (the installed clock keeps running).
+    const opened = Date.parse(asked[0]) - Date.parse("2026-09-03T11:00:00Z")
+    expect(opened).toBeGreaterThanOrEqual(0)
+    expect(opened).toBeLessThan(60_000)
+    // Half an hour on the page: "the last hour" is the half hour since as well.
+    await page.clock.fastForward("30:00")
+    await expect
+      .poll(() => Date.parse(asked.at(-1)!) - Date.parse(asked[0]))
+      .toBeGreaterThanOrEqual(30 * 60_000)
+  })
+
+  test("an alert's link opens the requests around the moment it fired", async ({ page }) => {
+    await mockProject(page)
+    const asked: URL[] = []
+    await page.route("**/api/v1/deploy/7/requests*", async (route) => {
+      asked.push(new URL(route.request().url()))
+      await route.fallback()
+    })
+    await page.goto("/deploy/7/logs?view=requests&moment=2026-09-03T11:50:00Z")
+    await expect
+      .poll(() =>
+        asked.some(
+          (url) =>
+            url.searchParams.get("since") === "2026-09-03T11:20:00.000Z" &&
+            url.searchParams.get("until") === "2026-09-03T12:20:00.000Z",
+        ),
+      )
+      .toBe(true)
+    // The moment became the window: the address says so, and a reload keeps it.
+    await expect.poll(() => new URL(page.url()).searchParams.get("range")).toBe("custom")
+    const url = new URL(page.url())
+    expect(url.searchParams.get("moment")).toBeNull()
+    expect(url.searchParams.get("since")).toBe("2026-09-03T11:20:00.000Z")
+    asked.length = 0
+    await page.reload()
+    await expect
+      .poll(() =>
+        asked.some(
+          (url) =>
+            url.searchParams.get("since") === "2026-09-03T11:20:00.000Z" &&
+            url.searchParams.get("until") === "2026-09-03T12:20:00.000Z",
+        ),
+      )
+      .toBe(true)
+    await expect(page.getByRole("combobox", { name: "Request window" })).toHaveText(/11:20.*12:20/)
+    expect(new URL(page.url()).searchParams.get("since")).toBe("2026-09-03T11:20:00.000Z")
+  })
+
+  test("a request whose release has since been removed says so, rather than reading another container", async ({
+    page,
+  }) => {
+    await mockProject(page, {
+      runtime: {
+        status: "available",
+        observedAt: now,
+        services: [
+          {
+            containerId: "abc123",
+            name: "api-production-r20",
+            releaseId: 20,
+            liveRelease: true,
+            state: "running",
+            health: "healthy",
+            imageId: `sha256:${"a".repeat(64)}`,
+          },
+        ],
+      },
+    })
+    // Release #1 went live at eleven and #2 at noon: the failing checkout at
+    // 11:59 was #1's, whose containers are gone.
+    await page.route("**/api/v1/deploy/7/environments/12/releases*", (route) =>
+      json(route, [
+        { ...release(20, 2), activatedAt: now },
+        { ...release(19, 1), activatedAt: "2026-09-03T11:00:00Z" },
+      ]),
+    )
+    const { searches } = await mockOutput(page)
+    await page.goto("/deploy/7/logs")
+    await page.getByText("/api/checkout").first().click()
+
+    const lines = page.getByRole("region", { name: "Lines from this request" })
+    await expect(lines.getByText(/Release #1 was live then/)).toBeVisible()
+    await expect(page.getByRole("region", { name: "Proxy said" })).toBeVisible()
+    // The live container did not exist then: its lines would answer another question.
+    expect(searches.some((q) => q.get("source") === "docker:abc123")).toBe(false)
+    await expect(page.getByRole("button", { name: "Open in Output", exact: true })).toHaveCount(0)
+  })
+
+  test("behind nginx, a failure reads the site's error log, and the lines are the second around the answer", async ({
+    page,
+  }) => {
+    await mockProject(page, {
+      runtime: {
+        status: "available",
+        observedAt: now,
+        services: [
+          {
+            containerId: "abc123",
+            name: "api-production-r20",
+            releaseId: 20,
+            liveRelease: true,
+            state: "running",
+            health: "healthy",
+            imageId: `sha256:${"a".repeat(64)}`,
+          },
+        ],
+      },
+    })
+    const errorLog = "/var/log/nginx/just-dashboard-env-12.error.log"
+    await page.route("**/api/v1/deploy/7/requests*", (route) => {
+      const body = deploymentRequests(new URL(route.request().url()))
+      // nginx's combined format: no host, no duration, and the site's own error file.
+      return json(route, {
+        ...body,
+        driver: "nginx",
+        format: "combined",
+        latency: false,
+        ingress: undefined,
+        errorLog,
+        entries: body.entries.map((entry) => ({ ...entry, durationMs: undefined })),
+        slowest: [],
+        summary: { ...body.summary, latency: undefined },
+      })
+    })
+    const { searches } = await mockOutput(page)
+    const own: URLSearchParams[] = []
+    await page.route("**/api/v1/logs/search*", (route) => {
+      const url = new URL(route.request().url())
+      if (url.searchParams.get("source") !== "docker:abc123") return route.fallback()
+      own.push(url.searchParams)
+      return json(route, searchResult([]))
+    })
+    await page.goto("/deploy/7/logs")
+    await page.getByText("/api/checkout").first().click()
+
+    const proxy = page.getByRole("region", { name: "Proxy said" })
+    await expect(proxy.getByText("the site's nginx error log")).toBeVisible()
+    const read = searches.find((q) => q.get("source") === `file:${errorLog}`)!
+    expect(read.get("lens")).toBe("nginx-error")
+    // The file is the site's own, and its lines carry no host to match.
+    expect(read.getAll("f")).toEqual([])
+    expect(read.get("since")).toBe("2026-09-03T11:59:30.000Z")
+    expect(read.get("until")).toBe("2026-09-03T11:59:32.000Z")
+
+    // No duration, so no arrival: the second either side of the answer, said as that.
+    const lines = page.getByRole("region", { name: "Lines from this request" })
+    await expect(
+      lines.getByText("The container wrote nothing in the second either side of the answer."),
+    ).toBeVisible()
+    expect(own[0].get("since")).toBe("2026-09-03T11:59:30.000Z")
+    expect(own[0].get("until")).toBe("2026-09-03T11:59:32.000Z")
+  })
+
+  test("a deployment nobody routes to still has its output's failures on Insights", async ({
+    page,
+  }) => {
+    await mockProject(page, {
+      runtime: stackRuntime,
+      operations: { ...healthyOperations, domains: { status: "available", domains: [] } },
+    })
+    await page.route("**/api/v1/deploy/7/requests*", (route) =>
+      json(route, {
+        ...deploymentRequests(new URL(route.request().url())),
+        status: "unavailable",
+        reason: "This deployment has no public route, so nothing records the requests it serves.",
+        entries: [],
+      }),
+    )
+    const { searches } = await mockOutput(page)
+    await page.goto("/deploy/7/logs?view=insights")
+
+    // Which nothing this is, and the owner's way out of it, above the section.
+    await expect(page.getByText("No request record for this deployment")).toBeVisible()
+    await expect(page.getByRole("link", { name: "Add a domain" })).toHaveAttribute(
+      "href",
+      "/deploy/7/settings/domains",
+    )
+    const output = page.getByRole("region", { name: "Output" })
+    await expect(output.getByText("Error: connect ECONNREFUSED 10.0.4.7:5432")).toBeVisible()
+    await expect(output.getByRole("heading", { level: 2, name: "Output" })).toBeVisible()
+    expect(searches.find((q) => q.get("facets") === "error")!.get("source")).toBe(
+      "stack:api-production",
+    )
+  })
+
+  test("an OOM loop folds, a clean loop is not a failure, and a removed container's last lines are said to be gone", async ({
+    page,
+  }) => {
+    // Nothing of this deployment runs any more, and Docker holds no container of it.
+    await mockProject(page, { runtime: { status: "available", observedAt: now, services: [] } })
+    const { searches } = await mockOutput(page)
+    const at = (minute: number, second = 0) =>
+      `2026-09-03T11:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}Z`
+    const event = (
+      action: string,
+      time: string,
+      exitCode?: string,
+      name = "api-production-r20",
+    ) => ({
+      time,
+      type: "container",
+      action,
+      name,
+      id: name === "api-production-r20" ? "c0ffee" : "b00c1e",
+      exitCode,
+      message:
+        action === "die"
+          ? `${name} exited with status ${exitCode}`
+          : action === "oom"
+            ? `${name} ran out of memory`
+            : `${name} started`,
+      level: action === "start" || exitCode === "0" ? "info" : "error",
+      source: "daemon",
+      owner: { "environment-id": "12" },
+    })
+    await page.route("**/api/v1/deploy/7/lifecycle*", (route) =>
+      json(route, {
+        status: "available",
+        watching: true,
+        since: "2026-09-03T06:00:00Z",
+        events: [
+          // Docker sends the reaper's note and the exit in the same second.
+          event("start", at(9)),
+          event("die", at(8, 59), "137"),
+          event("oom", at(8, 59)),
+          event("start", at(7)),
+          event("oom", at(6, 59)),
+          event("die", at(6, 59), "137"),
+          event("start", at(5)),
+          event("die", at(4, 59), "137"),
+          event("oom", at(4, 59)),
+          // A job its restart policy runs again, exiting cleanly each time.
+          event("start", at(3), undefined, "report-job"),
+          event("die", at(2), "0", "report-job"),
+          event("start", at(1), undefined, "report-job"),
+          event("die", at(0), "0", "report-job"),
+        ],
+      }),
+    )
+    await page.goto("/deploy/7/logs?view=events")
+
+    const feed = page.getByRole("region", { name: "Container events" })
+    await expect(feed.getByText("Restarted ×3 in 4 min")).toBeVisible()
+    await expect(feed.getByText("· OOM-killed")).toBeVisible()
+    await expect(feed.getByText("· exit 137")).toBeVisible()
+    await expect(feed.getByText("Restarted ×2 in 3 min")).toBeVisible()
+    await expect(feed.getByText("· each exit clean")).toBeVisible()
+    await expect(feed.getByText("· exit 0")).toHaveCount(0)
+
+    // The container is gone, so the newest failure's last lines are said to
+    // be gone with it rather than asked for and refused.
+    const last = feed.getByRole("region", { name: "Last lines" })
+    await expect(last).toHaveCount(1)
+    await expect(last.getByText(/has since been removed/)).toBeVisible()
+    await expect(feed.getByRole("button", { name: "Last lines" })).toHaveCount(0)
+    expect(searches.some((q) => q.get("source")?.startsWith("docker:"))).toBe(false)
   })
 
   test("the page fits without scrolling sideways, at a phone and at a laptop", async ({

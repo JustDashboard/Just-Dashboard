@@ -16,13 +16,13 @@ import { PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { IconAction, RowActions } from "@/components/icon-action"
+import { IconAction, DimActions } from "@/components/icon-action"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
-import { Address } from "@/components/security/marks"
+import { Address, PeerIdentity } from "@/components/security/marks"
 import { InitialsMark } from "@/components/account/user-avatar"
+import { ProductLogo } from "@/components/product-logo"
 import { Meter } from "@/components/meter"
 import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import { VerbActions } from "@/components/verbs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
@@ -111,8 +111,10 @@ export function LoginsPanels() {
       </StatGrid>
 
       <CurrentSessions poll={sessions} />
-      {admin && <AttackersPanel poll={attackers} />}
-      <LoginHistoryPanel history={history} />
+      <div className={cn("grid min-w-0 items-start gap-6", admin && "2xl:grid-cols-2")}>
+        {admin && <AttackersPanel poll={attackers} />}
+        <LoginHistoryPanel history={history} />
+      </div>
     </>
   )
 }
@@ -126,7 +128,14 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
   return (
     <>
       <Panel>
-        <PanelHeader title="Interactive logins" />
+        <PanelHeader
+          title="Interactive logins"
+          actions={
+            <span className="numeric text-hint text-muted-foreground">
+              {sessions.length} open {sessions.length === 1 ? "session" : "sessions"}
+            </span>
+          }
+        />
         <PanelBody flush>
           {loading && !data ? (
             <LoadingPanel rows={3} className="mt-3" />
@@ -144,46 +153,47 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>User</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="hidden sm:table-cell">Terminal</TableHead>
-                    <TableHead className="hidden md:table-cell">Logged in</TableHead>
-                    <TableHead className="hidden lg:table-cell">Idle</TableHead>
-                    <TableHead className="w-full">From</TableHead>
-                    <TableHead className="w-px" />
+                    <TableHead>Account</TableHead>
+                    <TableHead className="w-full">Connection</TableHead>
+                    <TableHead>Session</TableHead>
+                    <TableHead className="w-px">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {sessions.map((session, i) => (
                     <TableRow key={`${session.user}-${session.tty}-${i}`} className="group">
-                      <TableCell className="text-body font-medium">
-                        <span className="inline-flex items-center gap-2">
-                          <InitialsMark name={session.user} size="xs" />
-                          {session.user}
-                        </span>
+                      <TableCell className="py-4">
+                        <div className="flex items-center gap-3">
+                          <InitialsMark name={session.user} />
+                          <div className="space-y-1">
+                            <span className="block text-body font-medium">{session.user}</span>
+                            <span className="font-mono text-hint text-muted-foreground">
+                              {session.tty} · {session.isSsh ? "SSH" : "local"}
+                            </span>
+                          </div>
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Tag>{session.isSsh ? "ssh" : "local"}</Tag>
-                      </TableCell>
-                      <TableCell className="hidden font-mono sm:table-cell">
-                        {session.tty}
-                      </TableCell>
-                      <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">
-                        {session.loginTime ? timestamp(session.loginTime) : "—"}
-                      </TableCell>
-                      <TableCell className="numeric hidden text-muted-foreground lg:table-cell">
-                        {session.idle ?? "—"}
+                        <Address ip={session.from || "local"} />
                       </TableCell>
                       <TableCell>
-                        {session.from ? (
-                          <Address ip={session.from} />
-                        ) : (
-                          <span className="font-mono">local</span>
-                        )}
+                        <div className="space-y-1.5">
+                          <span
+                            className="block text-body"
+                            title={session.loginTime ? timestamp(session.loginTime) : undefined}
+                          >
+                            {session.loginTime ? relativeTime(session.loginTime) : "—"}
+                          </span>
+                          <span className="block text-hint text-muted-foreground">
+                            Idle: {session.idle || "—"}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell>
                         {can("system.admin") && session.pid ? (
-                          <RowActions className="justify-end">
+                          <DimActions className="justify-end">
                             <IconAction
                               label={`Disconnect ${session.user}`}
                               className="text-destructive"
@@ -208,7 +218,7 @@ function CurrentSessions({ poll }: { poll: ReturnType<typeof usePoll<LoginSessio
                             >
                               <Logout />
                             </IconAction>
-                          </RowActions>
+                          </DimActions>
                         ) : null}
                       </TableCell>
                     </TableRow>
@@ -302,58 +312,51 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
               <TableHeader className={stickyTableHeader}>
                 <TableRow>
                   <TableHead>Address</TableHead>
-                  <TableHead>Attempts</TableHead>
-                  <TableHead className="hidden w-full sm:table-cell">Accounts tried</TableHead>
-                  <TableHead className="hidden md:table-cell">First</TableHead>
-                  <TableHead className="hidden sm:table-cell">Last</TableHead>
-                  <TableHead className="w-px" />
+                  <TableHead className="w-full">Attempts</TableHead>
+                  <TableHead>
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.attackers.map((attacker) => (
                   <TableRow key={attacker.address} className="group">
-                    <TableCell>
-                      <Address ip={attacker.address} />
+                    <TableCell className="py-4">
+                      <PeerIdentity ip={attacker.address} />
+                      <span className="mt-2 block text-hint text-muted-foreground">
+                        {attacker.users.length
+                          ? `Tried ${attacker.users.join(", ")}`
+                          : "No accounts recorded"}
+                      </span>
                     </TableCell>
                     <TableCell>
-                      {/* Against the most persistent address on the page,
-                          so the shape of the list is read down the column
-                          before any figure is. */}
-                      <span className="flex w-28 items-center gap-2">
-                        <span
-                          className={cn(
-                            "numeric w-10 shrink-0 text-right text-xs font-medium",
-                            attacker.attempts >= 50 ? "text-destructive" : "text-muted-foreground",
-                          )}
-                        >
-                          {attacker.attempts}
-                        </span>
+                      <div className="min-w-24 space-y-2">
+                        <div className="flex items-center justify-between gap-4">
+                          <span
+                            className={cn(
+                              "numeric text-body font-medium",
+                              attacker.attempts >= 50 && "text-destructive",
+                            )}
+                          >
+                            {attacker.attempts}
+                          </span>
+                          <span
+                            className="text-hint text-muted-foreground"
+                            title={`Last: ${timestamp(attacker.last)}`}
+                          >
+                            {relativeTime(attacker.last)}
+                          </span>
+                        </div>
                         <Meter
                           value={(attacker.attempts / most) * 100}
                           tone={attacker.attempts >= 50 ? "danger" : "default"}
                           size="thin"
-                          className="min-w-0 flex-1"
                           label={`${attacker.attempts} attempts`}
                         />
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden sm:table-cell">
-                      <span className="flex flex-wrap gap-1">
-                        {attacker.users.map((user) => (
-                          <Tag key={user} mono>
-                            {user}
-                          </Tag>
-                        ))}
-                        {attacker.users.length === 0 && (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">
-                      {relativeTime(attacker.first)}
-                    </TableCell>
-                    <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">
-                      {relativeTime(attacker.last)}
+                        <span className="block text-hint text-muted-foreground">
+                          Since {relativeTime(attacker.first)}
+                        </span>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <VerbActions
@@ -484,43 +487,48 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
             <Table containerClassName="max-h-[28rem]">
               <TableHeader className={stickyTableHeader}>
                 <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead className="hidden sm:table-cell">Terminal</TableHead>
+                  <TableHead>Account</TableHead>
+                  <TableHead className="w-full">Origin</TableHead>
                   <TableHead>When</TableHead>
-                  <TableHead className="hidden md:table-cell">Lasted</TableHead>
-                  <TableHead className="w-full">From</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {shown.map((record, i) => (
                   <TableRow key={`${record.user}-${record.loginTime ?? i}-${i}`}>
-                    <TableCell className="text-body font-medium">
-                      <span className="flex items-center gap-2">
-                        {record.user}
-                        {record.kind !== "login" && (
-                          <Tag>{record.kind === "boot" ? "boot" : "shutdown"}</Tag>
+                    <TableCell className="py-4">
+                      <div className="flex items-center gap-3">
+                        {record.kind === "login" ? (
+                          <InitialsMark name={record.user} />
+                        ) : (
+                          <ProductLogo id="linux" size="sm" />
                         )}
-                      </span>
+                        <div className="space-y-1">
+                          <span className="block text-body font-medium">{record.user}</span>
+                          <span className="block font-mono text-hint text-muted-foreground">
+                            {record.kind === "login" ? record.tty || "—" : record.kind}
+                          </span>
+                        </div>
+                      </div>
                     </TableCell>
-                    <TableCell className="hidden font-mono sm:table-cell">
-                      {record.tty || "—"}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {record.loginTime ? timestamp(record.loginTime) : "—"}
-                    </TableCell>
-                    <TableCell className="numeric hidden text-muted-foreground md:table-cell">
-                      {record.active ? (
-                        <Status state="active" label="still open" />
-                      ) : (
-                        (record.duration ?? record.ended ?? "—")
-                      )}
+                    <TableCell className="whitespace-normal">
+                      <Address ip={record.from || "local"} />
                     </TableCell>
                     <TableCell>
-                      {record.from ? (
-                        <Address ip={record.from} />
-                      ) : (
-                        <span className="font-mono">local</span>
-                      )}
+                      <div className="space-y-1.5">
+                        <span
+                          className="block text-body"
+                          title={record.loginTime ? timestamp(record.loginTime) : undefined}
+                        >
+                          {record.loginTime ? relativeTime(record.loginTime) : "—"}
+                        </span>
+                        {record.active ? (
+                          <Status state="active" label="still open" />
+                        ) : (
+                          <span className="block text-hint text-muted-foreground">
+                            {record.duration ?? record.ended ?? "—"}
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

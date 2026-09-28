@@ -119,6 +119,9 @@ Create containers from a template, a pasted `docker run` or a form, with the com
 before it runs. Two verdicts: what Docker reports, and what needs attention — exposure, disk,
 memory limits, security posture — each with an explanation and, where possible, a button.
 Stacks deploy, rebuild and roll back with the compose diff shown first.
+Each container's Usage tab combines live CPU, memory, network and block I/O readings with recorded
+history. Inspect per-interface transfer rates, totals, packet errors and drops, memory cache and CPU
+throttling; unavailable readings stay distinct from zero activity.
 
 ### Terminal
 
@@ -178,8 +181,9 @@ each one feeds — with a map of the deployments, containers and machines readin
 database opens on its connection string, as the URL, the `.env` line or the shell command, on
 this server or, with one press, from anywhere. Browse and edit rows, change the structure, run
 queries, draw the schema, read the advisor's findings with their fixes, manage the server's
-accounts, databases and extensions, and keep and restore dumps. A database installed on the
-machine itself is connected by letting the dashboard make its own account on it.
+accounts, databases and extensions, keep and restore dumps, and read the server's own log and the
+statements it recorded as slow. A database installed on the machine itself is connected by letting the
+dashboard make its own account on it.
 
 ### And the rest
 
@@ -187,7 +191,7 @@ machine itself is connected by letting the dashboard make its own account on it.
 | --- | --- |
 | **Metrics** | CPU split by user, system, iowait and steal; memory judged on what is available; pressure, disks, inodes, sockets and interfaces, with seven days of history the backend records itself. |
 | **Processes** | Live table, PM2, systemd services and cron jobs, each with its verbs as words. |
-| **Logs** | Files, container output, PM2 and the journal in one viewer, filtered on the server. |
+| **Logs** | Files, container output, compose stacks, PM2 and the journal in one viewer, filtered on the server, each read as what it is — Postgres's slow statements and auth failures, nginx's requests and upstream errors, sshd's logins and attackers — with quick views and insights. Every service's page shows its own log the same way, where the service is. |
 | **Proxy & TLS** | Sites written as ordinary nginx, streams, certificates through certbot including DNS wildcards, and a live TLS report. |
 | **Security** | A verdict on the host: firewall (ufw or firewalld), sshd, fail2ban, open ports, connections, logins and who is attacking. |
 | **Backups** | Scheduled archives to disk, S3 or B2, native database dumps, single-file and in-place restore, and a list of what is not covered. |

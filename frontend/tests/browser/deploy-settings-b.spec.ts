@@ -1198,6 +1198,42 @@ test.describe("Automation", () => {
     expect(rejectBody).toEqual({ revision: "deadbeefcafefeed0000" })
   })
 
+  test("a sender's repository wraps inside the picture instead of running past its edge", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/environments/12/triggers**", (route) =>
+      route.request().method() === "GET"
+        ? json(route, [
+            {
+              id: 31,
+              projectId: 7,
+              environmentId: 12,
+              name: "GitHub webhook",
+              kind: "github",
+              provider: "github",
+              config: { repository: "JustDashboard/frontend", ref: "main", delivery: "app" },
+              hookId: "provider-hook",
+              enabled: true,
+              lastStatus: "",
+            },
+          ])
+        : route.fallback(),
+    )
+    await page.goto("/deploy/7/settings/automation")
+
+    const picture = page.getByRole("list", { name: "What deploys this project" })
+    const title = picture.getByText("JustDashboard/frontend@main", { exact: true })
+    for (const width of [1024, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect(title).toBeVisible()
+      const frame = (await picture.boundingBox())!
+      const words = (await title.boundingBox())!
+      expect(words.x).toBeGreaterThanOrEqual(frame.x)
+      expect(words.x + words.width).toBeLessThanOrEqual(frame.x + frame.width)
+    }
+  })
+
   test("legacy compose projects show only the legacy hook", async ({ page }) => {
     await mockProject(page, { normalized: false })
     await page.goto("/deploy/7/settings/automation")

@@ -169,7 +169,7 @@ function Entry({
 
         <ul className="mt-5 max-w-3xl space-y-3.5">
           {shown.map((change, i) => (
-            <li key={i} className="flex gap-4">
+            <li key={i} className="flex items-baseline gap-4">
               <span className="w-16 shrink-0">
                 <ChangeLabel kind={change.kind} />
               </span>

@@ -9,6 +9,9 @@ export type VHost = {
   upstreams: string[]
   tls: boolean
   certPath?: string
+  /** Where an nginx site writes its requests and errors, as its own page reads them. */
+  accessLogPath?: string
+  errorLogPath?: string
   modified: string
   size: number
 }

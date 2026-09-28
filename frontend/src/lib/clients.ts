@@ -127,7 +127,7 @@ export function crawlerOf(ua: string): { name: string; product?: string } | unde
 }
 
 /**
- * What the request log's agent family is — the backend's `agentFamily()`
+ * What the request log's agent family is — the backend's `accesslog.AgentFamily()`
  * reduces a user agent to "Chrome", "curl", "Googlebot", or its first word.
  * A family is not a user agent, so it is read as the product token it would
  * start one with (`Chrome/`), through the same tables `parseAgent` uses.

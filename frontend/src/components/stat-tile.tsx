@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 import type { Tone } from "@/components/tone"
-import { ArrowRight } from "@/components/icons"
+import { ArrowRight, Filter } from "@/components/icons"
 import { rowReveal } from "@/components/icon-action"
 import { Meter } from "@/components/meter"
 
@@ -138,30 +138,77 @@ export function StatLink({
 }
 
 /**
+ * A stat tile that narrows what is under it.
+ *
+ * `StatLink`'s shape for a figure that is a question rather than a place: a
+ * log's "Auth failures 12" is the filter those twelve lines answer, and a
+ * press applies it to the pane below instead of leaving the page. The mark
+ * that appears is the funnel every "only lines like this" carries, for the
+ * same reason the link's is an arrow — a tile that washes on hover and says
+ * nothing of what a press does is a surface that only reacts. `pressed` is
+ * the figure's filter being the one on screen.
+ */
+export function StatButton({
+  label,
+  pressed,
+  onClick,
+  children,
+}: {
+  label: string
+  pressed?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={pressed}
+      className="group relative block h-full w-full min-w-0 text-left focus-ring-inset [&_[data-slot=stat-tile]>p:last-child]:pr-5"
+    >
+      {children}
+      <Filter
+        aria-hidden
+        className={cn(
+          "absolute right-4 bottom-4 size-3.5 text-muted-foreground",
+          pressed ? "text-foreground" : rowReveal(),
+        )}
+      />
+    </button>
+  )
+}
+
+/**
  * A run of `StatTile`s as one object.
  *
  * No outer frame. Four bordered cards with a gap between them drew eight
  * vertical edges to separate four numbers; one framed grid with hairlines
  * drew five; this draws three — a hairline between neighbours and nothing
  * around the outside — so the figures read as a row of readings on the page
- * rather than as a box of them above it. The first column starts on the page's
- * own edge, in line with the title.
+ * rather than as a box of them above it.
+ *
+ * Every tile keeps the same inset, the first in a row included. The first
+ * column used to give up its left padding to line its name up with the title,
+ * and on a `StatLink` that put the hover wash flush against the name: one tile
+ * of the row drawn tighter than the others beside it.
  *
  * `framed` restores the box, for the one place a run of figures sits inside
  * another surface and needs an edge of its own.
  *
  * `columns` is the count at the widest breakpoint; below it they stack two-up
  * and then one-up, which is the arrangement every call site had written out by
- * hand as `sm:grid-cols-2 xl:grid-cols-4`.
+ * hand as `sm:grid-cols-2 xl:grid-cols-4`. A tile left alone on the last row
+ * takes the whole row rather than leave a hole beside it — five two-up is two,
+ * two and one, and the one used to sit under half a hairline.
  *
  * `dense` keeps them two-up on a phone as well, for a run of short figures
  * that should not stack into four hundred pixels before the first thing the
  * page is about: the Logs and Deployments readings, the settings pages'. The
- * tiles give up a step of padding below `sm` to fit, and an odd count lets its
- * last tile take the whole row rather than leave a hole beside it. From `sm`
- * up it is the default grid exactly. It is opt-in because a figure like
- * "Everything is up" needs the whole width of a phone, and only the call site
- * knows which kind it has.
+ * tiles give up a step of padding below `sm` to fit. From `sm` up it is the
+ * default grid exactly. It is opt-in because a figure like "Everything is up"
+ * needs the whole width of a phone, and only the call site knows which kind it
+ * has.
  */
 export function StatGrid({
   columns = 4,
@@ -182,15 +229,7 @@ export function StatGrid({
         framed && "overflow-hidden rounded-xl border bg-card",
         "[&>*]:min-w-0 [&>a]:block [&>a]:h-full",
         // A hairline between cells and only between them: a cell starting a
-        // row draws no left edge and the first row draws no top one. Unframed,
-        // the cell that starts a row also drops its left padding so the
-        // column of names lines up with the page's content edge.
-        //
-        // Each padding rule is written twice: once for a tile that sits
-        // inside the cell (a `StatLink`), once for a tile that *is* the cell.
-        // The descendant form alone never matched the second — the child is
-        // not its own descendant — so every grid of bare tiles started a
-        // step in from the content edge it was meant to line up with.
+        // row draws no left edge and the first row draws no top one.
         "[&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0",
         // Dense writes the two-up rules at the base width, where the default
         // writes them from `sm` over a one-up base.
@@ -198,33 +237,27 @@ export function StatGrid({
           ? [
               "grid-cols-2",
               "[&>*]:border-l [&>*:nth-child(-n+2)]:border-t-0 [&>*:nth-child(2n+1)]:border-l-0",
-              !framed &&
-                "[&_[data-slot=stat-tile]]:pl-5 [&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-0 [&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-0",
-              "max-sm:[&>*:last-child:nth-child(odd)]:col-span-2",
-              "max-sm:[&_[data-slot=stat-tile]]:py-3 max-sm:[&_[data-slot=stat-tile]]:pr-4 max-sm:[&_[data-slot=stat-tile]]:pl-4",
+              "max-sm:[&_[data-slot=stat-tile]]:px-4 max-sm:[&_[data-slot=stat-tile]]:py-3",
             ]
           : [
               "grid-cols-1 sm:grid-cols-2",
-              !framed && "[&_[data-slot=stat-tile]]:pl-0",
               "sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0",
-              !framed &&
-                "sm:[&_[data-slot=stat-tile]]:pl-5 sm:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-0 sm:[&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-0",
             ],
+        // The lone last tile while the grid is two-up, bounded by the width
+        // where it goes to its full count: past that, an odd tile is no longer
+        // alone on its row, and spanning two would push it onto a row of its own.
+        columns === 2 && dense && "[&>*:last-child:nth-child(odd)]:col-span-2",
+        columns === 2 && !dense && "sm:[&>*:last-child:nth-child(odd)]:col-span-2",
+        columns === 3 && dense && "max-lg:[&>*:last-child:nth-child(odd)]:col-span-2",
+        columns === 3 && !dense && "sm:max-lg:[&>*:last-child:nth-child(odd)]:col-span-2",
+        columns >= 4 && dense && "max-xl:[&>*:last-child:nth-child(odd)]:col-span-2",
+        columns >= 4 && !dense && "sm:max-xl:[&>*:last-child:nth-child(odd)]:col-span-2",
         columns === 3 &&
-          "lg:grid-cols-3 lg:[&>*]:border-l lg:[&>*:nth-child(-n+3)]:border-t-0 lg:[&>*:nth-child(2n+1)]:border-l lg:[&>*:nth-child(3n+1)]:border-l-0",
-        columns === 3 &&
-          !framed &&
-          "lg:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 lg:[&>*:nth-child(3n+1)_[data-slot=stat-tile]]:pl-0 lg:[&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-5 lg:[&>[data-slot=stat-tile]:nth-child(3n+1)]:pl-0",
+          "lg:grid-cols-3 lg:[&>*]:border-l lg:[&>*:last-child:nth-child(3n+1)]:col-span-3 lg:[&>*:nth-child(-n+3)]:border-t-0 lg:[&>*:nth-child(2n+1)]:border-l lg:[&>*:nth-child(3n+1)]:border-l-0",
         columns === 4 &&
-          "xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&>*:nth-child(4n+1)]:border-l-0",
-        columns === 4 &&
-          !framed &&
-          "xl:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 xl:[&>*:nth-child(4n+1)_[data-slot=stat-tile]]:pl-0 xl:[&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-5 xl:[&>[data-slot=stat-tile]:nth-child(4n+1)]:pl-0",
+          "xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:last-child:nth-child(4n+1)]:col-span-4 xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&>*:nth-child(4n+1)]:border-l-0",
         columns === 5 &&
-          "xl:grid-cols-5 xl:[&>*]:border-l xl:[&>*:nth-child(-n+5)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&>*:nth-child(5n+1)]:border-l-0",
-        columns === 5 &&
-          !framed &&
-          "xl:[&>*:nth-child(2n+1)_[data-slot=stat-tile]]:pl-5 xl:[&>*:nth-child(5n+1)_[data-slot=stat-tile]]:pl-0 xl:[&>[data-slot=stat-tile]:nth-child(2n+1)]:pl-5 xl:[&>[data-slot=stat-tile]:nth-child(5n+1)]:pl-0",
+          "xl:grid-cols-5 xl:[&>*]:border-l xl:[&>*:last-child:nth-child(5n+1)]:col-span-5 xl:[&>*:nth-child(-n+5)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&>*:nth-child(5n+1)]:border-l-0",
         className,
       )}
       {...props}

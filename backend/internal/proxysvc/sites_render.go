@@ -188,8 +188,8 @@ func renderServerOptions(l *lines, spec *SiteSpec) {
 		wrote = true
 	}
 	if spec.AccessLog {
-		l.add("    access_log /var/log/nginx/%s.access.log;", spec.Name)
-		l.add("    error_log  /var/log/nginx/%s.error.log;", spec.Name)
+		l.add("    access_log %s;", nginxAccessLogPath(spec.Name))
+		l.add("    error_log  %s;", nginxErrorLogPath(spec.Name))
 		wrote = true
 	} else {
 		l.add("    access_log off;")

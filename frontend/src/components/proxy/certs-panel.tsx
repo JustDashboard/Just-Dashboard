@@ -25,13 +25,16 @@ import {
 } from "@/components/proxy/certbot-panel"
 import { CertificateInventory } from "@/components/proxy/certificate-inventory"
 import { ImportDialog } from "@/components/proxy/import-dialog"
+import { RenewalLog } from "@/components/proxy/renewal-log"
 import { WatchedDomains } from "@/components/proxy/watched-domains"
 import { Button } from "@/components/ui/button"
 
 /**
  * Inventory and lifecycle controls sit beside each other: the certificate you
- * inspect stays separate from the certbot lineage you renew. Watched domains
- * stay distinct because a live handshake can disagree with the file on disk.
+ * inspect stays separate from the certbot lineage you renew. Every renewal
+ * certbot ran follows them across the page's width, which a log needs. Watched
+ * domains stay distinct because a live handshake can disagree with the file on
+ * disk.
  */
 export function CertificatesPage() {
   const { can } = useAuth()
@@ -293,6 +296,11 @@ export function CertificatesPage() {
           )}
         </div>
       </div>
+
+      {/* Every renewal certbot ran, not only the ones started from this
+          page: the timer's runs are the ones nobody was watching. */}
+      {!certbotGone && <RenewalLog certbot={certbot.data} />}
+
       <WatchedDomains admin={admin} />
 
       {admin && (

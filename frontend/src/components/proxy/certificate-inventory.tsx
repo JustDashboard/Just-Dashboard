@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { ProxyGrid } from "@/components/proxy/route-path"
 import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { certificateProduct } from "@/components/proxy/marks"
+import { sitePath } from "@/components/proxy/site-verbs"
 
 /** One inventory with a detail surface, so paths and every SAN remain readable at any width. */
 export function CertificateInventory({
@@ -175,7 +176,7 @@ export function CertificateInventory({
                     {selectedCert.usedBy.map((site) => (
                       <Link
                         key={site}
-                        href={`/proxy/sites?site=${encodeURIComponent(site)}`}
+                        href={sitePath(site)}
                         className="break-all text-brand hover:underline"
                       >
                         {site}

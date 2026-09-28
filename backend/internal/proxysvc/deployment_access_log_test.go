@@ -93,6 +93,11 @@ func TestNginxAccessLogPathMatchesWhatTheSiteAsksFor(t *testing.T) {
 	if !strings.Contains(rendered, nginxAccessLogPath("just-dashboard-env-3.conf")) {
 		t.Fatalf("reader and writer disagree about the path:\n%s", rendered)
 	}
+	// The error file is read for why a request failed; it has to be the one
+	// the same block writes.
+	if !strings.Contains(rendered, "error_log  "+nginxErrorLogPath("just-dashboard-env-3.conf")+";") {
+		t.Fatalf("reader and writer disagree about the error file:\n%s", rendered)
+	}
 }
 
 func TestAccessLogReaderWithoutDockerIngressIsTheHostFile(t *testing.T) {
@@ -106,6 +111,9 @@ func TestAccessLogReaderWithoutDockerIngressIsTheHostFile(t *testing.T) {
 	}
 	if facts.Driver != accessDriverNginx || facts.Format != accesslog.FormatCombined || facts.Latency {
 		t.Fatalf("facts = %+v", facts)
+	}
+	if facts.ErrorLog != "/var/log/nginx/just-dashboard-env-3.conf.error.log" || facts.Container != "" {
+		t.Fatalf("where nginx says why a request failed = %+v", facts)
 	}
 	if _, _, err := s.AccessLogReader(context.Background(), "../etc/passwd"); err == nil {
 		t.Fatal("an unsafe route name must not become a path under /var/log")

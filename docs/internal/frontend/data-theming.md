@@ -4,13 +4,24 @@
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
   `X-Confirm-Encoding: uri` (including Unicode and surrounding whitespace), `ApiError` with
   `needsConfirmation`/`isAuthProblem`/`needsTotp`; `wsUrl()` and
-  `downloadUrl()` build the non-JSON URLs.
+  `downloadUrl()` build the non-JSON URLs. A `Query` value may be an array, which is a repeated
+  parameter (`f=a&f=b`, the log routes' field predicates): joining on a character and splitting it again
+  on the server breaks on a value that holds it, and an IPv6 address is all colons. `useSocket` takes the
+  same `Query`.
+- A log source is asked for by one id, built only in `lib/log-sources.ts` (`dockerSource`,
+  `fileSource` → `file:<path>`, `journalSource`, `journalIdSource`, `kernelSource`, `stackSource`,
+  `pm2Source`): an id spelled by hand — a bare path here, `file:` there — was a different session key for
+  the same file and opened on the wrong remembered filter.
 - `usePoll` schedules the next request only after the previous one settles and pauses scheduled
   requests on hidden tabs. Its fixed-length dependency list identifies the resource: changing it
   immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
   retain the same resource's data. Cleanup aborts the request and ignores late responses.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket.
+- Persisted view/session values use individual Web Storage entries, so changing a small filter does not
+  serialize unrelated editor drafts. Writes remain synchronous for reload persistence. Existing single
+  documents migrate on first read, with restoration and the old persistence path if splitting exceeds
+  quota. Prefix deletion and sign-out remove the same values; the memory store never writes to storage.
 - `lib/view-state.ts` is what a page remembers about itself, in three stores drawn by how long the
   thing should live. `useViewState` is **how the page is arranged** — a hidden panel, a chosen tab, a
   sort order, a toggle — in localStorage, so a reload keeps it. `useSessionState` is **what you were
@@ -33,7 +44,14 @@
   arriving on the rail's bare link puts the last selection back with `replaceState`; the databases
   layout does the same for `?conn=`, `?schema=` and `?table=`. Every route area was reviewed for this:
   filters, chips, facets, pagination, chosen sub-tabs, open detail rows, in-progress forms and the
-  whole new-project flow are remembered; a search box is no longer the exception it used to be.
+  whole new-project flow are remembered; a search box is no longer the exception it used to be. A
+  service's logs keep their reading — source, view, filter, lens, range, window — under the embedding
+  page's `storageKey` (`databases.<id>.logs`, `docker.container.<id>.logs`, `docker.stack.<name>.logs`,
+  `deploy.<id>.output`, `proxy.site.<name>`, `security.ssh.log`, `packages.log`, …), never under
+  `logs.*`, which is the host Logs page's own; a sheet's live only as long as it is open. A request
+  record's question is kept under its owner's key (`deploy.<id>.requests`,
+  `proxy.site.<name>.requests`), so a deployment's or a site's requests read the same question on its
+  own page and on `/logs`.
 - `useMetricsWindow` — the charts' window as a **stack**: zooming is exploratory, so the way out of five
   minutes is the hour it was inside, not the day you started from. Deliberately component state — a named
   range is a standing choice, a zoom is a question being asked now, and restoring yesterday's zoom shows an
@@ -51,10 +69,12 @@
   connection and table. Exact integer/decimal SQL values and Redis scan cursors travel as strings;
   `lib/db-values.ts` preserves precision and rejects non-finite ordinary numeric input. CSV exports
   escape column names and carriage returns with the same rules as cell values.
-- PM2 actions, deletes, and log sockets send both the trusted `daemonId` as `user` and numeric `id`.
-  The application name alone cannot identify a process across multiple account-owned daemons.
-  A false `logsAvailable` shows the server's `logsUnavailableReason` instead of opening a rejected
-  socket. Available log streams show their connection state, including reconnects.
+- PM2 actions and deletes send both the trusted `daemonId` as `user` and numeric `id`, and a PM2
+  application's logs are the `pm2:<daemon>/<id>/<name>` source on `/logs/stream` (`pm2Source`, the
+  account and name escaped): the application name alone cannot identify a process across multiple
+  account-owned daemons. A false `logsAvailable` shows the server's `logsUnavailableReason` instead of
+  opening a rejected socket. Available log streams show their connection state, including reconnects,
+  and a stream that ended says Stopped rather than reconnecting for ever.
 - Blueprint catalogue entries expose `deploymentSupported` and `unavailableReason`. Unsupported
   entries remain visible with their reason but cannot be selected or inspected for deployment.
   Template selection keeps a stable details column while fetching, preserves per-template edits, and
@@ -81,7 +101,11 @@
   and the `MetricsWindow` a dragged span becomes (fixed in the past, fetched once, never re-polled).
   **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
   magnitude, and a chart drawing twenty coarse points and a hundred fine ones at equal spacing lies about
-  when things happened. Container charts offer only recorded ranges. `hooks/use-metrics.ts` and
+  when things happened. Container charts offer only recorded ranges; the container Usage tab also has
+  a separate `container-live-usage.tsx` reading section on its existing stats WebSocket. Its rate helper
+  differences Docker timestamps and per-interface counters, rejects resets and gaps, and establishes a
+  new baseline after reconnects. Pausing freezes labelled readings; a disconnected or ten-second-stale
+  feed clears current figures without hiding recorded history. `hooks/use-metrics.ts` and
   `hooks/use-metrics-history.ts` are the React surface over those two.
 - `hooks/use-self-update.tsx` is one poll for the whole shell, and its gotcha is the feature's design
   problem: **the API goes away in the middle of the thing it is watching**. A failed poll during a run

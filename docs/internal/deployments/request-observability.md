@@ -27,20 +27,26 @@ And nothing anywhere recorded a single request to any deployment. `renderDockerC
 
 ## The decision
 
-"Logs" is one word covering three questions. The page answers all three, in one pane, over one
+"Logs" is one word covering several questions. The page answers them in one pane, over one
 timeline:
 
 | View | Question | Source |
 | --- | --- | --- |
 | **Requests** | Is it serving traffic, and how well? | The ingress's access log |
-| **Insights** | What does the window add up to — which page fails, who is scanning, where visitors come from? | The same record, faceted |
+| **Insights** | What does the window add up to — which page fails, who is scanning, where visitors come from, which exception the release keeps throwing? | The same record, faceted, and the output's exceptions and failed starts |
+| **Output** | What did the containers write? | Each container's output, read through its image's lens |
+| **Builds** | What did the builds say? | The recent runs' transcripts |
 | **Events** | What happened to the container? | Docker's own event stream |
 
-The container's own output is no longer a view of this page. For a modern framework it is a startup
-banner and then silence, and a tab that never moves teaches the reader to ignore the page. The lines
-stay one press away from a failing request — "Container output around this moment" opens the host
-Logs page on the live container for the minute either side (the same handoff a run's own logs use) —
-which is the only time anybody wanted them. The run page keeps its runtime-logs view.
+The container's output was once taken off this page — for a modern framework it is a startup banner
+and then silence, and a tab that never moves teaches the reader to ignore the page — and the first
+answer was a handoff to the host Logs page for the minute around a failing request. It came back as
+**Output**, beside Requests rather than instead of it, because a game server, a worker and a crashing
+release have nothing else to say, and a request's own lines are now inside the request (below): no view
+of this page sends the reader to `/logs`. The page opens on Requests where a domain routes to the
+deployment and on Output for a game or worker profile or a deployment nothing routes to
+(`defaultView`), where "routed" falls back to the saved domains so the page does not flash Requests
+first.
 
 The ingress is the right layer for the first because it is the one place every request passes
 through regardless of what the application chose to write about itself — and it works for every
@@ -120,6 +126,11 @@ each byte once and keeps what it parsed.
   milliseconds out of time order; the running maximum is monotone regardless, and a window's start
   is found in it by binary search — exact, because everything before the index found is older than
   the window and the filter decides the rest.
+- **Aggregation and exports release the route lock.** A reader captures an immutable slice and its
+  coverage, then filters, aggregates and sorts outside the lock. Export callbacks likewise cannot hold
+  up a live tail while a download waits on its client. Published entries are append-only; retention must
+  copy survivors into a new backing array, never compact an array a reader may still hold. The snapshot
+  therefore requires no full-record copy per request and still describes one consistent window.
 - **Rotation, by identity.** A reader addresses a generation by inode, not by path. A read of the
   live file names the inode it expects; when the file has rolled, the container-side script finds the
   old generation with `find -inum` wherever the roller put it, opens it and holds it — an open file
@@ -215,9 +226,25 @@ The page's four readings and the Requests view's own poll share that refresh, an
 is another reader of the same record rather than a second follower of the file: one process reads
 the log, however many pages are open on it.
 
+The window's filter is `requestFilterFrom`, shared by the window, the socket and the export: `path`,
+`client`, `host`, exact `status` codes, `classes`, `methods`, `pages`, `minMs` and `maxMs`, and `agent`
+and `referer` — an agent family as the Agents list names it (`accesslog.AgentFamily`) and a referring
+site as Came from names it, the site's own links excluded — so a row of either list narrows like every
+other. The window also carries where the proxy says why it failed a request: `ingress` (the Caddy
+ingress container, whose runtime log has the upstream's refusal) or `errorLog` (the nginx site's
+`.error.log`).
+
 These sit on the same authenticated group as every other deployment read, with no extra capability.
 That matches the existing boundary rather than widening it: `/logs` already serves
 `/var/log/nginx/access.log`, which is the same data for the same host.
+
+**A proxy site's requests are the same record.** `/proxy/sites/{name}/requests`, `/stream` and
+`/export` answer in a deployment window's shape over the same `accesslog.Store`, under a route of their
+own: `file:<the path the site's access_log names>`, resolved from the site's file on every request and
+held to `JD_LOG_ROOTS` — generations included, before each open — or, for a deployment's own site and a
+Docker Caddy route, the deployment's route itself, so one record is never held twice. Rotated files are
+the names logrotate gives (`logsx.Archives`: `.N` and dated) for sites and deployments alike, compressed
+ones skipped. The contract is in [the proxy's](../backend/databases-proxy-platform.md#proxy).
 
 ## Traffic alerts
 
@@ -240,7 +267,11 @@ Delivery is the notification channels' own: the two events are rendered by `rend
 the same provider payloads a run's outcome takes (Discord, Slack, Telegram, e-mail; a webhook gets the
 envelope with an `alert` block verbatim). The rule's channels, or every enabled channel when it names
 none. "Send test" delivers the rule as if it had just fired, at twice its limit, with `[test]` in the
-title so nobody wakes up for it.
+title so nobody wakes up for it. The message's link opens the Logs page on the requests around the
+moment the rule changed state (`?view=requests&moment=<RFC 3339>`, added by `requestsAt` where the
+moment is known, `modules.go` still supplying the page's address) rather than on "the last hour", which
+an hour later no longer holds what it was about; the page turns a moment on Requests into a window of
+half an hour either side, ending no later than now.
 
 The Logs page carries one line under its readings — no alerts, all quiet with the rules as sentences,
 or what is firing and since when — naming the channels each rule tells by their logos, and saying
@@ -352,7 +383,9 @@ of a host's logs.
 
 `ProjectLogs` is a `StatGrid` of five readings (requests/min with page views, failing share, p95,
 bytes served, container events — the figures count up on arrival through `NumberTicker`) and the
-alerts line over a `Pane` with the three views. Each reading carries its last hour in the tile, as
+alerts line over a `Pane` with the five views, the pane a definite height (`max(28rem, 100dvh − 6rem)`,
+`40rem` from `sm`) with each view scrolling inside it — a 307-line live tail had stretched it to
+nearly seven thousand pixels. Each reading carries its last hour in the tile, as
 the host Overview's do: the request rate, the p95 and the bytes as lines from the buckets, the
 browsers, programs and crawlers that asked as their logos beside the tile's name, the failing share
 as a strip of the hour's sixty minutes (green where a minute went fine, red where it had a 5xx, grey
@@ -369,16 +402,47 @@ the Metrics page's deploy colour), a container exit that was not clean or an OOM
 restart or a start (warning) — a clean exit is the other half of a release going live or of somebody
 stopping it, and is not marked. A spike of red with a deploy mark at its foot is a different
 afternoon from the same spike with none.
-A failing request's detail opens onto the container's output around that minute (host Logs page) and
-onto Events scoped to two minutes either side. The view and that instant are written back to the URL
-(`?view=events&moment=…`, through `history.replaceState` as the host Logs page does): they were read
-on arrival and never written, so pressing the tab changed nothing in the address bar and a reload
-landed back on Requests with the scoping gone — and a link to the minute a deployment broke is
-exactly the thing somebody pastes into a chat.
+A request opens in place on what was written while it was in flight (`request-lines.tsx`):
+**Lines from this request**, the container's lines from its arrival (the answer's time less its
+duration, less a second) to a second after it was answered, labelled *approximate* — the ingress
+records no request id for the application to log, so on a busy container they are other requests' too
+— read from the container that was live then (`containerAt`: the release most recently activated
+before the request, else the live one), and, when that release's containers have since been removed,
+the release named instead of another container's lines; a record with no durations (nginx's
+`combined`) reads the second either side of the answer and says so. A 5xx adds **Proxy said**: the
+Caddy ingress's error lines for the request's host within two seconds, read off the ingress
+container's output through the caddy lens (`event` refused, timeout or error), or the site's nginx
+error log through the nginx-error lens — and nothing found says the application answered the error
+itself. Its verbs are **Open in Output**, History a minute either side on that container (absent when
+it is gone), and Events scoped to two minutes either side. The address says which view, the moment of
+the view on screen (each view keeps its own: Events' two minutes around a request does not leak into
+Output, whose moment is kept for the tab with the History it opened), the service on Output, and the
+request query in the API's own words, through `history.replaceState` as the host Logs page does: they
+were read on arrival and never written, so pressing the tab changed nothing in the address bar and a
+reload landed back on Requests with the scoping gone — and a link to the minute a deployment broke is
+exactly the thing somebody pastes into a chat. `?service=` alone opens Output on that container, which
+is what a Runtime service's and the game console's Logs verbs send. The request query is kept for the
+tab too (`deploy.<id>.requests`), and a preset window is resolved at every poll rather than when it
+was chosen, so half an hour on "Last hour" is still the last hour and the export asks the rows' own
+question.
 
-`LifecycleFeed` carries the toolbar the other two views have — a search box, kind chips with counts,
-and a Live chip over the socket — because it was the only one of the three that could be neither
-searched nor followed. Filtering is applied in the browser rather than on the wire, for the reason
+**Output** (`project-output.tsx`) is the service logs every page embeds, flush in the page's pane:
+one source per container the runtime reports — the live release's first, the one readiness follows or
+the project's own before its neighbours, so the application leads its database — then "All services"
+(`stack:<project>`) for a release of several, then older releases' containers, each read through the
+lens its image calls for, in Live and History only. The page has one Insights, the requests', and the
+output's own ranking is an **Output** section at its end (`output-insights.tsx`): the live release's
+exceptions grouped by their error and component and its failed starts, over the same window floored to
+the minute, each opening Output at its last occurrence; with no request record at all Insights is that
+section under a note saying why. **Builds** (`project-builds.tsx`) is the recent runs down a rail —
+who started each, how it ended, how long, when — with the chosen one's transcript in the run page's own
+console beside it and a link to the run; below 900 px of the pane's own width the rail is the header's
+picker. `useRunStream` (`run-stream.ts`) is the one reader of a run's stream — resync, dedupe, cap,
+resume, close — for this view and the run page alike.
+
+`LifecycleFeed` carries the toolbar the request views have — a search box, kind chips with counts,
+and a Live chip over the socket — because it was the only view that could be neither searched nor
+followed. Filtering is applied in the browser rather than on the wire, for the reason
 the host feed gives: re-subscribing on every keystroke would drop the connection four times a word.
 Its empty state names the boundary instead of asserting steadiness. "Watching since 07:28" is the
 backend's own start, so a few minutes after a restart the old copy — "which for a running deployment
@@ -386,8 +450,15 @@ is the reading you want" — was a claim the page could not make; under an hour 
 begins with the dashboard and nothing from before was kept. A row's release links to the run that put
 it there and a correlated trigger links to `/audit?action=…`, the same hand-off the host feed makes.
 Its rows are grouped under hour rules, each event drawn on its project's or image's tile with what
-happened as a toned badge in the corner, and the rows a poll or the socket brings rise as they
-arrive. The Overview carries two of this page's readings among its own four (requests a minute with
+happened as a toned glyph in the corner (`EventMark`, shared with the Docker page's Events through
+`components/docker/event-marks.tsx`), and the rows a poll or the socket brings rise as they
+arrive. A crash loop is one row: consecutive exit-and-start pairs on one container with one exit code
+fold into "Restarted ×N in M min · exit X" (`foldRestarts` in `logs-model.ts`), an OOM kill folded with
+its exit and a loop of clean exits said to be clean, and the row unfolds onto its events and says
+"docker itself". An exit or an OOM kill has its **Last lines** — the minute before it, through the
+container's lens — folded under it while the container exists, open by default only on the newest
+failure; a removed container's newest failure says it was removed rather than searching. The Overview
+carries two of this page's readings among its own four (requests a minute with
 the hour's line, and the failing share), and each fleet card a sparkline with the rate, both from
 `/deploy/traffic`; the run page's Metrics view leads with `RunTrafficPanel` — requests/min, failing
 share and p95 before → after activation. The readings are
@@ -423,6 +494,14 @@ or past the line a latency alert watches, washed amber, and each mark narrowing 
 requests at least that slow. Every narrowing the page makes is one of the API's own filters —
 `host`, exact `status` codes, `minMs` — and the poll, the socket and the CSV export are asked the
 same query, so what is exported is what is on screen.
+
+`RequestsWorkspace` reads any record by its API base (`/deploy/12`, `/proxy/sites/shop`), so a
+deployment's requests and a site's are one workspace over two routes; the owner adds what it knows
+about one request through one inline slot (`renderInline`, called only for the open row: a
+deployment's lines and proxy, a site's error log), an `emptyAction` (a deployment's Add a domain) and a
+section after Insights. The Took band (at least / at most) is offered only where the record carries
+durations, and the agent and referring-site chips clear themselves like the rest. The host Logs page
+reads the same records in its Requests group.
 
 `RequestConsole` draws rows in the log console's own anatomy rather than a `<table>`: a request record
 is read the way a log is read, and a nine-column table at this density spends its width on cell
@@ -512,8 +591,18 @@ container itself wins over the one naming its project. `TestLiveDeploymentEvents
 drives the whole path against a real daemon — a labelled container exiting 137 and a named network
 destroyed, read back through the real routes and the real socket — because the one thing the unit
 tests cannot hold is whether Docker still carries an object's labels on its events.
-`tests/browser/deploy-requests.spec.ts`
-covers the three views, the readings, chip narrowing, the opened row, the absent-record sentence,
+`internal/accesslog` also covers the agent and referring-site filters, and `internal/api` the filter
+reading them (`TestRequestFilterReadsTheAgentAndTheSiteItCameFrom`) and a site's record read from the
+file its site names, held to the roots, re-resolved when the file moves, streamed and exported
+(`TestSiteRequestsReadTheFileTheSiteNames`); `internal/proxysvc` covers where a site logs
+(`TestParseSiteSpecReadsWhereTheSiteLogs`) and the site's route held to the roots; `internal/deploy` the
+alert link's moment. `components/deploy/logs-model.test.js` covers the default view, the window
+resolved at `now`, the address round trip, which container answered a moment, the picker's order and
+the restart folding. `tests/browser/deploy-requests.spec.ts`
+covers the five views, the readings, the inline lines and Proxy said for Caddy and nginx, a removed
+release, Output's picker and `?service=`, Builds, the crash loop and Last lines, the agent, referer and
+Took narrowings, the query surviving a reload, the alert's moment, chip narrowing, the opened row, the
+absent-record sentence,
 the Events toolbar (kind chips, search, the no-match sentence, the socket), the audit and run links
 on a correlated row, the restart-empty sentence, `?view=`/`?moment=` surviving a reload, which
 addresses are offered a Block, and that the page fits at 390 and 1280 — and that a code, a latency

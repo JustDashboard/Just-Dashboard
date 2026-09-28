@@ -42,7 +42,9 @@ export function tabClasses(selected: boolean | undefined, height: string) {
     // the strip sat within two pixels of the title above it and the panel
     // titles below; with the title at 24 the strip has a rank of its own
     // again, and 12px chrome under a 24px title read as an afterthought.
-    "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-body font-medium whitespace-nowrap transition-colors",
+    // The 2px top padding balances the 2px underline, so the label sits on the
+    // strip's centre line with whatever else shares the strip.
+    "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 pt-0.5 text-body font-medium whitespace-nowrap transition-colors",
     height,
     "focus-ring-inset",
     // The underline is the brand blue: the tab says which view you are

@@ -21,6 +21,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
 import { FactDot, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { InstallPanel } from "@/components/packages/install-panel"
+import { PackageLogView } from "@/components/packages/log-view"
 import {
   OriginFact,
   PackageMark,
@@ -30,7 +31,7 @@ import {
 } from "@/components/packages/marks"
 import { PackageSheet } from "@/components/packages/package-sheet"
 import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelFooter, PanelToolbar } from "@/components/panel"
+import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ProductGlyphs, platformProduct } from "@/components/product-logo"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
@@ -67,8 +68,11 @@ import {
  * Drawn the way the host Overview is (design-system.md §15): the host's
  * identity line — its distribution as the mark, the manager beside the name,
  * the index's age as a fact and whether anything is owed as the verdict, with
- * the index's verbs at its end — four figures as tiles, and three views under
- * one strip of tabs, each a toolbar, a hairline and a framed table. The three
+ * the index's verbs at its end — four figures as tiles, and four views under
+ * one strip of tabs: three a toolbar, a hairline and a framed table, and the
+ * fourth the package manager's own log, read in place through its lens — what
+ * was installed, upgraded and removed, when, by which command — rather than
+ * a link to the logs page. The three
  * things worth acting on before reading any of that — security updates
  * waiting, a reboot owed, an index too old to trust — are notices, each
  * carrying its own button, rather than a framed box with a header and nothing
@@ -86,12 +90,13 @@ import {
 const MAX_ROWS = 400
 
 type Scope = "explicit" | "all" | "upgradable"
-type View = "installed" | "updates" | "install"
+type View = "installed" | "updates" | "install" | "log"
 
 const VIEWS: { key: View; label: string }[] = [
   { key: "installed", label: "Installed" },
   { key: "updates", label: "Updates" },
   { key: "install", label: "Add software" },
+  { key: "log", label: "Log" },
 ]
 
 export default function PackagesPage() {
@@ -249,6 +254,9 @@ export default function PackagesPage() {
 
   const upgradeCount = data?.upgradeCount ?? 0
   const securityCount = data?.securityCount ?? 0
+  // An inventory that failed has answered too: its figures are dashes beside
+  // the error and the package log under it, not a load that never ends.
+  const answered = Boolean(data) || Boolean(inventory.error)
 
   return (
     <Page>
@@ -344,7 +352,7 @@ export default function PackagesPage() {
         <StatTile
           label="Installed"
           value={
-            <Figure settled={Boolean(data)}>
+            <Figure settled={answered}>
               {data?.available ? <NumberTicker value={data.packages.length} /> : "—"}
             </Figure>
           }
@@ -361,7 +369,7 @@ export default function PackagesPage() {
         <StatTile
           label="Installed by hand"
           value={
-            <Figure settled={Boolean(data)}>
+            <Figure settled={answered}>
               {knowsExplicit ? <NumberTicker value={data!.explicitCount} /> : "—"}
             </Figure>
           }
@@ -376,7 +384,7 @@ export default function PackagesPage() {
         <StatTile
           label="Updates"
           value={
-            <Figure settled={Boolean(data)}>
+            <Figure settled={answered}>
               {data?.available ? <NumberTicker value={upgradeCount} /> : "—"}
             </Figure>
           }
@@ -406,7 +414,7 @@ export default function PackagesPage() {
         <StatTile
           label="On disk"
           value={
-            <Figure settled={Boolean(data)}>{data?.totalSize ? bytes(data.totalSize) : "—"}</Figure>
+            <Figure settled={answered}>{data?.totalSize ? bytes(data.totalSize) : "—"}</Figure>
           }
           hint={
             largest?.size
@@ -474,6 +482,17 @@ export default function PackagesPage() {
       />
 
       {inventory.error && <ErrorState error={inventory.error} />}
+      {/* A package database that cannot be read is usually a transaction
+          that did not finish, and apt's own log is where it says why — so
+          the log stays on the page when the views it sits among cannot. */}
+      {inventory.error && !data && (
+        <Panel plain>
+          <PanelHeader title="Package log" />
+          <PanelBody flush className="pt-3">
+            <PackageLogView product={platformProduct(host?.platform)} />
+          </PanelBody>
+        </Panel>
+      )}
       {inventory.loading && !data && <LoadingPanel />}
 
       {data && !data.available && (
@@ -687,6 +706,12 @@ export default function PackagesPage() {
 
           {view === "install" && (
             <InstallPanel manager={data.manager} onJob={console_.attach} onInspect={setInspect} />
+          )}
+
+          {view === "log" && (
+            <PackageLogView
+              product={platformProduct(host?.platform) ?? managerProduct(data.manager)}
+            />
           )}
         </div>
       )}

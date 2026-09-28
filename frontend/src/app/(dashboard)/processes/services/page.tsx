@@ -381,7 +381,7 @@ function UnitNarrowRow({ unit, pending, confirm, act, onOpen }: RowProps) {
           <Tag>{unit.unitFileState || "unknown"}</Tag>
         </div>
         <p className="truncate text-hint text-muted-foreground">{unit.description}</p>
-        <div className="mt-1.5">
+        <div className="mt-1.5 flex">
           <Status
             state={busy ? "activating" : unit.activeState}
             label={busy ? `${busy}…` : `${unit.activeState} (${unit.subState})`}

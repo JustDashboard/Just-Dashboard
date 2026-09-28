@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { PG_LINES } from "./logs-lens-fixture"
 
 /**
  * The three claims the Docker overhaul rests on, checked in a browser.
@@ -971,6 +972,517 @@ test("asking for a container's logs opens the logs", async ({ page }) => {
 })
 
 /**
+ * A database container whose restart policy keeps bringing it back: the
+ * container a Logs tab and an Events view exist for.
+ */
+const DB = "2222222222222222"
+const dbDetail = {
+  ...detail,
+  ...containers[1],
+  env: [],
+  mounts: [],
+  restartPolicy: "always",
+  restartCount: 17,
+  hasHealthcheck: true,
+}
+
+const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
+
+/** A loop of three restarts that exit 1, and the exit that ended it. */
+const dbEvents = (() => {
+  const at = (s: number) => new Date(Date.now() - 20 * 60_000 + s * 1000).toISOString()
+  const ev = (s: number, action: string, exitCode?: string) => ({
+    time: at(s),
+    type: "container",
+    action,
+    name: "db",
+    id: DB,
+    image: "postgres:16",
+    exitCode,
+    message: action === "die" ? "db exited with status 1" : "db started",
+    level: action === "die" ? "error" : "notice",
+    source: "daemon",
+  })
+  return [
+    ev(240, "die", "1"),
+    ev(183, "start"),
+    ev(180, "die", "1"),
+    ev(122, "start"),
+    ev(120, "die", "1"),
+    ev(61, "start"),
+    ev(60, "die", "1"),
+    ev(0, "start"),
+  ]
+})()
+
+/**
+ * What the database wrote around an exit: the minute before it, and the next
+ * attempt starting up a moment after — which a last-lines search, bounded at
+ * the exit, must not bring back as the minute before.
+ */
+const lastLines = (since: number) => [
+  {
+    text: "2026-09-27 10:14:02.311 UTC [1] LOG:  starting PostgreSQL 16.4 on x86_64-pc-linux-gnu",
+    timestamp: new Date(since + 59_000).toISOString(),
+    level: "info",
+    event: "startup",
+  },
+  {
+    text: '2026-09-27 10:14:02.402 UTC [1] FATAL:  data directory "/var/lib/postgresql/data" has invalid permissions',
+    timestamp: new Date(since + 59_990).toISOString(),
+    level: "error",
+    event: "fatal",
+  },
+  {
+    text: "2026-09-27 10:14:02.600 UTC [1] LOG:  the next attempt, starting up",
+    timestamp: new Date(since + 60_200).toISOString(),
+    level: "info",
+    event: "startup",
+  },
+]
+
+/** How a last-lines search is told apart from the pane's own: it asks for this many. */
+const LAST_LINES_LIMIT = "20"
+
+const dbFailure = {
+  containerId: DB,
+  name: "db",
+  checkedAt: minutesAgo(0),
+  state: "looping",
+  headline: "Restart loop detected: 4 starts in 4m.",
+  likely: "It exits with status 1 shortly after starting.",
+  confidence: "inferred",
+  evidence: [],
+  restarts: { count: 17, recent: 4, looping: true, window: "4m", summary: "4 starts in 4m" },
+  suggestions: [],
+  logWindow: {
+    since: minutesAgo(18),
+    until: minutesAgo(15),
+    reason: "the window around the most recent start, which is where the failure repeats",
+  },
+}
+
+const dbInspect = {
+  Id: DB,
+  Config: { Image: "postgres:16", Healthcheck: { Test: ["CMD-SHELL", "pg_isready -U postgres"] } },
+  State: {
+    Status: "running",
+    Health: {
+      Status: "unhealthy",
+      FailingStreak: 2,
+      Log: [
+        {
+          Start: "2026-09-27T10:13:30.000000001Z",
+          End: "2026-09-27T10:13:35.000000001Z",
+          ExitCode: 1,
+          Output: "/var/run/postgresql:5432 - no response\n",
+        },
+        {
+          Start: "2026-09-27T10:13:00.123456789Z",
+          End: "2026-09-27T10:13:00.456789012Z",
+          ExitCode: 0,
+          Output: "/var/run/postgresql:5432 - accepting connections\n",
+        },
+      ],
+    },
+  },
+}
+
+/**
+ * The stack's web service exited and came back. Its events name the
+ * container as compose did, and the service as the stack's log does.
+ */
+const stackEvents = [
+  { action: "die", at: 5, exitCode: "1", message: "running-app-web-1 exited with status 1" },
+  { action: "start", at: 4.9, message: "running-app-web-1 started" },
+].map(({ action, at, exitCode, message }) => ({
+  time: minutesAgo(at),
+  type: "container",
+  action,
+  name: "running-app-web-1",
+  service: "web",
+  id: "4444",
+  image: "web",
+  stack: "running-app",
+  exitCode,
+  message,
+  level: action === "die" ? "error" : "notice",
+  source: "daemon",
+}))
+
+/** A stack's merged log: each line carries the service it came from. */
+const stackLines = [
+  {
+    text: "listening on :3000",
+    timestamp: minutesAgo(3),
+    source: "api",
+    attrs: { service: "api", container: "3333" },
+  },
+  {
+    text: "GET /orders 500 upstream timed out",
+    timestamp: minutesAgo(2),
+    source: "web",
+    level: "error",
+    attrs: { service: "web", container: "4444" },
+  },
+  {
+    text: "GET /health 200",
+    timestamp: minutesAgo(1),
+    source: "api",
+    attrs: { service: "api", container: "3333" },
+  },
+]
+
+type ServiceLogMocks = {
+  sockets: URLSearchParams[]
+  searches: URLSearchParams[]
+  events: URLSearchParams[]
+  eventSockets: URLSearchParams[]
+}
+
+/** The pane's own History searches: bounded at both ends, unlike a reading's, and not a last-lines one. */
+const historySearches = (mocks: ServiceLogMocks) =>
+  mocks.searches.filter((s) => s.has("until") && s.get("limit") !== LAST_LINES_LIMIT)
+
+/**
+ * The service logs a container's and a stack's Logs tab embed, over the
+ * database container and the running-app stack: `/logs/source` describes
+ * each as the server would (the database read as Postgres), the live socket
+ * sends their lines, and every search, event read and socket is recorded so
+ * a spec can say which question reached the server.
+ */
+async function mockServiceLogs(page: Page): Promise<ServiceLogMocks> {
+  const recorded: ServiceLogMocks = { sockets: [], searches: [], events: [], eventSockets: [] }
+  await page.route(`**/api/v1/docker/containers/${DB}`, (route) => json(route, dbDetail))
+  await page.route(`**/api/v1/docker/containers/${DB}/failure`, (route) => json(route, dbFailure))
+  await page.route(`**/api/v1/docker/containers/${DB}/raw`, (route) => json(route, dbInspect))
+  await page.route("**/api/v1/docker/stacks/running-app", (route) => json(route, stacks[0]))
+  await page.route("**/api/v1/docker/events?**", (route) => {
+    const params = new URL(route.request().url()).searchParams
+    recorded.events.push(params)
+    return json(route, {
+      listening: true,
+      since: minutesAgo(180),
+      buffered: dbEvents.length,
+      events:
+        params.get("container") === DB
+          ? dbEvents
+          : params.get("stack") === "running-app"
+            ? stackEvents
+            : [],
+    })
+  })
+  await page.routeWebSocket(/\/api\/v1\/docker\/events\/stream/, (socket) => {
+    recorded.eventSockets.push(new URL(socket.url()).searchParams)
+  })
+  await page.route("**/api/v1/logs/**", (route) => {
+    const url = new URL(route.request().url())
+    const source = url.searchParams.get("source") ?? ""
+    if (url.pathname.endsWith("/logs/source")) {
+      if (source === `docker:${DB}`) {
+        return json(route, { id: source, kind: "docker", status: "running", lens: "postgres" })
+      }
+      if (source === "stack:running-app") {
+        return json(route, { id: source, kind: "stack", status: "running", detail: "2 services" })
+      }
+      return json(route, {})
+    }
+    if (url.pathname.endsWith("/logs/search")) {
+      recorded.searches.push(url.searchParams)
+      const before = url.searchParams.get("limit") === LAST_LINES_LIMIT
+      // Up to the bound and no further, as the server reads it.
+      const until = Date.parse(url.searchParams.get("until") ?? "")
+      const found = before
+        ? lastLines(Date.parse(url.searchParams.get("since")!)).filter(
+            (line) => !(Date.parse(line.timestamp) > until),
+          )
+        : []
+      const facet = url.searchParams.get("facets")
+      return json(route, {
+        facets: facet
+          ? {
+              [facet]: {
+                values: [{ value: "web", count: 1, errors: 1 }],
+                distinct: 1,
+                other: 0,
+                missing: 0,
+              },
+            }
+          : undefined,
+        lines: found,
+        scanned: 40,
+        matched: before ? found.length : 3,
+        truncated: false,
+        complete: true,
+        files: [],
+        histogram: [],
+        tookMillis: 1,
+        lens: source === `docker:${DB}` ? "postgres" : undefined,
+      })
+    }
+    return json(route, {})
+  })
+  await page.routeWebSocket("**/api/v1/logs/stream**", (socket) => {
+    const params = new URL(socket.url()).searchParams
+    recorded.sockets.push(params)
+    const stack = params.get("source")?.startsWith("stack:")
+    socket.send(
+      JSON.stringify({
+        type: "meta",
+        data: {
+          kind: stack ? "stack" : "docker",
+          label: params.get("source"),
+          filtered: false,
+          lens: stack ? undefined : "postgres",
+        },
+        ts: Date.now(),
+      }),
+    )
+    socket.send(
+      JSON.stringify({ type: "logs", data: stack ? stackLines : PG_LINES, ts: Date.now() }),
+    )
+  })
+  return recorded
+}
+
+/**
+ * A container's Logs tab is the service logs every page embeds, not a raw
+ * tail: the lines are read through the lens its image names — a Postgres
+ * container's as deadlocks and failed logins — with the lens's readings over
+ * them, and the tab is still the page's own Radix tab.
+ */
+test("a container's logs read as what its image writes", async ({ page }) => {
+  await mockDocker(page)
+  const mocks = await mockServiceLogs(page)
+  await page.goto(`/docker/containers/${DB}?tab=logs`)
+
+  await expect(page.getByRole("tab", { name: "Logs" })).toHaveAttribute("data-state", "active")
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("deadlock", { exact: true })).toHaveClass(/text-destructive/)
+  await expect(lines.getByText("auth failed", { exact: true })).toBeVisible()
+  expect(mocks.sockets.at(-1)?.get("source")).toBe(`docker:${DB}`)
+  // Postgres's own questions, one press each, and its readings above the pane.
+  await expect(page.getByRole("button", { name: /^Slow\b/ })).toBeVisible()
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(5)
+  await expect(page.getByText("Deadlocks & lock waits")).toBeVisible()
+  // A question a tile answers is counted once, by the tile over its hour:
+  // its chip carries no second figure from the lines on screen. One no tile
+  // asks keeps its count.
+  await expect(page.getByRole("button", { name: "Errors", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Maintenance\s*\d/ })).toBeVisible()
+})
+
+/**
+ * Events is what Docker did to the container, beside its lines: the health
+ * check's probes first because they say why "unhealthy", a restart loop as
+ * one row rather than eight, and the minute before each failed exit inline.
+ * The failure's window is one press from the pane itself.
+ */
+test("a container's events fold its restart loop under its health check", async ({ page }) => {
+  await mockDocker(page)
+  const mocks = await mockServiceLogs(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${DB}?tab=logs`)
+
+  await page.getByRole("button", { name: "Events", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Events", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  expect(mocks.events.at(-1)?.get("container")).toBe(DB)
+  await expect.poll(() => mocks.eventSockets.at(-1)?.get("container")).toBe(DB)
+
+  const health = page.getByRole("region", { name: "Health check" })
+  await expect(health.getByText("pg_isready -U postgres")).toBeVisible()
+  await expect(health.getByText("Unhealthy")).toBeVisible()
+  await expect(health.getByText("exit 1")).toBeVisible()
+  await expect(health.getByText("/var/run/postgresql:5432 - no response")).toBeVisible()
+  await expect(health.getByText("passed")).toBeVisible()
+
+  const events = page.getByRole("region", { name: "Container events" })
+  await expect(events.getByText(/^Restarted ×3 in 2 min · exit 1$/)).toBeVisible()
+  // Three exits folded, and the one that ended the loop still its own row.
+  await expect(events.getByText("db exited with status 1")).toHaveCount(1)
+  await events.getByRole("button", { name: "Show the 6 events" }).click()
+  await expect(events.getByText("db exited with status 1")).toHaveCount(4)
+
+  // The minute before the last two failures, read as the pane reads them.
+  await expect(events.getByText("the minute before it exited")).toBeVisible()
+  await expect(events.getByText("the minute before its last exit")).toBeVisible()
+  await expect(events.getByText(/has invalid permissions/)).toHaveCount(2)
+  // Up to the exit and no further: the next attempt's start-up is not why it died.
+  await expect(events.getByText(/the next attempt, starting up/)).toHaveCount(0)
+  const before = mocks.searches.filter((s) => s.get("limit") === LAST_LINES_LIMIT)
+  expect(before).toHaveLength(2)
+  expect(before.map((s) => s.get("source"))).toEqual([`docker:${DB}`, `docker:${DB}`])
+  // The minute runs to the exit itself, as the event wrote it.
+  const exit = Date.parse(dbEvents[0].time)
+  const last = before.find((s) => Date.parse(s.get("since")!) === exit - 60_000)
+  expect(last?.get("until")).toBe(dbEvents[0].time)
+
+  // The failure's window: History on it, in the pane, named as what it is.
+  await page.getByRole("button", { name: "Crash window" }).click()
+  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect
+    .poll(() => mocks.searches.at(-1)?.get("since"))
+    .toBe(new Date(dbFailure.logWindow.since).toISOString())
+  expect(mocks.searches.at(-1)?.get("until")).toBe(
+    new Date(dbFailure.logWindow.until).toISOString(),
+  )
+})
+
+/**
+ * The Crash window chip says what the pane is reading, and nothing else: it
+ * is on while the pane reads the window, and off the moment the reader moves
+ * to Live, to "Open in History" on an exit, or anywhere else — with the
+ * strip's "Crash window" going with it. Pressed again, it opens the window
+ * again.
+ */
+test("the crash window chip and the pane stay in step", async ({ page }) => {
+  await mockDocker(page)
+  const mocks = await mockServiceLogs(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${DB}?tab=logs`)
+  const chip = page.getByRole("button", { name: "Crash window" })
+  const live = page.getByRole("button", { name: "Live", exact: true })
+  const history = page.getByRole("button", { name: "History", exact: true })
+  const eventsView = page.getByRole("button", { name: "Events", exact: true })
+  const named = page.getByText(/^Crash window · /)
+  const windowSince = new Date(dbFailure.logWindow.since).toISOString()
+
+  // On, then to Events and back to Live: Live, with the chip off.
+  await chip.click()
+  await expect(history).toHaveAttribute("aria-pressed", "true")
+  await expect(chip).toHaveAttribute("aria-pressed", "true")
+  await expect(named).toBeVisible()
+  await eventsView.click()
+  await live.click()
+  await expect(live).toHaveAttribute("aria-pressed", "true")
+  await expect(chip).toHaveAttribute("aria-pressed", "false")
+  await expect(named).toHaveCount(0)
+
+  // On, then an exit's own minutes from Events: that range, not the window's.
+  await chip.click()
+  await expect(chip).toHaveAttribute("aria-pressed", "true")
+  await eventsView.click()
+  await page
+    .getByRole("region", { name: "Container events" })
+    .getByRole("button", { name: "Open in History" })
+    .first()
+    .click()
+  await expect(history).toHaveAttribute("aria-pressed", "true")
+  await expect
+    .poll(() => historySearches(mocks).at(-1)?.get("since"))
+    .toBe(new Date(Date.parse(dbEvents[0].time) - 5 * 60_000).toISOString())
+  await expect(chip).toHaveAttribute("aria-pressed", "false")
+  await expect(named).toHaveCount(0)
+
+  // And pressed again, the window again.
+  await chip.click()
+  await expect(chip).toHaveAttribute("aria-pressed", "true")
+  await expect(named).toBeVisible()
+  await expect.poll(() => historySearches(mocks).at(-1)?.get("since")).toBe(windowSince)
+})
+
+/**
+ * The Overview's account of a failure reads the lines it names in one press:
+ * the Logs tab, on the failure's window.
+ */
+test("the failure's notice opens the logs on its window", async ({ page }) => {
+  await mockDocker(page)
+  const mocks = await mockServiceLogs(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${DB}?tab=overview`)
+
+  await page.getByRole("button", { name: "Read those lines" }).click()
+  await expect(page.getByRole("tab", { name: "Logs" })).toHaveAttribute("data-state", "active")
+  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.getByRole("button", { name: "Crash window" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.getByText(/^Crash window · /)).toBeVisible()
+  await expect
+    .poll(() => historySearches(mocks).at(-1)?.get("since"))
+    .toBe(new Date(dbFailure.logWindow.since).toISOString())
+})
+
+/**
+ * The pane keeps its reading for the tab, and a window it was handed is the
+ * page's: gone by the time the page is back, it is not restored as an old
+ * moment with nothing naming it.
+ */
+test("a crash window let go of while the page was away is not what it opens on", async ({
+  page,
+}) => {
+  await mockDocker(page)
+  await mockServiceLogs(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${DB}?tab=logs`)
+  const chip = page.getByRole("button", { name: "Crash window" })
+  await chip.click()
+  await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+
+  await page.reload()
+  await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(chip).toHaveAttribute("aria-pressed", "false")
+  await expect(page.getByText(/^Crash window · /)).toHaveCount(0)
+})
+
+/**
+ * A stack's Logs tab is one log of every container, each line in its
+ * service's lane rather than behind a `web | ` prefix, from the stack's own
+ * source — not a socket of the stack page's own. The service is a field to
+ * narrow by, the readings above narrow the pane as a container's do, and
+ * Events names each container by its service, as the lines do.
+ */
+test("a stack's logs are one log with a lane per service", async ({ page }) => {
+  await mockDocker(page)
+  const mocks = await mockServiceLogs(page)
+  await page.goto("/docker/stacks/running-app")
+  await page.getByRole("tab", { name: "Logs" }).click()
+
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("GET /orders 500 upstream timed out")).toBeVisible()
+  await expect(lines.getByText("api", { exact: true }).first()).toBeVisible()
+  await expect(lines.getByText("web", { exact: true })).toBeVisible()
+  await expect(lines.getByText(/\| /)).toHaveCount(0)
+  expect(mocks.sockets.at(-1)?.get("source")).toBe("stack:running-app")
+
+  await page.getByRole("button", { name: /^Fields/ }).click()
+  await page.getByRole("option", { name: /^web/ }).click()
+  await expect.poll(() => mocks.sockets.at(-1)?.getAll("f")).toEqual(["service:web"])
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "Clear the service filter" }).click()
+  await expect.poll(() => mocks.sockets.at(-1)?.getAll("f")).toEqual([])
+
+  await page.getByRole("button", { name: "Show the lines behind errors", exact: true }).click()
+  await expect(
+    page.getByRole("button", { name: "Show every line again, not only the errors" }),
+  ).toHaveAttribute("aria-pressed", "true")
+  await expect.poll(() => mocks.sockets.at(-1)?.get("levels")).toMatch(/error/)
+
+  await page.getByRole("button", { name: "Events", exact: true }).click()
+  const events = page.getByRole("region", { name: "Stack events" })
+  await expect(events).toBeVisible()
+  expect(mocks.events.at(-1)?.get("stack")).toBe("running-app")
+  await expect(events.getByText("web", { exact: true }).first()).toBeVisible()
+  await expect(events.getByText("running-app-web-1", { exact: true })).toHaveCount(0)
+})
+
+/**
  * Neither Docker page takes the shell sideways, at any width anybody has.
  *
  * A horizontal scrollbar on a dashboard is never local to the thing that caused
@@ -1002,6 +1514,28 @@ for (const width of [320, 390, 640, 768, 1024, 1280, 1600]) {
       )
       expect(overflow, `${path} overflows at ${width}px`).toBeLessThanOrEqual(1)
     }
+  })
+
+  test(`no Docker logs view scrolls sideways at ${width}px`, async ({ page }) => {
+    await mockDocker(page)
+    await mockServiceLogs(page)
+    await page.setViewportSize({ width, height: 900 })
+    const overflow = () =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      )
+
+    await page.goto(`/docker/containers/${DB}?tab=logs`)
+    await expect(page.getByLabel("Log lines").getByText("deadlock", { exact: true })).toBeVisible()
+    expect(await overflow(), `the container's logs overflow at ${width}px`).toBeLessThanOrEqual(1)
+    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await expect(page.getByText(/^Restarted ×3/)).toBeVisible()
+    expect(await overflow(), `the container's events overflow at ${width}px`).toBeLessThanOrEqual(1)
+
+    await page.goto("/docker/stacks/running-app")
+    await page.getByRole("tab", { name: "Logs" }).click()
+    await expect(page.getByLabel("Log lines").getByText("listening on :3000")).toBeVisible()
+    expect(await overflow(), `the stack's logs overflow at ${width}px`).toBeLessThanOrEqual(1)
   })
 }
 
@@ -1168,11 +1702,13 @@ test("the storage browser draws a directory the way the file manager does", asyn
 })
 
 /**
- * The Storage tab named every mount and showed the contents of none.
+ * The Storage tab named every mount and showed the contents of none, and then
+ * showed them only once a row was expanded.
  *
- * A row opens onto what is in it. A tmpfs row does not, and must not grow a
- * control that could only fail: it is memory in the container's namespace and
- * there is nothing on this filesystem to list.
+ * The one mount there is to look in is open with the tab, and with nothing to
+ * choose between its row is not a control. A tmpfs row never grows one either:
+ * it is memory in the container's namespace and there is nothing on this
+ * filesystem to list.
  */
 test("the storage tab opens onto what is in a mount", async ({ page }) => {
   await mockDocker(page)
@@ -1181,12 +1717,262 @@ test("the storage tab opens onto what is in a mount", async ({ page }) => {
   await page.goto("/docker/containers/1111111111111111")
   await page.getByRole("tab", { name: "Storage" }).click()
 
-  const volume = page.getByRole("button").filter({ hasText: "/usr/share/nginx/html" })
-  await expect(volume).toHaveAttribute("aria-expanded", "false")
-  await volume.click()
   await expect(page.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
+  const mounts = page.getByRole("list", { name: "Mounts" })
+  await expect(mounts.getByText("/usr/share/nginx/html")).toBeVisible()
+  await expect(mounts.getByRole("button", { pressed: true })).toHaveCount(0)
+  await expect(mounts.getByRole("button").filter({ hasText: "/usr/share/nginx/html" })).toHaveCount(
+    0,
+  )
 
   // Temporary memory names itself and offers nothing to open.
   await expect(page.getByRole("button").filter({ hasText: "Temporary memory" })).toHaveCount(0)
   await expect(page.getByText("Temporary memory")).toBeVisible()
 })
+
+/**
+ * With two mounts to look in, the rows choose which one the listing shows.
+ */
+test("the storage tab switches the listing between mounts", async ({ page }) => {
+  await mockDocker(page)
+  await mockVolumeFiles(page)
+  await page.route("**/api/v1/docker/containers/1111111111111111", (route) =>
+    json(route, {
+      ...detail,
+      mounts: [
+        ...detail.mounts,
+        {
+          type: "bind",
+          name: "",
+          source: "/srv/site/config",
+          destination: "/etc/nginx/conf.d",
+          mode: "",
+          rw: false,
+        },
+      ],
+    }),
+  )
+  await page.route("**/api/v1/files/list?*", (route, request) =>
+    new URL(request.url()).searchParams.get("path") === "/srv/site/config"
+      ? json(route, { path: "/srv/site/config", entries: [entry("default.conf", false, 512)] })
+      : route.fallback(),
+  )
+  await page.goto("/docker/containers/1111111111111111")
+  await page.getByRole("tab", { name: "Storage" }).click()
+
+  const mounts = page.getByRole("list", { name: "Mounts" })
+  const volume = mounts.getByRole("button").filter({ hasText: "/usr/share/nginx/html" })
+  const bind = mounts.getByRole("button").filter({ hasText: "/etc/nginx/conf.d" })
+  await expect(volume).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
+
+  await bind.click()
+  await expect(bind).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("button", { name: "default.conf" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "postgresql.conf" })).toHaveCount(0)
+  await expect(mounts.getByText("read-only")).toBeVisible()
+})
+
+function usageSample(second: number, received: number) {
+  return {
+    id: detail.id,
+    name: detail.name,
+    ts: new Date(Date.now() - 4000 + second * 1000).toISOString(),
+    cpuPercent: 150,
+    cpuReady: true,
+    cpuTotal: 1000000 + second * 1000,
+    systemCpu: 100000000 + second * 8000,
+    hostCpus: 8,
+    onlineCpus: 8,
+    cpuLimit: 2,
+    cpuPeriods: second * 10,
+    cpuThrottledPeriods: second,
+    memUsage: 100 * 1024 * 1024,
+    memRaw: 128 * 1024 * 1024,
+    memCache: 28 * 1024 * 1024,
+    memRss: 80 * 1024 * 1024,
+    memSwap: null,
+    memLimit: 512 * 1024 * 1024,
+    memLimited: true,
+    memPercent: 19.53,
+    memHostPercent: 1.22,
+    pids: 12,
+    pidsLimit: 256,
+    netRx: received,
+    netTx: received / 2,
+    networkAvailable: true,
+    blockAvailable: true,
+    blockRead: received * 2,
+    blockWrite: received * 3,
+    networks: {
+      eth0: {
+        rxBytes: received,
+        txBytes: received / 2,
+        rxPackets: received / 100,
+        txPackets: received / 200,
+        rxErrors: 0,
+        txErrors: 2,
+        rxDropped: 1,
+        txDropped: 0,
+      },
+    },
+  }
+}
+
+async function mockUsage(
+  page: Page,
+  options: { host?: boolean; stopped?: boolean; disabled?: boolean; idle?: boolean } = {},
+) {
+  await mockDocker(page)
+  await page.route(`**/api/v1/docker/containers/${detail.id}`, (route) =>
+    json(route, {
+      ...detail,
+      state: options.stopped ? "exited" : "running",
+      networkMode: options.host ? "host" : "bridge",
+    }),
+  )
+  await page.route(`**/api/v1/docker/containers/${detail.id}/anomalies`, (route) =>
+    json(route, { anomalies: [] }),
+  )
+  await page.route("**/api/v1/system/metrics/events**", (route) => json(route, []))
+  await page.route(`**/api/v1/docker/containers/${detail.id}/stats/history**`, (route) => {
+    if (options.disabled)
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "metrics_history_disabled", message: "History disabled" },
+        }),
+      })
+    return json(route, {
+      name: "web",
+      from: now,
+      to: now,
+      stepSeconds: 150,
+      sampleIntervalSeconds: 15,
+      retentionSeconds: 604800,
+      earliest: now,
+      points: Array.from({ length: 24 }, (_, i) => ({
+        ts: new Date(Date.now() - (24 - i) * 150000).toISOString(),
+        samples: 10,
+        cpu: 20 + Math.sin(i) * 10,
+        cpuPeak: 70,
+        mem: 20,
+        memPeak: 25,
+        memBytes: (100 + Math.sin(i) * 8) * 1024 * 1024,
+        memBytesPeak: 140 * 1024 * 1024,
+        memLimit: 512 * 1024 * 1024,
+        pids: 12,
+        netRx: options.host ? null : options.idle ? 0 : 1024 * (20 + i),
+        netTx: options.host ? null : options.idle ? 0 : 1024 * (10 + i),
+        blockRead: 4096,
+        blockWrite: 8192,
+      })),
+    })
+  })
+  let socket: import("@playwright/test").WebSocketRoute | undefined
+  let connections = 0
+  await page.routeWebSocket(
+    new RegExp(`/api/v1/docker/containers/${detail.id}/stats/stream`),
+    (ws) => {
+      socket = ws
+      connections++
+    },
+  )
+  await page.goto(`/docker/containers/${detail.id}?tab=usage`)
+  const sampleTime = Date.now() - 4000
+  const send = async (second: number, received: number) => {
+    await expect.poll(() => !!socket).toBe(true)
+    const data = usageSample(second, received)
+    data.ts = new Date(sampleTime + second * 1000).toISOString()
+    if (options.host) {
+      data.networks = {} as typeof data.networks
+      data.networkAvailable = false
+    }
+    socket!.send(JSON.stringify({ type: "stats", data }))
+  }
+  return { send, connections: () => connections }
+}
+
+test("usage separates live rates from totals, waits for intervals, and keeps idle history", async ({
+  page,
+}) => {
+  const feed = await mockUsage(page, { idle: true })
+  const live = page.getByTestId("container-live-usage")
+  const received = live.locator('[data-slot="stat-tile"]').filter({ hasText: "Network received" })
+  await feed.send(0, 1024 * 1024)
+  await expect(received).toContainText("—")
+  await expect(received).toContainText("1.0 MB total received")
+  await feed.send(2, 1024 * 1024 + 4096)
+  await expect(received).toContainText("KB/s")
+  await expect(live.getByRole("cell", { name: "eth0", exact: true })).toBeVisible()
+  await expect(live.getByText("150.0%", { exact: true })).toBeVisible()
+  await expect(live.getByText("28.0 MB", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Network throughput", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Pause readings" }).click()
+  await expect(live.getByText("Paused", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Resume readings" }).click()
+  await expect.poll(feed.connections).toBe(2)
+  await feed.send(4, 2000000)
+  await expect(received).toContainText("—")
+})
+
+test("usage stays live with history disabled and removes stale figures", async ({ page }) => {
+  await page.clock.install()
+  const feed = await mockUsage(page, { disabled: true })
+  await feed.send(0, 1000)
+  await feed.send(2, 3000)
+  const live = page.getByTestId("container-live-usage")
+  await expect(live.getByText("Live", { exact: true })).toBeVisible()
+  await expect(page.getByText(/History is not being recorded/)).toBeVisible()
+  await page.clock.fastForward(12000)
+  await expect(live.getByText("Readings stale", { exact: true })).toBeVisible()
+  await expect(live.getByText("150.0%", { exact: true })).toHaveCount(0)
+})
+
+test("host networking explains unavailable attribution and stopped containers keep history", async ({
+  page,
+}) => {
+  const feed = await mockUsage(page, { host: true })
+  await feed.send(0, 0)
+  await expect(page.getByRole("link", { name: "View host network usage" })).toHaveAttribute(
+    "href",
+    "/metrics",
+  )
+  await expect(page.getByRole("heading", { name: "Network throughput", exact: true })).toHaveCount(
+    0,
+  )
+  const stopped = await mockUsage(page, { stopped: true })
+  await expect(page.getByText("Container exited", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Usage history", exact: true })).toBeVisible()
+  expect(stopped.connections()).toBe(0)
+})
+
+for (const width of [1280, 1720, 390]) {
+  test(`usage has readable measurements without page overflow at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const feed = await mockUsage(page)
+    await feed.send(0, 1024 * 1024)
+    await feed.send(2, 1024 * 1024 + 4096)
+    await expect(
+      page.getByRole("heading", { name: "Network interfaces", exact: true }),
+    ).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Usage history", exact: true })).toBeVisible()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    await page.screenshot({
+      path: testInfo.outputPath(`container-usage-${width}.png`),
+      fullPage: true,
+    })
+    await page.getByRole("tabpanel", { name: "Usage", exact: true }).evaluate((element) => {
+      element.scrollTop = element.scrollHeight
+    })
+    await page.screenshot({
+      path: testInfo.outputPath(`container-history-${width}.png`),
+      fullPage: true,
+    })
+  })
+}

@@ -18,6 +18,8 @@ import { EmptyState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { EngineActions, EngineIdentity, useEngineUnit } from "@/components/proxy/engine"
+import { EngineLog } from "@/components/proxy/engine-log"
+import { sitePath } from "@/components/proxy/site-verbs"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { RoutePath } from "@/components/proxy/route-path"
@@ -27,6 +29,8 @@ import { foldProxyFindings } from "@/components/proxy/attention"
 /**
  * Readings first, then the engine and its commands. Routes own the wide column;
  * findings and expiry share the rail so a list of warnings never pushes every route off screen.
+ * The engine's own log closes the page, read here rather than on the Logs page, because this is
+ * where "why is the proxy unhappy" is asked.
  */
 export default function ProxyOverviewPage() {
   const { status, loading, refresh: refreshStatus } = useProxy()
@@ -273,7 +277,7 @@ export default function ProxyOverviewPage() {
                 {hosts.slice(0, 8).map((vhost) => (
                   <ChoiceRow
                     key={`${vhost.kind}:${vhost.name}`}
-                    href={`/proxy/sites?site=${encodeURIComponent(vhost.name)}`}
+                    href={sitePath(vhost.name)}
                     verb={`Open ${vhost.name}`}
                     className="gap-4 p-4"
                     leading={<ProductLogo id={siteProduct(vhost)} size="md" />}
@@ -363,6 +367,8 @@ export default function ProxyOverviewPage() {
           </Panel>
         </div>
       </div>
+
+      <EngineLog status={status} />
     </Page>
   )
 }

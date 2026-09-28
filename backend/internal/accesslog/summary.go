@@ -22,6 +22,11 @@ type Filter struct {
 	Path    string
 	Host    string
 	Client  string
+	// Agent is a family as the Agents list names it (`AgentFamily`), and
+	// Referer a site as Came from names it: what those lists rank is what a
+	// press on one of their rows narrows to.
+	Agent   string
+	Referer string
 	MinMs   float64
 	MaxMs   float64
 	// PagesOnly keeps the requests a person would call a page view and drops
@@ -135,6 +140,12 @@ func (f Filter) Match(e Entry) bool {
 		return false
 	}
 	if f.Client != "" && !strings.HasPrefix(e.RemoteIP, f.Client) {
+		return false
+	}
+	if f.Agent != "" && !strings.EqualFold(f.Agent, AgentFamily(e.UserAgent)) {
+		return false
+	}
+	if f.Referer != "" && !strings.EqualFold(f.Referer, refererHost(e.Referer, e.Host)) {
 		return false
 	}
 	// "Pages" is what people opened: a document, and not a scanner's refused
@@ -371,7 +382,7 @@ func (c *Collector) Feed(e Entry) {
 	c.bump(c.paths, e.Path, e, failed, refused, probe)
 	c.bump(c.hosts, e.Host, e, failed, refused, probe)
 	c.bump(c.clients, e.RemoteIP, e, failed, refused, probe)
-	c.bump(c.agents, agentFamily(e.UserAgent), e, failed, refused, probe)
+	c.bump(c.agents, AgentFamily(e.UserAgent), e, failed, refused, probe)
 	c.bump(c.referers, refererHost(e.Referer, e.Host), e, failed, refused, probe)
 	if probe {
 		c.bump(c.probes, e.Path, e, failed, refused, probe)
@@ -483,10 +494,10 @@ func boolInt(v bool) int {
 	return 0
 }
 
-// agentFamily reduces a user agent to something a column can hold. The full
+// AgentFamily reduces a user agent to something a column can hold. The full
 // string is kept on the row; grouping by it would give a table where every
 // Chrome point release is its own client.
-func agentFamily(agent string) string {
+func AgentFamily(agent string) string {
 	if agent == "" {
 		return ""
 	}
@@ -512,6 +523,37 @@ func agentFamily(agent string) string {
 		return agent[:i]
 	}
 	return agent
+}
+
+// botMarks are what an automated client puts in its user agent, lowercased. A
+// crawler says so — "bot", "spider", a "+https://…" page about itself — a
+// scanner names its tool, and a script sends its HTTP library's default. A
+// person's browser does none of these, which is what lets "traffic nobody
+// opened" be answered without a list of every crawler ever written. The tool
+// names are the ones on this project's own public hosts' logs.
+var botMarks = []string{
+	"bot", "crawl", "spider", "slurp", "scan", "+http", "facebookexternalhit", "whatsapp",
+	"curl/", "wget", "python-", "go-http-client", "okhttp", "java/", "httpclient", "libwww",
+	"axios", "node-fetch", "undici", "httpx", "aiohttp", "scrapy", "postman", "headlesschrome",
+	"zgrab", "nmap", "nikto", "sqlmap", "nuclei", "censys", "l9explore", "l9tcpid",
+	"feroxbuster", "libredtail",
+}
+
+// IsBot reports whether a user agent is a program rather than a person's
+// browser: a crawler, a scanner, or a script. An absent agent answers false,
+// because a format that records none — Apache's common log — would otherwise
+// read as nothing but bots.
+func IsBot(agent string) bool {
+	if agent == "" {
+		return false
+	}
+	lower := strings.ToLower(agent)
+	for _, mark := range botMarks {
+		if strings.Contains(lower, mark) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Collector) Result() *Result {

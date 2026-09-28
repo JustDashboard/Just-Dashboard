@@ -39,14 +39,12 @@ export function scanDomain(vhost: VHost): string | undefined {
 }
 
 /**
- * The access log the site form writes for a site, addressed the way the log
- * viewer addresses a file. A hand-written site may log elsewhere; the viewer
- * says so rather than this guessing.
+ * The site's own page: what it is, its verbs, and its requests and errors
+ * read where it is. Every site has one — a Caddy route with no file on the
+ * host still has a log to read.
  */
-export function accessLogSource(vhost: VHost): string | undefined {
-  if (vhost.kind !== "nginx") return undefined
-  const stem = vhost.name.replace(/\.conf$/, "")
-  return `/var/log/nginx/${stem}.access.log`
+export function sitePath(name: string): string {
+  return `/proxy/sites/${encodeURIComponent(name)}`
 }
 
 export function useSiteVerbs({
@@ -77,7 +75,6 @@ export function useSiteVerbs({
   const hasFile = Boolean(vhost.path)
   const url = siteUrl(vhost)
   const domain = scanDomain(vhost)
-  const log = accessLogSource(vhost)
 
   if (managedByForm && admin) {
     verbs.push({
@@ -114,14 +111,14 @@ export function useSiteVerbs({
       run: () => router.push(`/proxy/tls?domain=${encodeURIComponent(domain)}`),
     })
   }
-  if (log) {
-    verbs.push({
-      key: "log",
-      label: "Access log",
-      icon: Logs,
-      run: () => router.push(`/logs?source=${encodeURIComponent(log)}`),
-    })
-  }
+  // The site's logs on its own page, where they are read as its requests
+  // and its errors rather than as a file on the host Logs page.
+  verbs.push({
+    key: "log",
+    label: "Logs",
+    icon: Logs,
+    run: () => router.push(sitePath(vhost.name)),
+  })
   if (managedByForm && admin) {
     verbs.push({
       key: "duplicate",

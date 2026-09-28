@@ -160,6 +160,8 @@ export function BuildConsole({
   onSelectStep,
   hidden,
   focusLine,
+  flush,
+  className,
 }: {
   /** The transcript as lines, read once by the page (`consoleRows`). */
   rows: ConsoleRow[]
@@ -187,6 +189,10 @@ export function BuildConsole({
    * scrolls it into the middle of the console.
    */
   focusLine?: { seq: number; nonce: number }
+  /** Inside a pane the page draws — the Logs page's Builds view — with no frame of its own. */
+  flush?: boolean
+  /** The console's size where the page decides it; the run page's own height otherwise. */
+  className?: string
 }) {
   const [query, setQuery] = useState("")
   const [errorsOnly, setErrorsOnly] = useState(false)
@@ -299,7 +305,11 @@ export function BuildConsole({
   )
 
   return (
-    <Pane className="relative h-[min(70vh,44rem)] min-h-72" hidden={hidden}>
+    <Pane
+      flush={flush}
+      className={cn("relative", className ?? "h-[min(70vh,44rem)] min-h-72")}
+      hidden={hidden}
+    >
       {active && <BorderBeam size={96} duration={7} />}
       <PaneHeader className="flex-wrap gap-2 py-2">
         <SearchInput

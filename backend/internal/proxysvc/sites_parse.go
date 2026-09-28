@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"bufio"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -106,8 +107,24 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		case "gzip":
 			spec.Gzip = value == "on"
 		case "access_log":
-			sawAccessLog = true
-			spec.AccessLog = value != "off"
+			// A server's own directive, not a location's: `access_log off`
+			// under /favicon.ico is the common case, and it silences one path
+			// rather than the site — read as the site's, the form said a site
+			// logging to nginx's shared file kept no log at all. The first
+			// that names a file wins, since a plain-HTTP server that only
+			// redirects often logs nothing while the one beside it logs
+			// everything.
+			if location == "" {
+				sawAccessLog = true
+				spec.AccessLog = value != "off"
+				if spec.AccessLogPath == "" {
+					spec.AccessLogPath = logFile(value)
+				}
+			}
+		case "error_log":
+			if location == "" && spec.ErrorLogPath == "" {
+				spec.ErrorLogPath = logFile(value)
+			}
 		case "auth_basic":
 			spec.BasicAuthRealm = strings.Trim(value, `"`)
 		case "auth_basic_user_file":
@@ -357,6 +374,23 @@ func cutDirective(line string) (string, string) {
 		return name, ""
 	}
 	return name, strings.TrimSpace(value)
+}
+
+// logFile is the file an access_log or error_log directive writes to: its
+// first token, when that is one. `off`, `syslog:`, `stderr` and `memory:` are
+// not files; a path under /dev is a stream the reader cannot seek in; one
+// carrying a variable is a file per value of it; and a relative one is
+// relative to a prefix only nginx's build knows.
+func logFile(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	path := strings.Trim(fields[0], `"'`)
+	if !filepath.IsAbs(path) || strings.Contains(path, "$") || strings.HasPrefix(path, "/dev/") {
+		return ""
+	}
+	return filepath.Clean(path)
 }
 
 func parseSeconds(value string) int {

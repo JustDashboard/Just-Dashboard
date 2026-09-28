@@ -72,7 +72,13 @@ export default function BoardsPage() {
           icon={Layout}
           title="No boards yet"
           description="Create a board to map an idea or document how this server fits together."
-          action={can("service.control") ? <Button onClick={create}>New board</Button> : undefined}
+          action={
+            can("service.control") ? (
+              <Button onClick={create} pending={creating}>
+                New board
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

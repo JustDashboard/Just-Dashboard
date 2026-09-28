@@ -1,16 +1,16 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useMemo, useState } from "react"
 import { useViewState } from "@/lib/view-state"
 import Link from "next/link"
-import type { LogLine, PM2Process } from "@/lib/types"
+import type { PM2Process } from "@/lib/types"
 import { post } from "@/lib/api"
-import { bytes, duration, relativeTime, timestamp } from "@/lib/format"
+import { bytes, duration, plural, relativeTime, timestamp } from "@/lib/format"
+import { pm2Source } from "@/lib/log-sources"
 import { notify } from "@/lib/toast"
-import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field } from "@/components/form"
-import { LogViewer } from "@/components/log-viewer"
+import { ServiceLogs, type LogWindow, type ServiceLogSource } from "@/components/logs/service-logs"
 import { Modal } from "@/components/modal"
 import { Detail, DetailList } from "@/components/page"
 import { ChartActivity } from "@/components/icons"
@@ -19,6 +19,7 @@ import { ProductLogo, pm2Product } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { VerbBar } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -26,7 +27,12 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { pm2Key, usePM2Control, usePM2Verbs } from "@/components/procs/pm2-actions"
 
-const LOG_LIMIT = 5000
+/**
+ * The stretch "around the last start" covers: the crash before it — PM2's
+ * backoff waits up to fifteen seconds before trying again — and the start.
+ */
+const BEFORE_START = 2 * 60_000
+const AFTER_START = 60_000
 
 /**
  * One PM2 application, opened: how it is run, and what it has printed.
@@ -117,16 +123,20 @@ function PM2Sheet({
           <TabsContent value="overview" className="min-h-0 flex-1 overflow-y-auto">
             <PM2Overview process={process} />
           </TabsContent>
-          <TabsContent value="logs" className="flex min-h-0 flex-1 flex-col">
+          <TabsContent value="logs" className="flex min-h-0 flex-1 flex-col gap-3">
             {/* Keyed on the process, so switching to another one starts with a
-                clean buffer instead of appending to the previous process's. */}
+                clean buffer instead of appending to the previous process's.
+                A daemon whose files are outside the log roots opens nothing:
+                the server would refuse the read, and a socket retrying a
+                refusal once a second is noise under a sentence that already
+                says why. */}
             {process.logsAvailable === false ? (
               <Notice title="Logs unavailable">
                 {process.logsUnavailableReason ||
                   "The daemon's log files are outside the configured log roots."}
               </Notice>
             ) : (
-              <PM2LogStream key={pm2Key(process)} process={process} />
+              <PM2Logs key={pm2Key(process)} process={process} />
             )}
           </TabsContent>
         </Tabs>
@@ -365,50 +375,72 @@ function ScaleDialog({
   )
 }
 
-function PM2LogStream({ process }: { process: PM2Process }) {
-  const [lines, setLines] = useState<LogLine[]>([])
-
-  const onMessage = useCallback((envelope: Envelope) => {
-    if (envelope.type !== "logs") return
-    const batch = envelope.data as { stream: string; text: string }[]
-    setLines((prev) => {
-      // stdout and stderr arrive interleaved on one socket; the stream tag is
-      // what lets stderr be coloured without re-parsing the text.
-      const next = [
-        ...prev,
-        ...batch.map((l) => ({
-          text: l.text,
-          level: l.stream === "stderr" ? "error" : undefined,
-        })),
-      ]
-      return next.length > LOG_LIMIT ? next.slice(next.length - LOG_LIMIT) : next
+/**
+ * What the application printed, read the way the logs page reads it: both
+ * files as one stream, through the PM2 lens, with its history and what it
+ * adds up to. The restarts are PM2's own count from the process record —
+ * its daemon log is not read — and while it is up, the minutes around its
+ * last start are one press away, which is where the crash that caused a
+ * restart is.
+ *
+ * That press is offered only when PM2 stamps the lines (`--time`,
+ * `log_date_format`). Without a stamp a line has no time to fall in a
+ * window by, History keeps every such line, and "the three minutes around
+ * the last start" would be the file's last lines under that name.
+ */
+function PM2Logs({ process }: { process: PM2Process }) {
+  const id = pm2Source(process.daemonId, process.id, process.name)
+  const product = pm2Product(process.interpreter)
+  const sources = useMemo<ServiceLogSource[]>(
+    () => [{ id, label: process.name, kind: "pm2", product }],
+    [id, process.name, product],
+  )
+  // Fixed when pressed: the record's uptime is re-read every few seconds,
+  // and a window that moved with it would run History again each time.
+  const [around, setAround] = useState<LogWindow>()
+  const aroundLastStart = () => {
+    if (around) {
+      setAround(undefined)
+      return
+    }
+    // On whole seconds, which is what the window's fields show.
+    const started = Math.round((Date.now() - process.uptimeMs) / 1000) * 1000
+    setAround({
+      since: new Date(started - BEFORE_START).toISOString(),
+      until: new Date(started + AFTER_START).toISOString(),
     })
-  }, [])
-
-  const { state } = useSocket(`/pm2/${encodeURIComponent(process.name)}/logs/stream`, {
-    onMessage,
-    query: { lines: 300, user: process.daemonId, id: process.id },
-  })
-
+  }
   return (
-    <LogViewer
-      className="h-full min-h-80"
-      lines={lines}
-      showTimestamps={false}
-      toolbar={
-        <Status
-          state={state}
-          live={state === "open"}
-          label={
-            state === "open"
-              ? "Live"
-              : state === "connecting"
-                ? "Connecting"
-                : "Disconnected — retrying"
-          }
-        />
-      }
-      onClear={() => setLines([])}
-    />
+    <>
+      <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-hint text-muted-foreground">
+        <span className="numeric">
+          {process.restarts > 0
+            ? `Restarted ${plural(process.restarts, "time")}`
+            : "Never restarted"}
+        </span>
+        {process.unstableRestarts > 0 && (
+          <span className="numeric font-medium text-destructive">
+            {process.unstableRestarts} unstable
+          </span>
+        )}
+        {process.uptimeMs > 0 && (
+          <span className="numeric">up {duration(process.uptimeMs / 1000)}</span>
+        )}
+        {process.logTimes && (process.uptimeMs > 0 || around) && (
+          <FilterChip selected={Boolean(around)} onClick={aroundLastStart} className="ml-auto">
+            Around the last start
+          </FilterChip>
+        )}
+      </div>
+      <ServiceLogs
+        sources={sources}
+        layout="sheet"
+        window={around}
+        // Live pressed while the window is open lets the window go.
+        onLeaveWindow={() => setAround(undefined)}
+        className="min-h-0 flex-1"
+        paneClassName="min-h-80"
+      />
+    </>
   )
 }

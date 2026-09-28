@@ -518,12 +518,12 @@ function SetupPath({ stage, deploying }: { stage: GitHubAppStage; deploying: boo
               {state === "current" ? (
                 <span
                   aria-hidden
-                  className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center"
+                  className="mt-px flex size-3.5 shrink-0 items-center justify-center"
                 >
                   <span className="size-1.5 rounded-full bg-brand" />
                 </span>
               ) : (
-                <StepMark state={state} className="mt-0.5" />
+                <StepMark state={state} className="mt-px" />
               )}
               <span
                 className={cn(

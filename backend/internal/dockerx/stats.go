@@ -9,15 +9,19 @@ import (
 	"github.com/docker/docker/api/types/container"
 )
 
-// ContainerStats mirrors what `docker stats` shows, already reduced to the
-// percentages and rates a dashboard needs. Doing the arithmetic here keeps the
-// frontend from having to understand cgroup counter semantics.
+// ContainerStats carries Docker's CPU percentage, cache-adjusted memory and
+// cumulative I/O counters. Rates require two observations and their timestamps.
 type ContainerStats struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`
 	TS         time.Time `json:"ts"`
 	CPUPercent float64   `json:"cpuPercent"`
+	CPUReady   bool      `json:"cpuReady"`
 	MemUsage   uint64    `json:"memUsage"`
+	MemRaw     uint64    `json:"memRaw"`
+	MemCache   uint64    `json:"memCache"`
+	MemRSS     *uint64   `json:"memRss"`
+	MemSwap    *uint64   `json:"memSwap"`
 	// MemLimit is what the kernel will enforce, which for a container with no
 	// limit of its own is the whole machine.
 	MemLimit uint64 `json:"memLimit"`
@@ -40,14 +44,21 @@ type ContainerStats struct {
 	// UI can say "of 8 cores" rather than leaving the reader to guess whether
 	// 400% is possible. CPULimit is the container's own quota in cores, zero
 	// when it has none.
-	HostCPUs   int     `json:"hostCpus,omitempty"`
-	CPULimit   float64 `json:"cpuLimit,omitempty"`
-	NetRx      uint64  `json:"netRx"`
-	NetTx      uint64  `json:"netTx"`
-	BlockRead  uint64  `json:"blockRead"`
-	BlockWrite uint64  `json:"blockWrite"`
-	PIDs       uint64  `json:"pids"`
-	OnlineCPUs uint32  `json:"onlineCpus"`
+	HostCPUs            int                        `json:"hostCpus,omitempty"`
+	CPULimit            float64                    `json:"cpuLimit,omitempty"`
+	NetRx               uint64                     `json:"netRx"`
+	NetTx               uint64                     `json:"netTx"`
+	BlockRead           uint64                     `json:"blockRead"`
+	BlockWrite          uint64                     `json:"blockWrite"`
+	PIDs                uint64                     `json:"pids"`
+	OnlineCPUs          uint32                     `json:"onlineCpus"`
+	PIDsLimit           uint64                     `json:"pidsLimit"`
+	Networks            map[string]NetworkCounters `json:"networks"`
+	NetworkAvailable    bool                       `json:"networkAvailable"`
+	BlockAvailable      bool                       `json:"blockAvailable"`
+	CPUPeriods          uint64                     `json:"cpuPeriods"`
+	CPUThrottledPeriods uint64                     `json:"cpuThrottledPeriods"`
+	CPUThrottledTime    uint64                     `json:"cpuThrottledTime"`
 
 	// SizeRw is the container's writable layer, folded into the sample so the
 	// history can answer "how fast is this growing".
@@ -70,6 +81,19 @@ type ContainerStats struct {
 	SystemCPU uint64 `json:"systemCpu"`
 }
 
+// Keep interface identity: a newly attached interface must establish its own
+// baseline, rather than turn its existing byte counter into a traffic spike.
+type NetworkCounters struct {
+	RxBytes   uint64 `json:"rxBytes"`
+	TxBytes   uint64 `json:"txBytes"`
+	RxPackets uint64 `json:"rxPackets"`
+	TxPackets uint64 `json:"txPackets"`
+	RxErrors  uint64 `json:"rxErrors"`
+	TxErrors  uint64 `json:"txErrors"`
+	RxDropped uint64 `json:"rxDropped"`
+	TxDropped uint64 `json:"txDropped"`
+}
+
 // StatsStream follows one container's stats until the context ends.
 func (c *Client) StatsStream(ctx context.Context, id string, out chan<- ContainerStats) error {
 	cli, err := c.api()
@@ -82,9 +106,10 @@ func (c *Client) StatsStream(ctx context.Context, id string, out chan<- Containe
 	}
 	defer resp.Body.Close()
 
-	// The container's own limits, read once rather than per frame: they cannot
-	// change while it runs, and the alternative is an inspect a second.
+	// Docker permits live resource updates. Refresh the inspect on a bounded
+	// cadence so a stream left open does not keep reporting the old quota.
 	limit := c.resourceLimitsOf(ctx, id)
+	limitsAt := time.Now()
 
 	dec := json.NewDecoder(resp.Body)
 	for {
@@ -94,6 +119,13 @@ func (c *Client) StatsStream(ctx context.Context, id string, out chan<- Containe
 				return nil
 			}
 			return err
+		}
+		if raw.Read.IsZero() {
+			continue // Docker emits empty frames for a stopped container.
+		}
+		if time.Since(limitsAt) >= 15*time.Second {
+			limit = c.resourceLimitsOf(ctx, id)
+			limitsAt = time.Now()
 		}
 		st := convertStats(id, raw)
 		frame := []ContainerStats{st}
@@ -230,6 +262,9 @@ func (s *StatsSampler) Sample(ctx context.Context, ids []string) ([]ContainerSta
 		if decErr != nil {
 			continue
 		}
+		if raw.Read.IsZero() {
+			continue
+		}
 		st := convertStats(id, raw)
 		seen[id] = struct{}{}
 		s.fillCPU(id, &st, cpuCount(raw))
@@ -243,10 +278,8 @@ func (s *StatsSampler) Sample(ctx context.Context, ids []string) ([]ContainerSta
 
 // applyWritableSizes folds the cached disk-usage walk into a stats batch.
 //
-// Reads the cache and never forces a refresh: a sampler running every fifteen
-// seconds must not trigger a walk of every layer on the host. A batch taken
-// before the first walk completes simply carries no size, which the history
-// records as absent rather than as zero.
+// Shares the disk cache and its background refresh: a sampler running every
+// fifteen seconds must not trigger a separate layer walk for every batch.
 func (c *Client) applyWritableSizes(ctx context.Context, out []ContainerStats) {
 	if len(out) == 0 {
 		return
@@ -269,6 +302,8 @@ func (c *Client) applyWritableSizes(ctx context.Context, out []ContainerStats) {
 // SampleAll reads every running container, which is what a recorder wants: it
 // should follow whatever is up now rather than a list captured at startup.
 func (s *StatsSampler) SampleAll(ctx context.Context) ([]ContainerStats, error) {
+	// Recording an explicit budget needs the inspect: a limit equal to host
+	// RAM is indistinguishable from no limit in Docker's stats response.
 	list, err := s.client.ListContainers(ctx, false)
 	if err != nil {
 		return nil, err
@@ -283,7 +318,28 @@ func (s *StatsSampler) SampleAll(ctx context.Context) ([]ContainerStats, error) 
 		s.forget(nil)
 		return nil, nil
 	}
-	return s.Sample(ctx, ids)
+	stats, err := s.Sample(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	limits := make(map[string]Container, len(list))
+	for _, ct := range list {
+		limits[ct.ID] = ct
+	}
+	for i := range stats {
+		ct := limits[stats[i].ID]
+		if !ct.Inspected {
+			continue
+		}
+		stats[i].MemLimited = ct.MemoryLimit > 0
+		if stats[i].MemLimited {
+			stats[i].MemLimit = uint64(ct.MemoryLimit)
+			stats[i].MemPercent = round2(float64(stats[i].MemUsage) / float64(ct.MemoryLimit) * 100)
+		} else {
+			stats[i].MemPercent = 0
+		}
+	}
+	return stats, nil
 }
 
 func (s *StatsSampler) fillCPU(id string, st *ContainerStats, cpus float64) {
@@ -291,11 +347,12 @@ func (s *StatsSampler) fillCPU(id string, st *ContainerStats, cpus float64) {
 	defer s.mu.Unlock()
 	prev, ok := s.prev[id]
 	s.prev[id] = cpuCounters{total: st.CPUTotal, system: st.SystemCPU}
-	if !ok || st.CPUPercent > 0 {
+	if !ok || st.CPUReady {
 		// Either nothing to difference against, or the sample already carried
 		// its own predecessor because it came from the streaming endpoint.
 		return
 	}
+	st.CPUReady = st.CPUTotal >= prev.total && st.SystemCPU > prev.system && cpus > 0
 	st.CPUPercent = cpuPercent(
 		float64(st.CPUTotal)-float64(prev.total),
 		float64(st.SystemCPU)-float64(prev.system),
@@ -339,22 +396,33 @@ func cpuCount(raw container.StatsResponse) float64 {
 
 func convertStats(id string, raw container.StatsResponse) ContainerStats {
 	s := ContainerStats{
-		ID:         id,
-		Name:       trimName(raw.Name),
-		TS:         raw.Read.UTC(),
-		MemLimit:   raw.MemoryStats.Limit,
-		PIDs:       raw.PidsStats.Current,
-		OnlineCPUs: raw.CPUStats.OnlineCPUs,
+		ID:                  id,
+		Name:                trimName(raw.Name),
+		TS:                  raw.Read.UTC(),
+		MemLimit:            raw.MemoryStats.Limit,
+		PIDs:                raw.PidsStats.Current,
+		PIDsLimit:           raw.PidsStats.Limit,
+		OnlineCPUs:          raw.CPUStats.OnlineCPUs,
+		MemRaw:              raw.MemoryStats.Usage,
+		Networks:            make(map[string]NetworkCounters, len(raw.Networks)),
+		NetworkAvailable:    len(raw.Networks) > 0,
+		BlockAvailable:      len(raw.BlkioStats.IoServiceBytesRecursive) > 0,
+		CPUPeriods:          raw.CPUStats.ThrottlingData.Periods,
+		CPUThrottledPeriods: raw.CPUStats.ThrottlingData.ThrottledPeriods,
+		CPUThrottledTime:    raw.CPUStats.ThrottlingData.ThrottledTime,
 	}
 	// Docker reports total memory including the page cache; subtracting the
 	// reclaimable portion is what the CLI does and is what operators expect.
 	usage := raw.MemoryStats.Usage
-	if cache, ok := raw.MemoryStats.Stats["inactive_file"]; ok && cache < usage {
+	if cache, ok := raw.MemoryStats.Stats["total_inactive_file"]; ok && cache < usage {
 		usage -= cache
-	} else if cache, ok := raw.MemoryStats.Stats["total_inactive_file"]; ok && cache < usage {
+	} else if cache, ok := raw.MemoryStats.Stats["inactive_file"]; ok && cache < usage {
 		usage -= cache
 	}
 	s.MemUsage = usage
+	s.MemCache = s.MemRaw - usage
+	s.MemRSS = memoryCounter(raw.MemoryStats.Stats, "total_rss", "anon", "rss")
+	s.MemSwap = memoryCounter(raw.MemoryStats.Stats, "total_swap", "swap")
 	if s.MemLimit > 0 {
 		s.MemPercent = round2(float64(usage) / float64(s.MemLimit) * 100)
 	}
@@ -373,9 +441,13 @@ func convertStats(id string, raw container.StatsResponse) ContainerStats {
 	// for a container sharing the host's network namespace, because there is
 	// no per-container interface to measure. Nothing is missing there and
 	// nothing can be reported.
-	for _, n := range raw.Networks {
+	for name, n := range raw.Networks {
 		s.NetRx += n.RxBytes
 		s.NetTx += n.TxBytes
+		s.Networks[name] = NetworkCounters{
+			RxBytes: n.RxBytes, TxBytes: n.TxBytes, RxPackets: n.RxPackets, TxPackets: n.TxPackets,
+			RxErrors: n.RxErrors, TxErrors: n.TxErrors, RxDropped: n.RxDropped, TxDropped: n.TxDropped,
+		}
 	}
 	for _, b := range raw.BlkioStats.IoServiceBytesRecursive {
 		switch b.Op {
@@ -398,8 +470,18 @@ func convertStats(id string, raw container.StatsResponse) ContainerStats {
 	}
 	cpuDelta := float64(raw.CPUStats.CPUUsage.TotalUsage) - float64(raw.PreCPUStats.CPUUsage.TotalUsage)
 	sysDelta := float64(raw.CPUStats.SystemUsage) - float64(raw.PreCPUStats.SystemUsage)
+	s.CPUReady = cpuDelta >= 0 && sysDelta > 0 && cpuCount(raw) > 0
 	s.CPUPercent = cpuPercent(cpuDelta, sysDelta, cpuCount(raw))
 	return s
+}
+
+func memoryCounter(stats map[string]uint64, keys ...string) *uint64 {
+	for _, key := range keys {
+		if value, ok := stats[key]; ok {
+			return &value
+		}
+	}
+	return nil
 }
 
 func trimName(n string) string {

@@ -1,167 +1,206 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
-import { Download, Logs } from "@/components/icons"
+import { useRef, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { Warning } from "@/components/icons"
 import { get } from "@/lib/api"
-import type { DbAccess, DbConnection, LogLine, LogSourceIndex } from "@/lib/types"
+import type { DbConnection, DbLogSources } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { useAuth } from "@/hooks/use-auth"
+import {
+  ServiceLogs,
+  type ServiceLogsContext,
+  type ServiceLogsView,
+} from "@/components/logs/service-logs"
 import { Pane } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
-import { EmptyState, LoadingPanel } from "@/components/state"
-import { Button } from "@/components/ui/button"
-import { LogViewer } from "@/components/log-viewer"
-import { ProductLogo } from "@/components/product-logo"
-
-const LOG_LIMIT = 5000
+import { ProductGlyph } from "@/components/product-logo"
+import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { DatabaseQueries } from "@/components/database/queries-view"
+import { queryNoun } from "@/components/database/queries"
 
 /**
- * The server's own output — the thing to read when a connection fails and
- * the engine's refusal says less than its log does.
+ * The server's own log, read on the database's page.
  *
- * A database in a container is its container's output, streamed here the
- * way the Docker page streams it. One installed on the machine writes to
- * the journal, so the page lists the units that look like this engine's and
- * hands each to the Logs page, which already knows how to follow a unit.
+ * The server is found from the connection rather than guessed at
+ * (`GET /databases/{id}/logs/sources`): a database in a container is its
+ * container's output; one installed on the machine is the file its process
+ * writes — even when last night's rotation left it empty, since its history
+ * is in the rotated files the History reading opens — and its unit's journal
+ * beside it. A server nothing answers for is found by name instead — the
+ * container the connection is named after, or the engine's units — since
+ * a stopped server's log is read for the lines that say why. Either is read
+ * through the engine's own lens, so a Postgres log reads as its slow
+ * statements, auth failures, locks and checkpoints, with the quick views and
+ * Insights that go with them, and a line opens in place. Nothing sends the
+ * reader to the host's Logs page.
+ *
+ * The page adds its own reading of the same server: its queries, as the
+ * server recorded them. A server on another machine and a SQLite file have no
+ * log here, so they are that reading alone, with the reason said above it.
+ *
+ * The lens's readings are figures over its window — restarts, persistence
+ * failures, memory limits in the last hour — and the Databases section draws
+ * no tiles (§15's `/git` exit), so they are the counts on the lens row's
+ * chips, each a press from the lines it counts.
  */
-export function LogsTab({ conn }: { conn: DbConnection }) {
-  const { can } = useAuth()
-  const admin = can("system.admin")
-  const access = usePoll(
-    (signal) => get<DbAccess>(`/databases/${conn.id}/access`, undefined, signal),
-    0,
+export function LogsTab({
+  conn,
+  onQuery,
+}: {
+  conn: DbConnection
+  onQuery?: (sql: string) => void
+}) {
+  const found = usePoll(
+    (signal) => get<DbLogSources>(`/databases/${conn.id}/logs/sources`, undefined, signal),
+    60_000,
     [conn.id],
-    { enabled: admin },
   )
-  const sources = usePoll(
-    (signal) => get<LogSourceIndex>("/logs/sources", undefined, signal),
-    0,
-    [],
-    { enabled: admin ? access.data !== undefined && !access.data.container : true },
-  )
+  // A server that stops takes its listener with it, and the next answer may
+  // find nothing left to follow. The log already open stays, with why,
+  // rather than going from under the reader just as it explains the most.
+  const [held, setHeld] = useState<{ id: number; found: DbLogSources } | null>(null)
+  const latest = found.data
+  if (latest && latest.sources.length > 0 && (held?.found !== latest || held.id !== conn.id)) {
+    setHeld({ id: conn.id, found: latest })
+  }
+  const kept = held?.id === conn.id ? held.found : undefined
 
-  if (!admin) {
+  if (found.error && !latest) return <ErrorState error={found.error} />
+  if (!latest) {
     return (
-      <EmptyState
-        icon={Logs}
-        title="Logs are read by an administrator"
-        description="Reading a server's output means reading its container or the system journal, which this account cannot."
-      />
+      <Pane className="h-full">
+        <LoadingRows rows={8} className="p-3" />
+      </Pane>
     )
   }
-  if (access.loading && !access.data) return <LoadingPanel />
-  if (access.data?.container) return <ContainerLogs container={access.data.container} />
-
-  const wanted = journalNeedles(conn.driver)
-  const units = (sources.data?.units ?? []).filter((u) =>
-    wanted.some((w) => u.name.toLowerCase().includes(w)),
-  )
-  if (sources.loading && !sources.data) return <LoadingPanel />
-  if (units.length === 0) {
-    return (
-      <EmptyState
-        icon={Logs}
-        title="No log for this server here"
-        description={
-          conn.driver === "sqlite"
-            ? "A SQLite database is a file and writes no log of its own."
-            : access.data?.exposure === "remote"
-              ? "The server is on another machine; its log is there."
-              : "No container and no systemd unit on this machine looks like this engine's. The Logs page lists every source it can read."
-        }
-      />
-    )
+  if (latest.sources.length > 0) {
+    return <ServerLogs conn={conn} found={latest} onQuery={onQuery} />
+  }
+  if (kept) {
+    const note =
+      "Nothing answers for this connection any more, so the server may have stopped. This is the log it was writing."
+    return <ServerLogs conn={conn} found={{ ...kept, note }} onQuery={onQuery} />
   }
   return (
-    <RowList>
-      {units.map((u) => (
-        <Row
-          key={u.name}
-          href={`/logs?source=journal:${encodeURIComponent(u.name)}`}
-          leading={<ProductLogo id={conn.driver} size="sm" />}
-          title={u.name}
-          subtitle={u.description || u.active}
-        />
+    <QueriesAlone conn={conn} reason={latest.reason} refused={latest.refused} onQuery={onQuery} />
+  )
+}
+
+function ServerLogs({
+  conn,
+  found,
+  onQuery,
+}: {
+  conn: DbConnection
+  found: DbLogSources
+  onQuery?: (sql: string) => void
+}) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const params = useSearchParams()
+  const noun = queryNoun(conn.driver)
+  const sources = found.sources
+  const primary = sources.find((s) => s.primary)
+
+  // The page owns its address: the view and the source are in it, so a link
+  // opens on the same reading. One press can change both — "Server log
+  // around this" opens History on the server's own log — and two replaces
+  // built from the same address would each undo the other, so the changes
+  // of one press are gathered and written once.
+  const pending = useRef<URLSearchParams | null>(null)
+  const write = (key: string, value: string) => {
+    if (!pending.current) {
+      const next = new URLSearchParams(params.toString())
+      pending.current = next
+      queueMicrotask(() => {
+        pending.current = null
+        router.replace(`${pathname}?${next.toString()}`, { scroll: false })
+      })
+    }
+    pending.current.set(key, value)
+  }
+
+  // A statement's rows came from the server's own log, so the log around one
+  // is that log — not the journal beside it, which holds systemd's starts and
+  // stops.
+  const onServerLog = (ctx: ServiceLogsContext): ServiceLogsContext =>
+    !primary || ctx.sourceId === primary.id
+      ? ctx
+      : { ...ctx, openHistory: (at) => ctx.openHistory({ ...at, source: primary.id }) }
+
+  const views: ServiceLogsView[] = [
+    {
+      id: "queries",
+      label: noun.view,
+      render: (ctx) => <DatabaseQueries conn={conn} ctx={onServerLog(ctx)} onQuery={onQuery} />,
+    },
+  ]
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      {found.note && (
+        <Notice tone="warning" icon={Warning} title="The server is not answering">
+          <p className="max-w-3xl text-pretty">{found.note}</p>
+        </Notice>
+      )}
+      {found.refused?.map((r) => (
+        <p key={r.path} className="shrink-0 text-hint text-pretty text-muted-foreground">
+          Also writes <span className="font-mono wrap-anywhere">{r.path}</span>, which is {r.reason}
+        </p>
       ))}
-    </RowList>
+      <ServiceLogs
+        sources={sources}
+        source={params.get("source")}
+        onSourceChange={(id) => write("source", id)}
+        view={params.get("view")}
+        onViewChange={(id) => write("view", id)}
+        storageKey={`databases.${conn.id}.logs`}
+        views={views}
+        // The Databases section draws no tiles (§15's `/git` exit): the
+        // lens's figures are the counts on its chips, each a press from the
+        // lines it counts.
+        readings="chips"
+        pickerLabel="Server log"
+        className="min-h-0 flex-1"
+      />
+    </div>
   )
 }
 
-function journalNeedles(driver: string): string[] {
-  switch (driver) {
-    case "postgres":
-      return ["postgres"]
-    case "mysql":
-      return ["mysql", "mariadb"]
-    case "redis":
-      return ["redis", "valkey", "keydb"]
-    case "mongodb":
-      return ["mongod"]
-    case "clickhouse":
-      return ["clickhouse"]
-    case "sqlserver":
-      return ["mssql"]
-    case "oracle":
-      return ["oracle"]
-  }
-  return []
-}
-
-function ContainerLogs({ container }: { container: string }) {
-  const [lines, setLines] = useState<LogLine[]>([])
-  const [timestamps, setTimestamps] = useState(true)
-  const onMessage = useCallback((envelope: Envelope) => {
-    if (envelope.type !== "logs") return
-    const batch = envelope.data as { stream: string; text: string }[]
-    setLines((prev) => {
-      const next = [...prev, ...batch.map((l) => ({ text: l.text }))]
-      return next.length > LOG_LIMIT ? next.slice(next.length - LOG_LIMIT) : next
-    })
-  }, [])
-  const query = useMemo(
-    () => ({ tail: 500, timestamps: timestamps ? "true" : "false" }),
-    [timestamps],
-  )
-  const { state } = useSocket(`/docker/containers/${encodeURIComponent(container)}/logs/stream`, {
-    onMessage,
-    query,
-  })
-  const save = () => {
-    const blob = new Blob([lines.map((l) => l.text).join("\n")], { type: "text/plain" })
-    const a = document.createElement("a")
-    a.href = URL.createObjectURL(blob)
-    a.download = `${container}.log`
-    a.click()
-    URL.revokeObjectURL(a.href)
-  }
+/**
+ * A database with no log on this machine — on another machine, or a SQLite
+ * file — is its queries alone, in a pane of the same shape, with why there
+ * is no log said beside the name, wrapping rather than cut: it is the one
+ * sentence the reader came for.
+ */
+function QueriesAlone({
+  conn,
+  reason,
+  refused,
+  onQuery,
+}: {
+  conn: DbConnection
+  reason?: string
+  refused?: DbLogSources["refused"]
+  onQuery?: (sql: string) => void
+}) {
+  const noun = queryNoun(conn.driver)
+  const why = reason ?? (refused?.length ? `${refused[0].path} is ${refused[0].reason}.` : "")
   return (
     <Pane className="h-full min-h-[24rem]">
-      <LogViewer
-        className="h-full"
-        lines={lines}
-        showTimestamps={false}
-        onClear={() => setLines([])}
-        emptyMessage={state === "open" ? "No output yet." : "Connecting…"}
-        toolbar={
-          <>
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() => {
-                setLines([])
-                setTimestamps((t) => !t)
-              }}
-            >
-              {timestamps ? "Hide times" : "Show times"}
-            </Button>
-            <Button size="xs" variant="ghost" onClick={save} disabled={lines.length === 0}>
-              <Download className="size-3" />
-              Save
-            </Button>
-          </>
-        }
-      />
+      <div className="flex shrink-0 items-start gap-x-2 border-b border-hairline px-2.5 py-2.5">
+        <ProductGlyph id={conn.driver} className="mt-px" />
+        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <span className="shrink-0 text-body font-medium">
+            {conn.driver === "sqlite" ? "Statements run from here" : noun.title}
+          </span>
+          {why && (
+            <span className="min-w-0 basis-64 text-hint text-pretty text-muted-foreground max-sm:basis-full sm:flex-1">
+              {why}
+            </span>
+          )}
+        </div>
+      </div>
+      <DatabaseQueries conn={conn} onQuery={onQuery} />
     </Pane>
   )
 }

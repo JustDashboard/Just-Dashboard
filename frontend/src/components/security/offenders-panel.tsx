@@ -10,14 +10,14 @@ import type { BanSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { Meter } from "@/components/meter"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { VerbActions } from "@/components/verbs"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
 import { JailName } from "@/components/security/intrusion-panels"
-import { Address } from "@/components/security/marks"
+import { PeerIdentity } from "@/components/security/marks"
 import {
   Table,
   TableBody,
@@ -36,8 +36,19 @@ import {
  * way round turns it into the one question worth asking of it: this is not a
  * passing scanner, it is somebody working through your host, and a permanent
  * firewall rule is a better answer than another ten-minute ban.
+ *
+ * The fold reads fail2ban.log. Where the page's Activity reads fail2ban's
+ * journal instead (`journal`) — no file, or none the dashboard may read —
+ * an empty fold is not "nothing was banned", and Activity's Insights, which
+ * rank the addresses banned more than once, is where the same answer is.
  */
-export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
+export function OffendersPanel({
+  onBlocked,
+  journal,
+}: {
+  onBlocked?: () => void
+  journal?: boolean
+}) {
   const { can } = useAuth()
   const router = useRouter()
   const [blocking, setBlocking] = useState<string | null>(null)
@@ -63,21 +74,20 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
     }
   }
 
+  // Framed only around its table (§2): on a journal host the fold is a
+  // sentence pointing at Activity, drawn on the page like any other.
+  const pointer = journal && !data?.offenders.length
+  const mostBans = Math.max(1, ...(data?.offenders ?? []).map((offender) => offender.bans))
+
   return (
-    <Panel>
+    <Panel plain={pointer}>
       <PanelHeader title="Repeat offenders" />
       {data && data.offenders.length > 0 && (
         <PanelToolbar className="gap-x-6">
-          <MetricStrip>
-            <Metric label="bans" value={data.bans} />
-            <Metric label="releases" value={data.unbans} />
-            <Metric label="addresses" value={data.offenders.length} />
-            <Metric
-              label="since"
-              value={data.since ? relativeTime(data.since) : "—"}
-              hint="as far back as the log goes"
-            />
-          </MetricStrip>
+          <span className="numeric text-hint text-muted-foreground">
+            {data.bans} bans · {data.unbans} releases · since{" "}
+            {data.since ? relativeTime(data.since) : "—"}
+          </span>
           {data.perDay.length > 1 && (
             <>
               <span className="flex-1" />
@@ -94,7 +104,12 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
         </PanelToolbar>
       )}
       <PanelBody flush>
-        {unavailable ? (
+        {pointer && (unavailable || data) ? (
+          <Notice tone="default" title="No bans in fail2ban.log" className="mt-3">
+            Activity below reads fail2ban&rsquo;s journal instead, and its Insights rank the
+            addresses banned more than once.
+          </Notice>
+        ) : unavailable ? (
           <Notice tone="default" title="No fail2ban log on this host" className="mt-3">
             fail2ban is not installed, or it logs only to the journal. There is no file to fold.
           </Notice>
@@ -110,41 +125,48 @@ export function OffendersPanel({ onBlocked }: { onBlocked?: () => void }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Address</TableHead>
-                  <TableHead>Bans</TableHead>
-                  <TableHead className="hidden md:table-cell">First seen</TableHead>
-                  <TableHead className="hidden sm:table-cell">Last seen</TableHead>
-                  <TableHead className="w-full">Jails</TableHead>
-                  <TableHead className="w-px" />
+                  <TableHead className="w-full">Bans</TableHead>
+                  <TableHead className="w-px">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.offenders.map((offender) => (
                   <TableRow key={offender.ip} className="group">
-                    <TableCell>
-                      <Address ip={offender.ip} />
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={cn(
-                          "numeric text-xs font-medium",
-                          offender.bans >= 5 ? "text-destructive" : "text-muted-foreground",
-                        )}
-                      >
-                        {offender.bans}
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden whitespace-nowrap text-muted-foreground md:table-cell">
-                      {relativeTime(offender.first)}
-                    </TableCell>
-                    <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">
-                      {relativeTime(offender.last)}
-                    </TableCell>
-                    <TableCell>
-                      <span className="flex flex-wrap gap-x-3 gap-y-1 text-body text-muted-foreground">
+                    <TableCell className="py-4">
+                      <PeerIdentity ip={offender.ip} />
+                      <span className="mt-2 flex flex-wrap gap-x-2 text-hint text-muted-foreground">
                         {offender.jails.map((jail) => (
                           <JailName key={jail} name={jail} />
                         ))}
                       </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="min-w-24 space-y-2">
+                        <div className="flex items-center justify-between gap-4">
+                          <span
+                            className={cn(
+                              "numeric text-body font-medium",
+                              offender.bans >= 5 && "text-destructive",
+                            )}
+                          >
+                            {offender.bans}
+                          </span>
+                          <span className="text-hint text-muted-foreground">
+                            {relativeTime(offender.last)}
+                          </span>
+                        </div>
+                        <Meter
+                          value={(offender.bans / mostBans) * 100}
+                          tone={offender.bans >= 5 ? "danger" : "default"}
+                          size="thin"
+                          label={`${offender.bans} bans`}
+                        />
+                        <span className="block text-hint text-muted-foreground">
+                          Since {relativeTime(offender.first)}
+                        </span>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <VerbActions

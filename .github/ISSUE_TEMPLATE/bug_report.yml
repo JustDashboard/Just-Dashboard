@@ -1,0 +1,130 @@
+# Adapted from T3 Code's contribution templates; see ../TEMPLATE_LICENSE.
+name: Bug report
+description: Tell us about something that is broken or stopped working in Just Dashboard.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report one problem at a time. For an improvement, use the feature request form.
+        Report vulnerabilities [privately](https://github.com/JustDashboard/Just-Dashboard/security/advisories/new).
+        Remove passwords, tokens, keys, and other private information from logs and screenshots.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the existing issues for this problem.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Choose the closest match.
+      options:
+        - Installation or updates
+        - Login, accounts, or two-factor authentication
+        - Overview, metrics, or boards
+        - Docker or Compose
+        - Deployments
+        - Databases
+        - Proxy, domains, or certificates
+        - Files or backups
+        - Git or provider integrations
+        - Terminal, processes, or services
+        - Logs
+        - Security, firewall, or host users
+        - Packages
+        - Settings
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the page, action, and setup needed to see the problem.
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Click ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include the error message, if there is one.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      description: How does this affect your use of the dashboard?
+      options:
+        - I cannot complete the task
+        - The task often fails or is unreliable
+        - It happens occasionally or has a workaround
+        - It is a visual issue
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Just Dashboard version
+      description: The installed version, or branch and commit for a source checkout. Enter "unknown" if installation failed before you could check.
+      placeholder: Release version or branch @ commit
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include what you know. Host means the Linux server running Just Dashboard, which may differ from the device running your browser.
+      placeholder: |
+        Host Linux distribution and version:
+        Host architecture (amd64 / arm64):
+        Docker and Compose versions:
+        Install method (installer / manual Compose / local development):
+        Browser and version (for UI issues):
+        Access method (Tailscale / SSH tunnel / other):
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste only the lines around the failure. Remove credentials, including any bootstrap admin password. Do not paste your .env file.
+      render: text
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or recordings
+      description: Attach images or a short recording if they help explain the problem. Hide credentials and private host details.
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround or additional context
+      description: Mention anything that helps you get past the problem, or when it first started.

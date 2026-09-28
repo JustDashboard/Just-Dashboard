@@ -86,24 +86,35 @@ that does something.
   rows; the preview's verdict and the network panel's shape diagram are the two `Group tinted` fences
   the section keeps, and a diff or a captured compose file sits in a `Well`.
 - `stack-detail.tsx` is a stack as the application it is: clickable ports, the compose file editable in
-  place (validated before saving — and saving is *not* deploying, which the UI says), one merged log feed
-  tagged by service, a Files tab over the stack's directory, and links to git and a shell in it. `container-detail.tsx` adds
+  place (validated before saving — and saving is *not* deploying, which the UI says), its logs as one
+  source (`stack:<name>`: every container merged by time, each line under its service in that service's
+  hue, the stack's readings over it, and an Events view of what Docker did to the project), a Files tab
+  over the stack's directory, and links to git and a shell in it. `container-detail.tsx` adds
   the reachability join (published port + the proxy site pointing at it turns "running on 3000" into a
-  URL), the writable-layer investigator, the failure diagnosis, editable limits, raw inspect, and
+  URL), the writable-layer investigator, the failure diagnosis (whose window the Logs tab opens as a
+  Crash window chip, and the Overview's notice as Read those lines), its logs through the lens its
+  image names with an Events view beside them (`container-events.tsx`: the health check's probes,
+  Docker's events for the container with crash loops folded and an exit's last lines under it),
+  editable limits, raw inspect, and
   Update/Duplicate/Rename — the last two behind a statement of consequence when compose owns the
   container, because the next deploy silently undoes them days later. Its Storage tab leads with the path
   *inside* the container — the one the application's own configuration names — states the kind of storage
-  in words rather than as a Docker noun, and puts where it actually lives on the second line; the header
-  answers the question the tab is opened with, which is how much of this survives a rebuild. A volume or
-  bind row also opens onto what is *in* it — `files/inline-browser.tsx`, the same component the volume
-  panel and the stack's Files tab use, drawn as the file manager's own listing in a pane — because naming a mount does not answer whether the backup landed or what the application
-  wrote; a tmpfs row does not, since memory has nowhere on this filesystem to look. Storage that looks
+  in words rather than as a Docker noun, and puts where it actually lives beside it, one line per mount with
+  the kind at the row's edge (amber for memory, which does not survive a rebuild). Under the mounts, the
+  first volume or bind is already open in `files/inline-browser.tsx` — the same component the volume
+  panel and the stack's Files tab use, drawn as the file manager's own listing in a pane, here in its
+  `fill` form so the listing takes the tab's height — because naming a mount does not answer whether the
+  backup landed or what the application wrote. With more than one to look in, the rows are the switch
+  between them; a tmpfs row never is, since memory has nowhere on this filesystem to look. Storage that looks
   like a database's own files is named as such above the browser while the container is running
-  (`docker/shared.tsx`). Its Usage
-  tab drops the network chart entirely for a container on the host's network namespace: Docker reports no
-  per-container interface there, and a chart-shaped hole explaining itself beside a real chart draws the
-  eye first to say "nothing here". `build-dialog.tsx` is where the git panel and Docker stop being two
-  products: a repository we already pull is a build context.
+  (`docker/shared.tsx`). Its Usage tab leads with live CPU, memory working set and network receive/send
+  tiles, then processor/task, memory and block I/O details and a per-interface table of rates, totals,
+  packet rates, errors and drops. Live readings can be paused and remain independent of history
+  retention. Host networking links to host metrics; shared container namespaces are labelled as shared.
+  Recorded charts stay visible for idle interfaces (zero is data); charts with no measurable intervals
+  are omitted with a compact explanation. CPU/memory and network/block charts share one range control,
+  carry measured peaks, and use the reading register's plain surfaces. `build-dialog.tsx` is where the
+  git panel and Docker stop being two products: a repository we already pull is a build context.
 
 Four deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`, `/audit?action=`.
 All but the terminal one are read once as an initial value rather than kept in sync — the URL is where
@@ -113,7 +124,7 @@ event; landing on an unfiltered list of everything the dashboard has ever done i
 promised.
 
 A container and a stack are their own destinations — `/docker/containers/<id>` and
-`/docker/stacks/<name>` — since 2026-09-21: each holds a live log feed, and the container a shell and
+`/docker/stacks/<name>` — since 2026-09-21: each holds its logs, and the container a shell and
 the stack a compose editor, which is the test for a page rather than a sheet (`shell-design.md`). The
 container takes `?tab=` so a link can ask its question — "show me the logs" lands on the logs. The
 `?container=` and `?stack=` addresses those pages replaced still resolve, by redirect. Deployment
@@ -135,47 +146,71 @@ under the domain field because "the name does not point here yet" causes most ce
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
 protocol row.
 
-The security section is eight pages of one shape, the host Overview's: compact contextual state and
-controls, a run of `StatTile` readings on the page's own ground, the findings about that area
-under them (`AreaFindings`, plain), then the detail as plain tables that bleed to the page edge. The
-overview opens on how this browser reaches the panel — the exposure grade, the allowlist, the tunnel
-interfaces and **the address you arrived from** (`Exposure.client`) as a row of facts — then five
-tiles, one per area with a figure, each a `StatLink` to its page, and the whole posture as one findings
-list. There is no second list of the areas: the rail's Security panel already names every page, and the
-tiles carry the verdicts that used to sit beside seven links. The rules it follows are the ones the
-[design system](design-system.md) states, plus four of its own:
+The security section has eight reading pages (§15–16), all retaining their headline
+`StatGrid` readings. The overview adds a picture of the observed browser → access scope → dashboard
+path using the deployment section's `SettingPicture`, `WireNode` and still `AnimatedBeam` vocabulary.
+It describes access to the dashboard, not exposure of every port on the host. The finding severity
+counts and unavailable checks sit in a rail beside the findings.
 
-- **An address is the same thing on every page.** A remote peer on Connections, a repeat offender in
-  the ban log and an attacker in the failed-login record all take the verbs in `address-verbs.tsx`:
-  *block at the firewall* inline (a source-only deny the server puts in front of every allow, omitted
-  for a role that cannot write rules and for a private peer), and behind the menu the three lookups —
-  who owns it, reverse lookup, trace the route — each of which opens the Tools page narrowed to that
-  probe with the address filled in (`?tool=asn&target=…`). Arriving never runs the probe; a probe is
-  traffic this server sends to an address, and the run stays a press.
-- **The jail sheet can ban, and the tuning dialog knows who you are.** `POST /fail2ban/{jail}/ban`
-  existed since the jail controls shipped and nothing on the page reached it; the sheet has the input
-  now, with the server refusing the caller's own address. The tuning dialog's allowlist offers "Never
-  ban my address" — the exposure's `client` — because banning yourself is the commonest way to lose a
-  server you were in the middle of hardening, and its notice says what actually happens: applied to the
-  running fail2ban and written to `jail.d/99-just-dashboard.local`, not "lost at the next restart".
-- **Logins folds btmp into attackers.** Five hundred lines of the same three addresses answer nothing;
-  `GET /logins/attackers` (admin, like the listing it is folded from) gives each address its attempts,
-  the account names it tried most — "root, admin, ubuntu" is a scanner, one real name is somebody who
-  knows the host — and the block beside it.
-- **A standing fact is not a banner.** Text that never changes — the firewall's lockout guard, "a probe
-  answers outward, not inward" — is stated *once*, in the footer of the thing it qualifies or at the top
-  of the page it applies to, never repeated per block. Only a `Notice` that explains why the control
-  under it will refuse (sshd with no key on the host) stays above the control, and it sits under the
-  readings rather than above them. The firewall's defaults are readings in tiles and, where the backend
-  can take an instruction, controls in one plain "Defaults" block — a read-only host gets the tiles and
-  no row of dead controls under them.
+- **Firewall:** the rules are the working column, with default-policy and logging controls beside
+  them on wide screens. Each row groups its destination service, port and comment; actions stay
+  visible. The rule dialog groups policy, destination and source, using source choice cards
+  (Tailscale's own mark for a tailnet source) and service marks where the port identifies a product.
+  Address-only deny/reject rules can be edited without inventing a destination port. Existing
+  typed confirmations for toggle, reset and inbound-deny policy remain. The page ends on the Firewall
+  log (`ufw.log`, else `kern.log`, else the kernel ring, read as the firewall lens); while ufw or
+  firewalld says logging is off, the section says so and its button brings the logging control
+  beside the rules into view instead of drawing an empty pane.
+- **SSH:** authentication, access, session limits and other directives are `FormSection aside`
+  groups. Every control occupies the same column; recommendations sit with the setting, explanatory
+  detail is available beside its label, and a sticky pending footer applies the changed values
+  together. Reverting a draft to its effective value removes it from the change set. The apply
+  dialog still requires `change ssh`; the backend tests and reloads through its existing job. For an
+  administrator the page ends on the Auth log (`auth.log` or `secure`, else the journal's sshd, sudo,
+  su and logind lines); anyone else is told the page needs an administrator and no log is asked for.
+- **Intrusion:** jail destination rows carry the watched service, current state, counts and a meter
+  of bans still held. The jail sheet retains manual ban and release actions. Its tuning form shows
+  the subject, groups the three policy numbers, and offers the browser's address for the allowlist.
+  Draft values use fail2ban's lowercase parameter names while the saved configuration uses camel
+  case. Repeat offenders take their row alone, and Activity — fail2ban's own log, every strike as
+  well as every ban — follows across the page; where fail2ban writes only to its journal, the
+  offenders' fold says Activity reads it instead rather than "nothing has been banned".
+- **Each area reads its own log in place.** SSH, Firewall and Intrusion read the file an operator
+  would open first, each asked after with `GET /logs/source` rather than out of the whole log index,
+  and fall back to the journal's reading of the same program, saying in the pane's facts whether the
+  file is missing or outside `JD_LOG_ROOTS` (`host-logs.ts`, `log-section.tsx`). The day's counts
+  from the log are a second run of the page's one grid, each a press that narrows the log under it.
+  The client of a line takes the same address verbs as a peer anywhere else in the section, but the
+  block only where the line is an attack a deny answers — a failed or invalid login, a strike or a
+  ban, a rate-limited packet — never an accepted login, an `ignoreip` match or an allowed packet,
+  which can be the operator's own; an outbound packet's address is this host's, and gets no verbs.
+- **Connections:** each peer's address and network share one column, its process and ports another,
+  with a socket count and a comparative meter. **Logins** groups account/terminal, origin and session
+  age, then places attackers and login history beside one another when there is room. Addresses
+  use `PeerIdentity` or the inline `Address`; real product marks and consistent account initials
+  carry through all three pages. Address block and lookup actions remain in `address-verbs.tsx`.
+- **Network:** devices group identity, addresses/reach, link state/MTU and transferred bytes. The
+  received/sent meter compares cumulative byte counts, not bandwidth or utilization. Routes keep
+  their own table beside the resolver facts. Virtual and bridge devices remain folded by default.
+- **Tools:** 21 probes plus the browser-only subnet calculator occupy a two-pane workbench. The
+  searchable chooser selects one labelled form and result area. Other probes stay mounted while
+  hidden, preserving drafts, results and in-flight requests when switching. A new query-string
+  arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs it;
+  sending traffic remains an explicit Run action. The metrics and outward-tool hint distinguish
+  outbound reachability from inbound exposure.
 
-`tests/browser/security-ui.spec.ts` drives all eight pages against a mocked API: the readings each
-page draws from the shapes the backend sends, the joins above (the block a row sends, the ban the sheet
-sends, the allowlist the tuning offers, the prefill Tools arrives with), that no block on any page is
-framed, that every icon-only control is named, that row controls are reachable without a pointer, and
-that nothing scrolls sideways on a phone. Set `JD_SECURITY_SHOTS` to a directory to have it write
-review screenshots of every page at 1280 and 1720 wide.
+Capability-gated controls, unavailable modules, backend paths and audit/confirmation boundaries
+retain their contracts. Tables keep their frames because they own scroll regions; plain findings
+and forms do not. Phone tables scroll inside those frames without expanding the page.
+
+`tests/browser/security-ui.spec.ts` checks all eight pages, their mutations and lookup handoffs,
+probe draft/request preservation, jail policy edits, SSH draft reversion, source-only rules,
+typed confirmations, limited roles and unavailable modules, and each area's log — its lens, its
+readings, its fallbacks and which lines offer a block — against the lines the Go lenses read
+(`host-logs-fixture.ts`). It checks the viewport at 390, 1280 and 1720, and requires desktop tables to
+fit their action columns. `JD_SECURITY_SHOTS` writes
+review screenshots at those three widths, including scrolled content and rule/jail dialogs.
+The changed-file gate also runs the design-system checks.
 
 **Packages.** `install-panel.tsx` updates as you type, which is not decoration: the reason people open a
 terminal instead of a package page is that they do not know the name (`postgresql-client`, not `psql`;
@@ -187,7 +222,12 @@ feature; the installed table caps at 400 rendered rows with the count said plain
 is drawn per design-system §15: the search is a plain panel of hand-laid rows (`ROW_BLEED`) whose
 install verb is an outline button — sixty brand faces in a result list would be sixty commands — and
 a started install is a `Status`, not a disabled button; the sheet's usage sections open with an eyebrow
-alone, and its copyable commands sit on the control ground.
+alone, and its copyable commands sit on the control ground. The fourth view, **Log**
+(`components/packages/log-view.tsx`), reads what the package manager did from its own logs — apt's
+history with each transaction's command and who asked, dpkg's record, the unattended runs, dnf's — in
+History and Insights only, opening on everything on disk, since a package log is written a few times
+a week and a live tail of it is an empty pane; it is named Log because the pane's own first tab is
+History.
 
 ## The terminal panel
 

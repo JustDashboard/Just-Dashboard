@@ -243,10 +243,14 @@ export type ContainerHistoryPoint = {
   memLimit: number
   pids: number
   /** Bytes per second, differenced from the cumulative counters Docker reports. */
-  netRx: number
-  netTx: number
-  blockRead: number
-  blockWrite: number
+  netRx: number | null
+  netTx: number | null
+  blockRead: number | null
+  blockWrite: number | null
+  netRxPeak?: number | null
+  netTxPeak?: number | null
+  blockReadPeak?: number | null
+  blockWritePeak?: number | null
 }
 
 export type ContainerHistory = {
@@ -327,14 +331,6 @@ export type Health = {
   recorded: boolean
 }
 
-/** One ban or unban, read from fail2ban's own log rather than remembered here. */
-export type BanEvent = {
-  action: "ban" | "unban"
-  jail: string
-  ip: string
-  at: string
-}
-
 export type MetricsHistory = {
   from: string
   to: string
@@ -382,6 +378,7 @@ export type NetStats = {
   recvRate: number
   addrs: string[]
   isUp: boolean
+  kind: NetInterface["kind"]
 }
 
 export type DirEntry = {
@@ -519,7 +516,12 @@ export type ContainerStats = {
   name: string
   ts: string
   cpuPercent: number
+  cpuReady?: boolean
   memUsage: number
+  memRaw?: number
+  memCache?: number
+  memRss?: number | null
+  memSwap?: number | null
   memLimit: number
   memPercent: number
   netRx: number
@@ -538,6 +540,24 @@ export type ContainerStats = {
   /** Cumulative nanosecond totals. Only meaningful as a difference between two samples. */
   cpuTotal: number
   systemCpu: number
+  networks?: Record<string, ContainerNetworkCounters>
+  networkAvailable?: boolean
+  blockAvailable?: boolean
+  pidsLimit?: number
+  cpuPeriods?: number
+  cpuThrottledPeriods?: number
+  cpuThrottledTime?: number
+}
+
+export type ContainerNetworkCounters = {
+  rxBytes: number
+  txBytes: number
+  rxPackets: number
+  txPackets: number
+  rxErrors: number
+  txErrors: number
+  rxDropped: number
+  txDropped: number
 }
 
 export type DockerImage = {
@@ -810,6 +830,8 @@ export type DockerEvent = {
   image?: string
   stack?: string
   exitCode?: string
+  /** The compose service: what a stack's log names the container by (`db`, not `shop-db-1`). */
+  service?: string
   /**
    * The dashboard's own labels off the object this happened to, with the
    * `io.just-dashboard.` prefix stripped — `environment-id`, `release-id`,
@@ -1194,6 +1216,8 @@ export type PM2Process = {
   autorestart: boolean
   maxMemoryRestart?: number
   createdAtMs?: number
+  /** PM2 stamps each line it writes (`--time`, `log_date_format`), so the log can be read by time. */
+  logTimes?: boolean
 }
 
 /** One account's PM2 daemon: whether what it runs would survive a reboot. */
@@ -1356,7 +1380,19 @@ export type Crontab = {
 export type LogSource = {
   id: string
   label: string
-  kind: "system" | "nginx" | "app" | "pm2" | "docker" | "journal"
+  kind:
+    | "system"
+    | "nginx"
+    | "app"
+    | "pm2"
+    | "docker"
+    | "journal"
+    /** Every container of one compose project, merged by time. */
+    | "stack"
+    /** The journal of one or more syslog identifiers (`journalctl -t`). */
+    | "journal-id"
+    /** The kernel ring (`journalctl -k`). */
+    | "kernel"
   path?: string
   size?: number
   modified?: string
@@ -1368,12 +1404,22 @@ export type LogSource = {
   detail?: string
   /** A live source's state — a stopped container still has logs worth reading. */
   status?: string
+  /**
+   * The lens the server reads this source through (`lib/log-lenses.ts`) —
+   * detected from the path, the image or the unit. Absent where none applies,
+   * and for a stack whose containers disagree.
+   */
+  lens?: string
+  /** A stack's services' images, for drawing it as the products it runs. */
+  images?: string[]
 }
 
 export type LogJournalUnit = {
   name: string
   description: string
   active: string
+  /** The lens `journal:<unit>` is read through. */
+  lens?: string
 }
 
 /**
@@ -1418,9 +1464,25 @@ export type LogLine = {
    */
   message?: string
   fields?: Record<string, string>
+  /**
+   * What the line records, in its lens's words ("auth_failed", "slow",
+   * "ban"), and the values the lens read out of its text. A plain line keeps
+   * being drawn as the text it is; these are what it can be filtered,
+   * counted and labelled by.
+   */
+  event?: string
+  attrs?: Record<string, string>
+  /**
+   * The line continues the record above it — a Postgres DETAIL, a stack
+   * frame. It carries its head's level, took its head's verdict under the
+   * filter, and is folded under it.
+   */
+  cont?: boolean
+  /** The lens that named `event`, where it is not the stream's own (a syslog line read as auth). */
+  lens?: string
 }
 
-/** One column of the search histogram, counted by level. */
+/** One column of the search histogram, counted by level — or by `histogramBy`'s values. */
 export type LogBucket = {
   start: string
   total: number
@@ -1450,6 +1512,50 @@ export type LogSearchResult = {
   first?: string
   last?: string
   tookMillis: number
+  /** Top values per asked-for key, over every match in the window (`facets=`). */
+  facets?: Record<string, LogFacet>
+  /** The distribution of a numeric key over the matches (`measure=`). */
+  measure?: LogMeasure
+  /** The lens the search read the source through. */
+  lens?: string
+  /** What the histogram's counts are keyed by, when it is not the level. */
+  histogramBy?: string
+}
+
+export type LogFacetValue = {
+  value: string
+  count: number
+  /** How many of those lines were errors or worse. */
+  errors: number
+  sum?: number
+  max?: number
+  first?: string
+  last?: string
+  /** The last value seen of each `sample=` key, beside this one. */
+  samples?: Record<string, string>
+}
+
+export type LogFacet = {
+  values: LogFacetValue[]
+  distinct: number
+  /** The distinct count stopped being exact past the server's budget. */
+  distinctCapped?: boolean
+  /** Matches whose value is not among `values`. */
+  other: number
+  /** Matches that carry no value for the key at all. */
+  missing: number
+}
+
+export type LogMeasure = {
+  key: string
+  count: number
+  p50: number
+  p75: number
+  p90: number
+  p95: number
+  p99: number
+  max: number
+  mean: number
 }
 
 /** The frame the live socket opens with, before any lines. */
@@ -1461,6 +1567,8 @@ export type LogStreamMeta = {
   prefill?: { lines: number; complete: boolean }
   archives?: number
   note?: string
+  /** The lens the stream reads its lines through. */
+  lens?: string
 }
 
 export type LogRotateRule = {
@@ -1491,16 +1599,6 @@ export type LogRetention = {
   level: "ok" | "warn" | "unknown"
   lastRun?: string
   available: boolean
-}
-
-export type JournalEntry = {
-  timestamp: string
-  message: string
-  priority: number
-  unit?: string
-  pid?: string
-  hostname?: string
-  syslogIdentifier?: string
 }
 
 export type FileEntry = {
@@ -5427,6 +5525,53 @@ export type DbStatements = {
   totalMs: number
 }
 
+/**
+ * The logs a database's server writes, as GET /databases/{id}/logs/sources
+ * follows the connection to them: its container, or the file its process
+ * holds open, the file its package writes and its unit's journal. `primary`
+ * is where the server writes its own lines — the file even while logrotate
+ * has left it empty.
+ */
+export type DbLogSource = LogSource & { primary?: boolean }
+
+export type DbLogSources = {
+  sources: DbLogSource[]
+  /** Logs the server writes that the log roots do not reach. */
+  refused?: { path: string; reason: string }[]
+  /** Why there is no source, when there is none. */
+  reason?: string
+  /** What the sources are when nothing answers for the connection: a stopped server's log. */
+  note?: string
+}
+
+/** One statement the server itself recorded as slow — or, for ClickHouse, as run. */
+export type DbQueryEntry = {
+  at: string
+  durationMs: number
+  query: string
+  fp?: string
+  user?: string
+  db?: string
+  client?: string
+  rows?: number
+  examined?: number
+  error?: string
+  code?: string
+}
+
+/** GET /databases/{id}/querylog: the statements, where they were read, and what keeps them empty. */
+export type DbQueryLog = {
+  supported: boolean
+  reason?: string
+  source: "log" | "slowlog" | "query_log" | "slow_log" | "statements_history" | ""
+  /** The setting that keeps the log empty, and the statement that changes it. */
+  enable?: { setting: string; current: string; sql: string }
+  /** How slow a statement has to be to be recorded, in the engine's words. */
+  threshold?: string
+  entries: DbQueryEntry[]
+  truncated: boolean
+}
+
 export type DbBackupFile = {
   file: string
   size: number
@@ -5959,6 +6104,13 @@ export type DeploymentRequests = {
   format?: string
   /** Whether this format carries a request duration at all. */
   latency: boolean
+  /**
+   * Where the proxy says why it failed a request: the Caddy ingress
+   * container, whose output carries its error lines, or nginx's error file
+   * for the site. At most one is set.
+   */
+  ingress?: string
+  errorLog?: string
   /** What is held reaches the start of the retained record; false means every figure is a floor. */
   complete: boolean
   observedAt: string

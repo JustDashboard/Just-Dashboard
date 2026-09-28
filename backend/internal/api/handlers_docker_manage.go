@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -992,94 +994,6 @@ func requireComposePhraseWS(w http.ResponseWriter, r *http.Request, action docke
 	return httpx.RequireTypedConfirmationWS(w, r, name)
 }
 
-// handleStackLogStream follows every container in a stack at once.
-//
-// A stack is one application; its logs are one story told by four processes,
-// and reading them means opening four panels and correlating timestamps by
-// eye. Each line is tagged with the service it came from so the merged stream
-// stays readable, which is what `docker compose logs -f` does and what nothing
-// in this dashboard could do until now.
-func (s *Server) handleStackLogStream(w http.ResponseWriter, r *http.Request) error {
-	name := httpx.URLParam(r, "name")
-	stack, err := s.findStack(r, name)
-	if err != nil {
-		return err
-	}
-
-	conn, err := s.WS.Upgrade(w, r)
-	if err != nil {
-		return nil
-	}
-	defer conn.Close()
-	ctx, cancel := contextWithCancel(r)
-	defer cancel()
-	go conn.Keepalive(ctx)
-	go conn.DrainControl(cancel)
-
-	tail := defaultStr(r.URL.Query().Get("tail"), "200")
-	merged := make(chan dockerx.LogLine, 512)
-	closers := []func(){}
-	for _, svc := range stack.Services {
-		if svc.Container == "" || svc.State != "running" {
-			continue
-		}
-		ch, closer, err := s.modules.docker.Logs(ctx, svc.Container, dockerx.LogOptions{
-			Tail: tail, Follow: true, Timestamps: r.URL.Query().Get("timestamps") == "true",
-		})
-		if err != nil {
-			continue
-		}
-		closers = append(closers, func() { closer.Close() })
-		go func(service string, in <-chan dockerx.LogLine) {
-			for line := range in {
-				line.Service = service
-				select {
-				case <-ctx.Done():
-					return
-				case merged <- line:
-				}
-			}
-		}(svc.Name, ch)
-	}
-	defer func() {
-		for _, c := range closers {
-			c()
-		}
-	}()
-	if len(closers) == 0 {
-		conn.Send("eof", map[string]string{"reason": "nothing in this stack is running"})
-		return nil
-	}
-
-	// Batched on the same short tick the single-container stream uses: a
-	// stack of chatty services can emit thousands of lines a second between
-	// them, and one frame each would drown the browser.
-	batch := make([]dockerx.LogLine, 0, 256)
-	flush := time.NewTicker(150 * time.Millisecond)
-	defer flush.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case line := <-merged:
-			batch = append(batch, line)
-			if len(batch) >= 256 {
-				if err := conn.Send("logs", batch); err != nil {
-					return nil
-				}
-				batch = batch[:0]
-			}
-		case <-flush.C:
-			if len(batch) > 0 {
-				if err := conn.Send("logs", batch); err != nil {
-					return nil
-				}
-				batch = batch[:0]
-			}
-		}
-	}
-}
-
 // ---------------------------------------------------- events & diagnosis ---
 
 func (s *Server) handleDockerDiagnose(w http.ResponseWriter, r *http.Request) error {
@@ -1093,14 +1007,35 @@ func (s *Server) handleDockerDiagnose(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
+// eventFilterFrom reads the feed's question from a request: the kinds and
+// text the host feed narrows by, and the one container or compose project a
+// container's or a stack's page is about.
+func eventFilterFrom(q url.Values) (dockerx.EventFilter, error) {
+	f := dockerx.EventFilter{Search: q.Get("search"), Container: q.Get("container"), Stack: q.Get("stack")}
+	if raw := q.Get("kinds"); raw != "" {
+		f.Kinds = strings.Split(raw, ",")
+	}
+	if f.Container != "" && !eventContainer.MatchString(f.Container) {
+		return f, httpx.BadRequest("container must be a container's id or name")
+	}
+	if f.Stack != "" && !stackProject.MatchString(f.Stack) {
+		return f, httpx.BadRequest("stack must be a compose project name")
+	}
+	return f, nil
+}
+
+// eventContainer is what Docker accepts as a container name, which an id is
+// one of.
+var eventContainer = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
 func (s *Server) handleDockerEvents(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
-	var kinds []string
-	if raw := q.Get("kinds"); raw != "" {
-		kinds = strings.Split(raw, ",")
+	filter, err := eventFilterFrom(q)
+	if err != nil {
+		return err
 	}
 	running, since, buffered := s.modules.dockerEvents.Status()
-	events := s.modules.dockerEvents.Recent(atoiDefault(q.Get("limit"), 200), kinds, q.Get("search"))
+	events := s.modules.dockerEvents.Find(atoiDefault(q.Get("limit"), 200), filter)
 	s.correlateEvents(r, events)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"events": events,
@@ -1210,7 +1145,15 @@ func auditNames(entry *audit.Entry, ev *dockerx.Event) bool {
 	}
 }
 
+// handleDockerEventStream follows the feed. The same question the list takes
+// narrows it, so a container's page is told about its own restarts and not
+// every other container's; asked nothing, it is the whole host's, as before.
 func (s *Server) handleDockerEventStream(w http.ResponseWriter, r *http.Request) error {
+	// Refused before the upgrade, where a bad parameter is still a 400.
+	filter, err := eventFilterFrom(r.URL.Query())
+	if err != nil {
+		return err
+	}
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
 		return nil
@@ -1221,15 +1164,18 @@ func (s *Server) handleDockerEventStream(w http.ResponseWriter, r *http.Request)
 	go conn.Keepalive(ctx)
 	go conn.DrainControl(cancel)
 
+	// Subscribed before the past is read, so an event recorded between the
+	// two is sent rather than lost; one recorded in that moment arrives
+	// twice, and every reader drops the second copy.
+	events, unsubscribe := s.modules.dockerEvents.Subscribe()
+	defer unsubscribe()
 	// The buffered past first, so a feed opened at 09:00 can still show the
 	// container that died at 03:00.
-	if recent := s.modules.dockerEvents.Recent(200, nil, ""); len(recent) > 0 {
+	if recent := s.modules.dockerEvents.Find(200, filter); len(recent) > 0 {
 		if err := conn.Send("events", recent); err != nil {
 			return nil
 		}
 	}
-	events, unsubscribe := s.modules.dockerEvents.Subscribe()
-	defer unsubscribe()
 	for {
 		select {
 		case <-ctx.Done():
@@ -1237,6 +1183,9 @@ func (s *Server) handleDockerEventStream(w http.ResponseWriter, r *http.Request)
 		case ev, ok := <-events:
 			if !ok {
 				return nil
+			}
+			if !filter.Match(ev) {
+				continue
 			}
 			if err := conn.Send("events", []dockerx.Event{ev}); err != nil {
 				return nil

@@ -59,6 +59,16 @@ type Server struct {
 	// The GitHub accounts' own pictures, read once an hour per account.
 	avatars avatarCache
 
+	// The reference a bare image id was created from, by image id, for
+	// choosing a container's log lens. The container list reports a moved
+	// tag's image as sha256:…, and a Postgres container read as an app is
+	// the first thing a database page would get wrong.
+	logImageRefs sync.Map
+
+	// Each database connection's logs as last resolved, by connection id,
+	// for the page's two polls to share (handlers_db_logs.go).
+	dbLogSourcesKept sync.Map
+
 	modules moduleSet
 }
 

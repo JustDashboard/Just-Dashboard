@@ -329,6 +329,7 @@ type ComposeResult struct {
 // explicitly and never passed through a shell, and the project directory comes
 // from the container labels rather than from user input.
 func (c *Client) RunCompose(ctx context.Context, dir string, action ComposeAction, service string) (*ComposeResult, error) {
+	defer c.forgetDiskUsage()
 	if !dirExists(dir) {
 		return nil, os.ErrNotExist
 	}

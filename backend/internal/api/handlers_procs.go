@@ -1,8 +1,6 @@
 package api
 
 import (
-	"bufio"
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -17,7 +15,6 @@ import (
 func (s *Server) mountProcessRoutes(r chi.Router) {
 	r.Route("/pm2", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handlePM2List))
-		r.Method(http.MethodGet, "/{name}/logs/stream", s.handle(s.handlePM2LogStream))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/save", s.handle(s.handlePM2Save))
@@ -55,8 +52,6 @@ func (s *Server) mountProcessRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleUnitList))
 		r.Method(http.MethodGet, "/timers", s.handle(s.handleTimerList))
 		r.Method(http.MethodGet, "/{name}", s.handle(s.handleUnitShow))
-		r.Method(http.MethodGet, "/{name}/journal", s.handle(s.handleUnitJournal))
-		r.Method(http.MethodGet, "/{name}/journal/stream", s.handle(s.handleUnitJournalStream))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{name}/start", s.handle(s.unitAction(procs.UnitStart)))
@@ -225,94 +220,6 @@ func (s *Server) pm2Action(action procs.PM2Action) httpx.Handler {
 	}
 }
 
-// handlePM2LogStream tails a process's stdout and stderr files. Following the
-// files rather than `pm2 logs` means the stream survives a restart of the
-// process and reports which stream each line came from.
-func (s *Server) handlePM2LogStream(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
-	daemon, id, err := pm2TargetQuery(r)
-	if err != nil {
-		return err
-	}
-	outPath, errPath, err := s.modules.pm2.LogPathsTarget(r.Context(), name, daemon, id)
-	if err != nil {
-		return mapProcsError(err)
-	}
-	if err := s.checkPM2LogPaths(outPath, errPath); err != nil {
-		return err
-	}
-
-	conn, err := s.WS.Upgrade(w, r)
-	if err != nil {
-		return nil
-	}
-	defer conn.Close()
-	ctx, cancel := contextWithCancel(r)
-	defer cancel()
-	go conn.Keepalive(ctx)
-	go conn.DrainControl(cancel)
-
-	lines := atoiDefault(r.URL.Query().Get("lines"), 300)
-	events := make(chan taggedLine, 256)
-	started := 0
-	for _, src := range []struct {
-		path, stream string
-	}{{outPath, "stdout"}, {errPath, "stderr"}} {
-		if src.path == "" || src.path == "/dev/null" {
-			continue
-		}
-		started++
-		go s.modules.logs.TailInto(ctx, src.path, lines, func(text string) {
-			select {
-			case <-ctx.Done():
-			case events <- taggedLine{Stream: src.stream, Text: text}:
-			}
-		})
-	}
-	if started == 0 {
-		conn.SendError("pm2 process " + name + " has no readable log files")
-		return nil
-	}
-	return pumpTagged(ctx, conn, events)
-}
-
-type taggedLine struct {
-	Stream string `json:"stream"`
-	Text   string `json:"text"`
-}
-
-// pumpTagged batches lines onto the socket. Batching matters for busy logs:
-// one frame per line saturates the browser's event loop long before it
-// saturates the network.
-func pumpTagged(ctx context.Context, conn interface {
-	Send(string, any) error
-}, events <-chan taggedLine) error {
-	batch := make([]taggedLine, 0, 256)
-	t := time.NewTicker(150 * time.Millisecond)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case line := <-events:
-			batch = append(batch, line)
-			if len(batch) >= 256 {
-				if err := conn.Send("logs", batch); err != nil {
-					return nil
-				}
-				batch = batch[:0]
-			}
-		case <-t.C:
-			if len(batch) > 0 {
-				if err := conn.Send("logs", batch); err != nil {
-					return nil
-				}
-				batch = batch[:0]
-			}
-		}
-	}
-}
-
 func (s *Server) handleUnitList(w http.ResponseWriter, r *http.Request) error {
 	if !s.modules.systemd.Available() {
 		httpx.JSON(w, http.StatusOK, map[string]any{"available": false, "units": []any{}})
@@ -380,117 +287,6 @@ func (s *Server) unitAction(action procs.UnitAction) httpx.Handler {
 		httpx.SetAudit(r, "systemd."+string(action), name, map[string]any{"exitCode": res.ExitCode})
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
-	}
-}
-
-func (s *Server) handleUnitJournal(w http.ResponseWriter, r *http.Request) error {
-	q := r.URL.Query()
-	cmd, err := procs.JournalCommand(r.Context(), chi.URLParam(r, "name"),
-		atoiDefault(q.Get("lines"), 300), false, q.Get("since"))
-	if err != nil {
-		return mapProcsError(err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return httpx.Internal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		return mapProcsError(err)
-	}
-	entries := []procs.JournalEntry{}
-	sc := bufio.NewScanner(stdout)
-	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	for sc.Scan() {
-		if e, ok := procs.ParseJournalLine(sc.Bytes()); ok {
-			entries = append(entries, e)
-		}
-	}
-	cmd.Wait()
-	httpx.JSON(w, http.StatusOK, entries)
-	return nil
-}
-
-func (s *Server) handleUnitJournalStream(w http.ResponseWriter, r *http.Request) error {
-	q := r.URL.Query()
-	conn, err := s.WS.Upgrade(w, r)
-	if err != nil {
-		return nil
-	}
-	defer conn.Close()
-	ctx, cancel := contextWithCancel(r)
-	defer cancel()
-	go conn.Keepalive(ctx)
-	go conn.DrainControl(cancel)
-
-	cmd, err := procs.JournalCommand(ctx, chi.URLParam(r, "name"),
-		atoiDefault(q.Get("lines"), 300), true, q.Get("since"))
-	if err != nil {
-		conn.SendError(err.Error())
-		return nil
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		conn.SendError(err.Error())
-		return nil
-	}
-	if err := cmd.Start(); err != nil {
-		conn.SendError(err.Error())
-		return nil
-	}
-	// Killing the process group on exit stops journalctl -f; otherwise it
-	// would linger after the browser tab closes.
-	defer func() {
-		if cmd.Process != nil {
-			cmd.Process.Kill()
-		}
-		cmd.Wait()
-	}()
-
-	batch := make([]procs.JournalEntry, 0, 128)
-	flush := time.NewTicker(200 * time.Millisecond)
-	defer flush.Stop()
-	lines := make(chan procs.JournalEntry, 256)
-	go func() {
-		defer close(lines)
-		sc := bufio.NewScanner(stdout)
-		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		for sc.Scan() {
-			if e, ok := procs.ParseJournalLine(sc.Bytes()); ok {
-				select {
-				case <-ctx.Done():
-					return
-				case lines <- e:
-				}
-			}
-		}
-	}()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case e, ok := <-lines:
-			if !ok {
-				if len(batch) > 0 {
-					conn.Send("journal", batch)
-				}
-				conn.Send("eof", nil)
-				return nil
-			}
-			batch = append(batch, e)
-			if len(batch) >= 128 {
-				if err := conn.Send("journal", batch); err != nil {
-					return nil
-				}
-				batch = batch[:0]
-			}
-		case <-flush.C:
-			if len(batch) > 0 {
-				if err := conn.Send("journal", batch); err != nil {
-					return nil
-				}
-				batch = batch[:0]
-			}
-		}
 	}
 }
 

@@ -14,10 +14,11 @@ since a tab was opened, and charts that start empty every visit cannot show last
   replaces the container and seeing across the restart is the point. Docker being absent is logged once,
   not an error. `/docker/containers/stats/history` serves a sparkline per table row in one query.
 - The sample carries `size_rw`, the writable layer, taken from the **cached** disk walk rather than by
-  asking the daemon for sizes: a sampler running every fifteen seconds must never trigger a walk of every
-  layer on the host. It is what makes "grew 6.4 GB today" a measurement — a static 38.7 GB cannot tell a
-  container that has held it for six months from one whose disk has two days left. Zero means the walk
-  had not completed when the sample was taken, and `dockerx.DetectAnomalies` treats that as an absent
+  asking the daemon for sizes per container: a sampler running every fifteen seconds shares the bounded
+  disk cache and its refresh instead of starting a separate walk per sample. It is what makes
+  "grew 6.4 GB today" a measurement — a static 38.7 GB cannot tell a container that has held it for six
+  months from one whose disk has two days left. Zero means the walk
+  was unavailable when the sample was taken, and `dockerx.DetectAnomalies` treats that as an absent
   measurement rather than as an empty layer.
 - Samples also retain the observed container ID for release attribution. The additive `container_id`
   column defaults to empty for old rows, which stay visible in name-continuous charts but cannot be
@@ -25,9 +26,15 @@ since a tab was opened, and charts that start empty every visit cannot show last
   CPU/memory means, peaks and sample counts; its half-open window is limited to 24 hours and requested
   resolution to 600 buckets per container. Empty series remain empty, and retention-disabled reads
   return no samples. An `(container_id, ts)` index is installed after the column migration.
-- Container network/block totals are stored as Docker's **cumulative counters** and differenced in SQL
-  (`MAX - MIN` over the bucket). A total can be re-bucketed later; a rate recorded against one interval
-  cannot.
+- Container network/block totals are stored as Docker's **cumulative counters** at Docker's sample
+  timestamp (`sample_time` retains fractional seconds; legacy rows use their integer timestamp).
+  `container_usage.go` differences consecutive samples **before** bucketing, with a bounded
+  look-behind for the first visible sample. Means are weighted by measured elapsed time; peaks are the
+  highest measured interval rate. Single-sample buckets retain the interval from their predecessor.
+  Missing counters, identity changes, backwards CPU/I/O counters and gaps over three sample intervals
+  return null rates, not zeroes or spikes. Additive nullable availability/limit/counter columns leave old
+  rows unknown; positive legacy counters can still establish availability. Only explicitly configured
+  memory limits become historical limit lines, rather than Docker's default host RAM ceiling.
 - The recorder keeps its **own** `sysinfo.Collector` and `dockerx.StatsSampler`: rates are deltas, and
   sharing with request handlers would let a one-shot `GET /system/metrics` shorten the next interval.
 
@@ -43,6 +50,11 @@ Two **live-only hardware readings** ride on the snapshot and are never recorded:
 container runtime hands out the 64-bit maximum, so nothing divides by it), and `sensors` is every hwmon
 or thermal-zone temperature gopsutil can read, hottest first, each with the driver's own high and critical
 marks. A VPS usually reports no sensors, and the UI shows none rather than a cold machine.
+
+Each of the snapshot's `net` rows carries the `kind` the Security network page uses
+(`netsec.ClassifyInterface`: physical, tunnel, bridge, virtual) and they arrive in that order, so the
+metrics page can open on the host's own devices and set Docker's veth pairs and bridges aside — a host
+running a dozen containers otherwise lists thirty interfaces with the uplink among them.
 
 `metrics.Assess` (`GET /system/health`) turns those into findings — measured / means / do — ranked
 worst-first. It runs on the server because the thresholds are a claim the product makes, and because
@@ -77,8 +89,32 @@ fail2ban's allowlist by name.
 
 `BanHistory` reads at most the last `banLogTailBytes` (8 MB) of each fail2ban log and drops the line
 the seek tears in half. fail2ban writes a "Found" line per failed attempt, so a host under a campaign
-has a log of hundreds of megabytes, and three panels plus the posture check each read it every minute
-or two; the tail holds the events every reader wants.
+has a log of hundreds of megabytes, and the repeat offenders (`/fail2ban/offenders`) and the posture
+check each read it every minute or two; the tail holds the events every reader wants. The Intrusion
+page no longer calls `/fail2ban/history`: its Activity section reads fail2ban's log itself, through
+the `fail2ban` lens on the `/logs` routes, and — unlike the ban table it replaced — a host where
+fail2ban writes only to the journal is read from `journal:fail2ban.service` rather than said to have
+nothing.
+
+**Each area's own log is read on its page, and login records stay the administrator's.** SSH reads
+`auth.log`, else `secure`, else the journal's `sshd`, `sshd-session`, `sshd-auth`, `sudo`, `su` and
+`systemd-logind` lines (`journal-id:`), through the `auth` lens; Firewall reads `ufw.log`, else
+`kern.log`, else the kernel ring (`kernel:`), forced through the `firewall` lens since kern.log is
+mostly other things; Intrusion reads `fail2ban.log`, else its unit's journal. Each page asks after its
+own files with `GET /logs/source` rather than the whole log index, and names in the pane why it fell
+back — the file is missing (404) or outside `JD_LOG_ROOTS` (400). The auth lens leaves a failed or
+invalid login at info — its tone in the UI carries it, and a public SSH log must not be a sea of amber —
+and raises only a failed `sudo` or `su` and sshd's too-many-attempts to warn. The same reasoning that
+puts `/logins/failed` behind `system.admin` applies to these lines, and the log routes enforce it on the
+source rather than on the page: auth.log, secure, their numbered generations and anything resolving to
+them — including a link among another file's generations, and a PM2 process's out or error file, which
+its owner names — the `ssh`/`sshd` units, and a `journal-id:` naming any of those programs or `login`
+are refused to anyone else on every `/logs` route and left out of `/logs/sources`
+([Logs](docker-files-logs.md#logs)).
+The SSH page makes no log request for a non-administrator. **The whole journal (`journal:`) is still
+readable at `read`, as it was before the gate** — narrowing it to sshd is what is gated — so a determined
+reader without the capability can find those lines in the unfiltered journal; that is a known gap, not
+the boundary.
 
 `netsec.Assess` (`GET /security/posture`) is to security what `metrics.Assess` is to load: every panel
 in this class shows facts and leaves the reading to somebody who already knows how; the ones that take a
@@ -282,6 +318,13 @@ beats a page that renders empty.
 
 - **The installed set comes from the local database, never the front end** (dpkg, `rpm -qa`). Asking dnf
   needs a metadata cache present to answer a question about this disk.
+- The installed inventory is reused for up to 30 seconds, with concurrent misses sharing one read.
+  Cached and uncached answers preserve every architecture and return independent slices. Package jobs
+  invalidate at start and completion, including failure or cancellation, and suppress cache fills while
+  any job is active. A generation check rejects reads begun before invalidation. External changes are
+  picked up after expiry; pending upgrades are still read separately on each inventory request. The
+  cache belongs to this backend instance, and cancelling a waiting reader does not cancel a shared
+  package-manager read, which has its own two-minute deadline.
 - **"Installed on purpose" is a different question on each** and is what makes two thousand rows
   readable: `apt-mark showmanual`, `dnf repoquery --userinstalled`, pacman's `Install Reason`, Alpine's
   `/etc/apk/world`. zypper has no supported query, so `Explicit` stays false and the filter is hidden.

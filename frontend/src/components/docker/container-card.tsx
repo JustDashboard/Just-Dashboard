@@ -17,7 +17,7 @@ import {
   statusDetail,
   statusWord,
 } from "@/components/docker/container-cells"
-import { ProductLogo, imageProduct } from "@/components/product-logo"
+import { ProductLogo, containerProduct } from "@/components/product-logo"
 
 /**
  * One container, as a card you open — at every width.
@@ -82,7 +82,7 @@ export function ContainerCard({
       verb={container.name}
       onSelect={onOpen}
       className={cn(pending && "opacity-70")}
-      leading={<ProductLogo id={imageProduct(container.image)} size="sm" />}
+      leading={<ProductLogo id={containerProduct(container)} size="sm" />}
       title={container.name}
       description={<ContainerIdentity container={container} id={wide} />}
       trailing={
@@ -90,7 +90,10 @@ export function ContainerCard({
           // Each reading in its own fixed measure, so a column of cards lines
           // up the way the table's columns did.
           <>
-            <span className="w-32 min-w-0" aria-busy={pending ? true : undefined}>
+            <span
+              className="flex w-32 min-w-0 flex-col items-start"
+              aria-busy={pending ? true : undefined}
+            >
               <ContainerStatus container={container} pending={pending} />
             </span>
             <span className="w-24">

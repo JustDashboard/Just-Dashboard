@@ -1182,6 +1182,13 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Name continuity serves Docker charts; release attribution needs the exact
 	// observed container identity. Old samples deliberately remain unattributed.
 	{"metric_container_samples", "container_id", "TEXT NOT NULL DEFAULT ''"},
+	// Unknown for pre-upgrade rows: an absent measurement must not become an
+	// idle interface or an operator-configured limit during migration.
+	{"metric_container_samples", "network_available", "INTEGER DEFAULT NULL"},
+	{"metric_container_samples", "block_available", "INTEGER DEFAULT NULL"},
+	{"metric_container_samples", "mem_limited", "INTEGER DEFAULT NULL"},
+	{"metric_container_samples", "cpu_total", "INTEGER DEFAULT NULL"},
+	{"metric_container_samples", "sample_time", "REAL DEFAULT NULL"},
 
 	// Inode exhaustion fills a filesystem that reports free space, and is
 	// invisible in a used-bytes percentage.

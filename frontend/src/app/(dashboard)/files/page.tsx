@@ -1986,7 +1986,7 @@ function SearchDialog({
         title={<>Search under {truncateMiddle(path, 40)}</>}
       >
         <div className="space-y-3">
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <Input
               autoFocus
               value={query}

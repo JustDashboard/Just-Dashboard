@@ -67,6 +67,15 @@ type Container struct {
 }
 
 func (c *Client) ListContainers(ctx context.Context, all bool) ([]Container, error) {
+	if snapshot := c.snapshot(ctx); snapshot != nil {
+		index := 0
+		if all {
+			index = 1
+		}
+		return snapshot.lists[index].get(ctx, snapshot.ctx, func(ctx context.Context) ([]Container, error) {
+			return c.listContainers(ctx, container.ListOptions{All: all})
+		})
+	}
 	return c.listContainers(ctx, container.ListOptions{All: all})
 }
 
@@ -81,6 +90,17 @@ func (c *Client) ListContainersWithLabels(ctx context.Context, labels map[string
 }
 
 func (c *Client) listContainers(ctx context.Context, options container.ListOptions) ([]Container, error) {
+	list, err := c.listContainerSummaries(ctx, options)
+	if err != nil {
+		return nil, err
+	}
+	c.enrichUptime(ctx, list)
+	return list, nil
+}
+
+// Membership joins and samplers need only the Engine summary. Keeping those
+// reads separate avoids inspecting every running container for unused fields.
+func (c *Client) listContainerSummaries(ctx context.Context, options container.ListOptions) ([]Container, error) {
 	cli, err := c.api()
 	if err != nil {
 		return nil, err
@@ -128,6 +148,7 @@ func (c *Client) listContainers(ctx context.Context, options container.ListOptio
 		}
 		cn.ComposeStack = it.Labels["com.docker.compose.project"]
 		cn.ComposeSvc = it.Labels["com.docker.compose.service"]
+		cn.Exposure = DescribePorts(cn.Ports)
 		out = append(out, cn)
 	}
 	// Running first, then by name — the same ordering Portainer uses, and the
@@ -138,7 +159,6 @@ func (c *Client) listContainers(ctx context.Context, options container.ListOptio
 		}
 		return out[i].Name < out[j].Name
 	})
-	c.enrichUptime(ctx, out)
 	return out, nil
 }
 
@@ -154,40 +174,58 @@ func (c *Client) listContainers(ctx context.Context, options container.ListOptio
 // and inspecting a hundred of them to draw a table would make the page slower
 // for information nobody is reading; `Inspected` marks the difference so the
 // UI never renders an absence as an answer.
+//
+// The exception is a container the listing names by image id. The Engine
+// reports `sha256:…` in place of the reference the container was created from
+// once that tag has moved to a newer pull — a `postgres:16-alpine` database
+// started before the last `docker pull` — and an id says nothing about what
+// the container is: every page drew it as a generic Docker image, and
+// database discovery, which reads the product off the name, skipped it. The
+// name survives in the container's own config, which is what `Inspect`
+// already reports, so the listing takes it from there and the two agree.
 func (c *Client) enrichUptime(ctx context.Context, list []Container) {
-	cli, err := c.api()
-	if err != nil {
+	for i := range list {
+		unnamed := IsImageID(list[i].Image)
+		if list[i].State != "running" && !unnamed {
+			continue
+		}
+		insp, err := c.inspectContainer(ctx, list[i].ID)
+		if err != nil {
+			continue
+		}
+		if unnamed && insp.Config != nil && Pullable(insp.Config.Image) {
+			list[i].Image = insp.Config.Image
+		}
+		if list[i].State != "running" || insp.State == nil {
+			continue
+		}
+		enrichContainer(&list[i], insp)
+	}
+}
+
+func enrichContainer(ct *Container, insp container.InspectResponse) {
+	if insp.State == nil {
 		return
 	}
-	for i := range list {
-		list[i].Exposure = DescribePorts(list[i].Ports)
-		if list[i].State != "running" {
-			continue
-		}
-		insp, err := cli.ContainerInspect(ctx, list[i].ID)
-		if err != nil || insp.State == nil {
-			continue
-		}
-		list[i].Inspected = true
-		if started, err := time.Parse(time.RFC3339Nano, insp.State.StartedAt); err == nil {
-			s := started.UTC()
-			list[i].StartedAt = &s
-			list[i].UptimeSecond = int64(time.Since(started).Seconds())
-		}
-		if insp.State.Health != nil {
-			list[i].Health = insp.State.Health.Status
-		}
-		list[i].HasHealthchk = healthFactsOf(insp).hasCheck
-		if insp.HostConfig != nil {
-			list[i].MemoryLimit = insp.HostConfig.Memory
-			list[i].RestartPolicy = string(insp.HostConfig.RestartPolicy.Name)
-			list[i].Privileged = insp.HostConfig.Privileged
-			switch {
-			case insp.HostConfig.NanoCPUs > 0:
-				list[i].CPULimit = float64(insp.HostConfig.NanoCPUs) / 1e9
-			case insp.HostConfig.CPUQuota > 0 && insp.HostConfig.CPUPeriod > 0:
-				list[i].CPULimit = float64(insp.HostConfig.CPUQuota) / float64(insp.HostConfig.CPUPeriod)
-			}
+	ct.Inspected = true
+	if started, err := time.Parse(time.RFC3339Nano, insp.State.StartedAt); err == nil {
+		s := started.UTC()
+		ct.StartedAt = &s
+		ct.UptimeSecond = int64(time.Since(started).Seconds())
+	}
+	if insp.State.Health != nil {
+		ct.Health = insp.State.Health.Status
+	}
+	ct.HasHealthchk = healthFactsOf(insp).hasCheck
+	if insp.HostConfig != nil {
+		ct.MemoryLimit = insp.HostConfig.Memory
+		ct.RestartPolicy = string(insp.HostConfig.RestartPolicy.Name)
+		ct.Privileged = insp.HostConfig.Privileged
+		switch {
+		case insp.HostConfig.NanoCPUs > 0:
+			ct.CPULimit = float64(insp.HostConfig.NanoCPUs) / 1e9
+		case insp.HostConfig.CPUQuota > 0 && insp.HostConfig.CPUPeriod > 0:
+			ct.CPULimit = float64(insp.HostConfig.CPUQuota) / float64(insp.HostConfig.CPUPeriod)
 		}
 	}
 }
@@ -300,11 +338,7 @@ func RedactEnv(env []string) []string {
 // system.admin, and why the UI keeps even an admin's copy behind a deliberate
 // reveal rather than printing it on screen.
 func (c *Client) Inspect(ctx context.Context, id string) (*ContainerDetail, error) {
-	cli, err := c.api()
-	if err != nil {
-		return nil, err
-	}
-	insp, err := cli.ContainerInspect(ctx, id)
+	insp, err := c.inspectContainer(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -442,6 +476,7 @@ func (c *Client) Lifecycle(ctx context.Context, id string, action LifecycleActio
 	if err != nil {
 		return err
 	}
+	defer c.forgetDiskUsage()
 	switch action {
 	case ActionStart:
 		return cli.ContainerStart(ctx, id, container.StartOptions{})
@@ -471,6 +506,7 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, force, removeVo
 	if err != nil {
 		return err
 	}
+	defer c.forgetDiskUsage()
 	return cli.ContainerRemove(ctx, id, container.RemoveOptions{
 		Force: force, RemoveVolumes: removeVolumes,
 	})
@@ -492,11 +528,6 @@ type LogOptions struct {
 type LogLine struct {
 	Stream string `json:"stream"`
 	Text   string `json:"text"`
-	// Service is set only when several containers' logs are merged into one
-	// feed — a compose stack followed as a whole. Without it the merged
-	// stream is four processes talking over each other with no way to tell
-	// which said what.
-	Service string `json:"service,omitempty"`
 }
 
 // Logs returns a reader of demultiplexed log lines. The caller must drain it;
@@ -546,9 +577,14 @@ func (c *Client) Logs(ctx context.Context, id string, opts LogOptions) (<-chan L
 			outW.CloseWithError(copyErr)
 			errW.CloseWithError(copyErr)
 		}()
+		// A scanner that stops — the context ended, a line too long — closes
+		// its side of the pipe. StdCopy would otherwise block for good writing
+		// the next frame into it, never close the other side, and hold this
+		// goroutine, the channel and the connection open after the reader
+		// left.
 		done := make(chan struct{}, 2)
-		go func() { scanLines(ctx, outR, "stdout", ch); done <- struct{}{} }()
-		go func() { scanLines(ctx, errR, "stderr", ch); done <- struct{}{} }()
+		go func() { scanLines(ctx, outR, "stdout", ch); outR.Close(); done <- struct{}{} }()
+		go func() { scanLines(ctx, errR, "stderr", ch); errR.Close(); done <- struct{}{} }()
 		<-done
 		<-done
 	}()
@@ -560,11 +596,11 @@ func (c *Client) PruneContainers(ctx context.Context) (uint64, []string, error) 
 	if err != nil {
 		return 0, nil, err
 	}
+	defer c.forgetDiskUsage()
 	rep, err := cli.ContainersPrune(ctx, filters.NewArgs())
 	if err != nil {
 		return 0, nil, err
 	}
-	defer c.forgetDiskUsage()
 	deleted := rep.ContainersDeleted
 	if deleted == nil {
 		deleted = []string{}

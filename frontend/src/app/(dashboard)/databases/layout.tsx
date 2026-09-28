@@ -435,7 +435,10 @@ function ConnectionStatus({ id }: { id: number }) {
   )
   if (!data) return <Spinner className="text-muted-foreground" />
   return (
-    <span title={data.error}>
+    // A flex box, not a bare span: a block wrapper keeps the page's 16px line
+    // box and sets the 12px status on its baseline, a few pixels below the
+    // centre every other item in the strip sits on.
+    <span title={data.error} className="flex">
       <Status verdict={data.ok ? "ok" : "critical"} label={data.ok ? "connected" : "unreachable"} />
     </span>
   )

@@ -139,7 +139,7 @@ func (c *Client) Diagnose(ctx context.Context) (*Diagnosis, error) {
 	if err != nil {
 		return nil, err
 	}
-	list, err := c.ListContainers(ctx, true)
+	list, err := c.listContainerSummaries(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return nil, err
 	}
@@ -175,10 +175,15 @@ func (c *Client) Diagnose(ctx context.Context) (*Diagnosis, error) {
 	// is the whole reason the summary exists.
 	health := map[string]healthFacts{}
 
-	for _, ct := range list {
+	for i := range list {
+		ct := list[i]
 		insp, err := cli.ContainerInspect(ctx, ct.ID)
 		if err != nil {
 			continue
+		}
+		if ct.State == "running" {
+			enrichContainer(&ct, insp)
+			list[i] = ct
 		}
 		d.Checked++
 		if size, ok := writable[ct.ID]; ok {

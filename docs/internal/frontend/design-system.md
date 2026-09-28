@@ -45,12 +45,13 @@ unless it can say why it needs an edge.** The host Overview ended 0.6.7 with no 
 above its Services row and none in it — see §15 for what that took. Three kinds of thing stopped
 taking a frame:
 
-- a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them, and the
-  first column starts on the page's own content edge (`framed` restores the box for
-  the one case a run sits inside another surface). The first-column rule is written twice, for a tile
-  inside a `StatLink` and for a tile that *is* the cell: the descendant form alone never matched the
-  second, so until the Security pass every grid of bare tiles started a step in from the content it
-  was meant to line up with. The Overview's Services row is one of these too:
+- a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them (`framed`
+  restores the box for the one case a run sits inside another surface). Every tile keeps the same
+  inset, the first in a row included: the first column used to drop its left padding to line its
+  name up with the title, and on a `StatLink` that put the hover wash flush against the name, one
+  tile of the row drawn tighter than the rest. A tile left alone on the last row takes the whole row
+  rather than sit beside a hole — five two-up is two, two and one. The Overview's Services row is one
+  of these too:
   a module's headline figure is a reading, and eight framed cards under a page that had just stopped
   drawing boxes were eight boxes. Each is a `StatLink`, so the arrow says it goes somewhere;
 - a list that is the whole of a section — `Panel plain` keeps the panel's anatomy (header, toolbar,
@@ -60,12 +61,14 @@ taking a frame:
   overview's idle containers, attention, compose projects, cleanup and disk; the containers, images,
   volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
   images; the attention and storage blocks on a container's page), the
-  whole of the Security section (the overview's exposure facts, five area tiles and findings, and on
-  every area page the readings, the findings under them, the tables and the twenty probe blocks on
-  Tools), every block on the proxy pages (the overview's engine facts, attention list, sites and
-  certificate expiry; the sites, certificates and streams inventories and the ports table with their
-  toolbars; the TLS report's readings, findings, protocol, certificate, chain and HTTP rows; the password files
-  and DNS provider lists),
+  Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
+  log and Activity sections — each a title over the log's `Pane` (its tables, dashboard access
+  picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
+  facts, attention list, sites, certificate expiry and Engine log; the sites, certificates and
+  streams inventories and the ports table with their toolbars; the Renewals section on
+  Certificates; a site's own page, its readings on the page's ground and its logs one `Pane` under
+  its identity line; the TLS report's readings, findings, protocol, certificate, chain and HTTP
+  rows; the password files and DNS provider lists),
   health findings, the runtime-health bar, and every block of the deployment section — the fleet
   and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
   and Console, the run page, the nine settings pages and the create flow — are plain, with every
@@ -106,9 +109,12 @@ taking a frame:
   databases section's connection facts and maintenance rows, its find, monitor and generate panels,
   and every block on the four Processes pages — the live table, the PM2 applications, the systemd
   units, and the cron jobs, timers and system cron files on Scheduled, each a title, a toolbar and
-  a hairline under four `StatTile` readings (Scheduled's are what fires next across cron and the
-  timers together, the account's jobs, the timers armed and what the packages run), with a detail
-  sheet built from plain panels that opens on the thing's own mark — and the
+  a hairline under `StatTile` readings — four, and five on Scheduled (what fires next across cron and
+  the timers together, the account's jobs, the runs cron started in the last day, the timers armed
+  and what the packages run), whose Cron log is a plain panel holding the log's `Pane` and whose
+  timers open their runs inside the table's own row, framed by nothing but the row — with a detail
+  sheet built from plain panels that opens on the thing's own mark, the unit's journal and a PM2
+  application's logs a `Pane` in their sheets — and the
   two System pages follow the same shape: on System users four readings (accounts, administrators,
   who can sign in, the last sign-in) over the accounts as lit cards in a plain list, because each
   opens its keys, with its SSH-keys sheet a plain list of rows and a plain form, and on the audit
@@ -126,8 +132,9 @@ taking a frame:
   covered, every thing on it drawn as its product, with a job's own page built from a fact list and
   plain panels; the five account pages — the profile's identity line, readings and capability rows,
   sessions and keys as rows under plain panels where a framed table used to be, the users as cards
-  in a `ChoiceList`, and Security as `FormSection aside`s in a rail; and the three views on
-  Packages — the installed and updates tables and the software search, under one underlined strip
+  in a `ChoiceList`, and Security as `FormSection aside`s in a rail; and the four views on
+  Packages — the installed and updates tables, the software search and the package Log (its `Pane`
+  on the page's ground, no panel around it), under one underlined strip
   (`tabClasses`) rather than a filled tab list, beneath the host's identity line — each a toolbar
   and a hairline over a framed table or, for the search, rows on the page's own edge, with what
   needs acting on (security updates waiting, a reboot owed, a stale index) said as a `Notice` that
@@ -349,7 +356,7 @@ the pointer is on the row. A reserved column left empty reads as a layout bug, n
 | --- | --- | --- |
 | `Panel` | A block of content *on* the page: framed, header, hairline, body — or `plain`, the same anatomy with no frame | Not a working region |
 | `RowList` / `Row` | A list of rows with hairlines between them: a leading mark, a title, a second line, a trailing state | Not a table — nothing lines up in columns |
-| `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console. `flush` drops its frame for a pane that is one column of a workbench sharing a single frame, with a hairline between columns (the terminal page, the logs page's source rail beside its log workspace, and the files page's sidebar, listing and inspector under the strip that holds the page's commands) | Not a block in a page's flow |
+| `Pane` | A sized region of a workspace that owns its own scrolling — session rail, file tree, log console. `flush` drops its frame for a pane that is one column of a workbench sharing a single frame, with a hairline between columns (the terminal page, the logs page's source rail beside its log workspace, the files page's sidebar, listing and inspector under the strip that holds the page's commands, and a deployment's Output inside its Logs page's pane) | Not a block in a page's flow |
 | `Well` | Output you read: command output, a log tail, a diff, a stored secret | Not a fence around controls |
 | `Group` | A fence around part of a body: a set of ports, one release task, a repeated form row | Not a `Panel` — no header, no lift |
 | `StatTile` | One headline figure, in a `StatGrid` | Not free-form — a row of them is read as a table |
@@ -644,6 +651,19 @@ name. It is opaque, so rows scroll *under* a sticky header rather than through i
 is opaque with is `--panel-ground` — declared by the panel (`--card` framed, `--background` plain),
 never assumed by the table. Reading `--card` there put a faint unexplained band across every table on
 a plain panel, overhanging the header hairline by the table's own `-mx-4` bleed.
+
+**A row's text shares one centre line.** A bare `span`, `div` or `Link` placed in a flex row is a
+block, and a block keeps the line box it inherits — the page's 16px, 24px-tall one where nothing
+set another. A 12px `Status` or `Tag` inside it rests on that box's baseline, three pixels below the
+button beside it: the database strip's "connected", a deployment's route and certificate columns,
+a container card's state, a release note's kind and the identity line's aside all shipped that way.
+A wrapper around an inline status is a flex box (`flex`, or `flex flex-col items-start` for a state
+over its detail), or it carries its content's own type size. A glyph beside a title is nudged by
+the title's line box, not by habit: `mt-0.5` centres a 16px glyph on a 20px line and drops it two
+pixels below a `leading-tight` one. A field and its button in one row are `items-center`, since the
+field is 44px on a phone and the button is not. A view strip's tabs carry `pt-0.5` against their
+2px underline, so their labels sit on the strip's centre line with whatever shares the strip.
+`design-system.spec.ts` checks the first of these on every surface it opens.
 
 `.eyebrow` is the small-caps label that opens a section, a panel header or a stat tile. `.numeric` is
 any figure meant to be compared with the one above it — tabular digits stop a polling table from
@@ -1041,7 +1061,10 @@ owner's picture on the same reasoning: the face is the account, which a glyph co
 
 The same marks carry into Docker and Databases, because they are the same products. A container,
 an image and a stack's service are drawn as the product their image is (`imageProduct` reads the
-last segment of the reference; anything it cannot name is Docker's whale), a stack as its services'
+last segment of the reference; anything it cannot name is Docker's whale). A container whose reference
+names nothing — a deployment's is a bare image id — is what its image's OCI title or source label says
+(`containerProduct`), since the publisher wrote those and Docker copies them onto the container; the
+reference wins when it names a product, because labels are inherited from a base. A stack is drawn as its services'
 products overlapping (`ProductLogos`, the way a group of avatars overlaps; Compose's own mark when
 none has a logo), a volume as the product of the container that keeps its data there, and a
 database connection as its engine — in the workbench switcher and in every engine picker,
@@ -1102,26 +1125,27 @@ sixth. A game server's three pages add one line under that header (`GameIdentity
 the game can say — the address a player types, the edition, how full it is — and draw neither the
 game nor its name again.
 
-**The Security section draws what it watches, not what it is.** Its pages are about things with
-few marks of their own — a firewall backend, sshd, a jail — so the marks it draws are the things
-those watch and hold (`components/security/marks.tsx`). The section opens on how the panel is
-reached as its identity line (`ExposureIdentity`): Tailscale's mark on a tailnet-only panel, a
-glyph for the place otherwise, the grade as the title in its verdict's colour, the allowed ranges
-and interfaces as its facts, the address this browser arrived from drawn as the network it is on,
-and the posture's verdict at the right end, so the two answers the page is opened for share one
-line. Firewall, SSH and Intrusion open on the same line for the thing each is about: the backend by
-its own name with the enable switch beside its state, sshd with its port and what holds the
-listener with its verdict beside the recent jobs, and fail2ban as its own mark (the project's, from
-homarr) with whether it is running. A jail is a card you open — its sheet of held addresses is the
-destination — drawn as the service it watches (`jailProduct`: nginx's mark for `nginx-http-auth`,
-a glyph for `sshd`, which has none) with its counts in fixed measures. An address anywhere in the
-section is drawn as the network it is on (`Address`: Tailscale's mark for the tailnet, a glyph for
-the rest), a peer's processes as the products they are (`ProcessList`, through `processProduct`),
-a network device as what made it (`interfaceProduct`: Tailscale's tunnel, Docker's bridges and
-veths, a Kubernetes CNI; a physical port keeps a glyph for its kind), an account holding a key as
-its initials in the users list's hue, and an attacker's attempts against the most persistent
-address's as a meter. Connections, logins, devices and routes are readings with verbs, so their
-rows stay rows.
+**The Security section draws what it watches.** All eight pages use the reading register and
+retain their `StatGrid` figures. Beneath them, the overview's observed browser-to-dashboard path is
+one framed picture, using the same `SettingPicture`, `WireNode` and still `AnimatedBeam` as deployment
+settings. The picture names the access scope and this browser's address; it never claims that every
+host port has that scope. Findings put severity and skipped checks in a rail beside the list.
+Firewall's policy controls sit beside its bounded rule table; SSH groups its directives into rail
+forms, with controls aligned and the pending apply action following a dirty form. Intrusion's jail
+choices carry their watched service's mark, state and comparable readings. SSH, Firewall and
+Intrusion each end on their own log — the auth log, the firewall's log, fail2ban's Activity — read
+through its lens in one `Pane` under a title across the page, since a log needs the width a rail or a
+half row does not have; the last day's counts join the page's one `StatGrid` rather than drawing a
+second, and an attacker's address is blocked from the line it is on. Repeat offenders therefore take
+Intrusion's row alone. Connections, Logins and Network combine related facts into fewer,
+richer columns: a peer and its network, a service and its ports, an account and its terminal, an
+interface and its kind. Their action columns are always drawn. Tools is a two-pane working surface,
+with a searchable choice rail and one visible form/result, retaining every other probe's work.
+The diagram and the workbench have edges for §7's reasons; tables keep theirs, and forms and
+findings remain plain. `components/security/marks.tsx` supplies the inline address, `PeerIdentity`,
+process and interface marks. A product is named only when it can be identified; no logo is guessed
+for ufw, sshd or an unknown interface. Source choices in the firewall dialog use the same lit
+`ChoiceCard` as deployment choices, with Tailscale's own mark for the tailnet.
 
 **The proxy section draws routes, engines and authorities.** All six pages stay in the reading
 register and begin with four `StatTile` readings, two per row on phones. On the overview the engine
@@ -1133,6 +1157,11 @@ truncated line. Sites and streams use a two-column grid on wide screens and a si
 smaller ones. The nginx or Caddy mark names a site's engine, the stream's port names its product
 where known, and the TLS reading carries Let's Encrypt's mark only where the certificate path
 supports it. Unknown products keep a glyph.
+Every site card, the overview's route rows and a certificate's links to the sites using it open the
+site's own page (`/proxy/sites/<name>`): the same marks as an identity line, its readings on the
+page's ground, and its requests and errors read there in one log `Pane`, so a site's Logs verb goes to
+that page rather than to a file on the Logs page. Editing stays with the card's verbs. The overview
+ends on the engine's own log, a `Pane` across the page under the two columns.
 
 Certificates has a searchable inventory beside renewal and DNS management. Each inventory card opens
 its details — all names, dates, the full path and links to the sites using it — so it takes the lit
@@ -1141,7 +1170,9 @@ short verdict on the card and its complete error in the detail sheet; unavailabl
 status stay unknown, and it draws no invented lifetime.
 A watched domain opens a live report and preserves its nonstandard port. Password files and
 watched-domain setup use the deployment settings' rail sections. Certificate renewal lineages and
-DNS providers remain readings with their own actions, laid out to fit the management column. The TLS
+DNS providers remain readings with their own actions, laid out to fit the management column; every
+run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
+page's width, which a log needs and the management column does not have. The TLS
 report keeps findings, protocol checks and HTTP readings beside the live certificate and its
 vertical chain; long header values wrap instead of hiding the verdict. Listening sockets stay a
 table of readings, with fixed endpoint, application, reach and action columns and a stacked phone
@@ -1269,7 +1300,9 @@ format, logfmt pairs, a JSON object, bracketed and shouted levels, addresses, re
 paths, ids — as spans over the original text, so the search's match ranges still land; and
 `components/logs/log-text.tsx` colours them from one map. The **status hues** go only to what is a
 reading of state: a level, an HTTP status by its class (2xx success, 4xx warning, 5xx destructive), a
-word that says something failed or succeeded. Every other kind takes a `--tag-*` hue, which sit at one
+word that says something failed or succeeded. A word is read whole, digits and all — `fail2ban` is a
+name, not "fail" — and a firewall's `BLOCK`, `DROP` or `REJECT` is the firewall working, on every line
+of its log, so it is not a failure word. Every other kind takes a `--tag-*` hue, which sit at one
 lightness so no kind outshouts another, and what the eye should skip goes muted — the line's own
 timestamp (not drawn at all while the time column shows it), this host's name on a syslog line (not
 drawn either), the pid, the punctuation, the keys. The message stays in the foreground. A program's
@@ -1277,9 +1310,29 @@ name takes a hue by name from `LANES` (`lib/hue.ts`: the tag hues without red an
 console would read as a process that failed), so one process can be followed down a busy page — the
 same argument as `AuthorMark`, whose hash now lives there too. An error or a critical row is washed the
 way the build console washes a failing step, a warning row in amber; the level column is the level's
-word at the line's size. A structured line is drawn as its message and fields in the logfmt shape the
+word at the line's size. Where a lens named what the line records, **its event word takes that
+column** — "auth failed", "deadlock", "upstream refused" say more than "err" — at the line's size in
+the event's tone (`EVENT_WORD`: `font-medium text-destructive` for a failure, `text-warning`,
+`text-success`, muted otherwise), and the level stays as the edge and the wash; the column is as wide as
+the longest word on screen, within bounds, rather than a fixed width that cut "restart scheduled" short.
+An event a busy log says constantly and neutrally — a request, a connection, a cron session — keeps the
+level's word (`mark: false`), or the column would be a wall of words saying nothing. A value the lens
+read out of the text is drawn as what it is (`components/logs/field-value.tsx`: an address as its
+network, a status in its family's colour, a method as its word, a duration in its latency tone, a unit,
+a jail, a package or an image beside its product), the same drawing a request's client gets, so a
+Postgres client and a visitor are one mark; at most three such columns stand before the message, only in
+colour and only while a line on screen fills one, a column drawn as its text as wide as its longest
+value on screen (an upstream cut to "http://1…" identified nothing). A record's continuation lines stay
+under their head, the first three shown and the rest one fold away; a run's start (a unit started, an
+application came up) is a hairline rule across the pane with its word and the unit's lane hue, so a
+service's runs read as runs — in one service's stream only, and never for a stop or a failure, whose
+word and wash already mark them: a whole host's journal ruled off every timer that fired; and in the
+live tail a run of identical lines is one row with a muted `×N`. `stderr` is a muted word, never a danger tag — Postgres writes every line there, and a red tag on
+each said a failure that was not there. None of these is a pill or a badge: a `Tag` carries the word
+only with Colour off. A structured line is drawn as its message and fields in the logfmt shape the
 tokenizer reads, most telling field first. The "Colour" toggle beside Wrap and Time turns all of it
-off and shows each line exactly as it was written.
+off and shows each line exactly as it was written; in a pane too narrow for a switch each (a phone, a
+sheet), Wrap, Time, Colour and Repeats are one **View** menu, so the level chips are not squeezed to one.
 
 A deployment's request log is a log, and is drawn by the same rules: the request console, a request
 opened in place, the Insights lists and the scanners notice all take their parts from
@@ -1308,7 +1361,10 @@ already knows the format by is a legend they do not have to learn.
 
 A folder's colour is a **label**, and §3's tag argument is why it is the operator's: "the red one is
 production" is a fact about this server, so it is stored there (`files.colours`) and drawn wherever the
-folder is — the listing, the tiles, the sidebar, the inspector, the strip, the finder, the terminal's tree.
+folder is — the listing, the tiles, the sidebar, the inspector, the strip, the finder, the terminal's and
+a checkout's tree, a volume's or a stack's browser, a deployment's storage. The shell provides the saved
+labels to every page (`SavedFolderColours`, read again on each navigation); Files nests its own provider
+over it so a colour it picks is drawn before the round trip lands.
 The strip's compact folder button sets one colour for every folder, stores it as `files.defaultColour`,
 and clears old individual labels. A folder can then be labelled on its own in its inspector or menu;
 that label takes precedence until another global choice. Nine names (`--folder-*`, one value each;
@@ -1345,9 +1401,13 @@ The passes, in order. Each one is a diff you can review on its own.
    side are both plain; the gap between them is the separation. A framed block that survives this pass
    has a sentence in a comment saying why.
 2. **Figures are tiles.** Any set of headline numbers — utilisation, counts, one-per-module "service
-   cards" — is a `StatGrid` of `StatTile`s: hairlines between, nothing around, the first column on the
-   page's own edge. A tile that is a destination is wrapped in `StatLink` and takes
+   cards" — is a `StatGrid` of `StatTile`s: hairlines between, nothing around, every tile the same
+   inset. A tile that is a destination is wrapped in `StatLink` and takes
    `className="h-full transition-colors group-hover:bg-row-hover"`; the arrow is the link's, not yours.
+   A tile whose figure is a question about what is under it — a log's "Auth failures 12" — is a
+   `StatButton` instead: a press narrows the pane below rather than leaving the page, its revealed mark
+   is the funnel every "only lines like this" carries, and `pressed` says the figure's filter is the
+   one on screen (pressing it again lets it go).
    The figure is 24px (`text-2xl`): `text-xl` is not on the ladder. A state colours the figure through
    `tone`, never through a badge beside it.
 
@@ -1454,8 +1514,8 @@ The passes, in order. Each one is a diff you can review on its own.
 8. **Data, not captions.** No sentence under a title (§5). What the reader needs is a `Tag`, a
    `Status`, a hint on a tile, or a `Notice`. What the page *is* — a hostname, a kernel, a platform —
    is its own row.
-9. **Alignment.** Tiles top-align so a row of names is a row; hints truncate rather than wrap; the
-   first column starts at the page gutter.
+9. **Alignment.** Tiles top-align so a row of names is a row; hints truncate rather than wrap; every
+   tile in a row, the first included, keeps the same inset.
 10. **Verify.** `scripts/test-changed.sh` (it runs `tests/browser/design-system.spec.ts` for any
     UI change), then a screenshot at 1280 and 1720 wide against a mocked
     API in the pattern `mockShell` uses, and look at it: a scrollbar where none belongs, a label a
@@ -1484,8 +1544,10 @@ their engines, each carrying its own three figures, an attention list under them
 here and not yet connected, and the map of what they feed — and a database opens on its own overview:
 the connection string, its facts as one list, its largest tables as bars and what reads it. The
 section took pass 2's `/git` exit on every page (the control center, the topology, a database's
-connection, backups and advisor): each figure went to the card, the header or the lane that counts
-the thing it was about, and every page's doc comment names where. Its per-connection pages keep the
+connection, backups, advisor and logs): each figure went to the card, the header or the lane that
+counts the thing it was about — on Logs, the lens's readings are the counts on its quick-view chips
+(`ServiceLogs readings="chips"`), a reading no view asks being a chip of its own — and every page's
+doc comment names where. Its per-connection pages keep the
 connection switcher, facts, status and New command in one compact strip. Flow pages keep their visible question as the `h1`, since the question is the work on that
 screen (§16).
 

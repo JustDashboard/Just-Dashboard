@@ -13,9 +13,7 @@ import type {
   DeploymentEnvironmentConfiguration,
   DeploymentOperations,
   DockerVolume,
-  FilePlaces,
 } from "@/lib/types"
-import { FolderColourProvider } from "@/components/files/file-icon"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { ProductLogo } from "@/components/product-logo"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -52,11 +50,10 @@ import { useProject } from "@/components/deploy/project-context"
  * each one is — so they are cards you open rather than lines to read, with
  * a card to back up any volume nothing copies.
  *
- * The four readings come from three places the page may not be allowed to
- * read: Docker's volume sizes, the backup coverage report and the Files
- * page's folder colours. Each one refused leaves its reading out rather than
- * guessing at it; one still being read is a dash until it lands, never the
- * refusal's sentence.
+ * The four readings come from two places the page may not be allowed to
+ * read: Docker's volume sizes and the backup coverage report. Each one
+ * refused leaves its reading out rather than guessing at it; one still being
+ * read is a dash until it lands, never the refusal's sentence.
  */
 
 export function StorageSettings({
@@ -76,9 +73,6 @@ export function StorageSettings({
     (signal) => get<BackupResourceReport>("/backups/resources", undefined, signal),
     60000,
   )
-  // The colour a folder was given in Files, so a host path here is the folder
-  // the operator already knows by sight.
-  const places = usePoll((signal) => get<FilePlaces>("/files/places", undefined, signal), 0)
   // A poll that fails after it has answered keeps its last answer, so only a
   // read that never answered is a refusal — and one still in flight is
   // neither, which is what "—" says until it lands.
@@ -90,19 +84,14 @@ export function StorageSettings({
     coverageRefused: !coverage.data && Boolean(coverage.error),
   }
   return (
-    <FolderColourProvider
-      colours={places.data?.colours ?? {}}
-      defaultColour={places.data?.defaultColour}
+    <SettingsPage
+      state={state}
+      readings={(configuration) => <StorageReadings configuration={configuration} {...facts} />}
     >
-      <SettingsPage
-        state={state}
-        readings={(configuration) => <StorageReadings configuration={configuration} {...facts} />}
-      >
-        {(configuration) => (
-          <StorageForm configuration={configuration} save={state.save} {...facts} />
-        )}
-      </SettingsPage>
-    </FolderColourProvider>
+      {(configuration) => (
+        <StorageForm configuration={configuration} save={state.save} {...facts} />
+      )}
+    </SettingsPage>
   )
 }
 

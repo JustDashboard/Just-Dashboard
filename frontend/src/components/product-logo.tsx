@@ -301,13 +301,39 @@ export function imageProduct(reference: string) {
 }
 
 /**
+ * Which product a container is: its image's, or when the reference names
+ * nothing — a deployment's container is created from a bare image id — what
+ * the image says it is. The OCI title and source labels are the publisher's
+ * own statement (`n8n`, `github.com/filebrowser/filebrowser`), and Docker
+ * copies them onto every container made from the image, so they are on the
+ * listing without asking for more.
+ */
+export function containerProduct(container: { image: string; labels?: Record<string, string> }) {
+  const named = imageProduct(container.image)
+  if (named !== "docker") return named
+  const labelled = ["org.opencontainers.image.title", "org.opencontainers.image.source"]
+    .map((key) => container.labels?.[key])
+    .filter((value) => value !== undefined)
+    .map(imageProduct)
+  return labelled.find((id) => id !== "docker") ?? named
+}
+
+/**
  * The products a set of images is, most-named first and each once: a stack of
  * three Postgres replicas and an API is Postgres and Docker, not four marks.
  */
 export function imageProducts(references: string[]) {
+  return mostNamed(references.map(imageProduct))
+}
+
+/** `imageProducts` for containers, each named by `containerProduct`. */
+export function containerProducts(containers: Parameters<typeof containerProduct>[0][]) {
+  return mostNamed(containers.map(containerProduct))
+}
+
+function mostNamed(products: string[]) {
   const counts = new Map<string, number>()
-  for (const reference of references) {
-    const id = imageProduct(reference)
+  for (const id of products) {
     counts.set(id, (counts.get(id) ?? 0) + 1)
   }
   // Docker's whale says "an image", which every one of them is: it is only
