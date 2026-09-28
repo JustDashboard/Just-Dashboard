@@ -53,6 +53,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		renderRedirectServer(l, names, spec)
 		l.blank()
 	}
+	renderCanonicalServers(l, spec)
 
 	l.add("server {")
 	renderListen(l, spec)
@@ -79,27 +80,11 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 
 	switch spec.Kind {
 	case "redirect":
-		code := 302
-		if spec.Permanent {
-			code = 301
-		}
-		l.add("    # $request_uri keeps the path and query, so a bookmark deeper than")
-		l.add("    # the home page still lands somewhere useful.")
-		l.add("    return %d %s$request_uri;", code, strings.TrimSuffix(spec.RedirectTo, "/"))
+		renderRedirect(l, spec)
 	case "static":
-		l.add("    root %s;", spec.Root)
-		l.add("    index index.html index.htm;")
-		l.blank()
-		l.add("    location / {")
-		if spec.SPA {
-			l.add("        # A single-page app routes in the browser: a path with no file")
-			l.add("        # of its own is answered with index.html, and the app's router")
-			l.add("        # takes it from there.")
-			l.add("        try_files $uri $uri/ /index.html;")
-		} else {
-			l.add("        try_files $uri $uri/ =404;")
-		}
-		l.add("    }")
+		renderStatic(l, spec)
+	case "php":
+		renderPHP(l, spec)
 	default:
 		for _, loc := range spec.Locations {
 			renderLocation(l, loc, spec)

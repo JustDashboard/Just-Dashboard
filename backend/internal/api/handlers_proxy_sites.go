@@ -47,6 +47,25 @@ func (s *Server) mountSiteBuilderRoutes(r chi.Router) {
 	})
 }
 
+// mountPHPSocketRoutes lists the PHP-FPM sockets a PHP site can hand its
+// scripts to. Admin-only because it runs a command on the host, for the form
+// only an admin can use.
+func (s *Server) mountPHPSocketRoutes(r chi.Router) {
+	r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+		Method(http.MethodGet, "/", s.handle(s.handlePHPSockets))
+}
+
+func (s *Server) handlePHPSockets(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 10*time.Second)
+	defer cancel()
+	sockets, err := proxysvc.ListPHPSockets(ctx)
+	if err != nil {
+		return httpx.Err(http.StatusBadGateway, "php_sockets_failed", err.Error())
+	}
+	httpx.JSON(w, http.StatusOK, sockets)
+	return nil
+}
+
 // mountRealIPRoutes is the Cloudflare range list sites trust for the
 // visitor's address. The ranges are public, so reading them needs no more
 // than a sign-in; refreshing downloads, writes and reloads.

@@ -29,7 +29,7 @@ type SiteSpec struct {
 	// Name is the file name under sites-available.
 	Name    string   `json:"name"`
 	Domains []string `json:"domains"`
-	// Kind is proxy, static or redirect.
+	// Kind is proxy, static, redirect or php.
 	Kind string `json:"kind"`
 
 	Upstream string `json:"upstream,omitempty"`
@@ -40,11 +40,30 @@ type SiteSpec struct {
 	// single-page app whose router runs in the browser. Static sites only:
 	// without it a deep link or a reload on /settings is nginx's 404.
 	SPA bool `json:"spa,omitempty"`
-	// RedirectTo is the destination for a redirect site, and Permanent
-	// decides 301 against 302. The distinction matters more than it looks:
-	// browsers cache a 301 more or less forever.
-	RedirectTo string `json:"redirectTo,omitempty"`
-	Permanent  bool   `json:"permanent,omitempty"`
+	// Autoindex lists a folder without an index; GzipStatic sends file.gz in
+	// place of file to a client that accepts it. Static sites only.
+	Autoindex  bool `json:"autoindex,omitempty"`
+	GzipStatic bool `json:"gzipStatic,omitempty"`
+	// IndexFiles is the order nginx looks for a folder's index in, for a
+	// static or PHP site; empty is the kind's usual order.
+	IndexFiles []string `json:"indexFiles,omitempty"`
+	// PHPSocket is the PHP-FPM socket a php site hands scripts to, and
+	// PHPFrontController sends a path with no file of its own to index.php.
+	PHPSocket          string `json:"phpSocket,omitempty"`
+	PHPFrontController bool   `json:"phpFrontController,omitempty"`
+	// RedirectTo is the destination for a redirect site. RedirectCode is
+	// 301, 302, 307 or 308; zero is Permanent's 301 against 302, the only
+	// choice before, kept so a spec saved then means what it did. The
+	// distinction matters more than it looks: browsers cache a 301 more or
+	// less forever. RedirectDropPath sends every path to RedirectTo itself
+	// rather than carrying the path and query across.
+	RedirectTo       string `json:"redirectTo,omitempty"`
+	Permanent        bool   `json:"permanent,omitempty"`
+	RedirectCode     int    `json:"redirectCode,omitempty"`
+	RedirectDropPath bool   `json:"redirectDropPath,omitempty"`
+	// Canonical is "www" or "apex": the other form of each domain gets a
+	// server of its own redirecting to the site's. Empty adds none.
+	Canonical string `json:"canonical,omitempty"`
 
 	TLS        bool   `json:"tls"`
 	CertPath   string `json:"certPath,omitempty"`
@@ -361,8 +380,12 @@ func ValidateSpec(spec *SiteSpec) error {
 		if err := validRedirect(spec.RedirectTo); err != nil {
 			return err
 		}
+	case "php":
 	default:
-		return fmt.Errorf("kind must be proxy, static or redirect")
+		return fmt.Errorf("kind must be proxy, static, redirect or php")
+	}
+	if err := validateKinds(spec); err != nil {
+		return err
 	}
 	if spec.TLS {
 		if !absPathRe.MatchString(spec.CertPath) || !absPathRe.MatchString(spec.KeyPath) {
@@ -717,6 +740,7 @@ func SpecWarnings(spec *SiteSpec) []string {
 	warnings = append(warnings, cacheWarnings(spec)...)
 	warnings = append(warnings, realIPWarnings(spec)...)
 	warnings = append(warnings, headersWarnings(spec)...)
+	warnings = append(warnings, kindWarnings(spec)...)
 	if spec.Kind == "proxy" && (spec.UpstreamSNI || spec.UpstreamVerify) && !spec.hasHTTPSUpstream() {
 		warnings = append(warnings,
 			"The upstream TLS settings apply only to an https:// upstream, and this site forwards to none.")

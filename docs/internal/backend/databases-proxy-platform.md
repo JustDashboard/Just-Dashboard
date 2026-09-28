@@ -699,6 +699,23 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   named site they do nothing; protocol options do follow SNI. HTTP/3 is not offered: it needs one
   `listen 443 quic reuseport` owner, and the default site does not claim QUIC.
 
+  **Site kinds** (`sites_kinds.go`, form "What it serves"). A redirect's `RedirectCode` is 301, 302,
+  307 or 308; 0 falls back to `Permanent` (301/302), and the parser writes back only 307/308 into it so
+  pre-existing files round-trip unchanged. `RedirectDropPath` writes `return <code> <to>;` without
+  `$request_uri`. `Canonical` (`www`/`apex`, any kind) adds, per non-wildcard domain, a server for its
+  other form marked `# Canonical host (<mode>): …` that the parser skips whole; it listens on 80 (and
+  443 with the site's certificate when TLS), keeps the ACME path, and 301s to the site's name; a name
+  that is already a domain is refused, and a TLS site gets a warning that the certificate must cover
+  the other names. Static sites gain `Autoindex` (warned), `GzipStatic` and `IndexFiles` (also PHP;
+  empty = the kind's order, a default read back as empty). Kind `php` needs `Root` and `PHPSocket`
+  and renders `location ~ \.php$ { try_files $uri =404; include fastcgi_params; fastcgi_param
+  SCRIPT_FILENAME …; fastcgi_pass unix:<socket>; }` plus `location ~ /\.ht { deny all; }`, with
+  `PHPFrontController` ending `location /` in `/index.php?$query_string`. fastcgi_params is used
+  always rather than Debian's `snippets/fastcgi-php.conf`: the render is pure (it cannot look at the
+  host) and the snippet only adds PATH_INFO. Preflight checks a PHP site's root and socket.
+  `GET /proxy/php-sockets` (system.admin; runs `find /run/php -maxdepth 1 -type s` on the host via
+  hostexec argv) lists sockets for the form.
+
   **Path routing** (`sites.go` `validLocation`/`validUpstreamTLS`, `sites_render.go` `renderLocation`/
   `renderUpstreamTLS`, form "Paths that go somewhere else" + `site-routes.ts` preview table).
   `SiteLocation.Match` is empty (prefix), `=`, `^~`, `~` or `~*`; `locationPathRe` refuses `; ' " $ ( )`

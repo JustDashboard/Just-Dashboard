@@ -210,6 +210,52 @@ const KIND_MARK: Record<SiteSpec["kind"], Icon> = {
   proxy: Globe,
   static: FolderOpen,
   redirect: ArrowRight,
+  php: Code,
+}
+
+const REDIRECT_CODES = [
+  { code: 301, hint: "Permanent. Browsers keep it more or less forever." },
+  { code: 302, hint: "Temporary. Use it while you are still deciding." },
+  { code: 307, hint: "Temporary, and a form post is posted again to the new address." },
+  { code: 308, hint: "Permanent, and a form post is posted again to the new address." },
+] as const
+
+/** The status a redirect answers with; a site saved before 307 and 308 has only `permanent`. */
+function redirectCode(spec: SiteSpec) {
+  return spec.redirectCode ?? (spec.permanent ? 301 : 302)
+}
+
+/**
+ * The index order, typed as names separated by spaces. Held as typed so a
+ * space can be typed at all; the spec gets the names.
+ */
+function IndexFilesField({
+  spec,
+  onChange,
+}: {
+  spec: SiteSpec
+  onChange: (files: string[] | undefined) => void
+}) {
+  const [text, setText] = useState(spec.indexFiles?.join(" ") ?? "")
+  return (
+    <Field
+      label="Index files"
+      htmlFor="site-index"
+      hint="Looked for in this order in each folder. Empty is the usual order."
+    >
+      <Input
+        id="site-index"
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value)
+          const files = e.target.value.split(/\s+/).filter(Boolean)
+          onChange(files.length ? files : undefined)
+        }}
+        placeholder={spec.kind === "php" ? "index.php index.html" : "index.html index.htm"}
+        className="font-mono text-xs"
+      />
+    </Field>
+  )
 }
 
 function SiteFormBody({
@@ -470,6 +516,12 @@ function SiteFormBody({
   // open: an app started half-way through filling it in should appear, and
   // the warning that nothing listens should go.
   const forwards = open && spec.kind === "proxy"
+  const phpSockets = usePoll<string[]>(
+    (signal) => get("/proxy/php-sockets", undefined, signal),
+    30_000,
+    [],
+    { enabled: open && spec.kind === "php" },
+  )
   const listeners = usePoll<Listener[]>((signal) => get("/ports", undefined, signal), 15_000, [], {
     enabled: forwards,
   })
@@ -1010,11 +1062,12 @@ function SiteFormBody({
           )}
 
           <FormSection title="What it serves">
-            <ChoiceGrid columns={3} className="grid-cols-3">
+            <ChoiceGrid columns={2} className="grid-cols-2 sm:grid-cols-4">
               {(
                 [
                   { kind: "proxy", label: "An app" },
                   { kind: "static", label: "Files" },
+                  { kind: "php", label: "PHP" },
                   { kind: "redirect", label: "A redirect" },
                 ] as const
               ).map(({ kind, label }) => {
@@ -1093,12 +1146,90 @@ function SiteFormBody({
                   className="font-mono text-xs"
                 />
               </Field>
+              <IndexFilesField spec={spec} onChange={(v) => set("indexFiles", v)} />
               <OptionList>
                 <OptionRow
                   title="Single-page app"
                   hint="A path with no file of its own gets index.html, so the app's router answers deep links and reloads."
                   checked={!!spec.spa}
                   onCheckedChange={(v) => set("spa", v)}
+                />
+                <OptionRow
+                  title="List folders"
+                  hint="A folder without an index is answered with a list of its files, visible to anyone who can reach the site."
+                  checked={!!spec.autoindex}
+                  onCheckedChange={(v) => set("autoindex", v)}
+                />
+                <OptionRow
+                  title="Serve precompressed files"
+                  hint="A file.gz beside a file is sent in its place to browsers that accept gzip. Compress at build time."
+                  checked={!!spec.gzipStatic}
+                  onCheckedChange={(v) => set("gzipStatic", v)}
+                />
+              </OptionList>
+            </>
+          )}
+          {spec.kind === "php" && (
+            <>
+              <Field
+                label="Directory"
+                htmlFor="site-root"
+                hint="The folder holding index.php: a Laravel app's public folder."
+              >
+                <Input
+                  id="site-root"
+                  value={spec.root ?? ""}
+                  onChange={(e) => set("root", e.target.value)}
+                  placeholder="/var/www/site"
+                  className="font-mono text-xs"
+                />
+              </Field>
+              <Field
+                label="PHP-FPM socket"
+                htmlFor="site-php-socket"
+                hint={
+                  phpSockets.data?.length
+                    ? `Found in /run/php: ${phpSockets.data.join(", ")}`
+                    : phpSockets.data
+                      ? "No socket in /run/php. Install php-fpm, or give the socket its pool listens on."
+                      : "Where php-fpm listens."
+                }
+              >
+                {phpSockets.data?.length ? (
+                  <Select value={spec.phpSocket ?? ""} onValueChange={(v) => set("phpSocket", v)}>
+                    <SelectTrigger id="site-php-socket" className="w-full font-mono text-xs">
+                      <SelectValue placeholder="Choose a socket" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[
+                        ...phpSockets.data,
+                        ...(spec.phpSocket && !phpSockets.data.includes(spec.phpSocket)
+                          ? [spec.phpSocket]
+                          : []),
+                      ].map((socket) => (
+                        <SelectItem key={socket} value={socket} className="font-mono text-xs">
+                          {socket}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    id="site-php-socket"
+                    value={spec.phpSocket ?? ""}
+                    onChange={(e) => set("phpSocket", e.target.value)}
+                    placeholder="/run/php/php8.3-fpm.sock"
+                    className="font-mono text-xs"
+                  />
+                )}
+              </Field>
+              <IndexFilesField spec={spec} onChange={(v) => set("indexFiles", v)} />
+              <OptionList>
+                <OptionRow
+                  title="Front controller"
+                  hint="A path with no file of its own goes to index.php, which is how WordPress and Laravel route every page."
+                  checked={!!spec.phpFrontController}
+                  onCheckedChange={(v) => set("phpFrontController", v)}
                 />
               </OptionList>
             </>
@@ -1108,7 +1239,11 @@ function SiteFormBody({
               <Field
                 label="Redirect to"
                 htmlFor="site-redirect"
-                hint="The path and query are carried across."
+                hint={
+                  spec.redirectDropPath
+                    ? "Every path lands on this address."
+                    : "The path and query are carried across."
+                }
               >
                 <Input
                   id="site-redirect"
@@ -1118,15 +1253,82 @@ function SiteFormBody({
                   className="font-mono text-xs"
                 />
               </Field>
+              <Field
+                label="Status"
+                hint={REDIRECT_CODES.find((c) => c.code === redirectCode(spec))?.hint}
+              >
+                <ToggleGroup
+                  type="single"
+                  aria-label="Redirect status"
+                  value={String(redirectCode(spec))}
+                  onValueChange={(v) => {
+                    if (!v) return
+                    const code = Number(v) as NonNullable<SiteSpec["redirectCode"]>
+                    setSpec((s) => ({
+                      ...s,
+                      redirectCode: code,
+                      permanent: code === 301 || code === 308,
+                    }))
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                >
+                  {REDIRECT_CODES.map(({ code }) => (
+                    <ToggleGroupItem
+                      key={code}
+                      value={String(code)}
+                      className="flex-1 font-mono text-hint"
+                    >
+                      {code}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </Field>
               <OptionList>
                 <OptionRow
-                  title="Permanent (301)"
-                  hint="Browsers cache a permanent redirect more or less forever. Use 302 while you are still deciding."
-                  checked={!!spec.permanent}
-                  onCheckedChange={(v) => set("permanent", v)}
+                  title="Keep the path and query"
+                  hint="/docs?page=2 lands on the same path at the new address. Off, every path lands on the address itself."
+                  checked={!spec.redirectDropPath}
+                  onCheckedChange={(v) => set("redirectDropPath", !v)}
                 />
               </OptionList>
             </>
+          )}
+
+          {spec.domains.some((d) => !d.startsWith("*.")) && (
+            <Field
+              label="Canonical name"
+              hint={
+                spec.canonical === "www"
+                  ? "example.com is sent to www.example.com for each www. domain above."
+                  : spec.canonical === "apex"
+                    ? "www.example.com is sent to example.com for each domain above without www."
+                    : "Only the domains above are answered."
+              }
+            >
+              <ToggleGroup
+                type="single"
+                aria-label="Canonical name"
+                value={spec.canonical || "none"}
+                onValueChange={(v) => {
+                  if (v) set("canonical", v === "none" ? undefined : (v as "www" | "apex"))
+                }}
+                variant="outline"
+                size="sm"
+                className="w-full"
+              >
+                <ToggleGroupItem value="none" className="flex-1 text-hint">
+                  As listed
+                </ToggleGroupItem>
+                <ToggleGroupItem value="apex" className="flex-1 text-hint">
+                  Without www
+                </ToggleGroupItem>
+                <ToggleGroupItem value="www" className="flex-1 text-hint">
+                  With www
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </Field>
           )}
 
           <FormSection title="Encryption">
