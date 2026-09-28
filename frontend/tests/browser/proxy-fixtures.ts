@@ -7,6 +7,7 @@ import * as siteform from "./fixtures/proxy/siteform"
 import * as sites from "./fixtures/proxy/sites"
 import * as streams from "./fixtures/proxy/streams"
 import * as tls from "./fixtures/proxy/tls"
+import * as tlsMonitor from "./fixtures/proxy/tls-monitor"
 
 /**
  * One mocked host for the proxy pages, assembled from a route table per area
@@ -34,7 +35,7 @@ export const PROXY_PAGES = [
   "/proxy/ports",
 ]
 
-const areas = [engine, sites, siteform, streams, ports, certs, tls]
+const areas = [engine, sites, siteform, streams, ports, certs, tls, tlsMonitor]
 
 /** One table from several, refusing a path two areas both claim. */
 function merge(tables: ProxyRoutes[]): ProxyRoutes {

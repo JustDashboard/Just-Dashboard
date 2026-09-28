@@ -26,6 +26,7 @@ func (s *Server) mountTLSRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/dns", s.handle(s.handleDomainDNS))
 		r.Method(http.MethodPost, "/watched", s.handle(s.handleWatchDomain))
 		r.Method(http.MethodDelete, "/watched/{id}", s.handle(s.handleUnwatchDomain))
+		r.Method(http.MethodGet, "/scan/deep", s.handle(s.handleTLSDeepScan))
 	})
 }
 

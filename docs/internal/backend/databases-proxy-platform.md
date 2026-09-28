@@ -380,6 +380,43 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `0`, `+993` or `host:+993` is a 400 rather than 443 or 993.
   A scan runs on its request's context, so a caller that leaves (the report's Cancel) ends its
   handshakes and probes at once.
+- **The deep scan** (`GET /certificates/scan/deep?domain=&port=`, `system.admin`, handler in
+  `handlers_tls_deep.go`) is its own request, which the report makes after the quick scan when `?deep=1`
+  is in its address. Go's TLS client offers only the suites Go implements and in TLS 1.3 all of them
+  whatever it is told, so the suites are asked with a ClientHello of the scan's own (`tlshello.go`): it
+  reads the ServerHello's version, suite and TLS 1.3 group (and a HelloRetryRequest's), and for TLS 1.2
+  the ServerKeyExchange's curve or DH prime size, then hangs up; no key is ever derived. A hello between
+  256 and 511 bytes is padded to 512 as browsers do (F5), SSL 3.0 carries the renegotiation SCSV and no
+  extensions, and signature_algorithms goes only in TLS 1.2 and 1.3 hellos. Each of SSL 3.0 to TLS 1.3 is
+  listed by elimination (`tlsciphers.go`): offer the whole catalogue (every ECDHE/DHE/RSA/static-ECDH
+  suite with AES, ChaCha20, CCM, ARIA, Camellia, SEED, IDEA, 3DES, RC4 or DES, and the export,
+  anonymous and NULL ones; PSK, SRP and GOST need a secret or certificate no scan has), note the pick,
+  offer the rest, until a refusal — about one connection per accepted suite — then offer the accepted
+  ones reversed to say whose `order` it is. A version stopped short by a probe that heard nothing says
+  so (`complete: false`). Suites rate `insecure` (NULL, export, DES, RC4, anonymous), `weak` (no forward
+  secrecy, CBC, a 64-bit block, CCM_8) or `strong`. TLS 1.3 groups are asked one at a time — real key
+  shares for X25519, P-256/384/521 and the three ML-KEM hybrids (X25519MLKEM768 puts the ML-KEM key
+  first), none for X448 and ffdhe, which a server answers with a retry — and then as a browser offers
+  them, whose pick is `browserGroup`; without TLS 1.3 that is TLS 1.2's curve for a browser's offer.
+  TLS 1.2 curves are not listed one by one: there the offered curves also bound an ECDSA certificate's,
+  so one at a time refuses the certificate, not the curve. Every probe goes to the one address the first
+  handshake reached, eight at a time, five seconds each, under a 45-second budget (`tlsdeep.go`). That
+  first handshake is a browser's (ALPN h2/http/1.1, a session cache): its protocol is held against the
+  site form's HTTP/2 switch for the enabled nginx site that claims the name with a TLS listen on the
+  scanned port (`SiteForName`: exact, then the longest leading wildcard, then trailing; a name no site
+  claims is not compared), only when the connection reached this server. Resumption offers its session
+  back (TLS 1.3 tickets arrive after the handshake, so it reads for up to a second, asking a website for
+  its headers), plus a TLS 1.2 pair; a TLS 1.2 server that issues no ticket is reported untested, since
+  Go cannot resume by session ID. Handshakes naming no site and a `.invalid` name show what a scanner
+  gets; a certificate there is `tls.sni.default-certificate`, whose fix is a default server with
+  `ssl_reject_handshake on`. Alt-Svc is read from an HTTPS GET, and QUIC asked on the advertised UDP port
+  of the same host (or, unadvertised, the scanned port) with one padded packet in a reserved version,
+  which a QUIC server must answer with Version Negotiation (`tlsquic.go`); another host's alternative is
+  never sent anything. `deepFindings` is pure; version findings reuse the quick scan's ids so the page
+  can drop the ones the quick report already lists, and advice for an answer from another machine says
+  so. `TestLiveDeepScanOfNginx`, `TestLiveNginxRejectingUnknownNamesLeaksNothing`,
+  `TestLiveNginxWithOnlyRSAKeyExchangeHasNoForwardSecrecy` and `TestLiveNginxSmallDHGroup` hold it
+  against a private real nginx; Go servers cover ML-KEM, TLS 1.3 suites, ALPN and resumption.
 - **The watch list is endpoints.** `watched_endpoints` (lane G in `proxySchema`) is a name, a port and
   an address, unique together, so a mail server can be watched on 443 and 993; `watched_domains` held
   one row per name and a second port replaced the first. Its rows are copied in on every boot with

@@ -43,6 +43,7 @@ import { expiryTone } from "@/components/proxy/expiry-status"
 import { Button } from "@/components/ui/button"
 import { Field } from "@/components/form"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
+import { DeepScanSection } from "@/components/proxy/tls-ciphers"
 
 /**
  * What a visitor actually gets, graded.
@@ -706,6 +707,7 @@ export function TLSReportPage() {
               </Panel>
             </div>
           </div>
+          <DeepScanSection scan={scan} />
         </div>
       )}
     </Page>
