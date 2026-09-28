@@ -654,6 +654,23 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   cloudflare.com/ips-v4 and ips-v6 (10s, 64 KiB each, every line a masked CIDR of its family, v4 ≥ /8,
   v6 ≥ /16), writes both files, runs `nginx -t` and restores both on failure (422), then reloads.
 
+  **Headers** (`sites_headers.go`, form "Headers"). `SiteSpec.Headers{Request, Response, Hide,
+  FrameOptions, CSP, Permissions, CORS}`. Every value is rendered in double quotes and refuses `" ' \ ;
+  { } $` and control characters; names match `^[A-Za-z0-9][A-Za-z0-9-]{0,63}$`. A request header value may
+  instead be one whole `$var`; it is written into every forwarding location after the fixed
+  `proxy_set_header` lines (a location's list replaces the server's) and read back from `location /`.
+  Request and Hide are proxy-only; Hide refuses what nginx already drops (Server, Date, X-Accel-*). CSP
+  and Permissions-Policy are kept as parts (keywords unquoted: `self`, `none`, `nonce-…`), so the stored
+  scalars never carry `;` or quotes; the renderer adds them. Custom response headers may not name one a
+  control writes (X-Frame-Options, CSP, Permissions-Policy, HSTS, `Access-Control-*`, and whatever the
+  security-headers switch or caches send). All response headers go through `renderHeaders`, so the
+  maintenance page's location repeats them. CORS (not on redirects): an http-level
+  `map $http_origin $jd_<id>_cors` (exact origins → `$http_origin`, else empty, so no ACAO is sent) or a
+  literal `*` (refused with credentials), a `map "$request_method:$http_access_control_request_method"
+  $jd_<id>_preflight`, and a server-level `if ($jd_<id>_preflight) { return 204; }` — only real preflights
+  are answered, before auth and limits; other OPTIONS reach the application. A proxy site hides the
+  application's own `Access-Control-Allow-*` headers so browsers never see two.
+
   **Path routing** (`sites.go` `validLocation`/`validUpstreamTLS`, `sites_render.go` `renderLocation`/
   `renderUpstreamTLS`, form "Paths that go somewhere else" + `site-routes.ts` preview table).
   `SiteLocation.Match` is empty (prefix), `=`, `^~`, `~` or `~*`; `locationPathRe` refuses `; ' " $ ( )`
