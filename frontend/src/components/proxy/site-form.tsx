@@ -26,6 +26,7 @@ import type {
   Exposure,
   Listener,
   RequestLimit,
+  LocationMatch,
   SiteLimits,
   SiteLocation,
   SiteMaintenance,
@@ -41,7 +42,15 @@ import { ChoiceCard, ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { ProductLogo } from "@/components/product-logo"
 import { CodeEditor } from "@/components/code-editor"
 import { DiffView } from "@/components/files/diff-view"
-import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
+import {
+  Disclosure,
+  Field,
+  FieldRow,
+  FormNote,
+  FormSection,
+  OptionList,
+  OptionRow,
+} from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Group, Pane, Well } from "@/components/panel"
@@ -60,7 +69,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   deriveIdentity,
   fileNameProblem,
@@ -97,6 +115,13 @@ import {
 } from "@/components/proxy/upstream-options"
 import { UpstreamPicker } from "@/components/proxy/upstream-picker"
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
+import {
+  MATCH_LABEL,
+  renderedPath,
+  renderedUpstream,
+  siteRoutes,
+  splitUpstream,
+} from "@/components/proxy/site-routes"
 
 /**
  * Putting a domain in front of a port, without writing nginx.
@@ -1109,6 +1134,21 @@ function SiteFormBody({
                   />
                 </Field>
               </FieldRow>
+              <OptionList>
+                <OptionRow
+                  title="Buffer responses"
+                  hint="nginx holds the answer until it has it, freeing a slow application sooner. Off streams it as it is produced, which server-sent events and progress output need."
+                  checked={spec.buffering ?? false}
+                  onCheckedChange={(v) => set("buffering", v)}
+                />
+                <OptionRow
+                  title="Stream uploads"
+                  hint="The application gets a request body as it arrives, rather than after nginx has read all of it."
+                  checked={spec.streamUploads ?? false}
+                  onCheckedChange={(v) => set("streamUploads", v)}
+                />
+              </OptionList>
+              <UpstreamAdvanced spec={spec} set={set} />
             </FormSection>
           )}
 
@@ -1217,6 +1257,7 @@ function SiteFormBody({
                 onChange={(v) => set("locations", v)}
                 picker={picker}
               />
+              {spec.locations.length > 0 && <RoutesTable spec={spec} />}
             </FormSection>
           )}
 
@@ -1527,84 +1568,14 @@ function LocationsField({
   return (
     <div className="space-y-2">
       {locations.map((loc, i) => (
-        <Group key={i} className={cn("space-y-2")}>
-          <div className="flex items-center gap-2">
-            <Input
-              value={loc.path}
-              onChange={(e) => update(i, { path: e.target.value })}
-              placeholder="/api"
-              aria-label="Path"
-              className="font-mono text-xs"
-            />
-            <IconAction
-              label={`Remove ${loc.path || "location"}`}
-              className="text-destructive"
-              onClick={() => onChange(locations.filter((_, j) => j !== i))}
-            >
-              <Trash />
-            </IconAction>
-          </div>
-          <UpstreamPicker
-            value={loc.upstream ?? ""}
-            onChange={(upstream) => update(i, { upstream, root: "" })}
-            options={picker.options}
-            loading={picker.loading}
-            failed={picker.failed}
-            onRetry={picker.onRetry}
-            placeholder="http://127.0.0.1:4000 — or leave empty and give a folder"
-            label="Upstream"
-            pickLabel={`Pick from running services for ${loc.path || "this path"}`}
-          />
-          {loc.upstream && (
-            <IdleNote
-              upstream={loc.upstream}
-              listeners={picker.listeners}
-              containers={picker.containers}
-            />
-          )}
-          {!loc.upstream && (
-            <Input
-              value={loc.root ?? ""}
-              onChange={(e) => update(i, { root: e.target.value })}
-              placeholder="/var/www/assets"
-              aria-label="Folder"
-              className="font-mono text-xs"
-            />
-          )}
-          {!loc.upstream && loc.root && loc.rootMode === "root" && (
-            <FormNote>
-              Files come from{" "}
-              <code className="font-mono">
-                {loc.root.replace(/\/$/, "")}
-                {loc.path}
-              </code>
-              , as this file was written: nginx adds the path to the folder.
-            </FormNote>
-          )}
-          <label className="flex items-center gap-2 text-hint text-muted-foreground">
-            <Checkbox
-              checked={loc.webSockets}
-              onCheckedChange={(v) => update(i, { webSockets: Boolean(v) })}
-            />
-            WebSockets on this path
-          </label>
-          <label className="flex items-center gap-2 text-hint text-muted-foreground">
-            <Checkbox
-              checked={Boolean(loc.rateLimit)}
-              onCheckedChange={(v) =>
-                update(i, { rateLimit: v ? { rate: "10r/m", burst: 5 } : undefined })
-              }
-            />
-            A request rate of its own
-          </label>
-          {loc.rateLimit && (
-            <RequestLimitFields
-              id={`site-loc-${i}-limit`}
-              value={loc.rateLimit}
-              onChange={(rateLimit) => update(i, { rateLimit })}
-            />
-          )}
-        </Group>
+        <LocationCard
+          key={i}
+          index={i}
+          loc={loc}
+          update={(patch) => update(i, patch)}
+          remove={() => onChange(locations.filter((_, j) => j !== i))}
+          picker={picker}
+        />
       ))}
       <Button
         size="sm"
@@ -1615,6 +1586,450 @@ function LocationsField({
         Add a path
       </Button>
     </div>
+  )
+}
+
+const MATCHES: LocationMatch[] = ["", "^~", "=", "~", "~*"]
+
+/** One extra path: how it matches, where it goes, and what it does differently. */
+function LocationCard({
+  index,
+  loc,
+  update,
+  remove,
+  picker,
+}: {
+  index: number
+  loc: SiteLocation
+  update: (patch: Partial<SiteLocation>) => void
+  remove: () => void
+  picker: Picker
+}) {
+  const id = `site-loc-${index}`
+  const match = loc.match ?? ""
+  const prefix = match === "" || match === "^~"
+  const regex = match === "~" || match === "~*"
+  const folder = !loc.upstream && Boolean(loc.root)
+  const forwards = Boolean(loc.upstream)
+  const shown = renderedPath(loc)
+  const facts = [
+    loc.bodyLimit && `uploads ${loc.bodyLimit}`,
+    loc.timeout && `${loc.timeout}s timeout`,
+    loc.buffering && `buffering ${loc.buffering}`,
+    loc.requestBuffering && `upload buffering ${loc.requestBuffering}`,
+    loc.basicAuthFile && "own password",
+    (loc.allowFrom?.length || loc.denyFrom?.length) && "own address list",
+  ].filter(Boolean)
+  // An exact or regex path cannot serve a folder with alias, so a folder
+  // there is nginx's root, which adds the path to it.
+  const setMatch = (next: LocationMatch) =>
+    update({
+      match: next || undefined,
+      ...(next === "" || next === "^~"
+        ? {}
+        : { stripPrefix: false, spa: false, ...(loc.root ? { rootMode: "root" as const } : {}) }),
+    })
+  return (
+    <Group className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Select
+          value={match || "prefix"}
+          onValueChange={(v) => setMatch(v === "prefix" ? "" : (v as LocationMatch))}
+        >
+          <SelectTrigger aria-label="Match" className="w-44 shrink-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MATCHES.map((m) => (
+              <SelectItem key={m || "prefix"} value={m || "prefix"}>
+                {MATCH_LABEL[m]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          value={loc.path}
+          onChange={(e) => update({ path: e.target.value })}
+          placeholder={regex ? "\\.(png|jpg)$" : "/api"}
+          aria-label="Path"
+          className="font-mono text-xs"
+        />
+        <IconAction
+          label={`Remove ${loc.path || "location"}`}
+          className="text-destructive"
+          onClick={remove}
+        >
+          <Trash />
+        </IconAction>
+      </div>
+      <UpstreamPicker
+        value={loc.upstream ?? ""}
+        onChange={(upstream) => update({ upstream, root: "" })}
+        options={picker.options}
+        loading={picker.loading}
+        failed={picker.failed}
+        onRetry={picker.onRetry}
+        placeholder={
+          regex
+            ? "http://127.0.0.1:4000 — no path after the port"
+            : "http://127.0.0.1:4000 — or leave empty and give a folder"
+        }
+        label="Upstream"
+        pickLabel={`Pick from running services for ${loc.path || "this path"}`}
+      />
+      {loc.upstream && (
+        <IdleNote
+          upstream={loc.upstream}
+          listeners={picker.listeners}
+          containers={picker.containers}
+        />
+      )}
+      {!loc.upstream && (
+        <Input
+          value={loc.root ?? ""}
+          onChange={(e) =>
+            update({ root: e.target.value, ...(prefix ? {} : { rootMode: "root" as const }) })
+          }
+          placeholder="/var/www/assets"
+          aria-label="Folder"
+          className="font-mono text-xs"
+        />
+      )}
+      {folder && loc.rootMode === "root" && (
+        <FormNote>
+          Files come from{" "}
+          <code className="font-mono">
+            {loc.root?.replace(/\/$/, "")}
+            {prefix ? loc.path : "<the request's path>"}
+          </code>
+          : nginx adds the path to the folder.
+          {prefix && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-foreground"
+                onClick={() => update({ rootMode: undefined })}
+              >
+                Serve the folder itself at {loc.path || "the path"}
+              </button>
+            </>
+          )}
+        </FormNote>
+      )}
+      {forwards && prefix && (
+        <label className="flex items-center gap-2 text-hint text-muted-foreground">
+          <Checkbox
+            checked={loc.stripPrefix ?? false}
+            onCheckedChange={(v) => update({ stripPrefix: Boolean(v) })}
+          />
+          Strip {loc.path || "the path"} before forwarding
+          {loc.stripPrefix && loc.path && (
+            <span className="font-mono">
+              ({shown.replace(/\/$/, "")}/users arrives as {splitUpstream(renderedUpstream(loc))[1]}
+              users)
+            </span>
+          )}
+        </label>
+      )}
+      {folder && prefix && (
+        <label className="flex items-center gap-2 text-hint text-muted-foreground">
+          <Checkbox
+            checked={loc.spa ?? false}
+            onCheckedChange={(v) => update({ spa: Boolean(v) })}
+          />
+          Single-page app: a path with no file gets {shown}index.html
+        </label>
+      )}
+      {forwards && (
+        <label className="flex items-center gap-2 text-hint text-muted-foreground">
+          <Checkbox
+            checked={loc.webSockets}
+            onCheckedChange={(v) => update({ webSockets: Boolean(v) })}
+          />
+          WebSockets on this path
+        </label>
+      )}
+      <label className="flex items-center gap-2 text-hint text-muted-foreground">
+        <Checkbox
+          checked={Boolean(loc.rateLimit)}
+          onCheckedChange={(v) =>
+            update({ rateLimit: v ? { rate: "10r/m", burst: 5 } : undefined })
+          }
+        />
+        A request rate of its own
+      </label>
+      {loc.rateLimit && (
+        <RequestLimitFields
+          id={`${id}-limit`}
+          value={loc.rateLimit}
+          onChange={(rateLimit) => update({ rateLimit })}
+        />
+      )}
+      <Disclosure quiet summary="Advanced" facts={facts.length > 0 ? facts.join(" · ") : undefined}>
+        <div className="space-y-3 pt-2">
+          {forwards && (
+            <>
+              <FieldRow>
+                <Field label="Upload limit" htmlFor={`${id}-body`} hint="Empty keeps the site's.">
+                  <Input
+                    id={`${id}-body`}
+                    value={loc.bodyLimit ?? ""}
+                    onChange={(e) => update({ bodyLimit: e.target.value || undefined })}
+                    placeholder="200m"
+                    className="font-mono text-xs"
+                  />
+                </Field>
+                <Field
+                  label="Timeout"
+                  htmlFor={`${id}-timeout`}
+                  hint="Seconds; empty keeps the site's."
+                >
+                  <Input
+                    id={`${id}-timeout`}
+                    value={loc.timeout ? String(loc.timeout) : ""}
+                    inputMode="numeric"
+                    onChange={(e) => update({ timeout: Number(e.target.value) || undefined })}
+                    placeholder="300"
+                    className="font-mono text-xs"
+                  />
+                </Field>
+              </FieldRow>
+              <FieldRow>
+                <OnOffField
+                  id={`${id}-buffering`}
+                  label="Response buffering"
+                  value={loc.buffering}
+                  onChange={(buffering) => update({ buffering })}
+                />
+                <OnOffField
+                  id={`${id}-request-buffering`}
+                  label="Upload buffering"
+                  value={loc.requestBuffering}
+                  onChange={(requestBuffering) => update({ requestBuffering })}
+                />
+              </FieldRow>
+            </>
+          )}
+          <Field
+            label="Password file"
+            htmlFor={`${id}-auth`}
+            hint="In place of the site's on this path. Empty keeps the site's."
+          >
+            <Input
+              id={`${id}-auth`}
+              value={loc.basicAuthFile ?? ""}
+              onChange={(e) => update({ basicAuthFile: e.target.value || undefined })}
+              placeholder="/etc/nginx/jd-auth/api"
+              list="site-auth-files"
+              className="font-mono text-hint"
+            />
+          </Field>
+          <ListField
+            id={`${id}-allow`}
+            label="Allow only these"
+            placeholder="10.0.0.0/8"
+            values={loc.allowFrom ?? []}
+            onChange={(allowFrom) => update({ allowFrom })}
+            hint="A list here replaces the site's on this path — nginx uses only one."
+          />
+          <ListField
+            id={`${id}-deny`}
+            label="Deny"
+            placeholder="203.0.113.0/24"
+            values={loc.denyFrom ?? []}
+            onChange={(denyFrom) => update({ denyFrom })}
+          />
+        </div>
+      </Disclosure>
+    </Group>
+  )
+}
+
+/** The site's setting, or on or off, for this path. */
+function OnOffField({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: "on" | "off" | undefined
+  onChange: (value: "on" | "off" | undefined) => void
+}) {
+  return (
+    <Field label={label} htmlFor={id}>
+      <Select
+        value={value ?? "site"}
+        onValueChange={(v) => onChange(v === "on" || v === "off" ? v : undefined)}
+      >
+        <SelectTrigger id={id} className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="site">The site&apos;s</SelectItem>
+          <SelectItem value="on">On</SelectItem>
+          <SelectItem value="off">Off</SelectItem>
+        </SelectContent>
+      </Select>
+    </Field>
+  )
+}
+
+/** Each path as nginx will decide it, most decisive first. */
+function RoutesTable({ spec }: { spec: SiteSpec }) {
+  const routes = siteRoutes(spec)
+  return (
+    <Group className="p-0">
+      <Table aria-label="What each path does">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Path</TableHead>
+            <TableHead>Goes to</TableHead>
+            <TableHead>For example</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {routes.map((route) => (
+            <TableRow key={route.location}>
+              <TableCell className="align-top">
+                <div className="font-mono">{route.location}</div>
+                <div className="text-hint text-muted-foreground">{route.rule}</div>
+              </TableCell>
+              <TableCell className="align-top">
+                <div className="font-mono break-all">{route.target || "—"}</div>
+                {route.notes.length > 0 && (
+                  <div className="text-hint text-muted-foreground">{route.notes.join(" · ")}</div>
+                )}
+              </TableCell>
+              <TableCell className="align-top font-mono text-hint text-muted-foreground">
+                {route.example
+                  ? `${route.example.request} → ${route.example.reaches}`
+                  : "the request's own path"}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Group>
+  )
+}
+
+/** The Host header and how nginx talks to an HTTPS upstream. */
+function UpstreamAdvanced({
+  spec,
+  set,
+}: {
+  spec: SiteSpec
+  set: <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => void
+}) {
+  const https = [spec.upstream, ...spec.locations.map((loc) => loc.upstream)].some((u) =>
+    u?.startsWith("https://"),
+  )
+  const host = spec.hostHeader ?? ""
+  const facts = [
+    host === "upstream" && "Host: the upstream's",
+    host === "custom" && `Host: ${spec.hostHeaderValue ?? ""}`,
+    spec.upstreamSni && "sends SNI",
+    spec.upstreamVerify && "verifies the certificate",
+  ].filter(Boolean)
+  return (
+    <Disclosure
+      quiet
+      summary="Advanced upstream"
+      facts={facts.length > 0 ? facts.join(" · ") : undefined}
+    >
+      <div className="space-y-3 pt-2">
+        <Field
+          label="Host header"
+          htmlFor="site-host-header"
+          hint="What the application is told it was asked for. Most applications want the visitor's."
+        >
+          <ToggleGroup
+            id="site-host-header"
+            type="single"
+            value={host || "visitor"}
+            onValueChange={(v) => {
+              if (!v) return
+              set("hostHeader", v === "visitor" ? undefined : (v as SiteSpec["hostHeader"]))
+            }}
+            variant="outline"
+            size="sm"
+            className="w-full"
+          >
+            <ToggleGroupItem value="visitor" className="flex-1 text-hint">
+              The visitor&apos;s
+            </ToggleGroupItem>
+            <ToggleGroupItem value="upstream" className="flex-1 text-hint">
+              The upstream&apos;s
+            </ToggleGroupItem>
+            <ToggleGroupItem value="custom" className="flex-1 text-hint">
+              Custom
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </Field>
+        {host === "custom" && (
+          <Field label="Host" htmlFor="site-host-value">
+            <Input
+              id="site-host-value"
+              value={spec.hostHeaderValue ?? ""}
+              onChange={(e) => set("hostHeaderValue", e.target.value)}
+              placeholder="app.internal"
+              className="font-mono text-xs"
+            />
+          </Field>
+        )}
+        {!https && (
+          <FormNote>
+            The settings below apply to an https:// upstream, and this site forwards to none.
+          </FormNote>
+        )}
+        <OptionList>
+          <OptionRow
+            title="Send the name in the TLS handshake (SNI)"
+            hint="nginx does not by default, and a host serving several names over HTTPS answers without one with the wrong certificate or not at all."
+            checked={spec.upstreamSni ?? false}
+            onCheckedChange={(v) => set("upstreamSni", v)}
+          />
+          <OptionRow
+            title="Verify the upstream's certificate"
+            hint="Without this nginx accepts any certificate the upstream presents."
+            checked={spec.upstreamVerify ?? false}
+            onCheckedChange={(v) => set("upstreamVerify", v)}
+          >
+            <Field
+              label="CA file"
+              htmlFor="site-upstream-ca"
+              hint="Empty checks against the system's CAs."
+            >
+              <Input
+                id="site-upstream-ca"
+                value={spec.upstreamCa ?? ""}
+                onChange={(e) => set("upstreamCa", e.target.value)}
+                placeholder="/etc/ssl/certs/ca-certificates.crt"
+                className="font-mono text-xs"
+              />
+            </Field>
+          </OptionRow>
+        </OptionList>
+        {(spec.upstreamSni || spec.upstreamVerify) && (
+          <Field
+            label="TLS name"
+            htmlFor="site-upstream-name"
+            hint="Sent and checked in place of the upstream's host — for an upstream addressed by IP. Empty uses the host."
+          >
+            <Input
+              id="site-upstream-name"
+              value={spec.upstreamTlsName ?? ""}
+              onChange={(e) => set("upstreamTlsName", e.target.value)}
+              placeholder="api.example.com"
+              className="font-mono text-xs"
+            />
+          </Field>
+        )}
+      </div>
+    </Disclosure>
   )
 }
 

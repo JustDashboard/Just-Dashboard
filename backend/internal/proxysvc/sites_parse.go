@@ -33,6 +33,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	sawPlainRedirect := false
 	sawAccessLog := false
 	sawGzip := false
+	sawBuffering := false
 	var custom []string
 	inCustom := false
 	// Depth of an http-level object at the top of the file (a map, an
@@ -95,7 +96,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 		if m := locationOpenRe.FindStringSubmatch(raw); m != nil {
 			depth++
-			location = m[1]
+			location = m[2]
 			// The exploit blocks are this renderer's, not the operator's, and
 			// the switch that produced them is a field of its own. Reading
 			// them back as locations would drop them; reading them back as
@@ -118,9 +119,13 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			// of the operator's own locations makes a round trip emit it
 			// twice — once in the redirect server and once inside the TLS
 			// one, where it does nothing.
-			if location != "/" && location != acmeChallengePath &&
-				!strings.HasPrefix(location, "~") && locationPathRe.MatchString(location) {
-				spec.Locations = append(spec.Locations, SiteLocation{Path: location})
+			// The catch-all is the site's own upstream, and the exploit
+			// blocks are read back as their switch above.
+			loc := SiteLocation{Path: location, Match: m[1]}
+			if (location != "/" || m[1] != "") && location != acmeChallengePath &&
+				location != exploitDotLocation && location != exploitExtLocation &&
+				validLocationPath(loc) {
+				spec.Locations = append(spec.Locations, loc)
 				current = &spec.Locations[len(spec.Locations)-1]
 			} else {
 				current = nil
@@ -179,7 +184,11 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		case "ssl_certificate_key":
 			spec.KeyPath = value
 		case "client_max_body_size":
-			spec.ClientMaxBody = value
+			if current != nil {
+				current.BodyLimit = value
+			} else {
+				spec.ClientMaxBody = value
+			}
 		case "gzip":
 			sawGzip = true
 			spec.Gzip = value == "on"
@@ -207,19 +216,34 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				spec.ErrorLogPath = directiveLogFile(value)
 			}
 		case "auth_basic":
-			spec.BasicAuthRealm = strings.Trim(value, `"`)
+			// A path's own prompt says the site's realm; only the server's
+			// is the site's.
+			if current == nil {
+				spec.BasicAuthRealm = strings.Trim(value, `"`)
+			}
 		case "auth_basic_user_file":
-			spec.BasicAuthFile = value
+			if current != nil {
+				current.BasicAuthFile = value
+			} else {
+				spec.BasicAuthFile = value
+			}
 		case "allow":
-			// Server level only, like deny: an allow inside a location
-			// restricts that one path, and hoisting it into the form's
-			// site-wide list would apply it to the whole site on the next
-			// save — a widening or a narrowing nobody asked for.
-			if location == "" {
+			// A list inside a location restricts that one path, and
+			// hoisting it into the form's site-wide list would apply it to
+			// the whole site on the next save — a widening or a narrowing
+			// nobody asked for. So it stays the path's own.
+			if current != nil {
+				current.AllowFrom = append(current.AllowFrom, value)
+			} else if location == "" {
 				spec.AllowFrom = append(spec.AllowFrom, value)
 			}
 		case "deny":
-			if location == "" {
+			if current != nil {
+				// The fence the renderer writes after an allow list.
+				if value != "all" || len(current.AllowFrom) == 0 {
+					current.DenyFrom = append(current.DenyFrom, value)
+				}
+			} else if location == "" {
 				spec.DenyFrom = append(spec.DenyFrom, value)
 			}
 		case "add_header":
@@ -255,6 +279,16 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				rootLocationUpstream = upstream
 			}
 		case "proxy_set_header":
+			if host, ok := strings.CutPrefix(value, "Host "); ok && current == nil {
+				switch host = strings.TrimSpace(host); host {
+				case "$host":
+					spec.HostHeader, spec.HostHeaderValue = "", ""
+				case "$proxy_host":
+					spec.HostHeader, spec.HostHeaderValue = "upstream", ""
+				default:
+					spec.HostHeader, spec.HostHeaderValue = "custom", host
+				}
+			}
 			if strings.HasPrefix(value, "Upgrade") {
 				if current != nil {
 					current.WebSockets = true
@@ -263,12 +297,43 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				}
 			}
 		case "try_files":
+			fields := strings.Fields(value)
 			if location == "/" {
-				fields := strings.Fields(value)
 				spec.SPA = len(fields) > 0 && fields[len(fields)-1] == "/index.html"
+			} else if current != nil {
+				current.SPA = len(fields) > 0 && strings.HasSuffix(fields[len(fields)-1], "/index.html")
 			}
 		case "proxy_read_timeout":
-			spec.ProxyTimeout = parseSeconds(value)
+			if current != nil {
+				current.Timeout = parseSeconds(value)
+			} else {
+				spec.ProxyTimeout = parseSeconds(value)
+			}
+		case "proxy_buffering":
+			if current != nil {
+				current.Buffering = value
+			} else {
+				sawBuffering = true
+				spec.Buffering = value == "on"
+			}
+		case "proxy_request_buffering":
+			if current != nil {
+				current.RequestBuffering = value
+			} else {
+				spec.StreamUploads = value == "off"
+			}
+		case "proxy_ssl_server_name":
+			spec.UpstreamSNI = spec.UpstreamSNI || (current == nil && value == "on")
+		case "proxy_ssl_verify":
+			spec.UpstreamVerify = spec.UpstreamVerify || (current == nil && value == "on")
+		case "proxy_ssl_name":
+			if current == nil {
+				spec.UpstreamTLSName = value
+			}
+		case "proxy_ssl_trusted_certificate":
+			if current == nil && value != systemCABundle {
+				spec.UpstreamCA = value
+			}
 		case "return":
 			fields := strings.Fields(value)
 			if len(fields) >= 2 {
@@ -302,6 +367,12 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			inCustom = true
 			continue
 		}
+		if strings.HasPrefix(raw, stripMarker) {
+			if current != nil {
+				current.StripPrefix = true
+			}
+			continue
+		}
 		// A comment after a statement is not part of it: certbot ends every
 		// line it adds with "# managed by Certbot", and read as part of the
 		// value that made the certificate path "…/fullchain.pem; # managed
@@ -333,6 +404,11 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	if !managed && !sawGzip {
 		spec.Gzip = true
 	}
+	// And for buffering, which nginx does unless told not to. Every managed
+	// file says, one way or the other.
+	if !managed && !sawBuffering {
+		spec.Buffering = true
+	}
 	if spec.Kind != "redirect" {
 		if spec.Upstream == "" && spec.Root != "" {
 			spec.Kind = "static"
@@ -355,8 +431,10 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// offering to save a location that proxies nowhere.
 	kept := spec.Locations[:0]
 	for _, loc := range spec.Locations {
-		if loc.Upstream != "" || loc.Root != "" {
-			kept = append(kept, loc)
+		// An alias under a regex serves the regex's captures, which the
+		// form cannot express either.
+		if (loc.Upstream != "" || loc.Root != "") && !(loc.servesFolder() && !loc.isPrefix() && loc.RootMode == "") {
+			kept = append(kept, settleLocation(loc, spec))
 		}
 	}
 	spec.Locations = kept
@@ -372,6 +450,46 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	return spec, managed
 }
 
+// settleLocation reads a path's settings back as the form holds them: what
+// the renderer wrote only because the site says so is the site's, not the
+// path's, and a stripped upstream loses the slash stripping gives it.
+func settleLocation(loc SiteLocation, spec *SiteSpec) SiteLocation {
+	if loc.Timeout == spec.ProxyTimeout {
+		loc.Timeout = 0
+	}
+	if loc.Buffering == onOff(spec.Buffering) {
+		loc.Buffering = ""
+	}
+	if loc.RequestBuffering == onOff(!spec.StreamUploads) {
+		loc.RequestBuffering = ""
+	}
+	if address, uri := splitUpstream(loc.Upstream); loc.StripPrefix && uri == "/" {
+		loc.Upstream = address
+	}
+	// What only a forwarding path uses, read from a hand-written folder,
+	// is nothing nginx did with it there.
+	if loc.servesFolder() {
+		loc.StripPrefix, loc.BodyLimit, loc.Timeout = false, "", 0
+		loc.Buffering, loc.RequestBuffering = "", ""
+	} else {
+		loc.SPA = false
+	}
+	loc.SPA = loc.SPA && loc.isPrefix()
+	return loc
+}
+
+// validLocationPath says whether a location read from a file is one the form
+// can hold.
+func validLocationPath(loc SiteLocation) bool {
+	switch loc.Match {
+	case "", "=", "^~":
+		return locationPathRe.MatchString(loc.Path)
+	case "~", "~*":
+		return locationRegexRe.MatchString(loc.Path)
+	}
+	return false
+}
+
 const acmeChallengePath = "/.well-known/acme-challenge/"
 
 // customMarker introduces the operator's own directives, and exploitDotLocation
@@ -381,6 +499,7 @@ const acmeChallengePath = "/.well-known/acme-challenge/"
 const (
 	customMarker       = "# Added by hand from the site form."
 	exploitDotLocation = `/\.(?!well-known)`
+	exploitExtLocation = `\.(sql|bak|old|orig|save|swp|env)$`
 )
 
 // httpObjects are the http-level statements a site file may carry above its
@@ -418,7 +537,7 @@ func pageFromURI(location string) (string, bool) {
 	return m[1], true
 }
 
-var locationOpenRe = regexp.MustCompile(`^location\s+(?:[~^=*]+\s+)?(\S+)\s*\{`)
+var locationOpenRe = regexp.MustCompile(`^location\s+(?:([~^=*]+)\s+)?(\S+)\s*\{`)
 
 // listenIsTLS reads a listen directive's value the way nginx does: the first
 // field is the address, and `ssl` is a parameter after it. `listen 4430` and

@@ -1,4 +1,10 @@
-import type { ProxyDiagnostic, ServerNameConflict, SiteResult, SiteSpec } from "@/lib/types"
+import type {
+  ProxyDiagnostic,
+  ServerNameConflict,
+  SiteLocation,
+  SiteResult,
+  SiteSpec,
+} from "@/lib/types"
 
 /**
  * The spec as the server should read it. HSTS goes only with TLS: the switch
@@ -9,13 +15,47 @@ import type { ProxyDiagnostic, ServerNameConflict, SiteResult, SiteSpec } from "
  * reason: a switch left on under another kind is not drawn and means nothing.
  */
 export function sendableSpec(spec: SiteSpec): SiteSpec {
-  const { spa, permanent, limits, ...rest } = spec
+  const { spa, permanent, limits, hostHeaderValue, upstreamCa, upstreamTlsName, ...rest } = spec
+  const locations = spec.locations.map(sendableLocation)
   return {
     ...rest,
-    ...sendableLimits(spec, limits),
+    locations,
+    ...sendableLimits({ ...spec, locations }, limits),
+    ...(spec.hostHeader === "custom" ? { hostHeaderValue } : {}),
+    ...(spec.upstreamVerify ? { upstreamCa } : {}),
+    ...(spec.upstreamSni || spec.upstreamVerify ? { upstreamTlsName } : {}),
     hsts: spec.hsts && spec.tls,
     ...(spec.kind === "static" && spa !== undefined ? { spa } : {}),
     ...(spec.kind === "redirect" && permanent !== undefined ? { permanent } : {}),
+  }
+}
+
+/**
+ * A path sends only what its kind uses: a folder does not forward, so it has
+ * no prefix to strip, upload limit, timeout or buffering, and a forwarding
+ * path has no index.html to fall back to. An exact or regex path has no
+ * prefix to strip either. The server refuses each of these rather than
+ * ignoring it, and each is a switch the form no longer draws.
+ */
+function sendableLocation(loc: SiteLocation): SiteLocation {
+  const prefix = !loc.match || loc.match === "^~"
+  if (!loc.upstream && loc.root) {
+    return {
+      ...loc,
+      stripPrefix: undefined,
+      bodyLimit: undefined,
+      timeout: undefined,
+      buffering: undefined,
+      requestBuffering: undefined,
+      spa: Boolean(loc.spa) && prefix,
+    }
+  }
+  return {
+    ...loc,
+    spa: undefined,
+    root: undefined,
+    rootMode: undefined,
+    stripPrefix: Boolean(loc.stripPrefix) && prefix,
   }
 }
 
