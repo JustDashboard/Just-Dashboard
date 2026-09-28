@@ -11,11 +11,24 @@ import (
 	"testing"
 )
 
+// shimPrelude starts a fake nginx the way the real one reads its
+// configuration: $conf is the file after -c (the trial copy a disabled site
+// is tested in) or nginx.conf, and $include the pattern of its first
+// include, in whichever directory that points. Every call is logged to
+// bin/calls.log with what the live sites-enabled held at the time.
+func shimPrelude(root string) string {
+	return "#!/bin/sh\n" +
+		"conf='" + root + "/nginx.conf'\n" +
+		"if [ \"$2\" = \"-c\" ]; then conf=\"$3\"; fi\n" +
+		"include=$(sed -n 's/^ *include \\(.*\\);$/\\1/p' \"$conf\" | head -n 1)\n" +
+		"echo \"$* :: $(ls '" + root + "/sites-enabled' 2>/dev/null | tr '\\n' ' ')\" >> '" + root + "/bin/calls.log'\n"
+}
+
 // siteNginx puts an nginx first on PATH that answers `nginx -t` with the
 // given lines and exit code and `nginx -s reload` with its own, and returns
 // a Service over a Debian layout in a temporary directory. Its `nginx -T`
-// prints what nginx would: nginx.conf, then every file in sites-enabled in
-// sorted order, which nginx.conf includes inside http.
+// prints what nginx would: the configuration it was given, then every file
+// its include matches in sorted order, which nginx.conf includes inside http.
 func siteNginx(t *testing.T, test string, testExit int, reload string, reloadExit int) (*Service, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -28,10 +41,10 @@ func siteNginx(t *testing.T, test string, testExit int, reload string, reloadExi
 	if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\n" +
+	script := shimPrelude(root) +
 		"if [ \"$1\" = \"-t\" ]; then printf '%s\\n' \"$JD_TEST_OUT\"; exit $JD_TEST_EXIT; fi\n" +
 		"if [ \"$1\" = \"-T\" ]; then printf '%s\\n' \"$JD_TEST_OUT\" >&2\n" +
-		"  for f in '" + root + "/nginx.conf' '" + root + "'/sites-enabled/*; do\n" +
+		"  for f in \"$conf\" $include; do\n" +
 		"    [ -e \"$f\" ] || continue; printf '# configuration file %s:\\n' \"$f\"; cat \"$f\"; printf '\\n'\n" +
 		"  done; exit $JD_TEST_EXIT; fi\n" +
 		"if [ \"$1\" = \"-s\" ]; then printf '%s\\n' \"$JD_TEST_RELOAD_OUT\"; exit $JD_TEST_RELOAD_EXIT; fi\n" +
@@ -652,17 +665,17 @@ func TestReadSiteSpecNamesAConfDSiteWithoutItsSuffix(t *testing.T) {
 }
 
 // linkTestedNginx is siteNginx with a test that fails, the way nginx fails
-// on a broken site, only while sites-enabled/<name> is there, and a reload
-// that leaves a mark in the prefix.
+// on a broken site, only while the directory its configuration includes has
+// <name> in it, and a reload that leaves a mark in the prefix.
 func linkTestedNginx(t *testing.T, name string) (*Service, string) {
 	t.Helper()
 	service, root := siteNginx(t, cleanTest, 0, "", 0)
-	link := filepath.Join(root, "sites-enabled", name)
-	script := "#!/bin/sh\n" +
+	script := shimPrelude(root) +
 		"if [ \"$1\" = \"-t\" ]; then\n" +
-		"  if [ -e '" + link + "' ]; then\n" +
-		"    echo 'nginx: [emerg] unknown directive \"frobnicate\" in " + link + ":3'\n" +
-		"    echo 'nginx: configuration file " + root + "/nginx.conf test failed'; exit 1\n" +
+		"  site=\"$(dirname \"$include\")/" + name + "\"\n" +
+		"  if [ -e \"$site\" ]; then\n" +
+		"    echo \"nginx: [emerg] unknown directive \\\"frobnicate\\\" in $site:3\"\n" +
+		"    echo \"nginx: configuration file $conf test failed\"; exit 1\n" +
 		"  fi\n" +
 		"  printf '%s\\n' \"$JD_TEST_OUT\"; exit 0\n" +
 		"fi\n" +
@@ -676,9 +689,9 @@ func linkTestedNginx(t *testing.T, name string) (*Service, string) {
 
 // A site saved disabled used to be written untested: nginx -t never read a
 // file nothing linked, so "saved" said nothing about the day somebody
-// enabled it. It is now tested with its link in place for the test only,
-// and what that test says is reported without refusing the save or leaving
-// the link behind.
+// enabled it. It is now tested in a copy of the configuration that links it,
+// and what that test says is reported without refusing the save, in the
+// words of the real files rather than the copy's.
 func TestSaveSiteTestsADisabledSiteAsEnabled(t *testing.T) {
 	service, root := linkTestedNginx(t, "app")
 	ctx := context.Background()
@@ -693,11 +706,17 @@ func TestSaveSiteTestsADisabledSiteAsEnabled(t *testing.T) {
 	}
 	want := Diagnostic{Level: "emerg", Message: `unknown directive "frobnicate"`, File: res.Path, Line: 3}
 	if len(res.Validation.Diagnostics) != 1 || res.Validation.Diagnostics[0] != want {
-		t.Fatalf("diagnostics = %+v, want %+v: the link must still be there when nginx's file is resolved", res.Validation.Diagnostics, want)
+		t.Fatalf("diagnostics = %+v, want %+v: the copy must still be there when nginx's file is resolved", res.Validation.Diagnostics, want)
+	}
+	wantOutput := `nginx: [emerg] unknown directive "frobnicate" in ` + filepath.Join(root, "sites-enabled", "app") + ":3\n" +
+		"nginx: configuration file " + filepath.Join(root, "nginx.conf") + " test failed"
+	if res.Validation.Output != wantOutput {
+		t.Fatalf("output = %q, want %q", res.Validation.Output, wantOutput)
 	}
 	if isLinked(t, root, "app") {
-		t.Fatal("the link put in place for the test was left behind")
+		t.Fatal("the site was linked into the live configuration")
 	}
+	noTrialLeft(t, root)
 	if b, _ := os.ReadFile(filepath.Join(root, "sites-available", "app")); !strings.Contains(string(b), "server_name app.example.com") {
 		t.Fatalf("the disabled site was not written:\n%s", b)
 	}
@@ -751,8 +770,8 @@ func TestSaveSiteReportsADisabledSitesConflictsWithoutRefusing(t *testing.T) {
 	}
 }
 
-// A disabled site whose name another site's link holds cannot have its link
-// put in place for the test, and the result says it was not tested.
+// A disabled site whose name another site's link holds cannot be tested
+// under its name, and the result says it was not tested.
 func TestSaveSiteSaysWhenADisabledSiteCouldNotBeTested(t *testing.T) {
 	service, root := siteNginx(t, cleanTest, 0, "", 0)
 	handWritten := filepath.Join(root, "sites-available", "shopfront.conf")
@@ -775,5 +794,322 @@ func TestSaveSiteSaysWhenADisabledSiteCouldNotBeTested(t *testing.T) {
 	}
 	if got := linkTarget(t, root, "shop.example.com"); got != handWritten {
 		t.Fatalf("the other site's link now names %s", got)
+	}
+}
+
+// noTrialLeft fails when a trial configuration outlived its test.
+func noTrialLeft(t *testing.T, root string) {
+	t.Helper()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".jd-trial-") {
+			t.Fatalf("%s was left in %s", e.Name(), root)
+		}
+	}
+}
+
+// liveCalls are the fake nginx's calls, each with what the live
+// sites-enabled held while it ran.
+func liveCalls(t *testing.T, root string) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(root, "bin", "calls.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+// A disabled site used to be linked into the live sites-enabled for the
+// length of its test and of the dump that orders a conflict. Nothing that
+// runs nginx outside the service lock waits for that — the reload and test
+// endpoints, a toggle, certbot's hook — so a reload in the window served the
+// disabled site, and one that was broken failed the reload. Every nginx the
+// save runs now reads a copy, and the live tree never holds the site.
+func TestADisabledSaveNeverPutsTheSiteInTheLiveConfiguration(t *testing.T) {
+	service, root := siteNginx(t, conflictWarning("app.example.com"), 0, "", 0)
+	enableSite(t, root, plainSpec("legacy", "app.example.com"))
+	conf, _ := os.ReadFile(filepath.Join(root, "nginx.conf"))
+
+	res, err := service.SaveSite(context.Background(), plainSpec("app", "app.example.com"), SiteSave{})
+	if err != nil || !res.TestedAsEnabled || len(res.Conflicts) != 1 || res.Conflicts[0].Effect != ConflictTakes {
+		t.Fatalf("result = %+v %v, want tested as enabled and taking the name from legacy", res, err)
+	}
+	calls := liveCalls(t, root)
+	if len(calls) != 2 || !strings.HasPrefix(calls[0], "-t -c ") || !strings.HasPrefix(calls[1], "-T -c ") {
+		t.Fatalf("nginx was run as %q, want a test and a dump of the copy", calls)
+	}
+	for _, call := range calls {
+		if held := strings.Fields(strings.SplitN(call, "::", 2)[1]); !reflect.DeepEqual(held, []string{"legacy"}) {
+			t.Fatalf("the live sites-enabled held %v while nginx ran %q", held, call)
+		}
+	}
+	if after, _ := os.ReadFile(filepath.Join(root, "nginx.conf")); string(after) != string(conf) {
+		t.Fatalf("nginx.conf changed:\n%s", after)
+	}
+	noTrialLeft(t, root)
+}
+
+// The copy is nginx.conf with only the include of the site directory
+// pointed elsewhere, so every line nginx names in it is nginx.conf's line.
+func TestTrialConfigurationKeepsNginxConfAsItIs(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	sites := filepath.Join(root, "sites-enabled")
+	conf := "events {}\n" +
+		"http {\n" +
+		"    include mime.types; # sites-enabled/* comes last\n" +
+		"    include \"" + sites + "/*\";\n" +
+		"    include sites-enabled/*.conf;\n" +
+		"}\n"
+	if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sites, "legacy"), []byte("server {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	site := filepath.Join(root, "sites-available", "app")
+	trial, note := service.stageTrial(sites, "app", site)
+	if note != "" {
+		t.Fatal(note)
+	}
+	b, err := os.ReadFile(trial.main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.ReplaceAll(conf, "\""+sites+"/*\"", "\""+trial.dir+"/*\"")
+	want = strings.Replace(want, "include sites-enabled/*.conf", "include "+trial.dir+"/*.conf", 1)
+	if string(b) != want {
+		t.Fatalf("copy:\n%s\nwant:\n%s", b, want)
+	}
+	for name, target := range map[string]string{"legacy": filepath.Join(sites, "legacy"), "app": site} {
+		if got, err := os.Readlink(filepath.Join(trial.dir, name)); err != nil || got != target {
+			t.Fatalf("%s in the copy links %q (%v), want %s", name, got, err, target)
+		}
+	}
+	trial.remove()
+	noTrialLeft(t, root)
+
+	// A site nginx.conf's include would not read enabled is not tested as
+	// if it were, and neither is one when nginx.conf includes no sites.
+	if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte("http {\n    include "+sites+"/*.conf;\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, note := service.stageTrial(sites, "app", site); note != "nginx.conf includes sites-enabled as "+sites+"/*.conf, which does not match app"+trialUntested {
+		t.Fatalf("note = %q", note)
+	}
+	if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte("http {\n    include conf.d/*.conf;\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, note := service.stageTrial(sites, "app", site); note != "nginx.conf does not include sites-enabled itself"+trialUntested {
+		t.Fatalf("note = %q", note)
+	}
+	noTrialLeft(t, root)
+}
+
+// confdNginx is linkTestedNginx on a host that keeps its sites in conf.d,
+// whose test fails while conf.d/<failing> is read.
+func confdNginx(t *testing.T, failing string) (*Service, string) {
+	t.Helper()
+	service, root := linkTestedNginx(t, failing)
+	if err := os.RemoveAll(filepath.Join(root, "sites-available")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "conf.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	conf := "events {}\nhttp {\n    include " + filepath.Join(root, "conf.d") + "/*.conf;\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "nginx.conf"), []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return service, root
+}
+
+func confdEntries(t *testing.T, root string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(root, "conf.d"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// A conf.d site is switched off by renaming app.conf to app.conf.disabled,
+// which nginx's conf.d/*.conf no longer reads. The form read it back as
+// app.conf.disabled, said it would stay disabled, and saved it to
+// app.conf.disabled.conf — a second copy of the site that nginx reads. The
+// save now writes the file that was read, tests it as if it ended in .conf,
+// and leaves it off.
+func TestSaveSiteKeepsAConfDSiteThatIsOffWhereItIs(t *testing.T) {
+	service, root := confdNginx(t, "app.conf.disabled.conf")
+	ctx := context.Background()
+	off := filepath.Join(root, "conf.d", "app.conf.disabled")
+	written, err := RenderNginx(plainSpec("app.conf.disabled", "app.example.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(off, []byte(written), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	spec, _, _, err := service.ReadSiteSpec("app.conf.disabled")
+	if err != nil || spec.Name != "app.conf.disabled" {
+		t.Fatalf("read back as %+v %v", spec, err)
+	}
+	file, err := service.SiteFile(spec.Name)
+	if err != nil || file != (SiteFileInfo{Path: off, Exists: true, Confd: true}) {
+		t.Fatalf("site file = %+v %v, want the file that was read, off", file, err)
+	}
+
+	spec.Upstream = "http://127.0.0.1:4000"
+	res, err := service.SaveSite(ctx, spec, SiteSave{Overwrite: true})
+	if err != nil {
+		t.Fatalf("keeping a conf.d site off: %v", err)
+	}
+	if res.Enabled || !res.TestedAsEnabled || res.Validation.Valid || res.Path != off {
+		t.Fatalf("result = %+v, want off, tested as app.conf.disabled.conf and failing", res)
+	}
+	want := Diagnostic{Level: "emerg", Message: `unknown directive "frobnicate"`, File: off, Line: 3}
+	if len(res.Validation.Diagnostics) != 1 || res.Validation.Diagnostics[0] != want {
+		t.Fatalf("diagnostics = %+v, want %+v", res.Validation.Diagnostics, want)
+	}
+	if got := confdEntries(t, root); !reflect.DeepEqual(got, []string{"app.conf.disabled"}) {
+		t.Fatalf("conf.d holds %v after the save, want the one file nginx does not read", got)
+	}
+	if b, _ := os.ReadFile(off); !strings.Contains(string(b), "127.0.0.1:4000") {
+		t.Fatalf("the edit was not written in place:\n%s", b)
+	}
+	noTrialLeft(t, root)
+
+	// There is no link to make: enabling it is renaming it, which a save
+	// does not do.
+	if _, err := service.SaveSite(ctx, spec, SiteSave{Enable: true, Overwrite: true, Reload: true}); err == nil ||
+		!strings.Contains(err.Error(), "renaming") {
+		t.Fatalf("enabling a conf.d site that is off: %v", err)
+	}
+	if got := confdEntries(t, root); !reflect.DeepEqual(got, []string{"app.conf.disabled"}) {
+		t.Fatalf("conf.d holds %v after a refused enable", got)
+	}
+
+	// Deleting it deletes the file the listing names, where it looked for
+	// app.conf.disabled.conf and found no such site.
+	if err := service.DeleteSite(ctx, "app.conf.disabled"); err != nil {
+		t.Fatal(err)
+	}
+	if got := confdEntries(t, root); !reflect.DeepEqual(got, []string{"app.conf.disabled.bak"}) {
+		t.Fatalf("conf.d holds %v after the delete", got)
+	}
+}
+
+// app and app.conf side by side are two sites; each is read back under a
+// name that saves and deletes that one, never the other.
+func TestConfDSitesOfOneNameWithAndWithoutTheSuffixStayApart(t *testing.T) {
+	service, root := confdNginx(t, "nothing")
+	for _, name := range []string{"app", "app.conf"} {
+		if err := os.WriteFile(filepath.Join(root, "conf.d", name), []byte("# "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for listed, wantEnabled := range map[string]bool{"app": false, "app.conf": true} {
+		spec, _, _, err := service.ReadSiteSpec(listed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := service.SiteFile(spec.Name)
+		if err != nil || file.Path != filepath.Join(root, "conf.d", listed) || file.Enabled != wantEnabled {
+			t.Fatalf("%s reads back as %q, saving to %+v %v", listed, spec.Name, file, err)
+		}
+	}
+	if err := service.DeleteSite(context.Background(), "app"); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, "conf.d", "app.conf")); err != nil || string(b) != "# app.conf\n" {
+		t.Fatalf("deleting app touched app.conf: %q %v", b, err)
+	}
+}
+
+// A site linked under a name of its own choosing — sites-enabled/010-app —
+// is enabled. It was called disabled, so a save put a second link beside
+// the first for its test: nginx read the file twice, reported the site
+// conflicting with itself, and the edit was never reloaded.
+func TestSaveSiteTakesALinkOfAnotherNameForEnabled(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	ctx := context.Background()
+	spec := plainSpec("app", "app.example.com")
+	full := filepath.Join(root, "sites-available", "app")
+	if err := os.WriteFile(full, []byte("server { server_name app.example.com; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../sites-available/app", filepath.Join(root, "sites-enabled", "010-app")); err != nil {
+		t.Fatal(err)
+	}
+	// A dotted entry is not one nginx's include reads.
+	if err := os.Symlink(full, filepath.Join(root, "sites-enabled", ".app.old")); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := service.SiteFile("app"); err != nil || !file.Enabled {
+		t.Fatalf("site file = %+v %v, want enabled", file, err)
+	}
+	for _, opts := range []SiteSave{{Overwrite: true, Reload: true}, {Enable: true, Overwrite: true, Reload: true}} {
+		res, err := service.SaveSite(ctx, spec, opts)
+		if err != nil || !res.Enabled || res.TestedAsEnabled || !res.Reloaded || len(res.Conflicts) != 0 {
+			t.Fatalf("%+v: result = %+v %v, want enabled and reloaded", opts, res, err)
+		}
+		if isLinked(t, root, "app") {
+			t.Fatalf("%+v: a second link was made beside 010-app", opts)
+		}
+	}
+	for _, call := range liveCalls(t, root) {
+		if strings.Contains(call, "-c") {
+			t.Fatalf("an enabled site was tested in a copy: %q", call)
+		}
+	}
+
+	// Without 010-app it is disabled again, and the dotted entry does not
+	// change that.
+	if err := os.Remove(filepath.Join(root, "sites-enabled", "010-app")); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := service.SiteFile("app"); err != nil || file.Enabled {
+		t.Fatalf("site file = %+v %v, want disabled", file, err)
+	}
+}
+
+// The listing called a site serving whenever a link of its name was there,
+// wherever it pointed, while the form said the site could be neither
+// enabled nor tested: its link enables another file.
+func TestTheListingAndTheFormAgreeOnALinkThatEnablesAnotherFile(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	for _, name := range []string{"held.example.com", "other", "own", "off"} {
+		if err := os.WriteFile(available(name), []byte("server {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{"held.example.com": available("other"), "own": available("own")} {
+		if err := os.Symlink(target, filepath.Join(root, "sites-enabled", link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed := map[string]bool{}
+	for _, v := range service.nginxVHosts() {
+		listed[v.Name] = v.Enabled
+	}
+	for _, name := range []string{"held.example.com", "own", "off"} {
+		file, err := service.SiteFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if listed[name] != file.Enabled {
+			t.Errorf("%s: listed enabled=%v, the form says enabled=%v", name, listed[name], file.Enabled)
+		}
+	}
+	if listed["held.example.com"] {
+		t.Error("a site whose name's link enables another file is listed as serving")
 	}
 }

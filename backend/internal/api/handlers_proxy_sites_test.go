@@ -13,8 +13,10 @@ import (
 
 // siteFormServer is a signed-in admin against a Debian nginx layout in a
 // temporary directory, with an nginx first on PATH whose test prints
-// $JD_TEST_OUT, whose dump prints nginx.conf and sites-enabled in the order
-// nginx reads them, and whose reload exits $JD_TEST_RELOAD_EXIT.
+// $JD_TEST_OUT, whose dump prints the configuration it is given (nginx.conf,
+// or the copy a disabled site is tested in after -c) and the directory that
+// includes in the order nginx reads them, and whose reload exits
+// $JD_TEST_RELOAD_EXIT.
 func siteFormServer(t *testing.T) (*client, string) {
 	t.Helper()
 	s := testServer(t)
@@ -28,9 +30,9 @@ func siteFormServer(t *testing.T) (*client, string) {
 	if err := os.WriteFile(filepath.Join(dir, "nginx.conf"), []byte(conf), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\n" +
+	script := siteShimPrelude(dir) +
 		"if [ \"$1\" = \"-t\" ]; then printf '%s\\n' \"$JD_TEST_OUT\"; exit 0; fi\n" +
-		"if [ \"$1\" = \"-T\" ]; then for f in '" + dir + "/nginx.conf' '" + dir + "'/sites-enabled/*; do\n" +
+		"if [ \"$1\" = \"-T\" ]; then for f in \"$conf\" $include; do\n" +
 		"  [ -e \"$f\" ] || continue; printf '# configuration file %s:\\n' \"$f\"; cat \"$f\"; printf '\\n'\n" +
 		"done; exit 0; fi\n" +
 		"if [ \"$1\" = \"-s\" ]; then echo 'nginx: [error] invalid PID number \"\" in \"/run/nginx.pid\"'; exit ${JD_TEST_RELOAD_EXIT:-0}; fi\n" +
@@ -43,6 +45,15 @@ func siteFormServer(t *testing.T) (*client, string) {
 	s.Cfg.NginxDir = dir
 	s.initModules()
 	return &client{t: t, h: s.Routes(), cookie: signIn(t, s)}, dir
+}
+
+// siteShimPrelude sets $conf to the configuration a fake nginx is given — the
+// file after -c, or nginx.conf — and $include to the pattern it includes.
+func siteShimPrelude(dir string) string {
+	return "#!/bin/sh\n" +
+		"conf='" + dir + "/nginx.conf'\n" +
+		"if [ \"$2\" = \"-c\" ]; then conf=\"$3\"; fi\n" +
+		"include=$(sed -n 's/^ *include \\(.*\\);$/\\1/p' \"$conf\" | head -n 1)\n"
 }
 
 func siteBody(t *testing.T, name, domain, enable string, extra map[string]any) string {
@@ -274,16 +285,17 @@ func TestSitePreviewSaysWhichFileASaveWrites(t *testing.T) {
 
 // The form reads whether a site is enabled from the site and from each
 // preview, and offers a disabled one "Save (stays disabled)" and "Save and
-// enable". A disabled site saved is tested with its link in place for the
-// test: a failing test is its result, not a refusal, and nothing is
+// enable". A disabled site saved is tested in a copy of the configuration
+// that links it: a failing test is its result, not a refusal, and nothing is
 // reloaded after it.
 func TestSiteSaveTestsADisabledSiteAsEnabled(t *testing.T) {
 	c, dir := siteFormServer(t)
 	link := filepath.Join(dir, "sites-enabled", "app")
-	script := "#!/bin/sh\n" +
+	script := siteShimPrelude(dir) +
 		"if [ \"$1\" = \"-t\" ]; then\n" +
-		"  if [ -e '" + link + "' ]; then\n" +
-		"    echo 'nginx: [emerg] unknown directive \"frobnicate\" in " + link + ":3'; exit 1\n" +
+		"  site=\"$(dirname \"$include\")/app\"\n" +
+		"  if [ -e \"$site\" ]; then\n" +
+		"    echo \"nginx: [emerg] unknown directive \\\"frobnicate\\\" in $site:3\"; exit 1\n" +
 		"  fi\n" +
 		"  echo 'nginx: configuration file test is successful'; exit 0\n" +
 		"fi\n" +
@@ -320,7 +332,7 @@ func TestSiteSaveTestsADisabledSiteAsEnabled(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 	if _, err := os.Lstat(link); err == nil {
-		t.Fatal("the link put in place for the test was left behind")
+		t.Fatal("the disabled site was linked into the live configuration")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "reloaded")); !os.IsNotExist(err) {
 		t.Fatal("nginx was reloaded after a failing test")
@@ -356,5 +368,53 @@ func TestSiteSaveTestsADisabledSiteAsEnabled(t *testing.T) {
 	}
 	if got := enabled("/api/v1/proxy/sites/preview", preview); got == nil || !*got {
 		t.Fatalf("the preview of an enabled site says enabled=%v", got)
+	}
+}
+
+// A conf.d site switched off by its name — app.conf.disabled — reads back
+// off and in conf.d, and its preview names the file that was read: the form
+// then offers only to keep it off, where it offered to keep it off and wrote
+// app.conf.disabled.conf, which nginx reads.
+func TestSiteSpecSaysAConfDSiteIsOffAndWhereItIs(t *testing.T) {
+	c, dir := siteFormServer(t)
+	if err := os.RemoveAll(filepath.Join(dir, "sites-available")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "conf.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	off := filepath.Join(dir, "conf.d", "app.conf.disabled")
+	content, err := proxysvc.RenderNginx(&proxysvc.SiteSpec{
+		Name: "app.conf.disabled", Kind: "proxy", Domains: []string{"app.example.com"}, Upstream: "http://127.0.0.1:3000",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(off, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	type answer struct {
+		Spec    proxysvc.SiteSpec `json:"spec"`
+		Path    string            `json:"path"`
+		Enabled *bool             `json:"enabled"`
+		Confd   bool              `json:"confd"`
+	}
+	w := c.do(http.MethodGet, "/api/v1/proxy/sites/app.conf.disabled", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", w.Code, w.Body.String())
+	}
+	var read answer
+	decodeSite(t, w, &read)
+	if read.Spec.Name != "app.conf.disabled" || read.Enabled == nil || *read.Enabled || !read.Confd {
+		t.Fatalf("read back as %+v", read)
+	}
+	w = c.do(http.MethodPost, "/api/v1/proxy/sites/preview", siteBody(t, "app.conf.disabled", "app.example.com", `"keep"`, nil), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("preview answered %d: %s", w.Code, w.Body.String())
+	}
+	var preview answer
+	decodeSite(t, w, &preview)
+	if preview.Path != off || preview.Enabled == nil || *preview.Enabled || !preview.Confd {
+		t.Fatalf("preview = %+v, want %s, off, in conf.d", preview, off)
 	}
 }

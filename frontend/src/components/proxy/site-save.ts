@@ -60,9 +60,12 @@ export function conflictsText(
       const other = c.site ?? "another server block"
       // A disabled site answers nothing yet: what its test found is what
       // enabling it would do.
-      if (!enabled && c.effect === "ignored")
-        return `Enabled, its claim to ${at} would be ignored: nginx answers it from ${other}.`
-      if (!enabled && c.effect === "takes") return `Enabled, it would take ${at} from ${other}.`
+      if (!enabled) {
+        if (c.effect === "ignored")
+          return `Enabled, its claim to ${at} would be ignored: nginx answers it from ${other}.`
+        if (c.effect === "takes") return `Enabled, it would take ${at} from ${other}.`
+        return `Enabled, it would share ${at} with ${other}, and nginx would answer it from only one of the two.`
+      }
       switch (c.effect) {
         case "ignored":
           return `nginx answers ${at} from ${other}, not ${name}.`

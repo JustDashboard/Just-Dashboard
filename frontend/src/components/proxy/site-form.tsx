@@ -177,9 +177,9 @@ function SiteFormBody({
   // The save in flight, so the button pressed is the one that spins.
   const [busy, setBusy] = useState<SaveMode | "anyway" | null>(null)
   const [loaded, setLoaded] = useState(source === null)
-  // Whether nginx reads the site being edited, as it was read back; each
-  // preview then says it afresh.
-  const [readEnabled, setReadEnabled] = useState<boolean | undefined>(undefined)
+  // Whether nginx reads the site being edited, and whether it is in conf.d,
+  // as it was read back; each preview then says both afresh.
+  const [readFile, setReadFile] = useState<Pick<SiteRead, "enabled" | "confd">>({})
   // A save refused over a name another server block claims, with the
   // server's sentence saying which of the two nginx answers. Kept with the
   // spec it was about, so any edit puts the question away.
@@ -225,7 +225,7 @@ function SiteFormBody({
           setDomainText(r.spec.domains.join(" "))
           setManaged(r.managed)
           setFixed(fixedFor(r.spec, true))
-          setReadEnabled(r.enabled)
+          setReadFile({ enabled: r.enabled, confd: r.confd })
         }
         setLoaded(true)
       })
@@ -428,7 +428,10 @@ function SiteFormBody({
   // A disabled site is saved as it is or enabled on purpose; "Save and
   // reload" did neither, and reloading changes nothing about a file nginx
   // does not read.
-  const disabled = editing !== null && (file?.enabled ?? readEnabled) === false
+  const disabled = editing !== null && (file?.enabled ?? readFile.enabled) === false
+  // A conf.d site is on while its name ends in .conf, and a save does not
+  // rename it: enabling one is not the form's to offer.
+  const confd = file?.confd ?? readFile.confd
   const certKnown =
     !spec.tls || !spec.certPath || !certs.data || certs.data.some((c) => c.path === spec.certPath)
   const issueHref = `/proxy/certificates?issue=${encodeURIComponent(spec.domains.join(" "))}`
@@ -456,9 +459,11 @@ function SiteFormBody({
             <span className="mr-auto text-hint text-muted-foreground">
               {file?.enabledElsewhere
                 ? `${file.enabledElsewhere}, so this site can be neither enabled nor tested under its name.`
-                : "Disabled. nginx tests it as if enabled, and it stays off until you enable it."}
+                : confd
+                  ? "Disabled: nginx reads only the conf.d files ending in .conf. nginx tests it as if it did, and it stays off until it is renamed."
+                  : "Disabled. nginx tests it as if enabled, and it stays off until you enable it."}
             </span>
-            {!file?.enabledElsewhere && (
+            {!file?.enabledElsewhere && !confd && (
               <Button
                 size="sm"
                 variant="outline"

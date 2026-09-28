@@ -121,7 +121,11 @@ test("HSTS reaches the server only with TLS", async ({ page }) => {
  * legacy.example.com, disabled, as the host reports it: in the listing, read
  * back into the form and in every preview.
  */
-async function disableLegacy(page: Page, preview: Record<string, unknown> = {}) {
+async function disableLegacy(
+  page: Page,
+  preview: Record<string, unknown> = {},
+  read: Record<string, unknown> = {},
+) {
   await page.route("**/api/v1/proxy/vhosts", (route) =>
     json(
       route,
@@ -129,7 +133,14 @@ async function disableLegacy(page: Page, preview: Record<string, unknown> = {}) 
     ),
   )
   await page.route("**/api/v1/proxy/sites/legacy.example.com", (route) =>
-    json(route, { spec: legacySpec, managed: true, content: "", warnings: [], enabled: false }),
+    json(route, {
+      spec: legacySpec,
+      managed: true,
+      content: "",
+      warnings: [],
+      enabled: false,
+      ...read,
+    }),
   )
   await page.route("**/api/v1/proxy/sites/preview", (route) =>
     json(route, sitePreview(route.request().postDataJSON().spec, { enabled: false, ...preview })),
@@ -347,6 +358,51 @@ test("a disabled site whose name another site's link holds can only stay disable
   await expect(page.getByText("legacy.example.com saved", { exact: true })).toBeVisible()
   await expect(page.getByText(`${note} It stays disabled.`)).toBeVisible()
   expect(saved[0]).toMatchObject({ enable: "keep", reload: false })
+})
+
+test("a conf.d site that is off can only stay off, and says how it is turned on", async ({
+  page,
+}) => {
+  // At a phone's width, where its longer sentence has to fit beside the button.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  const path = "/etc/nginx/conf.d/legacy.example.com"
+  await disableLegacy(page, { confd: true, path }, { confd: true })
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route) =>
+    json(
+      route,
+      siteResult({
+        ...LEGACY,
+        path,
+        enabled: false,
+        testedAsEnabled: true,
+        validation: passed,
+        reloaded: false,
+      }),
+    ),
+  )
+  const sheet = await openLegacy(page)
+  await expect(
+    sheet.getByText(
+      "Disabled: nginx reads only the conf.d files ending in .conf. nginx tests it as if it did, and it stays off until it is renamed.",
+    ),
+  ).toBeVisible()
+  // Enabling a conf.d site is renaming its file, which a save does not do:
+  // "Save and enable" wrote a copy under a .conf name that nginx read.
+  await expect(sheet.getByRole("button", { name: "Save and enable" })).toHaveCount(0)
+  const keep = sheet.getByRole("button", { name: "Save (stays disabled)" })
+  await expect(keep).toBeEnabled()
+  await expect(keep).toBeInViewport({ ratio: 1 })
+  expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true,
+  )
+  await keep.click()
+  await expect(page.getByText("legacy.example.com saved", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText("nginx tested it as if enabled. It stays disabled until it is enabled."),
+  ).toBeVisible()
+  expect(saved).toHaveLength(1)
+  expect(saved[0]).toMatchObject({ enable: "keep", overwrite: true, reload: false })
 })
 
 test("a disabled site's footer fits a phone", async ({ page }) => {

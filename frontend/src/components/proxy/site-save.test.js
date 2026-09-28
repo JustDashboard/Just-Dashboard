@@ -280,5 +280,17 @@ describe("what a save says", () => {
     ).toBe(
       "a.example.com on [::]:443 is also claimed by another server block; nginx answers it from only one of the two.",
     )
+    // A disabled site claims nothing yet: said in the tense of enabling it,
+    // where it was said as though the site were serving and then "It stays
+    // disabled".
+    expect(
+      conflictsText([{ domain: "a.example.com", listen: "0.0.0.0:80" }], {
+        name: "app",
+        reloaded: false,
+        enabled: false,
+      }),
+    ).toBe(
+      "Enabled, it would share a.example.com on 0.0.0.0:80 with another server block, and nginx would answer it from only one of the two.",
+    )
   })
 })

@@ -121,8 +121,12 @@ func TestLiveServerNameConflictIsReadFromNginx(t *testing.T) {
 	// app sorts before legacy in sites-enabled, so nginx reads it first and
 	// it is legacy's claim that is ignored.
 	service.mu.Lock()
-	service.orderConflicts(context.Background(), got, full, nil)
+	files, err := service.dumpNginx(context.Background())
 	service.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.orderConflicts(got, full, nil, files)
 	if got[0].Effect != ConflictTakes || got[0].Site != "legacy" {
 		t.Fatalf("ordered as %+v, want app taking the name from legacy", got[0])
 	}
@@ -472,4 +476,195 @@ func TestLiveDisabledSiteIsTestedAsEnabled(t *testing.T) {
 		t.Fatalf("conflicts = %+v, want %+v", res.Conflicts, wantConflict)
 	}
 	answers("app.test", "app")
+}
+
+// liveSites is a private nginx on one loopback port, an upstream per site
+// name that answers with that name, and SaveSite writing sites on that port.
+type liveSites struct {
+	t         *testing.T
+	root      string
+	service   *Service
+	port      int
+	upstreams map[string]string
+}
+
+func newLiveSites(t *testing.T, names ...string) *liveSites {
+	t.Helper()
+	root := liveNginx(t)
+	l := &liveSites{t: t, root: root, service: New(root, filepath.Join(root, "Caddyfile")),
+		port: freePort(t), upstreams: map[string]string{}}
+	for _, name := range names {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, name)
+		}))
+		t.Cleanup(server.Close)
+		l.upstreams[name] = server.URL
+	}
+	return l
+}
+
+func (l *liveSites) spec(name, upstream, domain, custom string) *SiteSpec {
+	s := plainSpec(name, domain)
+	s.Upstream, s.Custom = l.upstreams[upstream], custom
+	return s
+}
+
+// render is the site's file on the test's port: nginx -t binds what it is
+// given, and an unprivileged test cannot bind 80.
+func (l *liveSites) render(spec *SiteSpec) string {
+	l.t.Helper()
+	content, err := RenderNginx(spec)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	content = strings.ReplaceAll(content, "    listen 80;\n", fmt.Sprintf("    listen 127.0.0.1:%d;\n", l.port))
+	return strings.ReplaceAll(content, "    listen [::]:80;\n", "")
+}
+
+func (l *liveSites) save(spec *SiteSpec, opts SiteSave) (*SiteResult, string, error) {
+	l.t.Helper()
+	content := l.render(spec)
+	l.service.mu.Lock()
+	defer l.service.mu.Unlock()
+	res, err := l.service.saveSiteLocked(context.Background(), spec, content, opts)
+	if errors.Is(err, errSiteReloadFailed) {
+		l.t.Fatalf("nginx did not reload: %v", err)
+	}
+	return res, content, err
+}
+
+// answers waits for host to be answered by the upstream called want.
+func (l *liveSites) answers(host, want string) {
+	l.t.Helper()
+	body := ""
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if _, body = siteGet(l.t, l.port, host, "/"); body == want {
+			return
+		}
+	}
+	l.t.Fatalf("%s answered %q, want %q", host, body, want)
+}
+
+// A reload does not wait for the service lock, and a disabled site's save
+// used to link it into sites-enabled for the length of its test: a reload
+// in that window served the disabled site until the next reload, and failed
+// over one that was broken. The save now tests a copy, and a reload running
+// beside it reads only what is enabled.
+func TestLiveReloadsBesideADisabledSaveNeverReadIt(t *testing.T) {
+	l := newLiveSites(t, "legacy", "app")
+	ctx := context.Background()
+	installSite(t, l.root, l.spec("legacy", "legacy", "legacy.test", ""), l.port)
+	startNginx(t, l.root)
+	l.answers("app.test", "legacy")
+
+	for round := 0; round < 12; round++ {
+		custom := ""
+		if round%2 == 0 {
+			custom = "frobnicate on;"
+		}
+		reloads := make(chan error, 1)
+		go func() {
+			defer close(reloads)
+			for i := 0; i < 4; i++ {
+				if _, err := l.service.Reload(ctx, KindNginx); err != nil {
+					reloads <- err
+					return
+				}
+			}
+		}()
+		res, _, err := l.save(l.spec("app", "app", "app.test", custom), SiteSave{Overwrite: round > 0})
+		if err != nil || res.Enabled || !res.TestedAsEnabled || res.Validation.Valid != (custom == "") {
+			t.Fatalf("round %d: %+v %v", round, res, err)
+		}
+		if err := <-reloads; err != nil {
+			t.Fatalf("round %d: a reload beside a disabled save failed: %v", round, err)
+		}
+		l.answers("app.test", "legacy")
+	}
+	noTrialLeft(t, l.root)
+}
+
+// A conf.d site switched off as app.conf.disabled is saved where it is,
+// tested as nginx would read it enabled — through nginx.conf's relative
+// include of conf.d/*.conf — and nginx goes on not reading it.
+func TestLiveConfDSiteThatIsOffIsTestedAndStaysOff(t *testing.T) {
+	l := newLiveSites(t, "legacy", "app")
+	if err := os.RemoveAll(filepath.Join(l.root, "sites-available")); err != nil {
+		t.Fatal(err)
+	}
+	confd := filepath.Join(l.root, "conf.d")
+	legacy := l.render(l.spec("legacy", "legacy", "legacy.test", ""))
+	if err := os.WriteFile(filepath.Join(confd, "legacy.conf"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	off := filepath.Join(confd, "app.conf.disabled")
+	if err := os.WriteFile(off, []byte(l.render(l.spec("app.conf.disabled", "app", "app.test", ""))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	startNginx(t, l.root)
+	l.answers("app.test", "legacy")
+
+	spec, _, _, err := l.service.ReadSiteSpec("app.conf.disabled")
+	if err != nil || spec.Name != "app.conf.disabled" {
+		t.Fatalf("read back as %+v %v", spec, err)
+	}
+	spec.Custom = "frobnicate on;"
+	res, content, err := l.save(spec, SiteSave{Overwrite: true, Reload: true})
+	if err != nil {
+		t.Fatalf("keeping a failing conf.d site off was refused: %v", err)
+	}
+	line := strings.Count(content[:strings.Index(content, "frobnicate on;")], "\n") + 1
+	want := Diagnostic{Level: "emerg", Message: `unknown directive "frobnicate"`, File: resolvedFile(off), Line: line}
+	if res.Enabled || !res.TestedAsEnabled || res.Validation.Valid || res.Reloaded ||
+		len(res.Validation.Diagnostics) == 0 || res.Validation.Diagnostics[0] != want {
+		t.Fatalf("result = %+v, diagnostics %+v, want %+v\n%s", res, res.Validation.Diagnostics, want, res.Validation.Output)
+	}
+
+	spec.Custom = ""
+	res, _, err = l.save(spec, SiteSave{Overwrite: true, Reload: true})
+	if err != nil || res.Enabled || !res.TestedAsEnabled || !res.Validation.Valid || !res.Reloaded {
+		t.Fatalf("a passing conf.d site kept off: %+v %v\n%s", res, err, res.Validation.Output)
+	}
+	l.answers("app.test", "legacy")
+	entries, _ := os.ReadDir(confd)
+	if len(entries) != 2 {
+		t.Fatalf("conf.d holds %v, want legacy.conf and app.conf.disabled", entries)
+	}
+	if v := runValidator(context.Background(), "nginx", "-t"); !v.Valid {
+		t.Fatalf("nginx no longer passes its test:\n%s", v.Output)
+	}
+	noTrialLeft(t, l.root)
+}
+
+// A site linked under a name of its own — sites-enabled/010-app — is
+// serving, and an edit to it is tested and reloaded like any enabled site's,
+// with no second link and no conflict with itself.
+func TestLiveSiteLinkedUnderAnotherNameIsEditedLive(t *testing.T) {
+	l := newLiveSites(t, "app")
+	full := filepath.Join(l.root, "sites-available", "app")
+	if err := os.WriteFile(full, []byte(l.render(l.spec("app", "app", "app.test", ""))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(full, filepath.Join(l.root, "sites-enabled", "010-app")); err != nil {
+		t.Fatal(err)
+	}
+	startNginx(t, l.root)
+	l.answers("app.test", "app")
+
+	res, _, err := l.save(l.spec("app", "app", "app.test", "add_header X-Edited yes always;"), SiteSave{Overwrite: true, Reload: true})
+	if err != nil || !res.Enabled || res.TestedAsEnabled || !res.Reloaded || len(res.Conflicts) != 0 || len(res.TestWarnings) != 0 {
+		t.Fatalf("result = %+v %v\n%s", res, err, res.Validation.Output)
+	}
+	if isLinked(t, l.root, "app") {
+		t.Fatal("a second link was made beside 010-app")
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		response, _ := siteGet(t, l.port, "app.test", "/")
+		if response.Header.Get("X-Edited") == "yes" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the edit was not served")
+		}
+	}
 }

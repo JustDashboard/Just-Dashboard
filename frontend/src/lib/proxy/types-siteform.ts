@@ -59,8 +59,17 @@ export type SitePreview = {
    * site a new one of this name would unlink. A sentence.
    */
   enabledElsewhere?: string
-  /** Whether nginx reads the file: linked into sites-enabled, or in conf.d. */
+  /**
+   * Whether nginx reads the file: linked into sites-enabled under its own
+   * name or another, or in conf.d with a name ending in .conf.
+   */
   enabled?: boolean
+  /**
+   * The host keeps its sites in conf.d: a file is on while its name ends in
+   * .conf, and enabling one that does not is renaming it, which a save does
+   * not do.
+   */
+  confd?: boolean
 }
 
 /** What GET /proxy/sites/{name} answers: a site read back into the form. */
@@ -71,6 +80,8 @@ export type SiteRead = {
   warnings: string[]
   /** Whether nginx reads the site; absent when its name is not one the form saves. */
   enabled?: boolean
+  /** The site is in conf.d, where it is enabled by renaming it. */
+  confd?: boolean
 }
 
 /** One of a site's names another server block also claims on the same address. */

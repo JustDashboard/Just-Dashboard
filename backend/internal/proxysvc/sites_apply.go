@@ -140,44 +140,45 @@ func (s *Service) applySiteLocked(ctx context.Context, spec *SiteSpec, content s
 }
 
 func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content string, opts SiteSave) (*SiteResult, error) {
-	enable := opts.Enable
 	full, confd, err := s.siteTarget(spec.Name)
 	if err != nil {
 		return nil, err
-	}
-	if confd {
-		// There is no enable/disable in the conf.d layout.
-		enable = true
 	}
 	original, existed := readIfPresent(full)
 	if existed && !opts.Overwrite {
 		return nil, fmt.Errorf("a site called %s already exists", spec.Name)
 	}
 	link := filepath.Join(s.nginxDir, "sites-enabled", spec.Name)
-	// A link of this name that enables another file is that site's. Linking
-	// this one in its place unlinks it before nginx -t runs, so the test
-	// never sees the two claim one name and the site just stops.
-	elsewhere := ""
-	if !confd {
+	// read is whether nginx reads the file as it stands: a conf.d file whose
+	// name ends in .conf, or one linked into sites-enabled — under its own
+	// name, or under another such as 010-app, which enables it all the same.
+	// Taking the second for disabled staged a second link, so nginx read the
+	// file twice, reported the site conflicting with itself, and the edit
+	// was never reloaded.
+	read := false
+	elsewhere, via := "", ""
+	if confd {
+		read = strings.HasSuffix(full, ".conf")
+		if !read && opts.Enable {
+			return nil, fmt.Errorf("conf.d/%s is off: nginx reads only the conf.d files whose names end in .conf, so it is enabled by renaming it", filepath.Base(full))
+		}
+	} else {
+		// A link of this name that enables another file is that site's.
+		// Linking this one in its place unlinks it before nginx -t runs, so
+		// the test never sees the two claim one name and the site just stops.
 		elsewhere = enabledElsewhere(link, full)
-	}
-	if elsewhere != "" && (!opts.Overwrite || enable) {
-		return nil, fmt.Errorf("%s — pick another name, or move that link aside first", elsewhere)
+		if elsewhere != "" && (!opts.Overwrite || opts.Enable) {
+			return nil, fmt.Errorf("%s — pick another name, or move that link aside first", elsewhere)
+		}
+		via = enablingLink(link, full)
+		read = via != ""
 	}
 	// What nginx read of this file before the save: a name the site wins
 	// after it is only taken from someone if the site did not answer it
 	// already.
 	var previous []Directive
-	if existed && (!strings.Contains(full, "sites-available") || resolvedFile(link) == full) {
+	if existed && read {
 		previous, _ = ParseNginxFile(full, original, []string{"http"})
-	}
-	if !enable && elsewhere == "" {
-		// Leaving the link as it was: a site that has one is enabled, and
-		// relinking it makes sure the link names the file being saved. One
-		// that enables another file is not this site's and stays put.
-		if _, err := os.Lstat(link); err == nil {
-			enable = true
-		}
 	}
 
 	res := &SiteResult{
@@ -187,15 +188,18 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		return nil, err
 	}
 	undoLink := func() {}
-	// staged is a site saved disabled whose link is in place for the test
-	// only.
-	staged := false
+	// trial is the copy of the configuration a site saved disabled is tested
+	// in, with it enabled.
+	var trial *trialConfig
 	untested := ""
-	if !strings.Contains(full, "sites-available") {
-		// In the conf.d layout every present file is active, so there is no
-		// symlink to make and nothing to report as pending.
+	switch {
+	case confd && read, via != "" && via != spec.Name:
+		// nginx reads the file where it is: every conf.d file ending in
+		// .conf, or one linked under another name. There is no link to make.
 		res.Enabled = true
-	} else if enable {
+	case read || opts.Enable:
+		// A site with its own link keeps it, relinked so that it names the
+		// file being saved.
 		undo, err := linkEnabled(link, full)
 		if err != nil {
 			// The write is undone rather than left standing: a file in
@@ -207,27 +211,34 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		}
 		undoLink = undo
 		res.Enabled = true
-	} else if elsewhere != "" {
-		untested = elsewhere + ", so nginx could not test this site as enabled."
-	} else if undo, err := linkEnabled(link, full); err != nil {
-		untested = fmt.Sprintf("Its link could not be put in place for the test (%v), so nginx could not test it.", err)
-	} else {
-		// A site saved disabled is tested as it would be enabled, its link
-		// in place for the length of the test the way Validate stages a
-		// candidate file. Without it `nginx -t` never read the file, and
-		// "saved" said nothing about the day somebody enables it.
-		undoLink, staged = undo, true
-		res.TestedAsEnabled = true
+	case elsewhere != "":
+		untested = elsewhere + trialUntested
+	default:
+		// A site saved disabled is tested as it would be enabled: in
+		// sites-enabled under its name, or in conf.d with the .conf its name
+		// lacks. Without that `nginx -t` never read the file, and "saved"
+		// said nothing about the day somebody enables it.
+		from, entry := filepath.Dir(link), spec.Name
+		if confd {
+			from, entry = filepath.Dir(full), filepath.Base(full)+".conf"
+		}
+		trial, untested = s.stageTrial(from, entry, full)
+		res.TestedAsEnabled = trial != nil
 	}
 
-	res.Validation = runValidator(ctx, "nginx", "-t")
-	if !res.Validation.Valid && !staged {
+	if trial != nil {
+		res.Validation = trial.validate(ctx)
+	} else {
+		res.Validation = runValidator(ctx, "nginx", "-t")
+	}
+	if !res.Validation.Valid && trial == nil {
 		undoLink()
 		restoreConfig(full, original, existed)
 		res.Enabled = false
 		return res, ErrInvalidConf
 	}
-	if res.Validation.Valid {
+	// Only a test that read the file says anything about its names.
+	if res.Validation.Valid && (res.Enabled || trial != nil) {
 		// nginx passes a second server block claiming a name on an address
 		// the first already answers it on, and serves only the first in
 		// include order. A save that takes a domain from a working site, or
@@ -236,15 +247,21 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		// since refusing it blocks an edit to the site that is serving.
 		res.Conflicts = s.serverNameConflicts(res.Validation, spec.Domains, content, full)
 		if len(res.Conflicts) > 0 {
-			s.orderConflicts(ctx, res.Conflicts, full, previous)
+			dump := s.dumpNginx
+			if trial != nil {
+				dump = trial.dump
+			}
+			if files, err := dump(ctx); err == nil {
+				s.orderConflicts(res.Conflicts, full, previous, files)
+			}
 		}
 	}
 	res.TestWarnings = warningsIn(res.Validation, full)
-	if staged {
-		// Out again whatever the test said: a failing test or a contested
-		// name is what enabling the site would meet, and the result says
-		// so, but it is no reason to refuse a file nginx does not read.
-		undoLink()
+	if trial != nil {
+		// Whatever the test said: a failing test or a contested name is what
+		// enabling the site would meet, and the result says so, but it is no
+		// reason to refuse a file nginx does not read.
+		trial.remove()
 	} else if refusesConflicts(res.Conflicts) && !opts.AllowConflict {
 		undoLink()
 		restoreConfig(full, original, existed)
@@ -381,14 +398,12 @@ func listenPort(address string) string {
 // claim's site from the same tree, which beats the listing: the listing
 // cannot tell the site that answers from the one that is ignored.
 //
-// previous is the file as nginx read it before the save, nil when it did not
-// read it at all. A conflict whose order cannot be read is left without an
-// Effect, and with the site the listing gave it.
-func (s *Service) orderConflicts(ctx context.Context, conflicts []ServerNameConflict, full string, previous []Directive) {
-	files, err := s.dumpNginx(ctx)
-	if err != nil {
-		return
-	}
+// files is that dump — of the live configuration, or of the trial one a
+// disabled site is tested in — and previous is the file as nginx read it
+// before the save, nil when it did not read it at all. A conflict whose
+// order cannot be read is left without an Effect, and with the site the
+// listing gave it.
+func (s *Service) orderConflicts(conflicts []ServerNameConflict, full string, previous []Directive, files []ConfigFile) {
 	tree, err := NginxTree(files)
 	if err != nil {
 		return
@@ -558,14 +573,14 @@ func warningsIn(v *ValidationResult, file string) []Diagnostic {
 
 // siteTarget is the file a site named name is saved in: sites-available on a
 // Debian layout, and conf.d on a host that keeps everything there, where
-// every present file is active and confd says there is no link to make. The
-// suffix is added by confdPath rather than here, so editing a site the
-// listing calls app.conf writes back over it instead of creating
+// confd says there is no link to make and nginx reads a file whose name ends
+// in .conf. The suffix is added by confdSite rather than here, so editing a
+// site the listing calls app.conf writes back over it instead of creating
 // app.conf.conf.
 func (s *Service) siteTarget(name string) (full string, confd bool, err error) {
 	available := filepath.Join(s.nginxDir, "sites-available", name)
 	if _, err := os.Stat(filepath.Dir(available)); err != nil {
-		available, confd = s.confdPath(name), true
+		available, confd = s.confdSite(name), true
 		if _, err := os.Stat(filepath.Dir(available)); err != nil {
 			// Neither layout is present, which on a host that really runs
 			// nginx means JD_NGINX_DIR points at the wrong place. Saying
@@ -578,6 +593,19 @@ func (s *Service) siteTarget(name string) (full string, confd bool, err error) {
 	return full, confd, err
 }
 
+// confdSite is the conf.d file of the site named name. A file of exactly
+// that name that nginx does not read — app.conf.disabled, or app, the usual
+// ways to switch a conf.d site off — is the site the listing names so, and
+// saving writes it where it is: confdPath's app.conf.disabled.conf beside it
+// was a second copy of the site that nginx reads.
+func (s *Service) confdSite(name string) string {
+	exact := filepath.Join(s.nginxDir, "conf.d", name)
+	if info, err := os.Stat(exact); err == nil && info.Mode().IsRegular() {
+		return exact
+	}
+	return s.confdPath(name)
+}
+
 // SiteFileInfo is where saving a site of some name writes, and what already
 // holds that name.
 type SiteFileInfo struct {
@@ -587,9 +615,13 @@ type SiteFileInfo struct {
 	// EnabledElsewhere says what holds the name's sites-enabled link when
 	// that is not Path — another site's file, which a save would unlink.
 	EnabledElsewhere string
-	// Enabled is a file at Path that nginx reads: linked into sites-enabled,
-	// or any file in the conf.d layout.
+	// Enabled is a file at Path that nginx reads: linked into sites-enabled
+	// under its own name or another, or in conf.d with a name ending in .conf.
 	Enabled bool
+	// Confd says the host keeps its sites in conf.d, where there is no link
+	// to make: a file is on while its name ends in .conf, and one without
+	// the suffix is off until it is renamed.
+	Confd bool
 }
 
 // SiteFile is the file saving a site named name writes, and what already
@@ -605,14 +637,41 @@ func (s *Service) SiteFile(name string) (SiteFileInfo, error) {
 		return SiteFileInfo{}, err
 	}
 	_, err = os.Stat(full)
-	file := SiteFileInfo{Path: full, Exists: err == nil, Enabled: err == nil}
-	if !confd {
+	file := SiteFileInfo{Path: full, Exists: err == nil, Confd: confd}
+	if confd {
+		file.Enabled = file.Exists && strings.HasSuffix(full, ".conf")
+	} else {
 		link := filepath.Join(s.nginxDir, "sites-enabled", name)
 		file.EnabledElsewhere = enabledElsewhere(link, full)
-		_, err := os.Lstat(link)
-		file.Enabled = file.Exists && err == nil && file.EnabledElsewhere == ""
+		file.Enabled = file.Exists && enablingLink(link, full) != ""
 	}
 	return file, nil
+}
+
+// enablingLink is the entry of sites-enabled through which nginx reads full:
+// link, the name's own, when it names full, or else any other entry that
+// resolves to full — a site linked under another name, such as 010-app, is
+// enabled all the same. Empty when nothing there enables it. An entry
+// starting with a dot is passed over, as nginx's include passes it over.
+func enablingLink(link, full string) string {
+	if _, err := os.Lstat(link); err == nil && enabledElsewhere(link, full) == "" {
+		return filepath.Base(link)
+	}
+	dir := filepath.Dir(link)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	target := resolvePath(full)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") || e.Name() == filepath.Base(link) {
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(filepath.Join(dir, e.Name())); err == nil && resolved == target {
+			return e.Name()
+		}
+	}
+	return ""
 }
 
 // enabledElsewhere says what holds the sites-enabled link a site saved as
@@ -679,7 +738,7 @@ func (s *Service) ReadSiteSpec(name string) (*SiteSpec, bool, string, error) {
 		// Both spellings of the conf.d layout: the listing on such a host
 		// reports a name that already ends in .conf, and a host that was set
 		// up by hand may have a file without it.
-		{filepath.Join(s.nginxDir, "conf.d", name), strings.TrimSuffix(name, ".conf")},
+		{filepath.Join(s.nginxDir, "conf.d", name), s.confdSpecName(name)},
 		{filepath.Join(s.nginxDir, "conf.d", name+".conf"), name},
 	}
 	var err error
@@ -692,6 +751,18 @@ func (s *Service) ReadSiteSpec(name string) (*SiteSpec, bool, string, error) {
 		}
 	}
 	return nil, false, "", err
+}
+
+// confdSpecName is the spec name of the conf.d file called name: without its
+// .conf when confdSite writes that shorter name back to this file, and as it
+// is when a file of the shorter name is there too and would be written
+// instead.
+func (s *Service) confdSpecName(name string) string {
+	short := strings.TrimSuffix(name, ".conf")
+	if s.confdSite(short) == filepath.Join(s.nginxDir, "conf.d", name) {
+		return short
+	}
+	return name
 }
 
 // linkEnabled points sites-enabled at this file, and returns the undo.
@@ -788,9 +859,12 @@ func (s *Service) DeleteSite(ctx context.Context, name string) error {
 			s.forgetEffective()
 		}
 	}
+	// The conf.d file the listing names: app.conf.disabled itself, where
+	// confdPath's app.conf.disabled.conf was not there, and app rather than
+	// the app.conf beside it.
 	for _, candidate := range []string{
 		filepath.Join(s.nginxDir, "sites-available", name),
-		s.confdPath(name),
+		s.confdSite(name),
 	} {
 		full, err := s.allowedPath(candidate)
 		if err != nil {

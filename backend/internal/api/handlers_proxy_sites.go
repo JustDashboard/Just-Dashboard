@@ -45,9 +45,10 @@ func (s *Server) handleSiteSpec(w http.ResponseWriter, r *http.Request) error {
 	}
 	// Whether nginx reads the site, so the form offers to keep a disabled
 	// one disabled or enable it, instead of a "Save and reload" that did
-	// neither.
+	// neither — and whether it is in conf.d, where enabling it is renaming
+	// the file, which a save does not do.
 	if file, err := s.modules.proxy.SiteFile(spec.Name); err == nil {
-		out["enabled"] = file.Enabled
+		out["enabled"], out["confd"] = file.Enabled, file.Confd
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
@@ -98,7 +99,7 @@ func (s *Server) handleSitePreview(w http.ResponseWriter, r *http.Request) error
 	// form says which file that is, and that it belongs to another site,
 	// before the save refuses it.
 	if file, err := s.modules.proxy.SiteFile(req.Spec.Name); err == nil {
-		out["path"], out["exists"], out["enabled"] = file.Path, file.Exists, file.Enabled
+		out["path"], out["exists"], out["enabled"], out["confd"] = file.Path, file.Exists, file.Enabled, file.Confd
 		if file.EnabledElsewhere != "" {
 			out["enabledElsewhere"] = file.EnabledElsewhere
 		}

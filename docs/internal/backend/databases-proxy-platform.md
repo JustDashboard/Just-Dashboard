@@ -281,29 +281,60 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     `false` always meant keep (it declined to make a link and never removed one). A site that has a link
     keeps it, relinked to the file being saved, and `SiteResult.enabled` says which it is.
     `GET /proxy/sites/{name}` and every preview say whether nginx reads the file (`enabled`, from
-    `SiteFile`: linked into sites-enabled, or any file in conf.d), and the form's footer follows it: a
-    disabled site offers **Save (stays disabled)** (`keep`, no reload) and **Save and enable**
-    (`enable`, reload) instead of a "Save and reload" that did neither, and only the first when its
-    name's link is another file's.
-  - **A site saved disabled is tested as it would be enabled.** Without a link `nginx -t` never read the
-    file, so a disabled site was saved untested and failed on the day somebody enabled it. Its link now
-    goes in for the length of the test (and of the `nginx -T` that orders a conflict) and comes out again
-    whatever the test says, the way `Validate` stages a candidate file under the same lock
-    (`testedAsEnabled`). Nothing the test finds refuses the save — nginx does not read the file — and the
-    result is what enabling it would meet: `validation` with nginx's objection placed at its file and line
-    (resolved while the link is still there), `conflicts` worded as what enabling would do, and
-    `testWarnings`. A reload follows only a test that passed, so a disabled site that fails enabled does
-    not reload nginx, and one that passes is out of the tree again before the reload (checked against a
-    running nginx in `TestLiveDisabledSiteIsTestedAsEnabled`). When its name's link is another file's the
-    link cannot be staged; the result is untested and `validation.note` says why.
+    `SiteFile`: linked into sites-enabled under its own name or any other — a site linked as
+    `sites-enabled/010-app` is enabled, and a save neither stages nor makes a second link for it, which
+    had nginx read the file twice and report it conflicting with itself — or in conf.d with a name ending
+    in `.conf`) and whether it is in conf.d (`confd`). The form's footer follows them: a disabled site
+    offers **Save (stays disabled)** (`keep`, no reload) and **Save and enable** (`enable`, reload)
+    instead of a "Save and reload" that did neither, and only the first when its name's link is another
+    file's or the site is in conf.d. The listing (`nginxVHosts`) likewise calls a site enabled only when
+    its name's link names its own file (`enabledElsewhere`), so it no longer says "serving" beside a form
+    that says the link is another site's; a site enabled only under another name is still listed as
+    disabled there, which is the listing's and the toggle's to change.
+  - **A conf.d site is saved where the listing found it.** A conf.d file is switched off by a name that
+    does not end in `.conf` (`app.conf.disabled`, or `app`). `siteTarget` used to add the suffix to
+    every name, so saving that site as "stays disabled" wrote `app.conf.disabled.conf` beside it — a copy
+    nginx reads. `confdSite` now targets an existing file of exactly the name, `ReadSiteSpec` keeps the
+    `.conf` in a spec name when a file of the shorter name exists beside it (so `app` and `app.conf` are
+    two sites, each saved to itself), and `DeleteSite` removes the file the listing names. A save that
+    asks to enable such a file is refused: enabling it is renaming it.
+  - **A site saved disabled is tested as it would be enabled, in a copy of the configuration**
+    (`site_trial.go`). Without that `nginx -t` never read the file, so a disabled site was saved untested
+    and failed on the day somebody enabled it. The live tree is never touched: `stageTrial` writes
+    `<nginx dir>/.jd-trial-*.conf`, nginx.conf byte for byte except that its include of `sites-enabled`
+    (or of `conf.d` for a conf.d site) points at `.jd-trial-*.d`, which links every entry of the real
+    directory plus the site under the name enabling it would give it (`<name>`, or `<file>.conf` in
+    conf.d), so nginx sorts it where enabling would put it. `nginx -t -c` and, for a conflict's order,
+    `nginx -T -c` run on the copy; the copy sits beside nginx.conf so relative includes resolve the same,
+    and its paths are renamed back to nginx.conf and the real directory in the result. Linking the site
+    into the live `sites-enabled` for the length of the test, as the save first did, raced everything that
+    runs nginx without the service lock — `POST /proxy/reload` and `/proxy/test`, the vhost toggle, a site
+    delete, a stream save, certbot's hook, systemctl: a reload in the window served the disabled site until
+    the next reload, and a broken one failed unrelated reloads with 422
+    (`TestLiveReloadsBesideADisabledSaveNeverReadIt` runs reloads beside disabled saves, and
+    `TestADisabledSaveNeverPutsTheSiteInTheLiveConfiguration` records what the live directory held during
+    every nginx the save ran). Nothing the test finds refuses the save — nginx does not read the file —
+    and the result is what enabling it would meet (`testedAsEnabled`): `validation` with nginx's objection
+    placed at its file and line, `conflicts` worded as what enabling would do, and `testWarnings`. A reload
+    follows only a test that passed. The copy assumes nginx loads `<nginx dir>/nginx.conf`, as the
+    htpasswd and stream checks do. It is untested, with `validation.note` saying why, when its name's link
+    is another file's, when nginx.conf does not include the directory itself or its pattern would not read
+    the name, or when nginx.conf cannot be copied.
+  - **What still races an outside reload.** An enabling save, an edit to an enabled site, `Validate` and
+    the config editor's write put the file (and an enabling save its link) in the live tree for the length
+    of their test and take it back if the test fails: nginx has nothing else to test a file it reads. The
+    reload and test endpoints do not take the service lock, so one landing in that window reads the
+    candidate — refused over a broken one, or loading one the save is about to take back until the next
+    reload.
   - **A name another server block also claims is refused when the save changes who answers it**, 409
     `name_conflict` with `ConflictSummary`'s sentences. `nginx -t` passes a second claim on a name with only
     `[warn] conflicting server name … ignored` and answers from the **first** block it reads, so the save
     could as easily take a working site's domain as leave its own unreachable. The conflicts are nginx's own
     warnings for this site's names on the addresses its file listens on — nginx already knows a wildcard
     `:80` and `127.0.0.1:80` are separate. `orderConflicts` then reads which claim wins from `nginx -T`
-    (`dumpNginx` under the held lock, then `NginxTree`, so `sites-enabled/*` sorted, a
-    `conf.d` include before or after it and a block inline in `nginx.conf` all fall where nginx reads them),
+    (`dumpNginx` under the held lock, or the trial's dump for a disabled site, then `NginxTree`, so
+    `sites-enabled/*` sorted, a `conf.d` include before or after it and a block inline in `nginx.conf` all
+    fall where nginx reads them),
     names the other claim's site from that tree, and sets `effect`: `ignored` (the other keeps the name:
     "nginx answers app.example.com on 0.0.0.0:80 from legacy, which it reads first, and ignores this site's
     claim."), `takes` (this site sorts first and takes it: "Saving anyway takes … from legacy, since nginx
