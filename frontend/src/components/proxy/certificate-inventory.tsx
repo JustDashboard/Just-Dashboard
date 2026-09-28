@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Copy, Inspect, ShieldCheck, Trash, Warning } from "@/components/icons"
+import { Copy, FileText, Inspect, ShieldCheck, Trash, Warning } from "@/components/icons"
 import { certbotRunning, replacingTestCertificate } from "@/lib/certificates"
 import { copyText } from "@/lib/clipboard"
 import { calendarDate } from "@/lib/format"
@@ -18,6 +18,7 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { VerbBar, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
+import { CertificateDetails, PemDecoder } from "@/components/proxy/cert-detail"
 import { ProxyGrid } from "@/components/proxy/route-path"
 import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { certificateProduct } from "@/components/proxy/marks"
@@ -47,12 +48,15 @@ function sourceLabel(cert: Certificate): string {
 export function CertificateInventory({
   certs,
   canScan,
+  canReadHistory,
   job = null,
   onReplace,
   onDelete,
 }: {
   certs: Certificate[]
   canScan: boolean
+  /** A certificate's timeline reads the audit trail, which only administrators may. */
+  canReadHistory: boolean
   /** The job on screen: a certificate it is replacing says so, and no other certbot run starts. */
   job?: Job | null
   /** Opens the real issuance for a test certificate's names; absent where nobody here can issue. */
@@ -64,6 +68,7 @@ export function CertificateInventory({
   const [filter, setFilter] = useState<"all" | "attention" | "caddy">("all")
   // In the URL so the TLS report can link at the file a site serves.
   const [selected, setSelected] = useQuerySelection("cert")
+  const [decoding, setDecoding] = useState(false)
   const needsAttention = (cert: Certificate) =>
     Boolean(cert.error || cert.expired || cert.expiring || cert.staging)
   // Only certbot's own file is replaced in place; a copy a site names
@@ -119,20 +124,27 @@ export function CertificateInventory({
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Certificate, domain or issuer"
         />
-        <ChipStrip>
-          <FilterChip selected={filter === "all"} onClick={() => setFilter("all")}>
-            All <ChipCount>{certs.length}</ChipCount>
-          </FilterChip>
-          <FilterChip selected={filter === "attention"} onClick={() => setFilter("attention")}>
-            Needs attention <ChipCount>{certs.filter(needsAttention).length}</ChipCount>
-          </FilterChip>
-          {caddyCount > 0 && (
-            <FilterChip selected={filter === "caddy"} onClick={() => setFilter("caddy")}>
-              Caddy <ChipCount>{caddyCount}</ChipCount>
+        <div className="flex flex-wrap items-center gap-2">
+          <ChipStrip>
+            <FilterChip selected={filter === "all"} onClick={() => setFilter("all")}>
+              All <ChipCount>{certs.length}</ChipCount>
             </FilterChip>
-          )}
-        </ChipStrip>
+            <FilterChip selected={filter === "attention"} onClick={() => setFilter("attention")}>
+              Needs attention <ChipCount>{certs.filter(needsAttention).length}</ChipCount>
+            </FilterChip>
+            {caddyCount > 0 && (
+              <FilterChip selected={filter === "caddy"} onClick={() => setFilter("caddy")}>
+                Caddy <ChipCount>{caddyCount}</ChipCount>
+              </FilterChip>
+            )}
+          </ChipStrip>
+          <Button size="sm" variant="outline" onClick={() => setDecoding(true)}>
+            <FileText className="size-3.5" />
+            Paste a certificate
+          </Button>
+        </div>
       </Toolbar>
+      <PemDecoder open={decoding} onOpenChange={setDecoding} />
       {ordered.length === 0 ? (
         <EmptyState icon={ShieldCheck} title="No certificates match" />
       ) : (
@@ -203,7 +215,7 @@ export function CertificateInventory({
         onOpenChange={(open) => !open && setSelected(null)}
         title={selectedCert?.name ?? "Certificate"}
         description="Certificate details and the sites using it"
-        width="md"
+        width="lg"
         footer={
           selectedCert && (
             <>
@@ -337,6 +349,7 @@ export function CertificateInventory({
                 {selectedCert.error ? "—" : selectedCert.selfSigned ? "yes" : "no"}
               </Detail>
             </DetailList>
+            <CertificateDetails cert={selectedCert} canReadHistory={canReadHistory} />
           </div>
         )}
       </SidePanel>

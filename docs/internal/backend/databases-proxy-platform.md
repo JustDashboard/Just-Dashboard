@@ -1685,7 +1685,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `GET /certificates/served?path=`, system.admin) asks each such site over a TLS handshake on its
   first `listen … ssl` — a wildcard address on loopback, a named one only when it is this host's, a
   PROXY header first behind `proxy_protocol`, with a server name the certificate covers — and
-  compares the leaf with the file's; `settle=1` asks again for up to three seconds while a site
+  compares the leaf with the file's. Certificate details (`cert_detail.go`): `GET
+  /certificates/detail?path=` (read) answers 403 for a path `listCertificates` does not list, and
+  returns the file's chain in file order (subject/issuer DNs, SANs, serial, SHA-256/SHA-1, key type,
+  AIA/CRL, embedded SCT count) with a verdict judged offline against the system roots (`complete`,
+  `wrong-order`, `missing-intermediate` when the top issuer publishes an AIA URL, else `private-ca`,
+  `self-signed`, `invalid`), plus the key's path (the site's `ssl_certificate_key`, certbot's
+  `privkey`, or a sibling `privkey.pem`), mode, owner and whether it matches — never the key.
+  `GET /certificates/history?name=` (system.admin: it reads the audit trail) merges certbot's
+  `archive/<name>/certN.pem` versions (only for a name with a renewal conf), `certificates.*` audit
+  entries whose target names it, and renewal failures from the renewal record. `POST
+  /certificates/decode` (read, 256 KiB) decodes a pasted PEM chain or CSR in memory and refuses to
+  read a private-key block. Back to the served check: `settle=1` asks again for up to three seconds while a site
   serves anything else, since nginx swaps its workers a moment after a reload's signal. The page
   offers "Reload nginx" only while a site answers with a test certificate, and its toast says what
   the sites answered after the reload. `Certificate.Staging` (`certs.go`,

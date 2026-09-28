@@ -260,3 +260,93 @@ export type SiteCertificates = {
   /** The folder a site saved with managedAcme serves its HTTP challenge from. */
   webRoot: string
 }
+
+/** One certificate, decoded from a file or a paste. */
+export type CertificateFacts = {
+  subject: string
+  issuer: string
+  dnsNames: string[]
+  ipAddresses: string[]
+  emails: string[]
+  uris: string[]
+  serial: string
+  sha256: string
+  sha1: string
+  notBefore: string
+  notAfter: string
+  keyType: string
+  keyBits: number
+  signature: string
+  ca: boolean
+  selfSigned: boolean
+  ocsp: string[]
+  issuerUrls: string[]
+  crl: string[]
+  /** Signed certificate timestamps embedded in it. */
+  scts: number
+  /** It signs the certificate before it in the file; unset on the first. */
+  signsPrevious?: boolean
+}
+
+export type ChainVerdict =
+  "complete" | "wrong-order" | "missing-intermediate" | "private-ca" | "self-signed" | "invalid"
+
+/** The certificates a file carries, in the order nginx sends them. */
+export type CertificateChain = {
+  verdict: ChainVerdict
+  note: string
+  certificates: CertificateFacts[]
+}
+
+/** What is known of the key beside a certificate: never the key itself. */
+export type CertificateKey = {
+  path: string
+  from: string
+  mode?: string
+  owner?: string
+  group?: string
+  groupReadable?: boolean
+  worldReadable?: boolean
+  /** Null when the key could not be read or parsed; error says why. */
+  matches: boolean | null
+  error?: string
+}
+
+export type CertificateDetail = {
+  path: string
+  chain: CertificateChain
+  key: CertificateKey | null
+}
+
+export type CertificateEvent = {
+  time: string
+  kind: "version" | "audit" | "failure"
+  title: string
+  detail?: string
+  serial?: string
+  sha256?: string
+}
+
+export type CertificateHistory = {
+  events: CertificateEvent[]
+  /** Why renewal failures are missing, when they could not be read. */
+  note: string
+}
+
+export type DecodedCSR = {
+  subject: string
+  dnsNames: string[]
+  ipAddresses: string[]
+  emails: string[]
+  keyType: string
+  keyBits: number
+  signature: string
+  signatureValid: boolean
+}
+
+export type DecodedPEM = {
+  chain?: CertificateChain
+  requests: DecodedCSR[]
+  /** Blocks left unread: a private key is never decoded. */
+  refused: string[]
+}

@@ -430,6 +430,7 @@ export function CertificatesPage() {
               <CertificateInventory
                 certs={certs.data}
                 canScan={admin}
+                canReadHistory={admin}
                 job={job}
                 onReplace={
                   admin && !certbotGone && !testAuthority
