@@ -152,6 +152,58 @@ const numbered = {
   serverNames: ["_"],
 }
 
+/** A deployment's route, written by the environment its name carries. */
+const owned = {
+  ...app,
+  name: "just-dashboard-env-7.conf",
+  path: "/etc/nginx/sites-available/just-dashboard-env-7.conf",
+  enabledPath: "/etc/nginx/sites-enabled/just-dashboard-env-7.conf",
+  serverNames: ["shop.example.com"],
+  upstreams: ["http://127.0.0.1:4100"],
+  accessLog: "/var/log/nginx/just-dashboard-env-7.conf.access.log",
+  errorLog: "/var/log/nginx/just-dashboard-env-7.conf.error.log",
+  owner: { projectId: 3, environmentId: 7, project: "shop", environment: "production" },
+}
+
+/** The same, left behind by an environment that was archived. */
+const leftBehind = {
+  ...owned,
+  name: "just-dashboard-env-9.conf",
+  path: "/etc/nginx/sites-available/just-dashboard-env-9.conf",
+  enabledPath: "/etc/nginx/sites-enabled/just-dashboard-env-9.conf",
+  serverNames: ["pr-12.shop.example.com"],
+  owner: { projectId: 3, environmentId: 9, project: "shop", environment: "pr-12", archived: true },
+}
+
+/** The distribution's default site, disabled as most hosts have it and unchanged. */
+const stock = {
+  ...legacy,
+  name: "default",
+  path: "/etc/nginx/sites-available/default",
+  enabledPath: "/etc/nginx/sites-enabled/default",
+  enabled: false,
+  serverNames: ["_"],
+  listen: ["80 default_server", "[::]:80 default_server"],
+  upstreams: [],
+  package: "nginx-common",
+  accessLog: "/var/log/nginx/access.log",
+  errorLog: "/var/log/nginx/error.log",
+}
+
+/** A site behind an upstream block, saying what else it does. */
+const featured = {
+  ...app,
+  name: "pool.example.com",
+  path: "/etc/nginx/sites-available/pool.example.com",
+  enabledPath: "/etc/nginx/sites-enabled/pool.example.com",
+  serverNames: ["pool.example.com"],
+  upstreams: ["http://app_pool"],
+  pools: [{ name: "app_pool", servers: ["10.0.0.2:8080", "10.0.0.3:8080"] }],
+  features: ["auth", "allow", "ws", "h2", "maintenance"],
+  accessLog: "/var/log/nginx/pool.access.log",
+  errorLog: "/var/log/nginx/pool.error.log",
+}
+
 async function serveSites(page: Page, sites: unknown[]) {
   let reads = 0
   await page.route("**/api/v1/proxy/vhosts", (route) => {
@@ -1202,11 +1254,198 @@ test("the password-file warning says what nginx really does without the file", a
   await expect(confirm).not.toContainText("stops nginx from starting")
 })
 
+test("a deployment's route leads to its deployment and is edited only after asking", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, owned, leftBehind])
+  const asked: string[] = []
+  await page.route("**/api/v1/proxy/config?**", (route) => {
+    asked.push("config")
+    return json(route, { content: "server {\n    server_name shop.example.com;\n}\n" })
+  })
+  await page.route("**/api/v1/proxy/sites/just-dashboard-env-7.conf", (route) => {
+    asked.push("form")
+    return route.fulfill({ status: 503, contentType: "application/json", body: "{}" })
+  })
+  await page.goto("/proxy/sites")
+
+  const shop = card(page, "just-dashboard-env-7.conf")
+  await expect(shop).toContainText("Managed by shop · production")
+  await expect(shop).toContainText("The next deploy of shop writes this route again")
+  await expect(shop.getByRole("button", { name: "Open deployment" })).toBeVisible()
+  await expect(shop.getByRole("button", { name: "View config" })).toBeVisible()
+  await expect(shop.getByRole("button", { name: "Edit" })).toHaveCount(0)
+  const menu = await openMenu(page, "just-dashboard-env-7.conf")
+  await expect(menu.getByRole("menuitem", { name: /^(Delete|Disable|Duplicate)$/ })).toHaveCount(0)
+  await expect(menu.getByRole("menuitem", { name: "Access log" })).toBeVisible()
+  await expect(menu.getByRole("menuitem", { name: "Error log" })).toBeVisible()
+  await expect(menu.getByRole("menuitem", { name: "Edit anyway" })).toBeVisible()
+  await page.keyboard.press("Escape")
+
+  // Its card opens the file to read, not the form.
+  await shop.getByRole("button", { name: "Open just-dashboard-env-7.conf" }).click()
+  const viewer = page.getByRole("dialog")
+  await expect(viewer.locator(".monaco-editor .view-lines")).toContainText(
+    "server_name shop.example.com",
+    editorLoad,
+  )
+  await expect(viewer.getByRole("button", { name: /^Save/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect(viewer).toHaveCount(0)
+
+  // So does the deployment's own link to it.
+  await page.goto("/proxy/sites?site=just-dashboard-env-7.conf")
+  await expect(page.getByRole("dialog").locator(".monaco-editor .view-lines")).toContainText(
+    "server_name",
+    editorLoad,
+  )
+  await expect(page.getByRole("dialog").getByRole("button", { name: /^Save/ })).toHaveCount(0)
+  expect(asked).not.toContain("form")
+  await page.keyboard.press("Escape")
+
+  // Editing anyway says what the next deploy does, then opens the form.
+  await (
+    await openMenu(page, "just-dashboard-env-7.conf")
+  )
+    .getByRole("menuitem", { name: "Edit anyway" })
+    .click()
+  const confirm = page.getByRole("dialog", { name: "Edit just-dashboard-env-7.conf anyway" })
+  await expect(confirm).toContainText("shop writes this route on every deploy")
+  await confirm.getByRole("button", { name: "Edit anyway" }).click()
+  await expect.poll(() => asked.includes("form")).toBe(true)
+  await expect(page.getByText(/anyway completed/)).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  // An archived environment deploys nothing: its route is the operator's.
+  const left = card(page, "just-dashboard-env-9.conf")
+  await expect(left).toContainText("Written by shop · pr-12, which is archived")
+  await expect(left.getByRole("button", { name: "Edit" })).toBeVisible()
+  await expect(
+    (await openMenu(page, "just-dashboard-env-9.conf")).getByRole("menuitem", { name: "Delete" }),
+  ).toBeVisible()
+  await page.keyboard.press("Escape")
+
+  await shop.getByRole("button", { name: "Open deployment" }).click()
+  await expect(page).toHaveURL(/\/deploy\/3$/)
+})
+
+test("a reader sees who manages a route and reaches its deployment, and nothing to edit", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [owned])
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.goto("/proxy/sites")
+  const shop = card(page, "just-dashboard-env-7.conf")
+  await expect(shop).toContainText("Managed by shop · production")
+  await expect(shop.getByRole("button", { name: "Open deployment" })).toBeVisible()
+  const menu = await openMenu(page, "just-dashboard-env-7.conf")
+  await expect(menu.getByRole("menuitem", { name: /anyway|Enable|Disable|Delete/ })).toHaveCount(0)
+})
+
+test("the overview's finding for a link to nothing leads to its removal", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, layouts)
+  let removed: string | undefined
+  await page.route("**/api/v1/proxy/vhosts/ghost/link", (route) => {
+    removed = route.request().method()
+    return json(route, {
+      name: "ghost",
+      enabled: false,
+      reloaded: true,
+      reload: { validation: { ...brokenTest, valid: true }, reloaded: true, output: "" },
+    })
+  })
+  await page.goto("/proxy")
+  await page.getByText("sites-enabled/ghost points at a file that is gone").click()
+  await page.getByRole("button", { name: "Open site" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\?site=ghost$/)
+
+  const confirm = page.getByRole("dialog", { name: "Remove sites-enabled/ghost" })
+  await expect(confirm).toContainText("Removing it is what lets nginx load its configuration again")
+  await confirm.getByRole("button", { name: "Cancel" }).click()
+  await expect(confirm).toHaveCount(0)
+  await expect(page).toHaveURL(/\/proxy\/sites$/)
+  expect(removed).toBeUndefined()
+
+  await page.goto("/proxy/sites?site=ghost")
+  await confirm.getByRole("button", { name: "Remove and reload" }).click()
+  await expect(page.getByText("sites-enabled/ghost removed", { exact: true })).toBeVisible()
+  expect(removed).toBe("DELETE")
+  await expect(confirm).toHaveCount(0)
+  await expect(page).toHaveURL(/\/proxy\/sites$/)
+
+  // A reader has nothing to take out.
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.goto("/proxy/sites?site=ghost")
+  await expect(card(page, "ghost")).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+})
+
+test("the distribution's untouched default site waits on nobody", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, stock, off])
+  await page.goto("/proxy/sites")
+  const waiting = page.getByRole("list", { name: "Needs attention" })
+  await expect(waiting.locator("[data-slot='choice-row']")).toHaveCount(1)
+  await expect(waiting).toContainText("off.example.com")
+  const defaultSite = card(page, "default")
+  await expect(defaultSite).toContainText(
+    "As the nginx-common package installed it, unchanged since.",
+  )
+  await expect(defaultSite.getByText("disabled", { exact: true })).toBeVisible()
+  await expect(page.getByRole("list", { name: "Serving" })).toContainText("default")
+
+  await page.goto("/proxy")
+  await expect(page.getByText("off.example.com is on disk but not serving")).toBeVisible()
+  await expect(page.getByText("default is on disk but not serving")).toHaveCount(0)
+})
+
+test("a card names the servers behind its upstream block, what the site does, and the logs it writes", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [featured, { ...legacy, accessLog: undefined, errorLog: undefined }])
+  await page.goto("/proxy/sites")
+  const pool = card(page, "pool.example.com")
+  await expect(pool).toContainText("http://app_pool (10.0.0.2:8080, 10.0.0.3:8080)")
+  for (const word of ["password", "IP-restricted", "WebSockets", "HTTP/2", "maintenance"]) {
+    await expect(pool.getByText(word, { exact: true })).toBeVisible()
+  }
+
+  const plain = await openMenu(page, "legacy.example.com")
+  await expect(plain.getByRole("menuitem", { name: /^(Access|Error) log$/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  await page.getByPlaceholder("Site, domain or upstream").fill("10.0.0.3")
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
+  await expect(card(page, "pool.example.com")).toBeVisible()
+
+  const menu = await openMenu(page, "pool.example.com")
+  await expect(menu.getByRole("menuitem", { name: "Error log" })).toBeVisible()
+  await menu.getByRole("menuitem", { name: "Access log" }).click()
+  await expect(page).toHaveURL(/\/logs\?source=%2Fvar%2Flog%2Fnginx%2Fpool\.access\.log$/)
+})
+
 for (const width of [390, 1280]) {
   test(`every kind of entry fits the sites list at ${width}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await mockProxy(page, { included: true })
-    await serveSites(page, [...layouts, copied, outside, numbered])
+    await serveSites(page, [
+      ...layouts,
+      copied,
+      outside,
+      numbered,
+      owned,
+      leftBehind,
+      stock,
+      featured,
+    ])
     await page.goto("/proxy/sites")
     await expect(card(page, "ghost")).toBeVisible()
     await expect(card(page, "outside.example.com")).toContainText("/srv/app/deploy/nginx.conf")

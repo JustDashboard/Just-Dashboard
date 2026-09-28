@@ -11,7 +11,7 @@ import type { SiteDeleteResult, SystemdUnit, VHost, VHostLinkResult } from "@/li
 import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
-import { useConfirm } from "@/components/confirm-dialog"
+import { ConfirmDialog, useConfirm } from "@/components/confirm-dialog"
 import { ChoiceRow, GroupRule } from "@/components/flow"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
@@ -25,7 +25,14 @@ import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
-import { ServingStatus, SiteLinkNote, SiteTLS, siteKind } from "@/components/proxy/site-marks"
+import {
+  ServingStatus,
+  SiteFeatures,
+  SiteNotes,
+  SiteTLS,
+  siteKind,
+} from "@/components/proxy/site-marks"
+import { activeOwner, matchesSearch, upstreamTargets } from "@/components/proxy/site-details"
 import { reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
 import {
   engineRun,
@@ -88,8 +95,10 @@ type ReloadCopy = { notRunning: string; notReloaded: string }
 /**
  * A file open in the config editor: the site's own, or — for a site whose
  * name in sites-enabled holds a separate copy — the copy nginx serves.
+ * `override` is a deployment's route an administrator chose to edit anyway;
+ * without it, such a route opens read-only.
  */
-type OpenFile = { vhost: VHost; served?: boolean }
+type OpenFile = { vhost: VHost; served?: boolean; override?: boolean }
 
 /**
  * A route needs two readable ends and commands separate from its readings.
@@ -177,16 +186,21 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // into state, so the back button closes it and a reload reopens it. The
   // form is for an administrator and a file it saves back where it found it;
   // anyone else, and any other file, gets the config viewer — read-only
-  // unless they may write it.
+  // unless they may write it. A deployment's route, which a deployment
+  // links to, opens read-only: its deployment is where it is changed.
   const linked = requested
     ? (data?.find((vhost) => vhost.name === requested && vhost.formEditable) ??
       data?.find((vhost) => vhost.name === requested))
     : undefined
-  const linkedForm = admin && linked?.formEditable ? linked : undefined
+  const linkedForm = admin && linked?.formEditable && !activeOwner(linked) ? linked : undefined
   const rawEditing: OpenFile | null =
     editing ?? (linked && !linkedForm && opensFile(linked) ? { vhost: linked } : null)
   const rawSite = rawEditing?.vhost
   const rawServed = Boolean(rawEditing?.served)
+  const rawReadOnly = !admin || Boolean(rawSite && activeOwner(rawSite) && !rawEditing?.override)
+  // A link to nothing has no file to open: the overview's finding links it
+  // here, and what there is to do with it is take it out.
+  const linkedRemoval = admin && linked?.broken === "dangling" && !linked.path ? linked : undefined
   const formIsOpen = form.open || Boolean(linkedForm)
   const formEditing = form.open ? form.editing : (linkedForm?.name ?? null)
 
@@ -225,12 +239,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         if (chip === "tls" && !v.tls) return false
         if (chip === "plain" && !isPlain(v)) return false
         if (chip === "disabled" && !isDisabled(v)) return false
-        if (!needle) return true
-        return (
-          v.name.toLowerCase().includes(needle) ||
-          v.serverNames.some((n) => n.toLowerCase().includes(needle)) ||
-          v.upstreams.some((u) => u.toLowerCase().includes(needle))
-        )
+        return matchesSearch(v, needle)
       })
       .sort(byUrgency)
   }, [hosts, filter, chip])
@@ -434,45 +443,46 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     void apply()
   }
 
+  /** Takes out a link in sites-enabled that no site's switch owns, and says how it went. */
+  const removeLink = async (vhost: VHost): Promise<"reported"> => {
+    setBusy(vhost.name, "Removing")
+    try {
+      const res = await del<VHostLinkResult>(`/proxy/vhosts/${encodeURIComponent(vhost.name)}/link`)
+      // A site in sites-available stays listed, now disabled; a link
+      // that was all there was leaves the list with its card.
+      const outcome = noteReload(vhost.name, res, vhost.layout === "sites-available")
+      reportLink(res, outcome, `sites-enabled/${vhost.name} removed`, {
+        notRunning: "nginx starts without it.",
+        notReloaded:
+          "If nginx is running, it keeps the configuration from before until a reload succeeds.",
+      })
+    } catch (err) {
+      reportRefusal(`Could not remove sites-enabled/${vhost.name}`, vhost.name, err)
+    } finally {
+      reread(vhost.name)
+    }
+    return "reported"
+  }
+  /** What a link removal asks, from a card or from the overview's finding. */
+  const linkRemoval = (vhost: VHost) => ({
+    title: `Remove sites-enabled/${vhost.name}`,
+    confirmLabel: "Remove and reload",
+    description:
+      vhost.broken === "dangling" ? (
+        <p>
+          The link points at <code className="font-mono break-all">{vhost.linkTarget}</code>, which
+          is missing. Removing it is what lets nginx load its configuration again; nothing else is
+          deleted.
+        </p>
+      ) : (
+        <p>
+          nginx stops reading <code className="font-mono break-all">{vhost.linkTarget}</code> once
+          it reloads. The file itself stays where it is, but nothing on this page links it back.
+        </p>
+      ),
+  })
   const unlink = (vhost: VHost) =>
-    confirm({
-      title: `Remove sites-enabled/${vhost.name}`,
-      confirmLabel: "Remove and reload",
-      description:
-        vhost.broken === "dangling" ? (
-          <p>
-            The link points at <code className="font-mono break-all">{vhost.linkTarget}</code>,
-            which is missing. Removing it is what lets nginx load its configuration again; nothing
-            else is deleted.
-          </p>
-        ) : (
-          <p>
-            nginx stops reading <code className="font-mono break-all">{vhost.linkTarget}</code> once
-            it reloads. The file itself stays where it is, but nothing on this page links it back.
-          </p>
-        ),
-      action: async (): Promise<"reported"> => {
-        setBusy(vhost.name, "Removing")
-        try {
-          const res = await del<VHostLinkResult>(
-            `/proxy/vhosts/${encodeURIComponent(vhost.name)}/link`,
-          )
-          // A site in sites-available stays listed, now disabled; a link
-          // that was all there was leaves the list with its card.
-          const outcome = noteReload(vhost.name, res, vhost.layout === "sites-available")
-          reportLink(res, outcome, `sites-enabled/${vhost.name} removed`, {
-            notRunning: "nginx starts without it.",
-            notReloaded:
-              "If nginx is running, it keeps the configuration from before until a reload succeeds.",
-          })
-        } catch (err) {
-          reportRefusal(`Could not remove sites-enabled/${vhost.name}`, vhost.name, err)
-        } finally {
-          reread(vhost.name)
-        }
-        return "reported"
-      },
-    })
+    confirm({ ...linkRemoval(vhost), action: () => removeLink(vhost) })
 
   const remove = (vhost: VHost) =>
     confirm({
@@ -504,6 +514,28 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       },
     })
 
+  // A deployment's route, opened for editing all the same: the form where
+  // it saves the file back, the raw editor otherwise.
+  const override = (vhost: VHost) => {
+    const owner = activeOwner(vhost)
+    confirm({
+      title: `Edit ${vhost.name} anyway`,
+      confirmLabel: "Edit anyway",
+      description: (
+        <p>
+          <b>{owner?.project ?? vhost.name}</b> writes this route on every deploy. The next deploy
+          replaces whatever is changed here with what the deployment&apos;s own settings say, so a
+          lasting change belongs there.
+        </p>
+      ),
+      action: async (): Promise<"reported"> => {
+        if (vhost.formEditable) openForm(vhost.name)
+        else setEditing({ vhost, override: true })
+        return "reported"
+      },
+    })
+  }
+
   const handlers = {
     admin,
     onEdit: (v: VHost) => openForm(v.name),
@@ -513,6 +545,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     onToggle: toggle,
     onDelete: remove,
     onUnlink: unlink,
+    onOverride: override,
   }
 
   const header = <PageContext eyebrow="Proxy" title="Sites" />
@@ -740,7 +773,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         path={(rawServed ? rawSite?.enabledPath : rawSite?.path) ?? ""}
         kind={rawSite?.kind ?? "nginx"}
         title={rawServed ? `sites-enabled/${rawSite?.name}` : (rawSite?.name ?? "Configuration")}
-        readOnly={!admin}
+        readOnly={rawReadOnly}
         siteDisabled={
           !rawServed &&
           rawSite?.kind === "nginx" &&
@@ -762,6 +795,14 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
             />
           )
         }
+      />
+      <ConfirmDialog
+        request={
+          linkedRemoval
+            ? { ...linkRemoval(linkedRemoval), action: () => removeLink(linkedRemoval) }
+            : null
+        }
+        onOpenChange={(open) => !open && setRequested(null)}
       />
       <Modal
         open={output !== null}
@@ -796,14 +837,16 @@ type CardProps = {
   onToggle: (v: VHost, enabled: boolean) => void
   onDelete: (v: VHost) => void
   onUnlink: (v: VHost) => void
+  onOverride: (v: VHost) => void
 }
 
 /**
  * The route owns the body; service state and commands each have their own
  * line. The card opens the form for an administrator and a file the form
  * saves back; everything else with a file opens that file, read-only unless
- * the reader may write it. A link to nothing has nothing to open, and a file
- * outside the proxy's directories is one the editor refuses.
+ * the reader may write it — and a deployment's route read-only for everyone,
+ * since its deployment writes it. A link to nothing has nothing to open, and
+ * a file outside the proxy's directories is one the editor refuses.
  */
 function SiteCard({
   vhost,
@@ -816,7 +859,7 @@ function SiteCard({
   ...handlers
 }: CardProps) {
   const verbs = useSiteVerbs({ vhost, busy, ambiguous, ...handlers })
-  const form = handlers.admin && vhost.formEditable
+  const form = handlers.admin && vhost.formEditable && !activeOwner(vhost)
   const primary = () => (form ? handlers.onEdit(vhost) : handlers.onRaw(vhost))
   const canOpen = form || opensFile(vhost)
   // A link to nothing has no domain or upstream to draw, only where it points.
@@ -845,15 +888,16 @@ function SiteCard({
       {!linkOnly && (
         <RoutePath
           source={vhost.serverNames.join(", ") || "Default host"}
-          destination={vhost.upstreams.join(", ") || "Served by configuration"}
+          destination={upstreamTargets(vhost).join(", ") || "Served by configuration"}
         />
       )}
-      <SiteLinkNote vhost={vhost} />
+      <SiteNotes vhost={vhost} />
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         {!linkOnly && (
           <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-hint text-muted-foreground">
             <SiteTLS vhost={vhost} />
             <span className="font-mono">{vhost.listen.join(" · ") || "No listener reported"}</span>
+            <SiteFeatures vhost={vhost} />
           </div>
         )}
         <VerbBar verbs={verbs} menuLabel={`More actions for ${vhost.name}`} className="ml-auto" />
@@ -889,6 +933,7 @@ function SiteFileVerbs({
     onToggle: noop,
     onDelete: noop,
     onUnlink: noop,
-  }).filter((v) => v.key === "open" || v.key === "scan" || v.key === "log" || v.key === "edit")
+    onOverride: noop,
+  }).filter((v) => ["open", "scan", "log", "errors", "edit", "deployment"].includes(v.key))
   return <VerbBar verbs={verbs.map((v) => ({ ...v, inline: true }))} className="ml-auto" />
 }

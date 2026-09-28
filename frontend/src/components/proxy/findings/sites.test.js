@@ -91,4 +91,45 @@ describe("site findings", () => {
       ["site.plain.plain", "warning"],
     ])
   })
+
+  test("a link that is all there is opens its removal on Sites", () => {
+    const [ghost, own] = siteFindings({
+      vhosts: [
+        site({ name: "ghost", layout: "sites-enabled", path: "", broken: "dangling" }),
+        site({ name: "app", enabled: false, broken: "dangling", linkTarget: "/gone" }),
+      ],
+    })
+    expect(ghost.href).toBe("/proxy/sites?site=ghost")
+    expect(own.href).toBe("/proxy/sites")
+  })
+
+  test("the distribution's untouched default site is not a notice, an edited one is", () => {
+    const findings = siteFindings({
+      vhosts: [
+        site({ name: "default", enabled: false, upstreams: [], package: "nginx-common" }),
+        site({ name: "default-edited", enabled: false, upstreams: [] }),
+      ],
+    })
+    expect(findings.map((f) => f.id)).toEqual(["site.disabled.default-edited"])
+  })
+
+  test("a deployment's route is fixed from its deployment", () => {
+    const owner = { projectId: 3, environmentId: 7, project: "shop", environment: "production" }
+    const [off, plain] = siteFindings({
+      vhosts: [
+        site({ name: "just-dashboard-env-7.conf", enabled: false, owner }),
+        site({ name: "just-dashboard-env-8.conf", tls: false, owner }),
+      ],
+    })
+    expect(off.advice).toBe(
+      "Enable it from Sites, or deploy shop again, which writes and enables it.",
+    )
+    expect(plain.advice).toBe(
+      "Turn HTTPS on for its domains in shop's domain settings; the next deploy writes it here.",
+    )
+    const [archived] = siteFindings({
+      vhosts: [site({ name: "old", tls: false, owner: { ...owner, archived: true } })],
+    })
+    expect(archived.advice).toContain("Certificates page")
+  })
 })

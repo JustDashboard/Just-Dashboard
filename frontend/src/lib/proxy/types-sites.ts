@@ -34,8 +34,38 @@ export type VHost = {
   tls: boolean
   certPath?: string
   certPaths?: string[]
+  /** The file the site's requests are logged to, its own or nginx.conf's; absent where it logs nowhere openable. */
+  accessLog?: string
+  errorLog?: string
+  /** The upstream blocks the file declares. */
+  pools?: SitePool[]
+  features?: SiteFeature[]
+  /** The package that installed this file, which it still matches byte for byte: the stock default site. */
+  package?: string
+  /** The deployment environment that writes this route. */
+  owner?: VHostOwner
   modified: string
   size: number
+}
+
+/** An upstream block and the servers in it. */
+export type SitePool = { name: string; servers: string[] }
+
+/**
+ * What a site's server blocks do besides naming and listening: a password,
+ * sign-in through another server, an address list, a rate limit, a cache,
+ * WebSockets, HTTP/2, HTTP/3, and maintenance.
+ */
+export type SiteFeature =
+  "auth" | "sso" | "allow" | "ratelimit" | "cache" | "ws" | "h2" | "h3" | "maintenance"
+
+/** A deployment environment that writes a route; `archived` is one nothing deploys any more. */
+export type VHostOwner = {
+  projectId: number
+  environmentId: number
+  project: string
+  environment: string
+  archived?: boolean
 }
 
 /** An htpasswd file and who is in it. */

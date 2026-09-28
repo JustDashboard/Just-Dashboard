@@ -11,8 +11,16 @@ export function isPlain(v: VHost) {
 export function isDisabled(v: VHost) {
   return v.kind === "nginx" && !v.enabled && Boolean(v.enabledPath) && !v.broken
 }
+/**
+ * Disabled, and something to decide about. The distribution's own default
+ * site, still as its package installed it, is disabled on most hosts on
+ * purpose: nobody made it and nobody has to act on it.
+ */
+export function isParked(v: VHost) {
+  return isDisabled(v) && !v.package
+}
 export function waiting(v: VHost) {
-  return isBroken(v) || isPlain(v) || isDisabled(v)
+  return isBroken(v) || isPlain(v) || isParked(v)
 }
 
 /**
@@ -21,7 +29,7 @@ export function waiting(v: VHost) {
  */
 export function byUrgency(a: VHost, b: VHost): number {
   const rank = (v: VHost) =>
-    v.broken === "dangling" ? 0 : isBroken(v) ? 1 : isPlain(v) ? 2 : isDisabled(v) ? 3 : 4
+    v.broken === "dangling" ? 0 : isBroken(v) ? 1 : isPlain(v) ? 2 : isParked(v) ? 3 : 4
   if (rank(a) !== rank(b)) return rank(a) - rank(b)
   return a.name.localeCompare(b.name)
 }

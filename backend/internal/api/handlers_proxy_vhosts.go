@@ -1,10 +1,15 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
@@ -31,8 +36,67 @@ func (s *Server) handleVHostList(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.Internal(err)
 	}
+	if err := s.markDeploymentRoutes(r.Context(), hosts); err != nil {
+		return httpx.Internal(err)
+	}
 	httpx.JSON(w, http.StatusOK, hosts)
 	return nil
+}
+
+// deploymentRouteRe is the name deploy.RouteNameFor gives an environment's
+// route, on nginx and in the Docker Caddy ingress alike.
+var deploymentRouteRe = regexp.MustCompile(`^just-dashboard-env-([1-9][0-9]{0,17})\.conf$`)
+
+// markDeploymentRoutes names the deployment environment that writes each
+// route. Such a route looked like any hand-made site, with Edit, Disable and
+// Delete on it: an edit was overwritten by the next deploy without a word,
+// and a delete took the application offline and failed the deployment's
+// next check of its route. A name whose environment is gone — its project
+// deleted — is left unowned, since nothing will write it again.
+func (s *Server) markDeploymentRoutes(ctx context.Context, hosts []proxysvc.VHost) error {
+	ids := map[int64][]int{}
+	for i, host := range hosts {
+		m := deploymentRouteRe.FindStringSubmatch(host.Name)
+		if m == nil {
+			continue
+		}
+		id, err := strconv.ParseInt(m[1], 10, 64)
+		// The same spelling back, so a name deploy would never write is
+		// never taken for one it did.
+		if err != nil || deploy.RouteNameFor(id) != host.Name {
+			continue
+		}
+		ids[id] = append(ids[id], i)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(ids))
+	for id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.Store.DB.QueryContext(ctx, `
+		SELECT e.id, e.project_id, e.name, p.name, e.archived_at, p.archived_at
+		  FROM deploy_environments e JOIN deploy_projects p ON p.id = e.project_id
+		 WHERE e.id IN (?`+strings.Repeat(",?", len(args)-1)+`)`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var owner proxysvc.VHostOwner
+		var environmentArchived, projectArchived int64
+		if err := rows.Scan(&owner.EnvironmentID, &owner.ProjectID, &owner.Environment, &owner.Project,
+			&environmentArchived, &projectArchived); err != nil {
+			return err
+		}
+		owner.Archived = environmentArchived != 0 || projectArchived != 0
+		for _, i := range ids[owner.EnvironmentID] {
+			own := owner
+			hosts[i].Owner = &own
+		}
+	}
+	return rows.Err()
 }
 
 type vhostToggleRequest struct {

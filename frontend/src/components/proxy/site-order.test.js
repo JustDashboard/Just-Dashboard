@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { byUrgency, isBroken, isDisabled, isPlain, sharedNames, waiting } from "./site-order"
+import {
+  byUrgency,
+  isBroken,
+  isDisabled,
+  isParked,
+  isPlain,
+  sharedNames,
+  waiting,
+} from "./site-order"
 
 const vhost = (overrides) => ({
   name: "app.example.com",
@@ -96,5 +104,30 @@ describe("sharedNames", () => {
       vhost({ name: "other", kind: "caddy" }),
     ])
     expect([...shared]).toEqual(["app.conf"])
+  })
+})
+
+describe("the stock default site", () => {
+  const stock = vhost({
+    name: "default",
+    enabled: false,
+    upstreams: [],
+    package: "nginx-common",
+  })
+
+  test("is disabled but not waiting on anybody", () => {
+    expect(isDisabled(stock)).toBe(true)
+    expect(isParked(stock)).toBe(false)
+    expect(waiting(stock)).toBe(false)
+  })
+
+  test("sorts with the settled sites, not ahead of them", () => {
+    const edited = vhost({ name: "zz-edited", enabled: false, upstreams: [] })
+    const serving = vhost({ name: "aa-serving" })
+    expect([serving, stock, edited].sort(byUrgency).map((v) => v.name)).toEqual([
+      "zz-edited",
+      "aa-serving",
+      "default",
+    ])
   })
 })

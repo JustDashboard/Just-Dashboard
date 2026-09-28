@@ -2,7 +2,9 @@ import { ShieldCheck } from "@/components/icons"
 import type { VHost } from "@/lib/types"
 import { ProductGlyph } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { certPathProduct } from "@/components/proxy/marks"
+import { FEATURE_LABEL, activeOwner } from "@/components/proxy/site-details"
 
 /**
  * A site's two states, as the overview's list and the Sites cards both draw
@@ -83,8 +85,13 @@ export function ServingStatus({
   )
 }
 
-/** Where an nginx site lives, where that is not the ordinary sites-available. */
+/**
+ * Who writes the site, where that is a deployment; otherwise where an nginx
+ * site lives, where that is not the ordinary sites-available.
+ */
 export function siteKind(vhost: VHost): string {
+  const owner = activeOwner(vhost)
+  if (owner) return `Managed by ${owner.project} · ${owner.environment}`
   if (vhost.kind !== "nginx") return vhost.path ? "Caddyfile" : "Docker Caddy ingress"
   if (vhost.layout === "conf.d") return "nginx site in conf.d"
   if (vhost.layout === "sites-enabled") return "nginx site in sites-enabled"
@@ -92,12 +99,13 @@ export function siteKind(vhost: VHost): string {
 }
 
 /**
- * What the site's links in sites-enabled do that the rest of the card cannot
- * say: a name there that does not serve its file, the other names that do,
- * and a file the editor will not open because it lives outside the nginx
- * directory.
+ * What the rest of the card cannot say about where the site comes from and
+ * how nginx reaches it: a name in sites-enabled that does not serve its file,
+ * the other names that do, a file the editor will not open because it lives
+ * outside the nginx directory, a deployment that wrote the route and is
+ * archived, and a file still as its package installed it.
  */
-export function SiteLinkNote({ vhost }: { vhost: VHost }) {
+export function SiteNotes({ vhost }: { vhost: VHost }) {
   const link = <span className="font-mono">sites-enabled/{vhost.name}</span>
   const target = <span className="font-mono break-all">{vhost.linkTarget}</span>
   const lines: { key: string; text: React.ReactNode }[] = []
@@ -157,9 +165,52 @@ export function SiteLinkNote({ vhost }: { vhost: VHost }) {
       ),
     })
   }
+  const owner = vhost.owner
+  if (activeOwner(vhost) && owner) {
+    lines.push({
+      key: "owner",
+      text: (
+        <>
+          The next deploy of <b className="font-medium text-foreground">{owner.project}</b> writes
+          this route again, and an edit made here is lost then.
+        </>
+      ),
+    })
+  } else if (owner?.archived) {
+    lines.push({
+      key: "owner",
+      text: (
+        <>
+          Written by <b className="font-medium text-foreground">{owner.project}</b> ·{" "}
+          {owner.environment}, which is archived: nothing deploys it any more.
+        </>
+      ),
+    })
+  }
+  if (vhost.package) {
+    lines.push({
+      key: "package",
+      text: (
+        <>
+          As the <span className="font-mono">{vhost.package}</span> package installed it, unchanged
+          since.
+        </>
+      ),
+    })
+  }
   return lines.map((line) => (
     <p key={line.key} className="text-hint text-muted-foreground">
       {line.text}
     </p>
+  ))
+}
+
+/** What the site does besides naming and listening, one word each. */
+export function SiteFeatures({ vhost }: { vhost: VHost }) {
+  if (!vhost.features?.length) return null
+  return vhost.features.map((feature) => (
+    <Tag key={feature} tone={feature === "maintenance" ? "warning" : "default"}>
+      {FEATURE_LABEL[feature]}
+    </Tag>
   ))
 }

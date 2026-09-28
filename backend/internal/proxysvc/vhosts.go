@@ -62,10 +62,29 @@ type VHost struct {
 	// one, including those in a snippet it includes: an RSA and an ECDSA
 	// pair is two, and a certificate only reached through its snippet is
 	// still the one the site serves.
-	CertPath  string    `json:"certPath,omitempty"`
-	CertPaths []string  `json:"certPaths,omitempty"`
-	Modified  time.Time `json:"modified"`
-	Size      int64     `json:"size"`
+	CertPath  string   `json:"certPath,omitempty"`
+	CertPaths []string `json:"certPaths,omitempty"`
+	// AccessLog and ErrorLog are the files the site's requests and errors
+	// are written to: its own access_log and error_log, or the ones it
+	// inherits from nginx.conf. Empty where it logs nowhere this page can
+	// open — access_log off, syslog, a path built from variables.
+	AccessLog string `json:"accessLog,omitempty"`
+	ErrorLog  string `json:"errorLog,omitempty"`
+	// Pools are the upstream blocks the file declares, so a proxy_pass to
+	// one reads as the servers behind it rather than as its name.
+	Pools []Pool `json:"pools,omitempty"`
+	// Features are what the site's server blocks do besides naming and
+	// listening, in siteFeatureOrder.
+	Features []string `json:"features,omitempty"`
+	// Package is the distribution package that installed this file, when
+	// the file is still byte for byte what it installed: the stock default
+	// site, which is not something the operator made or has to act on.
+	Package string `json:"package,omitempty"`
+	// Owner is the deployment that writes this site, filled in by the API
+	// from the deploy store; the proxy knows only the file.
+	Owner    *VHostOwner `json:"owner,omitempty"`
+	Modified time.Time   `json:"modified"`
+	Size     int64       `json:"size"`
 }
 
 var (
@@ -152,11 +171,19 @@ func (s *Service) nginxVHosts() []VHost {
 	// name. They were listed as sites of their own while the file they
 	// serve read "disabled", and its Enable loaded it a second time.
 	aliased := map[string]bool{}
+	logs := s.inheritedLogs()
 	if debian {
 		links := enabledLinks(enabled)
 		for _, name := range siteFiles(available) {
 			full := filepath.Join(available, name)
-			v := s.fileVHost(name, full, "sites-available")
+			// The dashboard's own plumbing is listed by the feature that
+			// writes it; its link in sites-enabled is its own too.
+			if dashboardOwned(name, full) {
+				own[name] = true
+				continue
+			}
+			v := s.fileVHost(name, full, "sites-available", logs)
+			v.Package = stockPackage(full)
 			v.EnabledPath = filepath.Join(enabled, name)
 			v.FormEditable = s.readable(full)
 			v.LinkedAs = otherNames(links[resolvedFile(full)], name)
@@ -181,10 +208,11 @@ func (s *Service) nginxVHosts() []VHost {
 	}
 	for _, name := range siteFiles(confd) {
 		full := filepath.Join(confd, name)
-		if !declaresServer(full) {
+		if !declaresServer(full) || dashboardOwned(name, full) {
 			continue
 		}
-		v := s.fileVHost(name, full, "conf.d")
+		v := s.fileVHost(name, full, "conf.d", logs)
+		v.Package = stockPackage(full)
 		// conf.d is included as *.conf, so the suffix is the whole
 		// difference between a file nginx reads and one it ignores. There
 		// is no symlink to toggle either way, which EnabledPath staying
@@ -210,7 +238,11 @@ func (s *Service) nginxVHosts() []VHost {
 		if info, err := os.Stat(link); err == nil && info.IsDir() {
 			continue
 		}
-		v := s.fileVHost(name, link, "sites-enabled")
+		// Under any name, a link to the dashboard's own file is its own.
+		if real := resolvedFile(link); dashboardOwned(filepath.Base(real), real) {
+			continue
+		}
+		v := s.fileVHost(name, link, "sites-enabled", logs)
 		v.Enabled = true
 		if state, target := readEnabledLink(link, link); target != "" {
 			v.EnabledPath, v.LinkTarget = link, target
@@ -321,8 +353,8 @@ func (s *Service) readable(path string) bool {
 }
 
 // fileVHost is the listing's entry for the file at path, as far as the file
-// itself says.
-func (s *Service) fileVHost(name, path, layout string) VHost {
+// itself — and, for its logs, nginx.conf — says.
+func (s *Service) fileVHost(name, path, layout string, logs logDefaults) VHost {
 	v := VHost{
 		Name: name, Kind: KindNginx, Path: path, Layout: layout,
 		ServerNames: []string{}, Listen: []string{}, Upstreams: []string{},
@@ -375,6 +407,7 @@ func (s *Service) fileVHost(name, path, layout string) VHost {
 		v.TLS = true
 		v.CertPath = v.CertPaths[0]
 	}
+	s.siteDetails(&v, path, text, logs)
 	return v
 }
 

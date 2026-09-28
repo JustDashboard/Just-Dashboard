@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 // vhostServer is a server whose proxy is a Debian-layout nginx directory in
@@ -302,5 +303,73 @@ func TestSiteDeleteLeavesAServedCopyAlone(t *testing.T) {
 	}
 	if b, err := os.ReadFile(copied); err != nil || string(b) != "server { return 200; }\n" {
 		t.Errorf("the served copy is gone or changed: %q %v", b, err)
+	}
+}
+
+// A deployment's route looked like any hand-made site, with Edit, Disable and
+// Delete on it. The listing now names the environment that writes it; a name
+// deploy would not spell, or whose environment is gone, is nobody's; and an
+// archived environment's route says nothing will write it again.
+func TestVHostListNamesTheDeploymentThatWritesARoute(t *testing.T) {
+	c, s, root := vhostServer(t, func(string) string { return "exit 0" })
+	// Only this directory: not a Caddyfile or a Docker ingress the machine
+	// running the test happens to have.
+	s.modules.proxy = proxysvc.New(root, filepath.Join(root, "Caddyfile"))
+	projectID, environmentID := seedDeployment(t, s, "shop")
+	archived, err := s.Store.DB.Exec(`INSERT INTO deploy_environments(project_id, name, slug, kind, created_at, updated_at, archived_at)
+		VALUES(?, 'pr-12', 'pr-12', 'preview', 1, 1, 5)`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archivedID, _ := archived.LastInsertId()
+	site := "server { server_name shop.example.com; }\n"
+	names := map[string]int64{
+		fmt.Sprintf("just-dashboard-env-%d.conf", environmentID):  environmentID,
+		fmt.Sprintf("just-dashboard-env-%d.conf", archivedID):     archivedID,
+		"just-dashboard-env-999999.conf":                          0,
+		fmt.Sprintf("just-dashboard-env-0%d.conf", environmentID): 0,
+		fmt.Sprintf("just-dashboard-env-%d", environmentID):       0,
+	}
+	for name := range names {
+		if err := os.WriteFile(filepath.Join(root, "sites-available", name), []byte(site), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	w := c.do(http.MethodGet, "/api/v1/proxy/vhosts", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", w.Code, w.Body.String())
+	}
+	var hosts []struct {
+		Name  string `json:"name"`
+		Owner *struct {
+			ProjectID     int64  `json:"projectId"`
+			EnvironmentID int64  `json:"environmentId"`
+			Project       string `json:"project"`
+			Environment   string `json:"environment"`
+			Archived      bool   `json:"archived"`
+		} `json:"owner"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &hosts); err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != len(names) {
+		t.Fatalf("listed %d sites: %s", len(hosts), w.Body.String())
+	}
+	for _, host := range hosts {
+		want := names[host.Name]
+		switch {
+		case want == 0 && host.Owner != nil:
+			t.Errorf("%s is owned by %+v", host.Name, *host.Owner)
+		case want == 0:
+		case host.Owner == nil:
+			t.Errorf("%s has no owner", host.Name)
+		case host.Owner.EnvironmentID != want || host.Owner.ProjectID != projectID || host.Owner.Project != "shop":
+			t.Errorf("%s owner = %+v", host.Name, *host.Owner)
+		case want == environmentID && (host.Owner.Environment != "production" || host.Owner.Archived):
+			t.Errorf("%s owner = %+v", host.Name, *host.Owner)
+		case want == archivedID && (host.Owner.Environment != "pr-12" || !host.Owner.Archived):
+			t.Errorf("%s owner = %+v", host.Name, *host.Owner)
+		}
 	}
 }
