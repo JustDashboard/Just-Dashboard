@@ -15,7 +15,11 @@ import type { Verb } from "@/components/verbs"
 import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { ExportDialog } from "@/components/logs/export-dialog"
-import { LensReadings, useLensReadings } from "@/components/logs/lens-readings"
+import {
+  LensReadings,
+  useLensReadings,
+  type LensReadingsState,
+} from "@/components/logs/lens-readings"
 import { LogWorkspace } from "@/components/logs/log-workspace"
 import { askOf, emptiedFile, withAsk, type LogAsk } from "@/components/logs/logs-model"
 import { SourceFacts } from "@/components/logs/source-facts"
@@ -116,6 +120,11 @@ export type ServiceLogsProps = {
    * section draws no tiles.
    */
   readings?: boolean | "chips"
+  /**
+   * The lens's readings where the page draws them in a grid of its own: a
+   * quick view one of them answers then carries no second count of its own.
+   */
+  answeredBy?: LensReadingsState
   /** The window History opens on until the reader picks another: a log written weekly reads empty over a day. */
   initialRange?: LogTimeRange
   /**
@@ -223,8 +232,11 @@ export function ServiceLogs(props: ServiceLogsProps) {
   // The lens the filter's fields were written in, or null before the first.
   const [filterLens, setFilterLens] = useKept<string | null>(storageKey, "filterLens", null)
   // "" reads the source as the page named it; "auto" as the server detects
-  // it, over a lens the page named; "none" as plain text; else that lens.
-  const [readAs, setReadAs] = useKept(storageKey, "lens", "")
+  // it, over a lens the page named; "none" as plain text; else that lens —
+  // on the source it was chosen on. A lens forced on one source was a
+  // statement about that one: carried to the next, nginx-error read an access
+  // log and None took a container's journal out of its lens.
+  const [readAsOn, setReadAsOn] = useKept(storageKey, "readAs", { source: "", lens: "" })
   const [storedRange, setRange] = useKept<LogTimeRange>(storageKey, "range", opening)
   const [storedSince, setSince] = useKept(storageKey, "since", "")
   const [storedUntil, setUntil] = useKept(storageKey, "until", "")
@@ -388,6 +400,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
   const ready =
     Boolean(given?.described) || described.data !== undefined || described.error !== undefined
   const pageLens = given?.described ? "" : (given?.lens ?? "")
+  const readAs = readAsOn.source === sourceId ? readAsOn.lens : ""
   const forced = readAs === "auto" ? "" : readAs || pageLens
   const detected = given?.described ? given.lens : detectedOf(described.data)
   const lensId =
@@ -401,7 +414,9 @@ export function ServiceLogs(props: ServiceLogsProps) {
   const applying = asking !== null && ready
   const shown = useMemo(() => {
     const base = relens
-      ? withLensDefaults(filterLens === null ? filter : { ...filter, fields: {} }, lens)
+      ? filterLens === null
+        ? withLensDefaults(filter, lens)
+        : withLensDefaults({ ...filter, fields: {} }, lens, lensFor(filterLens || undefined))
       : filter
     return applying ? withAsk(base, asking) : base
   }, [relens, filterLens, filter, lens, applying, asking])
@@ -630,10 +645,14 @@ export function ServiceLogs(props: ServiceLogsProps) {
           onLensChange={(next) =>
             // Auto over a lens the page named is a choice of its own; the
             // page's lens chosen again is the page's reading back.
-            setReadAs(next === "" && pageLens ? "auto" : next === pageLens ? "" : next)
+            setReadAsOn({
+              source: sourceId,
+              lens: next === "" && pageLens ? "auto" : next === pageLens ? "" : next,
+            })
           }
           detectedLens={detected}
           readings={asChips ? readings : undefined}
+          answered={asTiles ? readings : props.answeredBy}
           lineVerbs={props.lineVerbs}
           range={range}
           onRangeChange={(next) => {

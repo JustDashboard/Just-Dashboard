@@ -612,6 +612,7 @@ export function FirewallPanel({
         log={firewallLog}
         storageKey="security.firewall.log"
         ask={ask}
+        readings={readings}
         instead={
           silent && (
             <EmptyState

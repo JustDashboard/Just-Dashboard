@@ -78,6 +78,7 @@ export function IntrusionPanels() {
       storageKey="security.intrusion.log"
       lineVerbs={lineVerbs}
       ask={ask}
+      readings={readings}
     />
   )
 

@@ -1321,15 +1321,18 @@ read out of the text is drawn as what it is (`components/logs/field-value.tsx`: 
 network, a status in its family's colour, a method as its word, a duration in its latency tone, a unit,
 a jail, a package or an image beside its product), the same drawing a request's client gets, so a
 Postgres client and a visitor are one mark; at most three such columns stand before the message, only in
-colour and only while a line on screen fills one. A record's continuation lines stay under their head,
-the first three shown and the rest one fold away; a lens's lifecycle event (a unit started, an
+colour and only while a line on screen fills one, a column drawn as its text as wide as its longest
+value on screen (an upstream cut to "http://1…" identified nothing). A record's continuation lines stay
+under their head, the first three shown and the rest one fold away; a run's start (a unit started, an
 application came up) is a hairline rule across the pane with its word and the unit's lane hue, so a
-service's runs read as runs; and in the live tail a run of identical lines is one row with a muted
-`×N`. `stderr` is a muted word, never a danger tag — Postgres writes every line there, and a red tag on
+service's runs read as runs — in one service's stream only, and never for a stop or a failure, whose
+word and wash already mark them: a whole host's journal ruled off every timer that fired; and in the
+live tail a run of identical lines is one row with a muted `×N`. `stderr` is a muted word, never a danger tag — Postgres writes every line there, and a red tag on
 each said a failure that was not there. None of these is a pill or a badge: a `Tag` carries the word
 only with Colour off. A structured line is drawn as its message and fields in the logfmt shape the
 tokenizer reads, most telling field first. The "Colour" toggle beside Wrap and Time turns all of it
-off and shows each line exactly as it was written.
+off and shows each line exactly as it was written; in a pane too narrow for a switch each (a phone, a
+sheet), Wrap, Time, Colour and Repeats are one **View** menu, so the level chips are not squeezed to one.
 
 A deployment's request log is a log, and is drawn by the same rules: the request console, a request
 opened in place, the Insights lists and the scanners notice all take their parts from

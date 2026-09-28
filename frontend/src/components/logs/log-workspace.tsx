@@ -6,6 +6,8 @@ import {
   ClockRewind,
   MagnifyingGlass,
   MagnifyingGlassMinus,
+  Pause,
+  Play,
   RefreshClockwise,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -45,6 +47,7 @@ import { LensBar } from "@/components/logs/lens-bar"
 import type { LensReadingsState } from "@/components/logs/lens-readings"
 import { LineDetail } from "@/components/logs/line-detail"
 import { LogConsole } from "@/components/logs/log-console"
+import { oneService, unitJournalLens } from "@/components/logs/logs-model"
 import { RetentionNote } from "@/components/logs/retention-note"
 import { ChipCount, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
@@ -127,6 +130,11 @@ type WorkspaceProps = {
   insightReadings?: boolean
   /** The lens's readings as the figures on the lens row's chips, for a page that draws no tiles. */
   readings?: LensReadingsState
+  /**
+   * The readings the page draws as tiles of its own: a quick view one of
+   * them answers carries no count, since the tile says it over its window.
+   */
+  answered?: LensReadingsState
   /** A page's verbs for one line — "Block this address" on an auth line. */
   lineVerbs?: (line: LogLine) => Verb[]
   /** One column of a workbench that draws the frame: no frame of its own. */
@@ -191,6 +199,15 @@ export function LogWorkspace(props: WorkspaceProps) {
   const served = mode === "live" ? live.meta?.lens : undefined
   const detected = props.detectedLens ?? source.lens
   const [searchedLens, setSearchedLens] = useState<string | undefined>()
+  // What History's last answer was read through is that run's lens: once the
+  // reader forces another, or goes back to Auto, it names nothing on screen
+  // until History runs again, and Insights drew one source's figures in
+  // another's vocabulary.
+  const [searchedFor, setSearchedFor] = useState(forced)
+  if (searchedFor !== forced) {
+    setSearchedFor(forced)
+    setSearchedLens(undefined)
+  }
   const lensId =
     forced === "none"
       ? undefined
@@ -200,6 +217,10 @@ export function LogWorkspace(props: WorkspaceProps) {
         detected ||
         (source.kind === "stack" ? STACK_LENS : undefined)
   const lens = lensFor(lensId)
+  const barLens = useMemo(
+    () => unitJournalLens(lens, source.kind, sourceId),
+    [lens, source.kind, sourceId],
+  )
 
   const search = useHistorySearch(props, lens, setSearchedLens)
 
@@ -431,7 +452,7 @@ export function LogWorkspace(props: WorkspaceProps) {
 
       {filtered && (
         <LensBar
-          lens={lens}
+          lens={barLens}
           lensId={lensId}
           filter={filter}
           onFilterChange={onFilterChange}
@@ -444,6 +465,7 @@ export function LogWorkspace(props: WorkspaceProps) {
                 : undefined
           }
           readings={props.readings}
+          answered={props.answered}
         />
       )}
 
@@ -510,6 +532,7 @@ export function LogWorkspace(props: WorkspaceProps) {
             lens={lensId}
             columns={columns}
             collapseRepeats={mode === "live"}
+            dividers={oneService(source.kind, sourceId)}
             renderDetail={renderDetail}
             status={
               mode === "live" ? (
@@ -572,6 +595,8 @@ export function LogWorkspace(props: WorkspaceProps) {
                   state={live.state}
                   ended={live.ended}
                   error={live.error}
+                  held={live.held}
+                  onResume={() => live.setPaused(false)}
                   filter={applied}
                   requirement={requirement}
                   onReconnect={live.reconnect}
@@ -978,6 +1003,8 @@ function LiveEmpty({
   state,
   ended,
   error,
+  held,
+  onResume,
   filter,
   requirement,
   onReconnect,
@@ -987,6 +1014,9 @@ function LiveEmpty({
   state: string
   ended: boolean
   error: string | null
+  /** Lines that arrived while paused, which an empty pane is not the absence of. */
+  held: number
+  onResume: () => void
   filter: LogFilterState
   requirement?: string
   onReconnect: () => void
@@ -1013,6 +1043,23 @@ function LiveEmpty({
               Reconnect
             </Button>
           </div>
+        }
+      />
+    )
+  }
+  // Paused, a new question's lines are held like any others: the pane is
+  // empty because of the pause, not because nothing matches.
+  if (held > 0) {
+    return (
+      <EmptyState
+        icon={Pause}
+        title={`${plural(held, "line")} arrived while paused`}
+        description="The stream holds what arrives while you read. Resume to see them."
+        action={
+          <Button size="sm" onClick={onResume}>
+            <Play className="size-3.5" />
+            Resume
+          </Button>
         }
       />
     )

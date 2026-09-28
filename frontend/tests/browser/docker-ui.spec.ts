@@ -1265,6 +1265,11 @@ test("a container's logs read as what its image writes", async ({ page }) => {
   await expect(page.getByRole("button", { name: /^Slow\b/ })).toBeVisible()
   await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(5)
   await expect(page.getByText("Deadlocks & lock waits")).toBeVisible()
+  // A question a tile answers is counted once, by the tile over its hour:
+  // its chip carries no second figure from the lines on screen. One no tile
+  // asks keeps its count.
+  await expect(page.getByRole("button", { name: "Errors", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Maintenance\s*\d/ })).toBeVisible()
 })
 
 /**

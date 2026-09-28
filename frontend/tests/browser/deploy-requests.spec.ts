@@ -432,7 +432,8 @@ test.describe("a deployment's traffic", () => {
     expect(own.get("order")).toBe("asc")
 
     // A 5xx also gets what the proxy said: Caddy's error line for the same
-    // host within two seconds, read off the ingress through the caddy lens.
+    // host while it was in flight and a second either side, read off the
+    // ingress through the caddy lens.
     const proxy = page.getByRole("region", { name: "Proxy said" })
     await expect(proxy.getByText(/connection refused/).first()).toBeVisible()
     const caddy = searches.find((q) => q.get("source") === `docker:${INGRESS_CONTAINER}`)!
@@ -443,8 +444,8 @@ test.describe("a deployment's traffic", () => {
       "event:error",
       "host:api.example.com",
     ])
-    expect(caddy.get("since")).toBe("2026-09-03T11:59:29.000Z")
-    expect(caddy.get("until")).toBe("2026-09-03T11:59:33.000Z")
+    expect(caddy.get("since")).toBe("2026-09-03T11:59:27.160Z")
+    expect(caddy.get("until")).toBe("2026-09-03T11:59:32.000Z")
 
     // The redirect to the host Logs page is gone: the full output is a view
     // of this page, on History at the minute either side.
@@ -1367,8 +1368,8 @@ test.describe("a deployment's traffic", () => {
     expect(read.get("lens")).toBe("nginx-error")
     // The file is the site's own, and its lines carry no host to match.
     expect(read.getAll("f")).toEqual([])
-    expect(read.get("since")).toBe("2026-09-03T11:59:29.000Z")
-    expect(read.get("until")).toBe("2026-09-03T11:59:33.000Z")
+    expect(read.get("since")).toBe("2026-09-03T11:59:30.000Z")
+    expect(read.get("until")).toBe("2026-09-03T11:59:32.000Z")
 
     // No duration, so no arrival: the second either side of the answer, said as that.
     const lines = page.getByRole("region", { name: "Lines from this request" })

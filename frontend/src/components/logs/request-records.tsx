@@ -356,7 +356,6 @@ function SiteRecord({ record, view, query, onQueryChange, openLog }: RecordProps
                 <FailedRequestLines
                   entry={entry}
                   errors={errors}
-                  engine="nginx"
                   // The error log beside the access log, on the minute around
                   // the failure, narrowed to this site where the log is shared.
                   onOpen={() =>

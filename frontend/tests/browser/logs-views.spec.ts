@@ -478,7 +478,7 @@ test("/logs reads a site's record, and its access log's Requests view, with ngin
   await expect(page.getByText("/api/checkout", { exact: true }).first()).toBeVisible()
   expect(mocks.asked.some((url) => url.pathname.endsWith("/proxy/sites/shop/requests"))).toBe(true)
   await page.getByText("/api/checkout", { exact: true }).first().click()
-  const said = page.getByRole("region", { name: "What nginx logged" })
+  const said = page.getByRole("region", { name: "Proxy said" })
   await expect(said.getByText("upstream refused")).toBeVisible()
 
   // The error log opens in the workbench on the minute around the failure.

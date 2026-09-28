@@ -247,7 +247,7 @@ export default function LogsPage() {
     const current = lens === "none" ? undefined : lens || detectedLens
     if (lens) setLens("")
     if (next !== current) {
-      setFilter((f) => withLensDefaults({ ...f, fields: {} }, lensFor(next)))
+      setFilter((f) => withLensDefaults({ ...f, fields: {} }, lensFor(next), lensFor(current)))
     }
   }
 
@@ -290,18 +290,23 @@ export default function LogsPage() {
     setMode("search")
     setJump((n) => n + 1)
   }
-  const ctx: ServiceLogsContext | undefined = viewSource && {
-    source: viewSource,
-    sourceId,
-    lens: lensFor(readLens),
-    filter,
-    window: resolveRange(range, since, until),
-    setFilter,
-    // A view that names another source is heard: a database's statement
-    // opens its server's own log.
-    openHistory: (at: OpenAt) => openLog(at.source, at),
-    openLive: () => setMode("live"),
-  }
+  // Not while the link's window is refused: its bounds are not dates, and the
+  // page draws the refusal instead of any view.
+  const ctx: ServiceLogsContext | undefined =
+    viewSource && !windowError
+      ? {
+          source: viewSource,
+          sourceId,
+          lens: lensFor(readLens),
+          filter,
+          window: resolveRange(range, since, until),
+          setFilter,
+          // A view that names another source is heard: a database's statement
+          // opens its server's own log.
+          openHistory: (at: OpenAt) => openLog(at.source, at),
+          openLive: () => setMode("live"),
+        }
+      : undefined
   const views = viewSource
     ? serviceViews(viewSource, finds, {
         openLog,

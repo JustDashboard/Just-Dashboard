@@ -105,6 +105,7 @@ export function Insights(props: InsightsProps) {
   const readings = useLensReadings(props.sourceId, lens, {
     forcedLens: props.forcedLens,
     enabled: Boolean(props.readings),
+    range: { range: props.range, since: props.since, until: props.until },
   })
 
   const overview = answer?.overview

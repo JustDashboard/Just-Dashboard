@@ -60,6 +60,22 @@ test("a quick view and a field's value narrow the stream on the server", async (
   expect(mocks.searches).toHaveLength(0)
 })
 
+test("paused, a new question's lines are held, and the pane says so rather than that none match", async ({
+  page,
+}) => {
+  await mockLensLogs(page)
+  await page.goto(pgLog)
+  const lines = page.getByLabel("Log lines")
+  await expect(lines.getByText("slow", { exact: true })).toBeVisible()
+
+  await page.getByRole("button", { name: "Pause" }).click()
+  await page.getByRole("button", { name: /^Slow\b/ }).click()
+  await expect(lines.getByText(/ lines? arrived while paused$/)).toBeVisible()
+  await expect(page.getByText("Nothing in the recent window matches")).toHaveCount(0)
+  await lines.getByRole("button", { name: "Resume" }).click()
+  await expect(lines.getByText("slow", { exact: true })).toBeVisible()
+})
+
 test("a line opens in place, and the lines around it are two searches either side", async ({
   page,
 }) => {

@@ -94,6 +94,7 @@ export function SSHPanel({
   const authLog = useHostLog(AUTH_LOG, admin)
   const readings = useLensReadings(authLog.data?.id ?? "", AUTH_LENS, {
     forcedLens: "auth",
+    only: SSH_READINGS,
     enabled: Boolean(authLog.data) && Boolean(data?.available),
   })
   const lineVerbs = useAddressLineVerbs({ comment: "blocked from the auth log", blockOn: ATTACKS })
@@ -328,16 +329,14 @@ export function SSHPanel({
               : `${data.keyedAccounts.reduce((n, a) => n + a.keys, 0)} authorized keys in total`
           }
         />
-        {readings.tiles
-          .filter((tile) => SSH_READINGS.includes(tile.reading.id))
-          .map((tile) => (
-            <ReadingTile
-              key={tile.reading.id}
-              tile={tile}
-              window={readings.window}
-              onPick={() => press(tile.reading)}
-            />
-          ))}
+        {readings.tiles.map((tile) => (
+          <ReadingTile
+            key={tile.reading.id}
+            tile={tile}
+            window={readings.window}
+            onPick={() => press(tile.reading)}
+          />
+        ))}
       </StatGrid>
 
       <AreaFindings posture={posture} area="ssh" onFix={onFix} />
@@ -489,6 +488,7 @@ export function SSHPanel({
         storageKey="security.ssh.log"
         lineVerbs={lineVerbs}
         ask={ask}
+        readings={readings}
       />
 
       {dialog}

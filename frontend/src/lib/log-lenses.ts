@@ -103,7 +103,7 @@ const errorsReading: LensReading = {
   label: "Errors",
   levels: ERRORS,
   tone: "danger",
-  hint: "Lines at error level or worse",
+  hint: "Error level or worse",
 }
 const restartsReading: LensReading = {
   id: "restarts",
@@ -180,7 +180,7 @@ const POSTGRES: LogLens = {
       label: "Slow statements",
       fields: event("slow"),
       tone: "warning",
-      hint: "Statements past the logging threshold",
+      hint: "Past the slow threshold",
       requires: "log_min_duration_statement",
     },
     {
@@ -188,14 +188,14 @@ const POSTGRES: LogLens = {
       label: "Auth failures",
       fields: event("auth_failed"),
       tone: "danger",
-      hint: "Failed password, peer and ident checks",
+      hint: "Password, peer, ident",
     },
     {
       id: "locks",
       label: "Deadlocks & lock waits",
       fields: event("deadlock", "lock_wait"),
       tone: "warning",
-      hint: "Transactions that waited on or broke a lock",
+      hint: "Lock waits and deadlocks",
     },
     restartsReading,
   ],
@@ -262,21 +262,21 @@ const MYSQL: LogLens = {
       label: "Access denied",
       fields: event("auth_failed"),
       tone: "danger",
-      hint: "Logins the server refused",
+      hint: "Logins it refused",
     },
     {
       id: "aborted",
       label: "Aborted connections",
       fields: event("aborted_connection"),
       tone: "warning",
-      hint: "Clients that went away without closing",
+      hint: "Dropped without closing",
     },
     {
       id: "deadlocks",
       label: "Deadlocks",
       fields: event("deadlock"),
       tone: "danger",
-      hint: "Transactions InnoDB rolled back to break a deadlock",
+      hint: "InnoDB rolled one back",
     },
     restartsReading,
   ],
@@ -334,21 +334,21 @@ const REDIS: LogLens = {
       label: "Warnings",
       levels: WARNINGS,
       tone: "warning",
-      hint: "Lines Redis marked # or worse",
+      hint: "Marked # or worse",
     },
     {
       id: "persistence",
       label: "Persistence failures",
       fields: event("persistence_failed"),
       tone: "danger",
-      hint: "Snapshots and AOF writes that failed",
+      hint: "Failed snapshots or AOF",
     },
     {
       id: "attacks",
       label: "Security attacks",
       fields: event("security_attack"),
       tone: "danger",
-      hint: "HTTP or cross-protocol requests sent to the Redis port",
+      hint: "HTTP at the Redis port",
     },
     restartsReading,
   ],
@@ -397,14 +397,14 @@ const MONGODB: LogLens = {
       label: "Slow operations",
       fields: event("slow"),
       tone: "warning",
-      hint: "Operations past slowms (100 ms unless set)",
+      hint: "Past slowms (100 ms)",
     },
     {
       id: "auth",
       label: "Auth failures",
       fields: event("auth_failed"),
       tone: "danger",
-      hint: "Authentication the server refused",
+      hint: "Logins it refused",
     },
     {
       id: "connections",
@@ -467,28 +467,28 @@ const CLICKHOUSE: LogLens = {
       label: "Exceptions",
       fields: event("exception"),
       tone: "danger",
-      hint: "Queries and background jobs that threw",
+      hint: "Queries and jobs threw",
     },
     {
       id: "memory",
       label: "Memory limit",
       fields: event("memory_limit"),
       tone: "danger",
-      hint: "Queries stopped at the memory limit",
+      hint: "Stopped at memory limit",
     },
     {
       id: "parts",
       label: "Too many parts",
       fields: event("too_many_parts"),
       tone: "danger",
-      hint: "Inserts refused while merges fell behind",
+      hint: "Merges fell behind",
     },
     {
       id: "auth",
       label: "Auth failures",
       fields: event("auth_failed"),
       tone: "danger",
-      hint: "Logins the server refused",
+      hint: "Logins it refused",
     },
     restartsReading,
   ],
@@ -534,7 +534,7 @@ const MSSQL: LogLens = {
       label: "Failed logins",
       fields: event("auth_failed"),
       tone: "warning",
-      hint: "Logins the server refused",
+      hint: "Logins it refused",
     },
     restartsReading,
   ],
@@ -570,20 +570,20 @@ const requestReadings: LensReading[] = [
     label: "4xx",
     fields: { class: ["4xx"] },
     tone: "warning",
-    hint: "Refused: not found, not allowed",
+    hint: "Not found, not allowed",
   },
   {
     id: "5xx",
     label: "5xx",
     fields: { class: ["5xx"] },
     tone: "danger",
-    hint: "The server failed to answer",
+    hint: "Server failed to answer",
   },
   {
     id: "probes",
     label: "Probes",
     fields: event("probe"),
-    hint: "Scanners asking for files this server does not have",
+    hint: "Scans for missing files",
   },
 ]
 
@@ -676,14 +676,14 @@ const NGINX_ERROR: LogLens = {
       label: "Upstream failures",
       fields: event(...upstreamEvents),
       tone: "danger",
-      hint: "The app behind nginx refused, timed out or closed",
+      hint: "Refused, timeout, closed",
     },
     {
       id: "rate-limited",
       label: "Rate limited",
       fields: event("rate_limited"),
       tone: "warning",
-      hint: "Requests limit_req or limit_conn turned away",
+      hint: "Turned away by a limit",
     },
     {
       id: "tls",
@@ -788,7 +788,7 @@ const AUTH: LogLens = {
       id: "accepted",
       label: "Accepted logins",
       fields: event("ssh_accepted"),
-      hint: "SSH sessions that signed in",
+      hint: "SSH sessions signed in",
     },
     // Untoned for the reason the events' levels stay info: a public SSH port
     // is tried all day, and the page that shows it must not read as alarmed.
@@ -796,27 +796,27 @@ const AUTH: LogLens = {
       id: "failed",
       label: "Failed attempts",
       fields: event(...sshFailures),
-      hint: "Wrong passwords and users",
+      hint: "Bad passwords, users",
     },
     {
       id: "invalid",
       label: "Invalid users",
       fields: event("ssh_invalid_user"),
-      hint: "Names with no account here",
+      hint: "No such account here",
     },
     {
       id: "attackers",
       label: "Attackers",
       fields: event(...sshFailures),
       distinct: "client",
-      hint: "Distinct failing addresses",
+      hint: "Distinct failing IPs",
     },
     {
       id: "sudo-failed",
       label: "sudo failures",
       fields: event("sudo_failed"),
       tone: "danger",
-      hint: "Wrong passwords and refused commands under sudo",
+      hint: "sudo refused or failed",
     },
   ],
   readingsWindow: "24h",
@@ -866,21 +866,21 @@ const FIREWALL: LogLens = {
       id: "blocked",
       label: "Blocked",
       fields: event("block"),
-      hint: "Packets the firewall dropped",
+      hint: "Dropped packets",
     },
     {
       id: "sources",
       label: "Sources",
       fields: event("block"),
       distinct: "client",
-      hint: "Distinct addresses dropped",
+      hint: "Distinct dropped IPs",
     },
     {
       id: "limited",
       label: "Rate-limited",
       fields: event("limit"),
       tone: "warning",
-      hint: "Connections a limit rule turned away",
+      hint: "Turned away by a limit",
     },
   ],
   readingsWindow: "24h",
@@ -923,21 +923,21 @@ const KERNEL: LogLens = {
       label: "OOM kills",
       fields: event("oom_kill", "oom"),
       tone: "danger",
-      hint: "Processes the kernel killed for memory",
+      hint: "Killed for memory",
     },
     {
       id: "segfaults",
       label: "Segfaults",
       fields: event("segfault"),
       tone: "danger",
-      hint: "Processes that crashed on a bad address",
+      hint: "Crashed on a bad address",
     },
     {
       id: "storage",
       label: "Storage errors",
       fields: event("io_error", "fs_error", "readonly_fs"),
       tone: "danger",
-      hint: "Disk and filesystem errors",
+      hint: "Disk, filesystem errors",
     },
   ],
 }
@@ -973,7 +973,7 @@ const FAIL2BAN: LogLens = {
       id: "unbans",
       label: "Unbans",
       fields: event("unban"),
-      hint: "Bans that expired or were lifted",
+      hint: "Expired or lifted",
     },
     {
       id: "errors",
@@ -1029,13 +1029,13 @@ const SYSTEMD: LogLens = {
     starting: { label: "starting" },
     started: { label: "started", tone: "success", divider: true },
     stopping: { label: "stopping" },
-    stopped: { label: "stopped", divider: true },
+    stopped: { label: "stopped" },
     deactivated: { label: "deactivated" },
     reloading: { label: "reloading" },
     reloaded: { label: "reloaded" },
-    exited: { label: "exited", divider: true },
+    exited: { label: "exited" },
     killed: { label: "killed", tone: "warning" },
-    failed: { label: "failed", tone: "danger", divider: true },
+    failed: { label: "failed", tone: "danger" },
     restart_scheduled: { label: "restart scheduled", tone: "warning" },
     start_limit: { label: "start limit hit", tone: "danger" },
     oom: { label: "oom kill", tone: "danger" },
@@ -1049,21 +1049,21 @@ const SYSTEMD: LogLens = {
       label: "Failures",
       fields: event(...unitFailures),
       tone: "danger",
-      hint: "Units that failed, crashed or hit their start limit",
+      hint: "Failed or start-limited",
     },
     {
       id: "restarts",
       label: "Restarts scheduled",
       fields: event("restart_scheduled"),
       tone: "warning",
-      hint: "Restart= brought a unit back after it died",
+      hint: "Brought back by Restart=",
     },
     {
       id: "oom",
       label: "OOM kills",
       fields: event("oom"),
       tone: "danger",
-      hint: "Units killed for their memory",
+      hint: "Killed for memory",
     },
   ],
 }
@@ -1105,7 +1105,7 @@ const APP: LogLens = {
       label: "Exceptions",
       fields: event("exception"),
       tone: "danger",
-      hint: "Uncaught errors and their stack traces",
+      hint: "Uncaught, with a trace",
     },
     errorsReading,
     {
@@ -1113,14 +1113,14 @@ const APP: LogLens = {
       label: "OOM",
       fields: event("oom"),
       tone: "danger",
-      hint: "The runtime ran out of memory",
+      hint: "Runtime out of memory",
     },
     {
       id: "startup",
       label: "Startup failures",
       fields: event(...startupFailures),
       tone: "danger",
-      hint: "A port taken, a variable missing, a database not there",
+      hint: "Port, env or database",
     },
   ],
   groups: [
@@ -1176,7 +1176,7 @@ const PACKAGES: LogLens = {
       id: "removals",
       label: "Removals",
       fields: event("remove", "purge"),
-      hint: "Packages removed or purged",
+      hint: "Removed or purged",
     },
     {
       id: "errors",
@@ -1220,7 +1220,7 @@ const CRON: LogLens = {
       label: "Output discarded",
       fields: event("output_discarded"),
       tone: "warning",
-      hint: "Jobs whose output had no mailer to go to",
+      hint: "Output with no mailer",
     },
     {
       id: "errors",
@@ -1267,20 +1267,20 @@ const CERTBOT: LogLens = {
       id: "renewed",
       label: "Renewed",
       fields: event("renewed", "obtained"),
-      hint: "Certificates issued or renewed",
+      hint: "Issued or renewed",
     },
     {
       id: "failed",
       label: "Failed",
       fields: event(...certbotFailures),
       tone: "danger",
-      hint: "Renewals that did not go through",
+      hint: "Renewals that failed",
     },
     {
       id: "not-due",
       label: "Not due",
       fields: event("not_due"),
-      hint: "Checks that found nothing to do",
+      hint: "Nothing to renew yet",
     },
   ],
   readingsWindow: "7d",
@@ -1328,7 +1328,7 @@ const SYSLOG: LogLens = {
       label: "OOM kills",
       fields: event("oom_kill", "oom"),
       tone: "danger",
-      hint: "Processes killed for memory",
+      hint: "Killed for memory",
     },
   ],
   groups: [{ id: "programs", label: "By program", by: "program", levels: WARNINGS }],
@@ -1368,7 +1368,7 @@ const STACK: LogLens = {
       levels: ERRORS,
       distinct: "service",
       tone: "danger",
-      hint: "How many of its services logged one",
+      hint: "Services that logged one",
     },
     {
       id: "warnings",
@@ -1381,7 +1381,7 @@ const STACK: LogLens = {
       id: "starts",
       label: "Starts",
       fields: event("startup"),
-      hint: "Times a service said it was starting",
+      hint: "Services starting up",
     },
   ],
 }
@@ -1465,12 +1465,28 @@ export function eventLabel(lensId: string | undefined, eventId: string, lineLens
  * The filter a lens opens on: its defaults' predicates and levels, replacing
  * whatever the last source left, so the noise a lens hides is hidden from the
  * first line and shown as a chip that can be pressed away.
+ *
+ * Levels the lens being left (`from`) imposed go with it, while they are as
+ * it set them: ClickHouse opens on "Info and above", and carried to an app's
+ * container that hid every line with no level word in it. Levels the reader
+ * chose stay theirs.
  */
-export function withLensDefaults(filter: LogFilterState, lens: LogLens | undefined) {
-  if (!lens?.defaults) return filter
+export function withLensDefaults(
+  filter: LogFilterState,
+  lens: LogLens | undefined,
+  from?: LogLens,
+) {
+  const imposed = from?.defaults?.levels
+  const base =
+    imposed &&
+    imposed.length === filter.levels.length &&
+    imposed.every((level) => filter.levels.includes(level))
+      ? { ...filter, levels: [] }
+      : filter
+  if (!lens?.defaults) return base
   return {
-    ...filter,
+    ...base,
     fields: lens.defaults.fields ?? {},
-    levels: lens.defaults.levels ?? filter.levels,
+    levels: lens.defaults.levels ?? base.levels,
   }
 }

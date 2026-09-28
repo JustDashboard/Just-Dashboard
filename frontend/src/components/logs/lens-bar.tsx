@@ -22,7 +22,6 @@ import { readingFilter } from "@/lib/log-insights"
 import type { LensView, LogLens } from "@/lib/log-lenses"
 import { FieldValue } from "@/components/logs/field-value"
 import {
-  WINDOW_WORDS,
   readingPressed,
   type LensReadingTile,
   type LensReadingsState,
@@ -148,7 +147,10 @@ function tally(lines: LogLine[], key: string): { values: Tally[]; missing: numbe
  * carries them too: a view whose question a reading asks shows the
  * reading's figure over its window instead of a count of the screen, and a
  * reading no view asks is a chip of its own — one chip per question, never
- * two with two different counts.
+ * two with two different counts. Where the page draws the readings as tiles
+ * above the pane (`answered`), a view a tile answers carries no count at all:
+ * the tile says it over its window, and a count of the screen under it was
+ * a second figure for one question.
  */
 export function LensBar({
   lens,
@@ -158,6 +160,7 @@ export function LensBar({
   lines,
   facets,
   readings,
+  answered,
 }: {
   lens: LogLens | undefined
   /** The lens the lines were read through, which names event values. */
@@ -170,6 +173,8 @@ export function LensBar({
   facets?: Record<string, LogFacet>
   /** The lens's readings, drawn as the chips' figures. */
   readings?: LensReadingsState
+  /** The readings the page draws as tiles: the views they answer take no count. */
+  answered?: LensReadingsState
 }) {
   const fields = fieldsOf(filter)
   const views = lens?.views ?? NO_VIEWS
@@ -197,9 +202,11 @@ export function LensBar({
   }, [views, facets, lines])
 
   const defaults = lens?.defaults
+  // A lens whose defaults are levels alone — ClickHouse's "Info and above" —
+  // is on them with no field narrowed; one with fields never is, since an
+  // empty filter is not its fields.
   const onDefaults =
     defaults !== undefined &&
-    Object.keys(fields).length > 0 &&
     fieldsEqual(fields, defaults.fields ?? {}) &&
     (!defaults.levels || sameLevels(filter.levels, defaults.levels))
   const selectedView = views.find((view) => viewSelected(view, filter))
@@ -265,6 +272,7 @@ export function LensBar({
 
       {views.map((view) => {
         const tile = readingFor(view, tiles)
+        const drawn = answered && readingFor(view, answered.tiles)
         const count = counts.get(view.id)
         return (
           <FilterChip
@@ -274,16 +282,20 @@ export function LensBar({
             title={
               tile && readings
                 ? readingTitle(tile, readings.window)
-                : view.requires
-                  ? `Logged only with ${view.requires} set`
-                  : undefined
+                : drawn && answered
+                  ? readingTitle(drawn, answered.window)
+                  : view.requires
+                    ? `Logged only with ${view.requires} set`
+                    : undefined
             }
           >
             {view.label}
             {tile && readings ? (
               <ReadingCount tile={tile} window={readings.window} />
             ) : (
-              count !== undefined && count > 0 && <ChipCount>{count.toLocaleString()}</ChipCount>
+              !drawn &&
+              count !== undefined &&
+              count > 0 && <ChipCount>{count.toLocaleString()}</ChipCount>
             )}
           </FilterChip>
         )
@@ -323,8 +335,8 @@ function readingTitle(tile: LensReadingTile, window: Window) {
   if (figure.value === 0 && reading.requires) return `Logged only with ${reading.requires} set`
   const { text } = readingShown(reading, figure, window)
   return reading.figure === "per_minute"
-    ? `${text} a minute over ${WINDOW_WORDS[window].long} — ${reading.hint}`
-    : `${text} in ${WINDOW_WORDS[window].long} — ${reading.hint}`
+    ? `${text} a minute over ${window.long} — ${reading.hint}`
+    : `${text} in ${window.long} — ${reading.hint}`
 }
 
 /**

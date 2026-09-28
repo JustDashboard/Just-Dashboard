@@ -4,16 +4,22 @@ import { useMemo } from "react"
 import { get } from "@/lib/api"
 import type { LogSearchResult } from "@/lib/types"
 import type { LogFilterState } from "@/components/logs/types"
-import { fieldsOf } from "@/lib/log-filter"
+import { fieldsOf, resolveRange } from "@/lib/log-filter"
 import {
-  READINGS_MINUTES,
   readingFigure,
   readingFilter,
   readingSearches,
   type ReadingFigure,
 } from "@/lib/log-insights"
 import type { LensReading, LogLens } from "@/lib/log-lenses"
-import { readingShown, sameQuestion } from "@/components/logs/logs-model"
+import {
+  READINGS_WINDOWS,
+  readingShown,
+  readingsWindowOf,
+  sameQuestion,
+  type ReadingsWindow,
+} from "@/components/logs/logs-model"
+import type { LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { TileTrend } from "@/components/metrics/sparkline"
@@ -27,14 +33,6 @@ const REFRESH = 60_000
 /** The narrowest a reading's tile reads whole: its name, its figure and its line. */
 const TILE_MIN = 200
 
-type Window = NonNullable<LogLens["readingsWindow"]>
-
-export const WINDOW_WORDS: Record<Window, { short: string; long: string }> = {
-  "1h": { short: "in 1h", long: "the last hour" },
-  "24h": { short: "in 24h", long: "the last 24 hours" },
-  "7d": { short: "in 7d", long: "the last 7 days" },
-}
-
 export type LensReadingTile = {
   reading: LensReading
   /** Absent until the search that serves it has answered, or when it failed. */
@@ -43,7 +41,7 @@ export type LensReadingTile = {
 
 export type LensReadingsState = {
   tiles: LensReadingTile[]
-  window: Window
+  window: ReadingsWindow
   loading: boolean
 }
 
@@ -60,11 +58,20 @@ export type LensReadingsState = {
  * with `ReadingTile`; `LensReadings` is the grid for a page without one.
  * A page that draws only some of them names those (`only`), and the others
  * are not searched for: each is a scan a minute for a figure nobody sees.
+ *
+ * Drawn among figures of a window the reader picked — Insights' — they are
+ * read over that window (`range`) rather than the lens's own, so one view
+ * does not hold two answers to "how many errors" from two stretches of time.
  */
 export function useLensReadings(
   sourceId: string,
   lens: LogLens | undefined,
-  options: { forcedLens?: string; enabled?: boolean; only?: readonly string[] } = {},
+  options: {
+    forcedLens?: string
+    enabled?: boolean
+    only?: readonly string[]
+    range?: { range: LogTimeRange; since: string; until: string }
+  } = {},
 ): LensReadingsState {
   const onlyKey = options.only?.join(",")
   const readings = useMemo(() => {
@@ -73,20 +80,30 @@ export function useLensReadings(
     const wanted = onlyKey.split(",")
     return all.filter((reading) => wanted.includes(reading.id))
   }, [lens, onlyKey])
-  const window = lens?.readingsWindow ?? "1h"
+  const rangeId = options.range?.range
+  const rangeSince = options.range?.since ?? ""
+  const rangeUntil = options.range?.until ?? ""
+  const picked = useMemo(
+    () => (rangeId ? readingsWindowOf(rangeId, rangeSince, rangeUntil) : undefined),
+    [rangeId, rangeSince, rangeUntil],
+  )
+  const window = picked ?? READINGS_WINDOWS[lens?.readingsWindow ?? "1h"]
   const searches = useMemo(() => readingSearches(readings), [readings])
   const forced = options.forcedLens || undefined
 
   const poll = usePoll(
     async (signal) => {
-      const since = new Date(Date.now() - READINGS_MINUTES[window] * 60_000).toISOString()
+      const bounds =
+        picked && rangeId
+          ? resolveRange(rangeId, rangeSince, rangeUntil)
+          : { since: new Date(Date.now() - window.minutes * 60_000).toISOString() }
       // Settled one by one: a distinct count the server refused should not
       // take the four counts beside it down with it.
       const answers = await Promise.allSettled(
         searches.map((search) =>
           get<LogSearchResult>(
             "/logs/search",
-            { source: sourceId, lens: forced, since, ...search.params },
+            { source: sourceId, lens: forced, ...bounds, ...search.params },
             signal,
           ),
         ),
@@ -100,7 +117,7 @@ export function useLensReadings(
       return figures
     },
     REFRESH,
-    [sourceId, lens?.id, forced, onlyKey],
+    [sourceId, lens?.id, forced, onlyKey, rangeId, rangeSince, rangeUntil],
     { enabled: (options.enabled ?? true) && Boolean(sourceId) && searches.length > 0 },
   )
 
@@ -179,12 +196,12 @@ export function ReadingTile({
   onPick,
 }: {
   tile: LensReadingTile
-  window: Window
+  window: ReadingsWindow
   pressed?: boolean
   onPick?: () => void
 }) {
   const { reading, figure } = tile
-  const words = WINDOW_WORDS[window]
+  const words = window
   const perMinute = reading.figure === "per_minute"
   const { value, text: shown } = readingShown(reading, figure, window)
   const hint =

@@ -1063,7 +1063,7 @@ test("/proxy/sites/app.example.com reads the site's requests, and what nginx sai
 
   // A 502 opened says why, from the site's error log, in the second around it.
   await page.getByText("/cart", { exact: true }).click()
-  const said = page.getByRole("region", { name: "What nginx logged" })
+  const said = page.getByRole("region", { name: "Proxy said" })
   await expect(said.getByText("upstream refused")).toBeVisible()
   await expect(said.getByText(/Connection refused/)).toBeVisible()
   const around = logs.searches.find((q) => q.get("order") === "asc")!
@@ -1137,6 +1137,14 @@ test("/proxy/sites/app.example.com reads its error log by what failed", async ({
   // The counts still come from the day: the other kinds keep their chips.
   await expect(page.getByRole("button", { name: /^TLS/ })).toBeVisible()
   await expect(page.getByRole("button", { name: /^All/ })).toContainText("2")
+
+  // The day is read again when asked, not on a timer: a poll swapped the
+  // lines out from under the one being read, and rescanned a shared log.
+  const asked = logs.searches.filter((q) => q.get("limit") === "1000").length
+  await page.getByRole("button", { name: "Read the errors again" }).click()
+  await expect
+    .poll(() => logs.searches.filter((q) => q.get("limit") === "1000").length)
+    .toBeGreaterThan(asked)
 
   // Live reads the error log through its lens, since that is the log named.
   await views.getByRole("button", { name: "Live" }).click()
@@ -1390,7 +1398,7 @@ test("/proxy/sites/just-dashboard-shop reads its route's requests, and what Cadd
   await expect(readings.getByText("Upstream failures")).toHaveCount(0)
 
   await page.getByText("/cart", { exact: true }).click()
-  const said = page.getByRole("region", { name: "What Caddy logged" })
+  const said = page.getByRole("region", { name: "Proxy said" })
   await expect(said.getByText("upstream refused")).toBeVisible()
   await expect(said.getByText(/connection refused/)).toBeVisible()
   const around = logs.searches.find(

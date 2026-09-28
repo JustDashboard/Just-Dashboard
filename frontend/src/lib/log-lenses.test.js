@@ -253,4 +253,30 @@ describe("a lens's defaults", () => {
     expect(withLensDefaults(f, lensFor("postgres"))).toBe(f)
     expect(withLensDefaults(f, undefined)).toBe(f)
   })
+
+  test("the levels a lens left imposed go with it; levels the reader chose stay", () => {
+    const clickhouse = lensFor("clickhouse")
+    const opened = withLensDefaults(EMPTY_FILTER, clickhouse)
+    expect(opened.levels).toEqual(clickhouse.defaults.levels)
+    expect(withLensDefaults(opened, lensFor("app"), clickhouse).levels).toEqual([])
+    const chosen = { ...EMPTY_FILTER, levels: ["error"] }
+    expect(withLensDefaults(chosen, lensFor("app"), clickhouse).levels).toEqual(["error"])
+  })
+})
+
+test("a reading's hint fits one line of its tile", () => {
+  for (const lens of lenses) {
+    for (const reading of lens.readings) {
+      expect(`${lens.id}: ${reading.hint}`).toBe(`${lens.id}: ${reading.hint.slice(0, 24)}`)
+    }
+  }
+})
+
+test("only a run's start is drawn as a rule", () => {
+  for (const lens of lenses) {
+    for (const [id, meta] of Object.entries(lens.events)) {
+      if (meta.divider)
+        expect(`${lens.id}.${id}`).toMatch(/^(systemd\.started|(app|pm2)\.startup)$/)
+    }
+  }
 })

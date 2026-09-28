@@ -15,6 +15,7 @@ import {
   type ServiceLogSource,
   type ServiceLogsProps,
 } from "@/components/logs/service-logs"
+import type { LensReadingsState } from "@/components/logs/lens-readings"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
@@ -169,6 +170,7 @@ export function HostLogSection({
   instead,
   lineVerbs,
   ask,
+  readings,
 }: {
   title: string
   /** From `useHostLog`. */
@@ -179,6 +181,8 @@ export function HostLogSection({
   lineVerbs?: (line: LogLine) => Verb[]
   /** A reading pressed in the page's grid (`useReadingPress`). */
   ask?: ServiceLogsProps["ask"]
+  /** The readings the page's grid draws, which the lens row's views then leave to it. */
+  readings?: LensReadingsState
 }) {
   // The grid is at the top of the page and the log at the bottom: a press
   // that narrowed lines out of sight would look like a press that did nothing.
@@ -203,6 +207,7 @@ export function HostLogSection({
             storageKey={storageKey}
             lineVerbs={lineVerbs}
             ask={ask}
+            answeredBy={readings}
             paneClassName="h-[min(75vh,40rem)] min-h-80"
           />
         )}

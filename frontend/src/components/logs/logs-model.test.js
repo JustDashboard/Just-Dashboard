@@ -3,12 +3,17 @@ import { EMPTY_FILTER } from "@/lib/log-filter"
 import { lensFor } from "@/lib/log-lenses"
 import {
   askOf,
+  buildRows,
+  columnWidthFor,
   emptiedFile,
   eventColumnFor,
+  oneService,
   readingFor,
   readingShown,
+  readingsWindowOf,
   sameQuestion,
   unaskedReadings,
+  unitJournalLens,
   withAsk,
 } from "./logs-model"
 
@@ -51,15 +56,15 @@ describe("a reading on the quick view that asks its question", () => {
 describe("a reading's figure as it is drawn", () => {
   test("a count, capped when the distinct count stopped being exact", () => {
     const reading = { id: "a", label: "Attackers", hint: "", distinct: "client" }
-    expect(readingShown(reading, { value: 1200, capped: true }, "24h").text).toBe(
+    expect(readingShown(reading, { value: 1200, capped: true }, { minutes: 1440 }).text).toBe(
       `${(1200).toLocaleString()}+`,
     )
-    expect(readingShown(reading, undefined, "24h")).toEqual({ value: 0, text: "—" })
+    expect(readingShown(reading, undefined, { minutes: 1440 })).toEqual({ value: 0, text: "—" })
   })
 
   test("a per-minute reading is its rate over the window", () => {
     const reading = { id: "rate", label: "Requests/min", hint: "", figure: "per_minute" }
-    const shown = readingShown(reading, { value: 90 }, "1h")
+    const shown = readingShown(reading, { value: 90 }, { minutes: 60 })
     expect(shown.value).toBe(1.5)
     expect(shown.text).toBe((1.5).toLocaleString())
   })
@@ -122,5 +127,87 @@ describe("the event column's width", () => {
     expect(eventColumnFor([line("deadlock", { cont: true })], "postgres")).toBe(0)
     // A connection is too common to mark, and draws its level instead.
     expect(eventColumnFor([line("connection")], "postgres")).toBe(0)
+  })
+})
+
+describe("the rows the lines are drawn as", () => {
+  const rows = (lines, opts = {}) =>
+    buildRows(lines, { dedupe: true, folds: new Set(), ...opts }).filter((r) => r.kind === "line")
+  const health = (at) => ({ text: "GET /healthz 200", level: "info", timestamp: at })
+
+  test("a run of repeats keeps its first line's key, so an opened row stays open", () => {
+    const first = health("2026-09-27T10:00:01Z")
+    const two = rows([first, health("2026-09-27T10:00:02Z")])
+    const newest = health("2026-09-27T10:00:03Z")
+    const three = rows([first, health("2026-09-27T10:00:02Z"), newest])
+    expect(two).toHaveLength(1)
+    expect(three).toHaveLength(1)
+    expect(three[0].key).toBe(two[0].key)
+    expect(three[0].repeat).toBe(3)
+    // The row shows the newest of them, and when the first was.
+    expect(three[0].line).toBe(newest)
+    expect(three[0].since).toBe("2026-09-27T10:00:01Z")
+  })
+
+  test("a run starts under a rule only where the pane is one service's", () => {
+    const started = { text: "Started postgresql.service", event: "started", lens: "systemd" }
+    const failed = { text: "Failed with result 'exit-code'", event: "failed", lens: "systemd" }
+    const drawn = (dividers) =>
+      buildRows([started, failed], { dedupe: false, dividers, lens: "postgres", folds: new Set() })
+        .filter((r) => r.kind === "divider")
+        .map((r) => r.label)
+    expect(drawn(true)).toEqual(["started"])
+    expect(drawn(false)).toEqual([])
+  })
+
+  test("one service's stream, not a whole host's", () => {
+    expect(oneService("docker", "docker:web")).toBe(true)
+    expect(oneService("stack", "stack:shop")).toBe(true)
+    expect(oneService("journal", "journal:postgresql.service")).toBe(true)
+    expect(oneService("journal", "journal:")).toBe(false)
+    expect(oneService("kernel", "kernel:")).toBe(false)
+    expect(oneService("system", "file:/var/log/syslog")).toBe(false)
+  })
+})
+
+test("a lens column is as wide as its longest value on screen, within bounds", () => {
+  const line = (upstream, extra = {}) => ({ text: "x", attrs: { upstream }, ...extra })
+  const long = "http://127.0.0.1:3000/"
+  expect(columnWidthFor([line(long), line("unix:/run/a")], "upstream")).toBe(long.length)
+  expect(columnWidthFor([line("a")], "upstream")).toBe(6)
+  expect(columnWidthFor([line("x".repeat(80))], "upstream")).toBe(24)
+  expect(columnWidthFor([line(long, { cont: true })], "upstream")).toBe(0)
+})
+
+test("a unit's journal offers the manager's Failures beside its own lens's views", () => {
+  const postgres = lensFor("postgres")
+  const unit = unitJournalLens(postgres, "journal", "journal:postgresql.service")
+  expect(unit.views.map((v) => v.id)).toEqual([...postgres.views.map((v) => v.id), "failures"])
+  expect(unit.facets).toBe(postgres.facets)
+  // The whole journal, a container, and systemd's own lens are left as they are.
+  expect(unitJournalLens(postgres, "journal", "journal:")).toBe(postgres)
+  expect(unitJournalLens(postgres, "docker", "docker:db")).toBe(postgres)
+  const systemd = lensFor("systemd")
+  expect(unitJournalLens(systemd, "journal", "journal:cron.service")).toBe(systemd)
+})
+
+describe("the window a picked range reads readings over", () => {
+  test("a preset is its own length and words", () => {
+    expect(readingsWindowOf("24h", "", "")).toEqual({
+      minutes: 1440,
+      short: "in 24h",
+      long: "the last 24 hours",
+    })
+    expect(readingsWindowOf("1h", "", "").long).toBe("the last hour")
+  })
+
+  test("a custom range is its length; everything on disk has none", () => {
+    const now = Date.parse("2026-09-27T12:00:00Z")
+    expect(readingsWindowOf("custom", "2026-09-27T10:00:00Z", "", now)?.minutes).toBe(120)
+    expect(
+      readingsWindowOf("custom", "2026-09-27T10:00:00Z", "2026-09-27T10:30:00Z", now)?.minutes,
+    ).toBe(30)
+    expect(readingsWindowOf("custom", "", "", now)).toBeUndefined()
+    expect(readingsWindowOf("all", "", "", now)).toBeUndefined()
   })
 })

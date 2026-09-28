@@ -13,6 +13,7 @@ import {
   Layers,
   Pause,
   Play,
+  SettingsSliders,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { plural, timestamp } from "@/lib/format"
@@ -37,7 +38,7 @@ import {
   structuredText,
 } from "@/components/logs/log-text"
 import { FieldValue } from "@/components/logs/field-value"
-import { eventColumnFor } from "@/components/logs/logs-model"
+import { buildRows, columnWidthFor, eventColumnFor, type Row } from "@/components/logs/logs-model"
 import { LOG_TIMES, TIME_WIDTH, formatLogTime, setLogView, useLogView } from "@/lib/log-view"
 import type { LogTime } from "@/lib/log-view"
 import { useMetrics } from "@/hooks/use-metrics"
@@ -48,140 +49,19 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { copyText } from "@/lib/clipboard"
-import { logLineKey } from "@/lib/log-line-key"
 
 function lineToText(line: LogLine, withTime: boolean) {
   const stamp = withTime && line.timestamp ? `${timestamp(line.timestamp)} ` : ""
   return `${stamp}${line.text}`
-}
-
-/**
- * The run of a stack trace shown before the rest folds away. A run one line
- * longer is shown whole: a fold that hides one line costs a line to say so.
- */
-const FOLD_AFTER = 3
-
-type Row =
-  | {
-      kind: "line"
-      key: number
-      line: LogLine
-      /** The stamp of the row drawn above, for the time column's `delta`. */
-      prev?: string
-      /** The record this line continues, when it is part of one. */
-      head?: LogLine
-      /** How many identical lines this row stands for, and when the first was. */
-      repeat?: number
-      since?: string
-    }
-  | { kind: "fold"; key: string; head: number; hidden: number; expanded: boolean }
-  | { kind: "divider"; key: string; line: LogLine; label: string }
-
-/**
- * What a line is compared on to call it a repeat: who said it, how loudly,
- * what it records, and the words — without the time the line itself leads
- * with, which is the one part a repeat never repeats.
- */
-const LEADING_TIME =
-  /^\[?(?:\d{4}[-/.]\d{2}[-/.]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?|[A-Z][a-z]{2} +\d{1,2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)\]?\s*/
-
-function sameAs(a: LogLine, b: LogLine) {
-  return (
-    a.source === b.source &&
-    a.level === b.level &&
-    a.event === b.event &&
-    (a.message ?? a.text.replace(LEADING_TIME, "")) ===
-      (b.message ?? b.text.replace(LEADING_TIME, ""))
-  )
-}
-
-function hasHit(line: LogLine, filter: LogFilterState | undefined) {
-  if (line.match?.length) return true
-  return filter ? highlightRanges(line.text, filter).length > 0 : false
-}
-
-/**
- * The rows the lines are drawn as. A record's continuation lines stay under
- * their head — the first few inline, the rest behind a fold unless one of
- * them is what the search found — a lens's lifecycle events get a rule across
- * the pane, and in the live tail a run of identical lines is one row with its
- * count. An orphan continuation at the top of the window (its head scrolled
- * out of the buffer) is drawn as the line it is.
- */
-function buildRows(
-  lines: LogLine[],
-  opts: {
-    dedupe: boolean
-    lens?: string
-    folds: ReadonlySet<number>
-    filter?: LogFilterState
-  },
-): Row[] {
-  const rows: Row[] = []
-  let prev: string | undefined
-  let head: { line: LogLine; key: number } | undefined
-  let last: Extract<Row, { kind: "line" }> | undefined
-  let lastHasRun = false
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (line.cont && head) {
-      let end = i
-      while (end < lines.length && lines[end].cont) end++
-      const run = lines.slice(i, end)
-      const long = run.length > FOLD_AFTER + 1
-      const expanded = long && opts.folds.has(head.key)
-      // A fold that hides what the search found is a result nobody sees.
-      const open = !long || expanded || run.slice(FOLD_AFTER).some((l) => hasHit(l, opts.filter))
-      const shown = open ? run : run.slice(0, FOLD_AFTER)
-      for (const cont of shown) {
-        rows.push({ kind: "line", key: logLineKey(cont), line: cont, prev, head: head.line })
-        prev = cont.timestamp ?? prev
-      }
-      if (long && (expanded || !open)) {
-        rows.push({
-          kind: "fold",
-          key: `fold:${head.key}`,
-          head: head.key,
-          hidden: run.length - FOLD_AFTER,
-          expanded,
-        })
-      }
-      lastHasRun = true
-      last = undefined
-      i = end - 1
-      continue
-    }
-
-    const key = logLineKey(line)
-    const startsRun = Boolean(lines[i + 1]?.cont)
-    if (opts.dedupe && last && !lastHasRun && !startsRun && sameAs(last.line, line)) {
-      last.repeat = (last.repeat ?? 1) + 1
-      last.since ??= last.line.timestamp
-      last.line = line
-      last.key = key
-      head = { line, key }
-      continue
-    }
-
-    const meta = line.event ? eventMeta(opts.lens, line.event, line.lens) : undefined
-    if (meta?.divider) {
-      rows.push({ kind: "divider", key: `divider:${key}`, line, label: meta.label })
-    }
-    last = { kind: "line", key, line, prev }
-    rows.push(last)
-    prev = line.timestamp ?? prev
-    head = { line, key }
-    lastHasRun = false
-  }
-  return rows
 }
 
 /** The event word a line draws in the level column, if its lens names one worth drawing. */
@@ -196,12 +76,17 @@ function markable(line: LogLine, lens: string | undefined) {
 // is width taken from the text.
 export { eventColumnFor }
 
+/**
+ * The lens columns whose drawing is not their text — an address with its
+ * network, a duration as its latency — take a width by kind. Every other kind
+ * is drawn as it is written and sized to what is on screen (`columnWidthFor`).
+ */
 const COLUMN_WIDTH: Partial<Record<LogFieldKind, string>> = {
   address: "w-28",
   duration: "w-14",
   status: "w-10",
   method: "w-20",
-  code: "w-16",
+  bytes: "w-16",
 }
 
 /**
@@ -257,6 +142,7 @@ export function LogConsole({
   lens,
   columns,
   collapseRepeats,
+  dividers,
   renderDetail,
 }: {
   lines: LogLine[]
@@ -291,6 +177,12 @@ export function LogConsole({
   columns?: string[]
   /** Whether a run of identical lines may collapse — the live tail, never History. */
   collapseRepeats?: boolean
+  /**
+   * Whether a lens's lifecycle events draw a rule across the pane: in one
+   * service's stream they mark its runs; in a whole host's they would rule
+   * off every timer that fired.
+   */
+  dividers?: boolean
   /** What opens under a line; `head` is the record a continuation line belongs to. */
   renderDetail?: (line: LogLine, head: LogLine | undefined) => React.ReactNode
 }) {
@@ -352,11 +244,12 @@ export function LogConsole({
     () =>
       buildRows(lines, {
         dedupe: Boolean(collapseRepeats && dedupe),
+        dividers,
         lens,
         folds,
         filter: clientFilter,
       }),
-    [lines, collapseRepeats, dedupe, lens, folds, clientFilter],
+    [lines, collapseRepeats, dedupe, dividers, lens, folds, clientFilter],
   )
   const eventColumn = useMemo(() => eventColumnFor(lines, lens), [lines, lens])
   // A lens column no line on screen has a value for is not drawn either. Keyed
@@ -366,6 +259,29 @@ export function LogConsole({
     [columns, lines],
   )
   const shownColumns = useMemo(() => (shownKey ? shownKey.split(",") : undefined), [shownKey])
+  // The widths of the columns drawn as their text, keyed on the widths
+  // themselves, so a new line redraws the rows only when it widens one.
+  const widthsKey = useMemo(
+    () =>
+      (shownColumns ?? [])
+        .filter((key) => !COLUMN_WIDTH[fieldOf(key).kind])
+        .map((key) => `${key}:${columnWidthFor(lines, key)}`)
+        .join(","),
+    [shownColumns, lines],
+  )
+  const columnWidths = useMemo(
+    () =>
+      Object.fromEntries(
+        widthsKey
+          .split(",")
+          .filter(Boolean)
+          .map((entry) => {
+            const [key, n] = entry.split(":")
+            return [key, Number(n)]
+          }),
+      ),
+    [widthsKey],
+  )
   const lineRows = useMemo(
     () => rows.filter((r): r is Extract<Row, { kind: "line" }> => r.kind === "line"),
     [rows],
@@ -425,7 +341,8 @@ export function LogConsole({
           chips are the thing to reach, and two more rows of chrome above the
           lines were two more rows of lines lost. The chips scroll and the
           toggles stay: in a sheet's narrow column the chips pushed Wrap off
-          the end, and it is the toggle a narrow pane needs most. */}
+          the end. In a narrow pane the switches for how the lines are drawn
+          are one menu, View: seven buttons left the chips room for one. */}
       <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-hairline px-2 py-1">
         <div className="scroll-affordance flex min-w-0 flex-1 [scrollbar-width:none] items-center overflow-x-auto [&::-webkit-scrollbar]:hidden">
           {leading}
@@ -446,20 +363,29 @@ export function LogConsole({
             }
           />
         )}
+        <ViewMenu
+          wrap={wrap}
+          time={time}
+          highlight={highlight}
+          dedupe={collapseRepeats ? dedupe : undefined}
+          className="@md:hidden"
+        />
         <ToolbarToggle
           active={wrap}
           onClick={() => setLogView({ wrap: !wrap })}
           icon={CodeWrap}
           label="Wrap"
           hint="Wrap long lines instead of scrolling sideways"
+          className="@max-md:hidden"
         />
-        <TimeMenu time={time} />
+        <TimeMenu time={time} className="@max-md:hidden" />
         <ToolbarToggle
           active={highlight}
           onClick={() => setLogView({ highlight: !highlight })}
           icon={BlendMode}
           label="Colour"
-          hint="Colour each line by what is in it, and show structured lines as their message and fields. Off shows every line exactly as written."
+          hint={COLOUR_HINT}
+          className="@max-md:hidden"
         />
         {collapseRepeats && (
           <ToolbarToggle
@@ -467,7 +393,8 @@ export function LogConsole({
             onClick={() => setLogView({ dedupe: !dedupe })}
             icon={Layers}
             label="Repeats"
-            hint="Collapse a run of identical lines into one with its count"
+            hint={REPEATS_HINT}
+            className="@max-md:hidden"
           />
         )}
         <ToolbarToggle
@@ -539,6 +466,7 @@ export function LogConsole({
                   lens={lens}
                   eventColumn={eventColumn}
                   columns={shownColumns}
+                  columnWidths={columnWidths}
                   renderDetail={renderDetail}
                 />
               )
@@ -652,6 +580,8 @@ type LineProps = {
   /** The event column's width in characters (`eventColumnFor`); none, the level's own. */
   eventColumn?: number | false
   columns?: string[]
+  /** The characters each column drawn as its text takes (`columnWidthFor`). */
+  columnWidths?: Record<string, number>
   repeat?: number
   since?: string
   /** A continuation line: its head already carries the level and the event. */
@@ -692,6 +622,7 @@ export const LogRow = memo(function LogRow({
   lens,
   eventColumn,
   columns,
+  columnWidths,
   repeat,
   since,
   cont,
@@ -795,13 +726,12 @@ export const LogRow = memo(function LogRow({
       {highlight &&
         columns?.map((key) => {
           const value = cont ? undefined : lineValue(line, key)
+          const width = COLUMN_WIDTH[fieldOf(key).kind]
           return (
             <span
               key={key}
-              className={cn(
-                "hidden shrink-0 overflow-hidden @min-[900px]:flex",
-                COLUMN_WIDTH[fieldOf(key).kind] ?? "w-16",
-              )}
+              className={cn("hidden shrink-0 overflow-hidden @min-[900px]:flex", width)}
+              style={width ? undefined : { width: `${columnWidths?.[key] || 6}ch` }}
             >
               {value && <FieldValue name={key} value={value} compact lens={lens} />}
             </span>
@@ -872,11 +802,91 @@ export const LogRow = memo(function LogRow({
   )
 })
 
+const COLOUR_HINT =
+  "Colour each line by what is in it, and show structured lines as their message and fields. Off shows every line exactly as written."
+const REPEATS_HINT = "Collapse a run of identical lines into one with its count"
+
+/**
+ * How the lines are drawn — wrapped, coloured, repeats collapsed, the time's
+ * reading — as one menu, for a pane too narrow for a switch each. Each item
+ * keeps the switch's name.
+ */
+function ViewMenu({
+  wrap,
+  time,
+  highlight,
+  dedupe,
+  className,
+}: {
+  wrap: boolean
+  time: LogTime
+  highlight: boolean
+  /** Absent where repeats never collapse: History. */
+  dedupe?: boolean
+  className?: string
+}) {
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="sm"
+              variant="ghost"
+              className={cn("h-7 shrink-0 gap-1.5 px-2 text-xs", className)}
+              aria-label="View"
+            >
+              <SettingsSliders className="size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>How the lines are drawn</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="min-w-48">
+        <DropdownMenuCheckboxItem
+          checked={wrap}
+          onCheckedChange={(checked) => setLogView({ wrap: checked })}
+        >
+          Wrap
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
+          checked={highlight}
+          title={COLOUR_HINT}
+          onCheckedChange={(checked) => setLogView({ highlight: checked })}
+        >
+          Colour
+        </DropdownMenuCheckboxItem>
+        {dedupe !== undefined && (
+          <DropdownMenuCheckboxItem
+            checked={dedupe}
+            title={REPEATS_HINT}
+            onCheckedChange={(checked) => setLogView({ dedupe: checked })}
+          >
+            Repeats
+          </DropdownMenuCheckboxItem>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Time</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={time}
+          onValueChange={(value) => setLogView({ time: value as LogTime })}
+        >
+          {LOG_TIMES.map((mode) => (
+            <DropdownMenuRadioItem key={mode.id} value={mode.id}>
+              {mode.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 /**
  * The time column's reading, as the Time toggle's menu. The accessible name
  * stays "Time", the name the switch it replaced had.
  */
-function TimeMenu({ time }: { time: LogTime }) {
+function TimeMenu({ time, className }: { time: LogTime; className?: string }) {
   return (
     <DropdownMenu>
       <Tooltip>
@@ -885,7 +895,7 @@ function TimeMenu({ time }: { time: LogTime }) {
             <Button
               size="sm"
               variant={time !== "off" ? "secondary" : "ghost"}
-              className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+              className={cn("h-7 shrink-0 gap-1.5 px-2 text-xs", className)}
               aria-label="Time"
             >
               <Clock className="size-3" />
@@ -924,6 +934,7 @@ function ToolbarToggle({
   label,
   hint,
   extra,
+  className,
 }: {
   active?: boolean
   onClick: () => void
@@ -932,6 +943,7 @@ function ToolbarToggle({
   hint: string
   /** A reading that stays visible at every width — the held count. */
   extra?: React.ReactNode
+  className?: string
 }) {
   return (
     <Tooltip>
@@ -939,7 +951,7 @@ function ToolbarToggle({
         <Button
           size="sm"
           variant={active ? "secondary" : "ghost"}
-          className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+          className={cn("h-7 shrink-0 gap-1.5 px-2 text-xs", className)}
           aria-label={label}
           aria-pressed={active}
           onClick={onClick}

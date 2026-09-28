@@ -1,16 +1,14 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ClockRewind, MagnifyingGlassMinus } from "@/components/icons"
-import { errorMessage, get } from "@/lib/api"
+import { ClockRewind, MagnifyingGlassMinus, RefreshClockwise } from "@/components/icons"
+import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
 import type { DeploymentRequests, LogLine, LogSearchResult, RequestEntry } from "@/lib/types"
 import { EMPTY_FILTER, filterQuery, type LogLevel } from "@/lib/log-filter"
 import { lensFor } from "@/lib/log-lenses"
-import { useLogView } from "@/lib/log-view"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import type { LogFields } from "@/components/logs/types"
 import {
   ServiceLogs,
@@ -20,10 +18,11 @@ import {
 } from "@/components/logs/service-logs"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { LineDetail } from "@/components/logs/line-detail"
-import { LogConsole, LogRow, eventColumnFor } from "@/components/logs/log-console"
+import { LogConsole } from "@/components/logs/log-console"
 import { EmptyState, ErrorState } from "@/components/state"
 import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipCount, FilterChip } from "@/components/tabs"
+import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { TileTrend } from "@/components/metrics/sparkline"
 import {
@@ -31,6 +30,9 @@ import {
   RequestsWorkspace,
   type RequestQuery,
 } from "@/components/deploy/requests-workspace"
+import { OutputLines } from "@/components/deploy/output-lines"
+import { PROXY_SILENT, proxyWindow } from "@/components/deploy/request-lines"
+import { ProductGlyph } from "@/components/product-logo"
 import type { StatusClass } from "@/lib/requests"
 import type { SiteErrorLog, SiteLogPlan } from "@/components/proxy/site-log-plan"
 
@@ -42,9 +44,6 @@ const ERRORS_WINDOW = 24 * 3_600_000
 
 /** The most lines the Errors view reads of one kind: the newest, as a search keeps them. */
 const ERRORS_LIMIT = 1000
-
-/** A failed request's own lines: this far either side of the second it was answered in. */
-const AROUND_REQUEST = 1_000
 
 /** The error log opened on a failed request: a minute either side, to see what led to it. */
 const AROUND_OPEN = 60_000
@@ -84,7 +83,7 @@ export function SiteLogs({
 }: {
   name: string
   plan: SiteLogPlan
-  /** The engine's name, for what the error lines are said to be: "nginx said". */
+  /** The engine's name, for who wrote the error lines: "nginx wrote no error…". */
   engine: string
 }) {
   const base = `/proxy/sites/${encodeURIComponent(name)}`
@@ -160,7 +159,6 @@ export function SiteLogs({
                     <FailedRequestLines
                       entry={entry}
                       errors={errors}
-                      engine={engine}
                       onOpen={() => openAround(entry)}
                     />
                   ) : undefined
@@ -267,13 +265,7 @@ function SiteReadings({
     enabled: Boolean(errors),
     only: UPSTREAM,
   })
-  const failed = readings.tiles.find((t) => t.reading.id === "upstream")
-  // The lens's own hint, in a quarter of the row, was cut off before it
-  // said what failed.
-  const upstream = failed && {
-    ...failed,
-    reading: { ...failed.reading, hint: "Refused, timed out, closed" },
-  }
+  const upstream = readings.tiles.find((t) => t.reading.id === "upstream")
 
   const summary = hour.data?.status === "available" ? hour.data.summary : undefined
   const buckets = summary?.buckets ?? []
@@ -383,100 +375,53 @@ function requestFields(entry: RequestEntry, errors: SiteErrorLog): LogFields {
 }
 
 /**
- * What the proxy wrote in its error log in the second a failed request was
- * answered in — "connect() failed (111: Connection refused) while connecting
- * to upstream" under the 502 it explains. The error log's lines carry the
- * host they were about, so a log other sites share is narrowed to this one's.
- * A second either side because nginx stamps both records to the second, and
- * the request's own time is when it was answered, after the failure it
- * explains. Nothing found says so, and what that means: the failure came
- * from behind the proxy.
+ * What the proxy wrote in its error log while a failed request was in flight
+ * and the second either side — "connect() failed (111: Connection refused)
+ * while connecting to upstream" under the 502 it explains. The error log's
+ * lines carry the host they were about, so a log other sites share is
+ * narrowed to this one's. Drawn as the deployment's opened request draws
+ * the same answer (`RequestLines`), with the same window and the same
+ * sentence when there is none: the failure came from behind the proxy.
  */
 export function FailedRequestLines({
   entry,
   errors,
-  engine,
   onOpen,
 }: {
   entry: RequestEntry
   errors: SiteErrorLog
-  engine: string
   onOpen: () => void
 }) {
-  const { time, highlight } = useLogView()
-  // On a phone the time column is width the answer needs, and the opened
-  // row above already says when; nginx's own stamp stays in its line.
-  const wide = useMediaQuery("(min-width: 640px)")
   const at = Date.parse(entry.time)
-  const fields = requestFields(entry, errors)
-  const said = usePoll(
-    (signal) =>
-      get<LogSearchResult>(
-        "/logs/search",
-        {
-          source: errors.source,
-          lens: errors.lens,
-          since: iso(at - (entry.durationMs ?? 0) - AROUND_REQUEST),
-          until: iso(at + AROUND_REQUEST),
-          order: "asc",
-          limit: 20,
-          ...filterQuery({ ...EMPTY_FILTER, levels: FAILURES, fields }),
-        },
-        signal,
-      ),
-    0,
-    [errors.source, entry.time, JSON.stringify(fields)],
-    { enabled: Number.isFinite(at) },
-  )
-  const lines = said.data?.lines ?? []
-  const eventColumn = eventColumnFor(lines, errors.lens)
-
+  if (!Number.isFinite(at)) return null
   return (
-    <section aria-label={`What ${engine} logged`} className="mt-3 border-t border-hairline pt-2.5">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-sans text-hint">
-        <span className="font-medium text-foreground">{engine} said</span>
-        <span className="text-muted-foreground">
-          {errors.shared && !narrowed(errors)
-            ? "within a second of this request, in the log every site shares"
-            : "within a second of this request"}
-        </span>
-        <Button size="xs" variant="ghost" className="ml-auto h-6 px-1.5" onClick={onOpen}>
+    <OutputLines
+      title="Proxy said"
+      facts={
+        <>
+          <ProductGlyph id={errors.lens === "caddy" ? "caddy" : "nginx"} className="size-3" />
+          <span className="truncate">
+            {logName(errors)}
+            {errors.shared && !narrowed(errors) ? ", which every site shares" : ""}
+          </span>
+        </>
+      }
+      query={{
+        source: errors.source,
+        lens: errors.lens,
+        ...proxyWindow(entry, at),
+        order: "asc",
+        limit: 20,
+        ...filterQuery({ ...EMPTY_FILTER, levels: FAILURES, fields: requestFields(entry, errors) }),
+      }}
+      empty={PROXY_SILENT}
+      action={
+        <Button size="xs" variant="ghost" className="h-6 px-1.5" onClick={onOpen}>
           <ClockRewind className="size-3" />
           Open in {logName(errors)}
         </Button>
-      </div>
-      {said.error ? (
-        <p className="mt-1.5 font-sans text-hint text-muted-foreground">
-          Could not read {logName(errors)}: {errorMessage(said.error)}
-        </p>
-      ) : !said.data ? (
-        <p className="mt-1.5 font-sans text-hint text-muted-foreground">
-          Reading {logName(errors)}…
-        </p>
-      ) : lines.length === 0 ? (
-        <p className="mt-1.5 font-sans text-hint text-muted-foreground">
-          {engine} logged nothing then, so the {entry.status} came from the application behind it
-          rather than from {engine} itself.
-        </p>
-      ) : (
-        // Wrapped whatever the console's setting: these few lines are the
-        // answer, and the part that says why is at the end of a long one.
-        <div className="mt-1.5 rounded-lg bg-surface-sunken py-1">
-          {lines.map((line, i) => (
-            <LogRow
-              key={i}
-              line={line}
-              time={wide ? time : "off"}
-              wrap
-              highlight={highlight}
-              lens={errors.lens}
-              eventColumn={eventColumn}
-              cont={line.cont}
-            />
-          ))}
-        </div>
-      )}
-    </section>
+      }
+    />
   )
 }
 
@@ -498,6 +443,12 @@ function failureKinds(lensId: string): { id: string; label: string; events: stri
 /**
  * The last day's failures in the error log that `fields` narrow it to, or
  * nothing asked while there is no such question.
+ *
+ * Read when the view opens and when its question changes, and again when the
+ * reader asks — not on a timer. Each read is a pass over a day of a log that
+ * on a Caddy ingress is every site's, two or three at once, and a view left
+ * open would keep them running; a poll also answered with new lines, which
+ * closed the one the reader had opened. Live is where fresh lines arrive.
  */
 function useFailures(
   errors: SiteErrorLog,
@@ -523,7 +474,7 @@ function useFailures(
       )
       return { res, since, until }
     },
-    30_000,
+    0,
     [errors.source, errors.lens, JSON.stringify(fields), limit, facets],
     { enabled: fields !== undefined },
   )
@@ -619,6 +570,16 @@ function SiteErrors({
     }
   }, [chosen, readingRes, certRes])
   const failure = all.error ?? certified.error ?? picked.error
+  // A read asked for is pending until it answers, which replaces the answer
+  // it was asked over.
+  const [asked, setAsked] = useState<{ data: unknown; error: unknown }>()
+  const pending = asked !== undefined && asked.data === all.data && asked.error === all.error
+  const again = () => {
+    setAsked({ data: all.data, error: all.error })
+    all.refresh()
+    certified.refresh()
+    picked.refresh()
+  }
 
   const narrowedTo: LogFields = chosen ? { event: chosen.events } : {}
   const openHistory = (fields: LogFields = narrowedTo) =>
@@ -689,27 +650,25 @@ function SiteErrors({
         ) : undefined
       }
       footer={
-        <Button
-          size="xs"
-          variant="ghost"
-          className="ml-auto h-5 px-1.5"
-          onClick={() => openHistory()}
-        >
-          <ClockRewind className="size-3" />
-          Open in History
-        </Button>
+        <span className="ml-auto flex items-center gap-1">
+          <IconAction
+            label="Read the errors again"
+            className="size-5"
+            pending={pending}
+            disabled={!all.data && !all.error}
+            onClick={again}
+          >
+            <RefreshClockwise />
+          </IconAction>
+          <Button size="xs" variant="ghost" className="h-5 px-1.5" onClick={() => openHistory()}>
+            <ClockRewind className="size-3" />
+            Open in History
+          </Button>
+        </span>
       }
       empty={
         failure && !shown ? (
-          <ErrorState
-            error={failure}
-            onRetry={() => {
-              all.refresh()
-              certified.refresh()
-              picked.refresh()
-            }}
-            className="max-w-lg"
-          />
+          <ErrorState error={failure} onRetry={again} className="max-w-lg" />
         ) : !shown ? (
           <EmptyState
             icon={MagnifyingGlassMinus}

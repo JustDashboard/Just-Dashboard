@@ -361,7 +361,10 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   the newest end took so long that the rest cannot fit in the time left, the rest is not started and
   the answer is one stretch up to the window's end, marked incomplete. `order=asc` keeps the forward
   read. A container's window goes to Docker as RFC 3339 with nanoseconds: in whole seconds an `until`
-  was cut back to the start of its second, and "the minute before the crash" lost the crash line.
+  was cut back to the start of its second, and "the minute before the crash" lost the crash line. The
+  journal's goes to `journalctl` to the microsecond and spelled `… UTC` (`journalTimeSpec`): it runs on
+  the host, reads a stamp with no zone in the host's local time, and moved every window by the host's
+  offset — leaving a hole before the newest records a tail search held.
 - **Nothing is offered that cannot be opened**: `Discover` runs `Allow` over the well-known paths, or an
   install that narrowed `JD_LOG_ROOTS` gets a rail of files that refuse to open. Source kinds that cannot
   be queried return an explanation in `missing`; an installed PM2 with no managed processes reports that
@@ -407,8 +410,10 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   its own. A lens marks such lines `Cont`, and `Stream` (`stream.go`) gives each the verdict of the head
   it follows: kept iff its head was, drawn in its head's level, never counted in `matched`, the
   histogram, the facets or the measure. Every reader runs the same four steps — `Skip` before parsing,
-  `ParseLine`, `Read`, `Keep` — and the text pre-reject may skip a line only while no kept record is
-  open. The gate resets per file and per stream, and a continuation line at the top of a window, whose
+  `ParseLine`, `Read`, `Keep` — and the text pre-reject may skip a line only while no lens reads the
+  stream and no kept record is open: a lens carries values forward (a transaction's Start-Date onto its
+  Upgrade line, a connection's address onto the FATAL that ends it), so a line it never saw would read
+  one way with a query and another without, and lose the stamp that keeps it out of a window. The gate resets per file and per stream, and a continuation line at the top of a window, whose
   head nobody saw, stands on its own. Docker's and the journal's own stamps are re-applied after the
   reader, so no lens can move a line in time.
 - **Detection runs in the handlers, never in the search or the tail** (`DetectLens`), so those read
@@ -471,8 +476,13 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   history is the stack's too — merged by Docker's stamps, each line's `source` the service and its attrs
   carrying `service` and the short `container`, each container read through its own lens with its own
   record gate. The tail opens on each container's last n merged by stamp and then follows each running
-  one from its own last stamp; history and export merge into one collector, so a stack's search has one
-  limit, one histogram and one set of facets. `journal-id:<ident>[,<ident>…]` is `journalctl -t` per
+  one from its own newest stamp (the newest, not the last read: stdout and stderr arrive through two
+  pipes, out of order). Docker ends a follow when its container stops, and restarts, crash loops and
+  redeploys are stops while the rest of the stack runs on, so every `stackRejoin` (2 s) the project's
+  containers are listed again and one that runs and is not followed is — the same container from its own
+  newest line, a redeploy's replacement from the newest line its service sent, one stopped when the
+  socket opened from then; the socket sends `eof` once nothing in the stack runs. History and export
+  merge into one collector, so a stack's search has one limit, one histogram and one set of facets. `journal-id:<ident>[,<ident>…]` is `journalctl -t` per
   identifier (1–16, each `procs.ValidateName`'d) and `kernel:` is `journalctl -k`; both are followable and
   searchable like `journal:`. `/logs/sources` lists one stack per compose project with its `images` and
   a status; `Source` and `LogJournalUnit` carry `lens`. `GET /logs/source?source=<id>` describes one
@@ -486,7 +496,11 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
   `secure` (with their numbered generations, `auth.log.1` and `secure-20240612`, and any file resolving
   to one of them), the `ssh`/`sshd` units and their `ssh@`/`sshd@` instances, and a `journal-id:` naming
   `sshd`, `sshd-session`, `sshd-auth`, `sudo`, `su`, `login` or `systemd-logind`; `/logs/sources` leaves
-  those files and units out for a non-admin, so nothing is offered that cannot be opened. The reason is
+  those files and units out for a non-admin, so nothing is offered that cannot be opened. A file is also
+  gated when one of its rotated generations resolves to auth data, since a search with archives reads
+  them, and so is a PM2 process whose out or error file does: its owner names them. Whatever the gate,
+  a generation is read only when it resolves inside the roots itself (`searchPaths` runs `Allow` on
+  each), since a name beside the live file can be a link to anywhere. The reason is
   `/logins/failed`'s: "Invalid user <what was typed>" is sometimes a password typed into the username
   prompt, and a sudo line carries the command that was run. **The whole journal (`journal:`) stays
   readable at `read`**, as it was before the gate existed — narrowing it to sshd is what is gated — and
@@ -520,7 +534,9 @@ level's column (`eventMeta` in `lib/log-lenses.ts`: "auth failed" says more than
 names an event (`LEVEL_MARK` in `lib/log-filter.ts`, `LEVEL_WORD` in `log-text.tsx`); with Colour on, up
 to three of the lens's columns for values its text buries (a Postgres line's duration, user and
 database, drawn by `field-value.tsx`), shown only while some line on screen has one and only from 900 px
-of the console's own width; the journal unit or a stack's service in its lane's hue; then the message
+of the console's own width — one drawn as its text (an upstream, a jail, a namespace) as wide as its
+longest value on screen within 6–24 characters (`columnWidthFor`), an address, a duration or a status by
+its kind; the journal unit or a stack's service in its lane's hue; then the message
 drawn by its shapes: `lib/log-tokens.ts` cuts the text into spans (time, host, program, pid, level, key,
 string, number, address, URL, path, method, status, id, failure and success words) over the original
 string, so the server's match ranges still intersect them, and `log-text.tsx` colours them from one map
@@ -531,15 +547,19 @@ washed, warnings too; `stderr` is a muted mark, not a verdict, since Postgres wr
 line the server parsed as structured (`message` and `fields` on the wire) is drawn as its message and
 fields in logfmt order, most telling field first — except in a History result, whose match ranges are
 over the raw JSON. A record's continuation lines stay under their head, three inline and the rest behind
-an "N more lines" fold that a search hit inside forces open; a lens's lifecycle events (`divider`: a unit
-started, an application came up) draw a rule across the pane; and in Live, consecutive repeats — same
-source, level, event and words, the leading time aside — are one row with `×N` (the Repeats toggle).
+an "N more lines" fold that a search hit inside forces open; a run's start (`divider`: a unit started,
+an application came up) draws a rule across the pane of one service's stream — a container, a process,
+a stack, an application's file, a unit's journal (`oneService`) — and never across a whole host's, where
+it ruled off every timer that fired; and in Live, consecutive repeats — same source, level, event and
+words, the leading time aside — are one row with `×N` (the Repeats toggle), keeping the first line's key
+so an opened row stays open as the run grows.
 Tokens are cached by text, because a server's log repeats itself, and each row is memoised and keyed by
 its arrival (`lib/log-line-key.ts`, a `WeakMap` sequence on the line object) rather than its buffer
 position, because the live tail appends and trims: evicting old lines at the 4,000-line cap reuses the
 retained rows and keeps the opened line attached to its text, the weak keys hold no evicted history, and
 identical messages from separate arrivals keep separate keys. A "Colour" toggle, persisted with Wrap, Time and Repeats in `lib/log-view.ts`, shows every line exactly as
-written. A press on a line — only when nothing is selected, so a drag still copies — opens it **in place**
+written. Below a console width of 28rem those four are one **View** menu beside Pause, Copy and Clear:
+seven buttons left the level chips room for one. A press on a line — only when nothing is selected, so a drag still copies — opens it **in place**
 (`line-detail.tsx`, the request row's shape): the event as its title, its values as facts drawn as what
 they are, each with "Only lines where …" and "Hide lines where …", the raw text in a `Well` (indented
 when it is JSON), and "Lines around this", two searches either side of the line's instant with nothing
@@ -549,13 +569,16 @@ container as its image, nginx, PM2, the system files as the host's distribution,
 it names one). The console uses `content-visibility` rather than a virtualiser: off-screen rows skip
 layout while the scrollbar stays honest, wrapped rows keep real heights, and the browser's own find
 still works. The level chips carry the on-screen counts and share their swatches (`LEVEL_DOT`) with the
-level column and the histogram. **Pausing holds incoming lines instead of dropping them.**
+level column and the histogram. **Pausing holds incoming lines instead of dropping them**, a new
+question's opening window included — the empty pane then says how many are held and offers Resume,
+rather than that nothing matches.
 `histogram.tsx` is matches over time by level, or by the key a search split them by (a status class in
 its family's colour, events by their tone); clicking a column narrows the window to it.
 
 **A lens's presentation is data** (`lib/log-lenses.ts`, types only from `lib/log-fields.ts`, which names
 each attr's label and kind): per lens, its event labels and tones (`mark: false` for the high-volume
-neutral ones — a request, a connection — which keep the level word; `divider` for the lifecycle ones),
+neutral ones — a request, a connection — which keep the level word; `divider` for a run's start:
+systemd's `started` and an application's `startup`; a hint under 25 characters, one line of a tile),
 its **quick views** (a question as fields and levels: Postgres's Slow, Auth, Locks, Maintenance), its
 **readings** (figures over the lens's window), its **groups** (a key ranked under the group's own
 predicates, with a sample and a measure: slow statements by their shape with the query beside it,
@@ -565,15 +588,21 @@ reads the Go golden (`testdata/lenses.golden.json`) and holds the registry to wh
 ways. `lens-bar.tsx` is the lens's one row, scrolling sideways: what is narrowed first, as chips that go
 on a press; one **Fields** chip opening a popover of each facet's top values (a press includes, an icon
 excludes); then the quick views with their counts — from History's facets, or tallied over the lines on
-screen in Live. Applying a view replaces the question's fields and levels; pressing it again lets them
-go. `insights.tsx` is **Insights**, any lens's version of the request log's: one overview search
+screen in Live — except a view a tile the page draws already answers (`answered`), which carries no
+count of its own under the tile's. A unit's journal adds systemd's Failures to its own lens's views,
+since most of a failing unit's journal is the manager's lines about it. Applying a view replaces the
+question's fields and levels; pressing it again lets them go. A lens whose defaults are levels alone
+(ClickHouse's "Info and above") shows them as the defaults chip too, and they go with it when the pane
+moves to a source in another lens, unless the reader changed them. `insights.tsx` is **Insights**, any lens's version of the request log's: one overview search
 (`facets`, the measure, `histogramBy=event`) and one per group, in parallel, over the window and the
 filter on screen, drawn as the events over time, a `BarList` per key (a press narrows and stays),
 the measure's ladder where it is milliseconds, each group as a ranked table and the log's patterns last.
 `lens-readings.tsx` is the readings: those on one key share a search, those on levels another, and a
 distinct count asks on its own (`lib/log-insights.ts`), read again each minute and independent of the
-filter on screen; a page with a `StatGrid` of its own takes the tiles from `useLensReadings` (`only`
-names the ones it draws, and the rest are not searched for).
+filter on screen, over the lens's window — or, in Insights, over the window the reader picked
+(`readingsWindowOf`), so the tiles and the figures under them are of one stretch of time; a page with a
+`StatGrid` of its own takes the tiles from `useLensReadings` (`only` names the ones it draws, and the
+rest are not searched for) and hands them to the pane (`answeredBy`).
 
 **`service-logs.tsx` is the one thing a page that shows a service's log embeds** — a database's server
 log, a container's output, a site's access log, a unit's journal — so no page sends the reader to
@@ -589,7 +618,8 @@ or a server without the route, loses the facts and nothing else; `described` ski
 source the page already asked about; a 403 is a refusal said as the server's sentence, with no socket
 and no search — keeps its state for the tab under the page's `storageKey` (never `logs.*`, which is the
 host page's) or in React state without one, opens an emptied file with its rotated set, clears the
-fields when the source's lens changes, and issues no search on mount but History's own run.
+fields when the source's lens changes, keeps a **Read as** on the source it was chosen on, and issues
+no search on mount but History's own run.
 `service-views.tsx` is where a source's page views are defined once, for the owning page and `/logs`
 alike: `docker:` and `stack:` get Events, a unit's journal Runs, a container or a host log that is a saved
 connection's server Queries (a container through `/databases/fleet`, a file or unit by asking each of

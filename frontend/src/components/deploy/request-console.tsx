@@ -640,7 +640,10 @@ function RequestDetail({
   const action = "w-full font-sans max-sm:h-9 sm:w-auto"
 
   return (
-    <div className="animate-rise border-y border-hairline bg-background px-4 py-3 pl-[1.125rem]">
+    // Its facts are laid out by the width it is given, not the window's: in the
+    // logs page's workbench it stands beside the source rail, and three
+    // columns chosen by the viewport cut every value there.
+    <div className="@container animate-rise border-y border-hairline bg-background px-4 py-3 pl-[1.125rem]">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline pb-2 font-sans text-xs">
         {mark}
         <span className="text-body font-medium">
@@ -659,7 +662,7 @@ function RequestDetail({
         )}
       </div>
 
-      <dl className="mt-2.5 grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">
+      <dl className="mt-2.5 grid grid-cols-1 gap-x-6 gap-y-1.5 @lg:grid-cols-2 @4xl:grid-cols-3">
         {facts.map(([label, value, title]) => (
           <div key={label} className="flex min-w-0 gap-2">
             <dt className="w-20 shrink-0 font-sans text-hint leading-5 text-muted-foreground">

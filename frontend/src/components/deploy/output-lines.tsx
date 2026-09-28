@@ -45,10 +45,13 @@ export function OutputLines({
   }>()
   const key = JSON.stringify(query)
 
+  // The lens the lines were asked through names their events when the answer
+  // does not say which it read them with.
+  const asked = typeof query.lens === "string" ? query.lens : undefined
   useEffect(() => {
     const controller = new AbortController()
     get<LogSearchResult>("/logs/search", query, controller.signal).then(
-      (result) => setState({ key, lines: result.lines ?? [], lens: result.lens }),
+      (result) => setState({ key, lines: result.lines ?? [], lens: result.lens || asked }),
       (err) => {
         if (!controller.signal.aborted) setState({ key, error: errorMessage(err) })
       },

@@ -13,6 +13,20 @@ const CADDY_FAILURES = ["upstream_refused", "upstream_timeout", "error"]
 
 const iso = (ms: number) => new Date(ms).toISOString()
 
+/** What a proxy with nothing to say about a failure means, wherever its lines are asked for. */
+export const PROXY_SILENT =
+  "The proxy wrote nothing about this request, so the error was the application's own answer."
+
+/**
+ * Where the proxy's lines about one failed request are looked for: while it
+ * was in flight, and a second either side, since proxies stamp their lines
+ * to the second and a request's time is when it was answered, after the
+ * failure that explains it. One rule for a deployment's request and a site's.
+ */
+export function proxyWindow(entry: RequestEntry, at: number) {
+  return { since: iso(at - (entry.durationMs ?? 0) - 1000), until: iso(at + 1000) }
+}
+
 /**
  * What was written while one request was in flight, inside the request.
  *
@@ -27,8 +41,8 @@ const iso = (ms: number) => new Date(ms).toISOString()
  * and the block's words say that instead of "in flight".
  *
  * A failure also gets what the proxy said about it: Caddy's error line for
- * the same host within two seconds, read off the ingress container's output
- * through the caddy lens, or the site's nginx error file. "dial tcp
+ * the same host while it was in flight (`proxyWindow`), read off the ingress
+ * container's output through the caddy lens, or the site's nginx error file. "dial tcp
  * 172.18.0.5:3000: connect: connection refused" is the sentence a 502 row
  * could not say before; its absence says something too — the application
  * answered the error itself.
@@ -59,7 +73,7 @@ export function RequestLines({
             </>
           }
           query={proxy.query}
-          empty="The proxy wrote nothing about this request, so the error was the application's own answer."
+          empty={PROXY_SILENT}
         />
       )}
       {answering &&
@@ -107,7 +121,7 @@ export function RequestLines({
 
 /** Where the proxy in front of this deployment writes why it failed, asked about one request. */
 function proxyQuery(entry: RequestEntry, window: DeploymentRequests, at: number) {
-  const around = { since: iso(at - 2000), until: iso(at + 2000), limit: 5 }
+  const around = { ...proxyWindow(entry, at), limit: 5 }
   if (window.ingress) {
     return {
       product: "caddy",

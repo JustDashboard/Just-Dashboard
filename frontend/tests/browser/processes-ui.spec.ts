@@ -836,8 +836,12 @@ test("on a phone a unit's lines start at the sheet's edge and its controls stay 
   const message = (await row.locator(":scope > :last-child").boundingBox())!
   expect(message.x - pane.x).toBeLessThan(24)
   expect(message.x + 40).toBeLessThan(pane.x + pane.width)
-  // Wrap is what a narrow pane needs, and the tabs are all there to press.
-  await expect(sheet.getByRole("button", { name: "Wrap" })).toBeInViewport()
+  // The switches for how the lines are drawn are one menu, so the level chips
+  // keep their room, and Wrap — what a narrow pane needs — is in it.
+  await expect(sheet.getByRole("button", { name: "Wrap" })).toBeHidden()
+  await sheet.getByRole("button", { name: "View" }).click()
+  await expect(page.getByRole("menuitemcheckbox", { name: "Wrap" })).toBeVisible()
+  await page.keyboard.press("Escape")
   const modes = sheet.getByRole("navigation", { name: "Log mode" })
   await expect(modes.getByRole("button", { name: "Runs" })).toBeInViewport()
 })
