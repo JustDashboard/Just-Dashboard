@@ -460,6 +460,43 @@ func (s *Service) RevokeArgs(name string) ([]string, error) {
 	return []string{"revoke", "--non-interactive", "--cert-name", name, "--delete-after-revoke"}, nil
 }
 
+// DeleteArgs removes a lineage without revoking it: its live, archive and
+// renewal files go, so the renewal schedule stops trying to renew it — an
+// expired lineage for a domain that has moved elsewhere otherwise fails
+// every run. The certificate itself stays valid until it expires.
+func (s *Service) DeleteArgs(name string) ([]string, error) {
+	if !certNameRe.MatchString(name) {
+		return nil, fmt.Errorf("invalid certificate name")
+	}
+	return []string{"delete", "--non-interactive", "--cert-name", name}, nil
+}
+
+// CertificateInUseError refuses to delete a certificate an enabled nginx
+// site names: nginx keeps serving what it read at its last reload, and its
+// next configuration test fails on the missing file.
+type CertificateInUseError struct {
+	Name  string
+	Sites []string
+}
+
+func (e *CertificateInUseError) Error() string {
+	who := "those sites name"
+	if len(e.Sites) == 1 {
+		who = "that site names"
+	}
+	return fmt.Sprintf("%s is served by %s. Deleting it makes nginx's next reload fail until %s another certificate.",
+		e.Name, strings.Join(e.Sites, ", "), who)
+}
+
+// LineageInUse refuses a lineage an enabled site names, unless force.
+func (s *Service) LineageInUse(name string, force bool) error {
+	sites := s.lineageSites([]string{name})[name]
+	if len(sites) == 0 || force {
+		return nil
+	}
+	return &CertificateInUseError{Name: name, Sites: sites}
+}
+
 // lastMeaningfulLine picks the line worth putting in an error toast. certbot
 // prints a paragraph and buries the reason near the end.
 func lastMeaningfulLine(out string) string {

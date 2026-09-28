@@ -137,7 +137,12 @@ export function lineageActivity(
   lineage: Pick<CertbotCert, "name" | "domains">,
 ): string | undefined {
   if (replacingTestCertificate(job, lineage.domains)) return "Replacing…"
-  if (!certbotRunning(job) || job?.target !== lineage.name) return undefined
+  if (!certbotRunning(job)) return undefined
+  // One delete job takes every lineage the clean-up checked, in turn.
+  if (job?.kind === "certbot.delete" && job.target?.split(", ").includes(lineage.name)) {
+    return "Deleting…"
+  }
+  if (job?.target !== lineage.name) return undefined
   if (job.kind === "certbot.revoke") return "Revoking…"
   if (job.kind === "certbot.renew") {
     return job.title.startsWith("Dry run") ? "Testing renewal…" : "Renewing…"

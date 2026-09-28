@@ -357,6 +357,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   through `/systemd/{unit}/enable` and `/start`. `DNSProvider.HasCredentials` reports a saved
   token without reading it, and `DELETE /certificates/dns-credentials/{provider}` removes one
   (destructive, ordinary confirmation, audited as `certificates.dns.credentials.remove`).
+- **Deleting a certificate revokes nothing.** `POST /certificates/delete {names, force}` runs
+  `certbot delete --non-interactive --cert-name` (`DeleteArgs`) for each lineage in turn in one
+  `certbot.delete` job; `DELETE /certificates/imported/{name}?force=1` removes
+  `importedDir/<name>` (a real directory only, named by `importNameRe`; Caddy release copies are
+  refused and stay with the evidence prune). Both are destructive with an ordinary confirmation,
+  audited as `certificates.delete` / `certificates.imported.delete`, and answer 409 `in_use`, the
+  message naming the sites, while an enabled nginx site's `ssl_certificate` resolves inside the
+  lineage or import — unless `force`, which the page sends only after its dialog has named those
+  sites. Host-Caddy `tls` file references are not detected. The page's "Delete expired and unused"
+  checklist offers expired certbot/imported certificates whose `UsedBy` is empty and never forces.
 - **Two layouts, and files that are not sites.** `nginxVHosts` (`vhosts.go`, with the rest of the
   listing and `SetVHostEnabled`) reads sites-available where it exists and conf.d where it does not
   (every RPM distro, Alpine, Arch — most of the servers this runs on); the difference reaches the UI as an

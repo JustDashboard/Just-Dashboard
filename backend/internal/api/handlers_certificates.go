@@ -62,6 +62,11 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 			// the certificate is no longer to be trusted, and every
 			// client holding it starts refusing the site.
 			r.Method(http.MethodPost, "/revoke", s.handle(s.handleCertRevoke))
+			// Deleting without revoking leaves the certificate valid where
+			// a copy of it is, and removes only this host's files and its
+			// renewal: the ordinary confirmation, no phrase.
+			r.Method(http.MethodPost, "/delete", s.handle(s.handleCertDelete))
+			r.Method(http.MethodDelete, "/imported/{name}", s.handle(s.handleImportedDelete))
 		})
 	})
 }
@@ -557,6 +562,85 @@ func (s *Server) handleCertRevoke(w http.ResponseWriter, r *http.Request) error 
 		_, err := certbotJob(ctx, out, args, "")
 		return err
 	})
+}
+
+type certDeleteRequest struct {
+	// Names are certbot lineages, deleted one after another in one job:
+	// certbot holds one lock for all of its work.
+	Names []string `json:"names"`
+	// Force deletes a lineage an enabled site serves.
+	Force bool `json:"force"`
+}
+
+// handleCertDelete runs certbot delete over lineages, which removes their
+// files and renewal configuration and revokes nothing. A lineage an enabled
+// site serves is refused before the job starts unless the operator
+// acknowledged it.
+func (s *Server) handleCertDelete(w http.ResponseWriter, r *http.Request) error {
+	var req certDeleteRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if len(req.Names) == 0 {
+		return httpx.BadRequest("names is required")
+	}
+	runs := make([][]string, 0, len(req.Names))
+	var served []string
+	for _, name := range req.Names {
+		args, err := s.modules.proxy.DeleteArgs(name)
+		if err != nil {
+			return httpx.BadRequest("%v", err)
+		}
+		if err := s.modules.proxy.LineageInUse(name, req.Force); err != nil {
+			return certificateInUse(err)
+		}
+		served = append(served, s.modules.proxy.SitesServingLineages([]string{name})...)
+		runs = append(runs, args)
+	}
+	target := strings.Join(req.Names, ", ")
+	httpx.SetAudit(r, "certificates.delete", target,
+		map[string]any{"force": req.Force, "servedBy": served, "streamed": true})
+	return s.startCertbotJob(w, r, jobs.Spec{
+		Kind: "certbot.delete", Title: "Deleting " + target, Target: target, Timeout: 5 * time.Minute,
+	}, func(ctx context.Context, out jobs.Emitter) error {
+		out.Status("certbot deletes the files and the renewal configuration and revokes nothing: a copy of the certificate elsewhere stays valid until it expires.")
+		for i, args := range runs {
+			if _, err := certbotJob(ctx, out, args, ""); err != nil {
+				return fmt.Errorf("%s: %w", req.Names[i], err)
+			}
+			out.Status("Deleted %s.", req.Names[i])
+		}
+		if len(served) > 0 {
+			out.Status("nginx keeps serving what it read at its last reload. Point %s at another certificate before the next reload, which fails until then.",
+				strings.Join(served, ", "))
+		}
+		return nil
+	})
+}
+
+// handleImportedDelete removes an imported certificate and its key.
+func (s *Server) handleImportedDelete(w http.ResponseWriter, r *http.Request) error {
+	name := chi.URLParam(r, "name")
+	force := r.URL.Query().Get("force") == "1"
+	err := s.modules.proxy.DeleteImportedCertificate(name, force)
+	var inUse *proxysvc.CertificateInUseError
+	switch {
+	case errors.As(err, &inUse):
+		return certificateInUse(err)
+	case errors.Is(err, proxysvc.ErrImportNotFound):
+		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
+	case err != nil:
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "certificates.imported.delete", name, map[string]any{"force": force})
+	httpx.NoContent(w)
+	return nil
+}
+
+// certificateInUse is the refusal to delete a certificate a site serves; its
+// message names the sites.
+func certificateInUse(err error) error {
+	return httpx.Err(http.StatusConflict, "in_use", err.Error())
 }
 
 func (s *Server) handleDNSProviders(w http.ResponseWriter, r *http.Request) error {

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Copy, Inspect, ShieldCheck, Warning } from "@/components/icons"
+import { Copy, Inspect, ShieldCheck, Trash, Warning } from "@/components/icons"
 import { certbotRunning, replacingTestCertificate } from "@/lib/certificates"
 import { copyText } from "@/lib/clipboard"
 import { calendarDate } from "@/lib/format"
@@ -46,6 +46,7 @@ export function CertificateInventory({
   canScan,
   job = null,
   onReplace,
+  onDelete,
 }: {
   certs: Certificate[]
   canScan: boolean
@@ -53,6 +54,8 @@ export function CertificateInventory({
   job?: Job | null
   /** Opens the real issuance for a test certificate's names; absent where nobody here can issue. */
   onReplace?: (domains: string) => void
+  /** Deletes a certbot lineage or an import; absent for anyone who may not. */
+  onDelete?: (cert: Certificate) => void
 }) {
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<"all" | "attention" | "caddy">("all")
@@ -99,6 +102,10 @@ export function CertificateInventory({
   const selectedCert = certs.find((cert) => cert.path === selected)
   const scanDomain = selectedCert?.domains.find((domain) => !domain.startsWith("*"))
   const selectedReplace = selectedCert && replaceVerb(selectedCert)
+  // Only certbot's lineages and the imports are this host's to delete: a
+  // file a site names elsewhere is the site's, and Caddy renews its own.
+  const deletable =
+    onDelete && (selectedCert?.source === "certbot" || selectedCert?.source === "imported")
 
   return (
     <div className="min-w-0 space-y-4">
@@ -209,6 +216,20 @@ export function CertificateInventory({
                     <Inspect className="size-3.5" />
                     TLS report
                   </Link>
+                </Button>
+              )}
+              {deletable && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={selectedCert.source === "certbot" && certbotRunning(job)}
+                  onClick={() => {
+                    setSelected(null)
+                    onDelete(selectedCert)
+                  }}
+                >
+                  <Trash className="size-3.5" />
+                  Delete
                 </Button>
               )}
               {selectedReplace && (
