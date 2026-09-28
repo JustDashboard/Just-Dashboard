@@ -421,14 +421,27 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   an address, unique together, so a mail server can be watched on 443 and 993; `watched_domains` held
   one row per name and a second port replaced the first. Its rows are copied in on every boot with
   `INSERT OR IGNORE`, which brings nothing back because an unwatch deletes the `watched_domains` row as
-  well. Each endpoint keeps its last check (`checked_at`, `certificate` as JSON). Only an
-  administrator's `GET /certificates/watched` handshakes, and stores what it found; every other account
-  reads the stored result — the list is readable by all, and the handshake is outbound traffic a
-  read-only account may not cause. The checks run eight at a time under one 30-second budget, through
-  `CheckEndpoint` (`tlsscan.go`), whose dial ends with the context — `CheckDomain`'s ignores it, and 33
-  silent endpoints once held the request 40 seconds. The stalest endpoints go first; one still in flight
-  or not started when the budget ends keeps its stored result and time, so a long list is covered over
-  successive visits. What was found is stored even if the viewer has left.
+  well. Each endpoint keeps its last check (`checked_at`, `certificate` as JSON) and may name an `ip` to
+  reach the name at (an origin behind a CDN): the handshake then goes there and still asks for, and is
+  verified against, the name (`CheckEndpointAt`). `GET /certificates/watched` only reads; no visit
+  handshakes. The server checks on its own schedule: `proxysvc.TLSMonitor` (`tlsmonitor.go`, started in
+  `startProxyExtras`, stopped in `stopProxyExtras`) looks every minute for endpoints whose last check is
+  older than the interval (setting `certificates.watch.interval`, default 300 s, 60–86400 s; read by any
+  account at `GET /certificates/watch-schedule`, set by `system.admin` at `PUT`), and
+  `POST /certificates/watched/check` (`system.admin`, audited) checks all now under a 30-second budget and
+  answers with the list. Either way eight run at a time, stalest first, through `CheckEndpoint`, whose dial
+  ends with the context; one still in flight or not started when the budget ends keeps its stored result
+  and time. One pass at a time: a caller waiting for a scheduled pass waits only as long as its own budget.
+  Every check also goes into `watched_checks` (days left, fingerprint, error; 2000 per endpoint and 90
+  days, cascading with the endpoint), read at `GET /certificates/watched/{id}/history`.
+- **TLS report history.** Every quick scan that runs to its end (not one its caller cancelled) is stored in
+  `tls_scans` (grade, days left, fingerprint, reachability and the report as JSON; 100 per target and 180
+  days). `GET /certificates/reports?domain=&port=` lists a target's reports newest first and
+  `GET /certificates/reports/{id}` returns one with `changes` against the report before it
+  (`proxysvc.DiffScans`, `tlsdiff.go`: reachability, grade, certificate replaced, trust, key, negotiated
+  and per-protocol status, HSTS, each security header and the port-80 redirect). Both only read, so every
+  account may; `DELETE /certificates/reports?domain=&port=` is destructive and audited. Deep scans are not
+  stored, and a successful scan records no connected address, so an address change is not diffed.
 - **`dns01.go` — wildcards and CDN-fronted domains**, which between them are most of the certificates
   people want: Let's Encrypt signs `*.example.com` only against DNS-01, and a Cloudflare-proxied domain
   never receives an HTTP challenge. Eight certbot plugins as a closed set (each names credentials and

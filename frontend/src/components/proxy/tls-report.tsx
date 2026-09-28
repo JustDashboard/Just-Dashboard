@@ -44,6 +44,7 @@ import { Button } from "@/components/ui/button"
 import { Field } from "@/components/form"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 import { DeepScanSection } from "@/components/proxy/tls-ciphers"
+import { ScanHistoryPanel, useScanHistory } from "@/components/proxy/tls-history"
 
 /**
  * What a visitor actually gets, graded.
@@ -146,7 +147,11 @@ export function TLSReportPage() {
     setCancelled({ key: targetKey, after, over: report.data !== undefined })
     setRescanOver(undefined)
   }
-  const scan = report.data ?? null
+  // A past report the reader opened, else the live one, else the last one
+  // stored: the page shows that at once while a new scan runs, and to an
+  // account that may not scan at all.
+  const history = useScanHistory(target, report.data?.checkedAt)
+  const scan = history.viewing?.report ?? report.data ?? history.latest?.report ?? null
   const busy = report.loading || rescanning
   const scanned = scan ? targetLabel({ host: scan.domain, port: scan.port }) : ""
 
@@ -710,6 +715,7 @@ export function TLSReportPage() {
           <DeepScanSection scan={scan} />
         </div>
       )}
+      {target && <ScanHistoryPanel history={history} target={target} admin={admin} />}
     </Page>
   )
 }

@@ -1,31 +1,64 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Globe, Inspect, RefreshClockwise, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { ApiError, del, get, post } from "@/lib/api"
-import { calendarDate, relativeTime } from "@/lib/format"
-import { parseScanTarget, targetLabel, tlsReportHref } from "@/lib/scan-target"
-import type { Certificate } from "@/lib/types"
+import { ApiError, del, get, post, put } from "@/lib/api"
+import { calendarDate, duration, plural, relativeTime } from "@/lib/format"
+import { parseScanTarget, scanSuggestions, targetLabel, tlsReportHref } from "@/lib/scan-target"
+import type { Certificate, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FormSection, FormSections } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
+import { Sparkline } from "@/components/metrics/sparkline"
 import { ErrorState, LoadingRows } from "@/components/state"
 import { VerbBar } from "@/components/verbs"
 import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { certificateProduct } from "@/components/proxy/marks"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 type Watched = {
   id: number
   domain: string
   port: number
+  /** The address the name is reached at instead of where DNS points. */
+  ip?: string
   /** When the certificate was read; absent until the first check. */
   checkedAt?: string
   certificate?: Certificate
+}
+
+type WatchedCheck = { checkedAt: string; daysLeft?: number; fingerprint?: string; error?: string }
+
+/** The schedule's choices, in seconds; the server takes 60 to 86400. */
+const INTERVALS = [
+  { seconds: 60, label: "every minute" },
+  { seconds: 300, label: "every 5 minutes" },
+  { seconds: 900, label: "every 15 minutes" },
+  { seconds: 3600, label: "every hour" },
+  { seconds: 21600, label: "every 6 hours" },
+  { seconds: 86400, label: "every day" },
+]
+
+function intervalLabel(seconds: number) {
+  return (
+    INTERVALS.find((choice) => choice.seconds === seconds)?.label ?? `every ${duration(seconds)}`
+  )
+}
+
+function endpointLabel(row: Pick<Watched, "domain" | "port" | "ip">) {
+  const label = targetLabel({ host: row.domain, port: row.port })
+  return row.ip ? `${label} via ${row.ip}` : label
 }
 
 /**
@@ -33,55 +66,32 @@ type Watched = {
  * certificates because a live handshake can disagree with the file on disk,
  * and that disagreement is what they are for.
  *
- * Only an administrator's request checks them — the handshake is traffic to
- * another host, which a read-only account may not send — so everyone else
- * reads what the last check found, and every row says when that was.
+ * The server checks them on its own schedule, whoever has the page open or
+ * nobody, and every row says when its answer was read. Reading the list sends
+ * nothing; an administrator can ask for a check now.
  */
 export function WatchedDomains({ admin }: { admin: boolean }) {
   const router = useRouter()
   const [domain, setDomain] = useState("")
+  const [ip, setIp] = useState("")
   const [fieldError, setFieldError] = useState<string>()
   const [adding, setAdding] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [watchingSites, setWatchingSites] = useState(false)
   const [removing, setRemoving] = useState<number>()
-  // Endpoints removed since the list was fetched. Fetching it again would
-  // send an administrator's handshake to every other endpoint to show one
-  // fewer row, so a removal the server confirmed is taken off here instead.
+  // Endpoints removed since the list was fetched, kept off the screen until
+  // the next read confirms it.
   const [removed, setRemoved] = useState<number[]>([])
   const watched = usePoll(
     (signal) => get<Watched[]>("/certificates/watched", undefined, signal),
-    300_000,
+    60_000,
   )
-  // An administrator's request handshakes with every endpoint, which can take
-  // up to half a minute; usePoll keeps the old list on screen meanwhile and
-  // does not call that loading, so the re-check is tracked here until an
-  // answer or an error replaces the list it was asked over. An endpoint just
-  // added rides along: its row is on screen, being checked, from the moment
-  // the server has it, where it used to appear only when the whole list came
-  // back and nothing said anything was happening.
-  const [recheckOver, setRecheckOver] = useState<
-    Pick<typeof watched, "data" | "error"> & { added?: Watched }
-  >()
-  const rechecking =
-    recheckOver !== undefined &&
-    recheckOver.data === watched.data &&
-    recheckOver.error === watched.error
-  // Adding re-checks after its request returns, when the list this render
-  // closed over may already have been replaced; the one on screen is read.
-  const onScreen = useRef(watched)
-  useEffect(() => {
-    onScreen.current = watched
-  })
-  const recheck = (added?: Watched) => {
-    setRecheckOver({ data: onScreen.current.data, error: onScreen.current.error, added })
-    watched.refresh()
-  }
-  const added = rechecking ? recheckOver.added : undefined
-  // Watch stays busy until the new endpoint's first check is on screen: a
-  // second submission would restart the list's request and abandon it.
-  const watching = adding || added !== undefined
-  const rows = watched.data
-    ?.concat(added && !watched.data.some((row) => row.id === added.id) ? [added] : [])
-    .filter((row) => !removed.includes(row.id))
+  const settings = usePoll(
+    (signal) => get<{ intervalSeconds: number }>("/certificates/watch-schedule", undefined, signal),
+    0,
+  )
+  const interval = settings.data?.intervalSeconds
+  const rows = watched.data?.filter((row) => !removed.includes(row.id))
 
   const addDomain = async () => {
     // Read the way the TLS report reads its field: host:port for a service
@@ -92,19 +102,25 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
       setFieldError(parsed.error)
       return
     }
-    const label = targetLabel(parsed.target)
+    const label = endpointLabel({
+      domain: parsed.target.host,
+      port: parsed.target.port,
+      ip: ip.trim(),
+    })
     setAdding(true)
     try {
       const row = await post<Watched>("/certificates/watched", {
         domain: parsed.target.host,
         port: parsed.target.port,
+        ip: ip.trim() || undefined,
       })
       setDomain("")
+      setIp("")
       if (rows?.some((shown) => shown.id === row.id)) {
         notify.info(`${label} is already watched`)
       } else {
         notify.success(`Watching ${label}`)
-        recheck(row)
+        watched.refresh()
       }
     } catch (err) {
       notify.error("Could not watch domain", err)
@@ -113,8 +129,64 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
     }
   }
 
+  const checkNow = async () => {
+    setChecking(true)
+    try {
+      await post("/certificates/watched/check")
+      watched.refresh()
+    } catch (err) {
+      notify.error("Could not check the watched domains", err)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  // Every name a TLS site of this server answers, on the ports it serves TLS
+  // on, as the TLS report's field offers them.
+  const watchSites = async () => {
+    setWatchingSites(true)
+    try {
+      const sites = await get<VHost[]>("/proxy/vhosts")
+      const targets = scanSuggestions({ recent: [], sites: sites.filter((site) => site.tls) })
+        .map((suggestion) => parseScanTarget(suggestion.value).target)
+        .filter((target) => target !== undefined)
+        .filter(
+          (target) =>
+            !rows?.some((row) => !row.ip && row.domain === target.host && row.port === target.port),
+        )
+      if (targets.length === 0) {
+        notify.info("Every site domain is already watched")
+        return
+      }
+      const results = await Promise.allSettled(
+        targets.map((target) =>
+          post("/certificates/watched", { domain: target.host, port: target.port }),
+        ),
+      )
+      const failed = results.filter((result) => result.status === "rejected").length
+      if (failed > 0)
+        notify.error(`${failed} of ${targets.length} site domains could not be watched`)
+      else notify.success(`Watching ${plural(targets.length, "site domain")}`)
+      watched.refresh()
+    } catch (err) {
+      notify.error("Could not read this server's sites", err)
+    } finally {
+      setWatchingSites(false)
+    }
+  }
+
+  const changeInterval = async (seconds: number) => {
+    try {
+      await put("/certificates/watch-schedule", { intervalSeconds: seconds })
+      settings.refresh()
+      notify.success(`Watched domains are checked ${intervalLabel(seconds)}`)
+    } catch (err) {
+      notify.error("Could not change the schedule", err)
+    }
+  }
+
   const stopWatching = async (row: Watched) => {
-    const label = targetLabel({ host: row.domain, port: row.port })
+    const label = endpointLabel(row)
     setRemoving(row.id)
     try {
       await del(`/certificates/watched/${row.id}`)
@@ -136,15 +208,37 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
       <FormSection
         aside
         title="Watched domains"
-        hint={`${rows?.length ?? 0} watched, checked while an administrator has this page open`}
+        hint={
+          interval === undefined
+            ? `${rows?.length ?? 0} watched`
+            : `${rows?.length ?? 0} watched, checked by the server ${intervalLabel(interval)}`
+        }
         actions={
-          admin &&
-          rows &&
-          rows.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => recheck()} pending={rechecking}>
-              <RefreshClockwise className="size-3.5" />
-              {rechecking ? "Re-checking…" : "Re-check now"}
-            </Button>
+          admin && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void watchSites()}
+                pending={watchingSites}
+                disabled={watchingSites || !rows}
+              >
+                <Globe className="size-3.5" />
+                Watch every site domain
+              </Button>
+              {rows && rows.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void checkNow()}
+                  pending={checking}
+                  disabled={checking}
+                >
+                  <RefreshClockwise className="size-3.5" />
+                  {checking ? "Re-checking…" : "Re-check now"}
+                </Button>
+              )}
+            </div>
           )
         }
       >
@@ -152,7 +246,7 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
           <form
             onSubmit={(event) => {
               event.preventDefault()
-              if (domain.trim() && !watching) void addDomain()
+              if (domain.trim() && !adding) void addDomain()
             }}
             className="min-w-0"
           >
@@ -161,9 +255,11 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
             <Field
               label="Domain to watch"
               htmlFor="watch-domain"
+              hint="A name, host:port or URL, and optionally the IP address to reach it at"
+              info="With an address, the handshake goes to that server and still asks for the name, so an origin behind a CDN or one server of several behind one name is checked on its own."
               error={fieldError && <span className="wrap-anywhere">{fieldError}</span>}
             >
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap">
                 <Input
                   id="watch-domain"
                   value={domain}
@@ -177,42 +273,71 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
                   autoCapitalize="none"
                   autoCorrect="off"
                   inputMode="url"
+                  className="min-w-0 flex-1"
+                />
+                <Input
+                  id="watch-ip"
+                  aria-label="Reach it at this IP address (optional)"
+                  value={ip}
+                  onChange={(event) => setIp(event.target.value)}
+                  placeholder="IP address (optional)"
+                  spellCheck={false}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  className="min-w-0 font-mono sm:w-44"
                 />
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={!domain.trim() || watching}
-                  pending={watching}
+                  disabled={!domain.trim() || adding}
+                  pending={adding}
                 >
                   Watch
                 </Button>
               </div>
             </Field>
+            {interval !== undefined && (
+              <Field label="Check" htmlFor="watch-interval" className="pt-3">
+                <Select
+                  value={String(interval)}
+                  onValueChange={(value) => void changeInterval(Number(value))}
+                >
+                  <SelectTrigger id="watch-interval" className="w-full sm:w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INTERVALS.some((choice) => choice.seconds === interval) ? null : (
+                      <SelectItem value={String(interval)}>{intervalLabel(interval)}</SelectItem>
+                    )}
+                    {INTERVALS.map((choice) => (
+                      <SelectItem key={choice.seconds} value={String(choice.seconds)}>
+                        {choice.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
           </form>
         )}
         <div>
-          {watched.loading || (rechecking && watched.error) ? (
+          {watched.loading ? (
             <LoadingRows rows={2} />
           ) : watched.error ? (
-            <ErrorState error={watched.error} onRetry={() => recheck()} />
+            <ErrorState error={watched.error} onRetry={watched.refresh} />
           ) : !rows?.length ? (
             <p className="py-2 text-body text-muted-foreground">
-              Nothing watched yet. A watched domain is checked with a real handshake when an
-              administrator opens this page and every five minutes while it stays open, which is
-              what catches a certificate renewed on disk and never reloaded.
+              Nothing watched yet. The server checks a watched domain with a real handshake on its
+              own schedule, which is what catches a certificate renewed on disk and never reloaded.
             </p>
           ) : (
             <ChoiceList aria-label="Watched domains" className="animate-rise">
               {rows.map((row) => (
                 <ChoiceRow
                   key={row.id}
-                  verb={
-                    admin
-                      ? `Inspect ${targetLabel({ host: row.domain, port: row.port })}`
-                      : row.domain
-                  }
+                  verb={admin ? `Inspect ${endpointLabel(row)}` : endpointLabel(row)}
                   disabled={!admin}
-                  busy={rechecking || removing === row.id}
+                  busy={removing === row.id}
                   href={admin ? tlsReportHref({ host: row.domain, port: row.port }) : undefined}
                   leading={
                     <ProductLogo
@@ -227,6 +352,11 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
                       {row.port !== 443 && (
                         <span className="numeric ml-1.5 font-mono text-hint text-muted-foreground">
                           :{row.port}
+                        </span>
+                      )}
+                      {row.ip && (
+                        <span className="ml-1.5 font-mono text-hint text-muted-foreground">
+                          via {row.ip}
                         </span>
                       )}
                     </>
@@ -255,18 +385,19 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
                       the description it was the part a phone cut off, and for
                       a read-only account it is the one new fact. */}
                   <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                    <p className="text-hint text-muted-foreground">
-                      {removing === row.id
-                        ? "Removing…"
-                        : row.checkedAt
-                          ? `checked ${relativeTime(row.checkedAt)}`
-                          : rechecking
-                            ? "checking…"
-                            : "not checked yet"}
-                    </p>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <p className="text-hint text-muted-foreground">
+                        {removing === row.id
+                          ? "Removing…"
+                          : row.checkedAt
+                            ? `checked ${relativeTime(row.checkedAt)}`
+                            : "waiting for its first check"}
+                      </p>
+                      <CheckTrend id={row.id} checkedAt={row.checkedAt} />
+                    </div>
                     {admin && (
                       <VerbBar
-                        menuLabel={`More actions for ${targetLabel({ host: row.domain, port: row.port })}`}
+                        menuLabel={`More actions for ${endpointLabel(row)}`}
                         verbs={[
                           {
                             key: "scan",
@@ -295,5 +426,29 @@ export function WatchedDomains({ admin }: { admin: boolean }) {
         </div>
       </FormSection>
     </FormSections>
+  )
+}
+
+/**
+ * How an endpoint's days left moved over its recent checks, and how many of
+ * them failed. A renewal shows as a jump up; a line that only falls is a
+ * certificate nothing is renewing.
+ */
+function CheckTrend({ id, checkedAt }: { id: number; checkedAt?: string }) {
+  const history = usePoll(
+    (signal) => get<WatchedCheck[]>(`/certificates/watched/${id}/history`, undefined, signal),
+    0,
+    [id, checkedAt],
+    { enabled: checkedAt !== undefined },
+  )
+  const checks = history.data ?? []
+  const days = checks.flatMap((check) => (check.daysLeft === undefined ? [] : [check.daysLeft]))
+  const failed = checks.filter((check) => check.error).length
+  if (checks.length < 2) return null
+  return (
+    <span className="flex items-center gap-2 text-hint text-muted-foreground">
+      <Sparkline values={days} label="Days left over the recent checks" />
+      {failed > 0 && <span className="numeric">{plural(failed, "failed check")}</span>}
+    </span>
   )
 }

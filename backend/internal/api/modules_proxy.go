@@ -1,6 +1,10 @@
 package api
 
-import "context"
+import (
+	"context"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+)
 
 // proxyExtras is what the proxy pages keep beyond proxysvc.Service itself:
 // recorders, watchers and the stores behind them. It lives apart from
@@ -21,6 +25,7 @@ type proxyExtras struct {
 	// --- lane F: certificates ---
 
 	// --- lane G: TLS report & monitoring ---
+	tlsMonitor *proxysvc.TLSMonitor
 }
 
 // initProxyExtras runs last in initModules, so the proxy service and every
@@ -40,6 +45,7 @@ func (s *Server) initProxyExtras() {
 	// --- lane F: certificates ---
 
 	// --- lane G: TLS report & monitoring ---
+	s.modules.proxyExtras.tlsMonitor = proxysvc.NewTLSMonitor(watchStore{s})
 }
 
 // startProxyExtras starts the proxy's background work from Start. Nothing
@@ -60,6 +66,7 @@ func (s *Server) startProxyExtras(ctx context.Context) error {
 	// --- lane F: certificates ---
 
 	// --- lane G: TLS report & monitoring ---
+	s.modules.proxyExtras.tlsMonitor.Start(ctx)
 
 	return nil
 }
@@ -81,4 +88,5 @@ func (s *Server) stopProxyExtras() {
 	// --- lane F: certificates ---
 
 	// --- lane G: TLS report & monitoring ---
+	s.modules.proxyExtras.tlsMonitor.Stop()
 }

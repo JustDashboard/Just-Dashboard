@@ -48,4 +48,34 @@ CREATE TABLE IF NOT EXISTS watched_endpoints (
 -- was, for a downgrade to find.
 INSERT OR IGNORE INTO watched_endpoints(domain, port, ip, created_at)
   SELECT domain, port, '', created_at FROM watched_domains;
+
+-- Every TLS report, so the page opens on the last one and says what changed
+-- since the one before. report is the scan as the page reads it; the other
+-- columns are what the history's sparkline and list need without decoding
+-- it. Kept to 100 per target and 180 days.
+CREATE TABLE IF NOT EXISTS tls_scans (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain      TEXT NOT NULL,
+  port        INTEGER NOT NULL,
+  grade       TEXT NOT NULL DEFAULT '',
+  days_left   INTEGER,
+  fingerprint TEXT NOT NULL DEFAULT '',
+  reachable   INTEGER NOT NULL DEFAULT 0,
+  checked_at  INTEGER NOT NULL,
+  report      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tls_scans_target ON tls_scans(domain, port, checked_at);
+
+-- Every check of a watched endpoint, by the schedule or an administrator,
+-- so a row can show how its days left moved and when its certificate
+-- changed. Kept to 2000 per endpoint and 90 days.
+CREATE TABLE IF NOT EXISTS watched_checks (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  endpoint_id INTEGER NOT NULL REFERENCES watched_endpoints(id) ON DELETE CASCADE,
+  checked_at  INTEGER NOT NULL,
+  days_left   INTEGER,
+  fingerprint TEXT NOT NULL DEFAULT '',
+  error       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_watched_checks_endpoint ON watched_checks(endpoint_id, checked_at);
 `
