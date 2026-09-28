@@ -12,7 +12,9 @@ the firewall, backups and deploys, behind a login that lives on your private net
 
 </div>
 
-![The overview page](docs/overview.png)
+![The server overview with live metrics, health findings and service summaries](docs/overview.png)
+
+Screenshots show version 0.7.0 with example data.
 
 ---
 
@@ -106,7 +108,7 @@ a link. *No sponsors yet — the space is open.*
 
 ### Everything is one keystroke away
 
-![The command palette](docs/command-palette.png)
+![The command palette with search and shortcuts to server tools](docs/command-palette.png)
 
 **⌘K** from anywhere. The sidebar drills into a section — Docker, Databases, Security, one
 deployment — and every page comes back the way you left it.
@@ -141,7 +143,7 @@ resource page. Board editing needs `service.control`, and deletion asks for the 
 
 ### Files
 
-![The file manager, with pictures drawn as themselves](docs/files.png)
+![The file manager with coloured folders and a Compose file preview](docs/files.png)
 
 Browse, preview, edit with a diff before saving, drag and drop, upload whole folders, crop
 pictures, chmod, search by content, archive and extract. Every path is checked against
@@ -151,7 +153,7 @@ then set a different colour for one folder.
 
 ### Git
 
-![A repository, with its changes and a file open beside them](docs/git.png)
+![A Git workspace with staged and unstaged changes beside the file editor](docs/git.png)
 
 Every repository under the configured roots. Stage, commit, push, stash, branch, merge, tag, and
 open pull requests from the page, signed in to GitHub with the same device flow `gh` uses.
@@ -162,7 +164,7 @@ or connect a GitLab/Gitea token for requests on those providers.
 
 ### Deployments
 
-![A project with its website preview and live release](docs/deployments.png)
+![A project's website preview, live release, running containers and traffic metrics](docs/deployments.png)
 
 Point it at a repository, an image, a template, a Compose stack or something already running. It
 says what it found, shows the plan, and runs it as a job with a permanent URL. Each project has
@@ -173,7 +175,7 @@ health checks and runtime limits remain editable before the first deployment.
 
 ### Databases
 
-![A database's overview: its connection string in the shapes it is pasted in, its facts, its largest tables and what reads it](docs/databases.png)
+![A PostgreSQL database with its masked connection string, table sizes and connected applications](docs/databases.png)
 
 PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. The
 section opens on every database at once — which answer, what they take, who is connected, what
