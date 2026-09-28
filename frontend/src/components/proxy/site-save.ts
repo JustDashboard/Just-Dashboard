@@ -15,10 +15,22 @@ import type {
  * reason: a switch left on under another kind is not drawn and means nothing.
  */
 export function sendableSpec(spec: SiteSpec): SiteSpec {
-  const { spa, permanent, limits, hostHeaderValue, upstreamCa, upstreamTlsName, ...rest } = spec
+  const {
+    spa,
+    permanent,
+    limits,
+    hostHeaderValue,
+    upstreamCa,
+    upstreamTlsName,
+    upstream,
+    pool,
+    ...rest
+  } = spec
   const locations = spec.locations.map(sendableLocation)
   return {
     ...rest,
+    // A pool replaces the single upstream, and only a proxy forwards.
+    ...(spec.kind === "proxy" && pool ? { pool } : { upstream }),
     locations,
     ...sendableLimits({ ...spec, locations }, limits),
     ...(spec.hostHeader === "custom" ? { hostHeaderValue } : {}),

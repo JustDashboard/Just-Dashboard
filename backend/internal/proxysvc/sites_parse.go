@@ -44,6 +44,10 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// let past it.
 	inMaintGeo := false
 	limits := newLimitParse()
+	pools := newPoolParse()
+	// The catch-all's retry settings, which belong to the pool it forwards to.
+	var rootRetryOn []string
+	rootTries := 0
 	maintenance := func() *SiteMaintenance {
 		if spec.Maintenance == nil {
 			spec.Maintenance = &SiteMaintenance{BypassFrom: []string{}}
@@ -65,6 +69,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				inMaintGeo = inMaintGeo && objectDepth > 0
 				if objectDepth == 0 {
 					limits.closed()
+					pools.closed()
 				}
 			} else if inMaintGeo {
 				if fields := strings.Fields(strings.TrimSuffix(raw, ";")); len(fields) == 2 && fields[0] != "default" {
@@ -72,6 +77,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				}
 			} else if objectDepth == 1 {
 				limits.entry(raw)
+				pools.entry(raw)
 			}
 			return
 		}
@@ -79,6 +85,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			name, value := cutDirective(raw)
 			if httpObjects[name] {
 				limits.object(name, value)
+				pools.object(name, value)
 				if strings.HasSuffix(raw, "{") {
 					objectDepth = 1
 					if name == "geo" && maintGeoRe.MatchString(value) {
@@ -263,6 +270,14 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			} else if location == "/" || location == "" {
 				rootLocationUpstream = upstream
 			}
+		case "proxy_next_upstream":
+			if current == nil && location == "/" {
+				rootRetryOn = strings.Fields(value)
+			}
+		case "proxy_next_upstream_tries":
+			if current == nil && location == "/" {
+				rootTries, _ = strconv.Atoi(value)
+			}
 		case "proxy_set_header":
 			if host, ok := strings.CutPrefix(value, "Host "); ok && current == nil {
 				switch host = strings.TrimSpace(host); host {
@@ -372,6 +387,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	}
 
 	spec.Upstream = rootLocationUpstream
+	pools.settle(spec, rootRetryOn, rootTries)
 	spec.WebSockets = rootLocationWS
 	// A hand-written file with no access_log line is logging to nginx's
 	// default, not to nowhere. Reading it back as "off" meant the first save
@@ -395,7 +411,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		spec.Buffering = true
 	}
 	if spec.Kind != "redirect" {
-		if spec.Upstream == "" && spec.Root != "" {
+		if spec.Upstream == "" && spec.Pool == nil && spec.Root != "" {
 			spec.Kind = "static"
 		}
 	}
@@ -405,7 +421,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	spec.ForceHTTPS = sawTLSListen && sawPlainRedirect
 	// A file with a plain-HTTP redirect block and nothing else is a redirect
 	// site; one that also serves something is a TLS site forcing HTTPS.
-	if spec.Kind == "proxy" && spec.Upstream == "" && spec.Root == "" && sawPlainRedirect {
+	if spec.Kind == "proxy" && spec.Upstream == "" && spec.Pool == nil && spec.Root == "" && sawPlainRedirect {
 		spec.Kind = "redirect"
 		spec.RedirectTo = "https://" + firstOr(spec.Domains, "")
 		spec.Permanent = true
