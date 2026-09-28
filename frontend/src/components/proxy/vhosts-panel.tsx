@@ -12,6 +12,7 @@ import type {
   Certificate,
   ProxyPending,
   SiteDeleteResult,
+  SiteRenameResult,
   SitesBulkResult,
   SitesTraffic,
   SiteUpstreamHealth,
@@ -55,6 +56,7 @@ import { ConfigEditor } from "@/components/proxy/config-editor"
 import { DefaultSitePanel } from "@/components/proxy/default-site"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
+import { SiteRenameDialog } from "@/components/proxy/site-rename"
 import {
   ServingStatus,
   SiteFeatures,
@@ -193,6 +195,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // The site j and k have moved to, which Enter opens.
   const [cursor, setCursor] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [renaming, setRenaming] = useState<VHost | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState<Record<string, Busy>>({})
   const [output, setOutput] = useState<NginxOutput | null>(null)
@@ -680,6 +683,37 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       },
     })
 
+  /**
+   * Moves a site to a new name. A refusal is thrown back into the dialog,
+   * which keeps the typed name; on success whatever pointed at the old name
+   * on this page — the URL's selection, the cursor, a ticked box — follows
+   * it, since that card is gone.
+   */
+  const rename = async (vhost: VHost, to: string) => {
+    setBusy(vhost.name, "Renaming")
+    let outcome: ReloadOutcome | undefined
+    try {
+      const res = await post<SiteRenameResult>(
+        `/proxy/sites/${encodeURIComponent(vhost.name)}/rename`,
+        { to, reload: true },
+      )
+      outcome = noteReload(vhost.name, res, false)
+      if (requested === vhost.name) setRequested(res.name)
+      const moved = siteKey({ ...vhost, name: res.name })
+      setCursor((c) => (c === siteKey(vhost) ? moved : c))
+      setSelected((list) => list.map((name) => (name === vhost.name ? res.name : name)))
+      reportLink(res, outcome, `${vhost.name} renamed to ${res.name}`, {
+        notRunning: "nginx starts with it under the new name.",
+        notReloaded:
+          "If nginx is running, it keeps serving the site as it loaded it until a reload succeeds.",
+      })
+      for (const warning of res.warnings)
+        notify.warning(`${res.name}: moved unchanged`, { description: warning })
+    } finally {
+      reread(vhost.name, outcome === "reloaded")
+    }
+  }
+
   // A deployment's route, opened for editing all the same: the form where
   // it saves the file back, the raw editor otherwise.
   const override = (vhost: VHost) => {
@@ -710,6 +744,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     onDuplicate: (v: VHost) => openForm(null, v.name),
     onToggle: toggle,
     onDelete: remove,
+    onRename: setRenaming,
     onUnlink: unlink,
     onOverride: override,
     traffic: hasTraffic,
@@ -1294,6 +1329,11 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         }
         onOpenChange={(open) => !open && setRequested(null)}
       />
+      <SiteRenameDialog
+        vhost={renaming}
+        onOpenChange={(open) => !open && setRenaming(null)}
+        onRename={rename}
+      />
       <Modal
         open={output !== null}
         onOpenChange={(open) => !open && setOutput(null)}
@@ -1342,6 +1382,7 @@ type CardProps = {
   onDuplicate: (v: VHost) => void
   onToggle: (v: VHost, enabled: boolean) => void
   onDelete: (v: VHost) => void
+  onRename: (v: VHost) => void
   onUnlink: (v: VHost) => void
   onOverride: (v: VHost) => void
 }
@@ -1571,6 +1612,7 @@ function SiteFileVerbs({
     onDuplicate: noop,
     onToggle: noop,
     onDelete: noop,
+    onRename: noop,
     onUnlink: noop,
     onOverride: noop,
   }).filter((v) => ["open", "scan", "log", "errors", "edit", "deployment"].includes(v.key))

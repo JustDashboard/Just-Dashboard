@@ -433,6 +433,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   false, with `Reason`, where nginx is not installed, no master reads the configuration, or two do and
   the pid file names neither; a master with no worker is running with no `LastReload`. A certificate
   nginx has not reloaded is not a configuration file, and is left to the served-certificate check.
+- **Site rename.** `POST /proxy/sites/{name}/rename` (`system.admin` + destructive, audited
+  `proxy.site.rename` with the new name, path and whether it was re-rendered) takes `{to, reload}`.
+  `RenameSite` in `sites_ops.go`, under the service lock, finds the file in sites-available or conf.d
+  (a conf.d file keeps its `.conf`), refuses a link rather than a file, an existing target name or
+  `sites-enabled/<to>`, a `just-dashboard-env-*` deployment route on either side and a `jd-*` owned
+  file, then moves the file, moves its own `sites-enabled` link to the new name and re-points links under
+  other names, runs `nginx -t` and puts file, content and links back on a refusal (422). A form-written
+  file that still renders byte-for-byte is re-rendered under the new name (header and log paths — the
+  renderer derives nothing else from the name); a hand-edited managed file moves unchanged and the
+  answer carries a warning. History records a delete of the old path and a `rename` write of the new.
 - **Bulk site changes.** `POST /proxy/sites/bulk` (`system.admin` + destructive, audited
   `proxy.sites.bulk` with the action, the names and what changed) takes `{action: enable|disable|delete,
   names}` (at most 200, each once) and `BulkSites` in `sites_ops.go` applies it under the service lock

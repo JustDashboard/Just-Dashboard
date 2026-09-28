@@ -21,6 +21,10 @@ func (s *Server) mountSiteOpsRoutes(r chi.Router) {
 		// the same switch a single toggle gates the same way.
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/bulk", s.handle(s.handleSitesBulk))
+			// Destructive as a delete is: the old name stops existing, and
+			// anything that reached the site by it — a bookmark, a script,
+			// a log path — no longer does.
+			r.Method(http.MethodPost, "/{name}/rename", s.handle(s.handleSiteRename))
 		})
 	})
 }
@@ -70,6 +74,51 @@ func (s *Server) handleSitesBulk(w http.ResponseWriter, r *http.Request) error {
 	}
 	detail["changed"] = res.Changed
 	httpx.SetAudit(r, action, "", link.auditDetail(detail))
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
+}
+
+type siteRenameRequest struct {
+	To     string `json:"to"`
+	Reload bool   `json:"reload"`
+}
+
+type siteRenameResult struct {
+	vhostLinkResult
+	From       string   `json:"from"`
+	Path       string   `json:"path"`
+	Rerendered bool     `json:"rerendered"`
+	Warnings   []string `json:"warnings"`
+}
+
+// handleSiteRename moves a site to a new name behind one nginx test, and
+// reloads when asked.
+func (s *Server) handleSiteRename(w http.ResponseWriter, r *http.Request) error {
+	from := httpx.URLParam(r, "name")
+	var req siteRenameRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	const action = "proxy.site.rename"
+	detail := map[string]any{"to": req.To}
+	res, reload, err := s.modules.proxy.RenameSite(r.Context(), from, req.To, req.Reload)
+	if err != nil {
+		var refused *proxysvc.RefusedError
+		if errors.As(err, &refused) {
+			return refusedLinkChange(r, action, from, detail, err)
+		}
+		detail["result"] = "refused"
+		detail["reason"] = err.Error()
+		httpx.SetAudit(r, action, from, detail)
+		return mapProxyError(err)
+	}
+	out := siteRenameResult{
+		vhostLinkResult: vhostLinkResult{Name: res.Name, Enabled: res.Enabled},
+		From:            from, Path: res.Path, Rerendered: res.Rerendered, Warnings: res.Warnings,
+	}
+	out.reloaded(reload)
+	detail["to"], detail["path"], detail["rerendered"] = res.Name, res.Path, res.Rerendered
+	httpx.SetAudit(r, action, from, out.auditDetail(detail))
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
