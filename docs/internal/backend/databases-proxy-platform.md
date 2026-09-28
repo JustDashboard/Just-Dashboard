@@ -875,6 +875,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   are answered, before auth and limits; other OPTIONS reach the application. A proxy site hides the
   application's own `Access-Control-Allow-*` headers so browsers never see two.
 
+  **HSTS and TLS versions** (`sites_tls.go`, form "Encryption"). `HSTSMaxAge` (0 = 15552000, else
+  300..63072000), `HSTSOwnNameOnly` (drops `includeSubDomains`) and `HSTSPreload` (refused below a year
+  or without subdomains; the form asks for the first domain typed) build the one
+  `Strict-Transport-Security` value; `readHSTS` reads it back, six months as 0, so older files save
+  unchanged. `TLSProfile` is empty (`ssl_protocols TLSv1.2 TLSv1.3`) or `modern` (`TLSv1.3` only, read
+  back from that exact value, with a SpecWarnings line). There is deliberately no cipher/curve profile:
+  nginx takes `ssl_ciphers` and `ssl_ecdh_curve` from the socket's default server before SNI, so in a
+  named site they do nothing; protocol options do follow SNI. HTTP/3 is not offered: it needs one
+  `listen 443 quic reuseport` owner, and the default site does not claim QUIC.
+
   **Path routing** (`sites.go` `validLocation`/`validUpstreamTLS`, `sites_render.go` `renderLocation`/
   `renderUpstreamTLS`, form "Paths that go somewhere else" + `site-routes.ts` preview table).
   `SiteLocation.Match` is empty (prefix), `=`, `^~`, `~` or `~*`; `locationPathRe` refuses `; ' " $ ( )`

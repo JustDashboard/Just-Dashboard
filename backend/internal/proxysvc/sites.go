@@ -53,7 +53,15 @@ type SiteSpec struct {
 	// ManagedACME selects the fixed host/container-shared deployment webroot.
 	ManagedACME bool `json:"managedAcme,omitempty"`
 	HSTS        bool `json:"hsts"`
-	HTTP2       bool `json:"http2"`
+	// HSTSMaxAge is the policy's lifetime in seconds; zero is six months.
+	// HSTSOwnNameOnly leaves includeSubDomains out, and HSTSPreload asks
+	// to be built into browsers, which takes months to undo.
+	HSTSMaxAge      int  `json:"hstsMaxAge,omitempty"`
+	HSTSOwnNameOnly bool `json:"hstsOwnNameOnly,omitempty"`
+	HSTSPreload     bool `json:"hstsPreload,omitempty"`
+	// TLSProfile is empty for TLS 1.2 and 1.3, or "modern" for 1.3 only.
+	TLSProfile string `json:"tlsProfile,omitempty"`
+	HTTP2      bool   `json:"http2"`
 
 	WebSockets      bool   `json:"webSockets"`
 	Gzip            bool   `json:"gzip"`
@@ -416,6 +424,9 @@ func ValidateSpec(spec *SiteSpec) error {
 	if err := validatePool(spec); err != nil {
 		return err
 	}
+	if err := validTLSOptions(spec); err != nil {
+		return err
+	}
 	switch spec.HostHeader {
 	case "", "upstream":
 		if spec.HostHeaderValue != "" {
@@ -659,6 +670,10 @@ func SpecWarnings(spec *SiteSpec) []string {
 	if spec.HSTS && !spec.TLS {
 		warnings = append(warnings,
 			"HSTS is ignored on a plain-HTTP site — browsers only honour the header when it arrives over TLS.")
+	}
+	if spec.TLS && spec.TLSProfile == tlsProfileModern {
+		warnings = append(warnings,
+			"TLS 1.3 only turns away clients without it: Android before 10, Java 8, older curl and OpenSSL, and some monitoring and payment callbacks.")
 	}
 	if spec.Kind == "proxy" && isPublicUpstream(spec.Upstream) {
 		warnings = append(warnings,

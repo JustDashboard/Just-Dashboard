@@ -383,8 +383,7 @@ func renderListen(l *lines, spec *SiteSpec) {
 func renderTLS(l *lines, spec *SiteSpec) {
 	l.add("    ssl_certificate     %s;", spec.CertPath)
 	l.add("    ssl_certificate_key %s;", spec.KeyPath)
-	l.add("    # TLS 1.0 and 1.1 are retired and no current client needs them.")
-	l.add("    ssl_protocols TLSv1.2 TLSv1.3;")
+	renderProtocols(l, spec)
 	l.add("    # With 1.3 the client's order is the better one; forcing the server's")
 	l.add("    # preference is a habit left over from the RC4 era.")
 	l.add("    ssl_prefer_server_ciphers off;")
@@ -403,8 +402,7 @@ func (spec *SiteSpec) writesHeaders() bool {
 
 func renderHeaders(l *lines, spec *SiteSpec) {
 	if spec.HSTS && spec.TLS {
-		l.add("    # Six months, which is what browsers and the preload list expect.")
-		l.add("    add_header Strict-Transport-Security \"max-age=15552000; includeSubDomains\" always;")
+		l.add("    add_header Strict-Transport-Security \"%s\" always;", spec.hstsValue())
 	}
 	if spec.SecurityHeaders {
 		l.add("    add_header X-Content-Type-Options nosniff always;")

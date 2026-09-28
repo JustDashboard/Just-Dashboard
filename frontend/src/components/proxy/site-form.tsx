@@ -69,6 +69,7 @@ import {
   OptionRow,
 } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
+import { useConfirm } from "@/components/confirm-dialog"
 import { Modal } from "@/components/modal"
 import { Group, Pane, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
@@ -1189,10 +1190,12 @@ function SiteFormBody({
                   />
                   <OptionRow
                     title="HSTS"
-                    hint="Tells the browser never to use plain HTTP for this name again. Hard to undo — a mistake sticks for six months."
+                    hint="Tells the browser never to use plain HTTP for this name again. Hard to undo — a mistake sticks for as long as the policy says."
                     checked={spec.hsts}
                     onCheckedChange={(v) => set("hsts", v)}
-                  />
+                  >
+                    <HSTSOptions spec={spec} set={set} />
+                  </OptionRow>
                   <OptionRow
                     title="HTTP/2"
                     hint="Faster for pages with many small assets."
@@ -1202,6 +1205,30 @@ function SiteFormBody({
                 </>
               )}
             </OptionList>
+            {spec.tls && (
+              <Field
+                label="TLS versions"
+                htmlFor="site-tls-profile"
+                hint={
+                  spec.tlsProfile === "modern"
+                    ? "Clients without TLS 1.3 cannot connect: Android before 10, Java 8, older curl and OpenSSL, some monitoring and payment callbacks."
+                    : "What every current browser and client speaks. 1.0 and 1.1 stay off."
+                }
+              >
+                <Select
+                  value={spec.tlsProfile || "compatible"}
+                  onValueChange={(v) => set("tlsProfile", v === "modern" ? "modern" : undefined)}
+                >
+                  <SelectTrigger id="site-tls-profile" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="compatible">TLS 1.2 and 1.3</SelectItem>
+                    <SelectItem value="modern">TLS 1.3 only (modern)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
             {spec.domains.length > 0 && (
               <SiteCertificate
                 spec={spec}
@@ -2019,6 +2046,103 @@ function LocationCard({
 }
 
 /** The site's setting, or on or off, for this path. */
+/** How long browsers keep the HSTS policy. Six months is what the form always wrote. */
+const HSTS_MAX_AGES: { value: number; label: string }[] = [
+  { value: 300, label: "5 minutes (while testing)" },
+  { value: 86400, label: "1 day" },
+  { value: 2592000, label: "30 days" },
+  { value: 15552000, label: "6 months" },
+  { value: 31536000, label: "1 year" },
+  { value: 63072000, label: "2 years" },
+]
+const HSTS_DEFAULT_MAX_AGE = 15552000
+const HSTS_PRELOAD_MAX_AGE = 31536000
+
+/**
+ * The HSTS policy's lifetime, whether it covers subdomains, and preload.
+ * Preload is behind a typed confirmation because it outlives the header:
+ * once a browser ships with the name built in, removing the header changes
+ * nothing for months, and every subdomain has to serve HTTPS in the meantime.
+ */
+function HSTSOptions({
+  spec,
+  set,
+}: {
+  spec: SiteSpec
+  set: <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => void
+}) {
+  const { confirm, dialog } = useConfirm()
+  const maxAge = spec.hstsMaxAge || HSTS_DEFAULT_MAX_AGE
+  const listed = HSTS_MAX_AGES.some((a) => a.value === maxAge)
+  const domain = spec.domains[0] ?? "preload"
+  const setMaxAge = (value: number) =>
+    set("hstsMaxAge", value === HSTS_DEFAULT_MAX_AGE ? undefined : value)
+  const askPreload = () =>
+    confirm({
+      title: "Ask browsers to preload HSTS",
+      description: (
+        <>
+          The header will carry <code className="font-mono">preload</code>, which lets {domain} be
+          submitted to the list browsers ship with. Once it is in, every subdomain must serve HTTPS,
+          and leaving the list takes months of browser releases. The policy is raised to at least a
+          year and covers subdomains, as the list requires.
+        </>
+      ),
+      phrase: domain,
+      confirmLabel: "Turn on preload",
+      action: async () => {
+        if (maxAge < HSTS_PRELOAD_MAX_AGE) set("hstsMaxAge", HSTS_PRELOAD_MAX_AGE)
+        set("hstsOwnNameOnly", undefined)
+        set("hstsPreload", true)
+      },
+    })
+  return (
+    <div className="space-y-3">
+      <Field
+        label="Remember for"
+        htmlFor="site-hsts-max-age"
+        hint="Start short while checking every subdomain works over HTTPS, then raise it."
+      >
+        <Select value={String(maxAge)} onValueChange={(v) => setMaxAge(Number(v))}>
+          <SelectTrigger id="site-hsts-max-age" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {!listed && <SelectItem value={String(maxAge)}>{`${maxAge} seconds`}</SelectItem>}
+            {HSTS_MAX_AGES.map((a) => (
+              <SelectItem
+                key={a.value}
+                value={String(a.value)}
+                disabled={spec.hstsPreload && a.value < HSTS_PRELOAD_MAX_AGE}
+              >
+                {a.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <OptionList>
+        <OptionRow
+          title="Include subdomains"
+          hint="Every name under this one must serve HTTPS too, including ones on other servers."
+          checked={!spec.hstsOwnNameOnly}
+          onCheckedChange={(v) => {
+            set("hstsOwnNameOnly", v ? undefined : true)
+            if (!v) set("hstsPreload", undefined)
+          }}
+        />
+        <OptionRow
+          title="Preload"
+          hint="Lets the name be built into browsers. Needs a year and subdomains; very slow to undo."
+          checked={Boolean(spec.hstsPreload)}
+          onCheckedChange={(v) => (v ? askPreload() : set("hstsPreload", undefined))}
+        />
+      </OptionList>
+      {dialog}
+    </div>
+  )
+}
+
 function OnOffField({
   id,
   label,
