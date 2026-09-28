@@ -1437,6 +1437,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   nginx through each save: an allowed address, a denied one, a password, an IPv4 client against an
   IPv6-only list — and that under `satisfy any` a correct password also opens a location the site closes
   with `deny all`, which the form says.
+- **`route_resolve.go`** answers "which site answers this URL": `ResolveRoute(tree, url)` replays nginx's
+  precedence over `NginxTree(EffectiveConfig())` — the address:port group (a block on a specific address
+  takes every request arriving there; a server without `listen` is `*:80`), `ssl` on that group, then
+  server_name (exact, `.name` also exact, longest `*.` wildcard, longest `.*` wildcard, first regex,
+  `default_server`, first block), server-level `return`, then locations the way
+  `ngx_http_core_find_location` recurses (`=`, longest prefix, its nested locations, `^~` stopping that
+  level's regexes, regexes in order, the 301 to a trailing slash for a `*_pass` prefix), then what answers
+  (`return`, a `*_pass`, or files under `root`/`alias` with `try_files`/`index`). Each step carries its
+  file:line; a `rewrite`, an `if`, or a regex Go's RE2 cannot compile marks the answer `certain: false`
+  rather than guessing. `GET /proxy/resolve?url=` (`handlers_proxy_resolve.go`, mounted in
+  `mountVHostRoutes`, `system.admin`, read-only, nothing is sent to the URL) → `RouteResolution`; 400 for
+  an unusable URL, 409 `config_unreadable` when `nginx -T` fails.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real
   story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago;
   `CertbotState` answers it before reading the lineages, whatever they say. A cron file whose command

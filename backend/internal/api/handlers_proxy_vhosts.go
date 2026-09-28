@@ -32,6 +32,7 @@ func (s *Server) mountVHostRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPut, "/default-site", s.handle(s.handleDefaultSitePut))
+		r.Method(http.MethodGet, "/resolve", s.handle(s.handleRouteResolve))
 		s.destructive(r, func(r chi.Router) {
 			// Removing the catch-all hands unknown hosts back to whichever
 			// site nginx reads first.
