@@ -145,6 +145,9 @@ func TestPlanStreamIncludeAppendsToAMainFileWithNoDirectory(t *testing.T) {
 	if plan.Mode != IncludeMainFile || plan.Path != main || !plan.Exists || plan.Before != before {
 		t.Fatalf("plan = %+v", plan)
 	}
+	if plan.Reason != AppendNoDirectory || plan.DropIn != "" || !plan.KeepsCopy || len(plan.Warnings) != 0 {
+		t.Fatalf("reason %q, drop-in %q, copy %v, warnings %q", plan.Reason, plan.DropIn, plan.KeepsCopy, plan.Warnings)
+	}
 	if !strings.HasPrefix(plan.After, before+"\n# Just Dashboard: streams begin.") ||
 		!strings.HasSuffix(plan.After, "stream {\n    include "+root+"/stream.d/*.conf;\n}\n# Just Dashboard: streams end.\n") {
 		t.Fatalf("after:\n%s", plan.After)
@@ -306,6 +309,58 @@ func TestPlanStreamIncludeAppendsWhenAModuleLoadsAfterTheDirectory(t *testing.T)
 	if plan.Mode != IncludeMainFile || plan.Path != filepath.Join(root, "nginx.conf") {
 		t.Fatalf("plan = %+v", plan)
 	}
+	if plan.Reason != AppendModuleLoadsAfter || plan.DropIn != filepath.Join(root, "modules-enabled", streamDropIn) {
+		t.Fatalf("reason %q, drop-in %q", plan.Reason, plan.DropIn)
+	}
+}
+
+// Every way a drop-in can fail is its own reason for editing nginx.conf, so
+// the page never gives the reason of another: the directory there but a file
+// of the drop-in's name in it, or the directory leading outside the nginx
+// directory. The first such directory's reason is the one given.
+func TestPlanStreamIncludeSaysWhyItEditsNginxConf(t *testing.T) {
+	outside := t.TempDir()
+	for _, tc := range []struct {
+		name   string
+		files  map[string]string
+		reason string
+		dropIn string
+	}{
+		{
+			"a file of that name is there",
+			map[string]string{"nginx.conf": debianConf, "modules-enabled/" + streamDropIn: "# the operator's own\n"},
+			AppendNameTaken, "$ROOT/modules-enabled/" + streamDropIn,
+		},
+		{
+			"the directory is outside",
+			map[string]string{"nginx.conf": "include " + outside + "/*.conf;\nevents {}\n"},
+			AppendDirectoryElsewhere, outside + "/" + streamDropIn,
+		},
+		{
+			"the first directory decides",
+			map[string]string{
+				"nginx.conf":                      "include $ROOT/modules-enabled/*.conf;\ninclude " + outside + "/*.conf;\nevents {}\n",
+				"modules-enabled/" + streamDropIn: "# the operator's own\n",
+			},
+			AppendNameTaken, "$ROOT/modules-enabled/" + streamDropIn,
+		},
+		{
+			"no glob the name matches",
+			map[string]string{"nginx.conf": "include $ROOT/modules-enabled/*.load;\nevents {}\n", "modules-enabled/.keep": ""},
+			AppendNoDirectory, "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, root := includeHost(t, tc.files)
+			plan, err := svc.PlanStreamInclude(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.Mode != IncludeMainFile || plan.Reason != tc.reason || plan.DropIn != strings.ReplaceAll(tc.dropIn, "$ROOT", root) {
+				t.Fatalf("mode %q, reason %q, drop-in %q", plan.Mode, plan.Reason, plan.DropIn)
+			}
+		})
+	}
 }
 
 // Where connecting cannot work, nothing is planned, and each case has its
@@ -409,6 +464,85 @@ func TestRemoveStreamIncludeLeavesAHandWrittenInclude(t *testing.T) {
 		if mustRead(t, filepath.Join(root, "nginx.conf")) != before {
 			t.Fatal("changed a hand-written include")
 		}
+	}
+}
+
+// The drop-in is taken out only as the dashboard wrote it: one the operator
+// has edited since is theirs, so a disconnect refuses and leaves it, and the
+// listing does not call it the dashboard's.
+func TestRemoveStreamIncludeLeavesAHandEditedDropIn(t *testing.T) {
+	svc, root := includeHost(t, map[string]string{"nginx.conf": debianConf, "modules-enabled/.keep": ""})
+	dropIn := filepath.Join(root, "modules-enabled", streamDropIn)
+	edited := strings.Replace(renderDropIn(svc.streamDir()), "stream {\n", "stream {\n    proxy_timeout 1h;\n", 1)
+	if edited == renderDropIn(svc.streamDir()) {
+		t.Fatal("the edit changed nothing")
+	}
+	if err := os.WriteFile(dropIn, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RemoveStreamInclude(context.Background(), true); includeError(t, err) != "not_connected" {
+		t.Fatalf("err = %v", err)
+	}
+	if got, err := os.ReadFile(dropIn); err != nil || string(got) != edited {
+		t.Fatalf("the edited drop-in was changed: %v %q", err, got)
+	}
+	if strings.Contains(nginxRuns(t, root), "reload") {
+		t.Fatal("reloaded although nothing was taken out")
+	}
+	status, err := svc.Streams(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Included || status.Connection != nil {
+		t.Fatalf("included %v, connection %+v", status.Included, status.Connection)
+	}
+}
+
+// A copy of the file a connect edits is kept only where nginx would not read
+// it: beside a stream block in a directory included whole, the copy would be a
+// second stream block. The plan says so before the change, and the change
+// keeps none; the same block in a directory included by *.conf keeps its copy.
+func TestApplyStreamIncludeKeepsNoCopyNginxWouldRead(t *testing.T) {
+	block := "stream {\n    server { listen 2222; proxy_pass 10.0.0.9:22; }\n}\n"
+	for _, tc := range []struct {
+		name, include, file string
+		kept                bool
+	}{
+		{"included whole", "$ROOT/main.d/*", "main.d/streams", false},
+		{"included by suffix", "$ROOT/main.d/*.conf", "main.d/streams.conf", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, root := includeHost(t, map[string]string{
+				"nginx.conf": "events {}\ninclude " + tc.include + ";\nhttp {}\n",
+				tc.file:      block,
+			})
+			path := filepath.Join(root, tc.file)
+			plan, err := svc.PlanStreamInclude(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			warned := strings.Contains(strings.Join(plan.Warnings, " "), "No copy of "+path)
+			if plan.Mode != IncludeStreamBlock || plan.Path != path || plan.KeepsCopy != tc.kept || warned == tc.kept {
+				t.Fatalf("mode %q, path %q, copy %v, warnings %q", plan.Mode, plan.Path, plan.KeepsCopy, plan.Warnings)
+			}
+			res, err := svc.ApplyStreamInclude(context.Background(), plan.Mode, plan.Path, true)
+			if err != nil {
+				t.Fatalf("%v %+v", err, res)
+			}
+			copies, _ := filepath.Glob(filepath.Join(root, "main.d", "*.jd-stream-*.bak"))
+			if tc.kept != (res.Backup != "") || len(copies) != map[bool]int{true: 1, false: 0}[tc.kept] {
+				t.Fatalf("backup %q, copies %v", res.Backup, copies)
+			}
+			if tc.kept && mustRead(t, res.Backup) != block {
+				t.Fatal("the copy is not the file as it was")
+			}
+			if !tc.kept && !strings.Contains(strings.Join(res.Warnings, " "), "No copy of "+path) {
+				t.Fatalf("warnings = %q", res.Warnings)
+			}
+			if mustRead(t, path) != plan.After {
+				t.Fatal("the file is not what the plan showed")
+			}
+		})
 	}
 }
 

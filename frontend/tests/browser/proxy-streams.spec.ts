@@ -1019,6 +1019,125 @@ test("install posts the module's package, streams the job, and the next step ope
   await expect(page.getByText("nginx is not reading these yet")).toBeVisible()
 })
 
+/** The listing, whose module is in once `installed()` says so. */
+async function installListing(page: Page, installed: () => boolean) {
+  await page.route("**/api/v1/proxy/streams/", (route) =>
+    route.request().method() === "GET"
+      ? json(
+          route,
+          streamStatus({
+            included: false,
+            module: installed() ? { state: "loaded", usable: true } : moduleNotInstalled,
+          }),
+        )
+      : route.fallback(),
+  )
+}
+
+/** An install finished earlier on the Packages page. */
+const htopJob = {
+  ...installJob,
+  id: "job-0",
+  title: "Installing htop",
+  target: "htop",
+  status: "succeeded",
+  endedAt: new Date().toISOString(),
+  lines: 1,
+}
+
+test("a page opened while the module installs shows that install and starts no second one", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: false })
+  let installed = false
+  await installListing(page, () => installed)
+  await page.route("**/api/v1/jobs/", (route) =>
+    json(route, [installed ? { ...installJob, status: "succeeded" } : installJob, htopJob]),
+  )
+  await page.route("**/api/v1/jobs/job-1", (route) =>
+    json(route, {
+      job: installJob,
+      lines: [
+        { seq: 1, stream: "stdout", text: "Unpacking libnginx-mod-stream (1.26.3) ...", at: "" },
+      ],
+    }),
+  )
+  let finish = () => {}
+  await page.routeWebSocket("**/api/v1/jobs/job-1/stream**", (socket) => {
+    finish = () => {
+      installed = true
+      socket.send(
+        JSON.stringify({
+          type: "job",
+          data: { ...installJob, status: "succeeded", endedAt: new Date().toISOString(), lines: 1 },
+        }),
+      )
+    }
+  })
+  let posted = 0
+  await page.route("**/api/v1/packages/install", (route) => {
+    posted++
+    return json(route, installJob)
+  })
+  await page.goto("/proxy/streams")
+
+  // The install already running is on screen, and the button waits for it.
+  await expect(page.getByText(/Unpacking libnginx-mod-stream/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Installing libnginx-mod-stream…" })).toBeDisabled()
+  await expect(
+    page.getByText("This keeps running if you close the page — reopen it from the recent list."),
+  ).toBeVisible()
+  // The recent list the console names is beside the button.
+  const steps = page.getByRole("list", { name: "Before a stream can forward" })
+  await expect(steps.getByRole("button", { name: "htop", exact: true })).toBeVisible()
+  await expect(
+    steps.getByRole("button", { name: "libnginx-mod-stream", exact: true }),
+  ).toBeVisible()
+  const pageFrame = page.locator("[data-slot='page']")
+  expect(
+    await pageFrame.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
+  if (process.env.JD_SHOTS) await page.screenshot({ path: process.env.JD_SHOTS, fullPage: true })
+
+  finish()
+  await expect(steps.getByText("loaded", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeVisible()
+  expect(posted).toBe(0)
+})
+
+test("an install that ends while another run is on screen still holds the button, then reads the listing", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: false })
+  let installed = false
+  await installListing(page, () => installed)
+  await page.route("**/api/v1/jobs/", (route) =>
+    json(route, [installed ? { ...installJob, status: "succeeded" } : installJob, htopJob]),
+  )
+  await page.route("**/api/v1/jobs/job-1", (route) => json(route, { job: installJob, lines: [] }))
+  await page.route("**/api/v1/jobs/job-0", (route) =>
+    json(route, {
+      job: htopJob,
+      lines: [{ seq: 1, stream: "stdout", text: "Setting up htop (3.3.0-4) ...", at: "" }],
+    }),
+  )
+  await page.routeWebSocket("**/api/v1/jobs/job-1/stream**", () => {})
+  await page.goto("/proxy/streams")
+  const steps = page.getByRole("list", { name: "Before a stream can forward" })
+  await expect(page.getByRole("button", { name: "Installing libnginx-mod-stream…" })).toBeDisabled()
+
+  // Reading an earlier run from the list does not free the button for a second install.
+  await steps.getByRole("button", { name: "htop", exact: true }).click()
+  await expect(page.getByText(/Setting up htop/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Installing libnginx-mod-stream…" })).toBeDisabled()
+
+  // Its end, seen only in the list, reads the listing again: the module is in.
+  installed = true
+  await expect(steps.getByText("loaded", { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/Setting up htop/)).toBeVisible()
+})
+
 test("an install that cannot start says why and offers it again", async ({ page }) => {
   await mockProxy(page, { included: false })
   await listing(page, { included: false, module: moduleNotInstalled })
@@ -1131,6 +1250,8 @@ test("an edit to nginx.conf shows before and after, and can wait for the next re
         mode: "nginx.conf",
         path: "/etc/nginx/nginx.conf",
         exists: true,
+        reason: "no-directory",
+        keepsCopy: true,
         before,
         after: `${before}\n${block}\n`,
         added: block,
@@ -1153,7 +1274,11 @@ test("an edit to nginx.conf shows before and after, and can wait for the next re
   await page.getByRole("button", { name: "Connect", exact: true }).click()
   const sheet = page.getByRole("dialog")
   await expect(sheet.getByText("an edit to nginx.conf")).toBeVisible()
-  await expect(sheet.getByText(/The file as it is now is kept beside it\./)).toBeVisible()
+  await expect(
+    sheet.getByText(
+      /it includes no directory at its top level where a file of its own could go\. The file as it is now is kept beside it\./,
+    ),
+  ).toBeVisible()
   const lines = sheet.locator(".monaco-editor .view-lines")
   await expect(lines).toContainText("streams begin")
   await sheet.getByRole("radio", { name: "Before" }).click()
@@ -1170,6 +1295,47 @@ test("an edit to nginx.conf shows before and after, and can wait for the next re
     page.getByText(/kept as \/etc\/nginx\/nginx\.conf\.jd-stream-1759000000\.bak/),
   ).toBeVisible()
   expect(bodies[0]).toEqual({ mode: "nginx.conf", path: "/etc/nginx/nginx.conf", reload: false })
+})
+
+test("an edit to nginx.conf gives the plan's own reason, and no copy nginx would read", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: false })
+  const before =
+    "include /etc/nginx/modules-enabled/*.conf;\nload_module modules/ngx_stream_js_module.so;\nevents {}\n"
+  const block =
+    "# Just Dashboard: streams begin.\nstream {\n    include /etc/nginx/streams/*.conf;\n}\n# Just Dashboard: streams end."
+  const noCopy =
+    "No copy of /etc/nginx/nginx.conf is kept beside it: an include in the configuration would read the copy as configuration."
+  await page.route("**/api/v1/proxy/streams/include/plan", (route) =>
+    json(
+      route,
+      includePlan({
+        mode: "nginx.conf",
+        path: "/etc/nginx/nginx.conf",
+        exists: true,
+        reason: "load-module-after",
+        dropIn: dropInPath,
+        keepsCopy: false,
+        before,
+        after: `${before}\n${block}\n`,
+        added: block,
+        line: 5,
+        warnings: [noCopy],
+      }),
+    ),
+  )
+  await page.goto("/proxy/streams")
+  await page.getByRole("button", { name: "Connect", exact: true }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(
+    sheet.getByText(
+      /after every module it loads: it includes \/etc\/nginx\/modules-enabled at its top level, but a module is loaded after that directory, and nginx refuses a module loaded after a stream block\.$/,
+    ),
+  ).toBeVisible()
+  await expect(sheet.getByText(/includes no directory/)).toHaveCount(0)
+  await expect(sheet.getByText(/kept beside it\./)).toHaveCount(0)
+  await expect(sheet.getByText(noCopy)).toBeVisible()
 })
 
 test("a stream whose port is taken keeps the connect from being made", async ({ page }) => {

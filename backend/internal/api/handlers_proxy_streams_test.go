@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/updates"
 )
 
 // streamServer is an API server over a temporary nginx directory whose nginx
@@ -451,11 +453,64 @@ func TestStreamIncludeConnectsAndDisconnectsThroughTheAPI(t *testing.T) {
 	}
 }
 
+// fakeCatalogue is a package manager that has exactly the packages in has,
+// answers err for every lookup when it is set, and logs what it was asked.
+type fakeCatalogue struct {
+	manager string
+	has     map[string]bool
+	err     error
+	asked   []string
+}
+
+func (f *fakeCatalogue) Manager() string { return f.manager }
+
+func (f *fakeCatalogue) Describe(_ context.Context, name string) (*updates.PackageDetail, error) {
+	f.asked = append(f.asked, name)
+	if f.err != nil {
+		return nil, f.err
+	}
+	if !f.has[name] {
+		return nil, updates.ErrUnknownPackage
+	}
+	return &updates.PackageDetail{Name: name}, nil
+}
+
+// A package is named only where the package manager has it: one it does not
+// know is never offered, a manager that builds the module in has no package
+// to name, and a lookup that fails for another reason names it anyway, for
+// the install to say the rest. The answer is kept rather than asked again.
+func TestModulePackageNamesOnlyWhatThePackageManagerHas(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fake *fakeCatalogue
+		want string
+	}{
+		{"apt has it", &fakeCatalogue{manager: "apt", has: map[string]bool{"libnginx-mod-stream": true}}, "libnginx-mod-stream"},
+		{"apt does not", &fakeCatalogue{manager: "apt"}, ""},
+		{"dnf has it", &fakeCatalogue{manager: "dnf", has: map[string]bool{"nginx-mod-stream": true}}, "nginx-mod-stream"},
+		{"the lookup fails", &fakeCatalogue{manager: "apt", err: errors.New("apt-cache: signal: killed")}, "libnginx-mod-stream"},
+		{"built in", &fakeCatalogue{manager: "pacman", has: map[string]bool{"libnginx-mod-stream": true}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{}
+			s.modules.proxyExtras.modulePackages.catalogue = tc.fake
+			for range 2 {
+				if got := s.modulePackage(context.Background(), "stream"); got != tc.want {
+					t.Fatalf("package = %q, want %q", got, tc.want)
+				}
+			}
+			if len(tc.fake.asked) > 1 {
+				t.Fatalf("asked %q: the answer was not kept", tc.fake.asked)
+			}
+		})
+	}
+}
+
 // Where nginx has no stream module, connecting is refused with a code the
-// page answers with the install, and the listing names the package only when
-// the package manager has it.
+// page answers with the install, and the listing and the module report name
+// the package only when the package manager has it.
 func TestStreamIncludeWaitsForTheModule(t *testing.T) {
-	c, _, dir := includeServer(t)
+	c, s, dir := includeServer(t)
 	shim := fmt.Sprintf(`#!/bin/sh
 case "$1" in
 -V) echo "configure arguments: --modules-path=%[1]s/modules --with-stream=dynamic" >&2 ;;
@@ -477,9 +532,31 @@ exit 0
 	if status.Module.State != proxysvc.ModuleNotInstalled {
 		t.Fatalf("module = %+v", status.Module)
 	}
-	// Without a package manager on PATH that has it, no package is promised.
-	if status.Module.Package != "" && status.Module.Package != "libnginx-mod-stream" {
-		t.Fatalf("package = %q", status.Module.Package)
+	for _, has := range []bool{true, false} {
+		packages := &s.modules.proxyExtras.modulePackages
+		packages.catalogue = &fakeCatalogue{manager: "apt", has: map[string]bool{"libnginx-mod-stream": has}}
+		packages.known = nil
+		want := map[bool]string{true: "libnginx-mod-stream", false: ""}[has]
+		var status proxysvc.StreamStatus
+		if err := json.Unmarshal(c.do(http.MethodGet, "/api/v1/proxy/streams/", "", nil).Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status.Module.Package != want {
+			t.Errorf("listing, package manager has it %v: package = %q", has, status.Module.Package)
+		}
+		var report proxysvc.NginxModules
+		if err := json.Unmarshal(c.do(http.MethodGet, "/api/v1/proxy/modules?fresh=1", "", nil).Body.Bytes(), &report); err != nil {
+			t.Fatal(err)
+		}
+		var stream *proxysvc.NginxModule
+		for i := range report.Modules {
+			if report.Modules[i].Name == "stream" {
+				stream = &report.Modules[i]
+			}
+		}
+		if stream == nil || stream.State != proxysvc.ModuleNotInstalled || stream.Package != want {
+			t.Errorf("module report, package manager has it %v: %+v", has, stream)
+		}
 	}
 }
 

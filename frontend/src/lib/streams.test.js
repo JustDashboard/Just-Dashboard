@@ -14,6 +14,7 @@ import {
   moduleRemedy,
   parseDuration,
   protocolLabel,
+  runningInstall,
   saveBlocked,
   streamBody,
   streamOutage,
@@ -204,14 +205,23 @@ describe("connecting the directory", () => {
 
   test("says what each change touches, and that disconnecting takes out only that", () => {
     const dropIn = "/etc/nginx/modules-enabled/zz-just-dashboard-stream.conf"
-    expect(connectChange("dropin", dropIn)).toMatch(
+    expect(connectChange({ mode: "dropin", path: dropIn, keepsCopy: false })).toMatch(
       /^Creates zz-just-dashboard-stream\.conf in \/etc\/nginx\/modules-enabled\. .*nginx\.conf stays/,
     )
-    expect(connectChange("nginx.conf", "/etc/nginx/nginx.conf")).toMatch(
-      /^Adds a stream block to the end of nginx\.conf.*kept beside it\.$/,
+    expect(
+      connectChange({
+        mode: "nginx.conf",
+        path: "/etc/nginx/nginx.conf",
+        reason: "no-directory",
+        keepsCopy: true,
+      }),
+    ).toBe(
+      "Adds a stream block to the end of nginx.conf, after every module it loads: it includes no directory at its top level where a file of its own could go. The file as it is now is kept beside it.",
     )
-    expect(connectChange("stream-block", "/etc/nginx/streams.conf")).toContain(
-      "one include line to the stream block in /etc/nginx/streams.conf",
+    expect(
+      connectChange({ mode: "stream-block", path: "/etc/nginx/streams.conf", keepsCopy: true }),
+    ).toBe(
+      "Adds one include line to the stream block in /etc/nginx/streams.conf. nginx refuses a second stream block, so the directory goes into the one that is there. The file as it is now is kept beside it.",
     )
     expect(disconnectChange("dropin", dropIn)).toBe(
       `It removes ${dropIn}, the file the dashboard added.`,
@@ -219,6 +229,68 @@ describe("connecting the directory", () => {
     expect(disconnectChange("nginx.conf", "/etc/nginx/nginx.conf")).toContain(
       "the stream block the dashboard added to the end of nginx.conf",
     )
+  })
+})
+
+describe("connectChange", () => {
+  const dropIn = "/etc/nginx/modules-enabled/zz-just-dashboard-stream.conf"
+  const edit = (reason, keepsCopy = true) =>
+    connectChange({ mode: "nginx.conf", path: "/etc/nginx/nginx.conf", reason, dropIn, keepsCopy })
+
+  test("gives the reason nginx.conf is edited that the plan gives, and only that one", () => {
+    expect(edit("load-module-after")).toContain(
+      ": it includes /etc/nginx/modules-enabled at its top level, but a module is loaded after that directory, and nginx refuses a module loaded after a stream block.",
+    )
+    expect(edit("directory-elsewhere")).toContain(
+      ": the directory it includes at its top level, /etc/nginx/modules-enabled, leads outside the nginx directory",
+    )
+    expect(edit("name-taken")).toContain(
+      ": /etc/nginx/modules-enabled, which it includes at its top level, already holds a zz-just-dashboard-stream.conf that is not the dashboard's.",
+    )
+    for (const reason of ["load-module-after", "directory-elsewhere", "name-taken"]) {
+      expect(edit(reason)).not.toContain("includes no directory")
+    }
+  })
+
+  test("promises a copy only where the plan keeps one", () => {
+    expect(edit("no-directory", false)).not.toContain("kept")
+    expect(edit("no-directory", true)).toMatch(/kept beside it\.$/)
+    expect(
+      connectChange({ mode: "stream-block", path: "/etc/nginx/main.d/streams", keepsCopy: false }),
+    ).not.toContain("kept")
+  })
+})
+
+describe("runningInstall", () => {
+  const job = (over) => ({
+    id: "job-1",
+    kind: "packages.install",
+    title: "Installing libnginx-mod-stream",
+    target: "libnginx-mod-stream",
+    status: "running",
+    exitCode: 0,
+    startedAt: "",
+    lines: 0,
+    ...over,
+  })
+
+  test("finds a running install of the package, alone or among others", () => {
+    expect(runningInstall([job()], "libnginx-mod-stream")?.id).toBe("job-1")
+    expect(
+      runningInstall([job({ target: "htop, libnginx-mod-stream" })], "libnginx-mod-stream")?.id,
+    ).toBe("job-1")
+  })
+
+  test("passes over a finished install, another package, and other kinds of job", () => {
+    for (const other of [
+      job({ status: "succeeded" }),
+      job({ status: "failed" }),
+      job({ target: "libnginx-mod-stream-geoip2" }),
+      job({ kind: "packages.remove" }),
+      job({ target: undefined }),
+    ]) {
+      expect(runningInstall([other], "libnginx-mod-stream")).toBeUndefined()
+    }
   })
 })
 

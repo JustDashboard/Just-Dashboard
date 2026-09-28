@@ -112,12 +112,22 @@ export type StreamDeleteResult = {
 }
 
 /** The change that connects the stream directory, shown before it is made. */
+/** Why a connect edits nginx.conf rather than adding a drop-in. */
+export type StreamAppendReason =
+  "no-directory" | "load-module-after" | "directory-elsewhere" | "name-taken"
+
 export type StreamIncludePlan = {
   mode: StreamIncludeMode
   /** The file the change is made in. */
   path: string
   /** False for a drop-in, a file the change creates. */
   exists: boolean
+  /** Why the change is an edit to nginx.conf, for that mode. */
+  reason?: StreamAppendReason
+  /** Where the drop-in would have gone, for every reason but no-directory. */
+  dropIn?: string
+  /** A copy of the file as it was is kept beside it; not where nginx would read the copy. */
+  keepsCopy: boolean
   before: string
   after: string
   /** What the change adds, as it reads in the file. */

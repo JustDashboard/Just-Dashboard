@@ -151,7 +151,7 @@ func TestLiveConnectAppendsWhenAModuleLoadsLate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Mode != IncludeMainFile {
+	if plan.Mode != IncludeMainFile || plan.Reason != AppendModuleLoadsAfter || plan.DropIn != dropIn || !plan.KeepsCopy {
 		t.Fatalf("plan = %+v", plan)
 	}
 	res, err := svc.ApplyStreamInclude(ctx, plan.Mode, plan.Path, true)
@@ -160,6 +160,64 @@ func TestLiveConnectAppendsWhenAModuleLoadsLate(t *testing.T) {
 	}
 	if !streamIncludeFound(root, svc.streamDir()) {
 		t.Fatal("not included")
+	}
+}
+
+// A stream block in a file of a directory nginx.conf includes whole: a copy of
+// that file beside it is a second stream block, which nginx refuses as
+// duplicate. The connect keeps none, says so first, and both the stream that
+// was there and the one it starts reading forward.
+func TestLiveConnectKeepsNoCopyNginxWouldRead(t *testing.T) {
+	existing := freeLoopbackPort(t, "tcp")
+	backend := sshBackend(t)
+	block := fmt.Sprintf("stream {\n    server {\n        listen 127.0.0.1:%d;\n        proxy_pass %s;\n    }\n}\n", existing, backend)
+	svc, root := liveStreamNginxWith(t, func(root string) string {
+		if err := os.MkdirAll(filepath.Join(root, "main.d"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "main.d", "streams"), []byte(block), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprintf("pid %[1]s/nginx.pid;\nerror_log %[1]s/error.log;\nevents {}\ninclude %[1]s/main.d/*;\n", root)
+	})
+	ctx := context.Background()
+	file := filepath.Join(root, "main.d", "streams")
+	if !forwards(existing, 5*time.Second) {
+		t.Fatal("the hand-written stream does not forward to begin with")
+	}
+	copied := file + ".jd-stream-1.bak"
+	if err := os.WriteFile(copied, []byte(block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := runValidator(ctx, "nginx", "-t"); res.Valid || !strings.Contains(res.Output, "duplicate") {
+		t.Fatalf("nginx took a copy of the stream block beside it: %+v", res)
+	}
+	if err := os.Remove(copied); err != nil {
+		t.Fatal(err)
+	}
+
+	spec := &StreamSpec{Name: "second", Listen: freeLoopbackPort(t, "tcp"), Address: "127.0.0.1", Upstream: backend,
+		AllowFrom: []string{"127.0.0.1"}}
+	if _, err := svc.ApplyStream(ctx, spec, "", false); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := svc.PlanStreamInclude(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Mode != IncludeStreamBlock || plan.Path != file || plan.KeepsCopy ||
+		!strings.Contains(strings.Join(plan.Warnings, " "), "No copy of "+file) {
+		t.Fatalf("plan = %+v", plan)
+	}
+	res, err := svc.ApplyStreamInclude(ctx, plan.Mode, plan.Path, true)
+	if err != nil || !res.Validation.Valid || !res.Reloaded || res.Backup != "" {
+		t.Fatalf("%v %+v", err, res)
+	}
+	if copies, _ := filepath.Glob(filepath.Join(root, "main.d", "*.bak")); len(copies) != 0 {
+		t.Fatalf("copies kept where nginx reads them: %v", copies)
+	}
+	if !forwards(spec.Listen, 5*time.Second) || !forwards(existing, time.Second) {
+		t.Fatal("not both streams forward")
 	}
 }
 

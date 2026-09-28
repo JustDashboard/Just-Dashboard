@@ -1,6 +1,9 @@
 import type {
+  Job,
+  StreamAppendReason,
   StreamEntry,
   StreamIncludeMode,
+  StreamIncludePlan,
   StreamModule,
   StreamSpec,
   StreamStatus,
@@ -166,16 +169,52 @@ function baseName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1)
 }
 
-/** What connecting changes, as a sentence, for the plan the sheet shows. */
-export function connectChange(mode: StreamIncludeMode, path: string): string {
-  switch (mode) {
-    case "dropin":
-      return `Creates ${baseName(path)} in ${path.slice(0, path.lastIndexOf("/"))}. nginx.conf already includes that directory at its top level, so the stream block sits beside http and nginx.conf stays as its package shipped it.`
-    case "nginx.conf":
-      return `Adds a stream block to the end of ${baseName(path)}, after every module it loads: it includes no directory at its top level where a file of its own could go. The file as it is now is kept beside it.`
-    case "stream-block":
-      return `Adds one include line to the stream block in ${path}. nginx refuses a second stream block, so the directory goes into the one that is there.`
+/** The directory a path is in. */
+function dirName(path: string): string {
+  return path.slice(0, path.lastIndexOf("/"))
+}
+
+/** Why nginx.conf is the file a connect edits, as the clause after "after every module it loads:". */
+function appendReason(reason: StreamAppendReason | undefined, dropIn = ""): string {
+  const dir = dirName(dropIn)
+  switch (reason) {
+    case "load-module-after":
+      return `it includes ${dir} at its top level, but a module is loaded after that directory, and nginx refuses a module loaded after a stream block`
+    case "directory-elsewhere":
+      return `the directory it includes at its top level, ${dir}, leads outside the nginx directory, where the dashboard does not write`
+    case "name-taken":
+      return `${dir}, which it includes at its top level, already holds a ${baseName(dropIn)} that is not the dashboard's`
   }
+  return "it includes no directory at its top level where a file of its own could go"
+}
+
+/** What connecting changes, as a sentence, for the plan the sheet shows. */
+export function connectChange(
+  plan: Pick<StreamIncludePlan, "mode" | "path" | "reason" | "dropIn" | "keepsCopy">,
+): string {
+  const kept = plan.keepsCopy ? " The file as it is now is kept beside it." : ""
+  switch (plan.mode) {
+    case "dropin":
+      return `Creates ${baseName(plan.path)} in ${dirName(plan.path)}. nginx.conf already includes that directory at its top level, so the stream block sits beside http and nginx.conf stays as its package shipped it.`
+    case "nginx.conf":
+      return `Adds a stream block to the end of ${baseName(plan.path)}, after every module it loads: ${appendReason(plan.reason, plan.dropIn)}.${kept}`
+    case "stream-block":
+      return `Adds one include line to the stream block in ${plan.path}. nginx refuses a second stream block, so the directory goes into the one that is there.${kept}`
+  }
+}
+
+/**
+ * The install of this package that is running now, whoever started it and
+ * from whichever page. A second one would only fail on the package manager's
+ * lock, so the page watches this one instead.
+ */
+export function runningInstall(jobs: Job[], pkg: string): Job | undefined {
+  return jobs.find(
+    (job) =>
+      job.kind === "packages.install" &&
+      job.status === "running" &&
+      (job.target ?? "").split(", ").includes(pkg),
+  )
 }
 
 /** What disconnecting takes out: only what connecting put in. */

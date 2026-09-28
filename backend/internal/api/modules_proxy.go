@@ -39,6 +39,8 @@ func (s *Server) initProxyExtras() {
 
 	// --- lane D: streams ---
 
+	s.modules.proxyExtras.modulePackages.catalogue = s.modules.updates
+
 	// --- lane E: ports & exposure ---
 
 	// --- lane F: certificates ---

@@ -48,8 +48,18 @@ func (s *Server) mountModuleRoutes(r chi.Router) {
 // has. Asking costs a repository lookup, and the answer changes only with the
 // repositories, so it is kept for ten minutes.
 type modulePackages struct {
-	mu    sync.Mutex
-	known map[string]packageAnswer
+	// catalogue is the host's package manager; a test puts one in its place.
+	catalogue packageCatalogue
+	mu        sync.Mutex
+	known     map[string]packageAnswer
+}
+
+// packageCatalogue is what of the package manager says whether it has a
+// package: its name, which decides the package's, and a lookup that answers
+// updates.ErrUnknownPackage for one it does not have.
+type packageCatalogue interface {
+	Manager() string
+	Describe(ctx context.Context, name string) (*updates.PackageDetail, error)
 }
 
 type packageAnswer struct {
@@ -64,16 +74,16 @@ const modulePackageTTL = 10 * time.Minute
 // page never offers an install that cannot find its package. A lookup that
 // fails for another reason names it anyway, and the install says the rest.
 func (s *Server) modulePackage(ctx context.Context, module string) string {
-	pkg := proxysvc.ModulePackage(s.modules.updates.Manager(), module)
+	cache := &s.modules.proxyExtras.modulePackages
+	pkg := proxysvc.ModulePackage(cache.catalogue.Manager(), module)
 	if pkg == "" {
 		return ""
 	}
-	cache := &s.modules.proxyExtras.modulePackages
 	cache.mu.Lock()
 	answer, ok := cache.known[pkg]
 	cache.mu.Unlock()
 	if !ok || time.Since(answer.at) > modulePackageTTL {
-		_, err := s.modules.updates.Describe(ctx, pkg)
+		_, err := cache.catalogue.Describe(ctx, pkg)
 		answer = packageAnswer{has: !errors.Is(err, updates.ErrUnknownPackage), at: time.Now()}
 		cache.mu.Lock()
 		if cache.known == nil {

@@ -1136,7 +1136,8 @@ supports it. Unknown products keep a glyph. Until streams can forward, the Strea
 block of two numbered steps above its list — the stream module, then connecting the directory — each
 with its `Status`, a line of meaning and the button that does it where the page can; the step that
 needs doing carries the page's one brand command, so "Prepare a stream" stays outline, and the
-connect opens a sheet showing the file before anything is written.
+connect opens a sheet showing the file before anything is written. The install step keeps the recent
+installs beside its button, the list its job console says a run is reopened from.
 
 Certificates has a searchable inventory beside renewal and DNS management. Each inventory card opens
 its details — all names, dates, the full path and links to the sites using it — so it takes the lit

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Copy, Download, Linked, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, get, post } from "@/lib/api"
@@ -12,12 +12,13 @@ import {
   moduleLabel,
   moduleMissing,
   moduleRemedy,
+  runningInstall,
   streamOutage,
 } from "@/lib/streams"
 import { usePoll } from "@/hooks/use-poll"
 import { CodeEditor } from "@/components/code-editor"
 import { Disclosure, FormFact, FormFacts, FormNote, OptionList, OptionRow } from "@/components/form"
-import { JobConsole, useJobConsole } from "@/components/job-console"
+import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
 import { Pane, Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { ErrorState, LoadingPanel, Notice } from "@/components/state"
@@ -56,12 +57,34 @@ export function StreamSetup({
   const [starting, setStarting] = useState(false)
   const [sheet, setSheet] = useState({ open: false, session: 0 })
   const pkg = status.module.package
+  const offered = Boolean(admin && pkg && status.module.state === "not-installed")
+
+  // An install of the package already running — started before this page was
+  // opened, or on the Packages page — is shown and waited for rather than
+  // started again, which would only fail on the package manager's lock.
+  const watched = useRef<string | undefined>(undefined)
+  const jobs = usePoll<Job[]>(
+    async (signal) => {
+      const all = await get<Job[]>("/jobs/", undefined, signal)
+      const running = pkg ? runningInstall(all, pkg) : undefined
+      // One that ended while another run was on screen: the module may be in.
+      if (watched.current && !running) onChanged()
+      watched.current = running?.id
+      if (running && !console_.job && !starting) await console_.open(running.id)
+      return all
+    },
+    5000,
+    [pkg],
+    { enabled: offered },
+  )
+  const installing = Boolean(pkg && jobs.data && runningInstall(jobs.data, pkg))
 
   const install =
-    admin && pkg && status.module.state === "not-installed"
+    offered && pkg
       ? {
           label: pkg,
-          busy: starting || console_.running,
+          busy: starting || console_.running || installing,
+          onOpen: console_.open,
           run: async () => {
             setStarting(true)
             try {
@@ -103,15 +126,28 @@ export function StreamSetup({
   )
 }
 
-type Install = { label: string; busy: boolean; run: () => void }
+type Install = {
+  label: string
+  busy: boolean
+  run: () => void
+  /** Opens an earlier install in the console. */
+  onOpen: (id: string) => void
+}
 
-/** The install, as the one command where the module is what is missing. */
-function InstallButton({ install }: { install: Install }) {
+/**
+ * The install, as the one command where the module is what is missing, and
+ * the installs run before it: the console says a run outlives the page and
+ * is reopened from this list.
+ */
+function InstallControls({ install }: { install: Install }) {
   return (
-    <Button size="sm" onClick={install.run} pending={install.busy} disabled={install.busy}>
-      <Download className="size-4" />
-      {install.busy ? `Installing ${install.label}…` : `Install ${install.label}`}
-    </Button>
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+      <Button size="sm" onClick={install.run} pending={install.busy} disabled={install.busy}>
+        <Download className="size-4" />
+        {install.busy ? `Installing ${install.label}…` : `Install ${install.label}`}
+      </Button>
+      <RecentJobs kinds={["packages.install"]} onOpen={install.onOpen} />
+    </div>
   )
 }
 
@@ -148,7 +184,7 @@ function Readiness({
               ? "Or disconnect the stream directory from this page's menu."
               : "Or take the stream block out of nginx.conf."}
           </p>
-          {install && <InstallButton install={install} />}
+          {install && <InstallControls install={install} />}
         </div>
       </Notice>
     )
@@ -198,7 +234,7 @@ function Readiness({
                 where its test refuses any stream file, so nothing can be saved here until that
                 include comes out.
               </p>
-              {install && <InstallButton install={install} />}
+              {install && <InstallControls install={install} />}
             </>
           ) : (
             <>
@@ -267,7 +303,7 @@ function SetupSteps({
             ) : install ? (
               <>
                 <p>Debian and Ubuntu ship it as a package of its own. {outage}</p>
-                <InstallButton install={install} />
+                <InstallControls install={install} />
               </>
             ) : (
               <p>
@@ -513,9 +549,7 @@ function ConnectSheet({
                 {data.streams.length === 0 ? "none yet" : data.streams.length}
               </FormFact>
             </FormFacts>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              {connectChange(data.mode, data.path)}
-            </p>
+            <p className="text-xs leading-relaxed text-muted-foreground">{connectChange(data)}</p>
             {data.conflicts.length > 0 && (
               <Notice tone="danger" icon={Warning} title="nginx could not bind every stream">
                 <div className="space-y-2">

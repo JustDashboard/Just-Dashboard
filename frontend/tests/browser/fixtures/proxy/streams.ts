@@ -60,6 +60,7 @@ export function includePlan(overrides: Record<string, unknown> = {}) {
     mode: "dropin",
     path: dropInPath,
     exists: false,
+    keepsCopy: false,
     before: "",
     after: dropIn,
     added: dropIn,

@@ -46,6 +46,23 @@ const (
 	IncludeStreamBlock = "stream-block"
 )
 
+// Why a connect edits nginx.conf rather than adding a drop-in: the plan says
+// which, so the page can say why nginx.conf is the file changed.
+const (
+	// AppendNoDirectory is nginx.conf including no directory at its top level
+	// by a glob the drop-in's name matches.
+	AppendNoDirectory = "no-directory"
+	// AppendModuleLoadsAfter is such a directory with a load_module read after
+	// it, which nginx refuses once a stream block has come before it.
+	AppendModuleLoadsAfter = "load-module-after"
+	// AppendDirectoryElsewhere is such a directory leading outside the nginx
+	// directory, where the dashboard does not write.
+	AppendDirectoryElsewhere = "directory-elsewhere"
+	// AppendNameTaken is such a directory holding a file of the drop-in's name
+	// that is not the dashboard's.
+	AppendNameTaken = "name-taken"
+)
+
 // streamDropIn is the drop-in's file name: after every NN-mod-*.conf.
 const streamDropIn = "zz-just-dashboard-stream.conf"
 
@@ -66,9 +83,18 @@ type StreamIncludePlan struct {
 	// Path is the file the change is made in.
 	Path string `json:"path"`
 	// Exists is false for a drop-in, a file the change creates.
-	Exists bool   `json:"exists"`
-	Before string `json:"before"`
-	After  string `json:"after"`
+	Exists bool `json:"exists"`
+	// Reason is why the change is an edit to nginx.conf and not a drop-in:
+	// no-directory, load-module-after, directory-elsewhere or name-taken.
+	Reason string `json:"reason,omitempty"`
+	// DropIn is where the drop-in would have gone, for every reason but
+	// no-directory.
+	DropIn string `json:"dropIn,omitempty"`
+	// KeepsCopy is whether a copy of the file as it was is kept beside it:
+	// not where an include would read that copy as configuration.
+	KeepsCopy bool   `json:"keepsCopy"`
+	Before    string `json:"before"`
+	After     string `json:"after"`
 	// Added is what the change adds, as it reads in the file.
 	Added string `json:"added"`
 	// Line is where Added starts in After, counted from 1.
@@ -81,6 +107,9 @@ type StreamIncludePlan struct {
 	// reload fails the same way. The change is refused until they are gone.
 	Conflicts []string `json:"conflicts"`
 	Warnings  []string `json:"warnings"`
+	// backup is the copy the change keeps, named when the plan is made so
+	// the plan's word on it and the change cannot differ.
+	backup string
 }
 
 // StreamIncludeResult is what connecting or disconnecting did.
@@ -212,17 +241,34 @@ func (s *Service) planStreamInclude(listeners []Listener, listenErr error) (*Str
 		if plan, err = s.planIntoStreamBlock(files, block, dir); err != nil {
 			return nil, err
 		}
-	} else if plan = s.planDropIn(files, dir); plan == nil {
-		plan = planAppend(files[0], dir)
+	} else {
+		var reason, dropIn string
+		if plan, reason, dropIn = s.planDropIn(files, dir); plan == nil {
+			plan = planAppend(files[0], dir)
+			plan.Reason, plan.DropIn = reason, dropIn
+		}
 	}
 	// The plan is held to what it is for: read as nginx reads it, the
 	// changed configuration has to include the directory in a stream block.
-	if context, found, err := streamIncludeContext(withFile(files, plan.Path, plan.After), dir); err != nil ||
+	changed := withFile(files, plan.Path, plan.After)
+	if context, found, err := streamIncludeContext(changed, dir); err != nil ||
 		!found || len(context) != 1 || context[0] != "stream" {
 		return nil, fmt.Errorf("the change planned in %s would not have nginx read %s in a stream block", plan.Path, dir)
 	}
+	target, err := s.includeTarget(plan.Path)
+	if err != nil {
+		return nil, err
+	}
 	plan.Streams, plan.Conflicts = stagedStreams(dir, listeners)
 	plan.Warnings = []string{}
+	if plan.Exists {
+		plan.backup = backupFor(changed, s.nginxDir, plan.Path, target, time.Now())
+		plan.KeepsCopy = plan.backup != ""
+		if !plan.KeepsCopy {
+			plan.Warnings = append(plan.Warnings, "No copy of "+plan.Path+
+				" is kept beside it: an include in the configuration would read the copy as configuration.")
+		}
+	}
 	if listenErr != nil {
 		plan.Warnings = append(plan.Warnings, "The host's listening sockets could not be read ("+listenErr.Error()+
 			"), so the streams' ports were not checked for a program already holding them.")
@@ -281,11 +327,13 @@ func (s *Service) includeTarget(path string) (string, error) {
 
 // planDropIn is a drop-in in the first directory nginx.conf includes at its
 // top level by a glob the drop-in's name matches — unless a load_module comes
-// after it, which nginx would refuse as too late.
-func (s *Service) planDropIn(files []ConfigFile, dir string) *StreamIncludePlan {
+// after it, which nginx would refuse as too late. Where there is none, it says
+// why not, and where the drop-in would have gone: the first such directory's
+// reason, since that is the one nginx.conf's reader looks for.
+func (s *Service) planDropIn(files []ConfigFile, dir string) (plan *StreamIncludePlan, reason, dropIn string) {
 	main, err := ParseNginxFile(files[0].Path, files[0].Content, nil)
 	if err != nil {
-		return nil
+		return nil, AppendNoDirectory, ""
 	}
 	content := renderDropIn(dir)
 	for _, d := range main {
@@ -308,19 +356,25 @@ func (s *Service) planDropIn(files []ConfigFile, dir string) *StreamIncludePlan 
 			continue
 		}
 		path := filepath.Join(parent, streamDropIn)
+		var why string
 		if _, err := s.includeTarget(path); err != nil {
-			continue
-		}
-		if _, err := os.Lstat(path); err == nil {
+			why = AppendDirectoryElsewhere
+		} else if _, err := os.Lstat(path); err == nil {
 			// A file of that name that nginx is not reading as ours.
-			continue
+			why = AppendNameTaken
+		} else if loadModuleAfter(withFile(files, path, content), path) {
+			why = AppendModuleLoadsAfter
+		} else {
+			return &StreamIncludePlan{Mode: IncludeDropIn, Path: path, After: content, Added: content, Line: 1}, "", ""
 		}
-		if loadModuleAfter(withFile(files, path, content), path) {
-			continue
+		if reason == "" {
+			reason, dropIn = why, path
 		}
-		return &StreamIncludePlan{Mode: IncludeDropIn, Path: path, After: content, Added: content, Line: 1}
 	}
-	return nil
+	if reason == "" {
+		reason = AppendNoDirectory
+	}
+	return nil, reason, dropIn
 }
 
 // loadModuleAfter reports a load_module that nginx reads after the stream
@@ -591,6 +645,20 @@ func ownConnection(files []ConfigFile, dir string) *StreamConnection {
 	return nil
 }
 
+// backupFor is the copy a change to target keeps of the file as it was, or ""
+// where an include would read that copy as configuration — by the name the
+// configuration gives the file or by the one it resolves to, since the copy
+// sits beside both.
+func backupFor(files []ConfigFile, nginxDir, named, target string, at time.Time) string {
+	suffix := fmt.Sprintf(".jd-stream-%d.bak", at.Unix())
+	for _, path := range []string{named + suffix, target + suffix} {
+		if readByNginx(files, nginxDir, path) {
+			return ""
+		}
+	}
+	return target + suffix
+}
+
 // readByNginx reports whether an include anywhere in the configuration would
 // take path, which a backup must never be.
 func readByNginx(files []ConfigFile, nginxDir, path string) bool {
@@ -654,21 +722,17 @@ func (s *Service) ApplyStreamInclude(ctx context.Context, mode, path string, rel
 	if err != nil {
 		return nil, err
 	}
+	// The plan's warnings already say when no copy is kept.
 	res := &StreamIncludeResult{Mode: plan.Mode, Path: plan.Path, Streams: len(plan.Streams), Warnings: plan.Warnings}
-	files, _ := readConfigFiles(s.nginxDir)
-	if plan.Exists {
+	if plan.backup != "" {
 		st, err := os.Stat(target)
 		if err != nil {
 			return nil, err
 		}
-		backup := fmt.Sprintf("%s.jd-stream-%d.bak", target, time.Now().Unix())
-		if readByNginx(files, s.nginxDir, backup) {
-			res.Warnings = append(res.Warnings, "No copy of "+plan.Path+" was kept beside it: nginx would have read the copy as configuration.")
-		} else if err := os.WriteFile(backup, []byte(plan.Before), st.Mode().Perm()); err != nil {
+		if err := os.WriteFile(plan.backup, []byte(plan.Before), st.Mode().Perm()); err != nil {
 			return nil, err
-		} else {
-			res.Backup = backup
 		}
+		res.Backup = plan.backup
 	}
 	undo := func() {
 		if plan.Exists {
