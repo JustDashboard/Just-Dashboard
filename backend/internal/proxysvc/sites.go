@@ -33,7 +33,9 @@ type SiteSpec struct {
 	Kind string `json:"kind"`
 
 	Upstream string `json:"upstream,omitempty"`
-	Root     string `json:"root,omitempty"`
+	// Pool, when set, replaces Upstream with several servers.
+	Pool *SitePool `json:"pool,omitempty"`
+	Root string    `json:"root,omitempty"`
 	// SPA answers a path with no file of its own with index.html, for a
 	// single-page app whose router runs in the browser. Static sites only:
 	// without it a deep link or a reload on /settings is nginx's 404.
@@ -333,8 +335,10 @@ func ValidateSpec(spec *SiteSpec) error {
 	}
 	switch spec.Kind {
 	case "proxy":
-		if err := validUpstream(spec.Upstream); err != nil {
-			return err
+		if spec.Pool == nil {
+			if err := validUpstream(spec.Upstream); err != nil {
+				return err
+			}
 		}
 	case "static":
 		if !absPathRe.MatchString(spec.Root) {
@@ -394,6 +398,9 @@ func ValidateSpec(spec *SiteSpec) error {
 		seenLocation[loc.blockKey()] = true
 	}
 	if err := validUpstreamTLS(spec); err != nil {
+		return err
+	}
+	if err := validatePool(spec); err != nil {
 		return err
 	}
 	switch spec.HostHeader {
@@ -542,7 +549,7 @@ func validUpstreamTLS(spec *SiteSpec) error {
 
 // hasHTTPSUpstream says whether any address the site forwards to is HTTPS.
 func (spec *SiteSpec) hasHTTPSUpstream() bool {
-	if strings.HasPrefix(spec.Upstream, "https://") {
+	if strings.HasPrefix(spec.mainUpstream(), "https://") {
 		return true
 	}
 	for _, loc := range spec.Locations {
@@ -637,7 +644,7 @@ func SpecWarnings(spec *SiteSpec) []string {
 	}
 	if spec.Kind == "proxy" {
 		routes := append([]SiteLocation{}, spec.Locations...)
-		for _, loc := range append(routes, SiteLocation{Path: "/", Upstream: spec.Upstream}) {
+		for _, loc := range append(routes, SiteLocation{Path: "/", Upstream: spec.mainUpstream()}) {
 			// An exact path is replaced whole and a regex one cannot carry
 			// an upstream path, so the prefix swap below is a prefix's.
 			if loc.Upstream == "" || !loc.isPrefix() {
@@ -677,6 +684,7 @@ func SpecWarnings(spec *SiteSpec) []string {
 			"Replacing the application's own error pages applies only to a site that forwards to an application; on this one only nginx's own errors get the site's pages.")
 	}
 	warnings = append(warnings, limitsWarnings(spec)...)
+	warnings = append(warnings, poolWarnings(spec)...)
 	if spec.Kind == "proxy" && (spec.UpstreamSNI || spec.UpstreamVerify) && !spec.hasHTTPSUpstream() {
 		warnings = append(warnings,
 			"The upstream TLS settings apply only to an https:// upstream, and this site forwards to none.")

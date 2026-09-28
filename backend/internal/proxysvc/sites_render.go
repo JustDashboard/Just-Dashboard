@@ -102,7 +102,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 			renderLocation(l, loc, spec)
 			l.blank()
 		}
-		renderLocation(l, SiteLocation{Path: "/", Upstream: spec.Upstream, WebSockets: spec.WebSockets}, spec)
+		renderLocation(l, SiteLocation{Path: "/", Upstream: spec.mainUpstream(), WebSockets: spec.WebSockets}, spec)
 	}
 
 	if spec.usesPages() {
@@ -143,8 +143,20 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		l.add("# rather than forwarding whatever Connection header the client sent.")
 		l.add("map $http_upgrade $%s {", spec.connectionVar())
 		l.add("    default upgrade;")
-		l.add("    ''      close;")
+		if spec.poolKeepsAlive() {
+			l.add("    # Cleared rather than close, so the pool's connections are kept.")
+			l.add("    ''      \"\";")
+		} else {
+			l.add("    ''      close;")
+		}
 		l.add("}")
+		wrote = true
+	}
+	if spec.Kind == "proxy" && spec.Pool != nil {
+		if wrote {
+			l.blank()
+		}
+		renderPool(l, spec)
 		wrote = true
 	}
 	if spec.AccessLog && spec.timedLog() {
@@ -507,6 +519,9 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 	// location's own prefix, and trimming its slash turned /app/ into /app,
 	// which sent /page to the application as /apppage.
 	l.add("        proxy_pass %s;", proxyPassTarget(loc.renderedPath(), loc.renderedUpstream()))
+	if spec.Pool != nil && loc.Upstream == spec.poolUpstream() {
+		renderPoolLocation(l, loc, spec)
+	}
 	l.add("        proxy_http_version 1.1;")
 	l.add("        # The application sees the visitor's address and scheme rather")
 	l.add("        # than the proxy's, which is what makes redirects, cookies and")

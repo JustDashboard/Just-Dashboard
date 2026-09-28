@@ -39,6 +39,8 @@ export type SiteSpec = {
   domains: string[]
   kind: "proxy" | "static" | "redirect"
   upstream?: string
+  /** Several servers in place of `upstream`. Proxy sites only. */
+  pool?: SitePool
   root?: string
   /** A static site whose paths with no file of their own get index.html. */
   spa?: boolean
@@ -94,6 +96,53 @@ export type SiteSpec = {
   /** How much one client may ask of the site. Not for a redirect. */
   limits?: SiteLimits
   custom?: string
+}
+
+/**
+ * The site's main upstream as an nginx upstream block. Health checking is
+ * passive: a server is set aside after its real requests fail.
+ */
+export type SitePool = {
+  /** Empty is round robin. */
+  method?: PoolMethod
+  /** How every server is spoken to; empty is http. */
+  scheme?: "" | "http" | "https"
+  servers: PoolServer[]
+  /** Idle connections each worker keeps open to the servers; 0 keeps none. */
+  keepalive?: number
+  /** proxy_next_upstream's conditions; empty is nginx's error and timeout, ["off"] never retries. */
+  retryOn?: RetryCondition[]
+  /** Servers one request may try; 0 is no cap. */
+  tries?: number
+}
+
+export type PoolMethod = "" | "least_conn" | "ip_hash" | "hash" | "random"
+
+export type RetryCondition =
+  | "error"
+  | "timeout"
+  | "invalid_header"
+  | "http_500"
+  | "http_502"
+  | "http_503"
+  | "http_504"
+  | "http_403"
+  | "http_404"
+  | "http_429"
+  | "non_idempotent"
+  | "off"
+
+/** One server: host:port, [IPv6]:port or unix:/path. Zero is nginx's default. */
+export type PoolServer = {
+  address: string
+  weight?: number
+  maxFails?: number
+  /** Seconds. */
+  failTimeout?: number
+  /** Gets requests only while every other server is unavailable. */
+  backup?: boolean
+  /** Kept in the file and sent nothing. */
+  down?: boolean
 }
 
 /** Counted per client address, as nginx sees it. */

@@ -1,4 +1,4 @@
-import type { LocationMatch, SiteLocation, SiteSpec } from "@/lib/types"
+import type { LocationMatch, SiteLocation, SitePool, SiteSpec } from "@/lib/types"
 
 /**
  * What each path of a proxy site does, in the order nginx decides it.
@@ -132,13 +132,20 @@ export function siteRoutes(spec: SiteSpec): SiteRoute[] {
         notes: notes(loc, spec),
       }
     })
-  const catchAll: SiteLocation = { path: "/", upstream: spec.upstream, webSockets: spec.webSockets }
+  const upstream = spec.pool ? poolTarget(spec.pool) : spec.upstream
+  const catchAll: SiteLocation = { path: "/", upstream, webSockets: spec.webSockets }
   rows.push({
     location: "/",
     rule: "Everything else",
-    target: spec.upstream ?? "",
+    target: upstream ?? "",
     example: example(catchAll),
     notes: notes(catchAll, spec),
   })
   return rows
+}
+
+/** A pool as the routes table names it: how many servers share it, and over what. */
+function poolTarget(pool: SitePool): string {
+  const n = pool.servers.length
+  return `pool of ${n} server${n === 1 ? "" : "s"} over ${pool.scheme || "http"}`
 }

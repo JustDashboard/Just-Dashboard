@@ -819,6 +819,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   with SNI or verify), `proxy_ssl_verify on` + `proxy_ssl_verify_depth 3` + `proxy_ssl_trusted_certificate`
   (`UpstreamCA`, else `/etc/ssl/certs/ca-certificates.crt`). Password-file paths are absolute-path
   checked like the site's; the route stays system.admin.
+- **`sites_pool.go` — several servers.** `SiteSpec.Pool` (`Method` empty/`least_conn`/`ip_hash`/`hash`
+  = `hash $request_uri consistent`/`random`, `Scheme` empty = http or `https`, `Servers[]` with `Weight`,
+  `MaxFails`, `FailTimeout` seconds, `Backup`, `Down`, zero = nginx's default; `Keepalive`, `RetryOn`
+  = `proxy_next_upstream` conditions or `["off"]`, `Tries`) replaces `Upstream` (both set is refused) and
+  renders `upstream jd_<ident>_pool { … }` above the servers, which the catch-all forwards to with its
+  `proxy_next_upstream`/`_tries`. Keepalive clears `Connection` (`proxy_set_header Connection ""`, or the
+  site's upgrade map answers `""` instead of `close`). Refused: backup with `ip_hash`/`hash`/`random`
+  (nginx refuses it), a pool of only backups, a scheme or path in a server address (host:port,
+  `[v6]:port` or `unix:/path`), Host "upstream's" (`$proxy_host` would be the block name) and an HTTPS
+  pool with SNI/verify but no `UpstreamTLSName`. The parser reads any upstream block the catch-all's
+  `proxy_pass` names back as the pool, so a Duplicate gets the new name's block. Health checking is
+  passive only (`max_fails`/`fail_timeout`); stock nginx has no active checks and the form says so.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
   quietly stopped. Each version is probed on a connection pinned to exactly that version, offering
