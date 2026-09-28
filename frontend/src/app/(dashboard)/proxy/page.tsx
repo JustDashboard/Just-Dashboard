@@ -10,7 +10,9 @@ import type {
   Certificate,
   CertbotState,
   DefaultSite,
+  ErrorReport,
   Listener,
+  SiteTrafficSummary,
   StreamStatus,
   UpstreamReport,
   VHost,
@@ -63,6 +65,8 @@ import {
 } from "@/components/proxy/freshness"
 import { overviewRoutes, routeKind, routeTarget } from "@/components/proxy/overview-routes"
 import { upstreamLabel, upstreamsOf, upstreamTone } from "@/components/proxy/upstream-health"
+import { busiestItems, trafficHref, trafficLabel } from "@/components/proxy/site-traffic"
+import { errorFinding } from "@/components/proxy/site-errors"
 
 /**
  * What a poll last answered, or nothing when its last read failed. A source
@@ -128,6 +132,21 @@ export default function ProxyOverviewPage() {
   const upstreams = usePoll(
     (signal) => get<UpstreamReport>("/proxy/upstreams", undefined, signal),
     30_000,
+    [],
+    { enabled: Boolean(status?.nginx) },
+  )
+  // Each site's last hour and nginx's recent errors, read from the logs on
+  // this host. A digest beside the routes rather than a source of findings:
+  // a failed read says so in its own panel and nowhere else.
+  const traffic = usePoll(
+    (signal) => get<SiteTrafficSummary>("/proxy/traffic", undefined, signal),
+    60_000,
+    [],
+    { enabled: Boolean(status?.nginx) },
+  )
+  const nginxErrors = usePoll(
+    (signal) => get<ErrorReport>("/proxy/errors", { window: "1h" }, signal),
+    60_000,
     [],
     { enabled: Boolean(status?.nginx) },
   )
@@ -217,6 +236,8 @@ export default function ProxyOverviewPage() {
     streams.refresh()
     ports.refresh()
     upstreams.refresh()
+    traffic.refresh()
+    nginxErrors.refresh()
     configTest.refreshLast()
   }
 
@@ -229,6 +250,11 @@ export default function ProxyOverviewPage() {
       : undefined
   const listeners = readable(ports)?.value
   const upstreamReport = upstreams.error ? undefined : upstreams.data
+  const siteTraffic = traffic.error ? undefined : traffic.data?.sites
+  const trafficBySite = new Map(
+    (siteTraffic ?? []).filter((t) => t.status === "available").map((t) => [t.site, t]),
+  )
+  const errorReport = nginxErrors.error ? undefined : nginxErrors.data
   const hosts = sites ?? []
   const routes = useMemo(() => overviewRoutes(sites ?? []), [sites])
   const onTls = hosts.filter((v) => v.tls).length
@@ -586,6 +612,7 @@ export default function ProxyOverviewPage() {
                 {routes.shown.map((vhost) => {
                   const target = routeTarget(vhost)
                   const reached = upstreamsOf(upstreamReport, vhost.path)
+                  const load = vhost.kind === "nginx" ? trafficBySite.get(vhost.name) : undefined
                   return (
                     <ChoiceRow
                       key={`${vhost.kind}:${vhost.name}:${vhost.path}`}
@@ -603,6 +630,7 @@ export default function ProxyOverviewPage() {
                       />
                       <div className="flex flex-wrap items-center justify-between gap-2 text-hint text-muted-foreground">
                         <SiteTLS vhost={vhost} />
+                        {load && <span className="numeric">{trafficLabel(load)}</span>}
                         <span className="font-mono">{vhost.listen.join(" · ")}</span>
                       </div>
                       {reached.length > 0 && (
@@ -665,6 +693,89 @@ export default function ProxyOverviewPage() {
               )}
             </PanelBody>
           </Panel>
+
+          {status.nginx && (
+            <Panel plain>
+              <PanelHeader
+                title="Busiest sites"
+                actions={
+                  <Link
+                    href="/proxy/traffic"
+                    className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    Traffic <ArrowRight className="size-3" />
+                  </Link>
+                }
+              />
+              <PanelBody flush>
+                {traffic.error ? (
+                  <p
+                    className="text-hint text-muted-foreground"
+                    title={errorMessage(traffic.error)}
+                  >
+                    {"Couldn't read the sites' access logs."}
+                  </p>
+                ) : !siteTraffic ? (
+                  <div className="space-y-3 py-1">
+                    <Skeleton className="h-4 w-48" />
+                    <Skeleton className="h-4 w-40" />
+                  </div>
+                ) : (
+                  <BarList
+                    className="animate-rise"
+                    items={busiestItems(
+                      siteTraffic.filter((t) => t.status === "available"),
+                      (site) => router.push(trafficHref(site)),
+                      5,
+                    )}
+                    emptyLabel="No site writes an access log the dashboard can read."
+                  />
+                )}
+              </PanelBody>
+            </Panel>
+          )}
+
+          {status.nginx && (
+            <Panel plain>
+              <PanelHeader
+                title="Recent nginx errors"
+                actions={
+                  <Link
+                    href="/proxy/traffic?view=errors"
+                    className="flex items-center gap-1 text-hint font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    Error log <ArrowRight className="size-3" />
+                  </Link>
+                }
+              />
+              <PanelBody>
+                {nginxErrors.error ? (
+                  <p
+                    className="text-hint text-muted-foreground"
+                    title={errorMessage(nginxErrors.error)}
+                  >
+                    {"Couldn't read nginx's error log."}
+                  </p>
+                ) : !errorReport ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-56" />
+                    <Skeleton className="h-4 w-40" />
+                  </div>
+                ) : (
+                  <div className="animate-rise">
+                    {errorReport.note ? (
+                      <p className="text-hint text-muted-foreground">{errorReport.note}</p>
+                    ) : (
+                      <FindingList
+                        findings={errorReport.groups.slice(0, 4).map(errorFinding)}
+                        emptyLabel="No errors in the last hour"
+                      />
+                    )}
+                  </div>
+                )}
+              </PanelBody>
+            </Panel>
+          )}
 
           {/* The four figures above count the certificates; none of them says
             which one runs out first, and that is the reading somebody opens a

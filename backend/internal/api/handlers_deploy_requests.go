@@ -197,17 +197,9 @@ func (s *Server) exportRequests(w http.ResponseWriter, r *http.Request, route, s
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q",
 		fmt.Sprintf("%s-%s.csv", stem, time.Now().UTC().Format("20060102-150405"))))
 	writer := csv.NewWriter(w)
-	_ = writer.Write([]string{"time", "method", "path", "query", "status", "durationMs", "size", "client", "host", "proto", "tls", "userAgent", "referer"})
+	_ = writer.Write(requestCSVHeader)
 	_, err := s.modules.requests.Export(ctx, route, filter, 0, func(e accesslog.Entry) {
-		duration := ""
-		if ms, ok := e.Duration(); ok {
-			duration = strconv.FormatFloat(ms, 'f', 3, 64)
-		}
-		_ = writer.Write([]string{
-			e.At().Format(time.RFC3339Nano), csvText(e.Method), csvText(e.Path), csvText(e.Query), strconv.Itoa(e.Status), duration,
-			strconv.FormatInt(e.Size, 10), csvText(e.RemoteIP), csvText(e.Host), csvText(e.Proto), strconv.FormatBool(e.TLS),
-			csvText(e.UserAgent), csvText(e.Referer),
-		})
+		_ = writer.Write(requestCSVRow(e))
 	})
 	writer.Flush()
 	if err != nil {
@@ -226,6 +218,22 @@ func csvText(v string) string {
 		return "'" + v
 	}
 	return v
+}
+
+// requestCSVHeader and requestCSVRow are the one spelling of a request as a
+// CSV row, shared by every download of a request record.
+var requestCSVHeader = []string{"time", "method", "path", "query", "status", "durationMs", "size", "client", "host", "proto", "tls", "userAgent", "referer"}
+
+func requestCSVRow(e accesslog.Entry) []string {
+	duration := ""
+	if ms, ok := e.Duration(); ok {
+		duration = strconv.FormatFloat(ms, 'f', 3, 64)
+	}
+	return []string{
+		e.At().Format(time.RFC3339Nano), csvText(e.Method), csvText(e.Path), csvText(e.Query), strconv.Itoa(e.Status), duration,
+		strconv.FormatInt(e.Size, 10), csvText(e.RemoteIP), csvText(e.Host), csvText(e.Proto), strconv.FormatBool(e.TLS),
+		csvText(e.UserAgent), csvText(e.Referer),
+	}
 }
 
 // handleDeploymentRunTraffic compares the traffic either side of a run's

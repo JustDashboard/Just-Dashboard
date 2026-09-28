@@ -1896,6 +1896,24 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   for 15 s with concurrent readers sharing one, so polling cannot amplify outbound traffic.
   `POST /proxy/upstreams/check` (system.admin, audited `proxy.upstreams.check`) skips the cache. 503
   `no_nginx` on a host without nginx, 503 `invalid_config` when `nginx -T` refuses.
+- **Site traffic and error log** (`proxysvc/site_logs.go`, `proxysvc/site_errors.go`,
+  `api/handlers_proxy_traffic.go`): `SiteLogsFor` finds an nginx site by its listed name (never a
+  joined path) and reads the `access_log`/`error_log` its file sets at file or server level;
+  `confineLog` refuses a relative path, a `$variable`, and anything that is not inside `/var/log/nginx`
+  both as written and after symlinks, and `syslog:`/`off` are reported as reasons. A second
+  `accesslog.Store` (`proxyExtras.siteTraffic`) is keyed by that log path, its opener re-confining it.
+  `parseCombined` also reads trailing `rt=` (latency) and `host=` when a `log_format` appends them; the
+  stock `combined` the site form writes has no timing, so p95 shows only for such formats. All reads,
+  open to every signed-in account like a deployment's request record: `GET /proxy/traffic` (each site's
+  last hour, each record refreshed at most once a minute), `GET /proxy/traffic/{name}?window=15m|1h|6h|24h|7d`
+  plus the deployment filter params (a `RequestWindow` with `logs`), `GET /proxy/traffic/{name}/tail?after=`
+  (polled tail from the window's cursor), `GET /proxy/traffic/{name}/export` (CSV), and
+  `GET /proxy/errors?site=&window=`: the last 8 MB of the site's error log, or of nginx's (the http
+  block's `error_log`, then main's, then `/var/log/nginx/error.log`) narrowed to the site's
+  `server_name`s by each line's `server:`/`host:`, grouped by level, message with quoted values and
+  numbers replaced, and upstream; recognised lines carry a plain title and advice (refused upstream,
+  timeouts, too-large bodies with the size to raise `client_max_body_size` to, missing files, TLS
+  handshakes and so on).
 - **Certificates carry their fingerprint and serial**, the SHA-256 of the DER and the serial number in
   the uppercase colon form `openssl x509 -fingerprint -sha256` prints, which
   `TestCertificateFingerprintMatchesOpenSSL` checks against openssl itself.

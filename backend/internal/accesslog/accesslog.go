@@ -233,9 +233,10 @@ func header(headers map[string][]string, name string) string {
 
 const combinedTimeLayout = "02/Jan/2006:15:04:05 -0700"
 
-// parseCombined reads nginx's stock format:
+// parseCombined reads nginx's stock format, and the fields readTrailing knows
+// when a log_format appends them:
 //
-//	1.2.3.4 - - [19/Sep/2026:05:47:57 +0000] "GET /a?b=1 HTTP/1.1" 200 1234 "ref" "agent"
+//	1.2.3.4 - - [19/Sep/2026:05:47:57 +0000] "GET /a?b=1 HTTP/1.1" 200 1234 "ref" "agent" rt=0.012
 //
 // It is hand-scanned rather than matched with a regular expression because a
 // request log is the one file on the host that is read a million lines at a
@@ -308,17 +309,33 @@ func parseCombined(line string) (Entry, bool) {
 	if agent, ok := quoted(&rest); ok && agent != "-" {
 		entry.UserAgent = agent
 	}
-	// The site builder's timed format is combined with named fields after
-	// it; rt= is $request_time in seconds.
+	readTrailing(&entry, rest)
+	return entry, true
+}
+
+// readTrailing reads what an operator appended to `combined` in a log_format
+// of their own: `rt=$request_time` gives the latency the stock format lacks,
+// and `host=$host` names the site on a log several share. A trailing field
+// this does not know, or one written `-`, is left alone rather than failing
+// the line, because the line up to it is still a served request.
+func readTrailing(entry *Entry, rest string) {
 	for _, field := range strings.Fields(rest) {
-		if raw, ok := strings.CutPrefix(field, "rt="); ok {
-			if seconds, err := strconv.ParseFloat(raw, 64); err == nil {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok || value == "" || value == "-" {
+			continue
+		}
+		value = strings.Trim(value, `"`)
+		switch key {
+		case "rt":
+			if seconds, err := strconv.ParseFloat(value, 64); err == nil && seconds >= 0 {
 				entry.duration, entry.timed = seconds*1000, true
 			}
-			break
+		case "host":
+			if entry.Host == "" {
+				entry.Host = value
+			}
 		}
 	}
-	return entry, true
 }
 
 // quoted takes the next "..." run, advancing the cursor past it. Escaped
