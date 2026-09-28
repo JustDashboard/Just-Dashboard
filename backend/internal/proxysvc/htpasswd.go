@@ -181,6 +181,9 @@ func (s *Service) DeleteAuthFile(file string) error {
 	if !authFileRe.MatchString(file) {
 		return fmt.Errorf("invalid file name")
 	}
+	if err := s.RefuseListedAuthFile(file); err != nil {
+		return err
+	}
 	if err := os.Remove(filepath.Join(s.authDir(), file)); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("no such password file: %s", file)

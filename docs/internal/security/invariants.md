@@ -145,8 +145,8 @@ argument from the other side — interrupting is how you *avoid* a bad outcome, 
 stop button is one somebody types while something is going wrong.
 
 The 0.6.1 review narrowed the set: a prune sparing volumes (containers, networks and images come back from
-a registry or a compose file), deleting a proxy site, nginx stream or htpasswd file (each recreated from
-the same form), deleting a git branch (a pointer whose commits survive in the reflog and on the remote),
+a registry or a compose file), deleting a proxy site, nginx stream, htpasswd file or access list (each
+recreated from the same form; an access list is refused while a site includes it), deleting a git branch (a pointer whose commits survive in the reflog and on the remote),
 and ending an SSH session (a SIGHUP the operator reconnects past). All keep `s.destructive` and an ordinary
 confirm dialog. `compose down` was reviewed and **kept** — it is the one compose action that removes rather
 than stops containers, and on a host running several stacks typing the name guards against `down`-ing the

@@ -35,6 +35,7 @@ func (s *Server) mountVHostRoutes(r chi.Router) {
 			r.Method(http.MethodDelete, "/vhosts/{name}/link", s.handle(s.handleVHostUnlink))
 		})
 	})
+	r.Route("/access-lists", s.mountAccessListRoutes)
 }
 
 func (s *Server) handleVHostList(w http.ResponseWriter, r *http.Request) error {
