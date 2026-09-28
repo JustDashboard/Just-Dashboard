@@ -172,6 +172,8 @@ var refusedTwice = map[string]bool{
 	"http2": true, "ssl_prefer_server_ciphers": true, "ssl_session_timeout": true,
 	"ssl_session_tickets": true, "client_max_body_size": true, "gzip": true, "gzip_vary": true,
 	"auth_basic": true, "auth_basic_user_file": true, "root": true,
+	"expires": true, "proxy_cache": true, "proxy_cache_key": true, "proxy_cache_lock": true,
+	"proxy_cache_background_update": true,
 }
 
 // driftFile is a site file as nginx reads it, with where each statement sits

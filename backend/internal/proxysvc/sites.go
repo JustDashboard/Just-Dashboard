@@ -111,6 +111,10 @@ type SiteSpec struct {
 	InterceptErrors bool `json:"interceptErrors,omitempty"`
 	// Limits caps the requests and connections one client may make.
 	Limits *SiteLimits `json:"limits,omitempty"`
+	// StaticCache has browsers keep the site's static files; ProxyCache
+	// keeps the application's responses on disk. Nil sets neither.
+	StaticCache *StaticCache `json:"staticCache,omitempty"`
+	ProxyCache  *ProxyCache  `json:"proxyCache,omitempty"`
 	// PagesDir is where the site's pages are served from. The service sets
 	// it from its own nginx directory; it is never taken from a request.
 	PagesDir string `json:"-"`
@@ -430,6 +434,9 @@ func ValidateSpec(spec *SiteSpec) error {
 	if err := validateLimits(spec); err != nil {
 		return err
 	}
+	if err := validateCache(spec); err != nil {
+		return err
+	}
 	if spec.PagesDir != "" && !absPathRe.MatchString(spec.PagesDir) {
 		return fmt.Errorf("the pages directory must be an absolute path")
 	}
@@ -677,6 +684,7 @@ func SpecWarnings(spec *SiteSpec) []string {
 	}
 	warnings = append(warnings, limitsWarnings(spec)...)
 	warnings = append(warnings, poolWarnings(spec)...)
+	warnings = append(warnings, cacheWarnings(spec)...)
 	if spec.Kind == "proxy" && (spec.UpstreamSNI || spec.UpstreamVerify) && !spec.hasHTTPSUpstream() {
 		warnings = append(warnings,
 			"The upstream TLS settings apply only to an https:// upstream, and this site forwards to none.")

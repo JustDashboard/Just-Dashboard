@@ -29,6 +29,7 @@ import type {
   LocationMatch,
   PoolMethod,
   PoolServer,
+  ProxyCache,
   RetryCondition,
   SiteLimits,
   SiteLocation,
@@ -39,6 +40,7 @@ import type {
   SiteRead,
   SiteResult,
   SiteSpec,
+  StaticCache,
 } from "@/lib/types"
 import { plural } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
@@ -1299,6 +1301,8 @@ function SiteFormBody({
 
           {spec.kind !== "redirect" && <LimitsSection spec={spec} set={set} />}
 
+          {spec.kind !== "redirect" && <CachingSection spec={spec} set={set} />}
+
           <PagesSection spec={spec} set={set} site={editing} />
 
           {spec.kind === "proxy" && (
@@ -2513,6 +2517,126 @@ function LimitsSection({
           hint="A monitor, an office, another server of yours."
         />
       )}
+    </FormSection>
+  )
+}
+
+/**
+ * What browsers and nginx keep. The proxy cache stores nothing nginx does not
+ * buffer, so turning it on turns buffering on with it.
+ */
+function CachingSection({
+  spec,
+  set,
+}: {
+  spec: SiteSpec
+  set: <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => void
+}) {
+  const asset = spec.staticCache
+  const proxy = spec.kind === "proxy" ? spec.proxyCache : undefined
+  const setAsset = (patch: Partial<StaticCache>) =>
+    set("staticCache", { maxAge: "30d", ...asset, ...patch })
+  const setProxy = (patch: Partial<ProxyCache>) =>
+    set("proxyCache", { maxSize: "1g", valid: "10m", ...proxy, ...patch })
+
+  return (
+    <FormSection
+      title="Caching"
+      hint="Browsers keep static files, and nginx can keep the application's answers."
+    >
+      <OptionList>
+        <OptionRow
+          title="Cache static files in browsers"
+          hint="Styles, scripts, images and fonts, chosen by their Content-Type, so pages are never kept."
+          checked={Boolean(asset)}
+          onCheckedChange={(on) => set("staticCache", on ? { maxAge: "30d" } : undefined)}
+        >
+          {asset && (
+            <div className="space-y-2">
+              <Field
+                label="Kept for"
+                htmlFor="site-cache-age"
+                hint="A time in nginx's units: 12h, 30d, 1y."
+              >
+                <Input
+                  id="site-cache-age"
+                  value={asset.maxAge}
+                  onChange={(e) => setAsset({ maxAge: e.target.value.trim() })}
+                  placeholder="30d"
+                  className="font-mono text-xs"
+                />
+              </Field>
+              <label className="flex items-center gap-2 text-hint text-muted-foreground">
+                <Checkbox
+                  checked={asset.immutable ?? false}
+                  onCheckedChange={(v) => setAsset({ immutable: Boolean(v) })}
+                />
+                Immutable: browsers do not ask again even on a reload. Only for file names that
+                change with their content.
+              </label>
+            </div>
+          )}
+        </OptionRow>
+        {spec.kind === "proxy" && (
+          <OptionRow
+            title="Cache the application's responses"
+            hint="nginx answers repeat requests from disk and adds an X-Cache-Status header. Requests with an Authorization header always reach the application."
+            checked={Boolean(proxy)}
+            onCheckedChange={(on) => {
+              if (on) set("buffering", true)
+              set("proxyCache", on ? { maxSize: "1g", valid: "10m", serveStale: true } : undefined)
+            }}
+          >
+            {proxy && (
+              <div className="space-y-2">
+                <FieldRow>
+                  <Field label="Size on disk" htmlFor="site-cache-size" hint="512m, 2g.">
+                    <Input
+                      id="site-cache-size"
+                      value={proxy.maxSize}
+                      onChange={(e) => setProxy({ maxSize: e.target.value.trim() })}
+                      placeholder="1g"
+                      className="font-mono text-xs"
+                    />
+                  </Field>
+                  <Field
+                    label="Kept for"
+                    htmlFor="site-cache-valid"
+                    hint="When the application's own Cache-Control does not say."
+                  >
+                    <Input
+                      id="site-cache-valid"
+                      value={proxy.valid}
+                      onChange={(e) => setProxy({ valid: e.target.value.trim() })}
+                      placeholder="10m"
+                      className="font-mono text-xs"
+                    />
+                  </Field>
+                </FieldRow>
+                <label className="flex items-center gap-2 text-hint text-muted-foreground">
+                  <Checkbox
+                    checked={proxy.serveStale ?? false}
+                    onCheckedChange={(v) => setProxy({ serveStale: Boolean(v) })}
+                  />
+                  Serve the last copy while the application is down
+                </label>
+                <label className="flex items-center gap-2 text-hint text-muted-foreground">
+                  <Checkbox
+                    checked={proxy.cacheCookies ?? false}
+                    onCheckedChange={(v) => setProxy({ cacheCookies: Boolean(v) })}
+                  />
+                  Cache requests with cookies too
+                </label>
+                {!spec.buffering && (
+                  <FormNote tone="warning">
+                    The cache needs Buffer responses on, under Behaviour.
+                  </FormNote>
+                )}
+              </div>
+            )}
+          </OptionRow>
+        )}
+      </OptionList>
     </FormSection>
   )
 }

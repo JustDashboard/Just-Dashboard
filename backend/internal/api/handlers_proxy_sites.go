@@ -20,6 +20,8 @@ func (s *Server) mountSiteBuilderRoutes(r chi.Router) {
 	// A page is what every visitor to the site may be shown, so reading
 	// one needs no more than reading the site.
 	r.Method(http.MethodGet, "/{name}/pages/{page}", s.handle(s.handleSitePageGet))
+	// The size of the cache and where it is; nothing of what is in it.
+	r.Method(http.MethodGet, "/{name}/cache", s.handle(s.handleSiteCacheGet))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// Preview renders and touches nothing, but it lives inside the
@@ -34,6 +36,9 @@ func (s *Server) mountSiteBuilderRoutes(r chi.Router) {
 			// Maintenance takes the site away from its visitors, the
 			// same as disabling it, and sits behind the same gate.
 			r.Method(http.MethodPost, "/{name}/maintenance", s.handle(s.handleSiteMaintenance))
+			// Emptying the cache sends every request to the application
+			// until it fills again, which can be more than it can take.
+			r.Method(http.MethodDelete, "/{name}/cache", s.handle(s.handleSiteCachePurge))
 		})
 	})
 }
@@ -260,6 +265,31 @@ func (s *Server) handleSiteMaintenance(w http.ResponseWriter, r *http.Request) e
 	}
 	httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
 	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
+
+func (s *Server) handleSiteCacheGet(w http.ResponseWriter, r *http.Request) error {
+	usage, err := s.modules.proxy.SiteCacheUsage(chi.URLParam(r, "name"))
+	if err != nil {
+		return mapProxyError(err)
+	}
+	httpx.JSON(w, http.StatusOK, usage)
+	return nil
+}
+
+// handleSiteCachePurge empties a site's proxy cache and answers with what it
+// held.
+func (s *Server) handleSiteCachePurge(w http.ResponseWriter, r *http.Request) error {
+	name := chi.URLParam(r, "name")
+	usage, err := s.modules.proxy.PurgeSiteCache(name)
+	if err != nil {
+		httpx.SetAudit(r, "proxy.site.cache.purge", name, map[string]any{"result": "failed"})
+		return mapProxyError(err)
+	}
+	httpx.SetAudit(r, "proxy.site.cache.purge", name, map[string]any{
+		"bytes": usage.Bytes, "files": usage.Files,
+	})
+	httpx.JSON(w, http.StatusOK, usage)
 	return nil
 }
 

@@ -31,6 +31,9 @@ type VHost struct {
 	Maintenance bool `json:"maintenance,omitempty"`
 	// RateLimited says a server of the site limits requests or connections.
 	RateLimited bool `json:"rateLimited,omitempty"`
+	// Cached says the site keeps its application's responses in a proxy
+	// cache of the form's, which the dashboard can empty.
+	Cached bool `json:"cached,omitempty"`
 }
 
 var (
@@ -40,6 +43,7 @@ var (
 	certRe       = regexp.MustCompile(`(?m)^\s*ssl_certificate\s+([^;]+);`)
 	maintOnRe    = regexp.MustCompile(`(?m)^\s*if\s*\(\$jd_\w+_maint\)`)
 	limitRe      = regexp.MustCompile(`(?m)^\s*limit_(req|conn)\s`)
+	cacheOnRe    = regexp.MustCompile(`(?m)^\s*proxy_cache\s+jd_\w+_cache\s*;`)
 )
 
 func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
@@ -151,6 +155,7 @@ func (s *Service) nginxVHosts() []VHost {
 			}
 			v.Maintenance = maintOnRe.MatchString(text)
 			v.RateLimited = limitRe.MatchString(text)
+			v.Cached = cacheOnRe.MatchString(text)
 		}
 		out = append(out, v)
 	}

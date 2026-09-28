@@ -616,6 +616,27 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   the extra configuration sets `real_ip_header`; the form cannot tell whether a CDN is in front.
   `VHost.rateLimited` puts "rate limited" on the Sites card.
 
+  **Caching** (`sites_cache.go`, form section "Caching", verb "Purge cache"). `SiteSpec.StaticCache{MaxAge,
+  Immutable}` (not for redirects) renders `map $sent_http_content_type $jd_<id>_asset_expires` (CSS, JS,
+  images, fonts, woff/wasm → MaxAge, default `off`) with server-level `expires` on it, so pages are never
+  kept; Immutable adds a second map and `add_header Cache-Control $jd_<id>_asset_immutable` (empty, so
+  unsent, for everything else). `SiteSpec.ProxyCache{MaxSize, Valid, ServeStale, CacheCookies}` (proxy
+  sites only, refused unless `Buffering` is on — nginx never caches an unbuffered response; a path with
+  buffering off is warned about as uncached) renders `proxy_cache_path /var/lib/just-dashboard/nginx-cache/
+  <name> levels=1:2 keys_zone=jd_<id>_cache:10m max_size=… inactive=7d use_temp_path=off` and at server
+  level `proxy_cache`, key `$scheme$host$request_uri` (so domains never share entries), `proxy_cache_valid
+  200 301 302`, `proxy_cache_lock`, and with ServeStale `proxy_cache_use_stale error timeout updating
+  http_5xx` + `proxy_cache_background_update`. `proxy_cache_bypass`/`proxy_no_cache` always carry
+  `$http_authorization` (not a toggle: nginx would otherwise store one user's authorised page) and
+  `$http_cookie` unless CacheCookies (which warns). `add_header X-Cache-Status $upstream_cache_status
+  always` sits with the site's other headers (`writesHeaders`), which the maintenance page repeats.
+  `SaveSite` makes the cache root (0755); nginx makes the site's folder at load and chowns it to its
+  worker. `GET /proxy/sites/{name}/cache` (the read gate; size only) walks it for blocks on disk and
+  files; `DELETE` (system.admin + destructive, audited `proxy.site.cache.purge`) empties it through an
+  `os.Root` and keeps the folder, refusing a linked root or site folder. There is no cache_purge module:
+  nginx takes a missing file as a MISS, but its shared-memory size accounting only catches up as the
+  cache manager evicts. `VHost.cached` shows the verb.
+
   **Path routing** (`sites.go` `validLocation`/`validUpstreamTLS`, `sites_render.go` `renderLocation`/
   `renderUpstreamTLS`, form "Paths that go somewhere else" + `site-routes.ts` preview table).
   `SiteLocation.Match` is empty (prefix), `=`, `^~`, `~` or `~*`; `locationPathRe` refuses `; ' " $ ( )`

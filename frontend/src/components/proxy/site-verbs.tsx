@@ -5,6 +5,7 @@ import {
   CheckCircle,
   Code,
   Copy,
+  Database,
   External,
   Inspect,
   Logs,
@@ -59,6 +60,7 @@ export function useSiteVerbs({
   onDuplicate,
   onToggle,
   onMaintenance,
+  onPurgeCache,
   onDelete,
 }: {
   vhost: VHost
@@ -71,6 +73,8 @@ export function useSiteVerbs({
   onToggle: (vhost: VHost, enabled: boolean) => void
   /** Turns the site's maintenance page on or off; left out where the verb has no place. */
   onMaintenance?: (vhost: VHost, on: boolean) => void
+  /** Empties the site's proxy cache; left out where the verb has no place. */
+  onPurgeCache?: (vhost: VHost) => void
   onDelete: (vhost: VHost) => void
 }): Verb[] {
   const router = useRouter()
@@ -178,6 +182,16 @@ export function useSiteVerbs({
             run: () => onMaintenance(vhost, true),
           },
     )
+  }
+  if (managedByForm && admin && vhost.cached && onPurgeCache) {
+    verbs.push({
+      key: "purge",
+      label: "Purge cache",
+      icon: Database,
+      progressive: "Purging cache",
+      disabled: Boolean(busy),
+      run: () => onPurgeCache(vhost),
+    })
   }
   if (managedByForm && admin) {
     verbs.push({
