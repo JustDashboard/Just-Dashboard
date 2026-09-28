@@ -601,6 +601,7 @@ export function CertificatesPage() {
             providers={providers.data ?? []}
             directory={certbot.data?.directory}
             testAuthority={testAuthority}
+            certs={certbot.data?.certs}
             certbotBusy={certbotBusy}
             onStarted={(job) => {
               console_.attach(job)

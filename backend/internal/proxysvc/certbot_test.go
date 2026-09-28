@@ -39,6 +39,8 @@ func TestCertbotErrorPreservesCauseBeforeHelpFooter(t *testing.T) {
 }
 
 func TestIssueValidation(t *testing.T) {
+	// No account on disk, so an empty email is refused.
+	useLetsencryptDir(t, t.TempDir())
 	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
 	cases := []struct {
 		name string
@@ -80,17 +82,19 @@ func TestRenewAndRevokeValidateTheName(t *testing.T) {
 // is worth reading back rather than trusting.
 func TestIssueArgsShape(t *testing.T) {
 	useLetsencryptDir(t, t.TempDir())
+	// The webroot has to be a folder where certbot runs.
+	webroot := t.TempDir()
 	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
 	args, err := s.IssueArgs(context.Background(), IssueRequest{
 		Domains: []string{"app.example.com", "www.app.example.com"},
-		Email:   "ops@example.com", Method: "webroot", WebRoot: "/var/www/html",
+		Email:   "ops@example.com", Method: "webroot", WebRoot: webroot,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"certonly", "--webroot", "-w /var/www/html", "--non-interactive", "--agree-tos",
+		"certonly", "--webroot", "-w " + webroot, "--non-interactive", "--agree-tos",
 		"-m ops@example.com", "--keep-until-expiring",
 		"-d app.example.com", "-d www.app.example.com",
 	} {
@@ -236,10 +240,11 @@ func TestIssueArgsReplacesAStagingLineage(t *testing.T) {
 	writeLineage(t, dir, "old.example.com", productionACME, leftover)
 
 	s := New("/etc/nginx", "/etc/caddy/Caddyfile")
+	webroot := t.TempDir()
 	issue := func(domains ...string) string {
 		t.Helper()
 		args, err := s.IssueArgs(context.Background(), IssueRequest{
-			Domains: domains, Email: "ops@example.com", Method: "webroot", WebRoot: "/var/www/html",
+			Domains: domains, Email: "ops@example.com", Method: "webroot", WebRoot: webroot,
 		})
 		if err != nil {
 			t.Fatal(err)

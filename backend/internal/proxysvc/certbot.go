@@ -281,7 +281,10 @@ func renewalScheduled(ctx context.Context) (bool, string) {
 // IssueRequest is a certificate to obtain.
 type IssueRequest struct {
 	Domains []string `json:"domains"`
-	Email   string   `json:"email"`
+	// Email is the contact to register the ACME account with. Empty is
+	// accepted only when certbot already has an account with the authority
+	// this run orders from: certbot asks for an email only to register one.
+	Email string `json:"email"`
 	// Method is how certbot proves control: nginx, webroot, standalone or dns.
 	Method  string `json:"method"`
 	WebRoot string `json:"webRoot,omitempty"`
@@ -312,7 +315,32 @@ type IssueRequest struct {
 	// editing the same file is how a site ends up with two ssl_certificate
 	// directives.
 	Install bool `json:"install"`
+	// KeyType is "ecdsa" or "rsa"; empty leaves certbot's default for a new
+	// certificate and an existing one's own key type.
+	KeyType string `json:"keyType,omitempty"`
+	// RSAKeySize is 2048, 3072 or 4096, for an RSA key only; 2048 when empty.
+	RSAKeySize int `json:"rsaKeySize,omitempty"`
+	// CertName is certbot's name for the lineage: a new certificate's name,
+	// or an existing one's to give these names instead of its own. That is
+	// how names are added to a certificate — the domains replace its list —
+	// without --expand, which fails unless the new list holds the old one.
+	CertName string `json:"certName,omitempty"`
 }
+
+// IssuePlan is the argv an issuance runs and what it replaces, for the job
+// to say and the preview to show.
+type IssuePlan struct {
+	Args []string `json:"args"`
+	// ReplacesTestCertificate is these names' test certificate from a staging
+	// authority being replaced by a real one.
+	ReplacesTestCertificate bool `json:"replacesTestCertificate"`
+	// ReplacesKeyOf names the lineage whose key is of another type or size
+	// than the one asked for: certbot keeps a lineage until it is due, so the
+	// new key is a forced renewal.
+	ReplacesKeyOf string `json:"replacesKeyOf,omitempty"`
+}
+
+var rsaKeySizes = []int{2048, 3072, 4096}
 
 var (
 	certDomainRe = regexp.MustCompile(`^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$`)
@@ -327,16 +355,29 @@ var (
 // a 400, not a job that fails a minute later — while the command itself
 // belongs to a job that outlives the request.
 func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, error) {
+	plan, err := s.PlanIssue(ctx, req)
+	return plan.Args, err
+}
+
+// PlanIssue is IssueArgs with what the argv replaces.
+func (s *Service) PlanIssue(ctx context.Context, req IssueRequest) (IssuePlan, error) {
+	args, plan, err := s.planIssue(ctx, req)
+	plan.Args = args
+	return plan, err
+}
+
+func (s *Service) planIssue(ctx context.Context, req IssueRequest) ([]string, IssuePlan, error) {
+	plan := IssuePlan{}
 	if len(req.Domains) == 0 {
-		return nil, fmt.Errorf("at least one domain is required")
+		return nil, plan, fmt.Errorf("at least one domain is required")
 	}
 	if len(req.Domains) > 100 {
-		return nil, fmt.Errorf("a certificate may cover at most 100 domains")
+		return nil, plan, fmt.Errorf("a certificate may cover at most 100 domains")
 	}
 	wildcard := false
 	for _, d := range req.Domains {
 		if !certDomainRe.MatchString(d) {
-			return nil, fmt.Errorf("%q is not a valid domain name", d)
+			return nil, plan, fmt.Errorf("%q is not a valid domain name", d)
 		}
 		if strings.HasPrefix(d, "*.") {
 			wildcard = true
@@ -346,10 +387,22 @@ func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, er
 	// it afterwards: "Wildcard domains are not supported by the HTTP-01
 	// challenge" is accurate and tells nobody what to do instead.
 	if wildcard && req.Method != "dns" {
-		return nil, fmt.Errorf("a wildcard certificate can only be issued with a DNS challenge — Let's Encrypt will not sign one any other way")
+		return nil, plan, fmt.Errorf("a wildcard certificate can only be issued with a DNS challenge — Let's Encrypt will not sign one any other way")
 	}
-	if !emailRe.MatchString(req.Email) {
-		return nil, fmt.Errorf("a contact email is required for the ACME account")
+	if req.Email == "" {
+		server := certbotServer(req.Staging)
+		if !acmeAccountExists(letsencryptDir, server) {
+			return nil, plan, fmt.Errorf("a contact email is required: certbot has no account with %s yet", server)
+		}
+	} else if !emailRe.MatchString(req.Email) {
+		return nil, plan, fmt.Errorf("%q is not an email address the certificate authority will take", req.Email)
+	}
+	keyArgs, err := issueKeyArgs(req)
+	if err != nil {
+		return nil, plan, err
+	}
+	if req.CertName != "" && !certNameRe.MatchString(req.CertName) {
+		return nil, plan, fmt.Errorf("a certificate name is letters, digits, dots, dashes and underscores")
 	}
 
 	args := []string{}
@@ -366,7 +419,10 @@ func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, er
 			args = append(args, "--nginx")
 		case "webroot":
 			if !absPathRe.MatchString(req.WebRoot) {
-				return nil, fmt.Errorf("the webroot must be an absolute path")
+				return nil, plan, fmt.Errorf("the webroot must be an absolute path")
+			}
+			if err := checkWebroot(ctx, req.WebRoot); err != nil {
+				return nil, plan, err
 			}
 			args = append(args, "--webroot", "-w", req.WebRoot)
 		case "standalone":
@@ -374,22 +430,22 @@ func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, er
 		case "dns":
 			provider, ok := DNSProviderFor(req.DNSProvider)
 			if !ok {
-				return nil, fmt.Errorf("choose a DNS provider for the challenge")
+				return nil, plan, fmt.Errorf("choose a DNS provider for the challenge")
 			}
 			if provider.Key != "route53" && !HasDNSCredentials(provider.Key) && strings.TrimSpace(req.Credentials) == "" {
-				return nil, fmt.Errorf("%s has no credentials saved yet", provider.Name)
+				return nil, plan, fmt.Errorf("%s has no credentials saved yet", provider.Name)
 			}
 			wait := req.DNSWait
 			if wait <= 0 {
 				wait = provider.DefaultWait
 			}
 			if wait > 3600 {
-				return nil, fmt.Errorf("the propagation wait is too long")
+				return nil, plan, fmt.Errorf("the propagation wait is too long")
 			}
 			plugin = provider.Plugin
 			args = append(args, dnsIssueArgs(provider, wait)...)
 		default:
-			return nil, fmt.Errorf("method must be nginx, webroot, standalone or dns")
+			return nil, plan, fmt.Errorf("method must be nginx, webroot, standalone or dns")
 		}
 	}
 	// webroot and standalone are part of certbot itself; the nginx and DNS
@@ -397,38 +453,58 @@ func (s *Service) IssueArgs(ctx context.Context, req IssueRequest) ([]string, er
 	if plugin == "nginx" || req.Method == "dns" {
 		rt, err := loadCertbotRuntime(ctx)
 		if err != nil {
-			return nil, err
+			return nil, plan, err
 		}
 		if rt == nil {
-			return nil, fmt.Errorf("certbot is not installed on this host")
+			return nil, plan, fmt.Errorf("certbot is not installed on this host")
 		}
 		if !rt.authenticators[plugin] {
-			return nil, fmt.Errorf("the certbot that runs here (%s) has no %s plugin", rt.where(), plugin)
+			return nil, plan, fmt.Errorf("the certbot that runs here (%s) has no %s plugin", rt.where(), plugin)
 		}
 	}
-	args = append(args, "--non-interactive", "--agree-tos", "-m", req.Email,
-		// Without this a re-run inside the renewal window fails rather than
-		// quietly succeeding, which is the wrong answer for a button somebody
-		// may press twice.
-		"--keep-until-expiring")
+	args = append(args, "--non-interactive", "--agree-tos")
+	if req.Email != "" {
+		args = append(args, "-m", req.Email)
+	}
+	// Without this a re-run inside the renewal window fails rather than
+	// quietly succeeding, which is the wrong answer for a button somebody may
+	// press twice.
+	args = append(args, "--keep-until-expiring")
+	args = append(args, keyArgs...)
+	if req.CertName != "" {
+		args = append(args, "--cert-name", req.CertName)
+	}
+	lineage, leaf, found := lineageFor(letsencryptDir, req.Domains)
+	if req.KeyType != "" && found && certNameRe.MatchString(lineage.Name) && !keyMatches(leaf, req.KeyType, req.RSAKeySize) {
+		// certbot refuses a key type other than the lineage's under
+		// --non-interactive unless --cert-name names it too, and keeps the
+		// lineage's old key until it is due unless the renewal is forced.
+		if req.CertName == "" {
+			args = append(args, "--cert-name", lineage.Name)
+		}
+		plan.ReplacesKeyOf = lineage.Name
+	}
 	if req.Staging || req.DryRun {
 		// Not --staging: that wrote a real lineage holding an untrusted
 		// certificate, left it where sites could name it, and made the real
 		// issuance that followed a no-op — the lineage was not due.
 		args = append(args, "--dry-run")
-	} else if lineage, leaf, ok := lineageFor(letsencryptDir, req.Domains); ok && lineage.testCertificate(leaf) && !acmeDirectory().staging() {
+	} else if found && lineage.testCertificate(leaf) && !acmeDirectory().staging() {
 		// These names already have a test certificate from a staging
 		// authority, and certbot keeps a lineage until it is due whatever
 		// signed it. Replacing it is the point of asking for a real one —
 		// unless the configured directory is a staging one too, when the
 		// replacement would be another test certificate.
 		args = append(args, "--force-renewal")
+		plan.ReplacesTestCertificate = true
+	} else if plan.ReplacesKeyOf != "" {
+		args = append(args, "--force-renewal")
 	}
 	args = append(args, acmeDirectory().certbotArgs()...)
 	for _, d := range req.Domains {
 		args = append(args, "-d", d)
 	}
-	return args, nil
+	return args, plan, nil
 }
 
 // RenewArgs builds a renewal. DryRun runs the whole exchange against the

@@ -1301,6 +1301,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   lineage or import — unless `force`, which the page sends only after its dialog has named those
   sites. Host-Caddy `tls` file references are not detected. The page's "Delete expired and unused"
   checklist offers expired certbot/imported certificates whose `UsedBy` is empty and never forces.
+- **Issuing (`certbot_issue.go`, `PlanIssue`).** `IssueRequest` takes `keyType` (`ecdsa`/`rsa`),
+  `rsaKeySize` (2048/3072/4096) and `certName` (`certNameRe`, passed as `--cert-name`: names are
+  added to a lineage by resending its whole list under its name, which avoids `--expand`). A key of
+  another type or size than an exact-names lineage's adds that lineage's `--cert-name` (certbot
+  refuses the change non-interactively otherwise) and `--force-renewal` on a real run. The email may
+  be empty only when `accounts/<host+path>` under certbot's directory holds an account for the server
+  this run orders from (staging for a test run). A webroot must pass `test -d` on the side certbot
+  runs on. `POST /certificates/issue/preview` (system.admin) answers the same checks with the argv and
+  runs nothing; DNS tokens appear only as their file path, and pasted credentials are checked there
+  and saved by the issuance job only. `GET /certificates/account` (system.admin) runs `certbot
+  show_account` when an account exists (it asks the authority, briefly holding certbot's lock) and
+  returns its server, URL, thumbprint and first email contact.
 - **Two layouts, and files that are not sites.** `nginxVHosts` (`vhosts.go`, with the rest of the
   listing and `SetVHostEnabled`) lists every place nginx takes a site from, each entry carrying its
   `Layout`: sites-available where it exists, conf.d always (a Debian nginx.conf includes it too; on
