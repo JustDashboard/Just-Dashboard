@@ -780,10 +780,7 @@ test("the attention finding opens the ports page on its ports alone", async ({ p
   await expect(rowsOf(page).first()).toContainText("redis-server")
 })
 
-test("a connection's service port opens what listens on it; a port the kernel picked does not", async ({
-  page,
-}) => {
-  await mockHost(page)
+async function mockConnections(page: Page) {
   await page.route("**/api/v1/connections", (route) =>
     json(route, {
       total: 5,
@@ -801,6 +798,13 @@ test("a connection's service port opens what listens on it; a port the kernel pi
       ],
     }),
   )
+}
+
+test("a connection's service port opens what listens on it; a port the kernel picked does not", async ({
+  page,
+}) => {
+  await mockHost(page)
+  await mockConnections(page)
   await page.goto("/security/connections")
   const row = page.getByRole("row").filter({ hasText: "203.0.113.50" })
   await expect(row.getByText("51234")).toBeVisible()
@@ -809,6 +813,28 @@ test("a connection's service port opens what listens on it; a port the kernel pi
   await expect(page).toHaveURL(/\/proxy\/ports\?q=:22$/)
   await expect(rowsOf(page)).toHaveCount(1)
   await expect(rowsOf(page).first()).toContainText("sshd")
+})
+
+test("the Listening tile opens every socket, not the port a link opened a moment ago", async ({
+  page,
+}) => {
+  await mockHost(page)
+  await mockConnections(page)
+  await page.goto("/security/connections")
+  await page
+    .getByRole("row")
+    .filter({ hasText: "203.0.113.50" })
+    .getByRole("link", { name: "What listens on port 22" })
+    .click()
+  await expect(page).toHaveURL(/\/proxy\/ports\?q=:22$/)
+  await expect(rowsOf(page)).toHaveCount(1)
+
+  // The tab now remembers `:22`; the tile asks for the whole list anyway.
+  await page.goBack()
+  await page.getByRole("link", { name: "Listening ports" }).click()
+  await expect(page.getByLabel("Search sockets")).toHaveValue("")
+  await expect(rowsOf(page)).toHaveCount(7)
+  await expect(page).toHaveURL(/\/proxy\/ports$/)
 })
 
 test("the list's controls are named, and a phone draws one list with no overflow", async ({

@@ -102,10 +102,15 @@ export function withView(search: string, view: PortView): string {
   return query ? `?${query}` : ""
 }
 
-/** A link to the ports page opened on a view; what it leaves out is the default. */
+/**
+ * A link to the ports page opened on a view; what it leaves out is the
+ * default. The whole list is named too, as `?q=`: a bare `/proxy/ports` is
+ * the sidebar's "where this tab left it", and a count tile following it
+ * would open on whatever search the last link into the page carried.
+ */
 export function portsHref(view: Partial<PortView>): string {
   const query = viewQuery({ q: "", reach: "all", proto: "all", sort: DEFAULT_SORT, ...view })
-  return query ? `/proxy/ports?${query}` : "/proxy/ports"
+  return `/proxy/ports?${query || "q="}`
 }
 
 // Colons, commas and brackets are what an endpoint and a port list are

@@ -375,7 +375,14 @@ describe("the view in the address bar", () => {
   test("a link into the page opens on the view it names", () => {
     expect(portsHref({ q: "port:5432,6379" })).toBe("/proxy/ports?q=port:5432,6379")
     expect(portsHref({ reach: "internet" })).toBe("/proxy/ports?reach=internet")
-    expect(portsHref({})).toBe("/proxy/ports")
+    // The whole list is a view the link names, not the tab's last one.
+    expect(portsHref({})).toBe("/proxy/ports?q=")
+    for (const href of [portsHref({}), portsHref({ reach: "internet" })]) {
+      const view = viewFromParams(new URL(href, "http://localhost").searchParams)
+      expect(view).not.toBeNull()
+      expect(portsHref(view)).toBe(href)
+    }
+    expect(withView("?q=", viewFromParams(params("q=")))).toBe("")
   })
 })
 

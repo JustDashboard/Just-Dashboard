@@ -124,7 +124,7 @@ export function ConnectionsPanel() {
           hint={fromInternet > 0 ? `${fromInternet} from the internet` : "all private or loopback"}
         />
         <StatTile label="Sockets" value={data?.total ?? 0} hint="every connection counted" />
-        <StatLink href="/proxy/ports" label="Listening ports">
+        <StatLink href={portsHref({})} label="Listening ports">
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Listening"
