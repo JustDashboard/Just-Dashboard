@@ -41,6 +41,7 @@ import type { Tone } from "@/components/tone"
 import { useNow } from "@/components/deploy/vocabulary"
 import { expiryTone } from "@/components/proxy/expiry-status"
 import { TLSDNSPanel } from "@/components/proxy/tls-dns"
+import { TLSServedBy } from "@/components/proxy/tls-served-by"
 import { Button } from "@/components/ui/button"
 import { Field } from "@/components/form"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
@@ -622,6 +623,7 @@ export function TLSReportPage() {
               {scan.preload && <PreloadPanel preload={scan.preload} domain={scan.domain} />}
             </div>
             <div className="min-w-0 space-y-8">
+              {scan.origin && <TLSServedBy origin={scan.origin} onRescan={rescan} />}
               <Panel plain>
                 <PanelHeader title="Live certificate" />
                 <PanelBody>

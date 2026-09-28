@@ -6,6 +6,7 @@ import { Copy, Inspect, ShieldCheck } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { calendarDate } from "@/lib/format"
 import type { Certificate } from "@/lib/types"
+import { useQuerySelection } from "@/hooks/use-query-selection"
 import { ChoiceRow } from "@/components/flow"
 import { Detail, DetailList, SearchInput, Toolbar } from "@/components/page"
 import { ProductLogo } from "@/components/product-logo"
@@ -28,7 +29,8 @@ export function CertificateInventory({
 }) {
   const [query, setQuery] = useState("")
   const [attention, setAttention] = useState(false)
-  const [selected, setSelected] = useState<string | null>(null)
+  // In the URL so the TLS report can link at the file a site serves.
+  const [selected, setSelected] = useQuerySelection("cert")
   const needsAttention = (cert: Certificate) => Boolean(cert.error || cert.expired || cert.expiring)
   const needle = query.trim().toLowerCase()
   const ordered = certs
