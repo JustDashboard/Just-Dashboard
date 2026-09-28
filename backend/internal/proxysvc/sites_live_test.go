@@ -361,3 +361,115 @@ func TestLiveSiteRoutingServesWhatTheFormSays(t *testing.T) {
 		t.Errorf("compression on did not compress: %v", response.Header)
 	}
 }
+
+// A site saved disabled, against the host's real nginx running a private
+// prefix: tested with its link in place, reported without being refused,
+// and not served afterwards even through a reload — the link is gone again
+// before nginx is told to reload. Its warnings are placed at their line, a
+// name it would contest is reported with which site nginx would answer it
+// from, and "enable" then serves it.
+func TestLiveDisabledSiteIsTestedAsEnabled(t *testing.T) {
+	root := liveNginx(t)
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	ctx := context.Background()
+	port := freePort(t)
+	listen := fmt.Sprintf("127.0.0.1:%d", port)
+	upstreams := map[string]string{}
+	for _, name := range []string{"legacy", "app", "zz"} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, name)
+		}))
+		t.Cleanup(server.Close)
+		upstreams[name] = server.URL
+	}
+	spec := func(name, domain, custom string) *SiteSpec {
+		s := plainSpec(name, domain)
+		s.Upstream, s.Custom = upstreams[name], custom
+		return s
+	}
+	save := func(spec *SiteSpec, opts SiteSave) (*SiteResult, string, error) {
+		t.Helper()
+		content, err := RenderNginx(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content = strings.ReplaceAll(content, "    listen 80;\n", "    listen "+listen+";\n")
+		content = strings.ReplaceAll(content, "    listen [::]:80;\n", "")
+		service.mu.Lock()
+		defer service.mu.Unlock()
+		res, err := service.saveSiteLocked(ctx, spec, content, opts)
+		if errors.Is(err, errSiteReloadFailed) {
+			t.Fatalf("nginx did not reload: %v", err)
+		}
+		return res, content, err
+	}
+	lineOf := func(content, text string) int {
+		for i, line := range strings.Split(content, "\n") {
+			if strings.TrimSpace(line) == text {
+				return i + 1
+			}
+		}
+		t.Fatalf("%q is not in the rendered file", text)
+		return 0
+	}
+	answers := func(host, want string) {
+		t.Helper()
+		body := ""
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			if _, body = siteGet(t, port, host, "/"); body == want {
+				return
+			}
+		}
+		t.Fatalf("%s answered %q, want %q", host, body, want)
+	}
+
+	// legacy is the first block on the port, so it answers any name no
+	// other block claims.
+	installSite(t, root, spec("legacy", "legacy.test", ""), port)
+	startNginx(t, root)
+	answers("app.test", "legacy")
+
+	res, content, err := save(spec("app", "app.test", "frobnicate on;"), SiteSave{Reload: true})
+	if err != nil {
+		t.Fatalf("a disabled site failing its test enabled was refused: %v", err)
+	}
+	full := resolvedFile(filepath.Join(root, "sites-available", "app"))
+	want := Diagnostic{Level: "emerg", Message: `unknown directive "frobnicate"`, File: full, Line: lineOf(content, "frobnicate on;")}
+	if !res.TestedAsEnabled || res.Enabled || res.Validation.Valid || len(res.Validation.Diagnostics) == 0 || res.Validation.Diagnostics[0] != want {
+		t.Fatalf("result = %+v, diagnostics %+v, want %+v\n%s", res, res.Validation.Diagnostics, want, res.Validation.Output)
+	}
+	if isLinked(t, root, "app") || res.Reloaded {
+		t.Fatalf("the failing disabled site was left linked or reloaded: %+v", res)
+	}
+	if v := runValidator(ctx, "nginx", "-t"); !v.Valid {
+		t.Fatalf("nginx no longer passes its test after the disabled save:\n%s", v.Output)
+	}
+
+	res, content, err = save(spec("app", "app.test", "ssi_types text/html;"), SiteSave{Overwrite: true, Reload: true})
+	if err != nil || !res.Validation.Valid || !res.Reloaded || res.Enabled {
+		t.Fatalf("a passing disabled save: %+v %v\n%s", res, err, res.Validation.Output)
+	}
+	wantWarning := []Diagnostic{{Level: "warn", Message: `duplicate MIME type "text/html"`, File: full, Line: lineOf(content, "ssi_types text/html;")}}
+	if !reflect.DeepEqual(res.TestWarnings, wantWarning) {
+		t.Fatalf("testWarnings = %+v, want %+v", res.TestWarnings, wantWarning)
+	}
+	// Reloaded, and still not served: the link came out before the reload.
+	answers("app.test", "legacy")
+
+	res, _, err = save(spec("app", "app.test", ""), SiteSave{Enable: true, Overwrite: true, Reload: true})
+	if err != nil || !res.Enabled || !res.Reloaded {
+		t.Fatalf("enabling: %+v %v", res, err)
+	}
+	answers("app.test", "app")
+
+	// zz sorts after app, so enabled, its claim to app.test would be ignored.
+	res, _, err = save(spec("zz", "app.test", ""), SiteSave{Reload: true})
+	if err != nil {
+		t.Fatalf("a disabled site contesting a name was refused: %v", err)
+	}
+	wantConflict := []ServerNameConflict{{Domain: "app.test", Listen: listen, Site: "app", Effect: ConflictIgnored}}
+	if !reflect.DeepEqual(res.Conflicts, wantConflict) || isLinked(t, root, "zz") {
+		t.Fatalf("conflicts = %+v, want %+v", res.Conflicts, wantConflict)
+	}
+	answers("app.test", "app")
+}

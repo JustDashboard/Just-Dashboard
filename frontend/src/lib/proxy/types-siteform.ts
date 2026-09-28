@@ -59,6 +59,18 @@ export type SitePreview = {
    * site a new one of this name would unlink. A sentence.
    */
   enabledElsewhere?: string
+  /** Whether nginx reads the file: linked into sites-enabled, or in conf.d. */
+  enabled?: boolean
+}
+
+/** What GET /proxy/sites/{name} answers: a site read back into the form. */
+export type SiteRead = {
+  spec: SiteSpec
+  managed: boolean
+  content: string
+  warnings: string[]
+  /** Whether nginx reads the site; absent when its name is not one the form saves. */
+  enabled?: boolean
 }
 
 /** One of a site's names another server block also claims on the same address. */
@@ -88,6 +100,12 @@ export type SiteResult = {
   /** nginx's test warnings placed in this site's own file. */
   testWarnings?: ProxyDiagnostic[]
   enabled: boolean
+  /**
+   * A site saved disabled, tested with its link in place for the test only:
+   * `validation`, `conflicts` and `testWarnings` are what enabling it would
+   * meet, and none of them refused the save.
+   */
+  testedAsEnabled?: boolean
   reloaded: boolean
   /** Why nginx did not reload a configuration that tested clean. */
   reloadError?: string

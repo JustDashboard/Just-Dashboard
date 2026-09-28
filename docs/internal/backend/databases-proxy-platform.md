@@ -280,6 +280,22 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     `POST /proxy/sites/` takes `enable: "enable" | "keep"`; the old `true`/`false` still parse, and
     `false` always meant keep (it declined to make a link and never removed one). A site that has a link
     keeps it, relinked to the file being saved, and `SiteResult.enabled` says which it is.
+    `GET /proxy/sites/{name}` and every preview say whether nginx reads the file (`enabled`, from
+    `SiteFile`: linked into sites-enabled, or any file in conf.d), and the form's footer follows it: a
+    disabled site offers **Save (stays disabled)** (`keep`, no reload) and **Save and enable**
+    (`enable`, reload) instead of a "Save and reload" that did neither, and only the first when its
+    name's link is another file's.
+  - **A site saved disabled is tested as it would be enabled.** Without a link `nginx -t` never read the
+    file, so a disabled site was saved untested and failed on the day somebody enabled it. Its link now
+    goes in for the length of the test (and of the `nginx -T` that orders a conflict) and comes out again
+    whatever the test says, the way `Validate` stages a candidate file under the same lock
+    (`testedAsEnabled`). Nothing the test finds refuses the save — nginx does not read the file — and the
+    result is what enabling it would meet: `validation` with nginx's objection placed at its file and line
+    (resolved while the link is still there), `conflicts` worded as what enabling would do, and
+    `testWarnings`. A reload follows only a test that passed, so a disabled site that fails enabled does
+    not reload nginx, and one that passes is out of the tree again before the reload (checked against a
+    running nginx in `TestLiveDisabledSiteIsTestedAsEnabled`). When its name's link is another file's the
+    link cannot be staged; the result is untested and `validation.note` says why.
   - **A name another server block also claims is refused when the save changes who answers it**, 409
     `name_conflict` with `ConflictSummary`'s sentences. `nginx -t` passes a second claim on a name with only
     `[warn] conflicting server name … ignored` and answers from the **first** block it reads, so the save
@@ -303,9 +319,17 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     `reloadError`, where it was a 400 "Not applied" over a file that was written and linked. The toast
     says nginx did not pick it up and to start or reload it, never what nginx is serving: the usual cause
     is an nginx that is not running (`open() "/run/nginx.pid" failed`), which serves nothing. The
-    deployment cutovers still get the error, since their recovery is built on it.
+    deployment cutovers still get the error, since their recovery is built on it. Not seen: a reload the
+    master refuses after `nginx -s reload` has returned 0, which only says the signal was delivered. The
+    case that matters is a listen address another process holds — `nginx -t` passes it, because its test
+    ignores `EADDRINUSE` — where the master logs `[emerg] bind() … failed (98: Address already in use)`
+    five times and keeps its old configuration (checked against nginx 1.26.3), and the save still says
+    "is live". Catching it needs the reload verified from the master's side (its error log or its
+    workers), which the engine's reload does not do either.
   - `testWarnings` are the test's warnings placed in the site's own file, so "is live" is said only when
-    nginx had nothing to say about it.
+    nginx had nothing to say about it: "Saved with 2 warnings" lists them by line, and alongside a
+    conflict they are listed after it rather than dropped. A conflict warning names no file, so it is
+    never among them.
 
   Renderer details:
   - The ACME challenge location goes **above** the catch-all redirect, or renewal silently stops and
@@ -387,10 +411,13 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   app.example.com "a", after one keystroke), and checks a typed name against the server's rule; the form
   shows the name as its own **File name** field (read-only for an existing site), with **Match the
   domain** and **Use the domain's certificate** to follow the domain again. `site-save.ts` builds the
-  request — `keep` for an existing site, HSTS only with TLS, since the switch is drawn only under HTTPS
+  request — `keep` for an existing site unless the operator chose **Save and enable**, HSTS only with
+  TLS, since the switch is drawn only under HTTPS
   and its hidden default warned on every plain-HTTP site, and `spa` and `permanent` only with the kind
-  that draws them — and turns the result into what the toast says. A refused conflict is a Notice in the
-  form with **Save anyway**. A new form opens with the keyboard in **Domains**, and the presets come
+  that draws them — and turns the result into what the toast says, a disabled site's included ("saved;
+  enabling it would fail nginx's test" with the line, "saved with a name conflict once enabled"). A
+  refused conflict is a Notice in the form with **Save anyway**, which repeats the save that was refused,
+  enabling included. A new form opens with the keyboard in **Domains**, and the presets come
   after the file name, so the one field every site needs is in view on a phone.
 
   A new site can **start from a preset** (`site-presets.ts`: Node.js app, single-page app, Grafana, Home

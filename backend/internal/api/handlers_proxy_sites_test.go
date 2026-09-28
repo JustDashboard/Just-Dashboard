@@ -271,3 +271,90 @@ func TestSitePreviewSaysWhichFileASaveWrites(t *testing.T) {
 		t.Fatalf("with no site directory: %+v", p)
 	}
 }
+
+// The form reads whether a site is enabled from the site and from each
+// preview, and offers a disabled one "Save (stays disabled)" and "Save and
+// enable". A disabled site saved is tested with its link in place for the
+// test: a failing test is its result, not a refusal, and nothing is
+// reloaded after it.
+func TestSiteSaveTestsADisabledSiteAsEnabled(t *testing.T) {
+	c, dir := siteFormServer(t)
+	link := filepath.Join(dir, "sites-enabled", "app")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"-t\" ]; then\n" +
+		"  if [ -e '" + link + "' ]; then\n" +
+		"    echo 'nginx: [emerg] unknown directive \"frobnicate\" in " + link + ":3'; exit 1\n" +
+		"  fi\n" +
+		"  echo 'nginx: configuration file test is successful'; exit 0\n" +
+		"fi\n" +
+		"if [ \"$1\" = \"-s\" ]; then touch '" + dir + "/reloaded'; exit 0; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "bin", "nginx"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	enabled := func(path, body string) *bool {
+		t.Helper()
+		method := http.MethodGet
+		if body != "" {
+			method = http.MethodPost
+		}
+		w := c.do(method, path, body, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		var out struct {
+			Enabled *bool `json:"enabled"`
+		}
+		decodeSite(t, w, &out)
+		return out.Enabled
+	}
+
+	w := c.do(http.MethodPost, "/api/v1/proxy/sites/", siteBody(t, "app", "app.example.com", `"keep"`, nil), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("a disabled save failing its test enabled answered %d: %s", w.Code, w.Body.String())
+	}
+	var res proxysvc.SiteResult
+	decodeSite(t, w, &res)
+	if res.Enabled || !res.TestedAsEnabled || res.Validation == nil || res.Validation.Valid ||
+		len(res.Validation.Diagnostics) != 1 || res.Validation.Diagnostics[0].Line != 3 || res.Reloaded {
+		t.Fatalf("result = %+v", res)
+	}
+	if _, err := os.Lstat(link); err == nil {
+		t.Fatal("the link put in place for the test was left behind")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "reloaded")); !os.IsNotExist(err) {
+		t.Fatal("nginx was reloaded after a failing test")
+	}
+	if got := enabled("/api/v1/proxy/sites/app", ""); got == nil || *got {
+		t.Fatalf("the saved disabled site reads back enabled=%v", got)
+	}
+	preview := siteBody(t, "app", "app.example.com", `"keep"`, nil)
+	if got := enabled("/api/v1/proxy/sites/preview", preview); got == nil || *got {
+		t.Fatalf("the preview of a disabled site says enabled=%v", got)
+	}
+
+	// Enabling it meets the same test, and is refused with it.
+	w = c.do(http.MethodPost, "/api/v1/proxy/sites/", siteBody(t, "app", "app.example.com", `"enable"`, nil), nil)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("enabling a site that fails its test answered %d: %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Lstat(link); err == nil {
+		t.Fatal("a refused enable left the link")
+	}
+
+	// Once it passes, "enable" links it and the site and preview say so.
+	if err := os.WriteFile(filepath.Join(dir, "bin", "nginx"),
+		[]byte("#!/bin/sh\necho 'nginx: configuration file test is successful'\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w = c.do(http.MethodPost, "/api/v1/proxy/sites/", siteBody(t, "app", "app.example.com", `"enable"`, nil), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("enabling answered %d: %s", w.Code, w.Body.String())
+	}
+	if got := enabled("/api/v1/proxy/sites/app", ""); got == nil || !*got {
+		t.Fatalf("the enabled site reads back enabled=%v", got)
+	}
+	if got := enabled("/api/v1/proxy/sites/preview", preview); got == nil || !*got {
+		t.Fatalf("the preview of an enabled site says enabled=%v", got)
+	}
+}

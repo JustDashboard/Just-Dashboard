@@ -20,21 +20,22 @@ export function sendableSpec(spec: SiteSpec): SiteSpec {
 
 /**
  * The request that saves a site. An existing site keeps whatever state its
- * link is in — the form used to enable every site it saved, so fixing one
- * field of a disabled site put it back on the internet — and a new one is
- * enabled.
+ * link is in unless the operator chose "Save and enable" — the form used to
+ * enable every site it saved, so fixing one field of a disabled site put it
+ * back on the internet — and a new one is enabled.
  */
 export function saveRequest(
   spec: SiteSpec,
   {
     existing,
     reload,
+    enable,
     allowConflict,
-  }: { existing: boolean; reload: boolean; allowConflict?: boolean },
+  }: { existing: boolean; reload: boolean; enable?: boolean; allowConflict?: boolean },
 ) {
   return {
     spec: sendableSpec(spec),
-    enable: existing ? "keep" : "enable",
+    enable: existing && !enable ? "keep" : "enable",
     reload,
     overwrite: existing,
     ...(allowConflict ? { allowConflict: true } : {}),
@@ -51,12 +52,17 @@ export type SaveOutcome = { tone: "success" | "warning"; title: string; descript
  */
 export function conflictsText(
   conflicts: ServerNameConflict[],
-  { name, reloaded }: { name: string; reloaded: boolean },
+  { name, reloaded, enabled = true }: { name: string; reloaded: boolean; enabled?: boolean },
 ): string {
   return conflicts
     .map((c) => {
       const at = `${c.domain} on ${c.listen}`
       const other = c.site ?? "another server block"
+      // A disabled site answers nothing yet: what its test found is what
+      // enabling it would do.
+      if (!enabled && c.effect === "ignored")
+        return `Enabled, its claim to ${at} would be ignored: nginx answers it from ${other}.`
+      if (!enabled && c.effect === "takes") return `Enabled, it would take ${at} from ${other}.`
       switch (c.effect) {
         case "ignored":
           return `nginx answers ${at} from ${other}, not ${name}.`
@@ -77,6 +83,75 @@ function warningsText(warnings: ProxyDiagnostic[]): string {
   return warnings.map((w) => (w.line ? `Line ${w.line}: ${w.message}` : w.message)).join("; ")
 }
 
+function warningsTitle(warnings: ProxyDiagnostic[]): string {
+  return warnings.length === 1 ? "a warning" : `${warnings.length} warnings`
+}
+
+/**
+ * nginx's first objection, placed: by line in the site's own file, by path
+ * and line in another — a test run with this site enabled also fails over a
+ * broken neighbour, and saying "line 3" would point into the wrong file.
+ */
+function refusalText(res: SiteResult): string {
+  const validation = res.validation
+  const error = validation?.diagnostics?.find((d) => d.level !== "warn")
+  if (!error) {
+    const lines = (validation?.output ?? "").split("\n").filter((l) => l.trim() !== "")
+    return lines.at(-1) ?? "nginx -t failed"
+  }
+  if (error.file === res.path && error.line) return `Line ${error.line}: ${error.message}`
+  if (error.file) return `${error.file}${error.line ? `:${error.line}` : ""}: ${error.message}`
+  return error.message
+}
+
+const STAYS_DISABLED = "It stays disabled until it is enabled."
+
+/**
+ * A site saved disabled: tested with its link in place for the test, the
+ * result is what enabling it would meet — or, where its name's link is
+ * another site's, the reason it could not be tested at all.
+ */
+function disabledOutcome(res: SiteResult): SaveOutcome {
+  const name = res.name
+  if (!res.testedAsEnabled) {
+    return {
+      tone: "warning",
+      title: `${name} saved`,
+      description: `${res.validation?.note ?? "nginx could not test it as enabled."} It stays disabled.`,
+    }
+  }
+  if (res.validation && !res.validation.valid) {
+    return {
+      tone: "warning",
+      title: `${name} saved; enabling it would fail nginx's test`,
+      description: `${refusalText(res)}. ${STAYS_DISABLED}`,
+    }
+  }
+  const conflicts = res.conflicts ?? []
+  const warnings = res.testWarnings ?? []
+  if (conflicts.length > 0 || warnings.length > 0) {
+    const found = [
+      conflicts.length > 0
+        ? conflictsText(conflicts, { name, reloaded: false, enabled: false })
+        : "",
+      warnings.length > 0 ? `nginx warns: ${warningsText(warnings)}.` : "",
+    ]
+    return {
+      tone: "warning",
+      title:
+        conflicts.length > 0
+          ? `${name} saved with a name conflict once enabled`
+          : `${name} saved with ${warningsTitle(warnings)}`,
+      description: `${found.filter(Boolean).join(" ")} ${STAYS_DISABLED}`,
+    }
+  }
+  return {
+    tone: "success",
+    title: `${name} saved`,
+    description: `nginx tested it as if enabled. ${STAYS_DISABLED}`,
+  }
+}
+
 /**
  * What a save did, said as it happened. "Is live" only when nginx reloaded
  * an enabled site and had nothing to say about it; everything short of that
@@ -93,26 +168,22 @@ export function saveOutcome(res: SiteResult, { existing }: { existing: boolean }
       description: `nginx did not pick it up; start or reload nginx to apply it. ${res.reloadError}`,
     }
   }
-  if (!res.enabled) {
-    return {
-      tone: "success",
-      title: `${name} saved`,
-      description: "It is disabled and stays that way until it is enabled from the list.",
-    }
-  }
+  if (!res.enabled) return disabledOutcome(res)
   const state = res.reloaded ? "is live" : "saved"
+  const warnings = res.testWarnings ?? []
   if (res.conflicts && res.conflicts.length > 0) {
+    // The warnings go with it rather than being dropped behind it.
+    const also = warnings.length > 0 ? ` nginx also warns: ${warningsText(warnings)}.` : ""
     return {
       tone: "warning",
       title: `${name} ${state} with a name conflict`,
-      description: conflictsText(res.conflicts, { name, reloaded: res.reloaded }),
+      description: conflictsText(res.conflicts, { name, reloaded: res.reloaded }) + also,
     }
   }
-  const warnings = res.testWarnings ?? []
   if (warnings.length > 0) {
     return {
       tone: "warning",
-      title: `${name} ${state} with ${warnings.length === 1 ? "a warning" : `${warnings.length} warnings`}`,
+      title: `${name} ${state} with ${warningsTitle(warnings)}`,
       description: warningsText(warnings),
     }
   }

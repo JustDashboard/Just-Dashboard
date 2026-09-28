@@ -39,10 +39,17 @@ func (s *Server) handleSiteSpec(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.ErrNotFound
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"spec": spec, "managed": managed, "content": content,
 		"warnings": proxysvc.SpecWarnings(spec),
-	})
+	}
+	// Whether nginx reads the site, so the form offers to keep a disabled
+	// one disabled or enable it, instead of a "Save and reload" that did
+	// neither.
+	if file, err := s.modules.proxy.SiteFile(spec.Name); err == nil {
+		out["enabled"] = file.Enabled
+	}
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
@@ -91,7 +98,7 @@ func (s *Server) handleSitePreview(w http.ResponseWriter, r *http.Request) error
 	// form says which file that is, and that it belongs to another site,
 	// before the save refuses it.
 	if file, err := s.modules.proxy.SiteFile(req.Spec.Name); err == nil {
-		out["path"], out["exists"] = file.Path, file.Exists
+		out["path"], out["exists"], out["enabled"] = file.Path, file.Exists, file.Enabled
 		if file.EnabledElsewhere != "" {
 			out["enabledElsewhere"] = file.EnabledElsewhere
 		}
@@ -133,6 +140,10 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 	}
 	if len(res.Conflicts) > 0 {
 		detail["conflicts"] = res.Conflicts
+	}
+	if res.TestedAsEnabled {
+		detail["testedAsEnabled"] = true
+		detail["valid"] = res.Validation.Valid
 	}
 	httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, detail)
 	httpx.JSON(w, http.StatusOK, res)

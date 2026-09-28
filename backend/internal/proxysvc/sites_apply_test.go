@@ -195,24 +195,28 @@ func TestSiteFileSaysWhatHoldsTheNamesLink(t *testing.T) {
 	if err := os.Symlink(available("app"), enabled("app")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(available("off"), []byte("server {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct {
-		name, want string
-		exists     bool
+		name, want      string
+		exists, enabled bool
 	}{
-		{"free", "", false},
-		{"app", "", true},
+		{"free", "", false, false},
+		{"app", "", true, true},
+		{"off", "", true, false},
 		// Its own link, left from a file deleted by hand: saving writes the
 		// file it already names.
-		{"stale", "", false},
-		{"orphan", "sites-enabled/orphan links to " + available("gone") + ", which is not there", false},
-		{"inline", "sites-enabled/inline is a file of its own, not a link", false},
+		{"stale", "", false, false},
+		{"orphan", "sites-enabled/orphan links to " + available("gone") + ", which is not there", false, false},
+		{"inline", "sites-enabled/inline is a file of its own, not a link", false, false},
 	} {
 		file, err := service.SiteFile(c.name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if file.Path != available(c.name) || file.Exists != c.exists || file.EnabledElsewhere != c.want {
-			t.Errorf("%s: %+v, want exists=%v held by %q", c.name, file, c.exists, c.want)
+		if file.Path != available(c.name) || file.Exists != c.exists || file.EnabledElsewhere != c.want || file.Enabled != c.enabled {
+			t.Errorf("%s: %+v, want exists=%v enabled=%v held by %q", c.name, file, c.exists, c.enabled, c.want)
 		}
 	}
 
@@ -229,8 +233,15 @@ func TestSiteFileSaysWhatHoldsTheNamesLink(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "conf.d"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if file, err := service.SiteFile("inline"); err != nil || file.EnabledElsewhere != "" {
+	if file, err := service.SiteFile("inline"); err != nil || file.EnabledElsewhere != "" || file.Enabled {
 		t.Fatalf("conf.d: %+v %v", file, err)
+	}
+	// And every file there is read.
+	if err := os.WriteFile(filepath.Join(root, "conf.d", "app.conf"), []byte("server {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if file, err := service.SiteFile("app"); err != nil || !file.Exists || !file.Enabled {
+		t.Fatalf("conf.d app: %+v %v", file, err)
 	}
 }
 
@@ -637,5 +648,132 @@ func TestReadSiteSpecNamesAConfDSiteWithoutItsSuffix(t *testing.T) {
 
 	if _, _, _, err := service.ReadSiteSpec("../nginx.conf"); err == nil {
 		t.Fatal("read a name that is a path")
+	}
+}
+
+// linkTestedNginx is siteNginx with a test that fails, the way nginx fails
+// on a broken site, only while sites-enabled/<name> is there, and a reload
+// that leaves a mark in the prefix.
+func linkTestedNginx(t *testing.T, name string) (*Service, string) {
+	t.Helper()
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	link := filepath.Join(root, "sites-enabled", name)
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"-t\" ]; then\n" +
+		"  if [ -e '" + link + "' ]; then\n" +
+		"    echo 'nginx: [emerg] unknown directive \"frobnicate\" in " + link + ":3'\n" +
+		"    echo 'nginx: configuration file " + root + "/nginx.conf test failed'; exit 1\n" +
+		"  fi\n" +
+		"  printf '%s\\n' \"$JD_TEST_OUT\"; exit 0\n" +
+		"fi\n" +
+		"if [ \"$1\" = \"-s\" ]; then touch '" + root + "/reloaded'; exit 0; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(root, "bin", "nginx"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return service, root
+}
+
+// A site saved disabled used to be written untested: nginx -t never read a
+// file nothing linked, so "saved" said nothing about the day somebody
+// enabled it. It is now tested with its link in place for the test only,
+// and what that test says is reported without refusing the save or leaving
+// the link behind.
+func TestSaveSiteTestsADisabledSiteAsEnabled(t *testing.T) {
+	service, root := linkTestedNginx(t, "app")
+	ctx := context.Background()
+	spec := plainSpec("app", "app.example.com")
+
+	res, err := service.SaveSite(ctx, spec, SiteSave{Reload: true})
+	if err != nil {
+		t.Fatalf("a disabled site that fails its test enabled was refused: %v", err)
+	}
+	if res.Enabled || !res.TestedAsEnabled || res.Validation.Valid {
+		t.Fatalf("result = %+v, want disabled, tested as enabled and failing", res)
+	}
+	want := Diagnostic{Level: "emerg", Message: `unknown directive "frobnicate"`, File: res.Path, Line: 3}
+	if len(res.Validation.Diagnostics) != 1 || res.Validation.Diagnostics[0] != want {
+		t.Fatalf("diagnostics = %+v, want %+v: the link must still be there when nginx's file is resolved", res.Validation.Diagnostics, want)
+	}
+	if isLinked(t, root, "app") {
+		t.Fatal("the link put in place for the test was left behind")
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "sites-available", "app")); !strings.Contains(string(b), "server_name app.example.com") {
+		t.Fatalf("the disabled site was not written:\n%s", b)
+	}
+	// A reload follows a passing test only, and this one did not pass.
+	if _, err := os.Stat(filepath.Join(root, "reloaded")); !os.IsNotExist(err) || res.Reloaded {
+		t.Fatal("nginx was reloaded after a failing test")
+	}
+
+	// Enabling it is refused over the same test, and puts back the file it
+	// replaced rather than deleting the disabled site.
+	spec.Upstream = "http://127.0.0.1:4000"
+	res, err = service.SaveSite(ctx, spec, SiteSave{Enable: true, Overwrite: true, Reload: true})
+	if !errors.Is(err, ErrInvalidConf) {
+		t.Fatalf("enabling a site that fails its test: %v", err)
+	}
+	if isLinked(t, root, "app") || res.Enabled {
+		t.Fatal("a refused enable left the site linked")
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "sites-available", "app")); !strings.Contains(string(b), "127.0.0.1:3000") {
+		t.Fatalf("a refused enable did not put the disabled file back:\n%s", b)
+	}
+
+	// A disabled site that passes is reloaded when asked and still not linked.
+	other := plainSpec("fine", "fine.example.com")
+	res, err = service.SaveSite(ctx, other, SiteSave{Reload: true})
+	if err != nil || !res.TestedAsEnabled || !res.Validation.Valid || res.Enabled || !res.Reloaded || isLinked(t, root, "fine") {
+		t.Fatalf("a passing disabled save: %+v %v", res, err)
+	}
+}
+
+// A name a disabled site shares with an enabled one is what enabling it
+// would meet: reported with which of the two nginx would answer it from,
+// and no reason to refuse a file nginx does not read.
+func TestSaveSiteReportsADisabledSitesConflictsWithoutRefusing(t *testing.T) {
+	service, root := siteNginx(t, conflictWarning("app.example.com"), 0, "", 0)
+	ctx := context.Background()
+	enableSite(t, root, plainSpec("legacy", "app.example.com"))
+
+	res, err := service.SaveSite(ctx, plainSpec("app", "app.example.com"), SiteSave{})
+	if err != nil {
+		t.Fatalf("a disabled site sharing a name was refused: %v", err)
+	}
+	want := []ServerNameConflict{{Domain: "app.example.com", Listen: "0.0.0.0:80", Site: "legacy", Effect: ConflictTakes}}
+	if !reflect.DeepEqual(res.Conflicts, want) || res.Enabled || !res.TestedAsEnabled || isLinked(t, root, "app") {
+		t.Fatalf("result = %+v, want the conflict enabling it would meet", res)
+	}
+
+	res, err = service.SaveSite(ctx, plainSpec("zz", "app.example.com"), SiteSave{})
+	if err != nil || len(res.Conflicts) != 1 || res.Conflicts[0].Effect != ConflictIgnored || isLinked(t, root, "zz") {
+		t.Fatalf("a disabled site nginx would ignore: %+v %v", res, err)
+	}
+}
+
+// A disabled site whose name another site's link holds cannot have its link
+// put in place for the test, and the result says it was not tested.
+func TestSaveSiteSaysWhenADisabledSiteCouldNotBeTested(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	handWritten := filepath.Join(root, "sites-available", "shopfront.conf")
+	if err := os.WriteFile(handWritten, []byte("server { server_name shop.example.com; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(handWritten, filepath.Join(root, "sites-enabled", "shop.example.com")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "sites-available", "shop.example.com"), []byte("# old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := service.SaveSite(context.Background(), plainSpec("shop.example.com", "shop.example.com"), SiteSave{Overwrite: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "sites-enabled/shop.example.com already enables " + handWritten + ", so nginx could not test this site as enabled."
+	if res.TestedAsEnabled || res.Enabled || res.Validation.Note != want {
+		t.Fatalf("result = %+v, note %q; want untested with %q", res, res.Validation.Note, want)
+	}
+	if got := linkTarget(t, root, "shop.example.com"); got != handWritten {
+		t.Fatalf("the other site's link now names %s", got)
 	}
 }

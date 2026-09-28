@@ -28,7 +28,12 @@ type SiteResult struct {
 	// TestWarnings are the test's warnings placed in this site's own file.
 	TestWarnings []Diagnostic `json:"testWarnings,omitempty"`
 	Enabled      bool         `json:"enabled"`
-	Reloaded     bool         `json:"reloaded"`
+	// TestedAsEnabled says a site saved disabled was tested with its link in
+	// place for the length of the test. Its Validation, Conflicts and
+	// TestWarnings are then what enabling it would meet, and none of them
+	// refused the save: nginx does not read the file while it is disabled.
+	TestedAsEnabled bool `json:"testedAsEnabled,omitempty"`
+	Reloaded        bool `json:"reloaded"`
 	// ReloadError is why nginx did not reload a configuration that tested
 	// clean. The site is written and in place, and nginx has not picked it
 	// up: a running nginx serves what it served before, and one that is not
@@ -79,7 +84,8 @@ var errSiteReloadFailed = errors.New("reload failed")
 type SiteSave struct {
 	// Enable links the site into sites-enabled. Without it the link is left
 	// as it was, so saving a disabled site keeps it disabled — the form used
-	// to enable every site it saved.
+	// to enable every site it saved. Such a site is still tested as it would
+	// be enabled, and the result says what that test found.
 	Enable bool
 	Reload bool
 	// Overwrite replaces a site of the same name; without it one is refused.
@@ -105,7 +111,9 @@ func (s *Service) ApplySite(ctx context.Context, spec *SiteSpec, enable, reload,
 // something, and both the file and the link are undone together if it fails.
 //
 // A reload that fails after a clean test is not an error here: the site was
-// saved, and the result says what nginx did not do.
+// saved, and the result says what nginx did not do. Nor is a site saved
+// disabled refused over its test: nginx does not read it, and the result
+// carries what enabling it would meet.
 func (s *Service) SaveSite(ctx context.Context, spec *SiteSpec, opts SiteSave) (*SiteResult, error) {
 	content, err := RenderNginx(spec)
 	if err != nil {
@@ -179,6 +187,10 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		return nil, err
 	}
 	undoLink := func() {}
+	// staged is a site saved disabled whose link is in place for the test
+	// only.
+	staged := false
+	untested := ""
 	if !strings.Contains(full, "sites-available") {
 		// In the conf.d layout every present file is active, so there is no
 		// symlink to make and nothing to report as pending.
@@ -195,35 +207,59 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		}
 		undoLink = undo
 		res.Enabled = true
+	} else if elsewhere != "" {
+		untested = elsewhere + ", so nginx could not test this site as enabled."
+	} else if undo, err := linkEnabled(link, full); err != nil {
+		untested = fmt.Sprintf("Its link could not be put in place for the test (%v), so nginx could not test it.", err)
+	} else {
+		// A site saved disabled is tested as it would be enabled, its link
+		// in place for the length of the test the way Validate stages a
+		// candidate file. Without it `nginx -t` never read the file, and
+		// "saved" said nothing about the day somebody enables it.
+		undoLink, staged = undo, true
+		res.TestedAsEnabled = true
 	}
 
 	res.Validation = runValidator(ctx, "nginx", "-t")
-	if !res.Validation.Valid {
+	if !res.Validation.Valid && !staged {
 		undoLink()
 		restoreConfig(full, original, existed)
 		res.Enabled = false
 		return res, ErrInvalidConf
 	}
-	// nginx passes a second server block claiming a name on an address the
-	// first already answers it on, and serves only the first in include
-	// order. A save that takes a domain from a working site, or whose own
-	// claim is ignored, is refused unless allowed; one that leaves a name
-	// with the site that already answered it is not, since refusing it
-	// blocks an edit to the site that is serving.
-	res.Conflicts = s.serverNameConflicts(res.Validation, spec.Domains, content, full)
-	if len(res.Conflicts) > 0 {
-		s.orderConflicts(ctx, res.Conflicts, full, previous)
+	if res.Validation.Valid {
+		// nginx passes a second server block claiming a name on an address
+		// the first already answers it on, and serves only the first in
+		// include order. A save that takes a domain from a working site, or
+		// whose own claim is ignored, is refused unless allowed; one that
+		// leaves a name with the site that already answered it is not,
+		// since refusing it blocks an edit to the site that is serving.
+		res.Conflicts = s.serverNameConflicts(res.Validation, spec.Domains, content, full)
+		if len(res.Conflicts) > 0 {
+			s.orderConflicts(ctx, res.Conflicts, full, previous)
+		}
 	}
-	if refusesConflicts(res.Conflicts) && !opts.AllowConflict {
+	res.TestWarnings = warningsIn(res.Validation, full)
+	if staged {
+		// Out again whatever the test said: a failing test or a contested
+		// name is what enabling the site would meet, and the result says
+		// so, but it is no reason to refuse a file nginx does not read.
+		undoLink()
+	} else if refusesConflicts(res.Conflicts) && !opts.AllowConflict {
 		undoLink()
 		restoreConfig(full, original, existed)
 		res.Enabled = false
 		return res, ErrServerNameConflict
 	}
-	res.TestWarnings = warningsIn(res.Validation, full)
+	if untested != "" {
+		res.Validation.Note = untested
+	}
 	s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
 		Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
-	if opts.Reload {
+	// Only a configuration that passed its test is reloaded. A disabled
+	// site's test failing with it enabled says nothing about the files
+	// nginx reads now, which have not been tested without it.
+	if opts.Reload && res.Validation.Valid {
 		raw, err := hostexec.Command(ctx, "nginx", "-s", "reload").CombinedOutput()
 		out := strings.TrimSpace(string(raw))
 		res.Output = out
@@ -551,6 +587,9 @@ type SiteFileInfo struct {
 	// EnabledElsewhere says what holds the name's sites-enabled link when
 	// that is not Path — another site's file, which a save would unlink.
 	EnabledElsewhere string
+	// Enabled is a file at Path that nginx reads: linked into sites-enabled,
+	// or any file in the conf.d layout.
+	Enabled bool
 }
 
 // SiteFile is the file saving a site named name writes, and what already
@@ -566,9 +605,12 @@ func (s *Service) SiteFile(name string) (SiteFileInfo, error) {
 		return SiteFileInfo{}, err
 	}
 	_, err = os.Stat(full)
-	file := SiteFileInfo{Path: full, Exists: err == nil}
+	file := SiteFileInfo{Path: full, Exists: err == nil, Enabled: err == nil}
 	if !confd {
-		file.EnabledElsewhere = enabledElsewhere(filepath.Join(s.nginxDir, "sites-enabled", name), full)
+		link := filepath.Join(s.nginxDir, "sites-enabled", name)
+		file.EnabledElsewhere = enabledElsewhere(link, full)
+		_, err := os.Lstat(link)
+		file.Enabled = file.Exists && err == nil && file.EnabledElsewhere == ""
 	}
 	return file, nil
 }

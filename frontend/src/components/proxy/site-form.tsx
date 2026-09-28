@@ -24,6 +24,7 @@ import type {
   Listener,
   SiteLocation,
   SitePreview,
+  SiteRead,
   SiteResult,
   SiteSpec,
 } from "@/lib/types"
@@ -117,6 +118,18 @@ export function SiteForm({
   )
 }
 
+/**
+ * The footer's saves: an enabled or new site is saved, or saved and
+ * reloaded; a disabled one is saved as it is, or enabled and reloaded.
+ */
+type SaveMode = "save" | "reload" | "keep" | "enable"
+const SAVE_MODES: Record<SaveMode, { reload: boolean; enable?: boolean }> = {
+  save: { reload: false },
+  reload: { reload: true },
+  keep: { reload: false },
+  enable: { reload: true, enable: true },
+}
+
 /** The glyph for a preset with no product of its own: its kind's. */
 const KIND_MARK: Record<SiteSpec["kind"], Icon> = {
   proxy: Globe,
@@ -161,14 +174,18 @@ function SiteFormBody({
   // Which of the name and certificate paths the operator has set, so that
   // typing the domains stops rewriting them.
   const [fixed, setFixed] = useSessionState<IdentityFixed>(`${draft}.fixed`, FOLLOW_DOMAINS)
-  const [busy, setBusy] = useState(false)
+  // The save in flight, so the button pressed is the one that spins.
+  const [busy, setBusy] = useState<SaveMode | "anyway" | null>(null)
   const [loaded, setLoaded] = useState(source === null)
+  // Whether nginx reads the site being edited, as it was read back; each
+  // preview then says it afresh.
+  const [readEnabled, setReadEnabled] = useState<boolean | undefined>(undefined)
   // A save refused over a name another server block claims, with the
   // server's sentence saying which of the two nginx answers. Kept with the
   // spec it was about, so any edit puts the question away.
   const [conflict, setConflict] = useState<{
     message: string
-    reload: boolean
+    mode: SaveMode
     spec: SiteSpec
   } | null>(null)
   const conflictRef = useRef<HTMLDivElement>(null)
@@ -186,11 +203,7 @@ function SiteFormBody({
   useEffect(() => {
     if (!open || !source) return
     const controller = new AbortController()
-    get<{ spec: SiteSpec; managed: boolean }>(
-      `/proxy/sites/${encodeURIComponent(source)}`,
-      undefined,
-      controller.signal,
-    )
+    get<SiteRead>(`/proxy/sites/${encodeURIComponent(source)}`, undefined, controller.signal)
       .then((r) => {
         if (copyFrom && !editing) {
           setSpec({
@@ -212,6 +225,7 @@ function SiteFormBody({
           setDomainText(r.spec.domains.join(" "))
           setManaged(r.managed)
           setFixed(fixedFor(r.spec, true))
+          setReadEnabled(r.enabled)
         }
         setLoaded(true)
       })
@@ -349,13 +363,13 @@ function SiteFormBody({
     setUpstreamSet(true)
   }
 
-  const save = async (reload: boolean, allowConflict = false) => {
-    setBusy(true)
+  const save = async (mode: SaveMode, allowConflict = false) => {
+    setBusy(allowConflict ? "anyway" : mode)
     try {
       const existing = editing !== null
       const res = await post<SiteResult>(
         "/proxy/sites/",
-        saveRequest(spec, { existing, reload, allowConflict }),
+        saveRequest(spec, { existing, ...SAVE_MODES[mode], allowConflict }),
       )
       const outcome = saveOutcome(res, { existing })
       notify[outcome.tone](outcome.title, { description: outcome.description })
@@ -363,12 +377,12 @@ function SiteFormBody({
       onOpenChange(false)
     } catch (err) {
       if (err instanceof ApiError && err.code === "name_conflict") {
-        setConflict({ message: err.message, reload, spec })
+        setConflict({ message: err.message, mode, spec })
       } else {
         notify.error("Not applied", err)
       }
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
@@ -411,6 +425,10 @@ function SiteFormBody({
     file !== null &&
     !nameProblem &&
     (editing !== null || (!file.exists && !file.enabledElsewhere))
+  // A disabled site is saved as it is or enabled on purpose; "Save and
+  // reload" did neither, and reloading changes nothing about a file nginx
+  // does not read.
+  const disabled = editing !== null && (file?.enabled ?? readEnabled) === false
   const certKnown =
     !spec.tls || !spec.certPath || !certs.data || certs.data.some((c) => c.path === spec.certPath)
   const issueHref = `/proxy/certificates?issue=${encodeURIComponent(spec.domains.join(" "))}`
@@ -433,18 +451,58 @@ function SiteFormBody({
       }
       bodyClassName="flex min-h-0 flex-1 flex-col gap-0 p-0 lg:flex-row"
       footer={
-        <>
-          <span className="mr-auto text-hint text-muted-foreground">
-            Validated with nginx&rsquo;s own parser before it takes effect, and rolled back if the
-            test fails.
-          </span>
-          <Button size="sm" variant="outline" onClick={() => save(false)} disabled={!ready || busy}>
-            Save only
-          </Button>
-          <Button size="sm" onClick={() => save(true)} disabled={!ready || busy} pending={busy}>
-            Save and reload
-          </Button>
-        </>
+        disabled ? (
+          <>
+            <span className="mr-auto text-hint text-muted-foreground">
+              {file?.enabledElsewhere
+                ? `${file.enabledElsewhere}, so this site can be neither enabled nor tested under its name.`
+                : "Disabled. nginx tests it as if enabled, and it stays off until you enable it."}
+            </span>
+            {!file?.enabledElsewhere && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => save("enable")}
+                disabled={!ready || busy !== null}
+                pending={busy === "enable"}
+              >
+                Save and enable
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={() => save("keep")}
+              disabled={!ready || busy !== null}
+              pending={busy === "keep"}
+            >
+              Save (stays disabled)
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="mr-auto text-hint text-muted-foreground">
+              Validated with nginx&rsquo;s own parser before it takes effect, and rolled back if the
+              test fails.
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => save("save")}
+              disabled={!ready || busy !== null}
+              pending={busy === "save"}
+            >
+              Save only
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => save("reload")}
+              disabled={!ready || busy !== null}
+              pending={busy === "reload"}
+            >
+              Save and reload
+            </Button>
+          </>
+        )
       }
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:w-[26rem] lg:shrink-0 lg:border-r lg:border-hairline">
@@ -457,8 +515,9 @@ function SiteFormBody({
                   <Button
                     size="xs"
                     variant="outline"
-                    onClick={() => save(conflictShown.reload, true)}
-                    disabled={busy}
+                    onClick={() => save(conflictShown.mode, true)}
+                    disabled={busy !== null}
+                    pending={busy === "anyway"}
                   >
                     Save anyway
                   </Button>

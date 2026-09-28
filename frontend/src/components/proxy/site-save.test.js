@@ -63,6 +63,18 @@ describe("what a save sends", () => {
       saveRequest(spec(), { existing: false, reload: true, allowConflict: true }),
     ).toMatchObject({ allowConflict: true })
   })
+
+  test("a disabled site is enabled only when the operator says so", () => {
+    expect(saveRequest(spec(), { existing: true, reload: false })).toMatchObject({
+      enable: "keep",
+      reload: false,
+    })
+    expect(saveRequest(spec(), { existing: true, reload: true, enable: true })).toMatchObject({
+      enable: "enable",
+      overwrite: true,
+      reload: true,
+    })
+  })
 })
 
 describe("what a save says", () => {
@@ -87,10 +99,120 @@ describe("what a save says", () => {
     expect(outcome.description).not.toMatch(/serving|served/)
   })
 
-  test("a disabled site says it stays disabled", () => {
-    const outcome = saveOutcome(result({ enabled: false }), { existing: true })
-    expect(outcome.title).toBe("app.example.com saved")
-    expect(outcome.description).toContain("stays that way")
+  test("a disabled site tested as enabled says so, and that it stays disabled", () => {
+    const tested = { enabled: false, reloaded: false, testedAsEnabled: true }
+    expect(
+      saveOutcome(result({ ...tested, validation: { valid: true, output: "", command: "" } }), {
+        existing: true,
+      }),
+    ).toEqual({
+      tone: "success",
+      title: "app.example.com saved",
+      description: "nginx tested it as if enabled. It stays disabled until it is enabled.",
+    })
+  })
+
+  test("a disabled site that would fail its test enabled says where", () => {
+    const failing = (diagnostics, output = "") =>
+      saveOutcome(
+        result({
+          enabled: false,
+          reloaded: false,
+          testedAsEnabled: true,
+          validation: { valid: false, output, command: "nginx -t", diagnostics },
+        }),
+        { existing: true },
+      )
+    const own = failing([
+      { level: "warn", message: "protocol options redefined", line: 2 },
+      {
+        level: "emerg",
+        message: 'unknown directive "frobnicate"',
+        file: "/etc/nginx/sites-available/app.example.com",
+        line: 14,
+      },
+    ])
+    expect(own).toEqual({
+      tone: "warning",
+      title: "app.example.com saved; enabling it would fail nginx's test",
+      description:
+        'Line 14: unknown directive "frobnicate". It stays disabled until it is enabled.',
+    })
+    // A broken neighbour fails the same test: its file is named, not "line 3".
+    expect(
+      failing([
+        {
+          level: "emerg",
+          message: 'cannot load certificate "/x.pem"',
+          file: "/etc/nginx/sites-available/other",
+          line: 3,
+        },
+      ]).description,
+    ).toBe(
+      '/etc/nginx/sites-available/other:3: cannot load certificate "/x.pem". It stays disabled until it is enabled.',
+    )
+    expect(
+      failing(
+        [],
+        "nginx: something odd\nnginx: configuration file /etc/nginx/nginx.conf test failed",
+      ).description,
+    ).toBe(
+      "nginx: configuration file /etc/nginx/nginx.conf test failed. It stays disabled until it is enabled.",
+    )
+  })
+
+  test("a disabled site's name conflicts and warnings are what enabling it would meet", () => {
+    const tested = {
+      enabled: false,
+      reloaded: false,
+      testedAsEnabled: true,
+      validation: { valid: true, output: "", command: "nginx -t" },
+    }
+    const conflict = (effect) => [
+      { domain: "app.example.com", listen: "0.0.0.0:80", site: "legacy", effect },
+    ]
+    expect(
+      saveOutcome(result({ ...tested, conflicts: conflict("takes") }), { existing: true }),
+    ).toEqual({
+      tone: "warning",
+      title: "app.example.com saved with a name conflict once enabled",
+      description:
+        "Enabled, it would take app.example.com on 0.0.0.0:80 from legacy. It stays disabled until it is enabled.",
+    })
+    expect(
+      saveOutcome(result({ ...tested, conflicts: conflict("ignored") }), { existing: true })
+        .description,
+    ).toBe(
+      "Enabled, its claim to app.example.com on 0.0.0.0:80 would be ignored: nginx answers it from legacy. It stays disabled until it is enabled.",
+    )
+    expect(
+      saveOutcome(result({ ...tested, testWarnings: [{ level: "warn", message: "x", line: 4 }] }), {
+        existing: true,
+      }),
+    ).toEqual({
+      tone: "warning",
+      title: "app.example.com saved with a warning",
+      description: "nginx warns: Line 4: x. It stays disabled until it is enabled.",
+    })
+  })
+
+  test("a disabled site nginx could not test says why", () => {
+    const note =
+      "sites-enabled/app.example.com already enables /etc/nginx/sites-available/app.conf, so nginx could not test this site as enabled."
+    expect(
+      saveOutcome(
+        result({
+          enabled: false,
+          reloaded: false,
+          validation: { valid: true, output: "", command: "nginx -t", note },
+        }),
+        { existing: true },
+      ),
+    ).toEqual({
+      tone: "warning",
+      title: "app.example.com saved",
+      description: `${note} It stays disabled.`,
+    })
   })
 
   test("a conflict saved anyway and the test's warnings are warnings", () => {
@@ -112,6 +234,10 @@ describe("what a save says", () => {
       title: "app.example.com saved with 2 warnings",
       description: "Line 12: protocol options redefined; x",
     })
+    // Both at once: the warnings are not dropped behind the conflict.
+    expect(saveOutcome(result({ conflicts, testWarnings }), { existing: false }).description).toBe(
+      "nginx now answers app.example.com on 0.0.0.0:80 from app.example.com, not legacy. nginx also warns: Line 12: protocol options redefined; x.",
+    )
   })
 
   test("saved without a reload says what nginx is serving", () => {

@@ -1,5 +1,11 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
-import { LINKED_ELSEWHERE, runningContainers, siteResult } from "./fixtures/proxy/siteform"
+import {
+  LINKED_ELSEWHERE,
+  legacySpec,
+  runningContainers,
+  sitePreview,
+  siteResult,
+} from "./fixtures/proxy/siteform"
 import { json, mockProxy, ports, user, vhosts } from "./proxy-fixtures"
 
 /**
@@ -111,39 +117,287 @@ test("HSTS reaches the server only with TLS", async ({ page }) => {
   await expect(sheet.getByRole("switch", { name: "HSTS" })).toBeChecked()
 })
 
-test("editing a disabled site keeps it disabled and says so", async ({ page }) => {
-  await mockProxy(page, { included: true })
+/**
+ * legacy.example.com, disabled, as the host reports it: in the listing, read
+ * back into the form and in every preview.
+ */
+async function disableLegacy(page: Page, preview: Record<string, unknown> = {}) {
   await page.route("**/api/v1/proxy/vhosts", (route) =>
     json(
       route,
       vhosts.map((v) => (v.name === "legacy.example.com" ? { ...v, enabled: false } : v)),
     ),
   )
-  const saved = await capture(page, "**/api/v1/proxy/sites/", (route) =>
-    json(
-      route,
-      siteResult({
-        name: "legacy.example.com",
-        path: "/etc/nginx/sites-available/legacy.example.com",
-        enabled: false,
-        reloaded: true,
-      }),
-    ),
+  await page.route("**/api/v1/proxy/sites/legacy.example.com", (route) =>
+    json(route, { spec: legacySpec, managed: true, content: "", warnings: [], enabled: false }),
   )
+  await page.route("**/api/v1/proxy/sites/preview", (route) =>
+    json(route, sitePreview(route.request().postDataJSON().spec, { enabled: false, ...preview })),
+  )
+}
+
+async function openLegacy(page: Page) {
   await page.goto("/proxy/sites")
   await page.getByRole("button", { name: "Open legacy.example.com" }).click()
   const sheet = page.getByRole("dialog", { name: "Edit legacy.example.com" })
   await expect(sheet.getByLabel("Domains")).toHaveValue("legacy.example.com")
+  return sheet
+}
+
+const LEGACY = {
+  name: "legacy.example.com",
+  path: "/etc/nginx/sites-available/legacy.example.com",
+}
+
+const passed = { valid: true, output: "", command: "nginx -t", diagnostics: [] }
+
+test("a disabled site is saved as it is, or enabled on purpose", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await disableLegacy(page)
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route, body) =>
+    json(
+      route,
+      body.enable === "enable"
+        ? siteResult({ ...LEGACY, validation: passed })
+        : siteResult({
+            ...LEGACY,
+            enabled: false,
+            testedAsEnabled: true,
+            validation: passed,
+            reloaded: false,
+          }),
+    ),
+  )
+  const sheet = await openLegacy(page)
   // A path written with root says where its files really come from.
   await expect(sheet.getByText("/srv/legacy/static")).toBeVisible()
+  await expect(
+    sheet.getByText(
+      "Disabled. nginx tests it as if enabled, and it stays off until you enable it.",
+    ),
+  ).toBeVisible()
+  // "Save and reload" enabled nothing and reloaded for a file nginx does
+  // not read.
+  await expect(sheet.getByRole("button", { name: "Save and reload" })).toHaveCount(0)
+  await expect(sheet.getByRole("button", { name: "Save only" })).toHaveCount(0)
 
-  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await sheet.getByRole("button", { name: "Save (stays disabled)" }).click()
   await expect(page.getByText("legacy.example.com saved", { exact: true })).toBeVisible()
-  await expect(page.getByText(/disabled and stays that way/)).toBeVisible()
-  expect(saved[0]).toMatchObject({ enable: "keep", overwrite: true })
+  await expect(
+    page.getByText("nginx tested it as if enabled. It stays disabled until it is enabled."),
+  ).toBeVisible()
+  await expect(sheet).toBeHidden()
+  expect(saved[0]).toMatchObject({ enable: "keep", overwrite: true, reload: false })
   expect((saved[0].spec as { locations: unknown[] }).locations).toEqual([
     { path: "/static", root: "/srv/legacy", rootMode: "root", webSockets: false },
   ])
+
+  const again = await openLegacy(page)
+  await again.getByRole("button", { name: "Save and enable" }).click()
+  await expect(page.getByText("legacy.example.com is live")).toBeVisible()
+  expect(saved[1]).toMatchObject({ enable: "enable", overwrite: true, reload: true })
+  expect(saved[1]).not.toHaveProperty("allowConflict")
+})
+
+test("a disabled site nginx would refuse enabled is saved, and says where", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await disableLegacy(page)
+  await capture(page, "**/api/v1/proxy/sites/", (route) =>
+    json(
+      route,
+      siteResult({
+        ...LEGACY,
+        enabled: false,
+        testedAsEnabled: true,
+        reloaded: false,
+        validation: {
+          valid: false,
+          command: "nginx -t",
+          output:
+            'nginx: [emerg] unknown directive "frobnicate" in /etc/nginx/sites-enabled/legacy.example.com:14\nnginx: configuration file /etc/nginx/nginx.conf test failed',
+          diagnostics: [
+            {
+              level: "emerg",
+              message: 'unknown directive "frobnicate"',
+              file: LEGACY.path,
+              line: 14,
+            },
+          ],
+        },
+      }),
+    ),
+  )
+  const sheet = await openLegacy(page)
+  await sheet.getByRole("button", { name: "Save (stays disabled)" }).click()
+  await expect(
+    page.getByText("legacy.example.com saved; enabling it would fail nginx's test"),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      'Line 14: unknown directive "frobnicate". It stays disabled until it is enabled.',
+    ),
+  ).toBeVisible()
+  await expect(page.getByText("Not applied")).toHaveCount(0)
+  await expect(sheet).toBeHidden()
+})
+
+test("a disabled site's name conflict is what enabling it would meet", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await disableLegacy(page)
+  await capture(page, "**/api/v1/proxy/sites/", (route) =>
+    json(
+      route,
+      siteResult({
+        ...LEGACY,
+        enabled: false,
+        testedAsEnabled: true,
+        reloaded: false,
+        validation: passed,
+        conflicts: [
+          {
+            domain: "legacy.example.com",
+            listen: "0.0.0.0:80",
+            site: "app.example.com",
+            effect: "ignored",
+          },
+        ],
+      }),
+    ),
+  )
+  const sheet = await openLegacy(page)
+  await sheet.getByRole("button", { name: "Save (stays disabled)" }).click()
+  await expect(
+    page.getByText("legacy.example.com saved with a name conflict once enabled"),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      "Enabled, its claim to legacy.example.com on 0.0.0.0:80 would be ignored: nginx answers it from app.example.com. It stays disabled until it is enabled.",
+    ),
+  ).toBeVisible()
+})
+
+test("enabling a disabled site over a name another site serves asks first", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await disableLegacy(page)
+  const refusal =
+    "Saving anyway takes legacy.example.com on 0.0.0.0:80 from app.example.com, since nginx reads this site first."
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route, body, index) =>
+    index === 0
+      ? route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "name_conflict", message: refusal } }),
+        })
+      : json(
+          route,
+          siteResult({
+            ...LEGACY,
+            reloaded: body.reload,
+            conflicts: [
+              {
+                domain: "legacy.example.com",
+                listen: "0.0.0.0:80",
+                site: "app.example.com",
+                effect: "takes",
+              },
+            ],
+          }),
+        ),
+  )
+  const sheet = await openLegacy(page)
+  await sheet.getByRole("button", { name: "Save and enable" }).click()
+  await expect(sheet.getByRole("alert")).toContainText(refusal)
+  await sheet.getByRole("button", { name: "Save anyway" }).click()
+  await expect(page.getByText("legacy.example.com is live with a name conflict")).toBeVisible()
+  await expect(
+    page.getByText(
+      "nginx now answers legacy.example.com on 0.0.0.0:80 from legacy.example.com, not app.example.com.",
+    ),
+  ).toBeVisible()
+  expect(saved).toHaveLength(2)
+  // Saving anyway repeats the save that was refused: enabled, not kept.
+  expect(saved[1]).toMatchObject({ enable: "enable", reload: true, allowConflict: true })
+})
+
+test("a disabled site whose name another site's link holds can only stay disabled", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const held =
+    "sites-enabled/legacy.example.com already enables /etc/nginx/sites-available/legacy.conf"
+  await disableLegacy(page, { enabledElsewhere: held })
+  const note = `${held}, so nginx could not test this site as enabled.`
+  const saved = await capture(page, "**/api/v1/proxy/sites/", (route) =>
+    json(
+      route,
+      siteResult({
+        ...LEGACY,
+        enabled: false,
+        reloaded: false,
+        validation: { ...passed, note },
+      }),
+    ),
+  )
+  const sheet = await openLegacy(page)
+  await expect(
+    sheet.getByText(`${held}, so this site can be neither enabled nor tested under its name.`),
+  ).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Save and enable" })).toHaveCount(0)
+  await sheet.getByRole("button", { name: "Save (stays disabled)" }).click()
+  await expect(page.getByText("legacy.example.com saved", { exact: true })).toBeVisible()
+  await expect(page.getByText(`${note} It stays disabled.`)).toBeVisible()
+  expect(saved[0]).toMatchObject({ enable: "keep", reload: false })
+})
+
+test("a disabled site's footer fits a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await disableLegacy(page)
+  const sheet = await openLegacy(page)
+  const keep = sheet.getByRole("button", { name: "Save (stays disabled)" })
+  const enable = sheet.getByRole("button", { name: "Save and enable" })
+  await expect(keep).toBeEnabled()
+  await expect(keep).toBeInViewport({ ratio: 1 })
+  await expect(enable).toBeInViewport({ ratio: 1 })
+  expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true,
+  )
+})
+
+test("a save nginx warns about says how many warnings and where", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await capture(page, "**/api/v1/proxy/sites/", (route) =>
+    json(
+      route,
+      siteResult({
+        testWarnings: [
+          {
+            level: "warn",
+            message: "protocol options redefined for 0.0.0.0:443",
+            file: "/etc/nginx/sites-available/app.example.com",
+            line: 12,
+          },
+          {
+            level: "warn",
+            message: 'duplicate MIME type "text/html"',
+            file: "/etc/nginx/sites-available/app.example.com",
+            line: 40,
+          },
+        ],
+      }),
+    ),
+  )
+  await page.goto("/proxy/sites")
+  await page.getByRole("button", { name: "Open app.example.com" }).click()
+  const sheet = page.getByRole("dialog", { name: "Edit app.example.com" })
+  await expect(sheet.getByLabel("Domains")).toHaveValue("app.example.com")
+  await sheet.getByRole("button", { name: "Save and reload" }).click()
+  await expect(page.getByText("app.example.com is live with 2 warnings")).toBeVisible()
+  await expect(
+    page.getByText(
+      'Line 12: protocol options redefined for 0.0.0.0:443; Line 40: duplicate MIME type "text/html"',
+    ),
+  ).toBeVisible()
 })
 
 test("a reload that fails after a clean test is reported as saved", async ({ page }) => {

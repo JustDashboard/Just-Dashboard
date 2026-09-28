@@ -64,22 +64,32 @@ export const LINKED_ELSEWHERE: Record<string, string> = {
     "sites-enabled/wiki.example.com already enables /etc/nginx/sites-available/wiki.conf",
 }
 
+/**
+ * A site's preview as the mocked host answers it: its file, and whether that
+ * file is there, enabled, or has its name's link held by another file.
+ */
+export function sitePreview(
+  spec: { name: string; domains: string[] },
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    content: `# Site: ${spec.name}\nserver {\n    server_name ${spec.domains.join(" ")};\n}\n`,
+    warnings: [],
+    path: `/etc/nginx/sites-available/${spec.name}`,
+    exists: ON_DISK.has(spec.name),
+    enabled: ON_DISK.has(spec.name),
+    ...(LINKED_ELSEWHERE[spec.name] ? { enabledElsewhere: LINKED_ELSEWHERE[spec.name] } : {}),
+    ...overrides,
+  }
+}
+
 /** The site form's own endpoints: reading a site back, its preview, and saving it. */
 export const routes: ProxyRoutes = {
   "/proxy/sites/app.example.com": (route) =>
-    json(route, { spec: siteSpec(), managed: true, content: "", warnings: [] }),
+    json(route, { spec: siteSpec(), managed: true, content: "", warnings: [], enabled: true }),
   "/proxy/sites/legacy.example.com": (route) =>
-    json(route, { spec: legacySpec, managed: true, content: "", warnings: [] }),
-  "/proxy/sites/preview": (route) => {
-    const { spec } = route.request().postDataJSON()
-    return json(route, {
-      content: `# Site: ${spec.name}\nserver {\n    server_name ${spec.domains.join(" ")};\n}\n`,
-      warnings: [],
-      path: `/etc/nginx/sites-available/${spec.name}`,
-      exists: ON_DISK.has(spec.name),
-      ...(LINKED_ELSEWHERE[spec.name] ? { enabledElsewhere: LINKED_ELSEWHERE[spec.name] } : {}),
-    })
-  },
+    json(route, { spec: legacySpec, managed: true, content: "", warnings: [], enabled: true }),
+  "/proxy/sites/preview": (route) => json(route, sitePreview(route.request().postDataJSON().spec)),
   "/proxy/sites/": (route) => {
     const body = route.request().postDataJSON()
     return json(
