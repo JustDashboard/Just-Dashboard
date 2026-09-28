@@ -17,6 +17,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
+import { relativeTime } from "@/lib/format"
 import { del, errorMessage, get, post } from "@/lib/api"
 import {
   authorityName,
@@ -27,6 +28,8 @@ import {
 } from "@/lib/certificates"
 import type {
   ACMEAccount,
+  ACMEAccountEntry,
+  ACMEAccounts,
   CertbotCert,
   CertbotState,
   DNSProvider,
@@ -47,7 +50,7 @@ import { Meter } from "@/components/meter"
 import { ROW_BLEED } from "@/components/row-list"
 import { CertLife } from "@/components/proxy/expiry-status"
 import { dnsProviderProduct } from "@/components/proxy/marks"
-import { EmptyState, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
@@ -675,6 +678,164 @@ export function DnsProvidersPanel({
 }
 
 /**
+ * The ACME accounts certbot keeps, one per authority it has ordered from,
+ * with each contact asked of the authority: the address that hears about
+ * expiring certificates and policy changes. Asked again once a certbot run
+ * ends, since an issuance may have registered one and certbot holds its lock
+ * until then.
+ */
+export function AcmeAccountsPanel({
+  certbotBusy,
+  onJob,
+}: {
+  certbotBusy: boolean
+  onJob: (job: Job) => void
+}) {
+  const accounts = usePoll<ACMEAccounts>(
+    (signal) => get("/certificates/accounts", undefined, signal),
+    0,
+    [certbotBusy],
+    { enabled: !certbotBusy },
+  )
+  const [editing, setEditing] = useState<ACMEAccountEntry | null>(null)
+  const list = accounts.data?.accounts ?? []
+  return (
+    <Panel plain>
+      <PanelHeader title="ACME accounts" />
+      <PanelBody flush>
+        {accounts.error ? (
+          <ErrorState error={accounts.error} onRetry={accounts.refresh} />
+        ) : accounts.data && list.length === 0 ? (
+          <EmptyState
+            icon={Key}
+            title="No account yet"
+            description="certbot registers one with the authority on the first issuance, with the contact email typed then."
+          />
+        ) : (
+          <ul className="divide-y divide-hairline">
+            {list.map((a) => (
+              <li
+                key={`${a.server} ${a.id}`}
+                className={cn(
+                  "group flex min-w-0 flex-wrap items-center gap-3 py-4 transition-colors hover:bg-row-hover",
+                  ROW_BLEED,
+                )}
+              >
+                <div className="min-w-0 flex-1 basis-40">
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-2">
+                    <span className="text-body font-medium">{a.authority}</span>
+                    {a.staging && <Tag>staging</Tag>}
+                    <Tag mono>{a.id.slice(0, 8)}</Tag>
+                  </div>
+                  <p className="text-hint break-all text-muted-foreground">{a.server}</p>
+                </div>
+                <VerbActions
+                  dim
+                  verbs={[
+                    {
+                      key: "email",
+                      label: "Update email",
+                      icon: Pencil,
+                      inline: true,
+                      disabled: certbotBusy,
+                      run: () => setEditing(a),
+                    },
+                  ]}
+                />
+                <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
+                  <Status
+                    tone={a.email ? "running" : "stopped"}
+                    label={
+                      a.email ?? (a.contacted ? "no contact" : a.error ? "contact unknown" : "…")
+                    }
+                  />
+                  {a.created && (
+                    <span className="text-hint text-muted-foreground">
+                      registered {relativeTime(a.created)}
+                    </span>
+                  )}
+                </div>
+                {a.error && (
+                  <p className="w-full text-hint break-words text-muted-foreground">{a.error}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </PanelBody>
+      {editing && (
+        <AccountEmailModal
+          account={editing}
+          certbotBusy={certbotBusy}
+          onOpenChange={(open) => !open && setEditing(null)}
+          onStarted={onJob}
+        />
+      )}
+    </Panel>
+  )
+}
+
+/** certbot update_account: the new contact is sent to the authority. */
+function AccountEmailModal({
+  account,
+  certbotBusy,
+  onOpenChange,
+  onStarted,
+}: {
+  account: ACMEAccountEntry
+  certbotBusy: boolean
+  onOpenChange: (open: boolean) => void
+  onStarted: (job: Job) => void
+}) {
+  const [email, setEmail] = useState(account.email ?? "")
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    setBusy(true)
+    try {
+      onStarted(
+        await post<Job>("/certificates/accounts/email", {
+          server: account.server,
+          id: account.id,
+          email: email.trim(),
+        }),
+      )
+      onOpenChange(false)
+    } catch (err) {
+      notify.error("The email was not changed", err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal
+      open
+      onOpenChange={onOpenChange}
+      title={`Update the ${account.authority} account's email`}
+      description="certbot sends the new contact to the authority, which writes to it about expiring certificates and changes to its terms."
+      footer={
+        <Button
+          onClick={save}
+          disabled={busy || certbotBusy || !email.trim() || email.trim() === account.email}
+          pending={busy}
+        >
+          Update
+        </Button>
+      }
+    >
+      <Field label="Contact email" htmlFor="acme-account-email" hint={account.server}>
+        <Input
+          id="acme-account-email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+        />
+      </Field>
+    </Modal>
+  )
+}
+
+/**
  * Saves a provider's credentials, checked against the keys its plugin reads,
  * so a token pasted under the wrong name is refused here rather than by the
  * first challenge.
@@ -902,11 +1063,33 @@ function IssueDialogBody({
   certbotBusy: boolean
   onStarted: (job: Job) => void
 }) {
+  // "" is whom JD_ACME_DIRECTORY configures, Let's Encrypt without it; a
+  // key names an authority, and "custom" any other ACME directory.
+  const [ca, setCa] = useState("")
+  const [customDirectory, setCustomDirectory] = useState("")
+  const authorities = usePoll<ACMEAccounts>(
+    (signal) => get("/certificates/accounts", undefined, signal),
+    0,
+    [],
+    { enabled: open },
+  )
+  const option = authorities.data?.authorities.find((a) => a.key === ca)
+  const otherAuthority = ca !== "" && ca !== "letsencrypt"
   // A configured authority is rehearsed with itself — certbot's --dry-run
   // goes to Let's Encrypt's staging endpoint only when no other is named —
   // and Let's Encrypt's limits say nothing about it. Let's Encrypt's own
   // directories come without one: they are Let's Encrypt.
-  const authority = directory ? authorityName(directory) : undefined
+  const authority =
+    ca === ""
+      ? directory
+        ? authorityName(directory)
+        : undefined
+      : ca === "custom"
+        ? authorityName(customDirectory.trim()) || "the directory"
+        : otherAuthority
+          ? option?.name
+          : undefined
+  const testing = ca === "" && testAuthority
   const [domains, setDomains] = useState(initialDomains ?? "")
   // The account's contact fills the field until the operator types: certbot
   // asks for an email only to register an account, so with one on disk the
@@ -918,8 +1101,20 @@ function IssueDialogBody({
     { enabled: open },
   )
   const [typedEmail, setEmail] = useState<string | null>(null)
-  const email = typedEmail ?? account.data?.email ?? ""
-  const hasAccount = account.data?.exists === true
+  const email = typedEmail ?? (ca === "" ? account.data?.email : undefined) ?? ""
+  const hasAccount =
+    ca === ""
+      ? account.data?.exists === true
+      : ca === "custom"
+        ? (authorities.data?.accounts ?? []).some((a) => a.server === customDirectory.trim())
+        : option?.account === true
+  // The binding registers the account and nothing else, so with an account
+  // at the authority there is nothing to paste.
+  const [eabKeyId, setEabKeyId] = useState("")
+  const [eabHmacKey, setEabHmacKey] = useState("")
+  const asksEab = otherAuthority && !hasAccount
+  const needsEab = asksEab && option?.eabRequired === true && !option.eabSaved
+  const eabTyped = asksEab && (eabKeyId.trim() !== "" || eabHmacKey.trim() !== "")
   const sites = usePoll<VHost[]>((signal) => get("/proxy/vhosts", undefined, signal), 0, [], {
     enabled: open,
   })
@@ -999,6 +1194,9 @@ function IssueDialogBody({
     ...(keyType && { keyType }),
     ...(keyType === "rsa" && { rsaKeySize: Number(rsaKeySize) }),
     ...(certName && { certName }),
+    ...(ca && { ca }),
+    ...(ca === "custom" && { directory: customDirectory.trim() }),
+    ...(eabTyped && { eabKeyId: eabKeyId.trim(), eabHmacKey: eabHmacKey.trim() }),
   })
 
   // The command, from the server's own checks: what the job would run, or
@@ -1006,7 +1204,10 @@ function IssueDialogBody({
   // typing stops.
   const [preview, setPreview] = useState<{ plan?: IssuePreview; error?: string }>({})
   const previewReady =
-    open && parseDomains(domains).length > 0 && (method !== "dns" || !!dnsProvider)
+    open &&
+    parseDomains(domains).length > 0 &&
+    (method !== "dns" || !!dnsProvider) &&
+    (ca !== "custom" || !!customDirectory.trim())
   useEffect(() => {
     const controller = new AbortController()
     const timer = setTimeout(
@@ -1041,6 +1242,8 @@ function IssueDialogBody({
     webRoot,
     staging,
     ...(certName && { certName }),
+    ...(ca && { ca }),
+    ...(ca === "custom" && { directory: customDirectory.trim() }),
   })
   const [preflight, setPreflight] = useState<{
     key: string
@@ -1048,7 +1251,8 @@ function IssueDialogBody({
     error?: string
   }>({ key: "" })
   const [recheck, setRecheck] = useState(0)
-  const preflightReady = open && parseDomains(domains).length > 0
+  const preflightReady =
+    open && parseDomains(domains).length > 0 && (ca !== "custom" || !!customDirectory.trim())
   useEffect(() => {
     const controller = new AbortController()
     const timer = setTimeout(
@@ -1104,7 +1308,7 @@ function IssueDialogBody({
       onOpenChange={onOpenChange}
       title="Issue a certificate"
       description={
-        testAuthority
+        testing
           ? `${authority ?? "Let's Encrypt's staging authority"} checks you control the domain, then signs a test certificate that browsers refuse. JD_ACME_DIRECTORY names a staging authority.`
           : authority
             ? `${authority} checks you control the domain, then signs a certificate. The renewal is automatic once the first one works.`
@@ -1125,6 +1329,8 @@ function IssueDialogBody({
               Boolean(unavailable[method]) ||
               !domains.trim() ||
               (!email.trim() && !hasAccount) ||
+              (ca === "custom" && !customDirectory.trim()) ||
+              (needsEab && (!eabKeyId.trim() || !eabHmacKey.trim())) ||
               (method === "dns" && !dnsProvider) ||
               (needsCredentials && !credentials.trim()) ||
               (fileProvider && waitInvalid) ||
@@ -1176,16 +1382,106 @@ function IssueDialogBody({
           </Field>
         )}
         <Field
+          label="Certificate authority"
+          htmlFor="issue-ca"
+          hint={
+            ca === "custom"
+              ? "Any ACME directory over https: a private CA such as step-ca, or an authority not listed here."
+              : otherAuthority
+                ? `${option?.name ?? "It"} checks control the same way, under its own limits rather than Let's Encrypt's.`
+                : "Where certbot orders the certificate. Renewals keep going to the same authority."
+          }
+        >
+          <div className="grid gap-2">
+            <Select
+              value={ca || DEFAULT_CA}
+              onValueChange={(v) => setCa(v === DEFAULT_CA ? "" : v)}
+            >
+              <SelectTrigger id="issue-ca" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_CA} hint={authorities.data?.default.server}>
+                  {directory
+                    ? `As configured · ${authorityName(directory)}`
+                    : testAuthority
+                      ? "Let's Encrypt staging · as configured"
+                      : "Let's Encrypt · the default"}
+                </SelectItem>
+                {(authorities.data?.authorities ?? [])
+                  .filter((a) => a.key !== "letsencrypt" || directory || testAuthority)
+                  .map((a) => (
+                    <SelectItem key={a.key} value={a.key} hint={a.directory}>
+                      {a.name}
+                      {a.eabRequired && !a.account && !a.eabSaved && " · needs EAB"}
+                    </SelectItem>
+                  ))}
+                <SelectItem value="custom">Another ACME directory</SelectItem>
+              </SelectContent>
+            </Select>
+            {ca === "custom" && (
+              <Input
+                aria-label="ACME directory URL"
+                value={customDirectory}
+                onChange={(e) => setCustomDirectory(e.target.value)}
+                placeholder="https://ca.internal:9000/acme/acme/directory"
+                className="font-mono text-xs"
+              />
+            )}
+          </div>
+        </Field>
+        {asksEab && (
+          <Well plain className="space-y-3">
+            <Field
+              label="EAB key ID"
+              htmlFor="issue-eab-kid"
+              hint={
+                option?.eabSaved
+                  ? `Leave both empty to register with the binding saved for ${option.name}.`
+                  : option?.eabRequired
+                    ? `${option.name} registers an account only with the External Account Binding its console hands out.`
+                    : "Only if the directory registers accounts through External Account Binding."
+              }
+            >
+              <Input
+                id="issue-eab-kid"
+                value={eabKeyId}
+                onChange={(e) => setEabKeyId(e.target.value)}
+                autoComplete="off"
+                className="font-mono text-xs"
+              />
+            </Field>
+            <Field
+              label="EAB HMAC key"
+              htmlFor="issue-eab-hmac"
+              hint="Saved sealed once the issuance starts, never shown again, and handed to certbot in a file only root can read, removed when the run ends."
+            >
+              <Input
+                id="issue-eab-hmac"
+                type="password"
+                value={eabHmacKey}
+                onChange={(e) => setEabHmacKey(e.target.value)}
+                autoComplete="off"
+                className="font-mono text-xs"
+              />
+            </Field>
+          </Well>
+        )}
+        <Field
           label="Contact email"
           htmlFor="issue-email"
           hint={
-            !hasAccount
-              ? "Registered with the certificate authority account."
-              : account.data?.email
-                ? `The contact of certbot's account with ${hostOf(account.data.server)}. It may stay empty: the account is registered already.`
-                : account.data?.error
-                  ? `certbot has an account with ${hostOf(account.data.server)}, so this may stay empty. Its contact could not be read: ${account.data.error}`
-                  : `certbot has an account with ${hostOf(account.data?.server ?? "")} with no contact, so this may stay empty.`
+            ca !== ""
+              ? hasAccount
+                ? `certbot has an account with ${authority ?? "Let's Encrypt"}, so this may stay empty.`
+                : "Registered with the certificate authority account."
+              : !hasAccount
+                ? "Registered with the certificate authority account."
+                : account.data?.email
+                  ? `The contact of certbot's account with ${hostOf(account.data.server)}. It may stay empty: the account is registered already.`
+                  : account.data?.error
+                    ? `certbot has an account with ${hostOf(account.data.server)}, so this may stay empty. Its contact could not be read: ${account.data.error}`
+                    : `certbot has an account with ${hostOf(account.data?.server ?? "")} with no contact, so this may stay empty.`
           }
         >
           <Input
@@ -1445,7 +1741,7 @@ function IssueDialogBody({
           <OptionRow
             title="Test run first"
             hint={
-              authority || testAuthority
+              authority || testing
                 ? `certbot goes through the whole exchange with ${authority ?? "Let's Encrypt's staging authority"} and saves nothing, so a mistake is found before anything is written.`
                 : "certbot goes through the whole exchange with Let's Encrypt's staging authority and saves nothing. The real limit is five failures an hour and it is easy to reach, so this is the right first attempt."
             }
@@ -1462,12 +1758,12 @@ function IssueDialogBody({
             />
           )}
         </OptionList>
-        {!staging && testAuthority && (
+        {!staging && testing && (
           <Notice tone="warning" icon={Warning} title="This issues a test certificate">
             JD_ACME_DIRECTORY names a staging authority, and browsers refuse what it signs.
           </Notice>
         )}
-        {!staging && !authority && !testAuthority && (
+        {!staging && !authority && !testing && (
           <Notice tone="warning" icon={Warning} title="This counts against the rate limit">
             Five failed attempts an hour for the same set of names, and five duplicate certificates
             a week. Get a test run to pass first.
@@ -1485,7 +1781,7 @@ function IssueDialogBody({
         {(command || preview.error) && (
           <Field
             label="Command"
-            hint="What the job runs. A DNS token appears only as the path of the file certbot reads it from."
+            hint="What the job runs. A DNS token or an EAB key appears only as the path of the file certbot reads it from."
             error={preview.error}
           >
             {command && (
@@ -1620,6 +1916,8 @@ function RateMeter({
 }
 
 const ISSUE_METHODS = ["nginx", "webroot", "standalone", "dns"]
+/** The authority select's "as configured": no authority key can be it. */
+const DEFAULT_CA = " default"
 /** The certificate select's "a new one": no lineage name can be it. */
 const NEW_CERT = " new"
 /** A server_name a certificate can carry: not "_", a regex or a bare host. */

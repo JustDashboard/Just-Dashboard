@@ -24,5 +24,15 @@ const proxySchema = `
 
 -- --- lane F: certificates ---
 
+-- External Account Binding for an ACME directory (ZeroSSL, Google Trust
+-- Services, a private CA): the HMAC key sealed with the dashboard's master
+-- key, reused for any issuance that has to register an account there.
+CREATE TABLE IF NOT EXISTS acme_eab (
+  directory TEXT PRIMARY KEY,
+  key_id TEXT NOT NULL,
+  hmac_enc TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 -- --- lane G: TLS report & monitoring ---
 `

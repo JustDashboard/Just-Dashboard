@@ -103,10 +103,9 @@ func (s *Service) IssuePreflight(ctx context.Context, req IssueRequest, failed [
 		result.Checks = append(result.Checks, checks...)
 		mu.Unlock()
 	}
-	authority := acmeDirectory()
-	issuer := ""
-	if !authority.configured() || authority.letsEncrypt() {
-		issuer = letsEncryptCAA
+	authority, err := authorityFor(req)
+	if err != nil {
+		return nil, err
 	}
 
 	var wg sync.WaitGroup
@@ -118,7 +117,7 @@ func (s *Service) IssuePreflight(ctx context.Context, req IssueRequest, failed [
 			slots <- struct{}{}
 			defer func() { <-slots }()
 			add(nameResolution(ctx, name, req.Method))
-			add(caaCheck(ctx, name, issuer, authority.host()))
+			add(caaCheck(ctx, name, authority))
 		}(strings.ToLower(name))
 	}
 	wg.Add(1)
@@ -134,6 +133,9 @@ func (s *Service) IssuePreflight(ctx context.Context, req IssueRequest, failed [
 	add(check)
 
 	result.Limits = CertificateRateLimits(req.Domains, failed)
+	// The limits counted are Let's Encrypt's, whatever JD_ACME_DIRECTORY says
+	// when the form names another authority.
+	result.Limits.Applies = authority.LetsEncrypt && !authority.Staging
 	add(rateChecks(result.Limits, relation, req.Staging)...)
 
 	order := map[string]int{"critical": 0, "warning": 1, "notice": 2, "ok": 3}
@@ -164,7 +166,7 @@ func nameResolution(ctx context.Context, name, method string) PreflightCheck {
 		if method != "dns" {
 			check.Level = "critical"
 			check.Title = name + " needs a DNS challenge"
-			check.Detail = "Let's Encrypt signs a wildcard only against a DNS-01 challenge."
+			check.Detail = "An ACME authority signs a wildcard only against a DNS-01 challenge."
 			check.Advice = "Choose DNS as the method."
 		}
 		return check
@@ -219,9 +221,9 @@ type caaRecord struct {
 	Domain string
 }
 
-// caaCheck asks whether the authority may issue for name. issuer is the
-// authority's CAA identifier, empty when it is not known.
-func caaCheck(ctx context.Context, name, issuer, authorityHost string) PreflightCheck {
+// caaCheck asks whether the authority may issue for name. Its CAA
+// identifier is empty when this host does not know it.
+func caaCheck(ctx context.Context, name string, authority IssueAuthority) PreflightCheck {
 	check := PreflightCheck{ID: "caa:" + name, Name: name, Check: "caa"}
 	wildcard := strings.HasPrefix(name, "*.")
 	records, err := lookupCAASet(ctx, strings.TrimPrefix(name, "*."))
@@ -231,6 +233,7 @@ func caaCheck(ctx context.Context, name, issuer, authorityHost string) Preflight
 		check.Detail = err.Error() + ". An authority that cannot read CAA records refuses to issue."
 		return check
 	}
+	issuer := authority.caa
 	allowed, restricted, listed := caaPermits(records, wildcard, issuer)
 	switch {
 	case !restricted:
@@ -240,20 +243,20 @@ func caaCheck(ctx context.Context, name, issuer, authorityHost string) Preflight
 	case issuer == "":
 		check.Level = "warning"
 		check.Title = "CAA for " + name + " names " + strings.Join(listed, ", ")
-		check.Detail = "Published at " + records[0].Domain + ". Whether " + authorityHost + " is one of these is its own CAA identifier, which this host does not know."
+		check.Detail = "Published at " + records[0].Domain + ". Whether " + authorityHost(authority.Server) + " is one of these is its own CAA identifier, which this host does not know."
 	case allowed:
 		check.Level = "ok"
-		check.Title = "CAA allows Let's Encrypt for " + name
+		check.Title = "CAA allows " + authority.Name + " for " + name
 		check.Detail = "Published at " + records[0].Domain + ": " + strings.Join(listed, ", ") + "."
 	default:
 		check.Level = "critical"
-		check.Title = "CAA forbids Let's Encrypt for " + name
+		check.Title = "CAA forbids " + authority.Name + " for " + name
 		check.Detail = "Published at " + records[0].Domain + ", it allows " + strings.Join(listed, ", ") + ". The authority must refuse."
 		tag := "issue"
 		if wildcard {
 			tag = "issuewild"
 		}
-		check.Advice = fmt.Sprintf("Add a CAA record at %s: 0 %s \"%s\".", records[0].Domain, tag, letsEncryptCAA)
+		check.Advice = fmt.Sprintf("Add a CAA record at %s: 0 %s \"%s\".", records[0].Domain, tag, issuer)
 	}
 	return check
 }

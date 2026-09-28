@@ -379,6 +379,21 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   and saved by the issuance job only. `GET /certificates/account` (system.admin) runs `certbot
   show_account` when an account exists (it asks the authority, briefly holding certbot's lock) and
   returns its server, URL, thumbprint and first email contact.
+  **Authorities and accounts** (`acme_accounts.go`): `IssueRequest.ca` picks `letsencrypt`, `zerossl`,
+  `google` (Google Trust Services) or `custom` with an https `directory`; empty keeps
+  `JD_ACME_DIRECTORY`/Let's Encrypt. The choice drives `--server`, the account check, the CAA
+  identifier the preflight judges against (`sectigo.com`, `pki.goog`) and whether Let's Encrypt's
+  limits apply. Buypass is not offered: it stopped issuing ACME certificates in October 2025 (its
+  directory still works as `custom` if that changes). ZeroSSL and Google need External Account
+  Binding to register: `eabKeyId`/`eabHmacKey` on the request are checked, the HMAC key saved by the
+  job sealed with `auth.Sealer` in `acme_eab` (keyed by directory), and, only when certbot has no
+  account there, written with `mktemp` + `tee` (stdin) on certbot's side as a 0600 file passed as
+  `--config` and removed when the job ends — never argv. `GET /certificates/accounts` (system.admin)
+  walks `accounts/**/regr.json` (never `private_key.json`), asks `certbot show_account --server
+  --account` for each (at most 8, sequentially, for the lock) and lists the offered authorities with
+  `eabSaved`/`account` flags, never the key. `POST /certificates/accounts/email` (system.admin,
+  audited) runs `certbot update_account --no-eff-email -m` for an account found on disk, as an
+  exclusive certbot job.
   `POST /certificates/issue/preflight` (system.admin, `issue_preflight.go`) checks the same request
   before a run and changes nothing it leaves behind: each name's resolution (`CheckDomainDNS`), its
   CAA set (a raw CAA query to `/etc/resolv.conf`'s nameservers via `x/net/dns/dnsmessage`, climbing

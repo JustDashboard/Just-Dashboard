@@ -63,6 +63,12 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/rate-limits", s.handle(s.handleCertRateLimits))
 		// The ACME account's contact: certbot asks the authority for it.
 		r.Method(http.MethodGet, "/account", s.handle(s.handleCertAccount))
+		// Every account certbot keeps, each contact asked of its authority,
+		// and the authorities the issue form offers; whether an External
+		// Account Binding is saved, never the key.
+		r.Method(http.MethodGet, "/accounts", s.handle(s.handleCertAccounts))
+		// certbot update_account for an account on disk, at its authority.
+		r.Method(http.MethodPost, "/accounts/email", s.handle(s.handleCertAccountEmail))
 		r.Method(http.MethodPost, "/import", s.handle(s.handleCertImport))
 		// The private key, bare or sealed in a PFX: whoever holds it can
 		// impersonate the site until the certificate expires, and nothing
@@ -352,18 +358,19 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx, cancel := timeoutCtx(r, 90*time.Second)
 	defer cancel()
-	plan, credentials, err := s.planCertIssue(ctx, req)
+	plan, credentials, binding, err := s.planCertIssue(ctx, req)
 	if err != nil {
 		return err
 	}
 	args := plan.Args
 	replacing := plan.ReplacesTestCertificate
-	authority := proxysvc.CertbotAuthorityInUse()
+	authority := plan.Authority
 	target := strings.Join(req.Domains, ", ")
 	httpx.SetAudit(r, "certificates.issue", target,
 		map[string]any{"method": req.Method, "testRun": req.Staging, "replacesTestCertificate": replacing,
 			"keyType": req.KeyType, "certName": req.CertName, "replacesKeyOf": plan.ReplacesKeyOf,
-			"credentialsSaved": credentials != nil, "streamed": true})
+			"credentialsSaved": credentials != nil, "authority": authority.Server,
+			"eabSaved": binding.save != nil, "eabUsed": binding.use != nil, "streamed": true})
 
 	title := "Issuing a certificate for " + target
 	switch {
@@ -389,8 +396,8 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 		case req.Staging:
 			// certbot's --dry-run asks its staging authority only when no
 			// other server is named; with one configured it rehearses there.
-			if authority.Directory != "" {
-				out.Status("A test run: certbot goes through the whole exchange with %s and saves nothing — no certificate is written.", authority.Directory)
+			if !authority.LetsEncrypt {
+				out.Status("A test run: certbot goes through the whole exchange with %s and saves nothing — no certificate is written.", authority.Server)
 			} else {
 				out.Status("A test run: certbot goes through the whole exchange with Let's Encrypt's staging authority and saves nothing — no certificate is written, and nothing counts against the real rate limits.")
 			}
@@ -400,11 +407,16 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 			out.Status("%s has a key of another type or size. certbot issues it again with the new key rather than keeping it until it is due, which counts as a duplicate certificate.", plan.ReplacesKeyOf)
 		default:
 			if authority.Staging {
-				out.Status("JD_ACME_DIRECTORY names a staging authority: the certificate it signs is a test one, and browsers refuse it.")
+				out.Status("%s is a staging authority: the certificate it signs is a test one, and browsers refuse it.", authority.Server)
 			}
 			kept = "certbot did not issue a new certificate: the one these names already have is not due for renewal yet, so it was kept as it is."
 		}
-		changed, err := certbotJob(ctx, out, args, kept)
+		var changed []string
+		err := s.withBinding(ctx, out, authority, binding, args, func(args []string) error {
+			var err error
+			changed, err = certbotJob(ctx, out, args, kept)
+			return err
+		})
 		if err != nil {
 			return err
 		}
@@ -427,22 +439,27 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 	})
 }
 
-// planCertIssue checks an issuance request whole: the argv, and the DNS
-// token it carries. The token is saved by the job, first thing, so a refused
-// request — or one that finds certbot busy — leaves nothing on disk.
-func (s *Server) planCertIssue(ctx context.Context, req proxysvc.IssueRequest) (proxysvc.IssuePlan, *proxysvc.DNSCredentials, error) {
+// planCertIssue checks an issuance request whole: the argv, the DNS token
+// and the External Account Binding it carries. Both are saved by the job,
+// first thing, so a refused request — or one that finds certbot busy —
+// leaves nothing on disk or in the database.
+func (s *Server) planCertIssue(ctx context.Context, req proxysvc.IssueRequest) (proxysvc.IssuePlan, *proxysvc.DNSCredentials, issueBinding, error) {
 	plan, err := s.modules.proxy.PlanIssue(ctx, req)
 	if err != nil {
-		return plan, nil, httpx.BadRequest("%v", err)
+		return plan, nil, issueBinding{}, httpx.BadRequest("%v", err)
+	}
+	binding, err := s.planIssueBinding(ctx, req, plan.Authority)
+	if err != nil {
+		return plan, nil, binding, err
 	}
 	if req.Method != "dns" || strings.TrimSpace(req.Credentials) == "" {
-		return plan, nil, nil
+		return plan, nil, binding, nil
 	}
 	checked, err := proxysvc.CheckDNSCredentials(req.DNSProvider, req.Credentials)
 	if err != nil {
-		return plan, nil, httpx.BadRequest("%v", err)
+		return plan, nil, binding, httpx.BadRequest("%v", err)
 	}
-	return plan, &checked, nil
+	return plan, &checked, binding, nil
 }
 
 // handleCertIssuePreview answers with the command /issue would run for the
@@ -454,11 +471,15 @@ func (s *Server) handleCertIssuePreview(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := timeoutCtx(r, 90*time.Second)
 	defer cancel()
-	plan, _, err := s.planCertIssue(ctx, req)
+	plan, _, binding, err := s.planCertIssue(ctx, req)
 	if err != nil {
 		return err
 	}
 	plan.Args = append([]string{"certbot"}, plan.Args...)
+	if binding.use != nil {
+		// The job's file is made when it starts; its name is mktemp's.
+		plan.Args = append(plan.Args, "--config", "/tmp/just-dashboard-eab.XXXXXXXXXX")
+	}
 	httpx.JSON(w, http.StatusOK, plan)
 	return nil
 }

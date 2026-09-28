@@ -328,13 +328,62 @@ export type ACMEAccount = {
   error?: string
 }
 
+/** Whom an issuance orders from. */
+export type IssueAuthority = {
+  name: string
+  /** The directory the run talks to: Let's Encrypt's staging one for its test runs. */
+  server: string
+  letsEncrypt: boolean
+  /** The directory signs only test certificates. */
+  staging: boolean
+  eabRequired: boolean
+  /** certbot has an account there: no email and no EAB are needed. */
+  account: boolean
+}
+
+/** A certificate authority the issue form offers by name. */
+export type ACMEAuthorityOption = {
+  key: string
+  name: string
+  directory: string
+  /** It registers no account without External Account Binding. */
+  eabRequired: boolean
+  /** An EAB is saved, sealed, for its directory; the key itself is never sent. */
+  eabSaved: boolean
+  account: boolean
+}
+
+/** One account certbot keeps under /etc/letsencrypt/accounts. */
+export type ACMEAccountEntry = {
+  id: string
+  server: string
+  authority: string
+  staging: boolean
+  url?: string
+  email?: string
+  /** The authority answered: an empty email is then an account with no contact. */
+  contacted: boolean
+  created?: string
+  /** Why the contact could not be asked. */
+  error?: string
+}
+
+export type ACMEAccounts = {
+  accounts: ACMEAccountEntry[]
+  authorities: ACMEAuthorityOption[]
+  /** Whom an issuance orders from when the form names nobody. */
+  default: IssueAuthority
+  error?: string
+}
+
 /** The command an issuance would run, and what it would replace. */
 export type IssuePreview = {
-  /** certbot's argv, "certbot" first. DNS tokens appear only as their file's path. */
+  /** certbot's argv, "certbot" first. DNS tokens and EAB keys appear only as their file's path. */
   args: string[]
   replacesTestCertificate: boolean
   /** The lineage whose key is replaced: a forced renewal, which counts as a duplicate. */
   replacesKeyOf?: string
+  authority: IssueAuthority
 }
 
 /** One preflight finding; "ok" is a check that passed. */
