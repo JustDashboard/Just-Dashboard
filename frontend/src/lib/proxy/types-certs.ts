@@ -336,3 +336,56 @@ export type IssuePreview = {
   /** The lineage whose key is replaced: a forced renewal, which counts as a duplicate. */
   replacesKeyOf?: string
 }
+
+export type CertificateFindingKind =
+  "key-readable" | "key-mismatch" | "key-reused" | "weak" | "uncovered" | "stale"
+
+export type CertificateHygieneFinding = {
+  id: string
+  kind: CertificateFindingKind
+  level: "critical" | "warning" | "notice"
+  title: string
+  detail: string
+  advice: string
+  /** A listed file the finding is about, which opens its sheet. */
+  certificate?: string
+  /** A certbot lineage the finding suggests deleting. */
+  lineage?: string
+  /** Server names the block's certificate does not cover. */
+  names?: string[]
+}
+
+export type CertificateHygiene = {
+  findings: CertificateHygieneFinding[]
+  /** "nginx -T", or "site files" when nginx could not print its configuration. */
+  config: string
+  configNote?: string
+}
+
+export type CoveredName = {
+  name: string
+  site: string
+  file: string
+  line: number
+  tls: boolean
+  state: "served" | "wrong" | "unknown" | "available" | "uncovered"
+  certificate?: string
+  certificateName?: string
+}
+
+export type UnusedCertificate = {
+  path: string
+  name: string
+  source: string
+  domains: string[]
+  expired: boolean
+  disabledSites?: string[]
+}
+
+export type CertificateCoverage = {
+  names: CoveredName[]
+  /** Null when only the site files could be read, so nothing can be called unused. */
+  unused: UnusedCertificate[] | null
+  config: string
+  configNote?: string
+}

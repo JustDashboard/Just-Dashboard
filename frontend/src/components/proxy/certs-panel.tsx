@@ -15,7 +15,15 @@ import {
   testRunPassed,
 } from "@/lib/certificates"
 import { notify } from "@/lib/toast"
-import type { Certificate, CertbotState, DNSProvider, Job, ServedCertificate } from "@/lib/types"
+import type {
+  Certificate,
+  CertbotState,
+  CertificateCoverage,
+  CertificateHygiene,
+  DNSProvider,
+  Job,
+  ServedCertificate,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -38,6 +46,10 @@ import {
 } from "@/components/proxy/certbot-panel"
 import { CaddyEvidencePrune } from "@/components/proxy/caddy-evidence"
 import { ExpiredCleanup } from "@/components/proxy/certificate-cleanup"
+import {
+  CertificateCoveragePanel,
+  CertificateHygienePanel,
+} from "@/components/proxy/certificate-coverage"
 import { CertificateInventory } from "@/components/proxy/certificate-inventory"
 import { ImportDialog } from "@/components/proxy/import-dialog"
 import { ReloadHookOption, RenewalLogPanel, RenewalRecord } from "@/components/proxy/renewal-health"
@@ -81,6 +93,20 @@ export function CertificatesPage() {
     (signal) => get("/certificates/certbot", undefined, signal),
     300_000,
   )
+  // Both read the server blocks nginx loads, so neither means anything
+  // without nginx.
+  const hygiene = usePoll<CertificateHygiene>(
+    (signal) => get("/certificates/findings", undefined, signal),
+    300_000,
+    [],
+    { enabled: hasNginx },
+  )
+  const coverage = usePoll<CertificateCoverage>(
+    (signal) => get("/certificates/coverage", undefined, signal),
+    300_000,
+    [],
+    { enabled: hasNginx },
+  )
   const providers = usePoll<DNSProvider[]>(
     (signal) => get("/certificates/dns-providers", undefined, signal),
     0,
@@ -98,14 +124,29 @@ export function CertificatesPage() {
       : ""
   const { refresh: refreshCerts } = certs
   const { refresh: refreshCertbot } = certbot
+  const { refresh: refreshHygiene } = hygiene
+  const { refresh: refreshCoverage } = coverage
   // An install or a test changes which plugins and credentials are there.
   const { refresh: refreshProviders } = providers
   useEffect(() => {
     if (!ended) return
     refreshCerts()
     refreshCertbot()
+    if (hasNginx) {
+      refreshHygiene()
+      refreshCoverage()
+    }
     if (admin) refreshProviders()
-  }, [ended, admin, refreshCerts, refreshCertbot, refreshProviders])
+  }, [
+    ended,
+    admin,
+    hasNginx,
+    refreshCerts,
+    refreshCertbot,
+    refreshHygiene,
+    refreshCoverage,
+    refreshProviders,
+  ])
   const { busy, renew } = useRenew(console_.attach)
   // certbot's lock is the host's, not this tab's: a run started from another
   // tab, or before this page loaded, holds it just the same.
@@ -297,6 +338,13 @@ export function CertificatesPage() {
   const testAuthority = certbot.data?.testAuthority ?? false
 
   const renewal = renewalReading(certbot.data, certbotGone)
+  // Names no certificate covers go to the Issue dialog as a test run first,
+  // as the dialog's own button starts one.
+  const issueFor =
+    admin && !certbotGone
+      ? (names: string[]) => setIssue({ open: true, domains: names.join(" "), staging: true })
+      : undefined
+  const deleteLineage = (name: string) => remove("certbot", name)
 
   return (
     <Page className="animate-rise">
@@ -573,6 +621,16 @@ export function CertificatesPage() {
           )}
         </div>
       </div>
+      {hasNginx && (
+        <div className="grid items-start gap-8 xl:grid-cols-2 [&>*]:min-w-0">
+          <CertificateHygienePanel
+            hygiene={hygiene}
+            onIssue={issueFor}
+            onDeleteLineage={admin && !certbotGone ? deleteLineage : undefined}
+          />
+          <CertificateCoveragePanel coverage={coverage} onIssue={issueFor} />
+        </div>
+      )}
       <WatchedDomains admin={admin} added={watchedAdded} />
 
       {admin && (
