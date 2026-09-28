@@ -930,8 +930,135 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   during an outage. Imports live in `/etc/ssl/just-dashboard`, so a renewal run can never prune a
   certificate it did not issue.
 - **`streams.go`** — nginx's `stream` is a sibling of `http`, so a stream cannot live under
-  sites-available. They go in `/etc/nginx/stream.d`, and the page says plainly when `nginx.conf` does not
-  include it. nginx.conf itself is never edited from here: everything else on the host depends on it.
+  sites-available. They go in `<JD_NGINX_DIR>/stream.d`, and the page says plainly when `nginx.conf` does not
+  include it. nginx.conf is never edited silently: the one change the dashboard makes to connect the
+  directory (below) is shown before it is made and asked for.
+  - **The module comes first.** Debian and Ubuntu build the stream module dynamic and ship it as
+    libnginx-mod-stream, which a plain `apt install nginx` leaves out; there a `stream` block is an unknown
+    directive, `nginx -t` fails and every reload is refused. `nginx_modules.go` (`StreamModule`) reads
+    `nginx -V` word by word (`--with-stream`, `=dynamic`; `--with-stream_ssl_module` is not the module), the
+    `load_module` lines of a `nginx -T` dump, nginx's own "unknown directive" when a block is already there,
+    and the `.so` on the host, into static / loaded / not-loaded / not-installed / absent / unknown; a `.so`
+    that is absent is not-installed even when the dump fails. For not-installed the list handler names the
+    package (`ModulePackage`: `libnginx-mod-<name>` for apt, `nginx-mod-<name>` for dnf/yum/apk,
+    `http-xslt-filter` for XSLT) only when the package manager has it (`updates.Describe`, remembered ten
+    minutes in `proxyExtras.modulePackages`, asked through its `catalogue` — the updates service, which
+    tests replace with a fake: an `ErrUnknownPackage` names nothing, any other failure names it for the
+    install to explain), and the page installs it through `POST /packages/install` as a job — Debian's
+    package links `modules-enabled/50-mod-stream.conf` itself. Unknown is never reported as missing.
+  - **The module report** (`NginxModules`, `GET /proxy/modules`, every signed-in account) lists each
+    `--with-` module `nginx -V` names — not threads, compat or the compiler flags — with `version`, `openssl`
+    and `modulesPath`, each static / loaded / not-loaded / not-installed / unknown (the configuration could
+    not be read, `detail` says why) and, for not-installed, the package as above. Kept a minute per service
+    (`?fresh=1` asks again); 503 `not_installed` without nginx. Lane A's engine line reads it.
+  - **Connecting the directory** (`main_dropin.go`). `GET /proxy/streams/include/plan` (system.admin)
+    works out the change without writing: a drop-in `zz-just-dashboard-stream.conf` holding
+    `stream { include <dir>/*.conf; }` in the first directory nginx.conf includes at its top level by a
+    glob it matches (Ubuntu's `modules-enabled/*.conf`, so nginx.conf stays the conffile its package
+    shipped; `zz-` sorts after the modules' own files because nginx refuses a `load_module` after a block —
+    a load_module read after the drop-in sends it to the next mode); else the block appended to nginx.conf
+    between `# Just Dashboard: streams begin.`/`end.` markers in the file's own line endings; else, where a
+    top-level stream block exists (a second is "duplicate"), one `include …; # added by Just Dashboard`
+    line before its closing brace, found by an offset scanner that reads comments and quotes as nginx does.
+    An nginx.conf edit carries `reason` — `no-directory`, `load-module-after`, `directory-elsewhere` (the
+    directory leads outside `JD_NGINX_DIR`) or `name-taken` (a file of the drop-in's name that is not the
+    dashboard's), the first such directory's — and `dropIn`, where the drop-in would have gone, so the
+    sheet never gives another mode's reason. The plan is checked with `NginxTree` (the changed
+    configuration must read the directory in a stream block), refuses a file outside `JD_NGINX_DIR` as the
+    connect would, and lists the staged stream files and their sockets that another program or another
+    staged stream holds. For an edited file it decides the copy then: `keepsCopy` is false, with a
+    warning, where an include in the changed configuration would read `<file>.jd-stream-<unix>.bak` by the
+    file's configured name or its resolved one (beside a stream block, a second one), and the connect
+    keeps exactly the copy the plan named. Refusals are 409s with codes: `module_missing`, `already_included`, `include_misplaced`,
+    `stream_block_elsewhere` (outside `JD_NGINX_DIR`), `config_unreadable`. `POST /proxy/streams/include
+    {mode, path, reload}` re-plans under `s.mu`, refuses a plan that changed (`plan_changed`) or has
+    conflicts (`port_in_use`: `nginx -t` does not bind, and the failed bind would poison every later
+    reload), keeps the plan's copy of an edited file where it named one, writes
+    through the resolved path, runs `nginx -t`, and on failure puts the bytes back (mode and CRLF kept, the
+    copy removed; 422 `invalid_config`). `POST /proxy/streams/include/remove {reload}` (destructive — a
+    POST, since `DELETE /{name}` would take a stream called "include") takes out exactly what a connect
+    wrote — the unchanged drop-in, the marked block, the marked line — and nothing written by hand
+    (`not_connected`), with the same test and restore. The listing's `connection` names the dashboard's
+    own include, and `streamBlock` the file whose stream block the manual snippet (then an `include` line)
+    goes into. Audited `proxy.stream.include.add` / `.remove` with mode, file, copy, streams and reload.
+  - **Pausing a stream** (`stream_pause.go`): `POST /proxy/streams/{name}/enabled {enabled}` (system.admin,
+    destructive, audited `proxy.stream.toggle`) moves `stream.d/<name>.conf` to and from `stream.d/paused/`,
+    which the `*.conf` include glob does not reach. Both directions run `nginx -t` when the directory is
+    read and move the file back on failure (422 `invalid_config` — a pause fails only under a hand-written
+    glob that takes the `paused/` directory itself). Resume refuses a taken name (`stream_exists`) or a
+    socket another stream, site or program holds (`port_in_use`), and a reload nginx fails on the stream's
+    own port puts it back in `paused/`, as a save does. A symbolic link is not paused (`stream_linked`):
+    deleting the link stops it. The listing returns paused files in `paused`, apart from `streams`, with
+    state `paused`; a delete takes a paused name too, without a reload, and a new stream or a rename onto
+    a paused name is `stream_exists`.
+  - **Where stream.d is read** (`stream_state.go`) is `NginxTree` over the files on disk, with a probe file
+    placed where a new stream would go: an include inside `http` is named as misplaced, a `stream` block in
+    its own file and a relative include count, and `upstream` or `other-stream.d` no longer do. It reads
+    from disk because it is asked with the lock held (`includeNote`) and while the configuration fails.
+  - **Hand-written files** are parsed token by token. `ParseStreamSpec` returns what the form cannot express
+    (deny rules, a second upstream server, TLS, a port range, an unknown directive) and the save refuses to
+    overwrite such a file (`HandwrittenStreamError`, 409 `stream_handwritten`); the raw editor is the way
+    in. A bind address, `10m`-style times, a direct `proxy_pass`, `unix:` upstreams and the UDP mode are
+    read and written back, so a loopback forward is never saved onto every interface. A hand-written file
+    the form rewrites is kept as `.bak`.
+  - **A save** (`ApplyStream(spec, previous, reload)`) refuses a new name, or a rename, onto a taken one
+    (409 `stream_exists`) and a port another stream, a site or another program holds (`PortInUseError`,
+    409 `port_in_use` on `spec.listen` with the next free port): `nginx -t` passes all three, and the
+    reload then fails inside the master while `nginx -s reload` exits 0. What holds a port
+    (`portClaims`) is read from the stream directory's files, the stream and http servers of the
+    configuration nginx reads (`configClaims`: a site by its first server name, else its Sites-page name;
+    an http `quic` listen is UDP, a listen-less server is `*:80`), and the running nginx's sockets; nginx's
+    own sockets are no conflict (its configuration names what it asks for, and one it holds for a server
+    that is gone is let go at the reload). `POST /proxy/streams/preview {spec, previous}` answers the same
+    refusal as `conflict` (`PortOwner` plus `suggest` and `message`), so the form says it while the port is
+    typed. A reload is then **watched** (`stream_probe.go`, `awaitListening`, up to 3 s, only when nginx
+    reads the file as a stream): done when a worker that was not there before runs and nginx holds every
+    socket (`listening: true`); a `bind()` failure nginx logs for the stream's own address puts the stream
+    back as it was (new file removed, edit restored, rename undone) and is the same 409 with nginx's words
+    in `BindError` — a stream nginx cannot bind makes every later reload on the host fail, so it is never
+    left behind — audited `result: rolled-back`; any other `[emerg]` is `reloaded: false` with
+    `reloadError` ("nginx did not take the reload up: …") and the valid file stays; a wait that runs out is
+    `listening: false` with `listenNote`; a running nginx that cannot be read is `listenNote` alone. A
+    rename moves the old file to `.bak` before
+    one test and puts both back if it fails. It reloads only when asked ("Save for later" does not), and a
+    reload that fails after a clean test is a 200 with `reloadError`, not "not applied". The upstream block
+    is `NginxIdent(name)_backend`, so `a-b` and `a_b` no longer declare one upstream; UDP writes
+    `proxy_responses 1` only in the one-reply mode (it made every datagram a new session for a game server
+    or WireGuard); protocol `both` writes a TCP and a UDP listen on the same addresses, the port check asks
+    for both sockets and names the one that clashed (`514/udp`), and `proxy_responses` touches its UDP side
+    only; the idle (`timeout`) and connect timeouts are separate and written as nginx time (`10m`, `1h30m`).
+    A file's zero timeout (`proxy_timeout 0`: nginx takes it and drops every connection) is `unsupported`, not unset.
+    Delete reloads only when nginx read the directory, and returns a failed reload as `reloadError`. A
+    stream directory that cannot be read is a retryable 500 `stream_dir_unreadable` ("Could not read the
+    stream directory"), never an empty list.
+  - **Each stream's state** (`fillStreamStates`, `state` / `stateReason` / `blocker` / `bindError` on
+    every listed stream): `not-read` where the file is not in a top-level stream block of the tree (no
+    module first, then the include missing or misplaced, a file that does not parse — every reload refused
+    — or an include that does not take it), `shadowed` where a stream read before it has one of its exact
+    addresses (nginx warns "conflicting server name" and gives the first every connection; a wildcard and
+    one address on a port are not a shadow), `not-listening` where a site nginx reads has its port (nginx
+    fails every reload on the second bind, verified on 1.27) or where the running nginx holds no socket
+    for a bind — named with the program holding it, nginx's last logged `bind()` failure for that address,
+    or "it last loaded its configuration before this file changed" (newest worker's start against the
+    file's mtime), `live` where nginx holds a socket taking every bind (its wildcard serves one address;
+    a live file changed since it was loaded says so), and `unknown` with why where the running nginx could
+    not be read. **The running nginx** (`stream_probe.go`) is the master process whose title names this
+    `nginx.conf` (`-c`, `-p`, else the build's `--conf-path`; two that do are told apart by the pid file,
+    read on the host where the dashboard runs in a container), its sockets are its network namespace's
+    `/proc/<pid>/net/{tcp,tcp6,udp,udp6}` — readable by any user, which is what lets a dashboard see an
+    nginx in another namespace — held by the master's descriptors, or, where those cannot be read (the
+    dashboard runs as another user), owned by nginx's uid; the host's listener list names another
+    program only in nginx's own namespace. The error log is the configuration's first top-level
+    `error_log` file, else the build's, read only under `/var/log` or `JD_NGINX_DIR` — the states are
+    shown to every account and the dashboard runs as root. `nginx -V` is kept a minute per service.
+  - **Links and unreadable files.** The listing names a symbolic link (`link`, and "a symbolic link" in
+    `unsupported`, so the form opens read-only; a save over one is `stream_handwritten`) and says a link to
+    nothing links to nothing. Delete (`StreamDeletion`) removes a link as a link, leaving its target, and
+    removes a file it cannot read without a `.bak`, answering `link` or `unread` in place of `backup`: a
+    dangling link fails `nginx -t` for the whole host and was the one file the page could not remove. The
+    route unescapes the name (`httpx.URLParam`), since the page encodes it and the listing shows any
+    `*.conf`. A directory included in the wrong block counts as read for the validation note
+    (`streamDirRead`): nginx reads it there, and its test refuses every stream in it.
 - **`htpasswd.go`** does bcrypt in process — `htpasswd` lives in apache2-utils, is not installed on a host
   running nginx, and would put the password in a world-readable argv.
 - **`access_lists.go` — one list, every site that includes it.** An office range or a VPN in front of ten

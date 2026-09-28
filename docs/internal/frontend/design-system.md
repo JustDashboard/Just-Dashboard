@@ -1191,7 +1191,12 @@ own labelled columns (stacked on phones), so a hostname and its upstream do not 
 truncated line. Sites and streams use a two-column grid on wide screens and a single column on
 smaller ones. The nginx or Caddy mark names a site's engine, the stream's port names its product
 where known, and the TLS reading carries Let's Encrypt's mark only where the certificate path
-supports it. Unknown products keep a glyph.
+supports it. Unknown products keep a glyph. Until streams can forward, the Streams page puts a plain
+block of two numbered steps above its list — the stream module, then connecting the directory — each
+with its `Status`, a line of meaning and the button that does it where the page can; the step that
+needs doing carries the page's one brand command, so "Prepare a stream" stays outline, and the
+connect opens a sheet showing the file before anything is written. The install step keeps the recent
+installs beside its button, the list its job console says a run is reopened from. A stream card's Status is nginx's own state for it — live, not listening, shadowed, not read — and a card that is not live says why in a hint line under its route, nginx's logged error in mono beneath; the first tile counts the live streams and chips filter by state.
 Every site card, the overview's route rows and a certificate's links to the sites using it open the
 site's own page (`/proxy/sites/<name>`): the same marks as an identity line, its readings on the
 page's ground, and its requests and errors read there in one log `Pane`, so a site's Logs verb goes to

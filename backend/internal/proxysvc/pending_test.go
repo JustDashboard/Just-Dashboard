@@ -832,7 +832,7 @@ func TestLivePendingFollowsTheRunningNginx(t *testing.T) {
 	var p *Pending
 	for deadline := time.Now().Add(10 * time.Second); ; {
 		p, _ = pendingOf(t, svc, "")
-		if p.Running && p.Generation != "" && serves(port) == "one" {
+		if p.Running && p.Generation != "" && servedBody(port) == "one" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -849,7 +849,7 @@ func TestLivePendingFollowsTheRunningNginx(t *testing.T) {
 	if !reflect.DeepEqual(got, map[string]string{filepath.Join(root, "sites-enabled", "app"): "changed sites-available/app"}) {
 		t.Errorf("after an edit: %v", got)
 	}
-	if body := serves(port); body != "one" {
+	if body := servedBody(port); body != "one" {
 		t.Errorf("serving %q before the reload", body)
 	}
 	if _, err := svc.Reload(ctx, KindNginx); err != nil {
@@ -859,7 +859,7 @@ func TestLivePendingFollowsTheRunningNginx(t *testing.T) {
 	if next.Generation == p.Generation || len(got) != 0 || !next.LastReload.After(*p.LastReload) {
 		t.Errorf("after the reload: %+v %v", next, got)
 	}
-	if body := serves(port); body != "two" {
+	if body := servedBody(port); body != "two" {
 		t.Errorf("serving %q after the reload", body)
 	}
 	if res, err := svc.Validate(ctx, KindNginx, available, site("three")); err != nil || !res.Valid {
@@ -942,7 +942,7 @@ func TestLivePendingKeepsTheLoadAcrossAWorkerKilled(t *testing.T) {
 	var p *Pending
 	for deadline := time.Now().Add(10 * time.Second); ; {
 		p, _ = pendingOf(t, svc, "")
-		if p.Running && p.Generation != "" && serves(port) == "one" {
+		if p.Running && p.Generation != "" && servedBody(port) == "one" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -967,7 +967,7 @@ func TestLivePendingKeepsTheLoadAcrossAWorkerKilled(t *testing.T) {
 		}
 	}
 	for deadline := time.Now().Add(10 * time.Second); ; {
-		if now := workers(); len(now) > 0 && now[0] != killed[0] && serves(port) == "one" {
+		if now := workers(); len(now) > 0 && now[0] != killed[0] && servedBody(port) == "one" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -992,13 +992,13 @@ func TestLivePendingKeepsTheLoadAcrossAWorkerKilled(t *testing.T) {
 	if next, got := pendingOf(t, svc, p.Generation); next.Generation == p.Generation || len(got) != 0 {
 		t.Errorf("after the reload: %+v %v", next, got)
 	}
-	if body := serves(port); body != "two" {
+	if body := servedBody(port); body != "two" {
 		t.Errorf("serving %q after the reload", body)
 	}
 }
 
-// serves is what the site on port answers, or empty when nothing does.
-func serves(port int) string {
+// servedBody is what the site on port answers, or empty when nothing does.
+func servedBody(port int) string {
 	client := http.Client{Timeout: 2 * time.Second}
 	res, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/", port))
 	if err != nil {

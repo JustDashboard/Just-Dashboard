@@ -173,6 +173,10 @@ export default function ProxyOverviewPage() {
   const sites = readable(vhosts)?.value
   const certificates = readable(certs)?.value
   const streamStatus = readable(streams)?.value
+  const streamDirError =
+    streams.error instanceof ApiError && streams.error.code === "stream_dir_unreadable"
+      ? streams.error
+      : undefined
   const listeners = readable(ports)?.value
   const hosts = sites ?? []
   const routes = useMemo(() => overviewRoutes(sites ?? []), [sites])
@@ -255,6 +259,10 @@ export default function ProxyOverviewPage() {
         certbot: certbotGone ? null : renewal,
         vhosts: sites,
         streams: streamStatus,
+        // A failed read of the streams is already an unreadable source
+        // below; only a directory nginx cannot be read from has a finding
+        // of its own, since its fix is on the Streams page.
+        streamsError: streamDirError,
         ports: listeners,
         unreadable,
         lastTest: lastTest && { engine: testEngine, record: lastTest },
@@ -265,6 +273,7 @@ export default function ProxyOverviewPage() {
       certbotGone,
       sites,
       streamStatus,
+      streamDirError,
       listeners,
       unreadable,
       lastTest,

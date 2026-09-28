@@ -21,6 +21,10 @@ type proxyExtras struct {
 
 	// --- lane D: streams ---
 
+	// modulePackages remembers which nginx module packages the package
+	// manager has, for the module report and the Streams page's install.
+	modulePackages modulePackages
+
 	// --- lane E: ports & exposure ---
 
 	// --- lane F: certificates ---
@@ -40,6 +44,8 @@ func (s *Server) initProxyExtras() {
 	// --- lane C: site builder ---
 
 	// --- lane D: streams ---
+
+	s.modules.proxyExtras.modulePackages.catalogue = s.modules.updates
 
 	// --- lane E: ports & exposure ---
 

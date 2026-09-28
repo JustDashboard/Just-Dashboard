@@ -41,6 +41,7 @@ const stream = (overrides) => ({
   upstream: "10.0.0.5:5432",
   proxyProtocol: false,
   allowFrom: [],
+  open: !overrides.allowFrom?.length,
   ...overrides,
 })
 const listener = (overrides) => ({
@@ -64,6 +65,7 @@ const inputs = {
     vhosts: [vhost({})],
     streams: {
       included: true,
+      module: { state: "static", usable: true },
       snippet: "",
       dir: "/etc/nginx/stream.d",
       streams: [stream({ allowFrom: ["10.0.0.0/8"] })],
@@ -107,6 +109,7 @@ const inputs = {
     ],
     streams: {
       included: false,
+      module: { state: "static", usable: true },
       snippet: "",
       dir: "/etc/nginx/stream.d",
       streams: [
@@ -125,6 +128,7 @@ const inputs = {
   oneStreamNotIncluded: {
     streams: {
       included: false,
+      module: { state: "static", usable: true },
       snippet: "",
       dir: "/etc/nginx/stream.d",
       streams: [stream({ allowFrom: ["1.2.3.4"] })],
@@ -247,7 +251,7 @@ describe("foldProxyFindings", () => {
         title: "3 streams are written but nginx is not reading them",
         detail: "nginx.conf has no stream block including /etc/nginx/stream.d.",
         advice:
-          "Add the include the Streams page prints, at the top level of nginx.conf beside the http block.",
+          "Connect the directory on the Streams page, which shows the change to nginx.conf before it makes it.",
         meta: "streams",
         href: "/proxy/streams",
       },
@@ -311,7 +315,7 @@ describe("foldProxyFindings", () => {
         title: "1 stream is written but nginx is not reading it",
         detail: "nginx.conf has no stream block including /etc/nginx/stream.d.",
         advice:
-          "Add the include the Streams page prints, at the top level of nginx.conf beside the http block.",
+          "Connect the directory on the Streams page, which shows the change to nginx.conf before it makes it.",
         meta: "streams",
         href: "/proxy/streams",
       },
