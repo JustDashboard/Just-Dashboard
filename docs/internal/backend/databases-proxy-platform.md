@@ -984,8 +984,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `mountProxyRoutes` (`api/handlers_proxy.go`): `mountEngineRoutes` (status, the raw config editor,
   validate, test, reload; `handlers_proxy_engine.go`), `mountVHostRoutes` (the listing, what nginx has not
   loaded, the enable switch and the removal of a stray link; `handlers_proxy_vhosts.go`, which also mounts
-  `mountAccessListRoutes` at `/proxy/access-lists`) and `mountProxyInsightRoutes` (`handlers_proxy_insights.go`) inside
-  `/proxy`; `mountSiteBuilderRoutes` (`handlers_proxy_sites.go`) and `mountSiteOpsRoutes`
+  `mountAccessListRoutes` at `/proxy/access-lists`) and `mountProxyInsightRoutes` (`handlers_proxy_insights.go`, which
+  mounts the live metrics from `handlers_proxy_metrics.go`) inside `/proxy`; `mountSiteBuilderRoutes` (`handlers_proxy_sites.go`) and `mountSiteOpsRoutes`
   (`handlers_proxy_siteops.go`) inside `/proxy/sites`; `mountStreamRoutes` (`handlers_proxy_streams.go`),
   `mountAuthFileRoutes` (`handlers_proxy_auth.go`) and `mountProxyToolRoutes` (`handlers_tls.go`, where
   the whole subtree is `system.admin` because every tool probes a caller-chosen destination) at
@@ -1097,11 +1097,48 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   site file as the writes do, and record nothing for a toggle that leaves the links as they were or that
   nginx refused), `RemoveVHostLink` (recorded as a disable of the file behind the link, or of the link
   itself when it points at nothing), `ApplyStream`,
-  `DeleteStream`, and a deployment route's restore — with its prior content and the actor
+  `DeleteStream`, the live metrics' status server going in and out, and a deployment route's restore —
+  with its prior content and the actor
   `WithActor` put on the context (empty for a deployment or a background loop). Password files are never
   recorded, a site file that resolves outside the proxy's directories is recorded without content, and
   the htpasswd writers do not call it; a recorder that fails is logged and the change stands.
   No recorder is attached yet.
+- **Live request metrics come from nginx's stub_status** (`stubstatus.go`, `api/handlers_proxy_metrics.go`).
+  `GET /proxy/metrics` is open to every signed-in account — nginx's counters are no secret, and the
+  sampler reads only the address in the dashboard's own file, so no caller can aim it — and
+  `PUT /proxy/metrics {enabled}` is the switch (`system.admin`, audited as `proxy.metrics.enable` and
+  `proxy.metrics.disable`). Switching off is not destructive: it stops no site and removes only the
+  dashboard's own file. The switch's state is that file, `conf.d/jd-status.conf`, whose first line says
+  `Just Dashboard owned` (the mark the site listing leaves `jd-*` files out by once site discovery
+  checks it; until that change lands, a conf.d-only host lists the file as a site): one `server` on
+  `127.0.0.1:<port>` with `location = /jd-status { stub_status; allow 127.0.0.1; deny all; }`,
+  `access_log off`, `keepalive_timeout 0` and a 404 for every other path. The port is the first from
+  19081 that `portalloc` can bind on 127.0.0.1 — the backend shares the host's network with nginx — and
+  a file already in place keeps its own. Switching on writes the file, runs `nginx -t`, checks with
+  `nginx -T` that nginx loads conf.d at all (a test passes over a file nginx never reads), reloads, and
+  waits up to ten seconds for the first reading, because nginx binds after the reload command has
+  returned and a port it cannot bind (taken since, or refused by SELinux) is only in its error log. A
+  step that fails puts the file back, and after a reload reloads again without it, so the switch is on
+  and answering or off: 422 `invalid_config` with the test beside it, 409 `metrics_unavailable` (no
+  conf.d, conf.d not included, a file at the path without the marker, which both directions leave
+  alone), 502 `reload_failed` or `no_answer`. The change runs to its end if the browser goes away.
+  Switching off removes the file only while the configuration tests clean without it; a reload that then
+  fails leaves it removed, and the 502 says, from whether the address still answers, either that nginx
+  serves the status server until its next reload or that nothing answers there (nginx is not running);
+  the client reads that as switched off with a warning. A dashboard-owned file whose listen names no
+  `127.0.0.1` port the sampler can read (parameters after the port are fine) reports as on with that
+  reason as its error rather than as on with nothing read. The
+  `StatusSampler` (started from `startProxyExtras`) reads the file's address every five seconds into an
+  in-memory hour — the file is the switch, so one removed by hand stops the series — trimmed on every
+  poll, failed ones included, and counted only back to an hour before the report's `at`, so readings that
+  fail for longer than an hour leave no hour behind — and
+  `Report(epoch, after)` sends a client only the readings after its cursor, one a poll rather than 720; a
+  new epoch (switched off and on, a moved port, a restarted dashboard) sends the whole series. Rates come
+  from counter deltas: none for the first reading, after nginx restarted (its counters fall) or across a
+  gap of more than four intervals, and never negative. The sampler's own connection and request are left
+  out of every figure — keep-alive is off on both sides, so they are exactly one of each — and `dropped`
+  is accepted minus handled, the connections nginx turned away at `worker_connections`.
+  `TestLiveStatusServer` runs the whole switch against the host's nginx binary on a private prefix.
 - **Certificates carry their fingerprint and serial**, the SHA-256 of the DER and the serial number in
   the uppercase colon form `openssl x509 -fingerprint -sha256` prints, which
   `TestCertificateFingerprintMatchesOpenSSL` checks against openssl itself.

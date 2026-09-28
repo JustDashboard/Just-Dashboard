@@ -8,4 +8,6 @@ import (
 // than from one site or certificate. Mounted inside /proxy beside the engine,
 // and kept in a file of its own so those readings grow without reopening the
 // engine's routes.
-func (s *Server) mountProxyInsightRoutes(r chi.Router) {}
+func (s *Server) mountProxyInsightRoutes(r chi.Router) {
+	s.mountProxyMetricRoutes(r)
+}
