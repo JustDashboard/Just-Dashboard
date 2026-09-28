@@ -7,6 +7,7 @@ import { certbotRunning, replacingTestCertificate } from "@/lib/certificates"
 import { copyText } from "@/lib/clipboard"
 import { calendarDate } from "@/lib/format"
 import type { Certificate, Job } from "@/lib/types"
+import { useQuerySelection } from "@/hooks/use-query-selection"
 import { ChoiceRow } from "@/components/flow"
 import { Detail, DetailList, SearchInput, Toolbar } from "@/components/page"
 import { ProductLogo } from "@/components/product-logo"
@@ -58,7 +59,8 @@ export function CertificateInventory({
 }) {
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<"all" | "attention" | "caddy">("all")
-  const [selected, setSelected] = useState<string | null>(null)
+  // In the URL so the TLS report can link at the file a site serves.
+  const [selected, setSelected] = useQuerySelection("cert")
   const needsAttention = (cert: Certificate) =>
     Boolean(cert.error || cert.expired || cert.expiring || cert.staging)
   // Only certbot's own file is replaced in place; a copy a site names

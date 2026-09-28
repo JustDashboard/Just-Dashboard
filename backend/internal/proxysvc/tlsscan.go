@@ -101,7 +101,10 @@ type TLSScan struct {
 	HTTP *HTTPScan `json:"http,omitempty"`
 	// Preload is the domain against the HSTS preload list's rules, for a
 	// name on port 443 whose HTTPS answered.
-	Preload  *PreloadCheck `json:"preload,omitempty"`
+	Preload *PreloadCheck `json:"preload,omitempty"`
+	// Origin is the nginx site and file behind the answer, set by the
+	// handler, which has the host's sites (see TraceOrigin).
+	Origin   *Origin       `json:"origin,omitempty"`
 	Findings []ScanFinding `json:"findings"`
 }
 

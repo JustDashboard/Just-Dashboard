@@ -140,6 +140,21 @@ export type ScanFailure = {
   dns?: DomainCheck
 }
 
+/**
+ * A scanned name traced to this host's nginx. "stale" is a later renewal of
+ * the answer on disk; "other" another certificate on this host answered;
+ * "foreign" none on this host did.
+ */
+export type TLSOrigin = {
+  state: "current" | "stale" | "other" | "foreign" | "unserved" | "unknown"
+  site?: string
+  match?: "exact" | "wildcard" | "regex" | "default"
+  defaultFlag?: boolean
+  file?: Certificate
+  served?: Certificate
+  detail: string
+}
+
 export type TLSScan = {
   domain: string
   port: number
@@ -183,6 +198,8 @@ export type TLSScan = {
   renewalWindowHours?: number
   http?: HTTPScan
   preload?: PreloadCheck
+  /** The nginx site and file behind the answer; absent for an address or another engine. */
+  origin?: TLSOrigin
   findings: ScanFinding[]
 }
 

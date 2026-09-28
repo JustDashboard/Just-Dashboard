@@ -97,6 +97,17 @@ func (s *Server) handleTLSScan(w http.ResponseWriter, r *http.Request) error {
 			return httpx.Internal(err)
 		}
 	}
+	if scan.Certificate != nil {
+		// The trace is a reading beside the scan: a host whose sites cannot
+		// be listed still gets its report, only without the site behind it.
+		vhosts, err := s.modules.proxy.ListVHosts(ctx)
+		if err == nil {
+			certs, err := s.modules.proxy.ListCertificates(ctx)
+			if err == nil {
+				scan.Origin = proxysvc.TraceOrigin(vhosts, certs, scan.Domain, scan.Port, scan.Certificate)
+			}
+		}
+	}
 	httpx.JSON(w, http.StatusOK, scan)
 	return nil
 }

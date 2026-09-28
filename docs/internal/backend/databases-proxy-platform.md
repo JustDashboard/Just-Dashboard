@@ -904,6 +904,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   so. `TestLiveDeepScanOfNginx`, `TestLiveNginxRejectingUnknownNamesLeaksNothing`,
   `TestLiveNginxWithOnlyRSAKeyExchangeHasNoForwardSecrecy` and `TestLiveNginxSmallDHGroup` hold it
   against a private real nginx; Go servers cover ML-KEM, TLS 1.3 suites, ALPN and resumption.
+- **A scan with a certificate is traced to the nginx site behind it** (`origin`, `tlsorigin.go`,
+  added by `handleTLSScan`): `TraceOrigin` picks among enabled nginx sites listening on the port by
+  nginx's order (exact `server_name`, longest leading then trailing wildcard, first regex RE2 can
+  compile, then the `default_server` or else the first site by name) at file granularity, finds the
+  site's `ssl_certificate` through the inventory's `usedBy`, and compares fingerprints: `current`,
+  `stale` (the file is a later certificate for the same names — a renewal nginx has not reloaded),
+  `other` (another certificate on this host answered), `foreign` (none on this host did), `unserved`
+  or `unknown` (no `ssl_certificate` in the site's own file, or unreadable). It is nil for an
+  address, a name Caddy claims, or a host without nginx sites. `stale` is a heuristic: a second
+  machine serving an older copy for the same names reads the same way.
 - **The watch list is endpoints.** `watched_endpoints` (lane G in `proxySchema`) is a name, a port and
   an address, unique together, so a mail server can be watched on 443 and 993; `watched_domains` held
   one row per name and a second port replaced the first. Its rows are copied in on every boot with
