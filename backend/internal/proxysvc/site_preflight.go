@@ -35,10 +35,10 @@ import (
 // in gets the answers for the parts it has. A field that fails its pattern is
 // skipped: the preview already says what is wrong with it.
 
-// PreflightCheck is one finding. Level is ok, info, warning or fail; a
+// SitePreflightCheck is one finding. Level is ok, info, warning or fail; a
 // Blocking one is a site that will not work as saved, and the form holds
 // Save until the operator says to save anyway.
-type PreflightCheck struct {
+type SitePreflightCheck struct {
 	ID       string `json:"id"`
 	Level    string `json:"level"`
 	Title    string `json:"title"`
@@ -49,9 +49,9 @@ type PreflightCheck struct {
 	Domain string `json:"domain,omitempty"`
 }
 
-// PreflightReport is every check for one spec, in a fixed order.
-type PreflightReport struct {
-	Checks []PreflightCheck `json:"checks"`
+// SitePreflightReport is every check for one spec, in a fixed order.
+type SitePreflightReport struct {
+	Checks []SitePreflightCheck `json:"checks"`
 }
 
 const (
@@ -102,11 +102,11 @@ var statOnHost = func(ctx context.Context, paths []string) (map[string]hostFile,
 // SitePreflight runs every check that applies to spec. The network ones —
 // DNS for each domain and a connection to each of the spec's own upstreams —
 // run four at a time.
-func (s *Service) SitePreflight(ctx context.Context, spec *SiteSpec) *PreflightReport {
+func (s *Service) SitePreflight(ctx context.Context, spec *SiteSpec) *SitePreflightReport {
 	paths := preflightPaths(spec)
 	files, statErr := statOnHost(ctx, paths)
 
-	checks := []PreflightCheck{}
+	checks := []SitePreflightCheck{}
 	if spec.TLS && absPathRe.MatchString(spec.CertPath) && absPathRe.MatchString(spec.KeyPath) {
 		checks = append(checks, certificateChecks(spec, files, statErr)...)
 	}
@@ -115,16 +115,16 @@ func (s *Service) SitePreflight(ctx context.Context, spec *SiteSpec) *PreflightR
 	}
 	checks = append(checks, rootChecks(spec, files, statErr)...)
 
-	probes := []func() PreflightCheck{}
+	probes := []func() SitePreflightCheck{}
 	for _, upstream := range specUpstreams(spec) {
-		probes = append(probes, func() PreflightCheck { return upstreamCheck(ctx, upstream, files, statErr) })
+		probes = append(probes, func() SitePreflightCheck { return upstreamCheck(ctx, upstream, files, statErr) })
 	}
 	for _, domain := range spec.Domains {
 		if domainRe.MatchString(domain) {
-			probes = append(probes, func() PreflightCheck { return dnsCheck(ctx, domain) })
+			probes = append(probes, func() SitePreflightCheck { return dnsCheck(ctx, domain) })
 		}
 	}
-	results := make([]PreflightCheck, len(probes))
+	results := make([]SitePreflightCheck, len(probes))
 	slots := make(chan struct{}, preflightConcurrency)
 	var wg sync.WaitGroup
 	for i, probe := range probes {
@@ -137,7 +137,7 @@ func (s *Service) SitePreflight(ctx context.Context, spec *SiteSpec) *PreflightR
 		}()
 	}
 	wg.Wait()
-	return &PreflightReport{Checks: append(checks, results...)}
+	return &SitePreflightReport{Checks: append(checks, results...)}
 }
 
 // preflightPaths is every file and folder the checks ask the host about.
@@ -171,27 +171,27 @@ func preflightPaths(spec *SiteSpec) []string {
 	return out
 }
 
-func notChecked(id, title string, err error) PreflightCheck {
-	return PreflightCheck{
+func notChecked(id, title string, err error) SitePreflightCheck {
+	return SitePreflightCheck{
 		ID: id, Level: "warning", Title: title,
 		Detail: fmt.Sprintf("Not checked: the host could not be asked (%v).", err),
 	}
 }
 
-func certificateChecks(spec *SiteSpec, files map[string]hostFile, statErr error) []PreflightCheck {
+func certificateChecks(spec *SiteSpec, files map[string]hostFile, statErr error) []SitePreflightCheck {
 	if statErr != nil {
-		return []PreflightCheck{notChecked("cert", "Certificate and key", statErr)}
+		return []SitePreflightCheck{notChecked("cert", "Certificate and key", statErr)}
 	}
-	checks := []PreflightCheck{}
+	checks := []SitePreflightCheck{}
 	certOnHost, keyOnHost := files[spec.CertPath].Kind == "regular file", files[spec.KeyPath].Kind == "regular file"
 	if !certOnHost {
-		checks = append(checks, PreflightCheck{
+		checks = append(checks, SitePreflightCheck{
 			ID: "cert", Level: "fail", Blocking: true, Title: "Certificate file missing",
 			Detail: spec.CertPath + " is not a file on this server. nginx refuses to start the site without it.",
 		})
 	}
 	if !keyOnHost {
-		checks = append(checks, PreflightCheck{
+		checks = append(checks, SitePreflightCheck{
 			ID: "key", Level: "fail", Blocking: true, Title: "Key file missing",
 			Detail: spec.KeyPath + " is not a file on this server. nginx refuses to start the site without it.",
 		})
@@ -203,7 +203,7 @@ func certificateChecks(spec *SiteSpec, files map[string]hostFile, statErr error)
 	// the paths the container shares with the host (/etc, /srv, /opt…).
 	certPEM, err := os.ReadFile(spec.CertPath)
 	if err != nil {
-		return append(checks, PreflightCheck{
+		return append(checks, SitePreflightCheck{
 			ID: "cert", Level: "warning", Title: "Certificate not compared",
 			Detail: "Both files exist, but the dashboard cannot read " + spec.CertPath + " to compare them with the domains and each other.",
 		})
@@ -221,7 +221,7 @@ func certificateChecks(spec *SiteSpec, files map[string]hostFile, statErr error)
 		}
 	}
 	if leaf == nil {
-		return append(checks, PreflightCheck{
+		return append(checks, SitePreflightCheck{
 			ID: "cert", Level: "fail", Blocking: true, Title: "Not a certificate",
 			Detail: spec.CertPath + " holds no PEM certificate nginx can load.",
 		})
@@ -229,22 +229,22 @@ func certificateChecks(spec *SiteSpec, files map[string]hostFile, statErr error)
 	summary := summarise(leaf, certificateName(spec.CertPath), spec.CertPath)
 
 	if keyPEM, err := os.ReadFile(spec.KeyPath); err != nil {
-		checks = append(checks, PreflightCheck{
+		checks = append(checks, SitePreflightCheck{
 			ID: "key", Level: "warning", Title: "Key not compared",
 			Detail: "The dashboard cannot read " + spec.KeyPath + " to check that it belongs to the certificate.",
 		})
 	} else if block, _ := pem.Decode(keyPEM); block == nil {
-		checks = append(checks, PreflightCheck{
+		checks = append(checks, SitePreflightCheck{
 			ID: "key", Level: "fail", Blocking: true, Title: "Not a private key",
 			Detail: spec.KeyPath + " holds no PEM private key.",
 		})
 	} else if err := keyMatchesCertificate(string(keyPEM), leaf); err != nil {
-		checks = append(checks, PreflightCheck{
+		checks = append(checks, SitePreflightCheck{
 			ID: "key", Level: "fail", Blocking: true, Title: "Key does not match the certificate",
 			Detail: capitalise(err.Error()) + ". nginx refuses to start the site with this pair.",
 		})
 	} else {
-		checks = append(checks, PreflightCheck{ID: "key", Level: "ok", Title: "Key matches the certificate"})
+		checks = append(checks, SitePreflightCheck{ID: "key", Level: "ok", Title: "Key matches the certificate"})
 	}
 
 	uncovered := []string{}
@@ -254,22 +254,22 @@ func certificateChecks(spec *SiteSpec, files map[string]hostFile, statErr error)
 		}
 	}
 	if len(uncovered) > 0 {
-		checks = append(checks, PreflightCheck{
+		checks = append(checks, SitePreflightCheck{
 			ID: "cert-domains", Level: "fail", Blocking: true, Title: "Certificate does not cover every domain",
 			Detail: fmt.Sprintf("It is for %s; browsers warn visitors to %s.",
 				strings.Join(summary.Domains, ", "), strings.Join(uncovered, ", ")),
 		})
 	} else {
-		checks = append(checks, PreflightCheck{
+		checks = append(checks, SitePreflightCheck{
 			ID: "cert-domains", Level: "ok", Title: "Certificate covers every domain",
 			Detail: strings.Join(summary.Domains, ", "),
 		})
 	}
 
-	expiry := PreflightCheck{ID: "cert-expiry", Level: "ok", Title: fmt.Sprintf("Certificate valid for %d more days", summary.DaysLeft)}
+	expiry := SitePreflightCheck{ID: "cert-expiry", Level: "ok", Title: fmt.Sprintf("Certificate valid for %d more days", summary.DaysLeft)}
 	switch {
 	case summary.Expired:
-		expiry = PreflightCheck{
+		expiry = SitePreflightCheck{
 			ID: "cert-expiry", Level: "fail", Blocking: true, Title: "Certificate expired",
 			Detail: "It expired on " + summary.NotAfter.Format("2 January 2006") + "; browsers refuse it.",
 		}
@@ -278,13 +278,6 @@ func certificateChecks(spec *SiteSpec, files map[string]hostFile, statErr error)
 		expiry.Detail = fmt.Sprintf("Inside the %d days in which certbot renews; browsers refuse it once it expires.", expiryWarningDays)
 	}
 	return append(checks, expiry)
-}
-
-func capitalise(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // authFiles is every password file the site and its paths name.
@@ -311,27 +304,27 @@ func locationAuthFiles(spec *SiteSpec) []string {
 // authFileCheck: nginx reads a password file on each request, in a worker, so
 // a file that is missing, empty or unreadable by the worker is not caught by
 // nginx -t — every visitor gets a 500 or a password prompt nothing passes.
-func (s *Service) authFileCheck(path string, files map[string]hostFile, statErr error) PreflightCheck {
+func (s *Service) authFileCheck(path string, files map[string]hostFile, statErr error) SitePreflightCheck {
 	id := "auth:" + path
 	if statErr != nil {
 		return notChecked(id, "Password file", statErr)
 	}
 	file, ok := files[path]
 	if !ok || file.Kind != "regular file" {
-		return PreflightCheck{
+		return SitePreflightCheck{
 			ID: id, Level: "fail", Blocking: true, Title: "Password file missing",
 			Detail: path + " is not a file on this server; nginx answers every request with a 500.",
 		}
 	}
 	users, err := readAuthUsers(path)
 	if err != nil {
-		return PreflightCheck{
+		return SitePreflightCheck{
 			ID: id, Level: "warning", Title: "Password file not read",
 			Detail: path + " exists, but the dashboard cannot read it to count who is in it.",
 		}
 	}
 	if len(users) == 0 {
-		return PreflightCheck{
+		return SitePreflightCheck{
 			ID: id, Level: "fail", Blocking: true, Title: "Password file has no users",
 			Detail: path + " is empty, so nobody gets past the password prompt.",
 		}
@@ -339,12 +332,12 @@ func (s *Service) authFileCheck(path string, files map[string]hostFile, statErr 
 	gid, known := s.nginxWorkerGID()
 	switch {
 	case file.Mode&0o004 != 0, known && file.GID == gid && file.Mode&0o040 != 0:
-		return PreflightCheck{
+		return SitePreflightCheck{
 			ID: id, Level: "ok", Title: "Password file ready",
-			Detail: fmt.Sprintf("%s: %d %s, readable by nginx's workers.", path, len(users), pluralWord(len(users), "user")),
+			Detail: fmt.Sprintf("%s: %d %s, readable by nginx's workers.", path, len(users), pluralWord(len(users), "user", "users")),
 		}
 	case known && file.UID == 0:
-		return PreflightCheck{
+		return SitePreflightCheck{
 			ID: id, Level: "fail", Blocking: true, Title: "nginx cannot read the password file",
 			Detail: fmt.Sprintf("%s is mode %03o, owned by root and group %d; nginx's workers (group %d) cannot read it, so every request gets a 500.",
 				path, file.Mode.Perm(), file.GID, gid),
@@ -352,19 +345,12 @@ func (s *Service) authFileCheck(path string, files map[string]hostFile, statErr 
 	default:
 		// Owned by an account other than root, which may be the worker's
 		// own: the group and mode alone cannot settle it.
-		return PreflightCheck{
+		return SitePreflightCheck{
 			ID: id, Level: "warning", Title: "Password file may not be readable",
 			Detail: fmt.Sprintf("%s is mode %03o and not readable by everyone; nginx's workers can read it only if they run as its owner or its group.",
 				path, file.Mode.Perm()),
 		}
 	}
-}
-
-func pluralWord(n int, word string) string {
-	if n == 1 {
-		return word
-	}
-	return word + "s"
 }
 
 type siteRoot struct {
@@ -394,35 +380,35 @@ func specRoots(spec *SiteSpec) []siteRoot {
 	return out
 }
 
-func rootChecks(spec *SiteSpec, files map[string]hostFile, statErr error) []PreflightCheck {
-	checks := []PreflightCheck{}
+func rootChecks(spec *SiteSpec, files map[string]hostFile, statErr error) []SitePreflightCheck {
+	checks := []SitePreflightCheck{}
 	for _, root := range specRoots(spec) {
 		if statErr != nil {
 			checks = append(checks, notChecked(root.id, "Folder "+root.dir, statErr))
 			continue
 		}
 		if files[root.dir].Kind != "directory" {
-			checks = append(checks, PreflightCheck{
+			checks = append(checks, SitePreflightCheck{
 				ID: root.id, Level: "fail", Blocking: true, Title: "Folder missing",
 				Detail: root.dir + " is not a folder on this server; nginx answers 404 for everything under it.",
 			})
 			continue
 		}
 		if !root.index {
-			checks = append(checks, PreflightCheck{ID: root.id, Level: "ok", Title: "Folder " + root.dir + " exists"})
+			checks = append(checks, SitePreflightCheck{ID: root.id, Level: "ok", Title: "Folder " + root.dir + " exists"})
 			continue
 		}
 		index := filepath.Join(root.dir, "index.html")
 		switch {
 		case files[index].Kind == "regular file":
-			checks = append(checks, PreflightCheck{ID: root.id, Level: "ok", Title: root.dir + " has an index.html"})
+			checks = append(checks, SitePreflightCheck{ID: root.id, Level: "ok", Title: root.dir + " has an index.html"})
 		case root.spa:
-			checks = append(checks, PreflightCheck{
+			checks = append(checks, SitePreflightCheck{
 				ID: root.id, Level: "fail", Blocking: true, Title: "No index.html",
 				Detail: root.dir + " has no index.html, which a single-page app answers every path with; each one gets an error.",
 			})
 		default:
-			checks = append(checks, PreflightCheck{
+			checks = append(checks, SitePreflightCheck{
 				ID: root.id, Level: "warning", Title: "No index.html",
 				Detail: root.dir + " has no index.html, so its front page is a 403 or 404 unless the files have another index.",
 			})
@@ -475,23 +461,23 @@ func specUpstreams(spec *SiteSpec) []string {
 // upstreamCheck opens a connection and sends a HEAD, each within two seconds.
 // Nothing listening is a warning, not a hold on the save: a site is often
 // saved before its application is started, and nginx answers 502 until then.
-func upstreamCheck(ctx context.Context, upstream string, files map[string]hostFile, statErr error) PreflightCheck {
+func upstreamCheck(ctx context.Context, upstream string, files map[string]hostFile, statErr error) SitePreflightCheck {
 	id := "upstream:" + upstream
 	if socket, ok := strings.CutPrefix(upstream, "unix:"); ok {
 		if statErr != nil {
 			return notChecked(id, upstream, statErr)
 		}
 		if files[socket].Kind != "socket" {
-			return PreflightCheck{
+			return SitePreflightCheck{
 				ID: id, Level: "warning", Title: "Nothing listens at " + upstream,
 				Detail: socket + " is not a socket on this server; nginx answers 502 until the application creates it.",
 			}
 		}
-		return PreflightCheck{ID: id, Level: "ok", Title: upstream + " exists", Detail: "A socket; no request is sent over it."}
+		return SitePreflightCheck{ID: id, Level: "ok", Title: upstream + " exists", Detail: "A socket; no request is sent over it."}
 	}
 	target, err := url.Parse(upstream)
 	if err != nil {
-		return PreflightCheck{ID: id, Level: "warning", Title: upstream, Detail: "Not an address that can be tried."}
+		return SitePreflightCheck{ID: id, Level: "warning", Title: upstream, Detail: "Not an address that can be tried."}
 	}
 	port := target.Port()
 	if port == "" {
@@ -505,7 +491,7 @@ func upstreamCheck(ctx context.Context, upstream string, files map[string]hostFi
 	dialer := &net.Dialer{Timeout: preflightProbeTimeout}
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
-		return PreflightCheck{
+		return SitePreflightCheck{
 			ID: id, Level: "warning", Title: "Nothing accepted a connection at " + address,
 			Detail: fmt.Sprintf("%v. nginx answers 502 until the application is listening there.", err),
 		}
@@ -526,18 +512,18 @@ func upstreamCheck(ctx context.Context, upstream string, files map[string]hostFi
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, upstream, nil)
 	if err != nil {
-		return PreflightCheck{ID: id, Level: "warning", Title: upstream, Detail: err.Error()}
+		return SitePreflightCheck{ID: id, Level: "warning", Title: upstream, Detail: err.Error()}
 	}
 	started = time.Now()
 	res, err := client.Do(req)
 	if err != nil {
-		return PreflightCheck{
+		return SitePreflightCheck{
 			ID: id, Level: "warning", Title: address + " accepts connections but did not answer",
 			Detail: fmt.Sprintf("Connected in %d ms; a HEAD request then failed: %v.", connected.Milliseconds(), err),
 		}
 	}
 	res.Body.Close()
-	check := PreflightCheck{
+	check := SitePreflightCheck{
 		ID: id, Level: "ok", Title: fmt.Sprintf("%s answers %s", address, res.Status),
 		Detail: fmt.Sprintf("HEAD %s in %d ms.", upstream, time.Since(started).Milliseconds()),
 	}
@@ -550,13 +536,13 @@ func upstreamCheck(ctx context.Context, upstream string, files map[string]hostFi
 // dnsCheck is CheckDomainDNS as a check. A name that does not point here is
 // never a hold on the save: DNS is often changed after the site is ready, and
 // behind a CDN or provider NAT the comparison cannot be made at all.
-func dnsCheck(ctx context.Context, domain string) PreflightCheck {
+func dnsCheck(ctx context.Context, domain string) SitePreflightCheck {
 	id := "dns:" + domain
 	if strings.HasPrefix(domain, "*.") {
-		return PreflightCheck{ID: id, Domain: domain, Level: "info", Title: "Wildcard", Detail: "A wildcard name is not looked up."}
+		return SitePreflightCheck{ID: id, Domain: domain, Level: "info", Title: "Wildcard", Detail: "A wildcard name is not looked up."}
 	}
 	check := CheckDomainDNS(ctx, domain)
-	out := PreflightCheck{ID: id, Domain: domain, Detail: check.Summary}
+	out := SitePreflightCheck{ID: id, Domain: domain, Detail: check.Summary}
 	switch {
 	case check.Error != "":
 		out.Level, out.Title = "warning", "Does not resolve"

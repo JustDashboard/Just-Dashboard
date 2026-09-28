@@ -12,7 +12,6 @@ import type {
   ErrorReport,
   SiteTrafficSummary,
   UpstreamReport,
-  VHost,
 } from "@/lib/types"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -740,7 +739,9 @@ export default function ProxyOverviewPage() {
                         <span className="text-muted-foreground">{app.process || "unknown"}</span>
                       </span>
                       <Button size="xs" variant="outline" asChild>
-                        <Link href={`/proxy/sites?new=1&upstream=${encodeURIComponent(app.upstream)}`}>
+                        <Link
+                          href={`/proxy/sites?new=1&upstream=${encodeURIComponent(app.upstream)}`}
+                        >
                           Put a domain in front of this
                         </Link>
                       </Button>

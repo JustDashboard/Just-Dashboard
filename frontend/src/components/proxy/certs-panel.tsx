@@ -16,7 +16,6 @@ import {
 } from "@/lib/certificates"
 import { notify } from "@/lib/toast"
 import type {
-  Certificate,
   CertbotState,
   CertificateCoverage,
   CertificateHygiene,

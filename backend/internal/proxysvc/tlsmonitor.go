@@ -197,7 +197,7 @@ func CheckEndpointAt(ctx context.Context, domain, ip string, port int) (*Certifi
 	failed := func(reason string) *Certificate {
 		return &Certificate{Name: domain, Domains: []string{domain}, Source: "live", UsedBy: []string{}, Error: reason}
 	}
-	conn, err := dialTLS(ctx, net.JoinHostPort(ip, strconv.Itoa(port)), domain, 0, 0)
+	conn, err := dialTLS(ctx, net.JoinHostPort(ip, strconv.Itoa(port)), domain, startTLSPorts[port], 0, 0)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

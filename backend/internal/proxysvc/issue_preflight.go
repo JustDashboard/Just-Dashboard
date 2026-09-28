@@ -62,8 +62,6 @@ type IssuePreflight struct {
 	CheckedAt time.Time `json:"checkedAt"`
 }
 
-const letsEncryptCAA = "letsencrypt.org"
-
 // ValidCertDomain is a name certbot's -d takes: a host name or a wildcard.
 func ValidCertDomain(name string) bool { return certDomainRe.MatchString(name) }
 
@@ -340,8 +338,6 @@ func resolvConfServers(path string) ([]string, error) {
 	}
 	return servers, nil
 }
-
-const typeCAA = dnsmessage.Type(257)
 
 func queryCAA(ctx context.Context, servers []string, domain string) ([]caaRecord, error) {
 	var last error
@@ -707,7 +703,7 @@ func lineageRelation(confs []renewalConf, domains []string, certName string) (Li
 		if err != nil {
 			continue
 		}
-		lineages = append(lineages, lineage{conf.Name, certNames(leaf)})
+		lineages = append(lineages, lineage{conf.Name, leafNames(leaf)})
 	}
 	diff := func(names []string) (added, removed []string) {
 		have := map[string]bool{}
@@ -751,7 +747,7 @@ func lineageRelation(confs []renewalConf, domains []string, certName string) (Li
 		return LineageRelation{Kind: "new", Lineage: certName}, check
 	}
 	for _, l := range lineages {
-		if sameNames(l.names, domains) {
+		if sameNameSet(l.names, domains) {
 			check.Level = "notice"
 			check.Title = l.name + " already has these names"
 			check.Detail = "certbot keeps it until it is due for renewal; nothing new is issued unless its key changes or it is a test certificate."

@@ -75,12 +75,12 @@ func readArchive(dir string, since time.Time) []archivedCert {
 		if err != nil || stagingIssuer(leaf) || leaf.NotBefore.Before(since) {
 			continue
 		}
-		out = append(out, archivedCert{names: certNames(leaf), notBefore: leaf.NotBefore})
+		out = append(out, archivedCert{names: leafNames(leaf), notBefore: leaf.NotBefore})
 	}
 	return out
 }
 
-func certNames(leaf *x509.Certificate) []string {
+func leafNames(leaf *x509.Certificate) []string {
 	names := leaf.DNSNames
 	if len(names) == 0 && leaf.Subject.CommonName != "" {
 		names = []string{leaf.Subject.CommonName}
@@ -92,7 +92,7 @@ func certNames(leaf *x509.Certificate) []string {
 	return out
 }
 
-func sameNames(a, b []string) bool {
+func sameNameSet(a, b []string) bool {
 	set := map[string]bool{}
 	for _, n := range a {
 		set[strings.ToLower(n)] = true
@@ -136,7 +136,7 @@ func rateLimitsAt(dir string, domains []string, failed []FailedIssue, now time.T
 	archive := readArchive(dir, now.Add(-rateWeek))
 	var duplicates []time.Time
 	for _, cert := range archive {
-		if sameNames(cert.names, domains) {
+		if sameNameSet(cert.names, domains) {
 			duplicates = append(duplicates, cert.notBefore)
 		}
 	}

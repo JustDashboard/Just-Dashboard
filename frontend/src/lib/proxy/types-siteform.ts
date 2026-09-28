@@ -358,7 +358,7 @@ export type SitePreview = {
 export type PreflightLevel = "ok" | "info" | "warning" | "fail"
 
 /** One of the checks POST /proxy/sites/preflight makes that nginx -t cannot. */
-export type PreflightCheck = {
+export type SitePreflightCheck = {
   id: string
   level: PreflightLevel
   title: string
@@ -371,7 +371,7 @@ export type PreflightCheck = {
 
 /** What POST /proxy/sites/preflight answers. */
 export type SitePreflight = {
-  checks: PreflightCheck[]
+  checks: SitePreflightCheck[]
 }
 
 /** What GET /proxy/sites/{name} answers: a site read back into the form. */

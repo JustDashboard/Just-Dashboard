@@ -31,7 +31,7 @@ import type {
   Listener,
   RequestLimit,
   LocationMatch,
-  PreflightCheck,
+  SitePreflightCheck,
   PreflightLevel,
   PermissionRule,
   PoolMethod,
@@ -1617,7 +1617,7 @@ const CHECK_TONE: Record<PreflightLevel, DotTone> = {
  * is not updated yet". Every domain, not only the first: a www alias that
  * points elsewhere fails the certificate order just the same.
  */
-function DomainChecks({ checks }: { checks: PreflightCheck[] }) {
+function DomainChecks({ checks }: { checks: SitePreflightCheck[] }) {
   if (checks.length === 0) return null
   return (
     <ul className="-mt-3 space-y-1">
