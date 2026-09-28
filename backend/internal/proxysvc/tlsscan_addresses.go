@@ -51,7 +51,7 @@ const addressScanConcurrency = 8
 // scanAddresses resolves domain and handshakes with each address on port,
 // naming domain in SNI. lookup is the resolver, so a test can give a name
 // addresses it does not have.
-func scanAddresses(ctx context.Context, domain string, port int, lookup lookupFunc) addressesResult {
+func scanAddresses(ctx context.Context, domain string, port int, starttls string, lookup lookupFunc) addressesResult {
 	lookupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	ips, err := lookup(lookupCtx, domain)
 	cancel()
@@ -68,7 +68,7 @@ func scanAddresses(ctx context.Context, domain string, port int, lookup lookupFu
 			defer wg.Done()
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			out[i] = scanAddress(ctx, ip.IP, domain, port, local, public)
+			out[i] = scanAddress(ctx, ip.IP, domain, port, starttls, local, public)
 		}()
 	}
 	wg.Wait()
@@ -81,13 +81,13 @@ func scanAddresses(ctx context.Context, domain string, port int, lookup lookupFu
 	return addressesResult{addresses: out}
 }
 
-func scanAddress(ctx context.Context, ip net.IP, domain string, port int, local, public []string) AddressScan {
+func scanAddress(ctx context.Context, ip net.IP, domain string, port int, starttls string, local, public []string) AddressScan {
 	addr := net.JoinHostPort(ip.String(), strconv.Itoa(port))
 	result := AddressScan{Address: addr, Family: "IPv6", Kind: whereConnected(addr, nil, local, public)}
 	if ip.To4() != nil {
 		result.Family = "IPv4"
 	}
-	conn, legacy, err := handshake(ctx, addr, domain)
+	conn, legacy, err := handshake(ctx, addr, domain, starttls)
 	if err != nil {
 		result.Error = err.Error()
 		return result

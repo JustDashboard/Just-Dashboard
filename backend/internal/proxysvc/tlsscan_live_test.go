@@ -28,7 +28,7 @@ func TestLiveNginxRefusalsAreReportedAsRefused(t *testing.T) {
 	addr := startLiveNginx(t, cert, "ssl_protocols TLSv1.2 TLSv1.3;")
 
 	got := map[string]ProtocolResult{}
-	for _, p := range probeProtocols(context.Background(), addr, "scan.test") {
+	for _, p := range probeProtocols(context.Background(), addr, "scan.test", "") {
 		got[p.Name] = p
 	}
 	for name, want := range map[string]string{
@@ -52,7 +52,7 @@ func TestLiveNginxLegacyVersionsWithOnlyRSAKeyExchangeAreOffered(t *testing.T) {
 	addr := startLiveNginx(t, rsaTestCert(t),
 		"ssl_protocols TLSv1 TLSv1.1 TLSv1.2;\n        ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:AES128-SHA:@SECLEVEL=0;")
 
-	protocols := probeProtocols(context.Background(), addr, "scan.test")
+	protocols := probeProtocols(context.Background(), addr, "scan.test", "")
 	for name, want := range map[string]string{
 		"TLS 1.0": "offered", "TLS 1.1": "offered", "TLS 1.2": "offered", "TLS 1.3": "refused",
 	} {
@@ -67,7 +67,7 @@ func TestLiveNginxLegacyVersionsWithOnlyRSAKeyExchangeAreOffered(t *testing.T) {
 func TestLiveNginxWithOnlyRSAKeyExchangeIsReachable(t *testing.T) {
 	addr := startLiveNginx(t, rsaTestCert(t), "ssl_protocols TLSv1.2;\n        ssl_ciphers AES128-GCM-SHA256;")
 
-	conn, legacy, err := handshake(context.Background(), addr, "scan.test")
+	conn, legacy, err := handshake(context.Background(), addr, "scan.test", "")
 	if err != nil {
 		t.Fatal(err)
 	}

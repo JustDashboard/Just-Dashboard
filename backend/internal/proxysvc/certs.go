@@ -3,7 +3,6 @@ package proxysvc
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"net"
@@ -248,17 +247,14 @@ func stagingIssuer(c *x509.Certificate) bool {
 // CheckDomain opens a TLS connection and reports what the domain is actually
 // serving. Reading the file on disk is not enough: a certificate can be renewed
 // on disk and never reloaded, and only a live handshake catches that.
+//
+// It dials as a scan does (dialTLS), so it ends with ctx and holds the
+// STARTTLS dialogue a port's service needs, as a scan's Auto does.
 func CheckDomain(ctx context.Context, domain string, port int) (*Certificate, error) {
 	if port == 0 {
 		port = 443
 	}
-	dialer := &net.Dialer{Timeout: 8 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(domain, fmt.Sprint(port)), &tls.Config{
-		ServerName: domain,
-		// The certificate is being inspected, not trusted — a failed
-		// verification is a finding to report, not a reason to give up.
-		InsecureSkipVerify: true,
-	})
+	conn, err := dialTLS(ctx, net.JoinHostPort(domain, fmt.Sprint(port)), domain, startTLSPorts[port], 0, 0)
 	if err != nil {
 		return &Certificate{Name: domain, Domains: []string{domain}, Source: "live", Error: err.Error()}, nil
 	}

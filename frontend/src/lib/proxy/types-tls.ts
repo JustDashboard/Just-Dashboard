@@ -209,12 +209,17 @@ export type PreloadCheck = {
   rules: PreloadRule[]
 }
 
+/** A service a scan upgrades with STARTTLS, as ?proto= and openssl -starttls name it. */
+export type StartTLS = "smtp" | "imap" | "pop3" | "ftp" | "postgres"
+
 /** How far a scan that never completed a handshake got, and why it stopped. */
 export type ScanFailure = {
   stage: "dns" | "connect" | "handshake"
   /**
    * dns: no-such-host, timeout, error. connect: refused, timeout, unreachable,
-   * error. handshake: alert, plain-http, not-tls, closed, timeout, error.
+   * error. handshake: alert, plain-http, not-tls, closed, timeout, error, and
+   * after a STARTTLS dialogue that went no further starttls-refused,
+   * starttls-unexpected, starttls-closed, starttls-timeout, starttls-error.
    */
   reason: string
   /** Where the failing connection went, once the name had resolved. */
@@ -275,6 +280,8 @@ export type TLSScan = {
   failure?: ScanFailure
   /** The IP dialled in place of the name's records, as curl --resolve does. */
   connectTo?: string
+  /** The plain-text dialogue held before the handshake, for a service that upgrades. */
+  starttls?: StartTLS
   /** The ip:port the handshake reached, and whose it is. */
   address?: string
   addressKind?: AddressKind

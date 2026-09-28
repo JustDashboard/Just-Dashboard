@@ -12,6 +12,7 @@ import type {
   GradeCheck,
   HTTPScan,
   RedirectHop,
+  StartTLS,
   TLSScan,
 } from "./proxy/types-tls"
 import { targetLabel, tlsReportHref } from "./scan-target"
@@ -85,6 +86,33 @@ const HANDSHAKE_REASONS: Record<string, string> = {
   "not-tls": "not TLS",
   closed: "closed",
   timeout: "no answer",
+  "starttls-refused": "no STARTTLS",
+  "starttls-unexpected": "other protocol",
+  "starttls-closed": "closed before TLS",
+  "starttls-timeout": "no answer before TLS",
+  "starttls-error": "failed before TLS",
+}
+
+/** The services a scan upgrades with STARTTLS, by the ?proto= that asks for one. */
+export const STARTTLS_NAMES: Record<StartTLS, string> = {
+  smtp: "SMTP",
+  imap: "IMAP",
+  pop3: "POP3",
+  ftp: "FTP",
+  postgres: "PostgreSQL",
+}
+
+/**
+ * The service Auto upgrades with STARTTLS on a port, as the backend's
+ * startTLSPorts does, so the field can say what Auto will do.
+ */
+export const STARTTLS_PORTS: Record<number, StartTLS> = {
+  21: "ftp",
+  25: "smtp",
+  110: "pop3",
+  143: "imap",
+  587: "smtp",
+  5432: "postgres",
 }
 
 const WHERE: Record<string, string> = {
@@ -164,7 +192,9 @@ export function diagnosisLinks(scan: TLSScan): { label: string; href: string }[]
   const links = [{ label: "Listening ports", href: `/proxy/ports?q=:${scan.port}` }]
   if (failure.stage === "connect" && failure.reason === "timeout")
     links.push({ label: "Firewall", href: "/security/firewall" })
-  if (failure.stage === "handshake") links.push({ label: "Sites", href: "/proxy/sites" })
+  // A STARTTLS service is not one of nginx's sites.
+  if (failure.stage === "handshake" && !scan.starttls)
+    links.push({ label: "Sites", href: "/proxy/sites" })
   return links
 }
 
@@ -233,7 +263,9 @@ export function reproduceCommands(scan: TLSScan): ReproduceCommand[] {
   const dialled = scan.connectTo ?? host
   const connect = dialled.includes(":") ? `[${dialled}]:${scan.port}` : `${dialled}:${scan.port}`
   const sni = isAddress(host) ? "" : ` -servername ${shellQuote(host)}`
-  const sClient = `openssl s_client -connect ${shellQuote(connect)}${sni}`
+  // openssl names the dialogues as ?proto= does.
+  const starttls = scan.starttls ? ` -starttls ${scan.starttls}` : ""
+  const sClient = `openssl s_client -connect ${shellQuote(connect)}${sni}${starttls}`
   const commands: ReproduceCommand[] = [
     { label: "Handshake and chain", command: `${sClient} -showcerts </dev/null` },
     {
@@ -399,7 +431,8 @@ export function connectedTo(scan: TLSScan): string | undefined {
   if (!scan.address) return undefined
   const kind = scan.addressKind ? ` — ${ADDRESS_KINDS[scan.addressKind]}` : ""
   const asked = scan.connectTo ? ", as asked in place of its DNS records" : ""
-  return `Connected to ${addressIP(scan.address)}${kind}${asked}`
+  const upgraded = scan.starttls ? `, upgraded with ${STARTTLS_NAMES[scan.starttls]} STARTTLS` : ""
+  return `Connected to ${addressIP(scan.address)}${kind}${asked}${upgraded}`
 }
 
 /** What one address served, in a line: the certificate, or why nothing. */

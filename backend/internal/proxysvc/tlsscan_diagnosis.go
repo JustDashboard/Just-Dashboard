@@ -32,7 +32,10 @@ type ScanFailure struct {
 	// Reason is what happened there. For dns: "no-such-host", "timeout" or
 	// "error". For connect: "refused", "timeout", "unreachable" or "error".
 	// For handshake: "alert" (the server refused), "plain-http" or "not-tls"
-	// (something that is not TLS answered), "closed", "timeout" or "error".
+	// (something that is not TLS answered), "closed", "timeout" or "error";
+	// or, when the scan held a STARTTLS dialogue first and it went no
+	// further, "starttls-refused", "starttls-unexpected", "starttls-closed",
+	// "starttls-timeout" or "starttls-error", with Answer what was said.
 	Reason string `json:"reason"`
 	// Address is where the failing connection went, as ip:port, once the
 	// name had resolved.
@@ -95,7 +98,10 @@ func classifyDialError(err error) ScanFailure {
 	}
 	failure := ScanFailure{Stage: "handshake", Reason: "error", Address: shake.addr}
 	var record tls.RecordHeaderError
-	if alert, alerted := remoteAlert(err); alerted {
+	var dialogue *startTLSError
+	if errors.As(err, &dialogue) {
+		failure.Reason, failure.Answer = dialogue.failureReason(), dialogue.reply
+	} else if alert, alerted := remoteAlert(err); alerted {
 		failure.Reason, failure.Alert = "alert", alert
 	} else if errors.As(err, &record) {
 		failure.Answer = printable(record.RecordHeader[:])
@@ -168,6 +174,12 @@ func failureSummary(scan *TLSScan, f ScanFailure) string {
 		return where + " answers something other than TLS."
 	case "handshake/closed":
 		return where + " closed the connection during the handshake."
+	case "handshake/starttls-refused":
+		return "The " + startTLSNames[scan.StartTLS] + " server on " + where + " would not start TLS."
+	case "handshake/starttls-unexpected":
+		return where + " does not answer as a " + startTLSNames[scan.StartTLS] + " server."
+	case "handshake/starttls-closed", "handshake/starttls-timeout", "handshake/starttls-error":
+		return where + " did not finish the " + startTLSNames[scan.StartTLS] + " dialogue before TLS."
 	case "handshake/timeout":
 		return where + " accepted the connection and never answered the handshake."
 	case "connect/error":
@@ -239,7 +251,7 @@ func failureFinding(scan *TLSScan, f ScanFailure, err error) ScanFinding {
 		finding.ID, finding.Title = "tls.not-tls", "Port "+port+" does not speak TLS"
 		finding.Detail = fmt.Sprintf("%s answered the TLS handshake with %q, which is not TLS.", where, f.Answer)
 		finding.Advice = hereOrThere(scan, f, advice{
-			here:       "Another service owns this port, or it starts in plain text and upgrades with STARTTLS, as SMTP on 25 and 587 and IMAP on 143 do. This check speaks TLS from the first byte.",
+			here:       "Another service owns this port, or it starts in plain text and upgrades with STARTTLS, as SMTP, IMAP, POP3, FTP and PostgreSQL do. This scan spoke TLS from the first byte: choose the service's protocol under Advanced and scan again.",
 			cloudflare: cloudflareHandshake,
 		})
 	case "handshake/closed":
@@ -255,6 +267,31 @@ func failureFinding(scan *TLSScan, f ScanFailure, err error) ScanFinding {
 		finding.Advice = hereOrThere(scan, f, advice{
 			here:       "Something listens there and does not speak first in TLS: a service that waits for its own protocol, such as a database, or a proxy stalled on its backend.",
 			cloudflare: cloudflareHandshake,
+		})
+	case "handshake/starttls-refused":
+		name := startTLSNames[scan.StartTLS]
+		finding.ID, finding.Title = "starttls.refused", "The "+name+" server would not start TLS"
+		finding.Detail = fmt.Sprintf("%s speaks %s and answered the request to upgrade with %q.", where, name, f.Answer)
+		finding.Advice = hereOrThere(scan, f, advice{
+			here:       startTLSAdvice[scan.StartTLS],
+			there:      "Its " + name + " server has no certificate configured, or offers TLS only on another port. A client that upgrades when it can sends everything in plain text here.",
+			cloudflare: cloudflareOtherPorts,
+		})
+	case "handshake/starttls-unexpected":
+		name := startTLSNames[scan.StartTLS]
+		finding.ID, finding.Title = "starttls.unexpected", "Port "+port+" does not answer as "+name
+		finding.Detail = fmt.Sprintf("%s answered the %s dialogue with %q, which that protocol does not define at that point.", where, name, f.Answer)
+		finding.Advice = hereOrThere(scan, f, advice{
+			here:       "Another service owns port " + port + ", or it speaks TLS from the first byte. Choose its protocol under Advanced, or TLS for a service that needs no upgrade, and scan again.",
+			cloudflare: cloudflareOtherPorts,
+		})
+	case "handshake/starttls-closed", "handshake/starttls-timeout", "handshake/starttls-error":
+		name := startTLSNames[scan.StartTLS]
+		finding.ID, finding.Title = "starttls.failed", "The "+name+" dialogue did not reach TLS"
+		finding.Detail = where + " accepted the connection and did not complete the " + name + " exchange before TLS: " + err.Error() + "."
+		finding.Advice = hereOrThere(scan, f, advice{
+			here:       "Something listens on " + port + " and does not speak " + name + " to this scan: another service, one that speaks TLS from the first byte (choose TLS under Advanced), or a " + name + " server that is overloaded or limiting connections from this address.",
+			cloudflare: cloudflareOtherPorts,
 		})
 	case "connect/error":
 		finding.ID, finding.Title = "tcp.failed", "The connection to "+where+" failed"
@@ -334,6 +371,16 @@ func localAddresses() []string {
 // advice is a finding's fix for each place its answer can have come from;
 // there is left empty when it reads the same as here.
 type advice struct{ here, there, cloudflare string }
+
+// startTLSAdvice is how the usual server for each dialogue is made to offer
+// STARTTLS.
+var startTLSAdvice = map[string]string{
+	"smtp":     "For Postfix to offer STARTTLS, set smtpd_tls_cert_file and smtpd_tls_key_file to the certificate and key, and smtpd_tls_security_level = may, then postfix reload.",
+	"imap":     "For Dovecot to take STARTTLS, set ssl = yes with ssl_cert = </path/fullchain.pem and ssl_key = </path/privkey.pem (ssl_server_cert_file and ssl_server_key_file in 2.4), then reload it.",
+	"pop3":     "For Dovecot to take STLS, set ssl = yes with ssl_cert = </path/fullchain.pem and ssl_key = </path/privkey.pem (ssl_server_cert_file and ssl_server_key_file in 2.4), then reload it.",
+	"ftp":      "For vsftpd to take AUTH TLS, set ssl_enable=YES with rsa_cert_file and rsa_private_key_file; in ProFTPD load mod_tls with TLSEngine on. Then restart it.",
+	"postgres": "An N answer is PostgreSQL with ssl off. Set ssl = on with ssl_cert_file and ssl_key_file in postgresql.conf, readable by the postgres user, then reload it.",
+}
 
 // hereOrThere picks the advice for a connection that reached this server,
 // Cloudflare's proxy or another host. When that cannot be known both this

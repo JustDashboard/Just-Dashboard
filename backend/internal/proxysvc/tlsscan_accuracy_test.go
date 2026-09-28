@@ -215,7 +215,7 @@ func TestClassifyDialError(t *testing.T) {
 	dial := func(addr string, timeout time.Duration) error {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		conn, err := dialTLS(ctx, addr, "scan.test", 0, 0)
+		conn, err := dialTLS(ctx, addr, "scan.test", "", 0, 0)
 		if err == nil {
 			conn.Close()
 		}

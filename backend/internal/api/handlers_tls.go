@@ -154,6 +154,12 @@ func (s *Server) handleTLSScan(w http.ResponseWriter, r *http.Request) error {
 			net.JoinHostPort(target.Host, strconv.Itoa(target.Port))+" via "+connect)
 	}
 	q := r.URL.Query()
+	// A service that upgrades with STARTTLS is asked through its own
+	// dialogue; Auto (no ?proto=) picks it by port.
+	opts.StartTLS, err = proxysvc.ParseStartTLS(q.Get("proto"), target.Port)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
 	opts.Request, err = proxysvc.ParseRequestShape(q.Get("method"), q.Get("path"), q.Get("host"))
 	if err != nil {
 		return httpx.BadRequest("%v", err)

@@ -1067,6 +1067,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   injectable), returns them as `addresses`, and raises the warning `tls.address-mismatch` when
   reachable addresses serve different leaf certificates; it caps no grade, since the grade is of the
   answer this scan got.
+- **STARTTLS services are scanned through their own dialogue** (`starttls.go`). `?proto=` is `auto`
+  (the default: SMTP on 25 and 587, IMAP 143, POP3 110, FTP 21, PostgreSQL 5432, TLS from the first
+  byte elsewhere), `tls`, `smtp`, `imap`, `pop3`, `ftp` or `postgres` (`ParseStartTLS`, anything else a
+  400). `dialTLS` holds the dialogue on every connection of the scan — the handshake, the four version
+  probes and each `?all=1` address — before its ClientHello, bounded by the handshake's deadline, the
+  request's context, 4 KiB a line and 100 lines a reply; EHLO names `localhost`. It is strict: an answer
+  the protocol does not define ends it, and so does any byte buffered after the server agreed (the
+  STARTTLS injection class). The scan carries `starttls`, sends no web request (`http.service` is
+  `other`) and skips the preload check; a dialogue that ends early is a failed handshake with reason
+  `starttls-refused`, `starttls-unexpected`, `starttls-closed`, `starttls-timeout` or
+  `starttls-error` and what the server said in `answer`, and a version probe it stops is `unknown`.
+  `CheckDomain` and `CheckEndpoint` use Auto; a watched endpoint has no per-endpoint protocol.
 - **The HTTPS request can be shaped, and its answer is audited.** `?method=` (GET, HEAD or OPTIONS
   only: a scan is a read; POST belongs to the audited request tester), `?path=` and `?host=` go
   through `proxysvc.ParseRequestShape` and change only the HTTPS request — SNI stays the scanned
@@ -1094,7 +1106,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   account at `GET /certificates/watch-schedule`, set by `system.admin` at `PUT`), and
   `POST /certificates/watched/check` (`system.admin`, audited) checks all now under a 30-second budget and
   answers with the list. Either way eight run at a time, stalest first, through `CheckEndpoint`, whose dial
-  ends with the context; one still in flight or not started when the budget ends keeps its stored result
+  ends with the context and holds the STARTTLS dialogue Auto picks by port, so a watched mail server on
+  587 is read as a scan reads it; one still in flight or not started when the budget ends keeps its stored result
   and time. One pass at a time: a caller waiting for a scheduled pass waits only as long as its own budget.
   Every check also goes into `watched_checks` (days left, fingerprint, error; 2000 per endpoint and 90
   days, cascading with the endpoint), read at `GET /certificates/watched/{id}/history`.
