@@ -11,6 +11,7 @@ import {
   Pencil,
   Slash,
   Trash,
+  Wrench,
 } from "@/components/icons"
 import type { VHost } from "@/lib/types"
 import type { Verb } from "@/components/verbs"
@@ -57,6 +58,7 @@ export function useSiteVerbs({
   onRaw,
   onDuplicate,
   onToggle,
+  onMaintenance,
   onDelete,
 }: {
   vhost: VHost
@@ -67,6 +69,8 @@ export function useSiteVerbs({
   onRaw: (vhost: VHost) => void
   onDuplicate: (vhost: VHost) => void
   onToggle: (vhost: VHost, enabled: boolean) => void
+  /** Turns the site's maintenance page on or off; left out where the verb has no place. */
+  onMaintenance?: (vhost: VHost, on: boolean) => void
   onDelete: (vhost: VHost) => void
 }): Verb[] {
   const router = useRouter()
@@ -151,6 +155,27 @@ export function useSiteVerbs({
             progressive: "Enabling",
             disabled: Boolean(busy),
             run: () => onToggle(vhost, true),
+          },
+    )
+  }
+  if (managedByForm && admin && onMaintenance) {
+    verbs.push(
+      vhost.maintenance
+        ? {
+            key: "maintenance",
+            label: "End maintenance",
+            icon: Wrench,
+            progressive: "Ending maintenance",
+            disabled: Boolean(busy),
+            run: () => onMaintenance(vhost, false),
+          }
+        : {
+            key: "maintenance",
+            label: "Start maintenance",
+            icon: Wrench,
+            progressive: "Starting maintenance",
+            disabled: Boolean(busy),
+            run: () => onMaintenance(vhost, true),
           },
     )
   }

@@ -45,7 +45,35 @@ export type SiteSpec = {
   /** Timed adds the request time traffic analytics reads latency from; empty is timed. */
   logFormat?: "timed" | "combined"
   locations: SiteLocation[]
+  /** The maintenance page and who gets past it; kept while off. */
+  maintenance?: SiteMaintenance
+  /** Codes answered with the site's own page: 404, 502, 503, 504. */
+  errorPages?: ErrorPageCode[]
+  /** Also replace the application's own responses with those codes. Proxy sites only. */
+  interceptErrors?: boolean
   custom?: string
+}
+
+export type SiteMaintenance = {
+  on: boolean
+  /** Seconds the 503 asks clients to wait; 0 sends no Retry-After. */
+  retryAfter?: number
+  /** Addresses that reach the site as usual while it is on. */
+  bypassFrom: string[]
+}
+
+export type ErrorPageCode = 404 | 502 | 503 | 504
+
+/** A page file a site serves: its maintenance page or one of its error pages. */
+export type SitePageName = "maintenance" | "404" | "502" | "503" | "504"
+
+/** GET/PUT /proxy/sites/{name}/pages/{page}. */
+export type SitePage = {
+  site: string
+  page: SitePageName
+  content: string
+  /** The site has its own file; otherwise this is the shipped default a save writes. */
+  custom: boolean
 }
 
 /**

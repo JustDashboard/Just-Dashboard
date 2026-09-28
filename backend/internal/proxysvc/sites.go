@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -70,6 +71,19 @@ type SiteSpec struct {
 	// Empty is timed, the default for a new site.
 	LogFormat string         `json:"logFormat,omitempty"`
 	Locations []SiteLocation `json:"locations"`
+	// Maintenance, when set, is the site's maintenance page and who gets past
+	// it; On is whether visitors get it now. Kept while off, so turning it
+	// back on keeps the addresses and the retry time.
+	Maintenance *SiteMaintenance `json:"maintenance,omitempty"`
+	// ErrorPages are the codes nginx answers with the site's own page
+	// rather than its stock one: 404, 502, 503 or 504.
+	ErrorPages []int `json:"errorPages,omitempty"`
+	// InterceptErrors also replaces the application's own responses with
+	// those codes, not only the ones nginx produces. Proxy sites only.
+	InterceptErrors bool `json:"interceptErrors,omitempty"`
+	// PagesDir is where the site's pages are served from. The service sets
+	// it from its own nginx directory; it is never taken from a request.
+	PagesDir string `json:"-"`
 	// Custom is appended verbatim inside the server block. It is the escape
 	// hatch, and it is the one field not validated beyond refusing an
 	// unbalanced brace — a form that cannot express everything needs
@@ -89,6 +103,41 @@ type SiteLocation struct {
 	// the folder itself would move every file it serves.
 	RootMode   string `json:"rootMode,omitempty"`
 	WebSockets bool   `json:"webSockets"`
+}
+
+// SiteMaintenance is a site's maintenance switch.
+type SiteMaintenance struct {
+	On bool `json:"on"`
+	// RetryAfter is the seconds the 503 tells clients and crawlers to wait;
+	// 0 sends no Retry-After.
+	RetryAfter int `json:"retryAfter,omitempty"`
+	// BypassFrom are the addresses that reach the site as usual while it is
+	// in maintenance.
+	BypassFrom []string `json:"bypassFrom"`
+}
+
+// errorPageCodes are the codes a site may give a page of its own, in the
+// order they are written.
+var errorPageCodes = []int{404, 502, 503, 504}
+
+// maintVar and maintIPVar name the site's maintenance map and geo.
+func (spec *SiteSpec) maintVar() string { return NginxIdent(spec.Name) + "_maint" }
+
+func (spec *SiteSpec) maintIPVar() string { return NginxIdent(spec.Name) + "_maint_ip" }
+
+// hasErrorPage says whether the site serves its own page for code.
+func (spec *SiteSpec) hasErrorPage(code int) bool {
+	for _, c := range spec.ErrorPages {
+		if c == code {
+			return true
+		}
+	}
+	return false
+}
+
+// usesPages says whether the rendered site serves any page from PagesDir.
+func (spec *SiteSpec) usesPages() bool {
+	return spec.Maintenance != nil || len(spec.ErrorPages) > 0
 }
 
 // timedLog says whether the access log is written in the site's timed format.
@@ -256,6 +305,29 @@ func ValidateSpec(spec *SiteSpec) error {
 			return fmt.Errorf("location %s needs either an upstream or a root", loc.Path)
 		}
 	}
+	if m := spec.Maintenance; m != nil {
+		if m.RetryAfter < 0 || m.RetryAfter > 86400 {
+			return fmt.Errorf("retry after must be between 0 and 86400 seconds")
+		}
+		for _, entry := range m.BypassFrom {
+			if err := validAddress(entry); err != nil {
+				return err
+			}
+		}
+	}
+	seenCode := map[int]bool{}
+	for _, code := range spec.ErrorPages {
+		if !slices.Contains(errorPageCodes, code) {
+			return fmt.Errorf("an error page can be set for 404, 502, 503 or 504, not %d", code)
+		}
+		if seenCode[code] {
+			return fmt.Errorf("the %d page is listed twice", code)
+		}
+		seenCode[code] = true
+	}
+	if spec.PagesDir != "" && !absPathRe.MatchString(spec.PagesDir) {
+		return fmt.Errorf("the pages directory must be an absolute path")
+	}
 	if strings.Count(spec.Custom, "{") != strings.Count(spec.Custom, "}") {
 		return fmt.Errorf("the extra configuration has unbalanced braces")
 	}
@@ -295,6 +367,17 @@ func validRedirect(raw string) error {
 		return fmt.Errorf("the redirect target must be a full URL, for example https://example.com")
 	}
 	return nil
+}
+
+// validAddress is an IP address or a CIDR, as geo reads one.
+func validAddress(entry string) error {
+	if _, _, err := net.ParseCIDR(entry); err == nil {
+		return nil
+	}
+	if net.ParseIP(entry) != nil {
+		return nil
+	}
+	return fmt.Errorf("%q is not an IP address or a CIDR", entry)
 }
 
 func validACLEntry(entry string) error {
@@ -360,6 +443,14 @@ func SpecWarnings(spec *SiteSpec) []string {
 		// auth_basic lives, so the password prompt never appears.
 		warnings = append(warnings,
 			"A redirect is answered before nginx checks the password, so this site will not prompt for one. Put the password on whatever the redirect points at.")
+	}
+	if spec.Maintenance != nil && spec.Maintenance.On {
+		warnings = append(warnings,
+			"Maintenance is on: visitors get the maintenance page with a 503, except from the addresses allowed past it.")
+	}
+	if spec.InterceptErrors && spec.Kind != "proxy" {
+		warnings = append(warnings,
+			"Replacing the application's own error pages applies only to a site that forwards to an application; on this one only nginx's own errors get the site's pages.")
 	}
 	if len(spec.AllowFrom) > 0 {
 		warnings = append(warnings,

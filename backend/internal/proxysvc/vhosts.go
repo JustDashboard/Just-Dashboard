@@ -27,6 +27,8 @@ type VHost struct {
 	CertPath    string    `json:"certPath,omitempty"`
 	Modified    time.Time `json:"modified"`
 	Size        int64     `json:"size"`
+	// Maintenance says the site answers with its maintenance page now.
+	Maintenance bool `json:"maintenance,omitempty"`
 }
 
 var (
@@ -34,6 +36,7 @@ var (
 	listenRe     = regexp.MustCompile(`(?m)^\s*listen\s+([^;]+);`)
 	proxyPassRe  = regexp.MustCompile(`(?m)^\s*proxy_pass\s+([^;]+);`)
 	certRe       = regexp.MustCompile(`(?m)^\s*ssl_certificate\s+([^;]+);`)
+	maintOnRe    = regexp.MustCompile(`(?m)^\s*if\s*\(\$jd_\w+_maint\)`)
 )
 
 func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
@@ -143,6 +146,7 @@ func (s *Service) nginxVHosts() []VHost {
 				v.TLS = true
 				v.CertPath = strings.TrimSpace(m[1])
 			}
+			v.Maintenance = maintOnRe.MatchString(text)
 		}
 		out = append(out, v)
 	}

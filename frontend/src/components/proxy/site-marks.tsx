@@ -31,6 +31,7 @@ export function SiteTLS({ vhost }: { vhost: VHost }) {
 /** Whether the site is serving, said as a state rather than a switch. */
 export function ServingStatus({ vhost, busy }: { vhost: VHost; busy?: string }) {
   if (busy) return <Status state="activating" label={`${busy}…`} />
+  if (vhost.enabled && vhost.maintenance) return <Status tone="warning" label="maintenance" />
   if (vhost.kind === "nginx" && !vhost.enabledPath && vhost.enabled) {
     // conf.d: every present .conf file is active and there is nothing to
     // toggle, which "always on" says without offering a control.

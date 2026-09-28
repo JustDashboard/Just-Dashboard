@@ -11,6 +11,8 @@ export type VHost = {
   certPath?: string
   modified: string
   size: number
+  /** The site answers with its maintenance page now. */
+  maintenance?: boolean
 }
 
 /** An htpasswd file and who is in it. */

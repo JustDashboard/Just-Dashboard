@@ -127,12 +127,16 @@ func (s *Service) ApplySite(ctx context.Context, spec *SiteSpec, enable, reload,
 // disabled refused over its test: nginx does not read it, and the result
 // carries what enabling it would meet.
 func (s *Service) SaveSite(ctx context.Context, spec *SiteSpec, opts SiteSave) (*SiteResult, error) {
+	s.SetPagesDir(spec)
 	content, err := RenderNginx(spec)
 	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.writeMissingPages(spec); err != nil {
+		return nil, fmt.Errorf("the site's pages could not be written: %w", err)
+	}
 	res, err := s.saveSiteLocked(ctx, spec, content, opts)
 	if errors.Is(err, errSiteReloadFailed) {
 		return res, nil

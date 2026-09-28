@@ -564,6 +564,30 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   only for `system.admin` on a host with nginx; the values go in as the link spelled them, so the form and
   preview say what is wrong with either. `tests/browser/proxy-site-builder.spec.ts` checks each state
   against mocks from `tests/browser/fixtures/proxy/siteform.ts`.
+
+  **Maintenance and error pages** (`site_pages.go`, form section "Maintenance & error pages",
+  `page-editor.tsx`). `SiteSpec.Maintenance{On, RetryAfter, BypassFrom}`, `ErrorPages` (404, 502, 503,
+  504) and `InterceptErrors` (proxy sites: `proxy_intercept_errors on`, so the application's own
+  responses with those codes get the pages too). Pages are files at `<nginxDir>/jd-pages/<site>/<page>.html`
+  (0644; the embedded `proxysvc/pages/*.html` are written for any page a save needs and the site lacks),
+  served from exact `internal` locations `= /__jd/<page>.html` by `alias`, reached with `error_page` to
+  that path — a path, not a named location, because nginx turns the request into a GET only on the
+  way to a path, and a POST to a static page is 405. `PagesDir` is set by the service, never read from a
+  request. Maintenance writes a `geo $jd_<id>_maint_ip` above the server (the bypass list) whenever it is
+  configured, and while on a server-level `set`/`if` pair that returns 503 except for the ACME challenge
+  and the maintenance page itself: a variable `set` on every pass rather than a `map`, whose value nginx
+  keeps across the error page's internal redirect. The maintenance location carries `Retry-After` and
+  repeats the server's security headers (its `add_header` stops them inheriting), and every page
+  location turns `auth_basic` off. While maintenance holds 503 the site's own 503 page is not routed,
+  but its location stays written, which is how the parser reads `ErrorPages` back. `VHost.maintenance`
+  reports the switch on the Sites card. Routes: `GET /proxy/sites/{name}/pages/{page}` (any signed-in
+  account; the default when the site has no file), `PUT` the same (`system.admin`, at most 256 KiB,
+  no reload, audited `proxy.site.page`), and `POST /proxy/sites/{name}/maintenance`
+  `{on, retryAfter?, bypassFrom?}` (destructive gate, like disabling; audited
+  `proxy.site.maintenance`), which saves the form's reading of the file with the switch changed and
+  reloads — refused (409 `not_managed`) for a file the form did not write or would drop lines of. Page
+  paths are refused unless the site folder resolves directly under `jd-pages` inside the nginx directory
+  and the file is not a link.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
   quietly stopped. Each version is probed on a connection pinned to exactly that version; a version this
