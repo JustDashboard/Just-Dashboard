@@ -74,6 +74,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	renderAccess(l, spec)
 	renderServerLimits(l, spec)
 	renderServerCache(l, spec)
+	renderServerHeaders(l, spec)
 	renderACMEChallenge(l, spec)
 
 	switch spec.Kind {
@@ -196,6 +197,13 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 			l.blank()
 		}
 		renderRealIPGeo(l, spec)
+		wrote = true
+	}
+	if spec.cors() != nil {
+		if wrote {
+			l.blank()
+		}
+		renderCORSMaps(l, spec)
 		wrote = true
 	}
 	if wrote {
@@ -389,7 +397,8 @@ func renderTLS(l *lines, spec *SiteSpec) {
 // which a location with an add_header of its own has to repeat.
 func (spec *SiteSpec) writesHeaders() bool {
 	return spec.SecurityHeaders || spec.HSTS ||
-		(spec.cachesStatic() && spec.StaticCache.Immutable) || spec.cachesProxy()
+		(spec.cachesStatic() && spec.StaticCache.Immutable) || spec.cachesProxy() ||
+		spec.headersWritten()
 }
 
 func renderHeaders(l *lines, spec *SiteSpec) {
@@ -399,10 +408,13 @@ func renderHeaders(l *lines, spec *SiteSpec) {
 	}
 	if spec.SecurityHeaders {
 		l.add("    add_header X-Content-Type-Options nosniff always;")
-		l.add("    add_header X-Frame-Options SAMEORIGIN always;")
+		if spec.Headers == nil || spec.Headers.FrameOptions == "" {
+			l.add("    add_header X-Frame-Options SAMEORIGIN always;")
+		}
 		l.add("    add_header Referrer-Policy strict-origin-when-cross-origin always;")
 	}
 	cacheHeaders(l, spec)
+	renderSiteHeaders(l, spec)
 }
 
 func renderServerOptions(l *lines, spec *SiteSpec) {
@@ -563,6 +575,7 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 		l.add("        proxy_set_header Upgrade    $http_upgrade;")
 		l.add("        proxy_set_header Connection $%s;", spec.connectionVar())
 	}
+	renderRequestHeaders(l, spec)
 	if loc.BodyLimit != "" {
 		l.add("        client_max_body_size %s;", loc.BodyLimit)
 	}

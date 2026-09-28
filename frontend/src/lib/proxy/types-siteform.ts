@@ -101,7 +101,49 @@ export type SiteSpec = {
   proxyCache?: ProxyCache
   /** The visitor's address put back behind Cloudflare or a load balancer. */
   realIp?: SiteRealIP
+  /** Headers added, hidden and sent on, and the CORS, CSP and framing policies. */
+  headers?: SiteHeaders
   custom?: string
+}
+
+export type SiteHeaders = {
+  /** Sent to the application; an empty value stops the visitor's own. Proxy sites only. */
+  request?: HeaderValue[]
+  /** Added to every answer, errors included. */
+  response?: HeaderValue[]
+  /** The application's response headers nginx drops. Proxy sites only. */
+  hide?: string[]
+  /** Empty leaves X-Frame-Options to the security headers switch. */
+  frameOptions?: "" | "deny" | "sameorigin"
+  csp?: SiteCSP
+  permissions?: PermissionRule[]
+  cors?: SiteCORS
+}
+
+/** A request header's value may instead be one nginx variable, such as $remote_addr. */
+export type HeaderValue = { name: string; value: string }
+
+export type SiteCSP = {
+  directives: CSPDirective[]
+  /** Browsers report what the policy would block and block nothing. */
+  reportOnly?: boolean
+}
+
+/** Keywords are kept without their quotes: self, none, unsafe-inline, nonce-…, sha256-…. */
+export type CSPDirective = { name: string; sources?: string[] }
+
+export type PermissionRule = { feature: string; allow: "none" | "self" | "all" }
+
+export type CORSMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS"
+
+export type SiteCORS = {
+  /** scheme://host[:port], or "*" alone for any origin. */
+  origins: string[]
+  methods: CORSMethod[]
+  /** Request headers a caller may send; empty allows whichever the browser asks for. */
+  headers?: string[]
+  /** Cookies and HTTP auth go along. Not with "*". */
+  credentials?: boolean
 }
 
 export type SiteRealIP = {

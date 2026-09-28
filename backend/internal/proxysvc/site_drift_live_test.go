@@ -30,10 +30,12 @@ func TestLiveMovedLinesKeepWhatTheyDid(t *testing.T) {
 	first, second := freePort(t), freePort(t)
 	content := installSite(t, root, spec, first)
 
+	// Text and a variable in one value is what the headers section cannot
+	// hold, so both headers stay the file's; $is_args is empty on "/".
 	edited := strings.Replace(content, "    server_name app.test;\n",
-		fmt.Sprintf("    server_name app.test;\n    listen 127.0.0.1:%d;\n    add_header X-Moved yes always;\n", second), 1)
+		fmt.Sprintf("    server_name app.test;\n    listen 127.0.0.1:%d;\n    add_header X-Moved yes$is_args always;\n", second), 1)
 	edited = strings.Replace(edited, "        proxy_set_header X-Forwarded-Host  $host;\n",
-		"        proxy_set_header X-Forwarded-Host  $host;\n        proxy_set_header X-Tenant acme;\n", 1)
+		"        proxy_set_header X-Forwarded-Host  $host;\n        proxy_set_header X-Tenant acme$is_args;\n", 1)
 	full := filepath.Join(root, "sites-available", "app")
 	if err := os.WriteFile(full, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
@@ -55,7 +57,7 @@ func TestLiveMovedLinesKeepWhatTheyDid(t *testing.T) {
 	// The test's own listen on its first port is one of them: the form
 	// writes listen 80 there, which is why it is the one line swapped back
 	// below.
-	want := []string{fmt.Sprintf("listen 127.0.0.1:%d;", first), fmt.Sprintf("listen 127.0.0.1:%d;", second), "add_header X-Moved yes always;"}
+	want := []string{fmt.Sprintf("listen 127.0.0.1:%d;", first), fmt.Sprintf("listen 127.0.0.1:%d;", second), "add_header X-Moved yes$is_args always;"}
 	if strings.Join(moved, "|") != strings.Join(want, "|") || len(dropped) != 4 {
 		t.Fatalf("dropped %+v", dropped)
 	}

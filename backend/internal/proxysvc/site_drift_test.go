@@ -71,7 +71,8 @@ func TestDroppedLinesOfAnUntouchedFileAreNone(t *testing.T) {
 
 // probeEdits are the hand edits a form save used to drop without a word: a
 // second port and a body buffer in the server block, and a header sent to
-// the application from location /.
+// the application from location / whose value mixes text and a variable,
+// which the headers section cannot hold.
 func probeEdits(t *testing.T) (string, *SiteSpec) {
 	t.Helper()
 	content, err := RenderNginx(proxySpec())
@@ -81,7 +82,7 @@ func probeEdits(t *testing.T) (string, *SiteSpec) {
 	edited := strings.Replace(content, "    server_name app.example.com;\n\n    ssl_certificate",
 		"    server_name app.example.com;\n    listen 8080;\n    client_body_buffer_size 1m;\n\n    ssl_certificate", 1)
 	edited = strings.Replace(edited, "        proxy_set_header X-Forwarded-Host  $host;\n",
-		"        proxy_set_header X-Forwarded-Host  $host;\n        proxy_set_header X-Tenant acme;  # for the billing app\n", 1)
+		"        proxy_set_header X-Forwarded-Host  $host;\n        proxy_set_header X-Tenant acme$is_args;  # for the billing app\n", 1)
 	if edited == content {
 		t.Fatal("the probe edits did not apply")
 	}
@@ -113,7 +114,7 @@ func TestDroppedLinesReportHandEditsWhereTheyAre(t *testing.T) {
 		// Its own line, comment and all, and nowhere in the form to go: a
 		// proxy_set_header in the server block is not inherited by a
 		// location that sets its own.
-		{Line: lineOf(edited, "X-Tenant"), Lines: 1, Text: "proxy_set_header X-Tenant acme;  # for the billing app", Context: "location /"},
+		{Line: lineOf(edited, "X-Tenant"), Lines: 1, Text: "proxy_set_header X-Tenant acme$is_args;  # for the billing app", Context: "location /"},
 	}
 	if !reflect.DeepEqual(dropped, want) {
 		t.Fatalf("dropped\n%+v\nwant\n%+v", dropped, want)
@@ -250,7 +251,7 @@ func TestDroppedLinesSayWhichCanMove(t *testing.T) {
 	edited := strings.Replace(content, "    server_name app.example.com;\n\n    ssl_certificate",
 		"    server_name app.example.com;\n"+
 			"    add_header X-Frame-Options DENY always;\n"+
-			"    add_header Permissions-Policy \"camera=()\" always;\n"+
+			"    add_header X-Served-By $hostname always;\n"+
 			"    access_log /var/log/nginx/custom.log;\n"+
 			"    location ~ \\.php$ { fastcgi_pass unix:/run/php.sock; }\n"+
 			"    client_body_buffer_size 1m;\n"+
@@ -279,7 +280,7 @@ func TestDroppedLinesSayWhichCanMove(t *testing.T) {
 	}
 	expect("upstream app_pool {", false, "outside any server", "")
 	expect("add_header X-Frame-Options DENY always;", false, "server", "the form writes its own X-Frame-Options header")
-	expect(`add_header Permissions-Policy "camera=()" always;`, true, "server", "")
+	expect("add_header X-Served-By $hostname always;", true, "server", "")
 	expect("access_log /var/log/nginx/custom.log;", false, "server", "the form writes its own access_log")
 	expect(`location ~ \.php$ { fastcgi_pass unix:/run/php.sock; }`, true, "server", "")
 	expect("server {", false, "server on port 80", "")
@@ -300,7 +301,7 @@ func TestDroppedLinesSayWhichCanMove(t *testing.T) {
 // A statement that shares its line with others is written out on its own,
 // and a server_name is dropped name by name.
 func TestDroppedLinesOfAOneLiner(t *testing.T) {
-	content := "server { listen 80; server_name app.example.com _; location / { proxy_pass http://127.0.0.1:3000; proxy_set_header X-Probe \"a b\"; } }\n"
+	content := "server { listen 80; server_name app.example.com _; location / { proxy_pass http://127.0.0.1:3000; proxy_set_header X-Probe \"a b$is_args\"; } }\n"
 	read, _ := ParseSiteSpec("app", content)
 	dropped, err := DroppedLines("/etc/nginx/sites-available/app", content, read, nil)
 	if err != nil {
@@ -308,7 +309,7 @@ func TestDroppedLinesOfAOneLiner(t *testing.T) {
 	}
 	want := []DroppedLine{
 		{Line: 1, Lines: 1, Text: "server_name _;", Context: "server", Movable: true},
-		{Line: 1, Lines: 1, Text: `proxy_set_header X-Probe "a b";`, Context: "location /"},
+		{Line: 1, Lines: 1, Text: `proxy_set_header X-Probe "a b$is_args";`, Context: "location /"},
 	}
 	if !reflect.DeepEqual(dropped, want) {
 		t.Fatalf("dropped\n%+v\nwant\n%+v", dropped, want)

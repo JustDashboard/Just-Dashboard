@@ -126,6 +126,9 @@ type SiteSpec struct {
 	// RealIP puts the visitor's address back behind Cloudflare or a load
 	// balancer. Nil leaves the connecting address as it is.
 	RealIP *SiteRealIP `json:"realIp,omitempty"`
+	// Headers adds, hides and sets headers, with the CORS, CSP,
+	// Permissions-Policy and X-Frame-Options policies. Nil sets none.
+	Headers *SiteHeaders `json:"headers,omitempty"`
 	// RealIPDir is where the shared Cloudflare lists are. The service sets
 	// it from its own nginx directory; it is never taken from a request.
 	RealIPDir string `json:"-"`
@@ -454,6 +457,9 @@ func ValidateSpec(spec *SiteSpec) error {
 	if err := validateCache(spec); err != nil {
 		return err
 	}
+	if err := validateHeaders(spec); err != nil {
+		return err
+	}
 	if spec.PagesDir != "" && !absPathRe.MatchString(spec.PagesDir) {
 		return fmt.Errorf("the pages directory must be an absolute path")
 	}
@@ -703,6 +709,7 @@ func SpecWarnings(spec *SiteSpec) []string {
 	warnings = append(warnings, poolWarnings(spec)...)
 	warnings = append(warnings, cacheWarnings(spec)...)
 	warnings = append(warnings, realIPWarnings(spec)...)
+	warnings = append(warnings, headersWarnings(spec)...)
 	if spec.Kind == "proxy" && (spec.UpstreamSNI || spec.UpstreamVerify) && !spec.hasHTTPSUpstream() {
 		warnings = append(warnings,
 			"The upstream TLS settings apply only to an https:// upstream, and this site forwards to none.")
