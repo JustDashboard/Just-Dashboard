@@ -42,12 +42,12 @@ import { useNow } from "@/components/deploy/vocabulary"
 import { expiryTone } from "@/components/proxy/expiry-status"
 import { TLSDNSPanel } from "@/components/proxy/tls-dns"
 import { TLSServedBy } from "@/components/proxy/tls-served-by"
+import { RequestTester, TLSTools } from "@/components/proxy/request-tester"
 import { Button } from "@/components/ui/button"
 import { Field } from "@/components/form"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 import { DeepScanSection } from "@/components/proxy/tls-ciphers"
 import { ScanHistoryPanel, useScanHistory } from "@/components/proxy/tls-history"
-import { TLSViewTabs } from "@/components/proxy/tls-fleet"
 
 /**
  * What a visitor actually gets, graded.
@@ -66,6 +66,11 @@ import { TLSViewTabs } from "@/components/proxy/tls-fleet"
  * the one decoration this system does not draw.
  */
 export function TLSReportPage() {
+  const params = useSearchParams()
+  return params.get("tool") === "request" ? <RequestTester /> : <TLSReport />
+}
+
+function TLSReport() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const router = useRouter()
@@ -220,7 +225,7 @@ export function TLSReportPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Proxy" title="TLS report" />
-      <TLSViewTabs view="report" />
+      <TLSTools current="report" />
 
       {scan?.reachable ? (
         <StatGrid columns={4} dense>

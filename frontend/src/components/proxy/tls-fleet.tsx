@@ -20,7 +20,7 @@ import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
-import { ChipCount, ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -36,6 +36,7 @@ import {
   TableRow,
   stickyTableHeader,
 } from "@/components/ui/table"
+import { TLSTools } from "@/components/proxy/request-tester"
 import { TLSReportPage, gradeTone } from "@/components/proxy/tls-report"
 
 /**
@@ -45,27 +46,6 @@ import { TLSReportPage, gradeTone } from "@/components/proxy/tls-report"
 export function TLSPage() {
   const params = useSearchParams()
   return params.get("view") === "fleet" ? <TLSFleetPage /> : <TLSReportPage />
-}
-
-export function TLSViewTabs({ view }: { view: "report" | "fleet" }) {
-  return (
-    <nav aria-label="TLS views" className="flex min-w-0 border-b border-hairline">
-      <Link
-        href="/proxy/tls"
-        aria-current={view === "report" ? "page" : undefined}
-        className={tabClasses(view === "report", "h-9")}
-      >
-        One target
-      </Link>
-      <Link
-        href="/proxy/tls?view=fleet"
-        aria-current={view === "fleet" ? "page" : undefined}
-        className={tabClasses(view === "fleet", "h-9")}
-      >
-        Every site
-      </Link>
-    </nav>
-  )
 }
 
 type Filter = "all" | "below-a" | "expiring" | "unreachable"
@@ -228,7 +208,7 @@ function TLSFleetPage() {
   const header = (
     <>
       <PageContext eyebrow="Proxy" title="TLS report" />
-      <TLSViewTabs view="fleet" />
+      <TLSTools current="fleet" />
     </>
   )
   if (fleet.loading && !fleet.data) {
