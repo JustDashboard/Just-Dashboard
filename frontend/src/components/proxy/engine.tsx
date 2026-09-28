@@ -2,12 +2,22 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { CheckCircle, Globe, ListOrdered, Play, RefreshClockwise, Stop } from "@/components/icons"
+import {
+  CheckCircle,
+  Globe,
+  ListOrdered,
+  Logs,
+  Play,
+  RefreshClockwise,
+  Stop,
+} from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { duration, plural } from "@/lib/format"
 import type { EngineAction, ProxyReloadResult, ProxyValidation, SystemdUnit } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { useAuth } from "@/hooks/use-auth"
+import { useConfirm } from "@/components/confirm-dialog"
 import { Status } from "@/components/status-dot"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { engineProduct } from "@/components/proxy/marks"
@@ -108,6 +118,7 @@ export function EngineIdentity({
   unitName,
   unitError,
   fetchedAt,
+  statusAt,
   pending,
   onStartAtBoot,
   serviceBusy,
@@ -122,6 +133,8 @@ export function EngineIdentity({
   /** Why the service's state could not be read; neither "running" nor "no service unit" is known then. */
   unitError?: Error
   fetchedAt?: number
+  /** When `status` was read, so the ingress's uptime is computed without a clock read during render. */
+  statusAt?: number
   /** A start, restart or stop under way, in its present participle. */
   pending?: string
   /** Sets the service to start at boot; absent for an account that may not. */
@@ -172,8 +185,10 @@ export function EngineIdentity({
               <EngineStatus unit={unit} fetchedAt={fetchedAt} />
               <EngineBoot unit={unit} onStartAtBoot={onStartAtBoot} busy={serviceBusy} />
             </>
+          ) : engine && status.ingressContainer ? (
+            <IngressUptime startedAt={status.ingressStartedAt} at={statusAt} />
           ) : engine ? (
-            <span>{status.ingressContainer ? "runs as a container" : "no service unit"}</span>
+            <span>no service unit</span>
           ) : (
             <span>nothing found on this host</span>
           )}
@@ -220,6 +235,22 @@ export function EngineIdentity({
         </>
       }
       aside={actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    />
+  )
+}
+
+/**
+ * The running ingress's reading: a container Docker found running, and for
+ * how long by its own start time. It has no unit, so this stands where the
+ * unit's state would.
+ */
+function IngressUptime({ startedAt, at }: { startedAt?: string; at?: number }) {
+  const started = startedAt ? Date.parse(startedAt) : NaN
+  const since = at && !Number.isNaN(started) ? Math.max(0, (at - started) / 1000) : 0
+  return (
+    <Status
+      state="active"
+      label={`running as a container${since > 60 ? `, up ${duration(since)}` : ""}`}
     />
   )
 }
@@ -299,7 +330,9 @@ export function EngineActions({
   onChanged: () => void
 }) {
   const router = useRouter()
-  const [busy, setBusy] = useState<"reload" | "">("")
+  const { can } = useAuth()
+  const { confirm, dialog } = useConfirm()
+  const [busy, setBusy] = useState<"reload" | "restart-container" | "">("")
   const kind = engineKind(status)
   const engine = control.engine
 
@@ -332,6 +365,33 @@ export function EngineActions({
     }
   }
 
+  const ingressId = kind === "caddy-ingress" ? status.ingressId : undefined
+  const container = status.ingressContainer
+  const restartContainer = () =>
+    confirm({
+      title: "Restart container",
+      confirmLabel: "Restart",
+      description: (
+        <p>
+          <b>{container}</b> will be stopped and started again. Every site the ingress serves is
+          offline until Caddy is back up.
+        </p>
+      ),
+      action: async (phrase) => {
+        setBusy("restart-container")
+        try {
+          await post(`/docker/containers/${ingressId}/restart`, undefined, { confirm: phrase })
+          notify.success(`${container} restarted`)
+          onChanged()
+        } catch (err) {
+          notify.error(`Could not restart ${container}`, err)
+          throw err
+        } finally {
+          setBusy("")
+        }
+      },
+    })
+
   // With no unit, or one that could not be read, the engine is whatever it
   // is and Reload says so if it cannot.
   const run = unitName && unit ? engineRun(unit) : undefined
@@ -361,6 +421,26 @@ export function EngineActions({
       label: "Service details",
       icon: ListOrdered,
       run: () => router.push(`/processes/services?unit=${encodeURIComponent(unitName)}`),
+    })
+  }
+  // The ingress's lifecycle is its container's, so its restart and its log
+  // are Docker's, through the Docker routes and their own gates.
+  if (ingressId) {
+    if (can("destructive")) {
+      verbs.push({
+        key: "restart-container",
+        label: "Restart container",
+        icon: RefreshClockwise,
+        danger: true,
+        disabled: busy !== "",
+        run: restartContainer,
+      })
+    }
+    verbs.push({
+      key: "container-logs",
+      label: "Container logs",
+      icon: Logs,
+      run: () => router.push(`/docker/containers/${encodeURIComponent(ingressId)}?tab=logs`),
     })
   }
 
@@ -417,6 +497,7 @@ export function EngineActions({
           </Button>
         ))}
       {verbs.length > 0 && <VerbMenu verbs={verbs} label={`More ${engine} actions`} />}
+      {dialog}
     </>
   )
 }

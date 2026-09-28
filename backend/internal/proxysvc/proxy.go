@@ -98,6 +98,12 @@ type Availability struct {
 	// IngressContainer is the running Docker Caddy's name; never set for one
 	// that would only be started later.
 	IngressContainer string `json:"ingressContainer,omitempty"`
+	// IngressID is that container's ID, which the page's Restart container
+	// and Container logs act on through the Docker routes and their own
+	// gates; a name can be reused by another container between two reads.
+	IngressID string `json:"ingressId,omitempty"`
+	// IngressStartedAt is when that container last started (RFC 3339).
+	IngressStartedAt string `json:"ingressStartedAt,omitempty"`
 	IngressState     string `json:"ingressState,omitempty"`
 	Nginx            bool   `json:"nginx"`
 	Caddy            bool   `json:"caddy"`
@@ -142,6 +148,8 @@ func (a *Availability) setIngress(edge *dockerCaddy, provisionable bool) {
 	case edge != nil:
 		a.Caddy = true
 		a.IngressContainer = edge.Name
+		a.IngressID = edge.ID
+		a.IngressStartedAt = edge.StartedAt
 		a.IngressState = IngressRunning
 	case provisionable:
 		a.IngressState = IngressProvisionable

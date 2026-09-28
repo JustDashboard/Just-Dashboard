@@ -534,6 +534,7 @@ export default function ProxyOverviewPage() {
         unitName={engine.name}
         unitError={engine.error}
         fetchedAt={engine.fetchedAt}
+        statusAt={statusAt}
         pending={underWay}
         onStartAtBoot={admin ? () => control.run("enable") : undefined}
         serviceBusy={control.pending}
