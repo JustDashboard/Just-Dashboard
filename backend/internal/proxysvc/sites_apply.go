@@ -713,6 +713,9 @@ func restoreConfig(path, original string, existed bool) {
 //
 // Both, and in that order: leaving the link behind points nginx at a file that
 // no longer exists, which takes every site on the box down at the next reload.
+// A sites-enabled/<name> that enables another file is that site's, not this
+// one's — a hand-written site linked under its domain — and stays: removing it
+// took a site nobody asked to delete off the air.
 func (s *Service) DeleteSite(ctx context.Context, name string) error {
 	if !siteNameRe.MatchString(name) {
 		return fmt.Errorf("invalid site name")
@@ -727,12 +730,21 @@ func (s *Service) DeleteSite(ctx context.Context, name string) error {
 	defer s.mu.Unlock()
 	removedLink := false
 	link := filepath.Join(s.nginxDir, "sites-enabled", name)
-	if _, err := os.Lstat(link); err == nil {
-		if err := os.Remove(link); err != nil {
-			return err
+	keptLink := ""
+	if info, err := os.Lstat(link); err == nil {
+		keptLink = enabledElsewhere(link, filepath.Join(s.nginxDir, "sites-available", name))
+		if _, err := os.Stat(link); err != nil && info.Mode()&os.ModeSymlink != 0 {
+			// A link to nothing enables nothing, so removing it cannot stop
+			// a site, and left behind it fails the next reload.
+			keptLink = ""
 		}
-		removedLink = true
-		s.forgetEffective()
+		if keptLink == "" {
+			if err := os.Remove(link); err != nil {
+				return err
+			}
+			removedLink = true
+			s.forgetEffective()
+		}
 	}
 	for _, candidate := range []string{
 		filepath.Join(s.nginxDir, "sites-available", name),
@@ -765,6 +777,9 @@ func (s *Service) DeleteSite(ctx context.Context, name string) error {
 		// the box down at the next reload, so removing it is the whole job
 		// and reporting failure afterwards would be wrong.
 		return nil
+	}
+	if keptLink != "" {
+		return fmt.Errorf("no such site: %s — %s, and stays", name, keptLink)
 	}
 	return fmt.Errorf("no such site: %s", name)
 }

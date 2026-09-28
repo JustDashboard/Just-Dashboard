@@ -234,6 +234,98 @@ func TestSiteFileSaysWhatHoldsTheNamesLink(t *testing.T) {
 	}
 }
 
+// Deleting a site whose name another site's link holds used to remove that
+// link wherever it pointed: the hand-written site linked under its domain
+// stopped being served, and the delete reported success.
+func TestDeleteSiteLeavesAnotherSitesLinkAlone(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	ctx := context.Background()
+	enabled := func(name string) string { return filepath.Join(root, "sites-enabled", name) }
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	write := func(path string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte("server {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := func(target, name string) {
+		t.Helper()
+		if err := os.Symlink(target, enabled(name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gone := func(path string) bool {
+		_, err := os.Lstat(path)
+		return os.IsNotExist(err)
+	}
+
+	// A file of the name, not enabled, beside a link of that name to the
+	// hand-written site: the file goes, the link stays.
+	write(available("shopfront.conf"))
+	link("../sites-available/shopfront.conf", "shop.example.com")
+	write(available("shop.example.com"))
+	if err := service.DeleteSite(ctx, "shop.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if !gone(available("shop.example.com")) {
+		t.Fatal("the site's file is still there")
+	}
+	if _, err := os.Stat(available("shop.example.com.bak")); err != nil {
+		t.Fatalf("the previous content was not kept: %v", err)
+	}
+	if got := linkTarget(t, root, "shop.example.com"); got != "../sites-available/shopfront.conf" {
+		t.Fatalf("the hand-written site's link now names %q", got)
+	}
+
+	// The link alone, with no file of the name: nothing of this site's to
+	// delete, and the other site's link is not taken instead.
+	err := service.DeleteSite(ctx, "shop.example.com")
+	want := "no such site: shop.example.com — sites-enabled/shop.example.com already enables " +
+		available("shopfront.conf") + ", and stays"
+	if err == nil || err.Error() != want {
+		t.Fatalf("deleting a name only another site's link holds: %v", err)
+	}
+	if got := linkTarget(t, root, "shop.example.com"); got != "../sites-available/shopfront.conf" {
+		t.Fatalf("the hand-written site's link now names %q", got)
+	}
+
+	// A file of its own in sites-enabled is a site too, with no backup if it
+	// were removed here.
+	write(enabled("inline.example.com"))
+	write(available("inline.example.com"))
+	if err := service.DeleteSite(ctx, "inline.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if gone(enabled("inline.example.com")) || !gone(available("inline.example.com")) {
+		t.Fatal("the delete took the file in sites-enabled, or left its own")
+	}
+
+	// The site's own link goes with it, spelled either way.
+	for _, target := range []string{"../sites-available/app", available("app")} {
+		write(available("app"))
+		link(target, "app")
+		if err := service.DeleteSite(ctx, "app"); err != nil {
+			t.Fatal(err)
+		}
+		if !gone(enabled("app")) || !gone(available("app")) {
+			t.Fatalf("the site's own link %s or its file survived the delete", target)
+		}
+	}
+
+	// A link to nothing enables nothing and fails the next reload, whoever
+	// it named: its own file deleted by hand, or another that is gone.
+	link("../sites-available/stale", "stale")
+	link(available("elsewhere-gone"), "orphan")
+	for _, name := range []string{"stale", "orphan"} {
+		if err := service.DeleteSite(ctx, name); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !gone(enabled(name)) {
+			t.Fatalf("the dangling link %s stayed", name)
+		}
+	}
+}
+
 // A reload that fails after a clean test is the running process's problem,
 // not the file's: the site is saved and in place, and the result says what
 // nginx did not do instead of reporting that nothing was applied.

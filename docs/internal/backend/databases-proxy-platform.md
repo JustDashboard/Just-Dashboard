@@ -374,7 +374,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   replace the link before `nginx -t`, so the test never saw the two sites claim one name and the other
   site silently stopped being served. An edit that keeps its link state leaves such a link alone and
   reports itself not enabled (`TestSaveSiteLeavesAnotherSitesLinkAlone`,
-  `TestSiteFileSaysWhatHoldsTheNamesLink`).
+  `TestSiteFileSaysWhatHoldsTheNamesLink`). `DeleteSite` had the same bug: it removed
+  `sites-enabled/<name>` wherever it pointed. Now it removes the link only when the link names the
+  file being deleted, or points at nothing (a dangling link enables nothing and fails the next reload).
+  It deletes the file and leaves any other link, or a file of its own in sites-enabled, where it is. A
+  name that only such a link holds is "no such site", and the error says what holds the name
+  (`TestDeleteSiteLeavesAnotherSitesLinkAlone`).
 
   The form's side of this lives in pure modules beside `site-form.tsx`, tested with bun:
   `site-identity.ts` works a new site's file name and certificate paths out of its whole first domain on
