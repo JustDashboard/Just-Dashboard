@@ -20,6 +20,23 @@ export type Certificate = {
   staging?: boolean
   /** This server's local CA signed it: trusted only where its root is installed. */
   localCA?: boolean
+  /** A Caddy certificate's release copies: what deployments of its domain were activated with. */
+  evidence?: CertificateEvidence[]
+}
+
+/** One of Caddy's caddy-<hash> release copies, kept beside the imports. */
+export type CertificateEvidence = {
+  name: string
+  /** The directory holding the copy. */
+  path: string
+  domains: string[]
+  notAfter: string
+}
+
+/** What a prune removed, and the copies asked for that a route or release names again. */
+export type EvidencePrune = {
+  removed: string[]
+  kept: string[]
 }
 
 export type CertbotCert = {

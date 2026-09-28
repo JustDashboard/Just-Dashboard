@@ -146,7 +146,10 @@ without a phrase — the same switch installs it again — and it never removes 
 name that does not carry the dashboard's marker. Starting the renewal timer's service now
 (`POST /certificates/renewal/run`) is a system.admin write, not a destructive one: it is the run the
 timer makes twice a day anyway, and it waits for any certbot job on the page like every other. The DNS token an issuance carries is saved by its job, never before the request is
-accepted, so a refused request leaves no credential on disk.
+accepted, so a refused request leaves no credential on disk. Pruning Caddy's release copies
+(`DELETE /certificates/evidence`) is destructive without a phrase: it accepts only `caddy-<24 hex>`
+names, so the join stays inside the imports directory, and deletes a copy only when, rechecked at that
+moment, no Caddy route serves its domain and no release in the deployment store names it.
 
 Discarding a waiting signing request (`DELETE /certificates/csr/{name}`) is destructive without a
 phrase: it deletes a key nothing uses yet, and the request is made again in a minute. Adding the

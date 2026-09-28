@@ -24,15 +24,20 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
   const out: ProxyFinding[] = []
 
   for (const cert of certs ?? []) {
+    // Caddy renews what it serves on its own schedule: its renewal window is
+    // nothing to act on, and one no route uses is Caddy's to clear away.
+    const caddy = cert.source === "caddy"
+    if (caddy && !cert.error && !cert.staging && !(cert.expired && cert.usedBy.length > 0)) continue
     const usedBy = cert.usedBy.length ? ` Used by ${cert.usedBy.join(", ")}.` : ""
     if (cert.error) {
       out.push({
         id: `cert.error.${cert.path || cert.name}`,
         level: "warning",
-        title: `${cert.name} could not be read`,
+        title: caddy ? "Caddy's certificates could not be read" : `${cert.name} could not be read`,
         detail: cert.error,
-        advice:
-          "A site pointing at a certificate nginx cannot read fails its next reload. Fix or replace the file, or point the site elsewhere.",
+        advice: caddy
+          ? "The list leaves out what the Docker ingress serves until it can read them. Check that the Caddy container is running and Docker answers."
+          : "A site pointing at a certificate nginx cannot read fails its next reload. Fix or replace the file, or point the site elsewhere.",
         meta: "certificate",
         href: "/proxy/certificates",
       })
@@ -54,7 +59,9 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
         level: "critical",
         title: `${cert.name} has expired`,
         detail: `Expired ${expiredAgo(cert.notAfter)}; every browser refuses it now.${usedBy}`,
-        advice: "Renew it, then find out why the renewal did not run on its own.",
+        advice: caddy
+          ? "Caddy renews it itself and did not. Its container log says why: usually DNS or inbound port 80 or 443."
+          : "Renew it, then find out why the renewal did not run on its own.",
         meta: "certificate",
         href: "/proxy/certificates",
       })
@@ -169,6 +176,9 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
  * would be refused just the same.
  */
 function stagingAdvice(cert: Certificate, certbot: CertbotState | null | undefined): string {
+  if (cert.source === "caddy") {
+    return "Caddy obtained it from the staging authority JD_ACME_DIRECTORY names. Point it at a production directory, restart the dashboard and deploy again, and Caddy obtains a real one."
+  }
   const certbotOwns = cert.source === "certbot"
   if (certbot === null) {
     return "certbot is not installed, so this dashboard cannot issue a real certificate. Import one for these names from the Certificates page and point the site at it."

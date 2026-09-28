@@ -43,6 +43,10 @@ type Certificate struct {
 	Staging bool `json:"staging,omitempty"`
 	// LocalCA is a certificate this host's local CA signed (localca.go).
 	LocalCA bool `json:"localCA,omitempty"`
+	// Evidence is the release copies kept for a Caddy certificate's domain:
+	// what deployments were activated with, folded under the certificate
+	// Caddy renews rather than listed as imports of their own.
+	Evidence []CertificateEvidence `json:"evidence,omitempty"`
 }
 
 // expiryWarningDays matches Let's Encrypt's own renewal window: certbot
@@ -64,13 +68,20 @@ func (s *Service) ListCertificates(ctx context.Context) ([]Certificate, error) {
 }
 
 // CertificateInventory is ListCertificates as the Certificates page and the
-// security posture read it: without the Caddy release copies no site serves.
+// security posture read it: without the Caddy release copies no site serves,
+// and with the certificates the Docker ingress serves and renews itself.
 func (s *Service) CertificateInventory(ctx context.Context) ([]Certificate, error) {
 	certs, err := s.ListCertificates(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return markLocalCALeaves(withoutCaddyEvidence(certs)), nil
+	out, evidence := splitCaddyEvidence(certs)
+	out = markLocalCALeaves(out)
+	caddy, err := s.caddyInventory(ctx, evidence)
+	if err != nil {
+		return append(out, caddyInventoryFailure(err)), nil
+	}
+	return append(out, caddy...), nil
 }
 
 // listCertificates is ListCertificates with its directories as arguments, so
