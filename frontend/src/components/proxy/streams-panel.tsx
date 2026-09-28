@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
+  ChartActivity,
   Code,
   Connection,
   Copy,
@@ -33,6 +34,7 @@ import type {
   StreamSpec,
   StreamStatus,
   StreamTestResult,
+  StreamTrafficSummary,
 } from "@/lib/types"
 import {
   STREAM_FILTERS,
@@ -69,10 +71,11 @@ import {
   testPlace,
   testStatus,
   testSummary,
+  trafficLine,
   type StreamFilter,
 } from "@/lib/streams"
 import { STREAM_PRESETS, applyPreset } from "@/lib/stream-presets"
-import { duration } from "@/lib/format"
+import { bytes, duration } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -93,6 +96,7 @@ import { StreamSetup } from "@/components/proxy/stream-setup"
 import { AccessRules } from "@/components/proxy/access-rules"
 import { StreamServers } from "@/components/proxy/stream-servers"
 import { StreamTLS } from "@/components/proxy/stream-tls"
+import { StreamTrafficPanel } from "@/components/proxy/stream-traffic"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
@@ -151,6 +155,16 @@ export function StreamsPage() {
     setCheckingFrom(reading)
     refresh()
   }
+  // The last hour of every stream that logs, for the cards; a stream that
+  // does not log has no line rather than a zero it never measured.
+  const { data: summaries } = usePoll<Record<string, StreamTrafficSummary>>(
+    (signal) => get("/proxy/streams/traffic", undefined, signal),
+    60_000,
+  )
+  const [traffic, setTraffic] = useState<{ stream: StreamEntry | null; open: boolean }>({
+    stream: null,
+    open: false,
+  })
   const admin = can("system.admin")
   const noNginx = !proxy.loading && !proxy.hasNginx
 
@@ -470,6 +484,18 @@ export function StreamsPage() {
             run: recheck,
           },
         ]
+  // Reading what a stream carried is no change, so every account has it.
+  const trafficVerb = (stream: StreamEntry): Verb[] =>
+    stream.error
+      ? []
+      : [
+          {
+            key: "traffic",
+            label: "Traffic",
+            icon: ChartActivity,
+            run: () => setTraffic({ stream, open: true }),
+          },
+        ]
   const rawVerb = (stream: StreamEntry): Verb => ({
     key: "raw",
     label: "Raw file",
@@ -517,7 +543,7 @@ export function StreamsPage() {
   })
   const verbsFor = (stream: StreamEntry): Verb[] =>
     !admin
-      ? [...recheckVerb(stream), ...copyVerbs(stream)]
+      ? [...recheckVerb(stream), ...trafficVerb(stream), ...copyVerbs(stream)]
       : stream.paused
         ? [
             {
@@ -529,6 +555,7 @@ export function StreamsPage() {
               run: () => void resume(stream),
             },
             ...testVerb(stream),
+            ...trafficVerb(stream),
             rawVerb(stream),
             ...duplicateVerb(stream),
             ...copyVerbs(stream),
@@ -545,6 +572,7 @@ export function StreamsPage() {
             },
             ...recheckVerb(stream),
             ...testVerb(stream),
+            ...trafficVerb(stream),
             rawVerb(stream),
             ...duplicateVerb(stream),
             ...copyVerbs(stream),
@@ -757,6 +785,11 @@ export function StreamsPage() {
                         // would repeat what the steps above already say.
                         (live || stream.state !== "not-read") && <StateReason stream={stream} />
                       }
+                      {summaries?.[stream.name] && (
+                        <p className="numeric text-hint text-muted-foreground">
+                          {trafficLine(summaries[stream.name], bytes)}
+                        </p>
+                      )}
                     </>
                   )}
                   <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
@@ -803,6 +836,14 @@ export function StreamsPage() {
           forgetSessionState("proxy.stream.form.")
           setRaw(stream)
         }}
+      />
+      <StreamTrafficPanel
+        stream={traffic.stream}
+        open={traffic.open}
+        onOpenChange={(open) => setTraffic((t) => ({ ...t, open }))}
+        admin={admin}
+        live={live}
+        onSaved={refresh}
       />
       <ConfigEditor
         open={raw !== null}
@@ -1064,6 +1105,9 @@ const BLANK: StreamSpec = {
   upstream: "",
   proxyProtocol: false,
   allowFrom: [],
+  // On for a new stream: an open port nobody can see the use of is the one
+  // an operator cannot judge.
+  logConnections: true,
 }
 
 function StreamForm({
@@ -1489,6 +1533,12 @@ function StreamForm({
               hint="Lets the backend see the real client address. It has to be expecting the header, or it reads it as the first bytes of the connection and fails in a way that looks like a protocol mismatch."
               checked={spec.proxyProtocol}
               onCheckedChange={(v) => edit({ proxyProtocol: v })}
+            />
+            <OptionRow
+              title="Log connections"
+              hint={`nginx writes one line per session — client, outcome, bytes, length — to /var/log/nginx/stream-${spec.name || "<name>"}.log, which the Traffic view reads.`}
+              checked={Boolean(spec.logConnections)}
+              onCheckedChange={(v) => edit({ logConnections: v })}
             />
           </OptionList>
 

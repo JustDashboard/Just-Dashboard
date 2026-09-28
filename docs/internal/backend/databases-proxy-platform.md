@@ -1686,6 +1686,20 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     resolves it once per reload. `unix:` upstreams are not tested (the socket path may not be in the
     container). netsec's PortCheck/BannerGrab are not reused: their own 6 s timeouts and a read that
     ignores the context would overrun the 5 s cap, and they answer in prose rather than an outcome.
+  - **Traffic** (`stream_traffic.go`). `LogConnections` (on by default for a new stream in the form)
+    renders `log_format jd_<ident>_log '$msec $remote_addr $protocol $status $bytes_sent $bytes_received
+    $session_time "$upstream_addr" $server_port';` at the top of the stream's own file and
+    `access_log /var/log/nginx/stream-<name>.log jd_<ident>_log;` in its server; the parser reads back exactly
+    that pair (and `access_log off`), anything else is unsupported. The format lives in each file rather than
+    a shared `_jd-*.conf`, so a paused or copied stream carries it and there is no second managed file.
+    `GET /proxy/streams/{name}/traffic?window=1h|24h|7d` reads at most 8 MiB from the end of the log and its
+    `.1` rotation (a `.2.gz` left unread makes `complete` false): sessions by bucket (by the time they
+    ended), status mix, bytes each way, session-length percentiles and the 12 busiest clients.
+    `GET /proxy/streams/traffic` is the last hour of every logging stream for the cards (1 MiB each), and
+    `GET /proxy/streams/{name}/sessions` lists the ESTABLISHED TCP sockets on the stream's port whose owner
+    is nginx or unknown (gopsutil; a UDP-only stream has no per-client socket and says so). All three are
+    readable by every account, like the nginx access logs in the log viewer; a Deny or Allow on a client
+    is an ordinary save of the stream (system.admin, audited `proxy.stream.apply`).
   - **A save** (`ApplyStream(spec, previous, reload)`) refuses a new name, or a rename, onto a taken one
     (409 `stream_exists`) and a port another stream, a site or another program holds (`PortInUseError`,
     409 `port_in_use` on `spec.listen` with the next free port): `nginx -t` passes all three, and the
