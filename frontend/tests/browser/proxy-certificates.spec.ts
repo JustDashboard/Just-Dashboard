@@ -1,5 +1,14 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test"
-import { certs, inThirtyDays, json, mockProxy, mockShowcase, now, user } from "./proxy-fixtures"
+import {
+  availability,
+  certs,
+  inThirtyDays,
+  json,
+  mockProxy,
+  mockShowcase,
+  now,
+  user,
+} from "./proxy-fixtures"
 import {
   certbotJob,
   certbotState,
@@ -630,6 +639,53 @@ test("a test certificate is a finding on the overview", async ({ page }) => {
       "A staging authority signed it, so every browser refuses it. Used by test.example.com.",
     ),
   ).toBeVisible()
+})
+
+test("with a staging authority configured, the overview's test-certificate finding points at the directory, not a real issuance", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page)
+  await mockStagingLineage(page, { testAuthority: true })
+  await page.goto("/proxy")
+  await page.getByRole("button", { name: /^test\.example\.com is a test certificate/ }).click()
+  await expect(
+    page.getByText(
+      "JD_ACME_DIRECTORY names a staging authority, so what this dashboard issues is a test certificate too. Clear it or point it at a production directory and restart the dashboard, then replace this one.",
+    ),
+  ).toBeVisible()
+  await expect(page.getByText(/real certificate from the Certificates page/)).toHaveCount(0)
+})
+
+test("with certbot not installed, the overview's test-certificate finding points at an import", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockStagingInventory(page)
+  // As the backend answers on such a host: the overview never asks certbot.
+  await page.route("**/api/v1/proxy/status", (route) =>
+    json(route, { ...availability, certbot: false }),
+  )
+  await page.route("**/api/v1/certificates/certbot", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "certbot_unavailable", message: "certbot is not installed on this host" },
+      }),
+    }),
+  )
+  await page.goto("/proxy")
+  await page.getByRole("button", { name: /^test\.example\.com is a test certificate/ }).click()
+  await expect(
+    page.getByText(
+      "certbot is not installed, so this dashboard cannot issue a real certificate. Import one for these names from the Certificates page and point the site at it.",
+    ),
+  ).toBeVisible()
+
+  await page.goto("/proxy/certificates")
+  await expect(page.getByRole("button", { name: "Import", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Issue certificate", exact: true })).toHaveCount(0)
 })
 
 test("the overview's certificate tile and expiry list count a test certificate as refused", async ({

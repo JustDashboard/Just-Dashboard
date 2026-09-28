@@ -36,10 +36,7 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
         level: cert.usedBy.length ? "critical" : "warning",
         title: `${cert.name} is a test certificate`,
         detail: `A staging authority signed it, so every browser refuses it.${usedBy}`,
-        advice:
-          cert.source === "certbot"
-            ? "Replace it with a real certificate from the Certificates page, then reload nginx."
-            : "Issue a real certificate for these names from the Certificates page and point the site at it.",
+        advice: stagingAdvice(cert, certbot),
         meta: "certificate",
         href: "/proxy/certificates",
       })
@@ -82,4 +79,23 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
   }
 
   return out
+}
+
+/**
+ * The way to a real certificate, through what the Certificates page offers:
+ * without certbot it issues nothing, and while JD_ACME_DIRECTORY names a
+ * staging authority it offers no real issuance, since whatever it ordered
+ * would be refused just the same.
+ */
+function stagingAdvice(cert: Certificate, certbot: CertbotState | null | undefined): string {
+  const certbotOwns = cert.source === "certbot"
+  if (certbot === null) {
+    return "certbot is not installed, so this dashboard cannot issue a real certificate. Import one for these names from the Certificates page and point the site at it."
+  }
+  if (certbot?.testAuthority) {
+    return `JD_ACME_DIRECTORY names a staging authority, so what this dashboard issues is a test certificate too. Clear it or point it at a production directory and restart the dashboard, then ${certbotOwns ? "replace this one" : "issue a real one and point the site at it"}.`
+  }
+  return certbotOwns
+    ? "Replace it with a real certificate from the Certificates page, then reload nginx."
+    : "Issue a real certificate for these names from the Certificates page and point the site at it."
 }

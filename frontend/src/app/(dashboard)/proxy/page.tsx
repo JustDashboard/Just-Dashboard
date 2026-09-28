@@ -102,7 +102,8 @@ export default function ProxyOverviewPage() {
   }, [certs.data])
   // certbot being absent is a fact about the host, not a failure to report.
   const certbotGone =
-    certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable"
+    status?.certbot === false ||
+    (certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable")
   const findings = useMemo(
     () =>
       foldProxyFindings({

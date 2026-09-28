@@ -81,4 +81,37 @@ describe("a test certificate's finding", () => {
     })
     expect(finding.advice).toContain("point the site at it")
   })
+
+  // The Certificates page offers no real issuance then, so the advice may not
+  // send the operator to it for one.
+  test("with a staging authority configured, the way out is the directory", () => {
+    const certbot = { available: true, autoRenew: true, certs: [], testAuthority: true }
+    const [lineage, named] = certificateFindings({
+      certs: [
+        staging({ usedBy: ["test.example.com"] }),
+        staging({ source: "nginx:test.example.com", path: "/etc/nginx/ssl/test.crt" }),
+      ],
+      certbot,
+    })
+    expect(lineage.advice).toBe(
+      "JD_ACME_DIRECTORY names a staging authority, so what this dashboard issues is a test certificate too. Clear it or point it at a production directory and restart the dashboard, then replace this one.",
+    )
+    expect(named.advice).toEndWith("then issue a real one and point the site at it.")
+    for (const finding of [lineage, named]) {
+      expect(finding.advice).not.toContain("from the Certificates page")
+    }
+  })
+
+  // Without certbot the page has Import and no issuance verb.
+  test("with certbot not installed, the way out is an import", () => {
+    const findings = certificateFindings({
+      certs: [staging(), staging({ source: "nginx:test.example.com", path: "/etc/nginx/ssl/t" })],
+      certbot: null,
+    })
+    for (const finding of findings) {
+      expect(finding.advice).toBe(
+        "certbot is not installed, so this dashboard cannot issue a real certificate. Import one for these names from the Certificates page and point the site at it.",
+      )
+    }
+  })
 })
