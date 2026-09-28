@@ -37,6 +37,9 @@ func (s *Server) mountProxyInsightRoutes(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPost, "/upstreams/check", s.handle(s.handleProxyUpstreams(true)))
 	})
+	// Rules that tell the notification channels about these readings,
+	// the operator's alone; see mountProxyAlertRoutes.
+	r.Route("/alerts", s.mountProxyAlertRoutes)
 }
 
 // upstreamBudget covers a check that has to dump the configuration first

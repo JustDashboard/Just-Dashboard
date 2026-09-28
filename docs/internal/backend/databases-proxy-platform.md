@@ -1969,6 +1969,28 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   numbers replaced, and upstream; recognised lines carry a plain title and advice (refused upstream,
   timeouts, too-large bodies with the size to raise `client_max_body_size` to, missing files, TLS
   handshakes and so on).
+- **Proxy alerts** (`api/proxy_alerts.go`, `api/handlers_proxy_alerts.go`; tables `proxy_alert_rules`,
+  `proxy_alert_state`, `proxy_alert_events` in `store/schema_proxy.go`): rules of kind `cert_expiring`
+  (`params.days` from 21/7/3/1), `cert_expired`, `engine_down` (the engine's systemd unit not
+  active/reloading/activating), `upstream_down` (`params.minutes`, 5–1440; the `/proxy/upstreams` check,
+  so only addresses nginx's own config names are dialled), `watch_unreachable` / `watch_untrusted`
+  (`CheckDomain` on each watched domain) and `site_errors` (`threshold` %, `minutes`, `minRequests` over
+  the site's access log through `proxyExtras.siteTraffic`). A pass runs every 5 min (`proxyAlerts.Start`
+  from `startProxyExtras`; clock, observer and deliverer are fields for tests). State is one row per
+  (rule, subject, level); a transition is told once — firing when the subject first holds (engine and
+  unreachable: two passes and a minute; upstream: two passes and the rule's minutes), recovered once the
+  reading no longer finds it — one message per subject at its most severe level; a source that cannot be
+  read, or a subject it cannot judge, keeps its state. Messages go through `DeliverNotification` as
+  `proxy.alert.firing` / `proxy.alert.recovered` with `NotificationEnvelope.Proxy`, rendered by
+  `renderProxyAlert`; a rule with no channels tells every enabled one, a paused channel gets nothing, a
+  muted subject is followed but not told, and every transition is kept in the newest 500 events. Routes,
+  all `system.admin` and audited (`proxy.alerts.*`): `GET /proxy/alerts` (rules, firing/pending/muted
+  subjects, last 100 events), `POST /proxy/alerts/rules`, `POST /proxy/alerts/test {channelId}` (a
+  `[test]` message to one existing channel), `POST /proxy/alerts/evaluate` (a pass now; holds still
+  apply); behind `destructive`: `PUT /proxy/alerts/rules/{id}` (can pause; new terms or a pause clear the
+  rule's state except mutes), `DELETE /proxy/alerts/rules/{id}`, `PUT /proxy/alerts/mutes {ruleId, subject,
+  muted}`. Not offered because nothing on this build reads them: a failed certbot renewal, served-certificate
+  drift, and a watched endpoint's grade dropping.
 - **Certificates carry their fingerprint and serial**, the SHA-256 of the DER and the serial number in
   the uppercase colon form `openssl x509 -fingerprint -sha256` prints, which
   `TestCertificateFingerprintMatchesOpenSSL` checks against openssl itself.

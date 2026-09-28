@@ -35,6 +35,10 @@ const (
 	// the channels it reaches, and these are what it sends them.
 	NotificationEventTrafficFiring    = "traffic.firing"
 	NotificationEventTrafficRecovered = "traffic.recovered"
+	// The proxy events, likewise, are sent to the channels a proxy alert
+	// rule names rather than selected on a channel.
+	NotificationEventProxyFiring    = "proxy.alert.firing"
+	NotificationEventProxyRecovered = "proxy.alert.recovered"
 )
 
 // NotificationEvents is the closed vocabulary a channel may select from.
@@ -304,6 +308,27 @@ type NotificationEnvelope struct {
 	// Alert carries a traffic alert's reading; it is set on the two traffic
 	// events and on nothing else.
 	Alert *TrafficAlertEnvelope `json:"alert,omitempty"`
+	// Proxy carries a proxy alert's subject and reading; it is set on the two
+	// proxy events and on nothing else.
+	Proxy *ProxyAlertEnvelope `json:"proxy,omitempty"`
+}
+
+// ProxyAlertEnvelope is what a proxy alert says when a subject — a
+// certificate, the engine, an upstream, a watched endpoint, a site — crosses
+// a rule's line or comes back. Label names the subject in words and Detail is
+// the reading, so a provider message can be acted on without opening the
+// dashboard.
+type ProxyAlertEnvelope struct {
+	RuleID  int64  `json:"ruleId"`
+	Kind    string `json:"kind"`
+	Subject string `json:"subject"`
+	Level   string `json:"level"`
+	Label   string `json:"label"`
+	Detail  string `json:"detail"`
+	// Since is when the subject entered the state being announced.
+	Since time.Time `json:"since"`
+	// Test marks a message sent from "Send test", so nobody acts on it.
+	Test bool `json:"test,omitempty"`
 }
 
 // TrafficAlertEnvelope is what a traffic alert says about itself when it
@@ -349,6 +374,8 @@ func renderNotification(envelope NotificationEnvelope) notificationMessage {
 	switch envelope.Event {
 	case NotificationEventTrafficFiring, NotificationEventTrafficRecovered:
 		return renderTrafficAlert(envelope, project, environment)
+	case NotificationEventProxyFiring, NotificationEventProxyRecovered:
+		return renderProxyAlert(envelope)
 	case NotificationEventTest:
 		message.Emoji, message.Color = "🔔", 0x5865f2
 		message.Title = "Test notification from Just Dashboard"
@@ -437,6 +464,58 @@ func renderTrafficAlert(envelope NotificationEnvelope, project, environment stri
 		message.Summary = fmt.Sprintf("Back within the limit of %s.", limit)
 	}
 	fields := [][2]string{{"Reading", reading}, {"Limit", limit}, {"Window", window}}
+	if !alert.Since.IsZero() {
+		fields = append(fields, [2]string{"Since", alert.Since.UTC().Format("2006-01-02 15:04 UTC")})
+	}
+	message.Fields = fields
+	return message
+}
+
+// proxyAlertWhat is each proxy alert kind as the noun phrase a title leads
+// with. The kinds are the api package's; an unknown one still renders.
+var proxyAlertWhat = map[string]string{
+	"cert_expiring":     "Certificate expiring",
+	"cert_expired":      "Certificate expired",
+	"engine_down":       "Proxy engine not running",
+	"upstream_down":     "Upstream down",
+	"watch_unreachable": "Watched endpoint unreachable",
+	"watch_untrusted":   "Watched endpoint untrusted",
+	"site_errors":       "Site failing",
+}
+
+// renderProxyAlert is the sentence a proxy alert sends: what, which subject,
+// and the reading that decided it.
+func renderProxyAlert(envelope NotificationEnvelope) notificationMessage {
+	message := notificationMessage{URL: envelope.URL}
+	alert := envelope.Proxy
+	if alert == nil {
+		alert = &ProxyAlertEnvelope{}
+	}
+	what := proxyAlertWhat[alert.Kind]
+	if what == "" {
+		what = "Proxy alert"
+	}
+	label := alert.Label
+	if label == "" {
+		label = alert.Subject
+	}
+	prefix := ""
+	if alert.Test {
+		prefix = "[test] "
+	}
+	if envelope.Event == NotificationEventProxyFiring {
+		message.Emoji, message.Color = "🚨", 0xef4444
+		message.Title = fmt.Sprintf("%s%s — %s", prefix, what, label)
+		message.Summary = alert.Detail
+	} else {
+		message.Emoji, message.Color = "✅", 0x22c55e
+		message.Title = fmt.Sprintf("%sResolved: %s — %s", prefix, what, label)
+		message.Summary = alert.Detail
+	}
+	fields := [][2]string{{"Subject", label}}
+	if alert.Detail != "" {
+		fields = append(fields, [2]string{"Reading", alert.Detail})
+	}
 	if !alert.Since.IsZero() {
 		fields = append(fields, [2]string{"Since", alert.Since.UTC().Format("2006-01-02 15:04 UTC")})
 	}

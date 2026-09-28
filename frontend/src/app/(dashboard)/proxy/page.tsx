@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Globe, RefreshClockwise } from "@/components/icons"
+import { ArrowRight, Bell, Globe, RefreshClockwise } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type {
@@ -67,6 +67,7 @@ import { overviewRoutes, routeKind, routeTarget } from "@/components/proxy/overv
 import { upstreamLabel, upstreamsOf, upstreamTone } from "@/components/proxy/upstream-health"
 import { busiestItems, trafficHref, trafficLabel } from "@/components/proxy/site-traffic"
 import { errorFinding } from "@/components/proxy/site-errors"
+import { AlertsPanel } from "@/components/proxy/alerts-panel"
 
 /**
  * What a poll last answered, or nothing when its last read failed. A source
@@ -106,6 +107,7 @@ export default function ProxyOverviewPage() {
   const router = useRouter()
   const admin = can("system.admin")
   const engine = useEngineUnit(status)
+  const [alertsOpen, setAlertsOpen] = useState(false)
 
   const vhosts = usePoll(
     (signal) => reading(get<VHost[]>("/proxy/vhosts", undefined, signal)),
@@ -407,14 +409,23 @@ export default function ProxyOverviewPage() {
         title="Proxy & TLS"
         className="justify-end"
         actions={
-          <Freshness
-            at={updatedAt}
-            refreshing={refreshing}
-            late={late}
-            onRefresh={refreshEverything}
-          />
+          <>
+            <Freshness
+              at={updatedAt}
+              refreshing={refreshing}
+              late={late}
+              onRefresh={refreshEverything}
+            />
+            {admin && (
+              <Button size="xs" variant="ghost" onClick={() => setAlertsOpen(true)}>
+                <Bell />
+                Alerts
+              </Button>
+            )}
+          </>
         }
       />
+      {admin && <AlertsPanel open={alertsOpen} onOpenChange={setAlertsOpen} />}
 
       <StatGrid columns={4} dense>
         <StatLink href="/proxy/sites" label="Sites">
