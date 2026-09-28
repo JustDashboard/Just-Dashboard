@@ -36,6 +36,13 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 	// The public parts of a listed file, which any TLS client is sent
 	// anyway; never its key.
 	r.Method(http.MethodGet, "/download", s.handle(s.handleCertDownload))
+	// Checks over the files and the server blocks nginx loads: key modes,
+	// shared and weak keys, mismatched pairs, names a block's certificate
+	// does not cover, and certbot names that resolve elsewhere, asked of
+	// this host's resolver for the host's own lineages only. Neither
+	// answer carries a key.
+	r.Method(http.MethodGet, "/findings", s.handle(s.handleCertFindings))
+	r.Method(http.MethodGet, "/coverage", s.handle(s.handleCertCoverage))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// A handshake with each site that names a certificate: loopback
@@ -118,6 +125,23 @@ func (s *Server) handleCertServed(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.JSON(w, http.StatusOK, served)
+	return nil
+}
+
+// handleCertFindings answers the certificate hygiene checks.
+func (s *Server) handleCertFindings(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	httpx.JSON(w, http.StatusOK, s.modules.proxy.CertificateHygiene(ctx))
+	return nil
+}
+
+// handleCertCoverage answers which certificate covers each server name, and
+// which listed certificates no server block names.
+func (s *Server) handleCertCoverage(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	httpx.JSON(w, http.StatusOK, s.modules.proxy.CertificateCoverage(ctx))
 	return nil
 }
 

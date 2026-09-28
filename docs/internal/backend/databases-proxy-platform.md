@@ -1897,7 +1897,19 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   rest) of a listed file as PEM, 403 for an unlisted path; `POST /certificates/export` (system.admin,
   typed `export <name>`, `{path, format: key|pfx, password, legacy}`) returns the matching key as PEM
   or a PFX (OpenSSL 3's AES-256/PBKDF2 default, or 3DES/SHA-1 with `legacy`; password at least 8
-  characters) — see invariants.md for why it is typed and how the password stays out of argv. Back to the served check: `settle=1` asks again for up to three seconds while a site
+  characters) — see invariants.md for why it is typed and how the password stays out of argv. Hygiene and coverage (`cert_hygiene.go`, both read): `GET /certificates/findings` reads the
+  server blocks from `nginx -T` through `NginxTree` (includes followed, http- and stream-level
+  `ssl_certificate` inherited, pairs matched by position; a `$variable`, `data:` or `engine:` value
+  is not read) and reports a key another account can read (the mode and every directory above the
+  resolved file must let it through, so certbot's 0700 archive hides a 0644 key), a certificate
+  paired with a key that is not its own, one key behind certificates sharing no name, an RSA key
+  under 2048 bits or a SHA-1 signature below the root, a TLS block answering names its certificate
+  does not cover, and a certbot lineage whose every plain name is NXDOMAIN or resolves off this
+  host's public addresses (a Cloudflare address, or a host with no public address, is not judged).
+  `GET /certificates/coverage` maps every server name to the certificate its block serves, or a
+  listed one that could, and lists the certificates no server block, stream or Caddyfile names;
+  when `nginx -T` fails (a mismatched pair is enough) the enabled site files are parsed alone,
+  `configNote` says so, and `unused` is null. Neither answer carries key material. Back to the served check: `settle=1` asks again for up to three seconds while a site
   serves anything else, since nginx swaps its workers a moment after a reload's signal. The page
   offers "Reload nginx" only while a site answers with a test certificate, and its toast says what
   the sites answered after the reload. `Certificate.Staging` (`certs.go`,

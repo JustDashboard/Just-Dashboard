@@ -177,6 +177,8 @@ export const routes: ProxyRoutes = {
   "/certificates/certbot": (route) => json(route, certbotState()),
   "/certificates/dns-providers": (route) => json(route, []),
   "/certificates/served": (route) => json(route, []),
+  "/certificates/findings": (route) => json(route, { findings: [], config: "nginx -T" }),
+  "/certificates/coverage": (route) => json(route, { names: [], unused: [], config: "nginx -T" }),
   "/certificates/renewal/log": (route) => json(route, renewalLog()),
   "/certificates/renewal-hook": (route) =>
     json(route, reloadHook(route.request().method() === "DELETE" ? "missing" : "installed")),

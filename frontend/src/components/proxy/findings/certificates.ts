@@ -6,22 +6,69 @@ import {
   standingFailures,
   unreloadedRenewals,
 } from "@/lib/certificates"
-import type { Certificate, CertbotState } from "@/lib/types"
+import type { Certificate, CertbotState, CertificateHygiene } from "@/lib/types"
 import type { ProxyFinding } from "@/components/proxy/findings/shared"
 
 export type CertificateFindingInput = {
   certs?: Certificate[]
   /** `null` when certbot is not installed, which is not a finding. */
   certbot?: CertbotState | null
+  /** GET /certificates/findings, which reads the keys and the server blocks. */
+  hygiene?: CertificateHygiene
+}
+
+/** What the Certificates page can do about a hygiene finding, where it offers it. */
+export type HygieneActions = {
+  /** Opens the Issue dialog on names no certificate here covers. */
+  issue?: (names: string[]) => void
+  /** Deletes a certbot lineage whose names point elsewhere. */
+  deleteLineage?: (name: string) => void
+}
+
+/**
+ * The hygiene checks the backend ran, each opening the certificate it is
+ * about, with the remedy the page can start where there is one.
+ */
+export function hygieneFindings(
+  hygiene: CertificateHygiene | undefined,
+  actions: HygieneActions = {},
+): ProxyFinding[] {
+  return (hygiene?.findings ?? []).map((finding) => {
+    const { issue, deleteLineage } = actions
+    const names = finding.names ?? []
+    const lineage = finding.lineage
+    return {
+      id: finding.id,
+      level: finding.level,
+      title: finding.title,
+      detail: finding.detail,
+      advice: finding.advice,
+      meta: finding.kind === "stale" || finding.kind === "uncovered" ? "coverage" : "key",
+      href: finding.certificate
+        ? `/proxy/certificates?cert=${encodeURIComponent(finding.certificate)}`
+        : "/proxy/certificates",
+      action:
+        finding.kind === "uncovered" && issue && names.length > 0
+          ? { label: "Issue for these", onClick: () => issue(names) }
+          : finding.kind === "stale" && deleteLineage && lineage
+            ? { label: "Delete", onClick: () => deleteLineage(lineage) }
+            : undefined,
+    }
+  })
 }
 
 /**
  * A certificate that cannot be read, is a test certificate, has expired or is
  * about to; a renewal nothing runs, one whose last run failed or whose hook
- * failed, one that will fail, and renewals nginx never reloads for.
+ * failed, one that will fail, and renewals nginx never reloads for; with
+ * the hygiene checks first where the caller fetched them.
  */
-export function certificateFindings({ certs, certbot }: CertificateFindingInput): ProxyFinding[] {
-  const out: ProxyFinding[] = []
+export function certificateFindings({
+  certs,
+  certbot,
+  hygiene,
+}: CertificateFindingInput): ProxyFinding[] {
+  const out: ProxyFinding[] = hygieneFindings(hygiene)
 
   for (const cert of certs ?? []) {
     // Caddy renews what it serves on its own schedule: its renewal window is
