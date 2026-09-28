@@ -4,6 +4,7 @@ import { useState } from "react"
 import {
   Clock,
   Key,
+  Logs,
   RefreshClockwise,
   ShieldCheck,
   ShieldOff,
@@ -12,7 +13,13 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, post } from "@/lib/api"
-import { authorityName, certbotRunning, lineageActivity, parseDomains } from "@/lib/certificates"
+import {
+  authorityName,
+  certbotRunning,
+  lineageActivity,
+  parseDomains,
+  renewalMethod,
+} from "@/lib/certificates"
 import type { CertbotCert, CertbotState, DNSProvider, Job } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field, OptionList, OptionRow } from "@/components/form"
@@ -95,6 +102,12 @@ export function useRenew(attach: (job: Job) => void) {
  * certbot holds one lock for all of its work, so while the job on screen is
  * a certbot run every verb here waits for it, and the lineage it acts on
  * says what is happening to it.
+ *
+ * Each lineage says how certbot renews it — the plugin, and the folder or
+ * DNS provider it names — and what stands in the way: why the last run
+ * failed on it, in certbot's words, and anything that will make the next
+ * one fail. Either brings the dry run out of the menu, since it is how to
+ * find out whether a fix worked.
  */
 export function CertbotLineages({
   state,
@@ -104,6 +117,7 @@ export function CertbotLineages({
   onRenew,
   onReplace,
   onRevoke,
+  onShowLog,
 }: {
   state: CertbotState
   admin: boolean
@@ -113,6 +127,8 @@ export function CertbotLineages({
   /** Opens the real issuance for a test certificate's names; absent where none can be issued. */
   onReplace?: (domains: string) => void
   onRevoke: (name: string) => void
+  /** Opens the renewal schedule's log. */
+  onShowLog: () => void
 }) {
   const { confirm, dialog } = useConfirm()
   const running = certbotRunning(job)
@@ -134,7 +150,8 @@ export function CertbotLineages({
     )
   }
   const waiting = busy !== "" || running
-  const verbsFor = ({ name, domains, staging }: CertbotCert): Verb[] => {
+  const verbsFor = ({ name, domains, staging, lastFailure, willFail }: CertbotCert): Verb[] => {
+    const troubled = Boolean(lastFailure) || Boolean(willFail?.length)
     const revoke: Verb = {
       key: "revoke",
       label: "Revoke and delete",
@@ -171,9 +188,13 @@ export function CertbotLineages({
         key: "dry-run",
         label: "Dry run",
         icon: ShieldCheck,
+        inline: troubled,
         disabled: waiting,
         run: () => onRenew(name, true),
       },
+      ...(lastFailure
+        ? [{ key: "log", label: "Show log", icon: Logs, inline: true, run: onShowLog }]
+        : []),
       {
         key: "force",
         label: "Force renewal",
@@ -228,7 +249,24 @@ export function CertbotLineages({
                   </p>
                 </div>
               </div>
+              <RenewalMethod cert={cert} />
               {!cert.error && <LineageLife cert={cert} />}
+              {cert.lastFailure && (
+                <p className="text-hint break-words text-destructive">
+                  Last renewal failed: {cert.lastFailure.reason}
+                </p>
+              )}
+              {cert.willFail && cert.willFail.length > 0 && (
+                <Notice tone="warning" icon={Warning} title="The next renewal will fail">
+                  <ul className="space-y-1">
+                    {cert.willFail.map((reason) => (
+                      <li key={reason} className="break-words">
+                        {reason}
+                      </li>
+                    ))}
+                  </ul>
+                </Notice>
+              )}
               {cert.staging && (
                 <p className="text-hint text-muted-foreground">
                   A staging authority signed it, so browsers refuse it. A real issuance for the same
@@ -264,16 +302,35 @@ export function CertbotLineages({
 }
 
 /**
- * certbot's lineages carry days left and an expiry but no issue date, and
- * every one of them is a ninety-day certificate: the meter is drawn against
- * that term.
+ * How certbot proves control when it renews the lineage: the plugin as a
+ * word, then the folder the webroot plugin writes into or the DNS provider.
+ */
+function RenewalMethod({ cert }: { cert: CertbotCert }) {
+  const method = renewalMethod(cert)
+  if (!method) return null
+  return (
+    <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+      <span className="text-hint text-muted-foreground">Renews with</span>
+      <Tag>{method.method}</Tag>
+      {method.detail && (
+        <Tag mono={method.mono} className="max-w-full break-all">
+          {method.detail}
+        </Tag>
+      )}
+    </p>
+  )
+}
+
+/**
+ * The meter runs from the certificate's issue date to its expiry, whatever
+ * the term: a ninety-day guess drew any other one wrong.
  */
 function LineageLife({ cert }: { cert: CertbotCert }) {
   return (
     <CertLife
       className="w-full"
       cert={{
-        notBefore: new Date(new Date(cert.expiry).getTime() - 90 * 86_400_000).toISOString(),
+        notBefore: cert.notBefore,
         notAfter: cert.expiry,
         daysLeft: cert.daysLeft,
         expired: !cert.valid,

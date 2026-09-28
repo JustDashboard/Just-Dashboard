@@ -54,24 +54,88 @@ export function stagingCertificate(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/** One certbot lineage as the API reads it, with whatever a test needs changed. */
+export function certbotLineage(overrides: Record<string, unknown> = {}) {
+  return {
+    name: "app.example.com",
+    domains: ["app.example.com"],
+    notBefore: new Date(Date.parse(inThirtyDays) - 90 * 86_400_000).toISOString(),
+    expiry: inThirtyDays,
+    daysLeft: 29,
+    valid: true,
+    certPath: "/etc/letsencrypt/live/app.example.com/fullchain.pem",
+    authenticator: "nginx",
+    installer: "nginx",
+    ...overrides,
+  }
+}
+
 /** certbot's state on the mocked host, with whatever a test needs changed. */
 export function certbotState(overrides: Record<string, unknown> = {}) {
   return {
     available: true,
     version: "certbot 2.9.0",
-    certs: [
-      {
-        name: "app.example.com",
-        domains: ["app.example.com"],
-        expiry: inThirtyDays,
-        daysLeft: 29,
-        valid: true,
-      },
-    ],
+    certs: [certbotLineage()],
     autoRenew: false,
     renewUnit: "certbot.timer",
+    nginxReloads: true,
+    reloadHook: reloadHook(),
     ...overrides,
   }
+}
+
+/** The renewal deploy hook's state. */
+export function reloadHook(state = "missing", others: string[] = []) {
+  return {
+    path: "/etc/letsencrypt/renewal-hooks/deploy/50-just-dashboard-reload-nginx",
+    state,
+    others,
+  }
+}
+
+const hour = 3_600_000
+
+/**
+ * The renewal record as this host had it: certbot.timer active, the last run
+ * of certbot.service an hour ago failing on the lineage, the next in eleven.
+ */
+export function renewalHealth(overrides: Record<string, unknown> = {}) {
+  return {
+    source: "certbot.service",
+    service: "certbot.service",
+    state: "failed",
+    lastRun: new Date(Date.now() - hour).toISOString(),
+    nextRun: new Date(Date.now() + 11 * hour).toISOString(),
+    exitStatus: 1,
+    failures: [{ lineage: "app.example.com", reason: "Some challenges have failed." }],
+    ...overrides,
+  }
+}
+
+/** certbot.service's journal for its last two runs, newest first. */
+export function renewalLog() {
+  const run = (hoursAgo: number) => {
+    const at = (ms: number) => new Date(Date.now() - hoursAgo * hour + ms).toISOString()
+    return {
+      start: at(0),
+      result: "failed",
+      lines: [
+        { time: at(0), text: "Starting certbot.service - Certbot...", systemd: true },
+        {
+          time: at(6000),
+          text: "Failed to renew certificate app.example.com with error: Some challenges have failed.",
+          error: true,
+        },
+        { time: at(6001), text: "1 renew failure(s), 0 parse failure(s)" },
+        {
+          time: at(6100),
+          text: "certbot.service: Failed with result 'exit-code'.",
+          systemd: true,
+        },
+      ],
+    }
+  }
+  return { source: "certbot.service", runs: [run(1), run(13)] }
 }
 
 /** A certbot job as the API answers one: running unless a test says otherwise. */
@@ -112,6 +176,9 @@ export const routes: ProxyRoutes = {
   "/certificates/certbot": (route) => json(route, certbotState()),
   "/certificates/dns-providers": (route) => json(route, []),
   "/certificates/served": (route) => json(route, []),
+  "/certificates/renewal/log": (route) => json(route, renewalLog()),
+  "/certificates/renewal-hook": (route) =>
+    json(route, reloadHook(route.request().method() === "DELETE" ? "missing" : "installed")),
 }
 
 export const showcase: ProxyRoutes = {

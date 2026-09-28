@@ -1,12 +1,13 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, CloudUpload, RefreshClockwise, ShieldOff } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import {
   afterReload,
   certbotRunning,
+  renewalReading,
   sameNames,
   stillServingTest,
   testCertificateReplaced,
@@ -34,6 +35,7 @@ import {
 } from "@/components/proxy/certbot-panel"
 import { CertificateInventory } from "@/components/proxy/certificate-inventory"
 import { ImportDialog } from "@/components/proxy/import-dialog"
+import { ReloadHookOption, RenewalLogPanel, RenewalRecord } from "@/components/proxy/renewal-health"
 import { WatchedDomains } from "@/components/proxy/watched-domains"
 import { Button } from "@/components/ui/button"
 
@@ -74,15 +76,37 @@ export function CertificatesPage() {
     { enabled: admin },
   )
   // The list is only right once certbot has finished writing, so it is
-  // refreshed when a job ends rather than when it starts.
-  const console_ = useJobConsole({
-    onSuccess: () => {
-      certs.refresh()
-      certbot.refresh()
-    },
-  })
+  // refreshed when a job ends rather than when it starts — however it ended:
+  // a renewal run that failed changes the renewal record as much as one
+  // that passed.
+  const console_ = useJobConsole()
+  const ended =
+    console_.job && console_.job.status !== "running"
+      ? `${console_.job.id}:${console_.job.status}`
+      : ""
+  const { refresh: refreshCerts } = certs
+  const { refresh: refreshCertbot } = certbot
+  useEffect(() => {
+    if (!ended) return
+    refreshCerts()
+    refreshCertbot()
+  }, [ended, refreshCerts, refreshCertbot])
   const { busy, renew } = useRenew(console_.attach)
   const certbotBusy = certbotRunning(console_.job)
+  const [logOpen, setLogOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
+  // The timer's own service, started now: systemd records the run, so the
+  // renewal reading changes with it.
+  const runRenewal = async () => {
+    setStarting(true)
+    try {
+      console_.attach(await post<Job>("/certificates/renewal/run"))
+    } catch (err) {
+      notify.error("The renewal did not start", err)
+    } finally {
+      setStarting(false)
+    }
+  }
   const certbotGone =
     certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable"
 
@@ -183,23 +207,7 @@ export function CertificatesPage() {
   // from here replaces one with a certificate browsers accept.
   const testAuthority = certbot.data?.testAuthority ?? false
 
-  const renewal = certbotGone
-    ? { value: "No certbot", hint: "install it to issue and renew", tone: "default" as const }
-    : !certbot.data
-      ? { value: "—", hint: undefined, tone: "default" as const }
-      : certbot.data.autoRenew
-        ? {
-            value: "Scheduled",
-            hint: `via ${certbot.data.renewSource}`,
-            tone: "success" as const,
-          }
-        : {
-            value: "Off",
-            hint: certbot.data.renewUnit
-              ? `${certbot.data.renewUnit} is off`
-              : "no timer or cron entry found",
-            tone: certbot.data.certs.length > 0 ? ("danger" as const) : ("default" as const),
-          }
+  const renewal = renewalReading(certbot.data, certbotGone)
 
   return (
     <Page className="animate-rise">
@@ -388,19 +396,33 @@ export function CertificatesPage() {
               ) : certbot.error ? (
                 <ErrorState error={certbot.error} />
               ) : certbot.data ? (
-                <CertbotLineages
-                  state={certbot.data}
-                  admin={admin}
-                  busy={busy}
-                  job={console_.job}
-                  onRenew={renew}
-                  onReplace={
-                    testAuthority
-                      ? undefined
-                      : (domains) => setIssue({ open: true, domains, staging: false })
-                  }
-                  onRevoke={revoke}
-                />
+                <>
+                  <RenewalRecord
+                    state={certbot.data}
+                    admin={admin}
+                    certbotBusy={certbotBusy || starting || busy !== ""}
+                    running={certbotBusy && job?.kind === "certbot.renewal"}
+                    onRun={runRenewal}
+                    onShowLog={() => setLogOpen(true)}
+                  />
+                  {admin && hasNginx && (
+                    <ReloadHookOption state={certbot.data} onChanged={certbot.refresh} />
+                  )}
+                  <CertbotLineages
+                    state={certbot.data}
+                    admin={admin}
+                    busy={busy}
+                    job={console_.job}
+                    onRenew={renew}
+                    onReplace={
+                      testAuthority
+                        ? undefined
+                        : (domains) => setIssue({ open: true, domains, staging: false })
+                    }
+                    onRevoke={revoke}
+                    onShowLog={() => setLogOpen(true)}
+                  />
+                </>
               ) : null}
             </PanelBody>
           </Panel>
@@ -442,6 +464,7 @@ export function CertificatesPage() {
             }}
           />
           <ImportDialog open={importOpen} onOpenChange={setImportOpen} onDone={certs.refresh} />
+          <RenewalLogPanel open={logOpen} onOpenChange={setLogOpen} />
         </>
       )}
       {dialog}

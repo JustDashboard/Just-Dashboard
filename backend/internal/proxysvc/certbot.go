@@ -36,6 +36,26 @@ type CertbotCert struct {
 	Staging bool `json:"staging,omitempty"`
 	// Error is why the lineage's certificate could not be read.
 	Error string `json:"error,omitempty"`
+	// NotBefore is when the certificate was issued: the other end of the
+	// meter, which a ninety-day guess drew wrong for any other term.
+	NotBefore time.Time `json:"notBefore"`
+	// How certbot renews it, from its renewal configuration: the plugin
+	// that proves control ("nginx", "webroot", "dns-cloudflare"), the one
+	// that deploys the result, the webroot folders, and the DNS provider by
+	// name where this dashboard knows the plugin.
+	Authenticator string   `json:"authenticator,omitempty"`
+	Installer     string   `json:"installer,omitempty"`
+	Webroots      []string `json:"webroots,omitempty"`
+	DNSProvider   string   `json:"dnsProvider,omitempty"`
+	// DeployHook is a hook of the lineage's own that certbot runs after
+	// renewing it (--deploy-hook); what it does is not read here.
+	DeployHook bool `json:"deployHook,omitempty"`
+	// WillFail is what will make the next renewal fail, each a certainty in
+	// certbot's code, found before the run that would find it.
+	WillFail []string `json:"willFail,omitempty"`
+	// LastFailure is why the last renewal run failed on this lineage, when
+	// it did and nothing has renewed it since.
+	LastFailure *RenewalFailure `json:"lastFailure,omitempty"`
 }
 
 // CertbotState is everything the Certificates tab needs about certbot.
@@ -64,6 +84,14 @@ type CertbotState struct {
 	// Let's Encrypt's staging one among them: a real issuance from here
 	// brings back one browsers refuse, so the page offers no "real" one.
 	TestAuthority bool `json:"testAuthority,omitempty"`
+	// Health is what the renewal schedule did last and does next, when
+	// there is one.
+	Health *RenewalHealth `json:"health,omitempty"`
+	// ReloadHook is the deploy hook that reloads nginx after a renewal.
+	ReloadHook *RenewalHook `json:"reloadHook,omitempty"`
+	// NginxReloads says whether the certbot here can reload nginx itself
+	// after renewing a lineage installed with its nginx plugin.
+	NginxReloads bool `json:"nginxReloads,omitempty"`
 }
 
 func (s *Service) CertbotState(ctx context.Context) *CertbotState {
@@ -83,11 +111,40 @@ func (s *Service) CertbotState(ctx context.Context) *CertbotState {
 	if !state.AutoRenew {
 		state.RenewUnit = renewalCandidate(ctx)
 	}
-	certs, err := readCertbotLineages(letsencryptDir)
+	state.NginxReloads = rt.installers["nginx"]
+	if hook, err := RenewalHookStatus(); err == nil {
+		state.ReloadHook = &hook
+	}
+	confs, err := readRenewalConfs(letsencryptDir)
+	// When each lineage was last saved, which tells a failure a later
+	// renewal fixed from one still standing; nil when that is unknown.
+	var written map[string]time.Time
 	if err != nil {
 		state.Error = err.Error()
+	} else {
+		written = map[string]time.Time{}
+		for _, conf := range confs {
+			// A certificate that cannot be stat'ed is still a lineage: its
+			// failure stands, as one nothing is known to have renewed.
+			at, _ := conf.written()
+			written[conf.Name] = at
+		}
 	}
-	state.Certs = certs
+	state.Certs = lineagesFrom(confs)
+	problems := s.renewalProblems(ctx, rt, confs)
+	for i := range state.Certs {
+		state.Certs[i].WillFail = problems[state.Certs[i].Name]
+	}
+	if state.AutoRenew {
+		state.Health = renewalHealth(ctx, state.RenewSource, written)
+		for _, failure := range state.Health.Failures {
+			for i := range state.Certs {
+				if state.Certs[i].Name == failure.Lineage && !failure.RenewedSince {
+					state.Certs[i].LastFailure = &failure
+				}
+			}
+		}
+	}
 	return state
 }
 

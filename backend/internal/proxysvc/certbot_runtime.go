@@ -29,8 +29,10 @@ type certbotRuntime struct {
 	onHost  bool
 	version string
 	// authenticators is what `certbot plugins` lists as able to answer a
-	// challenge.
+	// challenge, and installers what it lists as able to deploy one: a
+	// lineage names one of each, and renews only while both are there.
 	authenticators map[string]bool
+	installers     map[string]bool
 }
 
 // certbotRuntimeTTL bounds how stale the plugin list may be. Long enough that
@@ -72,6 +74,7 @@ func loadCertbotRuntime(ctx context.Context) (*certbotRuntime, error) {
 		return rt, fmt.Errorf("certbot could not list its plugins: %s", lastMeaningfulLine(strings.TrimSpace(string(out))))
 	}
 	rt.authenticators = certbotAuthenticators(string(out))
+	rt.installers = certbotInstallers(string(out))
 	certbotRuntimeCache.rt, certbotRuntimeCache.at = rt, time.Now()
 	return rt, nil
 }
@@ -141,6 +144,28 @@ func (rt *certbotRuntime) probeDirs(ctx context.Context) ([]string, func(), erro
 		_ = rt.on(ctx, "rm", "-rf", "--", dir).Run()
 	}
 	return []string{"--config-dir", dir, "--work-dir", filepath.Join(dir, "work"), "--logs-dir", filepath.Join(dir, "logs")}, cleanup, nil
+}
+
+// certbotInstallers reads the plugins `certbot plugins` lists with the
+// Installer interface, the way certbotAuthenticators reads the others.
+func certbotInstallers(output string) map[string]bool {
+	found := map[string]bool{}
+	name := ""
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "* "):
+			name = strings.TrimSpace(strings.TrimPrefix(line, "* "))
+		case name != "" && strings.HasPrefix(line, "Interfaces:"):
+			for _, role := range strings.Split(strings.TrimPrefix(line, "Interfaces:"), ",") {
+				if strings.EqualFold(strings.TrimSpace(role), "Installer") {
+					found[name] = true
+				}
+			}
+			name = ""
+		}
+	}
+	return found
 }
 
 // CertbotCommand is certbot with args on the side the page reads it from, for

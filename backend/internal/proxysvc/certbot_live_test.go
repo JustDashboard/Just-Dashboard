@@ -33,52 +33,8 @@ func TestLiveCertbotTestRunSavesNothingAndARealIssuanceReplacesAStagingLineage(t
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	docker := func(args ...string) string {
-		t.Helper()
-		raw, err := hostexec.Command(ctx, "docker", args...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("docker %s: %v: %s", strings.Join(args, " "), err, raw)
-		}
-		return strings.TrimSpace(string(raw))
-	}
 	dir := t.TempDir()
-	// One ninety-day profile, as Let's Encrypt issues: the image also offers
-	// a six-day one, and a six-day certificate is always inside certbot's
-	// thirty-day window — never the "not due" case this test is about.
-	pebbleConfig := filepath.Join(dir, "pebble-config.json")
-	if err := os.WriteFile(pebbleConfig, []byte(`{"pebble": {
-  "listenAddress": "0.0.0.0:14000", "managementListenAddress": "0.0.0.0:15000",
-  "certificate": "test/certs/localhost/cert.pem", "privateKey": "test/certs/localhost/key.pem",
-  "httpPort": 5002, "tlsPort": 5001, "ocspResponderURL": "", "externalAccountBindingRequired": false,
-  "keyAlgorithm": "ecdsa", "retryAfter": {"authz": 3, "order": 5},
-  "profiles": {"default": {"description": "ninety days", "validityPeriod": 7776000}}
-}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Pebble refuses 5% of nonces by default to exercise a client's retry,
-	// and certbot retries once: a run of a dozen requests failed now and then
-	// on that alone, which is Pebble testing certbot rather than this test.
-	pebble := docker("run", "-d", "-e", "PEBBLE_VA_ALWAYS_VALID=1", "-e", "PEBBLE_VA_NOSLEEP=1",
-		"-e", "PEBBLE_WFE_NONCEREJECT=0",
-		"-v", pebbleConfig+":/test/config/pebble-config.json:ro",
-		"-p", "127.0.0.1::14000", "ghcr.io/letsencrypt/pebble:latest")
-	defer hostexec.Command(context.Background(), "docker", "rm", "-f", "-v", pebble).Run()
-
-	// Pebble's directory is served over TLS from its own test root, which
-	// certbot has to trust to read it.
-	bundle := filepath.Join(dir, "minica.pem")
-	for attempt := 0; ; attempt++ {
-		if err := hostexec.Command(ctx, "docker", "cp", pebble+":/test/certs/pebble.minica.pem", bundle).Run(); err == nil {
-			if raw, _ := os.ReadFile(bundle); strings.Contains(string(raw), "BEGIN CERTIFICATE") {
-				break
-			}
-		}
-		if attempt > 40 {
-			t.Fatalf("Pebble's listener root was not readable: %s", docker("logs", pebble))
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	directory := "https://" + docker("port", pebble, "14000/tcp") + "/dir"
+	directory, bundle := startPebble(ctx, t, dir)
 
 	config := filepath.Join(dir, "letsencrypt")
 	work := filepath.Join(dir, "work")
@@ -172,4 +128,55 @@ func TestLiveCertbotTestRunSavesNothingAndARealIssuanceReplacesAStagingLineage(t
 	if lineages, err := readCertbotLineages(config); err != nil || len(lineages) != 1 || lineages[0].Staging {
 		t.Fatalf("the replaced lineage still reads as a test certificate: %+v %v", lineages, err)
 	}
+}
+
+// startPebble runs a Pebble that validates nothing, so no public port is
+// needed, and answers with its directory and the root its listener's
+// certificate chains to, which certbot has to trust to read it. The
+// container goes when the test ends.
+func startPebble(ctx context.Context, t *testing.T, dir string) (directory, bundle string) {
+	t.Helper()
+	docker := func(args ...string) string {
+		t.Helper()
+		raw, err := hostexec.Command(ctx, "docker", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker %s: %v: %s", strings.Join(args, " "), err, raw)
+		}
+		return strings.TrimSpace(string(raw))
+	}
+	// One ninety-day profile, as Let's Encrypt issues: the image also offers
+	// a six-day one, and a six-day certificate is always inside certbot's
+	// thirty-day window — never the "not due" case a test may be about.
+	pebbleConfig := filepath.Join(dir, "pebble-config.json")
+	if err := os.WriteFile(pebbleConfig, []byte(`{"pebble": {
+  "listenAddress": "0.0.0.0:14000", "managementListenAddress": "0.0.0.0:15000",
+  "certificate": "test/certs/localhost/cert.pem", "privateKey": "test/certs/localhost/key.pem",
+  "httpPort": 5002, "tlsPort": 5001, "ocspResponderURL": "", "externalAccountBindingRequired": false,
+  "keyAlgorithm": "ecdsa", "retryAfter": {"authz": 3, "order": 5},
+  "profiles": {"default": {"description": "ninety days", "validityPeriod": 7776000}}
+}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Pebble refuses 5% of nonces by default to exercise a client's retry,
+	// and certbot retries once: a run of a dozen requests failed now and then
+	// on that alone, which is Pebble testing certbot rather than the test.
+	pebble := docker("run", "-d", "-e", "PEBBLE_VA_ALWAYS_VALID=1", "-e", "PEBBLE_VA_NOSLEEP=1",
+		"-e", "PEBBLE_WFE_NONCEREJECT=0",
+		"-v", pebbleConfig+":/test/config/pebble-config.json:ro",
+		"-p", "127.0.0.1::14000", "ghcr.io/letsencrypt/pebble:latest")
+	t.Cleanup(func() { hostexec.Command(context.Background(), "docker", "rm", "-f", "-v", pebble).Run() })
+
+	bundle = filepath.Join(dir, "minica.pem")
+	for attempt := 0; ; attempt++ {
+		if err := hostexec.Command(ctx, "docker", "cp", pebble+":/test/certs/pebble.minica.pem", bundle).Run(); err == nil {
+			if raw, _ := os.ReadFile(bundle); strings.Contains(string(raw), "BEGIN CERTIFICATE") {
+				break
+			}
+		}
+		if attempt > 40 {
+			t.Fatalf("Pebble's listener root was not readable: %s", docker("logs", pebble))
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return "https://" + docker("port", pebble, "14000/tcp") + "/dir", bundle
 }

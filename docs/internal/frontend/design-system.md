@@ -1143,7 +1143,11 @@ draws no issuer mark, reads "test certificate" and a red meter whatever its days
 sentence and its one verb, the real issuance, on a line of its own under the card.
 A watched domain opens a live report and preserves its nonstandard port. Password files and
 watched-domain setup use the deployment settings' rail sections. Certificate renewal lineages and
-DNS providers remain readings with their own actions, laid out to fit the management column. The TLS
+DNS providers remain readings with their own actions, laid out to fit the management column. The
+renewal column opens on what the timer's last run did — a failed run is a danger Notice naming each
+certificate and certbot's reason, with Run now and Show log; otherwise a Status and the next run —
+then the "Reload nginx after every renewal" OptionRow; a lineage's last failure is a line in its
+row and a certain next failure a warning Notice. The TLS
 report keeps findings, protocol checks and HTTP readings beside the live certificate and its
 vertical chain; long header values wrap instead of hiding the verdict. Listening sockets stay a
 table of readings, with fixed endpoint, application, reach and action columns and a stacked phone

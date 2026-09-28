@@ -1,4 +1,13 @@
-import type { CertbotCert, Job, ServedCertificate } from "@/lib/types"
+import type {
+  CertbotCert,
+  CertbotState,
+  Certificate,
+  Job,
+  RenewalFailure,
+  RenewalHealth,
+  ServedCertificate,
+} from "@/lib/types"
+import type { Tone } from "@/components/tone"
 
 /**
  * Certificate readings that are pure arithmetic over the API's data, kept
@@ -152,4 +161,203 @@ export function authorityName(directory: string): string {
 /** The names typed into the issue form: spaces, commas or new lines between them. */
 export function parseDomains(text: string): string[] {
   return text.split(/[\s,]+/).filter(Boolean)
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+/** The day a time falls on, as a count of local days. */
+function localDay(d: Date): number {
+  return Math.round(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / DAY)
+}
+
+/** A time as the renewal readings place it: its clock, and how many days away. */
+function placed(iso: string, now: number) {
+  const at = new Date(iso)
+  return {
+    at,
+    clock: `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`,
+    days: localDay(at) - localDay(new Date(now)),
+  }
+}
+
+/**
+ * When a renewal run was, or will be, in the reader's time: "21:13" today,
+ * "yesterday 21:13", "tomorrow 09:12", "Mon 21:13" inside the week either
+ * way, "2 Jul 21:13" beyond it. The timer fires twice a day, so the hour is
+ * the reading and the day only a qualifier.
+ */
+export function runTime(iso: string, now: number = Date.now()): string {
+  const { at, clock, days } = placed(iso, now)
+  if (days === 0) return clock
+  if (days === -1) return `yesterday ${clock}`
+  if (days === 1) return `tomorrow ${clock}`
+  if (Math.abs(days) < 7) return `${WEEKDAYS[at.getDay()]} ${clock}`
+  return `${at.getDate()} ${MONTHS[at.getMonth()]} ${clock}`
+}
+
+/** runTime inside a sentence: "at 21:13", "yesterday at 21:13", "on 2 Jul at 07:20". */
+export function runPhrase(iso: string, now: number = Date.now()): string {
+  const { at, clock, days } = placed(iso, now)
+  if (days === 0) return `at ${clock}`
+  if (days === -1) return `yesterday at ${clock}`
+  if (days === 1) return `tomorrow at ${clock}`
+  if (Math.abs(days) < 7) return `on ${WEEKDAYS[at.getDay()]} at ${clock}`
+  return `on ${at.getDate()} ${MONTHS[at.getMonth()]} at ${clock}`
+}
+
+/** Where a streak began: the hour today, otherwise the day. */
+export function sinceDay(iso: string, now: number = Date.now()): string {
+  const { at, clock, days } = placed(iso, now)
+  if (days === 0) return clock
+  if (days === -1) return "yesterday"
+  if (Math.abs(days) < 7) return WEEKDAYS[at.getDay()]
+  return `${at.getDate()} ${MONTHS[at.getMonth()]}`
+}
+
+/** The failures of the last run that still stand: not renewed since. */
+export function standingFailures(health: RenewalHealth | undefined): RenewalFailure[] {
+  return (health?.failures ?? []).filter((f) => !f.renewedSince)
+}
+
+/** A stat tile's reading. */
+export type Reading = { value: string; hint?: string; tone: Tone }
+
+/**
+ * The Renewal tile: not whether a timer is active — the host this was built
+ * on had an active timer and a service that had failed every run for months
+ * — but what the last run did, and when the next one is.
+ */
+export function renewalReading(
+  state: CertbotState | undefined,
+  certbotGone: boolean,
+  now: number = Date.now(),
+): Reading {
+  if (certbotGone)
+    return { value: "No certbot", hint: "install it to issue and renew", tone: "default" }
+  if (!state) return { value: "—", tone: "default" }
+  if (!state.autoRenew) {
+    return {
+      value: "Off",
+      hint: state.renewUnit ? `${state.renewUnit} is off` : "no timer or cron entry found",
+      tone: state.certs.length > 0 ? "danger" : "default",
+    }
+  }
+  const health = state.health
+  const scheduled: Reading = {
+    value: "Scheduled",
+    hint: `via ${state.renewSource}`,
+    tone: "default",
+  }
+  if (!health) return scheduled
+  const last = health.lastRun ? runTime(health.lastRun, now) : undefined
+  switch (health.state) {
+    case "failed": {
+      const standing = standingFailures(health).length
+      return {
+        value: "Failing",
+        hint: last
+          ? standing > 0
+            ? `last run ${last} · ${standing} failed`
+            : `last run ${last} failed`
+          : "the last run failed",
+        tone: "danger",
+      }
+    }
+    case "recovered":
+      return {
+        value: "Recovered",
+        hint: last ? `renewed since the ${last} failure` : "renewed since the last failure",
+        tone: "default",
+      }
+    case "ok":
+      return {
+        value: "Healthy",
+        hint: health.nextRun
+          ? `next run ${runTime(health.nextRun, now)}`
+          : last
+            ? `last run ${last}`
+            : undefined,
+        tone: "success",
+      }
+    case "running":
+      return {
+        value: "Running",
+        hint: `${health.service ?? "certbot"} is renewing now`,
+        tone: "default",
+      }
+    case "never":
+      return {
+        value: "Scheduled",
+        hint: health.nextRun ? `first run ${runTime(health.nextRun, now)}` : scheduled.hint,
+        tone: "default",
+      }
+    default:
+      return scheduled
+  }
+}
+
+/**
+ * How certbot proves control when it renews a lineage, as a word and the
+ * thing it names: "webroot" and its folders, "DNS" and the provider.
+ */
+export function renewalMethod(
+  cert: Pick<CertbotCert, "authenticator" | "webroots" | "dnsProvider">,
+): { method: string; detail?: string; mono?: boolean } | undefined {
+  const auth = cert.authenticator
+  if (!auth) return undefined
+  if (auth === "webroot") {
+    return cert.webroots?.length
+      ? { method: "webroot", detail: cert.webroots.join(", "), mono: true }
+      : { method: "webroot" }
+  }
+  if (auth.startsWith("dns-")) {
+    return { method: "DNS", detail: cert.dnsProvider ?? auth.slice(4) }
+  }
+  return { method: auth }
+}
+
+/**
+ * Whether nginx reads a lineage's renewed certificate without anybody
+ * reloading it by hand: certbot's nginx plugin reloads it for the lineages it
+ * installed, and the dashboard's hook for every lineage. A hook of the
+ * lineage's own, or somebody else's in certbot's hooks directory, may — what
+ * they do is not read, so nothing is claimed for them.
+ */
+export function renewalReload(
+  cert: Pick<CertbotCert, "installer" | "deployHook">,
+  state: Pick<CertbotState, "nginxReloads" | "reloadHook">,
+): "certbot" | "hook" | "unknown" | "none" {
+  if (cert.installer === "nginx" && state.nginxReloads) return "certbot"
+  if (state.reloadHook?.state === "installed") return "hook"
+  if (
+    cert.deployHook ||
+    state.reloadHook?.state === "modified" ||
+    state.reloadHook?.others.length
+  ) {
+    return "unknown"
+  }
+  return "none"
+}
+
+/**
+ * The lineages a site serves whose renewal nothing reloads nginx for, and
+ * those sites: each renewal leaves them on the old certificate until it
+ * expires.
+ */
+export function unreloadedRenewals(
+  state: CertbotState,
+  certs: Certificate[],
+): { lineages: string[]; sites: string[] } {
+  const lineages: string[] = []
+  const sites = new Set<string>()
+  if (!state.autoRenew) return { lineages, sites: [] }
+  for (const lineage of state.certs) {
+    if (lineage.error || renewalReload(lineage, state) !== "none") continue
+    const served = certs.find((c) => c.path === lineage.certPath)?.usedBy ?? []
+    if (served.length === 0) continue
+    lineages.push(lineage.name)
+    for (const site of served) sites.add(site)
+  }
+  return { lineages, sites: [...sites] }
 }

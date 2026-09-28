@@ -137,7 +137,11 @@ somebody spent an afternoon on have no path back at all.
 
 Replacing an imported certificate is a write too (`POST /certificates/import` with `replace`): the
 pair it replaces stays beside the new one as `.bak`, and without `replace` a name in use is a 409 rather
-than an overwrite. The DNS token an issuance carries is saved by its job, never before the request is
+than an overwrite. Removing the renewal deploy hook (`DELETE /certificates/renewal-hook`) is destructive
+without a phrase — the same switch installs it again — and it never removes or replaces a file at that
+name that does not carry the dashboard's marker. Starting the renewal timer's service now
+(`POST /certificates/renewal/run`) is a system.admin write, not a destructive one: it is the run the
+timer makes twice a day anyway, and it waits for any certbot job on the page like every other. The DNS token an issuance carries is saved by its job, never before the request is
 accepted, so a refused request leaves no credential on disk.
 
 Editing a firewall rule is a write, not a destructive one, and is mounted accordingly: the replacement goes

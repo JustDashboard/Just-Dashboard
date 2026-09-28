@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -394,22 +395,27 @@ func keyPair(t *testing.T, certText, keyText string) tls.Certificate {
 }
 
 // A real issuance over a test certificate replaces it and says so in its
-// title. What it then says about nginx is what nginx answered: certonly
-// reloads nothing itself, but it runs certbot's deploy hooks on a renewed
-// lineage, and a hook that reloads nginx is the usual way a certonly
-// certificate is served. The job used to say "keeps serving the test one"
-// either way.
-func TestIssueOverATestCertificateSaysWhatNginxServesAfterward(t *testing.T) {
+// title. The job reloads nginx for the site serving it — certonly reloads
+// nothing itself — and then says what nginx answers, which is the evidence:
+// a reload that did not take leaves the test certificate served, and a
+// configuration that fails its test is not reloaded at all.
+func TestIssueOverATestCertificateReloadsNginxAndSaysWhatItServes(t *testing.T) {
 	for _, c := range []struct {
-		name     string
-		reloaded bool
-		want     string
+		name   string
+		takes  bool
+		broken bool
+		want   string
 	}{
-		{"nothing reloaded nginx", false, "The real certificate replaced the test one on disk. app still serves the test one until nginx reloads."},
-		{"a deploy hook reloaded nginx", true, "The real certificate replaced the test one on disk. nginx already serves it for app."},
+		{"the reload takes", true, false, "Reloaded nginx, so app serves the new certificate.\nstatus: The real certificate replaced the test one on disk. nginx already serves it for app."},
+		{"the reload does not take", false, false, "Reloaded nginx, so app serves the new certificate.\nstatus: The real certificate replaced the test one on disk. app still serves the test one until nginx reloads."},
+		{"the configuration is broken", false, true, "nginx: [emerg] unknown directive"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			host := useFakeCertbot(t, "webroot")
+			nginx := useFakeNginx(t)
+			if c.broken {
+				t.Setenv("JD_TEST_NGINX_BROKEN", "1")
+			}
 			s := testServer(t)
 			nginxDir := t.TempDir()
 			s.Cfg.NginxDir = nginxDir
@@ -432,7 +438,7 @@ func TestIssueOverATestCertificateSaysWhatNginxServesAfterward(t *testing.T) {
 			}
 			test, real := keyPair(t, testCert, testKey), keyPair(t, realCert, realKey)
 			servingSite(t, nginxDir, "app", fullchain, func() tls.Certificate {
-				if onDisk, _ := os.ReadFile(certPath); c.reloaded && string(onDisk) == realCert {
+				if _, err := os.Stat(nginx.reloaded); err == nil && c.takes {
 					return real
 				}
 				return test
@@ -453,14 +459,12 @@ func TestIssueOverATestCertificateSaysWhatNginxServesAfterward(t *testing.T) {
 			if job.Title != "Replacing the test certificate for app.example.com" {
 				t.Fatalf("title = %q", job.Title)
 			}
-			// Not reloaded, the check asks again for a few seconds in
-			// case a reload is still in flight.
+			// A reload that did not take is asked again for a few seconds
+			// in case it is still in flight.
 			deadline := time.Now().Add(30 * time.Second)
+			var final jobs.Job
 			for {
-				if final, _, _ := s.modules.jobs.Get(job.ID); final.Status != jobs.StatusRunning {
-					if final.Status != jobs.StatusSucceeded {
-						t.Fatalf("job = %+v", final)
-					}
+				if final, _, _ = s.modules.jobs.Get(job.ID); final.Status != jobs.StatusRunning {
 					break
 				}
 				if time.Now().After(deadline) {
@@ -472,10 +476,20 @@ func TestIssueOverATestCertificateSaysWhatNginxServesAfterward(t *testing.T) {
 				t.Fatalf("certbot ran as:\n%s", argv)
 			}
 			text := jobText(t, s, job.ID)
-			if !strings.Contains(text, "certbot replaces it with a real one") ||
-				!strings.Contains(text, c.want) ||
-				strings.Contains(text, "did not issue") {
+			if !strings.Contains(text, "certbot replaces it with a real one") || !strings.Contains(text, c.want) || strings.Contains(text, "did not issue") {
 				t.Fatalf("job output:\n%s", text)
+			}
+			if c.broken {
+				if final.Status != jobs.StatusFailed || final.Error != "the certificate was renewed, but nginx was not reloaded: its configuration test failed. app keeps serving the previous certificate until nginx reloads" {
+					t.Fatalf("job = %+v", final)
+				}
+				if calls := nginx.calls(t); strings.Contains(calls, "-s reload") {
+					t.Fatalf("a broken configuration was reloaded:\n%s", calls)
+				}
+				return
+			}
+			if final.Status != jobs.StatusSucceeded {
+				t.Fatalf("job = %+v", final)
 			}
 		})
 	}
@@ -676,5 +690,395 @@ func TestCaddyEvidenceIsOutOfTheInventoryAndInTheDeploymentsView(t *testing.T) {
 	}
 	if !suggestion.Covered || suggestion.CertificateName != evidence {
 		t.Fatalf("app.jd.test reads %+v, want covered by %s", suggestion, evidence)
+	}
+}
+
+// fakeNginx is an nginx on PATH that logs each call, fails its test while
+// JD_TEST_NGINX_BROKEN is set, and marks a reload by creating reloaded.
+type fakeNginx struct{ log, reloaded string }
+
+func useFakeNginx(t *testing.T) fakeNginx {
+	t.Helper()
+	bin := t.TempDir()
+	n := fakeNginx{log: filepath.Join(bin, "calls"), reloaded: filepath.Join(bin, "reloaded")}
+	script := fmt.Sprintf(`#!/bin/sh
+echo "nginx $*" >> %q
+case "$1" in
+-t)
+	if [ -n "$JD_TEST_NGINX_BROKEN" ]; then
+		echo 'nginx: [emerg] unknown directive "sslx_certificate" in /etc/nginx/sites-enabled/app:4' >&2
+		echo "nginx: configuration file /etc/nginx/nginx.conf test failed" >&2
+		exit 1
+	fi
+	echo "nginx: configuration file /etc/nginx/nginx.conf test is successful" >&2
+	exit 0 ;;
+-s) touch %q; exit 0 ;;
+esac
+exit 0
+`, n.log, n.reloaded)
+	if err := os.WriteFile(filepath.Join(bin, "nginx"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("JD_TEST_NGINX_BROKEN", "")
+	return n
+}
+
+func (n fakeNginx) calls(t *testing.T) string {
+	t.Helper()
+	raw, _ := os.ReadFile(n.log)
+	return string(raw)
+}
+
+// enabledSite is an enabled nginx site naming certificate.
+func enabledSite(t *testing.T, nginxDir, name, certificate string) {
+	t.Helper()
+	for _, dir := range []string{"sites-available", "sites-enabled"} {
+		if err := os.MkdirAll(filepath.Join(nginxDir, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	available := filepath.Join(nginxDir, "sites-available", name)
+	site := fmt.Sprintf("server {\n    listen 443 ssl;\n    server_name %s;\n    ssl_certificate %s;\n}\n", name, certificate)
+	if err := os.WriteFile(available, []byte(site), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(available, filepath.Join(nginxDir, "sites-enabled", name)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A renewal reaches browsers when nginx reloads, and certbot reloads it only
+// for a lineage its nginx plugin installed. The page's renewals reload nginx
+// once a certificate an enabled site serves has changed — and not for one no
+// site serves, a dry run, or a certificate certbot kept. A configuration
+// that fails its test is not reloaded, and the job says the certificate is
+// renewed but not served.
+func TestRenewalReloadsNginxOnlyForACertificateASiteServes(t *testing.T) {
+	host := useFakeCertbot(t, "webroot")
+	nginx := useFakeNginx(t)
+	s := testServer(t)
+	nginxDir := t.TempDir()
+	s.Cfg.NginxDir = nginxDir
+	s.initModules()
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	served := host.lineage(t, "app.example.com", "app.example.com")
+	unserved := host.lineage(t, "spare.example.com", "spare.example.com")
+	enabledSite(t, nginxDir, "app", filepath.Join(filepath.Dir(served), "fullchain.pem"))
+
+	renew := func(body, target string) (jobs.Job, string) {
+		t.Helper()
+		if target != "" {
+			replacement := filepath.Join(t.TempDir(), "new.pem")
+			newPEM, _ := testCertificate(t, []string{filepath.Base(filepath.Dir(target))})
+			if err := os.WriteFile(replacement, []byte(newPEM), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("JD_TEST_CERTBOT_REPLACE", replacement)
+			t.Setenv("JD_TEST_CERTBOT_TARGET", target)
+		} else {
+			t.Setenv("JD_TEST_CERTBOT_REPLACE", "")
+		}
+		w := c.do(http.MethodPost, "/api/v1/certificates/renew", body, nil)
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("renew = %d: %s", w.Code, w.Body.String())
+		}
+		job := waitForJob(t, s, decodeJob(t, w.Body.Bytes()).ID)
+		return job, jobText(t, s, job.ID)
+	}
+
+	job, text := renew(`{"name":"app.example.com"}`, served)
+	if job.Status != jobs.StatusSucceeded || !strings.Contains(text, "Reloaded nginx, so app serves the new certificate.") {
+		t.Fatalf("renewing what app serves: %+v\n%s", job, text)
+	}
+	if calls := nginx.calls(t); calls != "nginx -t\nnginx -s reload\n" {
+		t.Fatalf("nginx calls:\n%s", calls)
+	}
+
+	for _, c := range []struct{ body, target string }{
+		{`{"name":"spare.example.com"}`, unserved},
+		{`{"name":"app.example.com","dryRun":true}`, ""},
+		{`{"name":"app.example.com"}`, ""},
+	} {
+		job, text := renew(c.body, c.target)
+		if job.Status != jobs.StatusSucceeded || strings.Contains(text, "Reloaded nginx") {
+			t.Fatalf("%s: %+v\n%s", c.body, job, text)
+		}
+	}
+	if calls := nginx.calls(t); calls != "nginx -t\nnginx -s reload\n" {
+		t.Fatalf("nginx was called for a certificate no site serves, a dry run or a kept one:\n%s", calls)
+	}
+
+	t.Setenv("JD_TEST_NGINX_BROKEN", "1")
+	job, text = renew(`{"name":"app.example.com"}`, served)
+	if job.Status != jobs.StatusFailed ||
+		job.Error != "the certificate was renewed, but nginx was not reloaded: its configuration test failed. app keeps serving the previous certificate until nginx reloads" ||
+		!strings.Contains(text, `unknown directive "sslx_certificate"`) {
+		t.Fatalf("a broken configuration: %+v\n%s", job, text)
+	}
+	if strings.Count(nginx.calls(t), "-s reload") != 1 {
+		t.Fatalf("a configuration that failed its test was reloaded:\n%s", nginx.calls(t))
+	}
+}
+
+// fakeRenewalService is a systemd whose certbot.timer is active and starts
+// certbot.service, and a journal for it. What `systemctl start` does is the
+// script in $dir/start, sourced so it can rewrite the service's state and
+// append to the journal.
+func fakeRenewalService(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := fmt.Sprintf(`#!/bin/sh
+d=%q
+echo "systemctl $*" >> "$d/argv.log"
+case "$1" in
+is-active) [ "$2" = certbot.timer ] && { echo active; exit 0; }; echo inactive; exit 3 ;;
+show)
+	[ "$2" = "-p" ] && { echo not-found; exit 0; }
+	[ "$2" = certbot.timer ] && { printf 'Unit=certbot.service\nNextElapseUSecRealtime=Mon 2026-09-28 09:12:44 UTC\n'; exit 0; }
+	[ "$2" = certbot.service ] && cat "$d/service"
+	exit 0 ;;
+start) . "$d/start" ;;
+esac
+exit 1
+`, dir)
+	if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	journal := fmt.Sprintf("#!/bin/sh\ncat %q 2>/dev/null\nexit 0\n", filepath.Join(dir, "journal.json"))
+	if err := os.WriteFile(filepath.Join(dir, "journalctl"), []byte(journal), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	service := "Result=exit-code\nExecMainStatus=1\nExecMainStartTimestamp=Sun 2026-09-27 21:13:11 UTC\nActiveState=failed\nInvocationID=before\n"
+	if err := os.WriteFile(filepath.Join(dir, "service"), []byte(service), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return dir
+}
+
+// journalRecord is one line of `journalctl -o json`: certbot's own under
+// the run's _SYSTEMD_INVOCATION_ID, systemd's about it under INVOCATION_ID.
+func journalRecord(run string, systemd bool, message string) string {
+	key, pid := "_SYSTEMD_INVOCATION_ID", 4242
+	if systemd {
+		key, pid = "INVOCATION_ID", 1
+	}
+	return fmt.Sprintf(`{"MESSAGE":%q,"__REALTIME_TIMESTAMP":"%d","%s":%q,"PRIORITY":"6","_PID":"%d"}`+"\n",
+		message, time.Now().UnixMicro(), key, run, pid)
+}
+
+// "Run now" starts the timer's own service rather than a renewal of the
+// page's, so systemd records it; the job waits for the run, prints what it
+// printed, and ends the way it did — failed with certbot's reason, or
+// renewed with nginx reloaded for the site that serves the certificate.
+func TestRenewalRunStartsTheTimersServiceAndSaysHowItWent(t *testing.T) {
+	host := useFakeCertbot(t, "webroot")
+	nginx := useFakeNginx(t)
+	dir := fakeRenewalService(t)
+	s := testServer(t)
+	nginxDir := t.TempDir()
+	s.Cfg.NginxDir = nginxDir
+	s.initModules()
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	certPath := host.lineage(t, "app.example.com", "app.example.com")
+	enabledSite(t, nginxDir, "app", filepath.Join(filepath.Dir(certPath), "fullchain.pem"))
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func() (jobs.Job, string) {
+		t.Helper()
+		w := c.do(http.MethodPost, "/api/v1/certificates/renewal/run", "", nil)
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("run = %d: %s", w.Code, w.Body.String())
+		}
+		job := decodeJob(t, w.Body.Bytes())
+		if job.Kind != "certbot.renewal" || job.Title != "Running certbot.service" || job.Target != "certbot.service" {
+			t.Fatalf("job = %+v", job)
+		}
+		job = waitForJob(t, s, job.ID)
+		return job, jobText(t, s, job.ID)
+	}
+
+	// The run fails on the certificate, as the host's did.
+	write("start", fmt.Sprintf(`printf 'Result=exit-code
+ExecMainStatus=1
+ActiveState=failed
+InvocationID=run-1
+' > %[1]q
+cat >> %[2]q <<'JOURNAL'
+%[3]s%[4]s%[5]sJOURNAL
+echo "Job for certbot.service failed because the control process exited with error code." >&2
+exit 1
+`, filepath.Join(dir, "service"), filepath.Join(dir, "journal.json"),
+		journalRecord("run-1", true, "Starting certbot.service - Certbot..."),
+		journalRecord("run-1", false, "Failed to renew certificate app.example.com with error: Some challenges have failed."),
+		journalRecord("run-1", true, "certbot.service: Failed with result 'exit-code'.")))
+	job, text := run()
+	if job.Status != jobs.StatusFailed || job.Error != "certbot.service failed to renew app.example.com: Some challenges have failed." {
+		t.Fatalf("failed run: %+v\n%s", job, text)
+	}
+	if !strings.Contains(text, "$ systemctl start certbot.service") ||
+		!strings.Contains(text, "stdout: Failed to renew certificate app.example.com with error: Some challenges have failed.") ||
+		strings.Contains(text, "stdout: Starting certbot.service") || strings.Contains(text, "Reloaded nginx") {
+		t.Fatalf("failed run printed:\n%s", text)
+	}
+
+	// It renews the certificate app serves: nginx reloads.
+	replacement := filepath.Join(t.TempDir(), "new.pem")
+	newPEM, _ := testCertificate(t, []string{"app.example.com"})
+	if err := os.WriteFile(replacement, []byte(newPEM), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	write("start", fmt.Sprintf(`cp %[3]q %[4]q
+printf 'Result=success
+ExecMainStatus=0
+ActiveState=inactive
+InvocationID=run-2
+' > %[1]q
+cat >> %[2]q <<'JOURNAL'
+%[5]s%[6]sJOURNAL
+exit 0
+`, filepath.Join(dir, "service"), filepath.Join(dir, "journal.json"), replacement, certPath,
+		journalRecord("run-2", true, "Starting certbot.service - Certbot..."),
+		journalRecord("run-2", true, "Finished certbot.service - Certbot.")))
+	job, text = run()
+	if job.Status != jobs.StatusSucceeded || !strings.Contains(text, "Renewed app.example.com.") ||
+		!strings.Contains(text, "Reloaded nginx, so app serves the new certificate.") {
+		t.Fatalf("renewing run: %+v\n%s", job, text)
+	}
+	if calls := nginx.calls(t); calls != "nginx -t\nnginx -s reload\n" {
+		t.Fatalf("nginx calls:\n%s", calls)
+	}
+
+	// Nothing due: nothing renewed, nothing reloaded.
+	write("start", fmt.Sprintf(`printf 'Result=success
+ExecMainStatus=0
+ActiveState=inactive
+InvocationID=run-3
+' > %[1]q
+cat >> %[2]q <<'JOURNAL'
+%[3]sJOURNAL
+exit 0
+`, filepath.Join(dir, "service"), filepath.Join(dir, "journal.json"),
+		journalRecord("run-3", true, "Finished certbot.service - Certbot.")))
+	job, text = run()
+	if job.Status != jobs.StatusSucceeded || !strings.Contains(text, "Nothing was due for renewal, so certbot changed nothing.") ||
+		strings.Count(nginx.calls(t), "-s reload") != 1 {
+		t.Fatalf("a run with nothing due: %+v\n%s", job, text)
+	}
+
+	// A service systemd would not start never ran: the job says so, not
+	// that the last run failed again.
+	write("start", `echo "Failed to start certbot.service: Unit certbot.service is masked." >&2
+exit 1
+`)
+	job, text = run()
+	if job.Status != jobs.StatusFailed || job.Error != "systemctl start certbot.service exited 1 — the lines above say why" ||
+		!strings.Contains(text, "stderr: Failed to start certbot.service: Unit certbot.service is masked.") {
+		t.Fatalf("a start systemd refused: %+v\n%s", job, text)
+	}
+
+	// Like every certbot run, it waits for the one in progress.
+	release := filepath.Join(t.TempDir(), "release")
+	t.Setenv("JD_TEST_CERTBOT_WAIT", release)
+	w := c.do(http.MethodPost, "/api/v1/certificates/renew", `{"name":"app.example.com"}`, nil)
+	running := decodeJob(t, w.Body.Bytes())
+	if w := c.do(http.MethodPost, "/api/v1/certificates/renewal/run", "", nil); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "certbot_busy") {
+		t.Fatalf("run while certbot runs = %d: %s", w.Code, w.Body.String())
+	}
+	os.WriteFile(release, nil, 0o600)
+	waitForJob(t, s, running.ID)
+}
+
+// The renewal record's own lines, for the page's log panel, to an admin.
+func TestRenewalLogAnswersWithTheRunsToAnAdmin(t *testing.T) {
+	useFakeCertbot(t)
+	dir := fakeRenewalService(t)
+	if err := os.WriteFile(filepath.Join(dir, "journal.json"), []byte(
+		journalRecord("run-1", true, "Starting certbot.service - Certbot...")+
+			journalRecord("run-1", false, "Failed to renew certificate app.example.com with error: Some challenges have failed.")+
+			journalRecord("run-1", true, "certbot.service: Failed with result 'exit-code'.")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, s := newClient(t)
+	w := c.do(http.MethodGet, "/api/v1/certificates/renewal/log", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("log = %d: %s", w.Code, w.Body.String())
+	}
+	var log proxysvc.RenewalLog
+	if err := json.Unmarshal(w.Body.Bytes(), &log); err != nil {
+		t.Fatal(err)
+	}
+	if log.Source != "certbot.service" || len(log.Runs) != 1 || log.Runs[0].Result != "failed" || len(log.Runs[0].Lines) != 3 || !log.Runs[0].Lines[1].Error {
+		t.Fatalf("log = %+v", log)
+	}
+	viewer := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "viewer", auth.RoleReadOnly)}
+	if w := viewer.do(http.MethodGet, "/api/v1/certificates/renewal/log", "", nil); w.Code != http.StatusForbidden {
+		t.Fatalf("a read-only account = %d", w.Code)
+	}
+}
+
+// The switch's two routes: installing writes the hook executable and the
+// certbot reading shows it; removing takes it away without a typed phrase,
+// since the same switch puts it back; a file of somebody else's at the name
+// is left alone; a read-only account can do neither.
+func TestRenewalHookRoutesInstallAndRemoveTheHook(t *testing.T) {
+	host := useFakeCertbot(t)
+	c, s := newClient(t)
+	path := filepath.Join(host.letsencrypt, "renewal-hooks", "deploy", "50-just-dashboard-reload-nginx")
+	decode := func(w *httptest.ResponseRecorder) proxysvc.RenewalHook {
+		t.Helper()
+		var hook proxysvc.RenewalHook
+		if err := json.Unmarshal(w.Body.Bytes(), &hook); err != nil {
+			t.Fatalf("not a hook: %s", w.Body.String())
+		}
+		return hook
+	}
+
+	w := c.do(http.MethodPut, "/api/v1/certificates/renewal-hook", "", nil)
+	if w.Code != http.StatusOK || decode(w).State != "installed" || decode(w).Path != path {
+		t.Fatalf("install = %d: %s", w.Code, w.Body.String())
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("hook = %v, %v", info, err)
+	}
+	w = c.do(http.MethodGet, "/api/v1/certificates/certbot", "", nil)
+	var state proxysvc.CertbotState
+	if err := json.Unmarshal(w.Body.Bytes(), &state); err != nil || state.ReloadHook == nil || state.ReloadHook.State != "installed" {
+		t.Fatalf("certbot = %d: %s", w.Code, w.Body.String())
+	}
+
+	viewer := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "viewer", auth.RoleReadOnly)}
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		if w := viewer.do(method, "/api/v1/certificates/renewal-hook", "", nil); w.Code != http.StatusForbidden {
+			t.Fatalf("a read-only %s = %d", method, w.Code)
+		}
+	}
+
+	w = c.do(http.MethodDelete, "/api/v1/certificates/renewal-hook", "", nil)
+	if w.Code != http.StatusOK || decode(w).State != "missing" {
+		t.Fatalf("remove = %d: %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("the hook is still there: %v", err)
+	}
+	if w := c.do(http.MethodDelete, "/api/v1/certificates/renewal-hook", "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("remove again = %d: %s", w.Code, w.Body.String())
+	}
+
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nmine\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		if w := c.do(method, "/api/v1/certificates/renewal-hook", "", nil); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "hook_foreign") {
+			t.Fatalf("%s over somebody else's file = %d: %s", method, w.Code, w.Body.String())
+		}
+	}
+	if raw, _ := os.ReadFile(path); string(raw) != "#!/bin/sh\nmine\n" {
+		t.Fatalf("somebody else's file changed: %q", raw)
 	}
 }

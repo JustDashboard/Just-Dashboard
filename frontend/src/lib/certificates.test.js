@@ -6,11 +6,19 @@ import {
   expiredAgo,
   lineageActivity,
   parseDomains,
+  renewalMethod,
+  renewalReading,
+  renewalReload,
   replacingTestCertificate,
+  runPhrase,
+  runTime,
   sameNames,
+  sinceDay,
+  standingFailures,
   stillServingTest,
   testCertificateReplaced,
   testRunPassed,
+  unreloadedRenewals,
 } from "./certificates"
 
 const now = Date.parse("2026-09-27T12:00:00Z")
@@ -184,5 +192,226 @@ describe("the names typed into the issue form", () => {
       "*.example.com",
     ])
     expect(parseDomains("   ")).toEqual([])
+  })
+})
+
+// Local times, so the readings are checked in whatever zone the test runs.
+const local = (month, day, hour, minute) =>
+  new Date(2026, month - 1, day, hour, minute).toISOString()
+const localNow = new Date(2026, 8, 28, 2, 30).getTime()
+
+describe("when a renewal run was or will be", () => {
+  test("the hour today, the day named around it, the date beyond the week", () => {
+    expect(runTime(local(9, 28, 1, 5), localNow)).toBe("01:05")
+    expect(runTime(local(9, 27, 21, 13), localNow)).toBe("yesterday 21:13")
+    expect(runTime(local(9, 29, 9, 12), localNow)).toBe("tomorrow 09:12")
+    expect(runTime(local(9, 24, 9, 0), localNow)).toBe("Thu 09:00")
+    expect(runTime(local(7, 2, 7, 20), localNow)).toBe("2 Jul 07:20")
+  })
+
+  test("in a sentence, and where a streak began", () => {
+    expect(runPhrase(local(9, 28, 1, 5), localNow)).toBe("at 01:05")
+    expect(runPhrase(local(9, 27, 21, 13), localNow)).toBe("yesterday at 21:13")
+    expect(runPhrase(local(9, 24, 9, 0), localNow)).toBe("on Thu at 09:00")
+    expect(runPhrase(local(7, 2, 7, 20), localNow)).toBe("on 2 Jul at 07:20")
+    expect(sinceDay(local(9, 28, 1, 5), localNow)).toBe("01:05")
+    expect(sinceDay(local(9, 27, 21, 13), localNow)).toBe("yesterday")
+    expect(sinceDay(local(7, 2, 7, 20), localNow)).toBe("2 Jul")
+  })
+})
+
+const certbotState = (overrides = {}) => ({
+  available: true,
+  certs: [],
+  autoRenew: true,
+  renewSource: "certbot.timer",
+  ...overrides,
+})
+const health = (overrides = {}) => ({
+  source: "certbot.service",
+  service: "certbot.service",
+  state: "ok",
+  lastRun: local(9, 27, 21, 13),
+  nextRun: local(9, 28, 9, 12),
+  failures: [],
+  ...overrides,
+})
+
+describe("the Renewal tile", () => {
+  test("an active timer whose runs fail reads failing, not scheduled", () => {
+    const failing = health({
+      state: "failed",
+      exitStatus: 1,
+      failures: [{ lineage: "betbots.site", reason: "Some challenges have failed." }],
+    })
+    expect(renewalReading(certbotState({ health: failing }), false, localNow)).toEqual({
+      value: "Failing",
+      hint: "last run yesterday 21:13 · 1 failed",
+      tone: "danger",
+    })
+    const lock = health({
+      state: "failed",
+      reason: "Another instance of Certbot is already running.",
+    })
+    expect(renewalReading(certbotState({ health: lock }), false, localNow).hint).toBe(
+      "last run yesterday 21:13 failed",
+    )
+  })
+
+  test("a failure renewed since is recovered, and a passing run is healthy until the next", () => {
+    const recovered = health({
+      state: "recovered",
+      failures: [{ lineage: "betbots.site", reason: "x", renewedSince: true }],
+    })
+    expect(renewalReading(certbotState({ health: recovered }), false, localNow)).toEqual({
+      value: "Recovered",
+      hint: "renewed since the yesterday 21:13 failure",
+      tone: "default",
+    })
+    expect(renewalReading(certbotState({ health: health() }), false, localNow)).toEqual({
+      value: "Healthy",
+      hint: "next run 09:12",
+      tone: "success",
+    })
+    // A cron host has no next run to name.
+    const cron = health({
+      source: "/var/log/letsencrypt/letsencrypt.log",
+      service: undefined,
+      nextRun: undefined,
+    })
+    expect(
+      renewalReading(
+        certbotState({ renewSource: "/etc/cron.d/certbot", health: cron }),
+        false,
+        localNow,
+      ).hint,
+    ).toBe("last run yesterday 21:13")
+  })
+
+  test("running, never run, unknown, off and absent each say so", () => {
+    expect(
+      renewalReading(certbotState({ health: health({ state: "running" }) }), false, localNow),
+    ).toEqual({
+      value: "Running",
+      hint: "certbot.service is renewing now",
+      tone: "default",
+    })
+    expect(
+      renewalReading(
+        certbotState({ health: health({ state: "never", lastRun: undefined }) }),
+        false,
+        localNow,
+      ).hint,
+    ).toBe("first run 09:12")
+    expect(
+      renewalReading(certbotState({ health: health({ state: "unknown" }) }), false, localNow),
+    ).toEqual({
+      value: "Scheduled",
+      hint: "via certbot.timer",
+      tone: "default",
+    })
+    expect(
+      renewalReading(
+        certbotState({ autoRenew: false, renewUnit: "certbot.timer", certs: [{}] }),
+        false,
+      ),
+    ).toEqual({ value: "Off", hint: "certbot.timer is off", tone: "danger" })
+    expect(renewalReading(undefined, true).value).toBe("No certbot")
+  })
+
+  test("only the failures nothing has renewed since still stand", () => {
+    expect(
+      standingFailures(
+        health({
+          failures: [
+            { lineage: "a", reason: "x" },
+            { lineage: "b", reason: "y", renewedSince: true },
+          ],
+        }),
+      ).map((f) => f.lineage),
+    ).toEqual(["a"])
+  })
+})
+
+describe("how a lineage renews", () => {
+  test("a webroot names its folders, DNS its provider, the rest their plugin", () => {
+    expect(
+      renewalMethod({ authenticator: "webroot", webroots: ["/var/www/app", "/srv/static"] }),
+    ).toEqual({
+      method: "webroot",
+      detail: "/var/www/app, /srv/static",
+      mono: true,
+    })
+    expect(renewalMethod({ authenticator: "dns-cloudflare", dnsProvider: "Cloudflare" })).toEqual({
+      method: "DNS",
+      detail: "Cloudflare",
+    })
+    expect(renewalMethod({ authenticator: "dns-hetzner" })).toEqual({
+      method: "DNS",
+      detail: "hetzner",
+    })
+    expect(renewalMethod({ authenticator: "nginx" })).toEqual({ method: "nginx" })
+    expect(renewalMethod({})).toBeUndefined()
+  })
+})
+
+describe("whether nginx reads a renewed certificate", () => {
+  const hook = (state, others = []) => ({
+    path: "/etc/letsencrypt/renewal-hooks/deploy/50-just-dashboard-reload-nginx",
+    state,
+    others,
+  })
+
+  test("certbot's nginx plugin reloads what it installed, the hook reloads everything", () => {
+    expect(
+      renewalReload({ installer: "nginx" }, { nginxReloads: true, reloadHook: hook("missing") }),
+    ).toBe("certbot")
+    // The plugin gone from this certbot renews without deploying.
+    expect(
+      renewalReload({ installer: "nginx" }, { nginxReloads: false, reloadHook: hook("missing") }),
+    ).toBe("none")
+    expect(renewalReload({}, { reloadHook: hook("installed") })).toBe("hook")
+  })
+
+  test("hooks whose work is not read claim nothing either way", () => {
+    expect(renewalReload({ deployHook: true }, { reloadHook: hook("missing") })).toBe("unknown")
+    expect(renewalReload({}, { reloadHook: hook("missing", ["reload-haproxy"]) })).toBe("unknown")
+    expect(renewalReload({}, { reloadHook: hook("modified") })).toBe("unknown")
+  })
+
+  test("the served lineages nothing reloads for, with the sites left on the old certificate", () => {
+    const lineage = (name, overrides = {}) => ({
+      name,
+      domains: [name],
+      expiry: local(12, 1, 0, 0),
+      daysLeft: 60,
+      valid: true,
+      certPath: `/etc/letsencrypt/live/${name}/fullchain.pem`,
+      authenticator: "webroot",
+      ...overrides,
+    })
+    const cert = (name, usedBy) => ({ path: `/etc/letsencrypt/live/${name}/fullchain.pem`, usedBy })
+    const state = certbotState({
+      reloadHook: hook("missing"),
+      nginxReloads: true,
+      certs: [
+        lineage("app.example.com"),
+        lineage("idle.example.com"),
+        lineage("nginx.example.com", { installer: "nginx" }),
+      ],
+    })
+    const certs = [
+      cert("app.example.com", ["app", "www"]),
+      cert("idle.example.com", []),
+      cert("nginx.example.com", ["n"]),
+    ]
+    expect(unreloadedRenewals(state, certs)).toEqual({
+      lineages: ["app.example.com"],
+      sites: ["app", "www"],
+    })
+    expect(unreloadedRenewals({ ...state, reloadHook: hook("installed") }, certs).lineages).toEqual(
+      [],
+    )
+    expect(unreloadedRenewals({ ...state, autoRenew: false }, certs).lineages).toEqual([])
   })
 })

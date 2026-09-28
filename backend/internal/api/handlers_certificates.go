@@ -33,7 +33,16 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/import", s.handle(s.handleCertImport))
 		r.Method(http.MethodPost, "/dns-credentials", s.handle(s.handleDNSCredentials))
 		r.Method(http.MethodPost, "/renew", s.handle(s.handleCertRenew))
+		// The renewal schedule's own record: the timer's service journal,
+		// or certbot's log on a host that renews from cron, which holds
+		// the ACME exchange itself.
+		r.Method(http.MethodGet, "/renewal/log", s.handle(s.handleRenewalLog))
+		r.Method(http.MethodPost, "/renewal/run", s.handle(s.handleRenewalRun))
+		r.Method(http.MethodPut, "/renewal-hook", s.handle(s.handleRenewalHookInstall))
 		s.destructive(r, func(r chi.Router) {
+			// Removing the hook stops nginx reloading after renewals; the
+			// same switch puts it back, so no phrase.
+			r.Method(http.MethodDelete, "/renewal-hook", s.handle(s.handleRenewalHookRemove))
 			// Removing a saved DNS token is recoverable — paste it again
 			// — so it takes the ordinary confirmation and no phrase.
 			r.Method(http.MethodDelete, "/dns-credentials/{provider}", s.handle(s.handleDNSCredentialsRemove))
@@ -168,7 +177,11 @@ func (s *Server) handleCertIssue(w http.ResponseWriter, r *http.Request) error {
 			}
 			kept = "certbot did not issue a new certificate: the one these names already have is not due for renewal yet, so it was kept as it is."
 		}
-		if err := certbotJob(ctx, out, args, kept); err != nil {
+		changed, err := certbotJob(ctx, out, args, kept)
+		if err != nil {
+			return err
+		}
+		if err := s.reloadAfterRenewal(ctx, out, changed); err != nil {
 			return err
 		}
 		if replacing {
@@ -203,35 +216,68 @@ func (s *Server) startCertbotJob(w http.ResponseWriter, r *http.Request, spec jo
 
 // certbotJob runs certbot and turns a non-zero exit into an error, so a failed
 // order reads as a failed job rather than as a job that succeeded while
-// printing a problem.
+// printing a problem. It answers with the lineages the run renewed or issued.
 //
 // kept, when set, is what to say if certbot exits 0 having replaced nothing.
 // It does that when a certificate is not due — "no action taken" on an
 // issuance, "not due for renewal" on a renewal — and the job read as a
 // success that had done what was asked. The lineages' serials, compared
 // before and after, tell the two apart whatever certbot's wording.
-func certbotJob(ctx context.Context, out jobs.Emitter, args []string, kept string) error {
+func certbotJob(ctx context.Context, out jobs.Emitter, args []string, kept string) ([]string, error) {
 	environment, err := proxysvc.CertbotEnvironment()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	cmd, err := proxysvc.CertbotCommand(ctx, environment, args...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	before, beforeErr := proxysvc.CertbotSerials()
 	code, err := out.RunCmd(cmd, append([]string{"certbot"}, args...))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if code != 0 {
-		return fmt.Errorf("certbot exited %d — the last lines above say why", code)
+		return nil, fmt.Errorf("certbot exited %d — the last lines above say why", code)
 	}
-	if kept != "" && beforeErr == nil {
-		if after, err := proxysvc.CertbotSerials(); err == nil && len(before) > 0 && maps.Equal(before, after) {
-			out.Status("%s", kept)
+	if beforeErr != nil {
+		return nil, nil
+	}
+	after, err := proxysvc.CertbotSerials()
+	if err != nil {
+		return nil, nil
+	}
+	if kept != "" && len(before) > 0 && maps.Equal(before, after) {
+		out.Status("%s", kept)
+	}
+	return proxysvc.ChangedLineages(before, after), nil
+}
+
+// reloadAfterRenewal reloads nginx once a run has renewed a certificate an
+// enabled site serves. nginx keeps the certificate it read at its last
+// reload, and certbot reloads it only for a lineage its nginx plugin
+// installed — never for a brand-new one, whatever hooks are installed. The
+// reload tests the configuration first, and a failing test is the job's
+// failure: the certificate is renewed, but no browser gets it.
+func (s *Server) reloadAfterRenewal(ctx context.Context, out jobs.Emitter, changed []string) error {
+	sites := s.modules.proxy.SitesServingLineages(changed)
+	if len(sites) == 0 {
+		return nil
+	}
+	res, err := s.modules.proxy.Reload(ctx, proxysvc.KindNginx)
+	if err != nil {
+		why := err.Error()
+		if errors.Is(err, proxysvc.ErrInvalidConf) {
+			why = "its configuration test failed"
+			if res != nil && res.Validation != nil {
+				for _, line := range strings.Split(strings.TrimSpace(res.Validation.Output), "\n") {
+					out.Line("stderr", line)
+				}
+			}
 		}
+		return proxysvc.NotReloadedFor(sites, why)
 	}
+	out.Status("%s", proxysvc.ReloadedFor(sites))
 	return nil
 }
 
@@ -278,8 +324,140 @@ func (s *Server) handleCertRenew(w http.ResponseWriter, r *http.Request) error {
 		if req.Force {
 			out.Status("Forced renewal spends one of the five duplicate certificates Let's Encrypt allows per week.")
 		}
-		return certbotJob(ctx, out, args, kept)
+		changed, err := certbotJob(ctx, out, args, kept)
+		if err != nil {
+			return err
+		}
+		return s.reloadAfterRenewal(ctx, out, changed)
 	})
+}
+
+// handleRenewalRun starts the service the renewal timer starts, now, and
+// reports its run. It is the timer's renewal rather than one of this page's:
+// systemd records how it went, so the page's reading of the schedule
+// changes with it — what an operator wants after fixing why it failed.
+func (s *Server) handleRenewalRun(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	service, err := proxysvc.RenewalServiceFor(ctx)
+	if errors.Is(err, proxysvc.ErrRenewalNotSystemd) {
+		return httpx.Err(http.StatusConflict, "renewal_not_systemd",
+			"certbot renews from cron here, so there is no service to start. Use Renew all due instead.")
+	}
+	if err != nil {
+		return httpx.Err(http.StatusConflict, "renewal_not_scheduled", err.Error())
+	}
+	httpx.SetAudit(r, "certificates.renewal.run", service, map[string]any{"streamed": true})
+	return s.startCertbotJob(w, r, jobs.Spec{
+		Kind: "certbot.renewal", Title: "Running " + service, Target: service, Timeout: 15 * time.Minute,
+	}, func(ctx context.Context, out jobs.Emitter) error {
+		before, _ := proxysvc.CertbotSerials()
+		previous, running, err := proxysvc.RenewalInvocation(ctx, service)
+		if err != nil {
+			return err
+		}
+		if running {
+			// Starting a run in progress waits for it: that run is ours.
+			previous = ""
+			out.Status("%s is already running; waiting for it to finish.", service)
+		}
+		out.Status("%s is the renewal the timer runs: certbot renews every certificate that is due, and systemd records how it went.", service)
+		code, err := out.RunCmd(proxysvc.StartRenewalCommand(ctx, service), []string{"systemctl", "start", service})
+		if err != nil {
+			return err
+		}
+		run, failures, reason, readErr := proxysvc.RenewalRunAfter(ctx, service, previous)
+		if readErr == nil {
+			for _, line := range run.Lines {
+				if !line.Systemd {
+					out.Line("stdout", line.Text)
+				}
+			}
+		}
+		changed := []string{}
+		if after, err := proxysvc.CertbotSerials(); err == nil {
+			changed = proxysvc.ChangedLineages(before, after)
+		}
+		if len(changed) > 0 {
+			out.Status("Renewed %s.", strings.Join(changed, ", "))
+		}
+		failed := code != 0 || (run != nil && run.Result == "failed")
+		if !failed {
+			if len(changed) == 0 {
+				out.Status("Nothing was due for renewal, so certbot changed nothing.")
+			}
+			return s.reloadAfterRenewal(ctx, out, changed)
+		}
+		// What did renew still has to reach nginx.
+		if err := s.reloadAfterRenewal(ctx, out, changed); err != nil {
+			out.Status("%s", err.Error())
+		}
+		return renewalRunFailure(service, code, failures, reason, readErr)
+	})
+}
+
+// renewalRunFailure is a failed run of the renewal service, in the words its
+// journal gives.
+func renewalRunFailure(service string, code int, failures []proxysvc.RenewalFailure, reason string, readErr error) error {
+	switch {
+	case len(failures) > 0:
+		parts := make([]string, 0, len(failures))
+		for _, f := range failures {
+			parts = append(parts, f.Lineage+": "+f.Reason)
+		}
+		return fmt.Errorf("%s failed to renew %s", service, strings.Join(parts, "; "))
+	case reason != "":
+		return fmt.Errorf("%s failed: %s", service, reason)
+	case readErr != nil && code != 0:
+		return fmt.Errorf("systemctl start %s exited %d — the lines above say why", service, code)
+	}
+	return fmt.Errorf("%s failed (exit %d)", service, code)
+}
+
+// handleRenewalLog answers with the renewal schedule's recent runs.
+func (s *Server) handleRenewalLog(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	log, err := s.modules.proxy.RenewalLog(ctx)
+	if err != nil {
+		return httpx.Err(http.StatusBadGateway, "renewal_log", err.Error()).Retry()
+	}
+	httpx.JSON(w, http.StatusOK, log)
+	return nil
+}
+
+// handleRenewalHookInstall installs the deploy hook that reloads nginx after
+// every renewal, or restores it over a copy changed by hand.
+func (s *Server) handleRenewalHookInstall(w http.ResponseWriter, r *http.Request) error {
+	before, _ := proxysvc.RenewalHookStatus()
+	hook, err := proxysvc.InstallRenewalHook()
+	if errors.Is(err, proxysvc.ErrRenewalHookForeign) {
+		return httpx.Err(http.StatusConflict, "hook_foreign",
+			hook.Path+" is not this dashboard's file, so it is left as it is.")
+	}
+	if err != nil {
+		return httpx.Err(http.StatusInternalServerError, "hook_write_failed", "The hook could not be written: "+err.Error())
+	}
+	httpx.SetAudit(r, "certificates.renewal-hook.install", hook.Path, map[string]any{"was": before.State})
+	httpx.JSON(w, http.StatusOK, hook)
+	return nil
+}
+
+func (s *Server) handleRenewalHookRemove(w http.ResponseWriter, r *http.Request) error {
+	before, _ := proxysvc.RenewalHookStatus()
+	hook, err := proxysvc.RemoveRenewalHook()
+	switch {
+	case errors.Is(err, proxysvc.ErrRenewalHookForeign):
+		return httpx.Err(http.StatusConflict, "hook_foreign",
+			hook.Path+" is not this dashboard's file, so it is left as it is.")
+	case errors.Is(err, proxysvc.ErrRenewalHookMissing):
+		return httpx.Err(http.StatusNotFound, "not_found", "The hook is not installed.")
+	case err != nil:
+		return httpx.Err(http.StatusInternalServerError, "hook_write_failed", "The hook could not be removed: "+err.Error())
+	}
+	httpx.SetAudit(r, "certificates.renewal-hook.remove", hook.Path, map[string]any{"was": before.State})
+	httpx.JSON(w, http.StatusOK, hook)
+	return nil
 }
 
 type revokeRequest struct {
@@ -306,7 +484,8 @@ func (s *Server) handleCertRevoke(w http.ResponseWriter, r *http.Request) error 
 		Kind: "certbot.revoke", Title: "Revoking " + req.Name, Target: req.Name,
 		Timeout: 5 * time.Minute,
 	}, func(ctx context.Context, out jobs.Emitter) error {
-		return certbotJob(ctx, out, args, "")
+		_, err := certbotJob(ctx, out, args, "")
+		return err
 	})
 }
 

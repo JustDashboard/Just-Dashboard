@@ -1,4 +1,10 @@
-import { expiredAgo } from "@/lib/certificates"
+import {
+  expiredAgo,
+  runPhrase,
+  sinceDay,
+  standingFailures,
+  unreloadedRenewals,
+} from "@/lib/certificates"
 import type { Certificate, CertbotState } from "@/lib/types"
 import type { ProxyFinding } from "@/components/proxy/findings/shared"
 
@@ -10,7 +16,8 @@ export type CertificateFindingInput = {
 
 /**
  * A certificate that cannot be read, is a test certificate, has expired or is
- * about to, and a renewal nothing runs.
+ * about to; a renewal nothing runs, one whose last run failed, one that will
+ * fail, and renewals nginx never reloads for.
  */
 export function certificateFindings({ certs, certbot }: CertificateFindingInput): ProxyFinding[] {
   const out: ProxyFinding[] = []
@@ -59,6 +66,64 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
         advice:
           "certbot renews at thirty days. A certificate still here a week later means the timer is not running.",
         meta: "certificate",
+        href: "/proxy/certificates",
+      })
+    }
+  }
+
+  const health = certbot?.available ? certbot.health : undefined
+  if (health?.state === "failed") {
+    // Its reason is the certificates it failed on, or else why the whole
+    // run failed.
+    const standing = standingFailures(health)
+    const why = standing.length
+      ? standing.map((f) => `${f.lineage}: ${f.reason}`).join(" ")
+      : (health.reason ?? `It exited ${health.exitStatus ?? "with an error"}.`)
+    const when = health.lastRun ? ` ${runPhrase(health.lastRun)}` : ""
+    const since = health.failingSince
+      ? ` Every run since ${sinceDay(health.failingSince)} has failed.`
+      : ""
+    out.push({
+      id: "certbot.renewal-failing",
+      level: "critical",
+      title: "certbot's last renewal failed",
+      detail: `${health.service ?? "The renewal"} failed${when}. ${why}${since}`,
+      advice:
+        "Fix what it names, then use Dry run on the certificate and Run now under Automatic renewal on the Certificates page to confirm.",
+      meta: "renewal",
+      href: "/proxy/certificates",
+    })
+  }
+
+  for (const lineage of certbot?.available ? certbot.certs : []) {
+    if (!lineage.willFail?.length) continue
+    // Inside the renewal window certbot tries at every run; before it, the
+    // failure is still weeks away.
+    const due = !lineage.valid || lineage.daysLeft <= 30
+    out.push({
+      id: `certbot.will-fail.${lineage.name}`,
+      level: due ? "critical" : "warning",
+      title: `${lineage.name} will fail to renew`,
+      detail: lineage.willFail.join(" "),
+      advice: due
+        ? "It is inside its renewal window, so certbot tries at every run and fails the same way until this is fixed."
+        : "Fix this before it reaches its renewal window, thirty days before it expires.",
+      meta: "renewal",
+      href: "/proxy/certificates",
+    })
+  }
+
+  if (certbot?.available && certs) {
+    const { lineages, sites } = unreloadedRenewals(certbot, certs)
+    if (lineages.length > 0) {
+      out.push({
+        id: "certbot.no-reload",
+        level: "warning",
+        title: "Renewed certificates will not reach nginx",
+        detail: `certbot renews ${lineages.join(", ")} without reloading nginx, so ${sites.join(", ")} ${sites.length === 1 ? "keeps" : "keep"} serving the old certificate until it expires.`,
+        advice:
+          "Turn on “Reload nginx after every renewal” under Automatic renewal on the Certificates page.",
+        meta: "renewal",
         href: "/proxy/certificates",
       })
     }

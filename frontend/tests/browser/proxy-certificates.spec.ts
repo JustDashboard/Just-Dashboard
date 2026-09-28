@@ -1,17 +1,11 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test"
-import {
-  availability,
-  certs,
-  inThirtyDays,
-  json,
-  mockProxy,
-  mockShowcase,
-  now,
-  user,
-} from "./proxy-fixtures"
+import { availability, certs, json, mockProxy, mockShowcase, now, user } from "./proxy-fixtures"
 import {
   certbotJob,
+  certbotLineage,
   certbotState,
+  reloadHook,
+  renewalHealth,
   servedCertificate,
   stagingCertificate,
 } from "./fixtures/proxy/certs"
@@ -230,14 +224,13 @@ async function mockStagingLineage(page: Page, overrides: Record<string, unknown>
       route,
       certbotState({
         certs: [
-          {
+          certbotLineage({
             name: "test.example.com",
             domains: ["test.example.com", "www.test.example.com"],
-            expiry: inThirtyDays,
+            certPath: "/etc/letsencrypt/live/test.example.com/fullchain.pem",
             daysLeft: 80,
-            valid: true,
             staging: true,
-          },
+          }),
         ],
         ...overrides,
       }),
@@ -979,4 +972,347 @@ test("the runtime page's domain row says Caddy renews it, and fits at every widt
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)
   }
+})
+
+/** A host whose certbot.timer is active and whose last run failed on app.example.com. */
+async function mockFailingRenewal(page: Page, overrides: Record<string, unknown> = {}) {
+  await page.route("**/api/v1/certificates/certbot", (route) =>
+    json(
+      route,
+      certbotState({
+        autoRenew: true,
+        renewSource: "certbot.timer",
+        renewUnit: undefined,
+        health: renewalHealth(),
+        certs: [
+          certbotLineage({
+            lastFailure: { lineage: "app.example.com", reason: "Some challenges have failed." },
+          }),
+        ],
+        ...overrides,
+      }),
+    ),
+  )
+}
+
+test("an active timer whose last run failed reads failing, with certbot's reason on the certificate", async ({
+  page,
+}, testInfo) => {
+  await mockProxy(page, { included: true })
+  await mockFailingRenewal(page)
+  await page.goto("/proxy/certificates")
+
+  const tile = page.locator("[data-slot='stat-grid']")
+  await expect(tile.getByText("Failing", { exact: true })).toBeVisible()
+  await expect(tile.getByText(/^last run (yesterday )?\d\d:\d\d · 1 failed$/)).toBeVisible()
+  await expect(tile.getByText("Scheduled", { exact: true })).toHaveCount(0)
+
+  const notice = page.getByText("The last renewal failed").locator("..")
+  await expect(notice).toContainText(/certbot\.service exited 1 (yesterday )?at \d\d:\d\d\./)
+  await expect(notice).toContainText("app.example.com: Some challenges have failed.")
+
+  const lineages = page.getByRole("list", { name: "certbot lineages" })
+  await expect(
+    lineages.getByText("Last renewal failed: Some challenges have failed."),
+  ).toBeVisible()
+  // How to check a fix comes out of the menu.
+  await expect(lineages.getByRole("button", { name: "Dry run", exact: true })).toBeVisible()
+  await expect(lineages.getByText("Renews with")).toBeVisible()
+
+  await page.screenshot({ path: testInfo.outputPath("renewal-failing.png") })
+  await lineages.getByRole("button", { name: "Show log", exact: true }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByText("Renewal log")).toBeVisible()
+  await expect(sheet.getByRole("region")).toHaveCount(2)
+  const newest = sheet.getByRole("region").first()
+  await expect(
+    newest.getByText(
+      "Failed to renew certificate app.example.com with error: Some challenges have failed.",
+    ),
+  ).toHaveClass(/text-destructive/)
+  await expect(newest.getByText("Starting certbot.service - Certbot...")).toHaveClass(
+    /text-muted-foreground/,
+  )
+  await expect(newest.getByText("failed", { exact: true })).toBeVisible()
+})
+
+test("a failure renewed since reads recovered, and a passing run healthy until the next", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockFailingRenewal(page, {
+    health: renewalHealth({
+      state: "recovered",
+      failures: [
+        { lineage: "app.example.com", reason: "Some challenges have failed.", renewedSince: true },
+      ],
+    }),
+    certs: [certbotLineage()],
+  })
+  await page.goto("/proxy/certificates")
+  const tiles = page.locator("[data-slot='stat-grid']")
+  await expect(tiles.getByText("Recovered", { exact: true })).toBeVisible()
+  await expect(page.getByText("The last renewal failed")).toHaveCount(0)
+  await expect(page.getByText("renewed since", { exact: true })).toBeVisible()
+  await expect(page.getByText("Last renewal failed:")).toHaveCount(0)
+
+  await mockFailingRenewal(page, {
+    health: renewalHealth({ state: "ok", exitStatus: 0, failures: [] }),
+    certs: [certbotLineage()],
+  })
+  await page.reload()
+  await expect(tiles.getByText("Healthy", { exact: true })).toBeVisible()
+  await expect(tiles.getByText(/^next run (tomorrow )?\d\d:\d\d$/)).toBeVisible()
+  await expect(page.getByText(/^Last run (yesterday )?\d\d:\d\d passed$/)).toBeVisible()
+})
+
+test("Run now starts the timer's service, holds every certbot verb while it runs, and reads the record again after", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockFailingRenewal(page)
+  const stream = await holdJobStreams(page)
+  const running = certbotJob({
+    kind: "certbot.renewal",
+    title: "Running certbot.service",
+    target: "certbot.service",
+  })
+  const runs = await capture(page, "**/api/v1/certificates/renewal/run", () => running)
+  let reads = 0
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/v1/certificates/certbot")) reads++
+  })
+  await page.goto("/proxy/certificates")
+  await expect(page.getByText("The last renewal failed")).toBeVisible()
+  const before = reads
+
+  await page.getByRole("button", { name: "Run now", exact: true }).click()
+  expect(runs).toHaveLength(1)
+  await expect(page.getByText("Running…", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Run now", exact: true })).toBeDisabled()
+  const lineages = page.getByRole("list", { name: "certbot lineages" })
+  await expect(lineages.getByRole("button", { name: "Renew", exact: true })).toBeDisabled()
+  await expect(page.getByRole("button", { name: "Renew all due" })).toBeDisabled()
+
+  // It failed again: the record is read again all the same.
+  stream.finish({
+    ...running,
+    status: "failed",
+    error: "certbot.service failed to renew app.example.com: Some challenges have failed.",
+    endedAt: now,
+  })
+  await expect(page.getByRole("button", { name: "Run now", exact: true })).toBeEnabled()
+  await expect.poll(() => reads).toBeGreaterThan(before)
+})
+
+test("the reload switch installs the hook, and removing it asks first", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  let hook = reloadHook("missing")
+  await page.route("**/api/v1/certificates/certbot", (route) =>
+    json(
+      route,
+      certbotState({
+        autoRenew: true,
+        renewSource: "certbot.timer",
+        renewUnit: undefined,
+        health: renewalHealth({ state: "ok", exitStatus: 0, failures: [] }),
+        certs: [
+          certbotLineage({
+            authenticator: "webroot",
+            installer: undefined,
+            webroots: ["/var/www/app"],
+          }),
+        ],
+        reloadHook: hook,
+      }),
+    ),
+  )
+  const calls: string[] = []
+  await page.route("**/api/v1/certificates/renewal-hook", async (route) => {
+    calls.push(route.request().method())
+    hook = reloadHook(route.request().method() === "DELETE" ? "missing" : "installed")
+    await json(route, hook)
+  })
+  await page.goto("/proxy/certificates")
+
+  const lineages = page.getByRole("list", { name: "certbot lineages" })
+  await expect(lineages.getByText("/var/www/app")).toBeVisible()
+  const option = page.getByRole("switch", { name: "Reload nginx after every renewal" })
+  await expect(option).not.toBeChecked()
+  await expect(
+    page.getByText(
+      "certbot reloads nginx itself only for certificates issued through nginx. 1 of 1 here is not.",
+    ),
+  ).toBeVisible()
+  await option.click()
+  await expect(page.getByText("nginx reloads after every renewal")).toBeVisible()
+  await expect(option).toBeChecked()
+  await expect(
+    page.getByText(/certbot runs 50-just-dashboard-reload-nginx after each renewal/),
+  ).toBeVisible()
+
+  await option.click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByText("Stop reloading nginx after renewals")).toBeVisible()
+  await dialog.getByRole("button", { name: "Remove the hook" }).click()
+  await expect(option).not.toBeChecked()
+  expect(calls).toEqual(["PUT", "DELETE"])
+})
+
+test("a hook changed by hand offers its restore, and somebody else's file is left alone", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  let state = reloadHook("modified", ["reload-haproxy"])
+  await page.route("**/api/v1/certificates/certbot", (route) =>
+    json(route, certbotState({ reloadHook: state })),
+  )
+  const calls = await capture(page, "**/api/v1/certificates/renewal-hook", () => {
+    state = reloadHook("installed", ["reload-haproxy"])
+    return state
+  })
+  await page.goto("/proxy/certificates")
+  await expect(page.getByText(/was changed by hand, or is no longer executable/)).toBeVisible()
+  await expect(page.getByText(/certbot also runs reload-haproxy after each renewal/)).toBeVisible()
+  await page.getByRole("button", { name: "Restore the hook" }).click()
+  await expect(page.getByText("The hook is restored")).toBeVisible()
+  expect(calls).toHaveLength(1)
+  await expect(page.getByRole("button", { name: "Restore the hook" })).toHaveCount(0)
+
+  state = reloadHook("foreign")
+  await page.reload()
+  await expect(
+    page.getByRole("switch", { name: "Reload nginx after every renewal" }),
+  ).toBeDisabled()
+  await expect(page.getByText(/is not this dashboard's file, so it is left as it is/)).toBeVisible()
+})
+
+test("a lineage that will fail says why before the run does, and the overview raises it", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const reason =
+    "certbot renews it with the dns-cloudflare plugin, which the host's, certbot 2.11.0 does not have."
+  await page.route("**/api/v1/certificates/certbot", (route) =>
+    json(
+      route,
+      certbotState({
+        autoRenew: true,
+        renewSource: "certbot.timer",
+        renewUnit: undefined,
+        health: renewalHealth({ state: "ok", exitStatus: 0, failures: [] }),
+        certs: [
+          certbotLineage({
+            authenticator: "dns-cloudflare",
+            installer: undefined,
+            dnsProvider: "Cloudflare",
+            willFail: [reason],
+          }),
+        ],
+      }),
+    ),
+  )
+  await page.goto("/proxy/certificates")
+  const lineages = page.getByRole("list", { name: "certbot lineages" })
+  await expect(lineages.getByText("The next renewal will fail")).toBeVisible()
+  await expect(lineages.getByText(reason)).toBeVisible()
+  await expect(lineages.getByText("Cloudflare", { exact: true })).toBeVisible()
+  await expect(lineages.getByRole("button", { name: "Dry run", exact: true })).toBeVisible()
+
+  await page.goto("/proxy")
+  const finding = page.getByRole("button", { name: /^app\.example\.com will fail to renew/ })
+  await expect(finding).toBeVisible()
+  await finding.click()
+  await expect(page.getByText(reason)).toBeVisible()
+})
+
+test("the overview raises a failing renewal, and renewals no reload reaches", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockFailingRenewal(page, {
+    certs: [
+      certbotLineage({
+        authenticator: "webroot",
+        installer: undefined,
+        lastFailure: { lineage: "app.example.com", reason: "Some challenges have failed." },
+      }),
+    ],
+  })
+  await page.goto("/proxy")
+  const failing = page.getByRole("button", { name: /^certbot's last renewal failed/ })
+  await expect(failing).toBeVisible()
+  await failing.click()
+  await expect(
+    page.getByText(
+      /certbot\.service failed (yesterday )?at \d\d:\d\d\. app\.example\.com: Some challenges have failed\./,
+    ),
+  ).toBeVisible()
+  const unreloaded = page.getByRole("button", {
+    name: /^Renewed certificates will not reach nginx/,
+  })
+  await expect(unreloaded).toBeVisible()
+  await unreloaded.click()
+  await expect(
+    page.getByText(
+      "certbot renews app.example.com without reloading nginx, so app.example.com keeps serving the old certificate until it expires.",
+    ),
+  ).toBeVisible()
+})
+
+test("a read-only account reads the failure, with nothing to press", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockFailingRenewal(page)
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.goto("/proxy/certificates")
+  await expect(page.getByText("The last renewal failed")).toBeVisible()
+  await expect(page.getByText("Last renewal failed: Some challenges have failed.")).toBeVisible()
+  for (const name of ["Run now", "Show log", "Dry run", "Renew"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0)
+  }
+  await expect(page.getByRole("switch", { name: "Reload nginx after every renewal" })).toHaveCount(
+    0,
+  )
+})
+
+test("the failing renewal, its lineage and the switch fit a phone", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await mockFailingRenewal(page, {
+    certs: [
+      certbotLineage({
+        authenticator: "webroot",
+        installer: undefined,
+        webroots: ["/var/www/a-rather-long-application-name/public"],
+        lastFailure: {
+          lineage: "app.example.com",
+          reason:
+            "The manual plugin is not working; there may be problems with your existing configuration. The error was: PluginError('An authentication script must be provided with --manual-auth-hook when using the manual plugin non-interactively.')",
+        },
+        willFail: [
+          "It was issued by hand with the manual plugin, which renews unattended only with an auth hook, and it has none.",
+        ],
+      }),
+    ],
+  })
+  await page.goto("/proxy/certificates")
+  await page.getByText("The last renewal failed").scrollIntoViewIfNeeded()
+  await expect(page.getByText("The last renewal failed")).toBeInViewport()
+  await page.screenshot({ path: testInfo.outputPath("renewal-record-phone.png") })
+  await expect(page.getByRole("switch", { name: "Reload nginx after every renewal" })).toBeVisible()
+  const overflow = await page
+    .locator("[data-slot='page']")
+    .evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(1)
+  const lineages = page.getByRole("list", { name: "certbot lineages" })
+  const showLog = lineages.getByRole("button", { name: "Show log", exact: true })
+  await showLog.scrollIntoViewIfNeeded()
+  await expect(showLog).toBeInViewport({ ratio: 1 })
+  await page.screenshot({ path: testInfo.outputPath("renewal-phone.png"), fullPage: true })
+  await showLog.click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet).toBeInViewport({ ratio: 1 })
+  const sheetOverflow = await sheet.evaluate((el) => el.scrollWidth - el.clientWidth)
+  expect(sheetOverflow).toBeLessThanOrEqual(1)
+  await page.screenshot({ path: testInfo.outputPath("renewal-log-phone.png") })
 })

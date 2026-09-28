@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { runPhrase, sinceDay } from "@/lib/certificates"
 import { certificateFindings } from "./certificates"
 
 const expired = (hoursAgo) => ({
@@ -113,5 +114,151 @@ describe("a test certificate's finding", () => {
         "certbot is not installed, so this dashboard cannot issue a real certificate. Import one for these names from the Certificates page and point the site at it.",
       )
     }
+  })
+})
+
+const lineage = (overrides = {}) => ({
+  name: "betbots.site",
+  domains: ["betbots.site"],
+  expiry: new Date(Date.now() + 10 * 86_400_000).toISOString(),
+  daysLeft: 10,
+  valid: true,
+  certPath: "/etc/letsencrypt/live/betbots.site/fullchain.pem",
+  authenticator: "nginx",
+  installer: "nginx",
+  ...overrides,
+})
+const certbot = (overrides = {}) => ({
+  available: true,
+  certs: [lineage()],
+  autoRenew: true,
+  renewSource: "certbot.timer",
+  nginxReloads: true,
+  reloadHook: {
+    path: "/etc/letsencrypt/renewal-hooks/deploy/50-just-dashboard-reload-nginx",
+    state: "missing",
+    others: [],
+  },
+  ...overrides,
+})
+const lastRun = "2026-09-27T21:13:11Z"
+
+describe("a renewal that failed", () => {
+  test("is critical, with the certificate it failed on and the streak", () => {
+    const findings = certificateFindings({
+      certbot: certbot({
+        health: {
+          source: "certbot.service",
+          service: "certbot.service",
+          state: "failed",
+          lastRun,
+          exitStatus: 1,
+          failingSince: "2026-07-02T02:26:01Z",
+          failures: [{ lineage: "betbots.site", reason: "Some challenges have failed." }],
+        },
+      }),
+    })
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({
+      id: "certbot.renewal-failing",
+      level: "critical",
+      title: "certbot's last renewal failed",
+      detail: `certbot.service failed ${runPhrase(lastRun)}. betbots.site: Some challenges have failed. Every run since ${sinceDay("2026-07-02T02:26:01Z")} has failed.`,
+    })
+  })
+
+  test("with no certificate to blame, the run's own reason; renewed since, nothing", () => {
+    const failed = (overrides) =>
+      certificateFindings({
+        certbot: certbot({
+          health: {
+            source: "certbot.service",
+            service: "certbot.service",
+            lastRun,
+            failures: [],
+            ...overrides,
+          },
+        }),
+      })
+    expect(
+      failed({ state: "failed", reason: "Another instance of Certbot is already running." })[0]
+        .detail,
+    ).toBe(
+      `certbot.service failed ${runPhrase(lastRun)}. Another instance of Certbot is already running.`,
+    )
+    expect(failed({ state: "failed", exitStatus: 1 })[0].detail).toBe(
+      `certbot.service failed ${runPhrase(lastRun)}. It exited 1.`,
+    )
+    expect(
+      failed({
+        state: "recovered",
+        failures: [{ lineage: "betbots.site", reason: "x", renewedSince: true }],
+      }),
+    ).toEqual([])
+  })
+})
+
+describe("a renewal that will fail", () => {
+  test("inside the renewal window it is critical, before it a warning", () => {
+    const willFail = [
+      "certbot renews it with the dns-cloudflare plugin, which the host's, certbot 2.11.0 does not have.",
+    ]
+    const [due] = certificateFindings({ certbot: certbot({ certs: [lineage({ willFail })] }) })
+    expect(due).toMatchObject({
+      id: "certbot.will-fail.betbots.site",
+      level: "critical",
+      title: "betbots.site will fail to renew",
+      detail: willFail[0],
+    })
+    const [later] = certificateFindings({
+      certbot: certbot({ certs: [lineage({ willFail, daysLeft: 70 })] }),
+    })
+    expect(later.level).toBe("warning")
+  })
+})
+
+describe("renewals nginx never reloads for", () => {
+  const served = [
+    {
+      path: "/etc/letsencrypt/live/betbots.site/fullchain.pem",
+      usedBy: ["betbots"],
+      daysLeft: 10,
+      expiring: false,
+      expired: false,
+      name: "betbots.site",
+      domains: [],
+      issuer: "R11",
+      notBefore: "",
+      notAfter: "",
+      selfSigned: false,
+      source: "certbot",
+    },
+  ]
+
+  test("a webroot lineage a site serves, with no hook, is a warning naming the site", () => {
+    const findings = certificateFindings({
+      certs: served,
+      certbot: certbot({ certs: [lineage({ authenticator: "webroot", installer: undefined })] }),
+    })
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({
+      id: "certbot.no-reload",
+      level: "warning",
+      detail:
+        "certbot renews betbots.site without reloading nginx, so betbots keeps serving the old certificate until it expires.",
+    })
+  })
+
+  test("nothing when certbot's nginx plugin or the hook reloads it", () => {
+    expect(certificateFindings({ certs: served, certbot: certbot() })).toEqual([])
+    expect(
+      certificateFindings({
+        certs: served,
+        certbot: certbot({
+          certs: [lineage({ installer: undefined })],
+          reloadHook: { path: "x", state: "installed", others: [] },
+        }),
+      }),
+    ).toEqual([])
   })
 })
