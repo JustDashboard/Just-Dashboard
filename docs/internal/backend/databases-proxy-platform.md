@@ -928,7 +928,24 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   because where the chain ends is not known. The serial is colon hex as openssl prints it, and the
   unstapled-OCSP notice needs a responder in the leaf (`ocspServers`; Let's Encrypt names none);
   `crlUrls` and `spkiPin` (base64 SHA-256 of the public key, what `curl --pinnedpubkey` takes) are
-  reported beside them. **Expiry is judged against the certificate's term** (`tlsscan_lifetime.go`):
+  reported beside them. **Chain and revocation** (`tlsscan_chain.go`, `revocation.go`): each `chain`
+  link carries its validity, serial, SHA-256, signature algorithm, names, extended key usage and
+  `issuedByNext`; `trustPath` is the path `x509.Verify` built to a root in the system store (without
+  the name, so a mismatch does not hide it), each step marked sent or supplied by the store.
+  `chainAudit` feeds grade rules: `tls.no-server-auth` (EKU set without serverAuth, F), `tls.sha1`
+  (a non-root link signed with SHA-1, F), `tls.must-staple` (TLS Feature status_request with no
+  staple, F), and for a chain trusted here only, `tls.long-validity` (over 398 days, issued since
+  2020-09-01, B) and `tls.no-sct` (no SCT in the certificate, the TLS extension or the stapled OCSP
+  answer, B) — a private root in the system store is indistinguishable from a public one, and the
+  findings say so; `tls.chain-order` and `tls.root-sent` are notices. `revocation` reads the stapled
+  OCSP answer, then each responder (`x/crypto/ocsp`, POST), then each CRL (at most 20 MB,
+  `CheckSignatureFrom` the issuer, current by NextUpdate); an answer is believed only when signed by
+  the issuer or its delegated responder. Those URLs are the certificate issuer's to write, so the
+  fetch dials public addresses only (checked after DNS in a `Control` hook, like redirect hops),
+  follows no redirects and fetches `http`/`https` only. Good and revoked answers are cached in memory
+  per issuer key and serial until their NextUpdate. A revoked leaf is `tls.revoked` (F); an answer
+  that could not be had is the `tls.revocation-unchecked` notice when the leaf names a source.
+  **Expiry is judged against the certificate's term** (`tlsscan_lifetime.go`):
   renewal is due in the last third of it, the last half for a term of ten days or less — certbot's rule
   since 4.0, and Caddy's — and never more than 30 days out. `summarise` (`certs.go`) sets `expiring`
   by it, so the certificate inventory, the watch list and the report agree; a 6-day certificate is no

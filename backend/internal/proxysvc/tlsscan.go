@@ -1,6 +1,7 @@
 package proxysvc
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -91,6 +92,12 @@ type TLSScan struct {
 	Trusted       bool   `json:"trusted"`
 	TrustError    string `json:"trustError,omitempty"`
 	NameMatches   bool   `json:"nameMatches"`
+	// TrustPath is the path a verifier built from the leaf to a root in this
+	// machine's store, which may differ from what was sent: a root the store
+	// supplies, or a cross-signed intermediate passed over.
+	TrustPath  []TrustLink `json:"trustPath,omitempty"`
+	ChainAudit *ChainAudit `json:"chainAudit,omitempty"`
+	Revocation *Revocation `json:"revocation,omitempty"`
 
 	KeyType      string `json:"keyType,omitempty"`
 	KeyBits      int    `json:"keyBits,omitempty"`
@@ -149,13 +156,23 @@ type ProtocolResult struct {
 
 // ChainLink is one certificate as the server presented it.
 type ChainLink struct {
-	Subject    string    `json:"subject"`
-	Issuer     string    `json:"issuer"`
-	NotAfter   time.Time `json:"notAfter"`
-	IsCA       bool      `json:"isCa"`
-	KeyType    string    `json:"keyType,omitempty"`
-	KeyBits    int       `json:"keyBits,omitempty"`
-	SelfIssued bool      `json:"selfIssued"`
+	Subject   string    `json:"subject"`
+	Issuer    string    `json:"issuer"`
+	NotBefore time.Time `json:"notBefore"`
+	NotAfter  time.Time `json:"notAfter"`
+	Serial    string    `json:"serial"`
+	// Fingerprint is the SHA-256 of the certificate, colon hex.
+	Fingerprint  string   `json:"fingerprint"`
+	SignatureAlg string   `json:"signatureAlgorithm"`
+	DNSNames     []string `json:"dnsNames,omitempty"`
+	ExtKeyUsage  []string `json:"extKeyUsage,omitempty"`
+	// IssuedByNext is whether the certificate sent after this one is its
+	// issuer, which is the order a chain is meant to be sent in.
+	IssuedByNext bool   `json:"issuedByNext"`
+	IsCA         bool   `json:"isCa"`
+	KeyType      string `json:"keyType,omitempty"`
+	KeyBits      int    `json:"keyBits,omitempty"`
+	SelfIssued   bool   `json:"selfIssued"`
 	// PEM is the certificate as sent, so the chain can be saved and checked
 	// with openssl; certificates are public, so this reveals nothing.
 	PEM string `json:"pem"`
@@ -325,6 +342,15 @@ func ScanTLSWith(ctx context.Context, domain string, port int, opts ScanOptions)
 	scan.CipherSuite = tls.CipherSuiteName(state.CipherSuite)
 	scan.OCSPStapled = len(state.OCSPResponse) > 0
 	describeChain(scan, state.PeerCertificates, domain)
+	// Revocation asks the issuer's responder or CRL, which can take seconds,
+	// so it runs beside the probes.
+	var revocation chan *Revocation
+	if len(state.PeerCertificates) > 0 {
+		leaf, issuer := state.PeerCertificates[0], issuerOf(state.PeerCertificates)
+		auditHandshake(scan.ChainAudit, state.SignedCertificateTimestamps, state.OCSPResponse, leaf, issuer)
+		revocation = make(chan *Revocation, 1)
+		go func() { revocation <- CheckRevocation(ctx, leaf, issuer, state.OCSPResponse) }()
+	}
 
 	// The preload list is for names served on 443. Its www rule is a
 	// handshake of its own, so it runs beside the probes rather than after
@@ -363,6 +389,9 @@ func ScanTLSWith(ctx context.Context, domain string, port int, opts ScanOptions)
 	}
 
 	collectAddresses(scan, addresses)
+	if revocation != nil {
+		scan.Revocation = <-revocation
+	}
 	grade(scan)
 	return scan
 }
@@ -620,13 +649,18 @@ func describeChain(scan *TLSScan, chain []*x509.Certificate, domain string) {
 	scan.LifetimeHours = wholeHours(leaf.NotAfter.Sub(leaf.NotBefore))
 	scan.RenewalWindowHours = wholeHours(renewalWindow(leaf.NotBefore, leaf.NotAfter))
 
-	for _, c := range chain {
+	for i, c := range chain {
 		keyType, keyBits := keyInfo(c)
+		digest := sha256.Sum256(c.Raw)
 		scan.Chain = append(scan.Chain, ChainLink{
-			Subject:  nameOf(c.Subject.CommonName, c.Subject.String()),
-			Issuer:   nameOf(c.Issuer.CommonName, c.Issuer.String()),
-			NotAfter: c.NotAfter.UTC(), IsCA: c.IsCA,
-			KeyType: keyType, KeyBits: keyBits,
+			Subject:   nameOf(c.Subject.CommonName, c.Subject.String()),
+			Issuer:    nameOf(c.Issuer.CommonName, c.Issuer.String()),
+			NotBefore: c.NotBefore.UTC(), NotAfter: c.NotAfter.UTC(), IsCA: c.IsCA,
+			Serial: colonHex(c.SerialNumber.Bytes()), Fingerprint: colonHex(digest[:]),
+			SignatureAlg: c.SignatureAlgorithm.String(),
+			DNSNames:     c.DNSNames, ExtKeyUsage: extKeyUsageNames(c),
+			IssuedByNext: i+1 < len(chain) && bytes.Equal(c.RawIssuer, chain[i+1].RawSubject),
+			KeyType:      keyType, KeyBits: keyBits,
 			SelfIssued: c.Issuer.String() == c.Subject.String(),
 			PEM:        string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})),
 		})
@@ -647,6 +681,8 @@ func describeChain(scan *TLSScan, chain []*x509.Certificate, domain string) {
 	} else {
 		scan.Trusted = true
 	}
+	scan.TrustPath = trustPath(chain)
+	auditChain(scan, chain)
 }
 
 func nameOf(common, full string) string {
@@ -1152,12 +1188,16 @@ func grade(scan *TLSScan) {
 			Detail: "Below the 2048-bit minimum every authority has enforced for a decade.",
 			Advice: "Reissue with a 2048-bit RSA key or, better, an ECDSA P-256 one."})
 	}
-	if !scan.OCSPStapled && len(scan.OCSPServers) > 0 {
+	// A must-staple leaf without its staple has a finding of its own below.
+	mustStapleUnmet := scan.ChainAudit != nil && scan.ChainAudit.MustStaple && !scan.OCSPStapled
+	if !scan.OCSPStapled && len(scan.OCSPServers) > 0 && !mustStapleUnmet {
 		findings = append(findings, ScanFinding{ID: "tls.no-ocsp", Level: "notice",
 			Title:  "No OCSP response is stapled",
 			Detail: "The certificate names an OCSP responder (" + strings.Join(scan.OCSPServers, ", ") + "), and the server is not attaching its answer.",
 			Advice: "Optional: browsers work without it. In nginx it is ssl_stapling on and ssl_stapling_verify on, with a resolver set so nginx can reach the responder."})
 	}
+	gradeChainAudit(scan, demote, func(f ScanFinding) { findings = append(findings, f) }, check)
+	gradeRevocation(scan, demote, func(f ScanFinding) { findings = append(findings, f) }, check)
 
 	// A redirect that was followed and never reached HTTPS caps the grade at
 	// B; one that could not be judged still keeps A+ out of reach.
