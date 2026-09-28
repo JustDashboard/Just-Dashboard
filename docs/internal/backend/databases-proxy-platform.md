@@ -315,6 +315,17 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   the existing destructive `DELETE /firewall/rules/{n}` and ufw renumbers on every delete; the page also
   re-reads `/firewall/` and refuses when the number now names another rule. Any signed-in account may
   read it, as it may read `/firewall/`.
+  `GET /ports` also says what the proxy does with each socket (`proxysvc.AttachProxy` in
+  `ports_routes.go`): `routes` are the enabled sites whose upstream reaches the TCP socket
+  (`SitesForUpstreamPort`, shared with the container routes view: `localhost`, a loopback, `0.0.0.0` or one
+  of the host's own addresses at that exact port — `:30000` is not `:3000` — and only the loopback spellings
+  for a loopback socket; a container or other host name never matches), `stream` the nginx stream on an
+  nginx-held socket when nginx includes the stream directory, and `servedSites` the enabled nginx sites
+  listening on an nginx-held port. `GET /ports/free?protocol=&address=&from=&count=` (system.admin: it binds
+  each candidate for a moment on the address named) finds up to 20 ports with `portalloc.Select`, searching
+  up from `from` and passing over every host port a container publishes or, stopped, keeps in its
+  `PortBindings` (`dockerx.HostPortBindings`, ranges expanded); it answers `{ports, skipped,
+  containersChecked}` so the page does not claim to have avoided containers when Docker did not answer.
   `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
   root; it reads `/proc` and changes nothing.
   **Owners.** `ListListeners` also reads, once per holder, its start (`StartedAt`, the processes page's

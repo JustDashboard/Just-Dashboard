@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -10,9 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
@@ -29,6 +32,10 @@ func (s *Server) mountPortRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/", s.handle(s.handlePortList))
 	r.Method(http.MethodGet, "/meta", s.handle(s.handlePortsMeta))
 	r.Method(http.MethodGet, "/firewall", s.handle(s.handlePortsFirewall))
+	// Finding a free port binds each candidate for a moment, on an address
+	// the caller names; only someone who can then publish on it may ask.
+	r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+		Method(http.MethodGet, "/free", s.handle(s.handlePortsFree))
 }
 
 // portsFirewall is the firewall as the ports page needs it: whether rules
@@ -125,6 +132,8 @@ func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
 	}()
 	owners := make(chan proxysvc.OwnerInput, 1)
 	go func() { owners <- s.ownerInput(ctx, true) }()
+	proxy := make(chan portsProxy, 1)
+	go func() { proxy <- s.readPortsProxy(ctx) }()
 	listeners, err := proxysvc.ListListeners(ctx)
 	if errors.Is(err, context.DeadlineExceeded) {
 		return httpx.Err(http.StatusGatewayTimeout, "timeout",
@@ -138,8 +147,135 @@ func (s *Server) handlePortList(w http.ResponseWriter, r *http.Request) error {
 	listeners = proxysvc.AttributeOwners(listeners, in)
 	s.nameDeployments(ctx, listeners)
 	placeListeners(listeners, netsec.ReadHostNetwork(ctx), <-firewall)
+	routes := <-proxy
+	proxysvc.AttachProxy(listeners, routes.vhosts, routes.streams)
 	httpx.JSON(w, http.StatusOK, listeners)
 	return nil
+}
+
+// portsProxy is the proxy's sites and streams, as the ports page says what
+// routes to each socket.
+type portsProxy struct {
+	vhosts  []proxysvc.VHost
+	streams *proxysvc.StreamStatus
+}
+
+// readPortsProxy reads the proxy's configuration beside the socket walk. A
+// host without a proxy, or a Docker Caddy that does not answer in time,
+// leaves the sockets without routes rather than the listing failing.
+func (s *Server) readPortsProxy(ctx context.Context) portsProxy {
+	ctx, cancel := context.WithTimeout(ctx, ownerSourceTimeout)
+	defer cancel()
+	vhosts, err := s.modules.proxy.ListVHosts(ctx)
+	if err != nil {
+		vhosts = nil
+	}
+	return portsProxy{vhosts: vhosts, streams: s.modules.proxy.Streams(ctx)}
+}
+
+// freePortsMax bounds how many ports one call finds: each is a bind and a
+// close, and a form needs one.
+const freePortsMax = 20
+
+// portsFree is GET /ports/free.
+type portsFree struct {
+	Ports []int `json:"ports"`
+	// Skipped is the containers' ports the search passed over although
+	// nothing listens on them: a stopped container's, which it binds again
+	// when it starts, and a port Docker publishes through NAT alone.
+	Skipped []dockerx.HostPortBinding `json:"skipped"`
+	// ContainersChecked is false where Docker could not be asked, so the
+	// page does not claim to have kept clear of containers' ports.
+	ContainersChecked bool `json:"containersChecked"`
+}
+
+// handlePortsFree finds ports nothing listens on and no container keeps,
+// searching up from `from` and wrapping round, by binding each candidate on
+// the address and protocol given. A binding is an observation, not a
+// reservation: the port is free when this answers, not when a form is saved.
+func (s *Server) handlePortsFree(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+	protocol := q.Get("protocol")
+	if protocol == "" {
+		protocol = "tcp"
+	}
+	if protocol != "tcp" && protocol != "udp" {
+		return httpx.BadRequest("protocol must be tcp or udp")
+	}
+	address := q.Get("address")
+	if address == "" {
+		address = "0.0.0.0"
+	}
+	if net.ParseIP(address) == nil {
+		return httpx.BadRequest("address must be an IP address")
+	}
+	from, count := 1024, 5
+	if v := q.Get("from"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 65535 {
+			return httpx.BadRequest("from must be a port from 1 to 65535")
+		}
+		from = n
+	}
+	if v := q.Get("count"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > freePortsMax {
+			return httpx.BadRequest("count must be from 1 to %d", freePortsMax)
+		}
+		count = n
+	}
+
+	out := portsFree{Ports: []int{}, Skipped: []dockerx.HostPortBinding{}}
+	kept := map[int]dockerx.HostPortBinding{}
+	ctx, cancel := context.WithTimeout(r.Context(), ownerSourceTimeout)
+	bindings, err := s.modules.docker.HostPortBindings(ctx)
+	cancel()
+	if err == nil {
+		out.ContainersChecked = true
+		for _, b := range bindings {
+			if b.Protocol == protocol && bindingOverlaps(b.HostIP, address) {
+				kept[b.HostPort] = b
+			}
+		}
+	}
+	// A port under 1024 asked for is searched from there; otherwise the
+	// search stays among the ports an unprivileged program may take.
+	minimum := min(from, 1024)
+	passed := map[int]bool{}
+	for len(out.Ports) < count {
+		port, err := portalloc.Select(from, minimum, passed, func(candidate int) error {
+			if b, ok := kept[candidate]; ok {
+				if !passed[candidate] {
+					out.Skipped = append(out.Skipped, b)
+					passed[candidate] = true
+				}
+				return portalloc.ErrReserved
+			}
+			return portalloc.Available(address, protocol, candidate)
+		})
+		if err != nil {
+			if len(out.Ports) > 0 {
+				break
+			}
+			return httpx.BadRequest("%v", err)
+		}
+		out.Ports = append(out.Ports, port)
+		passed[port] = true
+		from = port
+	}
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
+}
+
+// bindingOverlaps says whether a container's binding on one address stands
+// in the way of a bind on another: either on every address, or both on the
+// same one.
+func bindingOverlaps(held, wanted string) bool {
+	if held == "" || held == "0.0.0.0" || held == "::" || wanted == "0.0.0.0" || wanted == "::" {
+		return true
+	}
+	a, b := net.ParseIP(held), net.ParseIP(wanted)
+	return a != nil && b != nil && a.Equal(b)
 }
 
 // ownerSourceTimeout bounds each source of a socket's owner. Each is a

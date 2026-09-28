@@ -110,6 +110,38 @@ export type Listener = {
   firewallRule?: number
   /** What the firewall does with a connection to an exposed socket; absent on loopback. */
   firewall?: ListenerFirewall
+  /** The enabled proxy sites whose upstream reaches this TCP socket. */
+  routes?: ListenerRoute[]
+  /** The nginx stream listening on this socket, where nginx holds it. */
+  stream?: string
+  /** On a socket nginx holds, how many enabled nginx sites listen on its port. */
+  servedSites?: number
+}
+
+/** A proxy site forwarding to a socket. */
+export type ListenerRoute = {
+  site: string
+  /** The site's first name; absent for a catch-all. */
+  serverName?: string
+  tls: boolean
+}
+
+/** A host port a container publishes, or keeps for its next start while stopped. */
+export type HostPortBinding = {
+  container: string
+  hostIp?: string
+  hostPort: number
+  protocol: string
+  running: boolean
+}
+
+/** GET /ports/free: ports nothing listens on and no container keeps, free when asked. */
+export type PortsFree = {
+  ports: number[]
+  /** Containers' ports the search passed over although nothing listens on them. */
+  skipped: HostPortBinding[]
+  /** False where Docker did not answer, so containers' ports were not avoided. */
+  containersChecked: boolean
 }
 
 /**
