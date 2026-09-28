@@ -67,7 +67,8 @@ taking a frame:
   facts, attention list, sites, certificate expiry and Engine log; the sites, certificates and
   streams inventories and the ports table with their toolbars; the Renewals section on
   Certificates; a site's own page, its readings on the page's ground and its logs one `Pane` under
-  its identity line; the TLS report's readings, findings, protocol, certificate, chain and HTTP
+  its identity line; the TLS report's readings, findings, protocol, certificate, chain, HTTP and
+  preload
   rows; the password files and DNS provider lists),
   health findings, the runtime-health bar, and every block of the deployment section â€” the fleet
   and its archive, Credentials and Notifications, a project's Overview, Deployments, Logs, Runtime
@@ -1232,7 +1233,9 @@ own words, each with Run now and Show log; otherwise a Status and the next run â
 nginx after every renewal" OptionRow; a lineage's last failure is a line in its row, its webroot
 folders wrapping mono paths rather than tags, and a certain next failure a warning Notice. The TLS
 report keeps findings, protocol checks and HTTP readings beside the live certificate and its
-vertical chain; long header values wrap instead of hiding the verdict. Listening sockets stay a
+vertical chain; long header values wrap instead of hiding the verdict. Its scan field is one input
+group, the address and its port, with a hint naming what will be scanned and a native datalist of
+known names; a scan in flight is a line with its elapsed time and an outline Cancel. Listening sockets stay a
 table of readings, with fixed endpoint, application, reach and action columns and a stacked phone
 layout chosen once by `useMediaQuery`; the three named columns sort from their headings, which carry
 `aria-sort`, and a phone gets the same orders as one Sort menu. The application cell is the owner

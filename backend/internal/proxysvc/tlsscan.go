@@ -8,14 +8,20 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -39,6 +45,9 @@ type TLSScan struct {
 	CheckedAt time.Time `json:"checkedAt"`
 	Reachable bool      `json:"reachable"`
 	Error     string    `json:"error,omitempty"`
+	// Failure is how far a scan that never completed a handshake got, and
+	// why it stopped there.
+	Failure *ScanFailure `json:"failure,omitempty"`
 
 	// Grade is A+ down to F, and Summary is the one sentence behind it.
 	Grade   string `json:"grade"`
@@ -46,9 +55,15 @@ type TLSScan struct {
 
 	Negotiated  string `json:"negotiated,omitempty"`
 	CipherSuite string `json:"cipherSuite,omitempty"`
+	// LegacyOnly reports that the server refused the handshake a current
+	// client makes and took one offering every version and cipher suite this
+	// library has; Negotiated and CipherSuite are what it took then.
+	LegacyOnly bool `json:"legacyOnly"`
 	// Protocols reports each version the server was asked for. "unknown" is a
-	// real answer: this client cannot always ask for the oldest ones, and
-	// saying so beats reporting a version as absent because we could not test.
+	// real answer: the probe got nothing from the server to stand behind —
+	// this client would not ask, the connection failed, or the server's answer
+	// could mean either — and saying so beats reporting a version as absent
+	// because it could not be tested.
 	Protocols []ProtocolResult `json:"protocols"`
 
 	Certificate *Certificate `json:"certificate,omitempty"`
@@ -67,8 +82,26 @@ type TLSScan struct {
 	Fingerprint  string `json:"fingerprint,omitempty"`
 	Serial       string `json:"serial,omitempty"`
 	OCSPStapled  bool   `json:"ocspStapled"`
+	// OCSPServers are the responders the leaf names. Without one there is
+	// nothing to staple — Let's Encrypt stopped naming one in 2025 — so a
+	// missing staple is only worth a word when this is not empty.
+	OCSPServers []string `json:"ocspServers,omitempty"`
+	// CRLURLs are the leaf's CRL distribution points.
+	CRLURLs []string `json:"crlUrls,omitempty"`
+	// SPKIPin is the base64 SHA-256 of the leaf's public key, the pin curl's
+	// --pinnedpubkey and a mobile app's pinning take. It survives a renewal
+	// that keeps the key, where the fingerprint does not.
+	SPKIPin string `json:"spkiPin,omitempty"`
+	// LifetimeHours is the leaf's whole term, and RenewalWindowHours the end
+	// of it in which renewal is due (see renewalWindow). Hours, because a
+	// short-lived certificate's 160 is no whole number of days.
+	LifetimeHours      int `json:"lifetimeHours,omitempty"`
+	RenewalWindowHours int `json:"renewalWindowHours,omitempty"`
 
-	HTTP     *HTTPScan     `json:"http,omitempty"`
+	HTTP *HTTPScan `json:"http,omitempty"`
+	// Preload is the domain against the HSTS preload list's rules, for a
+	// name on port 443 whose HTTPS answered.
+	Preload  *PreloadCheck `json:"preload,omitempty"`
 	Findings []ScanFinding `json:"findings"`
 }
 
@@ -76,6 +109,7 @@ type ProtocolResult struct {
 	Name string `json:"name"`
 	// Status is "offered", "refused" or "unknown".
 	Status string `json:"status"`
+	// Detail is what the server said, or why nothing it said was heard.
 	Detail string `json:"detail,omitempty"`
 }
 
@@ -92,17 +126,59 @@ type ChainLink struct {
 
 // HTTPScan is what the site says about itself over HTTP.
 type HTTPScan struct {
+	// Service is "http" when the HTTPS request got an HTTP answer, "other"
+	// when the service is known not to be a website — its port is
+	// registered to another protocol, or it answered in one — and "unknown"
+	// when the request got no answer that says either.
+	Service string `json:"service"`
+	// ServiceName is the protocol the port is registered to, when that is
+	// why no request was sent.
+	ServiceName string `json:"serviceName,omitempty"`
+	// Banner is the first line a service that is not HTTP answered with.
+	Banner     string `json:"banner,omitempty"`
 	StatusCode int    `json:"statusCode"`
 	Server     string `json:"server,omitempty"`
-	// PlainRedirects reports whether http:// sends the visitor to https://.
-	// A site with a perfect certificate that still answers on port 80 is one
-	// bookmark away from being read in plain text.
-	PlainRedirects bool          `json:"plainRedirects"`
-	PlainStatus    int           `json:"plainStatus,omitempty"`
-	PlainLocation  string        `json:"plainLocation,omitempty"`
-	PlainError     string        `json:"plainError,omitempty"`
-	HSTS           *HSTS         `json:"hsts,omitempty"`
-	Headers        []HeaderCheck `json:"headers"`
+	// Location is where the HTTPS answer redirects, when it does.
+	Location string `json:"location,omitempty"`
+	// HTTPSError is why the HTTPS request got no response, when the service
+	// said nothing to show it is not a website: it may be a quiet service or
+	// a failing site. Nothing else here was measured then — no header can be
+	// missing from a response that never came.
+	HTTPSError string `json:"httpsError,omitempty"`
+	// PlainRedirects reports whether http:// ends up at https://, however
+	// many hops it takes. A site with a perfect certificate that still
+	// answers on port 80 is one bookmark away from being read in plain text.
+	PlainRedirects bool `json:"plainRedirects"`
+	// PlainStatus and PlainLocation are the first hop's answer.
+	PlainStatus   int    `json:"plainStatus,omitempty"`
+	PlainLocation string `json:"plainLocation,omitempty"`
+	// PlainError is why port 80 did not answer at all, and PlainErrorKind
+	// which of "refused", "timeout", "dns" or "other" that was.
+	PlainError     string `json:"plainError,omitempty"`
+	PlainErrorKind string `json:"plainErrorKind,omitempty"`
+	// RedirectChain is every plain-HTTP request made, in order, and
+	// RedirectVerdict where it ended: "same-host" or "other-host" when it
+	// reached HTTPS on the host it started from or another one, "stays-http"
+	// at an answer that is not a redirect, "loop", "too-many" hops,
+	// "dead-end" at a hop that did not answer or pointed nowhere usable, and
+	// "internal" at a hop into this machine's network, which is not
+	// followed. It is empty when port 80 did not answer.
+	RedirectChain   []RedirectHop `json:"redirectChain"`
+	RedirectVerdict string        `json:"redirectVerdict,omitempty"`
+	HSTS            *HSTS         `json:"hsts,omitempty"`
+	Headers         []HeaderCheck `json:"headers"`
+}
+
+// RedirectHop is one plain-HTTP request and its answer: a status and where it
+// pointed, or the error when the hop did not answer. Internal is a hop that
+// was not requested at all, because it would have reached this machine or
+// its private network (see followPlainHTTP).
+type RedirectHop struct {
+	URL      string `json:"url"`
+	Status   int    `json:"status,omitempty"`
+	Location string `json:"location,omitempty"`
+	Error    string `json:"error,omitempty"`
+	Internal bool   `json:"internal,omitempty"`
 }
 
 // HSTS is the parsed Strict-Transport-Security header.
@@ -133,8 +209,9 @@ type ScanFinding struct {
 	Advice string `json:"advice,omitempty"`
 }
 
-// hstsStrongMaxAge is six months, the threshold the preload list requires and
-// the point at which HSTS is doing the job it exists for.
+// hstsStrongMaxAge is six months, the max-age A+ asks for here, as SSL Labs'
+// does: the point at which HSTS is doing the job it exists for. The preload
+// list asks for more (preloadMaxAge).
 const hstsStrongMaxAge = 15552000
 
 // ScanTLS runs the whole examination: a handshake, a version probe, the chain,
@@ -149,59 +226,206 @@ func ScanTLS(ctx context.Context, domain string, port int) *TLSScan {
 	}
 	addr := net.JoinHostPort(domain, strconv.Itoa(port))
 
-	conn, err := dialTLS(ctx, addr, domain, 0, 0)
+	conn, legacy, err := handshake(ctx, addr, domain)
 	if err != nil {
-		scan.Error = err.Error()
-		scan.Grade = "F"
-		scan.Summary = "Nothing answered a TLS handshake on " + addr + "."
-		scan.Findings = append(scan.Findings, ScanFinding{
-			ID: "tls.unreachable", Level: "critical", Title: "No TLS on this address",
-			Detail: err.Error(),
-			Advice: "Check the domain resolves to this server and that the proxy is listening on " + strconv.Itoa(port) + ".",
-		})
+		unanswered(ctx, scan, err)
 		return scan
 	}
 	state := conn.ConnectionState()
 	conn.Close()
 
 	scan.Reachable = true
+	scan.LegacyOnly = legacy
 	scan.Negotiated = tls.VersionName(state.Version)
 	scan.CipherSuite = tls.CipherSuiteName(state.CipherSuite)
 	scan.OCSPStapled = len(state.OCSPResponse) > 0
 	describeChain(scan, state.PeerCertificates, domain)
 
+	// The preload list is for names served on 443. Its www rule is a
+	// handshake of its own, so it runs beside the probes rather than after
+	// them.
+	preloadable := port == 443 && net.ParseIP(domain) == nil
+	var www chan PreloadRule
+	if preloadable && registrableDomain(domain) == domain {
+		www = make(chan PreloadRule, 1)
+		go func() { www <- checkWWW(ctx, domain, "443", net.DefaultResolver.LookupIPAddr) }()
+	}
+
 	scan.Protocols = probeProtocols(ctx, addr, domain)
-	scan.HTTP = scanHTTP(ctx, domain, port)
+	if name, registered := implicitTLSServices[port]; registered {
+		scan.HTTP = &HTTPScan{Service: "other", ServiceName: name, Headers: []HeaderCheck{}, RedirectChain: []RedirectHop{}}
+	} else {
+		// The HTTPS request offers what the handshake got an answer to. The
+		// plain half goes to port 80 whatever the TLS port is: a redirect on a
+		// non-standard port tells nobody anything, because no browser goes
+		// there.
+		offer := tlsOffer("", 0, 0)
+		if legacy {
+			offer = tlsOffer("", oldestVersion, newestVersion)
+		}
+		scan.HTTP = scanHTTP(ctx, "https://"+addr+"/", "http://"+urlHost(domain)+"/", offer)
+	}
+	if preloadable && scan.HTTP.Service == "http" {
+		var rule *PreloadRule
+		if www != nil {
+			r := <-www
+			rule = &r
+		}
+		scan.Preload = preloadCheck(domain, scan, rule)
+	}
 
 	grade(scan)
 	return scan
 }
 
-func dialTLS(ctx context.Context, addr, serverName string, minVer, maxVer uint16) (*tls.Conn, error) {
-	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{Timeout: 8 * time.Second},
-		Config: &tls.Config{
-			ServerName: serverName,
-			// The certificate is being examined, not trusted. A failed
-			// verification is the finding, not a reason to stop.
-			InsecureSkipVerify: true,
-			MinVersion:         minVer,
-			MaxVersion:         maxVer,
-		},
+// implicitTLSServices are the ports registered to a protocol that speaks TLS
+// from its first byte and is not HTTP. No web request is sent to them: the
+// answer would be the service's own greeting, and HSTS, security headers and
+// a port-80 redirect say nothing about a mail or directory server.
+var implicitTLSServices = map[int]string{
+	465:  "SMTP submission",
+	563:  "NNTP",
+	636:  "LDAP",
+	853:  "DNS over TLS",
+	990:  "FTP",
+	992:  "Telnet",
+	993:  "IMAP",
+	994:  "IRC",
+	995:  "POP3",
+	3269: "LDAP global catalog",
+	5061: "SIP",
+	5223: "XMPP",
+	5349: "TURN",
+	5671: "AMQP",
+	6697: "IRC",
+	8883: "MQTT",
+}
+
+// handshake is the scan's own, offering what a current client does. A server
+// that takes only what such a client leaves out — RSA key exchange, 3DES, TLS
+// 1.0 — answers that with an alert, and was reported as nothing answering at
+// all. So an alert is followed by an offer of every version and cipher suite
+// this library has, and when that is taken the current offer is made once
+// more: legacy is true only when it is refused again, so a passing fault is
+// not reported as the server's policy.
+func handshake(ctx context.Context, addr, serverName string) (conn *tls.Conn, legacy bool, err error) {
+	conn, err = dialTLS(ctx, addr, serverName, 0, 0)
+	if _, alerted := remoteAlert(err); !alerted {
+		return conn, false, err
 	}
+	old, oldErr := dialTLS(ctx, addr, serverName, oldestVersion, newestVersion)
+	if oldErr != nil {
+		return nil, false, err
+	}
+	if again, againErr := dialTLS(ctx, addr, serverName, 0, 0); againErr == nil {
+		old.Close()
+		return again, false, nil
+	}
+	return old, true, nil
+}
+
+// oldestVersion and newestVersion bound the offer of everything this library
+// has.
+const oldestVersion, newestVersion = tls.VersionTLS10, tls.VersionTLS13
+
+// remoteAlert is the alert a server answered a handshake with, in its words.
+func remoteAlert(err error) (string, bool) {
+	var op *net.OpError
+	if err == nil || !errors.As(err, &op) || op.Op != "remote error" {
+		return "", false
+	}
+	return strings.TrimPrefix(op.Err.Error(), "tls: "), true
+}
+
+// CheckEndpoint is CheckDomain for the watch list, which checks many
+// endpoints under one budget: CheckDomain's dial ignores its context, so a
+// list of silent endpoints held the request for eight seconds a batch however
+// short the budget. This handshake ends when ctx does, and then returns ctx's
+// error and no certificate — the budget ran out, which says nothing about the
+// endpoint. Every other failure is the endpoint's answer, on the certificate.
+func CheckEndpoint(ctx context.Context, domain string, port int) (*Certificate, error) {
+	failed := func(reason string) *Certificate {
+		return &Certificate{Name: domain, Domains: []string{domain}, Source: "live", UsedBy: []string{}, Error: reason}
+	}
+	conn, err := dialTLS(ctx, net.JoinHostPort(domain, strconv.Itoa(port)), domain, 0, 0)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if isTimeout(err) {
+			return failed("No TLS handshake within 10 seconds."), nil
+		}
+		return failed(err.Error()), nil
+	}
+	state := conn.ConnectionState()
+	conn.Close()
+	if len(state.PeerCertificates) == 0 {
+		return failed("The handshake completed without a certificate."), nil
+	}
+	leaf := state.PeerCertificates[0]
+	cert := summarise(leaf, domain, "")
+	cert.Source = "live"
+	// Trust is checked apart from reading the certificate, so the list can
+	// say "valid but untrusted" rather than conflating the two.
+	roots, _ := x509.SystemCertPool()
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		DNSName: domain, Roots: roots, Intermediates: intermediates(state.PeerCertificates),
+	}); err != nil {
+		cert.Error = err.Error()
+	}
+	return cert, nil
+}
+
+// dialTLS handshakes with addr, offering tlsOffer's versions and suites. The
+// connection and the handshake are two steps so a handshake that fails says
+// where it was connected (handshakeError).
+func dialTLS(ctx context.Context, addr, serverName string, minVer, maxVer uint16) (*tls.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	raw, err := (&net.Dialer{Timeout: 8 * time.Second}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	tlsConn, ok := conn.(*tls.Conn)
-	if !ok {
-		conn.Close()
-		return nil, fmt.Errorf("unexpected connection type")
+	conn := tls.Client(raw, tlsOffer(serverName, minVer, maxVer))
+	if err := conn.HandshakeContext(ctx); err != nil {
+		raw.Close()
+		return nil, &handshakeError{addr: raw.RemoteAddr().String(), err: err}
 	}
-	return tlsConn, nil
+	return conn, nil
 }
+
+// tlsOffer is what a handshake of this check offers. With versions set it
+// offers every cipher suite this library implements (probeSuites), so the
+// question it asks is only the version; unset it offers what a current client
+// does, since that handshake is what the report calls negotiated.
+func tlsOffer(serverName string, minVer, maxVer uint16) *tls.Config {
+	config := &tls.Config{
+		ServerName: serverName,
+		// The certificate is being examined, not trusted. A failed
+		// verification is the finding, not a reason to stop.
+		InsecureSkipVerify: true,
+		MinVersion:         minVer,
+		MaxVersion:         maxVer,
+	}
+	if minVer != 0 {
+		config.CipherSuites = probeSuites
+	}
+	return config
+}
+
+// probeSuites is every cipher suite this library implements, the insecure
+// ones included (TLS 1.3's are not configurable, and Go skips them here). Go
+// leaves RSA key exchange, 3DES and RC4 out of what it offers by default, so
+// a server still taking TLS 1.0 with only AES128-SHA answered the default
+// offer with a handshake failure and was reported as refusing a version it
+// accepts.
+var probeSuites = func() []uint16 {
+	ids := []uint16{}
+	for _, suite := range append(tls.CipherSuites(), tls.InsecureCipherSuites()...) {
+		ids = append(ids, suite.ID)
+	}
+	return ids
+}()
 
 // probedVersions are asked for one at a time, pinned to exactly one version so
 // the server's answer is unambiguous.
@@ -233,28 +457,57 @@ func probeProtocols(ctx context.Context, addr, serverName string) []ProtocolResu
 				out[i] = ProtocolResult{Name: v.name, Status: "offered"}
 				return
 			}
-			// Distinguish "the server said no" from "this client would not
-			// ask". Reporting the second as absent would be a false
-			// reassurance about exactly the versions that matter most.
-			if isLocalVersionRefusal(err) {
-				out[i] = ProtocolResult{
-					Name: v.name, Status: "unknown",
-					Detail: "This dashboard's TLS library will not negotiate it, so the server was never asked.",
-				}
-				return
-			}
-			out[i] = ProtocolResult{Name: v.name, Status: "refused"}
+			status, detail := protocolAnswer(err)
+			out[i] = ProtocolResult{Name: v.name, Status: status, Detail: detail}
 		}()
 	}
 	wg.Wait()
 	return out
 }
 
-func isLocalVersionRefusal(err error) bool {
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "no supported versions") ||
-		strings.Contains(msg, "protocol version not supported") ||
-		strings.Contains(msg, "unsupported protocol version")
+// protocolAnswer reads a handshake pinned to one version that failed.
+//
+// Only the server's own answer is a refusal: an alert, a different version
+// picked instead, or the connection closed on the ClientHello. Anything that
+// may be the network or this client stays "unknown" — calling it refused is
+// exactly the false reassurance the probe exists to avoid. The server's
+// protocol_version alert reads "protocol version not supported", which is why
+// the alert is recognised by its type and not its words: matching the words
+// once filed every correct refusal of TLS 1.0 as this client's own.
+//
+// Two alerts are the exception. OpenSSL refuses a version with
+// protocol_version and answers handshake_failure (or insufficient_security)
+// when the version is fine and no cipher is shared. The probe offers every
+// suite Go has, which leaves a server that takes the version only with one Go
+// lacks (finite-field DHE, Camellia), or a stack such as Java 8 that refuses
+// versions with handshake_failure. The alert cannot say which, so it is
+// "unknown" with both readings, never "refused".
+func protocolAnswer(err error) (status, detail string) {
+	var op *net.OpError
+	switch {
+	case strings.Contains(err.Error(), "no supported versions satisfy"):
+		return "unknown", "This dashboard's TLS library will not ask for it, so the server was never asked."
+	case errors.As(err, &op) && op.Op == "remote error":
+		alert := strings.TrimPrefix(op.Err.Error(), "tls: ")
+		if alert == "handshake failure" || alert == "insufficient security" {
+			return "unknown", "The server answered: " + alert + ". It refuses this version, or accepts it only with a cipher this probe cannot offer."
+		}
+		return "refused", "The server answered: " + alert + "."
+	case errors.As(err, &op) && op.Op == "dial":
+		return "unknown", "This probe could not connect: " + op.Err.Error() + "."
+	case strings.Contains(err.Error(), "server selected unsupported protocol version"):
+		return "refused", "The server answered with a different version."
+	case errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET):
+		return "refused", "The server closed the connection instead of answering."
+	case isTimeout(err):
+		return "unknown", "The server did not answer in time."
+	}
+	return "unknown", err.Error()
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout())
 }
 
 func describeChain(scan *TLSScan, chain []*x509.Certificate, domain string) {
@@ -268,7 +521,15 @@ func describeChain(scan *TLSScan, chain []*x509.Certificate, domain string) {
 	scan.SignatureAlg = leaf.SignatureAlgorithm.String()
 	sum := sha256.Sum256(leaf.Raw)
 	scan.Fingerprint = colonHex(sum[:])
-	scan.Serial = leaf.SerialNumber.String()
+	// Hex, as openssl, browsers and crt.sh print it; the decimal big.Int
+	// String gives matches nothing an operator can compare it with.
+	scan.Serial = colonHex(leaf.SerialNumber.Bytes())
+	scan.OCSPServers = leaf.OCSPServer
+	scan.CRLURLs = leaf.CRLDistributionPoints
+	pin := sha256.Sum256(leaf.RawSubjectPublicKeyInfo)
+	scan.SPKIPin = base64.StdEncoding.EncodeToString(pin[:])
+	scan.LifetimeHours = wholeHours(leaf.NotAfter.Sub(leaf.NotBefore))
+	scan.RenewalWindowHours = wholeHours(renewalWindow(leaf.NotBefore, leaf.NotAfter))
 
 	for _, c := range chain {
 		keyType, keyBits := keyInfo(c)
@@ -348,56 +609,271 @@ var securityHeaders = []struct {
 		"Turns off browser features the page does not use: camera, microphone, geolocation."},
 }
 
-func scanHTTP(ctx context.Context, domain string, port int) *HTTPScan {
-	out := &HTTPScan{Headers: []HeaderCheck{}}
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		// Redirects are the subject of the test, not something to follow: a
-		// client that follows them reports the headers of wherever it ended
-		// up, which may be an entirely different host.
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: &http.Transport{
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-			DisableKeepAlives:   true,
-			TLSHandshakeTimeout: 8 * time.Second,
-		},
-	}
+const scanUserAgent = "Just-Dashboard TLS check"
 
-	url := "https://" + net.JoinHostPort(domain, strconv.Itoa(port)) + "/"
-	if req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil); err == nil {
-		req.Header.Set("User-Agent", "Just-Dashboard TLS check")
-		if resp, err := client.Do(req); err == nil {
-			defer resp.Body.Close()
-			out.StatusCode = resp.StatusCode
-			out.Server = resp.Header.Get("Server")
-			out.HSTS = parseHSTS(resp.Header.Get("Strict-Transport-Security"))
-			for _, h := range securityHeaders {
-				value := resp.Header.Get(h.name)
-				out.Headers = append(out.Headers, HeaderCheck{
-					Name: h.name, Value: value, Present: value != "",
-					Level: h.level, Detail: h.detail,
-				})
+// scanHTTP fetches httpsURL for the headers, offering what offer does, then
+// follows plainURL's redirects to see whether a plain-HTTP visitor reaches
+// HTTPS.
+func scanHTTP(ctx context.Context, httpsURL, plainURL string, offer *tls.Config) *HTTPScan {
+	out := &HTTPScan{Headers: []HeaderCheck{}, RedirectChain: []RedirectHop{}}
+	// The connection keeps the first bytes the service sent, because they
+	// are what says a service is not a website: net/http's error quotes only
+	// a fragment of a first line that is not HTTP, and says nothing of one
+	// that arrived before the request was written (a server that greets on
+	// connect, as SMTP and IMAP do). The transport dials on a goroutine of
+	// its own, which may outlive a request that gave up.
+	var heard atomic.Pointer[firstBytes]
+	client := scanClient(&http.Transport{
+		DisableKeepAlives: true,
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 8 * time.Second}, Config: offer}
+			conn, err := dialer.DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			recorded := &firstBytes{Conn: conn}
+			heard.Store(recorded)
+			return recorded, nil
+		},
+	})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpsURL, nil)
+	if err != nil {
+		out.Service, out.HTTPSError = "unknown", err.Error()
+		return out
+	}
+	req.Header.Set("User-Agent", scanUserAgent)
+	resp, err := client.Do(req)
+	if err != nil {
+		// A mail server on a port of its own, or a site that is failing.
+		// Either way whatever answers port 80 is some other service, so its
+		// redirect is not this one's to be graded on.
+		out.HTTPSError = requestError(err)
+		out.Service = "unknown"
+		if recorded := heard.Load(); recorded != nil {
+			// It answered, in another protocol: that is no failure to
+			// report, and the greeting says what it is.
+			if line := recorded.firstLine(); line != "" && !strings.HasPrefix(line, "HTTP/") {
+				out.Service, out.Banner, out.HTTPSError = "other", line, ""
 			}
 		}
+		return out
+	}
+	resp.Body.Close()
+	out.Service = "http"
+	out.StatusCode = resp.StatusCode
+	out.Server = resp.Header.Get("Server")
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		out.Location = resp.Header.Get("Location")
+	}
+	out.HSTS = parseHSTS(resp.Header.Get("Strict-Transport-Security"))
+	for _, h := range securityHeaders {
+		value := resp.Header.Get(h.name)
+		out.Headers = append(out.Headers, HeaderCheck{
+			Name: h.name, Value: value, Present: value != "",
+			Level: h.level, Detail: h.detail,
+		})
 	}
 
-	// The plain-HTTP half. Port 80 whatever the TLS port is: a redirect on a
-	// non-standard port tells nobody anything, because no browser goes there.
-	plain := "http://" + domain + "/"
-	if req, err := http.NewRequestWithContext(ctx, http.MethodGet, plain, nil); err == nil {
-		req.Header.Set("User-Agent", "Just-Dashboard TLS check")
+	chain, verdict, err := followPlainHTTP(ctx, plainURL)
+	if err != nil {
+		out.PlainError = requestError(err)
+		out.PlainErrorKind = netErrorKind(err)
+		return out
+	}
+	out.RedirectChain = chain
+	out.RedirectVerdict = verdict
+	out.PlainRedirects = verdict == "same-host" || verdict == "other-host"
+	out.PlainStatus, out.PlainLocation = chain[0].Status, chain[0].Location
+	return out
+}
+
+// firstBytes is a connection that keeps the first bytes read from it.
+type firstBytes struct {
+	net.Conn
+	mu   sync.Mutex
+	head []byte
+}
+
+func (c *firstBytes) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	c.mu.Lock()
+	if room := 256 - len(c.head); room > 0 {
+		c.head = append(c.head, p[:min(n, room)]...)
+	}
+	c.mu.Unlock()
+	return n, err
+}
+
+// firstLine is the service's first line, as far as it can be shown: an IMAP
+// server's "* OK [CAPABILITY IMAP4rev1] Dovecot ready." is proof it is not a
+// website, and says what it is.
+func (c *firstBytes) firstLine() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	line, _, _ := strings.Cut(string(c.head), "\n")
+	line = strings.TrimSpace(printable([]byte(strings.TrimRight(line, "\r"))))
+	if len(line) > 120 {
+		line = line[:120] + "…"
+	}
+	return line
+}
+
+// scanClient makes one request per call and follows nothing. Redirects are
+// the subject of the test: a client that follows them reports the headers of
+// wherever it ended up, which may be an entirely different host, so
+// followPlainHTTP walks the plain ones by hand.
+func scanClient(transport *http.Transport) *http.Client {
+	return &http.Client{
+		Timeout:       10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		Transport:     transport,
+	}
+}
+
+// maxRedirectHops bounds the plain-HTTP chain: http://x → http://www.x →
+// https://www.x is two, and five is room for anything a working site does
+// while a hostile one cannot hold the scan.
+const maxRedirectHops = 5
+
+// errInternalHop is a redirect hop that was not requested because it would
+// have reached this machine or its private network.
+var errInternalHop = errors.New("not requested: an address on this machine or its private network")
+
+// followPlainHTTP requests start and follows its redirects by hand until one
+// points at https://, an answer is not a redirect, a URL comes round again or
+// the hops run out, and says which of those ended it (HTTPScan's
+// RedirectVerdict). The error is the first request's, when nothing answered
+// at all; a later hop that fails is recorded on the chain instead.
+//
+// The first request goes where the administrator asked. Every later one goes
+// where the remote site's Location header says, which is that site's choice,
+// so it may reach the address the first request reached or a public one and
+// nothing else: otherwise any site scanned could have this server send GETs,
+// with paths of its choosing, to the services on loopback and the private
+// network behind it, and read their redirects back in the report. The check
+// is on the address actually dialled, after DNS, so a name that resolves
+// inward is caught too. Such a hop is recorded as Internal, unrequested.
+func followPlainHTTP(ctx context.Context, start string) ([]RedirectHop, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	current, err := url.Parse(start)
+	if err != nil {
+		return nil, "", err
+	}
+	origin := current.Hostname()
+	// The hops run one after another, so first is written by the first
+	// request's dial before any later one reads it.
+	var first string
+	dialer := &net.Dialer{Timeout: 8 * time.Second}
+	guarded := &net.Dialer{Timeout: 8 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
+		if hopAllowed(first, address) {
+			return nil
+		}
+		return errInternalHop
+	}}
+	client := scanClient(&http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if first != "" {
+				return guarded.DialContext(ctx, network, addr)
+			}
+			conn, err := dialer.DialContext(ctx, network, addr)
+			if err == nil {
+				first = conn.RemoteAddr().String()
+			}
+			return conn, err
+		},
+	})
+
+	chain := []RedirectHop{}
+	seen := map[string]bool{}
+	for len(chain) < maxRedirectHops {
+		seen[current.String()] = true
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, current.String(), nil)
+		if err != nil {
+			return nil, "", err
+		}
+		req.Header.Set("User-Agent", scanUserAgent)
 		resp, err := client.Do(req)
 		if err != nil {
-			out.PlainError = err.Error()
-		} else {
-			defer resp.Body.Close()
-			out.PlainStatus = resp.StatusCode
-			out.PlainLocation = resp.Header.Get("Location")
-			out.PlainRedirects = resp.StatusCode >= 300 && resp.StatusCode < 400 &&
-				strings.HasPrefix(strings.ToLower(out.PlainLocation), "https://")
+			if len(chain) == 0 {
+				return nil, "", err
+			}
+			if errors.Is(err, errInternalHop) {
+				return append(chain, RedirectHop{URL: current.String(), Internal: true}), "internal", nil
+			}
+			return append(chain, RedirectHop{URL: current.String(), Error: requestError(err)}), "dead-end", nil
 		}
+		resp.Body.Close()
+		hop := RedirectHop{URL: current.String(), Status: resp.StatusCode, Location: resp.Header.Get("Location")}
+		chain = append(chain, hop)
+		if resp.StatusCode < 300 || resp.StatusCode >= 400 || hop.Location == "" {
+			return chain, "stays-http", nil
+		}
+		next, err := current.Parse(hop.Location)
+		switch {
+		case err != nil:
+			return chain, "dead-end", nil
+		case next.Scheme == "https" && strings.EqualFold(next.Hostname(), origin):
+			return chain, "same-host", nil
+		case next.Scheme == "https":
+			return chain, "other-host", nil
+		case next.Scheme != "http":
+			return chain, "dead-end", nil
+		case seen[next.String()]:
+			return chain, "loop", nil
+		}
+		current = next
 	}
-	return out
+	return chain, "too-many", nil
+}
+
+// hopAllowed says whether a redirect hop may dial address (ip:port, as
+// resolved): the one the first request reached, or any public one.
+func hopAllowed(first, address string) bool {
+	if address == first {
+		return true
+	}
+	host, _, err := net.SplitHostPort(address)
+	return err == nil && IsPublicAddress(net.ParseIP(host))
+}
+
+// requestError drops the `Get "url": ` net/http puts in front of every
+// failure — the URL is already on the page beside it — and says in words
+// what a bare "EOF" means.
+func requestError(err error) string {
+	if errors.Is(err, io.EOF) {
+		return "the server closed the connection without an HTTP response"
+	}
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err.Error()
+	}
+	return err.Error()
+}
+
+// netErrorKind names why a request got no answer, so "refused" is said only
+// of a connection that was refused.
+func netErrorKind(err error) string {
+	var dns *net.DNSError
+	switch {
+	case errors.As(err, &dns):
+		return "dns"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "refused"
+	case isTimeout(err):
+		return "timeout"
+	}
+	return "other"
+}
+
+// urlHost is a host as a URL writes it, with an IPv6 address in brackets.
+func urlHost(host string) string {
+	if strings.Contains(host, ":") {
+		return "[" + host + "]"
+	}
+	return host
 }
 
 // parseHSTS reads the header's directives. max-age is the only one that does
@@ -446,6 +922,12 @@ func grade(scan *TLSScan) {
 		scan.Findings = findings
 		return
 	}
+	if scan.LegacyOnly {
+		demote(gradeF, ScanFinding{ID: "tls.legacy-only", Level: "critical",
+			Title:  "The handshake a current client makes is refused",
+			Detail: "The server refused the versions and cipher suites a current client offers, and took " + scan.Negotiated + " with " + scan.CipherSuite + " when older ones were offered as well.",
+			Advice: "Clients that no longer offer those — this dashboard's own TLS library among them — cannot connect. In nginx set ssl_protocols TLSv1.2 TLSv1.3 and an ssl_ciphers list with ECDHE suites, such as Mozilla's intermediate profile."})
+	}
 	cert := scan.Certificate
 	switch {
 	case cert == nil:
@@ -456,11 +938,24 @@ func grade(scan *TLSScan) {
 			Title:  "The certificate has expired",
 			Detail: fmt.Sprintf("It expired on %s.", cert.NotAfter.Format("2 January 2006")),
 			Advice: "Every browser is refusing this site now. Renew it, then find out why the renewal did not run on its own."})
-	case cert.DaysLeft <= 14:
-		demote(gradeB, ScanFinding{ID: "tls.expiring", Level: "warning",
-			Title:  fmt.Sprintf("The certificate expires in %d days", cert.DaysLeft),
-			Detail: "Automatic renewal starts at 30 days left, so this one is not renewing.",
-			Advice: "Renew it by hand and check the renewal timer."})
+	case cert.Expiring:
+		// Due is the Certificates page's "expiring": inside the renewal
+		// window. Overdue is half of that window gone with the certificate
+		// still served, which no working renewal leaves it at.
+		left := time.Until(cert.NotAfter)
+		window := renewalWindow(cert.NotBefore, cert.NotAfter)
+		term := termShare(window, cert.NotAfter.Sub(cert.NotBefore))
+		if left <= window/2 {
+			demote(gradeB, ScanFinding{ID: "tls.expiring", Level: "warning",
+				Title:  "The certificate expires in " + timeLeft(left),
+				Detail: "Renewal is due in " + term + ", and half of that has passed with this certificate still served.",
+				Advice: "Either renewal is failing, or it renewed and the proxy was never reloaded: a renewed certificate is served only after a reload. Check the renewal log, renew by hand if it failed, and reload."})
+		} else {
+			findings = append(findings, ScanFinding{ID: "tls.renewal-due", Level: "notice",
+				Title:  "The certificate is due for renewal",
+				Detail: "It expires in " + timeLeft(left) + ", inside " + term + ", when automatic renewal replaces it.",
+				Advice: "Nothing to do yet if renewal is automatic. If this certificate is still served when half of that time has gone, renewal is not working."})
+		}
 	}
 	if !scan.NameMatches && cert != nil {
 		demote(gradeF, ScanFinding{ID: "tls.name-mismatch", Level: "critical",
@@ -508,14 +1003,22 @@ func grade(scan *TLSScan) {
 			Detail: "Below the 2048-bit minimum every authority has enforced for a decade.",
 			Advice: "Reissue with a 2048-bit RSA key or, better, an ECDSA P-256 one."})
 	}
-	if !scan.OCSPStapled {
+	if !scan.OCSPStapled && len(scan.OCSPServers) > 0 {
 		findings = append(findings, ScanFinding{ID: "tls.no-ocsp", Level: "notice",
 			Title:  "No OCSP response is stapled",
-			Detail: "The server is not attaching proof that its certificate has not been revoked.",
-			Advice: "Optional, and increasingly so — Let's Encrypt has stopped publishing OCSP entirely. Worth turning on only if your authority still supports it."})
+			Detail: "The certificate names an OCSP responder (" + strings.Join(scan.OCSPServers, ", ") + "), and the server is not attaching its answer.",
+			Advice: "Optional: browsers work without it. In nginx it is ssl_stapling on and ssl_stapling_verify on, with a resolver set so nginx can reach the responder."})
 	}
 
-	if http := scan.HTTP; http != nil {
+	// Only an HTTP answer is graded on HTTP: a service known to be something
+	// else has nothing to fix there, and a request that got no answer says
+	// nothing about headers it never received.
+	if http := scan.HTTP; http != nil && http.Service == "unknown" {
+		findings = append(findings, ScanFinding{ID: "http.https-error", Level: "notice",
+			Title:  "HTTPS did not answer an HTTP request",
+			Detail: http.HTTPSError,
+			Advice: "Expected of a service that is not a website, such as a mail server. For a website, the proxy or the application behind it is failing. HSTS, the security headers and the plain-HTTP redirect need an HTTP answer, so they were not checked."})
+	} else if http != nil && http.Service == "http" {
 		if http.HSTS == nil {
 			// A notice rather than a demotion: HSTS is what separates A from
 			// A+, and letterFor reads the header itself for that.
@@ -527,12 +1030,23 @@ func grade(scan *TLSScan) {
 			findings = append(findings, ScanFinding{ID: "tls.weak-hsts", Level: "notice",
 				Title:  "HSTS is set but short",
 				Detail: fmt.Sprintf("max-age is %d seconds.", http.HSTS.MaxAge),
-				Advice: "Six months (15552000) is the value browsers and the preload list expect."})
+				Advice: "Six months (15552000) is what A+ asks for, and the preload list asks for a year (31536000)."})
 		}
-		if !http.PlainRedirects && http.PlainError == "" {
+		chain := http.RedirectChain
+		switch {
+		case http.PlainRedirects || http.PlainError != "" || len(chain) == 0:
+		case chain[len(chain)-1].Internal:
+			// Where the chain ends is not known, so it is not graded: the
+			// hop may be a private site's own next address, or a public site
+			// sending its visitors somewhere they cannot reach.
+			findings = append(findings, ScanFinding{ID: "http.redirect-internal", Level: "notice",
+				Title:  "The plain-HTTP redirect was not followed",
+				Detail: describePlainChain(chain),
+				Advice: "Whether plain HTTP reaches HTTPS was not checked. For a public site, point the redirect at its public name."})
+		default:
 			demote(gradeB, ScanFinding{ID: "tls.no-redirect", Level: "warning",
 				Title:  "Plain HTTP does not redirect to HTTPS",
-				Detail: fmt.Sprintf("http://%s answered %d.", scan.Domain, http.PlainStatus),
+				Detail: describePlainChain(chain),
 				Advice: "Redirect port 80 to HTTPS permanently. A certificate protects nobody who arrives on the unencrypted port."})
 		}
 		for _, h := range http.Headers {
@@ -549,6 +1063,33 @@ func grade(scan *TLSScan) {
 	scan.Grade, scan.Summary = letterFor(worst, scan)
 }
 
+// describePlainChain says where a plain-HTTP chain that never reached HTTPS
+// stopped, since "answered 301" of a redirect to http://www is no reason.
+func describePlainChain(chain []RedirectHop) string {
+	first, last := chain[0], chain[len(chain)-1]
+	switch {
+	case last.Internal:
+		return fmt.Sprintf("%s redirects to %s, an address on this machine or its private network, where a remote site's redirect is not followed.", first.URL, last.URL)
+	case last.Error != "":
+		return fmt.Sprintf("%s redirects to %s, which did not answer.", first.URL, last.URL)
+	case last.Status < 300 || last.Status >= 400 || last.Location == "":
+		if len(chain) == 1 {
+			return fmt.Sprintf("%s answered %d.", first.URL, first.Status)
+		}
+		return fmt.Sprintf("%s redirects to %s, which answered %d.", first.URL, last.URL, last.Status)
+	}
+	if base, err := url.Parse(last.URL); err == nil {
+		if next, err := base.Parse(last.Location); err == nil {
+			for _, hop := range chain {
+				if hop.URL == next.String() {
+					return fmt.Sprintf("The redirects from %s loop back to %s.", first.URL, hop.URL)
+				}
+			}
+		}
+	}
+	return fmt.Sprintf("The redirects from %s stop at %s without reaching HTTPS.", first.URL, last.Location)
+}
+
 // Grade levels, worst-highest so a demotion is a max().
 const (
 	gradeA = iota
@@ -558,6 +1099,9 @@ const (
 )
 
 func letterFor(worst int, scan *TLSScan) (string, string) {
+	if scan.LegacyOnly {
+		return "F", "The handshake a current client makes is refused; only an older offer is taken."
+	}
 	switch worst {
 	case gradeF:
 		return "F", "Browsers will refuse or warn about this site."

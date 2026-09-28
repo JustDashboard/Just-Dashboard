@@ -87,12 +87,15 @@ func compareAddresses(resolved, host []string) (pointsHere, behindProxy bool) {
 	return false, behindProxy
 }
 
-// cloudflareRanges are the two Cloudflare publishes for its proxy. Not an
-// exhaustive list of every CDN — the point is to catch the one arrangement
-// that is overwhelmingly common and would otherwise read as a misconfiguration
-// every time somebody looked at the page.
+// cloudflareRanges are every range Cloudflare publishes for its proxy at
+// cloudflare.com/ips-v4 and /ips-v6. Not an exhaustive list of every CDN — the
+// point is to catch the one arrangement that is overwhelmingly common and
+// would otherwise read as a misconfiguration every time somebody looked at
+// the page. A range missing here is exactly that false alarm for the domains
+// Cloudflare serves from it.
 var cloudflareRanges = []*net.IPNet{
 	mustParseCIDR("104.16.0.0/13"),
+	mustParseCIDR("104.24.0.0/14"),
 	mustParseCIDR("172.64.0.0/13"),
 	mustParseCIDR("162.158.0.0/15"),
 	mustParseCIDR("173.245.48.0/20"),
@@ -108,6 +111,11 @@ var cloudflareRanges = []*net.IPNet{
 	mustParseCIDR("141.101.64.0/18"),
 	mustParseCIDR("2400:cb00::/32"),
 	mustParseCIDR("2606:4700::/32"),
+	mustParseCIDR("2803:f800::/32"),
+	mustParseCIDR("2405:b500::/32"),
+	mustParseCIDR("2405:8100::/32"),
+	mustParseCIDR("2a06:98c0::/29"),
+	mustParseCIDR("2c0f:f248::/32"),
 }
 
 func mustParseCIDR(s string) *net.IPNet {

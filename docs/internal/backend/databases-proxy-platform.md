@@ -731,11 +731,104 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   against mocks from `tests/browser/fixtures/proxy/siteform.ts`.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
-  quietly stopped. Each version is probed on a connection pinned to exactly that version; a version this
-  client will not ask for is `unknown`, **never `refused`**, since reporting it absent would be false
-  reassurance about the versions that matter most. `grade` is a pure function of the scan. The live
-  certificate, TLS and DNS probes require `system.admin`: each emits traffic to a caller-chosen
-  destination, the same scanner boundary as `/network/probe`.
+  quietly stopped. Each version is probed on a connection pinned to exactly that version, offering
+  every cipher suite Go implements (`probeSuites`: Go leaves RSA key exchange, 3DES and RC4 out by
+  default, and a server taking TLS 1.0 only with AES128-SHA read as refusing it). Only the server's own
+  answer is `refused` — an alert (recognised by its `remote error` type: OpenSSL's protocol_version
+  alert reads "protocol version not supported", and matching those words once filed every correct
+  refusal as this client's), a different version picked, or the connection closed on the ClientHello —
+  with its words in `detail`. handshake_failure and insufficient_security are the exception and read
+  `unknown`: OpenSSL sends them when the version is fine and no suite is shared (a suite Go lacks, such
+  as finite-field DHE), Java 8 when it refuses a version, and the alert cannot say which. A version this
+  client will not ask for, a probe that could not connect, or one that timed out is `unknown`, **never
+  `refused`**, since reporting it absent would be false reassurance about the versions that matter most;
+  `TestLiveNginxRefusalsAreReportedAsRefused` and
+  `TestLiveNginxLegacyVersionsWithOnlyRSAKeyExchangeAreOffered` hold this against a private real nginx.
+  The report's own handshake (`handshake`) offers what a current client does, since that is what it
+  calls negotiated. A server answering it with an alert is asked again offering every version and
+  suite (`tlsOffer` with TLS 1.0–1.3), then once more as a current client so a passing fault is not
+  reported as policy: taken only by the full offer, the scan is reachable and `legacyOnly`, graded F with
+  `tls.legacy-only` naming what was negotiated, and its HTTPS request makes the full offer too (a
+  server taking TLS 1.2 only with RSA key exchange was reported as nothing answering, with DNS advice).
+  Refused by both, it is `tls.refused` with the alert — no certificate for the name
+  (`ssl_reject_handshake`, Caddy), a client certificate wanted, or a suite Go lacks;
+  `TestLiveNginxWithOnlyRSAKeyExchangeIsReachable` and `TestLiveNginxRejectedHandshakeIsARefusal`.
+  **A scan that never completes a handshake says how far it got** (`failure`, `tlsscan_diagnosis.go`):
+  `classifyDialError` names the stage — `dns` (no record, or the lookup failed), `connect` (refused,
+  timed out, no route) or `handshake` (the server's alert, `plain-http` when the ClientHello is answered
+  with `HTTP/` — nginx's `listen 443;` without `ssl` — `not-tls` with the first bytes another protocol
+  sent, closed, or no answer). `dialTLS` connects and then handshakes as two steps so a handshake failure
+  carries the address it reached (`handshakeError`). `where` says whose answer it was: `here` (loopback or
+  an address on this machine's interfaces, private ones included), `cloudflare`, `elsewhere` only when
+  this server has a public address of its own in that family, or `unknown` when the provider maps it
+  in front of it — a dual-stack VM with its IPv6 on the interface cannot tell its mapped IPv4 from
+  another host's (`familyKnown`). Every connect and handshake finding's advice follows it
+  (`hereOrThere`): `tcp.refused` here is "nothing here listens on 443", elsewhere it is that host's
+  refusal; a handshake with Cloudflare is its edge's, so plain HTTP on 8080 names its plain-HTTP and
+  HTTPS ports rather than nginx's `listen … ssl`; plain HTTP on port 80, from any host, is HTTP's own
+  port answering as it should (`plainHTTPPort`), never told to add `ssl`, which would break http://,
+  the redirect and HTTP-01, and is sent to 443; and an address scanned as itself is never told to
+  point a record. `dns` carries `CheckDomainDNS`. `TestLiveNginxListenWithoutSSLIsDiagnosed` holds the plain-HTTP
+  case against a real nginx. **Only an HTTP answer is graded on HTTP** (`service`): a port registered to
+  a protocol that speaks TLS from its first byte and is not HTTP (`implicitTLSServices`: 465, 993, 995,
+  636, 853, 8883 and the rest) is sent no web request at all (`service: other`, `serviceName`); a
+  service that answers in its own protocol is `other` with its first line (`banner`, read off the
+  connection by `firstBytes`: net/http's error quotes only a fragment of a line that is not HTTP, and
+  nothing of a greeting sent on connect before the request, as SMTP and IMAP send theirs); a request
+  with no answer is `unknown` with `httpsError` and the `http.https-error` notice. In none of them is an
+  HSTS, header or redirect finding made, or port 80 asked. Otherwise the plain-HTTP side is followed by
+  hand up to five hops (`redirectChain`), passes when it reaches `https://` on any host, and says where
+  it ended (`redirectVerdict`: `same-host`, `other-host`, `stays-http`, `loop`, `too-many`, `dead-end`,
+  `internal`); `plainErrorKind` says whether port 80 refused, timed out or did not resolve. The HTTPS
+  answer's own redirect is `location`. Every hop after the first goes where the remote site's
+  `Location` says, so its dial (checked on the resolved address, in a `net.Dialer` `Control` hook) may
+  reach only the address the first request reached or a public one (`hopAllowed`, `IsPublicAddress`):
+  a redirect to loopback, a private or link-local network or CGNAT is recorded as an `internal` hop and
+  not requested, and graded as a notice (`http.redirect-internal`) rather than a missing redirect,
+  because where the chain ends is not known. The serial is colon hex as openssl prints it, and the
+  unstapled-OCSP notice needs a responder in the leaf (`ocspServers`; Let's Encrypt names none);
+  `crlUrls` and `spkiPin` (base64 SHA-256 of the public key, what `curl --pinnedpubkey` takes) are
+  reported beside them. **Expiry is judged against the certificate's term** (`tlsscan_lifetime.go`):
+  renewal is due in the last third of it, the last half for a term of ten days or less — certbot's rule
+  since 4.0, and Caddy's — and never more than 30 days out. `summarise` (`certs.go`) sets `expiring`
+  by it, so the certificate inventory, the watch list and the report agree; a 6-day certificate is no
+  longer expiring for its whole life. Not everything reads it yet: the Overview's attention entry still
+  says certbot renews at thirty days and turns critical at 7 days left (`findings/certificates.ts`),
+  certbot's lineage cards and an import's warning still count 30 days (`certbot-panel.tsx`,
+  `import.go`), and the Certificates page's expiring reading counts by the window under a 30-day label
+  (`certs-panel.tsx`). The report notes a certificate inside that window (`tls.renewal-due`) and grades B once
+  half of it has passed with the certificate still served (`tls.expiring`); `lifetimeHours` and
+  `renewalWindowHours` are in hours because a short-lived term is 160 of them. **HSTS preload** is
+  measured for a name on 443 that answered HTTP (`preload`, `tlsscan_preload.go`) against
+  hstspreload.org's rules, each with what was seen: a registrable domain by the Public Suffix List (a
+  subdomain gets only that rule, naming the parent to scan), a trusted certificate, a first plain-HTTP
+  redirect to HTTPS on the same host (a refused port 80 passes), an HTTPS redirect that stays on HTTPS,
+  `max-age` of a year, `includeSubDomains`, `preload`, and `www.` serving a trusted certificate when it
+  has a record — that handshake runs beside the probes. Six months stays the A+ threshold, as SSL
+  Labs'; the list asks for a year, which the report now says. `TestLiveNginxPreloadRules` checks the
+  rules against a real nginx. `grade` is a pure function of the scan. The live certificate, TLS and DNS probes require
+  `system.admin`: each emits traffic to a caller-chosen destination, the same scanner boundary as
+  `/network/probe`. What reaches them is `ParseScanTarget` (`scantarget.go`): a URL, host:port, a
+  bracketed IPv6 address or a name in its own script become a host and port, and anything else is a 400
+  with the reason, quoting the host as typed rather than the whole pasted URL;
+  `frontend/src/lib/scan-target.ts` is the same parser, and both are tested against
+  `frontend/src/lib/scan-target-cases.json`, whose `says` holds the two to the same words. A port,
+  written after the host or given as `?port=` text (`ParseScanQuery`), must be 1–65535 in digits, so
+  `0`, `+993` or `host:+993` is a 400 rather than 443 or 993.
+  A scan runs on its request's context, so a caller that leaves (the report's Cancel) ends its
+  handshakes and probes at once.
+- **The watch list is endpoints.** `watched_endpoints` (lane G in `proxySchema`) is a name, a port and
+  an address, unique together, so a mail server can be watched on 443 and 993; `watched_domains` held
+  one row per name and a second port replaced the first. Its rows are copied in on every boot with
+  `INSERT OR IGNORE`, which brings nothing back because an unwatch deletes the `watched_domains` row as
+  well. Each endpoint keeps its last check (`checked_at`, `certificate` as JSON). Only an
+  administrator's `GET /certificates/watched` handshakes, and stores what it found; every other account
+  reads the stored result — the list is readable by all, and the handshake is outbound traffic a
+  read-only account may not cause. The checks run eight at a time under one 30-second budget, through
+  `CheckEndpoint` (`tlsscan.go`), whose dial ends with the context — `CheckDomain`'s ignores it, and 33
+  silent endpoints once held the request 40 seconds. The stalest endpoints go first; one still in flight
+  or not started when the budget ends keeps its stored result and time, so a long list is covered over
+  successive visits. What was found is stored even if the viewer has left.
 - **`dns01.go` — wildcards and CDN-fronted domains**, which between them are most of the certificates
   people want: Let's Encrypt signs `*.example.com` only against DNS-01, and a Cloudflare-proxied domain
   never receives an HTTP challenge. Eight certbot plugins as a closed set (each names credentials and
@@ -1372,7 +1465,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   names a file in its live or archive directory (`SitesServingLineages`) — certbot runs no deploy hook
   for a new lineage — and a configuration that fails its test fails the job: renewed, not served.
   `dns.go` answers
-  "does this domain point here yet" and recognises Cloudflare explicitly, since reporting a CDN as a
+  "does this domain point here yet" and recognises Cloudflare explicitly — every range it publishes at
+  cloudflare.com/ips-v4 and /ips-v6 — since reporting a CDN as a
   misconfiguration is the commonest false alarm of this kind.
 - **The proxy routes are mounted per area**, each from its own file beside its handlers, and composed in
   `mountProxyRoutes` (`api/handlers_proxy.go`): `mountEngineRoutes` (status, the raw config editor,
