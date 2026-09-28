@@ -12,7 +12,8 @@ export function certificateFindings({ certs, certbot }: CertificateFindingInput)
   const out: ProxyFinding[] = []
 
   for (const cert of certs ?? []) {
-    const usedBy = cert.usedBy.length ? ` Used by ${cert.usedBy.join(", ")}.` : ""
+    const users = [...cert.usedBy, ...(cert.usedByStreams ?? []).map((name) => `stream ${name}`)]
+    const usedBy = users.length ? ` Used by ${users.join(", ")}.` : ""
     if (cert.error) {
       out.push({
         id: `cert.error.${cert.path || cert.name}`,

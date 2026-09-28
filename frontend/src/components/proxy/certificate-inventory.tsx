@@ -35,9 +35,14 @@ export function CertificateInventory({
     .filter(
       (cert) =>
         (!attention || needsAttention(cert)) &&
-        [cert.name, cert.issuer, cert.path, ...cert.domains, ...cert.usedBy].some((value) =>
-          value.toLowerCase().includes(needle),
-        ),
+        [
+          cert.name,
+          cert.issuer,
+          cert.path,
+          ...cert.domains,
+          ...cert.usedBy,
+          ...(cert.usedByStreams ?? []),
+        ].some((value) => value.toLowerCase().includes(needle)),
     )
     .sort((a, b) => {
       const rank = (c: Certificate) => (c.error ? 0 : c.expired ? 1 : c.expiring ? 2 : 3)
@@ -95,12 +100,22 @@ export function CertificateInventory({
                       ? "Certificate could not be read"
                       : `Expires ${calendarDate(cert.notAfter)}`}
                   </span>
-                  <Tag>{cert.source.startsWith("nginx:") ? "site file" : cert.source}</Tag>
+                  <Tag>
+                    {cert.source.startsWith("nginx:")
+                      ? "site file"
+                      : cert.source.startsWith("stream:")
+                        ? "stream file"
+                        : cert.source}
+                  </Tag>
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 text-hint text-muted-foreground">
                 <span className="min-w-0 break-all">
-                  Used by {cert.usedBy.join(", ") || "no site"}
+                  Used by{" "}
+                  {[
+                    ...cert.usedBy,
+                    ...(cert.usedByStreams ?? []).map((name) => `stream ${name}`),
+                  ].join(", ") || "nothing"}
                 </span>
                 {cert.selfSigned && <Tag tone="warning">self-signed</Tag>}
               </div>
@@ -170,7 +185,7 @@ export function CertificateInventory({
               </Detail>
               <Detail label="Source">{selectedCert.source}</Detail>
               <Detail label="Used by">
-                {selectedCert.usedBy.length ? (
+                {selectedCert.usedBy.length || selectedCert.usedByStreams?.length ? (
                   <div className="flex flex-col gap-2">
                     {selectedCert.usedBy.map((site) => (
                       <Link
@@ -181,9 +196,18 @@ export function CertificateInventory({
                         {site}
                       </Link>
                     ))}
+                    {selectedCert.usedByStreams?.map((stream) => (
+                      <Link
+                        key={`stream:${stream}`}
+                        href={`/proxy/streams?stream=${encodeURIComponent(stream)}`}
+                        className="break-all text-brand hover:underline"
+                      >
+                        stream {stream}
+                      </Link>
+                    ))}
                   </div>
                 ) : (
-                  "no site"
+                  "nothing"
                 )}
               </Detail>
               <Detail label="File">

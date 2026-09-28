@@ -47,6 +47,17 @@ export type StreamSpec = {
   uploadRate?: number
   /** Each connection's speed to the client, in KiB/s. Absent is no limit. */
   downloadRate?: number
+  /** nginx ends the client's TLS with certPath and keyPath. TCP only. */
+  tls?: boolean
+  certPath?: string
+  keyPath?: string
+  /** nginx speaks TLS to the backend. */
+  upstreamTls?: boolean
+  /** The backend's host name: sent as SNI, and what its certificate must carry when verified. */
+  upstreamName?: string
+  /** Check the backend's certificate against upstreamCa and upstreamName. */
+  upstreamVerify?: boolean
+  upstreamCa?: string
 }
 
 /** How nginx spreads a stream's connections: client-ip is a consistent hash of the client address. */
@@ -140,6 +151,8 @@ export type StreamModule = {
   package?: string
   /** nginx's own words when it could not be asked. */
   detail?: string
+  /** Built with stream_ssl_module, which a stream's TLS on either end needs. */
+  ssl?: boolean
 }
 
 /**
