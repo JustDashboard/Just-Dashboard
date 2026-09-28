@@ -12,6 +12,8 @@ export type SiteLocation = {
    */
   rootMode?: "root"
   webSockets: boolean
+  /** This path's own request rate, in place of the site's. */
+  rateLimit?: RequestLimit
 }
 
 export type SiteSpec = {
@@ -58,7 +60,32 @@ export type SiteSpec = {
   errorPages?: ErrorPageCode[]
   /** Also replace the application's own responses with those codes. Proxy sites only. */
   interceptErrors?: boolean
+  /** How much one client may ask of the site. Not for a redirect. */
+  limits?: SiteLimits
   custom?: string
+}
+
+/** Counted per client address, as nginx sees it. */
+export type SiteLimits = {
+  /** The site-wide request rate; a path's own replaces it there. */
+  request?: RequestLimit
+  /** Connections one address may hold open at once; 0 sets no cap. */
+  connPerIp?: number
+  /** Addresses no limit counts. */
+  exemptFrom: string[]
+  /** Log what would be refused, as "dry run" in the error log, and refuse nothing. */
+  dryRun?: boolean
+}
+
+export type RequestLimit = {
+  /** nginx's spelling: 10r/s or 60r/m. */
+  rate: string
+  /** Requests past the rate that are queued rather than refused. */
+  burst?: number
+  /** Answer the burst at once rather than spacing it out at the rate. */
+  noDelay?: boolean
+  /** One allowance per address, or per address and path; empty is per address. */
+  key?: "ip_path"
 }
 
 export type SiteMaintenance = {

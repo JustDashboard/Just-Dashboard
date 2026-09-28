@@ -89,6 +89,8 @@ type SiteSpec struct {
 	// InterceptErrors also replaces the application's own responses with
 	// those codes, not only the ones nginx produces. Proxy sites only.
 	InterceptErrors bool `json:"interceptErrors,omitempty"`
+	// Limits caps the requests and connections one client may make.
+	Limits *SiteLimits `json:"limits,omitempty"`
 	// PagesDir is where the site's pages are served from. The service sets
 	// it from its own nginx directory; it is never taken from a request.
 	PagesDir string `json:"-"`
@@ -111,6 +113,8 @@ type SiteLocation struct {
 	// the folder itself would move every file it serves.
 	RootMode   string `json:"rootMode,omitempty"`
 	WebSockets bool   `json:"webSockets"`
+	// RateLimit replaces the site's request rate on this path.
+	RateLimit *RequestLimit `json:"rateLimit,omitempty"`
 }
 
 // SiteMaintenance is a site's maintenance switch.
@@ -333,6 +337,9 @@ func ValidateSpec(spec *SiteSpec) error {
 		}
 		seenCode[code] = true
 	}
+	if err := validateLimits(spec); err != nil {
+		return err
+	}
 	if spec.PagesDir != "" && !absPathRe.MatchString(spec.PagesDir) {
 		return fmt.Errorf("the pages directory must be an absolute path")
 	}
@@ -460,6 +467,7 @@ func SpecWarnings(spec *SiteSpec) []string {
 		warnings = append(warnings,
 			"Replacing the application's own error pages applies only to a site that forwards to an application; on this one only nginx's own errors get the site's pages.")
 	}
+	warnings = append(warnings, limitsWarnings(spec)...)
 	if len(spec.AllowFrom) > 0 {
 		warnings = append(warnings,
 			"Only the listed addresses will reach this site. Everything else is refused — check the list includes however you reach it yourself.")

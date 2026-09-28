@@ -764,6 +764,21 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   reloads — refused (409 `not_managed`) for a file the form did not write or would drop lines of. Page
   paths are refused unless the site folder resolves directly under `jd-pages` inside the nginx directory
   and the file is not a link.
+
+  **Limits** (`sites_limits.go`, form section "Limits", a per-path override under the extra paths).
+  `SiteSpec.Limits{Request{Rate, Burst, NoDelay, Key}, ConnPerIP, ExemptFrom, DryRun}` and
+  `SiteLocation.RateLimit`. Rate is `^[1-9]\d{0,5}r/[sm]$`, Key is empty (per address) or `ip_path`
+  (`$binary_remote_addr$uri`), exemptions are IPs/CIDRs. Above the server: `geo $jd_<id>_limit_exempt`
+  (listed addresses 1), and per zone a `map` of it to `$<zone>_key` (`""` for exempt, which nginx does
+  not count) plus `limit_req_zone`/`limit_conn_zone` — zones `jd_<id>_req`, `jd_<id>_conn` and
+  `jd_<id>_req_p<n>` for the n-th extra path. The zone key is always that map variable because nginx
+  refuses a reload that finds a live zone counting by a different key. Server level: `limit_req`,
+  `limit_req_status 429`, `limit_conn`, `limit_conn_status 429`, and with DryRun `limit_req_dry_run on`
+  and `limit_conn_dry_run on` (logged as "dry run"); a path's own `limit_req` replaces the site's there,
+  as nginx inherits it. Refused for redirect sites (`return` runs before limits apply) and exemptions or
+  log-only with nothing limited. Every limit counts the address nginx sees, so a warning says so unless
+  the extra configuration sets `real_ip_header`; the form cannot tell whether a CDN is in front.
+  `VHost.rateLimited` puts "rate limited" on the Sites card.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
   quietly stopped. Each version is probed on a connection pinned to exactly that version, offering

@@ -42,6 +42,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// Inside the site's maintenance geo, whose entries are the addresses
 	// let past it.
 	inMaintGeo := false
+	limits := newLimitParse()
 	maintenance := func() *SiteMaintenance {
 		if spec.Maintenance == nil {
 			spec.Maintenance = &SiteMaintenance{BypassFrom: []string{}}
@@ -61,16 +62,22 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			} else if raw == "}" {
 				objectDepth--
 				inMaintGeo = inMaintGeo && objectDepth > 0
+				if objectDepth == 0 {
+					limits.closed()
+				}
 			} else if inMaintGeo {
 				if fields := strings.Fields(strings.TrimSuffix(raw, ";")); len(fields) == 2 && fields[0] != "default" {
 					maintenance().BypassFrom = append(maintenance().BypassFrom, fields[0])
 				}
+			} else if objectDepth == 1 {
+				limits.entry(raw)
 			}
 			return
 		}
 		if depth == 0 {
 			name, value := cutDirective(raw)
 			if httpObjects[name] {
+				limits.object(name, value)
 				if strings.HasSuffix(raw, "{") {
 					objectDepth = 1
 					if name == "geo" && maintGeoRe.MatchString(value) {
@@ -131,6 +138,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 
 		directive, value := cutDirective(raw)
+		if limits.directive(directive, value, location, current, len(spec.Locations)-1) {
+			return
+		}
 		if _, ok := pageFromURI(location); ok {
 			switch {
 			case directive == "alias":
@@ -339,6 +349,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		spec.RedirectTo = "https://" + firstOr(spec.Domains, "")
 		spec.Permanent = true
 	}
+	limits.settle(spec)
 	// Extra locations that ended up with neither an upstream nor a root are
 	// something this form cannot express; dropping them is better than
 	// offering to save a location that proxies nowhere.
