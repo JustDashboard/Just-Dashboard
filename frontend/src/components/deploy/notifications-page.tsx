@@ -150,6 +150,8 @@ const EVENT_WORD: Record<string, string> = {
   test: "Test message",
   "traffic.firing": "Traffic alert fired",
   "traffic.recovered": "Traffic back to normal",
+  "proxy.alert.firing": "Proxy alert fired",
+  "proxy.alert.recovered": "Proxy alert resolved",
 }
 
 /** How the far end answered, as the dispatcher records it. */

@@ -1633,6 +1633,7 @@ export type * from "./proxy/types-ports"
 export type * from "./proxy/types-certs"
 export type * from "./proxy/types-tls"
 export type * from "./proxy/types-insights"
+export type * from "./proxy/types-alerts"
 
 export type DbDriver =
   "postgres" | "mysql" | "sqlite" | "sqlserver" | "clickhouse" | "oracle" | "mongodb" | "redis"

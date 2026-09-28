@@ -18,6 +18,9 @@ type proxyExtras struct {
 	// siteTraffic holds each nginx site's parsed access log, keyed by the
 	// log's path; the deployments' store beside it is keyed by route.
 	siteTraffic *accesslog.Store
+	// alerts tells the notification channels when a certificate, the
+	// engine, an upstream, a watched endpoint or a site crosses a rule.
+	alerts *proxyAlerts
 
 	// --- lane B: sites list & lifecycle ---
 
@@ -40,6 +43,7 @@ func (s *Server) initProxyExtras() {
 	s.modules.proxy.SetRecorder(&proxyRevisions{db: s.Store.DB})
 	s.modules.proxyExtras.upstreams = proxysvc.NewUpstreamMonitor(s.modules.proxy)
 	s.modules.proxyExtras.siteTraffic = accesslog.NewStore(s.modules.proxy.SiteAccessLogReader)
+	s.modules.proxyExtras.alerts = s.newProxyAlerts()
 
 	// --- lane B: sites list & lifecycle ---
 
@@ -60,6 +64,8 @@ func (s *Server) initProxyExtras() {
 // queued behind a schedule.
 func (s *Server) startProxyExtras(ctx context.Context) error {
 	// --- lane A: engine & insights ---
+	// Stopped by ctx: Shutdown has nothing more to stop.
+	s.modules.proxyExtras.alerts.Start(ctx)
 
 	// --- lane B: sites list & lifecycle ---
 
