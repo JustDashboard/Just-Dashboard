@@ -365,6 +365,9 @@ func specRoots(spec *SiteSpec) []siteRoot {
 	if spec.Kind == "static" && absPathRe.MatchString(spec.Root) {
 		out = append(out, siteRoot{id: "root", dir: spec.Root, index: true, spa: spec.SPA})
 	}
+	if spec.Kind == "php" && absPathRe.MatchString(spec.Root) {
+		out = append(out, siteRoot{id: "root", dir: spec.Root})
+	}
 	if spec.Kind == "redirect" {
 		return out
 	}
@@ -447,6 +450,10 @@ func specUpstreams(spec *SiteSpec) []string {
 				}
 			}
 		}
+	}
+	// The socket is checked like an application's: it has to exist.
+	if spec.Kind == "php" && absPathRe.MatchString(spec.PHPSocket) {
+		add("unix:" + spec.PHPSocket)
 	}
 	if spec.Kind != "redirect" {
 		for _, loc := range spec.Locations {

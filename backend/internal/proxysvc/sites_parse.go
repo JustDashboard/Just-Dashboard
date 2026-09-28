@@ -48,6 +48,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	cache := &cacheParse{}
 	realIP := &realIPParse{}
 	headers := &headersParse{}
+	kinds := &kindParse{}
 	// The catch-all's retry settings, which belong to the pool it forwards to.
 	var rootRetryOn []string
 	rootTries := 0
@@ -64,6 +65,15 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// piece read in turn, where the line reader used to swallow everything
 	// after the opening brace.
 	read := func(raw string) {
+		if kinds.skipServer {
+			if strings.HasSuffix(raw, "{") {
+				depth++
+			} else if raw == "}" {
+				depth--
+				kinds.skipServer = depth > 0
+			}
+			return
+		}
 		if objectDepth > 0 {
 			if strings.HasSuffix(raw, "{") {
 				objectDepth++
@@ -144,6 +154,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			loc := SiteLocation{Path: location, Match: m[1]}
 			if (location != "/" || m[1] != "") && location != acmeChallengePath &&
 				location != exploitDotLocation && location != exploitExtLocation &&
+				location != phpLocation && location != htLocation &&
 				validLocationPath(loc) {
 				spec.Locations = append(spec.Locations, loc)
 				current = &spec.Locations[len(spec.Locations)-1]
@@ -182,6 +193,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			return
 		}
 		if headers.directive(directive, value, location == "" && current == nil, location == "/" && current == nil) {
+			return
+		}
+		if current == nil && kinds.directive(directive, value, location) {
 			return
 		}
 		switch directive {
@@ -385,7 +399,14 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				} else if strings.HasPrefix(target, "http") {
 					spec.Kind = "redirect"
 					spec.RedirectTo = strings.TrimSuffix(target, "$request_uri")
-					spec.Permanent = fields[0] == "301"
+					spec.RedirectDropPath = spec.RedirectTo == target
+					// 301 and 302 stay Permanent's, as every file written
+					// before the other two could be chosen reads back.
+					code, _ := strconv.Atoi(fields[0])
+					spec.Permanent = code == 301 || code == 308
+					if code == 307 || code == 308 {
+						spec.RedirectCode = code
+					}
 				}
 			}
 		}
@@ -407,6 +428,11 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 		if raw == customMarker {
 			inCustom = true
+			continue
+		}
+		if m := canonicalMarkerRe.FindStringSubmatch(raw); m != nil && depth == 0 {
+			spec.Canonical = m[1]
+			kinds.skipServer = true
 			continue
 		}
 		if strings.HasPrefix(raw, stripMarker) {
@@ -457,6 +483,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			spec.Kind = "static"
 		}
 	}
+	kinds.settle(spec)
 	// The fallback is a static site's; a proxy's location / answers from
 	// its upstream whatever try_files a hand-written file put beside it.
 	spec.SPA = spec.SPA && spec.Kind == "static"

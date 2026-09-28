@@ -37,15 +37,31 @@ export type SiteSpec = {
   managedAcme?: boolean
   name: string
   domains: string[]
-  kind: "proxy" | "static" | "redirect"
+  kind: "proxy" | "static" | "redirect" | "php"
   upstream?: string
   /** Several servers in place of `upstream`. Proxy sites only. */
   pool?: SitePool
   root?: string
   /** A static site whose paths with no file of their own get index.html. */
   spa?: boolean
+  /** A static site lists a folder without an index. */
+  autoindex?: boolean
+  /** A static site sends file.gz in place of file to a client that accepts gzip. */
+  gzipStatic?: boolean
+  /** The order a static or PHP site looks for a folder's index in; unset is the kind's usual. */
+  indexFiles?: string[]
+  /** The PHP-FPM socket a PHP site hands its scripts to. */
+  phpSocket?: string
+  /** A path with no file of its own goes to index.php (WordPress, Laravel). */
+  phpFrontController?: boolean
   redirectTo?: string
+  /** 301 or 302 when redirectCode is unset. */
   permanent?: boolean
+  redirectCode?: 301 | 302 | 307 | 308
+  /** Send every path to redirectTo itself rather than carrying the path and query across. */
+  redirectDropPath?: boolean
+  /** The other form of each domain redirects to the site's: www.x to x, or x to www.x. */
+  canonical?: "" | "www" | "apex"
   tls: boolean
   certPath?: string
   keyPath?: string

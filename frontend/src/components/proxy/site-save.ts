@@ -11,14 +11,22 @@ import type {
  * TLS: the switch is drawn only under "Serve over HTTPS", and the default it
  * keeps for when
  * TLS is turned on reached the server on every plain-HTTP site as a warning
- * about a control nobody could see. The single-page-app fallback goes only
- * with files and a permanent redirect only with a redirect, for the same
- * reason: a switch left on under another kind is not drawn and means nothing.
+ * about a control nobody could see. A folder's options go only with files or
+ * PHP, the socket only with PHP and the redirect's code and path only with a
+ * redirect, for the same reason: a switch left on under another kind is not
+ * drawn and means nothing.
  */
 export function sendableSpec(spec: SiteSpec): SiteSpec {
   const {
     spa,
+    autoindex,
+    gzipStatic,
+    indexFiles,
+    phpSocket,
+    phpFrontController,
     permanent,
+    redirectCode,
+    redirectDropPath,
     limits,
     hostHeaderValue,
     upstreamCa,
@@ -46,8 +54,10 @@ export function sendableSpec(spec: SiteSpec): SiteSpec {
     hsts: spec.hsts && spec.tls,
     ...(spec.hsts && spec.tls ? { hstsMaxAge, hstsOwnNameOnly, hstsPreload } : {}),
     ...(spec.tls ? { tlsProfile } : {}),
-    ...(spec.kind === "static" && spa !== undefined ? { spa } : {}),
-    ...(spec.kind === "redirect" && permanent !== undefined ? { permanent } : {}),
+    ...(spec.kind === "static" ? { spa, autoindex, gzipStatic } : {}),
+    ...(spec.kind === "static" || spec.kind === "php" ? { indexFiles } : {}),
+    ...(spec.kind === "php" ? { phpSocket, phpFrontController } : {}),
+    ...(spec.kind === "redirect" ? { permanent, redirectCode, redirectDropPath } : {}),
     // A redirect has no files to keep and only a proxy has responses to.
     ...(spec.kind !== "redirect" && staticCache ? { staticCache } : {}),
     ...(spec.kind === "proxy" && proxyCache ? { proxyCache } : {}),
