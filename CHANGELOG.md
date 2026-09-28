@@ -4,14 +4,31 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
-## 0.7.0 — 22 September 2026
+## 0.7.0 — 28 September 2026
 
-**Git is a whole workbench, every template says how you get in, and a deployment's Logs page reads its traffic**
+**Logs on every service, a full Git workspace, and database management**
 
-The Git workspace could commit, branch, merge and push, and everything past that was a terminal. 0.7.0 brings the rest into the same three columns: conflicts resolved side by side, single lines staged, local history rebased behind a recovery branch, worktrees, submodules, LFS and patches, reviews on GitHub pull requests and on GitLab and Gitea requests. Every reviewed template now declares how its first sign-in works, the five that could not say are no longer offered, and nine new ones join the catalogue. New project opens on whatever is still unanswered and checks the plan the moment Review is reached. A deployment's Logs page answers from the requests the proxy actually served, with insights, marks on the chart and traffic alerts. A container, a compose stack and a backup job are pages of their own, every page remembers what you were doing on it, and the rail's top level is twelve rows instead of seventeen.
+Read a service's logs on its own page, with events, fields and insights that understand what produced each line. The Git workspace gains conflict resolution, partial staging, local history editing and pull request reviews. Databases get a control center, connection strings, topology, server management and an advisor. Containers show live resource usage and recorded traffic rates, and their mounted files open in place. Boards keep server diagrams and notes, terminal sessions survive dashboard restarts, and Proxy and Security pages make routes, exposure and access easier to inspect. Deployment templates explain their first sign-in, while previews, request logs and traffic alerts connect a release to what it serves.
+
+> **Needs attention before you upgrade.** Direct log API clients must replace the removed Docker container/stack, systemd journal and PM2 log endpoints with /api/v1/logs/search or /api/v1/logs/stream, using the corresponding source value from /api/v1/logs/sources. Targeted authentication-log reads now require system.admin. The dashboard's own pages already use these routes.
+
+### Security
+
+- Targeted authentication logs require administrator access
+  - Authentication files and their rotated generations, SSH journal units, authentication journal identifiers and PM2 sources resolving to those files require system.admin on the log routes. Whole-journal access retains its existing read permission and can still include authentication records. Rotated log files must resolve inside the configured log roots, and request CSV exports neutralise spreadsheet formulas in client-supplied cells.
 
 ### Added
 
+- Read each service's logs on the page that owns it
+  - Databases, Docker containers and stacks, deployments, systemd units, PM2 applications, scheduled jobs, proxy sites, certificates, Security and Packages embed the same live, history and insights views. Twenty-one log readers recognise database messages, HTTP requests, authentication attempts, firewall decisions, service exits and application exceptions, with named events and filterable fields. Stack output is merged by time and labelled by service; crash windows, restart loops and the lines around an exit stay beside the service.
+- Filter log fields and inspect the records behind a finding
+  - Quick views narrow a log to slow statements, failed logins, upstream errors and other events its source can report. Field filters, top values and insights use the same parsed records as live output, history and export. Stack traces and continuation lines stay with their record, repeated lines fold together, and an opened line shows its fields, raw text and surrounding lines. The Logs page brings these views and deployment and proxy request records together.
+- A database can show its own slow-query log
+  - The Queries view reads PostgreSQL and MongoDB query records from their logs, Redis SLOWLOG, ClickHouse system.query_log, and MySQL slow_log or performance_schema. When logging is disabled, it explains the setting needed to enable it. A native server is followed from its port and process to its own log files, including rotated files, with its journal available as another source.
+- Inspect live container usage beside recorded history
+  - A container's Usage tab shows CPU, memory working set, cache, CPU throttling, block I/O and per-interface network rates and totals where Docker provides them. Pause keeps the readings on screen; disconnected or stale feeds clear current values, and reconnects start a new rate baseline. Host networking links to host metrics instead of claiming isolated container traffic. Live readings remain available when history retention is disabled.
+- Keep boards of the server and the things it runs
+  - The bundled Excalidraw editor saves multiple named boards in the dashboard's database, including images and linked cards for this host, deployment projects and database connections. Autosave detects conflicting revisions so an older tab cannot silently replace newer work.
 - Terminal sessions keep running when the dashboard restarts
   - A terminal's shell used to end whenever the dashboard restarted — an upgrade, a settings change, a rebuild — taking whatever ran in it along, an agent included. Each session's terminal is now held on the server by a small process of its own, so a session keeps running with every browser closed and across restarts and upgrades, and the dashboard picks it back up, with what it printed meanwhile, when it comes back. A session ends when you close it or its shell exits. A dropped connection reconnects by itself instead of waiting for a click.
 - Databases opens on a control center of every database at once
@@ -25,7 +42,7 @@ The Git workspace could commit, branch, merge and push, and everything past that
 - An Advisor reads the engine's catalogue for what is wrong, with the fix attached
   - Tables with no primary key and foreign keys with no index on every SQL engine; on PostgreSQL also indexes never read, duplicate indexes, tables the planner has no statistics for, dead rows, sequences near their ceiling, connections near the limit, a low cache hit ratio, sessions idle in a transaction, MD5 password hashing, extra superusers and a missing pg_stat_statements; on MySQL non-InnoDB tables, the slow log and performance_schema off, superusers open to any host and a small buffer pool; and, for an administrator, a server published to the internet. Each finding names its objects and, where one statement fixes it, carries that statement with Copy and Open in the console.
 - Monitor lists the slowest statements, and Backups and Logs are pages of the connection
-  - Monitor draws the statements that cost the most over their whole history from pg_stat_statements or performance_schema, as a ranked list with each one's calls, mean and cache share. Backups lists every dump of the database on this server with Dump now, download, restore (typed for) and delete, and says when the newest is over a week old. Logs streams a container database's output in place and, for a native server, hands its journal units to the Logs page.
+  - Monitor draws the statements that cost the most over their whole history from pg_stat_statements or performance_schema, as a ranked list with each one's calls, mean and cache share. Backups lists every dump of the database on this server with Dump now, download, restore (typed for) and delete, and says when the newest is over a week old. Logs reads a container's output or a native server's own log files and journal in place, with a Queries view for the engine's query records.
 - A database installed on the machine is connected by making the dashboard its own account
   - A PostgreSQL, MySQL or MariaDB, MongoDB or ClickHouse running natively no longer has to be given a password somebody remembers: from the same dialog the dashboard runs the engine's own client as its system account over the Unix socket, where peer authentication needs none, creates or resets an account with a password generated and sealed on the server, and connects over TCP with it. A native Redis has its requirepass read from its configuration file. Every attempt is audited with the account it made, and the password never reaches the browser.
 - Resolve a conflict side by side, and stage single lines
@@ -53,16 +70,20 @@ The Git workspace could commit, branch, merge and push, and everything past that
 - Decide auto-deploy, extra hostnames and an image's project type when the project is created
   - The configure screen draws the plan as source, build, runtime and address, each step opening the fields that decide it. Whether pushes deploy themselves, a second and third hostname, and whether an image is an HTTP application with a health-gated cutover are settled before the first release rather than found as settings afterwards. A name already taken is flagged while it is typed, a template's domain arrives filled in with the suggested hostname, and an abandoned or failed setup is deleted rather than left as unfinished work.
 - A deployment's Logs page answers from the requests the proxy served
-  - Container output for a modern framework is a banner and then silence, so the page now reads the access record the proxy keeps for the route: requests per minute, page views, the failing share, the slow tenth, bytes served and container events, over a chart that marks a release going live, an exit or a restart. Insights breaks the window down by page, client, agent, referrer and status, names scanners and offers to block them, and a failing request jumps to the container's output around that moment. The window exports as CSV, and routes written before recording existed are switched on in place by the lifecycle pass.
+  - The page reads the access record the proxy keeps for the route: requests per minute, page views, the failing share, the slow tenth, bytes served and container events, over a chart that marks a release going live, an exit or a restart. Insights breaks the window down by page, client, agent, referrer and status, names scanners and offers to block them. An opened request shows related container output and, on a server error, the proxy's own error lines in place. Output follows one service or all services, Builds opens run transcripts, and Events records lifecycle changes. The window exports as CSV, and routes written before recording existed are switched on in place by the lifecycle pass.
 - Traffic alerts, and the fleet's pulse on every project card
   - A rule watches one environment for its failing share, its p95, or silence from a route that used to be busy, and announces only when it starts firing and when it recovers, through the existing notification channels. Rules read as sentences on Automation settings and can send a test. Project cards carry the last hour as a sparkline, and a run's Metrics view compares requests, failures and p95 before and after activation.
 - Browse a volume's files where the volume is named
-  - A volume's panel and a container's Storage tab embed the file browser, clamped to the mount, with Open in Files carrying the directory reached. Storage that looks like a running database's own files carries a warning above it. The backend now mounts /var/lib/docker/volumes, without which every volume answered not found.
+  - A volume's page and a container's Storage tab embed the file browser, clamped to the mount, with Open in Files carrying the directory reached. Container storage opens directly onto a mount's contents, with mount rows switching the listing when there is more than one; tmpfs remains identified as memory-backed storage. Storage that looks like a running database's own files carries a warning above it. The backend mounts /var/lib/docker/volumes so named volumes can be read.
 - Every page remembers what you were doing when you come back to it
   - Filters, chips, the page of results, the open row, the SQL in the editor, half-filled dialogs and a new project's source and settings survive navigating away for the life of the tab. Secrets are kept in memory only and never written to browser storage.
 
 ### Changed
 
+- Proxy and Security pages put their inventories and controls together
+  - The proxy workspace presents routes, sites, ports and certificates with their status and actions, and each site opens on its requests and errors. The overview includes the engine log and Certificates includes renewal activity. Firewall rules sit beside their defaults, SSH settings are grouped with account access, and Intrusion keeps active bans, repeat offenders and fail2ban activity in view. These pages retain their inline logs and fit narrow screens.
+- Multiple viewers share Docker reads and large lists do less repeated work
+  - Container-table viewers share one live inventory and stats sampler, while direct reads and mutation checks stay fresh. Database discovery can reuse Docker reads within one request. Files defers offscreen previews and heavier controls while keeping every filename available to browser search and selection, and log rows retain their identity as older lines leave the buffer.
 - The terminal's sessions are opened and closed, and nothing else
   - The sessions rail has no folders, no renaming, no pinning and no menu on a row any more: a session is named after what it is running, so it is opened and closed. A window tab has no rename either, and its state dot sits at the end beside the close, where a session row has it.
 - Action menus are one word to a line
@@ -108,6 +129,12 @@ The Git workspace could commit, branch, merge and push, and everything past that
 
 ### Fixed
 
+- Recorded container traffic uses measured intervals and explicit memory budgets
+  - Network and block I/O rates are calculated from consecutive Docker samples before they are grouped into chart buckets. Counter resets, missing data and long gaps remain unavailable instead of becoming spikes or false zeroes. A bucket can use the preceding sample to measure its first interval. Historical memory limits record the configured budget, including a budget equal to host RAM, without presenting Docker's default host ceiling as a limit somebody set.
+- Docker caches refresh after changes and stop serving expired answers
+  - Image update checks re-read local image identity, cache successful registry answers and invalidate them after pulls or forced checks; an unreachable registry is not kept as a cached answer. Disk accounting shares its refresh, invalidates after Docker mutations and reports unavailable once an old snapshot can no longer be trusted. User and group names in Files are refreshed between requests.
+- Metrics, account menus and compact controls fit their rows
+  - Metrics shows the host's real network interfaces by default and keeps the interface table within a bounded height. Metric tiles, Git cards, account menus and header controls align consistently, and the deployment wiring selector stays inside its panel. Folder colours are shared by the file browser, trees and embedded storage listings.
 - Boards save, images included
   - Every board save was refused with "board revision and scene are required; scene must contain elements, appState, and files": the editor wrote the scene in Excalidraw's database format, which leaves out the images for a separate store this server does not have. It now saves Excalidraw's file format, so images are kept in the board. Opening a board no longer saves it, so two people looking at one board no longer put each other into a conflict. A blank name is not sent and comes back on leaving the field, Ctrl+S saves the board instead of downloading a file, a board deleted in another tab stops autosaving and says so, a scene over 16 MiB is refused as too large rather than malformed, and when a save cannot go through, Back asks before leaving instead of doing nothing. Deleting asks for the name the server has, so an untrimmed or unsaved name no longer makes the confirmation impossible.
 - A container is drawn as what it runs after its image is pulled again
@@ -137,6 +164,8 @@ The Git workspace could commit, branch, merge and push, and everything past that
 
 ### Removed
 
+- Per-service log endpoints are replaced by the shared log API
+  - The Docker container and stack log endpoints, systemd journal endpoints and PM2 log stream endpoint are removed. Direct integrations should select a source from /api/v1/logs/sources and use /api/v1/logs/search for history or /api/v1/logs/stream for live output. The dashboard's service pages use the shared API.
 - File Browser, wallabag, MinIO, Syncthing and Healthchecks are no longer offered
   - Each has a first credential nobody can know before the container starts: a password printed only into its own log, a fixed default account with no way to change it, an archived upstream, a web interface that is full control until someone sets a password, or a sign-up that needs mail. Deployments already made from them keep redeploying, because the definitions still ship and are still validated.
 
