@@ -23,6 +23,7 @@ import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state
 import { VerbBar } from "@/components/verbs"
 import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { AccessListsPanel } from "@/components/proxy/access-lists-panel"
+import { RouteResolver } from "@/components/proxy/route-resolver"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
@@ -760,6 +761,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
 
       {admin && hasNginx && <AuthFilesPanel />}
       {admin && hasNginx && <AccessListsPanel />}
+      {admin && hasNginx && <RouteResolver />}
 
       <SiteForm
         open={formIsOpen}

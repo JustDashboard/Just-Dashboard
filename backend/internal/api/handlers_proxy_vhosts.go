@@ -23,6 +23,7 @@ func (s *Server) mountVHostRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/vhosts", s.handle(s.handleVHostList))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
+		r.Method(http.MethodGet, "/resolve", s.handle(s.handleRouteResolve))
 		s.destructive(r, func(r chi.Router) {
 			// Disabling a vhost takes a site offline, and removing a link
 			// takes whatever it pointed at out of nginx's configuration.
