@@ -30,6 +30,9 @@ func (s *Server) mountSiteBuilderRoutes(r chi.Router) {
 		// separate gate would be a claim about a boundary that is not
 		// there.
 		r.Method(http.MethodPost, "/preview", s.handle(s.handleSitePreview))
+		// Preflight connects to the spec's upstreams and resolves its
+		// domains: outbound traffic to targets the caller chose.
+		r.Method(http.MethodPost, "/preflight", s.handle(s.handleSitePreflight))
 		r.Method(http.MethodPost, "/", s.handle(s.handleSiteApply))
 		r.Method(http.MethodPut, "/{name}/pages/{page}", s.handle(s.handleSitePagePut))
 		s.destructive(r, func(r chi.Router) {
@@ -152,6 +155,22 @@ func (e *siteEnable) UnmarshalJSON(raw []byte) error {
 // is filled in. Rendering on the server is what keeps one implementation of
 // "what does this spec mean"; a second one in the browser would drift, and the
 // one that mattered would be the one nobody was reading.
+// handleSitePreflight answers what nginx -t cannot: whether the files the spec
+// names are there and usable, whether its upstreams answer and where its
+// domains point. It reads and connects; it writes nothing.
+func (s *Server) handleSitePreflight(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Spec proxysvc.SiteSpec `json:"spec"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	httpx.JSON(w, http.StatusOK, s.modules.proxy.SitePreflight(ctx, &req.Spec))
+	return nil
+}
+
 func (s *Server) handleSitePreview(w http.ResponseWriter, r *http.Request) error {
 	var req siteRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
