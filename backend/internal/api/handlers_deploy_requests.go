@@ -180,16 +180,9 @@ func (s *Server) handleDeploymentRequestExport(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q",
 		fmt.Sprintf("requests-%d-%s.csv", environmentID, time.Now().UTC().Format("20060102-150405"))))
 	writer := csv.NewWriter(w)
-	_ = writer.Write([]string{"time", "method", "path", "query", "status", "durationMs", "size", "client", "host", "proto", "tls", "userAgent", "referer"})
+	_ = writer.Write(requestCSVHeader)
 	_, err = s.modules.requests.Export(ctx, name, filter, 0, func(e accesslog.Entry) {
-		duration := ""
-		if ms, ok := e.Duration(); ok {
-			duration = strconv.FormatFloat(ms, 'f', 3, 64)
-		}
-		_ = writer.Write([]string{
-			e.At().Format(time.RFC3339Nano), e.Method, e.Path, e.Query, strconv.Itoa(e.Status), duration,
-			strconv.FormatInt(e.Size, 10), e.RemoteIP, e.Host, e.Proto, strconv.FormatBool(e.TLS), e.UserAgent, e.Referer,
-		})
+		_ = writer.Write(requestCSVRow(e))
 	})
 	writer.Flush()
 	if err != nil {
@@ -198,6 +191,21 @@ func (s *Server) handleDeploymentRequestExport(w http.ResponseWriter, r *http.Re
 		fmt.Fprintf(w, "# export stopped: the request record could not be read\n")
 	}
 	return nil
+}
+
+// requestCSVHeader and requestCSVRow are the one spelling of a request as a
+// CSV row, shared by every download of a request record.
+var requestCSVHeader = []string{"time", "method", "path", "query", "status", "durationMs", "size", "client", "host", "proto", "tls", "userAgent", "referer"}
+
+func requestCSVRow(e accesslog.Entry) []string {
+	duration := ""
+	if ms, ok := e.Duration(); ok {
+		duration = strconv.FormatFloat(ms, 'f', 3, 64)
+	}
+	return []string{
+		e.At().Format(time.RFC3339Nano), e.Method, e.Path, e.Query, strconv.Itoa(e.Status), duration,
+		strconv.FormatInt(e.Size, 10), e.RemoteIP, e.Host, e.Proto, strconv.FormatBool(e.TLS), e.UserAgent, e.Referer,
+	}
 }
 
 // handleDeploymentRunTraffic compares the traffic either side of a run's

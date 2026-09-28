@@ -22,6 +22,14 @@ func (s *Server) mountProxyInsightRoutes(r chi.Router) {
 	// the last check for 15 seconds, so polling cannot turn the dashboard
 	// into a scanner.
 	r.Method(http.MethodGet, "/upstreams", s.handle(s.handleProxyUpstreams(false)))
+	// Each site's traffic and errors, read from the logs its own file names
+	// and only from under /var/log/nginx. Readable by every account, like a
+	// deployment's request record.
+	r.Method(http.MethodGet, "/traffic", s.handle(s.handleSiteTrafficSummary))
+	r.Method(http.MethodGet, "/traffic/{name}", s.handle(s.handleSiteTraffic))
+	r.Method(http.MethodGet, "/traffic/{name}/tail", s.handle(s.handleSiteTrafficTail))
+	r.Method(http.MethodGet, "/traffic/{name}/export", s.handle(s.handleSiteTrafficExport))
+	r.Method(http.MethodGet, "/errors", s.handle(s.handleSiteErrors))
 	r.Group(func(r chi.Router) {
 		// A check on demand skips that cache, so it is the operator's.
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))

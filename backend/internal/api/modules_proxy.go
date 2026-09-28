@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -14,6 +15,9 @@ import (
 type proxyExtras struct {
 	// --- lane A: engine & insights ---
 	upstreams *proxysvc.UpstreamMonitor
+	// siteTraffic holds each nginx site's parsed access log, keyed by the
+	// log's path; the deployments' store beside it is keyed by route.
+	siteTraffic *accesslog.Store
 
 	// --- lane B: sites list & lifecycle ---
 
@@ -35,6 +39,7 @@ func (s *Server) initProxyExtras() {
 	// --- lane A: engine & insights ---
 	s.modules.proxy.SetRecorder(&proxyRevisions{db: s.Store.DB})
 	s.modules.proxyExtras.upstreams = proxysvc.NewUpstreamMonitor(s.modules.proxy)
+	s.modules.proxyExtras.siteTraffic = accesslog.NewStore(s.modules.proxy.SiteAccessLogReader)
 
 	// --- lane B: sites list & lifecycle ---
 
