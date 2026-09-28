@@ -43,13 +43,15 @@ type Narrowing = {
   path: string
   client: string
   host: string
+  agent: string
+  referer: string
   status?: number
   minMs?: number
   since?: string
   until?: string
 }
 
-const NONE: Narrowing = { path: "", client: "", host: "" }
+const NONE: Narrowing = { path: "", client: "", host: "", agent: "", referer: "" }
 
 /** The query the window, the tail and the export share, so the three agree. */
 function trafficQuery(range: RequestRange, n: Narrowing) {
@@ -60,6 +62,8 @@ function trafficQuery(range: RequestRange, n: Narrowing) {
     path: n.path || undefined,
     client: n.client || undefined,
     host: n.host || undefined,
+    agent: n.agent || undefined,
+    referer: n.referer || undefined,
     status: n.status,
     minMs: n.minMs,
   }
@@ -382,6 +386,8 @@ function Requests({
       ["path", narrowing.path && `Path ${narrowing.path}`],
       ["client", narrowing.client && `Client ${narrowing.client}`],
       ["host", narrowing.host && `Host ${narrowing.host}`],
+      ["agent", narrowing.agent && `Agent ${narrowing.agent}`],
+      ["referer", narrowing.referer && `Referer ${narrowing.referer}`],
       ["status", narrowing.status && `Status ${narrowing.status}`],
       ["minMs", narrowing.minMs !== undefined && `Slower than ${latency(narrowing.minMs)}`],
     ] as const
@@ -431,6 +437,8 @@ function Requests({
         onFilterPath={(path) => onNarrow({ ...narrowing, path })}
         onFilterClient={(client) => onNarrow({ ...narrowing, client })}
         onFilterHost={(host) => onNarrow({ ...narrowing, host })}
+        onFilterAgent={(agent) => onNarrow({ ...narrowing, agent })}
+        onFilterReferer={(referer) => onNarrow({ ...narrowing, referer })}
         onFilterStatus={(status) => onNarrow({ ...narrowing, status })}
         onFilterSlow={(ms) => onNarrow({ ...narrowing, minMs: Math.floor(ms) })}
       />

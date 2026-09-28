@@ -1,5 +1,5 @@
 import type { ProxyValidation } from "./types-engine"
-import type { UpstreamReport, UpstreamTarget } from "./types-insights"
+import type { SiteTrafficSummary, UpstreamReport, UpstreamTarget } from "./types-insights"
 
 export type VHost = {
   name: string
@@ -204,7 +204,5 @@ export type SiteUpstreamHealth = UpstreamTarget
 
 export type SiteUpstreams = UpstreamReport
 
-/** A site's last hour from GET /proxy/traffic, the engine lane's summary. */
-export type SiteTraffic = { site: string; requests: number }
-
-export type SitesTraffic = { sites: SiteTraffic[] }
+/** Every site's last hour from GET /proxy/traffic, the engine lane's summary. */
+export type SitesTraffic = SiteTrafficSummary

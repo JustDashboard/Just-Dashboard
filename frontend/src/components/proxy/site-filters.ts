@@ -108,7 +108,9 @@ export { isDown }
 /** Requests in the last hour, when the traffic summary has the site. */
 export function siteRequests(v: VHost, traffic: SitesTraffic | undefined): number | undefined {
   if (!Array.isArray(traffic?.sites)) return undefined
-  return traffic.sites.find((s) => s.site === v.name)?.requests
+  const reading = traffic.sites.find((s) => s.site === v.name)
+  // A site whose log cannot be read has no count, not a count of zero.
+  return reading?.status === "available" ? reading.requests : undefined
 }
 
 export function matchesChip(v: VHost, chip: SiteChip, r: SiteReadings): boolean {
