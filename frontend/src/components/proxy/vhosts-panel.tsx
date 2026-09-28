@@ -1,12 +1,13 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Globe, Plus } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { del, get, post } from "@/lib/api"
+import { del, post } from "@/lib/api"
 import type { VHost } from "@/lib/types"
-import { usePoll } from "@/hooks/use-poll"
+import { useProxyRead } from "@/components/proxy/proxy-context"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -62,12 +63,23 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // In the URL so a deployment finding can link straight at the site serving
   // its hostname, and so the browser's back button restores the selection.
   const [requested, setRequested] = useQuerySelection("site")
-  const { data, error, loading, refresh } = usePoll(
-    (signal) => get<VHost[]>("/proxy/vhosts", undefined, signal),
-    30_000,
-  )
+  const { data, error, loading, refresh } = useProxyRead("vhosts")
+
+  // The overview's "Put a domain in front of this" names an app's address
+  // here; the form opens as a new site already pointed at it.
+  const params = useSearchParams()
+  const [prefill, setPrefill] = useState(() => params.get("upstream"))
+  const prefilled = Boolean(prefill && admin && hasNginx)
+  const dropPrefill = () => {
+    setPrefill(null)
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has("upstream")) return
+    url.searchParams.delete("upstream")
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+  }
 
   const openForm = (name: string | null, copyFrom: string | null = null) => {
+    dropPrefill()
     setRequested(null)
     setForm((f) => ({ open: true, editing: name, copyFrom, session: f.session + 1 }))
   }
@@ -77,12 +89,13 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // into state, so the back button closes it and a reload reopens it.
   const linked = requested ? data?.find((vhost) => vhost.name === requested) : undefined
   const rawEditing = editing ?? (linked && linked.kind !== "nginx" && linked.path ? linked : null)
-  const formIsOpen = form.open || linked?.kind === "nginx"
+  const formIsOpen = form.open || linked?.kind === "nginx" || prefilled
   const formEditing = form.open ? form.editing : (linked?.name ?? null)
 
   const closeForm = (open: boolean) => {
     setForm((f) => ({ ...f, open }))
     if (!open) {
+      dropPrefill()
       setRequested(null)
       forgetSessionState("proxy.site.form.")
     }
@@ -348,6 +361,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         open={formIsOpen}
         editing={formEditing}
         copyFrom={form.open ? form.copyFrom : null}
+        upstream={form.open || !prefilled ? null : prefill}
         session={form.session}
         onOpenChange={closeForm}
         onSaved={refresh}

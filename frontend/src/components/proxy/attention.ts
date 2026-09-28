@@ -4,6 +4,7 @@ import {
   type CertificateFindingInput,
 } from "@/components/proxy/findings/certificates"
 import { engineFindings, type EngineFindingInput } from "@/components/proxy/findings/engine"
+import { frontDoorFindings, type FrontDoorFindingInput } from "@/components/proxy/front-door"
 import { insightFindings, type InsightFindingInput } from "@/components/proxy/findings/insights"
 import { portFindings, type PortFindingInput } from "@/components/proxy/findings/ports"
 import type { ProxyFinding } from "@/components/proxy/findings/shared"
@@ -30,6 +31,7 @@ export function foldProxyFindings(
     SiteFindingInput &
     StreamFindingInput &
     PortFindingInput &
+    FrontDoorFindingInput &
     EngineFindingInput &
     InsightFindingInput,
 ): ProxyFinding[] {
@@ -38,6 +40,7 @@ export function foldProxyFindings(
     ...siteFindings(input),
     ...streamFindings(input),
     ...portFindings(input),
+    ...frontDoorFindings(input),
     ...engineFindings(input),
     ...insightFindings(input),
   ].sort((a, b) => RANK[b.level] - RANK[a.level])

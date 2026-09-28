@@ -4,10 +4,9 @@ import { useMemo } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
 import { ListOrdered, Router, Shield } from "@/components/icons"
-import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { Listener } from "@/lib/types"
-import { usePoll } from "@/hooks/use-poll"
+import { useProxyRead } from "@/components/proxy/proxy-context"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, portProduct, processProduct } from "@/components/product-logo"
@@ -49,10 +48,7 @@ export function PortsPage() {
   const router = useRouter()
   const [filter, setFilter] = useSessionState("proxy.ports.query", "")
   const [reach, setReach] = useSessionState<Reach>("proxy.ports.reach", "all")
-  const { data, error, loading } = usePoll(
-    (signal) => get<Listener[]>("/ports", undefined, signal),
-    15_000,
-  )
+  const { data, error, loading } = useProxyRead("ports")
 
   const all = useMemo(() => data ?? [], [data])
   const counts = useMemo(

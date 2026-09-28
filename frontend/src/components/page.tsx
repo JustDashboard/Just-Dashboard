@@ -189,6 +189,8 @@ export function SearchInput({
         )}
       />
       <Input
+        // A page's own filter, not one inside a pane's chrome, is what `/` focuses.
+        data-page-search={dense ? undefined : ""}
         className={cn(dense ? "h-7 pl-7 text-xs" : "h-10 pl-8 sm:h-8", className)}
         {...props}
       />

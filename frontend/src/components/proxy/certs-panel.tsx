@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { CheckCircle, CloudUpload, RefreshClockwise, ShieldOff } from "@/components/icons"
 import { ApiError, get, post } from "@/lib/api"
-import type { Certificate, CertbotState, DNSProvider, Job } from "@/lib/types"
+import type { CertbotState, DNSProvider, Job } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -13,7 +13,7 @@ import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { useProxy } from "@/components/proxy/proxy-context"
+import { useProxy, useProxyRead } from "@/components/proxy/proxy-context"
 import {
   ALL_CERTS,
   CertbotLineages,
@@ -50,10 +50,7 @@ export function CertificatesPage() {
   }))
   const [importOpen, setImportOpen] = useState(false)
 
-  const certs = usePoll(
-    (signal) => get<Certificate[]>("/certificates/", undefined, signal),
-    300_000,
-  )
+  const certs = useProxyRead("certs")
   const certbot = usePoll<CertbotState>(
     (signal) => get("/certificates/certbot", undefined, signal),
     300_000,

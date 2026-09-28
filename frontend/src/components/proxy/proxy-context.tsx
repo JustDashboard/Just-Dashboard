@@ -1,6 +1,10 @@
 "use client"
 
 import { createContext, useContext } from "react"
+import type { Certificate, Listener, StreamStatus, VHost } from "@/lib/types"
+import type { PollState } from "@/hooks/use-poll"
+import type { Reading } from "@/components/proxy/freshness"
+import type { ConfigTest } from "@/components/proxy/test-result"
 
 export type ProxyStatus = {
   nginx: boolean
@@ -46,6 +50,21 @@ export type ProxyContextValue = {
   loading: boolean
   hasNginx: boolean
   refresh: () => void
+  /**
+   * The lists more than one page shows, polled once here: the overview's
+   * figures, each page's own table and the rail's marks read the same
+   * answer, and moving between pages does not ask for it again.
+   */
+  reads: ProxyReads
+  /** The engine's config test, which `t` runs from any page of the section. */
+  configTest: ConfigTest
+}
+
+export type ProxyReads = {
+  vhosts: PollState<Reading<VHost[]>>
+  certs: PollState<Reading<Certificate[]>>
+  streams: PollState<Reading<StreamStatus>>
+  ports: PollState<Reading<Listener[]>>
 }
 
 const ProxyContext = createContext<ProxyContextValue | null>(null)
@@ -56,6 +75,17 @@ export function useProxy() {
   const value = useContext(ProxyContext)
   if (!value) throw new Error("useProxy must be used inside the proxy layout")
   return value
+}
+
+/**
+ * One of the layout's shared reads as a page's own poll would have answered
+ * it: the value without the time it was read.
+ */
+export function useProxyRead<K extends keyof ProxyReads>(
+  key: K,
+): PollState<NonNullable<ProxyReads[K]["data"]>["value"]> {
+  const poll = useProxy().reads[key]
+  return { data: poll.data?.value, error: poll.error, loading: poll.loading, refresh: poll.refresh }
 }
 
 /**

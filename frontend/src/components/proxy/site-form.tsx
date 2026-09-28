@@ -55,6 +55,7 @@ export function SiteForm({
   open,
   editing,
   copyFrom,
+  upstream,
   session,
   onOpenChange,
   onSaved,
@@ -64,6 +65,8 @@ export function SiteForm({
   editing: string | null
   /** A site whose settings a new one starts from. */
   copyFrom?: string | null
+  /** An address a new site starts pointed at: an app found on loopback. */
+  upstream?: string | null
   /** Bumped on every open, so a closed and reopened form never keeps a stale draft. */
   session?: number
   onOpenChange: (open: boolean) => void
@@ -73,10 +76,11 @@ export function SiteForm({
   // buffer — saving that under the wrong name would be a real outage.
   return (
     <SiteFormBody
-      key={`${editing ?? (copyFrom ? `copy:${copyFrom}` : "new")}:${session ?? 0}`}
+      key={`${editing ?? (copyFrom ? `copy:${copyFrom}` : upstream ? `to:${upstream}` : "new")}:${session ?? 0}`}
       open={open}
       editing={editing}
       copyFrom={copyFrom ?? null}
+      upstream={upstream ?? null}
       onOpenChange={onOpenChange}
       onSaved={onSaved}
     />
@@ -108,12 +112,14 @@ function SiteFormBody({
   open,
   editing,
   copyFrom,
+  upstream,
   onOpenChange,
   onSaved,
 }: {
   open: boolean
   editing: string | null
   copyFrom: string | null
+  upstream: string | null
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }) {
@@ -122,8 +128,11 @@ function SiteFormBody({
   // a site is a long form, and a look at a port or a certificate half-way
   // through it should not mean typing it again. An existing site is read
   // back from the server on every open, as before.
-  const draft = `proxy.site.form.${source ?? "new"}`
-  const [spec, setSpec] = useSessionState<SiteSpec>(`${draft}.spec`, BLANK)
+  const draft = `proxy.site.form.${source ?? (upstream ? `to.${upstream}` : "new")}`
+  const [spec, setSpec] = useSessionState<SiteSpec>(
+    `${draft}.spec`,
+    upstream ? { ...BLANK, upstream } : BLANK,
+  )
   const [domainText, setDomainText] = useSessionState(`${draft}.domains`, "")
   const [preview, setPreview] = useState("")
   const [warnings, setWarnings] = useState<string[]>([])

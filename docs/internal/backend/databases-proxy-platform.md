@@ -631,6 +631,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `DELETE /proxy/findings/snoozes?id=` (`destructive`, audited `proxy.findings.unsnooze`; the id is a
   query parameter because upstream finding ids carry file paths). The level is the browser's word, so
   the day cap on critical findings is a rule for the operator's own buttons, not a boundary.
+- **Recent changes on the overview** read `GET /audit/?action_prefix=proxy.&action_prefix=certificates.&action_prefix=system.packages.&limit=8`
+  (`system.admin`, as all of `/audit`). `audit.Filter.ActionPrefixes` matches each repeated
+  `action_prefix` as a literal prefix (`LIKE ? ESCAPE '\'`, with `%`, `_` and `\` escaped), OR-ed together;
+  `action=` keeps its substring match.
 - **Certificates carry their fingerprint and serial**, the SHA-256 of the DER and the serial number in
   the uppercase colon form `openssl x509 -fingerprint -sha256` prints, which
   `TestCertificateFingerprintMatchesOpenSSL` checks against openssl itself.

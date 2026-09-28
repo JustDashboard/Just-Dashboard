@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Connection, Pencil, Plus, Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { del, get, post } from "@/lib/api"
-import type { SiteResult, StreamSpec, StreamStatus } from "@/lib/types"
-import { usePoll } from "@/hooks/use-poll"
+import { del, post } from "@/lib/api"
+import type { SiteResult, StreamSpec } from "@/lib/types"
+import { useProxyRead } from "@/components/proxy/proxy-context"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { CodeEditor } from "@/components/code-editor"
@@ -44,10 +44,7 @@ export function StreamsPage() {
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useSessionState<StreamSpec | null>("proxy.streams.editing", null)
   const [form, setForm] = useSessionState("proxy.streams.form", { open: false, session: 0 })
-  const { data, error, loading, refresh } = usePoll<StreamStatus>(
-    (signal) => get("/proxy/streams/", undefined, signal),
-    60_000,
-  )
+  const { data, error, loading, refresh } = useProxyRead("streams")
   const admin = can("system.admin")
 
   const open = (spec: StreamSpec | null) => {
