@@ -49,6 +49,8 @@ export type VHost = {
   owner?: VHostOwner
   modified: string
   size: number
+  /** The site answers with its maintenance page now. */
+  maintenance?: boolean
 }
 
 /** An upstream block and the servers in it. */

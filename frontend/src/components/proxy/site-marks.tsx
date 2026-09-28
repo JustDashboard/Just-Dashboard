@@ -78,6 +78,7 @@ export function ServingStatus({
     )
   }
   if (notLive) return <Status verdict="warning" label={notLive} />
+  if (vhost.enabled && vhost.maintenance) return <Status tone="warning" label="maintenance" />
   if (vhost.kind === "nginx" && !vhost.enabledPath && vhost.enabled) {
     // conf.d: every present .conf file is active and there is nothing to
     // toggle, which "always on" says without offering a control.

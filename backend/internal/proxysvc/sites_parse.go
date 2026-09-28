@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"bufio"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -38,6 +39,15 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// upstream, a zone). Its contents are its own syntax, not a server's:
 	// a map entry or a geo range read as a directive could land in a field.
 	objectDepth := 0
+	// Inside the site's maintenance geo, whose entries are the addresses
+	// let past it.
+	inMaintGeo := false
+	maintenance := func() *SiteMaintenance {
+		if spec.Maintenance == nil {
+			spec.Maintenance = &SiteMaintenance{BypassFrom: []string{}}
+		}
+		return spec.Maintenance
+	}
 
 	// read handles one statement. It is a closure over the reader's state so
 	// that a line carrying several statements — `location / { proxy_pass
@@ -50,17 +60,31 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				objectDepth++
 			} else if raw == "}" {
 				objectDepth--
+				inMaintGeo = inMaintGeo && objectDepth > 0
+			} else if inMaintGeo {
+				if fields := strings.Fields(strings.TrimSuffix(raw, ";")); len(fields) == 2 && fields[0] != "default" {
+					maintenance().BypassFrom = append(maintenance().BypassFrom, fields[0])
+				}
 			}
 			return
 		}
 		if depth == 0 {
-			name, _ := cutDirective(raw)
+			name, value := cutDirective(raw)
 			if httpObjects[name] {
 				if strings.HasSuffix(raw, "{") {
 					objectDepth = 1
+					if name == "geo" && maintGeoRe.MatchString(value) {
+						inMaintGeo = true
+						maintenance()
+					}
 				}
 				return
 			}
+		}
+		if maintIfRe.MatchString(raw) {
+			maintenance().On = true
+			depth++
+			return
 		}
 		if m := locationOpenRe.FindStringSubmatch(raw); m != nil {
 			depth++
@@ -71,6 +95,16 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			// the flag is what makes the switch survive an edit.
 			if location == exploitDotLocation {
 				spec.BlockExploits = true
+			}
+			// A page's location is the renderer's, and says the page is on.
+			if page, ok := pageFromURI(location); ok {
+				if page == "maintenance" {
+					maintenance()
+				} else if code, err := strconv.Atoi(page); err == nil {
+					spec.ErrorPages = append(spec.ErrorPages, code)
+				}
+				current = nil
+				return
 			}
 			// The ACME challenge location belongs to the redirect block this
 			// renderer writes for a forced-HTTPS site. Reading it back as one
@@ -97,7 +131,18 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 
 		directive, value := cutDirective(raw)
+		if _, ok := pageFromURI(location); ok {
+			switch {
+			case directive == "alias":
+				spec.PagesDir = filepath.Dir(value)
+			case directive == "add_header" && strings.HasPrefix(value, "Retry-After "):
+				maintenance().RetryAfter = parseSeconds(strings.Fields(value)[1])
+			}
+			return
+		}
 		switch directive {
+		case "proxy_intercept_errors":
+			spec.InterceptErrors = value == "on"
 		case "server_name":
 			for _, d := range strings.Fields(value) {
 				if d == "_" || seenDomains[d] {
@@ -345,6 +390,21 @@ func accessLogFormat(value string) string {
 		return "timed"
 	}
 	return "combined"
+}
+
+var (
+	maintGeoRe = regexp.MustCompile(`^\$jd_\w+_maint_ip\s*\{$`)
+	maintIfRe  = regexp.MustCompile(`^if\s*\(\$jd_\w+_maint\)\s*\{$`)
+	pageURIRe  = regexp.MustCompile(`^/__jd/(maintenance|\d{3})\.html$`)
+)
+
+// pageFromURI is the page a location serves, when it is one of the site's.
+func pageFromURI(location string) (string, bool) {
+	m := pageURIRe.FindStringSubmatch(location)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
 }
 
 var locationOpenRe = regexp.MustCompile(`^location\s+(?:[~^=*]+\s+)?(\S+)\s*\{`)

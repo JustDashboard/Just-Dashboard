@@ -22,8 +22,12 @@ import type {
   Container,
   DomainCheck,
   DroppedLine,
+  ErrorPageCode,
+  Exposure,
   Listener,
   SiteLocation,
+  SiteMaintenance,
+  SitePageName,
   SitePreview,
   SiteRead,
   SiteResult,
@@ -90,6 +94,7 @@ import {
   type UpstreamOption,
 } from "@/components/proxy/upstream-options"
 import { UpstreamPicker } from "@/components/proxy/upstream-picker"
+import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
 
 /**
  * Putting a domain in front of a port, without writing nginx.
@@ -1196,6 +1201,8 @@ function SiteFormBody({
             </Field>
           </FormSection>
 
+          <PagesSection spec={spec} set={set} site={editing} />
+
           {spec.kind === "proxy" && (
             <FormSection
               title="Paths that go somewhere else"
@@ -1603,4 +1610,156 @@ function IdleNote({
 }) {
   const idle = nothingListening(upstream, listeners, containers)
   return idle ? <FormNote tone="warning">{idle}</FormNote> : null
+}
+
+const ERROR_CODES: ErrorPageCode[] = [404, 502, 503, 504]
+
+const ERROR_HINT: Record<ErrorPageCode, string> = {
+  404: "A path with nothing behind it.",
+  502: "The application is down or starting. The page shipped for it retries every 5 seconds.",
+  503: "The application says it cannot take requests.",
+  504: "The application took longer than the timeout to answer.",
+}
+
+/**
+ * The maintenance switch and the error pages. The pages themselves are files
+ * beside the site's configuration, edited once the site exists; until then a
+ * save gives it the ones the dashboard ships.
+ */
+function PagesSection({
+  spec,
+  set,
+  site,
+}: {
+  spec: SiteSpec
+  set: <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => void
+  /** The saved site's name, when there is one to hold page files. */
+  site: string | null
+}) {
+  const [editingPage, setEditingPage] = useState<SitePageName | null>(null)
+  const [page, setPage] = useState<SitePageName>("maintenance")
+  const [finding, setFinding] = useState(false)
+  const maintenance = spec.maintenance
+  const codes = spec.errorPages ?? []
+  const setMaintenance = (patch: Partial<SiteMaintenance>) =>
+    set("maintenance", { on: false, retryAfter: 300, bypassFrom: [], ...maintenance, ...patch })
+  const addMyAddress = async () => {
+    setFinding(true)
+    try {
+      const { client } = await get<Exposure>("/exposure")
+      if (!client) {
+        notify.error("The dashboard could not tell which address you come from")
+        return
+      }
+      const bypass = maintenance?.bypassFrom ?? []
+      if (!bypass.includes(client)) setMaintenance({ bypassFrom: [...bypass, client] })
+    } catch (err) {
+      notify.error("Could not read your address", err)
+    } finally {
+      setFinding(false)
+    }
+  }
+  const pages: SitePageName[] = [
+    ...(maintenance ? (["maintenance"] as const) : []),
+    ...codes.map((code) => String(code) as SitePageName),
+  ]
+  const edit = (name: SitePageName) => {
+    setPage(name)
+    setEditingPage(name)
+  }
+
+  return (
+    <FormSection title="Maintenance & error pages">
+      <OptionList>
+        <OptionRow
+          title="Maintenance"
+          hint="Answers every visitor with the maintenance page and a 503, except the addresses below. Certificate renewals keep working."
+          tone={maintenance?.on ? "warning" : "default"}
+          checked={maintenance?.on ?? false}
+          onCheckedChange={(on) => setMaintenance({ on })}
+        />
+      </OptionList>
+      {maintenance && (
+        <>
+          <Field
+            label="Retry after"
+            htmlFor="site-retry-after"
+            hint="Seconds clients and crawlers are told to wait. 0 sends no Retry-After."
+          >
+            <Input
+              id="site-retry-after"
+              value={String(maintenance.retryAfter ?? 0)}
+              inputMode="numeric"
+              onChange={(e) => setMaintenance({ retryAfter: Number(e.target.value) || 0 })}
+              className="font-mono text-xs"
+            />
+          </Field>
+          <ListField
+            id="site-bypass"
+            label="Let these addresses past"
+            placeholder="203.0.113.7"
+            values={maintenance.bypassFrom}
+            onChange={(bypassFrom) => setMaintenance({ bypassFrom })}
+            hint="They reach the site as usual while maintenance is on."
+          />
+          <div>
+            <Button size="sm" variant="outline" onClick={addMyAddress} pending={finding}>
+              Add my address
+            </Button>
+            <FormNote className="mt-1.5">
+              The address this browser reaches the dashboard from, which is the one the site sees
+              only when both are reached the same way.
+            </FormNote>
+          </div>
+        </>
+      )}
+      <OptionList>
+        {ERROR_CODES.map((code) => (
+          <OptionRow
+            key={code}
+            title={`Own ${PAGE_LABEL[String(code) as SitePageName]} page`}
+            hint={ERROR_HINT[code]}
+            checked={codes.includes(code)}
+            onCheckedChange={(on) =>
+              set(
+                "errorPages",
+                ERROR_CODES.filter((c) => (c === code ? on : codes.includes(c))),
+              )
+            }
+          />
+        ))}
+        {spec.kind === "proxy" && codes.length > 0 && (
+          <OptionRow
+            title="Replace the application's own error pages"
+            hint="Without it only the errors nginx produces itself get these pages; with it, the application's responses with those codes do too."
+            checked={spec.interceptErrors ?? false}
+            onCheckedChange={(v) => set("interceptErrors", v)}
+          />
+        )}
+      </OptionList>
+      {pages.length > 0 &&
+        (site ? (
+          <div className="flex flex-wrap gap-2">
+            {pages.map((name) => (
+              <Button key={name} size="sm" variant="outline" onClick={() => edit(name)}>
+                Edit {PAGE_LABEL[name]}
+              </Button>
+            ))}
+          </div>
+        ) : (
+          <FormNote>
+            A save gives the site the pages the dashboard ships. Edit them here once it is saved.
+          </FormNote>
+        ))}
+      {site && (
+        <PageEditor
+          key={`${site}:${page}`}
+          open={editingPage !== null}
+          onOpenChange={(open) => !open && setEditingPage(null)}
+          site={site}
+          page={page}
+        />
+      )}
+    </FormSection>
+  )
 }

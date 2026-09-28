@@ -10,6 +10,7 @@ import { ApiError, del, errorMessage, get, post } from "@/lib/api"
 import type {
   ProxyPending,
   SiteDeleteResult,
+  SiteResult,
   SystemdUnit,
   VHost,
   VHostLinkResult,
@@ -546,6 +547,46 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   })
   const unlink = (vhost: VHost) =>
     confirm({ ...linkRemoval(vhost), action: () => removeLink(vhost) })
+  // A save of the site as the form reads it with the switch changed, which
+  // the server refuses for a file the form would not write back whole.
+  const maintenance = (vhost: VHost, on: boolean) => {
+    const apply = async (c?: string) => {
+      setBusy(vhost.name, on ? "Starting maintenance" : "Ending maintenance")
+      try {
+        const res = await post<SiteResult>(
+          `/proxy/sites/${encodeURIComponent(vhost.name)}/maintenance`,
+          { on },
+          { confirm: c },
+        )
+        if (res.reloadError) {
+          notify.warning(`${vhost.name} saved, but nginx did not reload`, {
+            description: res.reloadError,
+          })
+        } else if (!on) {
+          notify.success(`${vhost.name} is out of maintenance`)
+        }
+        refresh()
+      } finally {
+        setBusy(vhost.name, null)
+      }
+    }
+    if (on) {
+      confirm({
+        title: "Start maintenance",
+        confirmLabel: "Start and reload",
+        description: (
+          <p>
+            Visitors to <b>{vhost.name}</b> get its maintenance page with a 503 as soon as nginx
+            reloads. Addresses let past it in the site form, and certificate renewals, still reach
+            the site. Edit the page and those addresses in the form.
+          </p>
+        ),
+        action: apply,
+      })
+      return
+    }
+    apply().catch((err) => notify.error("Could not end maintenance", err))
+  }
 
   const remove = (vhost: VHost) =>
     confirm({
@@ -607,6 +648,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     onServed: (v: VHost) => setEditing({ vhost: v, served: true }),
     onDuplicate: (v: VHost) => openForm(null, v.name),
     onToggle: toggle,
+    onMaintenance: maintenance,
     onDelete: remove,
     onUnlink: unlink,
     onOverride: override,
@@ -932,6 +974,7 @@ type CardProps = {
   onServed: (v: VHost) => void
   onDuplicate: (v: VHost) => void
   onToggle: (v: VHost, enabled: boolean) => void
+  onMaintenance: (v: VHost, on: boolean) => void
   onDelete: (v: VHost) => void
   onUnlink: (v: VHost) => void
   onOverride: (v: VHost) => void

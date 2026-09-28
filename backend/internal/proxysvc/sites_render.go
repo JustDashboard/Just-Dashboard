@@ -68,6 +68,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		l.blank()
 	}
 	renderServerOptions(l, spec)
+	renderErrorRouting(l, spec)
 	renderAccess(l, spec)
 
 	switch spec.Kind {
@@ -101,6 +102,10 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		renderLocation(l, SiteLocation{Path: "/", Upstream: spec.Upstream, WebSockets: spec.WebSockets}, spec)
 	}
 
+	if spec.usesPages() {
+		l.blank()
+		renderPageLocations(l, spec)
+	}
 	if spec.BlockExploits {
 		l.blank()
 		renderExploitBlocks(l)
@@ -148,8 +153,116 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		l.add("log_format %s %s;", spec.logFormatName(), timedLogFormat)
 		wrote = true
 	}
+	if spec.Maintenance != nil {
+		if wrote {
+			l.blank()
+		}
+		renderMaintenanceMaps(l, spec)
+		wrote = true
+	}
 	if wrote {
 		l.blank()
+	}
+}
+
+// renderMaintenanceMaps says which addresses maintenance lets through: 0 for
+// the listed ones, 1 for everyone else.
+func renderMaintenanceMaps(l *lines, spec *SiteSpec) {
+	l.add("# Maintenance: these addresses reach the site as usual while it is on;")
+	l.add("# everyone else gets the maintenance page.")
+	l.add("geo $%s {", spec.maintIPVar())
+	l.add("    default 1;")
+	for _, entry := range spec.Maintenance.BypassFrom {
+		l.add("    %s 0;", entry)
+	}
+	l.add("}")
+}
+
+// pageURI is the internal address a page is served at.
+func pageURI(page string) string { return "/__jd/" + page + ".html" }
+
+// maintenanceExempt are the paths maintenance lets through whoever asks: the
+// ACME challenge, so a certificate still renews while the site is down, and
+// the maintenance page itself.
+const maintenanceExempt = `"^/(\.well-known/acme-challenge/|__jd/maintenance\.html$)"`
+
+// renderErrorRouting sends the codes the site has pages for to them, and
+// answers a request with the maintenance page while maintenance is on.
+//
+// error_page to a path rather than a named location, because nginx turns
+// the request into a GET on the way there, where a named location keeps a
+// POST and the static page answers it 405. The path goes through the
+// server's rewrite phase again, which is why the check is a variable set
+// on every pass rather than a map, whose value nginx keeps for the rest of
+// the request.
+func renderErrorRouting(l *lines, spec *SiteSpec) {
+	on := spec.Maintenance != nil && spec.Maintenance.On
+	if !on && len(spec.ErrorPages) == 0 {
+		return
+	}
+	if on {
+		l.add("    # Maintenance is on. It is checked before anything else the")
+		l.add("    # server does, a redirect included.")
+		l.add("    set $%s $%s;", spec.maintVar(), spec.maintIPVar())
+		l.add("    if ($uri ~ %s) {", maintenanceExempt)
+		l.add("        set $%s 0;", spec.maintVar())
+		l.add("    }")
+		l.add("    if ($%s) {", spec.maintVar())
+		l.add("        return 503;")
+		l.add("    }")
+		l.add("    error_page 503 %s;", pageURI("maintenance"))
+	}
+	// The site's own 503 page waits while maintenance holds the code; its
+	// location stays written, which is what brings it back afterwards.
+	for _, code := range errorPageCodes {
+		if spec.hasErrorPage(code) && !(on && code == 503) {
+			l.add("    error_page %d %s;", code, pageURI(strconv.Itoa(code)))
+		}
+	}
+	l.blank()
+}
+
+// renderPageLocations writes the locations the pages are served from. Each
+// is internal, so a visitor cannot ask for one, and exact, so no other path
+// reaches the folder. The response keeps the status that sent it there.
+func renderPageLocations(l *lines, spec *SiteSpec) {
+	dir := spec.PagesDir
+	if dir == "" {
+		dir = "/etc/nginx/jd-pages/" + spec.Name
+	}
+	page := func(name string, extra func()) {
+		l.add("    location = %s {", pageURI(name))
+		l.add("        internal;")
+		l.add("        alias %s/%s.html;", dir, name)
+		if extra != nil {
+			extra()
+		}
+		if spec.BasicAuthFile != "" {
+			// A maintenance answer comes before the password check, and
+			// asking for a password to show a closed sign helps nobody.
+			l.add("        auth_basic off;")
+		}
+		l.add("    }")
+	}
+	if m := spec.Maintenance; m != nil {
+		page("maintenance", func() {
+			if m.RetryAfter == 0 {
+				return
+			}
+			l.add("        add_header Retry-After %d always;", m.RetryAfter)
+			// An add_header here stops the server's own from applying, so
+			// they are said again rather than lost on this response.
+			inner := &lines{}
+			renderHeaders(inner, spec)
+			for _, line := range inner.out {
+				l.add("    %s", line)
+			}
+		})
+	}
+	for _, code := range errorPageCodes {
+		if spec.hasErrorPage(code) {
+			page(strconv.Itoa(code), nil)
+		}
 	}
 }
 
@@ -324,6 +437,10 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 		l.add("        proxy_connect_timeout %s;", timeout)
 		l.add("        proxy_send_timeout    %s;", timeout)
 		l.add("        proxy_read_timeout    %s;", timeout)
+	}
+	if spec.Kind == "proxy" && spec.InterceptErrors {
+		l.add("        # The application's own error responses get the site's pages too.")
+		l.add("        proxy_intercept_errors on;")
 	}
 	if spec.Kind == "proxy" {
 		l.add("        # Streamed responses arrive as they are produced rather than")

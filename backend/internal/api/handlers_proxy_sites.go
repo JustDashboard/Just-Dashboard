@@ -22,6 +22,9 @@ func (s *Server) mountSiteBuilderRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/{name}/requests", s.handle(s.handleSiteRequests))
 	r.Method(http.MethodGet, "/{name}/requests/stream", s.handle(s.handleSiteRequestStream))
 	r.Method(http.MethodGet, "/{name}/requests/export", s.handle(s.handleSiteRequestExport))
+	// A page is what every visitor to the site may be shown, so reading
+	// one needs no more than reading the site.
+	r.Method(http.MethodGet, "/{name}/pages/{page}", s.handle(s.handleSitePageGet))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// Preview renders and touches nothing, but it lives inside the
@@ -30,8 +33,12 @@ func (s *Server) mountSiteBuilderRoutes(r chi.Router) {
 		// there.
 		r.Method(http.MethodPost, "/preview", s.handle(s.handleSitePreview))
 		r.Method(http.MethodPost, "/", s.handle(s.handleSiteApply))
+		r.Method(http.MethodPut, "/{name}/pages/{page}", s.handle(s.handleSitePagePut))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/{name}", s.handle(s.handleSiteDelete))
+			// Maintenance takes the site away from its visitors, the
+			// same as disabling it, and sits behind the same gate.
+			r.Method(http.MethodPost, "/{name}/maintenance", s.handle(s.handleSiteMaintenance))
 		})
 	})
 }
@@ -114,6 +121,7 @@ func (s *Server) handleSitePreview(w http.ResponseWriter, r *http.Request) error
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	s.modules.proxy.SetPagesDir(&req.Spec)
 	content, err := proxysvc.RenderNginx(&req.Spec)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
@@ -213,5 +221,78 @@ func (s *Server) handleSiteDelete(w http.ResponseWriter, r *http.Request) error 
 		out["reloadError"] = reloadErr.Error()
 	}
 	httpx.JSON(w, http.StatusOK, out)
+	return nil
+}
+
+// handleSiteMaintenance turns a site's maintenance page on or off: the site
+// saved as the form reads it with the switch changed, tested and reloaded.
+func (s *Server) handleSiteMaintenance(w http.ResponseWriter, r *http.Request) error {
+	name := chi.URLParam(r, "name")
+	var req proxysvc.MaintenanceChange
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	res, err := s.modules.proxy.SetMaintenance(ctx, name, req)
+	detail := map[string]any{"on": req.On}
+	if req.RetryAfter != nil {
+		detail["retryAfter"] = *req.RetryAfter
+	}
+	if req.BypassFrom != nil {
+		detail["bypassFrom"] = *req.BypassFrom
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, proxysvc.ErrSiteChanged):
+			detail["result"] = "changed_on_disk"
+			httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
+			return httpx.Err(http.StatusConflict, "site_changed", err.Error())
+		case errors.Is(err, proxysvc.ErrNotManaged):
+			detail["result"] = "not_managed"
+			httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
+			return httpx.Err(http.StatusConflict, "not_managed", err.Error())
+		case errors.Is(err, proxysvc.ErrInvalidConf):
+			detail["result"] = "rejected"
+			httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
+			return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
+		}
+		detail["result"] = "failed"
+		httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
+		return mapProxyError(err)
+	}
+	detail["reloaded"] = res.Reloaded
+	if res.ReloadError != "" {
+		detail["reloadError"] = res.ReloadError
+	}
+	httpx.SetAudit(r, "proxy.site.maintenance", name, detail)
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
+
+func (s *Server) handleSitePageGet(w http.ResponseWriter, r *http.Request) error {
+	page, err := s.modules.proxy.ReadSitePage(chi.URLParam(r, "name"), chi.URLParam(r, "page"))
+	if err != nil {
+		return mapProxyError(err)
+	}
+	httpx.JSON(w, http.StatusOK, page)
+	return nil
+}
+
+func (s *Server) handleSitePagePut(w http.ResponseWriter, r *http.Request) error {
+	name, pageName := chi.URLParam(r, "name"), chi.URLParam(r, "page")
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	page, err := s.modules.proxy.WriteSitePage(name, pageName, req.Content)
+	if err != nil {
+		httpx.SetAudit(r, "proxy.site.page", name, map[string]any{"page": pageName, "result": "failed"})
+		return mapProxyError(err)
+	}
+	httpx.SetAudit(r, "proxy.site.page", name, map[string]any{"page": pageName, "bytes": len(req.Content)})
+	httpx.JSON(w, http.StatusOK, page)
 	return nil
 }

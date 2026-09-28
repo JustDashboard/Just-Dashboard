@@ -91,6 +91,8 @@ type VHost struct {
 	Owner    *VHostOwner `json:"owner,omitempty"`
 	Modified time.Time   `json:"modified"`
 	Size     int64       `json:"size"`
+	// Maintenance says the site answers with its maintenance page now.
+	Maintenance bool `json:"maintenance,omitempty"`
 }
 
 var (
@@ -99,6 +101,7 @@ var (
 	proxyPassRe  = regexp.MustCompile(`(?m)^\s*proxy_pass\s+([^;]+);`)
 	certRe       = regexp.MustCompile(`(?m)^\s*ssl_certificate\s+([^;]+);`)
 	includeRe    = regexp.MustCompile(`(?m)^\s*include\s+([^;]+);`)
+	maintOnRe    = regexp.MustCompile(`(?m)^\s*if\s*\(\$jd_\w+_maint\)`)
 )
 
 func (s *Service) ListVHosts(ctx context.Context) ([]VHost, error) {
@@ -419,6 +422,7 @@ func (s *Service) fileVHost(name, path, layout string, logs logDefaults) VHost {
 		v.TLS = true
 		v.CertPath = v.CertPaths[0]
 	}
+	v.Maintenance = maintOnRe.MatchString(text)
 	s.siteDetails(&v, path, text, logs)
 	spec, _ := ParseSiteSpec(name, text)
 	v.AccessLogPath, v.ErrorLogPath = spec.AccessLogPath, spec.ErrorLogPath
