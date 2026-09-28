@@ -16,13 +16,14 @@ import (
 // disk: the live certificate check, the TLS report, DNS, and the watched
 // domains checked on a schedule. The watch list itself is in
 // handlers_domains.go, and the stored reports and the schedule's history in
-// handlers_tls_history.go.
+// handlers_tls_history.go, and the scan of every site in handlers_tls_fleet.go.
 func (s *Server) mountTLSRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/watched", s.handle(s.handleWatchedDomains))
 	r.Method(http.MethodGet, "/watch-schedule", s.handle(s.handleWatchSettings))
 	r.Method(http.MethodGet, "/watched/{id}/history", s.handle(s.handleWatchedHistory))
 	r.Method(http.MethodGet, "/reports", s.handle(s.handleTLSScans))
 	r.Method(http.MethodGet, "/reports/{id}", s.handle(s.handleTLSStoredScan))
+	r.Method(http.MethodGet, "/scans/latest", s.handle(s.handleLatestTLSScans))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// These checks emit traffic to caller-chosen destinations. Keeping
@@ -37,6 +38,7 @@ func (s *Server) mountTLSRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/scan/deep", s.handle(s.handleTLSDeepScan))
 		r.Method(http.MethodPost, "/watched/check", s.handle(s.handleCheckWatchedNow))
 		r.Method(http.MethodPut, "/watch-schedule", s.handle(s.handleSetWatchSettings))
+		r.Method(http.MethodPost, "/scan-all", s.handle(s.handleTLSScanAll))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/reports", s.handle(s.handleClearTLSScans))
 		})

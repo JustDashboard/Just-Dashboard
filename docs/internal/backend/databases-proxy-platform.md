@@ -926,6 +926,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   The comparison list is the `proxy.dns.resolvers` setting (IP literals only, at most six, empty
   restores 1.1.1.1, 8.8.8.8, 9.9.9.9), written by `PUT /certificates/dns/resolvers` (`system.admin`,
   audited as `certificates.dns.resolvers`). A name only: an address is refused with 400.
+- **Scan every site** (`tlsfleet.go`, `handlers_tls_fleet.go`). `proxysvc.FleetTargets` (pure) is each
+  enabled TLS site's names on each port its nginx `listen … ssl` directives name (443 when none does; a
+  Caddyfile address unless it says `http://` or is a bare port) plus every watched endpoint, once per
+  host and port; wildcards, regex names and `_` are left out, and a watched endpoint pinned to an address
+  is scanned by name. `POST /certificates/scan-all` (`system.admin`, audited, 409 while one runs, 400 with
+  nothing to scan) starts job `tls.scan-all`: `ScanFleet` runs the quick report four at a time, a minute
+  each, streams `[n/total] host:port grade — summary`, and stores each finished report in `tls_scans`;
+  cancelling the job starts nothing more and keeps nothing cut short. `GET /certificates/scans/latest`
+  (any account; it only reads) is the fleet with each target's latest stored report (grade, days left,
+  expiry flags, negotiated version, count of critical and warning findings) and the running job, if any.
 - **`dns01.go` — wildcards and CDN-fronted domains**, which between them are most of the certificates
   people want: Let's Encrypt signs `*.example.com` only against DNS-01, and a Cloudflare-proxied domain
   never receives an HTTP challenge. Eight certbot plugins as a closed set (each names credentials and
