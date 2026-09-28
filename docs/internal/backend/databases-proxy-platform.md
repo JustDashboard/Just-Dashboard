@@ -1550,7 +1550,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     its own file and a relative include count, and `upstream` or `other-stream.d` no longer do. It reads
     from disk because it is asked with the lock held (`includeNote`) and while the configuration fails.
   - **Hand-written files** are parsed token by token. `ParseStreamSpec` returns what the form cannot express
-    (a second upstream server, TLS, a port range, an unknown directive) and the save refuses to
+    (an upstream server option other than weight/max_fails/fail_timeout/backup/down, TLS, a port range,
+    an unknown directive) and the save refuses to
     overwrite such a file (`HandwrittenStreamError`, 409 `stream_handwritten`); the raw editor is the way
     in. A bind address, `10m`-style times, a direct `proxy_pass`, `unix:` upstreams and the UDP mode are
     read and written back, so a loopback forward is never saved onto every interface. A hand-written file
@@ -1565,6 +1566,14 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     nginx, http included) and `limit_conn` in the server; `UploadRate`/`DownloadRate` (KiB/s, per
     connection) render `proxy_upload_rate`/`proxy_download_rate`. Only zones declared under the stream's own
     names, each used once, read back; any other zone or cap is hand-written.
+  - **Pools.** `StreamSpec.Servers` (`{address, weight?, maxFails?, failTimeout?, backup?, down?}`) with
+    `Balance` (empty round robin, `least-conn`, `client-ip` = `hash $remote_addr consistent`, `random`) and
+    `NoRetry` (`proxy_next_upstream off;`) render into the stream's upstream block, the method first. nginx
+    defaults are folded (weight 1, max_fails 1, fail_timeout 10s), and a pool of one folds into `Upstream`
+    with its method, retry and options dropped, since nginx counts, weighs and retries nothing for a lone
+    server; `Upstream` is always the first server. Refused: backup under client-ip or random (nginx has none
+    there), every server down, no up server that is not a backup, a duplicate address, more than 32. The
+    upstream Test dials every server not marked down.
   - **Testing a stream** (`stream_dial.go`). `POST /proxy/streams/test {target, port, protocol, mode,
     query?}` (system.admin — it dials an address the caller chose — and audited `proxy.stream.test`) dials
     from the host's network namespace inside 5 s: `mode: upstream` the forward's target, `mode: nginx` the

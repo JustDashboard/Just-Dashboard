@@ -91,6 +91,7 @@ import { VerbBar, VerbMenu, type Verb } from "@/components/verbs"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { StreamSetup } from "@/components/proxy/stream-setup"
 import { AccessRules } from "@/components/proxy/access-rules"
+import { StreamServers } from "@/components/proxy/stream-servers"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
 import { ProxyGrid, RoutePath } from "@/components/proxy/route-path"
@@ -816,12 +817,20 @@ export function StreamsPage() {
 }
 
 /** The kind of forward, in the card's second line. */
+const BALANCE_LABELS: Record<NonNullable<StreamSpec["balance"]>, string> = {
+  "least-conn": "least busy first",
+  "client-ip": "one server per client",
+  random: "picked at random",
+}
+
 function describe(stream: StreamEntry): string {
   if (stream.error) return "could not be read"
   return [
     `${protocolLabel(stream.protocol)} forwarding`,
     stream.udpMode === "request" &&
       (stream.protocol === "both" ? "one reply per UDP session" : "one reply per session"),
+    stream.servers &&
+      `${stream.servers.length} servers${stream.balance ? `, ${BALANCE_LABELS[stream.balance]}` : ""}`,
     stream.proxyProtocol && "PROXY header",
     stream.timeout && `${duration(stream.timeout)} idle timeout`,
     stream.connectTimeout && `${duration(stream.connectTimeout)} connect timeout`,
@@ -955,8 +964,8 @@ function TestResults({ name, results }: { name: string; results: StreamTestResul
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80 space-y-3">
-        {results.map((result) => (
-          <div key={`${result.mode}/${result.protocol}`} className="min-w-0 space-y-1">
+        {results.map((result, i) => (
+          <div key={i} className="min-w-0 space-y-1">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3">
               <span className="text-hint font-medium">{testPlace(result)}</span>
               <Status {...testStatus(result)} />
@@ -1110,7 +1119,7 @@ function StreamForm({
   )
   const accessProblem = accessError(access)
   // A file the form cannot say everything about is not saved over: the
-  // form would drop what it cannot show — a second server, a TLS listener.
+  // form would drop what it cannot show — a max_conns, a TLS listener.
   const locked = Boolean(stream && (stream.error || stream.unsupported.length > 0))
   const readOnly = locked || blocked !== null
   const renaming = stream !== null && spec.name !== stream.name
@@ -1255,6 +1264,7 @@ function StreamForm({
               !spec.name ||
               !spec.listen ||
               !spec.upstream ||
+              spec.servers?.some((server) => !server.address.trim()) ||
               !timed ||
               accessProblem !== ""
             }
@@ -1423,29 +1433,29 @@ function StreamForm({
             </Field>
           )}
 
-          <Field
-            label="Forward to"
-            htmlFor="stream-upstream"
+          <StreamServers
+            pool={spec}
+            onChange={(pool) => edit(pool)}
             hint={
               target?.exposed
                 ? `${target.container} publishes this port on every address, so it is reachable around the stream, where these rules do not apply. Publish it on 127.0.0.1 instead.`
                 : "host:port of the service behind it, or unix:/path for a local socket."
             }
-          >
-            <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-              <Input
-                id="stream-upstream"
-                value={spec.upstream}
-                onChange={(e) => edit({ upstream: e.target.value })}
-                placeholder={`10.0.0.5:${presetPort ?? 5432}`}
-                className="min-w-0 flex-1 font-mono text-xs"
-              />
-              {targets.length > 0 && (
+            placeholder={`10.0.0.5:${presetPort ?? 5432}`}
+            picker={
+              targets.length > 0 && (
                 <Select
                   value={target?.key ?? ""}
                   onValueChange={(k) => {
                     const chosen = targets.find((t) => t.key === k)
-                    if (chosen) edit({ upstream: chosen.upstream })
+                    if (chosen)
+                      edit({
+                        upstream: chosen.upstream,
+                        servers: spec.servers && [
+                          { ...spec.servers[0], address: chosen.upstream },
+                          ...spec.servers.slice(1),
+                        ],
+                      })
                   }}
                 >
                   <SelectTrigger className="w-full sm:w-44" aria-label="Forward to a container">
@@ -1463,9 +1473,9 @@ function StreamForm({
                     ))}
                   </SelectContent>
                 </Select>
-              )}
-            </div>
-          </Field>
+              )
+            }
+          />
 
           <AccessRules access={access} error={accessProblem} onChange={setAccess} />
 
