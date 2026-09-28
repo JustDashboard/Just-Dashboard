@@ -14,6 +14,7 @@ import (
 type proxyExtras struct {
 	// --- lane A: engine & insights ---
 	statusMetrics *proxysvc.StatusSampler
+	servedCerts   *proxysvc.DriftCheck
 
 	// --- lane B: sites list & lifecycle ---
 
@@ -49,6 +50,7 @@ func (s *Server) initProxyExtras() {
 	// --- lane A: engine & insights ---
 	s.modules.proxyExtras.statusMetrics = proxysvc.NewStatusSampler(s.modules.proxy)
 	s.modules.proxy.SetRecorder(&proxyRevisions{db: s.Store.DB})
+	s.modules.proxyExtras.servedCerts = proxysvc.NewDriftCheck(s.modules.proxy)
 
 	// --- lane B: sites list & lifecycle ---
 

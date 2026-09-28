@@ -33,6 +33,7 @@ import { EngineFailure } from "@/components/proxy/engine-failure"
 import { PARTICIPLE } from "@/components/proxy/engine-lifecycle"
 import { useConfigTest } from "@/components/proxy/test-result"
 import { LiveTraffic } from "@/components/proxy/live-metrics"
+import { useServedDrift } from "@/components/proxy/served-drift"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { certificateProduct, siteProduct } from "@/components/proxy/marks"
 import { RoutePath } from "@/components/proxy/route-path"
@@ -40,6 +41,7 @@ import { ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
 import { isParked } from "@/components/proxy/site-order"
 import {
   CONFIG_TEST,
+  SERVED_STALE,
   findingAction,
   foldProxyFindings,
   unreadableSource,
@@ -134,6 +136,7 @@ export default function ProxyOverviewPage() {
     [],
     { enabled: hasNginx },
   )
+  const drift = useServedDrift({ onReloaded: refreshAll })
 
   // certbot being absent is a fact about the host, not a failure to report.
   const certbotGone =
@@ -295,6 +298,7 @@ export default function ProxyOverviewPage() {
         unreadable,
         lastTest: lastTest && { engine: testEngine, record: lastTest },
         defaultSite: defaultSite.data,
+        drift: drift.report,
       }),
     [
       certificates,
@@ -308,6 +312,7 @@ export default function ProxyOverviewPage() {
       lastTest,
       testEngine,
       defaultSite.data,
+      drift.report,
     ],
   )
   const retry: Record<ProxySource, () => void> = {
@@ -597,7 +602,12 @@ export default function ProxyOverviewPage() {
                           ? { label: "Try again", onClick: retry[source] }
                           : f.id === CONFIG_TEST
                             ? { label: "Open test", onClick: configTest.showLast }
-                            : { label: findingAction(f), onClick: () => router.push(f.href) },
+                            : admin && f.id.startsWith(SERVED_STALE)
+                              ? {
+                                  label: drift.reloading ? "Reloading nginx…" : "Reload nginx",
+                                  onClick: drift.reload,
+                                }
+                              : { label: findingAction(f), onClick: () => router.push(f.href) },
                       }
                     })}
                     emptyLabel="Certificates, renewal, sites, streams and exposed ports all within limits"
