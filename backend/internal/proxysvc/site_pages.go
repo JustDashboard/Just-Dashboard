@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
+	"time"
 )
 
 // A site's maintenance and error pages are plain HTML files nginx serves from
@@ -21,7 +23,38 @@ import (
 var defaultPages embed.FS
 
 // SitePages are the pages a site can have, by the name its file carries.
-var SitePages = []string{"maintenance", "404", "502", "503", "504"}
+var SitePages = []string{"maintenance", "404", "502", "503", "504", "security", "robots"}
+
+// pageFileName is the file a page is kept in: security.txt and robots.txt
+// are served as the text they are, every other page as HTML.
+func pageFileName(page string) string {
+	if page == "security" || page == "robots" {
+		return page + ".txt"
+	}
+	return page + ".html"
+}
+
+// sitePageDefault is what a site gets for a page it has no file for.
+// security.txt has to name a contact and an expiry (RFC 9116), so its
+// default is written for the site: a year from now, and an address at its
+// first domain the operator is told to check.
+func sitePageDefault(spec *SiteSpec, page string) (string, error) {
+	switch page {
+	case "security":
+		domain := strings.TrimPrefix(firstOr(spec.Domains, "example.com"), "*.")
+		return "# Served at " + securityTxtPath + " (RFC 9116). Check that the contact\n" +
+			"# reaches whoever handles security reports, and move Expires on before\n" +
+			"# it passes: an expired file tells researchers to ignore it.\n" +
+			"Contact: mailto:security@" + domain + "\n" +
+			"Expires: " + time.Now().UTC().AddDate(1, 0, 0).Truncate(time.Second).Format(time.RFC3339) + "\n", nil
+	case "robots":
+		return "# Served at " + robotsTxtPath + ". Crawlers that honour it read it first;\n" +
+			"# the ones that do not are what blocking by user agent is for.\n" +
+			"User-agent: *\n" +
+			"Disallow:\n", nil
+	}
+	return DefaultPage(page)
+}
 
 // MaxPageSize is the largest page accepted. A page nginx sends on every
 // error is not the place for an inline video.
@@ -84,7 +117,7 @@ func (s *Service) pageFile(site, page string, create bool) (string, error) {
 	if _, err := s.allowedPath(resolved); err != nil {
 		return "", err
 	}
-	full := filepath.Join(resolved, page+".html")
+	full := filepath.Join(resolved, pageFileName(page))
 	if info, err := os.Lstat(full); err == nil && !info.Mode().IsRegular() {
 		return "", fmt.Errorf("%w: %s is not a plain file", ErrUnsafePath, full)
 	}
@@ -107,7 +140,7 @@ func (s *Service) ReadSitePage(name, page string) (*SitePage, error) {
 	if err != nil {
 		return nil, err
 	}
-	fallback, err := DefaultPage(page)
+	fallback, err := sitePageDefault(spec, page)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +200,12 @@ func (s *Service) writeMissingPages(spec *SiteSpec) error {
 	for _, code := range spec.ErrorPages {
 		pages = append(pages, strconv.Itoa(code))
 	}
+	if spec.SecurityTxt {
+		pages = append(pages, "security")
+	}
+	if spec.RobotsTxt {
+		pages = append(pages, "robots")
+	}
 	for _, page := range pages {
 		full, err := s.pageFile(spec.Name, page, true)
 		if err != nil {
@@ -175,7 +214,7 @@ func (s *Service) writeMissingPages(spec *SiteSpec) error {
 		if _, err := os.Lstat(full); err == nil {
 			continue
 		}
-		content, err := DefaultPage(page)
+		content, err := sitePageDefault(spec, page)
 		if err != nil {
 			return err
 		}

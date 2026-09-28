@@ -17,7 +17,12 @@ export const PAGE_LABEL: Record<SitePageName, string> = {
   "502": "502 Bad gateway",
   "503": "503 Unavailable",
   "504": "504 Timed out",
+  security: "security.txt",
+  robots: "robots.txt",
 }
+
+/** The pages served as plain text rather than HTML, which have nothing to preview. */
+const TEXT_PAGES: SitePageName[] = ["security", "robots"]
 
 /**
  * One of a site's pages, edited beside what a visitor would see. Rendered
@@ -46,6 +51,7 @@ export function PageEditor({
   const [content, setContent] = useState("")
   const [saving, setSaving] = useState(false)
   const [reads, setReads] = useState(0)
+  const text = TEXT_PAGES.includes(page)
 
   useEffect(() => {
     if (!open) return
@@ -82,7 +88,11 @@ export function PageEditor({
       onOpenChange={onOpenChange}
       size="xl"
       title={`${PAGE_LABEL[page]} · ${site}`}
-      description="Edit the HTML nginx answers with, beside a preview of it."
+      description={
+        text
+          ? "Edit the text nginx serves at this address."
+          : "Edit the HTML nginx answers with, beside a preview of it."
+      }
       initialFocus="body"
       footer={
         <>
@@ -110,24 +120,35 @@ export function PageEditor({
               ? "The site's own page."
               : "The page the dashboard ships. Saving keeps a copy of it for this site."}
           </p>
-          <div className="grid gap-3 md:grid-cols-2">
+          {text ? (
             <Pane className="h-80 md:h-[28rem]">
               <CodeEditor
                 className="h-full"
-                language="html"
+                language="plaintext"
                 value={content}
                 onChange={setContent}
               />
             </Pane>
-            <Pane className="h-80 md:h-[28rem]">
-              <iframe
-                title={`Preview of ${PAGE_LABEL[page]}`}
-                sandbox=""
-                srcDoc={content}
-                className="size-full bg-background"
-              />
-            </Pane>
-          </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              <Pane className="h-80 md:h-[28rem]">
+                <CodeEditor
+                  className="h-full"
+                  language="html"
+                  value={content}
+                  onChange={setContent}
+                />
+              </Pane>
+              <Pane className="h-80 md:h-[28rem]">
+                <iframe
+                  title={`Preview of ${PAGE_LABEL[page]}`}
+                  sandbox=""
+                  srcDoc={content}
+                  className="size-full bg-background"
+                />
+              </Pane>
+            </div>
+          )}
         </div>
       )}
     </Modal>

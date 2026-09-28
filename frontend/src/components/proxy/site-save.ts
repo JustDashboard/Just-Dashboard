@@ -39,6 +39,11 @@ export function sendableSpec(spec: SiteSpec): SiteSpec {
     hstsOwnNameOnly,
     hstsPreload,
     tlsProfile,
+    satisfyAny,
+    clientCert,
+    hotlink,
+    securityTxt,
+    robotsTxt,
     ...rest
   } = spec
   const locations = spec.locations.map(sendableLocation)
@@ -61,6 +66,23 @@ export function sendableSpec(spec: SiteSpec): SiteSpec {
     // A redirect has no files to keep and only a proxy has responses to.
     ...(spec.kind !== "redirect" && staticCache ? { staticCache } : {}),
     ...(spec.kind === "proxy" && proxyCache ? { proxyCache } : {}),
+    ...(satisfyAny && spec.basicAuthFile && spec.allowFrom.length > 0 ? { satisfyAny } : {}),
+    // A client certificate guards only a site that answers nothing over plain HTTP.
+    ...(clientCert && spec.tls && spec.forceHttps
+      ? {
+          clientCert: {
+            ...clientCert,
+            passSubject: spec.kind === "proxy" && clientCert.passSubject,
+          },
+        }
+      : {}),
+    // A list replaces the site's own addresses and password, which the form
+    // stops showing once one is named.
+    ...(spec.accessList
+      ? { allowFrom: [], denyFrom: [], basicAuthFile: undefined, satisfyAny: undefined }
+      : {}),
+    // A redirect answers every path with itself, so it serves no files.
+    ...(spec.kind !== "redirect" ? { hotlink, securityTxt, robotsTxt } : {}),
   }
 }
 

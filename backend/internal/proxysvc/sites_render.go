@@ -99,7 +99,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	}
 	if spec.BlockExploits {
 		l.blank()
-		renderExploitBlocks(l)
+		renderExploitBlocks(l, spec)
 	}
 	if strings.TrimSpace(spec.Custom) != "" {
 		l.blank()
@@ -191,6 +191,13 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		renderCORSMaps(l, spec)
 		wrote = true
 	}
+	if spec.BlockBots != nil || spec.Hotlink != nil {
+		if wrote {
+			l.blank()
+		}
+		renderAccessMaps(l, spec)
+		wrote = true
+	}
 	if wrote {
 		l.blank()
 	}
@@ -268,7 +275,13 @@ func renderPageLocations(l *lines, spec *SiteSpec) {
 		if extra != nil {
 			extra()
 		}
-		if spec.BasicAuthFile != "" {
+		if spec.mayPassWithout() {
+			// Reached only from an error or maintenance answer. Under
+			// satisfy any a visitor let in on a password would otherwise
+			// meet the address list again here and get a 403.
+			l.add("        allow all;")
+		}
+		if spec.BasicAuthFile != "" || spec.AccessList != "" {
 			// A maintenance answer comes before the password check, and
 			// asking for a password to show a closed sign helps nobody.
 			l.add("        auth_basic off;")
@@ -295,6 +308,7 @@ func renderPageLocations(l *lines, spec *SiteSpec) {
 			page(strconv.Itoa(code), nil)
 		}
 	}
+	renderWellKnown(l, spec, dir)
 }
 
 // renderACMEChallenge serves the dashboard's webroot on a site that answers
@@ -375,6 +389,7 @@ func renderTLS(l *lines, spec *SiteSpec) {
 	l.add("    ssl_session_cache shared:SSL:10m;")
 	l.add("    ssl_session_timeout 1d;")
 	l.add("    ssl_session_tickets off;")
+	renderClientCert(l, spec)
 }
 
 // writesHeaders says whether the server sets any response header, each of
@@ -427,7 +442,20 @@ func renderServerOptions(l *lines, spec *SiteSpec) {
 }
 
 func renderAccess(l *lines, spec *SiteSpec) {
+	renderRequestChecks(l, spec)
 	wrote := false
+	if spec.AccessList != "" {
+		l.add("    # A shared access list, edited on the Sites page for every site")
+		l.add("    # that takes it in.")
+		l.add("    include %s;", spec.accessListPath())
+		wrote = true
+	}
+	if spec.SatisfyAny {
+		l.add("    # An allowed address gets in without the password, and anyone")
+		l.add("    # else with it.")
+		l.add("    satisfy any;")
+		wrote = true
+	}
 	if spec.BasicAuthFile != "" {
 		realm := spec.BasicAuthRealm
 		if realm == "" {
@@ -559,6 +587,7 @@ func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
 		l.add("        proxy_set_header Connection $%s;", spec.connectionVar())
 	}
 	renderRequestHeaders(l, spec)
+	renderClientCertHeaders(l, spec)
 	if loc.BodyLimit != "" {
 		l.add("        client_max_body_size %s;", loc.BodyLimit)
 	}
@@ -675,14 +704,17 @@ func splitUpstream(upstream string) (address, uri string) {
 	return upstream, ""
 }
 
-func renderExploitBlocks(l *lines) {
+func renderExploitBlocks(l *lines, spec *SiteSpec) {
 	l.add("    # The shapes scanners ask for constantly. Refusing them costs nothing")
 	l.add("    # and keeps the log readable; it is not a substitute for the")
 	l.add("    # application being sound.")
-	l.add("    location ~ %s {", exploitDotLocation)
-	l.add("        deny all;")
-	l.add("    }")
-	l.add("    location ~* %s {", exploitExtLocation)
-	l.add("        deny all;")
-	l.add("    }")
+	for _, loc := range []string{"~ " + exploitDotLocation, "~* " + exploitExtLocation} {
+		l.add("    location %s {", loc)
+		if spec.mayPassWithout() {
+			// Under satisfy any the site's password would open these.
+			l.add("        satisfy all;")
+		}
+		l.add("        deny all;")
+		l.add("    }")
+	}
 }

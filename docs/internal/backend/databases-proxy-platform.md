@@ -595,7 +595,7 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   preview say what is wrong with either. `tests/browser/proxy-site-builder.spec.ts` checks each state
   against mocks from `tests/browser/fixtures/proxy/siteform.ts`.
 
-  **Maintenance and error pages** (`site_pages.go`, form section "Maintenance & error pages",
+  **Maintenance and error pages** (`site_pages.go`, form section "Pages & files",
   `page-editor.tsx`). `SiteSpec.Maintenance{On, RetryAfter, BypassFrom}`, `ErrorPages` (404, 502, 503,
   504) and `InterceptErrors` (proxy sites: `proxy_intercept_errors on`, so the application's own
   responses with those codes get the pages too). Pages are files at `<nginxDir>/jd-pages/<site>/<page>.html`
@@ -688,6 +688,27 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   $jd_<id>_preflight`, and a server-level `if ($jd_<id>_preflight) { return 204; }` — only real preflights
   are answered, before auth and limits; other OPTIONS reach the application. A proxy site hides the
   application's own `Access-Control-Allow-*` headers so browsers never see two.
+
+  **Access options** (`sites_access.go`, form "Who may reach it", "Crawlers & hotlinking", "Pages &
+  files"). `BasicAuthRealm` is now in the form. `SatisfyAny` writes `satisfy any;` and needs both an
+  allow list and a password file; it is inherited by every location, so the exploit blocks then say
+  `satisfy all;` (a password must not open them) and the internal page locations say `allow all;`.
+  `AccessList` writes `include <nginxDir>/jd-access/<name>.conf;` (the access lists feature's
+  contract; `SetAccessListDir` sets the folder, never a request) and is refused beside the site's own
+  allow/deny/password/satisfy, since nginx refuses a second `auth_basic` and merges allow lists. A
+  missing list fails `nginx -t`. `ClientCert{CAPath, Mode, PassSubject}` writes
+  `ssl_client_certificate` + `ssl_verify_client on|optional` and is refused unless TLS with HTTP
+  redirected (port 80 would serve without a certificate); `optional` needs `PassSubject`, which sets
+  `X-Client-Verify`/`X-Client-Subject` in each forwarding location (proxy only; both names reserved from
+  custom request headers). `BlockBots{AI, Scanners, Custom}` renders an http-level
+  `map $http_user_agent $jd_<id>_bot` of `"~*<name>"` entries (custom names: letters, digits, space
+  `. _ / -`, dots escaped) and a server-level `if` returning 403; presets are read back when every
+  member is present. `Hotlink{Allow}` (not redirects) renders `map $uri $jd_<id>_hotlink_type` for
+  media extensions and `valid_referers none blocked server_names …` with a `set`/`if` returning 403
+  only for media with a foreign Referer. `SecurityTxt`/`RobotsTxt` (not redirects) serve
+  `jd-pages/<site>/security.txt` and `robots.txt` at `= /.well-known/security.txt` and `= /robots.txt`
+  (`default_type text/plain`), edited as pages `security` and `robots`; the security.txt default names
+  `security@<first domain>` and expires in a year, and the form warns within 30 days of `Expires`.
 
   **HSTS and TLS versions** (`sites_tls.go`, form "Encryption"). `HSTSMaxAge` (0 = 15552000, else
   300..63072000), `HSTSOwnNameOnly` (drops `includeSubDomains`) and `HSTSPreload` (refused below a year
