@@ -44,6 +44,12 @@ func (s *Server) mountEngineRoutes(r chi.Router) {
 		// What nginx loads, as `nginx -T` prints it: the host's binary run
 		// on request, gated with the test that runs it.
 		r.Method(http.MethodGet, "/effective", s.handle(s.handleProxyEffective))
+		// Server-wide directives and the linter read the same dump, so they
+		// carry its gate; writing a setting is the config editor's write.
+		r.Method(http.MethodGet, "/settings", s.handle(s.handleProxySettings))
+		r.Method(http.MethodPost, "/settings/preview", s.handle(s.handleProxySettingsPreview))
+		r.Method(http.MethodPut, "/settings", s.handle(s.handleProxySettingsWrite))
+		r.Method(http.MethodGet, "/lint", s.handle(s.handleProxyLint))
 		r.Method(http.MethodPost, "/reload", s.handle(s.handleProxyReload))
 		// Every file the dashboard changed, as each change left it, and a
 		// restore of any of them through the same tested write.
