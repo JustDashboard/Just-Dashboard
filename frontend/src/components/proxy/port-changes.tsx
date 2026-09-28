@@ -20,6 +20,7 @@ import { Segments } from "@/components/deploy/settings/segments"
 import { Button } from "@/components/ui/button"
 import {
   dangerousService,
+  ownerTitle,
   reachGroup,
   reachVerdict,
   reachWords,
@@ -29,7 +30,6 @@ import {
   matchesQuery,
   parseQuery,
   parseReachFilter,
-  processName,
   type ReachFilter,
 } from "@/components/proxy/ports-list"
 import {
@@ -338,7 +338,7 @@ function ChangeRow({ change, intervalSeconds }: { change: PortChange; intervalSe
   const pids = socketPids(socket)
   const held = heldFor(change)
   const owner = [
-    processName(socket),
+    ownerTitle(socket),
     socket.user,
     pids.length > 0 ? `${pids.length > 1 ? "PIDs" : "PID"} ${pids.join(", ")}` : undefined,
     held,
@@ -382,7 +382,7 @@ function ChangeRow({ change, intervalSeconds }: { change: PortChange; intervalSe
         </p>
         {previous && (
           <p className="mt-0.5 text-hint text-muted-foreground">
-            Held before by {processName(previous)}
+            Held before by {ownerTitle(previous)}
             {previous.user && ` · ${previous.user}`}
             {previous.pid > 0 && ` · PID ${previous.pid}`}
           </p>
