@@ -1139,8 +1139,10 @@ its details — all names, dates, the full path and links to the sites using it 
 edge; its issuer, expiry and lifetime meter remain on the card. An unreadable certificate carries a
 short verdict on the card and its complete error in the detail sheet; unavailable dates and signing
 status stay unknown, and it draws no invented lifetime.
-A watched domain opens a live report and preserves its nonstandard port. Password files and
-watched-domain setup use the deployment settings' rail sections. Certificate renewal lineages and
+A watched domain opens a live report and preserves its nonstandard port. Password files, access
+lists and watched-domain setup use the deployment settings' rail sections; an access list is a row
+you read (its addresses as mono tags, its sites as links, its include line with Copy) with Edit
+inline and Delete in its menu. Certificate renewal lineages and
 DNS providers remain readings with their own actions, laid out to fit the management column. The TLS
 report keeps findings, protocol checks and HTTP readings beside the live certificate and its
 vertical chain; long header values wrap instead of hiding the verdict. Listening sockets stay a

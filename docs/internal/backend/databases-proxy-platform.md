@@ -489,6 +489,47 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   include it. nginx.conf itself is never edited from here: everything else on the host depends on it.
 - **`htpasswd.go`** does bcrypt in process — `htpasswd` lives in apache2-utils, is not installed on a host
   running nginx, and would put the password in a world-readable argv.
+- **`access_lists.go` — one list, every site that includes it.** An office range or a VPN in front of ten
+  sites was ten copies of the same lines and ten edits when it changed. A list is
+  `<JD_NGINX_DIR>/jd-access/<name>.conf` (name `[a-z0-9][a-z0-9_-]{0,62}`), holding only `satisfy`, the
+  `auth_basic` pair and `allow`/`deny` — legal in http, server and location context — and a site takes it
+  in with `include <path>;` wherever it wants the restriction. `ValidateAccessList` writes every address
+  in `netip`'s canonical spelling, refuses `all` (a non-empty allow list is always closed with `deny all`,
+  denials written first, as the site form does), a range with bits past its length (nginx would take
+  `10.0.0.5/8` as `10.0.0.0/8` with a warning), a repeat (`10.0.0.1` and `10.0.0.1/32` are one), a zone,
+  more than 512 entries a side, a prompt with quotes, `$` (nginx expands variables there), control
+  characters or the word `off` (which turns the password off), and `satisfy any` without both an allow
+  list and a password file (with no allow list every address passes and the password would be moot).
+  `satisfy` is written only when a list has both addresses and a password, so a list adds no directive a
+  site might already set. The password file is a `jd-auth` file by name and must exist when saved. Read
+  back, a file with anything else — another directive, a block, a password file outside `jd-auth`, rules
+  the form would reorder (compared directive by directive with its own rendering) — carries
+  `HandWritten` with why, and a named password file that has gone is `AuthFileMissing`. `UsedBy` is every
+  site in the listing (`nginxVHosts`, enabled or not) whose file includes the list at any depth, directly
+  or through a file it includes (one level, as the listing follows a snippet), by absolute or relative
+  path, `./`/`../` or glob. `SaveAccessList` writes, runs `nginx -t` with the list in place — so it is
+  tested with every site that includes it — and on a refusal puts the previous bytes back (or removes a
+  new list) and returns a `*RefusedError` whose lead says whose error it is: "nginx refuses <name> where
+  a site includes it" (the error is in the list's own file: a site that already sets `auth_basic`, an
+  include where the directives are not allowed), "nginx refuses the configuration with this change to
+  <name>" (in a site's file), or "nginx already refuses the configuration without this change"; a passing
+  save is recorded and reloads nginx inside the same hold of the service lock. `DeleteAccessList` is
+  refused while any site includes the list (`AccessListInUseError`, naming them and which are disabled —
+  a disabled site would fail its next enable), removes it, tests, and puts it back if nginx still reads it
+  from somewhere the listing does not follow (nginx.conf, a snippet of a snippet); it keeps
+  `<name>.conf.bak`, which the listing and nginx's `*.conf` skip, and reloads nothing, since nothing nginx
+  loaded changed. Routes (`api/handlers_proxy_access_lists.go`, `mountAccessListRoutes`, mounted from
+  `mountVHostRoutes` at `/proxy/access-lists`, all `system.admin` like the password files they name):
+  `GET /` → `{dir, clientAddress, lists}`, where `clientAddress` is `httpx.ClientIP` for the page to check
+  each list against; `PUT /{name}` with the spec and `overwrite` (false for a new list, 409 `exists` if
+  one has the name) → `{list, validation, reloaded, reloadError?, reload?}`, 422 `invalid_config` with the
+  lead and nginx's first error as the message and the test as `raw`, 400 for a spec it refuses; `DELETE
+  /{name}` (destructive, ordinary confirmation) → 204, 409 `in_use`, 404. Audited as
+  `proxy.accesslist.save` (entry counts, password file, satisfy, created, the sites it reached, reloaded)
+  and `proxy.accesslist.delete`, refusals included. `TestLiveAccessListDecidesWhoGetsIn` drives a running
+  nginx through each save: an allowed address, a denied one, a password, an IPv4 client against an
+  IPv6-only list — and that under `satisfy any` a correct password also opens a location the site closes
+  with `deny all`, which the form says.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real
   story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago.
   Issuance defaults to `--staging` in the UI (the real limit is five failures an hour). `dns.go` answers
@@ -497,7 +538,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
 - **The proxy routes are mounted per area**, each from its own file beside its handlers, and composed in
   `mountProxyRoutes` (`api/handlers_proxy.go`): `mountEngineRoutes` (status, the raw config editor,
   validate, test, reload; `handlers_proxy_engine.go`), `mountVHostRoutes` (the listing, the enable
-  switch and the removal of a stray link; `handlers_proxy_vhosts.go`) and `mountProxyInsightRoutes` (`handlers_proxy_insights.go`) inside
+  switch and the removal of a stray link; `handlers_proxy_vhosts.go`, which also mounts
+  `mountAccessListRoutes` at `/proxy/access-lists`) and `mountProxyInsightRoutes` (`handlers_proxy_insights.go`) inside
   `/proxy`; `mountSiteBuilderRoutes` (`handlers_proxy_sites.go`) and `mountSiteOpsRoutes`
   (`handlers_proxy_siteops.go`) inside `/proxy/sites`; `mountStreamRoutes` (`handlers_proxy_streams.go`),
   `mountAuthFileRoutes` (`handlers_proxy_auth.go`) and `mountProxyToolRoutes` (`handlers_tls.go`, where
