@@ -25,13 +25,16 @@ export function DiagnosticList({
   canOpen,
   returnTo,
   onOpen,
+  openLabel = (line) => (line ? `Open at line ${line}` : "Open file"),
 }: {
   diagnostics: ProxyDiagnostic[]
-  /** Whether the editor may open this file; a file outside the proxy's directories is only named. */
-  canOpen: (file: string | undefined) => boolean
+  /** Whether the editor may open this place; a file outside the proxy's directories is only named. */
+  canOpen: (file: string | undefined, line?: number) => boolean
   /** The place whose file was just open, whose button takes the keyboard back. */
   returnTo?: ProxyPlace
   onOpen: (place: ProxyPlace) => void
+  /** What a place's button says: "Open at line 3", or "Go to line 3" inside the file's own editor. */
+  openLabel?: (line: number | undefined) => string
 }) {
   const returned = useRef<HTMLButtonElement>(null)
   // A child's effect runs before its dialog's, and the dialog's focus scope
@@ -59,14 +62,14 @@ export function DiagnosticList({
                 </p>
               )}
             </div>
-            {canOpen(d.file) && (
+            {canOpen(d.file, d.line) && (
               <Button
                 ref={d === returnTo ? returned : undefined}
                 size="xs"
                 variant="outline"
                 onClick={() => onOpen(d)}
               >
-                {d.line ? `Open at line ${d.line}` : "Open file"}
+                {openLabel(d.line)}
               </Button>
             )}
           </div>
@@ -79,7 +82,8 @@ export function DiagnosticList({
                 <Claim
                   key={index}
                   claim={claim}
-                  canOpen={canOpen(claim.file)}
+                  canOpen={canOpen(claim.file, claim.line)}
+                  label={openLabel(claim.line)}
                   buttonRef={claim === returnTo ? returned : undefined}
                   onOpen={() => onOpen(claim)}
                 />
@@ -101,11 +105,13 @@ export function DiagnosticList({
 function Claim({
   claim,
   canOpen,
+  label,
   buttonRef,
   onOpen,
 }: {
   claim: ProxyNameClaim
   canOpen: boolean
+  label: string
   buttonRef?: React.Ref<HTMLButtonElement>
   onOpen: () => void
 }) {
@@ -133,10 +139,10 @@ function Claim({
           ref={buttonRef}
           size="xs"
           variant="outline"
-          aria-label={`Open at line ${claim.line} of ${name}`}
+          aria-label={`${label} of ${name}`}
           onClick={onOpen}
         >
-          Open at line {claim.line}
+          {label}
         </Button>
       )}
     </li>

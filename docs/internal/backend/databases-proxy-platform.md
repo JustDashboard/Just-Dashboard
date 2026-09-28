@@ -493,6 +493,20 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   restart place against the configuration as it is now, within three seconds (the dump waits for the
   service lock, which the start's test has released by then); the record itself is kept as nginx
   wrote it.
+- **The Configuration page reads the nginx directory as files.** `GET /proxy/files` (every
+  signed-in account, as `GET /proxy/config`) is `ConfigFiles` (`config_files.go`): every file three
+  folders deep under the nginx directory with its size, modification time and kind (`main`, `link`,
+  `password`, `file`), editor and package-manager backups left out unless an include reaches them.
+  Whether nginx reads a file is worked out from the disk by following nginx.conf's includes as nginx
+  does (relative to the main file, glob(3) order, inside any block), not from `nginx -T`, which prints
+  nothing for a configuration that fails its test; a file that does not parse stops the walk and
+  `includesKnown` is false with the `problem` placed. A password file is listed as `protected` and
+  never read; a file the dashboard wrote carries its marker and is `managed`. `GET /proxy/effective`
+  (admin, gated with the test because it runs the host's nginx) answers `nginx -T` file by file with
+  `checkedAt`, each link's `target`, and every directive placed with its enclosing blocks
+  (`PlaceDirectives`) for a search by directive; a configuration nginx refuses is a 422 carrying the
+  test (`DumpRefusedError`), and one held behind the service lock past 20 s is a 503 `busy`. A
+  refused `PUT /proxy/config` now carries its test beside the error, as a refused reload's does.
 - **The configuration nginx actually loads.** `EffectiveConfig` (`effective.go`) runs `nginx -T` through
   `hostexec` under the service lock — so it never dumps a candidate `Validate` has staged — splits it into
   `ConfigFile`s byte for byte (`ParseEffective`, which takes a `# configuration file` line as a file only

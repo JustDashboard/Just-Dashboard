@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 import { availability, json, mockProxy, user, vhosts } from "./proxy-fixtures"
-import { longJournal, nginxUnit, passingTest } from "./fixtures/proxy/engine"
+import { configFiles, longJournal, nginxUnit, passingTest } from "./fixtures/proxy/engine"
 
 /**
  * The overview and the engine it drives, for the ways they told an operator
@@ -453,6 +453,9 @@ test("a fix saved while nginx is stopped is saved, and says it was not reloaded"
   // One input event: keys typed one by one are dropped by Monaco under load.
   await page.keyboard.insertText("fixed")
   await expect(lines).toContainText("fixed")
+  await editor.getByRole("button", { name: "Save and reload" }).click()
+  // The diff first, then the same command under it writes the file.
+  await expect(editor.getByRole("button", { name: "Back to editing" })).toBeVisible()
   await editor.getByRole("button", { name: "Save and reload" }).click()
 
   // It was "Not applied" over a file that had been written, with the buffer
@@ -1671,6 +1674,7 @@ test("a file saved from the test's editor is tested again when it closes", async
   await page.keyboard.insertText(" # fixed")
   await expect(lines).toContainText("# fixed")
   await editor.getByRole("button", { name: "Save only" }).click()
+  await editor.getByRole("button", { name: "Save only" }).click()
   await expect(page.getByText("Saved", { exact: true })).toBeVisible()
   await editor.getByRole("button", { name: "Close" }).click()
 
@@ -1714,4 +1718,345 @@ test("the config test and the sites claiming a name fit a phone", async ({ page 
   )
   expect(wide).toBe(false)
   await expect(panel.getByRole("button", { name: "Test again" })).toBeInViewport()
+})
+
+/** The Configuration page's reads: the files the editor opens, by path, each answered with its own name in it. */
+async function watchConfigFiles(page: Page) {
+  const reads: string[] = []
+  await page.route("**/api/v1/proxy/config?**", (route) => {
+    const path = new URL(route.request().url()).searchParams.get("path") ?? ""
+    reads.push(path)
+    return json(route, {
+      content: `# ${path}\nserver {\n    listen 80;\n    server_name app.example.com;\n    location / {\n        proxy_pass http://127.0.0.1:3000;\n    }\n}\n`,
+    })
+  })
+  return reads
+}
+
+/** Clicks into Monaco and waits until it has the keyboard, then types in one input event. */
+async function typeInEditor(page: Page, editor: Locator, text: string) {
+  const lines = editor.locator(".monaco-editor .view-lines")
+  await expect(lines).toContainText("server_name", { timeout: 20_000 })
+  await lines.click()
+  await expect(editor.locator(".monaco-editor.focused")).toBeVisible()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText(text)
+  await expect(lines).toContainText(text.trim())
+}
+
+test("the configuration page lists nginx's files by folder, each saying whether nginx reads it", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const reads = await watchConfigFiles(page)
+  await page.goto("/proxy/config")
+
+  const tile = (label: string) =>
+    page.locator("[data-slot='stat-tile']").filter({ has: page.getByText(label, { exact: true }) })
+  await expect(tile("Files")).toContainText("13")
+  await expect(tile("Files")).toContainText("in 8 folders")
+  // A link and its file are one file read once; the module outside counts.
+  await expect(tile("Read by nginx")).toContainText("7")
+  await expect(tile("Read by nginx")).toContainText("3 not read")
+  await expect(tile("Managed")).toContainText("2")
+  await expect(tile("Managed")).toContainText("7 written by hand")
+  await expect(tile("Last test")).toContainText("none since the dashboard started")
+
+  const enabled = page.getByRole("list", { name: "Files in sites-enabled/" })
+  const link = enabled.locator("[data-slot='choice-row']").filter({ hasText: "app.example.com" })
+  await expect(link).toContainText("→ sites-available/app.example.com")
+  await expect(link).toContainText("read")
+  const available = page.getByRole("list", { name: "Files in sites-available/" })
+  const old = available.locator("[data-slot='choice-row']").filter({ hasText: "old-site" })
+  await expect(old).toContainText("not read")
+  const site = available.locator("[data-slot='choice-row']").filter({ hasText: "app.example.com" })
+  await expect(site).toContainText("via sites-enabled/app.example.com")
+  await expect(site.getByText("managed", { exact: true })).toBeVisible()
+  await expect(
+    page
+      .getByRole("list", { name: "Files in snippets/" })
+      .locator("[data-slot='choice-row']")
+      .filter({ hasText: "ssl-params.conf" }),
+  ).toContainText("included by sites-available/app.example.com:12")
+
+  // A password file is named and never opened; a module outside the
+  // directory is named with where it is.
+  const password = page.getByRole("list", { name: "Files in jd-auth/" })
+  await expect(password).toContainText("the dashboard's password file, hidden")
+  await expect(password.getByRole("button")).toHaveCount(0)
+  const modules = page.getByRole("list", { name: "Files in modules-enabled/" })
+  await expect(modules).toContainText(
+    "→ /usr/share/nginx/modules-available/mod-http-geoip2.conf, outside /etc/nginx",
+  )
+  await expect(modules.getByRole("button")).toHaveCount(0)
+
+  // Filters count what they leave, and a search narrows by path.
+  await page.getByRole("button", { name: /^Not read/ }).click()
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(3)
+  await page.getByRole("button", { name: /^All/ }).click()
+  await page.getByLabel("Search files").fill("snip")
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(2)
+  await page.getByLabel("Search files").fill("")
+
+  // A link opens the file it points at, in the address bar so Back closes it.
+  await enabled.getByRole("button", { name: "Edit sites-enabled/app.example.com" }).click()
+  const editor = page.getByRole("dialog", { name: "app.example.com" })
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("server_name", {
+    timeout: 20_000,
+  })
+  expect(reads).toEqual(["/etc/nginx/sites-available/app.example.com"])
+  await expect(page).toHaveURL(/file=%2Fetc%2Fnginx%2Fsites-available%2Fapp\.example\.com/)
+  await page.goBack()
+  await expect(editor).toHaveCount(0)
+})
+
+test("a reader sees the files read-only, with no test and nothing of what nginx loads", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"] }),
+  )
+  let effectiveAsked = false
+  await page.route("**/api/v1/proxy/effective", (route) => {
+    effectiveAsked = true
+    return route.fallback()
+  })
+  await watchConfigFiles(page)
+  await page.goto("/proxy/config")
+
+  await expect(
+    page.locator("[data-slot='stat-tile']").filter({ hasText: "Last test" }),
+  ).toContainText("administrators only")
+  await expect(page.getByRole("button", { name: "Test config" })).toHaveCount(0)
+  await expect(page.getByRole("navigation", { name: "Configuration views" })).toHaveCount(0)
+  await page.getByRole("button", { name: "View nginx.conf" }).click()
+  const editor = page.getByRole("dialog", { name: "nginx.conf" })
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("server_name", {
+    timeout: 20_000,
+  })
+  for (const name of ["Test config", "Save only", "Save and reload", "Discard"]) {
+    await expect(editor.getByRole("button", { name, exact: true })).toHaveCount(0)
+  }
+  expect(effectiveAsked).toBe(false)
+})
+
+test("what nginx loads is listed in its order and searched by text, pattern and directive", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const reads = await watchConfigFiles(page)
+  await page.goto("/proxy/config")
+  await page
+    .getByRole("navigation", { name: "Configuration views" })
+    .getByRole("button", { name: "What nginx loads" })
+    .click()
+
+  const order = page.getByRole("list", { name: "Files nginx loads" })
+  await expect(order.locator("[data-slot='choice-row']")).toHaveCount(4)
+  await expect(order.locator("[data-slot='choice-row']").nth(2)).toContainText(
+    "sites-available/app.example.com",
+  )
+  await expect(order.locator("[data-slot='choice-row']").nth(2)).toContainText(
+    "8 lines · via sites-enabled/app.example.com",
+  )
+  await expect(page.getByText(/^read (just now|\d+s ago)$/)).toBeVisible()
+
+  const search = page.getByLabel("Search what nginx loads")
+  await search.fill("proxy_pass")
+  const matches = page.getByRole("list", { name: "Matches" })
+  await expect(matches.locator("[data-slot='choice-row']")).toHaveCount(2)
+  await expect(page.getByText("2 matches")).toBeVisible()
+  await expect(matches.locator("[data-slot='choice-row']").first()).toContainText(
+    "sites-available/app.example.com:6 · http › server app.example.com › location /",
+  )
+  await expect(matches.locator("mark").first()).toHaveText("proxy_pass")
+
+  await page.getByRole("radio", { name: "Regex" }).click()
+  await search.fill("listen\\s+4\\d\\d")
+  await expect(matches.locator("[data-slot='choice-row']")).toHaveCount(1)
+  await expect(matches.locator("mark")).toHaveText("listen 443")
+  await search.fill("listen (")
+  await expect(page.getByRole("alert")).toContainText("Not a regular expression")
+
+  await page.getByRole("radio", { name: "Directive" }).click()
+  await search.fill("listen 80")
+  await expect(matches.locator("[data-slot='choice-row']")).toHaveCount(1)
+  await expect(matches).toContainText("listen 80;")
+  await expect(matches).toContainText("sites-available/legacy.example.com:2")
+
+  // A match opens its file at its line, marked.
+  await matches
+    .getByRole("button", { name: "Open sites-available/legacy.example.com at line 2" })
+    .click()
+  const editor = page.getByRole("dialog", { name: "legacy.example.com" })
+  await expect(editor.locator(".monaco-line-mark")).toHaveCount(1, { timeout: 20_000 })
+  expect(reads).toEqual(["/etc/nginx/sites-available/legacy.example.com"])
+})
+
+test("a configuration nginx refuses shows its test in place of what it loads", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const reads = await watchConfigFiles(page)
+  let refuse = true
+  await page.route("**/api/v1/proxy/effective", (route) =>
+    refuse
+      ? route.fulfill({
+          status: 422,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "invalid_config",
+              message: `nginx refuses its configuration, so it has nothing loaded to show.\n${brokenTest.output}`,
+            },
+            validation: { ...brokenTest, command: "nginx -T" },
+          }),
+        })
+      : route.fallback(),
+  )
+  await page.goto("/proxy/config")
+  await page.getByRole("button", { name: "What nginx loads" }).click()
+
+  await expect(page.getByText("nginx refuses its configuration", { exact: true })).toBeVisible()
+  await expect(page.getByText('unknown directive "frobnicate"')).toBeVisible()
+  await page.getByRole("button", { name: "Open at line 3" }).click()
+  await expect(page.getByRole("dialog", { name: "app" })).toBeVisible()
+  expect(reads).toEqual(["/etc/nginx/sites-available/app"])
+  await page.getByRole("dialog", { name: "app" }).getByRole("button", { name: "Close" }).click()
+
+  refuse = false
+  await page.getByRole("button", { name: "Read again" }).click()
+  await expect(page.getByRole("list", { name: "Files nginx loads" })).toBeVisible()
+  await expect(page.getByText("nginx refuses its configuration", { exact: true })).toHaveCount(0)
+})
+
+test("the config editor shows the change before it saves, places a refusal in the file, and asks before it closes over changes", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await watchConfigFiles(page)
+  const file = "/etc/nginx/snippets/ssl-params.conf"
+  const saves: { content: string; reload: boolean }[] = []
+  let refuse = true
+  await page.route("**/api/v1/proxy/config", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    saves.push(route.request().postDataJSON())
+    if (!refuse) return json(route, { validation: passingTest })
+    return route.fulfill({
+      status: 422,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "invalid_config", message: `nginx: [emerg] unknown directive "gzip_oops"` },
+        validation: {
+          valid: false,
+          output: `nginx: [emerg] unknown directive "gzip_oops" in ${file}:9\nnginx: configuration file /etc/nginx/nginx.conf test failed`,
+          command: "nginx -t",
+          diagnostics: [
+            { level: "emerg", message: 'unknown directive "gzip_oops"', file, line: 9 },
+          ],
+          warnings: 0,
+        },
+      }),
+    })
+  })
+  await page.goto(`/proxy/config?file=${encodeURIComponent(file)}`)
+
+  const editor = page.getByRole("dialog", { name: /ssl-params\.conf/ })
+  await typeInEditor(page, editor, "gzip_oops on;")
+  await expect(editor.getByText("unsaved", { exact: true })).toBeVisible()
+
+  // Ctrl+S shows what changes; Back to editing keeps the buffer as it was.
+  await page.keyboard.press("Control+s")
+  await expect(editor.getByRole("button", { name: "Back to editing" })).toBeVisible()
+  await expect(editor.getByText("gzip_oops on;").first()).toBeVisible()
+  await expect(editor.getByText("+1", { exact: true })).toBeVisible()
+  expect(saves).toHaveLength(0)
+  await editor.getByRole("button", { name: "Back to editing" }).click()
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("gzip_oops on;")
+
+  // Save and reload shows the diff again, and the command under it writes.
+  await editor.getByRole("button", { name: "Save and reload" }).click()
+  await editor.getByRole("button", { name: "Save and reload" }).click()
+  await expect(editor.getByText("Not saved: the config test refuses it")).toBeVisible()
+  await expect(editor.getByText('unknown directive "gzip_oops"', { exact: true })).toBeVisible()
+  expect(saves).toHaveLength(1)
+  expect(saves[0]).toMatchObject({ reload: true })
+  await editor.getByRole("button", { name: "Go to line 9" }).click()
+  await expect(editor.locator(".monaco-line-mark")).toHaveCount(1)
+  await expect(editor.getByText("unsaved", { exact: true })).toBeVisible()
+
+  // Closing over changes asks; keeping them keeps the editor.
+  await editor.getByRole("button", { name: "Close", exact: true }).click()
+  await page.getByRole("button", { name: "Keep editing" }).click()
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("gzip_oops on;")
+
+  // A save that passes is said, and leaves nothing unsaved; Ctrl+S twice writes.
+  refuse = false
+  await editor.locator(".monaco-editor .view-lines").click()
+  await expect(editor.locator(".monaco-editor.focused")).toBeVisible()
+  await page.keyboard.press("Control+s")
+  await expect(editor.getByRole("button", { name: "Back to editing" })).toBeVisible()
+  await page.keyboard.press("Control+s")
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible()
+  expect(saves).toHaveLength(2)
+  expect(saves[1]).toMatchObject({ reload: false })
+  expect(saves[1].content).toContain("gzip_oops on;")
+  await expect(editor.getByText("unsaved", { exact: true })).toHaveCount(0)
+  await editor.getByRole("button", { name: "Close", exact: true }).click()
+  await expect(editor).toHaveCount(0)
+  await expect(page).not.toHaveURL(/file=/)
+})
+
+test("a file the directory's includes cannot follow is said, and the files past it are not known", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const reads = await watchConfigFiles(page)
+  await page.route("**/api/v1/proxy/files", (route) =>
+    json(route, {
+      ...configFiles,
+      includesKnown: false,
+      problem: {
+        message: 'unexpected "}"',
+        file: "/etc/nginx/sites-available/legacy.example.com",
+        line: 5,
+      },
+    }),
+  )
+  await page.goto("/proxy/config")
+
+  await expect(page.getByText("Not every include can be followed")).toBeVisible()
+  await expect(page.locator("[data-slot='page']")).toContainText(
+    'sites-available/legacy.example.com:5: unexpected "}".',
+  )
+  await expect(
+    page.locator("[data-slot='stat-tile']").filter({ hasText: "Read by nginx" }),
+  ).toContainText("not every include followed")
+  await expect(
+    page
+      .getByRole("list", { name: "Files in snippets/" })
+      .locator("[data-slot='choice-row']")
+      .filter({ hasText: "unused.conf" }),
+  ).toContainText("not known")
+  await page.getByRole("button", { name: "Open at line 5" }).click()
+  await expect(page.getByRole("dialog", { name: "legacy.example.com" })).toBeVisible()
+  expect(reads).toEqual(["/etc/nginx/sites-available/legacy.example.com"])
+})
+
+test("the configuration page and its editor's diff fit a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await watchConfigFiles(page)
+  await page.goto("/proxy/config")
+  await page.getByRole("button", { name: "Edit sites-available/app.example.com" }).click()
+  const editor = page.getByRole("dialog", { name: /app\.example\.com/ })
+  await typeInEditor(page, editor, "# phone")
+  await editor.getByRole("button", { name: "Save only" }).click()
+  await expect(editor.getByRole("button", { name: "Back to editing" })).toBeInViewport()
+  await expect(editor).toBeInViewport({ ratio: 1 })
+  const wide = await editor.evaluate((element) =>
+    [element, ...element.querySelectorAll(".overflow-y-auto")].some(
+      (node) => node.scrollWidth > node.clientWidth + 1,
+    ),
+  )
+  expect(wide).toBe(false)
 })

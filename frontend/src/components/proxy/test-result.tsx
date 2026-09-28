@@ -39,6 +39,10 @@ export type ConfigTest = {
    * be read.
    */
   last: ProxyTestRecord | undefined
+  /** Whether the kept test has been asked for and answered, so none is not read as none kept. */
+  lastRead: boolean
+  /** Why the kept test could not be read, when it could not. */
+  lastError: Error | undefined
   running: boolean
   /** Runs the test and opens the panel on it. */
   run: () => void
@@ -157,6 +161,8 @@ export function useConfigTest({
   return {
     engine,
     last,
+    lastRead: !lastPoll.loading,
+    lastError: lastPoll.error,
     running,
     run: () => void run(),
     showLast: () => {

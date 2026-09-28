@@ -1,5 +1,5 @@
 import type { Route } from "@playwright/test"
-import { json, type ProxyRoutes } from "./shared"
+import { json, now, type ProxyRoutes } from "./shared"
 
 /** What the backend answers once it parses `nginx -v` rather than storing it. */
 export const availability = {
@@ -84,6 +84,185 @@ export const longJournal = [
   ...failedJournal,
 ]
 
+const entry = (path: string, extra: Record<string, unknown> = {}) => ({
+  path: `/etc/nginx/${path}`,
+  kind: "file",
+  size: 1200,
+  modified: now,
+  included: false,
+  managed: false,
+  protected: false,
+  ...extra,
+})
+
+/**
+ * A Debian nginx directory as GET /proxy/files lists it: two enabled sites
+ * through their links, one disabled, a snippet a site includes and one
+ * nothing does, a stream nginx.conf does not include, a module outside the
+ * directory, and the dashboard's own password file.
+ */
+export const configFiles = {
+  root: "/etc/nginx",
+  main: "/etc/nginx/nginx.conf",
+  includesKnown: true,
+  truncated: false,
+  files: [
+    entry("conf.d/gzip.conf", {
+      included: true,
+      includedBy: { file: "/etc/nginx/nginx.conf", line: 60 },
+    }),
+    entry("jd-auth/shop", { kind: "password", protected: true, managed: true, size: 64 }),
+    entry("mime.types", {
+      included: true,
+      includedBy: { file: "/etc/nginx/nginx.conf", line: 20 },
+      size: 5527,
+    }),
+    entry("modules-enabled/50-mod-http-geoip2.conf", {
+      kind: "link",
+      included: true,
+      includedBy: { file: "/etc/nginx/nginx.conf", line: 4 },
+      target: "/usr/share/nginx/modules-available/mod-http-geoip2.conf",
+      outside: true,
+    }),
+    entry("nginx.conf", { kind: "main", included: true, size: 1547 }),
+    entry("sites-available/app.example.com", {
+      included: true,
+      managed: true,
+      includedBy: {
+        file: "/etc/nginx/nginx.conf",
+        line: 61,
+        via: "/etc/nginx/sites-enabled/app.example.com",
+      },
+    }),
+    entry("sites-available/legacy.example.com", {
+      included: true,
+      includedBy: {
+        file: "/etc/nginx/nginx.conf",
+        line: 61,
+        via: "/etc/nginx/sites-enabled/legacy.example.com",
+      },
+      size: 400,
+    }),
+    entry("sites-available/old-site", { size: 380 }),
+    entry("sites-enabled/app.example.com", {
+      kind: "link",
+      included: true,
+      includedBy: { file: "/etc/nginx/nginx.conf", line: 61 },
+      target: "/etc/nginx/sites-available/app.example.com",
+    }),
+    entry("sites-enabled/legacy.example.com", {
+      kind: "link",
+      included: true,
+      includedBy: { file: "/etc/nginx/nginx.conf", line: 61 },
+      target: "/etc/nginx/sites-available/legacy.example.com",
+    }),
+    entry("snippets/ssl-params.conf", {
+      included: true,
+      includedBy: { file: "/etc/nginx/sites-available/app.example.com", line: 12 },
+    }),
+    entry("snippets/unused.conf", { size: 90 }),
+    entry("stream.d/postgres.conf", { managed: true, size: 240 }),
+  ],
+}
+
+const appSite = [
+  "# Managed by Just Dashboard.",
+  "server {",
+  "    listen 443 ssl;",
+  "    server_name app.example.com;",
+  "    location / {",
+  "        proxy_pass http://127.0.0.1:3000;",
+  "    }",
+  "}",
+  "",
+].join("\n")
+
+/** What GET /proxy/effective answers for that directory: nginx -T, file by file, placed. */
+export const effectiveConfig = {
+  checkedAt: now,
+  files: [
+    {
+      path: "/etc/nginx/nginx.conf",
+      content:
+        "events {}\nhttp {\n    include /etc/nginx/conf.d/*.conf;\n    include /etc/nginx/sites-enabled/*;\n}\n",
+    },
+    { path: "/etc/nginx/conf.d/gzip.conf", content: "gzip on;\ngzip_types text/css;\n" },
+    {
+      path: "/etc/nginx/sites-enabled/app.example.com",
+      target: "/etc/nginx/sites-available/app.example.com",
+      content: appSite,
+    },
+    {
+      path: "/etc/nginx/sites-enabled/legacy.example.com",
+      target: "/etc/nginx/sites-available/legacy.example.com",
+      content:
+        "server {\n    listen 80;\n    server_name legacy.example.com;\n    location / {\n        proxy_pass http://127.0.0.1:8080;\n    }\n}\n",
+    },
+  ],
+  directives: [
+    { name: "events", args: [], file: "/etc/nginx/nginx.conf", line: 1, within: [], opens: true },
+    { name: "http", args: [], file: "/etc/nginx/nginx.conf", line: 2, within: [], opens: true },
+    {
+      name: "gzip",
+      args: ["on"],
+      file: "/etc/nginx/conf.d/gzip.conf",
+      line: 1,
+      within: ["http"],
+      opens: false,
+    },
+    {
+      name: "gzip_types",
+      args: ["text/css"],
+      file: "/etc/nginx/conf.d/gzip.conf",
+      line: 2,
+      within: ["http"],
+      opens: false,
+    },
+    ...site("/etc/nginx/sites-enabled/app.example.com", "app.example.com", "443", "3000", 1),
+    ...site("/etc/nginx/sites-enabled/legacy.example.com", "legacy.example.com", "80", "8080", 0),
+  ],
+}
+
+/** A site's directives as the tree places them, from its server line. */
+function site(file: string, name: string, port: string, upstream: string, offset: number) {
+  const server = `server ${name}`
+  return [
+    { name: "server", args: [], file, line: 1 + offset, within: ["http"], opens: true },
+    {
+      name: "listen",
+      args: port === "443" ? ["443", "ssl"] : [port],
+      file,
+      line: 2 + offset,
+      within: ["http", server],
+      opens: false,
+    },
+    {
+      name: "server_name",
+      args: [name],
+      file,
+      line: 3 + offset,
+      within: ["http", server],
+      opens: false,
+    },
+    {
+      name: "location",
+      args: ["/"],
+      file,
+      line: 4 + offset,
+      within: ["http", server],
+      opens: true,
+    },
+    {
+      name: "proxy_pass",
+      args: [`http://127.0.0.1:${upstream}`],
+      file,
+      line: 5 + offset,
+      within: ["http", server, "location /"],
+      opens: false,
+    },
+  ]
+}
+
 export const routes: ProxyRoutes = {
   "/proxy/status": (route) => json(route, availability),
   "/systemd/nginx.service": (route) => json(route, { unit: nginxUnit, properties: {} }),
@@ -97,6 +276,8 @@ export const routes: ProxyRoutes = {
   "/proxy/engine/stop": engineAction("stop"),
   "/proxy/engine/enable": engineAction("enable"),
   "/proxy/engine/reset-failed": engineAction("reset-failed"),
+  "/proxy/files": (route) => json(route, configFiles),
+  "/proxy/effective": (route) => json(route, effectiveConfig),
 }
 
 export const showcase: ProxyRoutes = {}

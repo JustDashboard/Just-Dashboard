@@ -63,6 +63,7 @@ export function CodeEditor({
   onCursorChange,
   onFormat,
   revealLine,
+  revealAgain,
 }: {
   value: string
   onChange?: (value: string) => void
@@ -94,6 +95,11 @@ export function CodeEditor({
    * never pulls the view back to it.
    */
   revealLine?: number
+  /**
+   * Changed to reveal `revealLine` again and put the keyboard on it: the
+   * reader scrolled away and asked for the line a second time.
+   */
+  revealAgain?: number
 }) {
   // The save handler is read through a ref for the same reason the completion
   // schema is: the command is registered once on mount and would otherwise
@@ -123,6 +129,13 @@ export function CodeEditor({
     const mounted = mountedRef.current
     if (mounted && value) markLine(mounted, revealLine)
   }, [revealLine, value])
+  useEffect(() => {
+    const mounted = mountedRef.current
+    if (!mounted || revealAgain === undefined) return
+    mounted.revealed = undefined
+    markLine(mounted, revealRef.current)
+    mounted.editor.focus()
+  }, [revealAgain])
 
   return (
     <div className={cn("monaco-host min-h-0", className)} style={{ minHeight }}>

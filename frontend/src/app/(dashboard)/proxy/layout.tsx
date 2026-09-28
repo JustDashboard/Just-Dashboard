@@ -6,9 +6,10 @@ import { ProxyProvider, type ProxyStatus } from "@/components/proxy/proxy-contex
 import { reading } from "@/components/proxy/freshness"
 
 /**
- * The proxy is six pages — the sites, the certificates, what a visitor
- * actually gets over TLS, the non-HTTP streams, and every listening port. The
- * rail lists them; this layout exists for the one thing they share.
+ * The proxy is seven pages — the overview, the sites, the certificates, what
+ * a visitor actually gets over TLS, the non-HTTP streams, every listening
+ * port, and nginx's configuration as files. The rail lists them; this layout
+ * exists for the one thing they share.
  *
  * It polls which proxy this host runs, because the site builder needs nginx
  * and both it and the Overview read that. It does not gate the section:

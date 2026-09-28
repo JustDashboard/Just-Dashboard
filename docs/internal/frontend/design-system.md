@@ -1123,7 +1123,7 @@ its initials in the users list's hue, and an attacker's attempts against the mos
 address's as a meter. Connections, logins, devices and routes are readings with verbs, so their
 rows stay rows.
 
-**The proxy section draws routes, engines and authorities.** All six pages stay in the reading
+**The proxy section draws routes, engines and authorities.** All seven pages stay in the reading
 register and begin with four `StatTile` readings, two per row on phones. On the overview the engine
 identity and service commands sit below them, with the routes in the main column and attention and
 expiry in a narrower column. A source the overview could not read is never drawn as an empty or

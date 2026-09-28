@@ -294,3 +294,76 @@ func findDirective(tree []Directive, name string) *Directive {
 	}
 	return nil
 }
+
+// A configuration that fails its test prints nothing for -T. The dump says
+// so as nginx's refusal, with its lines placed the way a config test's are,
+// rather than as a dump that went wrong — and a refusal is never cached, so
+// the file fixed a moment later is read at once.
+func TestLiveEffectiveConfigOfARefusedConfigurationIsItsTest(t *testing.T) {
+	root := liveNginx(t)
+	site := filepath.Join(root, "conf.d", "broken.conf")
+	if err := os.WriteFile(site, []byte("server {\n    listen 127.0.0.1:18198;\n    frobnicate on;\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	_, err := service.EffectiveConfig(context.Background())
+	var refused *DumpRefusedError
+	if !errors.As(err, &refused) || !errors.Is(err, ErrInvalidConf) {
+		t.Fatalf("got %v, want nginx's refusal", err)
+	}
+	res := refused.Validation
+	if res.Valid || res.Command != "nginx -T" || len(res.Diagnostics) != 1 {
+		t.Fatalf("%+v", res)
+	}
+	if d := res.Diagnostics[0]; d.Level != "emerg" || d.File != site || d.Line != 3 ||
+		!strings.Contains(d.Message, `unknown directive "frobnicate"`) {
+		t.Fatalf("placed as %+v", d)
+	}
+
+	if err := os.WriteFile(site, []byte("server {\n    listen 127.0.0.1:18198;\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, at, err := service.EffectiveConfigAt(context.Background())
+	if err != nil || len(files) != 2 || at.IsZero() || time.Since(at) > time.Minute {
+		t.Fatalf("after the fix: %d files at %v, %v", len(files), at, err)
+	}
+}
+
+// A search by directive reads each statement with the blocks it sits in,
+// named as the configuration names them: a server by its first server_name,
+// a location by its path, in the order nginx reads them.
+func TestPlaceDirectivesNamesTheBlocksEachSitsIn(t *testing.T) {
+	tree := parsedTree(t,
+		ConfigFile{Path: "/etc/nginx/nginx.conf", Content: "events {}\nhttp {\n    include /etc/nginx/conf.d/*.conf;\n}\n"},
+		ConfigFile{Path: "/etc/nginx/conf.d/app.conf", Content: "server {\n    listen 80;\n    server_name app.test www.app.test;\n" +
+			"    location /api {\n        proxy_pass http://127.0.0.1:3000;\n    }\n}\nserver {\n    listen 81;\n}\n"},
+	)
+	got := PlaceDirectives(tree)
+	type placed struct {
+		name, file string
+		line       int
+		within     string
+		opens      bool
+	}
+	var short []placed
+	for _, d := range got {
+		short = append(short, placed{d.Name, filepath.Base(d.File), d.Line, strings.Join(d.Within, " › "), d.Opens})
+	}
+	want := []placed{
+		{"events", "nginx.conf", 1, "", true},
+		{"http", "nginx.conf", 2, "", true},
+		{"server", "app.conf", 1, "http", true},
+		{"listen", "app.conf", 2, "http › server app.test", false},
+		{"server_name", "app.conf", 3, "http › server app.test", false},
+		{"location", "app.conf", 4, "http › server app.test", true},
+		{"proxy_pass", "app.conf", 5, "http › server app.test › location /api", false},
+		{"server", "app.conf", 8, "http", true},
+		{"listen", "app.conf", 9, "http › server", false},
+	}
+	if !reflect.DeepEqual(short, want) {
+		t.Fatalf("got %+v\nwant %+v", short, want)
+	}
+	if got[6].Args[0] != "http://127.0.0.1:3000" || got[0].Within == nil {
+		t.Fatalf("args %v, within %#v", got[6].Args, got[0].Within)
+	}
+}

@@ -21,6 +21,10 @@ import (
 func (s *Server) mountEngineRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/status", s.handle(s.handleProxyStatus))
 	r.Method(http.MethodGet, "/config", s.handle(s.handleProxyConfigRead))
+	// The nginx directory as a tree: names, sizes and whether nginx reads
+	// each file, never a password file's content — no more than the read
+	// above already gives every account, file by file.
+	r.Method(http.MethodGet, "/files", s.handle(s.handleProxyFiles))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		// Validation is not a read: nginx cannot test a config it cannot
@@ -37,6 +41,9 @@ func (s *Server) mountEngineRoutes(r chi.Router) {
 		// ran before. Its output names files and quotes them, which is the
 		// same trust as running it.
 		r.Method(http.MethodGet, "/test/last", s.handle(s.handleProxyTestLast))
+		// What nginx loads, as `nginx -T` prints it: the host's binary run
+		// on request, gated with the test that runs it.
+		r.Method(http.MethodGet, "/effective", s.handle(s.handleProxyEffective))
 		r.Method(http.MethodPost, "/reload", s.handle(s.handleProxyReload))
 		// The engine's own service, resolved here rather than named by the
 		// caller. Start and restart run the config test first; stop and
@@ -130,7 +137,9 @@ func (s *Server) handleProxyConfigWrite(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		if errors.Is(err, proxysvc.ErrInvalidConf) {
 			httpx.SetAudit(r, "proxy.config.write", req.Path, map[string]any{"result": "rejected"})
-			return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Output)
+			// The test beside the error, as a refused reload's, so the
+			// editor can place each of nginx's lines in the file.
+			return refuseInvalidConfig(w, r, httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Output), res)
 		}
 		return mapProxyError(err)
 	}
