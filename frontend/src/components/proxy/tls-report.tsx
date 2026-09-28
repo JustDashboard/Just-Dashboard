@@ -47,11 +47,13 @@ import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import type {
   Certificate,
+  ChainLink,
   GradeCheck,
   HTTPScan,
   PreloadCheck,
   ScanFinding,
   TLSScan,
+  TrustLink,
   VHost,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -763,6 +765,9 @@ function TLSReport() {
                           ? "no"
                           : "not applicable, the certificate names no OCSP responder"}
                     </Detail>
+                    <Detail label="Revocation">
+                      <RevocationFact scan={scan} />
+                    </Detail>
                     {scan.ocspServers?.length ? (
                       <CopyDetail
                         label="OCSP"
@@ -795,34 +800,27 @@ function TLSReport() {
                 <PanelBody flush>
                   <ol className="ml-4 border-l border-hairline pl-6">
                     {scan.chain.map((link, index) => (
-                      <li
-                        key={`${link.subject}-${index}`}
-                        className="relative space-y-2 py-4 first:pt-1"
-                      >
-                        <span className="absolute top-4 -left-10 flex size-8 items-center justify-center bg-background">
+                      <li key={`${link.subject}-${index}`} className="relative py-3 first:pt-1">
+                        <span className="absolute top-3 -left-10 flex size-8 items-center justify-center bg-background">
                           <ProductLogo
                             id={issuerProduct(link.issuer)}
                             size="sm"
                             fallback={Inspect}
                           />
                         </span>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-body font-medium wrap-anywhere">
-                            {link.subject}
-                          </span>
-                          {link.isCa && <Tag>CA</Tag>}
-                          {link.selfIssued && <Tag>self-issued</Tag>}
-                        </div>
-                        <p className="text-hint wrap-anywhere text-muted-foreground">
-                          Issued by {link.issuer}
-                        </p>
-                        <p className="text-hint text-muted-foreground">
-                          {link.keyType} {link.keyBits || ""} · expires{" "}
-                          {relativeTime(link.notAfter)}
-                        </p>
+                        <ChainLinkRow
+                          link={link}
+                          last={index === scan.chain.length - 1}
+                          outOfOrder={
+                            index < scan.chain.length - 1 &&
+                            !link.issuedByNext &&
+                            scan.chainAudit?.order !== "ordered"
+                          }
+                        />
                       </li>
                     ))}
                   </ol>
+                  {scan.trustPath?.length ? <TrustPathList path={scan.trustPath} /> : null}
                 </PanelBody>
               </Panel>
               <ReportExport scan={scan} />
@@ -951,6 +949,139 @@ function capTone(cap: string): Tone {
 }
 
 /** A certificate fact with a way to copy it exactly, however it is shown. */
+/**
+ * One certificate as sent, folded: its name and issuer while shut, the facts
+ * an operator compares with openssl's output once open.
+ */
+function ChainLinkRow({
+  link,
+  last,
+  outOfOrder,
+}: {
+  link: ChainLink
+  last: boolean
+  outOfOrder: boolean
+}) {
+  return (
+    <Disclosure
+      quiet
+      summary={
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="wrap-anywhere">{link.subject}</span>
+          {link.isCa && <Tag>CA</Tag>}
+          {link.selfIssued && <Tag>self-issued</Tag>}
+          {outOfOrder && <Tag tone="warning">next is not its issuer</Tag>}
+          {/^SHA1-|-SHA1$/.test(link.signatureAlgorithm) && !link.selfIssued && (
+            <Tag tone="danger">SHA-1</Tag>
+          )}
+        </span>
+      }
+      facts={
+        <span className="wrap-anywhere">
+          Issued by {link.issuer} · expires {relativeTime(link.notAfter)}
+        </span>
+      }
+    >
+      <DetailList className="pt-2 pb-1">
+        <CopyDetail label="Issuer" value={link.issuer} />
+        {link.dnsNames?.length ? (
+          <CopyDetail label="Names" value={link.dnsNames.join(", ")} />
+        ) : null}
+        <CopyDetail label="Valid from" value={link.notBefore} shown={timestamp(link.notBefore)} />
+        <CopyDetail label="Valid until" value={link.notAfter} shown={timestamp(link.notAfter)} />
+        <CopyDetail
+          label="Key"
+          value={link.keyType && `${link.keyType}${link.keyBits ? ` ${link.keyBits} bits` : ""}`}
+        />
+        <CopyDetail label="Signature" value={link.signatureAlgorithm} />
+        {link.extKeyUsage?.length ? (
+          <CopyDetail label="Key usage" value={link.extKeyUsage.join(", ")} />
+        ) : null}
+        <CopyDetail label="Serial" value={link.serial} className="font-mono break-all" />
+        <CopyDetail
+          label="SHA-256"
+          value={link.fingerprint}
+          className="font-mono text-micro break-all"
+        />
+        {!last && (
+          <Detail label="Next">{link.issuedByNext ? "its issuer" : "not its issuer"}</Detail>
+        )}
+      </DetailList>
+    </Disclosure>
+  )
+}
+
+/**
+ * The path a verifier built from the leaf to a trusted root, which is not
+ * always the chain as sent: the store supplies the root, and may choose a
+ * different intermediate than the server sent.
+ */
+function TrustPathList({ path }: { path: TrustLink[] }) {
+  return (
+    <div className="space-y-2 pt-4">
+      <p className="text-xs text-muted-foreground">Trust path</p>
+      <ol className="space-y-1.5">
+        {path.map((step, index) => (
+          <li
+            key={`${step.subject}-${index}`}
+            className="flex flex-wrap items-center gap-2 text-xs"
+          >
+            <span className="wrap-anywhere">{step.subject}</span>
+            {step.root && <Tag>root</Tag>}
+            <Tag tone={step.sent ? "default" : "success"}>{step.sent ? "sent" : "from store"}</Tag>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+/** The issuer's word on the leaf, and where it came from. */
+function RevocationFact({ scan }: { scan: TLSScan }) {
+  const revocation = scan.revocation
+  if (!revocation) return <>not checked</>
+  const via =
+    revocation.method === "stapled"
+      ? "stapled OCSP answer"
+      : revocation.method === "ocsp"
+        ? "OCSP"
+        : revocation.method === "crl"
+          ? "CRL"
+          : undefined
+  const verdict = {
+    good: "not revoked",
+    revoked: "revoked",
+    unknown: "unknown to the responder",
+    unchecked: "could not be checked",
+  }[revocation.status]
+  return (
+    <div className="space-y-0.5">
+      <span
+        className={cn("block", revocation.status === "revoked" && "font-medium text-destructive")}
+      >
+        {verdict}
+        {revocation.revokedAt && ` since ${timestamp(revocation.revokedAt)}`}
+        {revocation.reason && ` (${revocation.reason})`}
+        {via && `, by ${via}`}
+      </span>
+      {revocation.source && (
+        <span className="block font-mono text-micro wrap-anywhere text-muted-foreground">
+          {revocation.source}
+        </span>
+      )}
+      {revocation.nextUpdate && (
+        <span className="block text-muted-foreground">
+          {revocation.cached ? "Cached answer, " : "Answer "}good until{" "}
+          {timestamp(revocation.nextUpdate)}
+        </span>
+      )}
+      {revocation.status === "unchecked" && revocation.detail && (
+        <span className="block wrap-anywhere text-muted-foreground">{revocation.detail}</span>
+      )}
+    </div>
+  )
+}
+
 function CopyDetail({
   label,
   value,

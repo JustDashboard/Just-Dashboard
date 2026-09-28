@@ -11,13 +11,58 @@ export type ProtocolResult = {
 export type ChainLink = {
   subject: string
   issuer: string
+  notBefore: string
   notAfter: string
+  serial: string
+  /** SHA-256 of the certificate, colon hex. */
+  fingerprint: string
+  signatureAlgorithm: string
+  dnsNames?: string[]
+  extKeyUsage?: string[]
+  /** Whether the certificate sent after this one is its issuer. */
+  issuedByNext: boolean
   isCa: boolean
   keyType?: string
   keyBits?: number
   selfIssued: boolean
   /** The certificate as the server sent it, PEM-encoded. */
   pem: string
+}
+
+/** One step of the path a verifier built from the leaf to a root in this machine's store. */
+export type TrustLink = {
+  subject: string
+  notAfter: string
+  /** Sent by the server, rather than supplied by the store. */
+  sent: boolean
+  root: boolean
+}
+
+/** What the chain as sent says beyond whether it is trusted. */
+export type ChainAudit = {
+  order: "ordered" | "out-of-order" | "extra"
+  rootSent: boolean
+  sha1?: string[]
+  leafDays: number
+  tooLong: boolean
+  mustStaple: boolean
+  scts: number
+  sctSources?: ("certificate" | "tls" | "ocsp")[]
+  serverAuth: boolean
+}
+
+/** The issuer's answer on whether the leaf is revoked, believed only when its signature checks. */
+export type Revocation = {
+  status: "good" | "revoked" | "unknown" | "unchecked"
+  method?: "stapled" | "ocsp" | "crl"
+  source?: string
+  revokedAt?: string
+  reason?: string
+  thisUpdate?: string
+  nextUpdate?: string
+  detail?: string
+  /** Reused from an earlier scan; it holds until the issuer's nextUpdate. */
+  cached?: boolean
 }
 
 export type HSTS = {
@@ -235,6 +280,9 @@ export type TLSScan = {
   trusted: boolean
   trustError?: string
   nameMatches: boolean
+  trustPath?: TrustLink[]
+  chainAudit?: ChainAudit
+  revocation?: Revocation
   keyType?: string
   keyBits?: number
   signatureAlgorithm?: string
