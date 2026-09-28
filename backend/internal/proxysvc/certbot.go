@@ -325,6 +325,15 @@ type IssueRequest struct {
 	// how names are added to a certificate — the domains replace its list —
 	// without --expand, which fails unless the new list holds the old one.
 	CertName string `json:"certName,omitempty"`
+	// CA is the authority to order from: a key of ACMEAuthorities, "custom"
+	// for Directory, or empty for what JD_ACME_DIRECTORY configures.
+	CA        string `json:"ca,omitempty"`
+	Directory string `json:"directory,omitempty"`
+	// EABKeyID and EABHMACKey are an External Account Binding for
+	// registering the account, saved sealed once the request is accepted.
+	// They reach certbot in a temporary 0600 --config file, never argv.
+	EABKeyID   string `json:"eabKeyId,omitempty"`
+	EABHMACKey string `json:"eabHmacKey,omitempty"`
 }
 
 // IssuePlan is the argv an issuance runs and what it replaces, for the job
@@ -338,6 +347,8 @@ type IssuePlan struct {
 	// than the one asked for: certbot keeps a lineage until it is due, so the
 	// new key is a forced renewal.
 	ReplacesKeyOf string `json:"replacesKeyOf,omitempty"`
+	// Authority is whom the run orders from.
+	Authority IssueAuthority `json:"authority"`
 }
 
 var rsaKeySizes = []int{2048, 3072, 4096}
@@ -387,12 +398,16 @@ func (s *Service) planIssue(ctx context.Context, req IssueRequest) ([]string, Is
 	// it afterwards: "Wildcard domains are not supported by the HTTP-01
 	// challenge" is accurate and tells nobody what to do instead.
 	if wildcard && req.Method != "dns" {
-		return nil, plan, fmt.Errorf("a wildcard certificate can only be issued with a DNS challenge — Let's Encrypt will not sign one any other way")
+		return nil, plan, fmt.Errorf("a wildcard certificate can only be issued with a DNS challenge — no ACME authority signs one any other way")
 	}
+	authority, err := authorityFor(req)
+	if err != nil {
+		return nil, plan, err
+	}
+	plan.Authority = authority
 	if req.Email == "" {
-		server := certbotServer(req.Staging)
-		if !acmeAccountExists(letsencryptDir, server) {
-			return nil, plan, fmt.Errorf("a contact email is required: certbot has no account with %s yet", server)
+		if !authority.Account {
+			return nil, plan, fmt.Errorf("a contact email is required: certbot has no account with %s yet", authority.Server)
 		}
 	} else if !emailRe.MatchString(req.Email) {
 		return nil, plan, fmt.Errorf("%q is not an email address the certificate authority will take", req.Email)
@@ -489,7 +504,7 @@ func (s *Service) planIssue(ctx context.Context, req IssueRequest) ([]string, Is
 		// certificate, left it where sites could name it, and made the real
 		// issuance that followed a no-op — the lineage was not due.
 		args = append(args, "--dry-run")
-	} else if found && lineage.testCertificate(leaf) && !acmeDirectory().staging() {
+	} else if found && lineage.testCertificate(leaf) && !authority.Staging {
 		// These names already have a test certificate from a staging
 		// authority, and certbot keeps a lineage until it is due whatever
 		// signed it. Replacing it is the point of asking for a real one —
@@ -500,7 +515,7 @@ func (s *Service) planIssue(ctx context.Context, req IssueRequest) ([]string, Is
 	} else if plan.ReplacesKeyOf != "" {
 		args = append(args, "--force-renewal")
 	}
-	args = append(args, acmeDirectory().certbotArgs()...)
+	args = append(args, authority.certbotArgs()...)
 	for _, d := range req.Domains {
 		args = append(args, "-d", d)
 	}

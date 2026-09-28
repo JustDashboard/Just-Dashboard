@@ -39,6 +39,7 @@ import {
   CertbotLineages,
   CertbotMissing,
   CertbotRuntimeLine,
+  AcmeAccountsPanel,
   DnsProvidersPanel,
   forceRenewal,
   IssueDialog,
@@ -648,6 +649,9 @@ export function CertificatesPage() {
               onJob={console_.attach}
               onChanged={providers.refresh}
             />
+          )}
+          {admin && certbot.data?.available && (
+            <AcmeAccountsPanel certbotBusy={certbotBusy} onJob={console_.attach} />
           )}
           {admin && providers.error && (
             <Panel plain>
