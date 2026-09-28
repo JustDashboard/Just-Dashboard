@@ -48,8 +48,8 @@ func (s *Service) SetPagesDir(spec *SiteSpec) {
 	}
 }
 
-// DefaultPage is the page the dashboard ships for a page name.
-func DefaultPage(page string) (string, error) {
+// ShippedSitePage is the page the dashboard ships for a page name.
+func ShippedSitePage(page string) (string, error) {
 	b, err := defaultPages.ReadFile("pages/" + page + ".html")
 	if err != nil {
 		return "", fmt.Errorf("there is no page called %s", page)
@@ -107,7 +107,7 @@ func (s *Service) ReadSitePage(name, page string) (*SitePage, error) {
 	if err != nil {
 		return nil, err
 	}
-	fallback, err := DefaultPage(page)
+	fallback, err := ShippedSitePage(page)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (s *Service) writeMissingPages(spec *SiteSpec) error {
 		if _, err := os.Lstat(full); err == nil {
 			continue
 		}
-		content, err := DefaultPage(page)
+		content, err := ShippedSitePage(page)
 		if err != nil {
 			return err
 		}

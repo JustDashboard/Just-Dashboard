@@ -552,6 +552,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const maintenance = (vhost: VHost, on: boolean) => {
     const apply = async (c?: string) => {
       setBusy(vhost.name, on ? "Starting maintenance" : "Ending maintenance")
+      let reloaded = false
       try {
         const res = await post<SiteResult>(
           `/proxy/sites/${encodeURIComponent(vhost.name)}/maintenance`,
@@ -565,9 +566,9 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         } else if (!on) {
           notify.success(`${vhost.name} is out of maintenance`)
         }
-        refresh()
+        reloaded = !res.reloadError
       } finally {
-        setBusy(vhost.name, null)
+        reread(vhost.name, reloaded)
       }
     }
     if (on) {
