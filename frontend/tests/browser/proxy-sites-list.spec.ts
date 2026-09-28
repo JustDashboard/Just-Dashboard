@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import { json, mockProxy, mockShowcase, user, vhosts } from "./proxy-fixtures"
+import { availability, json, mockProxy, mockShowcase, user, vhosts } from "./proxy-fixtures"
 
 /**
  * The Sites list and what its verbs report back.
@@ -292,8 +292,47 @@ const notRunning = {
   reload: { validation: { ...brokenTest, valid: true }, reloaded: false, output: noPidFile },
 }
 
+/** systemd's reading of an engine's unit, as GET /systemd/{name} answers it. */
+function engineUnit(activeState: string, mainPid?: number, name = "nginx.service") {
+  return {
+    unit: {
+      name,
+      description: "A high performance web server",
+      loadState: "loaded",
+      activeState,
+      subState: activeState === "active" ? "running" : activeState === "failed" ? "failed" : "dead",
+      unitFileState: "enabled",
+      enabled: true,
+      ...(mainPid ? { mainPid, activeSince: Math.floor(Date.now() / 1000) - 600 } : {}),
+    },
+    properties: {},
+  }
+}
+
+/** Serves nginx's unit as `set` last left it, so a test can stop or start nginx. */
+async function serveUnit(page: Page, initial: unknown) {
+  let current = initial
+  await page.route("**/api/v1/systemd/nginx.service", (route) => json(route, current))
+  return (next: unknown) => {
+    current = next
+  }
+}
+
+/** A reload nginx was refused the signal for: it is running, with what it had. */
+const signalRefused = "nginx: [alert] kill(812, 1) failed (1: Operation not permitted)"
+const refusedSignal = {
+  reloaded: false,
+  reloadError: `reload failed: ${signalRefused}`,
+  reload: { validation: { ...brokenTest, valid: true }, reloaded: false, output: signalRefused },
+}
+const reloadedOk = {
+  reloaded: true,
+  reload: { validation: { ...brokenTest, valid: true }, reloaded: true, output: "" },
+}
+
 test("a change with no nginx running says so, not that nginx keeps serving", async ({ page }) => {
   await mockProxy(page, { included: true })
+  await serveUnit(page, engineUnit("inactive"))
   await serveSites(page, [layouts[1], app, legacy, off])
   await page.route("**/api/v1/proxy/vhosts/*/enabled", (route) => {
     const { enabled } = route.request().postDataJSON()
@@ -346,6 +385,315 @@ test("a change with no nginx running says so, not that nginx keeps serving", asy
   await expect(deleted).toContainText("nginx starts without it.")
   await expect(deleted).not.toContainText(/serving|serves/)
   await expect(page.getByText("Delete legacy.example.com completed")).toHaveCount(0)
+})
+
+test("with nginx stopped no nginx site reads serving, and the page says why", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const setUnit = await serveUnit(page, engineUnit("inactive"))
+  const confd = layouts[3]
+  const shop = vhosts[2]
+  const state = { off: false, app: true }
+  await page.route("**/api/v1/proxy/vhosts", (route) =>
+    json(route, [{ ...app, enabled: state.app }, { ...off, enabled: state.off }, confd, shop]),
+  )
+  await page.route("**/api/v1/proxy/vhosts/off.example.com/enabled", (route) => {
+    state.off = true
+    return json(route, { name: "off.example.com", enabled: true, ...notRunning })
+  })
+  await page.route("**/api/v1/proxy/vhosts/app.example.com/enabled", (route) => {
+    state.app = false
+    return json(route, { name: "app.example.com", enabled: false, ...reloadedOk })
+  })
+  await page.goto("/proxy/sites")
+
+  const stopped = page.getByText(
+    "systemd reports nginx.service inactive (dead), so no nginx site below is served until it starts.",
+  )
+  await expect(page.getByText("nginx is not running", { exact: true })).toBeVisible()
+  await expect(stopped).toBeVisible()
+  await expect(page.getByRole("link", { name: "Start it from the Overview" })).toHaveAttribute(
+    "href",
+    "/proxy",
+  )
+  await expect(card(page, "app.example.com").getByText("enabled", { exact: true })).toBeVisible()
+  await expect(card(page, "extra.conf").getByText("enabled", { exact: true })).toBeVisible()
+  await expect(card(page, "extra.conf").getByText("always on", { exact: true })).toHaveCount(0)
+  await expect(card(page, "off.example.com").getByText("disabled", { exact: true })).toBeVisible()
+  // The Docker ingress is a container of its own, which nginx stopping does not touch.
+  await expect(
+    card(page, "just-dashboard-shop").getByText("serving", { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.locator("[data-slot='choice-row']").getByText("serving", { exact: true }),
+  ).toHaveCount(1)
+  await expect(page.getByRole("list", { name: "Enabled" })).toBeVisible()
+  await expect(page.getByRole("list", { name: "Serving" })).toHaveCount(0)
+
+  // An enable with nginx stopped lands, and the card says enabled, not serving.
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  await expect(
+    page
+      .locator("[data-sonner-toast]")
+      .filter({ hasText: "off.example.com enabled; nginx is not running" }),
+  ).toContainText("It serves once nginx starts.")
+  const turnedOn = card(page, "off.example.com")
+  await expect(turnedOn.getByText("enabled", { exact: true })).toBeVisible()
+  await expect(turnedOn.getByText("serving", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("every site enabled")).toBeVisible()
+  await expect(page.getByText("every site serving")).toHaveCount(0)
+  await expect(stopped).toBeVisible()
+
+  // nginx is started, and the next verb's read of systemd finds it running:
+  // it read the configuration as it is now.
+  setUnit(engineUnit("active", 812))
+  await (await openMenu(page, "app.example.com")).getByRole("menuitem", { name: "Disable" }).click()
+  await page.getByRole("button", { name: "Disable and reload" }).click()
+  await expect(page.getByText("app.example.com disabled", { exact: true })).toBeVisible()
+  await expect(turnedOn.getByText("serving", { exact: true })).toBeVisible()
+  await expect(card(page, "extra.conf").getByText("always on", { exact: true })).toBeVisible()
+  await expect(page.getByText("nginx is not running", { exact: true })).toHaveCount(0)
+  await expect(page.getByRole("list", { name: "Serving" })).toBeVisible()
+})
+
+test("a reader sees nginx is not running, without the way to start it", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await serveUnit(page, engineUnit("failed"))
+  await serveSites(page, [app, legacy])
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.goto("/proxy/sites")
+  await expect(
+    page.getByText(
+      "systemd reports nginx.service failed, so no nginx site below is served until it starts.",
+    ),
+  ).toBeVisible()
+  await expect(page.getByRole("link", { name: "Start it from the Overview" })).toHaveCount(0)
+  await expect(card(page, "legacy.example.com").getByText("enabled", { exact: true })).toBeVisible()
+  await expect(page.getByText("every site enabled")).toBeVisible()
+})
+
+test("a switch nginx did not reload reads not reloaded until nginx has loaded it", async ({
+  page,
+}, testInfo) => {
+  // At phone width: the longest state a card draws.
+  await page.setViewportSize({ width: 390, height: 1000 })
+  await mockProxy(page, { included: true })
+  const setUnit = await serveUnit(page, engineUnit("active", 812))
+  const state: Record<string, boolean> = { "off.example.com": false, "legacy.example.com": true }
+  // On TLS, so only a change nginx has not loaded puts it among the sites
+  // that need attention.
+  await page.route("**/api/v1/proxy/vhosts", (route) =>
+    json(route, [
+      app,
+      { ...off, enabled: state["off.example.com"], tls: true, listen: ["443 ssl"] },
+      { ...legacy, enabled: state["legacy.example.com"] },
+    ]),
+  )
+  let answer: "refused signal" | "reloaded" | "refused change" = "refused signal"
+  await page.route("**/api/v1/proxy/vhosts/*/enabled", (route) => {
+    const name = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2) ?? "")
+    const { enabled } = route.request().postDataJSON()
+    if (answer === "refused change") {
+      return route.fulfill({
+        status: 422,
+        contentType: "application/json",
+        body: JSON.stringify(refusal),
+      })
+    }
+    state[name] = enabled
+    return json(route, {
+      name,
+      enabled,
+      ...(answer === "reloaded" ? reloadedOk : refusedSignal),
+    })
+  })
+  await page.goto("/proxy/sites")
+  const toast = (title: string) => page.locator("[data-sonner-toast]").filter({ hasText: title })
+  const offCard = card(page, "off.example.com")
+  await expect(offCard.getByText("disabled", { exact: true })).toBeVisible()
+
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  await expect(toast("off.example.com enabled, not reloaded")).toContainText(
+    "It is not serving until nginx reloads.",
+  )
+  await expect(offCard.getByText("enabled, not reloaded", { exact: true })).toBeVisible()
+  await expect(offCard.getByText("serving", { exact: true })).toHaveCount(0)
+  const inGroup = (group: string) =>
+    page
+      .getByRole("list", { name: group })
+      .locator("[data-slot='choice-row']")
+      .filter({ has: page.getByText("off.example.com", { exact: true }) })
+  await expect(inGroup("Needs attention")).toBeVisible()
+  await expect(page.getByText("every site enabled")).toBeVisible()
+  // nginx is running: nothing says it is not.
+  await expect(page.getByText("nginx is not running")).toHaveCount(0)
+  expect(
+    await page
+      .locator("[data-slot='page']")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath("sites-not-reloaded-390.png"), fullPage: true })
+
+  // Refused, a later switch changes nothing, and nginx still lacks the enable.
+  answer = "refused change"
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Disable" }).click()
+  await page.getByRole("button", { name: "Disable and reload" }).click()
+  await expect(toast("Could not disable off.example.com")).toBeVisible()
+  await expect(offCard.getByText("enabled, not reloaded", { exact: true })).toBeVisible()
+
+  // A reload that goes through loads every change before it.
+  answer = "reloaded"
+  await (
+    await openMenu(page, "legacy.example.com")
+  )
+    .getByRole("menuitem", { name: "Disable" })
+    .click()
+  await page.getByRole("button", { name: "Disable and reload" }).click()
+  await expect(page.getByText("legacy.example.com disabled", { exact: true })).toBeVisible()
+  await expect(offCard.getByText("serving", { exact: true })).toBeVisible()
+  await expect(inGroup("Serving")).toBeVisible()
+  const legacyCard = card(page, "legacy.example.com")
+  await expect(legacyCard.getByText("disabled", { exact: true })).toBeVisible()
+
+  // A disable nginx did not reload: a running nginx still has the site.
+  answer = "refused signal"
+  await (
+    await openMenu(page, "legacy.example.com")
+  )
+    .getByRole("menuitem", { name: "Enable" })
+    .click()
+  await expect(toast("legacy.example.com enabled, not reloaded")).toBeVisible()
+  await expect(legacyCard.getByText("enabled, not reloaded", { exact: true })).toBeVisible()
+  answer = "reloaded"
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Disable" }).click()
+  await page.getByRole("button", { name: "Disable and reload" }).click()
+  await expect(legacyCard.getByText("serving", { exact: true })).toBeVisible()
+  answer = "refused signal"
+  await (
+    await openMenu(page, "legacy.example.com")
+  )
+    .getByRole("menuitem", { name: "Disable" })
+    .click()
+  await page.getByRole("button", { name: "Disable and reload" }).click()
+  await expect(toast("legacy.example.com disabled, not reloaded")).toBeVisible()
+  await expect(legacyCard.getByText("disabled, not reloaded", { exact: true })).toBeVisible()
+
+  // nginx is restarted: a new process read the configuration as it is now,
+  // which the next read of systemd shows.
+  setUnit(engineUnit("active", 944))
+  answer = "refused change"
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  await expect(toast("Could not enable off.example.com")).toBeVisible()
+  await expect(legacyCard.getByText("disabled", { exact: true })).toBeVisible()
+  await expect(legacyCard.getByText("disabled, not reloaded", { exact: true })).toHaveCount(0)
+})
+
+test("a reload that finds no pid file while systemd has nginx up says it did not reload", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveUnit(page, engineUnit("active", 812))
+  let enabled = false
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, [app, { ...off, enabled }]))
+  await page.route("**/api/v1/proxy/vhosts/off.example.com/enabled", (route) => {
+    enabled = true
+    return json(route, { name: "off.example.com", enabled: true, ...notRunning })
+  })
+  await page.goto("/proxy/sites")
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  // Up, with its pid file gone: nginx serves what it had, out of the reload's reach.
+  const said = page
+    .locator("[data-sonner-toast]")
+    .filter({ hasText: "off.example.com enabled, not reloaded" })
+  await expect(said).toContainText("It is not serving until nginx reloads.")
+  await expect(said).toContainText(noPidFile)
+  await expect(page.getByText("nginx is not running")).toHaveCount(0)
+  await expect(
+    card(page, "off.example.com").getByText("enabled, not reloaded", { exact: true }),
+  ).toBeVisible()
+  await expect(card(page, "app.example.com").getByText("serving", { exact: true })).toBeVisible()
+})
+
+test("where nginx has no unit, a reload that found none says nginx is not running until one goes through", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveUnit(page, {
+    unit: { ...engineUnit("inactive").unit, loadState: "not-found", activeState: "inactive" },
+    properties: {},
+  })
+  const state = { off: false, app: true }
+  await page.route("**/api/v1/proxy/vhosts", (route) =>
+    json(route, [{ ...app, enabled: state.app }, { ...off, enabled: state.off }, legacy]),
+  )
+  await page.route("**/api/v1/proxy/vhosts/off.example.com/enabled", (route) => {
+    state.off = true
+    return json(route, { name: "off.example.com", enabled: true, ...notRunning })
+  })
+  await page.route("**/api/v1/proxy/vhosts/app.example.com/enabled", (route) => {
+    state.app = false
+    return json(route, { name: "app.example.com", enabled: false, ...reloadedOk })
+  })
+  await page.goto("/proxy/sites")
+  // No unit, no reading: the page claims nothing it has not been told.
+  await expect(page.getByText("nginx is not running")).toHaveCount(0)
+  await expect(card(page, "app.example.com").getByText("serving", { exact: true })).toBeVisible()
+
+  await (await openMenu(page, "off.example.com")).getByRole("menuitem", { name: "Enable" }).click()
+  await expect(page.getByText("off.example.com enabled; nginx is not running")).toBeVisible()
+  await expect(
+    page.getByText(
+      "The last reload found no nginx process to signal, so no nginx site below is served until it starts.",
+    ),
+  ).toBeVisible()
+  await expect(page.getByRole("link", { name: "Start it from the Overview" })).toHaveCount(0)
+  await expect(card(page, "app.example.com").getByText("enabled", { exact: true })).toBeVisible()
+  await expect(card(page, "off.example.com").getByText("enabled", { exact: true })).toBeVisible()
+  await expect(
+    page.locator("[data-slot='choice-row']").getByText("serving", { exact: true }),
+  ).toHaveCount(0)
+
+  await (await openMenu(page, "app.example.com")).getByRole("menuitem", { name: "Disable" }).click()
+  await page.getByRole("button", { name: "Disable and reload" }).click()
+  await expect(page.getByText("app.example.com disabled", { exact: true })).toBeVisible()
+  await expect(page.getByText("nginx is not running", { exact: true })).toHaveCount(0)
+  await expect(card(page, "off.example.com").getByText("serving", { exact: true })).toBeVisible()
+})
+
+test("with Caddy's unit stopped, its Caddyfile sites do not read serving", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/status", (route) =>
+    json(route, {
+      ...availability,
+      nginx: false,
+      nginxVersion: "",
+      caddy: true,
+      caddyVersion: "v2.8.4",
+    }),
+  )
+  await page.route("**/api/v1/systemd/caddy.service", (route) =>
+    json(route, engineUnit("failed", undefined, "caddy.service")),
+  )
+  await serveSites(page, [
+    {
+      ...vhosts[2],
+      name: "shop.example.com",
+      path: "/etc/caddy/Caddyfile",
+      serverNames: ["shop.example.com"],
+      upstreams: ["http://127.0.0.1:3000"],
+    },
+  ])
+  await page.goto("/proxy/sites")
+  await expect(page.getByText("Caddy is not running", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText(
+      "systemd reports caddy.service failed, so no Caddy site below is served until it starts.",
+    ),
+  ).toBeVisible()
+  const shop = card(page, "shop.example.com")
+  await expect(shop.getByText("enabled", { exact: true })).toBeVisible()
+  await expect(shop.getByText("serving", { exact: true })).toHaveCount(0)
 })
 
 test("a switch whose list could not be read again does not show the state from before", async ({
