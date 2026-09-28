@@ -58,6 +58,8 @@ export type StreamSpec = {
   /** Check the backend's certificate against upstreamCa and upstreamName. */
   upstreamVerify?: boolean
   upstreamCa?: string
+  /** nginx writes a line per session to /var/log/nginx/stream-<name>.log, which the traffic view reads. */
+  logConnections?: boolean
 }
 
 /** How nginx spreads a stream's connections: client-ip is a consistent hash of the client address. */
@@ -347,4 +349,77 @@ export type StreamTestResult = {
   detail: string
   warnings: string[]
   error?: string
+}
+
+/** One bucket of a stream's timeline; `start` is Unix seconds. */
+export type StreamTrafficSlice = {
+  start: number
+  sessions: number
+  denied: number
+  failed: number
+  bytes: number
+}
+
+/** One client address over a traffic window. `last` is Unix seconds. */
+export type StreamClient = {
+  address: string
+  sessions: number
+  denied: number
+  failed: number
+  bytes: number
+  last: number
+}
+
+/** What a stream carried over a window, read from its own access log. Times are Unix seconds. */
+export type StreamTraffic = {
+  name: string
+  /** The file logs sessions now; a stream that stopped still shows what its log holds. */
+  logging: boolean
+  path: string
+  window: StreamWindow
+  since: number
+  until: number
+  /** Every session logged in the window was read; otherwise every figure is a floor. */
+  complete: boolean
+  oldest?: number
+  sessions: number
+  /** Turned away by the access list (403). */
+  denied: number
+  /** Not forwarded: no server answered, or a limit was hit (5xx). */
+  failed: number
+  /** What clients sent, and what they were sent. */
+  bytesIn: number
+  bytesOut: number
+  /** Sessions by nginx's stream status: 200, 400, 403, 500, 502, 503. */
+  statuses: Record<string, number>
+  buckets: StreamTrafficSlice[]
+  /** Session lengths, in seconds. */
+  duration: { p50: number; p90: number; p99: number; max: number }
+  /** The busiest client addresses, most sessions first. */
+  clients: StreamClient[]
+  /** Lines not in the dashboard's format. */
+  skipped: number
+  unreadable?: string
+}
+
+export type StreamWindow = "1h" | "24h" | "7d"
+
+/** A card's reading: the last hour of a stream that logs. */
+export type StreamTrafficSummary = {
+  sessions: number
+  denied: number
+  bytes: number
+  complete: boolean
+}
+
+/** The TCP connections nginx holds on a stream's port now. */
+export type StreamSessions = {
+  name: string
+  listen: number
+  paused?: boolean
+  /** No TCP side: nginx answers UDP clients from one socket, so there is none per session. */
+  udpOnly?: boolean
+  sessions: { client: string; local: string; pid?: number }[]
+  /** Every session found; `sessions` holds the first 500. */
+  total: number
 }

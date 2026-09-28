@@ -26,6 +26,11 @@ import (
 // DELETE /{name} deletes a stream, and a stream may be called "include".
 func (s *Server) mountStreamRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/", s.handle(s.handleStreamList))
+	// Traffic and sessions name client addresses, as the nginx access logs
+	// the log viewer already shows every account do; reading is no change.
+	r.Method(http.MethodGet, "/traffic", s.handle(s.handleStreamTrafficSummary))
+	r.Method(http.MethodGet, "/{name}/traffic", s.handle(s.handleStreamTraffic))
+	r.Method(http.MethodGet, "/{name}/sessions", s.handle(s.handleStreamSessions))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPost, "/preview", s.handle(s.handleStreamPreview))
@@ -145,6 +150,49 @@ func (s *Server) handleStreamList(w http.ResponseWriter, r *http.Request) error 
 		module.Package = s.modulePackage(ctx, "stream")
 	}
 	httpx.JSON(w, http.StatusOK, status)
+	return nil
+}
+
+// handleStreamTrafficSummary is the last hour of every stream that logs, for
+// the cards.
+func (s *Server) handleStreamTrafficSummary(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	sums, err := s.modules.proxy.StreamTrafficSummaries(ctx, time.Now())
+	if err != nil {
+		return httpx.Err(http.StatusInternalServerError, "stream_dir_unreadable", err.Error()).Retry()
+	}
+	httpx.JSON(w, http.StatusOK, sums)
+	return nil
+}
+
+// handleStreamTraffic is one stream's sessions over ?window= (1h, 24h, 7d).
+func (s *Server) handleStreamTraffic(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	traffic, err := s.modules.proxy.StreamTraffic(ctx, httpx.URLParam(r, "name"), r.URL.Query().Get("window"), time.Now())
+	if errors.Is(err, proxysvc.ErrStreamNotFound) {
+		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
+	}
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, traffic)
+	return nil
+}
+
+// handleStreamSessions is who is connected to a stream now.
+func (s *Server) handleStreamSessions(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	sessions, err := s.modules.proxy.StreamSessions(ctx, httpx.URLParam(r, "name"))
+	if errors.Is(err, proxysvc.ErrStreamNotFound) {
+		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
+	}
+	if err != nil {
+		return httpx.Err(http.StatusInternalServerError, "sessions_unreadable", err.Error()).Retry()
+	}
+	httpx.JSON(w, http.StatusOK, sessions)
 	return nil
 }
 

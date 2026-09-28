@@ -15,6 +15,7 @@ import type {
   StreamTestOutcome,
   StreamTestRequest,
   StreamTestResult,
+  StreamTrafficSummary,
 } from "@/lib/types"
 import type { DotTone, Verdict } from "@/components/status-dot"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
@@ -53,6 +54,7 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     upstreamName,
     upstreamVerify,
     upstreamCa,
+    logConnections,
   } = stream
   return {
     name,
@@ -81,6 +83,7 @@ export function streamSpecOf(stream: StreamSpec): StreamSpec {
     upstreamName,
     upstreamVerify,
     upstreamCa,
+    logConnections,
   }
 }
 
@@ -740,4 +743,56 @@ export function testSummary(results: StreamTestResult[]): { tone: DotTone; label
   if (!results.some((result) => result.ok)) return { tone: "unknown", label: "Nothing testable" }
   const warned = results.some((result) => result.warnings.length > 0)
   return { tone: warned ? "warning" : "running", label: "Test passed" }
+}
+
+/**
+ * The access list with one client's rule put first, where it wins over every
+ * other: a rule already naming that source is dropped rather than left to
+ * contradict it further down.
+ */
+export function withClientRule(
+  access: StreamAccess,
+  action: "allow" | "deny",
+  source: string,
+): StreamAccess {
+  return {
+    rules: [{ action, source }, ...access.rules.filter((rule) => rule.source.trim() !== source)],
+    defaultAllow: access.defaultAllow,
+  }
+}
+
+/** A client address a rule can name: an IP, not a unix socket's "unix:". */
+export function ruleableClient(address: string): boolean {
+  return /^[0-9a-f.:]+$/i.test(address) && /[.:]/.test(address)
+}
+
+/** What nginx's stream status codes mean, in the words the traffic view uses. */
+export const STREAM_STATUSES: Record<string, string> = {
+  "200": "completed",
+  "400": "client sent what nginx could not read",
+  "403": "denied by the access list",
+  "500": "nginx failed internally",
+  "502": "no server accepted",
+  "503": "turned away by a connection limit",
+}
+
+/** A card's traffic line: "142 sessions/h · 3 denied · 1.2 GB". A floor is marked with "+". */
+export function trafficLine(summary: StreamTrafficSummary, size: (n: number) => string): string {
+  const floor = summary.complete ? "" : "+"
+  return [
+    `${summary.sessions.toLocaleString()}${floor} session${summary.sessions === 1 ? "" : "s"}/h`,
+    summary.denied > 0 && `${summary.denied.toLocaleString()}${floor} denied`,
+    summary.bytes > 0 && size(summary.bytes),
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+/** A session's length: milliseconds under a second, as most short queries are. */
+export function sessionLength(seconds: number): string {
+  if (seconds < 1) return `${Math.round(seconds * 1000)} ms`
+  if (seconds < 60) return `${seconds.toFixed(1)} s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ${Math.floor(seconds % 60)}s`
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }

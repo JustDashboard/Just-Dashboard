@@ -123,6 +123,9 @@ type StreamSpec struct {
 	// default, so without it the link is encrypted but not authenticated.
 	UpstreamVerify bool   `json:"upstreamVerify,omitempty"`
 	UpstreamCA     string `json:"upstreamCa,omitempty"`
+	// LogConnections writes a line per session to StreamLogPath, which the
+	// traffic view reads (stream_traffic.go).
+	LogConnections bool `json:"logConnections,omitempty"`
 }
 
 // StreamServer is one server of a stream's pool, with nginx's own options.
@@ -648,6 +651,10 @@ func RenderStream(spec *StreamSpec) (string, error) {
 	if spec.MaxConnPerIP > 0 || spec.MaxConnTotal > 0 {
 		l.blank()
 	}
+	if spec.LogConnections {
+		l.add("log_format %s '%s';", streamLogFormatName(spec.Name), streamLogFormat)
+		l.blank()
+	}
 	l.add("upstream %s {", upstream)
 	if method := streamBalances[spec.Balance]; method != "" {
 		l.add("    %s;", method)
@@ -712,6 +719,11 @@ func RenderStream(spec *StreamSpec) (string, error) {
 		if spec.MaxConnTotal > 0 {
 			l.add("    limit_conn %s %d;", total, spec.MaxConnTotal)
 		}
+	}
+	if spec.LogConnections {
+		l.blank()
+		l.add("    # One line per session, which the dashboard's traffic view reads.")
+		l.add("    %s", streamLogDirective(spec.Name))
 	}
 	l.blank()
 	l.add("    proxy_pass %s;", upstream)
@@ -843,6 +855,8 @@ func parseStreamFile(fileName, content string) parsedStream {
 	// does, by name, with whether a limit_conn uses them.
 	perIP, total := streamZoneNames(p.spec.Name)
 	zones := map[string]bool{}
+	// logFormat is whether the file declares the format RenderStream writes.
+	logFormat := false
 	for _, d := range directives {
 		switch {
 		case d.Name == "upstream" && d.Block != nil && len(d.Args) == 1:
@@ -853,6 +867,9 @@ func parseStreamFile(fileName, content string) parsedStream {
 			(d.Args[0] == "$binary_remote_addr" && d.Args[1] == "zone="+perIP+":1m" ||
 				d.Args[0] == "$server_port" && d.Args[1] == "zone="+total+":1m"):
 			zones[strings.TrimSuffix(strings.TrimPrefix(d.Args[1], "zone="), ":1m")] = false
+		case d.Name == "log_format" && len(d.Args) == 2 &&
+			d.Args[0] == streamLogFormatName(p.spec.Name) && d.Args[1] == streamLogFormat:
+			logFormat = true
 		default:
 			p.cannot(d.Name)
 		}
@@ -912,6 +929,16 @@ func parseStreamFile(fileName, content string) parsedStream {
 			}
 		case "limit_conn":
 			p.readLimitConn(d.Args, zones, perIP, total)
+		case "access_log":
+			switch {
+			case len(d.Args) == 1 && d.Args[0] == "off":
+				// The stream module's default, so saving without it is the same.
+			case logFormat && len(d.Args) == 2 && d.Args[0] == StreamLogPath(p.spec.Name) &&
+				d.Args[1] == streamLogFormatName(p.spec.Name):
+				p.spec.LogConnections = true
+			default:
+				p.cannot("access_log " + strings.Join(d.Args, " "))
+			}
 		case "ssl_certificate", "ssl_certificate_key", "proxy_ssl_trusted_certificate", "proxy_ssl_name":
 			p.readTLSValue(d)
 		case "proxy_ssl", "proxy_ssl_server_name", "proxy_ssl_verify":
@@ -944,6 +971,9 @@ func parseStreamFile(fileName, content string) parsedStream {
 		if !used[name] {
 			p.cannot("an upstream nothing uses")
 		}
+	}
+	if logFormat && !p.spec.LogConnections {
+		p.cannot("a log_format nothing uses")
 	}
 	for _, inUse := range zones {
 		if !inUse {
