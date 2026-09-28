@@ -45,13 +45,32 @@ func (s *Server) mountTLSRoutes(r chi.Router) {
 	})
 }
 
-// mountProxyToolRoutes is the operator's own probes under /proxy/tools. Every
-// one of them sends traffic somewhere the caller chooses, which is the scanner
-// boundary above, so the whole subtree is admin-only rather than each route
-// remembering to be.
+// mountProxyToolRoutes is the operator's own tools under /proxy/tools. The
+// request tester sends traffic somewhere the caller chooses, which is the
+// scanner boundary above, and the directive finder serves the TLS page's
+// fixes, which only an administrator can carry out; so the whole subtree is
+// admin-only rather than each route remembering to be.
 func (s *Server) mountProxyToolRoutes(r chi.Router) {
 	r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 	r.Method(http.MethodPost, "/request", s.handle(s.handleRequestTest))
+	r.Method(http.MethodGet, "/directive", s.handle(s.handleFindDirective))
+}
+
+// handleFindDirective lists every place ?name= is set in the configuration
+// nginx loads, so a finding about protocols can open the line behind it.
+func (s *Server) handleFindDirective(w http.ResponseWriter, r *http.Request) error {
+	name := r.URL.Query().Get("name")
+	if !proxysvc.IsDirectiveName(name) {
+		return httpx.BadRequest("%q is not an nginx directive name", name)
+	}
+	ctx, cancel := timeoutCtx(r, 45*time.Second)
+	defer cancel()
+	uses, err := s.modules.proxy.FindDirective(ctx, name)
+	if err != nil {
+		return mapProxyError(err)
+	}
+	httpx.JSON(w, http.StatusOK, uses)
+	return nil
 }
 
 // handleRequestTest sends one request to this machine's nginx for one of its

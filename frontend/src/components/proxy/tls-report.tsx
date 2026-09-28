@@ -67,6 +67,7 @@ import { useNow } from "@/components/deploy/vocabulary"
 import { expiryTone } from "@/components/proxy/expiry-status"
 import { TLSDNSPanel } from "@/components/proxy/tls-dns"
 import { TLSServedBy } from "@/components/proxy/tls-served-by"
+import { useTLSFixes } from "@/components/proxy/tls-fix-sheet"
 import { RequestTester, TLSTools } from "@/components/proxy/request-tester"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
@@ -187,6 +188,7 @@ function TLSReport() {
   const history = useScanHistory(target, report.data?.checkedAt)
   const scan = history.viewing?.report ?? report.data ?? history.latest?.report ?? null
   const busy = report.loading || rescanning
+  const fixes = useTLSFixes({ scan, rescanning, onRescan: rescan })
   const scanned = scan ? targetLabel({ host: scan.domain, port: scan.port }) : ""
 
   // A #finding-… link opens that finding and brings it into view once the
@@ -505,6 +507,7 @@ function TLSReport() {
                     findings={scan.findings.map((finding) => ({
                       ...finding,
                       extra: <FindingLink id={finding.id} />,
+                      action: fixes.actionFor(finding),
                     }))}
                     anchor={findingAnchor}
                     defaultOpen={linkedFinding ? [linkedFinding] : undefined}
@@ -805,6 +808,7 @@ function TLSReport() {
           openAtFirst={!scan.reachable}
         />
       )}
+      {fixes.element}
     </Page>
   )
 }

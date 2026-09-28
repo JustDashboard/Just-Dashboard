@@ -1026,6 +1026,15 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   by hand, at most five, each Location re-checked as the first URL was: one that names no local site
   ends the chain as `elsewhere`, so the tester never reaches anything but this nginx. Authorization and
   Cookie are dropped when a redirect changes host.
+- **`tlsscan_fixes.go` — remedies for TLS findings.** Each `ScanFinding` carries a `fix` hint
+  (`renew`, `issue`, `force-https`, `hsts`, `security-headers`, `fullchain`, `protocols`); it is a hint
+  only, and every remedy runs through an endpoint that already exists (site preview and apply,
+  `/certificates/renew`, `/proxy/config`, test-then-reload). The one new route is
+  `GET /proxy/tools/directive?name=` (`system.admin` with the rest of `/proxy/tools`, read-only, not
+  audited): the name must match `^[a-z_][a-z0-9_]{0,63}$`, and the answer is every place it is set in
+  the tree `NginxTree` builds from `EffectiveConfig` — path, line, arguments, block context and the
+  enclosing server's `server_name`s. Files `EffectiveConfig` leaves out (outside the proxy directory,
+  such as certbot's `options-ssl-nginx.conf`, or password files) are not searched.
 - **`dns01.go` — wildcards and CDN-fronted domains**, which between them are most of the certificates
   people want: Let's Encrypt signs `*.example.com` only against DNS-01, and a Cloudflare-proxied domain
   never receives an HTTP challenge. Eight certbot plugins as a closed set (each names credentials and
