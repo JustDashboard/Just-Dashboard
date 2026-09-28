@@ -298,9 +298,11 @@ export function blocksReloads(stream: Pick<StreamEntry, "state" | "blocker">): b
 /**
  * A file that cannot be read first, then a stream stopping every reload, one
  * that forwards nothing, one another stream shadows, then streams open to
- * anyone — a database port first among those.
+ * anyone — a database port first among those — and paused streams last.
  */
 function rank(stream: StreamEntry): number {
+  // Paused forwards nothing and asks nothing of anyone until it is resumed.
+  if (stream.paused) return 7
   if (stream.error) return 0
   if (blocksReloads(stream)) return 1
   if (stream.state === "not-listening") return 2
@@ -321,6 +323,7 @@ export const STREAM_STATES: StreamState[] = [
   "shadowed",
   "not-read",
   "unknown",
+  "paused",
 ]
 
 /** A state in the words its chip and its card use. */
@@ -334,6 +337,8 @@ export function stateLabel(state: StreamState): string {
       return "shadowed"
     case "not-read":
       return "not read"
+    case "paused":
+      return "paused"
   }
   return "unknown"
 }
@@ -359,6 +364,8 @@ export function stateStatus(stream: Pick<StreamEntry, "state" | "error">): {
     case "shadowed":
     case "not-read":
       return { verdict: "warning", label: stateLabel(stream.state) }
+    case "paused":
+      return { tone: "stopped", label: "paused" }
   }
   return { tone: "unknown", label: "unknown" }
 }
@@ -372,6 +379,7 @@ export function stateCounts(streams: StreamEntry[]): Record<StreamState | "all",
     shadowed: 0,
     "not-read": 0,
     unknown: 0,
+    paused: 0,
   }
   for (const stream of streams) counts[stream.state]++
   return counts

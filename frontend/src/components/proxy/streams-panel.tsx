@@ -6,7 +6,9 @@ import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
   Code,
   Connection,
+  Pause,
   Pencil,
+  Play,
   Plus,
   RefreshClockwise,
   Slash,
@@ -133,13 +135,13 @@ export function StreamsPage() {
       stopping: streams.filter(blocksReloads).length,
     }
   }, [data])
-  const states = useMemo(() => stateCounts(data?.streams ?? []), [data])
+  // Paused streams are listed with the rest, apart only from the counts of
+  // what nginx reads.
+  const listed = useMemo(() => [...(data?.streams ?? []), ...(data?.paused ?? [])], [data])
+  const states = useMemo(() => stateCounts(listed), [listed])
   const shown = useMemo(
-    () =>
-      [...(data?.streams ?? [])]
-        .filter((stream) => chip === "all" || stream.state === chip)
-        .sort(byUrgency),
-    [data, chip],
+    () => [...listed].filter((stream) => chip === "all" || stream.state === chip).sort(byUrgency),
+    [listed, chip],
   )
 
   const live = data ? streamsLive(data) : false
@@ -157,20 +159,22 @@ export function StreamsPage() {
       : ""
     confirm({
       title: `Delete ${stream.name}`,
-      confirmLabel: live ? "Delete and reload" : "Delete",
+      confirmLabel: live && !stream.paused ? "Delete and reload" : "Delete",
       description: (
         <p>
-          {port === null
-            ? live
-              ? "nginx reloads without it."
-              : misplaced
-                ? `${misplaced}, so this file never forwarded anything.`
-                : "nginx is not reading these, so this only removes the file."
-            : live
-              ? `Port ${port} stops being forwarded as soon as nginx reloads.`
-              : misplaced
-                ? `${misplaced}, so port ${port} was never forwarded.`
-                : `nginx is not reading these, so port ${port} was never forwarded — this removes the file before it ever took effect.`}{" "}
+          {stream.paused
+            ? "It is paused, so nginx is not reading it and nothing stops forwarding."
+            : port === null
+              ? live
+                ? "nginx reloads without it."
+                : misplaced
+                  ? `${misplaced}, so this file never forwarded anything.`
+                  : "nginx is not reading these, so this only removes the file."
+              : live
+                ? `Port ${port} stops being forwarded as soon as nginx reloads.`
+                : misplaced
+                  ? `${misplaced}, so port ${port} was never forwarded.`
+                  : `nginx is not reading these, so port ${port} was never forwarded — this removes the file before it ever took effect.`}{" "}
           {stream.link ? (
             <>
               This removes the link only, not <code className="font-mono">{stream.link}</code>.
@@ -242,6 +246,72 @@ export function StreamsPage() {
       },
     })
   }
+  // Pausing moves the file into paused/, out of the include's reach; the
+  // form cannot edit it there, and Resume puts it back under a save's checks.
+  const pause = (stream: StreamEntry) => {
+    let result: StreamResult | undefined
+    const reads = live && stream.state !== "not-read"
+    confirm({
+      title: `Pause ${stream.name}`,
+      confirmLabel: reads ? "Pause and reload" : "Pause",
+      description: (
+        <p>
+          {reads
+            ? `Port ${stream.listen} stops being forwarded as soon as nginx reloads.`
+            : "nginx is not reading this stream, so nothing stops forwarding."}{" "}
+          The file moves to <code className="font-mono">paused/</code> unchanged, and Resume puts it
+          back.
+        </p>
+      ),
+      action: async () => {
+        result = await post<StreamResult>(
+          `/proxy/streams/${encodeURIComponent(stream.name)}/enabled`,
+          { enabled: false },
+        )
+        refresh()
+      },
+      onDone: () => {
+        if (result?.reloadError) {
+          notify.warning("nginx did not reload", {
+            description: `Port ${stream.listen} is still forwarded until nginx reloads. ${result.reloadError}`,
+          })
+        }
+      },
+    })
+  }
+  const [resuming, setResuming] = useState("")
+  const resume = async (stream: StreamEntry) => {
+    setResuming(stream.name)
+    try {
+      const res = await post<StreamResult>(
+        `/proxy/streams/${encodeURIComponent(stream.name)}/enabled`,
+        { enabled: true },
+      )
+      if (res.reloadError) {
+        notify.warning(`${stream.name} resumed, reload failed`, {
+          description: `The file passed nginx's test and is back, but nginx did not reload, so it is not forwarding yet: ${res.reloadError}`,
+        })
+      } else if (res.listening === false) {
+        notify.warning(`${stream.name} resumed, not listening yet`, {
+          description: res.listenNote,
+          action: { label: "Re-check", onClick: refresh },
+        })
+      } else if (!res.validation) {
+        notify.warning(`${stream.name} resumed, not yet live`, { description: res.listenNote })
+      } else {
+        notify.success(
+          res.listening ? `${stream.name} resumed and listening` : `${stream.name} resumed`,
+          { description: res.listenNote },
+        )
+      }
+    } catch (err) {
+      notify.error(`${stream.name} not resumed`, err)
+    } finally {
+      setResuming("")
+      refresh()
+    }
+  }
+
   const pageVerbs: Verb[] = connection
     ? [{ key: "disconnect", label: "Disconnect", icon: Slash, danger: true, run: disconnect }]
     : []
@@ -250,7 +320,7 @@ export function StreamsPage() {
   // at the next minute's poll — after freeing its port, say. Reading is no
   // change, so every account has it.
   const recheckVerb = (stream: StreamEntry): Verb[] =>
-    stream.state === "live" || stream.state === "not-read"
+    stream.state === "live" || stream.state === "not-read" || stream.paused
       ? []
       : [
           {
@@ -262,34 +332,54 @@ export function StreamsPage() {
             run: recheck,
           },
         ]
+  const rawVerb = (stream: StreamEntry): Verb => ({
+    key: "raw",
+    label: "Raw file",
+    icon: Code,
+    disabled: Boolean(stream.error),
+    run: () => setRaw(stream),
+  })
+  const deleteVerb = (stream: StreamEntry): Verb => ({
+    key: "delete",
+    label: "Delete",
+    icon: Trash,
+    danger: true,
+    run: () => remove(stream),
+  })
   const verbsFor = (stream: StreamEntry): Verb[] =>
-    admin
-      ? [
-          {
-            key: "edit",
-            label: "Edit",
-            icon: Pencil,
-            inline: true,
-            disabled: Boolean(stream.error),
-            run: () => open(stream),
-          },
-          ...recheckVerb(stream),
-          {
-            key: "raw",
-            label: "Raw file",
-            icon: Code,
-            disabled: Boolean(stream.error),
-            run: () => setRaw(stream),
-          },
-          {
-            key: "delete",
-            label: "Delete",
-            icon: Trash,
-            danger: true,
-            run: () => remove(stream),
-          },
-        ]
-      : recheckVerb(stream)
+    !admin
+      ? recheckVerb(stream)
+      : stream.paused
+        ? [
+            {
+              key: "resume",
+              label: resuming === stream.name ? "Resuming…" : "Resume",
+              icon: Play,
+              inline: true,
+              disabled: resuming !== "" || Boolean(stream.error),
+              run: () => void resume(stream),
+            },
+            rawVerb(stream),
+            deleteVerb(stream),
+          ]
+        : [
+            {
+              key: "edit",
+              label: "Edit",
+              icon: Pencil,
+              inline: true,
+              disabled: Boolean(stream.error),
+              run: () => open(stream),
+            },
+            ...recheckVerb(stream),
+            rawVerb(stream),
+            // A link is stopped by deleting it: moved into paused/, a relative
+            // one would point somewhere else.
+            ...(stream.link || stream.error
+              ? []
+              : [{ key: "pause", label: "Pause", icon: Pause, run: () => pause(stream) }]),
+            deleteVerb(stream),
+          ]
 
   const header = <PageContext eyebrow="Proxy" title="Streams" />
 
@@ -405,7 +495,7 @@ export function StreamsPage() {
             )
           }
         />
-        {(data.streams.length > 1 || chip !== "all") && (
+        {(listed.length > 1 || chip !== "all") && (
           // A state no stream is in has no chip, except the one chosen: it
           // stays to say why the list is empty, and All is beside it.
           <PanelToolbar>
@@ -422,7 +512,7 @@ export function StreamsPage() {
           </PanelToolbar>
         )}
         <PanelBody flush>
-          {data.streams.length === 0 ? (
+          {listed.length === 0 ? (
             <EmptyState
               mark={<ProductLogos ids={["postgresql", "redis", "minecraft-java"]} size="md" />}
               title="Nothing forwarded"
@@ -440,9 +530,11 @@ export function StreamsPage() {
               {shown.map((stream, index) => (
                 <ChoiceRow
                   key={stream.name}
-                  verb={admin ? `Edit ${stream.name}` : stream.name}
-                  onSelect={admin && !stream.error ? () => open(stream) : undefined}
-                  disabled={!admin || Boolean(stream.error)}
+                  verb={admin && !stream.paused ? `Edit ${stream.name}` : stream.name}
+                  onSelect={
+                    admin && !stream.error && !stream.paused ? () => open(stream) : undefined
+                  }
+                  disabled={!admin || Boolean(stream.error) || Boolean(stream.paused)}
                   index={index}
                   className="h-full gap-4 p-4"
                   leading={

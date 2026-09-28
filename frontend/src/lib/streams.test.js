@@ -474,6 +474,7 @@ describe("stream states", () => {
       "Shadowed",
       "Not read",
       "Unknown",
+      "Paused",
     ])
   })
 
@@ -491,6 +492,7 @@ describe("stream states", () => {
       shadowed: 1,
       "not-read": 0,
       unknown: 1,
+      paused: 0,
     })
   })
 

@@ -104,6 +104,9 @@ type StreamEntry struct {
 	// BindError is the last bind() failure nginx logged for one of the
 	// stream's sockets, with its time, in nginx's words.
 	BindError string `json:"bindError,omitempty"`
+	// Paused marks a stream kept in paused/, out of nginx's include
+	// (stream_pause.go). The form does not edit one; resume it first.
+	Paused bool `json:"paused,omitempty"`
 }
 
 // StreamStatus reports whether nginx is set up to read these at all.
@@ -130,6 +133,9 @@ type StreamStatus struct {
 	Snippet string        `json:"snippet"`
 	Dir     string        `json:"dir"`
 	Streams []StreamEntry `json:"streams"`
+	// Paused are the streams kept in paused/ (stream_pause.go), apart from
+	// Streams so nothing counting what nginx reads counts them.
+	Paused []StreamEntry `json:"paused"`
 }
 
 // StreamResult is what a save did.
@@ -760,6 +766,7 @@ func (s *Service) Streams(ctx context.Context) (*StreamStatus, error) {
 	status := &StreamStatus{
 		Dir:     dir,
 		Streams: []StreamEntry{},
+		Paused:  []StreamEntry{},
 		Snippet: "stream {\n    " + streamIncludeDirective(dir) + "\n}",
 	}
 	include := readStreamInclude(s.nginxDir, dir)
@@ -784,8 +791,22 @@ func (s *Service) Streams(ctx context.Context) (*StreamStatus, error) {
 			status.Streams = append(status.Streams, listStream(dir, e))
 		}
 	}
+	paused, err := os.ReadDir(s.pausedStreamDir())
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	for _, e := range paused {
+		if streamFileName(e) && e.Type().IsRegular() {
+			entry := listStream(s.pausedStreamDir(), e)
+			entry.Paused, entry.State, entry.StateReason = true, StreamPaused, streamPausedReason
+			status.Paused = append(status.Paused, entry)
+		}
+	}
 	sort.SliceStable(status.Streams, func(i, j int) bool {
 		return status.Streams[i].Listen < status.Streams[j].Listen
+	})
+	sort.SliceStable(status.Paused, func(i, j int) bool {
+		return status.Paused[i].Listen < status.Paused[j].Listen
 	})
 	s.fillStreamStates(ctx, status, include)
 	return status, nil
@@ -922,6 +943,11 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous st
 	if path != oldPath {
 		if _, err := os.Lstat(path); err == nil {
 			return nil, fmt.Errorf("%w: %s", ErrStreamExists, spec.Name)
+		}
+		// A paused stream keeps its name: resuming it would otherwise meet
+		// this one's file.
+		if _, err := os.Lstat(filepath.Join(s.pausedStreamDir(), spec.Name+".conf")); err == nil {
+			return nil, fmt.Errorf("%w: %s (paused)", ErrStreamExists, spec.Name)
 		}
 	}
 	// The configuration is read again under the lock: it is what the
@@ -1129,6 +1155,13 @@ func (s *Service) DeleteStream(ctx context.Context, name string) (*StreamDeletio
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	path, linked, err := s.streamFile(name)
+	paused := false
+	if errors.Is(err, ErrStreamNotFound) {
+		// The listing shows paused streams too, and deletes each it lists.
+		if pausedPath, pausedErr := s.pausedStreamFile(name); pausedErr == nil {
+			path, paused, err = pausedPath, true, nil
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1148,6 +1181,11 @@ func (s *Service) DeleteStream(ctx context.Context, name string) (*StreamDeletio
 		return nil, err
 	}
 	s.recordChange(ctx, Change{Path: path, Action: ChangeDelete, Before: before, BeforeExisted: true})
+	if paused {
+		// nginx never read it, so there is nothing to reload.
+		os.Remove(s.pausedStreamDir())
+		return out, nil
+	}
 	out.Read = streamIncludeFound(s.nginxDir, s.streamDir())
 	return out, nil
 }

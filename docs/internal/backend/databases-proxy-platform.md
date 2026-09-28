@@ -425,6 +425,16 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     (`not_connected`), with the same test and restore. The listing's `connection` names the dashboard's
     own include, and `streamBlock` the file whose stream block the manual snippet (then an `include` line)
     goes into. Audited `proxy.stream.include.add` / `.remove` with mode, file, copy, streams and reload.
+  - **Pausing a stream** (`stream_pause.go`): `POST /proxy/streams/{name}/enabled {enabled}` (system.admin,
+    destructive, audited `proxy.stream.toggle`) moves `stream.d/<name>.conf` to and from `stream.d/paused/`,
+    which the `*.conf` include glob does not reach. Both directions run `nginx -t` when the directory is
+    read and move the file back on failure (422 `invalid_config` — a pause fails only under a hand-written
+    glob that takes the `paused/` directory itself). Resume refuses a taken name (`stream_exists`) or a
+    socket another stream, site or program holds (`port_in_use`), and a reload nginx fails on the stream's
+    own port puts it back in `paused/`, as a save does. A symbolic link is not paused (`stream_linked`):
+    deleting the link stops it. The listing returns paused files in `paused`, apart from `streams`, with
+    state `paused`; a delete takes a paused name too, without a reload, and a new stream or a rename onto
+    a paused name is `stream_exists`.
   - **Where stream.d is read** (`stream_state.go`) is `NginxTree` over the files on disk, with a probe file
     placed where a new stream would go: an include inside `http` is named as misplaced, a `stream` block in
     its own file and a relative include count, and `upstream` or `other-stream.d` no longer do. It reads

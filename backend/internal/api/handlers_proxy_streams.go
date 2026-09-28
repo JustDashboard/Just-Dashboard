@@ -32,6 +32,9 @@ func (s *Server) mountStreamRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/include", s.handle(s.handleStreamIncludeApply))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/{name}", s.handle(s.handleStreamDelete))
+			// Pausing stops a forward; resume is the same switch, so it
+			// shares the route and the capability.
+			r.Method(http.MethodPost, "/{name}/enabled", s.handle(s.handleStreamToggle))
 			r.Method(http.MethodPost, "/include/remove", s.handle(s.handleStreamIncludeRemove))
 		})
 	})
@@ -267,6 +270,53 @@ func (s *Server) handleStreamDelete(w http.ResponseWriter, r *http.Request) erro
 	}
 	httpx.SetAudit(r, "proxy.stream.delete", name, detail)
 	httpx.JSON(w, http.StatusOK, out)
+	return nil
+}
+
+type streamToggleRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// handleStreamToggle pauses a stream or resumes a paused one
+// (proxysvc.SetStreamEnabled). The name is unescaped, as for a delete.
+func (s *Server) handleStreamToggle(w http.ResponseWriter, r *http.Request) error {
+	name := httpx.URLParam(r, "name")
+	var req streamToggleRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	res, err := s.modules.proxy.SetStreamEnabled(ctx, name, req.Enabled)
+	var inUse *proxysvc.PortInUseError
+	switch {
+	case errors.Is(err, proxysvc.ErrInvalidConf):
+		httpx.SetAudit(r, "proxy.stream.toggle", name, map[string]any{"enabled": req.Enabled, "result": "rejected"})
+		return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
+	case errors.As(err, &inUse):
+		if inUse.BindError != "" {
+			httpx.SetAudit(r, "proxy.stream.toggle", name,
+				map[string]any{"enabled": true, "result": "rolled-back", "bindError": inUse.BindError})
+		}
+		return httpx.Err(http.StatusConflict, "port_in_use", err.Error())
+	case errors.Is(err, proxysvc.ErrStreamLinkPause):
+		return httpx.Err(http.StatusConflict, "stream_linked", err.Error())
+	case errors.Is(err, proxysvc.ErrStreamExists):
+		return httpx.Err(http.StatusConflict, "stream_exists", err.Error())
+	case errors.Is(err, proxysvc.ErrStreamNotFound):
+		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
+	case err != nil:
+		return httpx.BadRequest("%v", err)
+	}
+	detail := map[string]any{"enabled": req.Enabled, "reloaded": res.Reloaded}
+	if res.ReloadError != "" {
+		detail["reloadError"] = res.ReloadError
+	}
+	if res.Listening != nil {
+		detail["listening"] = *res.Listening
+	}
+	httpx.SetAudit(r, "proxy.stream.toggle", name, detail)
+	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
 

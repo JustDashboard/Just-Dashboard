@@ -26,10 +26,10 @@ export type StreamSpec = {
 /**
  * What nginx does with a stream now: holds its port (`live`), reads it and
  * holds no socket for it (`not-listening`), gives its port to a stream read
- * first (`shadowed`), does not read it as a stream (`not-read`), or could not
- * be asked (`unknown`).
+ * first (`shadowed`), does not read it as a stream (`not-read`), could not
+ * be asked (`unknown`), or it is kept out of nginx's include (`paused`).
  */
-export type StreamState = "live" | "not-listening" | "shadowed" | "not-read" | "unknown"
+export type StreamState = "live" | "not-listening" | "shadowed" | "not-read" | "unknown" | "paused"
 
 /** What holds a port a stream asks for. */
 export type PortOwner = {
@@ -65,6 +65,8 @@ export type StreamEntry = StreamSpec & {
   blocker?: PortOwner
   /** The last bind() failure nginx logged for one of its sockets, with its time. */
   bindError?: string
+  /** Kept in paused/, which nginx does not read; the form edits it once resumed. */
+  paused?: boolean
 }
 
 /** A port a save would be refused for, as the preview reports it. */
@@ -118,6 +120,11 @@ export type StreamStatus = {
   snippet: string
   dir: string
   streams: StreamEntry[]
+  /**
+   * The streams kept in paused/, apart from `streams` so nothing counting what
+   * nginx reads counts them. Absent from a server older than pausing.
+   */
+  paused?: StreamEntry[]
 }
 
 /** What a save did. */
