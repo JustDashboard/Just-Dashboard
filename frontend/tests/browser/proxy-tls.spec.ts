@@ -289,6 +289,22 @@ test("Back after a cancelled scan and its answer is a page with nothing scanning
   expect(held).toHaveLength(2)
 })
 
+/**
+ * Resolves once every animation that ends has ended, so a box read next is
+ * where the element rests rather than a frame of the page's entrance rise.
+ * Endless ones (a pulsing dot) are left running; a cancelled one counts as done.
+ */
+async function settled(page: Page) {
+  await page.evaluate(() =>
+    Promise.allSettled(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
+        .map((animation) => animation.finished),
+    ),
+  )
+}
+
 /** Fails when the text around `locator` runs past its own line or off the viewport. */
 async function expectWrapped(locator: Locator) {
   const box = await locator.evaluate((element) => {
@@ -315,6 +331,7 @@ test("a long name in the hint or the refusal wraps under the field", async ({ pa
     const field = page.getByLabel("Domain to scan")
     const form = page.locator("form").filter({ has: field })
     await expect(page.getByText("A name, host:port or URL")).toBeVisible()
+    await settled(page)
     const before = await form.boundingBox()
 
     await field.fill(long)
@@ -329,6 +346,7 @@ test("a long name in the hint or the refusal wraps under the field", async ({ pa
     await expect(alert).toHaveText(`"${bad}" is not a domain name`)
     await expectWrapped(alert)
     // The form stays where it was, as wide as its field.
+    await settled(page)
     const after = await form.boundingBox()
     expect({ x: after?.x, y: after?.y, width: after?.width }).toEqual({
       x: before?.x,
@@ -748,17 +766,18 @@ async function watchList(page: Page, rows: object[]) {
   return { lists, hold }
 }
 
-const mailRow = {
+/** A watched mail server checked three minutes before the test that asks for it. */
+const mailRow = () => ({
   id: 1,
   domain: "mail.example.com",
   port: 993,
   checkedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
   certificate: certs[0],
-}
+})
 
 test("re-checking the watch list says so until the new checks arrive", async ({ page }) => {
   await mockShowcase(page)
-  const { lists, hold } = await watchList(page, [mailRow])
+  const { lists, hold } = await watchList(page, [mailRow()])
   await page.goto("/proxy/certificates")
   const recheck = page.getByRole("button", { name: "Re-check now" })
   await expect(recheck).toBeVisible()
@@ -776,9 +795,9 @@ test("re-checking the watch list says so until the new checks arrive", async ({ 
 test("stopping a watch says what happened, and a failure keeps the row", async ({ page }) => {
   await mockShowcase(page)
   const { lists } = await watchList(page, [
-    mailRow,
-    { ...mailRow, id: 2, domain: "gone.example.com", port: 443 },
-    { ...mailRow, id: 3, domain: "stuck.example.com", port: 443 },
+    mailRow(),
+    { ...mailRow(), id: 2, domain: "gone.example.com", port: 443 },
+    { ...mailRow(), id: 3, domain: "stuck.example.com", port: 443 },
   ])
   const deleted: string[] = []
   await page.route("**/api/v1/certificates/watched/*", (route) => {
@@ -846,7 +865,7 @@ test("on a phone every watched row keeps how old its check is in full", async ({
   await page.route("**/api/v1/auth/session", (route) => json(route, readOnly))
   await watchList(page, [
     {
-      ...mailRow,
+      ...mailRow(),
       certificate: { ...certs[0], issuer: "A Rather Long Issuing Authority Name R11" },
     },
   ])
