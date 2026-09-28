@@ -119,8 +119,8 @@ const inputs = {
       ],
     },
     ports: [
-      listener({ port: 5432, process: "postgres" }),
-      listener({ port: 6379, process: "", protocol: "tcp6" }),
+      listener({ port: 5432, process: "postgres", level: "warning" }),
+      listener({ port: 6379, process: "", protocol: "tcp6", level: "warning" }),
       listener({ port: 3306, exposed: false }),
       listener({}),
     ],
@@ -133,7 +133,7 @@ const inputs = {
       dir: "/etc/nginx/stream.d",
       streams: [stream({ allowFrom: ["1.2.3.4"] })],
     },
-    ports: [listener({ port: 27017, process: "mongod" })],
+    ports: [listener({ port: 27017, process: "mongod", level: "warning" })],
     certbot: {
       available: true,
       certs: [{ name: "a", domains: [], expiry: "", daysLeft: 60, valid: true }],
@@ -273,7 +273,7 @@ describe("foldProxyFindings", () => {
         advice:
           "Bind these to loopback or a private address, or close them in the firewall. A database port on the internet is the commonest way a server is emptied.",
         meta: "ports",
-        href: "/proxy/ports",
+        href: "/proxy/ports?q=port:5432,6379",
       },
       {
         id: "site.disabled.off",
@@ -327,7 +327,7 @@ describe("foldProxyFindings", () => {
         advice:
           "Bind these to loopback or a private address, or close them in the firewall. A database port on the internet is the commonest way a server is emptied.",
         meta: "ports",
-        href: "/proxy/ports",
+        href: "/proxy/ports?q=port:27017",
       },
     ])
   })

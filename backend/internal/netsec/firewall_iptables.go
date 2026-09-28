@@ -97,6 +97,31 @@ func (iptablesBackend) Status(ctx context.Context) (*FirewallStatus, error) {
 	return st, nil
 }
 
+// iptablesPort is the destination port a listed rule's match text names —
+// `tcp dpt:5432`, `tcp dpts:8000:8010`, `multiport dports 80,443` — in the
+// spelling ufw uses, or empty when it names none. The listing's Rule leaves
+// it out; the posture reads it to tell a rule opening a database to everyone
+// from one opening nothing.
+func iptablesPort(raw string) string {
+	fields := strings.Fields(raw)
+	if len(fields) <= 10 {
+		return ""
+	}
+	matches := fields[10:]
+	for i, f := range matches {
+		if port, ok := strings.CutPrefix(f, "dpt:"); ok {
+			return port
+		}
+		if ports, ok := strings.CutPrefix(f, "dpts:"); ok {
+			return ports
+		}
+		if f == "dports" && i+1 < len(matches) {
+			return matches[i+1]
+		}
+	}
+	return ""
+}
+
 // iptablesPolicyWord folds a chain's verdict onto the three words every
 // reader of DefaultPolicy speaks. The verdict itself stays verbatim in Default.
 //

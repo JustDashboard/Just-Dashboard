@@ -7,7 +7,10 @@ membership identifies systemd services, containers and login sessions; an empty 
 kernel worker; PM2's own PID list is overlaid by the handler because a PM2 child otherwise inherits its
 daemon's systemd cgroup. **Names are not used to guess ownership** — the same executable started by a
 service and by a shell has a different remedy. Unknowns stay `unmanaged`, which is information rather than
-a failed detection.
+a failed detection. `ManagerOf` is the same reading under a given process table, which the ports
+listing uses with `HOST_PROC`; `Systemd.Sockets` is `systemctl list-sockets --all --show-types
+--output=json`, each socket unit's addresses and the service it starts, which names a
+socket-activated service's port.
 
 - Process disk counters are cumulative in `/proc`, so `Table` keeps one small, mutex-protected previous
   sample per PID and returns rates. The create timestamp participates in the identity because Linux reuses

@@ -68,6 +68,8 @@ function readable<T>(poll: PollState<Reading<T>>): Reading<T> | undefined {
 function Unread({ error }: { error: Error }) {
   return <span title={errorMessage(error)}>{"couldn't read"}</span>
 }
+import { foldDualStack, privateNetworksHint, tallyReach } from "@/components/proxy/ports"
+import { portsHref } from "@/components/proxy/ports-list"
 
 /**
  * Readings first, then the engine and its commands. Routes own the wide column;
@@ -182,7 +184,8 @@ export default function ProxyOverviewPage() {
   const routes = useMemo(() => overviewRoutes(sites ?? []), [sites])
   const onTls = hosts.filter((v) => v.tls).length
   const disabled = hosts.filter(isParked).length
-  const exposed = useMemo(() => (listeners ?? []).filter((l) => l.exposed), [listeners])
+  // The ports page's own split, so the figure clicked through is on that page.
+  const reach = useMemo(() => tallyReach(foldDualStack(listeners ?? [])), [listeners])
   const badCerts = useMemo(
     () => (certificates ?? []).filter((c) => c.expired || c.expiring || c.error),
     [certificates],
@@ -407,22 +410,18 @@ export default function ProxyOverviewPage() {
             }
           />
         </StatLink>
-        <StatLink href="/proxy/ports" label="Exposed ports">
+        <StatLink href={portsHref({ reach: "internet" })} label="Internet-facing ports">
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
-            label="Exposed ports"
+            label="Internet-facing"
             value={
-              <Figure settled={!ports.loading}>{listeners ? exposed.length : undefined}</Figure>
+              <Figure settled={!ports.loading}>{listeners ? reach.internet : undefined}</Figure>
             }
             hint={
               ports.error ? (
                 <Unread error={ports.error} />
               ) : listeners ? (
-                exposed.length ? (
-                  `of ${listeners.length} listening, off the machine`
-                ) : (
-                  "everything on loopback"
-                )
+                privateNetworksHint(reach)
               ) : undefined
             }
             tone={ports.error ? "warning" : "default"}

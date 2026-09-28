@@ -112,16 +112,19 @@ func (s *Server) handleSecurityPosture(w http.ResponseWriter, r *http.Request) e
 		}
 	})
 	run(func() { in.SSH = s.modules.netsec.SSHDStatus(ctx) })
+	run(func() { in.Network = netsec.ReadHostNetwork(ctx) })
 	run(func() {
+		// The containers are read beside the walk, as the ports page reads
+		// them, so a port Docker publishes is graded as the page grades it —
+		// NAT-only ones included, which have no socket to walk.
+		owners := make(chan proxysvc.OwnerInput, 1)
+		go func() { owners <- s.ownerInput(ctx, false) }()
 		listeners, err := proxysvc.ListListeners(ctx)
 		if err != nil {
 			return
 		}
-		for _, l := range listeners {
-			in.Listeners = append(in.Listeners, netsec.ExposedPort{
-				Port: l.Port, Protocol: l.Protocol, Address: l.Address,
-				Process: l.Process, Exposed: l.Exposed,
-			})
+		for _, l := range proxysvc.AttributeOwners(listeners, <-owners) {
+			in.Listeners = append(in.Listeners, exposedPort(l))
 		}
 	})
 	run(func() {

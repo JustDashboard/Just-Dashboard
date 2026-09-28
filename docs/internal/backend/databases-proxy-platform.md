@@ -328,6 +328,81 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   round trips through `managedAcme`; ordinary site's ACME roots remain `/var/www/html`. Docker Caddy
   ownership uses native automatic HTTPS and shared routes; unsupported owners are reported explicitly.
   See [the ingress decision](../deployments/caddy-ingress.md) for provisioning, recovery and live tests.
+- **Listening ports** (`ports.go`, `ports_owner.go`) are read from the kernel's own tables,
+  `/proc/net/{tcp,tcp6,udp,udp6}` (under `HOST_PROC` when set, the variable gopsutil reads for the
+  process details), not from gopsutil's connection list: that list keeps one holder per socket, and its
+  `/proc` walk meets PID 1 first, so a socket-activated sshd, whose port systemd holds too, was listed as
+  systemd, `/sbin/init`. `socketHolders` keeps every PID holding a listening inode and `ownerOf` sets init
+  aside, then names the holder whose parent (`/proc/<pid>/stat`) is not itself a holder: a prefork
+  server's master, not one of the workers that inherited the socket. Not the lowest PID, because once the
+  PID counter wraps a reload's respawned workers are numbered below their master. The lowest PID decides
+  only between unrelated holders, and init only when it holds the socket alone.
+  `Listener.Scope` is `loopback`, `interface` (one specific address) or `all`; `Exposed` is every scope but
+  loopback. It used to mean "bound to a wildcard", which drew caddy on the tailnet address as loopback and
+  let a database on a public IP raise nothing in the posture or the attention list. `Listener.Reach` is
+  netsec's grade of the address (`loopback`, `host` for a bridge, `network`, `public`, `all`, see
+  observability-security.md), and `Listener.Network` and `Listener.Interface` name what it is made of
+  (`tailnet` on `tailscale0`, `docker` on `docker0` or a `br-<network id>`, `public` on `ens3`, `vpn`,
+  `uplink` for a private address on the default-route interface, `private`, another `bridge`,
+  `link-local`, `loopback`, `all`); all three come from one `HostNetwork.Place`, which needs the
+  interfaces, so `GET /ports` fills them and `ListListeners` leaves them empty. `GET /ports` also fills
+  `Listener.Level` and `InboundDefault` from `netsec.GradePort`, with the firewall status read beside the
+  walk: the posture's level for a finding on that socket (empty where it raises none) and the firewall's
+  inbound default when that is what holds it to a warning, or `PastFirewall` — `docker` for a port
+  docker-proxy holds, `rule` with `FirewallRule` for one a rule admits from anywhere — when the default
+  does not hold it (see observability-security.md). The ports page words a socket by its network
+  ("Tailnet only · tailscale0") and colours a database by `Level`, and the overview's attention finding
+  is levelled by it, so neither can call critical what the posture calls a warning. `Listener.Family`
+  (`ipv4`/`ipv6`) is the kernel table the socket is in, and `Listener.PPID` the owner's parent; the page
+  folds a service's two families on one network into one row and one count when one process holds both,
+  or one program run by one account was started by one parent (not init) or with the same command line
+  but for its addresses — Docker holds a published port's two families in two docker-proxy processes,
+  dockerd's children, each told its own `-host-ip`. The overview's Internet-facing tile counts the same
+  folded rows. A UDP socket on port 0 is not listed, and `GET /ports` gives the walk ten seconds before
+  a retryable 504, which the page offers to try again. `GET /ports/meta` answers `{ephemeralRange: {low,
+  high}}` from `EphemeralPorts`, `net.ipv4.ip_local_port_range` read under the same process table
+  (`null` where it cannot be read), apart from the list so `/ports` stays the plain array other pages
+  read: the page sets aside loopback sockets inside it on request, and the Connections page links a
+  connection's local port to the ports page only outside it, where somebody chose the port.
+  Every exposed socket carries `firewall` (`netsec.JudgeFirewall` in `reach.go`): `allowed`, `restricted`
+  (a rule admits one source ahead of a refusing default), `blocked`, `off`, `docker` (published past ufw's
+  or iptables' input chain; firewalld is not claimed) or `unknown`, with the deciding rule's number and
+  action, read in first-match order and passing over rules whose target the listing cannot say.
+  `GET /ports/firewall` answers `{backend, available, enabled, editable, incoming, orphanRules}`:
+  `netsec.OrphanRules` lists the inbound allows on single ports or lists that no socket and no Docker
+  publication answers (ranges, every-port, profile and interface rules and ufw's IPv6 twins are left out).
+  It reads the firewall afresh each call, uncached, because the page deletes an orphan by number through
+  the existing destructive `DELETE /firewall/rules/{n}` and ufw renumbers on every delete; the page also
+  re-reads `/firewall/` and refuses when the number now names another rule. Any signed-in account may
+  read it, as it may read `/firewall/`.
+  `TestListListenersNamesTheDaemonNotInitOnThisHost` checks the owner on the real host and runs only as
+  root; it reads `/proc` and changes nothing.
+  **Owners.** `ListListeners` also reads, once per holder, its start (`StartedAt`, the processes page's
+  own `CreateTime`, so a signal sent from the page can refuse a reused PID), its supervisor from its
+  cgroup under the same process table (`procs.ManagerOf`: `Manager`/`ManagerName`, `systemd` and a unit,
+  `container` and a short ID, `session`), and `DisplayName` — the executable's base name, or the
+  command line's first word where another account's `exe` is unreadable — where the kernel's name is a
+  thread's (node names its main thread `MainThread`); `Process` stays the raw comm, which
+  `dbx.DetectHost` and the HTTP-01 planner match on. `GET /ports` then runs `AttributeOwners` with what
+  `ownerInput` read beside the walk, each source under four seconds and left out when it fails: the
+  running containers from `dockerx.ListRunning` (the Engine's list, no inspects), `systemctl list-sockets
+  --all --show-types --output=json` through `procs.Systemd.Sockets` (read with `SocketUnitAt`: inet
+  stream and datagram addresses only), and — after the walk, and only when some owner's parent is a PM2
+  daemon (`UnderPM2`), since `pm2 jlist` starts a daemon where none runs — PM2's app PIDs. A socket systemd listens on for a service
+  carries `SocketUnit` and `Activates` (`ssh.socket` → `ssh.service`); a PM2 app's PID becomes `pm2` and
+  its name; a socket whose protocol, host address and port a container's published binding names — the
+  kernel lets one socket hold them, so whatever holds it is Docker's (docker-proxy, dockerd, or a holder
+  this account cannot see) — carries `Container` with `Published`, as does a wildcard docker-proxy or
+  unseen socket whose other family's binding names it (a Docker before 20.10 published every interface
+  as one proxy on `::`); a container on the host's network is joined by its cgroup's ID. A published
+  binding no socket stands for — the userland proxy off, NAT rules alone — becomes a row of its own with
+  `Source: "docker-nat"` and no PID. `Container.Deployment` names the project and environment its
+  `io.just-dashboard.environment-id` label (on a container also labelled `io.just-dashboard.managed`)
+  points at, looked up in `deploy_environments`. `Self` marks the dashboard's own sockets: its own PID,
+  and every container of the compose project whose container mounts `JD_DATA_DIR` (the `backend`
+  service's where several do); the ingress the dashboard creates serves deployments and is not its own.
+  The posture reads the same containers (`ownerInput` without systemd or PM2), so a published port
+  whose holder it cannot see, and a NAT-only one, is graded as Docker's there too.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our
   shape, not nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the
   server** so a spec has one meaning, and the output is hand-written rather than templated because order
@@ -1119,8 +1194,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `/proxy/streams`, `/proxy/auth-files` and `/proxy/tools`; `mountCertificateRoutes`
   (`handlers_certificates.go`) and `mountTLSRoutes` (`handlers_tls.go`; the watch list's handlers stay in
   `handlers_domains.go`) inside `/certificates`; and `mountPortRoutes` (`handlers_ports.go`) at `/ports`,
-  which chi serves with and without the trailing slash. `TestProxyRoutesKeepTheirPaths` pins every path,
-  method and gate as they stood before the split. The whole group runs `withProxyActor`, which puts the
+  which chi serves with and without the trailing slash, with `/ports/meta` and `/ports/firewall` beside it.
+  `TestProxyRoutesKeepTheirPaths` pins every path, method and gate as they stood before the split. The whole group runs `withProxyActor`, which puts the
   signed-in account on the context for the change record below. Background work and state the proxy
   pages keep beyond `proxysvc.Service` go in `api/modules_proxy.go` (`initProxyExtras`, run last in
   `initModules`; `startProxyExtras` from `Start`; `stopProxyExtras` from `Shutdown`, which also runs for a

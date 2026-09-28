@@ -1,6 +1,9 @@
 package procs
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -129,5 +132,39 @@ func TestMarkPM2OverridesAParentCgroup(t *testing.T) {
 	MarkPM2(rows, []PM2Process{{PID: 42, Name: "api"}})
 	if rows[0].Manager != "pm2" || rows[0].ManagerName != "api" {
 		t.Fatalf("managed row = %+v", rows[0])
+	}
+}
+
+// The ports page reads a socket's supervisor under the process table it read
+// the sockets from, which HOST_PROC may move.
+func TestManagerOfReadsTheGivenProcessTable(t *testing.T) {
+	root := t.TempDir()
+	writeCgroup(t, root, 2450808, "0::/system.slice/ssh.service\n")
+	writeCgroup(t, root, 1802112, "0::/system.slice/docker-c13e58c8f7b4822ff505f3e86405a1cb386156d3cc6a3ca4068fb715fb98b2db.scope\n")
+	for _, c := range []struct {
+		pid           int32
+		cmdline       string
+		manager, name string
+	}{
+		{2450808, "sshd: /usr/sbin/sshd -D", "systemd", "ssh.service"},
+		{1802112, "caddy run", "container", "c13e58c8f7b4"},
+		{4, "/usr/bin/gone", "unmanaged", ""},
+		{5, "", "kernel", "kernel"},
+	} {
+		manager, name := ManagerOf(root, c.pid, c.cmdline)
+		if manager != c.manager || name != c.name {
+			t.Errorf("ManagerOf(%d) = %s %q, want %s %q", c.pid, manager, name, c.manager, c.name)
+		}
+	}
+}
+
+func writeCgroup(t *testing.T, root string, pid int, content string) {
+	t.Helper()
+	dir := filepath.Join(root, strconv.Itoa(pid))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cgroup"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
