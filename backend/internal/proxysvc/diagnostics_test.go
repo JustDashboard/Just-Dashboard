@@ -92,6 +92,25 @@ nginx: configuration file /tmp/jd-nginx-test/nginx.conf test failed`,
 			want:   []Diagnostic{{Level: "emerg", Message: `unknown directive "frob"x"`, File: "/tmp/jd-nginx-test/conf.d/odd.conf", Line: 3}},
 		},
 		{
+			// The first place is part of the message; the file to open is
+			// the second, where nginx found the path used again.
+			name: "a path used twice is placed at its second use",
+			output: `nginx: [emerg] the same path name "/tmp/jd-nginx-test/cache" used in /tmp/jd-nginx-test/conf.d/dup.conf:1 and in /tmp/jd-nginx-test/conf.d/dup.conf:2
+nginx: configuration file /tmp/jd-nginx-test/nginx.conf test failed`,
+			want: []Diagnostic{{Level: "emerg", Message: `the same path name "/tmp/jd-nginx-test/cache" used in /tmp/jd-nginx-test/conf.d/dup.conf:1 and`, File: "/tmp/jd-nginx-test/conf.d/dup.conf", Line: 2}},
+		},
+		{
+			name:   "a timestamped path used twice in a spaced file is placed whole at its second use",
+			output: `2026/09/28 01:33:59 [emerg] 3582985#3582985: the same path name "/tmp/jd-nginx-test/cache" used in /tmp/jd-nginx-test/conf.d/zz spaced dup.conf:1 and in /tmp/jd-nginx-test/conf.d/zz spaced dup.conf:2`,
+			want:   []Diagnostic{{Level: "emerg", Message: `the same path name "/tmp/jd-nginx-test/cache" used in /tmp/jd-nginx-test/conf.d/zz spaced dup.conf:1 and`, File: "/tmp/jd-nginx-test/conf.d/zz spaced dup.conf", Line: 2}},
+		},
+		{
+			name: "a path with different levels is placed where they differ",
+			output: `nginx: [emerg] the same path name "/tmp/jd-nginx-test/lvl" in /tmp/jd-nginx-test/conf.d/lvl.conf:3 has the different levels than in /tmp/jd-nginx-test/conf.d/lvl.conf:4
+nginx: configuration file /tmp/jd-nginx-test/nginx.conf test failed`,
+			want: []Diagnostic{{Level: "emerg", Message: `the same path name "/tmp/jd-nginx-test/lvl" in /tmp/jd-nginx-test/conf.d/lvl.conf:3 has the different levels than`, File: "/tmp/jd-nginx-test/conf.d/lvl.conf", Line: 4}},
+		},
+		{
 			name:   "a clean test has nothing to say",
 			output: "nginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful",
 			want:   []Diagnostic{},
@@ -226,6 +245,29 @@ func TestValidationPlacesADiagnosticInAFileWithASpaceInItsName(t *testing.T) {
 	want := []Diagnostic{{Level: "emerg", Message: `unknown directive "frobnicate"`, File: broken, Line: 3}}
 	if res.Valid || !reflect.DeepEqual(res.Diagnostics, want) {
 		t.Fatalf("got %+v, want the emergency placed at %s:3", res.Diagnostics, broken)
+	}
+}
+
+// nginx names two places when a cache path is declared twice; the message
+// keeps the first, and the diagnostic opens the second, where nginx stopped.
+func TestValidationPlacesAPathUsedTwiceAtItsSecondUse(t *testing.T) {
+	root := liveNginx(t)
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	broken := filepath.Join(root, "conf.d", "zz spaced dup.conf")
+	cache := filepath.Join(root, "cache")
+	res, err := service.Validate(context.Background(), KindNginx, broken,
+		"proxy_cache_path "+cache+" keys_zone=a:1m;\nproxy_cache_path "+cache+" keys_zone=b:1m;\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Diagnostic{{
+		Level:   "emerg",
+		Message: `the same path name "` + cache + `" used in ` + broken + `:1 and`,
+		File:    broken,
+		Line:    2,
+	}}
+	if res.Valid || !reflect.DeepEqual(res.Diagnostics, want) {
+		t.Fatalf("got %+v, want the emergency placed at %s:2", res.Diagnostics, broken)
 	}
 }
 

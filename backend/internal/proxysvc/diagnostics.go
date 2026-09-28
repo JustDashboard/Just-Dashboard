@@ -62,10 +62,13 @@ func ParseNginxDiagnostics(output string) []Diagnostic {
 // conf.d/*.conf takes "zz spaced name.conf" — so it cannot end at the first
 // space. What marks where it starts is that nginx quotes what it repeats from
 // the configuration: an " in /" inside quotes is part of the message, as in
-// `open() "/srv/a in /b.conf" failed`, and the first one outside them is the
-// position. Quotes that do not pair leave the last " in /" as the best guess.
+// `open() "/srv/a in /b.conf" failed`. Of those outside quotes it is the last,
+// because two messages name a second place before it — `used in /a.conf:1 and
+// in /b.conf:2` and `in /a.conf:3 has the different levels than in
+// /a.conf:4` — and the appended one is where nginx stopped reading. Quotes
+// that do not pair leave the last " in /" of all as the best guess.
 func nginxPosition(text string) (message, file string, line int) {
-	quotes, split := 0, -1
+	quotes, split, unquoted := 0, -1, -1
 	for i := 0; i < len(text); i++ {
 		if text[i] == '"' {
 			quotes++
@@ -76,8 +79,11 @@ func nginxPosition(text string) (message, file string, line int) {
 		}
 		split = i
 		if quotes%2 == 0 {
-			break
+			unquoted = i
 		}
+	}
+	if unquoted >= 0 {
+		split = unquoted
 	}
 	if split < 0 {
 		return text, "", 0

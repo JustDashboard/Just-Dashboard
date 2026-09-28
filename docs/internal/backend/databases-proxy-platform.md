@@ -436,11 +436,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   them) and `Warnings`, the warn-level count — nginx exits 0 through a conflicting server name it is
   "ignoring", and that site then never serves. nginx writes a test's messages as `nginx: [warn] … in
   /path:12` when it can open its startup error log (root on the host) and as the timestamped error-log
-  line when it cannot; both are read, the path whole from the first ` in /` outside the quotes nginx
-  puts round what it repeats, so a file named with a space keeps its place. `ParseCaddyDiagnostics`
-  reads `caddy validate`'s JSON warnings and its `Error:` line, best effort, taking the position after
-  `, at ` before any other path-like text so an upstream URL is never read as one. A diagnostic's file
-  is named with its symlinks resolved, the form
+  line when it cannot; both are read, the path whole from the last ` in /` outside the quotes nginx
+  puts round what it repeats, so a file named with a space keeps its place and a message naming two
+  places (`used in /a.conf:1 and in /a.conf:2`) opens the second, where nginx stopped.
+  `ParseCaddyDiagnostics` reads `caddy validate`'s JSON warnings and its `Error:` line, best effort,
+  taking the position after `, at ` before any other path-like text so an upstream URL is never read
+  as one. A diagnostic's file is named with its symlinks resolved, the form
   `allowedPath` gives the file being edited, so a Debian site's error names its sites-available file
   rather than the sites-enabled link nginx included. Caddy is validated against a copy in a private
   directory under `/tmp/just-dashboard`, the one temporary directory docker-compose mounts at the same
