@@ -264,3 +264,47 @@ export type NginxModules = {
   /** Why a dynamic module's state could not be read. */
   detail?: string
 }
+
+/** One `POST /proxy/streams/test`: dialled from the host, inside five seconds. */
+export type StreamTestRequest = {
+  target: string
+  port: number
+  protocol: "tcp" | "udp"
+  /** The forward's target, or the stream's own port through nginx. */
+  mode: "upstream" | "nginx"
+  /** A real query to send; absent picks DNS for 53 and NTP for 123. */
+  query?: "dns" | "ntp"
+}
+
+/**
+ * What a test saw. `closed` is a connection accepted and dropped at once;
+ * `silent` is a UDP port that is not DNS or NTP, which is not dialled.
+ */
+export type StreamTestOutcome =
+  | "connected"
+  | "answered"
+  | "closed"
+  | "silent"
+  | "refused"
+  | "timeout"
+  | "dns"
+  | "unreachable"
+  | "error"
+
+export type StreamTestResult = {
+  mode: "upstream" | "nginx"
+  protocol: "tcp" | "udp"
+  /** What was dialled, a name resolved to its address. */
+  address: string
+  outcome: StreamTestOutcome
+  ok: boolean
+  /** The connect (TCP) or the reply (UDP), in milliseconds. */
+  ms: number
+  /** What the service sent first, unprompted. */
+  banner?: string
+  /** A DNS or NTP reply, summarised. */
+  answer?: string
+  detail: string
+  warnings: string[]
+  error?: string
+}

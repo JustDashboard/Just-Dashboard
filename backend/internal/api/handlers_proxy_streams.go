@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -27,6 +29,9 @@ func (s *Server) mountStreamRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPost, "/preview", s.handle(s.handleStreamPreview))
+		// A test sends traffic to an address the caller chose, which is the
+		// scanner boundary: admin only, like the network tools.
+		r.Method(http.MethodPost, "/test", s.handle(s.handleStreamTest))
 		r.Method(http.MethodPost, "/", s.handle(s.handleStreamApply))
 		r.Method(http.MethodGet, "/include/plan", s.handle(s.handleStreamIncludePlan))
 		r.Method(http.MethodPost, "/include", s.handle(s.handleStreamIncludeApply))
@@ -178,6 +183,24 @@ func (s *Server) handleStreamPreview(w http.ResponseWriter, r *http.Request) err
 		out["conflict"] = portConflict{PortOwner: refused.PortOwner, Suggest: refused.Suggest, Message: refused.Error()}
 	}
 	httpx.JSON(w, http.StatusOK, out)
+	return nil
+}
+
+// handleStreamTest dials a stream's upstream, or its own port through nginx,
+// from this host. It changes nothing, but it is audited because it makes the
+// server connect where the caller says.
+func (s *Server) handleStreamTest(w http.ResponseWriter, r *http.Request) error {
+	var req proxysvc.StreamDialRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	res, err := proxysvc.DialStream(r.Context(), req)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "proxy.stream.test", net.JoinHostPort(req.Target, strconv.Itoa(req.Port)),
+		map[string]any{"protocol": req.Protocol, "mode": req.Mode, "outcome": res.Outcome})
+	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
 

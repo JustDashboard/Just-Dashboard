@@ -12,6 +12,9 @@ import type {
   StreamSpec,
   StreamState,
   StreamStatus,
+  StreamTestOutcome,
+  StreamTestRequest,
+  StreamTestResult,
 } from "@/lib/types"
 import type { DotTone, Verdict } from "@/components/status-dot"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
@@ -630,4 +633,86 @@ export function containerTargets(
       a.container.localeCompare(b.container) ||
       a.upstream.localeCompare(b.upstream),
   )
+}
+
+/** A `host:port` upstream split for a dial, or null for a `unix:` socket or one without a port. */
+export function upstreamAddress(upstream: string): { host: string; port: number } | null {
+  if (upstream.startsWith("unix:")) return null
+  const at = upstream.lastIndexOf(":")
+  const port = Number(upstream.slice(at + 1))
+  if (at <= 0 || !Number.isInteger(port) || port < 1 || port > 65535) return null
+  return { host: upstream.slice(0, at).replace(/^\[|\]$/g, ""), port }
+}
+
+/**
+ * The dials a stream's Test makes: its upstream for each protocol it carries,
+ * and, while nginx holds its port, the same through nginx on the host — on
+ * loopback for a stream taking every address. The query follows the
+ * upstream's port, since a stream on 5353 in front of a resolver on 53 still
+ * carries DNS. A `unix:` upstream is not dialled: the socket may not be in the
+ * dashboard's container.
+ */
+export function streamTests(stream: StreamEntry): StreamTestRequest[] {
+  const upstream = upstreamAddress(stream.upstream)
+  const query = upstream?.port === 53 ? "dns" : upstream?.port === 123 ? "ntp" : undefined
+  const loopback =
+    !stream.address || stream.address === "0.0.0.0"
+      ? "127.0.0.1"
+      : stream.address === "::"
+        ? "::1"
+        : stream.address
+  const out: StreamTestRequest[] = []
+  for (const protocol of ["tcp", "udp"] as const) {
+    if (!carries(stream, protocol)) continue
+    if (upstream) {
+      out.push({ target: upstream.host, port: upstream.port, protocol, mode: "upstream", query })
+    }
+    if (stream.state === "live") {
+      out.push({ target: loopback, port: stream.listen, protocol, mode: "nginx", query })
+    }
+  }
+  return out
+}
+
+const TEST_OUTCOMES: Record<StreamTestOutcome, string> = {
+  connected: "connected",
+  answered: "answered",
+  closed: "closed at once",
+  silent: "not testable",
+  refused: "refused",
+  timeout: "timed out",
+  dns: "name did not resolve",
+  unreachable: "unreachable",
+  error: "failed",
+}
+
+/** Where a test dialled, as its line in the popover names it. */
+export function testPlace(result: Pick<StreamTestResult, "mode" | "protocol">): string {
+  return `${result.mode === "nginx" ? "Through nginx" : "Upstream"} · ${result.protocol.toUpperCase()}`
+}
+
+/** One result as a Status reads it. */
+export function testStatus(result: StreamTestResult): { tone: DotTone; label: string } {
+  const label = result.ok
+    ? `${TEST_OUTCOMES[result.outcome]} in ${result.ms} ms`
+    : TEST_OUTCOMES[result.outcome]
+  if (result.ok) return { tone: result.warnings.length > 0 ? "warning" : "running", label }
+  if (result.outcome === "silent") return { tone: "unknown", label }
+  if (result.outcome === "closed") return { tone: "warning", label }
+  return { tone: "danger", label }
+}
+
+/**
+ * A test's results as the card's one Status: the first that failed, named by
+ * where, or every dial through when none did.
+ */
+export function testSummary(results: StreamTestResult[]): { tone: DotTone; label: string } {
+  const failed = results.find((result) => !result.ok && result.outcome !== "silent")
+  if (failed) {
+    const status = testStatus(failed)
+    return { ...status, label: `${testPlace(failed)} ${status.label}` }
+  }
+  if (!results.some((result) => result.ok)) return { tone: "unknown", label: "Nothing testable" }
+  const warned = results.some((result) => result.warnings.length > 0)
+  return { tone: warned ? "warning" : "running", label: "Test passed" }
 }

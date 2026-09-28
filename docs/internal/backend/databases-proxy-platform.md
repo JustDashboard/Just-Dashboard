@@ -455,6 +455,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
     nginx, http included) and `limit_conn` in the server; `UploadRate`/`DownloadRate` (KiB/s, per
     connection) render `proxy_upload_rate`/`proxy_download_rate`. Only zones declared under the stream's own
     names, each used once, read back; any other zone or cap is hand-written.
+  - **Testing a stream** (`stream_dial.go`). `POST /proxy/streams/test {target, port, protocol, mode,
+    query?}` (system.admin — it dials an address the caller chose — and audited `proxy.stream.test`) dials
+    from the host's network namespace inside 5 s: `mode: upstream` the forward's target, `mode: nginx` the
+    stream's own port (the page sends 127.0.0.1 or ::1 for a wildcard listen). TCP waits up to 2 s for a
+    banner; `query: dns` (default for port 53) sends a root NS query, over TCP with its length prefix, and
+    `ntp` (default for 123, UDP only) a client packet; any other UDP port is answered `silent` without
+    sending, since a datagram the service does not understand proves nothing. Outcomes: connected,
+    answered, closed (nginx accepted and dropped — an access rule, a cap or an unreachable upstream),
+    silent, refused, timeout, dns, unreachable, error. A hostname upstream carries a warning that nginx
+    resolves it once per reload. `unix:` upstreams are not tested (the socket path may not be in the
+    container). netsec's PortCheck/BannerGrab are not reused: their own 6 s timeouts and a read that
+    ignores the context would overrun the 5 s cap, and they answer in prose rather than an outcome.
   - **A save** (`ApplyStream(spec, previous, reload)`) refuses a new name, or a rename, onto a taken one
     (409 `stream_exists`) and a port another stream, a site or another program holds (`PortInUseError`,
     409 `port_in_use` on `spec.listen` with the next free port): `nginx -t` passes all three, and the
