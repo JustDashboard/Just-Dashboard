@@ -1,27 +1,44 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
-import { ArrowRight, Code, FolderOpen, Globe, Plus, Trash, Warning } from "@/components/icons"
+import {
+  ArrowRight,
+  Code,
+  FolderOpen,
+  Globe,
+  Plus,
+  Trash,
+  Warning,
+  type Icon,
+} from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post } from "@/lib/api"
+import { ApiError, get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type {
   AuthFile,
   Certificate,
+  Container,
   DomainCheck,
+  DroppedLine,
+  Listener,
   SiteLocation,
+  SitePreview,
+  SiteRead,
   SiteResult,
   SiteSpec,
 } from "@/lib/types"
+import { plural } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
+import { ChoiceCard, ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { ProductLogo } from "@/components/product-logo"
 import { CodeEditor } from "@/components/code-editor"
+import { DiffView } from "@/components/files/diff-view"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { Group, Pane } from "@/components/panel"
+import { Modal } from "@/components/modal"
+import { Group, Pane, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, Notice } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
@@ -30,7 +47,49 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  deriveIdentity,
+  fileNameProblem,
+  fixedFor,
+  FOLLOW_DOMAINS,
+  type IdentityFixed,
+} from "@/components/proxy/site-identity"
+import { ConfigEditor } from "@/components/proxy/config-editor"
+import {
+  changeCount,
+  changesDiff,
+  draftFate,
+  droppedCount,
+  droppedDiff,
+  movableLines,
+  sameSpec,
+  specFromServer,
+  withMovedLines,
+  type DraftBase,
+} from "@/components/proxy/site-draft"
+import { NEW_SITE_DRAFT } from "@/components/proxy/site-link"
+import {
+  applyPreset,
+  BLANK,
+  leavePreset,
+  presetById,
+  PRESETS,
+} from "@/components/proxy/site-presets"
+import { saveOutcome, saveRequest, sendableSpec } from "@/components/proxy/site-save"
+import {
+  nothingListening,
+  upstreamOptions,
+  type UpstreamOption,
+} from "@/components/proxy/upstream-options"
+import { UpstreamPicker } from "@/components/proxy/upstream-picker"
 
 /**
  * Putting a domain in front of a port, without writing nginx.
@@ -84,25 +143,23 @@ export function SiteForm({
   )
 }
 
-const BLANK: SiteSpec = {
-  name: "",
-  domains: [],
-  kind: "proxy",
-  upstream: "http://127.0.0.1:3000",
-  tls: false,
-  forceHttps: true,
-  hsts: true,
-  http2: true,
-  webSockets: true,
-  gzip: true,
-  blockExploits: true,
-  securityHeaders: true,
-  clientMaxBody: "50m",
-  proxyTimeout: 60,
-  allowFrom: [],
-  denyFrom: [],
-  accessLog: true,
-  locations: [],
+/**
+ * The footer's saves: an enabled or new site is saved, or saved and
+ * reloaded; a disabled one is saved as it is, or enabled and reloaded.
+ */
+type SaveMode = "save" | "reload" | "keep" | "enable"
+const SAVE_MODES: Record<SaveMode, { reload: boolean; enable?: boolean }> = {
+  save: { reload: false },
+  reload: { reload: true },
+  keep: { reload: false },
+  enable: { reload: true, enable: true },
+}
+
+/** The glyph for a preset with no product of its own: its kind's. */
+const KIND_MARK: Record<SiteSpec["kind"], Icon> = {
+  proxy: Globe,
+  static: FolderOpen,
+  redirect: ArrowRight,
 }
 
 function SiteFormBody({
@@ -122,17 +179,63 @@ function SiteFormBody({
   const source = editing ?? copyFrom
   // Kept for the tab while the form is open (the panel forgets it on close):
   // a site is a long form, and a look at a port or a certificate half-way
-  // through it should not mean typing it again. An existing site is read
-  // back from the server on every open, as before.
-  const draft = `proxy.site.form.${source ?? "new"}`
+  // through it should not mean typing it again. An existing site's draft
+  // outlives a trip away only while its file is still the version the draft
+  // started from; the server's copy used to replace it on every open.
+  const draft = source ? `proxy.site.form.${source}` : NEW_SITE_DRAFT
   const [spec, setSpec] = useSessionState<SiteSpec>(`${draft}.spec`, BLANK)
   const [domainText, setDomainText] = useSessionState(`${draft}.domains`, "")
-  const [preview, setPreview] = useState("")
-  const [warnings, setWarnings] = useState<string[]>([])
+  // The preset last picked, drawn as the chosen card; the fields it filled
+  // stay the operator's to change.
+  const [preset, setPreset] = useSessionState<string | null>(`${draft}.preset`, null)
+  const presetNote = useRef<HTMLParagraphElement>(null)
+  // Whether somebody chose the upstream — typed, picked, a preset's or a
+  // link's. Until then it is BLANK's suggestion, and a blank form opened on
+  // a warning that nothing listens behind an address nobody had given.
+  const [upstreamSet, setUpstreamSet] = useSessionState(`${draft}.upstreamSet`, false)
+  // The rendered file and where it goes, for the spec named here: a preview
+  // of another name says nothing about this one's file.
+  const [preview, setPreview] = useState<(SitePreview & { name: string }) | null>(null)
   const [previewError, setPreviewError] = useState("")
   const [managed, setManaged] = useSessionState(`${draft}.managed`, true)
-  const [busy, setBusy] = useState(false)
+  // Which of the name and certificate paths the operator has set, so that
+  // typing the domains stops rewriting them.
+  const [fixed, setFixed] = useSessionState<IdentityFixed>(`${draft}.fixed`, FOLLOW_DOMAINS)
+  // The save in flight, so the button pressed is the one that spins.
+  const [busy, setBusy] = useState<SaveMode | "anyway" | null>(null)
   const [loaded, setLoaded] = useState(source === null)
+  // Whether nginx reads the site being edited, whether it is in conf.d, and
+  // whether nginx serves a file of its own under its name instead, as it was
+  // read back; each preview then says all three afresh.
+  const [readFile, setReadFile] = useState<Pick<SiteRead, "enabled" | "confd" | "servedCopy">>({})
+  // A save refused over a name another server block claims, with the
+  // server's sentence saying which of the two nginx answers. Kept with the
+  // spec it was about, so any edit puts the question away.
+  const [conflict, setConflict] = useState<{
+    message: string
+    mode: SaveMode
+    spec: SiteSpec
+  } | null>(null)
+  const conflictRef = useRef<HTMLDivElement>(null)
+  // What the draft started from: the file's version and the spec the form
+  // read from it, or the spec a new site opened with. Unsaved changes are
+  // measured against it.
+  const [base, setBase] = useSessionState<DraftBase | null>(`${draft}.base`, null)
+  // The file as last read, for an edit: what the Changes tab compares with.
+  const [disk, setDisk] = useState<SiteRead | null>(null)
+  // Bumped to read the file again: after the raw editor saved it, after a
+  // save refused because it changed, or when a preview found a newer one.
+  const [reads, setReads] = useState(0)
+  // A newer version of the file under a draft with edits in it — or the
+  // file gone — waiting for the operator to say which of the two wins.
+  const [stale, setStale] = useState<SiteRead | "gone" | null>(null)
+  const staleRef = useRef<HTMLDivElement>(null)
+  // A save was refused because the file changed: the question is asked
+  // even of a draft with no edits, since Save is what was pressed.
+  const refused = useRef(false)
+  const [discarding, setDiscarding] = useState(false)
+  const [rawOpen, setRawOpen] = useState(false)
+  const customRef = useRef<HTMLTextAreaElement>(null)
 
   const set = useCallback(
     <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => {
@@ -141,40 +244,82 @@ function SiteFormBody({
     [setSpec],
   )
 
+  // The file as it is now becomes the draft, and what it is measured from.
+  const take = (r: SiteRead) => {
+    const fresh = specFromServer(r.spec)
+    setSpec(fresh)
+    setDomainText(r.spec.domains.join(" "))
+    setFixed(fixedFor(r.spec, true))
+    setBase({ digest: r.digest, spec: fresh })
+    setStale(null)
+  }
+  // The draft goes on, now measured against — and saved over — the file as
+  // it is now, or written as a new file where the old one went.
+  const keepDraft = () => {
+    if (stale === "gone") setBase((b) => (b ? { ...b, digest: "" } : b))
+    else if (stale) setBase({ digest: stale.digest, spec: specFromServer(stale.spec) })
+    setStale(null)
+  }
+
   // Load an existing site back into the form — as itself, or as the start of
   // a new one with the name, domains and certificate paths cleared, since
-  // those three are the things a duplicate exists to change.
+  // those three are the things a duplicate exists to change. A draft already
+  // under way is kept while the file is the version it started from, given
+  // way to the file when nothing in it was changed, and otherwise the
+  // operator is asked which of the two wins.
+  const onRead = useEffectEvent((r: SiteRead) => {
+    if (copyFrom && !editing) {
+      if (!base) {
+        const copied: SiteSpec = {
+          ...specFromServer(r.spec),
+          name: "",
+          domains: [],
+          certPath: undefined,
+          keyPath: undefined,
+          managedAcme: false,
+        }
+        setSpec(copied)
+        setDomainText("")
+        setManaged(true)
+        setFixed(FOLLOW_DOMAINS)
+        setBase({ digest: "", spec: copied })
+      }
+      setLoaded(true)
+      return
+    }
+    setDisk(r)
+    setManaged(r.managed)
+    setReadFile({ enabled: r.enabled, confd: r.confd, servedCopy: r.servedCopy })
+    const fate = draftFate(base, spec, r.digest)
+    if (fate === "stale" || (fate === "take" && refused.current)) setStale(r)
+    else if (fate === "take") take(r)
+    refused.current = false
+    setLoaded(true)
+  })
+  // The file went while a draft of it was kept: the draft can be saved as
+  // the file again, or let go.
+  const onReadFailed = useEffectEvent((err: unknown) => {
+    if (editing && base && err instanceof ApiError && err.status === 404) {
+      setStale("gone")
+      setLoaded(true)
+      return
+    }
+    notify.error("Could not load the site", err)
+  })
   useEffect(() => {
     if (!open || !source) return
     const controller = new AbortController()
-    get<{ spec: SiteSpec; managed: boolean }>(
-      `/proxy/sites/${encodeURIComponent(source)}`,
-      undefined,
-      controller.signal,
-    )
-      .then((r) => {
-        if (copyFrom && !editing) {
-          setSpec({
-            ...BLANK,
-            ...r.spec,
-            name: "",
-            domains: [],
-            certPath: undefined,
-            keyPath: undefined,
-            managedAcme: false,
-          })
-          setDomainText("")
-          setManaged(true)
-        } else {
-          setSpec({ ...BLANK, ...r.spec })
-          setDomainText(r.spec.domains.join(" "))
-          setManaged(r.managed)
-        }
-        setLoaded(true)
-      })
-      .catch((err) => !controller.signal.aborted && notify.error("Could not load the site", err))
+    get<SiteRead>(`/proxy/sites/${encodeURIComponent(source)}`, undefined, controller.signal)
+      .then((r) => onRead(r))
+      .catch((err) => !controller.signal.aborted && onReadFailed(err))
     return () => controller.abort()
-  }, [open, source, copyFrom, editing, setSpec, setDomainText, setManaged])
+  }, [open, source, reads])
+  // A preview says which version of the file is on disk now; one other than
+  // the version last read means it changed while the form was open, and it
+  // is read again so the draft and the Changes tab go by what is there.
+  const onPreviewed = useEffectEvent((r: SitePreview) => {
+    if (editing && disk && r.digest && r.digest !== disk.digest) setReads((n) => n + 1)
+  })
 
   // The live preview. Debounced, because it is a request per keystroke
   // otherwise and the answer only matters once typing stops.
@@ -187,24 +332,23 @@ function SiteFormBody({
     const timer = setTimeout(
       () => {
         if (!ready) {
-          setPreview("")
-          setWarnings([])
+          setPreview(null)
           setPreviewError("")
           return
         }
-        post<{ content: string; warnings: string[] }>(
+        post<SitePreview>(
           "/proxy/sites/preview",
-          { spec },
+          { spec: sendableSpec(spec) },
           { signal: controller.signal },
         )
           .then((r) => {
-            setPreview(r.content)
-            setWarnings(r.warnings)
+            setPreview({ ...r, name: spec.name })
             setPreviewError("")
+            onPreviewed(r)
           })
           .catch((err) => {
             if (controller.signal.aborted) return
-            setPreview("")
+            setPreview(null)
             setPreviewError(String(err))
           })
       },
@@ -231,77 +375,237 @@ function SiteFormBody({
     [],
     { enabled: open && spec.tls },
   )
-
-  /**
-   * The file name the server will accept: lowercase, starting with a letter or
-   * a digit. Stripping the disallowed characters is not enough on its own —
-   * `*.example.com` becomes `.example.com`, which the server refuses, and the
-   * form has no name field to correct it in, so the first thing anybody
-   * issuing a wildcard did was hit an error they could not fix.
-   */
-  const fileNameFor = (domain: string) =>
-    domain
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]/g, "")
-      .replace(/^[^a-z0-9]+/, "")
-      .slice(0, 64)
+  // What is running for the upstream to point at, re-read while the form is
+  // open: an app started half-way through filling it in should appear, and
+  // the warning that nothing listens should go.
+  const forwards = open && spec.kind === "proxy"
+  const listeners = usePoll<Listener[]>((signal) => get("/ports", undefined, signal), 15_000, [], {
+    enabled: forwards,
+  })
+  // Docker is optional: a host without it just has no containers to offer.
+  const containers = usePoll<Container[]>(
+    (signal) => get("/docker/containers/", { all: "false" }, signal),
+    30_000,
+    [],
+    { enabled: forwards },
+  )
+  const options = useMemo(
+    () => upstreamOptions(listeners.data, containers.data),
+    [listeners.data, containers.data],
+  )
+  const picker = {
+    options,
+    listeners: listeners.data,
+    containers: containers.data,
+    loading: listeners.loading,
+    failed: Boolean(listeners.error) && !listeners.data,
+    onRetry: listeners.refresh,
+  }
 
   const commitDomains = (text: string) => {
     setDomainText(text)
     const domains = text.split(/[\s,]+/).filter(Boolean)
-    // A wildcard certificate is issued for the parent zone, so that is where
-    // certbot puts it — /etc/letsencrypt/live/example.com, never
-    // live/*.example.com, which is not a directory name at all.
-    const lineage = domains[0]?.replace(/^\*\./, "")
-    setSpec((s) => ({
-      ...s,
-      domains,
-      // The file is named after the first domain unless somebody has already
-      // typed a name. A site called "site-1" is one nobody can find later.
-      name: s.name || (domains[0] ? fileNameFor(domains[0]) : ""),
-      certPath:
-        s.certPath || (lineage ? `/etc/letsencrypt/live/${lineage}/fullchain.pem` : undefined),
-      keyPath: s.keyPath || (lineage ? `/etc/letsencrypt/live/${lineage}/privkey.pem` : undefined),
-    }))
+    setSpec((s) => ({ ...s, domains, ...deriveIdentity(domains, s, fixed) }))
   }
 
-  const save = async (reload: boolean) => {
-    setBusy(true)
+  // A certificate path typed by hand stays; emptied, it follows the domains
+  // again.
+  const setCertificate = (key: "certPath" | "keyPath", value: string) => {
+    set(key, value)
+    setFixed((f) => ({ ...f, [key]: value !== "" }))
+  }
+  // A name typed by hand stays whatever the domains become, emptied or not:
+  // "Match the domain" is the way back.
+  const setName = (name: string) => {
+    set("name", name)
+    setFixed((f) => ({ ...f, name: true }))
+  }
+  const follow = (parts: (keyof IdentityFixed)[]) => {
+    const unfixed = { ...fixed }
+    for (const part of parts) unfixed[part] = false
+    setFixed(unfixed)
+    setSpec((s) => ({ ...s, ...deriveIdentity(s.domains, s, unfixed) }))
+  }
+  const choosePreset = (id: string) => {
+    const chosen = presetById(id)
+    if (!chosen) return
+    setSpec((s) => applyPreset(s, chosen))
+    setPreset(id)
+    setUpstreamSet(true)
+    // What to set on the application's side lands under the cards, often
+    // past the pane's edge on a phone.
+    requestAnimationFrame(() => presetNote.current?.scrollIntoView({ block: "nearest" }))
+  }
+  // Another kind picked by hand is no longer the preset's site: its card
+  // lets go, its note goes, and so does what it put in.
+  const chooseKind = (kind: SiteSpec["kind"]) => {
+    const chosen = presetById(preset)
+    if (chosen && chosen.spec.kind !== kind) {
+      setSpec((s) => leavePreset(s, chosen, kind))
+      setPreset(null)
+      return
+    }
+    set("kind", kind)
+  }
+  const setUpstream = (upstream: string) => {
+    set("upstream", upstream)
+    setUpstreamSet(true)
+  }
+
+  const save = async (mode: SaveMode, allowConflict = false) => {
+    setBusy(allowConflict ? "anyway" : mode)
     try {
-      const res = await post<SiteResult>("/proxy/sites/", {
-        spec,
-        enable: true,
-        reload,
-        overwrite: editing !== null,
-      })
-      notify.success(res.reloaded ? `${spec.name} is live` : `${spec.name} saved`, {
-        description: res.reloaded
-          ? undefined
-          : "nginx has not reloaded yet, so the site is on disk but not serving.",
-      })
+      const existing = editing !== null
+      const res = await post<SiteResult>(
+        "/proxy/sites/",
+        saveRequest(spec, {
+          existing,
+          ...SAVE_MODES[mode],
+          allowConflict,
+          baseDigest: base?.digest,
+        }),
+      )
+      const outcome = saveOutcome(res, { existing })
+      notify[outcome.tone](outcome.title, { description: outcome.description })
       onSaved(res.reloaded)
       onOpenChange(false)
     } catch (err) {
-      notify.error("Not applied", err)
+      if (err instanceof ApiError && err.code === "name_conflict") {
+        setConflict({ message: err.message, mode, spec })
+      } else if (err instanceof ApiError && err.code === "site_changed") {
+        // Somebody saved the file after the form read it. Nothing was
+        // written: the file is read again and the operator asked which of
+        // the two wins, rather than their change being written over.
+        refused.current = true
+        setReads((n) => n + 1)
+      } else {
+        notify.error("Not applied", err)
+      }
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
-  const ready = spec.domains.length > 0 && spec.name !== "" && preview !== ""
+  // The refusal is said where the question is: focus moves onto it, so the
+  // next Tab reaches "Save anyway" and a screen reader reads it, instead of
+  // staying on a footer button that simply comes back enabled.
+  useEffect(() => {
+    if (!conflict) return
+    conflictRef.current?.scrollIntoView({ block: "nearest" })
+    conflictRef.current?.focus({ preventScroll: true })
+  }, [conflict])
+  const conflictShown = conflict?.spec === spec ? conflict : null
+  useEffect(() => {
+    if (!stale) return
+    staleRef.current?.scrollIntoView({ block: "nearest" })
+    staleRef.current?.focus({ preventScroll: true })
+  }, [stale])
+
+  // Unsaved changes: the draft is not what it started from. An edit whose
+  // file has not been read yet has nothing to be measured against.
+  const start = base?.spec ?? (source ? undefined : BLANK)
+  const dirty = start !== undefined && !sameSpec(spec, start)
+  // Every way out of the panel — Escape, the overlay, the close button —
+  // comes through here, so one question covers them all. A trip to another
+  // page is not a way out: the draft is kept for the tab.
+  const requestClose = (next: boolean) => {
+    if (busy) return
+    if (next || !dirty) onOpenChange(next)
+    else setDiscarding(true)
+  }
+
+  // What the identity would be if nothing were typed by hand, for the
+  // "Match the domain" actions.
+  const derived = deriveIdentity(spec.domains, spec, FOLLOW_DOMAINS)
+  const file = preview?.name === spec.name ? preview : null
+  const nameProblem = editing ? undefined : fileNameProblem(spec.name)
+  const nameError =
+    nameProblem && (spec.name !== "" || fixed.name)
+      ? nameProblem
+      : !editing && file?.exists
+        ? `A site called ${spec.name} already exists. Pick another name, or open that site to edit it.`
+        : !editing && file?.enabledElsewhere
+          ? `${file.enabledElsewhere}, so the name is taken. Pick another name.`
+          : undefined
+  const certificateFollows =
+    spec.domains.length === 0 ||
+    (derived.certPath === spec.certPath && derived.keyPath === spec.keyPath)
+  const idle =
+    spec.kind === "proxy" && (source !== null || upstreamSet)
+      ? nothingListening(spec.upstream ?? "", picker.listeners, picker.containers)
+      : undefined
+  const chosenPreset = !source ? presetById(preset) : undefined
+  const warnings = preview?.warnings ?? []
+
+  // Not while the file changed under the draft: the save would be refused
+  // until the operator says which of the two wins.
+  const ready =
+    spec.domains.length > 0 &&
+    spec.name !== "" &&
+    file !== null &&
+    !nameProblem &&
+    !stale &&
+    (editing !== null || (!file.exists && !file.enabledElsewhere))
+  // A disabled site is saved as it is or enabled on purpose; "Save and
+  // reload" did neither, and reloading changes nothing about a file nginx
+  // does not read.
+  const disabled = editing !== null && (file?.enabled ?? readFile.enabled) === false
+  // Nor is a site disabled whose sites-enabled entry is a file of its own:
+  // nginx serves that file, and a save here does not reach it.
+  const servedCopy = editing !== null && (file?.servedCopy ?? readFile.servedCopy) === true
+  // A conf.d site is on while its name ends in .conf, and a save does not
+  // rename it: enabling one is not the form's to offer.
+  const confd = file?.confd ?? readFile.confd
   const certKnown =
     !spec.tls || !spec.certPath || !certs.data || certs.data.some((c) => c.path === spec.certPath)
   const issueHref = `/proxy/certificates?issue=${encodeURIComponent(spec.domains.join(" "))}`
 
+  // What a save drops of the file that the form cannot hold: as the latest
+  // preview says for this draft, which leaves out lines moved into the extra
+  // configuration, or, until there is one, as the file was read.
+  const dropped: DroppedLine[] | undefined = editing ? (file?.dropped ?? disk?.dropped) : undefined
+  const droppedLines = dropped ? droppedCount(dropped) : 0
+  const movable = dropped ? movableLines(dropped, spec.custom) : []
+  const filePath = file?.path
+  const fileName = filePath ? filePath.slice(filePath.lastIndexOf("/") + 1) : spec.name
+  const moveLines = () => {
+    if (!dropped) return
+    set("custom", withMovedLines(spec.custom, dropped))
+    // Where they went, in view, rather than a notice that shrinks.
+    requestAnimationFrame(() => customRef.current?.scrollIntoView({ block: "nearest" }))
+  }
+  // What the save writes over the file as it is on disk.
+  const changes =
+    editing && disk && file ? changesDiff(disk.content, file.content, fileName) : undefined
+  const changed = changeCount(changes ?? null)
+
+  // Ctrl or Cmd+S is the footer's own command: save and reload, or, for a
+  // site nginx does not read, save it as it is. The raw editor and the
+  // discard question over the form are their own.
+  const primary: SaveMode = servedCopy || disabled ? "keep" : "reload"
+  const onSaveKey = useEffectEvent((event: KeyboardEvent) => {
+    const key = event.key.toLowerCase() === "s" && (event.ctrlKey || event.metaKey)
+    if (!key || event.altKey || event.shiftKey || rawOpen || discarding) return
+    event.preventDefault()
+    if (ready && busy === null) void save(primary)
+  })
+  useEffect(() => {
+    if (!open) return
+    const listener = (event: KeyboardEvent) => onSaveKey(event)
+    window.addEventListener("keydown", listener)
+    return () => window.removeEventListener("keydown", listener)
+  }, [open])
+
   return (
     <SidePanel
       open={open}
-      onOpenChange={(o) => !busy && onOpenChange(o)}
+      onOpenChange={requestClose}
       width="xl"
       title={
         <>
           <ProductLogo id="nginx-static" size="sm" />
           {editing ? `Edit ${editing}` : copyFrom ? `New site from ${copyFrom}` : "New site"}
+          {dirty && <Tag tone="warning">unsaved</Tag>}
         </>
       }
       description={
@@ -311,27 +615,206 @@ function SiteFormBody({
       }
       bodyClassName="flex min-h-0 flex-1 flex-col gap-0 p-0 lg:flex-row"
       footer={
-        <>
-          <span className="mr-auto text-hint text-muted-foreground">
-            Validated with nginx&rsquo;s own parser before it takes effect, and rolled back if the
-            test fails.
-          </span>
-          <Button size="sm" variant="outline" onClick={() => save(false)} disabled={!ready || busy}>
-            Save only
-          </Button>
-          <Button size="sm" onClick={() => save(true)} disabled={!ready || busy} pending={busy}>
-            Save and reload
-          </Button>
-        </>
+        servedCopy ? (
+          <>
+            <span className="mr-auto text-hint text-muted-foreground">
+              nginx serves <code className="font-mono">sites-enabled/{spec.name}</code>, a file of
+              its own, not this one. Saving here changes nothing it serves until that file is
+              replaced by a link to this one.
+            </span>
+            <Button
+              size="sm"
+              onClick={() => save("keep")}
+              disabled={!ready || busy !== null}
+              pending={busy === "keep"}
+              aria-keyshortcuts="Control+S Meta+S"
+            >
+              Save
+            </Button>
+          </>
+        ) : disabled ? (
+          <>
+            <span className="mr-auto text-hint text-muted-foreground">
+              {file?.enabledElsewhere
+                ? `${file.enabledElsewhere}, so this site can be neither enabled nor tested under its name.`
+                : confd
+                  ? "Disabled: nginx reads only the conf.d files ending in .conf. nginx tests it as if it did, and it stays off until it is renamed."
+                  : "Disabled. nginx tests it as if enabled, and it stays off until you enable it."}
+            </span>
+            {!file?.enabledElsewhere && !confd && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => save("enable")}
+                disabled={!ready || busy !== null}
+                pending={busy === "enable"}
+              >
+                Save and enable
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={() => save("keep")}
+              disabled={!ready || busy !== null}
+              pending={busy === "keep"}
+              aria-keyshortcuts="Control+S Meta+S"
+            >
+              Save (stays disabled)
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="mr-auto text-hint text-muted-foreground">
+              {droppedLines > 0
+                ? `Saving drops ${plural(droppedLines, "line")} of the file, listed above.`
+                : "Validated with nginx\u2019s own parser before it takes effect, and rolled back if the test fails."}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => save("save")}
+              disabled={!ready || busy !== null}
+              pending={busy === "save"}
+            >
+              Save only
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => save("reload")}
+              disabled={!ready || busy !== null}
+              pending={busy === "reload"}
+              aria-keyshortcuts="Control+S Meta+S"
+            >
+              Save and reload
+            </Button>
+          </>
+        )
       }
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-4 lg:w-[26rem] lg:shrink-0 lg:border-r lg:border-hairline">
         <div className="space-y-6">
-          {editing && !managed && (
-            <Notice tone="warning" icon={Warning} title="This file was written by hand">
-              The form has read what it recognises. Saving replaces the file with what the form
-              produces, so anything it could not represent will be lost — the previous version is
-              kept as <code className="font-mono">.bak</code>.
+          {conflictShown && (
+            <div ref={conflictRef} role="alert" tabIndex={-1} className="rounded-lg focus-ring">
+              <Notice tone="warning" icon={Warning} title="Already served elsewhere">
+                {conflictShown.message}
+                <div className="mt-2">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => save(conflictShown.mode, true)}
+                    disabled={busy !== null}
+                    pending={busy === "anyway"}
+                  >
+                    Save anyway
+                  </Button>
+                </div>
+              </Notice>
+            </div>
+          )}
+          {stale && (
+            <div ref={staleRef} role="alert" tabIndex={-1} className="rounded-lg focus-ring">
+              <Notice
+                tone="warning"
+                icon={Warning}
+                title={
+                  stale === "gone"
+                    ? `${fileName} is not on disk any more`
+                    : `${fileName} changed on disk`
+                }
+              >
+                <p>
+                  {stale === "gone"
+                    ? "Somebody removed it after the form read it. Keeping your draft writes it again when you save."
+                    : "Somebody saved it after the form read it \u2014 by hand, in the raw editor, or from another tab. Keeping your draft saves over their change; reloading takes theirs and drops the edits made here."}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {stale !== "gone" && (
+                    <Button size="xs" variant="outline" onClick={() => take(stale)}>
+                      Reload from disk
+                    </Button>
+                  )}
+                  <Button size="xs" variant="outline" onClick={keepDraft}>
+                    Keep my draft
+                  </Button>
+                </div>
+              </Notice>
+            </div>
+          )}
+          {editing && (!managed || droppedLines > 0) && (
+            <Notice
+              tone="warning"
+              icon={Warning}
+              title={
+                droppedLines > 0
+                  ? `Saving drops ${plural(droppedLines, "line")} of this ${managed ? "file" : "hand-written file"}`
+                  : "This file was written by hand"
+              }
+            >
+              {dropped && droppedLines > 0 ? (
+                <>
+                  <p>
+                    {managed
+                      ? `Added by hand, with no field in the form, so a save leaves ${dropped.length === 1 ? "it" : "them"} out.`
+                      : `The form has no field for ${dropped.length === 1 ? "this" : "these"}, so a save leaves ${dropped.length === 1 ? "it" : "them"} out.`}
+                    {!managed && (
+                      <>
+                        {" "}
+                        The current file is kept as{" "}
+                        <code className="font-mono">{fileName}.bak</code>.
+                      </>
+                    )}
+                  </p>
+                  <Well className="mt-2 overflow-hidden p-0">
+                    <DiffView
+                      body={droppedDiff(dropped)}
+                      singleFile
+                      lineNumbers
+                      className="max-h-56"
+                    />
+                  </Well>
+                  {movable.length < dropped.length && (
+                    <p className="text-hint text-muted-foreground">
+                      Only lines directly in the server block can move as they are. The others stay
+                      only if the file is edited by hand.
+                    </p>
+                  )}
+                  {dropped.some((d) => d.reason) && (
+                    <ul className="text-hint text-muted-foreground">
+                      {dropped
+                        .filter((d) => d.reason)
+                        .map((d) => (
+                          <li key={`${d.line}:${d.text}`}>
+                            Line {d.line}: {d.reason}.
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {movable.length > 0 && (
+                      <Button size="xs" variant="outline" onClick={moveLines}>
+                        Move {plural(droppedCount(movable), "line")} into Extra configuration
+                      </Button>
+                    )}
+                    {filePath && (
+                      <Button size="xs" variant="outline" onClick={() => setRawOpen(true)}>
+                        Edit the raw file
+                      </Button>
+                    )}
+                  </div>
+                </>
+              ) : dropped ? (
+                <p>
+                  The form reads every directive in it. Saving rewrites it in the form&rsquo;s own
+                  layout, without its comments, and keeps the current file as{" "}
+                  <code className="font-mono">{fileName}.bak</code>.
+                </p>
+              ) : (
+                <p>
+                  The form has read what it recognises. Saving replaces the file with what the form
+                  produces, so anything it could not read is lost; the current file is kept as{" "}
+                  <code className="font-mono">{fileName}.bak</code>.
+                </p>
+              )}
             </Notice>
           )}
 
@@ -339,40 +822,100 @@ function SiteFormBody({
             label="Domains"
             htmlFor="site-domains"
             hint={
-              spec.name
-                ? `Space-separated. Saved as ${spec.name} in nginx's site directory.`
-                : "Space-separated. The first one names the file."
+              editing
+                ? "Space-separated."
+                : "Space-separated. The first names the file and the certificate."
             }
           >
             <Input
               id="site-domains"
               value={domainText}
               onChange={(e) => commitDomains(e.target.value)}
+              // The one field every new site needs, so the keyboard starts
+              // here rather than on the first preset card.
+              autoFocus={!editing}
               placeholder="app.example.com www.app.example.com"
               className="font-mono text-xs"
             />
           </Field>
           {spec.domains[0] && <DNSCheck domain={spec.domains[0]} />}
 
+          <Field
+            label="File name"
+            htmlFor="site-name"
+            error={nameError}
+            hint={
+              file?.path
+                ? `Saved as ${file.path}`
+                : editing
+                  ? "The file this site is saved in."
+                  : fixed.name
+                    ? "Stays as typed, whatever the domains become."
+                    : "Follows the first domain until you change it."
+            }
+            trailing={
+              !editing &&
+              fixed.name &&
+              derived.name !== "" &&
+              derived.name !== spec.name && (
+                <Button size="xs" variant="ghost" onClick={() => follow(["name"])}>
+                  Match the domain
+                </Button>
+              )
+            }
+          >
+            <Input
+              id="site-name"
+              value={spec.name}
+              readOnly={editing !== null}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="app.example.com"
+              aria-invalid={nameError ? true : undefined}
+              className={cn("font-mono text-xs", editing && "text-muted-foreground")}
+            />
+          </Field>
+
+          {!source && (
+            <FormSection title="Start from">
+              <ChoiceGrid columns={2} className="grid-cols-2">
+                {PRESETS.map((p) => (
+                  <ProductCard
+                    key={p.id}
+                    product={p.product}
+                    fallback={KIND_MARK[p.spec.kind ?? "proxy"]}
+                    label={p.label}
+                    detail={p.detail}
+                    selected={preset === p.id}
+                    onClick={() => choosePreset(p.id)}
+                  />
+                ))}
+              </ChoiceGrid>
+              {chosenPreset?.note && <FormNote ref={presetNote}>{chosenPreset.note}</FormNote>}
+            </FormSection>
+          )}
+
           <FormSection title="What it serves">
             <ChoiceGrid columns={3} className="grid-cols-3">
               {(
                 [
-                  { kind: "proxy", label: "An app", icon: Globe },
-                  { kind: "static", label: "Files", icon: FolderOpen },
-                  { kind: "redirect", label: "A redirect", icon: ArrowRight },
+                  { kind: "proxy", label: "An app" },
+                  { kind: "static", label: "Files" },
+                  { kind: "redirect", label: "A redirect" },
                 ] as const
-              ).map(({ kind, label, icon: Icon }) => (
-                <ChoiceCard
-                  key={kind}
-                  selected={spec.kind === kind}
-                  onClick={() => set("kind", kind)}
-                  className="min-h-20 justify-center"
-                >
-                  <Icon aria-hidden className="size-4 text-muted-foreground" />
-                  <span className="text-body font-medium">{label}</span>
-                </ChoiceCard>
-              ))}
+              ).map(({ kind, label }) => {
+                const Mark = KIND_MARK[kind]
+                return (
+                  <ChoiceCard
+                    key={kind}
+                    selected={spec.kind === kind}
+                    onClick={() => chooseKind(kind)}
+                    className="min-h-20 justify-center"
+                  >
+                    <Mark aria-hidden className="size-4 text-muted-foreground" />
+                    <span className="text-body font-medium">{label}</span>
+                  </ChoiceCard>
+                )
+              })}
             </ChoiceGrid>
           </FormSection>
 
@@ -380,27 +923,46 @@ function SiteFormBody({
             <Field
               label="Send it to"
               htmlFor="site-upstream"
-              hint="Where the application is listening. Usually loopback on this machine."
+              hint={
+                idle ? (
+                  <span className="text-warning">{idle}</span>
+                ) : (
+                  "Where the application is listening. Usually loopback on this machine."
+                )
+              }
             >
-              <Input
+              <UpstreamPicker
                 id="site-upstream"
                 value={spec.upstream ?? ""}
-                onChange={(e) => set("upstream", e.target.value)}
+                onChange={setUpstream}
+                options={picker.options}
+                loading={picker.loading}
+                failed={picker.failed}
+                onRetry={picker.onRetry}
                 placeholder="http://127.0.0.1:3000"
-                className="font-mono text-xs"
               />
             </Field>
           )}
           {spec.kind === "static" && (
-            <Field label="Directory" htmlFor="site-root" hint="The folder holding index.html.">
-              <Input
-                id="site-root"
-                value={spec.root ?? ""}
-                onChange={(e) => set("root", e.target.value)}
-                placeholder="/var/www/site"
-                className="font-mono text-xs"
-              />
-            </Field>
+            <>
+              <Field label="Directory" htmlFor="site-root" hint="The folder holding index.html.">
+                <Input
+                  id="site-root"
+                  value={spec.root ?? ""}
+                  onChange={(e) => set("root", e.target.value)}
+                  placeholder="/var/www/site"
+                  className="font-mono text-xs"
+                />
+              </Field>
+              <OptionList>
+                <OptionRow
+                  title="Single-page app"
+                  hint="A path with no file of its own gets index.html, so the app's router answers deep links and reloads."
+                  checked={!!spec.spa}
+                  onCheckedChange={(v) => set("spa", v)}
+                />
+              </OptionList>
+            </>
           )}
           {spec.kind === "redirect" && (
             <>
@@ -442,7 +1004,7 @@ function SiteFormBody({
                       <Input
                         id="site-cert"
                         value={spec.certPath ?? ""}
-                        onChange={(e) => set("certPath", e.target.value)}
+                        onChange={(e) => setCertificate("certPath", e.target.value)}
                         className="font-mono text-hint"
                       />
                     </Field>
@@ -450,11 +1012,21 @@ function SiteFormBody({
                       <Input
                         id="site-key"
                         value={spec.keyPath ?? ""}
-                        onChange={(e) => set("keyPath", e.target.value)}
+                        onChange={(e) => setCertificate("keyPath", e.target.value)}
                         className="font-mono text-hint"
                       />
                     </Field>
                   </FieldRow>
+                  {!certificateFollows && (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      className="-ml-2"
+                      onClick={() => follow(["certPath", "keyPath"])}
+                    >
+                      Use the domain&rsquo;s certificate
+                    </Button>
+                  )}
                   {!certKnown && (
                     <FormNote tone="warning">
                       No certificate is listed at this path. If it does not exist yet, nginx refuses
@@ -560,6 +1132,26 @@ function SiteFormBody({
                 onCheckedChange={(v) => set("accessLog", v)}
               />
             </OptionList>
+            {spec.accessLog && (
+              <Field
+                label="Log format"
+                htmlFor="site-log-format"
+                hint="Timed is what the traffic pages read latency from."
+              >
+                <Select
+                  value={spec.logFormat ?? "timed"}
+                  onValueChange={(v) => set("logFormat", v as SiteSpec["logFormat"])}
+                >
+                  <SelectTrigger id="site-log-format" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="timed">Timed (adds response time)</SelectItem>
+                    <SelectItem value="combined">Standard</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
           </FormSection>
 
           <FormSection title="Who may reach it">
@@ -609,7 +1201,11 @@ function SiteFormBody({
               title="Paths that go somewhere else"
               hint="Everything not matched by one of these goes to the site's main upstream."
             >
-              <LocationsField locations={spec.locations} onChange={(v) => set("locations", v)} />
+              <LocationsField
+                locations={spec.locations}
+                onChange={(v) => set("locations", v)}
+                picker={picker}
+              />
             </FormSection>
           )}
 
@@ -621,6 +1217,7 @@ function SiteFormBody({
             >
               <Textarea
                 id="site-custom"
+                ref={customRef}
                 value={spec.custom ?? ""}
                 onChange={(e) => set("custom", e.target.value)}
                 rows={4}
@@ -639,6 +1236,16 @@ function SiteFormBody({
               <Code className="size-3.5" />
               nginx config
             </TabsTrigger>
+            {editing && (
+              <TabsTrigger value="changes">
+                Changes
+                {changed > 0 && (
+                  <span className="numeric ml-1 text-hint font-medium text-muted-foreground">
+                    {changed}
+                  </span>
+                )}
+              </TabsTrigger>
+            )}
             <TabsTrigger value="notes">
               Notes
               {warnings.length > 0 && (
@@ -653,7 +1260,7 @@ function SiteFormBody({
               {previewError ? (
                 <EmptyNote className="my-auto text-destructive">{previewError}</EmptyNote>
               ) : preview ? (
-                <CodeEditor className="h-full" language="ini" value={preview} readOnly />
+                <CodeEditor className="h-full" language="ini" value={preview.content} readOnly />
               ) : (
                 <EmptyNote className="my-auto">
                   Enter a domain and the config appears here, rendered by the server that will write
@@ -662,6 +1269,29 @@ function SiteFormBody({
               )}
             </Pane>
           </TabsContent>
+          {editing && (
+            <TabsContent value="changes" className="min-h-0 flex-1">
+              <Pane className="h-full">
+                {changes === undefined ? (
+                  <EmptyNote className={cn("my-auto", previewError && "text-destructive")}>
+                    {previewError ||
+                      "What a save changes in the file appears here once the form has read it."}
+                  </EmptyNote>
+                ) : changes === null ? (
+                  <EmptyNote className="my-auto">
+                    Too many changes to line up. The nginx config tab has the whole file a save
+                    writes.
+                  </EmptyNote>
+                ) : changes === "" ? (
+                  <EmptyNote className="my-auto">
+                    Saving writes the file exactly as it is on disk.
+                  </EmptyNote>
+                ) : (
+                  <DiffView body={changes} singleFile lineNumbers className="h-full" />
+                )}
+              </Pane>
+            </TabsContent>
+          )}
           <TabsContent value="notes" className="min-h-0 flex-1 overflow-y-auto">
             {warnings.length === 0 ? (
               <p className="flex items-center gap-2.5 py-2 text-body text-muted-foreground">
@@ -681,6 +1311,51 @@ function SiteFormBody({
           </TabsContent>
         </Tabs>
       </div>
+      {/* Inside the sheet, so each is layered over it: Escape and a click
+          outside close it, not the form behind it. */}
+      <Modal
+        open={discarding}
+        onOpenChange={setDiscarding}
+        size="sm"
+        title="Discard changes?"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setDiscarding(false)}>
+              Keep editing
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setDiscarding(false)
+                onOpenChange(false)
+              }}
+            >
+              Discard
+            </Button>
+          </>
+        }
+      >
+        <p className="text-body leading-relaxed">
+          {editing
+            ? `What you changed in ${editing} is not saved. Discarding it leaves the file as it is.`
+            : "This new site is not saved. Discarding it throws away what was filled in."}
+        </p>
+      </Modal>
+      {editing && filePath && (
+        <ConfigEditor
+          open={rawOpen}
+          onOpenChange={setRawOpen}
+          path={filePath}
+          kind="nginx"
+          title={fileName}
+          initialLine={dropped?.[0]?.line}
+          siteDisabled={disabled}
+          onSaved={() => {
+            setReads((n) => n + 1)
+            onSaved(false)
+          }}
+        />
+      )}
     </SidePanel>
   )
 }
@@ -816,12 +1491,24 @@ function ListField({
  * nginx matches the longest prefix regardless of order, so these are rendered
  * before the catch-all purely because that is the order a reader expects.
  */
+/** What the upstream pickers offer, read once for the whole form. */
+type Picker = {
+  options: UpstreamOption[]
+  listeners: Listener[] | undefined
+  containers: Container[] | undefined
+  loading: boolean
+  failed: boolean
+  onRetry: () => void
+}
+
 function LocationsField({
   locations,
   onChange,
+  picker,
 }: {
   locations: SiteLocation[]
   onChange: (locations: SiteLocation[]) => void
+  picker: Picker
 }) {
   const update = (i: number, patch: Partial<SiteLocation>) =>
     onChange(locations.map((loc, j) => (j === i ? { ...loc, ...patch } : loc)))
@@ -846,13 +1533,24 @@ function LocationsField({
               <Trash />
             </IconAction>
           </div>
-          <Input
+          <UpstreamPicker
             value={loc.upstream ?? ""}
-            onChange={(e) => update(i, { upstream: e.target.value, root: "" })}
+            onChange={(upstream) => update(i, { upstream, root: "" })}
+            options={picker.options}
+            loading={picker.loading}
+            failed={picker.failed}
+            onRetry={picker.onRetry}
             placeholder="http://127.0.0.1:4000 — or leave empty and give a folder"
-            aria-label="Upstream"
-            className="font-mono text-xs"
+            label="Upstream"
+            pickLabel={`Pick from running services for ${loc.path || "this path"}`}
           />
+          {loc.upstream && (
+            <IdleNote
+              upstream={loc.upstream}
+              listeners={picker.listeners}
+              containers={picker.containers}
+            />
+          )}
           {!loc.upstream && (
             <Input
               value={loc.root ?? ""}
@@ -861,6 +1559,16 @@ function LocationsField({
               aria-label="Folder"
               className="font-mono text-xs"
             />
+          )}
+          {!loc.upstream && loc.root && loc.rootMode === "root" && (
+            <FormNote>
+              Files come from{" "}
+              <code className="font-mono">
+                {loc.root.replace(/\/$/, "")}
+                {loc.path}
+              </code>
+              , as this file was written: nginx adds the path to the folder.
+            </FormNote>
           )}
           <label className="flex items-center gap-2 text-hint text-muted-foreground">
             <Checkbox
@@ -881,4 +1589,18 @@ function LocationsField({
       </Button>
     </div>
   )
+}
+
+/** Said under a path's upstream when nothing listens behind it. */
+function IdleNote({
+  upstream,
+  listeners,
+  containers,
+}: {
+  upstream: string
+  listeners: Listener[] | undefined
+  containers: Container[] | undefined
+}) {
+  const idle = nothingListening(upstream, listeners, containers)
+  return idle ? <FormNote tone="warning">{idle}</FormNote> : null
 }

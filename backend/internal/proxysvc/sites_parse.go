@@ -31,8 +31,13 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	sawTLSListen := false
 	sawPlainRedirect := false
 	sawAccessLog := false
+	sawGzip := false
 	var custom []string
 	inCustom := false
+	// Depth of an http-level object at the top of the file (a map, an
+	// upstream, a zone). Its contents are its own syntax, not a server's:
+	// a map entry or a geo range read as a directive could land in a field.
+	objectDepth := 0
 
 	// read handles one statement. It is a closure over the reader's state so
 	// that a line carrying several statements — `location / { proxy_pass
@@ -40,6 +45,23 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// piece read in turn, where the line reader used to swallow everything
 	// after the opening brace.
 	read := func(raw string) {
+		if objectDepth > 0 {
+			if strings.HasSuffix(raw, "{") {
+				objectDepth++
+			} else if raw == "}" {
+				objectDepth--
+			}
+			return
+		}
+		if depth == 0 {
+			name, _ := cutDirective(raw)
+			if httpObjects[name] {
+				if strings.HasSuffix(raw, "{") {
+					objectDepth = 1
+				}
+				return
+			}
+		}
 		if m := locationOpenRe.FindStringSubmatch(raw); m != nil {
 			depth++
 			location = m[1]
@@ -104,6 +126,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		case "client_max_body_size":
 			spec.ClientMaxBody = value
 		case "gzip":
+			sawGzip = true
 			spec.Gzip = value == "on"
 		case "access_log":
 			// A server's own directive, not a location's: `access_log off`
@@ -116,6 +139,10 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			if location == "" {
 				sawAccessLog = true
 				spec.AccessLog = value != "off"
+				spec.LogFormat = ""
+				if spec.AccessLog {
+					spec.LogFormat = accessLogFormat(value)
+				}
 				if spec.AccessLogPath == "" {
 					spec.AccessLogPath = directiveLogFile(value)
 				}
@@ -153,13 +180,24 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			} else if location == "" || location == "/" {
 				spec.Root = value
 			} else if current != nil {
-				current.Root = value
+				// nginx appends the whole path to a root, so this one is
+				// kept as a root: saving it as a folder served at the path
+				// would move every file the location answers with.
+				current.Root, current.RootMode = value, "root"
+			}
+		case "alias":
+			if current != nil {
+				current.Root, current.RootMode = strings.TrimSuffix(value, "/"), ""
 			}
 		case "proxy_pass":
+			upstream := strings.TrimPrefix(value, "http://unix:")
+			if upstream != value {
+				upstream = "unix:" + upstream
+			}
 			if current != nil {
-				current.Upstream = value
+				current.Upstream = upstream
 			} else if location == "/" || location == "" {
-				rootLocationUpstream = value
+				rootLocationUpstream = upstream
 			}
 		case "proxy_set_header":
 			if strings.HasPrefix(value, "Upgrade") {
@@ -168,6 +206,11 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 				} else {
 					rootLocationWS = true
 				}
+			}
+		case "try_files":
+			if location == "/" {
+				fields := strings.Fields(value)
+				spec.SPA = len(fields) > 0 && fields[len(fields)-1] == "/index.html"
 			}
 		case "proxy_read_timeout":
 			spec.ProxyTimeout = parseSeconds(value)
@@ -204,7 +247,12 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			inCustom = true
 			continue
 		}
-		if raw == "" || strings.HasPrefix(raw, "#") {
+		// A comment after a statement is not part of it: certbot ends every
+		// line it adds with "# managed by Certbot", and read as part of the
+		// value that made the certificate path "…/fullchain.pem; # managed
+		// by Certbot", which the form then refused to save.
+		raw = strings.TrimSpace(stripComment(raw))
+		if raw == "" {
 			continue
 		}
 		for _, piece := range splitInline(raw) {
@@ -221,12 +269,23 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	// only ever decides for the ones the form did not write.
 	if !managed && !sawAccessLog {
 		spec.AccessLog = true
+		spec.LogFormat = "combined"
+	}
+	// The same for compression: a hand-written site without a gzip line
+	// inherits the http block's, which is on in Debian's nginx.conf. A
+	// managed file always says, so one without the line predates `gzip off;`
+	// and was written with the switch off.
+	if !managed && !sawGzip {
+		spec.Gzip = true
 	}
 	if spec.Kind != "redirect" {
 		if spec.Upstream == "" && spec.Root != "" {
 			spec.Kind = "static"
 		}
 	}
+	// The fallback is a static site's; a proxy's location / answers from
+	// its upstream whatever try_files a hand-written file put beside it.
+	spec.SPA = spec.SPA && spec.Kind == "static"
 	spec.ForceHTTPS = sawTLSListen && sawPlainRedirect
 	// A file with a plain-HTTP redirect block and nothing else is a redirect
 	// site; one that also serves something is a TLS site forcing HTTPS.
@@ -268,6 +327,26 @@ const (
 	exploitDotLocation = `/\.(?!well-known)`
 )
 
+// httpObjects are the http-level statements a site file may carry above its
+// servers, which the renderer writes for the site and the parser steps over.
+var httpObjects = map[string]bool{
+	"map": true, "geo": true, "upstream": true, "log_format": true,
+	"limit_req_zone": true, "limit_conn_zone": true, "proxy_cache_path": true,
+}
+
+// accessLogFormat reads which format an access_log line writes in. One of
+// this renderer's timed formats is "timed" whichever site's name it carries,
+// so a file copied under a new name keeps its format; nginx's default and
+// any format the form does not write are "combined", the one the form can
+// offer in its place.
+func accessLogFormat(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) >= 2 && strings.HasPrefix(fields[1], "jd_") && strings.HasSuffix(fields[1], "_timed") {
+		return "timed"
+	}
+	return "combined"
+}
+
 var locationOpenRe = regexp.MustCompile(`^location\s+(?:[~^=*]+\s+)?(\S+)\s*\{`)
 
 // listenIsTLS reads a listen directive's value the way nginx does: the first
@@ -301,15 +380,13 @@ func hasField(value, want string) bool {
 
 // splitInline breaks a line holding several statements into one statement
 // per element: `location / { proxy_pass http://x; }` becomes the opener,
-// the directive and the closing brace. Quotes are respected, since a
-// Content-Security-Policy value carries semicolons of its own. A line with
-// nothing after its brace, or no brace at all, is returned as it came.
+// the directive and the closing brace, and `gzip on; gzip_vary on;` its two
+// directives — read whole, the second made the value "on; gzip_vary on",
+// which is not "on", and a save wrote `gzip off;`. Quotes are respected,
+// since a Content-Security-Policy value carries semicolons of its own, and
+// so is a ${variable}, whose braces open no block.
 func splitInline(raw string) []string {
-	i := braceOutsideQuotes(raw)
-	if i < 0 || strings.TrimSpace(raw[i+1:]) == "" {
-		return []string{raw}
-	}
-	out := []string{strings.TrimSpace(raw[:i+1])}
+	var out []string
 	var cur strings.Builder
 	flush := func() {
 		if s := strings.TrimSpace(cur.String()); s != "" {
@@ -318,7 +395,8 @@ func splitInline(raw string) []string {
 		cur.Reset()
 	}
 	var quote byte
-	for j := i + 1; j < len(raw); j++ {
+	variable := false
+	for j := 0; j < len(raw); j++ {
 		c := raw[j]
 		switch {
 		case quote != 0:
@@ -329,10 +407,13 @@ func splitInline(raw string) []string {
 		case c == '"' || c == '\'':
 			quote = c
 			cur.WriteByte(c)
-		case c == ';':
+		case c == '{' && j > 0 && raw[j-1] == '$':
+			variable = true
 			cur.WriteByte(c)
-			flush()
-		case c == '{':
+		case c == '}' && variable:
+			variable = false
+			cur.WriteByte(c)
+		case c == ';' || c == '{':
 			cur.WriteByte(c)
 			flush()
 		case c == '}':
@@ -343,27 +424,33 @@ func splitInline(raw string) []string {
 		}
 	}
 	flush()
+	if len(out) == 0 {
+		return []string{raw}
+	}
 	return out
 }
 
-// braceOutsideQuotes is the index of the first `{` that is not inside a
-// quoted string, or -1.
-func braceOutsideQuotes(raw string) int {
+// stripComment cuts a line at the "#" that starts a comment: outside quotes,
+// and where a word could start, which is where nginx reads one — a "#"
+// inside a word is part of it.
+func stripComment(raw string) string {
 	var quote byte
 	for i := 0; i < len(raw); i++ {
 		c := raw[i]
 		switch {
 		case quote != 0:
-			if c == quote {
+			if c == '\\' {
+				i++
+			} else if c == quote {
 				quote = 0
 			}
 		case c == '"' || c == '\'':
 			quote = c
-		case c == '{':
-			return i
+		case c == '#' && (i == 0 || strings.ContainsRune(" \t;{}", rune(raw[i-1]))):
+			return raw[:i]
 		}
 	}
-	return -1
+	return raw
 }
 
 func cutDirective(line string) (string, string) {

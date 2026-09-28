@@ -997,16 +997,6 @@ func TestLivePendingKeepsTheLoadAcrossAWorkerKilled(t *testing.T) {
 	}
 }
 
-func freePort(t *testing.T) int {
-	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
-}
-
 // serves is what the site on port answers, or empty when nothing does.
 func serves(port int) string {
 	client := http.Client{Timeout: 2 * time.Second}

@@ -331,21 +331,150 @@ ownership and cleanup, then removes its own containers/volumes/networks.
 - **Site builder** (`sites.go`, `sites_render.go`, `sites_parse.go`, `sites_apply.go`). `SiteSpec` is our
   shape, not nginx's, for the reason `ContainerSpec` is not `container.Config`; rendering happens **on the
   server** so a spec has one meaning, and the output is hand-written rather than templated because order
-  carries meaning to whoever maintains the file after this dashboard is gone. `ApplySite` puts the **symlink in
-  before `nginx -t`** — a new file in `sites-available` is not in the include tree, so the test has
-  nothing to say about it — and undoes both together on failure. Four renderer details:
+  carries meaning to whoever maintains the file after this dashboard is gone. `SaveSite` (`ApplySite` is
+  its positional form) puts the **symlink in before `nginx -t`** — a new file in `sites-available` is not
+  in the include tree, so the test has nothing to say about it — and undoes both together on failure.
+  What a save does, and says, beyond that:
+  - **The link is left as it was unless the save asks to enable.** The site form used to post
+    `enable: true` for every save, so fixing one field of a disabled site put it back on the internet.
+    `POST /proxy/sites/` takes `enable: "enable" | "keep"`; the old `true`/`false` still parse, and
+    `false` always meant keep (it declined to make a link and never removed one). A site that has a link
+    keeps it, relinked to the file being saved, and `SiteResult.enabled` says which it is.
+    `GET /proxy/sites/{name}` and every preview say whether nginx reads the file (`enabled`, from
+    `SiteFile`: linked into sites-enabled under its own name or any other — a site linked as
+    `sites-enabled/010-app` is enabled, and a save neither stages nor makes a second link for it, which
+    had nginx read the file twice and report it conflicting with itself — or in conf.d with a name ending
+    in `.conf`) and whether it is in conf.d (`confd`). The form's footer follows them: a disabled site
+    offers **Save (stays disabled)** (`keep`, no reload) and **Save and enable** (`enable`, reload)
+    instead of a "Save and reload" that did neither, and only the first when its name's link is another
+    file's or the site is in conf.d. The listing (`nginxVHosts`) likewise calls a site enabled only when
+    its name's link names its own file (`enabledElsewhere`), so it no longer says "serving" beside a form
+    that says the link is another site's; a site enabled only under another name is still listed as
+    disabled there, which is the listing's and the toggle's to change. A `sites-enabled/<name>` that is a
+    file of its own (a `cp` where a link was meant) is listed as serving, since nginx serves it
+    (`servedCopy()`). `SiteFile.ServedCopy` reaches the form as `servedCopy`, and the form says nginx
+    serves that file and not this one, and offers only **Save** (`keep`, no reload). The save's result
+    carries `servedCopy` and a note that it changed nothing nginx serves and was not tested, where it
+    used to say "It stays disabled" of a name nginx answers (`TestSaveSiteSaysNginxServesAFileOfItsOwn`).
+  - **A conf.d site is saved where the listing found it.** A conf.d file is switched off by a name that
+    does not end in `.conf` (`app.conf.disabled`, or `app`). `siteTarget` used to add the suffix to
+    every name, so saving that site as "stays disabled" wrote `app.conf.disabled.conf` beside it — a copy
+    nginx reads. `confdSite` now targets an existing file of exactly the name, `ReadSiteSpec` keeps the
+    `.conf` in a spec name when a file of the shorter name exists beside it (so `app` and `app.conf` are
+    two sites, each saved to itself), and `DeleteSite` removes the file the listing names. A save that
+    asks to enable such a file is refused: enabling it is renaming it.
+  - **A site saved disabled is tested as it would be enabled, in a copy of the configuration**
+    (`site_trial.go`). Without that `nginx -t` never read the file, so a disabled site was saved untested
+    and failed on the day somebody enabled it. The live tree is never touched: `stageTrial` writes
+    `<nginx dir>/.jd-trial-*.conf`, nginx.conf byte for byte except that its include of `sites-enabled`
+    (or of `conf.d` for a conf.d site) points at `.jd-trial-*.d`, which links every entry of the real
+    directory plus the site under the name enabling it would give it (`<name>`, or `<file>.conf` in
+    conf.d), so nginx sorts it where enabling would put it. `nginx -t -c` and, for a conflict's order,
+    `nginx -T -c` run on the copy; the copy sits beside nginx.conf so relative includes resolve the same,
+    and its paths are renamed back to nginx.conf and the real directory in the result. Linking the site
+    into the live `sites-enabled` for the length of the test, as the save first did, raced everything that
+    runs nginx without the service lock — `POST /proxy/reload` and `/proxy/test`, the vhost toggle, a site
+    delete, a stream save, certbot's hook, systemctl: a reload in the window served the disabled site until
+    the next reload, and a broken one failed unrelated reloads with 422
+    (`TestLiveReloadsBesideADisabledSaveNeverReadIt` runs reloads beside disabled saves, and
+    `TestADisabledSaveNeverPutsTheSiteInTheLiveConfiguration` records what the live directory held during
+    every nginx the save ran). Nothing the test finds refuses the save — nginx does not read the file —
+    and the result is what enabling it would meet (`testedAsEnabled`): `validation` with nginx's objection
+    placed at its file and line, `conflicts` worded as what enabling would do, and `testWarnings`. A reload
+    follows only a test that passed. The copy assumes nginx loads `<nginx dir>/nginx.conf`, as the
+    htpasswd and stream checks do. It is untested, with `validation.note` saying why, when its name's link
+    is another file's, when nginx.conf does not include the directory itself or its pattern would not read
+    the name, or when nginx.conf cannot be copied.
+  - **What still races an outside reload.** An enabling save, an edit to an enabled site, `Validate` and
+    the config editor's write put the file (and an enabling save its link) in the live tree for the length
+    of their test and take it back if the test fails: nginx has nothing else to test a file it reads. The
+    reload and test endpoints do not take the service lock, so one landing in that window reads the
+    candidate — refused over a broken one, or loading one the save is about to take back until the next
+    reload.
+  - **A name another server block also claims is refused when the save changes who answers it**, 409
+    `name_conflict` with `ConflictSummary`'s sentences. `nginx -t` passes a second claim on a name with only
+    `[warn] conflicting server name … ignored` and answers from the **first** block it reads, so the save
+    could as easily take a working site's domain as leave its own unreachable. The conflicts are nginx's own
+    warnings for this site's names on the addresses its file listens on — nginx already knows a wildcard
+    `:80` and `127.0.0.1:80` are separate. `orderConflicts` then reads which claim wins from `nginx -T`
+    (`dumpNginx` under the held lock, or the trial's dump for a disabled site, then `NginxTree`, so
+    `sites-enabled/*` sorted, a `conf.d` include before or after it and a block inline in `nginx.conf` all
+    fall where nginx reads them),
+    names the other claim's site from that tree, and sets `effect`: `ignored` (the other keeps the name:
+    "nginx answers app.example.com on 0.0.0.0:80 from legacy, which it reads first, and ignores this site's
+    claim."), `takes` (this site sorts first and takes it: "Saving anyway takes … from legacy, since nginx
+    reads this site first.") or `keeps` (this site already answered the name before the save — read from the
+    file as nginx loaded it — and still does). A `keeps` conflict alone is **not** refused: an edit to the
+    site that is serving a name was refused in the name of the site nginx ignores. When the order cannot be
+    read the conflict has no `effect` and says only that both claim the name. The file and link are taken
+    back on a refusal; `allowConflict: true` saves anyway and the result lists `conflicts`, which the toast
+    words by `effect` (checked against a running nginx in `TestLiveNameConflictSaysWhichSiteNginxAnswers`).
+    `ValidateSpec` refuses a domain listed twice, which nginx warns about the same way. Deployment cutovers
+    (`applySiteLocked`) are not refused over a conflict.
+  - **A reload that fails after a clean test is a saved site**, 200 with `reloaded: false` and
+    `reloadError`, where it was a 400 "Not applied" over a file that was written and linked. The toast
+    says nginx did not pick it up and to start or reload it, never what nginx is serving: the usual cause
+    is an nginx that is not running (`open() "/run/nginx.pid" failed`), which serves nothing. The
+    deployment cutovers still get the error, since their recovery is built on it. Not seen: a reload the
+    master refuses after `nginx -s reload` has returned 0, which only says the signal was delivered. The
+    case that matters is a listen address another process holds — `nginx -t` passes it, because its test
+    ignores `EADDRINUSE` — where the master logs `[emerg] bind() … failed (98: Address already in use)`
+    five times and keeps its old configuration (checked against nginx 1.26.3), and the save still says
+    "is live". Catching it needs the reload verified from the master's side (its error log or its
+    workers), which the engine's reload does not do either.
+  - `testWarnings` are the test's warnings placed in the site's own file, so "is live" is said only when
+    nginx had nothing to say about it: "Saved with 2 warnings" lists them by line, and alongside a
+    conflict they are listed after it rather than dropped. A conflict warning names no file, so it is
+    never among them.
+
+  Renderer details:
   - The ACME challenge location goes **above** the catch-all redirect, or renewal silently stops and
     nobody finds out for sixty days.
   - `http2 on;` is a directive, not a `listen` parameter (nginx 1.25 warns on every reload).
-  - WebSocket upgrades pass `$http_connection` through rather than a `$connection_upgrade` map. The
-    reason once given here — that a `map` is only legal in the `http` block and a site file cannot reach
-    it — is **false**: `sites-enabled/*` and `conf.d/*.conf` are both included *inside* `http {}`, so the
-    top of a site file, outside its `server` blocks, is http context. `map`, `upstream`,
-    `limit_req_zone`, `limit_conn_zone`, `proxy_cache_path`, `geo` and `log_format` written there pass
-    `nginx -t` (checked on nginx 1.26.3) and are deleted with the site. Their names are global to the
-    whole configuration and a duplicate zone is an emergency, so each is named with `NginxIdent(site)`.
-    The comment the renderer writes into the generated file still carries the old reason; it is output,
-    and changes with the renderer.
+  - **`proxy_pass` is the upstream as typed, less a path that is the location's own.** Its path is how
+    nginx is told to replace the location's prefix: `/api/` to `http://127.0.0.1:4000/` sends `/api/users`
+    as `/users`. Trimming its slash sent `/page` to `http://…/app/` as `/apppage`. When the path and the
+    upstream disagree about a trailing slash, `SpecWarnings` says what a request becomes. nginx forwards
+    the request exactly as sent **only to an upstream without a path**; to one with a path it sends the
+    path decoded, so `%2F` arrives as `/` (npm/Verdaccio scoped packages, GitLab project paths). An
+    upstream path equal to the location's prefix — `http://x/` pasted on `/`, `http://x/pkg/` on `/pkg/`
+    — swaps nothing, so it is left off and the request goes through raw; any other path is kept and
+    `SpecWarnings` says `/a%2Fb` reaches the application decoded (both checked against a running nginx).
+    A `unix:` upstream is written `http://unix:…`, the only spelling nginx accepts, and read back as
+    `unix:`.
+  - **A folder is served at its path**: `alias <folder>/;` in `location <path>/`, both ending in a slash
+    so a neighbour such as `/assets-private` is never read through `/assets` (checked against a running
+    nginx). `root` appended the path, so `/assets` with `/var/www/assets` looked in
+    `/var/www/assets/assets`. A location read back from a file that used `root` keeps it
+    (`SiteLocation.RootMode = "root"`), since rewriting it as the folder itself would move every file it
+    serves; a hand-written `alias` is read back as a folder.
+  - **A static site can be a single-page app** (`SiteSpec.SPA`): its `location /` answers a path with no
+    file of its own with `/index.html` (`try_files $uri $uri/ /index.html`) instead of 404, so a deep link
+    or a reload reaches the app's router; the probe blocks still refuse `/.env` (checked against a running
+    nginx). It is read back from that `try_files` and only for a static site.
+  - **Compression off is written `gzip off;`**: Debian's `nginx.conf` turns gzip on for the whole http
+    block, and a site saying nothing inherits it. A managed file with no gzip line predates this and was
+    written with the switch off; a hand-written one reads back as on.
+  - **A site file owns its http-level objects** (`renderHTTPBlock`, above the first `server`).
+    `sites-enabled/*` and `conf.d/*.conf` are both included *inside* `http {}`, so the top of a site
+    file is http context: `map`, `upstream`, `limit_req_zone`, `limit_conn_zone`, `proxy_cache_path`,
+    `geo` and `log_format` written there pass `nginx -t` (checked on nginx 1.26.3) and are deleted with
+    the site. Their names are global, so each is `NginxIdent(site)` plus a suffix: a second
+    `log_format` of one name fails the reload, and a `map` variable defined twice is decided by the
+    last file read. `ParseSiteSpec` steps over these statements (and whatever is inside their blocks)
+    rather than reading a map entry or a geo range as a server directive.
+  - **WebSockets use the standard upgrade map**, per site: `map $http_upgrade $jd_<id>_connection
+    { default upgrade; '' close; }`, with `Connection $jd_<id>_connection` in each upgrading location.
+    It replaces passing the client's `$http_connection` through, whose comment wrongly said a map had
+    to be shared by every site. Both forms read back as WebSockets on (the `Upgrade` header is what
+    the parser keys on), and the map is written only when a rendered proxy location upgrades.
+  - **Access logs are timed by default** (`SiteSpec.logFormat`: `timed`, the default when empty, or
+    `combined`). Timed is `log_format jd_<id>_timed` — combined followed by `rt=$request_time
+    urt="$upstream_response_time" host=$host cs=$upstream_cache_status` — so a stock combined reader
+    still reads every line and `accesslog.parseCombined` takes latency from `rt=`. An `access_log`
+    naming any `jd_*_timed` format reads back as timed; a file with none, or with another format,
+    reads back as `combined`, which the drift list already reports as the form writing its own
+    `access_log`. The form offers the choice under Hardening beside the access-log switch.
   - **An `allow` list is fenced with `deny all`.** nginx stops at the first match and otherwise permits,
     so a site restricted to `10.0.0.0/8` was reachable from anywhere; expecting the operator to write the
     fence themselves into a box labelled "Deny" fails too, since `0.0.0.0/0` lets in every IPv6 client.
@@ -361,7 +490,140 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   needs. It skips the generated ACME location (reading it back emits it twice), reports whether the file
   carries our marker so the UI can say a hand-written file may not survive, and leaves an `allow`/`deny`
   inside a location where it is — hoisting it into the site-wide list applied one path's restriction to
-  the whole site on the next save.
+  the whole site on the next save. A save over a file without the marker first keeps it as
+  `<file>.bak`, which the form's notice promised while nothing wrote it. The save then returns that
+  path as `SiteResult.backup`, and the toast names it. A later save of the now-managed file leaves that
+  `.bak` alone. A save that is refused puts back the `.bak` that was there before, or none
+  (`TestSaveSiteKeepsAHandWrittenFileAsBak`).
+
+  **What a save drops is listed before it happens** (`site_drift.go`). A save writes the form's reading
+  of the file, so a statement the form has no field for — a `proxy_set_header` added by hand, a second
+  `listen`, a location it cannot express, certbot's `include` — went with no word, from a managed file as
+  much as from a hand-written one. `DroppedLines` parses the file and what saving a spec writes with
+  `ParseNginxFile` and compares them statement by statement where they sit: each server block of the
+  file against the written block it shares a name and the most statements with (several may share one:
+  a site written as a `:80` block and a `:443` block is one block listening on both in the form, and
+  loses nothing), each block against its twin by name and arguments, and the statements in it as a
+  multiset. Spacing, quoting and comments do not count, and the spellings the form writes differently
+  with the same effect are the same statement: `listen 443 ssl http2` (it writes `http2 on;`),
+  `listen *:80`, a `proxy_pass` whose path is the location's own (see the renderer below), a folder
+  `alias` and its location without their trailing slashes, and a `server_name` split over several lines.
+  What is left is every statement not written back, with its line and its text — its own lines of the
+  file, comment and all, or the statement written out on one line where it shares one — and where it
+  sits. `SiteDrift` is the form's view of that: the statements the form's own reading of the file leaves
+  out, less those the current spec writes back, so an edit made in the form is a change rather than a
+  dropped line and a line moved into the extra configuration stops being one. `GET /proxy/sites/{name}`
+  carries it for the file as read (`dropped`, `lossless`), and every preview for the spec it is given
+  when that site's file exists; both are left out when the form cannot write the file at all, which its
+  preview then says.
+
+  A dropped line is **movable** when it sits directly in the server block the form writes and the extra
+  configuration, which goes there, keeps it as it is. Not one inside a location (a `proxy_set_header` in
+  the server block is not inherited by a location that sets its own), in another server block or outside
+  them all, and not one of a name the form writes there itself: nginx refuses most of those twice
+  (`http2`, `ssl_session_timeout`, `ssl_session_tickets`, `ssl_prefer_server_ciphers`, `gzip`,
+  `gzip_vary`, `client_max_body_size`, `root` and the `auth_basic` pair, checked against nginx 1.26.3 as
+  `refusedTwice`) and applies the rest twice — a second access log, a second `X-Frame-Options`.
+  `add_header` is compared by header and `listen` by address. An `include` is read for the names of the
+  directives it sets (`includedNames`: relative to the nginx directory, a glob without its dotfiles,
+  regular files under 1 MiB, and only the names leave, only as far as the reason), since certbot's
+  `options-ssl-nginx.conf` sets `ssl_session_timeout`, which the form writes, and moving it fails
+  `nginx -t` with "is duplicate" (`TestLiveAnIncludeThatRepeatsTheFormsTLSStaysOut`); its `reason` says
+  so. The same statement movable from two places moves once. `TestLiveMovedLinesKeepWhatTheyDid` has a
+  real nginx answer on a second port with a header added by hand, moves both into the extra
+  configuration, saves and reloads, and checks both still hold — and that the `proxy_set_header` it could
+  not move is no longer sent, as it said.
+
+  **A draft is of one version of the file.** `GET /proxy/sites/{name}` and every preview of an existing
+  file carry `digest`, the file's sha256 (`ContentDigest`). The form keeps it with the draft, and the
+  save sends it back as `baseDigest`: `SaveSite` refuses a file that is no longer that version, or is
+  gone, with 409 `site_changed` (audited as `changed_on_disk`) before it writes anything, so another
+  tab's edit or the raw editor's is never silently written over
+  (`TestSaveRefusesAFileThatChangedSinceTheFormReadIt`, `TestSiteSpecSaysWhatASaveDropsAndWhichVersionItRead`).
+  Deployment cutovers send none and are not checked.
+
+  **`POST /proxy/sites/preview` also says where the file goes**: `path` is what a save writes
+  (`SiteFile`, through the same `siteTarget` the save uses: `sites-available/<name>`, or
+  `conf.d/<name>.conf` on a conf.d host) and `exists` whether a file is there. Both are left out when the
+  host has neither directory. A new site's name follows its domain, so it can land on an existing site
+  without the operator typing it; the form refuses that at the field before the save refuses it.
+  `enabledElsewhere` is the other way a name is taken: a `sites-enabled/<name>` that enables a different
+  file (a hand-written site linked under its domain rather than its file name, or a link to a file that is
+  gone) or is a file of its own, said as a sentence (`enabledElsewhere()`, which follows relative and
+  chained links, so a link naming this very file, even before it is written, is not in the way). The save
+  refuses a new site there, and an edit asked to enable itself there, before `linkEnabled` runs: it used to
+  replace the link before `nginx -t`, so the test never saw the two sites claim one name and the other
+  site silently stopped being served. An edit that keeps its link state leaves such a link alone and
+  reports itself not enabled (`TestSaveSiteLeavesAnotherSitesLinkAlone`,
+  `TestSiteFileSaysWhatHoldsTheNamesLink`). `DeleteSite` had the same bug: it removed
+  `sites-enabled/<name>` wherever it pointed. Now it removes the link only when the link names the
+  file being deleted, or points at nothing (a dangling link enables nothing and fails the next reload).
+  It deletes the file and leaves any other link, or a file of its own in sites-enabled, where it is. A
+  name that only such a link holds is "no such site", and the error says what holds the name
+  (`TestDeleteSiteLeavesAnotherSitesLinkAlone`). Every other sites-enabled entry that resolves to the
+  deleted file goes with it (`linksTo`, skipping dotfiles as nginx's include does). Before, a site
+  linked as `010-app` lost only the `sites-enabled/<name>` it never had, and the dangling `010-app`
+  failed every later `nginx -t` and reload (`TestDeleteSiteRemovesALinkOfAnotherName`, and the real
+  nginx run in `TestLiveDeletingASiteLinkedUnderAnotherNameLeavesNginxValid`).
+
+  The form's side of this lives in pure modules beside `site-form.tsx`, tested with bun.
+  `site-draft.ts` holds the draft's rules. A draft survives a trip to another page while its file is
+  still the version it started from — the server's copy used to replace it on every open — gives way to
+  the file when nothing in it was changed, and otherwise the form asks, with **Reload from disk** or
+  **Keep my draft**, as it does after a save refused with `site_changed` (saving waits for the answer).
+  Unsaved changes are the draft against the spec it started from, compared as sent: they draw an
+  "unsaved" tag, and closing the sheet with them — Escape, the overlay, the close button, one funnel —
+  asks **Discard changes?**; a trip to another page keeps them instead. Ctrl/Cmd+S runs the footer's own
+  command. The dropped lines are drawn as a diff at their own line numbers, with the reason beneath for
+  a line of the server block that cannot move, **Move N lines into Extra configuration** and **Edit the
+  raw file** (the config editor over the form, at the first dropped line; saving there reads the file
+  again). A hand-written file the form reads whole says so and that it is kept as `<file>.bak`. A
+  **Changes** tab diffs the file on disk against the preview, which is what the save writes over it.
+
+  `site-identity.ts` works a new site's file name and certificate paths out of its whole first domain on
+  every change, for each part not typed by hand (keeping the first value named a site typed as
+  app.example.com "a", after one keystroke), and checks a typed name against the server's rule; the form
+  shows the name as its own **File name** field (read-only for an existing site), with **Match the
+  domain** and **Use the domain's certificate** to follow the domain again. `site-save.ts` builds the
+  request — `keep` for an existing site unless the operator chose **Save and enable**, HSTS only with
+  TLS, since the switch is drawn only under HTTPS
+  and its hidden default warned on every plain-HTTP site, and `spa` and `permanent` only with the kind
+  that draws them — and turns the result into what the toast says, a disabled site's included ("saved;
+  enabling it would fail nginx's test" with the line, "saved with a name conflict once enabled"). A
+  refused conflict is a Notice in the form with **Save anyway**, which repeats the save that was refused,
+  enabling included. A new form opens with the keyboard in **Domains**, and the presets come
+  after the file name, so the one field every site needs is in view on a phone.
+
+  A new site can **start from a preset** (`site-presets.ts`: Node.js app, single-page app, Grafana, Home
+  Assistant, Docker registry, MinIO, Jellyfin, redirect), a `SiteSpec` partial laid over the form. It
+  keeps the operator's name, domains, certificate, access settings and any upstream they typed, and
+  swaps only its own lines in the extra configuration (the registry and MinIO turn
+  `proxy_request_buffering` off there and lift the upload limit with `client_max_body_size 0`). A
+  preset's card stays chosen, with its note about the application's own settings, until the operator
+  picks another kind by hand: `leavePreset` then takes out the preset's extra lines and puts back the
+  default for each field it set that still holds its value. Each preset is checked in as `proxysvc/testdata/presets/<id>.json`, which `site-presets.test.js` holds equal
+  to the TypeScript; `TestPresetsRenderAndReadBackAsThemselves` renders every one plain and over HTTPS
+  and reads it back unchanged, `TestLivePresetsPassNginxTest` puts all of them through the host's
+  `nginx -t` with no warning, and two more live tests prove the single-page fallback and a 64 MB upload
+  through the large-upload presets (which the Node.js preset refuses with 413).
+
+  **Send it to** is an `UpstreamPicker` (`upstream-picker.tsx`) over `upstream-options.ts`: free text,
+  plus what `GET /ports` and `GET /docker/containers/?all=false` show — running containers by the port
+  they publish (a port they do not publish is listed, cannot be picked, and says to publish it on
+  127.0.0.1, since its bridge address changes with every recreate), then loopback and wildcard sockets;
+  443 and 8443 are offered as `https://`.
+  nginx's own sockets, UDP, sockets bound to one other interface and ports that answer something other
+  than HTTP (SSH, mail, databases, Docker's API) are left out. A loopback upstream nothing listens on is
+  warned about under the field, not refused: nginx answers 502 until the application starts. The blank
+  form's own default (`127.0.0.1:3000`) is not warned about until somebody sets the upstream — by
+  typing, picking, a preset or a link — or the site already had it. Both lists are polled while the form
+  is open, so an application started half-way through appears.
+
+  **`/proxy/sites?new=1&upstream=<url>&domain=<name>`** opens the form on a new site from elsewhere in
+  the dashboard (`site-link.ts`, called from the Sites page). It is read once, taken off the address, and
+  only for `system.admin` on a host with nginx; the values go in as the link spelled them, so the form and
+  preview say what is wrong with either. `tests/browser/proxy-site-builder.spec.ts` checks each state
+  against mocks from `tests/browser/fixtures/proxy/siteform.ts`.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
   quietly stopped. Each version is probed on a connection pinned to exactly that version; a version this
@@ -529,6 +791,17 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   false, with `Reason`, where nginx is not installed, no master reads the configuration, or two do and
   the pid file names neither; a master with no worker is running with no `LastReload`. A certificate
   nginx has not reloaded is not a configuration file, and is left to the served-certificate check.
+  writing `access_log off;`. Statements sharing a line without a brace are split too — `gzip on;
+  gzip_vary on;` read whole was gzip set to "on; gzip_vary on", which is not on, and the next save wrote
+  `gzip off;` — and a comment after a statement is cut off where nginx would read one (outside quotes,
+  where a word could start): certbot ends every line it adds with `# managed by Certbot`, which made
+  the certificate path `…/fullchain.pem; # managed by Certbot`, so the form could not save a site
+  certbot had touched.
+- **`SetVHostEnabled` replaces a stale link.** Enabling a site whose `sites-enabled` entry already
+  existed but pointed elsewhere returned success and changed nothing; it goes through `linkEnabled`
+  now, so the switch saying on means nginx reads the file. `parseCaddyfile` tracks brace depth so
+  only top-level blocks are site addresses — `handle`, `header` and `tls` blocks were listed as
+  server names.
 - **Certificates say who uses them.** `listCertificates` joins the sites' `ssl_certificate` paths
   onto the certificate list (`UsedBy`), through symlinks, so a certbot lineage and the site naming
   its `live/` path are one entry; `certificateName` names a file in a generic directory
@@ -608,6 +881,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   of Edit, Disable, Duplicate and Delete, opens it read-only (its card and a `?site=` link alike), and
   keeps Edit anyway behind a confirmation; an archived owner's route is the operator's again. The backend does not refuse
   those verbs on a route, since deployments call proxysvc directly and an administrator may override.
+  listing and `SetVHostEnabled`) reads sites-available where it exists and conf.d where it does not
+  (every RPM distro, Alpine, Arch — most of the servers this runs on); the difference reaches the UI as an
+  empty `EnabledPath`, because conf.d has no symlink and a switch that can only error is worse than none. `confdPath` stops `app.conf` becoming `app.conf.conf`, and `ReadSiteSpec` reads the listing's `app.conf` back as a spec called `app`, the name a save writes to — the spec kept `.conf` once, and the next save renamed the site's logs to `app.conf.access.log`. The listing
+  **skips backups** (`isBackupFile`: `.bak`, `~`, `.dpkg-old`, `.rpmsave`) — nginx reads none of them, and
+  since a delete, and a save over a hand-written file, keep `<name>.bak`, without the filter deleting a
+  site produced a second site.
 - **A password file must be readable by the account that reads it.** nginx opens `auth_basic_user_file` in
   a *worker* (www-data/nginx/http), not as the root that wrote it, so a 0640 root:root file is a 403 for
   every visitor and "Permission denied" in the log — which reads exactly like a wrong password.
@@ -721,7 +1000,7 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   included by, `./` and `../` left in, so includes and printed paths are compared cleaned; the files are
   indexed once by path and directory, which keeps thousands of sites linear.
 - **Every change to a configuration file is offered to a `ChangeRecorder`** (`changes.go`) once it is
-  committed — `WriteConfig`, `ApplySite` and deployment cutovers through `applySiteLocked`, `DeleteSite`,
+  committed — `WriteConfig`, `SaveSite` and deployment cutovers through `applySiteLocked`, `DeleteSite`,
   `SetVHostEnabled`/`ToggleVHost` (which now take the service lock like every other change, resolve the
   site file as the writes do, and record nothing for a toggle that leaves the links as they were or that
   nginx refused), `RemoveVHostLink` (recorded as a disable of the file behind the link, or of the link

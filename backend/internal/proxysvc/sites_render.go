@@ -47,6 +47,8 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	l.add("# form on the Proxy page reads it back either way.")
 	l.blank()
 
+	renderHTTPBlock(l, spec)
+
 	if spec.TLS && spec.ForceHTTPS {
 		renderRedirectServer(l, names, spec.ManagedACME)
 		l.blank()
@@ -82,14 +84,21 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		l.add("    index index.html index.htm;")
 		l.blank()
 		l.add("    location / {")
-		l.add("        try_files $uri $uri/ =404;")
+		if spec.SPA {
+			l.add("        # A single-page app routes in the browser: a path with no file")
+			l.add("        # of its own is answered with index.html, and the app's router")
+			l.add("        # takes it from there.")
+			l.add("        try_files $uri $uri/ /index.html;")
+		} else {
+			l.add("        try_files $uri $uri/ =404;")
+		}
 		l.add("    }")
 	default:
 		for _, loc := range spec.Locations {
-			renderLocation(l, loc.Path, loc.Upstream, loc.Root, loc.WebSockets, spec)
+			renderLocation(l, loc, spec)
 			l.blank()
 		}
-		renderLocation(l, "/", spec.Upstream, "", spec.WebSockets, spec)
+		renderLocation(l, SiteLocation{Path: "/", Upstream: spec.Upstream, WebSockets: spec.WebSockets}, spec)
 	}
 
 	if spec.BlockExploits {
@@ -105,6 +114,43 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	}
 	l.add("}")
 	return l.String(), nil
+}
+
+// timedLogFormat is combined followed by named fields, so a reader of the
+// stock format still reads every line and one that knows the names gets the
+// request time, the upstream's share of it and the cache's verdict.
+const timedLogFormat = `'$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" rt=$request_time urt="$upstream_response_time" host=$host cs=$upstream_cache_status'`
+
+// renderHTTPBlock writes the http-level objects the site owns, above its
+// servers. A site file is included inside http {}, so its top is http
+// context; what is defined there is deleted with the site. The names are
+// global to the whole configuration, so each carries the site's own
+// NginxIdent: a second log_format of the same name fails every reload, and a
+// map variable defined twice is decided by whichever file nginx reads last.
+func renderHTTPBlock(l *lines, spec *SiteSpec) {
+	wrote := false
+	if spec.usesWebSockets() {
+		l.add("# The standard upgrade map: a request asking to be upgraded is passed")
+		l.add("# on as one, and every other request closes its upstream connection")
+		l.add("# rather than forwarding whatever Connection header the client sent.")
+		l.add("map $http_upgrade $%s {", spec.connectionVar())
+		l.add("    default upgrade;")
+		l.add("    ''      close;")
+		l.add("}")
+		wrote = true
+	}
+	if spec.AccessLog && spec.timedLog() {
+		if wrote {
+			l.blank()
+		}
+		l.add("# nginx's combined format with the time taken added, which is what")
+		l.add("# the dashboard's traffic pages read latency from.")
+		l.add("log_format %s %s;", spec.logFormatName(), timedLogFormat)
+		wrote = true
+	}
+	if wrote {
+		l.blank()
+	}
 }
 
 // renderRedirectServer is the plain-HTTP half of a TLS site.
@@ -176,28 +222,29 @@ func renderHeaders(l *lines, spec *SiteSpec) {
 }
 
 func renderServerOptions(l *lines, spec *SiteSpec) {
-	wrote := false
 	if spec.ClientMaxBody != "" {
 		l.add("    client_max_body_size %s;", spec.ClientMaxBody)
-		wrote = true
 	}
 	if spec.Gzip {
 		l.add("    gzip on;")
 		l.add("    gzip_vary on;")
 		l.add("    gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;")
-		wrote = true
+	} else {
+		// Said rather than left out: Debian's nginx.conf turns gzip on for
+		// the whole http block, and a site saying nothing inherits it.
+		l.add("    gzip off;")
 	}
 	if spec.AccessLog {
-		l.add("    access_log %s;", nginxAccessLogPath(spec.Name))
+		if spec.timedLog() {
+			l.add("    access_log %s %s;", nginxAccessLogPath(spec.Name), spec.logFormatName())
+		} else {
+			l.add("    access_log %s;", nginxAccessLogPath(spec.Name))
+		}
 		l.add("    error_log  %s;", nginxErrorLogPath(spec.Name))
-		wrote = true
 	} else {
 		l.add("    access_log off;")
-		wrote = true
 	}
-	if wrote {
-		l.blank()
-	}
+	l.blank()
 }
 
 func renderAccess(l *lines, spec *SiteSpec) {
@@ -243,15 +290,22 @@ func renderAccess(l *lines, spec *SiteSpec) {
 	}
 }
 
-func renderLocation(l *lines, path, upstream, root string, websockets bool, spec *SiteSpec) {
-	l.add("    location %s {", path)
-	if root != "" {
-		l.add("        root %s;", root)
+func renderLocation(l *lines, loc SiteLocation, spec *SiteSpec) {
+	l.add("    location %s {", loc.renderedPath())
+	if loc.servesFolder() {
+		if loc.RootMode == "root" {
+			l.add("        root %s;", loc.Root)
+		} else {
+			l.add("        alias %s/;", strings.TrimSuffix(loc.Root, "/"))
+		}
 		l.add("        try_files $uri $uri/ =404;")
 		l.add("    }")
 		return
 	}
-	l.add("        proxy_pass %s;", strings.TrimSuffix(upstream, "/"))
+	// As typed: a path on the upstream is how nginx is told to replace the
+	// location's own prefix, and trimming its slash turned /app/ into /app,
+	// which sent /page to the application as /apppage.
+	l.add("        proxy_pass %s;", proxyPassTarget(loc.Path, loc.Upstream))
 	l.add("        proxy_http_version 1.1;")
 	l.add("        # The application sees the visitor's address and scheme rather")
 	l.add("        # than the proxy's, which is what makes redirects, cookies and")
@@ -261,14 +315,9 @@ func renderLocation(l *lines, path, upstream, root string, websockets bool, spec
 	l.add("        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;")
 	l.add("        proxy_set_header X-Forwarded-Proto $scheme;")
 	l.add("        proxy_set_header X-Forwarded-Host  $host;")
-	if websockets {
-		l.add("        # Passing the client's own Connection header through, rather than")
-		l.add("        # the usual $connection_upgrade map: a map is only legal in the")
-		l.add("        # http block, and a site file cannot reach there. This form keeps")
-		l.add("        # keep-alive working for ordinary requests and upgrades the ones")
-		l.add("        # that ask to be upgraded.")
+	if loc.WebSockets {
 		l.add("        proxy_set_header Upgrade    $http_upgrade;")
-		l.add("        proxy_set_header Connection $http_connection;")
+		l.add("        proxy_set_header Connection $%s;", spec.connectionVar())
 	}
 	if spec.ProxyTimeout > 0 {
 		timeout := strconv.Itoa(spec.ProxyTimeout) + "s"
@@ -282,6 +331,47 @@ func renderLocation(l *lines, path, upstream, root string, websockets bool, spec
 		l.add("        proxy_buffering off;")
 	}
 	l.add("    }")
+}
+
+// proxyPassTarget is the upstream as proxy_pass spells it for a location at
+// path. nginx refuses a bare unix: address ("invalid URL prefix"); a socket is
+// http://unix:<path>.
+//
+// A path on the upstream that is the location's own prefix is left off. The
+// swap it asks for changes nothing, and it is not free: nginx forwards the
+// request exactly as the client sent it only to an upstream without a path,
+// and to one with a path it sends the path decoded, so http://x/ on / turned
+// /pkg/%40scope%2Fname into /pkg/@scope/name — the pasted form of an address
+// quietly breaking every registry and repository path that carries a %2F.
+func proxyPassTarget(path, upstream string) string {
+	if address, uri := splitUpstream(upstream); uri == path {
+		upstream = address
+	}
+	if strings.HasPrefix(upstream, "unix:") {
+		return "http://" + upstream
+	}
+	return upstream
+}
+
+// splitUpstream parts an upstream into its address and the path after it,
+// where nginx reads them apart: after the host of a URL, and after the colon
+// that ends a socket's path in unix:/run/app.sock:/uri.
+func splitUpstream(upstream string) (address, uri string) {
+	if socket, ok := strings.CutPrefix(upstream, "unix:"); ok {
+		if i := strings.Index(socket, ":"); i >= 0 {
+			return "unix:" + socket[:i], socket[i+1:]
+		}
+		return upstream, ""
+	}
+	scheme := strings.Index(upstream, "://")
+	if scheme < 0 {
+		return upstream, ""
+	}
+	host := scheme + len("://")
+	if i := strings.Index(upstream[host:], "/"); i >= 0 {
+		return upstream[:host+i], upstream[host+i:]
+	}
+	return upstream, ""
 }
 
 func renderExploitBlocks(l *lines) {

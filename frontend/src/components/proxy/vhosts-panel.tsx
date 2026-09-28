@@ -30,6 +30,7 @@ import { VerbBar } from "@/components/verbs"
 import { AuthFilesPanel } from "@/components/proxy/auth-files-panel"
 import { AccessListsPanel } from "@/components/proxy/access-lists-panel"
 import { ConfigEditor } from "@/components/proxy/config-editor"
+import { useNewSiteLink } from "@/components/proxy/site-link"
 import { siteProduct } from "@/components/proxy/marks"
 import { SiteForm } from "@/components/proxy/site-form"
 import {
@@ -233,6 +234,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     setRequested(null)
     setForm((f) => ({ open: true, editing: name, copyFrom, session: f.session + 1 }))
   }
+  useNewSiteLink(() => openForm(null))
 
   // A ?site= link from elsewhere in the dashboard opens that site as soon as
   // its row loads. The open panel is derived from the URL rather than copied

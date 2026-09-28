@@ -139,6 +139,39 @@ func TestRenderStaticSite(t *testing.T) {
 	}
 }
 
+// A single-page app's router runs in the browser, so a path with no file of
+// its own gets index.html; the switch reads back from the file it wrote, and
+// a proxy never takes it from a try_files a hand-written file put beside its
+// upstream.
+func TestStaticSPAFallbackRoundTrips(t *testing.T) {
+	spec := proxySpec()
+	spec.Kind, spec.Upstream, spec.Root, spec.SPA = "static", "", "/var/www/app", true
+	out, err := RenderNginx(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "try_files $uri $uri/ /index.html;") || strings.Contains(out, "=404") {
+		t.Fatalf("the fallback is not rendered:\n%s", out)
+	}
+	back, _ := ParseSiteSpec("app", out)
+	if back.Kind != "static" || !back.SPA {
+		t.Fatalf("read back as kind %q, spa %v", back.Kind, back.SPA)
+	}
+	spec.SPA = false
+	out, err = RenderNginx(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back, _ := ParseSiteSpec("app", out); back.SPA {
+		t.Fatal("a plain folder read back as a single-page app")
+	}
+
+	proxy, _ := ParseSiteSpec("mixed", "server {\n listen 80;\n server_name m.example.com;\n location / {\n  try_files $uri /index.html;\n  proxy_pass http://127.0.0.1:3000;\n }\n}\n")
+	if proxy.Kind != "proxy" || proxy.SPA {
+		t.Fatalf("a proxy read back as kind %q, spa %v", proxy.Kind, proxy.SPA)
+	}
+}
+
 func TestRenderRedirectSite(t *testing.T) {
 	spec := &SiteSpec{
 		Name: "old", Kind: "redirect", Domains: []string{"old.example.com"},
