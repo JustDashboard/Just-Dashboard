@@ -92,7 +92,36 @@ export type SiteSpec = {
   staticCache?: StaticCache
   /** nginx keeps the application's responses on disk. Proxy sites only, with buffering on. */
   proxyCache?: ProxyCache
+  /** The visitor's address put back behind Cloudflare or a load balancer. */
+  realIp?: SiteRealIP
   custom?: string
+}
+
+export type SiteRealIP = {
+  /** Cloudflare's shared ranges and CF-Connecting-IP, or the proxies below and their header. */
+  source: "cloudflare" | "proxies"
+  /** The proxies whose header is believed. Proxies only. */
+  trusted?: string[]
+  /** X-Forwarded-For, X-Real-IP or another header they send. Proxies only. */
+  header?: string
+  /** Close every connection that does not come from Cloudflare. Cloudflare only. */
+  cloudflareOnly?: boolean
+}
+
+/** The Cloudflare ranges every site trusting Cloudflare includes. */
+export type CloudflareRanges = {
+  path: string
+  ranges: string[]
+  /** Empty until a site first needs the file. */
+  source: "" | "cloudflare" | "built-in"
+  fetched?: string
+}
+
+export type CloudflareRefresh = {
+  ranges: CloudflareRanges
+  validation: ProxyValidation
+  reloaded: boolean
+  reloadError?: string
 }
 
 export type StaticCache = {

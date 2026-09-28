@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -41,6 +42,43 @@ func (s *Server) mountSiteBuilderRoutes(r chi.Router) {
 			r.Method(http.MethodDelete, "/{name}/cache", s.handle(s.handleSiteCachePurge))
 		})
 	})
+}
+
+// mountRealIPRoutes is the Cloudflare range list sites trust for the
+// visitor's address. The ranges are public, so reading them needs no more
+// than a sign-in; refreshing downloads, writes and reloads.
+func (s *Server) mountRealIPRoutes(r chi.Router) {
+	r.Method(http.MethodGet, "/cloudflare", s.handle(s.handleCloudflareRanges))
+	r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+		Method(http.MethodPost, "/cloudflare/refresh", s.handle(s.handleCloudflareRefresh))
+}
+
+func (s *Server) handleCloudflareRanges(w http.ResponseWriter, r *http.Request) error {
+	ranges, err := s.modules.proxy.ReadCloudflareRanges()
+	if err != nil {
+		return mapProxyError(err)
+	}
+	httpx.JSON(w, http.StatusOK, ranges)
+	return nil
+}
+
+func (s *Server) handleCloudflareRefresh(w http.ResponseWriter, r *http.Request) error {
+	httpx.SetAudit(r, "proxy.realip.refresh", "cloudflare", nil)
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	res, err := s.modules.proxy.RefreshCloudflareRanges(ctx)
+	if errors.Is(err, proxysvc.ErrInvalidConf) {
+		return httpx.Err(http.StatusUnprocessableEntity, "invalid_config", res.Validation.Output)
+	}
+	if errors.Is(err, proxysvc.ErrUnsafePath) {
+		return mapProxyError(err)
+	}
+	if err != nil {
+		return httpx.Err(http.StatusBadGateway, "refresh_failed", err.Error())
+	}
+	httpx.SetAudit(r, "proxy.realip.refresh", "cloudflare", fmt.Sprintf("%d ranges", len(res.Ranges.Ranges)))
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
 }
 
 func (s *Server) handleSiteSpec(w http.ResponseWriter, r *http.Request) error {
@@ -120,6 +158,7 @@ func (s *Server) handleSitePreview(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	s.modules.proxy.SetPagesDir(&req.Spec)
+	s.modules.proxy.SetRealIPDir(&req.Spec)
 	content, err := proxysvc.RenderNginx(&req.Spec)
 	if err != nil {
 		return httpx.BadRequest("%v", err)

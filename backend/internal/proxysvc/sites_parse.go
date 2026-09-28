@@ -46,6 +46,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	limits := newLimitParse()
 	pools := newPoolParse()
 	cache := &cacheParse{}
+	realIP := &realIPParse{}
 	// The catch-all's retry settings, which belong to the pool it forwards to.
 	var rootRetryOn []string
 	rootTries := 0
@@ -102,6 +103,10 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 		}
 		if maintIfRe.MatchString(raw) {
 			maintenance().On = true
+			depth++
+			return
+		}
+		if realIP.ifOpen(raw) {
 			depth++
 			return
 		}
@@ -167,6 +172,9 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 			return
 		}
 		if cache.directive(directive, value, location) {
+			return
+		}
+		if realIP.directive(spec, directive, value, location == "" && current == nil) {
 			return
 		}
 		switch directive {
@@ -435,6 +443,7 @@ func ParseSiteSpec(name, content string) (*SiteSpec, bool) {
 	}
 	limits.settle(spec)
 	cache.settle(spec)
+	realIP.settle(spec)
 	// Extra locations that ended up with neither an upstream nor a root are
 	// something this form cannot express; dropping them is better than
 	// offering to save a location that proxies nowhere.

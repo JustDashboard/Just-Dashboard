@@ -50,7 +50,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 	renderHTTPBlock(l, spec)
 
 	if spec.TLS && spec.ForceHTTPS {
-		renderRedirectServer(l, names, spec.ManagedACME)
+		renderRedirectServer(l, names, spec)
 		l.blank()
 	}
 
@@ -67,6 +67,7 @@ func RenderNginx(spec *SiteSpec) (string, error) {
 		renderHeaders(l, spec)
 		l.blank()
 	}
+	renderRealIP(l, spec)
 	renderServerOptions(l, spec)
 	renderUpstreamTLS(l, spec)
 	renderErrorRouting(l, spec)
@@ -188,6 +189,13 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 			l.blank()
 		}
 		renderCacheObjects(l, spec)
+		wrote = true
+	}
+	if spec.RealIP != nil && spec.RealIP.CloudflareOnly {
+		if wrote {
+			l.blank()
+		}
+		renderRealIPGeo(l, spec)
 		wrote = true
 	}
 	if wrote {
@@ -318,18 +326,22 @@ func renderACMEChallenge(l *lines, spec *SiteSpec) {
 }
 
 // renderRedirectServer is the plain-HTTP half of a TLS site.
-func renderRedirectServer(l *lines, names string, managedACME bool) {
+func renderRedirectServer(l *lines, names string, spec *SiteSpec) {
 	l.add("server {")
 	l.add("    listen 80;")
 	l.add("    listen [::]:80;")
 	l.add("    server_name %s;", names)
 	l.blank()
+	if spec.RealIP != nil && spec.RealIP.CloudflareOnly {
+		renderRealIPLock(l, spec)
+		l.blank()
+	}
 	l.add("    # Let's Encrypt proves control of the domain over plain HTTP, so the")
 	l.add("    # challenge path has to survive the redirect or renewal stops working")
 	l.add("    # in sixty days and nobody finds out until the certificate expires.")
 	l.add("    location %s {", acmeChallengePath)
 	root := "/var/www/html"
-	if managedACME {
+	if spec.ManagedACME {
 		root = deploymentACMEWebroot
 	}
 	l.add("        root %s;", root)

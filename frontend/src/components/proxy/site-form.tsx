@@ -19,6 +19,8 @@ import { cn } from "@/lib/utils"
 import type {
   AuthFile,
   Certificate,
+  CloudflareRanges,
+  CloudflareRefresh,
   Container,
   DomainCheck,
   DroppedLine,
@@ -42,7 +44,7 @@ import type {
   SiteSpec,
   StaticCache,
 } from "@/lib/types"
-import { plural } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceCard, ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { ProductLogo } from "@/components/product-logo"
@@ -1299,6 +1301,8 @@ function SiteFormBody({
             </Field>
           </FormSection>
 
+          <RealIPSection spec={spec} set={set} open={open} />
+
           {spec.kind !== "redirect" && <LimitsSection spec={spec} set={set} />}
 
           {spec.kind !== "redirect" && <CachingSection spec={spec} set={set} />}
@@ -2437,6 +2441,150 @@ function RequestLimitFields({
         Answer the burst at once rather than spacing it out
       </label>
     </div>
+  )
+}
+
+const REAL_IP_HEADERS = ["X-Forwarded-For", "X-Real-IP"]
+
+/**
+ * Where the visitor's address comes from behind Cloudflare or a load
+ * balancer. Cloudflare's ranges are one shared file every such site
+ * includes, so the refresh here updates all of them at once.
+ */
+function RealIPSection({
+  spec,
+  set,
+  open,
+}: {
+  spec: SiteSpec
+  set: <K extends keyof SiteSpec>(key: K, value: SiteSpec[K]) => void
+  open: boolean
+}) {
+  const realIp = spec.realIp
+  const cloudflare = realIp?.source === "cloudflare"
+  const ranges = usePoll<CloudflareRanges>(
+    (signal) => get("/proxy/realip/cloudflare", undefined, signal),
+    0,
+    [],
+    { enabled: open && cloudflare },
+  )
+  const [refreshing, setRefreshing] = useState(false)
+  const refresh = async () => {
+    setRefreshing(true)
+    try {
+      const res = await post<CloudflareRefresh>("/proxy/realip/cloudflare/refresh")
+      if (res.reloadError) {
+        notify.error("Ranges saved, but nginx did not reload", res.reloadError)
+      } else {
+        notify.success(`${plural(res.ranges.ranges.length, "Cloudflare range")} in use`)
+      }
+      ranges.refresh()
+    } catch (err) {
+      notify.error("Could not refresh Cloudflare's ranges", err)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+  const header = realIp?.header ?? "X-Forwarded-For"
+  const rangeNote = (() => {
+    const data = ranges.data
+    if (!data) return null
+    if (!data.source) return "Written from the built-in list on save, until the first refresh."
+    const count = plural(data.ranges.length, "range")
+    if (data.source === "built-in") {
+      return `${count} from the built-in list, written ${relativeTime(data.fetched)}.`
+    }
+    return `${count} from cloudflare.com, fetched ${relativeTime(data.fetched)}.`
+  })()
+
+  return (
+    <FormSection
+      title="Visitor address"
+      hint="Behind Cloudflare or a load balancer every request comes from the proxy. This puts the visitor's address back for the log, the address lists and the limits."
+    >
+      <OptionList>
+        <OptionRow
+          title="Behind a proxy"
+          hint="The address is taken from a header, believed only from the proxy's own addresses."
+          checked={Boolean(realIp)}
+          onCheckedChange={(on) => set("realIp", on ? { source: "cloudflare" } : undefined)}
+        >
+          {realIp && (
+            <ToggleGroup
+              type="single"
+              aria-label="Which proxy"
+              value={realIp.source}
+              onValueChange={(v) => {
+                if (v === "cloudflare") set("realIp", { source: "cloudflare" })
+                if (v === "proxies")
+                  set("realIp", { source: "proxies", trusted: [], header: "X-Forwarded-For" })
+              }}
+              variant="outline"
+              size="sm"
+              className="w-full"
+            >
+              <ToggleGroupItem value="cloudflare" className="flex-1 text-hint">
+                Cloudflare
+              </ToggleGroupItem>
+              <ToggleGroupItem value="proxies" className="flex-1 text-hint">
+                My own proxies
+              </ToggleGroupItem>
+            </ToggleGroup>
+          )}
+        </OptionRow>
+        {cloudflare && (
+          <OptionRow
+            title="Only Cloudflare may reach this site"
+            hint="Closes every connection from outside Cloudflare's ranges without an answer. The domain has to be proxied through Cloudflare, certificate checks included."
+            tone={realIp.cloudflareOnly ? "warning" : "default"}
+            checked={realIp.cloudflareOnly ?? false}
+            onCheckedChange={(cloudflareOnly) =>
+              set("realIp", { source: "cloudflare", cloudflareOnly })
+            }
+          />
+        )}
+      </OptionList>
+      {cloudflare && (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-hint text-muted-foreground">
+            {rangeNote ?? "Reading Cloudflare's ranges…"}
+          </p>
+          <Button variant="outline" size="sm" disabled={refreshing} onClick={refresh}>
+            {refreshing ? "Refreshing…" : "Refresh ranges"}
+          </Button>
+        </div>
+      )}
+      {realIp?.source === "proxies" && (
+        <>
+          <ListField
+            id="site-realip-trusted"
+            label="Believe the header from"
+            placeholder="10.0.0.2"
+            values={realIp.trusted ?? []}
+            onChange={(trusted) => set("realIp", { ...realIp, trusted })}
+            hint="The load balancer's addresses. The header from anyone else is ignored."
+          />
+          <Field
+            label="Address header"
+            htmlFor="site-realip-header"
+            hint="With X-Forwarded-For the visitor is the last address that is not one of yours."
+          >
+            <Select value={header} onValueChange={(v) => set("realIp", { ...realIp, header: v })}>
+              <SelectTrigger id="site-realip-header" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[...new Set([...REAL_IP_HEADERS, header])].map((h) => (
+                  <SelectItem key={h} value={h}>
+                    {h}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        </>
+      )}
+    </FormSection>
   )
 }
 
