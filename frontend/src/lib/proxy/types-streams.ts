@@ -60,7 +60,17 @@ export type StreamSpec = {
   upstreamCa?: string
   /** nginx writes a line per session to /var/log/nginx/stream-<name>.log, which the traffic view reads. */
   logConnections?: boolean
+  /**
+   * Send a TLS client to a backend by the name it asks for, read from its
+   * hello without decrypting. `upstream` and `servers` are the default for
+   * every other name, no name, or no TLS. TCP only, with `tls` and
+   * `upstreamTls` off.
+   */
+  routes?: StreamRoute[]
 }
+
+/** Clients asking for `name` (or any name under `*.example.com`) go to `upstream`. */
+export type StreamRoute = { name: string; upstream: string }
 
 /** How nginx spreads a stream's connections: client-ip is a consistent hash of the client address. */
 export type StreamBalance = "least-conn" | "client-ip" | "random"
@@ -155,6 +165,8 @@ export type StreamModule = {
   detail?: string
   /** Built with stream_ssl_module, which a stream's TLS on either end needs. */
   ssl?: boolean
+  /** Built with stream_ssl_preread_module, which routing by TLS name needs. */
+  preread?: boolean
 }
 
 /**

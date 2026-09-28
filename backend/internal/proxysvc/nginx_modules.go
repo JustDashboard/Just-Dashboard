@@ -56,6 +56,10 @@ type StreamModule struct {
 	// on either end needs. It is part of the stream module — built into its
 	// shared object on a dynamic build — so it is read from nginx -V alone.
 	SSL bool `json:"ssl"`
+	// Preread is whether the build has stream_ssl_preread_module, which
+	// reads the TLS name a stream routes by. Like SSL it is read from
+	// nginx -V alone.
+	Preread bool `json:"preread"`
 }
 
 // streamNginxBuild is what `nginx -V` says about how the binary was compiled.
@@ -219,14 +223,15 @@ func (s *Service) StreamModule(ctx context.Context) StreamModule {
 	}
 	build := parseStreamNginxBuild(string(out))
 	ssl := build.modules["stream_ssl_module"] != ""
+	preread := build.modules["stream_ssl_preread_module"] != ""
 	switch build.modules["stream"] {
 	case "static":
-		return StreamModule{State: ModuleStatic, Usable: true, SSL: ssl}
+		return StreamModule{State: ModuleStatic, Usable: true, SSL: ssl, Preread: preread}
 	case "":
 		return StreamModule{State: ModuleAbsent}
 	}
 
-	module := StreamModule{Path: path.Join(build.modulesPath, streamModuleFile), SSL: ssl}
+	module := StreamModule{Path: path.Join(build.modulesPath, streamModuleFile), SSL: ssl, Preread: preread}
 	load := readLoadedModules(ctx)
 	module.State = load.state(ctx, "stream", module.Path)
 	module.Usable = module.State == ModuleLoaded

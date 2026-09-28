@@ -285,6 +285,8 @@ func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, proxysvc.ErrNoStreamSSL):
 		return httpx.Err(http.StatusConflict, "stream_ssl_missing", err.Error())
+	case errors.Is(err, proxysvc.ErrNoStreamPreread):
+		return httpx.Err(http.StatusConflict, "stream_preread_missing", err.Error())
 	case err != nil:
 		return mapProxyError(err)
 	}
@@ -301,6 +303,13 @@ func (s *Server) handleStreamApply(w http.ResponseWriter, r *http.Request) error
 	}
 	if req.Spec.UpstreamTLS {
 		detail["upstreamTls"] = map[string]any{"name": req.Spec.UpstreamName, "verify": req.Spec.UpstreamVerify}
+	}
+	if len(req.Spec.Routes) > 0 {
+		routes := make([]string, 0, len(req.Spec.Routes))
+		for _, route := range req.Spec.Routes {
+			routes = append(routes, route.Name+" -> "+route.Upstream)
+		}
+		detail["routes"] = routes
 	}
 	if res.Renamed != "" {
 		detail["renamedFrom"] = res.Renamed

@@ -126,6 +126,11 @@ type StreamSpec struct {
 	// LogConnections writes a line per session to StreamLogPath, which the
 	// traffic view reads (stream_traffic.go).
 	LogConnections bool `json:"logConnections,omitempty"`
+	// Routes send a TLS client to a backend by the name it asks for, read
+	// from its hello without decrypting (stream_sni.go). The pool above is
+	// the default for every other name. TCP only, and with nginx ending no
+	// TLS of its own.
+	Routes []StreamRoute `json:"routes,omitempty"`
 }
 
 // StreamServer is one server of a stream's pool, with nginx's own options.
@@ -336,6 +341,9 @@ func ValidateStream(spec *StreamSpec) error {
 		return err
 	}
 	if err := validStreamTLS(spec); err != nil {
+		return err
+	}
+	if err := validStreamRoutes(spec); err != nil {
 		return err
 	}
 	for _, limit := range []struct {
@@ -655,6 +663,9 @@ func RenderStream(spec *StreamSpec) (string, error) {
 		l.add("log_format %s '%s';", streamLogFormatName(spec.Name), streamLogFormat)
 		l.blank()
 	}
+	if len(spec.Routes) > 0 {
+		renderStreamRoutes(l, spec)
+	}
 	l.add("upstream %s {", upstream)
 	if method := streamBalances[spec.Balance]; method != "" {
 		l.add("    %s;", method)
@@ -726,7 +737,14 @@ func RenderStream(spec *StreamSpec) (string, error) {
 		l.add("    %s", streamLogDirective(spec.Name))
 	}
 	l.blank()
-	l.add("    proxy_pass %s;", upstream)
+	if len(spec.Routes) > 0 {
+		l.add("    # nginx reads the name from the client's TLS hello and passes the")
+		l.add("    # TLS through unopened: each backend presents its own certificate.")
+		l.add("    ssl_preread on;")
+		l.add("    proxy_pass %s;", streamSNIVar(spec.Name))
+	} else {
+		l.add("    proxy_pass %s;", upstream)
+	}
 	if spec.NoRetry {
 		l.add("    # A server that fails to accept fails the connection; no other is tried.")
 		l.add("    proxy_next_upstream off;")
@@ -813,6 +831,9 @@ type parsedStream struct {
 	// sni is whether proxy_ssl_server_name is on, which the form writes
 	// exactly when it writes proxy_ssl_name.
 	sni bool
+	// preread is whether ssl_preread is on, and sniMap whether proxy_pass
+	// goes through the stream's name map: the form writes both or neither.
+	preread, sniMap bool
 }
 
 func (p *parsedStream) cannot(what string) {
@@ -850,6 +871,8 @@ func parseStreamFile(fileName, content string) parsedStream {
 		return p
 	}
 	upstreams := map[string]Directive{}
+	// nameMaps are the maps from the TLS name, by the variable each sets.
+	nameMaps := map[string]Directive{}
 	var servers []Directive
 	// zones are the connection zones this file declares the way RenderStream
 	// does, by name, with whether a limit_conn uses them.
@@ -863,6 +886,9 @@ func parseStreamFile(fileName, content string) parsedStream {
 			upstreams[d.Args[0]] = d
 		case d.Name == "server" && d.Block != nil:
 			servers = append(servers, d)
+		case d.Name == "map" && d.Block != nil && len(d.Args) == 2 && d.Args[0] == "$ssl_preread_server_name" &&
+			nameMaps[d.Args[1]].Name == "":
+			nameMaps[d.Args[1]] = d
 		case d.Name == "limit_conn_zone" && len(d.Args) == 2 &&
 			(d.Args[0] == "$binary_remote_addr" && d.Args[1] == "zone="+perIP+":1m" ||
 				d.Args[0] == "$server_port" && d.Args[1] == "zone="+total+":1m"):
@@ -894,7 +920,22 @@ func parseStreamFile(fileName, content string) parsedStream {
 				p.cannot("proxy_pass")
 				continue
 			}
+			if strings.HasPrefix(d.Args[0], "$") {
+				if d.Args[0] != streamSNIVar(p.spec.Name) {
+					p.cannot("proxy_pass with a variable")
+					continue
+				}
+				p.readSNI(nameMaps, upstreams, used)
+				continue
+			}
 			p.readProxyPass(d.Args[0], upstreams, used)
+		case "ssl_preread":
+			on, ok := onOff(d.Args)
+			if !ok {
+				p.cannot("ssl_preread " + strings.Join(d.Args, " "))
+				continue
+			}
+			p.preread = on
 		case "allow", "deny":
 			if len(d.Args) != 1 {
 				p.cannot(d.Name)
@@ -972,6 +1013,9 @@ func parseStreamFile(fileName, content string) parsedStream {
 			p.cannot("an upstream nothing uses")
 		}
 	}
+	if len(nameMaps) > 1 || len(nameMaps) == 1 && !p.sniMap {
+		p.cannot("a name map nothing uses")
+	}
 	if logFormat && !p.spec.LogConnections {
 		p.cannot("a log_format nothing uses")
 	}
@@ -985,6 +1029,7 @@ func parseStreamFile(fileName, content string) parsedStream {
 	}
 	p.reduceBinds()
 	p.checkTLS()
+	p.checkSNI()
 	if p.spec.UDPMode == "request" && p.spec.Protocol == "tcp" {
 		p.cannot("proxy_responses on TCP")
 	}
@@ -1579,6 +1624,11 @@ func (s *Service) ApplyStream(ctx context.Context, spec *StreamSpec, previous st
 	if streamUsesTLS(spec) {
 		if m := s.StreamModule(ctx); m.State != ModuleUnknown && !m.SSL {
 			return nil, ErrNoStreamSSL
+		}
+	}
+	if len(spec.Routes) > 0 {
+		if m := s.StreamModule(ctx); m.State != ModuleUnknown && !m.Preread {
+			return nil, ErrNoStreamPreread
 		}
 	}
 	// Read before the lock: finding the running nginx walks /proc, and the
