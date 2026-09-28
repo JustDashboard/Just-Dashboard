@@ -67,16 +67,16 @@ func listensTLSOn(listens []string, port int) bool {
 		if len(fields) == 0 || hasField(value, "quic") || !listenIsTLS(value) {
 			continue
 		}
-		if listenPort(fields[0]) == port {
+		if deepListenPort(fields[0]) == port {
 			return true
 		}
 	}
 	return false
 }
 
-// listenPort is the port in a listen directive's address: 443, *:443,
+// deepListenPort is the port in a listen directive's address: 443, *:443,
 // 127.0.0.1:443 and [::]:443 are all 443, and an address with no port is 80.
-func listenPort(address string) int {
+func deepListenPort(address string) int {
 	if strings.HasPrefix(address, "unix:") {
 		return 0
 	}

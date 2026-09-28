@@ -499,8 +499,8 @@ func TestSiteForName(t *testing.T) {
 		}
 	}
 	for listen, want := range map[string]int{"443": 443, "*:8443": 8443, "127.0.0.1:443": 443, "[::]:443": 443, "[::1]": 80, "127.0.0.1": 80, "localhost": 80, "unix:/run/x.sock": 0} {
-		if got := listenPort(listen); got != want {
-			t.Errorf("listenPort(%q) = %d, want %d", listen, got, want)
+		if got := deepListenPort(listen); got != want {
+			t.Errorf("deepListenPort(%q) = %d, want %d", listen, got, want)
 		}
 	}
 }
