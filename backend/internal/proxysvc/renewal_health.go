@@ -134,12 +134,12 @@ var (
 	mainExitRe = regexp.MustCompile(`Main process exited, code=\w+, status=(\d+)/`)
 )
 
-// renewalWindow bounds how far back the journal is read, and renewalLines
+// renewalJournalSince bounds how far back the journal is read, and renewalLines
 // how much of it: two runs a day for two weeks, with room for what a failing
 // run prints.
 const (
-	renewalWindow = "-14d"
-	renewalLines  = 400
+	renewalJournalSince = "-14d"
+	renewalLines        = 400
 )
 
 // renewalHealth reads the runs of whatever renews: source is what
@@ -502,7 +502,7 @@ func journalMessage(raw json.RawMessage) string {
 func journalRuns(ctx context.Context, service string) ([]journalRun, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	cmd := hostexec.CommandOnHost(ctx, "journalctl", "-u", service, "--since", renewalWindow,
+	cmd := hostexec.CommandOnHost(ctx, "journalctl", "-u", service, "--since", renewalJournalSince,
 		"-n", strconv.Itoa(renewalLines), "--output=json", "--no-pager")
 	cmd.Env = append(cmd.Environ(), "SYSTEMD_IGNORE_CHROOT=1")
 	out, err := cmd.Output()
