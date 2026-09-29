@@ -476,6 +476,8 @@ func renderTrafficAlert(envelope NotificationEnvelope, project, environment stri
 var proxyAlertWhat = map[string]string{
 	"cert_expiring":     "Certificate expiring",
 	"cert_expired":      "Certificate expired",
+	"renewal_failed":    "Certbot renewal failed",
+	"served_drift":      "Served certificate differs",
 	"engine_down":       "Proxy engine not running",
 	"upstream_down":     "Upstream down",
 	"watch_unreachable": "Watched endpoint unreachable",

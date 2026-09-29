@@ -1015,6 +1015,7 @@ test("every place nginx reads a site from is listed, a link to nothing first", a
   ).toHaveCount(0)
   await page.keyboard.press("Escape")
   await copied.getByRole("link", { name: "Open copied-in" }).click()
+  await expect(page.getByRole("heading", { name: "copied-in" })).toBeVisible()
   await page.getByRole("button", { name: "Raw config" }).first().click()
   await expect(page.getByRole("dialog").locator(".monaco-editor .view-lines")).toContainText(
     "server",

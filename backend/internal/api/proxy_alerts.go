@@ -29,14 +29,14 @@ import (
 // back, and says nothing in between. The channels are the deployments'
 // notification channels; there is no second delivery system here.
 //
-// Kinds the proxy pages cannot read yet on this build are not offered: a
-// failed renewal (nothing records certbot's renewal outcome), a served
-// certificate that differs from the file (no drift check), and a watched
-// endpoint's grade dropping (no scan history to drop from).
+// A watched endpoint's grade dropping is not offered here: watched checks
+// record the handshake and certificate, not a full TLS grade.
 
 const (
 	proxyAlertCertExpiring     = "cert_expiring"
 	proxyAlertCertExpired      = "cert_expired"
+	proxyAlertRenewalFailed    = "renewal_failed"
+	proxyAlertServedDrift      = "served_drift"
 	proxyAlertEngineDown       = "engine_down"
 	proxyAlertUpstreamDown     = "upstream_down"
 	proxyAlertWatchUnreachable = "watch_unreachable"
@@ -52,7 +52,8 @@ const (
 )
 
 var proxyAlertKinds = []string{
-	proxyAlertCertExpiring, proxyAlertCertExpired, proxyAlertEngineDown, proxyAlertUpstreamDown,
+	proxyAlertCertExpiring, proxyAlertCertExpired, proxyAlertRenewalFailed, proxyAlertServedDrift,
+	proxyAlertEngineDown, proxyAlertUpstreamDown,
 	proxyAlertWatchUnreachable, proxyAlertWatchUntrusted, proxyAlertSiteErrors,
 }
 
@@ -148,7 +149,8 @@ func validateProxyAlert(in proxyAlertWrite) (proxyAlertWrite, error) {
 		if out.MinRequests < 1 || out.MinRequests > 1_000_000 {
 			return in, invalidProxyAlert("the fewest requests to judge is between 1 and 1,000,000")
 		}
-	case proxyAlertCertExpired, proxyAlertEngineDown, proxyAlertWatchUnreachable, proxyAlertWatchUntrusted:
+	case proxyAlertCertExpired, proxyAlertRenewalFailed, proxyAlertServedDrift,
+		proxyAlertEngineDown, proxyAlertWatchUnreachable, proxyAlertWatchUntrusted:
 	default:
 		return in, invalidProxyAlert("kind must be one of %s", strings.Join(proxyAlertKinds, ", "))
 	}
@@ -813,6 +815,15 @@ func (s *Server) observeProxyAlerts(ctx context.Context, rules []proxyAlertRule,
 		certs, err = s.modules.proxy.ListCertificates(ctx)
 		certsRead = err == nil
 	}
+	var renewal *proxysvc.CertbotState
+	if uses[proxyAlertRenewalFailed] {
+		renewal = s.modules.proxy.CertbotState(ctx)
+	}
+	var drift *proxysvc.DriftReport
+	if uses[proxyAlertServedDrift] {
+		report := s.modules.proxyExtras.servedCerts.Report(ctx, false)
+		drift = &report
+	}
 	var engine *proxyAlertReading
 	if uses[proxyAlertEngineDown] {
 		reading := s.readEngineAlert(ctx)
@@ -836,6 +847,10 @@ func (s *Server) observeProxyAlerts(ctx context.Context, rules []proxyAlertRule,
 			if certsRead {
 				out[rule.ID] = certificateAlertReading(rule, certs)
 			}
+		case proxyAlertRenewalFailed:
+			out[rule.ID] = renewalAlertReading(renewal)
+		case proxyAlertServedDrift:
+			out[rule.ID] = servedDriftAlertReading(drift)
 		case proxyAlertEngineDown:
 			out[rule.ID] = *engine
 		case proxyAlertUpstreamDown:
@@ -907,6 +922,62 @@ func certificateAlertDetail(cert proxysvc.Certificate) string {
 		detail += " Used by " + strings.Join(cert.UsedBy, ", ") + "."
 	}
 	return detail
+}
+
+func renewalAlertReading(state *proxysvc.CertbotState) proxyAlertReading {
+	if state == nil || !state.Available || !state.AutoRenew || state.Health == nil ||
+		state.Health.Error != "" || state.Health.State == "unknown" || state.Health.State == "running" ||
+		state.Health.State == "never" {
+		return proxyAlertReading{}
+	}
+	reading := newProxyAlertReading()
+	const subject = "certbot renewal"
+	health := state.Health
+	if health.State == "failed" || len(health.HookFailures) > 0 {
+		parts := []string{}
+		for _, failure := range health.Failures {
+			if !failure.RenewedSince {
+				parts = append(parts, failure.Lineage+": "+failure.Reason)
+			}
+		}
+		if health.Reason != "" {
+			parts = append(parts, health.Reason)
+		}
+		for _, failure := range health.HookFailures {
+			parts = append(parts, fmt.Sprintf("%s failed (exit %d)", failure.Kind, failure.Code))
+		}
+		if len(parts) == 0 {
+			parts = append(parts, "the last renewal run failed")
+		}
+		reading.Firing = append(reading.Firing, proxyAlertFinding{
+			Subject: subject, Level: proxyAlertFiringLevel, Label: "Certbot renewal failed", Detail: strings.Join(parts, "; "),
+		})
+	} else {
+		reading.Now[subject] = "The latest renewal run succeeded or its failed certificates have since renewed."
+	}
+	return reading
+}
+
+func servedDriftAlertReading(report *proxysvc.DriftReport) proxyAlertReading {
+	if report == nil {
+		return proxyAlertReading{}
+	}
+	reading := newProxyAlertReading()
+	for _, site := range report.Sites {
+		subject := site.Site + " " + site.ServerName + " " + site.Address
+		switch site.State {
+		case proxysvc.DriftStale, proxysvc.DriftMismatch:
+			reading.Firing = append(reading.Firing, proxyAlertFinding{
+				Subject: subject, Level: proxyAlertFiringLevel, Label: site.Site + " (" + site.ServerName + ")",
+				Detail: site.Reason,
+			})
+		case proxysvc.DriftOK:
+			reading.Now[subject] = "The site serves the certificate named by its configuration."
+		default:
+			reading.Unknown[subject] = true
+		}
+	}
+	return reading
 }
 
 // readEngineAlert asks systemd for the engine's unit. A host whose proxy is

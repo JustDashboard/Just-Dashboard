@@ -7,6 +7,8 @@
 export type ProxyAlertKind =
   | "cert_expiring"
   | "cert_expired"
+  | "renewal_failed"
+  | "served_drift"
   | "engine_down"
   | "upstream_down"
   | "watch_unreachable"

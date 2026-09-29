@@ -85,6 +85,18 @@ const KINDS: Record<ProxyAlertKind, KindWords> = {
     icon: CrossCircle,
     describe: () => "once a certificate runs out",
   },
+  renewal_failed: {
+    label: "Renewal failed",
+    hint: "Certbot's last renewal or reload hook failed.",
+    icon: RefreshClockwise,
+    describe: () => "after a failed certbot renewal or reload hook",
+  },
+  served_drift: {
+    label: "Served certificate differs",
+    hint: "An nginx site serves a different certificate from the one in its file.",
+    icon: ShieldOff,
+    describe: () => "when a site serves a different certificate",
+  },
   engine_down: {
     label: "Engine not running",
     hint: "The engine's unit stopped or failed, on two checks in a row.",
@@ -123,6 +135,8 @@ const KIND_ORDER = Object.keys(KINDS) as ProxyAlertKind[]
 const DEFAULT_PARAMS: Record<ProxyAlertKind, ProxyAlertParams> = {
   cert_expiring: { days: EXPIRY_DAYS },
   cert_expired: {},
+  renewal_failed: {},
+  served_drift: {},
   engine_down: {},
   upstream_down: { minutes: 5 },
   watch_unreachable: {},

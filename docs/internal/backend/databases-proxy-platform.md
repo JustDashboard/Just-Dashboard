@@ -2395,7 +2395,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   handshakes and so on).
 - **Proxy alerts** (`api/proxy_alerts.go`, `api/handlers_proxy_alerts.go`; tables `proxy_alert_rules`,
   `proxy_alert_state`, `proxy_alert_events` in `store/schema_proxy.go`): rules of kind `cert_expiring`
-  (`params.days` from 21/7/3/1), `cert_expired`, `engine_down` (the engine's systemd unit not
+  (`params.days` from 21/7/3/1), `cert_expired`, `renewal_failed` (the last certbot run or its reload
+  hook failed, with an unreadable or running renewal left unjudged), `served_drift` (a TLS site serves a
+  stale or mismatched certificate; unreachable and skipped sites are left unjudged), `engine_down`
+  (the engine's systemd unit not
   active/reloading/activating), `upstream_down` (`params.minutes`, 5–1440; the `/proxy/upstreams` check,
   so only addresses nginx's own config names are dialled), `watch_unreachable` / `watch_untrusted`
   (`CheckDomain` on each watched domain) and `site_errors` (`threshold` %, `minutes`, `minRequests` over
@@ -2413,8 +2416,12 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `[test]` message to one existing channel), `POST /proxy/alerts/evaluate` (a pass now; holds still
   apply); behind `destructive`: `PUT /proxy/alerts/rules/{id}` (can pause; new terms or a pause clear the
   rule's state except mutes), `DELETE /proxy/alerts/rules/{id}`, `PUT /proxy/alerts/mutes {ruleId, subject,
-  muted}`. Not offered because nothing on this build reads them: a failed certbot renewal, served-certificate
-  drift, and a watched endpoint's grade dropping.
+  muted}`. A watched endpoint's grade dropping is not offered: scheduled watched checks record a
+  handshake and certificate, but do not run the full TLS grader.
+  `TestProxyAlertsRequireAdminAndTellEachTransitionOnce` covers the API gate, audit, firing, unreadable
+  source, and recovery; `TestProxyAlertReadingsForRenewalAndServedCertificates` covers the two additional
+  readings; `TestLiveSiteSingleSignOnChecksBeforeForwarding` verifies the single sign-on access decisions
+  against a real nginx and two local HTTP services.
 - **Snoozed findings** (`api/handlers_proxy_findings.go`; table `proxy_finding_snoozes` in
   `store/schema_proxy.go`): the overview's findings are judged in the browser, so a snooze keeps the
   finding's id and the fingerprint it had (`finding-snooze.ts`: the level plus the area's fingerprint or
