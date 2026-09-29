@@ -176,11 +176,12 @@ function unnamedControls(page: Page) {
   })
 }
 
-/** Every fully rounded, filled element with text in it — the pill §4 deleted. */
+/** Fully rounded, filled labels; a person's avatar is the one identity exception. */
 function filledPills(page: Page) {
   return page.evaluate(() => {
     const bad: string[] = []
     for (const el of document.querySelectorAll<HTMLElement>("span, div")) {
+      if (el.dataset.slot === "user-avatar") continue
       const s = getComputedStyle(el)
       const r = parseFloat(s.borderTopLeftRadius)
       const h = el.getBoundingClientRect().height

@@ -3,7 +3,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ArrowUpDown, ChevronLeft, ChevronRight, Logout, MagnifyingGlass } from "@/components/icons"
+import { ChevronLeft, ChevronRight, ChevronUp, Logout, MagnifyingGlass } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useCommandPalette } from "@/components/command-palette"
@@ -543,7 +543,7 @@ function NavRow({
  * move around.
  *
  * The menu opens with the same picture and name as the card, larger, with the
- * sign-in name and role under them: the one place in the product that says
+ * sign-in name beneath and role at the edge: the one place in the product that says
  * plainly which account this is. What used to be a caption there — "two-factor
  * not enrolled" — is now a `Status` on the Security row, where it is a reading
  * beside the page that changes it.
@@ -562,52 +562,63 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
         <button
           type="button"
           aria-label={`Account menu for ${name}`}
-          className="flex w-full min-w-0 items-center gap-2.5 rounded-md p-1.5 text-left focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent"
+          className="group/account flex min-h-14 w-full min-w-0 items-center gap-3 rounded-lg border border-sidebar-border bg-card px-2.5 py-2 text-left focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:min-h-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent active:bg-sidebar-accent data-[state=open]:bg-sidebar-accent"
         >
           {user ? (
-            <UserAvatar user={user} size="sm" />
+            <UserAvatar user={user} size="md" className="group-data-[collapsible=icon]:size-7" />
           ) : (
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-plot-brand text-hint font-semibold text-brand">
+            <span
+              data-slot="user-avatar"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-plot-brand text-xs font-semibold text-brand group-data-[collapsible=icon]:size-7"
+            >
               ?
             </span>
           )}
-          <span className="grid min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <span className="truncate text-body leading-tight font-medium">{name}</span>
+          <span className="grid min-w-0 flex-1 gap-0.5 group-data-[collapsible=icon]:hidden">
+            <span className="truncate text-body leading-tight font-semibold">{name}</span>
             <span className="truncate text-hint leading-tight text-muted-foreground capitalize">
               {user?.role ?? "—"}
             </span>
           </span>
-          <ArrowUpDown className="size-3.5 shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" />
+          <ChevronUp className="size-4 shrink-0 text-muted-foreground transition-colors group-hover/account:text-foreground group-data-[collapsible=icon]:hidden group-data-[state=open]/account:text-foreground" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         side={collapsed ? "right" : "top"}
         align="start"
-        className="w-64 p-0"
+        aria-label="Account"
+        aria-labelledby={undefined}
+        className="w-72 max-w-[calc(100vw-1rem)] rounded-xl p-1.5"
         sideOffset={8}
+        collisionPadding={8}
       >
         {user && (
           <div className="flex min-w-0 items-center gap-3 px-3 py-3">
-            <UserAvatar user={user} size="md" />
+            <UserAvatar user={user} size="lg" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-body leading-tight font-medium">{name}</p>
-              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-hint leading-tight text-muted-foreground">
-                <span className="truncate">@{user.username}</span>
-                <Tag>{user.role}</Tag>
+              <p className="truncate text-title leading-tight font-semibold">{name}</p>
+              <p className="mt-1 truncate text-body leading-tight text-muted-foreground">
+                @{user.username}
               </p>
             </div>
+            <Tag className="shrink-0">{user.role}</Tag>
           </div>
         )}
-        <DropdownMenuSeparator className="my-0" />
-        <div className="p-1">
+        <DropdownMenuSeparator className="mx-1.5 my-1.5 bg-hairline" />
+        <div className="space-y-0.5">
           {entries.map((item) => (
-            <DropdownMenuItem key={item.href} asChild>
+            <DropdownMenuItem
+              key={item.href}
+              asChild
+              className="group/account-link min-h-11 gap-3 rounded-md px-3 font-normal focus-ring-inset sm:min-h-9"
+            >
               <Link
                 href={item.href}
                 data-active={item.href === pathname || undefined}
-                className="data-[active]:bg-accent"
+                aria-current={item.href === pathname ? "page" : undefined}
+                className="data-[active]:bg-accent data-[active]:font-medium"
               >
-                <item.icon className="size-4" />
+                <item.icon className="size-4 text-muted-foreground group-data-[active]/account-link:text-brand" />
                 <span className="flex-1">{item.title}</span>
                 {item.href === "/account/security" && (
                   <Status
@@ -620,9 +631,12 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
             </DropdownMenuItem>
           ))}
         </div>
-        <DropdownMenuSeparator className="my-0" />
-        <div className="p-1">
-          <DropdownMenuItem variant="destructive" onSelect={() => logout()}>
+        <DropdownMenuSeparator className="mx-1.5 my-1.5 bg-hairline" />
+        <div>
+          <DropdownMenuItem
+            onSelect={() => logout()}
+            className="min-h-11 gap-3 rounded-md px-3 font-normal focus-ring-inset sm:min-h-9"
+          >
             <Logout className="size-4" />
             Sign out
           </DropdownMenuItem>
