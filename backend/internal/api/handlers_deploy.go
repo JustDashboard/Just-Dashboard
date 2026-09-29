@@ -1447,6 +1447,13 @@ func (s *Server) handleDeployPurge(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
+	current, err := s.modules.deployStore.Get(r.Context(), id)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	if err := httpx.RequireTypedConfirmation(w, r, current.Name); err != nil {
+		return err
+	}
 	project, err := s.modules.deployStore.PurgeArchived(r.Context(), id)
 	if err != nil {
 		return mapDeployError(err)

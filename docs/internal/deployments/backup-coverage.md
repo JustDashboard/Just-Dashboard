@@ -37,8 +37,8 @@ A failed dump fails the run; a runner without the dump owner fails rather than p
 deployment gate accepts a native dump as coverage for a linked database (`Manifest.CoversDatabase`
 plus `Runner.VerifyDatabaseCoverage`, which checks the archived entry and its recorded size) before
 falling back to the engine's files; a run taken before the dump was configured cannot satisfy it.
-`POST /backups/runs/{runID}/restore-database` (destructive capability, typed confirmation of the target
-database name, audited) extracts one recorded dump bounded by its manifest size, verifies its digest
+`POST /backups/runs/{runID}/restore-database` (destructive capability, ordinary confirmation,
+audited) extracts one recorded dump bounded by its manifest size, verifies its digest
 and hands it to the Databases owner; naming another database on the same server is the restore drill.
 `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveBackupDumpsAndRestoresAPostgresDatabase` provisions
 a real PostgreSQL server, dumps a canary row, deletes it live and restores it into a drill database.

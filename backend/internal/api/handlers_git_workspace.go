@@ -167,9 +167,6 @@ func (s *Server) handleGitConflictChoose(w http.ResponseWriter, r *http.Request)
 	if req.Choice != "ours" && req.Choice != "theirs" && req.Choice != "delete" {
 		return httpx.BadRequest("choose a side or deletion")
 	}
-	if err := httpx.RequireTypedConfirmation(w, r, "discard changes"); err != nil {
-		return err
-	}
 	return s.gitAction(w, r, "conflict.choose", func(path string) (*gitx.Result, error) {
 		return s.modules.git.ResolveConflict(r.Context(), path, req)
 	})
@@ -195,9 +192,6 @@ func (s *Server) handleGitOperationContinue(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleGitOperationAbort(w http.ResponseWriter, r *http.Request) error {
-	if err := httpx.RequireTypedConfirmation(w, r, "abort operation"); err != nil {
-		return err
-	}
 	return s.gitAction(w, r, "operation.abort", func(path string) (*gitx.Result, error) {
 		return s.modules.git.AbortOperation(r.Context(), path)
 	})

@@ -47,11 +47,7 @@ import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 /**
- * What an operator types to confirm removing an image, and what the dialog
- * names it. It has to be the image's own tag rather than a fixed phrase — the
- * server keys the confirmation on the same value, for the reason it keys a
- * container's on its name: a phrase that is the same for every row can be
- * typed from muscle memory into the wrong dialog.
+ * The image's own tag or digest, shown in the ordinary confirmation dialog.
  */
 function imagePhrase(image: DockerImage): string {
   const tag = image.repoTags[0]

@@ -194,7 +194,6 @@ export default function PackagesPage() {
   const upgrade = (securityOnly: boolean) =>
     confirm({
       title: securityOnly ? "Install security updates" : "Upgrade all packages",
-      phrase: securityOnly ? "install security updates" : "upgrade packages",
       confirmLabel: securityOnly ? "Install" : "Upgrade",
       description: (
         <>

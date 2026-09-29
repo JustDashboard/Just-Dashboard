@@ -75,11 +75,7 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/{id}/rename", s.handle(s.handleContainerRename))
 				r.Method(http.MethodPatch, "/{id}/resources", s.handle(s.handleContainerResources))
 			})
-			// Stop, restart and kill interrupt a running service, so they
-			// carry the typed-confirmation requirement even though the
-			// container itself survives. Recreate destroys the container and
-			// builds a new one in its place, which is the same bargain with
-			// higher stakes.
+			// Lifecycle actions interrupt a running service and use the destructive gate.
 			s.destructive(r, func(r chi.Router) {
 				r.Method(http.MethodPost, "/{id}/stop", s.handle(s.containerLifecycle(dockerx.ActionStop)))
 				r.Method(http.MethodPost, "/{id}/restart", s.handle(s.containerLifecycle(dockerx.ActionRestart)))
@@ -190,10 +186,7 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/prune", s.handle(s.handlePruneAll))
 			r.Method(http.MethodPost, "/build-cache/prune", s.handle(s.handleBuildCachePrune))
-			// The category-selected sweep. Same gate as prune, and the
-			// handler additionally requires the typed phrase when volumes are
-			// among the categories — that is the one selection here that
-			// destroys data.
+			// The category-selected sweep uses the same destructive gate as prune.
 			r.Method(http.MethodPost, "/cleanup", s.handle(s.handleCleanupRun))
 		})
 	})
@@ -678,8 +671,7 @@ func (s *Server) handleImagePull(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) handleImageRemove(w http.ResponseWriter, r *http.Request) error {
 	id := httpx.URLParam(r, "id")
 	// No typed phrase: an image is reproducible — it came from a registry or a
-	// Dockerfile this dashboard can rebuild. Pruning many at once still asks,
-	// because that is the sweep nobody can enumerate in advance.
+	// Dockerfile this dashboard can rebuild. Pruning uses ordinary confirmation too.
 	//
 	// The tag is resolved before the removal rather than after, because after
 	// it there is nothing left to resolve it from — and a trail saying which
@@ -732,12 +724,6 @@ func (s *Server) handleVolumeInspect(w http.ResponseWriter, r *http.Request) err
 
 func (s *Server) handleVolumeRemove(w http.ResponseWriter, r *http.Request) error {
 	name := httpx.URLParam(r, "name")
-	// Typed, unlike the container, image and network beside it: a volume is the
-	// one Docker object that *is* the data. Everything else on this page can be
-	// rebuilt from a registry or a spec; this cannot be rebuilt from anything.
-	if err := httpx.RequireTypedConfirmation(w, r, name); err != nil {
-		return err
-	}
 	if err := s.modules.docker.RemoveVolume(r.Context(), name, r.URL.Query().Get("force") == "true"); err != nil {
 		return s.dockerErr(err)
 	}
@@ -747,9 +733,6 @@ func (s *Server) handleVolumeRemove(w http.ResponseWriter, r *http.Request) erro
 }
 
 func (s *Server) handleVolumePrune(w http.ResponseWriter, r *http.Request) error {
-	if err := httpx.RequireTypedConfirmation(w, r, "prune volumes"); err != nil {
-		return err
-	}
 	rep, err := s.modules.docker.PruneVolumes(r.Context())
 	if err != nil {
 		return s.dockerErr(err)
@@ -918,16 +901,6 @@ func (s *Server) handlePruneAll(w http.ResponseWriter, r *http.Request) error {
 		// means what its dialog says.
 		BuildCache:    r.URL.Query().Get("buildCache") == "true",
 		AllBuildCache: r.URL.Query().Get("allBuildCache") == "true",
-	}
-	// Only the volume sweep is typed for: a container, a network, an image or
-	// a cache entry comes back from a registry, a compose file or the next
-	// build; a volume comes back from nothing. Without volumes this is the
-	// routine housekeeping sweep and an ordinary confirmation is the right
-	// weight — see invariant 3 on frequency rather than severity.
-	if opts.Volumes {
-		if err := httpx.RequireTypedConfirmation(w, r, "prune everything"); err != nil {
-			return err
-		}
 	}
 	reports, err := s.modules.docker.PruneAll(r.Context(), opts)
 	if err != nil {

@@ -120,7 +120,6 @@ export function VolumesTab({
                   onClick={() =>
                     confirm({
                       title: "Prune volumes",
-                      phrase: "prune volumes",
                       confirmLabel: "Prune",
                       description: (
                         <>
@@ -301,7 +300,6 @@ function VolumeCard({
             onClick={() =>
               confirm({
                 title: "Delete volume",
-                phrase: volume.name,
                 confirmLabel: "Delete",
                 description: (
                   <>

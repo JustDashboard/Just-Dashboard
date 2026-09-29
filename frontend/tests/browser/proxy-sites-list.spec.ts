@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { availability, json, mockProxy, mockShowcase, user, vhosts } from "./proxy-fixtures"
 import { pendingNone } from "./fixtures/proxy/sites"
 import { siteSpec } from "./fixtures/proxy/siteform"
+import type { SiteRead } from "@/lib/proxy/types-siteform"
 
 /**
  * The Sites list and what its verbs report back.
@@ -1271,15 +1272,21 @@ test("a deployment's route leads to its deployment and is edited only after aski
   })
   await page.route("**/api/v1/proxy/sites/just-dashboard-env-7.conf", (route) => {
     asked.push("form")
-    return json(route, {
-      spec: siteSpec({
-        name: "just-dashboard-env-7.conf",
-        domains: ["shop.example.com"],
-        upstream: "http://127.0.0.1:4100",
-      }),
+    const read: SiteRead = {
+      spec: {
+        ...siteSpec({
+          name: "just-dashboard-env-7.conf",
+          domains: ["shop.example.com"],
+          upstream: "http://127.0.0.1:4100",
+        }),
+        kind: "proxy",
+      },
       managed: true,
+      content: "server {\n    server_name shop.example.com;\n}\n",
+      digest: "shop-route-v1",
       warnings: [],
-    })
+    }
+    return json(route, read)
   })
   await page.goto("/proxy/sites")
 

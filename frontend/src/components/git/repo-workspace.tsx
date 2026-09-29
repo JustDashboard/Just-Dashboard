@@ -84,7 +84,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  * you are, which branch, how far from its upstream, then fetch, pull and push
  * inline — the three pressed every hour — and everything else behind one
  * menu where each verb carries a sentence. Everything destructive goes
- * through the shared typed-confirmation dialog, and every unfamiliar word
+ * through the shared confirmation dialog, and every unfamiliar word
  * carries its meaning one hover away (see help.tsx), so the same screen
  * serves someone committing for the first time and someone who has done it
  * ten thousand times.
@@ -208,7 +208,7 @@ export function RepoWorkspace({
   }, [repo.path, status.data])
 
   // The tree speaks the fullscreen-safe ConfirmRequest shape; here it just maps
-  // onto the same typed-confirmation dialog everything else uses.
+  // onto the same confirmation dialog everything else uses.
   const treeConfirm = (req: TreeConfirmRequest) =>
     confirm({
       title: req.title,
@@ -384,7 +384,6 @@ export function RepoWorkspace({
                 onClick={() =>
                   confirm({
                     title: `Abort ${operation}`,
-                    phrase: "abort operation",
                     confirmLabel: "Abort operation",
                     description:
                       "Return to the state before the operation started. Uncommitted conflict resolutions made since it started are discarded.",

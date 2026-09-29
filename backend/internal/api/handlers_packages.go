@@ -155,13 +155,6 @@ func (s *Server) handlePackageUsage(w http.ResponseWriter, r *http.Request) erro
 // afterwards whether or not anybody watched it happen.
 func (s *Server) handlePackageUpgrade(w http.ResponseWriter, r *http.Request) error {
 	securityOnly := r.URL.Query().Get("security") == "true"
-	phrase := "upgrade packages"
-	if securityOnly {
-		phrase = "install security updates"
-	}
-	if err := httpx.RequireTypedConfirmation(w, r, phrase); err != nil {
-		return err
-	}
 	name, args, env, err := s.modules.updates.UpgradeCommand(r.Context(), securityOnly)
 	if err != nil {
 		if e := notSupported(err); e != nil {
@@ -240,8 +233,6 @@ func (s *Server) handlePackageRefresh(w http.ResponseWriter, r *http.Request) er
 type packageRequest struct {
 	Packages []string `json:"packages"`
 	// Purge additionally deletes the configuration the package left in /etc.
-	// It is the one part of a removal with no way back, which is why it — and
-	// only it — asks for the typed phrase.
 	Purge bool `json:"purge"`
 }
 
@@ -297,25 +288,13 @@ func plural(n int) string {
 }
 
 // handlePackageRemove takes packages off the host.
-//
-// It is destructive and confirmed, but the phrase is asked for only when the
-// configuration goes too. That is invariant 3's frequency test applied at the
-// call site, the same way handleFileDelete narrows to `recursive`: an ordinary
-// removal is undone by installing the package again from the same repository
-// it came from, and a phrase in front of something with a path back is a
-// phrase that teaches people to type phrases. Deleting the /etc files somebody
-// spent an afternoon on has no path back at all.
+// Purging also removes the package's configuration; both forms use ordinary confirmation.
 func (s *Server) handlePackageRemove(w http.ResponseWriter, r *http.Request) error {
 	var body packageRequest
 	if err := httpx.DecodeJSON(r, &body); err != nil {
 		return err
 	}
 	target := strings.Join(body.Packages, ", ")
-	if body.Purge {
-		if err := httpx.RequireTypedConfirmation(w, r, "purge "+target); err != nil {
-			return err
-		}
-	}
 	name, args, env, err := s.modules.updates.RemoveCommand(r.Context(), body.Packages, body.Purge)
 	if err != nil {
 		if e := notSupported(err); e != nil {

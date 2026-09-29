@@ -468,9 +468,7 @@ test("a rolled-back run offers no Retry", async ({ page }) => {
   await expect(page.getByRole("menuitem", { name: "Retry" })).toHaveCount(0)
 })
 
-test("a legacy project's commit rollback asks for the short sha before it runs", async ({
-  page,
-}) => {
+test("a legacy project's commit rollback uses ordinary confirmation", async ({ page }) => {
   await mockProject(page, { normalized: false })
   await page.goto("/deploy/7/deployments")
   const list = page.getByRole("list", { name: "Recoverable commits" })
@@ -481,8 +479,7 @@ test("a legacy project's commit rollback asks for the short sha before it runs",
   const dialog = page.getByRole("dialog", { name: "Roll back" })
   await expect(dialog).toContainText("api-production")
   const confirmButton = dialog.getByRole("button", { name: "Roll back", exact: true })
-  await expect(confirmButton).toBeDisabled()
-  await dialog.getByRole("textbox").fill("9988776")
+  await expect(dialog.getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await expect(confirmButton).toBeEnabled()
   await confirmButton.click()
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/86$/)

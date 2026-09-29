@@ -154,10 +154,9 @@ async function mockBackups(page: Page, existing = false) {
         { name: "source-0001/uploads/logo.png", size: 2048, mode: "0644", isDir: false },
       ]
     } else if (path === "/backups/runs/8/restore") {
-      // The client URI-encodes the phrase so a header can carry any text.
       restores.push({
         body: route.request().postDataJSON(),
-        confirm: decodeURIComponent(route.request().headers()["x-confirm"] ?? ""),
+        confirm: route.request().headers()["x-confirm"],
       })
       result = { runId: 8, destination: "", entries: 2, bytes: 120, targets: ["/srv/app"] }
     } else if (path === "/backups/runs/8/restore-database") {
@@ -328,11 +327,11 @@ test("a backup job dumps saved databases natively and a run restores one into a 
   await page.getByRole("textbox", { name: "Target database" }).fill("shop_drill")
   await page.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page.getByText(/replaces the contents of/)).toBeVisible()
-  await page.getByRole("textbox", { name: /Type/ }).fill("shop_drill")
+  await expect(page.getByRole("dialog").getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await page.getByRole("button", { name: "Restore database", exact: true }).last().click()
   await expect(page.getByText("Restored shop-db into shop_drill", { exact: true })).toBeVisible()
   expect(api.restores()).toEqual([
-    { body: { connectionId: 3, database: "shop_drill" }, confirm: "shop_drill" },
+    { body: { connectionId: 3, database: "shop_drill" }, confirm: undefined },
   ])
 })
 
@@ -391,12 +390,10 @@ test("a job is paused from its menu and files are put back in place or restored 
   await page.getByRole("option", { name: "Back where the files came from" }).click()
   await expect(page.getByText("source-0001 → /srv/app", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Continue", exact: true }).click()
-  await page.getByRole("textbox", { name: /Type/ }).fill("restore in place")
+  await expect(page.getByRole("dialog").getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await page.getByRole("button", { name: "Restore", exact: true }).click()
   await expect(page.getByText("Restored 2 entries (120 B)", { exact: true })).toBeVisible()
-  expect(api.restores()).toEqual([
-    { body: { inPlace: true, paths: [] }, confirm: "restore in place" },
-  ])
+  expect(api.restores()).toEqual([{ body: { inPlace: true, paths: [] }, confirm: undefined }])
 
   // One file out of the archive, into a directory of the operator's choosing.
   await runMenu(page, /Browse files/)
@@ -405,11 +402,11 @@ test("a job is paused from its menu and files are put back in place or restored 
   await page.getByRole("button", { name: "Restore 1 selected…" }).click()
   await page.getByRole("textbox", { name: "Destination directory" }).fill("/srv/restore")
   await page.getByRole("button", { name: "Continue", exact: true }).click()
-  await page.getByRole("textbox", { name: /Type/ }).fill("/srv/restore")
+  await expect(page.getByRole("dialog").getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await page.getByRole("button", { name: "Restore", exact: true }).click()
   await expect(page.getByText("Restored 2 entries (120 B)", { exact: true }).last()).toBeVisible()
   expect(api.restores().at(-1)).toEqual({
     body: { destination: "/srv/restore", inPlace: false, paths: ["source-0001/config.yml"] },
-    confirm: "/srv/restore",
+    confirm: undefined,
   })
 })

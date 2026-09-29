@@ -2,7 +2,8 @@
 
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
-  `X-Confirm-Encoding: uri` (including Unicode and surrounding whitespace), `ApiError` with
+  `X-Confirm-Encoding: uri` only when a typed phrase is supplied (including Unicode and surrounding
+  whitespace), `ApiError` with
   `needsConfirmation`/`isAuthProblem`/`needsTotp` and the whole parsed `body`, for a refusal that
   carries more than the error (the proxy engine's config-test refusal carries the test); `wsUrl()` and
   `downloadUrl()` build the non-JSON URLs. A `Query` value may be an array, which is a repeated
@@ -86,13 +87,11 @@
   action's existing capability. Stack pages hide those controls from limited accounts, explain the
   restriction, and retain stack/config/log read views. Direct container controls retain their separate
   capability checks.
-- `ConfirmDialog` collects the typed phrase and the server re-checks it — with one exception: deleting an
-  archived deployment permanently asks for the project's name in the dialog alone, and its route keeps
-  ordinary confirmation ([`permanent-deletion.md`](../deployments/permanent-deletion.md)). Its
-  `phrase` is optional and the
-  absence is meaningful: a request without one is reversible but still deserves a pause (deleting a
-  terminal folder loses a grouping and nothing else), and asking somebody to type "delete folder" teaches
-  them to type phrases without reading — the one habit the typed confirmation exists to prevent.
+- `ConfirmDialog` collects a phrase only for permanent deletion of an archived deployment project,
+  deletion of an entire database, or Docker stack removal. The server checks those phrases too
+  ([`invariants.md`](../security/invariants.md),
+  [`permanent-deletion.md`](../deployments/permanent-deletion.md)). Other destructive actions use the
+  ordinary dialog; `phrase` stays optional.
   The dialog toasts "<title> completed" when the action resolves, unless the action resolves to
   `"reported"`: an outcome that is only partly what the title promises — a site deleted but nginx not
   reloaded — is announced by the action itself, and a bare "completed" beside it would be the untrue

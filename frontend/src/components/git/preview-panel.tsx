@@ -741,7 +741,6 @@ function StashPreview({
       run: () =>
         ctx.confirm({
           title: `Drop stash ${stash.index}`,
-          phrase: "drop stash",
           confirmLabel: "Drop",
           description: (
             <p className="text-destructive">

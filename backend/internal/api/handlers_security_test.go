@@ -252,16 +252,15 @@ func TestNetworkProbeResolvesLocalhost(t *testing.T) {
 	}
 }
 
-// Invariant 3, on the routes added here: an irreversible action refuses to run
-// without the typed phrase, and says which phrase.
-func TestNewDestructiveRoutesDemandTheTypedPhrase(t *testing.T) {
+// These routes keep their capability checks but use ordinary confirmation.
+func TestSecurityDestructiveRoutesDoNotRequirePhrases(t *testing.T) {
 	cases := []struct {
-		method, path, body, phrase string
+		method, path, body string
 	}{
-		{http.MethodPost, "/api/v1/firewall/reset", `{}`, "reset firewall"},
-		{http.MethodPost, "/api/v1/firewall/policy", `{"direction":"incoming","policy":"deny"}`, "deny incoming"},
-		{http.MethodPost, "/api/v1/ssh/config", `{"settings":{"x11forwarding":"no"}}`, "change ssh"},
-		{http.MethodPost, "/api/v1/certificates/revoke", `{"name":"example.com"}`, "revoke example.com"},
+		{http.MethodPost, "/api/v1/firewall/reset", `{}`},
+		{http.MethodPost, "/api/v1/firewall/policy", `{"direction":"incoming","policy":"deny"}`},
+		{http.MethodPost, "/api/v1/ssh/config", `{"settings":{"x11forwarding":"no"}}`},
+		{http.MethodPost, "/api/v1/certificates/revoke", `{"name":"example.com"}`},
 	}
 	for _, tc := range cases {
 		// A client per case. These are destructive routes, so they share the
@@ -271,22 +270,8 @@ func TestNewDestructiveRoutesDemandTheTypedPhrase(t *testing.T) {
 		t.Run(tc.path, func(t *testing.T) {
 			c, _ := newClient(t)
 			w := c.do(tc.method, tc.path, tc.body, nil)
-			if w.Code != http.StatusPreconditionRequired {
-				t.Fatalf("got %d, want 428: %s", w.Code, w.Body.String())
-			}
-			var body struct {
-				Error struct{ Code, Phrase string } `json:"error"`
-			}
-			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-				t.Fatal(err)
-			}
-			if body.Error.Phrase != tc.phrase {
-				t.Fatalf("phrase = %q, want %q", body.Error.Phrase, tc.phrase)
-			}
-
-			w = c.do(tc.method, tc.path, tc.body, map[string]string{"X-Confirm": "yes"})
-			if w.Code != http.StatusPreconditionFailed {
-				t.Fatalf("wrong phrase got %d, want 412: %s", w.Code, w.Body.String())
+			if w.Code == http.StatusPreconditionRequired || w.Code == http.StatusPreconditionFailed {
+				t.Fatalf("route asked for a phrase: %d %s", w.Code, w.Body.String())
 			}
 		})
 	}

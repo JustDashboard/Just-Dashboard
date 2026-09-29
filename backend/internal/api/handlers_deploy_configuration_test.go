@@ -102,8 +102,8 @@ func TestDeploymentConfigurationRoutesEnforceSessionCapabilityConfirmationAndAud
 	}
 	removePath := fmt.Sprintf("/api/v1/deploy/%d/remove-managed", projectID)
 	volumeBody, _ := json.Marshal(deploy.RemoveManagedRequest{PlanDigest: plan.Digest, TargetIDs: []string{volume.ID}})
-	if response := admin.do(http.MethodPost, removePath, string(volumeBody), nil); response.Code != http.StatusPreconditionRequired {
-		t.Fatalf("unconfirmed volume removal = %d %s", response.Code, response.Body.String())
+	if response := admin.do(http.MethodPost, removePath, string(volumeBody), nil); response.Code == http.StatusPreconditionRequired || response.Code == http.StatusPreconditionFailed {
+		t.Fatalf("volume removal asked for a phrase = %d %s", response.Code, response.Body.String())
 	}
 	backupBody, _ := json.Marshal(deploy.RemoveManagedRequest{PlanDigest: plan.Digest, TargetIDs: []string{backup.ID}})
 	if response := admin.do(http.MethodPost, removePath, string(backupBody), nil); response.Code != http.StatusOK {
@@ -124,6 +124,49 @@ func TestDeploymentConfigurationRoutesEnforceSessionCapabilityConfirmationAndAud
 	}
 	if strings.Contains(audits, secret) {
 		t.Fatalf("deployment audit leaked secret: %s", audits)
+	}
+}
+
+func TestManagedComposeStackRemovalRequiresItsName(t *testing.T) {
+	s := testServer(t)
+	projectID, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	now := time.Now().UTC().Unix()
+	release, err := s.Store.DB.Exec(`
+		INSERT INTO deploy_releases(project_id, environment_id, release_number, state, plan_revision, config_digest, variables_digest, strategy, created_at)
+		VALUES(?, ?, 1, 'retained', 1, 'digest-config', 'digest-vars', 'stop_first', ?)`, projectID, environmentID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseID, _ := release.LastInsertId()
+	if _, err := s.Store.DB.Exec(`
+		INSERT INTO deploy_release_runtimes(release_id, environment_id, kind, runtime_id, name, working_directory, host, port, state, metadata_json, created_at, updated_at)
+		VALUES(?, ?, 'compose', 'managed-stack', 'managed-stack', '/srv/managed-stack', '127.0.0.1', 0, 'stopped', '{}', ?, ?)`, releaseID, environmentID, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.modules.deployStore.Archive(t.Context(), projectID); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := s.modules.deployPlanning.RemovalPlan(t.Context(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stack *deploy.RemovalTarget
+	for i := range plan.Targets {
+		if plan.Targets[i].Kind == "compose_stack" {
+			stack = &plan.Targets[i]
+		}
+	}
+	if stack == nil || stack.ConfirmationType != "typed" || stack.ConfirmationPhrase != "managed-stack" {
+		t.Fatalf("stack target = %#v", stack)
+	}
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "stack-removal-admin", auth.RoleAdmin)}
+	path := fmt.Sprintf("/api/v1/deploy/%d/remove-managed", projectID)
+	body, _ := json.Marshal(deploy.RemoveManagedRequest{PlanDigest: plan.Digest, TargetIDs: []string{stack.ID}})
+	if rec := admin.do(http.MethodPost, path, string(body), nil); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("missing stack name: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := admin.do(http.MethodPost, path, string(body), map[string]string{"X-Confirm": "another-stack"}); rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("wrong stack name: %d %s", rec.Code, rec.Body.String())
 	}
 }
 

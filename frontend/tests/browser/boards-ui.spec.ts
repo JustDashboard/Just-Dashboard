@@ -92,20 +92,7 @@ async function mockBoards(page: Page, scene: Scene = { elements: [], appState: {
       return json({ ...detail(), updatedAt: now })
     }
     if (path === "/boards/1" && request.method() === "DELETE") {
-      const phrase = decodeURIComponent(request.headers()["x-confirm"] ?? "")
-      if (phrase !== board.name) {
-        return json(
-          {
-            error: {
-              code: "confirmation_mismatch",
-              message: `type "${board.name}" to confirm`,
-              phrase: board.name,
-            },
-          },
-          428,
-        )
-      }
-      board.deletedWith = phrase
+      board.deletedWith = board.name
       return route.fulfill({ status: 204 })
     }
     if (path === "/databases/fleet") {
@@ -192,7 +179,7 @@ test("a board opens without saving, keeps its images, and saves inserted server 
   expect(externalFonts).toEqual([])
 })
 
-test("the name is saved trimmed, never blank, Ctrl+S saves now, and delete asks for the saved name", async ({
+test("the name is saved trimmed, never blank, Ctrl+S saves now, and delete uses ordinary confirmation", async ({
   page,
 }) => {
   const board = await mockBoards(page)
@@ -230,8 +217,7 @@ test("the name is saved trimmed, never blank, Ctrl+S saves now, and delete asks 
 
   await page.getByRole("button", { name: "Delete board" }).click()
   const dialog = page.getByRole("dialog")
-  await expect(dialog).toContainText("Type Ops map 2 to confirm")
-  await dialog.getByPlaceholder("Type the phrase above").fill("Ops map 2")
+  await expect(dialog.getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await dialog.getByRole("button", { name: "Delete board" }).click()
   await expect(page).toHaveURL(/\/boards$/)
   expect(board.deletedWith).toBe("Ops map 2")

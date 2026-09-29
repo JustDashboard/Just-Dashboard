@@ -82,25 +82,12 @@ func drive(t *testing.T, router http.Handler, method, path, body, confirm string
 	return rec
 }
 
-// The phrase is the version. Short on purpose — what has to be read is *which*
-// version, and naming the object is what every other typed route in this
-// codebase does.
-func TestInstallingAnUpdateDemandsTheVersionBeTyped(t *testing.T) {
+func TestInstallingAnUpdateDoesNotRequireAPhrase(t *testing.T) {
 	router := selfUpdateRouter(t, auth.RoleAdmin)
 
 	rec := drive(t, router, http.MethodPost, "/dashboard/update/install", `{}`, "")
-	if rec.Code != http.StatusPreconditionRequired {
-		t.Fatalf("an unconfirmed upgrade answered %d: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"phrase":"0.9"`) {
-		t.Fatalf("the server did not say which phrase it wants: %s", rec.Body.String())
-	}
-
-	// The phrase for a *different* version must not work, or the confirmation
-	// stops being about the thing being installed.
-	rec = drive(t, router, http.MethodPost, "/dashboard/update/install", `{}`, "0.5")
-	if rec.Code != http.StatusPreconditionFailed {
-		t.Fatalf("a mismatched phrase answered %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("update without a phrase answered %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

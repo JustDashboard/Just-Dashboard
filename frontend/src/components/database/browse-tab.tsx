@@ -356,8 +356,6 @@ export function BrowseTab({
   }
 
   // Bulk delete is one confirmation for the whole set rather than one per row.
-  // Asking somebody to type the table name eight times is how you teach them to
-  // type it without reading, which is the habit the phrase exists to prevent.
   const deleteSelected = () => {
     if (!rows.data || selected.size === 0 || !detail.data) return
     if ([...selected].some((index) => !rows.data?.rows[index])) return
@@ -527,7 +525,6 @@ export function BrowseTab({
   const dropTable = () =>
     confirm({
       title: "Drop table",
-      phrase: table,
       confirmLabel: "Drop table",
       description: (
         <p>
@@ -549,7 +546,6 @@ export function BrowseTab({
   const truncateTable = () =>
     confirm({
       title: "Empty table",
-      phrase: table,
       confirmLabel: "Empty it",
       description: (
         <p>

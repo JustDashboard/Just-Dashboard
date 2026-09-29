@@ -77,10 +77,6 @@ export function CleanupPanel({
     confirm({
       title: destroys ? "Remove volumes and reclaim disk" : `Reclaim ${bytes(total)}`,
       confirmLabel: "Remove",
-      // The typed phrase is required by the route whenever volumes are in the
-      // selection; asking for it here keeps the dialog and the server agreed
-      // on when it is needed rather than the client guessing.
-      phrase: destroys ? "delete volumes" : undefined,
       description: (
         <>
           <ul className="space-y-1.5 text-body">

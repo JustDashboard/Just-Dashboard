@@ -82,7 +82,6 @@ function ConflictEditor({
         choice === "delete"
           ? `Delete ${conflict.file}`
           : `Use the ${choice === "ours" ? "current" : "incoming"} version`,
-      phrase: "discard changes",
       confirmLabel: choice === "delete" ? "Delete and resolve" : "Use this version",
       description: (
         <p>

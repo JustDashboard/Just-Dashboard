@@ -93,7 +93,6 @@ export default function SystemUsersPage() {
   const remove = (user: SystemUser) =>
     confirm({
       title: "Delete system user",
-      phrase: user.username,
       confirmLabel: "Delete",
       subject: {
         mark: <AccountMark user={user} size="sm" />,

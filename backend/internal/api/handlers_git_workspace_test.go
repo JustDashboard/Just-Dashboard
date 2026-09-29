@@ -56,8 +56,8 @@ func TestGitWorkspaceRoutesEnforceCapabilitiesAndContainment(t *testing.T) {
 			t.Fatalf("limited wrote %s: %d", route, w.Code)
 		}
 		w = c.do(http.MethodPost, gitPath("/api/v1/git/"+route, repo), `{"choice":"theirs"}`, nil)
-		if !strings.Contains(w.Body.String(), "confirmation") {
-			t.Fatalf("%s did not require its phrase: %d %s", route, w.Code, w.Body.String())
+		if strings.Contains(w.Body.String(), "confirmation") {
+			t.Fatalf("%s asked for a phrase: %d %s", route, w.Code, w.Body.String())
 		}
 	}
 }

@@ -229,7 +229,6 @@ export function MongoBrowser({ conn, confirm }: { conn: DbConnection; confirm: C
   const dropCollection = () =>
     confirm({
       title: "Drop collection",
-      phrase: collection,
       confirmLabel: "Drop",
       description: (
         <p>
@@ -703,7 +702,6 @@ function AggregateTab({
     if (writes) {
       confirm({
         title: "Run a writing pipeline",
-        phrase: "run pipeline",
         confirmLabel: "Run it",
         description: (
           <p className="text-destructive">

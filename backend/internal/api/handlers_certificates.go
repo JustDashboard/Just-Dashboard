@@ -74,9 +74,7 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		// Writes nothing, but it may fetch an intermediate from the address
 		// a certificate names, which is why it sits behind admin too.
 		r.Method(http.MethodPost, "/import/inspect", s.handle(s.handleCertImportInspect))
-		// The private key, bare or sealed in a PFX: whoever holds it can
-		// impersonate the site until the certificate expires, and nothing
-		// here can take it back, so the name is typed.
+		// Export is administrator-only because a private key can impersonate the site.
 		r.Method(http.MethodPost, "/export", s.handle(s.handleCertExport))
 		r.Method(http.MethodPost, "/dns-credentials", s.handle(s.handleDNSCredentials))
 		// A DNS-01 dry run against a domain the caller names: an outbound
@@ -203,8 +201,7 @@ type certExportRequest struct {
 }
 
 // handleCertExport answers with the private key of the listed certificate
-// at path, as PEM or in a password-sealed PFX, once the caller has typed
-// "export <name>". The audit entry names the certificate and the format and
+// at path, as PEM or in a password-sealed PFX. The audit entry names the certificate and the format and
 // holds neither the key nor the password.
 func (s *Server) handleCertExport(w http.ResponseWriter, r *http.Request) error {
 	var req certExportRequest
@@ -220,9 +217,6 @@ func (s *Server) handleCertExport(w http.ResponseWriter, r *http.Request) error 
 	}
 	if err != nil {
 		return httpx.BadRequest("%v", err)
-	}
-	if err := httpx.RequireTypedConfirmation(w, r, "export "+part.Name); err != nil {
-		return err
 	}
 	httpx.SetAudit(r, "certificates.export", part.Name,
 		map[string]any{"path": req.Path, "format": req.Format, "legacy": req.Format == "pfx" && req.Legacy})
@@ -888,9 +882,6 @@ type revokeRequest struct {
 func (s *Server) handleCertRevoke(w http.ResponseWriter, r *http.Request) error {
 	var req revokeRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	if err := httpx.RequireTypedConfirmation(w, r, "revoke "+req.Name); err != nil {
 		return err
 	}
 	args, err := s.modules.proxy.RevokeArgs(req.Name)

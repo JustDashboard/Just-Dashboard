@@ -136,13 +136,15 @@ func TestUpdatesApplyStartsAJob(t *testing.T) {
 	s.modules.jobs.Cancel(job.ID)
 }
 
-// The confirmation still has to come first: making it a job must not become a
-// way around the typed phrase.
-func TestUpdatesApplyStillDemandsTheTypedPhrase(t *testing.T) {
-	c, _ := newClient(t)
+// Applying updates starts a job without a typed phrase.
+func TestUpdatesApplyUsesOrdinaryConfirmation(t *testing.T) {
+	c, s := newClient(t)
 	w := c.do(http.MethodPost, "/api/v1/packages/upgrade", "", nil)
-	if w.Code != http.StatusPreconditionRequired {
-		t.Fatalf("got %d, want 428: %s", w.Code, w.Body.String())
+	if w.Code == http.StatusPreconditionRequired || w.Code == http.StatusPreconditionFailed {
+		t.Fatalf("updates asked for a phrase: %d %s", w.Code, w.Body.String())
+	}
+	for _, job := range s.modules.jobs.List() {
+		s.modules.jobs.Cancel(job.ID)
 	}
 }
 

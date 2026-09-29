@@ -1,15 +1,14 @@
 /**
  * Typed client for the dashboard API.
  *
- * Two things every call here relies on:
+ * Requests here use:
  *  - `credentials: "include"` so the HttpOnly session cookie travels; the
  *    token is never readable from JS, which is the point of it.
  *  - `X-JD-CSRF` on every mutation, which makes a forged browser request need
  *    a CORS preflight the server will not authorise.
- *  - the `X-Confirm` header, which irreversible endpoints require. The server
- *    rejects the request without it, so a confirmation cannot be skipped by
- *    calling the API directly, and it sends back the exact phrase it wants in
- *    the error body rather than leaving the client to parse it out of prose.
+ *  - `X-Confirm` for project, database, and Docker stack deletion. These
+ *    handlers enforce the phrase on the server and return the expected phrase
+ *    in the error body.
  */
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1"
@@ -63,10 +62,8 @@ export class ApiError extends Error {
    * The phrase the server wants echoed back in X-Confirm.
    *
    * It arrives as its own field. It used to be recovered by matching the first
-   * quoted run in the human-readable message, which meant a phrase containing
-   * a double quote — a file named `my"file`, say — was truncated to `my`: the
-   * dialog asked for the wrong text and the server rejected every attempt, so
-   * the file could not be deleted from the UI at all.
+   * quoted run in the human-readable message, which truncated phrases with
+   * embedded double quotes and left the dialog impossible to complete.
    */
   confirmPhrase?: string
 
@@ -182,7 +179,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     Object.assign(headers, mutationHeaders())
   }
   if (options.body !== undefined) headers["Content-Type"] = "application/json"
-  if (options.confirm !== undefined) {
+  if (options.confirm) {
     headers["X-Confirm"] = encodeURIComponent(options.confirm)
     headers["X-Confirm-Encoding"] = "uri"
   }
@@ -288,7 +285,7 @@ export async function postFile(
     ...mutationHeaders(),
     "Content-Type": "application/json",
   }
-  if (opts.confirm !== undefined) {
+  if (opts.confirm) {
     headers["X-Confirm"] = encodeURIComponent(opts.confirm)
     headers["X-Confirm-Encoding"] = "uri"
   }

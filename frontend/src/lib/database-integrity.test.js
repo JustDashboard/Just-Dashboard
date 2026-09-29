@@ -69,6 +69,8 @@ test("confirmations preserve Unicode, whitespace, and literal percent signs in v
     expect(headers.get("X-Confirm-Encoding")).toBe("uri")
     expect(decodeURIComponent(headers.get("X-Confirm"))).toBe(phrase)
     expect(headers.get("X-JD-CSRF")).toBe("1")
+    await api("/files/", { method: "DELETE", confirm: "" })
+    expect(headers.get("X-Confirm")).toBeNull()
   } finally {
     globalThis.fetch = originalFetch
   }

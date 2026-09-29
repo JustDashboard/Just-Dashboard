@@ -14,8 +14,7 @@ import { expect, test, type Page, type Route } from "@playwright/test"
  *   repositories were behind their remote, so the question the page is
  *   opened with — is anything waiting — was answered by reading a column.
  *
- * The third is the typed phrase: discarding a file has to send the server
- * exactly what it asked for, encoded the way the client promises.
+ * Discarding a file asks for ordinary confirmation.
  */
 
 const now = new Date().toISOString()
@@ -410,7 +409,7 @@ test("the tree draws folders in the colours chosen in Files", async ({ page }) =
   await expect(drawn("docs")).toHaveAttribute("style", /--folder-green/)
 })
 
-test("discarding a file sends the typed phrase the server demands", async ({ page }) => {
+test("discarding a file uses ordinary confirmation", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const seen = await mockGit(page)
   await page.goto("/git?repo=%2Fsrv%2Fapp")
@@ -418,17 +417,13 @@ test("discarding a file sends the typed phrase the server demands", async ({ pag
 
   await page.getByRole("button", { name: "Discard", exact: true }).click()
   const dialog = page.getByRole("dialog")
-  await expect(dialog).toContainText("discard changes")
-  // The confirm button stays inert until the phrase is typed exactly.
-  await expect(dialog.getByRole("button", { name: "Discard" })).toBeDisabled()
-  await dialog.getByPlaceholder("Type the phrase above").fill("discard changes")
+  await expect(dialog.getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await dialog.getByRole("button", { name: "Discard" }).click()
 
   await expect.poll(() => seen.some((r) => r.path === "/git/discard")).toBe(true)
   const discard = seen.find((r) => r.path === "/git/discard")!
   expect(discard.method).toBe("POST")
-  expect(discard.headers["x-confirm"]).toBe("discard%20changes")
-  expect(discard.headers["x-confirm-encoding"]).toBe("uri")
+  expect(discard.headers["x-confirm"]).toBeUndefined()
 })
 
 /**

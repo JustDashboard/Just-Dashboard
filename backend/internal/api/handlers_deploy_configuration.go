@@ -91,7 +91,7 @@ func (s *Server) handleDeploymentRemoveManaged(w http.ResponseWriter, r *http.Re
 	for _, id := range request.TargetIDs {
 		selected[id] = true
 	}
-	typed := []deploy.RemovalTarget{}
+	stacks := []deploy.RemovalTarget{}
 	principal := httpx.MustPrincipal(r)
 	for _, target := range plan.Targets {
 		if !selected[target.ID] {
@@ -100,15 +100,15 @@ func (s *Server) handleDeploymentRemoveManaged(w http.ResponseWriter, r *http.Re
 		if target.RequiresAdmin && !principal.Can(auth.CapSystemAdmin) {
 			return httpx.Err(http.StatusForbidden, "advanced_authorization_required", "this removal target requires system administration")
 		}
-		if target.ConfirmationType == "typed" {
-			typed = append(typed, target)
+		if target.Kind == "compose_stack" {
+			stacks = append(stacks, target)
 		}
 	}
-	if len(typed) > 1 {
-		return httpx.BadRequest("remove data targets one at a time so each exact name is confirmed")
+	if len(stacks) > 1 {
+		return httpx.BadRequest("remove stacks one at a time so each exact name is confirmed")
 	}
-	if len(typed) == 1 {
-		if err := httpx.RequireTypedConfirmation(w, r, typed[0].ConfirmationPhrase); err != nil {
+	if len(stacks) == 1 {
+		if err := httpx.RequireTypedConfirmation(w, r, stacks[0].ResourceID); err != nil {
 			return err
 		}
 	}

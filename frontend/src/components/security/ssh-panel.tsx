@@ -178,7 +178,6 @@ export function SSHPanel({
   const apply = () =>
     confirm({
       title: "Apply SSH changes",
-      phrase: "change ssh",
       confirmLabel: "Test and apply",
       description: (
         <div className="space-y-2">

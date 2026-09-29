@@ -19,7 +19,7 @@ export type PruneScope = {
   buildCache?: boolean
   /** Every cache entry not in use, which is the figure the UI quotes. */
   allBuildCache?: boolean
-  /** The only part that destroys data, and the only part typed for. */
+  /** The part that can delete persistent data. */
   volumes?: boolean
 }
 
@@ -36,7 +36,7 @@ export const RECLAIM_SAFE: PruneScope = {
   allBuildCache: true,
 }
 
-export function prune(scope: PruneScope, confirmPhrase?: string) {
+export function prune(scope: PruneScope) {
   return post<PruneReport[]>("/docker/prune", undefined, {
     query: {
       allImages: scope.allImages ? "true" : undefined,
@@ -44,7 +44,6 @@ export function prune(scope: PruneScope, confirmPhrase?: string) {
       allBuildCache: scope.allBuildCache ? "true" : undefined,
       volumes: scope.volumes ? "true" : undefined,
     },
-    confirm: confirmPhrase,
   })
 }
 

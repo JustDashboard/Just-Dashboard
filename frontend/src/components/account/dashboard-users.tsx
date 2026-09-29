@@ -259,7 +259,7 @@ function UserCard({
  * Every dashboard account, with the two things an admin changes daily — the
  * role and whether it can sign in — on each card, and everything rarer
  * behind the card's menu: a rename or password reset in the editor, a 2FA
- * reset, deletion with the name typed.
+ * reset, and deletion with ordinary confirmation.
  */
 export function DashboardUsersView({ users }: { users: ReturnType<typeof useDashboardUsers> }) {
   const { status, refresh: refreshAuth } = useAuth()
@@ -324,7 +324,6 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
               run: () =>
                 confirm({
                   title: "Delete dashboard user",
-                  phrase: user.username,
                   confirmLabel: "Delete",
                   description: (
                     <p>

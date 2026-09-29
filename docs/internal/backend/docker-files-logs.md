@@ -100,8 +100,7 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   volume is removed, which is the commonest fear about the button.
 - **`cleanup.go` replaces one word covering five sweeps.** Each category reports what it holds, what
   removing it reclaims (Docker's own figure, which counts a shared layer once) and what that costs.
-  Volumes are always listed and never recommended, and the route additionally demands a typed phrase when
-  they are in the selection.
+  Volumes are always listed and never recommended; selecting them still uses ordinary confirmation.
 - **Authorization uses effective container resources.** Creation and recreation validate the selected
   spec, including a spec reused from an existing container. Limited accounts may use plain local
   volumes; references to existing named volumes are inspected first. Custom drivers or driver options
@@ -318,7 +317,7 @@ Space in the listing opens it, the arrows walk the folder's files. The editor ga
 and a diff review of the draft against the disk (`diff.ts`, a prefix/suffix-trimmed LCS capped at a few
 million cells) drawn by the git page's `DiffView`. The listing polls every twenty seconds and refetches
 hidden-file flips in place; the parent row is offered only where the parent is inside the roots; a bulk
-delete that includes a folder is typed for like a single one. Two layout rules are easy to undo: **the
+delete that includes a folder uses ordinary confirmation like a single one. Two layout rules are easy to undo: **the
 listing body does not scroll** (a sticky table header sticks to its nearest scrolling ancestor), and
 **the sidebar's tree waits for `/files/places`** before mounting, since it caches and would keep showing
 the refusal from listing a root it cannot. The image editor commits each operation to a **new canvas**

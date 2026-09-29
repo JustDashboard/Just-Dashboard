@@ -213,15 +213,6 @@ func (s *Server) handleFirewallPolicy(w http.ResponseWriter, r *http.Request) er
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	// Only the inbound default can cut the caller off, and only when it stops
-	// being allow. The others change what the host may do, not who may reach
-	// it, and a phrase in front of them would be the fourth exception the
-	// confirmation rule warns about.
-	if req.Direction == "incoming" && req.Policy != "allow" {
-		if err := httpx.RequireTypedConfirmation(w, r, "deny incoming"); err != nil {
-			return err
-		}
-	}
 	out, err := s.modules.netsec.SetDefaultPolicy(r.Context(), req.Direction, req.Policy)
 	if err != nil {
 		if errors.Is(err, netsec.ErrLockout) {
@@ -254,9 +245,6 @@ func (s *Server) handleFirewallLogging(w http.ResponseWriter, r *http.Request) e
 }
 
 func (s *Server) handleFirewallReset(w http.ResponseWriter, r *http.Request) error {
-	if err := httpx.RequireTypedConfirmation(w, r, "reset firewall"); err != nil {
-		return err
-	}
 	out, err := s.modules.netsec.Reset(r.Context())
 	if err != nil {
 		return mapFirewallError(err)
@@ -286,9 +274,6 @@ type sshApplyRequest struct {
 func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 	var req sshApplyRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	if err := httpx.RequireTypedConfirmation(w, r, "change ssh"); err != nil {
 		return err
 	}
 	plan, err := s.modules.netsec.PlanSSHSettings(r.Context(), req.Settings)

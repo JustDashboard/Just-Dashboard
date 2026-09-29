@@ -434,9 +434,6 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return httpx.ErrNotFound
 	}
-	if err := httpx.RequireTypedConfirmation(w, r, target.Username); err != nil {
-		return err
-	}
 	if err := s.Auth.DeleteUser(r.Context(), id); err != nil {
 		return mapAuthError(err)
 	}

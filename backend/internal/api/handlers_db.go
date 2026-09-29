@@ -145,10 +145,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/aggregate", s.handle(s.handleMongoAggregate))
 			r.Method(http.MethodPost, "/{id}/collections", s.handle(s.handleMongoCreateCollection))
 		})
-		// Everything here is destructive: the capability, the tighter budget and
-		// the audit entry apply to all of it. Only some of it additionally asks
-		// the operator to type a phrase, and each handler says which it is and
-		// why — invariant 3 is the rule they are applying.
+		// Everything here uses the destructive capability, tighter budget, and audit.
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/{id}/rows", s.handle(s.handleDBRowDelete))
 			// Killing a session stops work in flight and rolls it back, so it
@@ -156,9 +153,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			// activity list it is launched from.
 			r.Method(http.MethodPost, "/{id}/activity/kill", s.handle(s.handleDBKill))
 			r.Method(http.MethodPost, "/{id}/restore", s.handle(s.handleDBRestore))
-			// Schema changes that destroy. All but the index drop demand a
-			// typed confirmation naming what they remove; an index is the one
-			// object here that rebuilds from its own definition.
+			// Schema changes that destroy data or remove an index.
 			r.Method(http.MethodDelete, "/{id}/ddl/table", s.handle(s.handleDDLDropTable))
 			r.Method(http.MethodDelete, "/{id}/ddl/column", s.handle(s.handleDDLDropColumn))
 			r.Method(http.MethodDelete, "/{id}/ddl/index", s.handle(s.handleDDLDropIndex))
@@ -670,10 +665,7 @@ func (s *Server) handleDBClassify(w http.ResponseWriter, r *http.Request) error 
 }
 
 // handleDBQuery runs arbitrary SQL. A destructive statement additionally
-// requires the destructive capability and the tighter budget, and a *critical*
-// one — a DROP, a TRUNCATE, an UPDATE or DELETE with no WHERE — also requires a
-// typed confirmation, so the statement that hits every row cannot go out on a
-// single click.
+// requires the destructive capability and the tighter budget.
 func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -697,17 +689,6 @@ func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 		if !p.Can(auth.CapDestructive) {
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"this statement is destructive and your role does not permit it")
-		}
-		// Only critical statements are typed for. "high" is a scoped UPDATE or
-		// DELETE — the ordinary work of a SQL console, done dozens of times in
-		// a sitting — and "run high" names nothing about what is being run, so
-		// it was boilerplate to type rather than a sentence to read. Critical
-		// is the unscoped version of the same statement, a DROP, a TRUNCATE:
-		// rare, and the whole table either way.
-		if risk.Level == "critical" {
-			if err := httpx.RequireTypedConfirmation(w, r, "run "+risk.Level); err != nil {
-				return err
-			}
 		}
 		if !s.destrLim.Allow(p.Username() + "|dbquery") {
 			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
@@ -789,11 +770,6 @@ func (s *Server) handleDBRestore(w http.ResponseWriter, r *http.Request) error {
 	target := req.Database
 	if target == "" {
 		target = conn.Database
-	}
-	// A restore overwrites live data. Confirming on the target database name
-	// forces the operator to read which database they are about to replace.
-	if err := httpx.RequireTypedConfirmation(w, r, target); err != nil {
-		return err
 	}
 	// Invariant 6: a client-supplied path goes through files.Resolve, which is
 	// the only thing in the codebase that checks both the literal path and its

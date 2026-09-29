@@ -2050,9 +2050,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   read a private-key block. Downloads and export (`cert_export.go`): `GET
   /certificates/download?path=&part=` (read) answers `fullchain`, `cert` (the leaf) or `chain` (the
   rest) of a listed file as PEM, 403 for an unlisted path; `POST /certificates/export` (system.admin,
-  typed `export <name>`, `{path, format: key|pfx, password, legacy}`) returns the matching key as PEM
+  ordinary export confirmation, `{path, format: key|pfx, password, legacy}`) returns the matching key as PEM
   or a PFX (OpenSSL 3's AES-256/PBKDF2 default, or 3DES/SHA-1 with `legacy`; password at least 8
-  characters) — see invariants.md for why it is typed and how the password stays out of argv. Hygiene and coverage (`cert_hygiene.go`, both read): `GET /certificates/findings` reads the
+  characters) — see invariants.md for the confirmation policy and how the password stays out of argv. Hygiene and coverage (`cert_hygiene.go`, both read): `GET /certificates/findings` reads the
   server blocks from `nginx -T` through `NginxTree` (includes followed, http- and stream-level
   `ssl_certificate` inherited, pairs matched by position; a `$variable`, `data:` or `engine:` value
   is not read) and reports a key another account can read (the mode and every directory above the

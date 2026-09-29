@@ -15,17 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Which database routes ask for a typed phrase, and — just as importantly —
-// which do not.
-//
-// Invariant 3 reserves the typed phrase for the rare and unrecoverable, on the
-// grounds that a phrase in front of an everyday act is typed rather than read.
-// That line is a product decision and it has two failure modes, so both are
-// pinned here. Losing a phrase from a route that needs one is the obvious one.
-// The other is quieter and is how the line got crossed in the first place: a
-// phrase creeping back onto a routine action, one route at a time, each
-// defensible on its own, until an operator has learned to type table names
-// without looking at them.
+// The entire database drop is typed; smaller database operations are not.
 //
 // Both lists are written out by hand. A test deriving either from the router
 // would pass just as happily if a route moved between them.
@@ -78,20 +68,11 @@ func driveWithoutConfirmation(t *testing.T, router http.Handler, c confirmCase) 
 	return rec
 }
 
-// These destroy something that cannot be got back, and are done rarely enough
-// that typing the name is a sentence read rather than a reflex.
-func TestIrreversibleDatabaseRoutesDemandAPhrase(t *testing.T) {
+func TestDeletingAnEntireDatabaseDemandsAPhrase(t *testing.T) {
 	_, router := dbTestRouter(t)
 
 	for _, c := range []confirmCase{
-		{http.MethodDelete, "/databases/1/ddl/table", `{"table":"t"}`, "a dropped table is gone"},
-		{http.MethodDelete, "/databases/1/ddl/column", `{"table":"t","name":"c"}`, "a dropped column takes its data from every row"},
-		{http.MethodPost, "/databases/1/ddl/truncate", `{"table":"t"}`, "truncate empties the table"},
 		{http.MethodDelete, "/databases/1/database", `{}`, "a dropped database takes every table with it"},
-		// Dropping a Mongo collection belongs on this list too, but the
-		// connection here is SQLite and that route refuses a non-Mongo driver
-		// before it reaches any confirmation. It is asserted in
-		// TestLiveAPIMongo instead, against a real Mongo connection.
 	} {
 		rec := driveWithoutConfirmation(t, router, c)
 		if !strings.Contains(rec.Body.String(), "confirmation") {
@@ -112,6 +93,9 @@ func TestRoutineDatabaseRoutesDoNotAskForAPhrase(t *testing.T) {
 	_, router := dbTestRouter(t)
 
 	for _, c := range []confirmCase{
+		{http.MethodDelete, "/databases/1/ddl/table", `{"table":"t"}`, "table deletion uses an ordinary confirmation"},
+		{http.MethodDelete, "/databases/1/ddl/column", `{"table":"t","name":"c"}`, "column deletion uses an ordinary confirmation"},
+		{http.MethodPost, "/databases/1/ddl/truncate", `{"table":"t"}`, "truncate uses an ordinary confirmation"},
 		{http.MethodDelete, "/databases/1/rows", `{"table":"t","key":{"id":1}}`, "editing rows is what a data browser is"},
 		{http.MethodDelete, "/databases/1/ddl/index", `{"table":"t","name":"i"}`, "an index rebuilds from its own definition"},
 		{http.MethodDelete, "/databases/1", `{}`, "forgetting a connection string does not touch the server"},
@@ -143,8 +127,8 @@ func TestImportChecksDestructivenessByContent(t *testing.T) {
 	truncating.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, truncating)
-	if !strings.Contains(rec.Body.String(), "confirmation") {
-		t.Errorf("a truncating import without X-Confirm was not refused: %d %s",
+	if strings.Contains(rec.Body.String(), "confirmation") {
+		t.Errorf("a truncating import asked for a typed phrase: %d %s",
 			rec.Code, strings.TrimSpace(rec.Body.String()))
 	}
 

@@ -282,7 +282,7 @@ func (s *Server) handleBackupJobDelete(w http.ResponseWriter, r *http.Request) e
 		return mapBackupError(err)
 	}
 	// No typed phrase: this deletes a schedule, not the archives it produced.
-	// Restoring one of those is the route that still asks.
+	// Restoring one of those also uses ordinary confirmation.
 	if err := s.modules.backupStore.Delete(r.Context(), id); err != nil {
 		return mapBackupError(err)
 	}
@@ -383,15 +383,11 @@ func (s *Server) handleBackupContents(w http.ResponseWriter, r *http.Request) er
 type restoreRequest struct {
 	Destination string `json:"destination"`
 	// InPlace writes every recorded source back over the path it came from.
-	// The typed phrase is then the literal words, because there is no single
-	// destination to read back.
 	InPlace bool `json:"inPlace"`
 	// Paths narrows the restore to these archive entries and what is under
 	// them — one file, one directory — rather than the whole run.
 	Paths []string `json:"paths"`
 }
-
-const restoreInPlacePhrase = "restore in place"
 
 type restoreDatabaseRequest struct {
 	ConnectionID int64  `json:"connectionId"`
@@ -424,9 +420,6 @@ func (s *Server) handleBackupRestoreDatabase(w http.ResponseWriter, r *http.Requ
 	if target == "" {
 		return httpx.BadRequest("the connection names no database; specify one explicitly")
 	}
-	if err := httpx.RequireTypedConfirmation(w, r, target); err != nil {
-		return err
-	}
 	ctx, cancel := timeoutCtx(r, 60*time.Minute)
 	defer cancel()
 	output, err := s.modules.backupRunner.RestoreDatabase(ctx, runID, req.ConnectionID, req.Database)
@@ -452,9 +445,6 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request) err
 	}
 	opts := backups.RestoreOptions{Paths: req.Paths}
 	if req.InPlace {
-		if err := httpx.RequireTypedConfirmation(w, r, restoreInPlacePhrase); err != nil {
-			return err
-		}
 		ctx, cancel := timeoutCtx(r, 6*time.Hour)
 		defer cancel()
 		res, err := s.modules.backupRunner.RestoreInPlace(ctx, runID, opts)
@@ -471,15 +461,7 @@ func (s *Server) handleBackupRestore(w http.ResponseWriter, r *http.Request) err
 	if req.Destination == "" {
 		return httpx.BadRequest("destination is required")
 	}
-	// A restore overwrites whatever is at the destination, so the operator
-	// types the destination path back to confirm they read it.
-	if err := httpx.RequireTypedConfirmation(w, r, req.Destination); err != nil {
-		return err
-	}
-	// The typed phrase is a guard against a slip, not an authorisation check —
-	// it is a string the caller supplied twice. Invariant 6 is what bounds
-	// where an archive may be unpacked, and it is files.Resolve that enforces
-	// it; "not exactly /" was the only rule this destination had to satisfy.
+	// files.Resolve bounds where an archive may be unpacked, including symlink targets.
 	dest, err := s.modules.files.Resolve(req.Destination)
 	if err != nil {
 		return httpx.BadRequest("%v", err)

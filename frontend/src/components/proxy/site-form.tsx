@@ -2256,7 +2256,7 @@ const HSTS_PRELOAD_MAX_AGE = 31536000
 
 /**
  * The HSTS policy's lifetime, whether it covers subdomains, and preload.
- * Preload is behind a typed confirmation because it outlives the header:
+ * Preload is behind a confirmation because it outlives the header:
  * once a browser ships with the name built in, removing the header changes
  * nothing for months, and every subdomain has to serve HTTPS in the meantime.
  */
@@ -2284,7 +2284,6 @@ function HSTSOptions({
           year and covers subdomains, as the list requires.
         </>
       ),
-      phrase: domain,
       confirmLabel: "Turn on preload",
       action: async () => {
         if (maxAge < HSTS_PRELOAD_MAX_AGE) set("hstsMaxAge", HSTS_PRELOAD_MAX_AGE)

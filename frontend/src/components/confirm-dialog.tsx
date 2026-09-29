@@ -30,17 +30,8 @@ export type ConfirmRequest = {
   /**
    * The exact phrase the server expects echoed in X-Confirm.
    *
-   * Optional, and most actions leave it out. The test for whether an action
-   * needs one is **frequency, not severity**: a phrase in front of something
-   * done a dozen times a day is not read, it is typed, and that habit is what
-   * empties the phrase of meaning on the routes where it still matters.
-   *
-   * So stopping a container, deleting a row, killing a process, removing an
-   * image and disabling a site all get a plain confirmation — each is either
-   * routine, reversible, or both. Typing is reserved for the rare and
-   * unrecoverable: dropping a table or a column, emptying one, removing a
-   * Docker volume, deleting an account, restoring over live data, turning the
-   * firewall off, upgrading packages.
+   * Optional. Only permanent deployment project deletion, deleting an entire
+   * database, and Docker stack removal use it. The server checks these phrases.
    *
    * Whatever is set here, the server re-decides. This is a guard against a
    * slip, never the enforcement point.
@@ -60,8 +51,7 @@ export type ConfirmRequest = {
 /**
  * The confirmation dialog, in its two forms: a plain "are you sure" for the
  * ordinary destructive act, and the same dialog with a phrase to type for the
- * handful that are rare and unrecoverable. See ConfirmRequest.phrase for which
- * is which and why.
+ * three resource kinds named in ConfirmRequest.phrase.
  *
  * Either way the server re-decides, so this is a usability guard against a
  * mis-click rather than the enforcement point.

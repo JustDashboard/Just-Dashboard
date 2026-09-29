@@ -26,7 +26,6 @@ import { Status, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
@@ -261,7 +260,7 @@ function saveFile(blob: Blob, filename: string) {
 
 /**
  * The public parts as downloads anyone signed in may take, and for an administrator the
- * key, which is behind a typed phrase in ExportDialog.
+ * key, which is behind an explicit export dialog.
  */
 function CertificateFiles({
   cert,
@@ -307,22 +306,20 @@ function ExportDialog({ cert, onClose }: { cert: Certificate; onClose: () => voi
   const [format, setFormat] = useState<"pfx" | "key">("pfx")
   const [password, setPassword] = useState("")
   const [legacy, setLegacy] = useState(false)
-  const [typed, setTyped] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
-  const phrase = `export ${cert.name}`
-  const matches = typed === phrase
   const passwordShort = format === "pfx" && password.length < MIN_PFX_PASSWORD
   const run = async () => {
-    if (!matches || passwordShort || busy) return
+    if (passwordShort || busy) return
     setBusy(true)
     setError("")
     try {
-      const file = await postFile(
-        "/certificates/export",
-        { path: cert.path, format, password: format === "pfx" ? password : "", legacy },
-        { confirm: phrase },
-      )
+      const file = await postFile("/certificates/export", {
+        path: cert.path,
+        format,
+        password: format === "pfx" ? password : "",
+        legacy,
+      })
       saveFile(file.blob, file.filename)
       notify.success(`Exported ${file.filename}`)
       onClose()
@@ -339,7 +336,7 @@ function ExportDialog({ cert, onClose }: { cert: Certificate; onClose: () => voi
       title={`Export the key of ${cert.name}`}
       description="Downloads the private key, as a PEM file or sealed with a password in a PFX."
       footer={
-        <Button onClick={run} disabled={!matches || passwordShort} pending={busy}>
+        <Button onClick={run} disabled={passwordShort} pending={busy}>
           Export
         </Button>
       }
@@ -395,33 +392,11 @@ function ExportDialog({ cert, onClose }: { cert: Certificate; onClose: () => voi
             The key alone, unencrypted, exactly as nginx reads it.
           </p>
         )}
-        <Field
-          htmlFor="export-phrase"
-          label={
-            <>
-              Type <code className="font-mono text-foreground">{phrase}</code> to confirm
-            </>
-          }
-          error={error || undefined}
-        >
-          <InputGroup>
-            <InputGroupInput
-              id="export-phrase"
-              autoComplete="off"
-              spellCheck={false}
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void run()}
-              className="font-mono"
-              placeholder="Type the phrase above"
-            />
-            {matches && (
-              <InputGroupAddon align="inline-end">
-                <Check aria-hidden className="text-success" />
-              </InputGroupAddon>
-            )}
-          </InputGroup>
-        </Field>
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
       </div>
     </Modal>
   )

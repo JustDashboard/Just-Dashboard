@@ -112,8 +112,8 @@ func TestArchivePreservesResourcesAndRemovalPlanNamesOnlyManagedTargets(t *testi
 			t.Fatalf("non-managed target leaked into plan: %#v", target)
 		}
 	}
-	if route == nil || volume == nil || volume.ConfirmationType != "typed" ||
-		volume.ConfirmationPhrase != "config-app-data" || !volume.Data {
+	if route == nil || volume == nil || volume.ConfirmationType != "ordinary" ||
+		volume.ConfirmationPhrase != "" || !volume.Data {
 		t.Fatalf("removal target semantics route=%#v volume=%#v", route, volume)
 	}
 	remover := &managedRemovalFake{}

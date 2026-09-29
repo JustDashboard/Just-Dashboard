@@ -570,7 +570,7 @@ function ArchiveBrowser({
  * Where the files go back to. A directory of the operator's choosing is the
  * safe default — the archive unpacks under it with each source in its own
  * tree. Putting everything back where it came from is the recovery, and it
- * overwrites the live trees, so it is typed.
+ * overwrites the live trees, so it asks for ordinary confirmation.
  */
 function RestoreFilesDialog({
   run,
@@ -594,10 +594,8 @@ function RestoreFilesDialog({
 
   const submit = () => {
     onOpenChange(false)
-    const phrase = inPlace ? "restore in place" : destination.trim()
     void confirm({
       title: inPlace ? "Put the files back where they came from" : "Restore into a directory",
-      phrase,
       confirmLabel: "Restore",
       description: inPlace ? (
         <div className="space-y-2">
@@ -612,13 +610,12 @@ function RestoreFilesDialog({
               </li>
             ))}
           </ul>
-          <p>Type the phrase to continue.</p>
         </div>
       ) : (
         <p>
           Unpacks {paths.length > 0 ? `${paths.length} selected entries` : "the archive"} into{" "}
           <span className="font-mono">{destination.trim()}</span>, overwriting files that already
-          exist there. Type the destination to continue.
+          exist there.
         </p>
       ),
       action: async (confirmation) => {
@@ -751,13 +748,12 @@ function RestoreDatabaseDialog({
             void confirm({
               title: `Restore ${selected.name} into ${target}`,
               confirmLabel: "Restore database",
-              phrase: target,
               description: (
                 <p>
                   The <span className="font-mono">{selected.method}</span> dump of{" "}
                   <span className="font-mono">{selected.database}</span> ({bytes(selected.bytes)})
                   replaces the contents of <span className="font-mono">{target}</span> on{" "}
-                  {selected.name}. Type the target database name to continue.
+                  {selected.name}. Review the target before restoring.
                 </p>
               ),
               action: async (confirmation) => {

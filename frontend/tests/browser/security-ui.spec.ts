@@ -1374,15 +1374,15 @@ test("a new diagnostic deep link overrides only that tool's saved input and neve
   expect(mutations).toEqual([])
 })
 
-test("firewall and SSH changes still require their typed confirmation", async ({ page }) => {
+test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
   await page.goto("/security/firewall")
   await page.getByRole("switch", { name: "Firewall enabled" }).click()
-  await expect(page.getByRole("dialog")).toContainText("disable firewall")
+  await expect(page.getByRole("dialog").getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await expect(
     page.getByRole("dialog").getByRole("button", { name: "Disable", exact: true }),
-  ).toBeDisabled()
+  ).toBeEnabled()
   expect(mutations).toEqual([])
   await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click()
   await page.goto("/security/ssh")
@@ -1391,9 +1391,9 @@ test("firewall and SSH changes still require their typed confirmation", async ({
     .getByRole("radio", { name: "no", exact: true })
     .click()
   await page.getByRole("button", { name: "Test and apply", exact: true }).click()
-  await expect(page.getByRole("dialog")).toContainText("change ssh")
+  await expect(page.getByRole("dialog").getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await expect(
     page.getByRole("dialog").getByRole("button", { name: "Test and apply", exact: true }),
-  ).toBeDisabled()
+  ).toBeEnabled()
   expect(mutations).toEqual([])
 })

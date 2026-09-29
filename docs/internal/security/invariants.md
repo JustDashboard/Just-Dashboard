@@ -8,8 +8,9 @@ A change that weakens any of these has to say so explicitly.
    with an authenticator is **always** asked for a code, and a session that owes one reaches nothing but
    the 2FA routes. What `JD_REQUIRE_2FA` decides is whether an account that has *not* enrolled may sign
    in at all. It defaults to false.
-3. Every destructive action is behind `s.destructive` — capability, `destrLim`, audit entry — and pauses
-   the operator with a confirmation dialog. A **subset** also requires the typed `X-Confirm` phrase,
+3. Every destructive action is behind `s.destructive` — capability, `destrLim`, audit entry. Actions
+   with a meaningful accidental-click risk pause the operator with a confirmation dialog. A **subset**
+   also requires the typed `X-Confirm` phrase,
    enforced server-side inside the handler. See below. A route that also serves routine, non-destructive
    operations — the deployment run route's `stop`/`restart` alongside `deploy`/`redeploy` — cannot be
    wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
@@ -97,115 +98,27 @@ setting off would strand everyone who was mid-flow with a session that can never
 
 ## Invariant 3: which routes take a typed phrase
 
-**The test is frequency, not severity.** A phrase in front of something done a dozen times a day is not
-read, it is typed — and the operator who has learned to type one table name without looking types the next
-one the same way. That habit is exactly what the phrase protects on the routes that keep it, so every route
-added to the typed set makes the set weaker. The question is not "is this dangerous" (they all are — that
-is what `s.destructive` marks) but **"how often does somebody do this, and can they get it back"**.
+Typed confirmation is reserved for four deletion operations:
 
-**Typed — rare, and no way back:** `DROP DATABASE`, `DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, an import that
-truncates first, dropping a Mongo collection, a Mongo pipeline with `$out`/`$merge`, a `critical` statement
-in the query runner, restoring a database or backup over live data (a backup restore types the destination directory, or the phrase `restore in place` when the archive goes back over the paths it was taken from), `compose down`, removing a Docker
-volume, a prune that also sweeps volumes, deleting a dashboard or Linux account, deleting a board
-(type its name; its drawing has no recovery path), a recursive directory delete, `git discard`,
-`git reset --hard` and dropping a git stash, aborting a Git operation
-(`abort operation`, which discards conflict-resolution edits), choosing an entire conflict side or deletion
-(`discard changes`), toggling the firewall, resetting it, switching the inbound
-default to deny, changing sshd's configuration, revoking a certificate, applying package updates,
-**purging** a package (removing it *and* deleting its /etc configuration), and installing a new version of
-the dashboard itself.
+- Permanently deleting an archived deployment project (`DELETE /deploy/{id}/permanent`) requires the
+  project's name. Archiving a project is reversible and uses ordinary confirmation.
+- Dropping an entire database (`DELETE /databases/{id}/database`) requires the database name.
+- Taking down a Docker Compose stack requires the stack name, through both the HTTP and WebSocket
+  actions. The other Compose actions use ordinary confirmation.
+- Removing a managed Compose stack from an archived deployment's removal plan requires that stack's
+  name. The same plan presents volumes, paths, containers, and other managed resources with ordinary
+  confirmation.
 
-The firewall and sshd entries are not about losing data: get one wrong and the way back into the machine is
-gone, and no undo here helps, because reaching this UI is what you lost. They are also rare — an inbound
-default is set once, an sshd hardening pass happens on the day the server is built. The self-update phrase
-is the **version being installed** (`0.6`), not a fixed sentence: it names the object, as every other typed
-route does, and *which version* is what has to be read before pressing a button in the sidebar.
+These are the only places the UI asks the operator to type a phrase. Other destructive operations,
+including table and collection deletion, data restores, Docker volume removal and pruning, account and
+board deletion, Git discard/reset, firewall and SSH changes, package changes, certificate export and
+revocation, and self-update, use an ordinary confirmation in the UI. Read-only actions and routine
+mutations may need no dialog. The absence of a typed phrase does not relax capability checks, the
+`destrLim` rate budget, audit entries, path containment, or host command rules.
 
-Exporting a certificate's private key (`POST /certificates/export`, system.admin, phrase
-`export <name>`) is the one typed route that destroys nothing: a key that has left the host cannot be
-called back, only the certificate revoked, and it is exported rarely. The key is returned only after its
-public half is proven to be the listed certificate's leaf, so a site's `ssl_certificate_key` naming some
-other file cannot turn the route into a file reader. A PFX is built by `openssl pkcs12 -export` reading
-the key and chain from inherited pipes (`/dev/fd/3`, `/dev/fd/4`) and the password from `JD_PFX_PASS`
-(`-passout env:`), so neither is in an argv or on disk. The response is `Cache-Control: no-store`, and the
-audit entry holds the name, path and format — never the key or the password. The public parts
-(`GET /certificates/download`, read) are re-encoded from the file's `CERTIFICATE` blocks only.
-
-**Not typed — routine, recoverable, or both:** deleting rows, documents and Redis keys; dropping an index;
-dropping a database account, disabling an extension or deleting a dump on the Server and Backups pages
-(the account is recreated from its name and a new password, the extension is one `CREATE EXTENSION` away,
-and the database is still there to dump again);
-forgetting a connection; stopping a database session; stopping/restarting/killing/removing/recreating a
-container; removing an image or network; any prune that spares volumes; deleting one file; signalling a
-process; ending an SSH session; stopping or restarting a service; revoking a token or SSH key; deleting a
-backup job or deploy project (permanently deleting an *archived* deployment asks for its name in the
-dialog, as the dialog's own guard against a slip in an act that cannot be undone, but the name is not
-sent and the route stays in this set — see [permanent-deletion](../deployments/permanent-deletion.md));
-closing a pull request's preview (`POST /deploy/{id}/pull-requests/{number}/preview/close`: its
-container, volumes and tailnet address go, and the pull request can be tested again in a minute);
-rolling back a deploy; disabling **or deleting** a vhost; deleting an nginx
-stream, htpasswd file or saved DNS-provider credential (pasted again in a minute); deleting a git branch, a branch on the remote, a tag or a remote; adding, **editing** or deleting a firewall rule; tuning a
-fail2ban jail; unbanning an address; stopping a running job; closing a terminal session, window or pane;
-and **removing a package without purging it** — undone by installing it again, where the /etc files
-somebody spent an afternoon on have no path back at all.
-
-Replacing an imported certificate is a write too (`POST /certificates/import` with `replace`): the
-pair it replaces stays beside the new one as `.bak`, and without `replace` a name in use is a 409 rather
-than an overwrite. `POST /certificates/import/inspect` writes nothing but is system.admin: with the
-operator's consent it fetches a missing intermediate from the address a certificate names, and that
-fetch refuses every non-public address, redirects included. Removing the renewal deploy hook (`DELETE /certificates/renewal-hook`) is destructive
-without a phrase — the same switch installs it again — and it never removes or replaces a file at that
-name that does not carry the dashboard's marker. Starting the renewal timer's service now
-(`POST /certificates/renewal/run`) is a system.admin write, not a destructive one: it is the run the
-timer makes twice a day anyway, and it waits for any certbot job on the page like every other. The DNS token an issuance carries is saved by its job, never before the request is
-accepted, so a refused request leaves no credential on disk. Pruning Caddy's release copies
-(`DELETE /certificates/evidence`) is destructive without a phrase: it accepts only `caddy-<24 hex>`
-names, so the join stays inside the imports directory, and deletes a copy only when, rechecked at that
-moment, no Caddy route serves its domain and no release in the deployment store names it.
-
-Discarding a waiting signing request (`DELETE /certificates/csr/{name}`) is destructive without a
-phrase: it deletes a key nothing uses yet, and the request is made again in a minute. Adding the
-authority's certificate to it replaces a certificate kept under the same name only with `replace`, as
-an import does. The local CA's root key is never read back or exported by any route; its root
-certificate is readable by every signed-in account, because it is made to be installed.
-
-The Certificate Transparency monitor (`/certificates/transparency`) is system.admin throughout and off
-by default: its report lists every domain the host serves, and switching it on sends those names to
-crt.sh, a fixed third party no caller can redirect.
-
-Editing a firewall rule is a write, not a destructive one, and is mounted accordingly: the replacement goes
-in before the original comes out, so there is no moment the rule is missing. Stopping a job is the same
-argument from the other side — interrupting is how you *avoid* a bad outcome, and a phrase in front of a
-stop button is one somebody types while something is going wrong.
-
-The 0.6.1 review narrowed the set: a prune sparing volumes (containers, networks and images come back from
-a registry or a compose file), deleting a proxy site, nginx stream, htpasswd file or access list (each
-recreated from the same form; an access list is refused while a site includes it), deleting a git branch (a pointer whose commits survive in the reflog and on the remote),
-and ending an SSH session (a SIGHUP the operator reconnects past). All keep `s.destructive` and an ordinary
-confirm dialog. `compose down` was reviewed and **kept** — it is the one compose action that removes rather
-than stops containers, and on a host running several stacks typing the name guards against `down`-ing the
-wrong one. `git discard` and `git reset --hard` were kept too: they overwrite uncommitted work, which the
-reflog does not cover — and dropping a stash joined them for the same reason, since the work in it
-exists nowhere else.
-
-Several routes decide by content, and the narrowing lives at the call site: `handleDBQuery` types only for
-`critical`, `handleFileDelete` only when `recursive`, `handleGitReset` only when `--hard`, `handleDBImport`
-only when `truncate`, `handlePruneAll` only when `volumes=true`, `handlePackageRemove` only when `purge`,
-`composeNeedsPhrase` only for `down` — with `requireComposePhraseWS` applying the same narrowing on the
-socket, so the two entry points cannot disagree. The frontend mirrors each with a conditional `phrase`, and
-the server re-decides regardless.
-
-One relaxation: `httpx.RequireTypedConfirmationWS` also accepts the phrase as a query parameter, used only
-by WebSocket routes where a browser cannot set a header at all and `wsx`'s origin check supplies what the
-header guarded. **Do not reach for it from an ordinary handler.**
-
-The browser sends `X-Confirm-Encoding: uri` and an `encodeURIComponent`-encoded `X-Confirm` value.
-The backend percent-decodes it once, requires valid UTF-8 and compares the exact phrase, including
-leading/trailing whitespace. This supports Unicode database and file names without relying on HTTP
-header normalization. Legacy unencoded headers remain supported for ordinary phrases; the WebSocket
-query parameter is compared exactly after normal URL decoding.
-
-`api/handlers_db_test.go` pins both directions for the database surface
-(`TestIrreversibleDatabaseRoutesDemandAPhrase`, `TestRoutineDatabaseRoutesDoNotAskForAPhrase`), because the
-line has two failure modes and the second — a phrase creeping back onto routine work, one defensible route
-at a time — is the quieter of the two.
+The server enforces the four phrases inside their handlers. The browser sends an
+`encodeURIComponent`-encoded value in `X-Confirm` with `X-Confirm-Encoding: uri`; the backend decodes
+it once, requires valid UTF-8, and compares the exact phrase. Legacy unencoded headers remain
+supported. Only the Compose WebSocket action accepts a phrase in a query parameter because browsers
+cannot set custom WebSocket headers; `wsx` still checks the origin. An ordinary handler must use the
+header guard instead.

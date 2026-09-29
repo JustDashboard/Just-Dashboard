@@ -33,9 +33,8 @@ type Format = "csv" | "json"
  * The whole load is one transaction on the server, so the two switches here
  * mean what they say: "stop at the first bad row" aborts everything, and
  * leaving it off still commits or rolls back as a unit — a row being skipped
- * never means a file was half applied. Appending is a plain confirmation;
- * replacing the contents empties the table first and so asks for the table's
- * name to be typed, exactly as a TRUNCATE does.
+ * never means a file was half applied. Appending and replacing both use ordinary
+ * confirmation; replacing empties the table first.
  *
  * What is about to be loaded is counted before it is sent. A file dropped in
  * the wrong format, or a CSV whose header does not match the table, used to
@@ -117,7 +116,6 @@ export function ImportDialog({
     if (truncate) {
       confirm({
         title: "Replace table contents",
-        phrase: table,
         confirmLabel: "Replace",
         description: (
           <p>
@@ -262,7 +260,7 @@ export function ImportDialog({
             />
             <OptionRow
               title="Replace existing contents"
-              hint="Empties the table first. You will be asked to type its name."
+              hint="Empties the table first. Review the confirmation before continuing."
               checked={truncate}
               onCheckedChange={setTruncate}
               tone="danger"

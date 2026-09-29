@@ -17,7 +17,7 @@ import (
 //
 // The split in capability follows what the query classifier already decided:
 // CREATE is medium risk and needs service.control, DROP and TRUNCATE are
-// critical and need the destructive capability plus a typed confirmation. A
+// critical and need the destructive capability. A
 // form must not be a cheaper way to do what the SQL console gates — which is
 // also why dropping an index is the one exception on both sides at once: the
 // classifier does not call it critical and neither does this file.
@@ -37,11 +37,7 @@ type ddlRequest struct {
 // ddlContext decodes the request and identifies the connection, without
 // opening a pool.
 //
-// The pool comes later, deliberately: a handler that asks for a typed phrase
-// must reach that check before it does any work, so a request arriving without
-// the phrase is refused rather than first dialling the database. It also keeps
-// the error the caller sees honest — "you did not confirm" rather than whatever
-// the connection attempt happened to say.
+// The pool comes after request validation, so invalid requests do not dial the database.
 func (s *Server) ddlContext(r *http.Request) (*ddlRequest, *dbConnection, error) {
 	id, err := parseID(r)
 	if err != nil {
@@ -172,11 +168,6 @@ func (s *Server) handleDDLDropTable(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
-	// Confirming on the table name forces the operator to read which table they
-	// are destroying, exactly as DROP through the query runner does.
-	if err := httpx.RequireTypedConfirmation(w, r, req.Table); err != nil {
-		return err
-	}
 	pool, _, err := s.dbPool(r.Context(), conn.ID)
 	if err != nil {
 		return err
@@ -200,11 +191,6 @@ func (s *Server) handleDDLDropColumn(w http.ResponseWriter, r *http.Request) err
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		return httpx.BadRequest("the column to drop is required")
-	}
-	// The column name, not the table's: this destroys one column's data and the
-	// phrase should name what is actually being lost.
-	if err := httpx.RequireTypedConfirmation(w, r, req.Name); err != nil {
-		return err
 	}
 	pool, _, err := s.dbPool(r.Context(), conn.ID)
 	if err != nil {
@@ -254,9 +240,6 @@ func (s *Server) handleDDLTruncate(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
-	if err := httpx.RequireTypedConfirmation(w, r, req.Table); err != nil {
-		return err
-	}
 	pool, _, err := s.dbPool(r.Context(), conn.ID)
 	if err != nil {
 		return err
@@ -294,8 +277,7 @@ type importRequest struct {
 // larger than that belongs in the engine's own bulk loader, which is faster by
 // orders of magnitude and does not hold an HTTP request open for it.
 //
-// Truncate makes this destructive, so it demands the capability and a typed
-// confirmation by hand — the route cannot know, exactly as the query runner
+// Truncate makes this destructive, so it demands the capability by hand — the route cannot know, exactly as the query runner
 // cannot know from its path whether the SQL in it deletes anything.
 func (s *Server) handleDBImport(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
@@ -317,9 +299,6 @@ func (s *Server) handleDBImport(w http.ResponseWriter, r *http.Request) error {
 		if !p.Can(auth.CapDestructive) {
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"replacing a table's contents is destructive and your role does not permit it")
-		}
-		if err := httpx.RequireTypedConfirmation(w, r, req.Table); err != nil {
-			return err
 		}
 		if !s.destrLim.Allow(p.Username() + "|dbimport") {
 			return httpx.Err(http.StatusTooManyRequests, "rate_limited",

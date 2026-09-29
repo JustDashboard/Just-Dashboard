@@ -375,16 +375,6 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("path query parameter is required")
 	}
 	recursive := r.URL.Query().Get("recursive") == "true"
-	// Only a recursive delete is typed for. Deleting one file is what a file
-	// manager is, done constantly, and there is no undo anywhere in this
-	// product to make the typing worth it — but a recursive delete removes a
-	// tree the operator cannot see the whole of from the row they clicked, and
-	// that is the one where reading the name back matters.
-	if recursive {
-		if err := httpx.RequireTypedConfirmation(w, r, filepath.Base(path)); err != nil {
-			return err
-		}
-	}
 	entry, err := s.modules.files.ResolveEntry(path)
 	if err != nil {
 		return mapFileError(err)

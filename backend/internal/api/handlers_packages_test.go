@@ -62,42 +62,19 @@ func TestInstallingAndRemovingNeedSystemAdmin(t *testing.T) {
 	}
 }
 
-// The phrase guards the purge and only the purge. An ordinary removal is
-// undone by installing the package again from the repository it came from; the
-// /etc files somebody spent an afternoon on have no path back. See invariant 3
-// — the test is frequency, not severity, and every route added to the typed
-// set makes the typed set weaker.
-//
-// Both directions are asserted against a *protected* package on purpose. The
-// handler checks the phrase before it builds the argv, so a purge stops at 428
-// and an ordinary removal falls through to the guard's 400 — which is the
-// difference this test is about, with nothing that could start an apt run on
-// the machine running the suite.
-func TestOnlyAPurgeAsksForTheTypedPhrase(t *testing.T) {
+// Both forms of removal reach the protected-package guard without a phrase.
+func TestPackageRemovalAndPurgeUseOrdinaryConfirmation(t *testing.T) {
 	c, s := newClient(t)
 	if !s.modules.updates.Available() {
 		t.Skip("no package manager on this host, so nothing can be removed to find out")
 	}
 
 	w := c.do(http.MethodPost, "/api/v1/packages/remove", `{"packages":["systemd"],"purge":true}`, nil)
-	if w.Code != http.StatusPreconditionRequired {
-		t.Fatalf("a purge got past the phrase: %d %s", w.Code, w.Body.String())
-	}
-	var body struct {
-		Error struct {
-			Phrase string `json:"phrase"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	// The phrase names the object, as every typed route in this codebase does.
-	if body.Error.Phrase != "purge systemd" {
-		t.Errorf("phrase = %q, want %q", body.Error.Phrase, "purge systemd")
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "does not boot") {
+		t.Fatalf("purging protected package: %d %s", w.Code, w.Body.String())
 	}
 
-	// The same removal without the purge asks for no phrase at all — it
-	// reaches the guard, which is the next thing in the handler.
+	// Ordinary removal reaches the same guard.
 	w = c.do(http.MethodPost, "/api/v1/packages/remove", `{"packages":["systemd"]}`, nil)
 	if w.Code == http.StatusPreconditionRequired {
 		t.Fatal("an ordinary removal asked for a typed phrase")

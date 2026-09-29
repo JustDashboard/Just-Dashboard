@@ -122,7 +122,6 @@ export function ChangesPanel({
       title: untracked
         ? `Delete ${file.path.split("/").pop()}`
         : `Discard changes to ${file.path.split("/").pop()}`,
-      phrase: "discard changes",
       confirmLabel: untracked ? "Delete" : "Discard",
       description: (
         <p className="text-destructive">
@@ -149,7 +148,6 @@ export function ChangesPanel({
   const discardAll = (clean: boolean) =>
     confirm({
       title: clean ? "Discard everything" : "Discard every change",
-      phrase: "reset hard",
       confirmLabel: "Discard all",
       description: (
         <p className="text-destructive">

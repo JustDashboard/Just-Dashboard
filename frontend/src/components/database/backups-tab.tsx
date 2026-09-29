@@ -38,8 +38,8 @@ function backupStale(takenAt: string | undefined) {
  *
  * The Connection page had a Dump button and nothing that said what it had
  * produced before; the dumps sat in a directory only the file manager could
- * show. The files as a table, each downloadable, restorable (typed for: it
- * overwrites live data) and removable, under a header that says how many
+ * show. The files as a table, each downloadable, restorable with ordinary
+ * confirmation and removable, under a header that says how many
  * there are, what they take, when the newest was taken and where they sit —
  * the four readings that were tiles over the table, said once in the head of
  * the thing they count (§15 pass 2). A scheduled job that covers this
@@ -85,7 +85,6 @@ export function BackupsTab({ conn, confirm }: { conn: DbConnection; confirm: Con
   const restore = (file: DbBackupFile) =>
     confirm({
       title: "Restore this dump",
-      phrase: conn.database || file.file,
       confirmLabel: "Restore",
       description: (
         <p>

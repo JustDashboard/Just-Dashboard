@@ -212,10 +212,7 @@ func (s *Server) handleCleanupPreview(w http.ResponseWriter, r *http.Request) er
 
 // handleCleanupRun carries out the selected categories.
 //
-// The route is already behind the destructive gate. Volumes get a second,
-// stricter check here — a typed phrase — because they are the only category
-// whose contents cannot be recovered from a registry or a rebuild, and because
-// a category list is easy to submit with one more box ticked than intended.
+// The route is behind the destructive gate for every selected category.
 func (s *Server) handleCleanupRun(w http.ResponseWriter, r *http.Request) error {
 	var req struct {
 		Categories []string `json:"categories"`
@@ -225,17 +222,6 @@ func (s *Server) handleCleanupRun(w http.ResponseWriter, r *http.Request) error 
 	}
 	if len(req.Categories) == 0 {
 		return httpx.BadRequest("choose at least one category to remove")
-	}
-	wantsVolumes := false
-	for _, c := range req.Categories {
-		if strings.TrimSpace(c) == "volumes" {
-			wantsVolumes = true
-		}
-	}
-	if wantsVolumes {
-		if err := httpx.RequireTypedConfirmation(w, r, "delete volumes"); err != nil {
-			return err
-		}
 	}
 	reports, err := s.modules.docker.RunCleanup(r.Context(), req.Categories)
 	if err != nil {

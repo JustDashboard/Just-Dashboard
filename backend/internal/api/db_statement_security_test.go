@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -52,7 +53,7 @@ func TestReadOnlyExplainCannotMutateSQLite(t *testing.T) {
 		{`{"query":"SELECT * FROM t; DELETE FROM t"}`, http.StatusBadRequest},
 		{`{"query":"ANALYZE DELETE FROM t"}`, http.StatusBadRequest},
 	} {
-		req := httptest.NewRequest(http.MethodPost, "/databases/"+itoaLocal(int(id))+"/explain", strings.NewReader(tc.body))
+		req := httptest.NewRequest(http.MethodPost, "/databases/"+strconv.FormatInt(id, 10)+"/explain", strings.NewReader(tc.body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)

@@ -15,7 +15,7 @@ import type { Exposure, FirewallStatus, Posture, SecurityFinding } from "@/lib/t
  * `applyFix` lives here too, not copied into each page: it is the whole
  * difference between a warning and a remedy, and the two on it that can cost
  * access to the machine (enabling the firewall, changing sshd) go through the
- * typed-phrase confirmation. A second copy is where one of them quietly stops
+ * ordinary confirmation. A second copy is where one of them quietly stops
  * asking.
  */
 export type SecurityContextValue = {

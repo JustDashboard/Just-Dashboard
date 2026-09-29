@@ -128,19 +128,6 @@ func (s *Server) handleSelfUpdateInstall(w http.ResponseWriter, r *http.Request)
 			"the newest version is now "+target+", not "+body.Version+"; reload and read what changed before installing")
 	}
 
-	// The phrase is the version being installed.
-	//
-	// It is short, which is the point: what has to be read here is *which*
-	// version, and a phrase that names the object is the convention every
-	// other typed route in this codebase follows — a stack's name for compose
-	// down, a table's name for drop table. The frequency test that governs
-	// which routes ask at all puts this firmly inside: a release lands every
-	// few weeks, and an install that comes back broken is recovered over ssh,
-	// not from here.
-	if err := httpx.RequireTypedConfirmation(w, r, target); err != nil {
-		return err
-	}
-
 	actor := httpx.MustPrincipal(r).Username()
 	run, err := s.modules.selfUpdate.Install(r.Context(), target, actor)
 	httpx.SetAudit(r, "dashboard.update.install", target, map[string]any{

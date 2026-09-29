@@ -246,9 +246,6 @@ func (s *Server) handleBoardDelete(w http.ResponseWriter, r *http.Request) error
 	} else if err != nil {
 		return httpx.Internal(err)
 	}
-	if err := httpx.RequireTypedConfirmation(w, r, name); err != nil {
-		return err
-	}
 	if _, err := s.Store.DB.ExecContext(r.Context(), `DELETE FROM boards WHERE id = ?`, id); err != nil {
 		return httpx.Internal(err)
 	}
