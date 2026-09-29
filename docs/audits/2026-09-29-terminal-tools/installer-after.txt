@@ -1,0 +1,65 @@
+
+Just Dashboard  0.7.0
+Setup · private access to your Linux server
+Prepare host  →  Configure  →  Start stack  →  Ready
+
+[1/4] Prepare the host
+
+  Required host tools
+
+  Dashboard host tools
+  [ok] git, git-lfs, gh, whois and traceroute are ready
+
+  Docker and Compose
+  [ok] docker 29.8.1
+  [ok] docker compose plugin
+  [ok] curl, openssl and certbot are ready
+
+[2/4] Configure the dashboard
+
+  An .env already exists
+  [!] It holds JD_MASTER_KEY, which encrypts your stored secrets.
+  [!] Replacing it makes every stored TOTP seed, database password and
+  [!] backup credential unreadable.
+
+
+  Settings this .env predates
+
+[3/4] Build and start
+
+  Building and starting the stack
+  First build compiles the Go backend and the Next.js frontend; give it a few minutes.
+
+
+[4/4] Verify startup
+
+  Waiting for the dashboard to answer
+  [ok] backend is healthy
+
+Setup complete · the dashboard is running
+
+  Reach it over an SSH tunnel. From your laptop:
+
+    ssh -N -L 8443:localhost:8443 operator@TEST_SERVER
+
+  Then open http://localhost:8443 while that stays open.
+
+  SSH encrypts the connection. Localhost uses HTTP without a browser warning.
+
+  Terminal tools · run on this server
+    cd /opt/Just-Dashboard
+
+    sudo ./scripts/reset-password.sh USER        # recover a dashboard account
+    sudo ./scripts/create-user.sh USER limited   # create a dashboard account
+    sudo ./scripts/manage.sh users               # list accounts and roles
+    sudo ./scripts/manage.sh revoke-sessions USER # sign out an account
+    sudo ./scripts/manage.sh status              # containers and health
+    sudo ./scripts/manage.sh logs                # follow backend logs
+    sudo ./scripts/manage.sh restart             # apply .env edits; use SSH
+    ./scripts/manage.sh --help                   # all commands and options
+
+  Password prompts are hidden. Temporary passwords must be changed at sign-in;
+  a reset keeps two-factor enrollment and revokes sessions and API tokens.
+
+  Change access, ports and two-factor under Operations → Dashboard → Configuration.
+  Configuration changes there automatically roll back if startup fails.

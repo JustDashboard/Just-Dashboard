@@ -69,6 +69,8 @@ The installer asks how you intend to reach it. **Tailscale is the default**: the
 invisible to the internet and the dashboard answers at `https://your-box.tailnet-name.ts.net:8443`
 with a real certificate. **An SSH tunnel is the fallback**, served on loopback. It then generates
 the master key and a first password, builds the stack and prints the command to get in.
+Four labeled stages show progress; the completion guide includes terminal admin commands.
+Use `./install.sh --help` to preview the steps or `sudo NO_COLOR=1 ./install.sh` for plain output.
 Everything it asked is editable afterwards under **Settings → Configuration**. It also installs
 the host tools the web terminal and the dashboard's pages run on the server itself — `gh` from
 GitHub's own repository, `git-lfs`, `whois` and `traceroute` — where they are missing, so a GitHub
@@ -77,6 +79,36 @@ sign-in on the Git page works from the terminal and over ssh too.
 To upgrade, `git pull` and `docker compose up -d --build`, use the in-app update, or run
 `sudo ./install.sh` again. All three keep your `.env`, database, accounts and sessions; only
 the installer adds host tools a newer release relies on.
+
+### Terminal admin tools
+
+Run these on the server from your checkout. They manage **dashboard accounts**, separate from Linux
+users, and use the built backend image, so Go and a browser login are not needed. Account commands
+also work when the backend is stopped; Docker must be running and installation must be complete.
+
+```bash
+sudo ./scripts/reset-password.sh admin         # recover an account with a temporary password
+sudo ./scripts/create-user.sh alice limited    # readonly, limited or admin; default is readonly
+sudo ./scripts/manage.sh users                 # list accounts, roles and two-factor status
+sudo ./scripts/manage.sh revoke-sessions alice # sign out all browser sessions
+sudo ./scripts/manage.sh status                # show containers and health
+sudo ./scripts/manage.sh logs                  # follow backend logs; Ctrl+C exits
+sudo ./scripts/manage.sh logs proxy            # backend, frontend or proxy
+sudo ./scripts/manage.sh restart               # recreate containers to apply .env edits
+./scripts/manage.sh --help                     # usage without sudo
+```
+
+Passwords are entered twice with hidden input and must meet the dashboard's strength rules. New and
+reset passwords are temporary: the account holder must change them at sign-in, after completing any
+required two-factor step. A reset clears failed-login lockout and revokes that account's sessions and
+API tokens, while keeping two-factor enrollment, recovery codes, role and disabled state. Account
+changes are audited as local root. `revoke-sessions` leaves API tokens unchanged.
+
+For automation, append `--password-stdin` to either password command and pipe one password line from
+a trusted source. Never put passwords in command arguments or shell history. The scripts locate the
+checkout from their own path and let Compose read `.env`; they do not execute it as shell code.
+Run a stack restart from SSH because it disconnects the web terminal. The restart command recreates
+containers with current settings; `docker compose restart` alone keeps their previous environment.
 
 ## Read this before you expose it
 

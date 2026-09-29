@@ -1,0 +1,50 @@
+
+Just Dashboard 0.7.0 — setup
+Self-hosted management for a single Linux server.
+
+==> Installing and checking required host tools
+
+==> Installing the tools the dashboard uses on this host
+  ✓ git, git-lfs, gh, whois and traceroute are ready
+
+==> Checking what this machine already has
+  ✓ docker 29.8.1
+  ✓ docker compose plugin
+  ✓ curl, openssl and certbot are ready
+
+==> An .env already exists
+  ! It holds JD_MASTER_KEY, which encrypts your stored secrets.
+  ! Replacing it makes every stored TOTP seed, database password and
+  ! backup credential unreadable.
+
+
+==> Settings this .env predates
+
+==> Building and starting the stack
+  First build compiles the Go backend and the Next.js frontend; give it a few minutes.
+
+
+==> Waiting for the dashboard to answer
+  ✓ backend is healthy
+
+The dashboard is running.
+
+  Reach it over an SSH tunnel. From your laptop:
+
+    ssh -N -L 8443:localhost:8443 operator@TEST_SERVER
+
+  Then open http://localhost:8443 while that stays open.
+
+  Served over plain HTTP on loopback. That is not a downgrade: the ssh
+  tunnel is already encrypted and authenticated, and browsers treat
+  http://localhost as a secure origin — so there is no warning to click
+  through and no certificate to explain.
+
+  Useful from here:
+    docker compose logs -f backend    # what the server is doing
+    docker compose restart            # after editing .env by hand
+    docker compose down               # stop it
+
+  Ports, address, certificate and two-factor are all editable from the
+  dashboard itself, under Operations → Dashboard → Configuration. It
+  restarts into a change and puts the old one back if it does not come up.

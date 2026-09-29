@@ -10,6 +10,7 @@ fields.
 | --- | --- | --- |
 | `docker-compose.yml`, `deploy/Caddyfile`, `deploy/proxy-entrypoint.sh` | Single-host production topology, loopback-only services, the Caddy listener and its three TLS modes, mounts, and health checks | [`../deployments/implementation.md`](../deployments/implementation.md#deployment-topology) |
 | `install.sh`, `.env.example` | Installation: two reachability routes (Tailscale, SSH tunnel), certificate issuance, randomised internal ports, secrets, and operator configuration | [`../overview.md`](../overview.md), public [`../../../README.md`](../../../README.md) |
+| `scripts/manage.sh`, `scripts/create-user.sh`, `scripts/reset-password.sh`, `scripts/test_manage.py` | Local root account administration, stack status/logs/recreation, and isolated terminal/installer fixtures | [`../operations/terminal-tools.md`](../operations/terminal-tools.md) |
 | `scripts/release.sh`, `backend/scripts/` | Version update, generated changelog, build verification, and release commit preparation | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#cutting-a-release) |
 | `AGENTS.md`, `CONTRIBUTING.md` | Mandatory contributor workflow, security baseline, licensing, and the validation gate | [`../contributing/conventions.md`](../contributing/conventions.md) |
 | `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/`, `.github/TEMPLATE_LICENSE` | PR guidance, structured bug and feature reports, private security-report routing, and upstream template attribution | [`../contributing/conventions.md`](../contributing/conventions.md#contribution-templates) |
@@ -19,13 +20,14 @@ fields.
 ## Backend entry point and packages
 
 `backend/cmd/server` loads configuration, opens the store, creates the API server, starts background
-services, handles signals, and supports the isolated self-update worker mode. `backend/cmd/terminal-holder`
-is the terminal holder (`ptyhold`), shipped beside it in the image and copied to the data directory
-for the host to run. The 29 packages under
+services, handles signals, and supports the isolated self-update worker and local `--admin` modes.
+`backend/cmd/terminal-holder` is the terminal holder (`ptyhold`), shipped beside it in the image and copied to the data directory
+for the host to run. The packages under
 `backend/internal/` are:
 
 | Package | Responsibility | Detailed reference |
 | --- | --- | --- |
+| `admin` | Local root dashboard account commands, password input and audit, without API/module startup | [`../operations/terminal-tools.md`](../operations/terminal-tools.md) |
 | `agent` | Agent identity, certificates, and hub-facing mode | [`../backend/databases-proxy-platform.md`](../backend/databases-proxy-platform.md#streaming-jobs-secrets-agent-mode) |
 | `api` | Route map, middleware composition, handlers, module wiring, audit, and feature joins | [`../architecture/request-lifecycle.md`](../architecture/request-lifecycle.md) |
 | `audit` | Durable and process-log mutation audit records | [`../architecture/runtime-boundaries.md`](../architecture/runtime-boundaries.md#auth-secrets-state) |

@@ -35,6 +35,8 @@ sudo ./install.sh                    # interactive first install; re-runnable, k
                                      # asks one question that matters: Tailscale (default) or SSH tunnel
 docker compose up -d --build
 docker compose logs backend | grep "bootstrap admin"   # generated password, printed once
+./scripts/manage.sh --help           # local account recovery and stack operations
+python3 scripts/test_manage.py       # isolated terminal-tool and installer fixtures
 scripts/release.sh 0.6               # see backend/databases-proxy-platform.md#cutting-a-release
 ```
 

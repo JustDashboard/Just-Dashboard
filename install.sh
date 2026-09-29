@@ -15,7 +15,7 @@ set -euo pipefail
 
 # ── output ──────────────────────────────────────────────────────────────────
 
-if [ -t 1 ] && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
+if [ -t 1 ] && [ -z "${NO_COLOR+x}" ] && [ "${TERM:-dumb}" != "dumb" ] && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
 	BOLD=$(tput bold); DIM=$(tput dim); RESET=$(tput sgr0)
 	BLUE=$(tput setaf 4); GREEN=$(tput setaf 2); YELLOW=$(tput setaf 3); RED=$(tput setaf 1)
 else
@@ -23,9 +23,10 @@ else
 fi
 
 say()  { printf '%s\n' "$*"; }
-step() { printf '\n%s==>%s %s%s%s\n' "$BLUE" "$RESET" "$BOLD" "$*" "$RESET"; }
-ok()   { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$*"; }
-warn() { printf '  %s!%s %s\n' "$YELLOW" "$RESET" "$*"; }
+stage() { printf '\n%s%s[%s/4] %s%s\n' "$BLUE" "$BOLD" "$1" "$2" "$RESET"; }
+step() { printf '\n  %s%s%s\n' "$BOLD" "$*" "$RESET"; }
+ok()   { printf '  %s[ok]%s %s\n' "$GREEN" "$RESET" "$*"; }
+warn() { printf '  %s[!]%s %s\n' "$YELLOW" "$RESET" "$*"; }
 die()  { printf '\n%serror:%s %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 # Prompts read plain stdin rather than /dev/tty. This script requires a cloned
@@ -63,16 +64,41 @@ yes_no() {
 
 # Read rather than repeated, so the installer cannot announce a version this
 # checkout is not. Empty if the file moves — a nameless banner beats a wrong one.
-version="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' backend/internal/version/version.go 2>/dev/null)"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd -- "$ROOT"
+version="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' backend/internal/version/version.go 2>/dev/null || true)"
+
+case "${1:-}" in
+	--help|-h)
+		cat <<'EOF'
+Just Dashboard · setup
+
+Usage: sudo ./install.sh
+
+  1. Prepare the host and required tools
+  2. Configure private access and your administrator account
+  3. Build and start the Docker Compose stack
+  4. Verify startup and show sign-in and terminal commands
+
+Re-running keeps existing configuration by default. Set NO_COLOR=1 for
+plain output. Run ./scripts/manage.sh --help for terminal admin tools.
+EOF
+		exit 0
+		;;
+	"") ;;
+	*) die "unknown option; use --help for usage." ;;
+esac
 
 say ""
-say "${BOLD}Just Dashboard${version:+ $version} — setup${RESET}"
-say "${DIM}Self-hosted management for a single Linux server.${RESET}"
+say "${BLUE}${BOLD}Just Dashboard${RESET}${version:+  $version}"
+say "Setup · private access to your Linux server"
+say "${DIM}Prepare host  →  Configure  →  Start stack  →  Ready${RESET}"
 
 [ "$(id -u)" -eq 0 ] || die "run this with sudo — the dashboard manages the host, so setup needs root."
 [ -f docker-compose.yml ] || die "run this from inside the cloned repository (docker-compose.yml is not here)."
 
-step "Installing and checking required host tools"
+stage 1 "Prepare the host"
+step "Required host tools"
 source scripts/install-dependencies.sh
 source scripts/dotenv.sh
 jd_install_dependencies || die "Required host tools could not be provisioned. See the package-manager error above; re-run setup after resolving it."
@@ -81,7 +107,7 @@ jd_install_dependencies || die "Required host tools could not be provisioned. Se
 # the git, gh and network tools it and the dashboard's pages reach for have to
 # be host packages. Missing ones are a warning: the dashboard itself runs
 # without them, and a re-run installs whatever is still missing.
-step "Installing the tools the dashboard uses on this host"
+step "Dashboard host tools"
 if jd_install_host_tools; then
 	ok "git, git-lfs, gh, whois and traceroute are ready"
 else
@@ -90,7 +116,7 @@ else
 	warn "sign-in, and Security → Tools needs whois and traceroute. Re-run this to try again."
 fi
 
-step "Checking what this machine already has"
+step "Docker and Compose"
 
 need_docker=0
 if command -v docker >/dev/null 2>&1; then
@@ -128,6 +154,8 @@ if [ "$need_docker" -eq 1 ]; then
 fi
 
 # ── upgrading from VPS Dashboard ────────────────────────────────────────────
+
+stage 2 "Configure the dashboard"
 
 # The project was called VPS Dashboard, its settings were prefixed VPSD_ and it
 # kept its state under /var/lib/vps-dashboard. Compose now names the new paths
@@ -187,9 +215,8 @@ if [ "$KEEP_ENV" -eq 0 ]; then
 
 step "How will you reach the dashboard?"
 say ""
-say "  This dashboard is ${BOLD}root-equivalent${RESET}: anyone who reaches it with a valid"
-say "  session effectively has root on this machine. There are two ways in, and"
-say "  neither of them puts anything on the public internet."
+say "  A signed-in administrator has root access to this server."
+say "  Choose a private connection; both options keep it off the public internet."
 say ""
 
 # The proxy binds loopback in every configuration, so the allowlist has to
@@ -216,15 +243,12 @@ if command -v tailscale >/dev/null 2>&1; then
 fi
 
 say "  ${BOLD}1${RESET}) ${GREEN}Tailscale${RESET} ${BOLD}— recommended${RESET}${TS_IP:+  ${GREEN}already connected: $TS_IP${RESET}}"
-say "     ${DIM}Reach it from your laptop or phone anywhere, with nothing exposed to${RESET}"
-say "     ${DIM}the internet. With HTTPS enabled on your tailnet it also gets a real,${RESET}"
-say "     ${DIM}publicly trusted certificate — so the browser shows an ordinary padlock${RESET}"
-say "     ${DIM}rather than a warning. Set up for you if you do not have it.${RESET}"
+say "     Connect from devices on your tailnet. Setup can install it for you."
+say "     Enable tailnet HTTPS for a trusted browser certificate."
 say ""
 say "  ${BOLD}2${RESET}) SSH tunnel"
-say "     ${DIM}No new software, no account, nothing listening beyond loopback. Served${RESET}"
-say "     ${DIM}over plain HTTP on localhost, which browsers treat as secure — the ssh${RESET}"
-say "     ${DIM}connection is already the encryption. Needs an ssh -L command open.${RESET}"
+say "     Use your existing SSH connection. Keep the tunnel open while browsing."
+say "     The dashboard listens on localhost; SSH encrypts the connection."
 say ""
 
 CHOICE="$(ask "Choose 1 or 2" 1)"
@@ -593,6 +617,8 @@ fi
 
 # ── build and start ─────────────────────────────────────────────────────────
 
+stage 3 "Build and start"
+
 # Clipboard images cross from the backend container into a host-side shell.
 # The shared root therefore has to be owned by the root-running backend: it
 # deliberately refuses a directory a local account could replace underneath
@@ -638,6 +664,7 @@ docker run --rm --network host --pid host \
   -v "$PWD:$PWD" \
   just-dashboard-backend:latest -prepare-ports "$PWD" -start-stack
 
+stage 4 "Verify startup"
 step "Waiting for the dashboard to answer"
 
 SITE_ADDR="$(grep -E '^JD_SITE=' .env | cut -d= -f2-)"
@@ -677,7 +704,7 @@ fi
 # ── how to get in ───────────────────────────────────────────────────────────
 
 say ""
-say "${GREEN}${BOLD}The dashboard is running.${RESET}"
+say "${GREEN}${BOLD}Setup complete · the dashboard is running${RESET}"
 say ""
 
 PUBLIC_HOST="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
@@ -733,16 +760,11 @@ tailscale)
 	say "  ${DIM}No browser warning, and the dashboard renews it before it expires.${RESET}"
 	;;
 off)
-	say "  ${DIM}Served over plain HTTP on loopback. That is not a downgrade: the ssh${RESET}"
-	say "  ${DIM}tunnel is already encrypted and authenticated, and browsers treat${RESET}"
-	say "  ${DIM}http://localhost as a secure origin — so there is no warning to click${RESET}"
-	say "  ${DIM}through and no certificate to explain.${RESET}"
+	say "  SSH encrypts the connection. Localhost uses HTTP without a browser warning."
 	;;
 *)
-	say "  ${DIM}The certificate is signed by Caddy's own CA, so the browser warns once.${RESET}"
-	say "  ${DIM}That is expected: the link is already encrypted by the tunnel or tailnet.${RESET}"
-	say "  ${DIM}Turn HTTPS on for your tailnet to replace it with a trusted one — the${RESET}"
-	say "  ${DIM}dashboard's own settings page can then switch to it without a re-install.${RESET}"
+	say "  Your browser may warn because Caddy signs this certificate."
+	say "  For trusted HTTPS, enable tailnet HTTPS and switch in dashboard Configuration."
 	;;
 esac
 
@@ -753,7 +775,8 @@ if [ "${KEEP_ENV:-0}" -eq 0 ]; then
 	if [ "${GENERATED_PW:-0}" -eq 1 ]; then
 		say "    password  ${BOLD}$ADMIN_PW${RESET}"
 		say ""
-		warn "Save that password now — it is shown once. Change it from Account → Security whenever you like."
+		warn "Save that password now — it is shown once."
+		say "  Change it from Account → Security whenever you like."
 	else
 		say "    password  ${DIM}(the one you chose)${RESET}"
 	fi
@@ -767,12 +790,21 @@ if [ "${KEEP_ENV:-0}" -eq 0 ]; then
 fi
 
 say ""
-say "  ${DIM}Useful from here:${RESET}"
-say "    $COMPOSE logs -f backend    ${DIM}# what the server is doing${RESET}"
-say "    $COMPOSE restart            ${DIM}# after editing .env by hand${RESET}"
-say "    $COMPOSE down               ${DIM}# stop it${RESET}"
+say "  ${BOLD}Terminal tools${RESET} · run on this server"
+printf '    cd %q\n' "$ROOT"
 say ""
-say "  ${DIM}Ports, address, certificate and two-factor are all editable from the${RESET}"
-say "  ${DIM}dashboard itself, under Operations → Dashboard → Configuration. It${RESET}"
-say "  ${DIM}restarts into a change and puts the old one back if it does not come up.${RESET}"
+say "    sudo ./scripts/reset-password.sh USER        # recover a dashboard account"
+say "    sudo ./scripts/create-user.sh USER limited   # create a dashboard account"
+say "    sudo ./scripts/manage.sh users               # list accounts and roles"
+say "    sudo ./scripts/manage.sh revoke-sessions USER # sign out an account"
+say "    sudo ./scripts/manage.sh status              # containers and health"
+say "    sudo ./scripts/manage.sh logs                # follow backend logs"
+say "    sudo ./scripts/manage.sh restart             # apply .env edits; use SSH"
+say "    ./scripts/manage.sh --help                   # all commands and options"
+say ""
+say "  Password prompts are hidden. Temporary passwords must be changed at sign-in;"
+say "  a reset keeps two-factor enrollment and revokes sessions and API tokens."
+say ""
+say "  Change access, ports and two-factor under Operations → Dashboard → Configuration."
+say "  Configuration changes there automatically roll back if startup fails."
 say ""
