@@ -2665,6 +2665,10 @@ Database provisioning uses the shared `internal/portalloc` range selection inste
 It returns and audits Docker's actual host binding if a competing process claims the initial choice.
 
 `install.sh` sources `scripts/install-dependencies.sh` before any operation requiring curl or OpenSSL.
+It groups setup into four labeled stages and prints account-recovery and stack-command examples after
+successful health verification. The terminal scripts use the built backend's isolated `--admin` mode
+for account operations and Compose for status/logs/recreation; see
+[terminal tools](../operations/terminal-tools.md) for behavior, privilege boundaries and verification.
 It installs only missing curl/OpenSSL/Certbot packages using apt, dnf, yum, apk, zypper or pacman, validates
 Certbot's HTTP authenticators and enables an existing packaged renewal timer. Package failures stop setup.
 The same `jd_pkg_install` dispatch (one `apt-get update` per run) backs `jd_install_terminal_extras`,

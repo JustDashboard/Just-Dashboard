@@ -71,6 +71,9 @@ to the contribution terms above, including the additional licence grant to the p
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from
   the worktree under test and rebuild/restart it after source changes. `JD_BROWSER_BASE_URL` selects
   an explicitly managed frontend on another port when worktrees run alongside one another.
+- Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
+  `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
+  use fake host commands and temporary state rather than modifying an installed dashboard.
 - **`bun run build` is the final frontend type-check gate.** `frontend/Dockerfile`
   sets `JD_IMAGE_BUILD=1`, which tells `next.config.ts` to skip the type-check pass and the
   prerender source maps. That is deliberate: install and update are both

@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/admin"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/agent"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/api"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
@@ -37,6 +38,23 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--admin" {
+		if agent, _ := strconv.ParseBool(config.Env("JD_AGENT_MODE")); agent {
+			fmt.Fprintln(os.Stderr, "local dashboard accounts are unavailable in agent mode")
+			os.Exit(1)
+		}
+		dataDir := config.Env("JD_DATA_DIR")
+		if dataDir == "" {
+			dataDir = "/var/lib/just-dashboard"
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := admin.Run(ctx, dataDir, os.Args[2:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "account command failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--git-editor" {
 		if err := gitx.RunEditor(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)

@@ -116,6 +116,13 @@ API tokens may narrow their creator's role, never widen it, and are demoted with
 The first admin is created by `cmd/server/main.go` from `JD_BOOTSTRAP_USER`/`JD_BOOTSTRAP_PASSWORD`;
 `must_change_pw` is set only when the password was *generated* there and printed to the log — a
 password the operator chose in the installer is theirs and is not demanded again at first sign-in.
+
+Local host-root account recovery uses the same binary's isolated `--admin` mode through
+`scripts/manage.sh`. It opens only an existing store and starts no server or modules. Password resets
+atomically require a password change, clear login lockout, and revoke sessions/API tokens while keeping
+TOTP enrollment, recovery codes and disabled state; account mutations are audited as actor `cli`.
+See [terminal tools](../operations/terminal-tools.md) for commands and the local privilege boundary.
+
 `auth.Sealer` (from the 64-hex `JD_MASTER_KEY`) encrypts every stored secret — TOTP seeds, connection
 strings, deploy env, backup credentials.
 
@@ -151,4 +158,5 @@ columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 
 `internal/audit` writes `audit_log` **and** mirrors every entry to the process log, so a trail survives
 the database being tampered with. An `Entry` records who (user, role, `Actor` = session or token), from
-where, what (action, target, method, path), and how it went.
+where, what (action, target, method, path), and how it went. Local root account commands use
+`Actor = cli`, `Username = root`, and `Method = CLI`, with the dashboard account as the target.

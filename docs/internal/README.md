@@ -64,6 +64,8 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`operations/terminal-tools.md`](operations/terminal-tools.md) — installer stages and completion guide,
+  local root account recovery, password handling, audit, and terminal stack commands.
 - [`../audits/2026-09-22-deploy-new/README.md`](../audits/2026-09-22-deploy-new/README.md) — deployment
   creation audit, template/framework coverage, implementation plan and verification evidence.
 - [`../audits/2026-09-16-deployments/README.md`](../audits/2026-09-16-deployments/README.md) — deployment capability audit, fresh verification results, competitor comparison, and prioritized gaps.
