@@ -573,12 +573,12 @@ product still pass prose; they are not wrong so much as not yet done.
 
 ## 8. Type
 
-The face is **Satoshi**, self-hosted. The variable files sit in `src/app/fonts/` and
-`next/font/local` loads them in `app/layout.tsx`, which emits them as `--font-satoshi`; `--font-sans`
-in `globals.css` puts it ahead of the system stack, which stays behind it as the fallback. Nothing at
-build or run time reaches out to a font CDN — this product is built and run on locked-down networks,
-which is why the face was self-hosted rather than fetched, and the licence file travels with the
-files.
+The face is **Source Sans 3**, self-hosted from Adobe's
+[3.052R release](https://github.com/adobe-fonts/source-sans/releases/tag/3.052R). The upright and
+italic variable WOFF2 files sit in `src/app/fonts/` with their SIL Open Font License. `next/font/local`
+loads both in `app/layout.tsx` at weights 200–900 and emits `--font-source-sans-3`; `--font-sans` in
+`globals.css` puts it ahead of the system fallback. Nothing at build or run time reaches out to a
+font CDN. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
 
 The ladder is `text-micro` (10) → `text-hint` (11) → `text-xs` (12) → `text-body` (13) →
 `text-sm` (14) → `text-title` (15). An arbitrary `text-[Npx]` is a departure from it, and the linter
