@@ -26,6 +26,10 @@ network allowlist → rate limit → authenticate → CSRF (session mutations) �
   and partial 2FA sessions. The header makes a same-site sibling origin preflight, and this application
   grants no cross-origin browser access. Bearer tokens, agent mTLS and the HMAC webhook do not use
   ambient cookies and are deliberately outside that check.
+- **WebSocket origins** are checked by `wsx` against the request host, port and the scheme Caddy serves:
+  HTTPS for `JD_TLS=internal` or `tailscale`, HTTP for `JD_TLS=off` or local development. An explicit
+  `JD_ALLOWED_ORIGINS` entry remains the only cross-origin exception. The backend's loopback HTTP hop
+  does not determine the browser-facing scheme.
 
 After completing any required second factor, an account marked `must_change_pw` may use only
 the session-only `POST /account/password` mutation and authentication status/logout routes. Feature

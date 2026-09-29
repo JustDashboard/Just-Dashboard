@@ -92,7 +92,9 @@ metadata is never trusted as the quota. `internal/sysinfo` reads the host throug
 ## Auth, secrets, state
 
 `internal/auth` owns users, sessions, TOTP, recovery codes, API tokens. Cookie `vpsd_session` (HttpOnly,
-SameSite=Strict, Secure unless `JD_DEV`). A session that still owes a second factor is accepted only by
+SameSite=Strict, Secure unless `JD_DEV` or loopback-only `JD_TLS=off`). The WebSocket upgrader uses that
+same browser-facing scheme for its same-origin check, so HTTP tunnel installs can open live streams. A
+session that still owes a second factor is accepted only by
 the 2FA routes (`AuthenticatePartial`); everything else answers `totp_required` /
 `totp_enrollment_required`. Who owes one is decided per account: an enrolled account is always challenged,
 and `JD_REQUIRE_2FA` (default false, reported as the `require2fa` status field) decides only whether an
