@@ -1535,11 +1535,13 @@ the Overview share — and a template's definition), so moving between a project
 refetches the project, and a configuration save on any page is re-read there when the desired
 revision moves. The shell draws the name, then the identity line the host Overview opens on
 (`HostIdentity`): the project drawn as itself, its address with the certificate's state in the
-lock's colour, its source, commit, runtime, live release and automatic-deployment status as facts
-on their own marks, and its state — deploying, ready, failed, unhealthy, stopped, not deployed,
-derived from the summary and the runtime observation — with the diagnosis verdict or the stage in
-flight under it. Its actions are Visit, the one command (`projectCommand`: View deployment while a
-run is active, else Start, Deploy, Deploy changes or Redeploy) and a verbs menu grouped Running,
+lock's colour, with source, tracked branch and runtime on one facts row, then the live release's
+age and automatic-deployment status on a second. Exact commits, authors and trigger details remain
+in the deployment history and run pages; the Overview's wiring also names the live commit. Its
+state — deploying, ready, failed, unhealthy, stopped, not deployed, derived from the summary and
+the runtime observation — stays on its own line above the diagnosis verdict or stage in flight at
+every width. Its actions are Visit, the one command (`projectCommand`: View deployment while a run
+is active, else Start, Deploy, Deploy changes or Redeploy) and a verbs menu grouped Running,
 Building and Project — Restart and Stop; Redeploy live release, Retry, Rebuild without cache and
 Deploy a specific version; Duplicate project and Open in Docker — with Archive and Delete
 permanently under the danger rule. Starting a run goes through `useProjectStart`, the fleet card's

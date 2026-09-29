@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
   ArrowRight,
@@ -18,7 +18,6 @@ import type {
   DeploymentDomainRoute,
   DeploymentEngineRun,
   DeploymentEnvironmentConfiguration,
-  DeploymentRelease,
   DeploymentSummary,
   DeployProject,
   BlueprintDetail,
@@ -31,10 +30,9 @@ import { VerbMenu } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
 import { HostIdentity } from "@/components/metrics/host-identity"
 import { ProductGlyph, buildMethodProduct, hasProductLogo } from "@/components/product-logo"
-import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
+import { BranchChip } from "@/components/git/marks"
 import { useProject } from "@/components/deploy/project-context"
 import { projectCommand, useProjectVerbs } from "@/components/deploy/project-verbs"
-import { RunActorMark, runActorProduct } from "@/components/deploy/run-marks"
 import { PROJECT_NAV, PROJECT_SETTINGS_NAV } from "@/components/nav"
 import { useNavScope, type NavScope } from "@/components/nav-scope"
 import { DeployVersionDialog } from "@/components/deploy/deploy-version-dialog"
@@ -52,9 +50,6 @@ import {
   deploymentURL,
   frameworkLabel,
   hostOf,
-  runActor,
-  runCommit,
-  runTriggerLine,
   sourceProduct,
 } from "@/components/deploy/vocabulary"
 
@@ -74,12 +69,10 @@ import {
  * described the way the machine is: the project drawn as itself on the tile —
  * its site's icon, else the product it is — then where it answers, with the
  * certificate's state in the lock's colour, then what it is made of as facts
- * that each open on their own mark (the forge, the branch, the commit and its
- * author, the runtime, the release and who shipped it, whether it deploys
- * itself), and its state at the far end with what needs attention under it.
- * It was a row of grey words joined by dots, which stranded a dot at the end
- * of every line on a phone and repeated, on the Overview, what the wiring said
- * a few pixels below.
+ * in two rows: the source, branch and runtime, then the live release's age and
+ * whether it deploys itself. Commit and actor details belong to the deployment
+ * history, where the run gives them context. Its state and what needs attention
+ * stay on separate lines at the far end, including at desktop widths.
  *
  * The verbs are the projects grid's (`useProjectVerbs`): the command is the
  * first of View, Start, Deploy and Redeploy, and every other verb goes in the
@@ -96,7 +89,6 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   const url = deploymentURL(deployment.endpoint)
   const activeRun = deployment.activeRun
   const base = `/deploy/${project.projectId}`
-  const overview = usePathname() === base
 
   const verbs = useProjectVerbs(deployment, {
     confirm,
@@ -171,49 +163,38 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
           logo={<ProjectMark deployment={deployment} product={project.product} size="lg" />}
           title={<Address deployment={deployment} url={url} domain={domain} />}
           facts={
-            // Held to a measure, so the facts wrap under the title and the state
-            // keeps its place at the line's far end rather than dropping below.
-            <span className="flex max-w-[40rem] min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1.5">
-              <SourceFact
-                deployment={deployment}
-                record={record}
-                configuration={project.configuration}
-                blueprint={project.blueprint}
-              />
-              {/* On a phone only the Overview keeps the commit and the runtime:
-                  its wiring is where they are read, and on every other page
-                  they pushed the page's first field below the fold. */}
-              <span className={cn("contents", !overview && "max-sm:hidden")}>
-                <CommitFact
+            <span className="flex min-w-0 flex-1 flex-col gap-2">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+                <SourceFact
                   deployment={deployment}
                   record={record}
-                  run={project.liveRun}
-                  release={project.liveRelease}
+                  configuration={project.configuration}
+                  blueprint={project.blueprint}
                 />
+                <BranchFact deployment={deployment} record={record} />
                 <RuntimeFact deployment={deployment} configuration={project.configuration} />
               </span>
-              {project.liveRelease && (
-                <span className="inline-flex min-w-0 items-center gap-1.5">
-                  <span className="numeric shrink-0 text-foreground">
-                    Release #{project.liveRelease.number}
+              <span className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5">
+                {project.liveRelease && (
+                  <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
+                    <span className="numeric shrink-0 text-foreground">
+                      Release #{project.liveRelease.number}
+                    </span>
+                    <ReleaseLine
+                      run={project.liveRun}
+                      activatedAt={project.liveRelease.activatedAt}
+                    />
                   </span>
-                  <ReleaseLine
-                    run={project.liveRun}
-                    activatedAt={project.liveRelease.activatedAt}
-                    remote={deployment.sourceRemote}
-                  />
-                </span>
-              )}
-              <AutoDeployFact
-                reading={project.gitWatch && autoDeployReading(project.gitWatch)}
-                href={`${base}/settings/general#automatic-deployment`}
-              />
+                )}
+                <AutoDeployFact
+                  reading={project.gitWatch && autoDeployReading(project.gitWatch)}
+                  href={`${base}/settings/general#automatic-deployment`}
+                />
+              </span>
             </span>
           }
           aside={
-            // Beside the facts the two readings stack at the line's end; where the
-            // line has wrapped them under the facts they read across instead.
-            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 xl:block xl:space-y-1 xl:text-right">
+            <div className="grid min-w-0 justify-items-start gap-1 sm:justify-items-end sm:text-right">
               <ProjectStatus
                 summary={deployment}
                 runtime={runtime}
@@ -224,7 +205,7 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
               {activeRun ? (
                 <Link
                   href={`${base}/runs/${activeRun.id}`}
-                  className="flex items-center gap-1.5 rounded-sm text-xs focus-ring xl:justify-end"
+                  className="flex items-center gap-1.5 rounded-sm text-xs focus-ring"
                 >
                   <TextShimmer>
                     {activeRun.currentStep?.label ?? RUN_LABELS[activeRun.state]}
@@ -400,7 +381,7 @@ function Fact({
   children: React.ReactNode
 }) {
   return (
-    <span className={cn("inline-flex min-w-0 items-center gap-1.5", className)}>
+    <span className={cn("inline-flex max-w-full min-w-0 items-center gap-1.5", className)}>
       {mark}
       <span className={cn("truncate", mono && "font-mono")}>{children}</span>
     </span>
@@ -466,39 +447,20 @@ function SourceFact({
 }
 
 /**
- * The commit that is live, the way a forge writes one: the branch, the short
- * id, who wrote it and what it says. Only a repository has one. It is the
- * live release's — from the run that recorded it, else the release's own
- * revision — and only a project with nothing live yet names its newest run's,
- * so a build that failed or is still verifying is never drawn as what is live.
+ * The tracked branch belongs beside its repository. The exact live commit is
+ * read in the Overview's wiring and deployment history rather than repeated
+ * in the shared header on every settings page.
  */
-function CommitFact({
+function BranchFact({
   deployment,
   record,
-  run,
-  release,
 }: {
   deployment: DeploymentSummary
   record: DeployProject
-  run?: DeploymentEngineRun
-  release?: DeploymentRelease
 }) {
   if (deployment.sourceKind !== "git" && deployment.sourceKind !== "local") return null
-  const commit = runCommit(run) ?? (release ? undefined : runCommit(deployment.lastRun))
   return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      <BranchChip
-        branch={deployment.sourceRef || record.branch || "main"}
-        className="max-w-40 shrink-0"
-      />
-      <ShortSha sha={commit?.sha ?? release?.sourceRevision ?? deployment.sourceRevision} />
-      {commit?.subject && (
-        <>
-          <AuthorMark name={commit.author} />
-          <span className="max-w-[28ch] min-w-0 truncate text-foreground/80">{commit.subject}</span>
-        </>
-      )}
-    </span>
+    <BranchChip branch={deployment.sourceRef || record.branch || "main"} className="max-w-40" />
   )
 }
 
@@ -550,41 +512,17 @@ function RuntimeFact({
 }
 
 /**
- * When the live release went live and who shipped it — a person as their
- * face in the hue the rail gives them, anything else in its words.
+ * The live release's age stays visible; who shipped it is read with that
+ * deployment's full provenance in the history.
  */
-function ReleaseLine({
-  run,
-  activatedAt,
-  remote,
-}: {
-  run?: DeploymentEngineRun
-  activatedAt?: string
-  remote?: string
-}) {
+function ReleaseLine({ run, activatedAt }: { run?: DeploymentEngineRun; activatedAt?: string }) {
   if (!run)
     return activatedAt ? <span className="truncate">live {relativeTime(activatedAt)}</span> : null
-  const actor = runActor(run)
-  const product = runActorProduct(run, remote)
   return (
-    <>
-      <span className="shrink-0">
-        {run.operation === "rollback" ? "rolled back" : "deployed"}{" "}
-        {relativeTime(run.endedAt ?? run.requestedAt)}
-      </span>
-      {actor.kind === "person" ? (
-        <span className="inline-flex min-w-0 items-center gap-1">
-          by
-          <RunActorMark run={run} size="xs" className="size-4" />
-          <span className="truncate">{actor.name}</span>
-        </span>
-      ) : (
-        <span className="inline-flex min-w-0 items-center gap-1">
-          {hasProductLogo(product) && <ProductGlyph id={product} />}
-          <span className="truncate">{runTriggerLine(run)}</span>
-        </span>
-      )}
-    </>
+    <span className="truncate">
+      {run.operation === "rollback" ? "rolled back" : "deployed"}{" "}
+      {relativeTime(run.endedAt ?? run.requestedAt)}
+    </span>
   )
 }
 
@@ -624,7 +562,7 @@ function Assessment({ diagnosis, href }: { diagnosis?: DeploymentDiagnosis; href
       WORST.find((level) => diagnosis.findings.some((finding) => finding.severity === level)) ??
       "notice"
     return (
-      <Link href={href} className="flex rounded-sm focus-ring hover:underline xl:justify-end">
+      <Link href={href} className="flex rounded-sm focus-ring hover:underline">
         <Status
           verdict={worst}
           label={count === 1 ? "1 needs attention" : `${count} need attention`}
