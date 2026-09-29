@@ -396,7 +396,7 @@ type restoreDatabaseRequest struct {
 
 // handleBackupRestoreDatabase loads one native dump from a run back into its
 // saved connection, or into another database on the same server for a drill.
-// It overwrites live data, so the operator types the target database's name.
+// It overwrites live data, so the route uses the destructive gate and audit.
 func (s *Server) handleBackupRestoreDatabase(w http.ResponseWriter, r *http.Request) error {
 	runID, err := strconv.ParseInt(chi.URLParam(r, "runID"), 10, 64)
 	if err != nil {
