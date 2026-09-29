@@ -1555,6 +1555,15 @@ The passes, in order. Each one is a diff you can review on its own.
    to what it counts, and the products the environment talks to sit under the rail head. And a
    project's Runtime page carries each count in the header of the block it counts, with the four
    moving readings — processor, memory, processes, network — as the live usage tiles.
+
+   Deployment history also takes this exit: success and weekly frequency sit with the releases-per-day
+   chart, while median duration, its trend and recovery time are a compact timing list beside it.
+   The four readings keep their basis and window without a separate strip of tiles over the records.
+   The project Overview retains its delivery tiles. History's counted status filters use the
+   underlined view-strip look as toggle buttons; filtering the same records does not make them ARIA
+   tabs. Switching status or environment reserves the results' height for the page visit, so a
+   shorter list does not clamp the shell's scroll position. These rows skip the arrival stagger so
+   a filter does not replay the entrance of the same history.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed

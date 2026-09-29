@@ -1618,9 +1618,15 @@ caching, so an SVG opened directly is a picture and not a document; `404 favicon
 product, Compose, its framework, its recipe's language, Docker or nginx), and only a project no
 product names keeps its workload glyph.
 
-Deployments carries the delivery insights — a failure reason among them narrows the list to the
-failed runs — then the runs under a strip of the last twenty outcomes and the environment picker,
-grouped under In progress and then by day, narrowed by counted chips. A run is one shared row
+Deployments carries delivery insights with success rate and weekly frequency beside the daily chart,
+and median release time, its trend and recovery time in a compact timing list. These replace the
+history page's four tiles; the Overview keeps its delivery tiles. A failure reason narrows the list
+to the failed runs. The runs sit under a strip of the last twenty outcomes and the environment picker,
+grouped under In progress and then by day, narrowed by counted, underlined status filters. Zero-count
+filters remain selectable and show the empty state with Clear filters. Switching status or environment
+reserves the results' current height, including pagination, for this page visit so a shorter list
+cannot clamp the shell's scroll position and move the controls. History rows appear without replaying
+the arrival stagger when a filter changes. A run is one shared row
 (`run-row.tsx`): who started it as a face or a product, `#N Deploy` and the commit subject, then
 branch (or the requested tag or commit) · sha · author · trigger, and its state, duration and time in
 fixed columns, the duration with a bar that turns amber past twice the median of at least five
