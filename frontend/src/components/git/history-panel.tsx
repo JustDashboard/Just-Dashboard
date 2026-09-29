@@ -144,7 +144,6 @@ export function HistoryPanel({
   const resetTo = (c: GitCommit, hard: boolean) =>
     confirm({
       title: hard ? `Reset hard to ${c.short}` : `Undo commits back to ${c.short}`,
-      phrase: hard ? "reset hard" : undefined,
       confirmLabel: hard ? "Reset hard" : "Undo to here",
       description: hard ? (
         <p className="text-destructive">

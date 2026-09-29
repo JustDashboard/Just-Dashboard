@@ -84,7 +84,6 @@ export function StructureTab({
   const dropColumn = (column: string) =>
     confirm({
       title: "Drop column",
-      phrase: column,
       confirmLabel: "Drop column",
       description: (
         <p>
@@ -125,7 +124,6 @@ export function StructureTab({
   const dropTable = () =>
     confirm({
       title: "Drop table",
-      phrase: table,
       confirmLabel: "Drop table",
       description: (
         <p>
@@ -143,7 +141,6 @@ export function StructureTab({
   const truncateTable = () =>
     confirm({
       title: "Empty table",
-      phrase: table,
       confirmLabel: "Empty it",
       description: (
         <p>

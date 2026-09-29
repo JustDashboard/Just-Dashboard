@@ -164,12 +164,6 @@ func (s *Server) handleSysUserUpdate(w http.ResponseWriter, r *http.Request) err
 
 func (s *Server) handleSysUserDelete(w http.ResponseWriter, r *http.Request) error {
 	name := chi.URLParam(r, "name")
-	// Typed: an account is an identity, deleting one can take its home
-	// directory with it, and nobody does this often enough for the typing to
-	// become reflex.
-	if err := httpx.RequireTypedConfirmation(w, r, name); err != nil {
-		return err
-	}
 	removeHome := r.URL.Query().Get("removeHome") == "true"
 	if err := s.modules.linuxUsers.Delete(r.Context(), name, removeHome); err != nil {
 		return mapLinuxUserError(err)
@@ -216,7 +210,7 @@ func (s *Server) handleSSHKeyRemove(w http.ResponseWriter, r *http.Request) erro
 	}
 	// No typed phrase: an authorised key is a public key, and putting one back
 	// is a paste. Deleting the account it belongs to is the route above, and
-	// that still asks.
+	// that also uses ordinary confirmation.
 	if err := s.modules.linuxUsers.RemoveKey(name, fingerprint); err != nil {
 		return mapLinuxUserError(err)
 	}

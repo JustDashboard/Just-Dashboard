@@ -202,19 +202,12 @@ func TestAuthoriseSpecRejectsBlankBindSource(t *testing.T) {
 	}
 }
 
-// The 0.6.1 review took the typed phrase off `prune images`, `prune networks`,
-// `prune containers` and the "prune everything" sweep — each brings its objects
-// back from a registry or a compose file. The one prune that still types is the
-// volume sweep: a volume comes back from nothing. `handlePruneAll` reads that
-// from the query string, so the guard is by content, and both directions are
-// pinned here because the typed branch has no button in the UI to exercise it.
-func TestPruneAllTypesOnlyForTheVolumeSweep(t *testing.T) {
+// Every prune uses ordinary confirmation, including a sweep that removes volumes.
+func TestPruneAllDoesNotRequireAPhrase(t *testing.T) {
 	c, _ := newClient(t)
 
-	if w := c.do(http.MethodPost, "/api/v1/docker/prune?volumes=true", "", nil); w.Code != http.StatusPreconditionRequired {
-		t.Fatalf("a volume sweep without a phrase got %d, want 428: %s", w.Code, strings.TrimSpace(w.Body.String()))
-	} else if !strings.Contains(w.Body.String(), `"phrase":"prune everything"`) {
-		t.Fatalf("phrase is not \"prune everything\": %s", strings.TrimSpace(w.Body.String()))
+	if w := c.do(http.MethodPost, "/api/v1/docker/prune?volumes=true", "", nil); w.Code == http.StatusPreconditionRequired || w.Code == http.StatusPreconditionFailed {
+		t.Fatalf("a volume sweep asked for a phrase: %d %s", w.Code, strings.TrimSpace(w.Body.String()))
 	}
 
 	// The sweep the button actually runs. It may still fail for want of a Docker
@@ -260,11 +253,10 @@ func TestTheReclaimSweepIsNotTyped(t *testing.T) {
 	if w.Code == http.StatusPreconditionRequired || w.Code == http.StatusPreconditionFailed {
 		t.Fatalf("the reclaim sweep asked for a phrase: %d %s", w.Code, strings.TrimSpace(w.Body.String()))
 	}
-	// Adding volumes to the same sweep must still type, so the narrowing above
-	// cannot be widened into "prune is never typed".
+	// Adding volumes does not add a typed phrase.
 	if w := c.do(http.MethodPost,
-		"/api/v1/docker/prune?allImages=true&buildCache=true&volumes=true", "", nil); w.Code != http.StatusPreconditionRequired {
-		t.Fatalf("a sweep including volumes did not ask for a phrase: %d %s", w.Code, strings.TrimSpace(w.Body.String()))
+		"/api/v1/docker/prune?allImages=true&buildCache=true&volumes=true", "", nil); w.Code == http.StatusPreconditionRequired || w.Code == http.StatusPreconditionFailed {
+		t.Fatalf("a sweep including volumes asked for a phrase: %d %s", w.Code, strings.TrimSpace(w.Body.String()))
 	}
 }
 

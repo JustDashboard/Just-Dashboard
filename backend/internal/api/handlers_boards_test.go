@@ -80,10 +80,7 @@ func TestBoardsPersistAndRejectStaleSaves(t *testing.T) {
 	if rec := reader.do(http.MethodDelete, path, "", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("reader delete = %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := admin.do(http.MethodDelete, path, "", nil); rec.Code < 400 || !strings.Contains(rec.Body.String(), "confirmation_required") {
-		t.Fatalf("delete without phrase = %d %s", rec.Code, rec.Body.String())
-	}
-	if rec := admin.do(http.MethodDelete, path, "", map[string]string{"X-Confirm": "Production map"}); rec.Code != http.StatusNoContent {
+	if rec := admin.do(http.MethodDelete, path, "", nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := admin.do(http.MethodGet, path, "", nil); rec.Code != http.StatusNotFound {

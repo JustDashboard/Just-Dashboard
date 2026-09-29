@@ -637,8 +637,8 @@ export function purgeRequest(
         </p>
       </div>
     ),
-    action: async () => {
-      await del(`/deploy/${project.id}/permanent`)
+    action: async (phrase) => {
+      await del(`/deploy/${project.id}/permanent`, { confirm: phrase })
     },
     onDone,
   }

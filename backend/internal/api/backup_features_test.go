@@ -168,15 +168,8 @@ func TestBackupRestoreInPlaceAndSubsetThroughTheAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The typed phrase is required, and it is the literal words.
 	path := fmt.Sprintf("/api/v1/backups/runs/%d/restore", run.ID)
-	if response := admin.do(http.MethodPost, path, `{"inPlace":true}`, nil); response.Code != http.StatusPreconditionRequired && response.Code != http.StatusBadRequest && response.Code != http.StatusConflict {
-		t.Fatalf("restore in place without confirmation: %d %s", response.Code, response.Body.String())
-	}
-	if body, _ := os.ReadFile(conf); string(body) != "v2" {
-		t.Fatal("an unconfirmed restore wrote files")
-	}
-	response := admin.do(http.MethodPost, path, `{"inPlace":true,"paths":["source-0001/etc"]}`, map[string]string{"X-Confirm": "restore in place"})
+	response := admin.do(http.MethodPost, path, `{"inPlace":true,"paths":["source-0001/etc"]}`, nil)
 	if response.Code != http.StatusOK {
 		t.Fatalf("restore in place: %d %s", response.Code, response.Body.String())
 	}

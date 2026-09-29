@@ -18,10 +18,8 @@ import (
 //	service.control fetch, pull, push, checkout, branch, tag, stash, stage,
 //	                commit, merge, revert, cherry-pick, identity, remotes,
 //	                clone, init — every one of them recoverable
-//	destructive     discard and reset (typed: they throw away uncommitted
-//	                work), dropping a stash (typed: the same), and deleting a
-//	                branch, a tag or a remote (ordinary confirmation: the
-//	                commits survive)
+//	destructive     discard, reset, stash drop, and deleting a branch, tag,
+//	                or remote (all use ordinary confirmation)
 func (s *Server) mountGitRoutes(r chi.Router) {
 	r.Route("/git", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleGitRepos))
@@ -684,11 +682,6 @@ func (s *Server) handleGitStashDrop(w http.ResponseWriter, r *http.Request) erro
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	// The work in a stash exists nowhere else once it is dropped — the same
-	// argument as discard, and the same phrase weight.
-	if err := httpx.RequireTypedConfirmation(w, r, "drop stash"); err != nil {
-		return err
-	}
 	return s.gitAction(w, r, "stash.drop", func(p string) (*gitx.Result, error) {
 		return s.modules.git.StashDrop(r.Context(), p, req.Index)
 	})
@@ -701,9 +694,6 @@ func (s *Server) handleGitDiscard(w http.ResponseWriter, r *http.Request) error 
 	}
 	// Discarding rewrites a file to its committed state, or deletes an
 	// untracked one; the copy being overwritten exists nowhere else.
-	if err := httpx.RequireTypedConfirmation(w, r, "discard changes"); err != nil {
-		return err
-	}
 	return s.gitAction(w, r, "discard", func(p string) (*gitx.Result, error) {
 		return s.modules.git.Discard(r.Context(), p, req.File)
 	})
@@ -714,10 +704,6 @@ func (s *Server) handleGitBranchDelete(w http.ResponseWriter, r *http.Request) e
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	// An ordinary confirmation, not a typed phrase: a deleted branch is a name
-	// pointing at a commit, and the commit survives in the reflog and on the
-	// remote. Losing the pointer is recoverable in a way that discarding
-	// uncommitted work is not, which is where the phrase still stands.
 	return s.gitAction(w, r, "branch.delete", func(p string) (*gitx.Result, error) {
 		return s.modules.git.DeleteBranch(r.Context(), p, req.Ref, req.Hard)
 	})
@@ -747,14 +733,6 @@ func (s *Server) handleGitReset(w http.ResponseWriter, r *http.Request) error {
 	var req gitRefRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
-	}
-	// Only a hard reset is typed for. A soft or mixed reset moves the branch
-	// pointer and leaves the working tree alone, so the work is still on disk;
-	// --hard is the one that overwrites it with the commit and leaves no copy.
-	if req.Hard {
-		if err := httpx.RequireTypedConfirmation(w, r, "reset hard"); err != nil {
-			return err
-		}
 	}
 	return s.gitAction(w, r, "reset", func(p string) (*gitx.Result, error) {
 		return s.modules.git.Reset(r.Context(), p, req.Ref, req.Hard, req.Clean)

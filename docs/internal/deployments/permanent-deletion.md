@@ -11,8 +11,8 @@ as disabled as Archive left them — the operator turns automation back on delib
 resuming because the project came back.
 
 A separate `DELETE /deploy/{id}/permanent` operation removes the dashboard records of an already
-archived project. It runs behind `s.destructive`, uses ordinary confirmation (the existing deploy
-project confirmation policy), and records `deploy.project.purge` with the original display name,
+archived project. It runs behind `s.destructive`, requires the archived project's name through
+server-side typed confirmation, and records `deploy.project.purge` with the original display name,
 deployment ID, and `resourcesRemoved: false`. Missing projects return 404. Unarchived projects and
 projects with unfinished engine or legacy runs return 409. Unknown engine states fail closed.
 
@@ -26,12 +26,11 @@ This operation does not invoke Docker, Proxy, Files, Backups, or a host command.
 routes, database networks, persistent storage, checkouts, and on-disk artifacts remain. Database network
 reconciliation ends when its binding records are deleted. Their deployment ownership and
 rollback history are forgotten. Operators wanting managed resources removed must use the existing
-previewed Configuration removal flow first; it retains its per-target capability and typed-phrase
-rules. The permanent-delete dialog explicitly explains both the record loss and retained resources, as
+previewed Configuration removal flow first; managed Compose stacks there also require a typed phrase,
+while other targets use ordinary confirmation. The permanent-delete dialog explicitly explains both the record loss and retained resources, as
 two lists — what is deleted for good and what stays on the server — under the project it names, and
-it asks for the project's name to be typed before its button is live. That is the dialog's own guard
-against a slip in an act that is rare and cannot be undone: the name is not sent, and the route keeps
-the ordinary confirmation above rather than joining the server-side typed-phrase set.
+it asks for the project's name to be typed before its button is live. The name is sent in `X-Confirm`
+and checked by the API before records are deleted.
 
 `GET /deploy/?view=archived` lists archived projects without inspecting their Git checkouts. The
 archive page provides search, links to retained configuration/history, and permanent deletion. The

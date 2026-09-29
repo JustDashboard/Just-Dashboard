@@ -236,7 +236,7 @@ func (s *Server) handleFirewallDeleteRule(w http.ResponseWriter, r *http.Request
 	}
 	// No typed phrase: a rule is one line of configuration, visible on the row
 	// being deleted and re-addable from the form beside it. Turning the
-	// firewall off entirely is the route below, and that still asks.
+	// firewall off entirely is the route below, and that also uses ordinary confirmation.
 	out, err := s.modules.netsec.DeleteRule(r.Context(), number)
 	if err != nil {
 		return mapFirewallError(err)
@@ -253,15 +253,6 @@ type firewallToggleRequest struct {
 func (s *Server) handleFirewallToggle(w http.ResponseWriter, r *http.Request) error {
 	var req firewallToggleRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	// Enabling ufw applies its default-deny policy immediately; if the
-	// dashboard's own port is not already allowed, that is a lockout.
-	phrase := "disable firewall"
-	if req.Enabled {
-		phrase = "enable firewall"
-	}
-	if err := httpx.RequireTypedConfirmation(w, r, phrase); err != nil {
 		return err
 	}
 	out, err := s.modules.netsec.SetEnabled(r.Context(), req.Enabled)

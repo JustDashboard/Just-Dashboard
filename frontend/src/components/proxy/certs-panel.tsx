@@ -242,7 +242,6 @@ export function CertificatesPage() {
   const revoke = (name: string) =>
     confirm({
       title: `Revoke ${name}`,
-      phrase: `revoke ${name}`,
       confirmLabel: "Revoke and delete",
       description: (
         <p className="text-destructive">

@@ -170,7 +170,6 @@ export function FirewallPanel({
           onCheckedChange={(enabled) =>
             confirm({
               title: enabled ? "Enable firewall" : "Disable firewall",
-              phrase: enabled ? "enable firewall" : "disable firewall",
               confirmLabel: enabled ? "Enable" : "Disable",
               description: enabled ? (
                 <p className="text-destructive">
@@ -246,7 +245,6 @@ export function FirewallPanel({
     }
     confirm({
       title: "Deny inbound by default",
-      phrase: "deny incoming",
       confirmLabel: "Apply",
       description: (
         <p className="text-destructive">
@@ -422,7 +420,6 @@ export function FirewallPanel({
                 onClick={() =>
                   confirm({
                     title: "Reset the firewall",
-                    phrase: "reset firewall",
                     confirmLabel: "Reset",
                     description: (
                       <p className="text-destructive">
@@ -536,13 +533,6 @@ export function FirewallPanel({
                                 className="text-destructive"
                                 onClick={() =>
                                   confirm({
-                                    // No typed phrase. A rule is one line, visible
-                                    // on the row being deleted and re-addable from
-                                    // the form beside it — and a phrase in front of
-                                    // something done a dozen times a day is a
-                                    // phrase that gets typed without being read,
-                                    // which is what makes the phrase worthless on
-                                    // the routes that keep it.
                                     title: "Delete firewall rule",
                                     confirmLabel: "Delete",
                                     description: <p className="font-mono text-xs">{rule.raw}</p>,

@@ -117,23 +117,18 @@ func TestGitRoutesRefuseARepositoryOutsideTheRoots(t *testing.T) {
 	}
 }
 
-// The three operations that overwrite uncommitted work take a typed phrase;
-// the routine deletions do not — see invariant 3.
-func TestGitDestructiveRoutesAndTheirPhrases(t *testing.T) {
+// Git mutations keep their destructive capability but use ordinary confirmation.
+func TestGitDestructiveRoutesDoNotRequirePhrases(t *testing.T) {
 	c, _, _, repo := gitFixture(t)
-	typed := []struct{ path, body, phrase string }{
-		{"/api/v1/git/discard", `{"file":"a.txt"}`, "discard changes"},
-		{"/api/v1/git/reset", `{"ref":"HEAD","hard":true}`, "reset hard"},
-		{"/api/v1/git/stash/drop", `{"index":0}`, "drop stash"},
+	actions := []struct{ path, body string }{
+		{"/api/v1/git/discard", `{"file":"a.txt"}`},
+		{"/api/v1/git/reset", `{"ref":"HEAD","hard":true}`},
+		{"/api/v1/git/stash/drop", `{"index":0}`},
 	}
-	for _, tc := range typed {
+	for _, tc := range actions {
 		w := c.do(http.MethodPost, gitPath(tc.path, repo), tc.body, nil)
-		if !strings.Contains(w.Body.String(), "confirmation") {
-			t.Errorf("%s ran without a phrase: %d %s", tc.path, w.Code, w.Body.String())
-		}
-		w = c.do(http.MethodPost, gitPath(tc.path, repo), tc.body, map[string]string{"X-Confirm": "wrong"})
-		if !strings.Contains(w.Body.String(), "confirmation") {
-			t.Errorf("%s accepted the wrong phrase: %d %s", tc.path, w.Code, w.Body.String())
+		if strings.Contains(w.Body.String(), "confirmation") {
+			t.Errorf("%s asked for a phrase: %d %s", tc.path, w.Code, w.Body.String())
 		}
 	}
 	// A mixed reset moves the pointer and leaves the tree alone: no phrase.

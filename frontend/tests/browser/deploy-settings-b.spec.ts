@@ -1427,9 +1427,7 @@ test.describe("Danger zone", () => {
     await expect(page.getByRole("button", { name: "Refresh" })).toBeVisible()
   })
 
-  test("an archived project can remove a typed-confirmation target, then be deleted permanently", async ({
-    page,
-  }) => {
+  test("an archived project can remove a volume, then be deleted permanently", async ({ page }) => {
     await mockProject(page)
     await page.route("**/api/v1/deploy/7", async (route) => {
       if (route.request().method() !== "GET") return route.fallback()
@@ -1453,8 +1451,7 @@ test.describe("Danger zone", () => {
             ownership: "managed",
             data: true,
             requiresAdmin: true,
-            confirmationType: "typed",
-            confirmationPhrase: "api-data",
+            confirmationType: "ordinary",
           },
         ],
         digest: `sha256:${"9".repeat(64)}`,
@@ -1469,27 +1466,28 @@ test.describe("Danger zone", () => {
       await json(route, { deploymentId: 7, removed: [], remaining: [] })
     })
     let purged = 0
+    let purgeConfirm: string | undefined
     await page.route("**/api/v1/deploy/7/permanent", (route) => {
       purged++
+      purgeConfirm = route.request().headers()["x-confirm"]
       return route.fulfill({ status: 204 })
     })
     await page.goto("/deploy/7/settings/danger")
 
     await expect(page.getByRole("heading", { name: "Archive this deployment" })).toHaveCount(0)
-    // The plan is read on arrival: each target as the thing it is, marked
-    // where it holds data and where its name has to be typed.
+    // The plan is read on arrival: each target is marked where it holds data.
     await expect(page.getByText("api-data", { exact: true }).first()).toBeVisible()
-    await expect(page.getByText(/type its name to remove/)).toBeVisible()
+    await expect(page.getByText(/type its name to remove/)).toHaveCount(0)
     await expect(page.getByText("holds data", { exact: true })).toBeVisible()
 
     await page.getByRole("button", { name: "Remove", exact: true }).click()
     const removeDialog = page.getByRole("dialog", { name: "Remove api-data" })
-    await removeDialog.getByRole("textbox").fill("api-data")
+    await expect(removeDialog.getByPlaceholder("Type the phrase above")).toHaveCount(0)
     await removeDialog.getByRole("button", { name: "Remove managed resource" }).click()
 
     await expect.poll(() => removeBody).toBeDefined()
     expect(removeBody).toMatchObject({ targetIds: ["docker_volume:api-data"] })
-    expect(removeConfirm).toBe("api-data")
+    expect(removeConfirm).toBeUndefined()
 
     // The confirmation's own success toast sits bottom-right and can overlap
     // the next button while it is showing; waiting it out is the honest fix
@@ -1503,6 +1501,7 @@ test.describe("Danger zone", () => {
     await purgeDialog.getByRole("button", { name: "Delete permanently" }).click()
     await expect(page).toHaveURL(/\/deploy\?view=archived$/)
     expect(purged).toBe(1)
+    expect(purgeConfirm).toBe(encodeURIComponent(project.name))
   })
 })
 

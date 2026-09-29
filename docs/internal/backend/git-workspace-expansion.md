@@ -42,11 +42,11 @@ No CI workflows, release changes, commits or pushes are part of this request.
 
 - `/conflict` returns base/current/incoming blobs, the working result and a version digest.
   Text edits require both `service.control` and `file.write`; choosing a whole side or deletion is
-  destructive and requires `discard changes`. The server re-reads the index and working file before
+  destructive and uses ordinary confirmation. The server re-reads the index and working file before
   writing. Text is limited to 2 MiB; binary files and symlinks use whole-side selection. A submodule
   conflict records the selected gitlink in the parent index; update the child checkout afterward.
   `/operation/start` accepts merge, cherry-pick or revert, starts from a clean tree and keeps conflicts.
-  Continue rejects unmerged entries. Abort is destructive with the phrase `abort operation`.
+  Continue rejects unmerged entries. Abort is destructive with ordinary confirmation.
 - `/patch` and `/patch/stage` expose and apply selectable raw diff line IDs. The server reconstructs
   the selected index content from its own snapshot, verifies the version and runs `git apply --cached`
   with stdin. Unstaging reverses the selection without writing the working file. File content is

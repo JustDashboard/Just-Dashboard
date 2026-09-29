@@ -35,8 +35,7 @@ const WIDTHS = {
  *
  * No icon plot in front of the title, for the reason written at `PanelHeader`:
  * a dialog that says "Remove volume" does not need a picture of a disk to say
- * it, and the red one the typed-confirmation dialog used to wear was never the
- * thing that stopped anybody — the phrase they have to type is.
+ * it; the action and its subject are named in the confirmation body.
  *
  * The footer being a strip rather than a row of buttons floating in the body is
  * what makes a long form usable: the raw `DialogContent` scrolls as one box, so

@@ -56,7 +56,7 @@ option-shaped. Pull is fast-forward-only; push never forces and establishes a mi
 branch's own remote; checkout never forces, and a remote branch is checked out as a new local branch
 that tracks it. The legacy merge, revert and cherry-pick endpoints still abort on failure. The workspace
 uses `/operation/start`, which requires a clean checkout and retains conflicts for the visual resolver,
-`/operation/continue` and typed `/operation/abort`. Branch deletion defaults to Git's
+`/operation/continue` and ordinarily confirmed `/operation/abort`. Branch deletion defaults to Git's
 merged-only mode; stash includes untracked files; discard restores a tracked path from the index and
 deletes an untracked one (`clean -fd`); a hard reset may also clean untracked files; an identity is
 written into the repository's own config; a clone lands only in a new directory under a root, as the
@@ -66,10 +66,9 @@ Route capabilities reflect recoverability: reads require `read`; fetch/pull/push
 checkout, branch create/rename, merge, revert, cherry-pick, tag create, stash push/pop/apply,
 stage/unstage/commit, identity, adding a remote, clone and init require `service.control`; discard, reset,
 stash drop, and deleting a branch, a remote branch, a tag or a remote pass through `s.destructive`.
-Discard, hard reset and stash drop require typed confirmation because they overwrite or throw away
-uncommitted work; the deletions use ordinary confirmation because Git preserves the commits in
-reflogs/remotes. Every mutation lands in the audit log as `git.<verb>` with the repository it touched.
-`api/handlers_git_test.go` drives the routes against a real repository and pins the phrase policy and the
+Discard, hard reset, stash drop, and Git deletions use ordinary confirmation. Every mutation lands in
+the audit log as `git.<verb>` with the repository it touched.
+`api/handlers_git_test.go` drives the routes against a real repository and pins the confirmation policy and the
 capability tiers. GitHub authentication, pull requests and workflow runs are detailed in
 [`processes-terminal-github.md`](processes-terminal-github.md#github-sign-in).
 
@@ -132,8 +131,8 @@ capture, with snapshot digests in the manifest and live sidecars omitted. Jobs m
 database connections (`database_dumps`): each run asks the Databases owner for a native dump of every
 one (`dbx.Dump`: pg_dump, mysqldump, mongodump, Redis, or the built-in driver dump) into `database-NNNN/`
 inside the archive and records connection, engine, method, file, digest and size in the manifest; a
-failed dump fails the run. `POST /backups/runs/{runID}/restore-database` (destructive, typed
-confirmation of the target database name) extracts one recorded dump bounded by its manifest size,
+failed dump fails the run. `POST /backups/runs/{runID}/restore-database` (destructive, ordinary
+confirmation) extracts one recorded dump bounded by its manifest size,
 verifies its digest and restores it through `dbx.Restore` into the connection or a named drill
 database. Other sources retain ordinary filesystem capture. See
 [`../deployments/backup-coverage.md`](../deployments/backup-coverage.md).
@@ -142,7 +141,7 @@ An optional recovery plan runs a pinned application image against a private extr
 network access or production mounts. Check status, exact-artifact evidence and cleanup results are
 persisted in `backup_restore_tests` and shown in run history. Recovery can run after each backup, manually
 through the admin `POST /backups/runs/{runID}/verify-restore`, or to satisfy a deployment gate. Existing
-destination restores retain destructive/typed confirmation. See
+destination restores retain destructive capability and ordinary confirmation. See
 [`../deployments/restore-verification.md`](../deployments/restore-verification.md) for the checker contract
 and supported consistency protocols.
 
@@ -154,15 +153,14 @@ Active or cleanup-pending recovery records also block pruning and job deletion. 
 fall back from rename to copy. Deleting a job deliberately leaves its existing artifacts alone.
 
 Archive listing is bounded and does not extract. Restore requires a successful artifact, downloads remote
-objects into private staging, refuses `/`, and is typed-confirmed with the destination. The API resolves the
+objects into private staging, refuses `/`, and uses ordinary confirmation. The API resolves the
 destination through `files.Resolve`; extraction uses `safepath` for every directory, regular file, and
 symlink, refusing traversal and unsafe link targets. `restoreRequest` also takes `paths` — archive
 entries (`source-0001/etc`, one file) that narrow the restore to themselves and what lies under them —
 and `inPlace`, which `Runner.RestoreInPlace` answers by mapping each recorded `source-NNNN` root back
 onto the path the manifest says it came from, resolving every original path through `files.Resolve`
 again so a root restriction added since the backup still holds; it needs a complete manifest, so a
-legacy archive can only be restored into a directory, and its typed phrase is the literal
-`restore in place` because there is no single destination to read back. Database dumps are never
+legacy archive can only be restored into a directory. Database dumps are never
 written to disk by an in-place restore; they go back through the Databases owner as before.
 `GET /backups/runs/{runID}/download` streams the verified artifact (`Runner.OpenArtifact`: the local
 file, or a private download of a remote one, checksum proven first) as an attachment; it sits with the
@@ -192,7 +190,7 @@ accounts are hidden by default in the UI.
 Usernames and group names follow a closed 32-character Unix pattern. New accounts are created with a
 locked password, so access must be added deliberately with a public key; shells must be absolute, comments
 cannot inject passwd fields, and the group picker comes from the host group database. A protected-account
-set cannot be deleted or locked. Account deletion is destructive and typed with the username, especially
+set cannot be deleted or locked. Account deletion is destructive and ordinarily confirmed, especially
 because it may remove the home directory; key removal is destructive but ordinarily confirmed.
 
 SSH public keys are parsed with `x/crypto/ssh`, reject private/multi-line input, expose SHA-256 fingerprints,

@@ -12,7 +12,7 @@ import { SecurityProvider } from "@/components/security/security-context"
  * fail2ban, live connections, the login record, the interface list and a
  * scanner. The rail lists them; this layout owns the three verdicts every sub-page reads (`posture`,
  * `firewall`, `exposure`) and the one action that must not be duplicated
- * (`applyFix`, with its typed confirmations). It does not gate the section:
+ * (`applyFix`, with ordinary confirmations). It does not gate the section:
  * fail2ban absent, ufw absent and an unreadable sshd are independent absences,
  * and each page reports its own — an unavailable check is information here,
  * not an error.
@@ -27,14 +27,13 @@ export default function SecurityLayout({ children }: { children: React.ReactNode
   /**
    * A finding's one-click remedy. The server names the action; this maps it to
    * the request that carries it out and to the confirmation it deserves — the
-   * two that can cost access to the machine go through the typed phrase.
+   * two that can cost access to the machine still need confirmation.
    */
   const applyFix = (finding: SecurityFinding) => {
     const fix = finding.fix ?? ""
     if (fix === "firewall.enable") {
       confirm({
         title: "Enable firewall",
-        phrase: "enable firewall",
         confirmLabel: "Enable",
         description: (
           <p className="text-destructive">
@@ -54,7 +53,6 @@ export default function SecurityLayout({ children }: { children: React.ReactNode
       const [key, value] = fix.slice(4).split("=")
       confirm({
         title: finding.fixLabel ?? "Apply SSH change",
-        phrase: "change ssh",
         confirmLabel: "Test and apply",
         description: (
           <div className="space-y-2">

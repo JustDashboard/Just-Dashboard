@@ -93,8 +93,10 @@ func (s *PlanningStore) RemovalPlan(ctx context.Context, projectID int64) (*Remo
 	seen := map[string]bool{}
 	add := func(target RemovalTarget) {
 		target.Ownership = OwnershipManaged
-		if target.ConfirmationType == "" {
-			target.ConfirmationType = "ordinary"
+		if target.Kind == "compose_stack" {
+			target.ConfirmationType, target.ConfirmationPhrase = "typed", target.ResourceID
+		} else {
+			target.ConfirmationType, target.ConfirmationPhrase = "ordinary", ""
 		}
 		target.ID = removalTargetID(target.Kind, target.ResourceID)
 		if target.ResourceID == "" || seen[target.ID] {
@@ -190,7 +192,6 @@ func (s *PlanningStore) RemovalPlan(ctx context.Context, projectID int64) (*Remo
 			Owner: removalOwner(kind), DeepLink: removalDeepLink(kind, resourceID)}
 		if kind == "docker_volume" || kind == "bind_path" {
 			target.Data, target.RequiresAdmin = true, true
-			target.ConfirmationType, target.ConfirmationPhrase = "typed", resourceID
 		}
 		add(target)
 	}
@@ -225,7 +226,6 @@ func (s *PlanningStore) RemovalPlan(ctx context.Context, projectID int64) (*Remo
 			}
 			add(RemovalTarget{Kind: kind, ResourceID: mount.Source, DisplayName: mount.Source,
 				Owner: removalOwner(kind), Data: true, RequiresAdmin: true,
-				ConfirmationType: "typed", ConfirmationPhrase: mount.Source,
 				DeepLink: removalDeepLink(kind, mount.Source)})
 		}
 	}

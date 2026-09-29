@@ -157,7 +157,7 @@ counts and unavailable checks sit in a rail beside the findings.
   visible. The rule dialog groups policy, destination and source, using source choice cards
   (Tailscale's own mark for a tailnet source) and service marks where the port identifies a product.
   Address-only deny/reject rules can be edited without inventing a destination port. Existing
-  typed confirmations for toggle, reset and inbound-deny policy remain. The page ends on the Firewall
+  ordinary confirmations for toggle, reset and inbound-deny policy remain. The page ends on the Firewall
   log (`ufw.log`, else `kern.log`, else the kernel ring, read as the firewall lens); while ufw or
   firewalld says logging is off, the section says so and its button brings the logging control
   beside the rules into view instead of drawing an empty pane.
@@ -205,7 +205,7 @@ and forms do not. Phone tables scroll inside those frames without expanding the 
 
 `tests/browser/security-ui.spec.ts` checks all eight pages, their mutations and lookup handoffs,
 probe draft/request preservation, jail policy edits, SSH draft reversion, source-only rules,
-typed confirmations, limited roles and unavailable modules, and each area's log — its lens, its
+ordinary confirmations, limited roles and unavailable modules, and each area's log — its lens, its
 readings, its fallbacks and which lines offer a block — against the lines the Go lenses read
 (`host-logs-fixture.ts`). It checks the viewport at 390, 1280 and 1720, and requires desktop tables to
 fit their action columns. `JD_SECURITY_SHOTS` writes

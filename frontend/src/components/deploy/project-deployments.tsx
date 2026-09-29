@@ -655,10 +655,8 @@ export function ProjectDeployments() {
 /**
  * The legacy compose pipeline has no immutable releases to roll back to, only
  * the commits it built from. Rolling back means `git reset --hard` on the
- * server's checkout and rebuilding — rare, and not reversible the way an
- * immutable release swap is — so it is the one rollback in this rebuild that
- * asks for a typed phrase rather than the plain confirmation the dialog above
- * uses (design-system confirm-dialog: typing is for the rare and unrecoverable).
+ * server's checkout and rebuilding. It uses ordinary confirmation, like the
+ * immutable release rollback above.
  *
  * These rows are readings with a button, not destinations, so they stay a
  * `RowList`; each commit is drawn as a forge draws one — its sha, then its
@@ -725,7 +723,6 @@ function LegacyRecovery({
                         confirm({
                           title: "Roll back",
                           confirmLabel: "Roll back",
-                          phrase: commit.short,
                           subject: {
                             mark: <ProductLogo id="git" size="sm" />,
                             name: commit.subject,

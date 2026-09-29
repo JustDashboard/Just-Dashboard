@@ -56,7 +56,6 @@ export function ChangesSheet({
   const startInstall = () =>
     confirm({
       title: `Update to ${target}`,
-      phrase: target,
       confirmLabel: "Update now",
       description: (
         <>

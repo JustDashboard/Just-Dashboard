@@ -181,9 +181,8 @@ func (s *Server) mountAccountRoutes(r chi.Router) {
 // where the surrounding group already demands a stricter capability — nesting
 // it inside a system.admin group costs nothing (admin holds every capability)
 // and buys the tighter rate budget plus one honest answer to "which routes are
-// irreversible?". The typed-confirmation phrase is still enforced inside each
-// handler, where the expected phrase is known; adding a destructive route
-// means doing both.
+// irreversible?". Only the deletion routes listed in security invariant 3
+// additionally enforce a typed phrase inside their handlers.
 //
 // The one route that cannot use it is POST /databases/{id}/query, where
 // whether the request is destructive depends on the SQL rather than on the

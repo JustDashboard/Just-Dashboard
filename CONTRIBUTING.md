@@ -230,21 +230,19 @@ to the contribution terms above, including the additional licence grant to the p
 - Native database dump changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveBackupDumpsAndRestoresAPostgresDatabase -count=1 -v`.
   It provisions a real PostgreSQL container, dumps a canary row through a backup job, deletes the row
-  live, restores the dump into a drill database over the typed-confirmation route and checks the live
+  live, restores the dump into a drill database over an ordinary-confirmation route and checks the live
   database was not touched.
 - Blueprint, planning or activation changes also run `python3 scripts/e2e-deployments.py`, which
   starts an isolated backend and deploys real nginx, busybox and PostgreSQL-blueprint releases through
   the public API, including generated-password authentication over TCP and paused backup automation.
 - Keep the security posture intact. The network allowlist runs before
   authentication, enrolled accounts always require their second factor, every destructive route sits behind
-  the destructive capability with an audit entry, and the rare irreversible ones
-  require a typed confirmation phrase enforced server-side. A change that
+  the destructive capability with an audit entry, and deletion of deployment projects, entire databases,
+  and Docker stacks requires a typed confirmation phrase enforced server-side. A change that
   weakens any of those needs to say so explicitly in the PR description.
-- Before putting a typed confirmation on a new route, read invariant 3 in
-  `docs/internal/security/invariants.md`. The test is frequency, not severity: everything behind
-  `s.destructive` is dangerous, and adding a phrase to something done several
-  times a sitting is what teaches operators to type phrases without reading
-  them.
+- Before changing typed confirmation, read invariant 3 in
+  `docs/internal/security/invariants.md`. The typed set is limited to deletion of deployment projects,
+  entire databases, and Docker stacks; other destructive actions use ordinary confirmation.
 - Never edit `CHANGELOG.md` by hand — it is generated from
   `backend/internal/selfupdate/changelog.json`, which is also the file every
   install in the world reads to find out whether it is behind. If your change

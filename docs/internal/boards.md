@@ -33,9 +33,8 @@ saving, saved, failed, unnamed, conflict and deleted states. When changes cannot
 in-board links ask before leaving without saving instead of doing nothing.
 
 `DELETE /boards/{id}` uses `s.destructive`: the `destructive` capability, tighter rate limit and
-audit. It requires the board name as a server-checked `X-Confirm` phrase because the drawing cannot be
-recovered after deletion. The editor asks for the name the server holds, which can differ from an
-unsaved or untrimmed edit in the name field, and a failed save does not block deletion. All mutations
+audit. The editor uses ordinary confirmation before deleting the drawing. A failed save does not block
+deletion. All mutations
 also pass the shared CSRF and audit middleware. The backend treats scene JSON as data; no scene field
 invokes host commands or grants a capability.
 

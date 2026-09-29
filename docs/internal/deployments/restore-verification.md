@@ -27,8 +27,8 @@ See the [SQLite fixture's shared application/checker code](../../../backend/inte
 Run **Verify restore** in backup history to test an existing artifact. Status and cleanup results
 appear with that run; Log includes the check ID, schema and actual application image ID. A failed
 check can be retried. The session/API must have `system.admin`. This operation creates and removes
-its own temporary copy; the existing destination restore still uses the destructive route and typed
-destination confirmation because it overwrites operator-selected data.
+its own temporary copy; the existing destination restore still uses the destructive route and ordinary
+confirmation because it overwrites operator-selected data.
 
 Deployments with **Require restore evidence** first check coverage and artifact integrity, then
 reuse a matching successful check or execute the job's configured checker. Missing configuration,

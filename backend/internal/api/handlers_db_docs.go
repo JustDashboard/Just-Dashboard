@@ -339,7 +339,7 @@ func (s *Server) handleMongoDelete(w http.ResponseWriter, r *http.Request) error
 	}
 	// No typed phrase: a document is Mongo's row, and deleting one is the same
 	// everyday act the SQL side stopped typing for. Dropping the whole
-	// collection is the one below, and that still asks.
+	// collection below uses ordinary confirmation too.
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
 	n, err := dbx.MongoDelete(ctx, client, db, collection, req.Filter, req.Many)
@@ -369,9 +369,6 @@ func (s *Server) handleMongoAggregate(w http.ResponseWriter, r *http.Request) er
 		if !p.Can(auth.CapDestructive) {
 			return httpx.Err(http.StatusForbidden, "forbidden",
 				"this pipeline writes a collection and your role does not permit it")
-		}
-		if err := httpx.RequireTypedConfirmation(w, r, "run pipeline"); err != nil {
-			return err
 		}
 		if !s.destrLim.Allow(p.Username() + "|mongoagg") {
 			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
@@ -440,9 +437,6 @@ func (s *Server) handleMongoDropCollection(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return err
 	}
-	if err := httpx.RequireTypedConfirmation(w, r, collection); err != nil {
-		return err
-	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
 	if err := dbx.MongoDropCollection(ctx, client, db, collection); err != nil {
@@ -452,22 +446,6 @@ func (s *Server) handleMongoDropCollection(w http.ResponseWriter, r *http.Reques
 		map[string]any{"database": db, "collection": collection})
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	return nil
-}
-
-// itoaLocal keeps the confirmation phrase builder from importing strconv for
-// one call.
-func itoaLocal(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
 }
 
 // handleRedisRename moves a key to a new name, refusing to clobber an existing

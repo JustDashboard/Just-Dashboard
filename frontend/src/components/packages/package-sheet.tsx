@@ -94,10 +94,10 @@ export function PackageSheet({
   const loading = Boolean(name) && !current && !error
 
   const act = useCallback(
-    async (path: string, body: object, confirmPhrase?: string) => {
+    async (path: string, body: object) => {
       setBusy(true)
       try {
-        const job = await post<Job>(path, body, confirmPhrase ? { confirm: confirmPhrase } : {})
+        const job = await post<Job>(path, body)
         onJob(job)
         onOpenChange(false)
       } finally {
@@ -115,10 +115,6 @@ export function PackageSheet({
   const remove = (purge: boolean) =>
     confirm({
       title: purge ? `Remove ${name} and its configuration` : `Remove ${name}`,
-      // The phrase only guards the purge, and only because that half has no
-      // way back: an ordinary removal is undone by installing the package
-      // again from the repository it came from.
-      phrase: purge ? `purge ${name}` : undefined,
       confirmLabel: "Remove",
       description: purge ? (
         <>
@@ -141,8 +137,8 @@ export function PackageSheet({
           </p>
         </>
       ),
-      action: async (phrase) => {
-        await act("/packages/remove", { packages: [name], purge }, purge ? phrase : undefined)
+      action: async () => {
+        await act("/packages/remove", { packages: [name], purge })
       },
     })
 

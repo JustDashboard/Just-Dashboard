@@ -318,7 +318,7 @@ Cross-cutting:
   replacement goes in **first**; deleting first and failing to add leaves a hole in the firewall, the one
   outcome an edit must never produce. The rule is read before anything is added and found again by what
   it says rather than where it sat. Ordering lives in `replaceRule`, separate from backend detection.
-- `SetDefaultPolicy` refuses an inbound deny on a host admitting nobody; ambiguous cases go to the typed
+- `SetDefaultPolicy` refuses an inbound deny on a host admitting nobody; ambiguous cases go to ordinary
   confirmation, since a rule list admitting *something* cannot be judged without knowing which port the
   browser arrived on.
 - `ServiceCatalogue` (`GET /security/services`) is the rule form's teaching layer, served from the server

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -68,7 +69,7 @@ func liveAPIRouter(t *testing.T, driver dbx.Driver, dsn string) (*Server, http.H
 }
 
 func pathf(format string, id int64) string {
-	return strings.Replace(format, "%d", itoaLocal(int(id)), 1)
+	return strings.Replace(format, "%d", strconv.FormatInt(id, 10), 1)
 }
 
 func do(t *testing.T, r http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -180,9 +181,8 @@ func TestLiveAPIMongo(t *testing.T) {
 		}
 	})
 
-	// The two Mongo deletes sit on opposite sides of the confirmation line, and
-	// this is the only harness with a real Mongo connection to prove it on.
-	t.Run("document_delete_is_plain_but_drop_collection_is_typed", func(t *testing.T) {
+	// Both Mongo deletions use ordinary confirmation.
+	t.Run("document_and_collection_delete_do_not_need_phrases", func(t *testing.T) {
 		rec := do(t, r, http.MethodDelete, pathf("/databases/%d/documents", id),
 			`{"collection":"`+coll+`","filter":"{\"name\":\"Cy\"}"}`)
 		if strings.Contains(rec.Body.String(), "confirmation") {
@@ -190,8 +190,8 @@ func TestLiveAPIMongo(t *testing.T) {
 		}
 		drop := do(t, r, http.MethodDelete, pathf("/databases/%d/collections", id),
 			`{"collection":"`+coll+`"}`)
-		if !strings.Contains(drop.Body.String(), "confirmation") {
-			t.Errorf("dropping a collection ran without a phrase: %d %s",
+		if strings.Contains(drop.Body.String(), "confirmation") {
+			t.Errorf("dropping a collection asked for a phrase: %d %s",
 				drop.Code, drop.Body.String())
 		}
 	})

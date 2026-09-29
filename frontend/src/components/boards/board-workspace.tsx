@@ -345,20 +345,18 @@ function LoadedBoard({ board }: { board: Board }) {
 
   async function remove() {
     // Best effort: a save that fails must not keep a board from being deleted,
-    // and the phrase is the name the server holds, which is trimmed and may
-    // differ from an unsaved edit in the field.
+    // and the confirmation names the saved board, which may differ from an unsaved edit.
     await flush()
     const title = savedNameRef.current
     confirm({
       title: "Delete board",
       description: `Delete “${title}” and all its drawings? This cannot be undone.`,
-      phrase: title,
       confirmLabel: "Delete board",
-      action: async (phrase) => {
+      action: async () => {
         abandonedRef.current = true
         if (timerRef.current) clearTimeout(timerRef.current)
         try {
-          await del(`/boards/${board.id}`, { confirm: phrase })
+          await del(`/boards/${board.id}`)
         } catch (cause) {
           if (!(cause instanceof ApiError && cause.code === "board_not_found")) {
             abandonedRef.current = false

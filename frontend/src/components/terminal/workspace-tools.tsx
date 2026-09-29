@@ -447,8 +447,7 @@ function InlineFile({
 /**
  * The confirm surface for the destructive things in this panel — deleting a
  * file, discarding a change. Non-portalled on purpose (fullscreen), and a plain
- * yes/no rather than a typed phrase: the panel supplies the phrase the server
- * still requires, and the file's name shown in the body is the thing being
+ * yes/no, with the file's name shown in the body as the thing being
  * confirmed. Esc cancels, Enter confirms.
  */
 function InlineConfirm({ request, onClose }: { request: ConfirmRequest; onClose: () => void }) {

@@ -1008,12 +1008,11 @@ test("a conflict is resolved in the preview and the merge can continue", async (
   await expect.poll(() => seen.some((r) => r.path === "/git/operation/continue")).toBe(true)
 })
 
-test("aborting an operation requires its typed confirmation", async ({ page }) => {
+test("aborting an operation uses ordinary confirmation", async ({ page }) => {
   const seen = await fixture(page, false, "conflict")
   await page.goto("/git?repo=%2Fsrv%2Fapp")
   await page.getByRole("button", { name: "Abort", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Abort operation", exact: true })).toBeDisabled()
-  await page.getByRole("textbox").filter({ visible: true }).last().fill("abort operation")
+  await expect(page.getByRole("dialog").getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await page.getByRole("button", { name: "Abort operation", exact: true }).click()
   await expect.poll(() => seen.some((r) => r.path === "/git/operation/abort")).toBe(true)
 })

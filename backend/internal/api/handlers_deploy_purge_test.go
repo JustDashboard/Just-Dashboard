@@ -18,7 +18,8 @@ func TestDeploymentPermanentDeletionRequiresArchiveCapabilityAndPreservesHostRes
 	if res := reader.do(http.MethodDelete, path, "", nil); res.Code != http.StatusForbidden {
 		t.Fatalf("reader: %d %s", res.Code, res.Body.String())
 	}
-	if res := admin.do(http.MethodDelete, path, "", nil); res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), "deployment_not_archived") {
+	confirm := map[string]string{"X-Confirm": "api-config-app"}
+	if res := admin.do(http.MethodDelete, path, "", confirm); res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), "deployment_not_archived") {
 		t.Fatalf("unarchived: %d %s", res.Code, res.Body.String())
 	}
 	if _, err := s.modules.deployStore.Archive(t.Context(), id); err != nil {
@@ -27,12 +28,18 @@ func TestDeploymentPermanentDeletionRequiresArchiveCapabilityAndPreservesHostRes
 	if res := admin.do(http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d", id), "", nil); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "api-config-app") {
 		t.Fatalf("archived detail: %d %s", res.Code, res.Body.String())
 	}
+	if res := admin.do(http.MethodDelete, path, "", nil); res.Code != http.StatusPreconditionRequired {
+		t.Fatalf("missing phrase: %d %s", res.Code, res.Body.String())
+	}
+	if res := admin.do(http.MethodDelete, path, "", map[string]string{"X-Confirm": "other-project"}); res.Code != http.StatusPreconditionFailed {
+		t.Fatalf("wrong phrase: %d %s", res.Code, res.Body.String())
+	}
 	run, err := s.Store.DB.Exec(`INSERT INTO deploy_runs(project_id, environment_id, started_at, status, state) VALUES(?, ?, 1, 'running', 'verifying')`, id, environmentID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	runID, _ := run.LastInsertId()
-	if res := admin.do(http.MethodDelete, path, "", nil); res.Code != http.StatusConflict {
+	if res := admin.do(http.MethodDelete, path, "", confirm); res.Code != http.StatusConflict {
 		t.Fatalf("active: %d %s", res.Code, res.Body.String())
 	}
 	if _, err := s.Store.DB.Exec(`UPDATE deploy_runs SET state = 'succeeded', status = 'success' WHERE id = ?`, runID); err != nil {
@@ -50,7 +57,7 @@ func TestDeploymentPermanentDeletionRequiresArchiveCapabilityAndPreservesHostRes
 	if res := admin.do(http.MethodGet, "/api/v1/deploy/?view=archived", "", nil); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "api-config-app") {
 		t.Fatalf("archive: %d %s", res.Code, res.Body.String())
 	}
-	if res := admin.do(http.MethodDelete, path, "", nil); res.Code != http.StatusNoContent {
+	if res := admin.do(http.MethodDelete, path, "", confirm); res.Code != http.StatusNoContent {
 		t.Fatalf("purge: %d %s", res.Code, res.Body.String())
 	}
 	for _, table := range []string{"deploy_projects", "deploy_environments", "deploy_runs", "deploy_dependencies", "deploy_variable_revisions", "deploy_run_variable_revisions"} {

@@ -609,11 +609,6 @@ export default function FilesPage() {
   const deleteEntry = (entry: FileEntry) =>
     confirm({
       title: entry.isDir ? "Delete folder" : "Delete file",
-      // Only a directory is typed for. Deleting one file is what a file
-      // manager is, done constantly; a directory takes a tree the operator
-      // cannot see the whole of from the row they clicked, and that is the one
-      // worth reading the name back for.
-      phrase: entry.isDir ? entry.name : undefined,
       confirmLabel: "Delete",
       description: (
         <p className="text-destructive">
@@ -621,9 +616,8 @@ export default function FilesPage() {
           {entry.isDir ? ", along with everything inside it." : "."}
         </p>
       ),
-      action: async (c) => {
+      action: async () => {
         await del("/files/delete", {
-          confirm: entry.isDir ? c : undefined,
           query: { path: entry.path, recursive: entry.isDir },
         })
         setActive(null)
@@ -638,12 +632,6 @@ export default function FilesPage() {
     const dirs = targets.filter((e) => e.isDir)
     confirm({
       title: `Delete ${plural(targets.length, "item")}`,
-      // A folder in the selection is typed for, exactly as one deleted on its
-      // own is. The bulk path used to satisfy the server's phrase from code,
-      // which turned the one delete that asks for a name into the one that
-      // did not.
-      phrase:
-        dirs.length === 0 ? undefined : dirs.length === 1 ? dirs[0].name : `${dirs.length} folders`,
       confirmLabel: "Delete all",
       description: (
         <p className="text-destructive">
@@ -657,7 +645,6 @@ export default function FilesPage() {
         for (const entry of targets) {
           try {
             await del("/files/delete", {
-              confirm: entry.isDir ? entry.name : undefined,
               query: { path: entry.path, recursive: entry.isDir },
             })
           } catch {

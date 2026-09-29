@@ -87,8 +87,8 @@ the machine. It is built to sit behind a VPN or an SSH tunnel, and that is enfor
   and the allowlist is checked before authentication.
 - Two-factor is enforced for every account that has enrolled. `JD_REQUIRE_2FA` decides whether an
   account *must* enrol.
-- Destructive actions pause for confirmation; the rare unrecoverable ones require a typed phrase,
-  checked on the server.
+- Destructive actions are capability checked and audited. Deleting a deployment project, database, or
+  Docker stack requires a typed phrase checked on the server; other risky actions use ordinary confirmation.
 - Every state-changing request lands in an audit log.
 
 ## Who makes this

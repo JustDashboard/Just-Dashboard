@@ -261,7 +261,6 @@ export function FileTree({
       ),
       run: async () => {
         await del("/files/delete", {
-          confirm: entry.name,
           query: { path: entry.path, recursive: entry.isDir },
         })
         notify.success(`Deleted ${entry.name}`)
