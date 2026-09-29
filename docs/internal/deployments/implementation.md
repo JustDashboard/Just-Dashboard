@@ -1573,8 +1573,11 @@ the operations diagnosis (`#attention`, which the header's verdict links to) —
 environment's newest run when that run failed and made nothing live (critical when nothing serves,
 a warning while an older release does), titled by its cause and linking to the run, and
 `auto_deploy_stopped` when the watcher could not read its branch for a named reason; the delivery
-insights; the recent deployments beside the preview environments from `2xl`; and, for a project deploying
-a github.com repository, a **Pull requests** panel (`GET /deploy/{id}/pull-requests`, polled once a
+figures; the recent deployments; then release history, whose columns share the split of the lists
+above and whose single failure cause is a count instead of a full-width bar. The Overview keeps the
+delivery figures compact; the Deployments page retains the release-time trend. From `2xl`, recent
+deployments sit beside the preview environments. For a project deploying a github.com repository, that
+**Pull requests** panel (`GET /deploy/{id}/pull-requests`, polled once a
 minute; hidden when the read fails, since the panel is a window onto GitHub rather than a fact about the
 project) listing the open requests with the preview built from each — its address as a link once it is
 reachable, its state in the words `lib/pull-requests.ts` decides, "Out of date" when the head moved — then

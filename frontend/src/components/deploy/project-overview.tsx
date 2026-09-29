@@ -59,7 +59,8 @@ import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
 /**
  * The project's front page, in the order a visitor asks: is something
  * happening now, what is live and how a request reaches it, how it is doing,
- * what needs attention, how often it ships, and what shipped last.
+ * what needs attention, how often it ships, what shipped last, and the
+ * historical shape of those releases.
  *
  * A run in flight is the first thing on the page, as the run itself — the
  * runs list's own row, with the stage it is at and a light running round its
@@ -277,12 +278,6 @@ export function ProjectOverview() {
       </Panel>,
     ])
 
-  // The delivery figures belong on the front page as much as on Deployments:
-  // how often this project ships and how often it fails are the two facts a
-  // visitor asks after "is it up".
-  if (project.normalized)
-    blocks.push(["delivery", <Insights key="delivery" projectId={project.projectId} />])
-
   const info = pullRequests.data
   const previews = info?.previews ?? []
   // Drawn while there is something to say: the listing, or the previews
@@ -292,10 +287,8 @@ export function ProjectOverview() {
   const hasPulls = Boolean(
     info && info.reason !== "not_github" && (info.available || previews.length > 0),
   )
-  blocks.push([
-    "history",
+  const history = (
     <div
-      key="history"
       className={
         hasPulls ? "grid min-w-0 gap-8 2xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]" : "min-w-0"
       }
@@ -357,8 +350,19 @@ export function ProjectOverview() {
           </PanelBody>
         </Panel>
       )}
-    </div>,
-  ])
+    </div>
+  )
+
+  // The recent runs answer what shipped before the trend asks how often.
+  // Legacy projects have no delivery figures, but still have their run list.
+  if (project.normalized)
+    blocks.push([
+      "delivery",
+      <Insights key="delivery" projectId={project.projectId}>
+        {history}
+      </Insights>,
+    ])
+  else blocks.push(["history", history])
 
   return (
     <div className="space-y-8">

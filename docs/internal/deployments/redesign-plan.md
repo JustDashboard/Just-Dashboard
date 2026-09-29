@@ -411,8 +411,9 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   in order, the run in flight as the runs list's own row (confetti once if it goes live while
   watched), Production — the website tile, now switchable to a phone's width, beside the wiring
   drawn as products, over four live readings (requests, failing share, processor, memory) — first
-  sign-in, what needs attention, delivery, and recent deployments beside preview environments from
-  `2xl`. The separate Traffic and Resource usage panels became those readings. Deploy a specific
+  sign-in, what needs attention, delivery figures, recent deployments beside preview environments
+  from `2xl`, then release history. The separate Traffic and Resource usage panels became those
+  readings. Deploy a specific
   version picks from the commits the project's runs recorded; Connect a database takes a saved
   connection by its row.
 - **Deployments and the run page.** Runs are one shared row (`run-row.tsx`) grouped under In
