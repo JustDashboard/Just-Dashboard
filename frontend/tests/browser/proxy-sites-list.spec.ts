@@ -940,6 +940,8 @@ test("a ?site= link gives a reader the config viewer and an administrator the fo
   await page.keyboard.press("Escape")
   await expect(viewer).toHaveCount(0)
   await card(page, "app.example.com").getByRole("link", { name: "Open app.example.com" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/app\.example\.com$/)
+  await page.waitForLoadState("networkidle")
   await page.getByRole("button", { name: "View config" }).first().click()
   await expect(page.getByRole("dialog").locator(".monaco-editor .view-lines")).toContainText(
     "server_name",
@@ -1306,6 +1308,8 @@ test("a deployment's route leads to its deployment and is edited only after aski
 
   // Its card opens the route page, where the file is read-only.
   await shop.getByRole("link", { name: "Open just-dashboard-env-7.conf" }).click()
+  await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-env-7\.conf$/)
+  await expect(page.getByRole("heading", { name: "just-dashboard-env-7.conf" })).toBeVisible()
   await page.getByRole("button", { name: "View config" }).first().click()
   const viewer = page.getByRole("dialog")
   await expect(viewer.locator(".monaco-editor .view-lines")).toContainText(

@@ -287,9 +287,9 @@ func TestVHostRoutesTakeTheNameUnescaped(t *testing.T) {
 	}
 }
 
-// A site copied into sites-enabled is what nginx serves under its name, and
-// the delete took it with no copy kept.
-func TestSiteDeleteLeavesAServedCopyAlone(t *testing.T) {
+// A site copied into sites-enabled is what nginx serves under its name.
+// Deletion must refuse before changing either that copy or its source file.
+func TestSiteDeleteRefusesAServedCopy(t *testing.T) {
 	c, _, root := vhostServer(t, func(string) string { return "exit 0" })
 	copied := filepath.Join(root, "sites-enabled", "copy.test")
 	if err := os.WriteFile(filepath.Join(root, "sites-available", "copy.test"), []byte("server { return 204; }\n"), 0o644); err != nil {
@@ -299,11 +299,11 @@ func TestSiteDeleteLeavesAServedCopyAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := c.do(http.MethodDelete, "/api/v1/proxy/sites/copy.test", "", nil)
-	if w.Code != http.StatusOK {
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "file of its own") {
 		t.Fatalf("got %d %s", w.Code, w.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(root, "sites-available", "copy.test")); !os.IsNotExist(err) {
-		t.Errorf("the available file was not deleted: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "sites-available", "copy.test")); err != nil {
+		t.Errorf("the available file was changed: %v", err)
 	}
 	if b, err := os.ReadFile(copied); err != nil || string(b) != "server { return 200; }\n" {
 		t.Errorf("the served copy is gone or changed: %q %v", b, err)

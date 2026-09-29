@@ -603,7 +603,7 @@ func (b *npmBuilder) host(row npmRow, kind string) {
 		spec.WebSockets = row.flag("allow_websocket_upgrade")
 		p.item.Target = spec.Upstream
 		if row.flag("caching_enabled") {
-			note("NPM cached assets for this host; the form has no cache, so every request reaches the upstream.")
+			note("NPM cached assets for this host; its cache policy is not imported. Set the site's cache options after import if needed.")
 		}
 		b.locations(row, spec, note)
 		if !b.access(row, spec, p, note, skip) {
@@ -617,12 +617,16 @@ func (b *npmBuilder) host(row npmRow, kind string) {
 		}
 		spec.RedirectTo = scheme + "://" + strings.TrimSpace(row.str("forward_domain_name"))
 		code := row.num("forward_http_code")
-		spec.Permanent = code == 0 || code == 301 || code == 308
-		if code != 0 && code != 301 && code != 302 {
-			note("NPM answered with %d; the form writes %s.", code, map[bool]string{true: "301", false: "302"}[spec.Permanent])
+		if code == 301 || code == 302 || code == 307 || code == 308 {
+			spec.RedirectCode = int(code)
+		} else {
+			spec.Permanent = code == 0
+			if code != 0 {
+				note("NPM answered with %d; the imported redirect answers 302.", code)
+			}
 		}
 		if row.has("preserve_path") && !row.flag("preserve_path") {
-			note("NPM dropped the path; the redirect here keeps it, sending /a/b to the same path on the target.")
+			spec.RedirectDropPath = true
 		}
 		p.item.Target = spec.RedirectTo
 	}
@@ -635,7 +639,7 @@ func (b *npmBuilder) host(row npmRow, kind string) {
 			spec.HSTS = row.flag("hsts_enabled")
 			p.item.TLS, p.item.CertPath = true, cert
 			if spec.HSTS && !row.flag("hsts_subdomains") {
-				note("HSTS here always includes subdomains; NPM had it for this name only.")
+				spec.HSTSOwnNameOnly = true
 			}
 		} else {
 			note("NPM served it over HTTPS with its certificate #%d, which stays inside NPM's container, and no certificate on this host covers every one of its names — it is imported on plain HTTP. Issue one under Certificates, then turn TLS on in the site form.", row.num("certificate_id"))
@@ -728,11 +732,13 @@ func (b *npmBuilder) access(row npmRow, spec *SiteSpec, p *npmPlanned, note, ski
 		spec.BasicAuthFile = filepath.Join(b.s.authDir(), a.file)
 		spec.BasicAuthRealm = npmAuthRealm
 		p.item.Requires = []string{a.id}
-		if a.satisfyAny && (len(a.allow) > 0 || len(a.deny) > 0) {
-			note("NPM let a visitor in by address or by password (satisfy any); here both are required.")
+		if a.satisfyAny && len(a.allow) > 0 {
+			spec.SatisfyAny = true
+		} else if a.satisfyAny && len(a.deny) > 0 {
+			note("NPM used satisfy any without an allowed address; the imported site requires the password and obeys its denials.")
 		}
 		if !a.passAuth {
-			note("NPM stripped the Authorization header before the upstream; here the upstream receives it.")
+			spec.Headers = &SiteHeaders{Request: []HeaderValue{{Name: "Authorization", Value: ""}}}
 		}
 	}
 	return true

@@ -26,8 +26,7 @@ const publishedManifest = `{"releases":[
 
 // selfUpdateRouter mounts the routes with a chosen role, against a service
 // that believes 0.9 has been published and that this install is a checkout it
-// could rebuild. Nothing here reaches Docker: every assertion is about a
-// refusal that happens before an upgrade could start.
+// could rebuild.
 func selfUpdateRouter(t *testing.T, role auth.Role) http.Handler {
 	t.Helper()
 	s := testServer(t)
@@ -83,6 +82,13 @@ func drive(t *testing.T, router http.Handler, method, path, body, confirm string
 }
 
 func TestInstallingAnUpdateDoesNotRequireAPhrase(t *testing.T) {
+	// The route must reach the launch path to prove it needs no phrase. Keep
+	// that launch local: CI and development hosts need no updater image.
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	router := selfUpdateRouter(t, auth.RoleAdmin)
 
 	rec := drive(t, router, http.MethodPost, "/dashboard/update/install", `{}`, "")

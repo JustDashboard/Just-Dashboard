@@ -885,10 +885,32 @@ func linkEnabled(link, target string) (func(), error) {
 func keepBackup(full, original string) (func(), error) {
 	backup := full + ".bak"
 	before, existed := readIfPresent(backup)
-	if err := writeAtomic(backup, original); err != nil {
+	var beforeMode os.FileMode
+	if info, err := os.Stat(backup); err == nil {
+		beforeMode = info.Mode().Perm()
+	}
+	if err := writeSiteBackup(full, original); err != nil {
 		return nil, err
 	}
-	return func() { restoreConfig(backup, before, existed) }, nil
+	return func() {
+		if existed {
+			_ = writeAtomicMode(backup, before, beforeMode)
+		} else {
+			_ = os.Remove(backup)
+		}
+	}, nil
+}
+
+func writeSiteBackup(full, content string) error {
+	info, err := os.Stat(full)
+	if err != nil {
+		return err
+	}
+	mode := info.Mode().Perm()
+	if old, err := os.Stat(full + ".bak"); err == nil {
+		mode &= old.Mode().Perm()
+	}
+	return writeAtomicMode(full+".bak", content, mode)
 }
 
 func readIfPresent(path string) (string, bool) {
@@ -914,8 +936,8 @@ func restoreConfig(path, original string, existed bool) {
 // which takes every site on the box down at the next reload — a site linked
 // only as 010-app did that, since only sites-enabled/<name> was removed.
 // A sites-enabled/<name> that enables another file is that site's, not this
-// one's — a hand-written site linked under its domain — and stays: removing it
-// took a site nobody asked to delete off the air.
+// one's — a hand-written site linked under its domain — and stays. A regular
+// file there is refused: nginx serves it, and it has no separate backup.
 func (s *Service) DeleteSite(ctx context.Context, name string) error {
 	if !siteNameRe.MatchString(name) {
 		return fmt.Errorf("invalid site name")
@@ -928,8 +950,34 @@ func (s *Service) DeleteSite(ctx context.Context, name string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	removedLink := false
 	link := filepath.Join(s.nginxDir, "sites-enabled", name)
+	if servedCopy(link) {
+		return fmt.Errorf("sites-enabled/%s is a file of its own, and nginx serves it without a separate backup — move it out of sites-enabled before deleting this site", name)
+	}
+	var fileToDelete string
+	var before []byte
+	for _, candidate := range []string{
+		filepath.Join(s.nginxDir, "sites-available", name),
+		s.confdSite(name),
+	} {
+		full, err := s.allowedPath(candidate)
+		if err != nil {
+			continue
+		}
+		if _, err := os.Stat(full); err != nil {
+			continue
+		}
+		before, err = os.ReadFile(full)
+		if err != nil {
+			return err
+		}
+		if err := writeSiteBackup(full, string(before)); err != nil {
+			return err
+		}
+		fileToDelete = full
+		break
+	}
+	removedLink := false
 	keptLink := ""
 	if info, err := os.Lstat(link); err == nil {
 		keptLink = enabledElsewhere(link, filepath.Join(s.nginxDir, "sites-available", name))
@@ -946,39 +994,17 @@ func (s *Service) DeleteSite(ctx context.Context, name string) error {
 			s.forgetEffective()
 		}
 	}
-	// The conf.d file the listing names: app.conf.disabled itself, where
-	// confdPath's app.conf.disabled.conf was not there, and app rather than
-	// the app.conf beside it.
-	for _, candidate := range []string{
-		filepath.Join(s.nginxDir, "sites-available", name),
-		s.confdSite(name),
-	} {
-		full, err := s.allowedPath(candidate)
-		if err != nil {
-			continue
-		}
-		if _, err := os.Stat(full); err != nil {
-			continue
-		}
-		for _, entry := range linksTo(filepath.Join(s.nginxDir, "sites-enabled"), full) {
+	if fileToDelete != "" {
+		for _, entry := range linksTo(filepath.Join(s.nginxDir, "sites-enabled"), fileToDelete) {
 			if err := os.Remove(filepath.Join(s.nginxDir, "sites-enabled", entry)); err != nil {
 				return err
 			}
 			s.forgetEffective()
 		}
-		// Kept as .bak for the same reason a compose file is: validation
-		// catches a broken config, not a correct one that says the wrong
-		// thing, and the only cure for the second is the previous version.
-		// The listing skips these, so the copy is a file on disk rather than
-		// a site that comes back the moment the one it replaced is deleted.
-		b, readErr := os.ReadFile(full)
-		if readErr == nil {
-			os.WriteFile(full+".bak", b, 0o644)
-		}
-		if err := os.Remove(full); err != nil {
+		if err := os.Remove(fileToDelete); err != nil {
 			return err
 		}
-		s.recordChange(ctx, Change{Path: full, Action: ChangeDelete, Before: b, BeforeExisted: true})
+		s.recordChange(ctx, Change{Path: fileToDelete, Action: ChangeDelete, Before: before, BeforeExisted: true})
 		return nil
 	}
 	if removedLink {

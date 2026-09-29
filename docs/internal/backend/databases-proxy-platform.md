@@ -632,7 +632,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `<file>.bak`, which the form's notice promised while nothing wrote it. The save then returns that
   path as `SiteResult.backup`, and the toast names it. A later save of the now-managed file leaves that
   `.bak` alone. A save that is refused puts back the `.bak` that was there before, or none
-  (`TestSaveSiteKeepsAHandWrittenFileAsBak`).
+  (`TestSaveSiteKeepsAHandWrittenFileAsBak`). New backups take the original file's permissions;
+  replacing an existing backup cannot make its permissions broader (`TestSiteBackupsKeepRestrictedPermissions`).
 
   **What a save drops is listed before it happens** (`site_drift.go`). A save writes the form's reading
   of the file, so a statement the form has no field for — a `proxy_set_header` added by hand, a second
@@ -714,8 +715,10 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `TestSiteFileSaysWhatHoldsTheNamesLink`). `DeleteSite` had the same bug: it removed
   `sites-enabled/<name>` wherever it pointed. Now it removes the link only when the link names the
   file being deleted, or points at nothing (a dangling link enables nothing and fails the next reload).
-  It deletes the file and leaves any other link, or a file of its own in sites-enabled, where it is. A
-  name that only such a link holds is "no such site", and the error says what holds the name
+  It deletes the file and leaves any other link where it is. A file of its own in sites-enabled makes
+  deletion fail before changing either file: nginx serves that copy and deletion cannot silently remove
+  it without a backup (`TestDeleteSiteRefusesToRemoveServedCopy`). A name held only by another site's
+  link is "no such site", and the error says what holds the name
   (`TestDeleteSiteLeavesAnotherSitesLinkAlone`). Every other sites-enabled entry that resolves to the
   deleted file goes with it (`linksTo`, skipping dotfiles as nginx's include does). Before, a site
   linked as `010-app` lost only the `sites-enabled/<name>` it never had, and the dangling `010-app`
@@ -818,7 +821,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   as nginx inherits it. Refused for redirect sites (`return` runs before limits apply) and exemptions or
   log-only with nothing limited. Every limit counts the address nginx sees, so a warning says so unless
   the extra configuration sets `real_ip_header`; the form cannot tell whether a CDN is in front.
-  `VHost.rateLimited` puts "rate limited" on the Sites card.
+  `VHost.rateLimited` puts "rate limited" on the Sites card. The private-prefix nginx test loads the
+  rendered zones and confirms that a third request over a `1r/m` limit answers 429.
 
   **Caching** (`sites_cache.go`, form section "Caching", verb "Purge cache"). `SiteSpec.StaticCache{MaxAge,
   Immutable}` (not for redirects) renders `map $sent_http_content_type $jd_<id>_asset_expires` (CSS, JS,
@@ -839,7 +843,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   files; `DELETE` (system.admin + destructive, audited `proxy.site.cache.purge`) empties it through an
   `os.Root` and keeps the folder, refusing a linked root or site folder. There is no cache_purge module:
   nginx takes a missing file as a MISS, but its shared-memory size accounting only catches up as the
-  cache manager evicts. `VHost.cached` shows the verb.
+  cache manager evicts. `VHost.cached` shows the verb. A real-nginx test confirms MISS then HIT,
+  Authorization and Cookie bypasses, and a MISS after purge.
 
   **Visitor address** (`site_realip.go`, form "Visitor address"). `SiteSpec.RealIP{Source, Trusted,
   Header, CloudflareOnly}`: `cloudflare` renders `include <nginxDir>/jd-realip/cloudflare.conf;` +
@@ -895,6 +900,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `jd-pages/<site>/security.txt` and `robots.txt` at `= /.well-known/security.txt` and `= /robots.txt`
   (`default_type text/plain`), edited as pages `security` and `robots`; the security.txt default names
   `security@<first domain>` and expires in a year, and the form warns within 30 days of `Expires`.
+  Private-prefix nginx tests confirm the crawler and hotlink refusals, same-site referrals, and
+  single sign-on's 200, 401 redirect and 500 refusal before the application.
 
   **Single sign-on** (`sites_forward_auth.go`, form "Who may reach it" and each path's options).
   `SiteSpec.ForwardAuth{Provider, Verify, SignIn, PathsOnly}` writes `auth_request /__jd/auth;` at
@@ -937,6 +944,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `PHPFrontController` ending `location /` in `/index.php?$query_string`. fastcgi_params is used
   always rather than Debian's `snippets/fastcgi-php.conf`: the render is pure (it cannot look at the
   host) and the snippet only adds PATH_INFO. Preflight checks a PHP site's root and socket.
+  `TestLivePHPSiteRoutesThroughFPM` uses a cached PHP-FPM Docker image and a private nginx prefix to
+  verify scripts, front-controller paths, missing scripts and blocked Apache files; it skips without
+  the cached image.
   `GET /proxy/php-sockets` (system.admin; runs `find /run/php -maxdepth 1 -type s` on the host via
   hostexec argv) lists sockets for the form.
 
@@ -968,7 +978,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `[v6]:port` or `unix:/path`), Host "upstream's" (`$proxy_host` would be the block name) and an HTTPS
   pool with SNI/verify but no `UpstreamTLSName`. The parser reads any upstream block the catch-all's
   `proxy_pass` names back as the pool, so a Duplicate gets the new name's block. Health checking is
-  passive only (`max_fails`/`fail_timeout`); stock nginx has no active checks and the form says so.
+  passive only (`max_fails`/`fail_timeout`); stock nginx has no active checks and the form says so. A
+  private-prefix nginx test confirms a request uses the primary and then its backup after the primary
+  stops.
 - **`tlsscan.go` — what the domain actually serves.** Everything else on the page reads files, which
   cannot see a certificate renewed and never reloaded, a proxy still offering TLS 1.0, or a redirect that
   quietly stopped. Each version is probed on a connection pinned to exactly that version, offering
@@ -1365,8 +1377,8 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   inside the same hold of the service lock (`reloadLocked`): run after it, the reload's test could see
   another request's candidate link and report a change that had worked as "not reloaded". Both routes
   read `{name}` through `httpx.URLParam`, since chi hands back the escaped segment (`vb%3A8080`).
-  `DeleteSite` keeps a regular copy or another site's link at `sites-enabled/<name>` and removes
-  every alias to the deleted site's file, so no dangling link blocks the next reload. The bulk
+  `DeleteSite` refuses a regular copy at `sites-enabled/<name>`, keeps another site's link there,
+  and removes every alias to the deleted site's file, so no dangling link blocks the next reload. The bulk
   deletion path still uses `checkSiteDelete` to refuse cases it cannot remove safely.
   `parseCaddyfile` tracks brace depth so only top-level blocks are site addresses — `handle`,
   `header` and `tls` blocks were listed as server names — and says whether every site address is
@@ -1448,7 +1460,9 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   makes, `nginx -t` runs once over the result, and a refusal (422, as a link change) or any site the
   action cannot apply to (400 naming it) puts every site back and changes nothing. Unlike a single
   disable it does not go ahead over a configuration nginx already refuses. Deletes keep `<file>.bak`
-  only once the test passed; one reload follows. Sites already as asked come back as `unchanged`.
+  only once the test passed, with the original file's permissions; a backup that cannot be read or
+  written refuses the whole change (`TestBulkDeleteKeepsRestrictedBackupsAndRefusesAnUnreadableBackup`).
+  One reload follows. Sites already as asked come back as `unchanged`.
   The listing's `roots` and `redirects` (from `root` and `return 30x URL`) feed the list's search and
   its Static and Redirect chips.
 - **Site files.** `sites_files.go`, all `system.admin` and audited. `GET /proxy/sites/{name}/download`
@@ -1477,7 +1491,15 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   unexpired certificate and key cover every domain (NPM's own stay in its container); an access list
   the form cannot write faithfully, a disabled stream, a TLS-terminating stream and a disabled host on
   a conf.d host are skipped rather than imported weaker or live. Advanced configuration is shown,
-  never written. Conflicts (name taken, hostname served, stream port forwarded, password file present)
+  never written. Redirect hosts keep NPM's 301, 302, 307 or 308 and its preserve-path choice. An
+  imported access list keeps `satisfy any` when it has an allowed address and a password, and clears
+  `Authorization` to the upstream when NPM's `pass_auth` is off. A local TLS certificate also keeps
+  NPM's HSTS subdomain choice. NPM's asset cache policy is reported for manual setup because its
+  settings do not map to the site's cache options. A representative SQLite export is covered by a
+  preview, apply and real-nginx request test, including automatic password-file dependency import;
+  `JD_NPM_AUDIT_DB` can point that test at a private copy of a database initialized by NPM with its
+  fixture rows 7–9. Both paths were run against real nginx, and soft-deleted NPM rows stayed out.
+  Conflicts (name taken, hostname served, stream port forwarded, password file present)
   are rechecked at apply. The plan lives in memory for 15 minutes behind a token bound to the actor.
   `POST /proxy/import/npm/apply` `{token, ids}` (`proxy.import.npm`) adds required password files,
   writes every file and links every site, runs `nginx -t` once (422 and everything taken back out on a
@@ -2398,11 +2420,18 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   (`params.days` from 21/7/3/1), `cert_expired`, `renewal_failed` (the last certbot run or its reload
   hook failed, with an unreadable or running renewal left unjudged), `served_drift` (a TLS site serves a
   stale or mismatched certificate; unreachable and skipped sites are left unjudged), `engine_down`
-  (the engine's systemd unit not
-  active/reloading/activating), `upstream_down` (`params.minutes`, 5–1440; the `/proxy/upstreams` check,
+  (the engine's systemd unit not active/reloading/activating), `upstream_down` (`params.minutes`, 5–1440;
+  the `/proxy/upstreams` check,
   so only addresses nginx's own config names are dialled), `watch_unreachable` / `watch_untrusted`
-  (`CheckDomain` on each watched domain) and `site_errors` (`threshold` %, `minutes`, `minRequests` over
-  the site's access log through `proxyExtras.siteTraffic`). A pass runs every 5 min (`proxyAlerts.Start`
+  (`CheckEndpointAt` on each current `watched_endpoints` row, using its pinned IP when set, with the IP
+  in the alert subject so two origins of one name stay distinct), `watch_grade_below` (`params.grade`
+  defaults to A; A+, A, B or C allowed; a full `ScanTLSWith` of each current watched endpoint runs
+  only while the rule is enabled, up to four at once with a 60 s per-endpoint budget, following pinned
+  addresses and STARTTLS ports; watch lists over 12 endpoints rotate in two-pass batches so the hold
+  can mature while each pass stays bounded; an unreachable or unfinished scan is unjudged, and a grade
+  below the chosen minimum must persist through two checks and a minute) and `site_errors`
+  (`threshold` %, `minutes`, `minRequests` over the site's access log through
+  `proxyExtras.siteTraffic`). A pass runs every 5 min (`proxyAlerts.Start`
   from `startProxyExtras`; clock, observer and deliverer are fields for tests). State is one row per
   (rule, subject, level); a transition is told once — firing when the subject first holds (engine and
   unreachable: two passes and a minute; upstream: two passes and the rule's minutes), recovered once the
@@ -2416,12 +2445,14 @@ ownership and cleanup, then removes its own containers/volumes/networks.
   `[test]` message to one existing channel), `POST /proxy/alerts/evaluate` (a pass now; holds still
   apply); behind `destructive`: `PUT /proxy/alerts/rules/{id}` (can pause; new terms or a pause clear the
   rule's state except mutes), `DELETE /proxy/alerts/rules/{id}`, `PUT /proxy/alerts/mutes {ruleId, subject,
-  muted}`. A watched endpoint's grade dropping is not offered: scheduled watched checks record a
-  handshake and certificate, but do not run the full TLS grader.
+  muted}`. The ordinary watched-check schedule still records a handshake and certificate; only an
+  enabled grade rule runs the full grader. The operator chooses the minimum expected grade.
   `TestProxyAlertsRequireAdminAndTellEachTransitionOnce` covers the API gate, audit, firing, unreadable
   source, and recovery; `TestProxyAlertReadingsForRenewalAndServedCertificates` covers the two additional
-  readings; `TestLiveSiteSingleSignOnChecksBeforeForwarding` verifies the single sign-on access decisions
-  against a real nginx and two local HTTP services.
+  readings; `TestProxyAlertsCheckCurrentPinnedWatchEndpoints` and
+  `TestWatchedGradeRuleScansPinnedTargetsAndJudgesOnlyCompletedGrades` cover current watch rows,
+  pinned origins, STARTTLS and grade decisions; `TestWatchedGradeRuleRotatesLargeWatchListsAfterTwoPasses`
+  covers the bounded schedule.
 - **Snoozed findings** (`api/handlers_proxy_findings.go`; table `proxy_finding_snoozes` in
   `store/schema_proxy.go`): the overview's findings are judged in the browser, so a snooze keeps the
   finding's id and the fingerprint it had (`finding-snooze.ts`: the level plus the area's fingerprint or

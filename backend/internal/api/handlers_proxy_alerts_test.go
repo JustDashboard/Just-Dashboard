@@ -3,8 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,5 +164,106 @@ func TestProxyAlertReadingsForRenewalAndServedCertificates(t *testing.T) {
 	if reading = servedDriftAlertReading(report); len(reading.Firing) != 0 ||
 		reading.Now["app app.test 127.0.0.1:443"] == "" {
 		t.Fatalf("served certificate recovered: %+v", reading)
+	}
+}
+
+func TestProxyAlertsCheckCurrentPinnedWatchEndpoints(t *testing.T) {
+	s := testServer(t)
+	tlsServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer tlsServer.Close()
+	address := strings.TrimPrefix(tlsServer.URL, "https://")
+	ip, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, _ := strconv.Atoi(portText)
+	if _, err := s.Store.DB.Exec(`INSERT INTO watched_endpoints(domain, port, ip, created_at)
+		VALUES('origin.example.test', ?, ?, 1)`, port, ip); err != nil {
+		t.Fatal(err)
+	}
+	checks, read := s.checkWatchedDomains(t.Context())
+	if !read || len(checks) != 1 || checks[0].IP != ip || checks[0].Cert == nil {
+		t.Fatalf("the current pinned watch list was not checked: read %t, %+v", read, checks)
+	}
+	reading := watchAlertReading(proxyAlertRule{Kind: proxyAlertWatchUntrusted}, checks)
+	subject := "origin.example.test:" + portText + " via " + ip
+	if len(reading.Firing) != 1 || reading.Firing[0].Subject != subject {
+		t.Fatalf("the pinned endpoint was not reported separately: %+v", reading)
+	}
+}
+
+func TestWatchedGradeRuleScansPinnedTargetsAndJudgesOnlyCompletedGrades(t *testing.T) {
+	s := testServer(t)
+	if _, err := s.Store.DB.Exec(`INSERT INTO watched_endpoints(domain, port, ip, created_at)
+		VALUES('mail.example.test', 587, '127.0.0.1', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	checks, read := s.checkWatchedGrades(t.Context(), func(_ context.Context, domain string, port int, opts proxysvc.ScanOptions) *proxysvc.TLSScan {
+		if domain != "mail.example.test" || port != 587 || opts.ConnectTo != "127.0.0.1" || opts.StartTLS != "smtp" {
+			t.Errorf("wrong grade scan target: %s:%d, %+v", domain, port, opts)
+		}
+		return &proxysvc.TLSScan{Grade: "B", Reachable: true}
+	})
+	if !read || len(checks) != 1 {
+		t.Fatalf("grade checks = %+v, read %t", checks, read)
+	}
+	in, err := validateProxyAlert(proxyAlertWrite{Kind: proxyAlertWatchGradeBelow})
+	if err != nil || in.Params.Grade != "A" {
+		t.Fatalf("default minimum: %+v, %v", in, err)
+	}
+	if _, err := validateProxyAlert(proxyAlertWrite{Kind: proxyAlertWatchGradeBelow, Params: proxyAlertParams{Grade: "F"}}); err == nil {
+		t.Fatal("F is not a useful minimum grade")
+	}
+	rule := proxyAlertRule{Kind: proxyAlertWatchGradeBelow, Params: in.Params}
+	reading := watchGradeAlertReading(rule, checks)
+	if len(reading.Firing) != 1 || reading.Firing[0].Subject != "mail.example.test:587 via 127.0.0.1" ||
+		reading.Firing[0].Detail != "TLS grade B is below the expected A." {
+		t.Fatalf("grade B under A: %+v", reading)
+	}
+	checks[0].Grade = "A+"
+	reading = watchGradeAlertReading(rule, checks)
+	if len(reading.Firing) != 0 || reading.Now["mail.example.test:587 via 127.0.0.1"] == "" {
+		t.Fatalf("grade recovery: %+v", reading)
+	}
+	checks[0].Reachable = false
+	reading = watchGradeAlertReading(rule, checks)
+	if !reading.Unknown["mail.example.test:587 via 127.0.0.1"] || len(reading.Firing) != 0 {
+		t.Fatalf("unreachable is not a grade: %+v", reading)
+	}
+}
+
+func TestWatchedGradeRuleRotatesLargeWatchListsAfterTwoPasses(t *testing.T) {
+	s := testServer(t)
+	for i := 0; i < watchGradeBatch+1; i++ {
+		if _, err := s.Store.DB.Exec(`INSERT INTO watched_endpoints(domain, port, created_at) VALUES(?, 443, 1)`,
+			fmt.Sprintf("host-%02d.example.test", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seen [][]string
+	for pass := 0; pass < 4; pass++ {
+		checked := []string{}
+		checks, read := s.checkWatchedGrades(t.Context(), func(_ context.Context, _ string, _ int, _ proxysvc.ScanOptions) *proxysvc.TLSScan {
+			return &proxysvc.TLSScan{Grade: "A", Reachable: true}
+		})
+		if !read || len(checks) != watchGradeBatch+1 {
+			t.Fatalf("pass %d: read %t, checks %+v", pass, read, checks)
+		}
+		for _, check := range checks {
+			if check.Grade != "" {
+				checked = append(checked, check.Domain)
+			}
+		}
+		seen = append(seen, checked)
+	}
+	for _, pair := range [][2]int{{0, 1}, {2, 3}} {
+		if !slices.Equal(seen[pair[0]], seen[pair[1]]) {
+			t.Fatalf("two-pass batch changed: %+v", seen)
+		}
+	}
+	if slices.Equal(seen[0], seen[2]) || len(seen[0]) != watchGradeBatch || len(seen[2]) != watchGradeBatch {
+		t.Fatalf("batch did not rotate: %+v", seen)
 	}
 }

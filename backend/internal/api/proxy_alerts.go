@@ -28,10 +28,6 @@ import (
 // tells the channels once when a subject starts firing and once when it comes
 // back, and says nothing in between. The channels are the deployments'
 // notification channels; there is no second delivery system here.
-//
-// A watched endpoint's grade dropping is not offered here: watched checks
-// record the handshake and certificate, not a full TLS grade.
-
 const (
 	proxyAlertCertExpiring     = "cert_expiring"
 	proxyAlertCertExpired      = "cert_expired"
@@ -41,6 +37,7 @@ const (
 	proxyAlertUpstreamDown     = "upstream_down"
 	proxyAlertWatchUnreachable = "watch_unreachable"
 	proxyAlertWatchUntrusted   = "watch_untrusted"
+	proxyAlertWatchGradeBelow  = "watch_grade_below"
 	proxyAlertSiteErrors       = "site_errors"
 
 	// proxyAlertFiringLevel is the one level of every kind but expiry,
@@ -54,7 +51,7 @@ const (
 var proxyAlertKinds = []string{
 	proxyAlertCertExpiring, proxyAlertCertExpired, proxyAlertRenewalFailed, proxyAlertServedDrift,
 	proxyAlertEngineDown, proxyAlertUpstreamDown,
-	proxyAlertWatchUnreachable, proxyAlertWatchUntrusted, proxyAlertSiteErrors,
+	proxyAlertWatchUnreachable, proxyAlertWatchUntrusted, proxyAlertWatchGradeBelow, proxyAlertSiteErrors,
 }
 
 // proxyAlertExpiryDays are the thresholds a certificate expiry rule may tell
@@ -82,6 +79,8 @@ type proxyAlertParams struct {
 	Threshold float64 `json:"threshold,omitempty"`
 	// MinRequests keeps a site with three requests, one failed, from paging.
 	MinRequests int `json:"minRequests,omitempty"`
+	// Grade is the least grade a watched endpoint should serve.
+	Grade string `json:"grade,omitempty"`
 }
 
 type proxyAlertRule struct {
@@ -148,6 +147,14 @@ func validateProxyAlert(in proxyAlertWrite) (proxyAlertWrite, error) {
 		}
 		if out.MinRequests < 1 || out.MinRequests > 1_000_000 {
 			return in, invalidProxyAlert("the fewest requests to judge is between 1 and 1,000,000")
+		}
+	case proxyAlertWatchGradeBelow:
+		out.Grade = strings.ToUpper(strings.TrimSpace(p.Grade))
+		if out.Grade == "" {
+			out.Grade = "A"
+		}
+		if gradeRank(out.Grade) < 0 || out.Grade == "F" {
+			return in, invalidProxyAlert("the minimum TLS grade is A+, A, B or C")
 		}
 	case proxyAlertCertExpired, proxyAlertRenewalFailed, proxyAlertServedDrift,
 		proxyAlertEngineDown, proxyAlertWatchUnreachable, proxyAlertWatchUntrusted:
@@ -252,8 +259,9 @@ type proxyAlerts struct {
 	// mu keeps a pass on demand and the scheduled one from both telling the
 	// same transition. Rule edits do not take it: a pass can take a minute,
 	// and a form is not held that long.
-	mu       sync.Mutex
-	lastPass atomic.Int64
+	mu        sync.Mutex
+	lastPass  atomic.Int64
+	gradePass atomic.Uint64
 }
 
 // Start runs a pass every interval until the context ends.
@@ -317,7 +325,7 @@ func (a *proxyAlerts) Evaluate(ctx context.Context) {
 // an upstream is told only once it has been down for the rule's minutes.
 func proxyAlertHold(rule proxyAlertRule) (int, time.Duration) {
 	switch rule.Kind {
-	case proxyAlertEngineDown, proxyAlertWatchUnreachable:
+	case proxyAlertEngineDown, proxyAlertWatchUnreachable, proxyAlertWatchGradeBelow:
 		return 2, time.Minute
 	case proxyAlertUpstreamDown:
 		return 2, time.Duration(rule.Params.Minutes) * time.Minute
@@ -839,6 +847,11 @@ func (s *Server) observeProxyAlerts(ctx context.Context, rules []proxyAlertRule,
 	if uses[proxyAlertWatchUnreachable] || uses[proxyAlertWatchUntrusted] {
 		watched, watchedRead = s.checkWatchedDomains(ctx)
 	}
+	var grades []watchGrade
+	gradesRead := false
+	if uses[proxyAlertWatchGradeBelow] {
+		grades, gradesRead = s.checkWatchedGrades(ctx, proxysvc.ScanTLSWith)
+	}
 
 	out := map[int64]proxyAlertReading{}
 	for _, rule := range rules {
@@ -858,6 +871,10 @@ func (s *Server) observeProxyAlerts(ctx context.Context, rules []proxyAlertRule,
 		case proxyAlertWatchUnreachable, proxyAlertWatchUntrusted:
 			if watchedRead {
 				out[rule.ID] = watchAlertReading(rule, watched)
+			}
+		case proxyAlertWatchGradeBelow:
+			if gradesRead {
+				out[rule.ID] = watchGradeAlertReading(rule, grades)
 			}
 		case proxyAlertSiteErrors:
 			out[rule.ID] = s.readSiteErrorAlert(ctx, rule, now)
@@ -1051,14 +1068,14 @@ func (s *Server) readUpstreamAlert(ctx context.Context) proxyAlertReading {
 
 // checkWatchedDomains handshakes every watched endpoint once for the pass.
 func (s *Server) checkWatchedDomains(ctx context.Context) ([]watchedDomain, bool) {
-	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id, domain, port FROM watched_domains ORDER BY domain`)
+	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id, domain, port, ip FROM watched_endpoints ORDER BY domain, port, ip`)
 	if err != nil {
 		return nil, false
 	}
 	domains := []watchedDomain{}
 	for rows.Next() {
 		var d watchedDomain
-		if err := rows.Scan(&d.ID, &d.Domain, &d.Port); err != nil {
+		if err := rows.Scan(&d.ID, &d.Domain, &d.Port, &d.IP); err != nil {
 			rows.Close()
 			return nil, false
 		}
@@ -1078,7 +1095,7 @@ func (s *Server) checkWatchedDomains(ctx context.Context) ([]watchedDomain, bool
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if cert, err := proxysvc.CheckDomain(check, d.Domain, d.Port); err == nil {
+			if cert, err := proxysvc.CheckEndpointAt(check, d.Domain, d.IP, d.Port); err == nil {
 				d.Cert = cert
 			}
 		}(&domains[i])
@@ -1090,7 +1107,7 @@ func (s *Server) checkWatchedDomains(ctx context.Context) ([]watchedDomain, bool
 func watchAlertReading(rule proxyAlertRule, domains []watchedDomain) proxyAlertReading {
 	reading := newProxyAlertReading()
 	for _, d := range domains {
-		subject := fmt.Sprintf("%s:%d", d.Domain, d.Port)
+		subject := watchSubject(d)
 		if d.Cert == nil {
 			reading.Unknown[subject] = true
 			continue

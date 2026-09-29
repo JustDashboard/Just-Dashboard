@@ -482,6 +482,7 @@ var proxyAlertWhat = map[string]string{
 	"upstream_down":     "Upstream down",
 	"watch_unreachable": "Watched endpoint unreachable",
 	"watch_untrusted":   "Watched endpoint untrusted",
+	"watch_grade_below": "Watched TLS grade below minimum",
 	"site_errors":       "Site failing",
 }
 
