@@ -1051,11 +1051,8 @@ func TestARefusedDisablePutsBackEveryLink(t *testing.T) {
 	}
 }
 
-// Delete removes sites-enabled/<name> by name, file or link, before its
-// backup of the site. A copy there — the configuration nginx was really
-// serving — went with no copy kept, a stale link took out the other site it
-// served, and a numbered link to the file was left pointing at nothing,
-// which stops every reload.
+// Delete must refuse a standalone served copy, keep another site's link,
+// and remove every link that points to the deleted file.
 func TestDeleteSiteTakesOutOnlyWhatIsTheSites(t *testing.T) {
 	svc, root := debianTree(t)
 	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
@@ -1074,7 +1071,7 @@ func TestDeleteSiteTakesOutOnlyWhatIsTheSites(t *testing.T) {
 	symlink(t, "../custom/elsewhere.conf", enabled("elsewhere.test"))
 
 	for name, why := range map[string]string{
-		"only.test":      "no such site: only.test",
+		"only.test":      "file of its own",
 		"elsewhere.test": "no such site: elsewhere.test",
 	} {
 		if err := svc.DeleteSite(ctx, name); err == nil || !strings.Contains(err.Error(), why) {
@@ -1094,7 +1091,13 @@ func TestDeleteSiteTakesOutOnlyWhatIsTheSites(t *testing.T) {
 			t.Errorf("a refused delete removed %s", link)
 		}
 	}
-	for _, name := range []string{"copied.test", "stale.test", "numbered.test"} {
+	if err := svc.DeleteSite(ctx, "copied.test"); err == nil || !strings.Contains(err.Error(), "file of its own") {
+		t.Errorf("the served copy did not block deletion: %v", err)
+	}
+	if _, err := os.Stat(available("copied.test") + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("a refused delete wrote a backup: %v", err)
+	}
+	for _, name := range []string{"stale.test", "numbered.test"} {
 		if err := svc.DeleteSite(ctx, name); err != nil {
 			t.Errorf("DeleteSite(%q) = %v", name, err)
 		}
@@ -1103,7 +1106,7 @@ func TestDeleteSiteTakesOutOnlyWhatIsTheSites(t *testing.T) {
 		}
 	}
 	if b, err := os.ReadFile(enabled("copied.test")); err != nil || string(b) != served {
-		t.Errorf("the served copy was changed by deleting its available file: %q %v", b, err)
+		t.Errorf("the refused delete changed the served copy: %q %v", b, err)
 	}
 	if _, err := os.Lstat(enabled("stale.test")); err != nil {
 		t.Errorf("another site's link was removed: %v", err)

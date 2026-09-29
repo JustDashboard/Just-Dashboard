@@ -7,10 +7,13 @@
 export type ProxyAlertKind =
   | "cert_expiring"
   | "cert_expired"
+  | "renewal_failed"
+  | "served_drift"
   | "engine_down"
   | "upstream_down"
   | "watch_unreachable"
   | "watch_untrusted"
+  | "watch_grade_below"
   | "site_errors"
 
 /** Each kind reads its own; the server clears the rest. */
@@ -23,6 +26,8 @@ export type ProxyAlertParams = {
   threshold?: number
   /** The fewest requests in the window before a site is judged. */
   minRequests?: number
+  /** Minimum acceptable grade from a full scan of a watched endpoint. */
+  grade?: string
 }
 
 export type ProxyAlertRule = {

@@ -182,6 +182,24 @@ func TestRenderNotificationDescribesEveryOutcome(t *testing.T) {
 	}
 }
 
+func TestRenderProxyGradeAlertNamesTheRuleAndReading(t *testing.T) {
+	envelope := NotificationEnvelope{
+		Event: NotificationEventProxyFiring,
+		Proxy: &ProxyAlertEnvelope{
+			Kind: "watch_grade_below", Label: "mail.example.test:587", Detail: "TLS grade B is below the expected A.",
+		},
+	}
+	message := renderNotification(envelope)
+	if message.Title != "Watched TLS grade below minimum — mail.example.test:587" ||
+		message.Summary != envelope.Proxy.Detail {
+		t.Fatalf("grade alert message = %+v", message)
+	}
+	envelope.Event = NotificationEventProxyRecovered
+	if recovered := renderNotification(envelope); recovered.Title != "Resolved: "+message.Title {
+		t.Fatalf("grade recovery message = %+v", recovered)
+	}
+}
+
 func flattenFields(fields [][2]string) []string {
 	out := make([]string, 0, len(fields))
 	for _, field := range fields {

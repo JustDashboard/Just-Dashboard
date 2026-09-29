@@ -313,15 +313,15 @@ func TestDeleteSiteLeavesAnotherSitesLinkAlone(t *testing.T) {
 		t.Fatalf("the hand-written site's link now names %q", got)
 	}
 
-	// A file of its own in sites-enabled is a site too, with no backup if it
-	// were removed here.
+	// A file of its own in sites-enabled is served independently and must
+	// be moved explicitly before this site's file can be deleted.
 	write(enabled("inline.example.com"))
 	write(available("inline.example.com"))
-	if err := service.DeleteSite(ctx, "inline.example.com"); err != nil {
-		t.Fatal(err)
+	if err := service.DeleteSite(ctx, "inline.example.com"); err == nil {
+		t.Fatal("the delete accepted a served copy")
 	}
-	if gone(enabled("inline.example.com")) || !gone(available("inline.example.com")) {
-		t.Fatal("the delete took the file in sites-enabled, or left its own")
+	if gone(enabled("inline.example.com")) || gone(available("inline.example.com")) {
+		t.Fatal("the refused delete changed either file")
 	}
 
 	// The site's own link goes with it, spelled either way.
@@ -1292,5 +1292,56 @@ func TestDeleteSiteRemovesALinkOfAnotherName(t *testing.T) {
 	}
 	if _, err := os.Lstat(enabled(".app.old")); err != nil {
 		t.Fatalf("the dotted entry was removed: %v", err)
+	}
+}
+
+func TestSiteBackupsKeepRestrictedPermissions(t *testing.T) {
+	for _, action := range []string{"save", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			service, root := siteNginx(t, cleanTest, 0, "", 0)
+			full := filepath.Join(root, "sites-available", "private")
+			content := "server { server_name private.example.test; }\n"
+			if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if action == "save" {
+				_, err := service.SaveSite(t.Context(), plainSpec("private", "private.example.test"), SiteSave{Overwrite: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err := service.DeleteSite(t.Context(), "private"); err != nil {
+				t.Fatal(err)
+			}
+			backup := full + ".bak"
+			info, err := os.Stat(backup)
+			if err != nil || info.Mode().Perm() != 0o600 {
+				t.Fatalf("backup mode: %v, %v", info, err)
+			}
+			if got, err := os.ReadFile(backup); err != nil || string(got) != content {
+				t.Fatalf("backup content: %q, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestDeleteSiteRefusesToRemoveServedCopy(t *testing.T) {
+	service, root := siteNginx(t, cleanTest, 0, "", 0)
+	available := filepath.Join(root, "sites-available", "copy")
+	served := filepath.Join(root, "sites-enabled", "copy")
+	for _, path := range []string{available, served} {
+		if err := os.WriteFile(path, []byte("server { server_name copy.example.test; }\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := service.DeleteSite(t.Context(), "copy"); err == nil || !strings.Contains(err.Error(), "file of its own") {
+		t.Fatalf("delete did not explain the served copy: %v", err)
+	}
+	for _, path := range []string{available, served} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("delete changed %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(available + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("a refused delete left a backup: %v", err)
 	}
 }

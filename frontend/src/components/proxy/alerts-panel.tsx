@@ -85,6 +85,18 @@ const KINDS: Record<ProxyAlertKind, KindWords> = {
     icon: CrossCircle,
     describe: () => "once a certificate runs out",
   },
+  renewal_failed: {
+    label: "Renewal failed",
+    hint: "Certbot's last renewal or reload hook failed.",
+    icon: RefreshClockwise,
+    describe: () => "after a failed certbot renewal or reload hook",
+  },
+  served_drift: {
+    label: "Served certificate differs",
+    hint: "An nginx site serves a different certificate from the one in its file.",
+    icon: ShieldOff,
+    describe: () => "when a site serves a different certificate",
+  },
   engine_down: {
     label: "Engine not running",
     hint: "The engine's unit stopped or failed, on two checks in a row.",
@@ -109,6 +121,12 @@ const KINDS: Record<ProxyAlertKind, KindWords> = {
     icon: ShieldOff,
     describe: () => "serves a certificate that is not trusted",
   },
+  watch_grade_below: {
+    label: "Watched TLS grade below minimum",
+    hint: "A full TLS scan is below your chosen grade on two checks in a row.",
+    icon: Globe,
+    describe: (p) => `below grade ${p.grade ?? "A"} on two checks in a row`,
+  },
   site_errors: {
     label: "Site failing",
     hint: "A site's share of 5xx answers over a window.",
@@ -123,10 +141,13 @@ const KIND_ORDER = Object.keys(KINDS) as ProxyAlertKind[]
 const DEFAULT_PARAMS: Record<ProxyAlertKind, ProxyAlertParams> = {
   cert_expiring: { days: EXPIRY_DAYS },
   cert_expired: {},
+  renewal_failed: {},
+  served_drift: {},
   engine_down: {},
   upstream_down: { minutes: 5 },
   watch_unreachable: {},
   watch_untrusted: {},
+  watch_grade_below: { grade: "A" },
   site_errors: { threshold: 5, minutes: 15, minRequests: 20 },
 }
 
@@ -584,6 +605,7 @@ function RuleForm({
   const [minutes, setMinutes] = useState(String(initial.minutes ?? ""))
   const [threshold, setThreshold] = useState(String(initial.threshold ?? ""))
   const [minRequests, setMinRequests] = useState(String(initial.minRequests ?? ""))
+  const [grade, setGrade] = useState(initial.grade ?? "A")
   const [selected, setSelected] = useState<number[]>(rule?.channels ?? [])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
@@ -595,6 +617,7 @@ function RuleForm({
     if (defaults.minutes) setMinutes(String(defaults.minutes))
     if (defaults.threshold) setThreshold(String(defaults.threshold))
     if (defaults.minRequests) setMinRequests(String(defaults.minRequests))
+    if (defaults.grade) setGrade(defaults.grade)
   }
 
   const params = (): ProxyAlertParams => {
@@ -603,6 +626,8 @@ function RuleForm({
         return { days: days.map(Number).sort((a, b) => b - a) }
       case "upstream_down":
         return { minutes: Number(minutes) }
+      case "watch_grade_below":
+        return { grade }
       case "site_errors":
         return {
           threshold: Number(threshold),
@@ -710,6 +735,26 @@ function RuleForm({
               <InputGroupText>min</InputGroupText>
             </InputGroupAddon>
           </InputGroup>
+        </Field>
+      )}
+
+      {kind === "watch_grade_below" && (
+        <Field label="Minimum grade" hint="Full scans run in batches while this rule is on.">
+          <ToggleGroup
+            type="single"
+            value={grade}
+            onValueChange={(next) => next && setGrade(next)}
+            variant="outline"
+            size="sm"
+            className="w-full"
+            aria-label="Minimum TLS grade"
+          >
+            {["A+", "A", "B", "C"].map((value) => (
+              <ToggleGroupItem key={value} value={value} className="numeric flex-1 text-hint">
+                {value}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         </Field>
       )}
 

@@ -534,11 +534,15 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 }
 
 func writeAtomic(path, content string) error {
-	dir := filepath.Dir(path)
 	var mode os.FileMode = 0o644
 	if st, err := os.Stat(path); err == nil {
 		mode = st.Mode().Perm()
 	}
+	return writeAtomicMode(path, content, mode)
+}
+
+func writeAtomicMode(path, content string, mode os.FileMode) error {
+	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".vpsd-*")
 	if err != nil {
 		return err

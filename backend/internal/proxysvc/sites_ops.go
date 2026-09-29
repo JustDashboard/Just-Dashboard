@@ -36,7 +36,11 @@ type bulkStep struct {
 	change Change
 	// backup is the content a delete keeps as <file>.bak, written only
 	// once the whole change has passed nginx's test.
-	backup []byte
+	backup        []byte
+	backupMode    os.FileMode
+	oldBackup     []byte
+	oldBackupMode os.FileMode
+	hadBackup     bool
 }
 
 // BulkSites applies one action to several sites as a single change: every
@@ -137,13 +141,37 @@ func (s *Service) BulkSites(ctx context.Context, action BulkAction, names []stri
 		}
 		return nil, nil, refused
 	}
-	for _, step := range steps {
-		if step.backup != nil {
+	var backedUp []int
+	for i, step := range steps {
+		if step.change.Action == ChangeDelete {
 			// Kept for the reason a single delete keeps one: validation
 			// catches a broken config, not a correct one that says the
 			// wrong thing.
-			_ = os.WriteFile(step.change.Path+".bak", step.backup, 0o644)
+			if err := writeAtomicMode(step.change.Path+".bak", string(step.backup), step.backupMode); err != nil {
+				var failures []string
+				for j := len(backedUp) - 1; j >= 0; j-- {
+					prior := steps[backedUp[j]]
+					path := prior.change.Path + ".bak"
+					if prior.hadBackup {
+						if restoreErr := writeAtomicMode(path, string(prior.oldBackup), prior.oldBackupMode); restoreErr != nil {
+							failures = append(failures, restoreErr.Error())
+						}
+					} else if restoreErr := os.Remove(path); restoreErr != nil {
+						failures = append(failures, restoreErr.Error())
+					}
+				}
+				if undoErr := undoAll(); undoErr != nil {
+					failures = append(failures, undoErr.Error())
+				}
+				if len(failures) > 0 {
+					return nil, nil, fmt.Errorf("keeping %s's backup failed: %w; restoring the change also failed: %s", step.name, err, strings.Join(failures, "; "))
+				}
+				return nil, nil, fmt.Errorf("keeping %s's backup failed: %w — nothing was changed", step.name, err)
+			}
+			backedUp = append(backedUp, i)
 		}
+	}
+	for _, step := range steps {
 		s.recordChange(ctx, step.change)
 	}
 	return out, s.reloadLocked(ctx, reload), nil
@@ -233,6 +261,20 @@ func (s *Service) bulkDeleteStep(name string) (*bulkStep, error) {
 	if err != nil {
 		return nil, err
 	}
+	oldBackup, oldErr := os.ReadFile(full + ".bak")
+	if oldErr != nil && !os.IsNotExist(oldErr) {
+		return nil, oldErr
+	}
+	oldMode := os.FileMode(0)
+	mode := info.Mode().Perm()
+	if oldErr == nil {
+		old, err := os.Stat(full + ".bak")
+		if err != nil {
+			return nil, err
+		}
+		oldMode = old.Mode().Perm()
+		mode &= oldMode
+	}
 	link := filepath.Join(s.nginxDir, "sites-enabled", name)
 	var linkUndo func() error
 	if _, err := os.Lstat(link); err == nil {
@@ -257,7 +299,10 @@ func (s *Service) bulkDeleteStep(name string) (*bulkStep, error) {
 		return nil
 	}
 	change := Change{Path: full, Action: ChangeDelete, Before: content, BeforeExisted: true}
-	return &bulkStep{name: name, undo: undo, change: change, backup: content}, nil
+	return &bulkStep{
+		name: name, undo: undo, change: change, backup: content, backupMode: mode,
+		oldBackup: oldBackup, oldBackupMode: oldMode, hadBackup: oldErr == nil,
+	}, nil
 }
 
 // removeLinks takes symlinks out, refusing a real file, and returns how to

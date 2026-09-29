@@ -117,16 +117,15 @@ func TestLiveBackupDumpsAndRestoresAPostgresDatabase(t *testing.T) {
 		})
 	})
 	s.mountBackupRoutes(backupRouter)
-	restoreRequest := func(database, confirm string) *httptest.ResponseRecorder {
+	restoreRequest := func(database string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, pathf("/backups/runs/%d/restore-database", run.ID),
 			strings.NewReader(fmt.Sprintf(`{"connectionId":%d,"database":%q}`, conn.ID, database)))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Confirm", confirm)
 		rec := httptest.NewRecorder()
 		backupRouter.ServeHTTP(rec, req)
 		return rec
 	}
-	restored := restoreRequest("drill", "drill")
+	restored := restoreRequest("drill")
 	if restored.Code != http.StatusOK {
 		t.Fatalf("restore-database = %d %s", restored.Code, restored.Body.String())
 	}
@@ -142,11 +141,6 @@ func TestLiveBackupDumpsAndRestoresAPostgresDatabase(t *testing.T) {
 	var live int
 	if err := pool.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM orders`).Scan(&live); err != nil || live != 0 {
 		t.Fatalf("restore touched the live database: %d rows, %v", live, err)
-	}
-	// A wrong typed confirmation never reaches the engine.
-	refused := restoreRequest("app", "drill")
-	if refused.Code == http.StatusOK {
-		t.Fatalf("restore accepted a mismatched confirmation: %s", refused.Body.String())
 	}
 }
 

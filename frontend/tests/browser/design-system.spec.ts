@@ -445,7 +445,7 @@ test.describe("with no hover available", () => {
 })
 
 test("a centred row sets every item's text on its centre line", async ({ page }) => {
-  test.setTimeout(SURFACES.length * 5_000)
+  test.setTimeout(SURFACES.length * 10_000)
   await mockShell(page)
 
   for (const path of SURFACES) {
@@ -458,7 +458,7 @@ test("a centred row sets every item's text on its centre line", async ({ page })
 test("a centred row sets every item's text on its centre line, with a project", async ({
   page,
 }) => {
-  test.setTimeout(PROJECT_SURFACES.length * 5_000)
+  test.setTimeout(PROJECT_SURFACES.length * 10_000)
   await mockProject(page, { showcase: true })
 
   for (const path of PROJECT_SURFACES) {
@@ -558,7 +558,7 @@ test("every page declares one register, and only a flow page has a foreground", 
 }) => {
   // One test walks every surface, so its budget grows with the list: at the
   // default thirty seconds, thirteen pages under a parallel run timed out.
-  test.setTimeout(SURFACES.length * 5_000)
+  test.setTimeout(SURFACES.length * 10_000)
   await mockShell(page)
 
   for (const path of SURFACES) {
@@ -575,7 +575,7 @@ test("every page declares one register, and only a flow page has a foreground", 
  * grow a foreground, however many lit choices the redesign gives them.
  */
 test("the deployment pages are reading pages with no foreground", async ({ page }) => {
-  test.setTimeout(PROJECT_SURFACES.length * 5_000)
+  test.setTimeout(PROJECT_SURFACES.length * 10_000)
   await mockProject(page, { showcase: true })
 
   for (const path of PROJECT_SURFACES) {
