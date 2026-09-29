@@ -378,11 +378,10 @@
 }
 
 @theme inline {
-  /* Satoshi first, self-hosted through next/font/local (see src/app/layout.tsx)
-     so no build or run time depends on a font CDN. The system stack stays
-     behind it as the fallback for the instant before the font loads. */
+  /* Source Sans 3 is self-hosted through next/font/local (see src/app/layout.tsx).
+     The system stack covers the instant before the font loads. */
   --font-sans:
-    var(--font-satoshi), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    var(--font-source-sans-3), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --font-mono:
     ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas,
