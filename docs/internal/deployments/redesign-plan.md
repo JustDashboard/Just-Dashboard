@@ -406,8 +406,10 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   own sheet of attempts grouped by day, each linked to the run it announced. A signed webhook's
   secret is shown once, in the sheet that made it, with the command that verifies a signature.
 - **A project** opens on the identity line the host Overview does: its favicon or product, the
-  address with the certificate's state in the lock's colour, the source, commit, runtime and
-  release as facts on their own marks, and its state with what needs attention. The Overview is,
+  address with the certificate's state in the lock's colour, source, branch and runtime on one
+  facts row, then release timing and automatic-deployment state on a second. Its state and what
+  needs attention are stacked at every width; commit and actor details stay in the deployment
+  history and run pages. The Overview is,
   in order, the run in flight as the runs list's own row (confetti once if it goes live while
   watched), Production — the website tile, now switchable to a phone's width, beside the wiring
   drawn as products, over four live readings (requests, failing share, processor, memory) — first
