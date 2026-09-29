@@ -23,6 +23,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 	"github.com/go-chi/chi/v5"
@@ -30,6 +31,10 @@ import (
 )
 
 func terminalServer(t *testing.T) (*Server, http.Handler) {
+	return terminalServerWithTLS(t, selfcfg.TLSInternal)
+}
+
+func terminalServerWithTLS(t *testing.T, tlsMode string) (*Server, http.Handler) {
 	t.Helper()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
@@ -61,6 +66,7 @@ func terminalServer(t *testing.T) (*Server, http.Handler) {
 		LogRoots:       []string{t.TempDir()},
 		TerminalEnable: true,
 		TerminalUser:   me.Username,
+		TLSMode:        tlsMode,
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL, cfg.Require2FA)

@@ -89,7 +89,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, svc *auth.Servic
 		// — but not all of them have, and a session cookie the browser
 		// silently declines to store is a login page that simply loops.
 		Authn: &httpx.Authenticator{Svc: svc, Secure: !cfg.Dev && cfg.TLSMode != selfcfg.TLSOff},
-		WS:    wsx.NewUpgrader(cfg.AllowedOrigins, !cfg.Dev),
+		WS:    wsx.NewUpgrader(cfg.AllowedOrigins, !cfg.Dev && cfg.TLSMode != selfcfg.TLSOff),
 		// Login is deliberately tight: five attempts a minute per address on
 		// top of the per-account lockout.
 		loginLim: httpx.NewLimiter(10, 5),
