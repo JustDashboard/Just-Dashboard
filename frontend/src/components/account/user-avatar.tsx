@@ -48,11 +48,8 @@ const SIZES = {
 /**
  * An account's picture, or its initials while it has none.
  *
- * Square with the control radius rather than a circle: there is no pill in
- * this product (§4), and a filled circle holding two letters is one.
- *
  * The initials take a hue by the username, as a commit's author and a run's
- * actor take one by theirs: a list of eight people in eight brand-blue squares
+ * actor take one by theirs: a list of eight people in eight brand-blue faces
  * was a texture the eye read past, and the same person now keeps the same colour
  * in the rail, the users list and their own profile. The hues are `LANES`,
  * without red and amber, because these sit beside readings that use those to
@@ -77,19 +74,21 @@ export function UserAvatar({
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
+        data-slot="user-avatar"
         src={src}
         alt=""
         onError={() => setBroken(src)}
-        className={cn("shrink-0 object-cover select-none", SIZES[size], className)}
+        className={cn("shrink-0 object-cover select-none", SIZES[size], "rounded-full", className)}
       />
     )
   }
   return (
     <Initials
+      slot="user-avatar"
       name={name}
       hue={hueFor(user.username.toLowerCase(), LANES)}
       size={size}
-      className={className}
+      className={cn("rounded-full", className)}
     />
   )
 }
@@ -122,11 +121,13 @@ export function InitialsMark({
 }
 
 function Initials({
+  slot = "initials-mark",
   name,
   hue,
   size,
   className,
 }: {
+  slot?: "user-avatar" | "initials-mark"
   name: string
   hue: string
   size: keyof typeof SIZES
@@ -134,6 +135,7 @@ function Initials({
 }) {
   return (
     <span
+      data-slot={slot}
       aria-hidden
       className={cn(
         "flex shrink-0 items-center justify-center font-semibold select-none",

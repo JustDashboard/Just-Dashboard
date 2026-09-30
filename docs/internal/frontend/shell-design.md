@@ -85,13 +85,17 @@ Deployments open the second group because shipping something is the reason most 
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys and, for
 `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
 panel the rail drills into once you are inside `/account`; the palette's Account group; and the menu on
-the rail's foot. That menu opens with the account's picture,
-display name, sign-in name and role, then the five pages (Security carries a `Status` for two-factor)
-and Sign out. The picture is `components/account/user-avatar.tsx`: the stored image when there is
-one, otherwise the display name's initials in a hue taken from the username (`lib/hue.ts`'s `LANES`,
-so the same person keeps one colour in the rail, the users list and their profile), square with the
-control radius rather than a circle, because a filled circle holding two letters is the pill §4
-forbids.
+the rail's foot. Its button is a neutral control with a circular picture, display name and role;
+the upward chevron indicates the menu above it, while the collapsed rail shows only the picture.
+That menu opens with a larger picture, display name, sign-in name and a role `Tag`, then the five
+pages (Security carries a `Status` for two-factor) and a separate neutral Sign out row. Menu rows
+are 36px on desktop and 44px on a phone, with the current page marked by `aria-current`, an accent
+wash and a brand glyph. The picture is `components/account/user-avatar.tsx`: the stored image when
+there is one, otherwise the display name's initials in a hue taken from the username (`lib/hue.ts`'s
+`LANES`, so the same person keeps one colour in the rail, the users list and their profile). Pictures and
+initials are circular at every account-avatar size and carry `data-slot="user-avatar"`, the design
+system's identity exception to the pill ban. `InitialsMark` for a person drawn from a bare name
+retains the compact mark radius used in commit lines and forge faces.
 
 ## The design system
 

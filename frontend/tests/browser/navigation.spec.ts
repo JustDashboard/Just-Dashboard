@@ -35,6 +35,8 @@ const user = {
   user: {
     id: 1,
     username: "operator",
+    displayName: "Operator",
+    avatarVersion: 0,
     role: "admin",
     totpEnabled: true,
     disabled: false,
@@ -49,10 +51,10 @@ async function json(route: Route, body: unknown) {
 }
 
 /** A signed-in shell with Docker reachable and nothing else to look at. */
-async function mockShell(page: Page) {
+async function mockShell(page: Page, auth = user) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
-    if (path === "/auth/session") return json(route, user)
+    if (path === "/auth/session") return json(route, auth)
     if (path === "/updates/self") return json(route, { current: "0.6.7", latest: "0.6.7" })
     if (path === "/docker/ping") return json(route, { available: true, serverVersion: "27.0.0" })
     return json(route, [])
@@ -60,6 +62,138 @@ async function mockShell(page: Page) {
 }
 
 const rail = (page: Page) => page.getByRole("navigation", { name: "Sidebar" })
+
+test("the account menu supports keyboard navigation and returns focus on Escape", async ({
+  page,
+}) => {
+  await mockShell(page)
+  await page.goto("/account")
+
+  const trigger = page.getByRole("button", { name: "Account menu for Operator" })
+  await trigger.focus()
+  await trigger.press("Enter")
+  const menu = page.getByRole("menu", { name: "Account", exact: true })
+  const profile = menu.getByRole("menuitem", { name: "Profile", exact: true })
+  await expect(profile).toBeFocused()
+  await expect(profile).toHaveAttribute("aria-current", "page")
+  await expect(menu.getByText("@operator", { exact: true })).toBeVisible()
+  await expect(menu.getByRole("menuitem", { name: "Security 2FA on" })).toBeVisible()
+
+  await profile.press("ArrowDown")
+  const security = menu.getByRole("menuitem", { name: "Security 2FA on" })
+  await expect(security).toBeFocused()
+  await security.press("Enter")
+  await expect(page).toHaveURL(/\/account\/security$/)
+  await expect(menu).toHaveCount(0)
+
+  await trigger.press("Enter")
+  await expect(security).toHaveAttribute("aria-current", "page")
+  await menu.press("Escape")
+  await expect(menu).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+})
+
+test("the account menu keeps role visibility, two-factor state and sign out", async ({ page }) => {
+  await mockShell(page, {
+    ...user,
+    capabilities: ["read"],
+    user: { ...user.user, role: "readonly", totpEnabled: false },
+  })
+  let signedOut = false
+  await page.route("**/api/v1/auth/logout", async (route) => {
+    signedOut = route.request().method() === "POST"
+    await json(route, {})
+  })
+  await page.goto("/account")
+  await page.getByRole("button", { name: "Account menu for Operator" }).click()
+  const menu = page.getByRole("menu", { name: "Account", exact: true })
+  await expect(menu.getByRole("menuitem", { name: "Users", exact: true })).toHaveCount(0)
+  await expect(menu.getByRole("menuitem", { name: "Security 2FA off" })).toBeVisible()
+  await menu.getByRole("menuitem", { name: "Sign out", exact: true }).click()
+  await expect(page).toHaveURL(/\/login$/)
+  expect(signedOut).toBe(true)
+})
+
+test("uploaded account pictures stay circular in the button and menu", async ({ page }) => {
+  await mockShell(page, { ...user, user: { ...user.user, avatarVersion: 1 } })
+  await page.route("**/api/v1/account/avatar?*", (route) =>
+    route.fulfill({
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    }),
+  )
+  await page.goto("/account")
+  // The modal menu hides its trigger from assistive technology while it is open.
+  const trigger = page.getByRole("button", {
+    name: "Account menu for Operator",
+    includeHidden: true,
+  })
+  await trigger.click()
+  const menu = page.getByRole("menu", { name: "Account", exact: true })
+  for (const image of [trigger.locator("img"), menu.locator("img")]) {
+    await expect(image).toBeVisible()
+    expect(
+      await image.evaluate((el) => {
+        const box = el.getBoundingClientRect()
+        return (
+          Math.abs(box.width - box.height) < 0.1 &&
+          parseFloat(getComputedStyle(el).borderRadius) >= box.height / 2
+        )
+      }),
+    ).toBe(true)
+  }
+})
+
+for (const layout of ["expanded", "collapsed", "mobile"] as const) {
+  test(`the ${layout} account menu fits the viewport with circular avatar fallbacks`, async ({
+    page,
+  }) => {
+    if (layout === "mobile") await page.setViewportSize({ width: 390, height: 844 })
+    await mockShell(page, { ...user, user: { ...user.user, avatarVersion: 1 } })
+    await page.route("**/api/v1/account/avatar?*", (route) => route.fulfill({ status: 404 }))
+    await page.goto("/account")
+    if (layout !== "expanded") {
+      await page.getByRole("button", { name: "Toggle the sidebar", exact: true }).click()
+    }
+    const trigger = page.getByRole("button", {
+      name: "Account menu for Operator",
+      includeHidden: true,
+    })
+    const face = trigger.locator('[data-slot="user-avatar"]')
+    await expect(face).toHaveText("OP")
+    await trigger.click()
+    const menu = page.getByRole("menu", { name: "Account", exact: true })
+    await expect(menu).toBeVisible()
+    await menu.evaluate(async (el) => {
+      await Promise.all(el.getAnimations().map((animation) => animation.finished))
+    })
+    for (const avatar of [face, menu.locator('[data-slot="user-avatar"]')]) {
+      expect(
+        await avatar.evaluate((el) => {
+          const box = el.getBoundingClientRect()
+          return (
+            Math.abs(box.width - box.height) < 0.1 &&
+            parseFloat(getComputedStyle(el).borderRadius) >= box.height / 2
+          )
+        }),
+      ).toBe(true)
+    }
+    const box = await menu.boundingBox()
+    const viewport = page.viewportSize()!
+    expect(box!.x).toBeGreaterThanOrEqual(0)
+    expect(box!.y).toBeGreaterThanOrEqual(0)
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width)
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height)
+    if (layout === "mobile") {
+      for (const item of await menu.getByRole("menuitem").all()) {
+        expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+      }
+    }
+  })
+}
 
 /** The aria-labels the removed strips carried. None of them may come back. */
 const STRIPS = ["Section", "Project sections", "Database section", "Project settings"]

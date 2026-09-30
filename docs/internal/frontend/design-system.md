@@ -256,8 +256,12 @@ select option or command row, and `bg-accent`/`bg-control-hover` for a control w
 ## 4. One vocabulary per idea
 
 **There is no badge and no pill in this product.** `ui/badge.tsx` was deleted so the decision cannot
-come back by accident, and a Playwright test asserts no filled, fully-rounded element with text
-renders on any page.
+come back by accident, and a Playwright test asserts no filled, fully-rounded label renders on any
+page.
+
+**An account's avatar is circular.** `UserAvatar` draws a picture or initials and carries
+`data-slot="user-avatar"`. Account avatars are the one identity exception to the filled-circle ban;
+labels, counts and numbered steps remain subject to it.
 
 - A **count** is `.numeric` text next to its label.
 - A **state** is `Status` — a coloured dot (or an icon) and a word. No border, no fill.
@@ -684,6 +688,9 @@ name to the `font-size` group in `extendTailwindMerge`, or it will not survive a
 `rounded-xl` (12) for a block. Nesting runs outer → inner in that order. Bare `rounded` and the steps
 outside this ladder are lint errors.
 
+Account avatars use `rounded-full` at every size (§4); their silhouette identifies a person rather
+than a control or a surface. `InitialsMark` and forge faces retain their compact mark radii.
+
 ## 10. Charts
 
 `components/metrics/` is a third design-system file in all but name. Every chart goes through it
@@ -838,10 +845,10 @@ proportion in the section is already a figure and a `Meter`. `progressive-blur` 
 `backdrop-filter`, which is glass (§15), where `.scroll-affordance` already says "more past here"
 with ground; `scroll-progress` is a gradient bar tied to the window's scroll in a shell that
 scrolls an inner container, and reading progress is none of the four meanings. `avatar-circles` is
-round faces in white rings with a filled "+N" circle — §4's pill three times over — where this
-product's faces are squares. `pulsating-button` glows a command at rest, and §3 never lets a
-command be a state. `dock` magnifies on hover and blurs behind itself; `orbiting-circles` and
-`ripple` are perpetual decoration, beside wires that draw the real mechanism and a `StatusDot` that
+round faces in white rings with a filled "+N" circle; an account's circular avatar is an identity
+exception, but the filled count still violates §4. `pulsating-button` glows a command at rest, and §3
+never lets a command be a state. `dock` magnifies on hover and blurs behind itself;
+`orbiting-circles` and `ripple` are perpetual decoration, beside wires that draw the real mechanism and a `StatusDot` that
 already breathes. `shine-border` and `magic-card` are `BorderBeam` and `SpotlightBorder` already,
 and `animated-shiny-text` is `TextShimmer`. The marquee, the globe and the dotted map (which would
 need a GeoIP database and would fabricate the rest), the device mocks, the lens, the highlighter,
