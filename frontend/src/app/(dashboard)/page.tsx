@@ -22,13 +22,9 @@ import type {
   Container,
   DbConnection,
   DeploymentFleet,
-  DockerDiagnosis,
   Exposure,
-  Health,
-  HealthFinding,
   MetricEvent,
   MountStats,
-  SystemdUnit,
   UpdateReport,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -66,22 +62,8 @@ export default function OverviewPage() {
   const { host, snapshot, error } = useMetrics()
   const recorded = useMetricsHistory(HOUR)
   const events = useMetricEvents(HOUR)
-  const { health: recordedHealth, loading: healthLoading } = useHealth()
-  // Two verdicts the metrics recorder never sees, folded into the same list:
-  // a systemd unit that has failed and a container failing its own health
-  // check are exactly the "is anything wrong" a landing page exists to answer.
-  const failedUnits = usePoll<SystemdUnit[]>(
-    (signal) => get("/systemd/", { state: "failed" }, signal),
-    60_000,
-  )
-  const docker = usePoll<DockerDiagnosis>(
-    (signal) => get("/docker/health", undefined, signal),
-    120_000,
-  )
-  const health = useMemo(
-    () => foldHealth(recordedHealth, failedUnits.data, docker.data),
-    [recordedHealth, failedUnits.data, docker.data],
-  )
+  const { health: recordedHealth, loading: healthLoading, error: healthError } = useHealth()
+  const health = recordedHealth
 
   const trends = useMemo(() => {
     const points = recorded.history?.points ?? []
@@ -188,7 +170,13 @@ export default function OverviewPage() {
         }
         aside={
           <div className="flex flex-wrap items-center gap-2">
-            {health && <HealthVerdict status={health.status} className="text-body" />}
+            {health && (
+              <HealthVerdict
+                partial={!!health.silences?.length}
+                status={health.status}
+                className="text-body"
+              />
+            )}
             <Button variant="outline" size="sm" asChild>
               <Link href="/metrics">
                 <ChartActivity />
@@ -274,6 +262,7 @@ export default function OverviewPage() {
           plain
           className="lg:col-span-2"
           health={health}
+          error={healthError}
           loading={healthLoading}
           emptyLabel={
             health?.recorded
@@ -302,71 +291,6 @@ export default function OverviewPage() {
       </Section>
     </Page>
   )
-}
-
-const VERDICT_RANK: Record<Health["status"], number> = { ok: 0, notice: 1, warning: 2, critical: 3 }
-
-/**
- * The recorder's verdict plus the two the host reports about itself. A poll
- * that failed contributes nothing rather than a finding about the poll: the
- * list is what is wrong with the server, not with this page's fetches.
- */
-function foldHealth(
-  health: Health | undefined,
-  failedUnits: SystemdUnit[] | undefined,
-  docker: DockerDiagnosis | undefined,
-): Health | undefined {
-  if (!health) return health
-  const extra: HealthFinding[] = []
-  if (failedUnits && failedUnits.length > 0) {
-    const n = failedUnits.length
-    const names = failedUnits.map((u) => u.name)
-    extra.push({
-      id: "systemd.failed",
-      level: "warning",
-      title: n === 1 ? `${names[0]} has failed` : `${n} services have failed`,
-      detail: n === 1 ? failedUnits[0].description || names[0] : names.join(", "),
-      advice:
-        "Read the unit's journal under Processes → Services, then restart it — or disable it if nothing needs it any more.",
-      value: n,
-      threshold: 0,
-    })
-  }
-  const runtime = docker?.runtime
-  if (runtime && runtime.unhealthy > 0) {
-    const n = runtime.unhealthy
-    extra.push({
-      id: "docker.unhealthy",
-      level: runtime.status === "critical" ? "critical" : "warning",
-      title: n === 1 ? "1 container is unhealthy" : `${n} containers are unhealthy`,
-      detail:
-        n === 1
-          ? `1 of ${runtime.running} running containers fails its own health check`
-          : `${n} of ${runtime.running} running containers fail their own health checks`,
-      advice:
-        "Open Docker → Containers: the failure diagnosis on each one says what the check saw.",
-      value: n,
-      threshold: 0,
-    })
-  }
-  if (runtime && runtime.restarting > 0) {
-    const n = runtime.restarting
-    extra.push({
-      id: "docker.restarting",
-      level: "warning",
-      title: n === 1 ? "1 container is restarting" : `${n} containers are restarting`,
-      detail: "Docker keeps restarting it, which means it keeps exiting",
-      advice: "Its logs and failure diagnosis under Docker → Containers say why it exits.",
-      value: n,
-      threshold: 0,
-    })
-  }
-  if (extra.length === 0) return health
-  const status = extra.reduce<Health["status"]>(
-    (worst, f) => (VERDICT_RANK[f.level] > VERDICT_RANK[worst] ? f.level : worst),
-    health.status,
-  )
-  return { ...health, status, findings: [...health.findings, ...extra] }
 }
 
 /**

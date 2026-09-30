@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -858,6 +859,13 @@ func (c *Client) Recreate(ctx context.Context, id string, opts RecreateOptions, 
 		spec.Pull = "always"
 	}
 
+	if strings.TrimSpace(spec.Image) == "" {
+		return nil, errors.New("an image is required")
+	}
+	if _, _, _, _, err := spec.toEngine(); err != nil {
+		return nil, err
+	}
+
 	// A container created with --rm deletes itself the moment it stops, so
 	// there is no version of this that can put it back if the replacement
 	// fails to build. Refusing is the honest answer; the alternative is
@@ -929,13 +937,26 @@ func (c *Client) Recreate(ctx context.Context, id string, opts RecreateOptions, 
 	return res, nil
 }
 
+func ValidateResourceUpdate(limits ResourceLimits) error {
+	if limits.MemoryMB < 0 || (limits.MemoryMB > 0 && limits.MemoryMB < 6) || limits.MemoryMB > math.MaxInt64/(2*1024*1024) || limits.MemorySwapMB < 0 || limits.MemorySwapMB > math.MaxInt64/(1024*1024) || limits.CPUs < 0 || math.IsNaN(limits.CPUs) || math.IsInf(limits.CPUs, 0) || limits.CPUs >= float64(math.MaxInt64)/1e9 || limits.PidsLimit < 0 {
+		return errors.New("limits must be valid positive values; memory must be at least 6 MiB")
+	}
+	if limits.MemoryMB == 0 && limits.MemorySwapMB == 0 && limits.CPUs == 0 && limits.PidsLimit == 0 {
+		return errors.New("choose a memory, CPU, swap or process limit")
+	}
+	return nil
+}
+
 // UpdateResources changes the limits on a container that is already running.
 //
-// The one thing Docker really can change in place, and the reason it is worth
-// exposing separately from Recreate: an operator who put a memory limit on
+// Docker can change resources and restart policies in place. Exposing limits
+// separately from Recreate means an operator who put a memory limit on
 // something and got it wrong should not have to destroy the container to fix
 // the number.
 func (c *Client) UpdateResources(ctx context.Context, id string, limits ResourceLimits) ([]string, error) {
+	if err := ValidateResourceUpdate(limits); err != nil {
+		return nil, err
+	}
 	cli, err := c.api()
 	if err != nil {
 		return nil, err
@@ -943,6 +964,27 @@ func (c *Client) UpdateResources(ctx context.Context, id string, limits Resource
 	res := container.Resources{}
 	if limits.MemoryMB > 0 {
 		res.Memory = limits.MemoryMB * 1024 * 1024
+		if limits.MemorySwapMB == 0 {
+			// Engine update validates against the old total memory+swap limit.
+			// Preserve existing swap headroom, or Docker's equal-RAM default on
+			// a previously unlimited container, when only RAM was selected.
+			inspected, err := cli.ContainerInspect(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			hc := inspected.HostConfig
+			res.MemorySwap = 2 * res.Memory
+			if hc != nil && hc.MemorySwap == -1 {
+				res.MemorySwap = -1
+			}
+			if hc != nil && hc.MemorySwap > 0 {
+				headroom := max(int64(0), hc.MemorySwap-hc.Memory)
+				if headroom > math.MaxInt64-res.Memory {
+					return nil, errors.New("combined memory and swap limit is too large")
+				}
+				res.MemorySwap = res.Memory + headroom
+			}
+		}
 	}
 	if limits.MemorySwapMB > 0 {
 		res.MemorySwap = limits.MemorySwapMB * 1024 * 1024
@@ -955,6 +997,43 @@ func (c *Client) UpdateResources(ctx context.Context, id string, limits Resource
 		res.PidsLimit = &pids
 	}
 	out, err := cli.ContainerUpdate(ctx, id, container.UpdateConfig{Resources: res})
+	if err != nil {
+		return nil, err
+	}
+	return orEmpty(out.Warnings), nil
+}
+
+func ValidateRestartPolicyUpdate(name string, retries int) error {
+	if name == "" {
+		return errors.New("policy is required")
+	}
+	if retries < 0 || (name != "on-failure" && retries != 0) {
+		return errors.New("retry count applies only to on-failure and cannot be negative")
+	}
+	_, err := restartPolicy(name, retries)
+	return err
+}
+
+func (c *Client) UpdateRestartPolicy(ctx context.Context, id, name string, retries int) ([]string, error) {
+	if err := ValidateRestartPolicyUpdate(name, retries); err != nil {
+		return nil, err
+	}
+	policy, _ := restartPolicy(name, retries)
+	cli, err := c.api()
+	if err != nil {
+		return nil, err
+	}
+	inspected, err := cli.ContainerInspect(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if inspected.Config != nil && inspected.Config.Labels["com.docker.compose.project"] != "" {
+		return nil, errors.New("Compose owns this restart policy; edit its service configuration so the change survives deployment")
+	}
+	if inspected.HostConfig != nil && inspected.HostConfig.AutoRemove && !policy.IsNone() {
+		return nil, errors.New("auto-remove containers cannot have a restart policy")
+	}
+	out, err := cli.ContainerUpdate(ctx, id, container.UpdateConfig{RestartPolicy: policy})
 	if err != nil {
 		return nil, err
 	}

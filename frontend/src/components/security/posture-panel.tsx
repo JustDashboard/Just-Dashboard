@@ -1,5 +1,9 @@
 "use client"
 
+import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/use-auth"
+import { securityRemedy } from "@/lib/security-remedies"
+
 import {
   Bug,
   CheckCircle,
@@ -48,6 +52,13 @@ export function PosturePanel({
   onFix?: (finding: SecurityFinding) => void
   className?: string
 }) {
+  const { can } = useAuth()
+  const router = useRouter()
+  const act = (finding: SecurityFinding) => {
+    const remedy = securityRemedy(!onFix ? { ...finding, fix: undefined } : finding, can)
+    if (remedy.apply && onFix) onFix(finding)
+    else if (remedy.href) router.push(remedy.href)
+  }
   if (loading && !posture) {
     return (
       <Panel plain className={className}>
@@ -94,7 +105,13 @@ export function PosturePanel({
       }
     >
       <FindingList
-        findings={posture.findings.map((finding) => toFinding(finding, onFix))}
+        findings={posture.findings.map((finding) =>
+          toFinding(
+            finding,
+            act,
+            securityRemedy(!onFix ? { ...finding, fix: undefined } : finding, can).label,
+          ),
+        )}
         emptyLabel={
           posture.skipped.length > 0
             ? `No findings in completed checks. Not checked: ${posture.skipped.join(", ")}.`
@@ -122,6 +139,13 @@ export function AreaFindings({
   onFix?: (finding: SecurityFinding) => void
   className?: string
 }) {
+  const { can } = useAuth()
+  const router = useRouter()
+  const act = (finding: SecurityFinding) => {
+    const remedy = securityRemedy(!onFix ? { ...finding, fix: undefined } : finding, can)
+    if (remedy.apply && onFix) onFix(finding)
+    else if (remedy.href) router.push(remedy.href)
+  }
   const areas = Array.isArray(area) ? area : [area]
   const findings = posture?.findings.filter((f) => areas.includes(f.area)) ?? []
   if (findings.length === 0) return null
@@ -137,7 +161,11 @@ export function AreaFindings({
         }
       />
       <PanelBody>
-        <FindingList findings={findings.map((f) => toFinding(f, onFix))} />
+        <FindingList
+          findings={findings.map((f) =>
+            toFinding(f, act, securityRemedy(!onFix ? { ...f, fix: undefined } : f, can).label),
+          )}
+        />
       </PanelBody>
     </Panel>
   )
@@ -152,7 +180,11 @@ export function worstLevel(findings: SecurityFinding[]): SecurityFinding["level"
 }
 
 /** A `SecurityFinding` as the shape `FindingList` renders: area on the right, fix as a button. */
-function toFinding(finding: SecurityFinding, onFix?: (f: SecurityFinding) => void): Finding {
+function toFinding(
+  finding: SecurityFinding,
+  onFix?: (f: SecurityFinding) => void,
+  label?: string,
+): Finding {
   return {
     id: finding.id,
     level: finding.level,
@@ -169,10 +201,9 @@ function toFinding(finding: SecurityFinding, onFix?: (f: SecurityFinding) => voi
         {finding.area}
       </span>
     ),
-    action:
-      finding.fix && onFix
-        ? { label: finding.fixLabel ?? "Fix", onClick: () => onFix(finding) }
-        : undefined,
+    action: onFix
+      ? { label: label ?? finding.fixLabel ?? "Review controls", onClick: () => onFix(finding) }
+      : undefined,
   }
 }
 

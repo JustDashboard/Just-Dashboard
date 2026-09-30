@@ -172,7 +172,7 @@ export default function BackupsPage() {
         </Panel>
       )}
 
-      {jobs.error && !jobs.data && <ErrorState error={jobs.error} onRetry={jobs.refresh} />}
+      {jobs.error && <ErrorState error={jobs.error} onRetry={jobs.refresh} />}
       {jobs.data && list.length === 0 && (
         <EmptyState
           icon={Archive}
@@ -219,11 +219,12 @@ export default function BackupsPage() {
       )}
       {jobs.loading && !jobs.data && <LoadingRows rows={3} />}
 
+      {coverage.error && <ErrorState error={coverage.error} onRetry={coverage.refresh} />}
       <CoveragePanel
         report={coverage.data}
         containers={containers}
         loading={coverage.loading}
-        canCreate={admin}
+        canCreate={admin && !coverage.error}
         onProtect={(res) => openFor(prefillFor(res))}
         onOpenJob={(id) => router.push(`/backups/${id}`)}
       />

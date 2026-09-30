@@ -23,6 +23,7 @@ import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { Status, StatusDot } from "@/components/status-dot"
 import { EmptyState } from "@/components/state"
+import { useDockerFindingActions } from "@/components/docker/finding-actions"
 import { AttentionPanel, attentionLabel, runtimeLabel } from "@/components/docker/attention"
 import { CleanupPanel } from "@/components/docker/cleanup"
 import { DiskSummary } from "@/components/docker/disk-panel"
@@ -77,6 +78,7 @@ export default function DockerOverviewPage() {
     (signal) => get<DockerDiagnosis>("/docker/health", undefined, signal),
     60_000,
   )
+  const runFix = useDockerFindingActions({ confirm, onChanged: health.refresh })
   const stacks = usePoll<ComposeStack[]>(
     (signal) => get<ComposeStack[]>("/docker/stacks/", undefined, signal),
     60_000,
@@ -265,7 +267,7 @@ export default function DockerOverviewPage() {
           )}
 
           {/* Problems first. Everything below is context for them. */}
-          <AttentionPanel diagnosis={health.data} onRescan={health.refresh} />
+          <AttentionPanel diagnosis={health.data} onRescan={health.refresh} onAction={runFix} />
 
           <Panel plain>
             <PanelHeader

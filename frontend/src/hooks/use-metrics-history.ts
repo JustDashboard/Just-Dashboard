@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { get, ApiError } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import {
@@ -176,7 +176,11 @@ export function useHealth(intervalMs = 60_000): {
     (signal: AbortSignal) => get<Health>("/system/health", undefined, signal),
     [],
   )
-  const { data, error, loading } = usePoll<Health>(fetcher, intervalMs, [])
+  const { data, error, loading, refresh } = usePoll<Health>(fetcher, intervalMs, [])
+  useEffect(() => {
+    window.addEventListener("jd:health-changed", refresh)
+    return () => window.removeEventListener("jd:health-changed", refresh)
+  }, [refresh])
   return { health: data, error, loading }
 }
 

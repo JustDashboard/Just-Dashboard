@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // The advisor: what the engine's own catalogue says is wrong with a database,
@@ -49,8 +50,11 @@ type Adviser interface {
 // looked at, so an empty list can be read as "nothing found" rather than
 // "nothing checked".
 type AdviseReport struct {
-	Findings      []Advice `json:"findings"`
-	TablesChecked int      `json:"tablesChecked"`
+	CheckedAt     time.Time `json:"checkedAt"`
+	Silences      []string  `json:"silences"`
+	TablesOmitted int       `json:"tablesOmitted"`
+	Findings      []Advice  `json:"findings"`
+	TablesChecked int       `json:"tablesChecked"`
 	// EngineChecks is false where only the generic structure checks ran.
 	EngineChecks bool `json:"engineChecks"`
 }
@@ -64,20 +68,25 @@ func Advise(ctx context.Context, db *sql.DB, driver Driver, schema string) (*Adv
 	if schema == "" {
 		schema = d.DefaultSchema()
 	}
-	report := &AdviseReport{Findings: []Advice{}}
-	generic, checked, err := adviseStructure(ctx, db, d, schema)
+	report := &AdviseReport{Findings: []Advice{}, CheckedAt: time.Now().UTC(), Silences: []string{}}
+	generic, checked, omitted, err := adviseStructure(ctx, db, d, schema)
 	if err != nil {
 		return nil, err
 	}
 	report.TablesChecked = checked
+	report.TablesOmitted = omitted
+	if omitted > 0 {
+		report.Silences = append(report.Silences, fmt.Sprintf("Structure checks are bounded at %d tables; %d more tables were not assessed.", maxAdvisedTables, omitted))
+	}
 	report.Findings = append(report.Findings, generic...)
 	if a, ok := d.(Adviser); ok {
-		report.EngineChecks = true
 		engine, err := a.Advise(ctx, db, schema)
 		if err != nil {
-			return nil, err
+			report.Silences = append(report.Silences, "Engine statistics could not be assessed: "+err.Error())
+		} else {
+			report.EngineChecks = true
+			report.Findings = append(report.Findings, engine...)
 		}
-		report.Findings = append(report.Findings, engine...)
 	}
 	rank := map[string]int{"critical": 0, "warning": 1, "notice": 2}
 	sort.SliceStable(report.Findings, func(i, j int) bool {
@@ -90,40 +99,42 @@ func Advise(ctx context.Context, db *sql.DB, driver Driver, schema string) (*Adv
 // table is fine for a schema of fifty and an outage for one of five thousand.
 const maxAdvisedTables = 300
 
-func adviseStructure(ctx context.Context, db *sql.DB, d Dialect, schema string) ([]Advice, int, error) {
+func adviseStructure(ctx context.Context, db *sql.DB, d Dialect, schema string) ([]Advice, int, int, error) {
 	tables, err := d.Tables(ctx, db, schema)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	noKey := []string{}
 	unindexed := []string{}
 	unindexedSQL := []string{}
 	checked := 0
+	omitted := 0
 	for _, t := range tables {
 		if !strings.EqualFold(t.Type, "table") && !strings.EqualFold(t.Type, "base table") {
 			continue
 		}
 		if checked >= maxAdvisedTables {
-			break
+			omitted++
+			continue
 		}
 		checked++
 		pk, err := d.PrimaryKey(ctx, db, t.Schema, t.Name)
 		if err != nil {
-			return nil, checked, err
+			return nil, checked, 0, err
 		}
 		if len(pk) == 0 {
 			noKey = append(noKey, t.Name)
 		}
 		fks, err := d.ForeignKeys(ctx, db, t.Schema, t.Name)
 		if err != nil {
-			return nil, checked, err
+			return nil, checked, 0, err
 		}
 		if len(fks) == 0 {
 			continue
 		}
 		indexes, err := d.Indexes(ctx, db, t.Schema, t.Name)
 		if err != nil {
-			return nil, checked, err
+			return nil, checked, 0, err
 		}
 		for _, fk := range fks {
 			if indexCovers(indexes, fk.Columns) {
@@ -155,7 +166,7 @@ func adviseStructure(ctx context.Context, db *sql.DB, d Dialect, schema string) 
 			SQL:     strings.Join(unindexedSQL, "\n"),
 		})
 	}
-	return out, checked, nil
+	return out, checked, omitted, nil
 }
 
 // indexCovers reports whether some index begins with exactly the key's

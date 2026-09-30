@@ -194,7 +194,7 @@ export default function MetricsPage() {
   const recorded = useMetricsHistory(win)
   const recordedStorage = useStorageHistory(win)
   const events = useMetricEvents(win)
-  const { health, loading: healthLoading } = useHealth()
+  const { health, loading: healthLoading, error: healthError } = useHealth()
 
   const live = win.key === "live" && win.from === undefined
 
@@ -332,7 +332,13 @@ export default function MetricsPage() {
         }
         aside={
           <div className="flex max-w-full flex-wrap items-center gap-2">
-            {health && <HealthVerdict status={health.status} className="text-body" />}
+            {health && (
+              <HealthVerdict
+                partial={!!health.silences?.length}
+                status={health.status}
+                className="text-body"
+              />
+            )}
             {live && (
               <IconAction
                 label={paused ? "Resume live feed" : "Pause live feed"}
@@ -365,8 +371,8 @@ export default function MetricsPage() {
           entirely of the numbers it was computed from, "Warning" with no way
           to ask why is a dead end. Rendered only when there is something to
           say: a server with nothing wrong loses no height to a list saying so. */}
-      {health && health.findings.length > 0 && (
-        <HealthPanel plain health={health} loading={healthLoading} />
+      {(healthError || (health && (health.findings.length > 0 || health.silences?.length))) && (
+        <HealthPanel plain health={health} error={healthError} loading={healthLoading} />
       )}
 
       <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">

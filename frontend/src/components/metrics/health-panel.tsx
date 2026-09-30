@@ -1,6 +1,13 @@
 "use client"
 
-import type { Health } from "@/lib/types"
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import type { Health, HealthFinding } from "@/lib/types"
+import { relativeTime } from "@/lib/format"
+import { healthInvestigation } from "@/lib/server-advisor"
+import { HealthInvestigation } from "@/components/metrics/health-investigation"
+import { ErrorState } from "@/components/state"
+import { Button } from "@/components/ui/button"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Status } from "@/components/status-dot"
@@ -21,6 +28,8 @@ export function HealthPanel({
   plain,
   emptyLabel,
   className,
+  onChanged,
+  error,
 }: {
   health: Health | undefined
   loading: boolean
@@ -29,7 +38,15 @@ export function HealthPanel({
   /** What "nothing found" covers, when the caller has folded more checks in. */
   emptyLabel?: string
   className?: string
+  error?: Error
+  onChanged?: () => void
 }) {
+  const [selected, setSelected] = useState<HealthFinding | null>(null)
+  const router = useRouter()
+  const refresh = () => {
+    onChanged?.()
+    window.dispatchEvent(new Event("jd:health-changed"))
+  }
   if (loading && !health) {
     return (
       <Panel plain={plain} className={className}>
@@ -41,25 +58,67 @@ export function HealthPanel({
       </Panel>
     )
   }
-  if (!health) return null
+  if (!health) return error ? <HealthReadError error={error} onRetry={refresh} /> : null
 
   return (
     <Panel plain={plain} className={className}>
       <PanelHeader
         title="Health"
-        actions={<Status verdict={health.status} label={verdictLabel(health.status)} />}
+        actions={
+          <Status
+            verdict={health.status}
+            label={
+              health.status === "ok" && health.silences?.length
+                ? "Partial assessment"
+                : verdictLabel(health.status)
+            }
+          />
+        }
       />
       <PanelBody>
+        {error && <HealthReadError error={error} onRetry={refresh} />}
         <FindingList
-          findings={health.findings}
+          findings={health.findings.map((finding) => {
+            const target = healthInvestigation(finding.id)
+            return {
+              ...finding,
+              action: target
+                ? {
+                    label: target.kind === "link" ? target.label : "Investigate",
+                    onClick: () =>
+                      target.kind === "link" ? router.push(target.href) : setSelected(finding),
+                  }
+                : undefined,
+            }
+          })}
           emptyLabel={
-            emptyLabel ??
-            (health.recorded
-              ? "Capacity, memory, CPU steal, pressure and sockets all within limits"
-              : "Every check passed on the current reading")
+            health.silences?.length
+              ? "No findings in the completed checks"
+              : (emptyLabel ??
+                (health.recorded
+                  ? "Capacity, memory, CPU steal, pressure and sockets all within limits"
+                  : "Every check passed on the current reading"))
           }
         />
+        <p className="mt-3 text-hint text-muted-foreground">
+          Checked {relativeTime(health.checkedAt)}
+        </p>
+        {!!health.silences?.length && (
+          <div className="mt-2 text-hint text-muted-foreground">
+            <p className="font-medium">Not assessed</p>
+            <ul className="list-disc pl-4">
+              {health.silences.map((silence) => (
+                <li key={silence}>{silence}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </PanelBody>
+      <HealthInvestigation
+        finding={selected}
+        onOpenChange={(open) => !open && setSelected(null)}
+        onChanged={refresh}
+      />
     </Panel>
   )
 }
@@ -68,11 +127,19 @@ export function HealthPanel({
 export function HealthVerdict({
   status,
   className,
+  partial = false,
 }: {
   status: Health["status"]
+  partial?: boolean
   className?: string
 }) {
-  return <Status verdict={status} label={verdictLabel(status)} className={className} />
+  return (
+    <Status
+      verdict={status}
+      label={status === "ok" && partial ? "Partial assessment" : verdictLabel(status)}
+      className={className}
+    />
+  )
 }
 
 function verdictLabel(status: Health["status"]) {
@@ -80,4 +147,15 @@ function verdictLabel(status: Health["status"]) {
   if (status === "warning") return "Warning"
   if (status === "notice") return "Notice"
   return "Healthy"
+}
+
+function HealthReadError({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  return (
+    <div className="space-y-2">
+      <ErrorState error={error} />
+      <Button size="xs" variant="outline" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  )
 }

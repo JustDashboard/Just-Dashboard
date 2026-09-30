@@ -151,6 +151,7 @@ export default function FilesPage() {
   // "/", which is the one directory on a Linux server where nothing an
   // operator owns lives. A ?path= from a deep link still wins.
   const initialPath = useSearchParams().get("path")
+  const initialEntry = useSearchParams().get("entry")
   const places = usePoll<FilePlaces>((signal) => get("/files/places", undefined, signal), 0, [])
   // Derived rather than copied into state by an effect: until either the URL
   // or a navigation has said otherwise, the answer *is* whatever the server
@@ -201,13 +202,12 @@ export default function FilesPage() {
     dir: path ?? "/",
     paths: new Set(),
   })
-  const [active, setActive] = useState<{ dir: string; entry: FileEntry } | null>(null)
+  const [active, setActive] = useState<{ dir: string; entry: FileEntry } | null | undefined>()
   // Where a Shift-click range starts: the last row clicked or arrowed to.
   const anchor = useRef<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
   const selected = selection.dir === path ? selection.paths : EMPTY
-  const activeEntry = active && active.dir === path ? active.entry : null
 
   // Polled gently: a file that arrived by scp, a deploy that wrote a release,
   // a log that rotated — the listing used to show none of it until the
@@ -223,6 +223,14 @@ export default function FilesPage() {
     [path],
   )
   const refreshListing = listing.refresh
+  // A storage investigation names an existing entry in a validated listing.
+  // An explicit click or deselection wins over the initial URL selection.
+  const activeEntry =
+    active === undefined && initialEntry && path === initialPath
+      ? (listing.data?.entries.find((entry) => entry.path === initialEntry) ?? null)
+      : active && active.dir === path
+        ? active.entry
+        : null
   const firstHidden = useRef(true)
   useEffect(() => {
     if (firstHidden.current) {

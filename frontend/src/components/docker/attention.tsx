@@ -76,7 +76,9 @@ const CLASS_LABEL: Record<FindingClass, string> = {
   lifecycle: "Lifecycle",
 }
 
-export type FindingAction = (finding: DockerFinding) => void
+export type FindingAction = ((finding: DockerFinding) => void) & {
+  label?: (finding: DockerFinding) => string
+}
 
 /**
  * How many rows are shown before the panel asks whether you want the rest.
@@ -176,15 +178,18 @@ function toFinding(group: FindingGroup, onAction?: FindingAction): Finding {
 
   if (group.findings.length === 1) {
     return {
-      id: first.id,
+      id: group.key,
       level,
       title: first.title,
       detail: first.detail,
       advice: first.advice,
       meta,
       action:
-        first.action && onAction
-          ? { label: first.actionLabel ?? "Fix this", onClick: () => onAction(first) }
+        (first.action || first.targetId) && onAction
+          ? {
+              label: onAction.label?.(first) ?? first.actionLabel ?? "Inspect",
+              onClick: () => onAction(first),
+            }
           : undefined,
     }
   }
@@ -230,7 +235,7 @@ function Targets({ group, onAction }: { group: FindingGroup; onAction?: FindingA
             <button
               type="button"
               onClick={() => onAction(finding)}
-              title={finding.actionLabel ?? `Open ${finding.target}`}
+              title={onAction.label?.(finding) ?? finding.actionLabel ?? `Open ${finding.target}`}
             >
               {finding.target}
             </button>
@@ -314,9 +319,14 @@ export function AttentionPanel({
       <Panel plain className={cn("animate-rise", className)}>
         <PanelHeader title={<PanelTitle />} />
         <PanelBody>
+          <DiagnosisSilences diagnosis={diagnosis} />
           <FindingList
             findings={[]}
-            emptyLabel="Nothing to act on — posture, storage, configuration and exposure are all as they should be"
+            emptyLabel={
+              diagnosis.silences?.length
+                ? "No findings in completed checks"
+                : "Nothing to act on — posture, storage, configuration and exposure are all as they should be"
+            }
           />
         </PanelBody>
       </Panel>
@@ -404,6 +414,7 @@ export function AttentionPanel({
         }
       />
       <PanelBody>
+        <DiagnosisSilences diagnosis={diagnosis} />
         <FindingList findings={rows} onDismiss={dismissOne} />
         {(rest > 0 || showAll) && (
           <Button
@@ -418,6 +429,20 @@ export function AttentionPanel({
         )}
       </PanelBody>
     </Panel>
+  )
+}
+
+function DiagnosisSilences({ diagnosis }: { diagnosis: DockerDiagnosis }) {
+  if (!diagnosis.silences?.length) return null
+  return (
+    <div className="mb-3 text-hint text-muted-foreground">
+      <p className="font-medium">Not assessed</p>
+      <ul className="list-disc pl-4">
+        {diagnosis.silences.map((silence) => (
+          <li key={silence}>{silence}</li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -483,6 +508,15 @@ const RUNTIME_SEGMENTS = [
     of: (r: RuntimeHealth) => r.noHealthcheck,
     explain:
       "Docker reports these as up whenever their main process is alive — a wedged application answering nothing still counts.",
+  },
+  {
+    key: "unknown",
+    label: "with unread checks",
+    fill: "bg-muted-foreground",
+    swatch: "bg-muted-foreground",
+    of: (r: RuntimeHealth) => r.unknown ?? 0,
+    explain:
+      "The inspect read failed. These containers cannot be counted as healthy or without a health check.",
   },
 ] as const
 

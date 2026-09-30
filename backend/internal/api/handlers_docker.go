@@ -74,6 +74,7 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/preview", s.handle(s.handleContainerPreview))
 				r.Method(http.MethodPost, "/{id}/rename", s.handle(s.handleContainerRename))
 				r.Method(http.MethodPatch, "/{id}/resources", s.handle(s.handleContainerResources))
+				r.Method(http.MethodPatch, "/{id}/restart-policy", s.handle(s.handleContainerRestartPolicy))
 			})
 			// Lifecycle actions interrupt a running service and use the destructive gate.
 			s.destructive(r, func(r chi.Router) {
@@ -892,8 +893,9 @@ func (s *Server) stackAction(action dockerx.ComposeAction) httpx.Handler {
 
 func (s *Server) handlePruneAll(w http.ResponseWriter, r *http.Request) error {
 	opts := dockerx.PruneOptions{
-		Volumes:   r.URL.Query().Get("volumes") == "true",
-		AllImages: r.URL.Query().Get("allImages") == "true",
+		ImagesAndCacheOnly: r.URL.Query().Get("imagesAndCacheOnly") == "true",
+		Volumes:            r.URL.Query().Get("volumes") == "true",
+		AllImages:          r.URL.Query().Get("allImages") == "true",
 		// The build cache is the largest line on any server that builds, and
 		// until 0.6.4 no route in the product could touch it: the dashboard
 		// reported tens of gigabytes as reclaimable and had nothing to reclaim
@@ -902,13 +904,16 @@ func (s *Server) handlePruneAll(w http.ResponseWriter, r *http.Request) error {
 		BuildCache:    r.URL.Query().Get("buildCache") == "true",
 		AllBuildCache: r.URL.Query().Get("allBuildCache") == "true",
 	}
+	if opts.ImagesAndCacheOnly && opts.Volumes {
+		return httpx.BadRequest("imagesAndCacheOnly cannot remove volumes")
+	}
 	reports, err := s.modules.docker.PruneAll(r.Context(), opts)
 	if err != nil {
 		return s.dockerErr(err)
 	}
 	httpx.SetAudit(r, "docker.prune.all", "", map[string]any{
 		"volumes": opts.Volumes, "allImages": opts.AllImages,
-		"buildCache": opts.BuildCache, "reports": reports,
+		"buildCache": opts.BuildCache, "imagesAndCacheOnly": opts.ImagesAndCacheOnly, "reports": reports,
 	})
 	httpx.JSON(w, http.StatusOK, reports)
 	return nil

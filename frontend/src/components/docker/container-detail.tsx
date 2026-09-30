@@ -17,7 +17,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post, ApiError } from "@/lib/api"
+import { get, post, patch, ApiError } from "@/lib/api"
 import { bytes, duration, relativeTime, timestamp } from "@/lib/format"
 import { useViewState } from "@/lib/view-state"
 import type {
@@ -42,6 +42,8 @@ import { ContainerUsage } from "@/components/docker/container-usage"
 import { ContainerLiveUsage } from "@/components/docker/container-live-usage"
 import { statusWord } from "@/components/docker/container-cells"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
+import { useDockerFindingActions } from "@/components/docker/finding-actions"
+import { ConfigurationRemedy } from "@/components/docker/configuration-remedy"
 import { ContainerFindings } from "@/components/docker/attention"
 import { containerEventsView } from "@/components/docker/container-events"
 import { PortTag, RouteRow } from "@/components/docker/exposure"
@@ -136,6 +138,19 @@ function ContainerDetailPanel({
     (signal) => get<DockerDiagnosis>("/docker/health", undefined, signal),
     60_000,
   )
+  const runFix = useDockerFindingActions({
+    confirm,
+    onChanged: () => {
+      health.refresh()
+      setReloads((n) => n + 1)
+    },
+    open: (id, tab) =>
+      id === containerId
+        ? setTab(tab ?? "overview")
+        : router.push(
+            `/docker/containers/${encodeURIComponent(id)}?tab=${encodeURIComponent(tab ?? "overview")}`,
+          ),
+  })
   // Why it stopped, read once for the page rather than by the tab that says
   // so: the Logs tab opens on the same diagnosis's window.
   const failure = usePoll<FailureDiagnosis>(
@@ -264,6 +279,7 @@ function ContainerDetailPanel({
             <TabsTrigger value="env">Environment</TabsTrigger>
             <TabsTrigger value="mounts">Storage</TabsTrigger>
             <TabsTrigger value="inspect">Inspect</TabsTrigger>
+            <TabsTrigger value="configure">Configuration</TabsTrigger>
             {shell && <TabsTrigger value="shell">Shell</TabsTrigger>}
           </TabsList>
 
@@ -280,14 +296,21 @@ function ContainerDetailPanel({
                 setTab("logs")
               }}
             />
-            <ContainerFindings diagnosis={health.data} containerId={detail.id} />
+            <ContainerFindings diagnosis={health.data} containerId={detail.id} onAction={runFix} />
             <OverviewFields detail={detail} />
             <Reachability containerId={detail.id} />
           </TabsContent>
 
           <TabsContent value="usage" className="min-h-0 flex-1 space-y-6 overflow-y-auto">
             <ContainerLiveUsage key={detail.id} detail={detail} />
-            <ResourceLimitsEditor detail={detail} onSaved={() => setReloads((n) => n + 1)} />
+            <ResourceLimitsEditor
+              detail={detail}
+              onSaved={() => {
+                health.refresh()
+                setReloads((n) => n + 1)
+                window.dispatchEvent(new Event("jd:health-changed"))
+              }}
+            />
             <ContainerUsage containerId={detail.id} name={detail.name} plain />
           </TabsContent>
 
@@ -313,6 +336,22 @@ function ContainerDetailPanel({
               <MountList detail={detail} />
               <WritableLayer containerId={detail.id} />
             </div>
+          </TabsContent>
+
+          <TabsContent value="configure" className="min-h-0 flex-1 overflow-y-auto">
+            {tab === "configure" && (
+              <ConfigurationRemedy
+                detail={detail}
+                findings={(health.data?.findings ?? []).filter(
+                  (finding) => finding.targetId === detail.id,
+                )}
+                confirm={confirm}
+                onChanged={() => {
+                  health.refresh()
+                  setReloads((n) => n + 1)
+                }}
+              />
+            )}
           </TabsContent>
 
           <TabsContent value="inspect" className="min-h-0 flex-1">
@@ -1707,7 +1746,7 @@ function ResourceLimitsEditor({
   const save = async () => {
     setBusy(true)
     try {
-      const res = await post<{ warnings: string[] }>(
+      const res = await patch<{ warnings: string[] }>(
         `/docker/containers/${detail.id}/resources`,
         {
           memoryMb: Number(memory) || undefined,
@@ -1735,7 +1774,7 @@ function ResourceLimitsEditor({
       <Group className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1 text-xs text-muted-foreground">
           <Term name="memoryLimit">Limits</Term> can be changed without recreating this container —
-          the one part of its configuration Docker will edit in place.
+          resource limits can be updated without replacing it.
         </span>
         <Button size="xs" variant="outline" onClick={() => setOpen(true)}>
           <Pencil className="size-3" />
@@ -1782,6 +1821,18 @@ function ResourceLimitsEditor({
           Cancel
         </Button>
       </div>
+      {detail.composeStack && (
+        <p className="text-hint text-muted-foreground">
+          This changes the live container.{" "}
+          <Link
+            className="underline"
+            href={`/docker/stacks/${encodeURIComponent(detail.composeStack)}?tab=compose&remedy=nomemorylimit`}
+          >
+            Update the owning Compose service
+          </Link>{" "}
+          too, so the limit survives deployment.
+        </p>
+      )}
       <Hint>
         Leaving a field empty means no change. A memory limit is what makes the kernel kill this
         container rather than choosing a victim across the whole server; the trade is that it will

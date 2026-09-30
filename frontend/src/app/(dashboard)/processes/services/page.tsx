@@ -1,5 +1,6 @@
 "use client"
 
+import { useSearchParams } from "next/navigation"
 import { Suspense, useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { ListOrdered, RefreshClockwise, Servers } from "@/components/icons"
@@ -78,7 +79,18 @@ function Services() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [filter, setFilter] = useSessionState("processes.services.query", "")
-  const [state, setState] = useSessionState<StateFilter>("processes.services.state", "all")
+  const query = useSearchParams()
+  const [rememberedState, rememberState] = useSessionState<StateFilter>(
+    "processes.services.state",
+    "all",
+  )
+  const [state, setRequestedState] = useState<StateFilter>(
+    query.get("state") === "failed" ? "failed" : rememberedState,
+  )
+  const setState = (next: StateFilter) => {
+    setRequestedState(next)
+    rememberState(next)
+  }
   const [startup, setStartup] = useSessionState("processes.services.startup", "all")
   const [selected, select] = useQuerySelection("unit")
   const [focusTab, setFocusTab] = useState<string>()

@@ -25,9 +25,13 @@ type Process struct {
 	Username    string    `json:"username"`
 	Status      string    `json:"status"`
 	CPUPercent  float64   `json:"cpuPercent"`
+	CPUReady    bool      `json:"cpuReady"`
+	CPUWindow   float64   `json:"cpuWindowSeconds"`
 	MemPercent  float64   `json:"memPercent"`
 	RSS         uint64    `json:"rss"`
 	VMS         uint64    `json:"vms"`
+	Swap        uint64    `json:"swap"`
+	MemoryReady bool      `json:"memoryReady"`
 	Threads     int32     `json:"threads"`
 	Nice        int32     `json:"nice"`
 	CreateTime  time.Time `json:"createTime"`
@@ -37,7 +41,9 @@ type Process struct {
 	IOWrite     uint64    `json:"ioWriteBytes,omitempty"`
 	IOReadRate  uint64    `json:"ioReadRate,omitempty"`
 	IOWriteRate uint64    `json:"ioWriteRate,omitempty"`
+	IOReady     bool      `json:"ioReady"`
 	FDs         int32     `json:"fileDescriptors,omitempty"`
+	FDReady     bool      `json:"fdReady"`
 	Children    int       `json:"children,omitempty"`
 	State       string    `json:"state"`
 	Manager     string    `json:"manager"`
@@ -45,16 +51,22 @@ type Process struct {
 	// Detail-only readings. A snapshot leaves them empty: reading every
 	// process's sockets and limits on each poll would cost more than the
 	// table itself, and the table asks "what is heavy", not "what is on 3000".
-	Listening      []ListeningPort `json:"listening,omitempty"`
-	Connections    int             `json:"connections,omitempty"`
-	OpenFilesLimit uint64          `json:"openFilesLimit,omitempty"`
-	ioRateReady    bool
+	Listening       []ListeningPort `json:"listening,omitempty"`
+	Connections     int             `json:"connections,omitempty"`
+	OpenFilesLimit  uint64          `json:"openFilesLimit,omitempty"`
+	ioRateReady     bool
+	cpuSeconds      float64
+	cpuCounterReady bool
+	ioCounterReady  bool
 }
 
 type ioSample struct {
 	read, write uint64
 	created     int64
 	at          time.Time
+	cpu         float64
+	cpuReady    bool
+	ioReady     bool
 }
 
 type Table struct {
@@ -151,16 +163,20 @@ func (t *Table) snapshot(ctx context.Context) ([]Process, error) {
 		if st, err := p.StatusWithContext(ctx); err == nil && len(st) > 0 {
 			row.Status = strings.Join(st, ",")
 		}
-		row.CPUPercent, _ = p.CPUPercentWithContext(ctx)
-		row.CPUPercent = round2(row.CPUPercent)
+		if cpu, err := p.TimesWithContext(ctx); err == nil && cpu != nil {
+			row.cpuSeconds = cpu.User + cpu.System
+			row.cpuCounterReady = true
+		}
 		if mp, err := p.MemoryPercentWithContext(ctx); err == nil {
 			row.MemPercent = round2(float64(mp))
 		}
 		if mi, err := p.MemoryInfoWithContext(ctx); err == nil && mi != nil {
 			row.RSS, row.VMS = mi.RSS, mi.VMS
+			row.Swap, row.MemoryReady = mi.Swap, true
 		}
 		if io, err := p.IOCountersWithContext(ctx); err == nil && io != nil {
 			row.IORead, row.IOWrite = io.ReadBytes, io.WriteBytes
+			row.ioCounterReady = true
 		}
 		row.Threads, _ = p.NumThreadsWithContext(ctx)
 		row.Nice, _ = p.NiceWithContext(ctx)
@@ -189,17 +205,29 @@ func (t *Table) applyIORates(rows []Process) {
 	next := make(map[int32]ioSample, len(rows))
 	for i := range rows {
 		row := &rows[i]
-		created := row.CreateTime.UnixMilli()
-		current := ioSample{read: row.IORead, write: row.IOWrite, created: created, at: now}
-		if previous, ok := t.samples[row.PID]; ok && previous.created == created {
-			elapsed := now.Sub(previous.at)
-			row.IOReadRate = counterRate(previous.read, current.read, elapsed)
-			row.IOWriteRate = counterRate(previous.write, current.write, elapsed)
-			row.ioRateReady = true
-		}
-		next[row.PID] = current
+		next[row.PID] = applyProcessRates(row, t.samples[row.PID], now)
 	}
 	t.samples = next
+}
+
+func applyProcessRates(row *Process, previous ioSample, now time.Time) ioSample {
+	created := row.CreateTime.UnixMilli()
+	current := ioSample{read: row.IORead, write: row.IOWrite, created: created, at: now, cpu: row.cpuSeconds, cpuReady: row.cpuCounterReady, ioReady: row.ioCounterReady}
+	elapsed := now.Sub(previous.at)
+	if previous.created != created || row.CreateTime.IsZero() || previous.at.IsZero() || elapsed <= 0 {
+		return current
+	}
+	if previous.ioReady && current.ioReady {
+		row.IOReadRate = counterRate(previous.read, current.read, elapsed)
+		row.IOWriteRate = counterRate(previous.write, current.write, elapsed)
+		row.ioRateReady, row.IOReady = true, true
+	}
+	if previous.cpuReady && current.cpuReady && current.cpu >= previous.cpu {
+		row.CPUPercent = round2((current.cpu - previous.cpu) / elapsed.Seconds() * 100)
+		row.CPUReady = true
+		row.CPUWindow = elapsed.Seconds()
+	}
+	return current
 }
 
 func counterRate(previous, current uint64, elapsed time.Duration) uint64 {
@@ -389,17 +417,24 @@ func (t *Table) Detail(ctx context.Context, pid int32) (*Process, error) {
 	if st, err := p.StatusWithContext(ctx); err == nil {
 		row.Status = strings.Join(st, ",")
 	}
-	row.CPUPercent, _ = p.CPUPercentWithContext(ctx)
+	if cpu, err := p.TimesWithContext(ctx); err == nil && cpu != nil {
+		row.cpuSeconds = cpu.User + cpu.System
+		row.cpuCounterReady = true
+	}
 	if mp, err := p.MemoryPercentWithContext(ctx); err == nil {
 		row.MemPercent = round2(float64(mp))
 	}
 	if mi, err := p.MemoryInfoWithContext(ctx); err == nil && mi != nil {
 		row.RSS, row.VMS = mi.RSS, mi.VMS
+		row.Swap, row.MemoryReady = mi.Swap, true
 	}
 	if io, err := p.IOCountersWithContext(ctx); err == nil && io != nil {
 		row.IORead, row.IOWrite = io.ReadBytes, io.WriteBytes
+		row.ioCounterReady = true
 	}
-	row.FDs, _ = p.NumFDsWithContext(ctx)
+	if fds, err := p.NumFDsWithContext(ctx); err == nil {
+		row.FDs, row.FDReady = fds, true
+	}
 	if children, err := p.ChildrenWithContext(ctx); err == nil {
 		row.Children = len(children)
 	}
@@ -408,6 +443,9 @@ func (t *Table) Detail(ctx context.Context, pid int32) (*Process, error) {
 	if ct, err := p.CreateTimeWithContext(ctx); err == nil {
 		row.CreateTime = time.UnixMilli(ct).UTC()
 	}
+	t.mu.Lock()
+	t.samples[row.PID] = applyProcessRates(row, t.samples[row.PID], t.now())
+	t.mu.Unlock()
 	row.State = processState(row.Status)
 	row.Manager, row.ManagerName = processManager(row.PID, row.Cmdline)
 	row.Listening, row.Connections = sockets(ctx, p)

@@ -14,6 +14,7 @@ import type { PruneReport } from "@/lib/types"
  * all.
  */
 export type PruneScope = {
+  imagesAndCacheOnly?: boolean
   /** Tagged images no container uses, not merely the dangling ones. */
   allImages?: boolean
   buildCache?: boolean
@@ -39,6 +40,7 @@ export const RECLAIM_SAFE: PruneScope = {
 export function prune(scope: PruneScope) {
   return post<PruneReport[]>("/docker/prune", undefined, {
     query: {
+      imagesAndCacheOnly: scope.imagesAndCacheOnly ? "true" : undefined,
       allImages: scope.allImages ? "true" : undefined,
       buildCache: scope.buildCache ? "true" : undefined,
       allBuildCache: scope.allBuildCache ? "true" : undefined,

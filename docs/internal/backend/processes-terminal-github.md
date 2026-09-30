@@ -14,7 +14,7 @@ socket-activated service's port.
 
 - Process disk counters are cumulative in `/proc`, so `Table` keeps one small, mutex-protected previous
   sample per PID and returns rates. The create timestamp participates in the identity because Linux reuses
-  PIDs; a replacement starts at zero rather than inheriting the old process's apparent I/O spike.
+  PIDs; a replacement starts with an unavailable rate until a new interval is measured, rather than inheriting the old process's apparent I/O spike.
 - Concurrent inventory readers share a scan already in progress. Each receives its own row slice for
   sorting and PM2 enrichment, and canceling one reader does not cancel the others. The last reader's
   departure cancels collection; completed scans are not cached, so the next refresh starts fresh.
@@ -360,3 +360,20 @@ deploy pages use for the repository a project deploys.
   over 8 MiB produce an explanation and retain the link to GitHub. All gh output is capped at 8 MiB.
 - **GitLab and Gitea** use the separate `forgex` REST adapter and encrypted per-checkout account setup,
   described in [`git-workspace-expansion.md`](git-workspace-expansion.md#provider-accounts).
+
+## Local workload attribution
+
+`GET /system/advisor/workloads?sort=cpu|memory|swap|io|handles` takes two native snapshots so a cold
+advisor does not rely on another browser warming the process table. CPU is a delta of user+system
+CPU seconds over measured wall time (100% = one core), rather than a lifetime average. Both CPU and
+I/O counters are keyed by PID and creation time, with explicit readiness; new, replaced or
+unreadable counters cannot masquerade as a measured idle process. CPU counter resets also start a new
+interval instead of reporting an idle process. Details share the sampler under its
+mutex, while concurrent full snapshots share the expensive read and receive independent rows.
+
+Resident and swapped bytes come from the process memory read. Handle investigation counts descriptors
+on at most 4096 processes and returns the top 20 with partial/unavailable evidence. Descriptor counts
+are not equivalent to the host's open-file-description count. The advisor reuses the process detail,
+owner deep links, admin priority route and destructive signal route; selected controls include the
+creation timestamp, confirmation and refresh. A supervisor may respawn a signalled child, so its owner
+controls remain available. See [server advisor](server-advisor.md) for bounds and Linux verification.

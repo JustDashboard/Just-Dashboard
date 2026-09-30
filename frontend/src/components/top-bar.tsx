@@ -63,7 +63,6 @@ export function TopBar() {
       >
         <MagnifyingGlass className="size-4" />
       </Button>
-
     </header>
   )
 }
@@ -89,12 +88,12 @@ function Vitals() {
 
   return (
     <div className="mr-1 flex items-center gap-3">
-      {health && health.status !== "ok" && (
+      {health && (health.status !== "ok" || !!health.silences?.length) && (
         // Only when there is something to say. A permanent green badge in the
         // chrome is a badge nobody looks at, which makes it useless on the day
         // it turns red.
         <Link href="/" aria-label="Health findings" className="hidden items-center sm:flex">
-          <HealthVerdict status={health.status} />
+          <HealthVerdict partial={!!health.silences?.length} status={health.status} />
         </Link>
       )}
       {snapshot && (
@@ -179,4 +178,3 @@ function Reading({
     </Tooltip>
   )
 }
-

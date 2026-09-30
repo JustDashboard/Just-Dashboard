@@ -167,6 +167,10 @@ file, or a private download of a remote one, checksum proven first) as an attach
 administrator routes, because an archive is the whole of what it covers, and is audited as
 `backup.download`.
 
+The Backups page keeps failed job and resource-report reads visible even with older data. New
+protection actions are unavailable while coverage is stale; existing job logs, rerun, target tests,
+configuration and recovery controls retain their owner and capability boundaries.
+
 `GET /backups/resources` (`backup_resources.go`) is the coverage report: what the other owners hold that
 a job could protect — the dashboard's data directory (with its SQLite file as a snapshot suggestion),
 the nginx directory and the Caddyfile's directory when they exist, local Docker volumes with the

@@ -47,6 +47,7 @@ type Diagnosis struct {
 	// Attention is everything else: posture, storage, configuration,
 	// exposure. It does not clear itself, and it is never "health".
 	Attention AttentionSummary `json:"attention"`
+	Silences  []string         `json:"silences,omitempty"`
 }
 
 // DockerFinding is one thing worth telling the operator, with the reasoning
@@ -162,6 +163,8 @@ func (c *Client) Diagnose(ctx context.Context) (*Diagnosis, error) {
 		for _, ct := range du.Containers {
 			writable[ct.ID] = ct.SizeRw
 		}
+	} else {
+		d.Silences = append(d.Silences, "Docker disk usage could not be read; writable layers and reclaimable storage were not assessed.")
 	}
 
 	// Stack membership is needed to spot a half-up stack, which is only
@@ -179,6 +182,7 @@ func (c *Client) Diagnose(ctx context.Context) (*Diagnosis, error) {
 		ct := list[i]
 		insp, err := cli.ContainerInspect(ctx, ct.ID)
 		if err != nil {
+			d.Silences = append(d.Silences, "Could not inspect "+ct.Name+"; its configuration and health checks were not assessed.")
 			continue
 		}
 		if ct.State == "running" {
@@ -186,6 +190,11 @@ func (c *Client) Diagnose(ctx context.Context) (*Diagnosis, error) {
 			list[i] = ct
 		}
 		d.Checked++
+		if insp.HostConfig != nil && (insp.HostConfig.LogConfig.Type == "json-file" || insp.HostConfig.LogConfig.Type == "") && insp.LogPath != "" {
+			if _, err := os.Stat(insp.LogPath); err != nil {
+				d.Silences = append(d.Silences, "Log size could not be read for "+ct.Name+"; log growth was not assessed.")
+			}
+		}
 		if size, ok := writable[ct.ID]; ok {
 			ct.SizeRw = size
 		}
@@ -550,7 +559,7 @@ func diagnoseContainer(ct Container, insp containerInspect) []DockerFinding {
 				Severity: SeverityRecommendation, Class: ClassConfiguration,
 				Title:  name + " has no health check",
 				Detail: "Docker reports this container as up whenever its main process is alive. A process that is alive and not answering — a web server that lost its database, a worker stuck on a lock — is indistinguishable from a working one.",
-				Advice: "A health check is one command the container runs against itself. With one, this dashboard, compose's dependency ordering and the restart policy can all tell working from merely running.",
+				Advice: "Add an application-specific readiness command in the owning image or Compose service. This dashboard and Compose can then tell working from merely running. Docker restart policies respond to process exits, not an unhealthy check alone.",
 			})
 		}
 		if hostCfg.Memory == 0 {
@@ -559,7 +568,7 @@ func diagnoseContainer(ct Container, insp containerInspect) []DockerFinding {
 				Severity: SeverityRecommendation, Class: ClassConfiguration,
 				Title:  name + " has no memory limit",
 				Detail: "It can use as much of this server's memory as it asks for. When memory runs out the kernel picks a victim by its own arithmetic, and the process it kills is often not the one that caused the problem.",
-				Advice: "A limit turns \"the server became unresponsive\" into \"this container was restarted\", which is a much better night. Set it above the container's normal peak, which the usage chart on this container shows.",
+				Advice: "A memory limit contains this workload's growth. Set it above its observed peak; too low a limit can cause an OOM kill. A restart afterwards depends on its restart policy. For Compose workloads, also update the owning service so the limit survives deployment.",
 				Action: "usage", ActionLabel: "Show its memory history",
 			})
 		}
