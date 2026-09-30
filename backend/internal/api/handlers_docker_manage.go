@@ -278,13 +278,15 @@ func (s *Server) handleContainerRename(w http.ResponseWriter, r *http.Request) e
 }
 
 // handleContainerResources changes the limits on a container that is already
-// running — the one part of a container's configuration Docker will let you
-// edit in place, and the one an operator most often gets wrong first time.
+// running, without discarding its writable layer.
 func (s *Server) handleContainerResources(w http.ResponseWriter, r *http.Request) error {
 	id := httpx.URLParam(r, "id")
 	var limits dockerx.ResourceLimits
 	if err := httpx.DecodeJSON(r, &limits); err != nil {
 		return err
+	}
+	if err := dockerx.ValidateResourceUpdate(limits); err != nil {
+		return httpx.BadRequest("%s", err)
 	}
 	detail, err := s.modules.docker.Inspect(r.Context(), id)
 	if err != nil {
@@ -1572,5 +1574,30 @@ func (s *Server) authoriseVolumeOptions(r *http.Request, driver string, options 
 		}
 		options["device"] = resolved
 	}
+	return nil
+}
+
+func (s *Server) handleContainerRestartPolicy(w http.ResponseWriter, r *http.Request) error {
+	id := httpx.URLParam(r, "id")
+	var req struct {
+		Policy     string `json:"policy"`
+		MaxRetries int    `json:"maxRetries"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if err := dockerx.ValidateRestartPolicyUpdate(req.Policy, req.MaxRetries); err != nil {
+		return httpx.BadRequest("%s", err)
+	}
+	detail, err := s.modules.docker.Inspect(r.Context(), id)
+	if err != nil {
+		return s.dockerErr(err)
+	}
+	warnings, err := s.modules.docker.UpdateRestartPolicy(r.Context(), id, req.Policy, req.MaxRetries)
+	if err != nil {
+		return s.dockerErr(err)
+	}
+	httpx.SetAudit(r, "docker.container.restart-policy", detail.Name, map[string]any{"id": id, "policy": req.Policy, "maxRetries": req.MaxRetries})
+	httpx.JSON(w, http.StatusOK, map[string]any{"warnings": warnings})
 	return nil
 }

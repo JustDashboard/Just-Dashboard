@@ -25,6 +25,12 @@ Most panels show you a number and leave the reading to you: 68% CPU, exit code 1
 *waiting* rather than merely *busy*, that a container was killed for its memory limit and what
 the limit was, and where the dashboard can fix a finding, the finding comes with a button.
 
+Health and Attention use local rules and measurements, with no AI model, API key or paid service.
+Disk findings show allocated space, large folders, exact copies and old temporary files for selected
+cleanup. Resource findings show the processes responsible, their service owner and reviewed controls.
+Container configuration remedies can be previewed and applied, with Compose changes kept in their
+owning file. Missing evidence is reported instead of treated as a passed check.
+
 It manages exactly one machine. There is no fleet view, no agents to enrol, no cluster.
 
 ## What it does

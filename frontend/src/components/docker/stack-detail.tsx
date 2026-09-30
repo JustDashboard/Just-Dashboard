@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowCircleUp,
   ArrowLeft,
@@ -18,6 +18,7 @@ import {
   Warning,
   Wrench,
 } from "@/components/icons"
+import { composeRemedy } from "@/lib/docker-remedies"
 import { notify } from "@/lib/toast"
 import { get, post, put, ApiError } from "@/lib/api"
 import type { ComposeService, ComposeValidation, StackDetail } from "@/lib/types"
@@ -85,7 +86,13 @@ function StackBody({ name }: { name: string }) {
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  const [tab, setTab] = useViewState("docker.stack.tab", "services")
+  const query = useSearchParams()
+  const [rememberedTab, rememberTab] = useViewState("docker.stack.tab", "services")
+  const [tab, setRequestedTab] = useState(query.get("tab") ?? rememberedTab)
+  const setTab = (value: string) => {
+    setRequestedTab(value)
+    rememberTab(value)
+  }
   const runner = useRunConsole()
 
   const { data, error, loading, refresh } = usePoll<StackDetail>(
@@ -175,6 +182,18 @@ function StackBody({ name }: { name: string }) {
         )}
       </div>
 
+      {query.get("remedy") && (
+        <Notice title="Review the owning service">
+          <p>
+            Change only the affected service, validate and save the file, then bring the stack up to
+            apply it. Replacing a container discards its writable layer and old logs; retained
+            volumes keep their data.
+          </p>
+          <pre className="mt-2 font-mono text-hint whitespace-pre-wrap">
+            {composeRemedy(query.get("remedy") ?? "")}
+          </pre>
+        </Notice>
+      )}
       {error && <ErrorState error={error} />}
       {loading && !data && <LoadingRows />}
 

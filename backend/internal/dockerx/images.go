@@ -637,6 +637,8 @@ func (c *Client) DiskUsage(ctx context.Context) (DiskUsage, error) {
 // the conservative answer, so a zero value is `docker system prune`: stopped
 // containers, dangling images, unused networks and dangling build cache.
 type PruneOptions struct {
+	// ImagesAndCacheOnly narrows an advisory remedy to its advertised scope.
+	ImagesAndCacheOnly bool
 	// Volumes is the only one that destroys data, which is why it is the only
 	// one behind a typed phrase at the route.
 	Volumes bool
@@ -679,18 +681,22 @@ func (c *Client) PruneAll(ctx context.Context, opts PruneOptions) ([]PruneReport
 		reports = append(reports, rep)
 	}
 
-	ctRep, err := cli.ContainersPrune(ctx, filters.NewArgs())
-	add(PruneReport{
-		Kind: "containers", SpaceReclaimed: ctRep.SpaceReclaimed, Items: ctRep.ContainersDeleted,
-	}, err)
+	if !opts.ImagesAndCacheOnly {
+		ctRep, err := cli.ContainersPrune(ctx, filters.NewArgs())
+		add(PruneReport{
+			Kind: "containers", SpaceReclaimed: ctRep.SpaceReclaimed, Items: ctRep.ContainersDeleted,
+		}, err)
+	}
 	add(c.PruneImages(ctx, opts.AllImages))
 	if opts.BuildCache {
 		add(c.PruneBuildCache(ctx, opts.AllBuildCache))
 	}
-	if opts.Volumes {
+	if opts.Volumes && !opts.ImagesAndCacheOnly {
 		add(c.PruneVolumes(ctx))
 	}
-	add(c.pruneNetworks(ctx))
+	if !opts.ImagesAndCacheOnly {
+		add(c.pruneNetworks(ctx))
+	}
 	return reports, nil
 }
 

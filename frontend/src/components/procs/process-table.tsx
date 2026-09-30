@@ -495,7 +495,7 @@ function ProcessTableRow({
               : "text-muted-foreground",
         )}
       >
-        {percent(process.cpuPercent)}
+        {process.cpuReady === false ? "—" : percent(process.cpuPercent)}
       </TableCell>
       <TableCell className="numeric text-right font-mono">
         {bytes(process.rss)}
@@ -583,7 +583,7 @@ function ProcessNarrowRow({
               cpuTone(process.cpuPercent) !== "default" && "text-warning",
             )}
           >
-            {percent(process.cpuPercent)} CPU
+            {process.cpuReady === false ? "Sampling CPU" : `${percent(process.cpuPercent)} CPU`}
           </span>
           <span className="numeric font-mono text-muted-foreground">
             {bytes(process.rss)}

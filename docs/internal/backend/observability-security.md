@@ -58,10 +58,25 @@ running a dozen containers otherwise lists thirty interfaces with the uplink amo
 
 `metrics.Assess` (`GET /system/health`) turns those into findings — measured / means / do — ranked
 worst-first. It runs on the server because the thresholds are a claim the product makes, and because
-each check reads an hour of history to tell a spike from a trend. **Memory is judged on available, never
+the CPU steal check uses an hour of recorded history where available; the other thresholds use the live reading. **Memory is judged on available, never
 on "used"**: Linux counts page cache there and judging by it is a permanent meaningless warning. File
 handles are judged only against a real ceiling (80% of `max`), and a sensor only against its own
 thresholds — critical past `critical`, warning past `high`, nothing where the driver reports neither.
+
+The handler also reads service and container runtime concurrently with a four-second bound, adding
+named failed units and unhealthy/dead/restarting/paused containers. Exited one-shot containers are not
+assumed failed. Overview, Metrics and the top bar use this same response; the browser no longer folds
+its own additional verdict. Missing managers, unread checks, PSI and sensors appear in `silences`.
+A clean partial assessment names its missing evidence instead of claiming every check passed. Initial
+and subsequent failed Health reads stay visible on Overview and Metrics; Try again refreshes the
+mounted Health consumers.
+
+Health rows on Overview and Metrics open the [local server advisor](server-advisor.md). Storage
+investigation is requested only when opened, and copy hashing is an explicit extra read. CPU, memory,
+swap, disk I/O and handle findings open their own process attribution; network findings distinguish
+observed deltas from since-boot counters; steal and sensor findings state the provider or hardware
+remedy. Swap occupancy alone does not establish active thrashing. Successful controls dispatch
+`jd:health-changed` so all mounted health polls refresh.
 
 `metrics.Events` (`GET /system/metrics/events`) is the annotation layer, answered from `deploy_runs`,
 `backup_runs` and `audit_log` — this dashboard *is* the thing that ran the deploy. Reboots need no
@@ -419,3 +434,8 @@ command is a file whose **parent** is a bin directory (`/usr/bin` is in every fi
 `/man/man` (translated pages live under `de/man1`); and the page to render is **ranked**, or coreutils
 shows TEST(1) and openssh-client shows scp. `stripOverstrike` undoes nroff bold in four lines rather than
 shelling to `col -b`, which lives in the same package whose absence already costs the login records.
+
+Security findings without an authorized direct remedy open their owning controls: dashboard network
+allowlist, firewall, SSH, intrusion, listener ownership, certificates or host packages. Firewall and SSH
+remedies retain their administrator/destructive gates and existing confirmations. Inspection remains
+available to limited roles without advertising a mutation they cannot carry out.

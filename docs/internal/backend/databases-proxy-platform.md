@@ -193,6 +193,12 @@ accounts retain partial results. Full table details and mutation preconditions u
   `pg_stat_statements` (13+ and older column names both) or
   `performance_schema.events_statements_summary_by_digest`, top N by total time, and reports
   `supported: false` with the reason where neither is there.
+  Advisor reports include server `checkedAt`, `tablesOmitted` and `silences`. Structure scans beyond
+  300 tables report the omitted count. Unread engine statistics retain completed structure findings
+  and name the failed source with `engineChecks=false`. The frontend displays partial/stale reports,
+  disables stale SQL preparation and opens the SQL console for reviewed statements or the owning
+  Structure/Server controls for cases needing a choice; execution still uses existing SQL authorization.
+
 - **The server's own log, found from its connection.** `GET /databases/{id}/logs/sources`
   (`handlers_db_logs.go`, on the read surface — reading what the server printed is what `/activity`
   already shows any role) answers `{sources, refused?, reason?, note?}`, each source in `/logs/sources`'

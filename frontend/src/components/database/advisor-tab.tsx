@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { CodeBracket, Copy, Shield } from "@/components/icons"
@@ -51,6 +52,7 @@ export function AdvisorTab({
   /** Open the console with a statement in it. */
   onQuery: (sql: string) => void
 }) {
+  const router = useRouter()
   const report = usePoll(
     (signal) => get<DbAdviseReport>(`/databases/${conn.id}/advisor`, { schema }, signal),
     120_000,
@@ -95,6 +97,18 @@ export function AdvisorTab({
           detail: f.detail,
           advice: f.advice,
           meta: CATEGORY_WORD[f.category],
+          action: !f.sql
+            ? {
+                label:
+                  f.category === "schema" ? "Review table structure" : "Review server controls",
+                onClick: () =>
+                  router.push(
+                    f.category === "schema"
+                      ? `/databases/structure?conn=${conn.id}&schema=${encodeURIComponent(schema)}`
+                      : `/databases/server?conn=${conn.id}`,
+                  ),
+              }
+            : undefined,
           extra: (
             <>
               {f.objects && f.objects.length > 0 && (
@@ -111,7 +125,12 @@ export function AdvisorTab({
                 <div className="space-y-1.5">
                   <Well className="max-h-40 text-hint whitespace-pre-wrap">{f.sql}</Well>
                   <div className="flex flex-wrap gap-1.5">
-                    <Button size="xs" variant="outline" onClick={() => onQuery(f.sql!)}>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={!!report.error}
+                      onClick={() => onQuery(f.sql!)}
+                    >
                       <CodeBracket className="size-3" />
                       Open in the console
                     </Button>
@@ -129,7 +148,7 @@ export function AdvisorTab({
             </>
           ),
         })),
-    [report.data, category, onQuery],
+    [report.data, report.error, category, onQuery, router, conn.id, schema],
   )
 
   if (report.loading && !report.data) return <LoadingPanel />
@@ -141,11 +160,24 @@ export function AdvisorTab({
 
   return (
     <div className="flex min-w-0 animate-rise flex-col gap-6">
+      {report.error && <ErrorState error={report.error} onRetry={report.refresh} />}
+      {!!report.data.silences?.length && (
+        <div className="text-body text-muted-foreground">
+          <p className="font-medium">Not assessed</p>
+          <ul className="list-disc pl-4">
+            {report.data.silences.map((silence) => (
+              <li key={silence}>{silence}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <Panel plain>
         <PanelHeader
           title={
             report.data.findings.length === 0
-              ? "Nothing to fix"
+              ? report.data.silences?.length
+                ? "No findings in completed checks"
+                : "Nothing to fix"
               : `${plural(report.data.findings.length, "finding")}${
                   critical > 0 ? ` · ${critical} critical` : ""
                 }${warnings > 0 ? ` · ${plural(warnings, "warning")}` : ""}`
@@ -157,8 +189,8 @@ export function AdvisorTab({
                 {schema ? ` in ${schema}` : ""} ·{" "}
                 {report.data.engineChecks
                   ? "statistics, indexes and settings read"
-                  : "structure only, this engine keeps no statistics"}{" "}
-                · {relativeTime(checkedAt)}
+                  : "structure checks only; engine statistics were not assessed"}{" "}
+                · {relativeTime(report.data.checkedAt ?? checkedAt)}
               </span>
               <Button
                 size="xs"
@@ -189,7 +221,7 @@ export function AdvisorTab({
           findings={findings}
           emptyLabel={
             report.data.findings.length === 0
-              ? `Nothing found across ${plural(report.data.tablesChecked, "table")}`
+              ? `Nothing found in completed checks across ${plural(report.data.tablesChecked, "table")}`
               : "Nothing in this category"
           }
         />

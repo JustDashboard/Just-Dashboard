@@ -23,7 +23,9 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   create fails and the operator has nothing where their service was — so the old container is renamed
   aside (`<name>_jd_replaced_<random>`), restored if anything later fails, and removed only once the replacement
   runs. Compose-managed containers are refused with `ErrComposeManaged`. `UpdateResources` is separate
-  because limits genuinely can change in place.
+  because limits genuinely can change in place. `UpdateRestartPolicy` also uses an Engine update,
+  preserves the running process, and refuses Compose ownership and incompatible auto-remove settings.
+  The service-control route is `PATCH /docker/containers/{id}/restart-policy`; mutations are audited.
 - **`render.go` keeps the form from being a black box**: a spec back into the `docker run` line and the
   compose service, rendered **on the server** so "what does this spec mean" has one implementation. The
   YAML is hand-written, not marshalled — key order carries meaning and a marshaller would sort it into
@@ -674,3 +676,40 @@ failures report the retained original's parking name.
 
 PM2 discovery cannot expand log roots. Its file paths must pass the configured `JD_LOG_ROOTS` check,
 including symlink resolution; custom PM2 log directories require explicit administrator configuration.
+
+## Actionable findings and storage investigation
+
+Docker Overview, the container list and container details all use `components/docker/finding-actions.ts`.
+Restart-policy remedies update a standalone container in place; log-driver remedies review replacement,
+interruption and loss of logs/writable-layer data. Compose configuration remedies open the owning stack
+so the source configuration can be changed durably. Storage and reachability actions focus the relevant
+container tab; findings without an automatic remedy can still open configuration evidence. Permission
+fallbacks name inspection instead of claiming an unavailable mutation. Group and singleton dismissals
+use the same finding-kind key; Rescan restores them without changing the server diagnosis.
+
+The resource editor uses the backend's **PATCH** route. RAM-only updates preserve existing swap
+headroom (including explicitly unlimited swap); previously unset swap gets Docker's equal-RAM swap
+allowance. Explicit combined limits are kept. Empty, negative and overflowing updates are refused;
+Engine warnings remain visible. A real Docker fixture checks that restart policy, RAM and CPU changes
+keep the running PID and start timestamp.
+
+Host storage investigation and selected cleanup are documented in [server advisor](server-advisor.md).
+An advisor file link opens `/files?path=<parent>&entry=<absolute-file>`: the inspector selects only an
+entry already returned by that validated directory listing. An explicit click or deselection overrides
+the URL's initial selection. Paths still pass through the existing file service boundary.
+
+Standalone Configuration offers local preparation for readiness commands, image version/digest pins,
+port bindings, privileged mode and Docker socket mounts, plus the full supported replacement spec.
+Only administrators edit it because it includes credentials and host settings. Preview renders the
+reviewed spec; application readiness is not promised. Applying requires destructive capability and
+reviewed confirmation, reports Engine warnings and navigates to the returned replacement ID. Auto-remove
+containers cannot use this replacement path. Supported settings are carried through; Inspect remains the
+source for additional Engine options. Compose remedies open `?tab=compose&remedy=` with a service-level
+example, then use the existing validation/save/deploy workflow. Live limits link the owning file too.
+Removing Just Dashboard's required socket/host access is explicitly described as breaking its controls.
+
+Docker diagnosis reports unread inspections, disk accounting and log files in `silences`; running
+containers with unread inspections increment runtime `unknown`, rather than `noHealthcheck`. The
+Attention reclaim action uses `imagesAndCacheOnly=true` on `/docker/prune`, removing only unused images
+and build cache. It leaves containers, networks and volumes untouched. The older broad sweep retains
+its original scope; pairing images-only scope with volume removal is refused. Every scope is audited.

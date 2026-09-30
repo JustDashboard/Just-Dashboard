@@ -230,7 +230,7 @@ function ProcessDetail({
             <div className="space-y-3">
               <Reading
                 label="CPU"
-                value={percent(row.cpuPercent)}
+                value={row.cpuReady === false ? "Sampling" : percent(row.cpuPercent)}
                 pct={row.cpuPercent}
                 tone={cpuTone(row.cpuPercent)}
               />

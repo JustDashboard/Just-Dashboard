@@ -53,6 +53,8 @@ type Health struct {
 	// Recorded reports whether the history-backed checks ran at all. Without
 	// a recorder there is still a verdict, just a shallower one.
 	Recorded bool `json:"recorded"`
+	// Silences name unavailable evidence; a missing observation is never a pass.
+	Silences []string `json:"silences,omitempty"`
 }
 
 // Thresholds are the lines the checks draw.
@@ -92,8 +94,8 @@ const (
 	loadWarnPerCore     = 1.0
 	loadCriticalPerCore = 2.0
 
-	// Swap in use is not itself a problem — Linux swaps out idle pages on
-	// purpose. Half the swap device in use is.
+	// Occupancy warrants investigation, not a claim of active thrashing. Idle
+	// pages can stay swapped after pressure has passed.
 	swapWarnPercent = 50
 
 	// Ephemeral ports are a real ceiling around 28k by default, and TIME_WAIT
@@ -227,7 +229,7 @@ func memoryFindings(snap *sysinfo.Snapshot) []Finding {
 			Level:  "warning",
 			Title:  "Swap is heavily used",
 			Detail: fmt.Sprintf("%.0f%% of %s swapped", snap.Swap.UsedPercent, humanBytes(int64(snap.Swap.Total))),
-			Advice: "Some swapping is normal and healthy. This much means the working set no longer fits in RAM, and every touched page costs a disk read.",
+			Advice: "High occupancy can include idle pages left swapped after an earlier peak. Inspect the swap consumers and compare memory pressure and disk activity before deciding whether a workload needs stopping or limiting.",
 			Metric: "swap", Value: snap.Swap.UsedPercent, Threshold: swapWarnPercent,
 		})
 	}

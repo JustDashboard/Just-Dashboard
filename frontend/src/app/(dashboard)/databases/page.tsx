@@ -99,6 +99,11 @@ export default function DatabasesOverviewPage() {
         advice:
           "Publish its port, or attach it to a network this dashboard can reach, and it connects itself.",
         meta: engineLabel(server.driver),
+        action: {
+          label: "Inspect server networking",
+          onClick: () =>
+            router.push(`/docker/containers/${encodeURIComponent(server.container)}?tab=configure`),
+        },
       })
     }
     return out

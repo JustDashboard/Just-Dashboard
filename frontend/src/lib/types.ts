@@ -324,6 +324,7 @@ export type HealthFinding = {
 }
 
 export type Health = {
+  silences?: string[]
   status: "ok" | "critical" | "warning" | "notice"
   findings: HealthFinding[]
   checkedAt: string
@@ -712,6 +713,7 @@ export type RuntimeHealth = {
   unhealthy: number
   starting: number
   noHealthcheck: number
+  unknown?: number
   status: "ok" | "notice" | "warning" | "critical"
   summary: string
 }
@@ -728,6 +730,7 @@ export type AttentionSummary = {
 }
 
 export type DockerDiagnosis = {
+  silences?: string[]
   /** The worst of everything. Never render this as "health" — see `runtime`. */
   status: "ok" | "notice" | "warning" | "critical"
   findings: DockerFinding[]
@@ -1285,9 +1288,13 @@ export type ProcessRow = {
   username: string
   status: string
   cpuPercent: number
+  cpuReady?: boolean
+  cpuWindowSeconds?: number
   memPercent: number
   rss: number
   vms: number
+  swap?: number
+  memoryReady?: boolean
   threads: number
   nice: number
   createTime: string
@@ -1297,7 +1304,9 @@ export type ProcessRow = {
   ioWriteBytes?: number
   ioReadRate?: number
   ioWriteRate?: number
+  ioReady?: boolean
   fileDescriptors?: number
+  fdReady?: boolean
   children?: number
   state: "running" | "sleeping" | "blocked" | "stopped" | "zombie" | "other"
   manager: "pm2" | "systemd" | "container" | "session" | "kernel" | "unmanaged"
@@ -5510,6 +5519,9 @@ export type DbAdvice = {
 }
 
 export type DbAdviseReport = {
+  checkedAt?: string
+  silences?: string[]
+  tablesOmitted?: number
   findings: DbAdvice[]
   tablesChecked: number
   engineChecks: boolean

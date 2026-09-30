@@ -32,8 +32,13 @@ var (
 const maxEditBytes = 8 << 20
 
 type Service struct {
-	roots     []string
-	extractMu sync.Mutex
+	roots           []string
+	extractMu       sync.Mutex
+	storageSlots    chan struct{}
+	storageProc     string
+	storageHostRoot string
+	storageHostErr  error
+	storageCleanups chan struct{}
 }
 
 func New(roots []string) *Service {
@@ -46,7 +51,8 @@ func New(roots []string) *Service {
 	if len(cleaned) == 0 {
 		cleaned = []string{"/"}
 	}
-	return &Service{roots: cleaned}
+	hostRoot, hostErr := storageHostRoot()
+	return &Service{roots: cleaned, storageSlots: make(chan struct{}, 2), storageProc: "/proc", storageHostRoot: hostRoot, storageHostErr: hostErr, storageCleanups: make(chan struct{}, 1)}
 }
 
 func (s *Service) Roots() []string { return s.roots }

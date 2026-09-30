@@ -15,6 +15,7 @@ import (
 
 func (s *Server) mountSystemRoutes(r chi.Router) {
 	r.Route("/system", func(r chi.Router) {
+		s.mountAdvisorRoutes(r)
 		r.Method(http.MethodGet, "/host", s.handle(s.handleSystemHost))
 		r.Method(http.MethodGet, "/metrics", s.handle(s.handleSystemMetrics))
 		r.Method(http.MethodGet, "/metrics/history", s.handle(s.handleMetricsHistory))
@@ -125,7 +126,7 @@ func (s *Server) handleSystemHealth(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	httpx.JSON(w, http.StatusOK, s.modules.metrics.Assess(r.Context(), snap))
+	httpx.JSON(w, http.StatusOK, s.runtimeHealth(r.Context(), s.modules.metrics.Assess(r.Context(), snap), snap))
 	return nil
 }
 
