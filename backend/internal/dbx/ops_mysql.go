@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"math"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 // MySQL's and MariaDB's answers to the operations questions.
@@ -22,17 +25,75 @@ import (
 // mysqlFirstRows runs the first of several statements the server accepts and
 // returns its rows by column name. It is how one question is put to two
 // engines that spell it differently.
+//
+// When none is accepted, the error worth reporting is the one that says the
+// account may not ask, if any did: on MySQL 8.4 the older spelling is a syntax
+// error or a table that is not there, and reporting whichever came last told
+// an operator whose account lacks REPLICATION CLIENT that the server does not
+// know SLAVE STATUS.
 func mysqlFirstRows(ctx context.Context, db *sql.DB, statements ...string) ([]map[string]string, error) {
-	var last error
+	var refused mysqlRefusals
 	for _, stmt := range statements {
 		rows, err := db.QueryContext(ctx, stmt)
 		if err != nil {
-			last = err
+			refused.add(err)
 			continue
 		}
 		return rowMaps(rows)
 	}
-	return nil, last
+	return nil, refused.err()
+}
+
+// mysqlRefusals collects what a server answered to several spellings of one
+// question, and picks the answer to report: the first that denied access,
+// which names the privilege that is missing, and otherwise the last.
+type mysqlRefusals struct{ denied, last error }
+
+func (r *mysqlRefusals) add(err error) {
+	if r.denied == nil && mysqlAccessDenied(err) {
+		r.denied = err
+	}
+	r.last = err
+}
+
+func (r *mysqlRefusals) err() error {
+	if r.denied != nil {
+		return r.denied
+	}
+	return r.last
+}
+
+// mysqlAccessDenied reports whether the server refused a statement for want
+// of a privilege rather than for what the statement was: a database, a table
+// or a column the account may not read, or a privilege such as PROCESS the
+// statement needs.
+func mysqlAccessDenied(err error) bool {
+	var refused *mysql.MySQLError
+	if !errors.As(err, &refused) {
+		return false
+	}
+	switch refused.Number {
+	case 1044, 1045, 1142, 1143, 1227, 1370:
+		return true
+	}
+	return false
+}
+
+// mysqlPerformanceSchemaGap says why performance_schema gave no counts, given
+// the error its read ended in, or nil when it answered with no rows: the
+// account may not read it, the server runs with it off, or neither.
+func mysqlPerformanceSchemaGap(ctx context.Context, db *sql.DB, err error) string {
+	if mysqlAccessDenied(err) {
+		return "this account may not read performance_schema (" + err.Error() + ")"
+	}
+	var on sql.NullBool
+	if db.QueryRowContext(ctx, `SELECT @@performance_schema`).Scan(&on) == nil && on.Valid && !on.Bool {
+		return "performance_schema is off on this server"
+	}
+	if err != nil {
+		return "performance_schema could not be read (" + err.Error() + ")"
+	}
+	return "performance_schema holds no counts for them; its table instruments may be switched off"
 }
 
 // mysqlIsMariaDB asks the server which of the two it is. Only the handful of
@@ -449,12 +510,12 @@ func (mysqlDialect) Locks(ctx context.Context, db *sql.DB) (*LocksReport, error)
 		  LEFT JOIN information_schema.INNODB_LOCKS rl ON rl.lock_id = w.requested_lock_id
 		  ORDER BY 7 DESC LIMIT ` + itoa(maxHeldLocks)},
 	}
-	var last error
+	var refused mysqlRefusals
 	read := false
 	for _, q := range queries {
 		rows, err := db.QueryContext(ctx, q.sql)
 		if err != nil {
-			last = err
+			refused.add(err)
 			continue
 		}
 		for rows.Next() {
@@ -483,7 +544,7 @@ func (mysqlDialect) Locks(ctx context.Context, db *sql.DB) (*LocksReport, error)
 		// Neither table answered: an account without PROCESS, or an engine
 		// on this wire that has no InnoDB.
 		return &LocksReport{Waits: []LockWait{}, Locks: []HeldLock{},
-			Reason: "The InnoDB lock tables could not be read: " + last.Error()}, nil
+			Reason: "The InnoDB lock tables could not be read: " + refused.err().Error()}, nil
 	}
 	users := map[string]string{}
 	if rows, err := db.QueryContext(ctx, `SELECT CAST(ID AS CHAR), COALESCE(USER, '') FROM information_schema.PROCESSLIST`); err == nil {
@@ -668,7 +729,7 @@ func (mysqlDialect) TableStats(ctx context.Context, db *sql.DB, opts StatsOption
 	  WHERE `+schemaFilterOn(opsMySQLSchemaFilter, "OBJECT_SCHEMA")+`
 	  GROUP BY OBJECT_SCHEMA, OBJECT_NAME`, mysqlSchemaArgs(opts.Schema)...)
 	if err != nil {
-		out.Notes = append(out.Notes, "Read and write counts need performance_schema, which this server does not offer.")
+		out.Notes = append(out.Notes, "Read and write counts are unavailable: "+mysqlPerformanceSchemaGap(ctx, db, err)+".")
 		return out, nil
 	}
 	defer urows.Close()
@@ -686,7 +747,7 @@ func (mysqlDialect) TableStats(ctx context.Context, db *sql.DB, opts StatsOption
 		return nil, err
 	}
 	if len(byTable) == 0 && len(out.Tables) > 0 {
-		out.Notes = append(out.Notes, "Read and write counts are empty: performance_schema is off on this server.")
+		out.Notes = append(out.Notes, "Read and write counts are empty: "+mysqlPerformanceSchemaGap(ctx, db, nil)+".")
 	}
 	for i := range out.Tables {
 		t := &out.Tables[i]
@@ -774,10 +835,11 @@ func (mysqlDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOption
 
 	type usage struct{ scans, rows int64 }
 	used := map[string]usage{}
-	if urows, err := db.QueryContext(ctx, `
+	urows, usageErr := db.QueryContext(ctx, `
 	  SELECT OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, COUNT_READ, COUNT_FETCH
 	  FROM performance_schema.table_io_waits_summary_by_index_usage
-	  WHERE INDEX_NAME IS NOT NULL AND `+schemaFilterOn(opsMySQLSchemaFilter, "OBJECT_SCHEMA"), mysqlSchemaArgs(opts.Schema)...); err == nil {
+	  WHERE INDEX_NAME IS NOT NULL AND `+schemaFilterOn(opsMySQLSchemaFilter, "OBJECT_SCHEMA"), mysqlSchemaArgs(opts.Schema)...)
+	if usageErr == nil {
 		for urows.Next() {
 			var schema, table, index string
 			var u usage
@@ -788,7 +850,7 @@ func (mysqlDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOption
 		urows.Close()
 	}
 	if len(used) == 0 && len(out.Indexes) > 0 {
-		out.Notes = append(out.Notes, "Use counts are unavailable: performance_schema is off on this server, so no index can be called unused.")
+		out.Notes = append(out.Notes, "Use counts are unavailable: "+mysqlPerformanceSchemaGap(ctx, db, usageErr)+", so no index can be called unused.")
 	}
 	for i := range out.Indexes {
 		ix := &out.Indexes[i]
