@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -452,6 +453,94 @@ func TestChangesRenderForEachEngine(t *testing.T) {
 	})
 	if err != nil || c.sql != "UPDATE [app].[t] SET [name] = DEFAULT WHERE [id] = @p1" {
 		t.Errorf("mssql default = %v %v", c, err)
+	}
+}
+
+// Oracle reads text into a date by the session's NLS format, and has no = for
+// a LOB. Both are written into the statement around the bind marker — and
+// around the literal in the statement shown for review — while the value
+// itself is still bound.
+func TestChangesRenderOraclesDatesAndLobs(t *testing.T) {
+	d := oracleDialect{}
+	p := &changePlan{dialect: d, rel: `"APP"."T"`, columns: map[string]Column{}, key: []string{"ID"}}
+	for _, c := range []Column{
+		{Name: "ID", Type: "NUMBER(10,0)"}, {Name: "D", Type: "DATE"}, {Name: "TS", Type: "TIMESTAMP(6)"},
+		{Name: "TZ", Type: "TIMESTAMP(6) WITH TIME ZONE"}, {Name: "LTZ", Type: "TIMESTAMP(3) WITH LOCAL TIME ZONE"},
+		{Name: "NAME", Type: "VARCHAR2(50)"}, {Name: "BODY", Type: "CLOB"}, {Name: "NBODY", Type: "NCLOB"},
+		{Name: "RAWS", Type: "BLOB"}, {Name: "DOC", Type: "JSON"}, {Name: "X", Type: "XMLTYPE"},
+	} {
+		p.columns[c.Name] = c
+	}
+
+	c, err := p.render(Change{Op: ChangeUpdate, Key: map[string]any{"ID": json.Number("7")}, Values: map[string]any{
+		"D": "2024-01-02T03:04:05Z", "TS": "2024-01-02T03:04:05.123456Z", "TZ": "2024-01-02T03:04:05.5+02:00",
+		"LTZ": "2024-01-02 03:04:05", "NAME": "2024-01-02T03:04:05Z",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `UPDATE "APP"."T" SET "D" = TO_DATE(:1, 'YYYY-MM-DD"T"HH24:MI:SS'), ` +
+		`"LTZ" = TO_TIMESTAMP_TZ(:2, 'YYYY-MM-DD"T"HH24:MI:SS.FF9TZH:TZM'), "NAME" = :3, ` +
+		`"TS" = TO_TIMESTAMP(:4, 'YYYY-MM-DD"T"HH24:MI:SS.FF9'), ` +
+		`"TZ" = TO_TIMESTAMP_TZ(:5, 'YYYY-MM-DD"T"HH24:MI:SS.FF9TZH:TZM') WHERE "ID" = :6`; c.sql != want {
+		t.Errorf("sql  = %s\nwant = %s", c.sql, want)
+	}
+	// A zoneless type takes the clock the grid showed; a zoned one keeps the
+	// offset it was written with; text that is not a date column is untouched.
+	wantArgs := []any{
+		"2024-01-02T03:04:05", "2024-01-02T03:04:05.000000000+00:00", "2024-01-02T03:04:05Z",
+		"2024-01-02T03:04:05.123456000", "2024-01-02T03:04:05.500000000+02:00", json.Number("7"),
+	}
+	if fmt.Sprint(c.args) != fmt.Sprint(wantArgs) {
+		t.Errorf("args = %v\nwant   %v", c.args, wantArgs)
+	}
+	if !strings.Contains(c.rendered, `"D" = TO_DATE('2024-01-02T03:04:05', 'YYYY-MM-DD"T"HH24:MI:SS')`) ||
+		!strings.Contains(c.rendered, `"NAME" = '2024-01-02T03:04:05Z'`) {
+		t.Errorf("rendered = %s", c.rendered)
+	}
+	// What is not a date in any form this knows is left for Oracle to read,
+	// and to refuse in its own words.
+	c, err = p.render(Change{Op: ChangeInsert, Values: map[string]any{"ID": json.Number("1"), "D": "next tuesday", "TS": nil}})
+	if err != nil || c.sql != `INSERT INTO "APP"."T" ("D", "ID", "TS") VALUES (:1, :2, :3)` {
+		t.Errorf("an unreadable date = %v %v", c, err)
+	}
+
+	// No primary key: the row is the key, LOBs and all.
+	p.key = []string{}
+	c, err = p.render(Change{Op: ChangeDelete, Key: map[string]any{
+		"BODY": "text", "NBODY": "ntext", "RAWS": `\x00ff`, "DOC": map[string]any{"a": json.Number("1")}, "X": "<a/>",
+		"D": "2024-01-02T00:00:00Z", "NAME": nil,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `DELETE FROM "APP"."T" WHERE DBMS_LOB.COMPARE("BODY", TO_CLOB(:1)) = 0 AND ` +
+		`"D" = TO_DATE(:2, 'YYYY-MM-DD"T"HH24:MI:SS') AND JSON_EQUAL("DOC", :3) AND "NAME" IS NULL AND ` +
+		`DBMS_LOB.COMPARE("NBODY", TO_NCLOB(:4)) = 0 AND DBMS_LOB.COMPARE("RAWS", TO_BLOB(:5)) = 0 AND ` +
+		`DBMS_LOB.COMPARE(XMLSERIALIZE(CONTENT "X" AS CLOB NO INDENT), TO_CLOB(:6)) = 0`; c.sql != want {
+		t.Errorf("sql  = %s\nwant = %s", c.sql, want)
+	}
+	if len(c.args) != 6 || fmt.Sprint(c.args[4]) != fmt.Sprint([]byte{0x00, 0xff}) || c.args[2] != `{"a":1}` {
+		t.Errorf("args = %#v", c.args)
+	}
+	if !strings.Contains(c.rendered, `DBMS_LOB.COMPARE("BODY", TO_CLOB('text')) = 0`) || !strings.HasSuffix(c.rendered, ";") {
+		t.Errorf("rendered = %s", c.rendered)
+	}
+}
+
+// SQL Server is asked for the statement's own count, in the batch it runs in.
+func TestSQLServerChangesAskForTheirOwnCount(t *testing.T) {
+	counter, ok := mustDialect(t, DriverMSSQL).(ownRowCounter)
+	if !ok {
+		t.Fatal("SQL Server does not count its own rows")
+	}
+	if got := counter.countedSQL("DELETE FROM [t] WHERE [id] = @p1"); got != "DELETE FROM [t] WHERE [id] = @p1; SELECT @@ROWCOUNT AS jd_rows_touched" {
+		t.Errorf("counted statement = %s", got)
+	}
+	for _, driver := range []Driver{DriverPostgres, DriverMySQL, DriverSQLite, DriverOracle} {
+		if _, ok := mustDialect(t, driver).(ownRowCounter); ok {
+			t.Errorf("%s is asked for a count its driver already reports", driver)
+		}
 	}
 }
 

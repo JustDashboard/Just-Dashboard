@@ -170,6 +170,21 @@ type defaultlessUpdater interface {
 	updateCannotSetDefault() bool
 }
 
+// ownRowCounter is implemented by an engine whose driver reports, for an
+// UPDATE or a DELETE, the rows of everything the statement set off — a
+// trigger's writes added to the statement's own — or nothing at all when the
+// session has counting turned off. Either way the figure the one-row rule
+// needs is not the one that comes back, so the statement is made to say it.
+type ownRowCounter interface {
+	// countedSQL makes the statement answer with one row in a column named
+	// ownCountColumn: how many rows it touched itself.
+	countedSQL(statement string) string
+}
+
+// ownCountColumn names the result an ownRowCounter's statement answers with.
+// A name rather than a position: a trigger may answer in rows of its own.
+const ownCountColumn = "jd_rows_touched"
+
 // plannedChange is one change rendered and ready to run.
 type plannedChange struct {
 	op       string
@@ -188,6 +203,8 @@ type changePlan struct {
 	dialect Dialect
 	rel     string
 	columns map[string]Column
+	// ordered is the same columns in the table's own order.
+	ordered []Column
 	key     []string
 	changes []plannedChange
 }
@@ -228,7 +245,7 @@ func loadTable(ctx context.Context, db *sql.DB, driver Driver, schema, table str
 	if len(cols) == 0 {
 		return nil, fmt.Errorf("table %s was not found, or has no columns this account can see", table)
 	}
-	plan := &changePlan{dialect: d, rel: rel, columns: map[string]Column{}, key: []string{}}
+	plan := &changePlan{dialect: d, rel: rel, columns: map[string]Column{}, ordered: cols, key: []string{}}
 	for _, c := range cols {
 		plan.columns[c.Name] = c
 	}
@@ -285,6 +302,35 @@ func (p *changePlan) column(name string) (Column, string, error) {
 	return col, quoted, err
 }
 
+// operand prepares one value for a statement: what the driver binds for it,
+// how the marker that stands for it is written, and the same thing with the
+// value written in, for the statement the operator reads.
+func (p *changePlan) operand(col Column, v any) (arg any, write func(string) string, literal string, err error) {
+	if arg, err = cellArgument(col, p.dialect.Driver(), v); err != nil {
+		return nil, nil, "", err
+	}
+	write = func(operand string) string { return operand }
+	if w, ok := p.dialect.(valueWriter); ok {
+		bound, wrap := w.writeValue(col, arg)
+		if arg = bound; wrap != nil {
+			write = wrap
+		}
+	}
+	if literal, err = sqlLiteral(p.dialect, arg); err != nil {
+		return nil, nil, "", fmt.Errorf("column %s %w", col.Name, err)
+	}
+	return arg, write, write(literal), nil
+}
+
+// selection is the select list a row of the table is read back with, and what
+// its cells are typed by.
+func (p *changePlan) selection() (string, map[string]string) {
+	if project, err := projectionFor(p.dialect, p.ordered, nil); err == nil && project != nil {
+		return project.list, project.kinds
+	}
+	return "*", nil
+}
+
 // identity renders the WHERE that names one row.
 func (p *changePlan) identity(key map[string]any, argStart int) (string, []any, []string, error) {
 	if len(key) == 0 {
@@ -315,17 +361,12 @@ func (p *changePlan) identity(key map[string]any, argStart int) (string, []any, 
 			rendered = append(rendered, quoted+" IS NULL")
 			continue
 		}
-		arg, err := cellArgument(col, p.dialect.Driver(), key[name])
+		arg, write, literal, err := p.operand(col, key[name])
 		if err != nil {
 			return "", nil, nil, err
 		}
-		literal, err := sqlLiteral(p.dialect, arg)
-		if err != nil {
-			return "", nil, nil, fmt.Errorf("column %s %w", name, err)
-		}
-		expr := keyExprFor(p.dialect, col, quoted)
-		parts = append(parts, expr+" = "+p.dialect.Placeholder(argStart+len(args)))
-		rendered = append(rendered, expr+" = "+literal)
+		parts = append(parts, keyMatchFor(p.dialect, col, quoted, write(p.dialect.Placeholder(argStart+len(args)))))
+		rendered = append(rendered, keyMatchFor(p.dialect, col, quoted, literal))
 		args = append(args, arg)
 	}
 	return strings.Join(parts, " AND "), args, rendered, nil
@@ -350,16 +391,12 @@ func (p *changePlan) render(c Change) (*plannedChange, error) {
 				// every engine, including the ones with no DEFAULT keyword.
 				continue
 			}
-			arg, err := cellArgument(col, d.Driver(), c.Values[name])
+			arg, write, literal, err := p.operand(col, c.Values[name])
 			if err != nil {
 				return nil, err
 			}
-			literal, err := sqlLiteral(d, arg)
-			if err != nil {
-				return nil, fmt.Errorf("column %s %w", name, err)
-			}
 			names = append(names, quoted)
-			marks = append(marks, d.Placeholder(len(out.args)+1))
+			marks = append(marks, write(d.Placeholder(len(out.args)+1)))
 			literals = append(literals, literal)
 			out.args = append(out.args, arg)
 		}
@@ -410,15 +447,11 @@ func (p *changePlan) render(c Change) (*plannedChange, error) {
 				literals = append(literals, quoted+" = DEFAULT")
 				continue
 			}
-			arg, err := cellArgument(col, d.Driver(), c.Values[name])
+			arg, write, literal, err := p.operand(col, c.Values[name])
 			if err != nil {
 				return nil, err
 			}
-			literal, err := sqlLiteral(d, arg)
-			if err != nil {
-				return nil, fmt.Errorf("column %s %w", name, err)
-			}
-			sets = append(sets, quoted+" = "+d.Placeholder(len(out.args)+1))
+			sets = append(sets, quoted+" = "+write(d.Placeholder(len(out.args)+1)))
 			literals = append(literals, quoted+" = "+literal)
 			out.args = append(out.args, arg)
 		}
@@ -583,15 +616,15 @@ func (p *changePlan) applyOne(ctx context.Context, tx *sql.Tx, c *plannedChange,
 		return nil
 	}
 
-	res, err := runOn(ctx, tx, d.Driver(), c.sql, false, collectOptions{}, c.args...)
+	affected, err := p.execute(ctx, tx, c)
 	if err != nil {
 		return err
 	}
-	out.Affected = res.Affected
+	out.Affected = affected
 	switch c.op {
 	case ChangeDelete:
-		if res.Affected != 1 {
-			return &ChangeError{Conflict: true, Matched: res.Affected}
+		if affected != 1 {
+			return &ChangeError{Conflict: true, Matched: affected}
 		}
 		return nil
 	case ChangeUpdate:
@@ -599,12 +632,56 @@ func (p *changePlan) applyOne(ctx context.Context, tx *sql.Tx, c *plannedChange,
 			// Exactly one row was matched and locked above, whatever the engine
 			// says it changed.
 			out.Affected = 1
-		} else if res.Affected != 1 {
-			return &ChangeError{Conflict: true, Matched: res.Affected}
+		} else if affected != 1 {
+			return &ChangeError{Conflict: true, Matched: affected}
 		}
 	}
 	p.readBack(ctx, tx, c, out)
 	return nil
+}
+
+// execute runs a change that hands no row back and reports how many rows it
+// touched.
+func (p *changePlan) execute(ctx context.Context, tx *sql.Tx, c *plannedChange) (int64, error) {
+	counter, counted := p.dialect.(ownRowCounter)
+	if !counted || c.op == ChangeInsert {
+		res, err := runOn(ctx, tx, p.dialect.Driver(), c.sql, false, collectOptions{}, c.args...)
+		if err != nil {
+			return 0, err
+		}
+		return res.Affected, nil
+	}
+	args, err := sqlArguments(c.args)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := tx.QueryContext(ctx, counter.countedSQL(c.sql), args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	affected, found := int64(0), false
+	for {
+		if cols, err := rows.Columns(); err == nil && len(cols) == 1 && cols[0] == ownCountColumn {
+			if rows.Next() {
+				if err := rows.Scan(&affected); err != nil {
+					return 0, err
+				}
+				found = true
+			}
+		}
+		if !rows.NextResultSet() {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if !found {
+		// No count is not a count of one: the change is not kept.
+		return 0, fmt.Errorf("the engine did not say how many rows the change touched")
+	}
+	return affected, nil
 }
 
 // readBack fetches the row a change left behind, on the engines that cannot
@@ -635,8 +712,9 @@ func (p *changePlan) readBack(ctx context.Context, tx *sql.Tx, c *plannedChange,
 		return
 	}
 	tail, tailArgs := d.Paginate(2, 0, len(args)+1)
-	res, err := runOn(ctx, tx, d.Driver(), "SELECT * FROM "+p.rel+" WHERE "+where+" "+tail, true,
-		collectOptions{maxRows: 2}, append(args, tailArgs...)...)
+	list, kinds := p.selection()
+	res, err := runOn(ctx, tx, d.Driver(), "SELECT "+list+" FROM "+p.rel+" WHERE "+where+" "+tail, true,
+		collectOptions{maxRows: 2, kinds: kinds}, append(args, tailArgs...)...)
 	if err != nil || res.RowCount != 1 {
 		return
 	}

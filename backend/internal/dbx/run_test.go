@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -371,7 +372,7 @@ func TestOracleMeasuresACellBeforeReadingIt(t *testing.T) {
 		{"CLOB", `DBMS_LOB.GETLENGTH("c")`, true},
 		{"nclob", `DBMS_LOB.GETLENGTH("c")`, true},
 		{"JSON", `DBMS_LOB.GETLENGTH(JSON_SERIALIZE("c" RETURNING BLOB))`, false},
-		{"XMLTYPE", `DBMS_LOB.GETLENGTH(XMLSERIALIZE(CONTENT "c" AS CLOB))`, true},
+		{"XMLTYPE", `DBMS_LOB.GETLENGTH(XMLSERIALIZE(CONTENT "c" AS CLOB NO INDENT))`, true},
 		{"VARCHAR2(4000)", `VSIZE("c")`, false},
 		{"NUMBER(18,2)", `VSIZE("c")`, false},
 		{"RAW(16)", `VSIZE("c")`, false},
@@ -392,6 +393,157 @@ func TestOracleMeasuresACellBeforeReadingIt(t *testing.T) {
 	floor := (&CellTooLargeError{Size: MaxCellBytes + 1, AtLeast: true}).Error()
 	if !strings.Contains(exact, "is 8388609 bytes") || !strings.Contains(floor, "is at least 8388609 bytes") {
 		t.Errorf("exact: %q\nfloor: %q", exact, floor)
+	}
+}
+
+// Oracle's scope is that only a query is sent. The check reads the characters
+// of what is sent and nothing else, so it holds when the classifier's reading
+// of the statement was the thing that was wrong.
+func TestOnlyAQueryIsRunAsAReadOnOracle(t *testing.T) {
+	for query, want := range map[string]bool{
+		"SELECT 1 FROM dual":                                   true,
+		"select\n1 from dual":                                  true,
+		"  (SELECT 1 FROM dual) UNION SELECT 2 FROM dual":      true,
+		"WITH q AS (SELECT 1 n FROM dual) SELECT n FROM q":     true,
+		"with/* c */q AS (SELECT 1 FROM dual) SELECT * FROM q": true,
+		"SELECT(1) FROM dual":                                  true,
+		"SELECT":                                               false,
+		"SELECTED FROM t":                                      false,
+		"WITH$ AS x":                                           false,
+		"select_all()":                                         false,
+		"CREATE TABLE t (id INT)":                              false,
+		"DROP TABLE t":                                         false,
+		"INSERT INTO t SELECT 1 FROM dual":                     false,
+		"EXPLAIN PLAN FOR SELECT 1 FROM dual":                  false,
+		"BEGIN EXECUTE IMMEDIATE 'DROP TABLE t'; END":          false,
+		"/* SELECT */ DROP TABLE t":                            false,
+		"-- SELECT\nDROP TABLE t":                              false,
+		"":                                                     false,
+	} {
+		if got := beginsAsQuery(query); got != want {
+			t.Errorf("beginsAsQuery(%q) = %v, want %v", query, got, want)
+		}
+	}
+	if s := (oracleDialect{}).readScope(); s != readScopeQuery {
+		t.Errorf("Oracle's read scope = %v", s)
+	}
+	// So nothing that is called a read there may need more than a query:
+	// EXPLAIN PLAN is run as the write to the plan table that it is.
+	if st := mustStatement(t, DriverOracle, "EXPLAIN PLAN FOR SELECT 1 FROM dual"); st.Risk.Level != "medium" || st.returnsRows {
+		t.Errorf("Oracle's EXPLAIN PLAN is classified %s, returning rows %v", st.Risk.Level, st.returnsRows)
+	}
+	if st := mustStatement(t, DriverPostgres, "EXPLAIN SELECT 1"); st.Risk.Level != "read" || !st.returnsRows {
+		t.Errorf("PostgreSQL's EXPLAIN is classified %s, returning rows %v", st.Risk.Level, st.returnsRows)
+	}
+	// What the scope hands a statement to refuses before it reaches the engine:
+	// the queryer underneath is nil, and is never called.
+	guard := queryOnly{}
+	if _, err := guard.ExecContext(context.Background(), "CREATE TABLE smuggled (id INT)"); !errors.Is(err, ErrNotAQuery) {
+		t.Errorf("a schema change inside the scope = %v", err)
+	}
+	if _, err := guard.QueryContext(context.Background(), "DELETE FROM t RETURNING id"); !errors.Is(err, ErrNotAQuery) {
+		t.Errorf("a write that answers in rows inside the scope = %v", err)
+	}
+}
+
+// A table on an engine whose driver misreads some column types is selected
+// column by column and typed from the catalogue. Every other engine is asked
+// for * as before.
+func TestProjectionSelectsWhatTheDriverCannotRead(t *testing.T) {
+	cols := []Column{
+		{Name: "ID", Type: "NUMBER(10,0)"}, {Name: "DOC", Type: "JSON"}, {Name: "X", Type: "XMLTYPE"},
+		{Name: "FLAG", Type: "BOOLEAN"}, {Name: "BODY", Type: "BLOB"}, {Name: `odd"name`, Type: "VARCHAR2(10)"},
+	}
+	p, err := projectionFor(oracleDialect{}, cols, nil)
+	if err != nil || p == nil {
+		t.Fatalf("projection = %v %v", p, err)
+	}
+	if want := `"ID", "DOC", XMLSERIALIZE(CONTENT "X" AS CLOB NO INDENT) AS "X", "FLAG", "BODY", "odd""name"`; p.list != want {
+		t.Errorf("select list = %s\nwant          %s", p.list, want)
+	}
+	for name, want := range map[string]string{"ID": KindInteger, "DOC": KindJSON, "X": KindText, "FLAG": KindBoolean, "BODY": KindBinary} {
+		if p.kinds[name] != want {
+			t.Errorf("%s is typed %q, want %q", name, p.kinds[name], want)
+		}
+	}
+	// The grid's own choice of columns keeps its order, and a name the
+	// catalogue does not have is left for the engine to refuse.
+	p, err = projectionFor(oracleDialect{}, cols, []string{"X", "ID", "NOPE"})
+	if err != nil || p.list != `XMLSERIALIZE(CONTENT "X" AS CLOB NO INDENT) AS "X", "ID", "NOPE"` {
+		t.Errorf("narrowed select list = %v %v", p, err)
+	}
+	if _, err := projectionFor(oracleDialect{}, cols, []string{"bad\x00name"}); err == nil {
+		t.Error("a column name with a NUL in it was quoted")
+	}
+	for _, driver := range []Driver{DriverPostgres, DriverMySQL, DriverSQLite, DriverMSSQL, DriverClickHouse} {
+		if p, err := projectionFor(mustDialect(t, driver), cols, nil); p != nil || err != nil {
+			t.Errorf("%s was given a projection: %v %v", driver, p, err)
+		}
+	}
+	sel, err := browseSelect(oracleDialect{}, BrowseOptions{Schema: "APP", Table: "T", Columns: []string{"X", "ID"}, catalog: cols})
+	if err != nil || sel.query != `SELECT XMLSERIALIZE(CONTENT "X" AS CLOB NO INDENT) AS "X", "ID" FROM "APP"."T"` || sel.kinds["X"] != KindText {
+		t.Errorf("select = %v %v", sel, err)
+	}
+	// With no catalogue to go by, it is the statement every engine gets.
+	sel, err = browseSelect(oracleDialect{}, BrowseOptions{Schema: "APP", Table: "T"})
+	if err != nil || sel.query != `SELECT * FROM "APP"."T"` || sel.kinds != nil {
+		t.Errorf("select with no catalogue = %v %v", sel, err)
+	}
+}
+
+// Oracle compares a date with text by the session's own format, so a filter on
+// a date column is given the mask the grid's text is written in. Only where the
+// catalogue says the column is a date: everything else is bound as it came.
+func TestFiltersOnOracleDatesSayHowToReadThem(t *testing.T) {
+	catalog := []Column{
+		{Name: "D", Type: "DATE"}, {Name: "TS", Type: "TIMESTAMP(6)"},
+		{Name: "TZ", Type: "TIMESTAMP(6) WITH TIME ZONE"}, {Name: "NAME", Type: "VARCHAR2(50)"},
+	}
+	clause, args, err := buildWhereMatch(oracleDialect{}, []Filter{
+		{Column: "D", Op: "gte", Value: "2024-02-01"},
+		{Column: "TS", Op: "between", Values: []string{"2024-01-15T00:00:00Z", "2024-02-15 00:00:00.25"}},
+		{Column: "TZ", Op: "in", Values: []string{"2024-01-02T03:04:05+02:00"}},
+		{Column: "NAME", Op: "eq", Value: "2024-02-01"},
+		{Column: "D", Op: "eq", Value: "last week"},
+		{Column: "TS", Op: "contains", Value: "2024-02"},
+		{Column: "D", Op: "regex", Value: "^2024"},
+	}, false, 1, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ` WHERE "D" >= TO_DATE(:1, 'YYYY-MM-DD"T"HH24:MI:SS')` +
+		` AND "TS" BETWEEN TO_TIMESTAMP(:2, 'YYYY-MM-DD"T"HH24:MI:SS.FF9') AND TO_TIMESTAMP(:3, 'YYYY-MM-DD"T"HH24:MI:SS.FF9')` +
+		` AND "TZ" IN (TO_TIMESTAMP_TZ(:4, 'YYYY-MM-DD"T"HH24:MI:SS.FF9TZH:TZM'))` +
+		` AND "NAME" = :5 AND "D" = :6` +
+		` AND TO_CHAR(TO_CHAR("TS", 'YYYY-MM-DD"T"HH24:MI:SS.FF"Z"')) LIKE :7 ESCAPE '!'` +
+		` AND REGEXP_LIKE(TO_CHAR(TO_CHAR("D", 'YYYY-MM-DD"T"HH24:MI:SS"Z"')), :8)`
+	if clause != want {
+		t.Errorf("where = %s\nwant    %s", clause, want)
+	}
+	wantArgs := []any{
+		"2024-02-01T00:00:00", "2024-01-15T00:00:00.000000000", "2024-02-15T00:00:00.250000000",
+		"2024-01-02T03:04:05.000000000+02:00", "2024-02-01", "last week", "%2024-02%", "^2024",
+	}
+	if fmt.Sprint(args) != fmt.Sprint(wantArgs) {
+		t.Errorf("args = %v\nwant   %v", args, wantArgs)
+	}
+	// With no catalogue the filter is what it always was, on Oracle too.
+	clause, args, err = buildWhere(oracleDialect{}, []Filter{{Column: "D", Op: "gte", Value: "2024-02-01"}}, 1)
+	if err != nil || clause != ` WHERE "D" >= :1` || len(args) != 1 || args[0] != "2024-02-01" {
+		t.Errorf("without a catalogue = %s %v %v", clause, args, err)
+	}
+	// And no other engine is told anything: they read the text themselves.
+	clause, _, err = buildWhereMatch(mustDialect(t, DriverPostgres), []Filter{{Column: "D", Op: "gte", Value: "2024-02-01"}}, false, 1, catalog)
+	if err != nil || clause != ` WHERE "D" >= $1` {
+		t.Errorf("postgres = %s %v", clause, err)
+	}
+	for _, driver := range []Driver{DriverPostgres, DriverMySQL, DriverSQLite, DriverMSSQL, DriverClickHouse} {
+		if needsCatalog(mustDialect(t, driver)) {
+			t.Errorf("%s is said to need the catalogue for a page", driver)
+		}
+	}
+	if !needsCatalog(oracleDialect{}) {
+		t.Error("Oracle is not said to need the catalogue")
 	}
 }
 

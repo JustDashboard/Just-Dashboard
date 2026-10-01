@@ -26,10 +26,21 @@ console must not be a cheaper way to do what the kill and drop routes charge for
 A statement classified `read` runs inside the engine's own read-only scope (`dbx/run.go`), so a wrong
 verdict fails instead of writing: a read-only transaction on PostgreSQL, a read-only *session* on
 MySQL/MariaDB (`START TRANSACTION READ ONLY` lets DDL through — it commits implicitly first),
-`query_only` on SQLite, `readonly=2` sent with the query on ClickHouse, `SET TRANSACTION READ ONLY` on
-Oracle, and on SQL Server — which has none — a transaction that is always rolled back. Anything else
+`query_only` on SQLite, `readonly=2` sent with the query on ClickHouse, and on SQL Server — which has
+none — a transaction that is always rolled back, so a write there succeeds and is undone rather than
+refused. Oracle's read-only transaction is not used: a schema change commits the moment it runs and
+ends the transaction that was meant to refuse it (found live — `CREATE TABLE` and `DROP TABLE` both went
+through), and a table created or altered a few seconds ago cannot be read inside one at all
+(ORA-01466), which failed the last line of every script that makes a table and reads it. What Oracle
+does guarantee is that a query changes no data (DML inside one is ORA-14551), so its scope is that
+nothing but a query is sent: `beginsAsQuery` reads the characters of the text itself — not the lexer's
+or the classifier's reading of it, which is what the scope exists to distrust — and anything that does
+not begin with `SELECT` or `WITH` is refused before it reaches the engine, inside a transaction that is
+rolled back. Anything that is not a read
 runs on a connection of its own that is closed afterwards rather than pooled, because a pooled
-connection carries a `SET`, an open transaction or a temporary table into somebody else's request.
+connection carries a `SET`, an open transaction or a temporary table into somebody else's request. So
+is one whose statement was cancelled part-way: Oracle's driver leaves the interruption behind for the
+next statement on that connection to receive.
 A ClickHouse account may refuse the setting for two opposite reasons, and the refusals read alike, so
 the server is asked which (`clickhouseReadScope`): an account it already holds to reads runs under that
 limit, and one whose profile pins `readonly` at writable has no scope, so a statement called a read is
@@ -87,9 +98,24 @@ accounts retain partial results. Full table details and mutation preconditions u
   with none it is the row as it was read, a NULL compared as a NULL. Every UPDATE and DELETE must touch
   exactly one row or the whole set is rolled back and answered `409 change_conflict` naming the change
   (`field: changes[i]`, `reason: matched N rows`). MySQL counts rows *changed*, so there the match is
-  counted and locked first. A set containing a delete needs the destructive capability, checked in the
-  handler. ClickHouse is refused: its sorting key orders rows without identifying one. The older
+  counted and locked first. SQL Server's driver adds up every "rows affected" in the batch, a trigger's
+  included, and reports none when the session has `NOCOUNT` on, so there the statement is made to say
+  its own count (`; SELECT @@ROWCOUNT`, read by column name): a table with an audit trigger written
+  without `SET NOCOUNT ON` could not be edited at all. Its deadlock victim (error 1205) is run again
+  like a serialization failure. A set containing a delete needs the destructive capability, checked in
+  the handler. ClickHouse is refused: its sorting key orders rows without identifying one. The older
   single-row routes are this with a set of one. Row values and keys never reach the audit log.
+- **A value goes back the way the grid showed it.** A date is shown as RFC 3339, bytes as `\x…`, a
+  decimal as its digits, and an edit — or the whole-row key of a table with no primary key — sends
+  those forms back. Five engines read them by themselves. Oracle reads text into a date by the
+  session's NLS format and has no `=` for a LOB, so three optional dialect hooks say what it needs:
+  `valueWriter` wraps the bind marker of a date column in `TO_DATE` / `TO_TIMESTAMP` /
+  `TO_TIMESTAMP_TZ` with a fixed mask (the value is still bound; browse filters go through the same
+  hook), `keyMatcher` compares a CLOB, NCLOB or BLOB with `DBMS_LOB.COMPARE` and a JSON column with
+  `JSON_EQUAL`, and `columnTexter` gives a substring filter the text the grid shows rather than
+  `01-FEB-24`. `TestLiveARowGoesBackAsTheGridShowedIt` writes every type back as displayed and deletes
+  the row by it, on every engine. The statements a change set shows for review take the same wrappers
+  around their literals, and `TestLiveReviewedStatementsAreTheEnginesOwnSQL` runs them as written.
 - **A cell is typed by its column, not its content.** A binary column is hex whatever its bytes spell
   (`\x…`, which an edit may send straight back), a result carries each column's `kinds`, and a value
   cut for the page — a long text, a blob past the preview — is listed in `clipped` with its size and
@@ -97,6 +123,15 @@ accounts retain partial results. Full table details and mutation preconditions u
   on the server before it is fetched: `byteLength` is part of `Dialect`, so an engine cannot be added
   without saying how. Where the engine can only count characters (an Oracle CLOB) the figure is a
   floor and the refusal says "at least"; a type it cannot measure at all (Oracle's LONG) is not read.
+  A driver's name for a result column is not always what the column is. go-ora names its wire types:
+  a JSON column is a BLOB locator, a BOOLEAN a NUMBER, a BLOB a long raw, and an XMLTYPE it cannot
+  read at all — one such column left the page of the whole table waiting for ever. So a dialect may be
+  a `columnReader`: its tables are then selected column by column (`projectionFor`, an XMLTYPE through
+  `XMLSERIALIZE … NO INDENT`) and typed from the catalogue, in the page, the row a change hands back,
+  the cell read and the value search alike. `withCatalog` is the one extra catalogue read that costs,
+  and only Oracle pays it. A query typed into the editor has no catalogue to ask and is typed by the
+  driver's names, which `ValueKind` knows. A SQL Server `uniqueidentifier` is its GUID text in a page
+  and in a cell, never the sixteen bytes of the wire form.
 - `rowsql.go` is the one exception and does not generalise: it renders a row as an INSERT **for the
   clipboard**. Nothing executes what it produces, and no code path may call it and then run the result.
   `TestLiveRowInsertSQLQuoting` feeds `'); DROP TABLE …` to every live engine and checks the table stands.
@@ -191,6 +226,12 @@ accounts retain partial results. Full table details and mutation preconditions u
   reporting four times the real size, Postgres's `now()` being the *transaction* timestamp and so
   reporting a negative session age. Oracle has an optional live fixture using `JD_TEST_ORACLE_DSN`;
   without a configured server, its unit coverage does not establish live-engine compatibility.
+  The table editor and query runner's own live tests (`dbx/live_workbench_test.go`) run each case on
+  PostgreSQL, MariaDB, MySQL 8 (`JD_TEST_MYSQL8_DSN`), SQL Server and Oracle, and never fall back to a
+  standard port: an engine is named by its variable or skipped. The Oracle cases that use the JSON and
+  BOOLEAN types need 23ai, and the two that watch another session (`v$session`) need
+  `JD_TEST_ORACLE_ADMIN_DSN`. On a server shared between runs, point `JD_TEST_MSSQL_DSN` at a database
+  of the run's own; every table these tests make is named `jdwb_…`.
 
 - **The section opens on every database at once.** `GET /databases/fleet` dials every saved
   connection concurrently (six at a time, twelve seconds each) and hands back the row's facts with

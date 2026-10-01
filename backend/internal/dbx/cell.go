@@ -119,7 +119,11 @@ func ReadCell(ctx context.Context, db *sql.DB, driver Driver, schema, table, col
 		return nil, &CellTooLargeError{Size: sizes[0].Int64, AtLeast: floor}
 	}
 
-	rows, err = db.QueryContext(ctx, "SELECT "+quoted+" FROM "+plan.rel+" WHERE "+where+" "+tail, args...)
+	read := quoted
+	if reader, ok := d.(columnReader); ok {
+		read = reader.readExpr(col, quoted)
+	}
+	rows, err = db.QueryContext(ctx, "SELECT "+read+" FROM "+plan.rel+" WHERE "+where+" "+tail, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +151,10 @@ func ReadCell(ctx context.Context, db *sql.DB, driver Driver, schema, table, col
 // fill encodes a scanned value. Unlike a grid cell nothing is cut and nothing
 // is guessed from the content: a binary column is bytes, whatever they spell.
 func (c *CellValue) fill(driver Driver, v any) error {
+	if flag, ok := oracleBoolean(driver, c.Kind, v); ok {
+		c.Encoding, c.Value = "json", flag
+		return nil
+	}
 	switch t := v.(type) {
 	case nil:
 		c.Encoding, c.Value = "null", nil
@@ -154,6 +162,11 @@ func (c *CellValue) fill(driver Driver, v any) error {
 		c.Size = int64(len(t))
 		if c.Size > MaxCellBytes {
 			return &CellTooLargeError{Size: c.Size}
+		}
+		if id, ok := mssqlGUID(driver, c.Type, t); ok {
+			// The same text the grid shows, not the bytes it travels as.
+			c.Encoding, c.Value = "text", id
+			return nil
 		}
 		if c.Kind != KindBinary && driver != DriverSQLite && utf8.Valid(t) {
 			c.Encoding, c.Value = "text", string(t)

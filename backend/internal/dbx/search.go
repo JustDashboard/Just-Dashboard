@@ -85,7 +85,7 @@ func Search(ctx context.Context, db *sql.DB, driver Driver, schema, needle strin
 		if len(cols) > searchMaxColumns {
 			cols = cols[:searchMaxColumns]
 		}
-		matches, err := searchTable(ctx, db, d, t, cols, needle)
+		matches, err := searchTable(ctx, db, d, t, cols, cols, needle)
 		if err != nil {
 			// One column the engine will not cast — an image, a spatial type —
 			// used to cost the whole table. Asked one at a time, the columns
@@ -114,7 +114,7 @@ func searchColumns(ctx context.Context, db *sql.DB, d Dialect, t Table, cols []C
 	var out []SearchMatch
 	searched := 0
 	for _, c := range cols {
-		matches, err := searchTable(ctx, db, d, t, []Column{c}, needle)
+		matches, err := searchTable(ctx, db, d, t, cols, []Column{c}, needle)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -133,7 +133,9 @@ func searchColumns(ctx context.Context, db *sql.DB, d Dialect, t Table, cols []C
 	return out, nil
 }
 
-func searchTable(ctx context.Context, db *sql.DB, d Dialect, t Table, cols []Column, needle string) ([]SearchMatch, error) {
+// searchTable looks for the needle in cols and returns the matching rows of
+// the table, whose columns are row.
+func searchTable(ctx context.Context, db *sql.DB, d Dialect, t Table, row, cols []Column, needle string) ([]SearchMatch, error) {
 	rel, err := qualify(d, t.Schema, t.Name)
 	if err != nil {
 		return nil, err
@@ -145,6 +147,14 @@ func searchTable(ctx context.Context, db *sql.DB, d Dialect, t Table, cols []Col
 		q, err := d.QuoteIdent(c.Name)
 		if err != nil {
 			continue
+		}
+		// Looked for in the text the grid shows the column as, where the
+		// engine's own cast would produce some other text.
+		if reader, ok := d.(columnReader); ok {
+			q = reader.readExpr(c, q)
+		}
+		if texter, ok := d.(columnTexter); ok {
+			q = texter.textExpr(c, q)
 		}
 		// The marker is numbered by what has been bound, not by the column's
 		// position, so a skipped column leaves no gap.
@@ -158,9 +168,18 @@ func searchTable(ctx context.Context, db *sql.DB, d Dialect, t Table, cols []Col
 
 	tail, tailArgs := d.Paginate(searchMaxPerTable, 0, len(args)+1)
 	args = append(args, tailArgs...)
-	query := fmt.Sprintf("SELECT * FROM %s WHERE %s %s", rel, strings.Join(preds, " OR "), tail)
+	// The row is shown beside the match, so it is selected the way a page of
+	// the table is: on Oracle one XMLTYPE column in a plain SELECT * left the
+	// driver waiting for ever, and the search with it.
+	list, kinds := "*", map[string]string(nil)
+	if project, err := projectionFor(d, row, nil); err != nil {
+		return nil, err
+	} else if project != nil {
+		list, kinds = project.list, project.kinds
+	}
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s %s", list, rel, strings.Join(preds, " OR "), tail)
 
-	res, err := runOn(ctx, db, d.Driver(), query, true, collectOptions{maxRows: searchMaxPerTable}, args...)
+	res, err := runOn(ctx, db, d.Driver(), query, true, collectOptions{maxRows: searchMaxPerTable, kinds: kinds}, args...)
 	if err != nil {
 		return nil, err
 	}

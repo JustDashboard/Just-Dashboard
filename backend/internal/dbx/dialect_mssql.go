@@ -388,6 +388,16 @@ func (mssqlDialect) keyExpr(column Column, quoted string) string {
 	return quoted
 }
 
+// countedSQL asks for @@ROWCOUNT in the batch the statement runs in. The
+// driver's own figure adds up every "rows affected" the batch produced, so an
+// audit trigger written without SET NOCOUNT ON turned one edited row into
+// three and the edit into a conflict; and a login whose sessions start with
+// NOCOUNT on reported none, which read as the row having gone. @@ROWCOUNT
+// straight after the statement is the statement's own count in both cases.
+func (mssqlDialect) countedSQL(statement string) string {
+	return statement + "; SELECT @@ROWCOUNT AS " + ownCountColumn
+}
+
 func (mssqlDialect) byteLength(_ Column, quoted string) (string, bool, error) {
 	return "DATALENGTH(" + quoted + ")", false, nil
 }

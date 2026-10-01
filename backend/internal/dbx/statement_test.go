@@ -24,6 +24,12 @@ func TestClassifyForReadsEachEngine(t *testing.T) {
 		{DriverMySQL, "SELECT * FROM users INTO OUTFILE '/tmp/x'", "high"},
 		{DriverPostgres, "COPY (SELECT 1) TO PROGRAM 'curl example.org'", "critical"},
 		{DriverPostgres, "EXPLAIN ANALYZE DELETE FROM t WHERE id = 1", "high"},
+		// Oracle's EXPLAIN PLAN answers with nothing and writes the plan into
+		// the session's plan table, so there it is not a read.
+		{DriverOracle, "EXPLAIN PLAN FOR SELECT * FROM t", "medium"},
+		{DriverOracle, "EXPLAIN PLAN FOR DELETE FROM t", "critical"},
+		{DriverPostgres, "EXPLAIN SELECT * FROM t", "read"},
+		{DriverMySQL, "EXPLAIN SELECT * FROM t", "read"},
 		{DriverPostgres, "REFRESH MATERIALIZED VIEW totals", "high"},
 		{DriverPostgres, "BEGIN", "high"},
 		{DriverSQLite, "PRAGMA journal_mode = WAL", "high"},

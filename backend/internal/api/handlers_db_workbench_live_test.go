@@ -175,3 +175,180 @@ func TestLiveAPIWorkbenchMySQL(t *testing.T) {
 		})
 	}
 }
+
+// SQL Server and Oracle over the same routes. What differs is what the two
+// engines made hard: a date goes back to Oracle in the form the grid showed
+// it, a regex filter is refused where there is none, the only plan is text,
+// and a cancelled statement stops on a server that has no SLEEP to cancel.
+func TestLiveAPIWorkbenchSQLServerAndOracle(t *testing.T) {
+	type engine struct {
+		driver dbx.Driver
+		env    string
+		schema string
+		// name is an identifier as the catalogue holds it.
+		name func(string) string
+		// create, slow and dual spell the fixture's table, a statement that
+		// runs for minutes, and the tail a SELECT of a constant needs.
+		create, slow, dual string
+		regex              bool
+	}
+	same := func(s string) string { return s }
+	for _, e := range []engine{
+		{
+			driver: dbx.DriverMSSQL, env: "JD_TEST_MSSQL_DSN", schema: "dbo", name: same,
+			create: `CREATE TABLE jdwb_api_workbench (id INT PRIMARY KEY, label NVARCHAR(50) NOT NULL, seen DATETIME2)`,
+			slow:   `SELECT COUNT_BIG(*) FROM sys.all_columns a CROSS JOIN sys.all_columns b CROSS JOIN sys.all_columns c`,
+		},
+		{
+			driver: dbx.DriverOracle, env: "JD_TEST_ORACLE_DSN", name: strings.ToUpper,
+			create: `CREATE TABLE jdwb_api_workbench (id NUMBER(10) PRIMARY KEY, label VARCHAR2(50) NOT NULL, seen DATE)`,
+			slow:   `SELECT COUNT(*) FROM all_objects a, all_objects b, all_objects c`,
+			dual:   " FROM dual", regex: true,
+		},
+	} {
+		t.Run(string(e.driver), func(t *testing.T) {
+			r, id := liveWorkbenchRouter(t, e.driver, e.env)
+			table := e.name("jdwb_api_workbench")
+			post := func(route, body string) *httptest.ResponseRecorder {
+				t.Helper()
+				return do(t, r, http.MethodPost, pathf("/databases/%d/"+route, id), body)
+			}
+			get := func(route string, query url.Values) *httptest.ResponseRecorder {
+				t.Helper()
+				query.Set("schema", e.schema)
+				query.Set("table", table)
+				return do(t, r, http.MethodGet, pathf("/databases/%d/"+route, id)+"?"+query.Encode(), "")
+			}
+			cleanup := func() { post("script", `{"script":"DROP TABLE jdwb_api_workbench"}`) }
+			cleanup()
+			t.Cleanup(cleanup)
+
+			// A script that makes a table, fills it and reads it back.
+			rec := post("script", `{"script":"`+e.create+`;\nINSERT INTO jdwb_api_workbench (id, label) VALUES (1, 'a');\nINSERT INTO jdwb_api_workbench (id, label) VALUES (2, 'b');\nSELECT COUNT(*) FROM jdwb_api_workbench"}`)
+			script := decodeJSONBody[scriptJSON](t, rec)
+			if rec.Code != http.StatusOK || script.Failed != -1 || len(script.Statements) != 4 {
+				t.Fatalf("script = %d %s", rec.Code, rec.Body.String())
+			}
+			if got := script.Statements[3].Result.Rows[0][0]; got != "2" {
+				t.Errorf("the script's read of the table it made = %v", got)
+			}
+
+			// The grid's edits: a date written as the grid shows one, a row
+			// whose key the request supplied coming back as stored.
+			rec = post("changes", `{"schema":"`+e.schema+`","table":"`+table+`","changes":[
+				{"op":"update","key":{"`+e.name("id")+`":1},"values":{"`+e.name("seen")+`":"2024-05-06T07:08:09Z"}},
+				{"op":"insert","values":{"`+e.name("id")+`":3,"`+e.name("label")+`":"c"}}]}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("changes = %d: %s", rec.Code, rec.Body.String())
+			}
+			changes := decodeJSONBody[changesResponse](t, rec)
+			if row := changes.Results[0].Row; row == nil || row[e.name("seen")] != "2024-05-06T07:08:09Z" {
+				t.Errorf("the row after its date was edited = %v", changes.Results[0].Row)
+			}
+			if row := changes.Results[1].Row; row == nil || row[e.name("id")] != "3" || row[e.name("label")] != "c" {
+				t.Errorf("the inserted row = %v", changes.Results[1].Row)
+			}
+			// The same date is what finds the row again, and a key that
+			// finds none undoes the set and says which change it was.
+			rec = post("changes", `{"schema":"`+e.schema+`","table":"`+table+`","changes":[
+				{"op":"update","key":{"`+e.name("id")+`":1,"`+e.name("seen")+`":"2024-05-06T07:08:09Z"},"values":{"`+e.name("label")+`":"first"}},
+				{"op":"delete","key":{"`+e.name("id")+`":99}}]}`)
+			conflict := decodeJSONBody[errorEnvelope](t, rec).Error
+			if rec.Code != http.StatusConflict || conflict.Code != "change_conflict" || conflict.Field != "changes[1]" || conflict.Reason != "matched 0 rows" {
+				t.Errorf("a set with a stale delete = %d %s", rec.Code, rec.Body.String())
+			}
+			rec = post("changes", `{"schema":"`+e.schema+`","table":"`+table+`","changes":[
+				{"op":"update","key":{"`+e.name("id")+`":1,"`+e.name("seen")+`":"2024-05-06T07:08:09Z"},"values":{"`+e.name("label")+`":"first"}}]}`)
+			if rec.Code != http.StatusOK {
+				t.Errorf("an edit keyed by the row's date = %d: %s", rec.Code, rec.Body.String())
+			}
+
+			// The page: key, kinds, estimate; and one cell of it, whole.
+			rec = get("browse", url.Values{"filters": {`[{"column":"` + e.name("label") + `","op":"icontains","value":"FIR"}]`}})
+			page := decodeJSONBody[browseJSON](t, rec)
+			if rec.Code != http.StatusOK || page.RowCount != 1 || len(page.PrimaryKey) != 1 || page.PrimaryKey[0] != e.name("id") {
+				t.Errorf("browse = %d %s", rec.Code, rec.Body.String())
+			}
+			rec = get("browse", url.Values{"filters": {`[{"column":"` + e.name("label") + `","op":"regex","value":"^fi"}]`}})
+			if e.regex && (rec.Code != http.StatusOK || decodeJSONBody[browseJSON](t, rec).RowCount != 1) {
+				t.Errorf("a regex filter = %d %s", rec.Code, rec.Body.String())
+			}
+			if !e.regex && rec.Code != http.StatusBadRequest {
+				t.Errorf("a regex filter on an engine with none = %d %s", rec.Code, rec.Body.String())
+			}
+			rec = get("cell", url.Values{"column": {e.name("label")}, "key": {`{"` + e.name("id") + `":1}`}})
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"value":"first"`) {
+				t.Errorf("cell = %d %s", rec.Code, rec.Body.String())
+			}
+
+			// The plan is text here, and the other forms say they are not offered.
+			rec = post("explain", `{"query":"SELECT * FROM jdwb_api_workbench WHERE id > 1"}`)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"format":"text"`) {
+				t.Errorf("text plan = %d %.300s", rec.Code, rec.Body.String())
+			}
+			for _, body := range []string{
+				`{"query":"SELECT * FROM jdwb_api_workbench","format":"json"}`,
+				`{"query":"DELETE FROM jdwb_api_workbench","analyze":true}`,
+			} {
+				rec = post("explain", body)
+				if rec.Code != http.StatusBadRequest || decodeJSONBody[errorEnvelope](t, rec).Error.Code != "unsupported" {
+					t.Errorf("explain %s = %d %s", body, rec.Code, rec.Body.String())
+				}
+			}
+			rec = get("count", url.Values{})
+			if !strings.Contains(rec.Body.String(), `"count":3`) {
+				t.Errorf("rows after the refused plans = %s, want all three", rec.Body.String())
+			}
+
+			// A read is a query. What Oracle would run as something else is
+			// refused before it is sent, in words the editor can show.
+			rec = post("query", `{"query":"SELECT label FROM jdwb_api_workbench WHERE id = 3"}`)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"rows":[["c"]]`) {
+				t.Errorf("query = %d %s", rec.Code, rec.Body.String())
+			}
+			if e.driver == dbx.DriverOracle {
+				rec = post("query", `{"query":"DESCRIBE jdwb_api_workbench"}`)
+				if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "does not begin with SELECT or WITH") {
+					t.Errorf("a statement called a read that is not a query = %d %s", rec.Code, rec.Body.String())
+				}
+				// EXPLAIN PLAN writes to the session's plan table, so it is not
+				// called a read, and the script's next line reads the plan.
+				rec = post("script", `{"script":"EXPLAIN PLAN FOR SELECT * FROM jdwb_api_workbench;\nSELECT plan_table_output FROM TABLE(DBMS_XPLAN.DISPLAY())"}`)
+				plan := decodeJSONBody[scriptJSON](t, rec)
+				if rec.Code != http.StatusOK || plan.Failed != -1 || plan.Risk.Level != "medium" || len(plan.Statements[1].Result.Rows) == 0 {
+					t.Errorf("EXPLAIN PLAN and its plan in one script = %d %s", rec.Code, rec.Body.String())
+				}
+			}
+
+			// A named run is stopped on request, says it was, and leaves the
+			// connection pool fit for the next statement.
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() { done <- post("query", `{"queryId":"live-slow","query":"`+e.slow+`"}`) }()
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				rec := post("query/cancel", `{"queryId":"live-slow"}`)
+				if strings.Contains(rec.Body.String(), `"cancelled":true`) {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("the run never became cancellable")
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			select {
+			case rec := <-done:
+				if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "query_cancelled") {
+					t.Errorf("the cancelled run answered %d: %s", rec.Code, rec.Body.String())
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("the run did not stop")
+			}
+			for i := 0; i < 3; i++ {
+				rec = post("query", `{"query":"SELECT 1`+e.dual+`"}`)
+				if rec.Code != http.StatusOK {
+					t.Errorf("a query after the cancelled one = %d %s", rec.Code, rec.Body.String())
+				}
+			}
+		})
+	}
+}

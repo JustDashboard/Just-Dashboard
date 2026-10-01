@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type oracleDialect struct{}
@@ -364,7 +365,125 @@ func (oracleDialect) AdminDatabase() string { return "" }
 
 // --- the workbench ---------------------------------------------------------
 
-func (oracleDialect) readScope() readScope { return readScopeOracle }
+func (oracleDialect) readScope() readScope { return readScopeQuery }
+
+// oracleType is a catalogue type without its sizes: TIMESTAMP(6) WITH TIME
+// ZONE is TIMESTAMP WITH TIME ZONE, VARCHAR2(255) is VARCHAR2.
+func oracleType(name string) string {
+	var b strings.Builder
+	depth := 0
+	for _, r := range strings.ToUpper(strings.TrimSpace(name)) {
+		switch {
+		case r == '(':
+			depth++
+		case r == ')':
+			depth--
+		case depth == 0:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// gridTimeLayouts are the forms a date arrives in from the grid: the RFC 3339
+// a cell is shown as, and what a person types into one.
+var gridTimeLayouts = []string{
+	time.RFC3339Nano, "2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05.999999999", "2006-01-02",
+}
+
+// writeValue tells Oracle how to read a date. Every other engine here reads
+// the grid's RFC 3339 text into a date column by itself; Oracle reads text by
+// the session's NLS format, which is DD-MON-RR unless somebody changed it, so
+// a date cell could be neither edited nor used to find its row. The text is
+// still bound; only the mask it is read with is written into the statement.
+//
+// A DATE and a TIMESTAMP hold no zone, and the grid shows their wall clock
+// with a Z, so that is the clock written back. The two zoned types hold an
+// instant and are given one.
+func (oracleDialect) writeValue(column Column, arg any) (any, func(string) string) {
+	text, ok := arg.(string)
+	if !ok {
+		return arg, nil
+	}
+	var mask, layout string
+	zoned := false
+	switch oracleType(column.Type) {
+	case "DATE":
+		mask, layout = `TO_DATE(%s, 'YYYY-MM-DD"T"HH24:MI:SS')`, "2006-01-02T15:04:05"
+	case "TIMESTAMP":
+		mask, layout = `TO_TIMESTAMP(%s, 'YYYY-MM-DD"T"HH24:MI:SS.FF9')`, "2006-01-02T15:04:05.000000000"
+	case "TIMESTAMP WITH TIME ZONE", "TIMESTAMP WITH LOCAL TIME ZONE":
+		mask, layout = `TO_TIMESTAMP_TZ(%s, 'YYYY-MM-DD"T"HH24:MI:SS.FF9TZH:TZM')`, "2006-01-02T15:04:05.000000000-07:00"
+		zoned = true
+	default:
+		return arg, nil
+	}
+	for _, form := range gridTimeLayouts {
+		at, err := time.Parse(form, strings.TrimSpace(text))
+		if err != nil {
+			continue
+		}
+		if !zoned {
+			at = at.UTC()
+		}
+		// A zoned value keeps the offset it was written with: it is part of
+		// what TIMESTAMP WITH TIME ZONE stores.
+		return at.Format(layout), func(operand string) string { return fmt.Sprintf(mask, operand) }
+	}
+	// Not a form this knows: Oracle reads it by the session's own format, and
+	// says so when it cannot.
+	return arg, nil
+}
+
+// textExpr is a date as the grid writes it. TO_CHAR on its own uses the
+// session's format — 01-FEB-24 — so a filter for "2024-02" on a date column
+// matched nothing, in a column full of them.
+func (oracleDialect) textExpr(column Column, quoted string) string {
+	switch oracleType(column.Type) {
+	case "DATE":
+		return "TO_CHAR(" + quoted + `, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`
+	case "TIMESTAMP":
+		return "TO_CHAR(" + quoted + `, 'YYYY-MM-DD"T"HH24:MI:SS.FF"Z"')`
+	case "TIMESTAMP WITH TIME ZONE", "TIMESTAMP WITH LOCAL TIME ZONE":
+		// Shown as the instant in UTC, so that is the text looked in.
+		return "TO_CHAR(SYS_EXTRACT_UTC(" + quoted + `), 'YYYY-MM-DD"T"HH24:MI:SS.FF"Z"')`
+	}
+	return quoted
+}
+
+// keyMatch compares the types Oracle has no = for. A keyless table is matched
+// on its whole row, and one LOB column in it used to make every row of it
+// unreachable (ORA-22848).
+func (oracleDialect) keyMatch(column Column, quoted, operand string) string {
+	switch oracleType(column.Type) {
+	case "CLOB":
+		return "DBMS_LOB.COMPARE(" + quoted + ", TO_CLOB(" + operand + ")) = 0"
+	case "NCLOB":
+		return "DBMS_LOB.COMPARE(" + quoted + ", TO_NCLOB(" + operand + ")) = 0"
+	case "BLOB":
+		return "DBMS_LOB.COMPARE(" + quoted + ", TO_BLOB(" + operand + ")) = 0"
+	case "JSON":
+		return "JSON_EQUAL(" + quoted + ", " + operand + ")"
+	case "XMLTYPE":
+		return "DBMS_LOB.COMPARE(" + oracleXMLText(quoted) + ", TO_CLOB(" + operand + ")) = 0"
+	}
+	return ""
+}
+
+// oracleXMLText is an XMLTYPE as the text it was written as. NO INDENT, or
+// Oracle lays the document out afresh and the text is no longer the value.
+func oracleXMLText(quoted string) string {
+	return "XMLSERIALIZE(CONTENT " + quoted + " AS CLOB NO INDENT)"
+}
+
+// readExpr serialises an XMLTYPE on the server. The driver cannot read the
+// object form at all, and one such column used to fail the whole page.
+func (oracleDialect) readExpr(column Column, quoted string) string {
+	if oracleType(column.Type) == "XMLTYPE" {
+		return oracleXMLText(quoted)
+	}
+	return quoted
+}
 
 func (d oracleDialect) regexMatch(expr, ph string) string {
 	return "REGEXP_LIKE(" + d.CastText(expr) + ", " + ph + ")"
@@ -397,7 +516,7 @@ func (oracleDialect) byteLength(column Column, quoted string) (string, bool, err
 	case "JSON":
 		return "DBMS_LOB.GETLENGTH(JSON_SERIALIZE(" + quoted + " RETURNING BLOB))", false, nil
 	case "XMLTYPE":
-		return "DBMS_LOB.GETLENGTH(XMLSERIALIZE(CONTENT " + quoted + " AS CLOB))", true, nil
+		return "DBMS_LOB.GETLENGTH(" + oracleXMLText(quoted) + ")", true, nil
 	case "LONG", "LONG RAW":
 		return "", false, fmt.Errorf(
 			"Oracle cannot say how large a %s value is without reading it, so the dashboard does not read one whole", kind)

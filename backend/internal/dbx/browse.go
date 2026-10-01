@@ -52,6 +52,10 @@ type BrowseOptions struct {
 	StableKey []string
 	// ClipText cuts text cells to this many bytes. 0 leaves text whole.
 	ClipText int
+
+	// catalog is the table's columns, for the engines whose statements depend
+	// on what a column is (needsCatalog). withCatalog fills it in.
+	catalog []Column
 }
 
 const (
@@ -107,17 +111,35 @@ func FilterOpsFor(driver Driver) []string {
 }
 
 // filterCondition renders one filter and appends what it binds. n is the next
-// placeholder number.
-func filterCondition(d Dialect, f Filter, n int) (string, []any, error) {
+// placeholder number. column is what the catalogue says the filtered column
+// is, where the engine needs to know, and nil everywhere else.
+func filterCondition(d Dialect, f Filter, n int, column *Column) (string, []any, error) {
 	col, err := d.QuoteIdent(f.Column)
 	if err != nil {
 		return "", nil, err
 	}
+	// operand is the bind marker for one value of the column, and what to
+	// bind: the text as it came, unless the engine has to be told how to read
+	// it (valueWriter).
+	operand := func(n int, value string) (string, any) {
+		if w, ok := d.(valueWriter); ok && column != nil {
+			if bound, write := w.writeValue(*column, value); write != nil {
+				return write(d.Placeholder(n)), bound
+			}
+		}
+		return d.Placeholder(n), value
+	}
+	// text is the column as the text the grid shows it as.
+	text := col
+	if w, ok := d.(columnTexter); ok && column != nil {
+		text = w.textExpr(*column, col)
+	}
 	if sqlOp, ok := comparisonOps[f.Op]; ok {
-		return col + " " + sqlOp + " " + d.Placeholder(n), []any{f.Value}, nil
+		mark, bound := operand(n, f.Value)
+		return col + " " + sqlOp + " " + mark, []any{bound}, nil
 	}
 	if spec, ok := substringOps[f.Op]; ok {
-		frag, pattern := textMatchFor(d, col, spec.kind, spec.fold, d.Placeholder(n))
+		frag, pattern := textMatchFor(d, text, spec.kind, spec.fold, d.Placeholder(n))
 		if spec.negate {
 			frag = "NOT (" + frag + ")"
 		}
@@ -141,8 +163,7 @@ func filterCondition(d Dialect, f Filter, n int) (string, []any, error) {
 		marks := make([]string, len(values))
 		args := make([]any, len(values))
 		for i, v := range values {
-			marks[i] = d.Placeholder(n + i)
-			args[i] = v
+			marks[i], args[i] = operand(n+i, v)
 		}
 		word := " IN ("
 		if f.Op == "not_in" {
@@ -153,14 +174,15 @@ func filterCondition(d Dialect, f Filter, n int) (string, []any, error) {
 		if len(f.Values) != 2 {
 			return "", nil, fmt.Errorf("the between filter takes exactly two values")
 		}
-		return col + " BETWEEN " + d.Placeholder(n) + " AND " + d.Placeholder(n+1),
-			[]any{f.Values[0], f.Values[1]}, nil
+		from, low := operand(n, f.Values[0])
+		to, high := operand(n+1, f.Values[1])
+		return col + " BETWEEN " + from + " AND " + to, []any{low, high}, nil
 	case "regex":
 		m, ok := d.(regexMatcher)
 		if !ok {
 			return "", nil, fmt.Errorf("this engine has no regular-expression match")
 		}
-		return m.regexMatch(col, d.Placeholder(n)), []any{f.Value}, nil
+		return m.regexMatch(text, d.Placeholder(n)), []any{f.Value}, nil
 	}
 	return "", nil, fmt.Errorf("unsupported filter operator %q", f.Op)
 }
@@ -169,17 +191,23 @@ func filterCondition(d Dialect, f Filter, n int) (string, []any, error) {
 // arguments. argStart is the first placeholder number to use, so the caller can
 // place the filters before or after its own paging parameters.
 func buildWhere(d Dialect, filters []Filter, argStart int) (string, []any, error) {
-	return buildWhereMatch(d, filters, false, argStart)
+	return buildWhereMatch(d, filters, false, argStart, nil)
 }
 
-func buildWhereMatch(d Dialect, filters []Filter, matchAny bool, argStart int) (string, []any, error) {
+func buildWhereMatch(d Dialect, filters []Filter, matchAny bool, argStart int, catalog []Column) (string, []any, error) {
 	if len(filters) == 0 {
 		return "", nil, nil
 	}
 	parts := make([]string, 0, len(filters))
 	args := []any{}
 	for _, f := range filters {
-		frag, bound, err := filterCondition(d, f, argStart+len(args))
+		var column *Column
+		for i := range catalog {
+			if catalog[i].Name == f.Column {
+				column = &catalog[i]
+			}
+		}
+		frag, bound, err := filterCondition(d, f, argStart+len(args), column)
 		if err != nil {
 			return "", nil, err
 		}
@@ -211,7 +239,7 @@ func Browse(ctx context.Context, db *sql.DB, driver Driver, opts BrowseOptions) 
 	if opts.Offset < 0 {
 		opts.Offset = 0
 	}
-	sel, err := browseSelect(d, opts)
+	sel, err := browseSelect(d, withCatalog(ctx, db, d, opts))
 	if err != nil {
 		return nil, err
 	}
@@ -225,8 +253,26 @@ func Browse(ctx context.Context, db *sql.DB, driver Driver, opts BrowseOptions) 
 	args := append(sel.args, tailArgs...)
 
 	return runOn(ctx, db, driver, sel.query+" "+tail, true, collectOptions{
-		maxRows: opts.Limit, clipText: opts.ClipText,
+		maxRows: opts.Limit, clipText: opts.ClipText, kinds: sel.kinds,
 	}, args...)
+}
+
+// withCatalog reads the table's columns into the options, for the engines
+// whose statements depend on what a column is: Oracle has to be told how to
+// read a date it is compared with, and its driver cannot read every column
+// type as SELECT * returns it. Every other engine gets the options back as
+// they came, with nothing asked of the server.
+//
+// A catalogue that cannot be read is not an error here. The statement is then
+// what it is on the other engines, and the engine says what it makes of it.
+func withCatalog(ctx context.Context, db *sql.DB, d Dialect, opts BrowseOptions) BrowseOptions {
+	if !needsCatalog(d) || opts.catalog != nil {
+		return opts
+	}
+	if cols, err := d.Columns(ctx, db, catalogSchema(ctx, db, d, opts.Schema), opts.Table); err == nil {
+		opts.catalog = cols
+	}
+	return opts
 }
 
 // BrowsePage is a page of a table with what the grid needs beside it.
@@ -289,6 +335,8 @@ type selection struct {
 	query   string
 	args    []any
 	ordered bool
+	// kinds types the columns by name where the catalogue was consulted.
+	kinds map[string]string
 }
 
 // effectiveSort is the order a selection will carry: what was asked for, then
@@ -335,7 +383,13 @@ func browseSelect(d Dialect, opts BrowseOptions) (*selection, error) {
 		}
 		columns = strings.Join(quoted, ", ")
 	}
-	where, args, err := buildWhereMatch(d, opts.Filters, opts.MatchAny, 1)
+	var kinds map[string]string
+	if project, err := projectionFor(d, opts.catalog, opts.Columns); err != nil {
+		return nil, err
+	} else if project != nil {
+		columns, kinds = project.list, project.kinds
+	}
+	where, args, err := buildWhereMatch(d, opts.Filters, opts.MatchAny, 1, opts.catalog)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +417,7 @@ func browseSelect(d Dialect, opts BrowseOptions) (*selection, error) {
 		order += col + " " + dir
 	}
 	return &selection{
-		query: "SELECT " + columns + " FROM " + rel + where + order, args: args, ordered: order != "",
+		query: "SELECT " + columns + " FROM " + rel + where + order, args: args, ordered: order != "", kinds: kinds,
 	}, nil
 }
 
@@ -391,7 +445,8 @@ func Count(ctx context.Context, db *sql.DB, driver Driver, opts BrowseOptions) (
 	if err != nil {
 		return 0, err
 	}
-	where, args, err := buildWhereMatch(d, opts.Filters, opts.MatchAny, 1)
+	opts = withCatalog(ctx, db, d, opts)
+	where, args, err := buildWhereMatch(d, opts.Filters, opts.MatchAny, 1, opts.catalog)
 	if err != nil {
 		return 0, err
 	}

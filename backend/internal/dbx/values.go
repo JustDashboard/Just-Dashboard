@@ -256,6 +256,11 @@ func ValueKind(driver Driver, typeName string) string {
 		return KindInterval
 	case first == "BINARY_FLOAT" || first == "BINARY_DOUBLE":
 		return KindFloat
+	case driver == DriverOracle && oracleDriverKinds[first] != "":
+		return oracleDriverKinds[first]
+	case driver == DriverOracle && first == "NUMBER" && strings.HasSuffix(t, ",0)"):
+		// The catalogue's NUMBER(p,0): a whole number, whatever its width.
+		return KindInteger
 	case first == "TIMESTAMP" && driver == DriverMSSQL, first == "ROWVERSION":
 		// SQL Server's timestamp is a row version counter, eight opaque bytes.
 		return KindBinary
@@ -283,10 +288,25 @@ func ValueKind(driver Driver, typeName string) string {
 		return KindTime
 	case strings.Contains(first, "CHAR") || strings.Contains(first, "TEXT") || strings.Contains(first, "CLOB") ||
 		strings.Contains(first, "STRING") || first == "ENUM" || first == "SET" || first == "NAME" ||
-		first == "XML" || first == "ENUM8" || first == "ENUM16":
+		first == "XML" || first == "XMLTYPE" || first == "ENUM8" || first == "ENUM16":
 		return KindText
 	}
 	return KindOther
+}
+
+// oracleDriverKinds are the names go-ora gives a result column that say
+// nothing by themselves: its wire types, not Oracle's.
+var oracleDriverKinds = map[string]string{
+	"IBFLOAT": KindFloat, "IBDOUBLE": KindFloat, "BFLOAT": KindFloat, "BDOUBLE": KindFloat,
+	// A BLOB arrives inline as a long raw unless the connection asks for
+	// locators, and a BFILE as its locator.
+	"LONGRAW": KindBinary, "LONGVARRAW": KindBinary, "VARRAW": KindBinary, "OCIFILELOCATOR": KindBinary,
+	// A JSON column arrives as a BLOB locator holding its text, and so does a
+	// BLOB on a connection that asked for locators. The name cannot tell them
+	// apart, so the content decides: text is shown as text, the rest as hex.
+	// A table's own page is typed from the catalogue and does not come here.
+	"OCIBLOBLOCATOR": KindOther,
+	"VARNUM":         KindDecimal,
 }
 
 var integerTypes = map[string]bool{
@@ -320,15 +340,13 @@ func sizedInteger(name string) bool {
 // the display string and it matched nothing. size is the value's length in
 // bytes when it was cut, 0 when the cell holds the whole value.
 func encodeCell(driver Driver, kind, typeName string, v any, clipText int) (out any, size int64) {
+	if flag, ok := oracleBoolean(driver, kind, v); ok {
+		return flag, 0
+	}
 	switch t := v.(type) {
 	case []byte:
-		if driver == DriverMSSQL && len(t) == 16 && strings.EqualFold(typeName, "UNIQUEIDENTIFIER") {
-			// The wire form is byte-swapped in its first three groups; the
-			// driver's own type knows how to read it.
-			var id mssql.UniqueIdentifier
-			if id.Scan(t) == nil {
-				return id.String(), 0
-			}
+		if id, ok := mssqlGUID(driver, typeName, t); ok {
+			return id, 0
 		}
 		// SQLite's driver returns text as a string and only a BLOB as bytes,
 		// whatever the column was declared as.
@@ -344,6 +362,36 @@ func encodeCell(driver Driver, kind, typeName string, v any, clipText int) (out 
 		return clipString(t, clipText)
 	}
 	return normaliseValue(v), 0
+}
+
+// oracleBoolean reads an Oracle BOOLEAN, which the driver hands over as the
+// number 1 or 0. Left as that, a cell the catalogue calls a boolean would hold
+// the string "0" — which every client language reads as true.
+func oracleBoolean(driver Driver, kind string, v any) (flag, ok bool) {
+	if driver != DriverOracle || kind != KindBoolean {
+		return false, false
+	}
+	switch fmt.Sprint(v) {
+	case "1":
+		return true, true
+	case "0":
+		return false, true
+	}
+	return false, false
+}
+
+// mssqlGUID reads a SQL Server uniqueidentifier as the text every tool shows
+// it as. The driver hands over the sixteen bytes of the wire form, which is
+// byte-swapped in its first three groups; its own type knows how to read them.
+func mssqlGUID(driver Driver, typeName string, b []byte) (string, bool) {
+	if driver != DriverMSSQL || len(b) != 16 || !strings.EqualFold(typeName, "UNIQUEIDENTIFIER") {
+		return "", false
+	}
+	var id mssql.UniqueIdentifier
+	if id.Scan(b) != nil {
+		return "", false
+	}
+	return id.String(), true
 }
 
 // clipString cuts text to limit bytes on a character boundary. A limit of 0

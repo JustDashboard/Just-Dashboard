@@ -278,6 +278,12 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 	if st.leader == "with" && writes && !keywords["returning"] && !keywords["output"] {
 		st.returnsRows = false
 	}
+	// Oracle's EXPLAIN PLAN FOR answers with nothing: it writes the plan into
+	// the session's plan table, to be read from there.
+	storesPlan := driver == DriverOracle && st.leader == "explain"
+	if storesPlan {
+		st.returnsRows = false
+	}
 
 	words := rawWords(st.SQL)
 	risk := Risk{Level: "read", Reasons: []string{}}
@@ -376,6 +382,11 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 	}
 	if words.has("create") {
 		add("medium", "creates a database object")
+	}
+	if storesPlan {
+		// Not a read there, then, and Oracle's read-only scope — which sends
+		// nothing but a query — would refuse it if it were called one.
+		add("medium", "stores a plan in the plan table")
 	}
 	// Fail closed. An unrecognised statement — DO, CALL, VACUUM, whatever the
 	// next dialect adds — used to be indistinguishable from a SELECT, and the

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,6 +57,9 @@ type collectOptions struct {
 	// clipText cuts text cells to this many bytes and records them as clipped.
 	// 0 leaves text whole.
 	clipText int
+	// kinds says what a result column holds, by name, where the catalogue
+	// knows better than the driver's name for it (columnReader).
+	kinds map[string]string
 }
 
 func runOn(ctx context.Context, q queryer, driver Driver, query string, rowsBack bool, opts collectOptions, args ...any) (*QueryResult, error) {
@@ -106,6 +110,9 @@ func collect(rows *sql.Rows, driver Driver, statement string, opts collectOption
 		for i, t := range types {
 			res.Types = append(res.Types, t.DatabaseTypeName())
 			kinds[i] = ValueKind(driver, t.DatabaseTypeName())
+			if kind, ok := opts.kinds[cols[i]]; ok {
+				kinds[i] = kind
+			}
 		}
 		res.Kinds = kinds
 	}
@@ -165,9 +172,14 @@ const (
 	// ordinary one is rolled back. Weaker — a write succeeds and is undone,
 	// and anything not transactional is not undone at all.
 	readScopeRollback
-	// readScopeOracle: SET TRANSACTION READ ONLY as the first statement of a
-	// transaction, which the driver cannot ask for itself.
-	readScopeOracle
+	// readScopeQuery: only a statement that begins as a query is sent, in a
+	// transaction that is rolled back. It is Oracle's, whose read-only
+	// transaction does not do the job: a schema change commits the moment it
+	// runs and ends the transaction that was meant to refuse it, and a table
+	// created or altered a second ago cannot be read inside one at all
+	// (ORA-01466). What Oracle does guarantee is that a query changes no data
+	// — DML inside one is ORA-14551 — so the scope is that nothing else goes.
+	readScopeQuery
 	// readScopeSession: the connection itself is switched to refuse writes for
 	// the statement and switched back after (sessionScoper says how).
 	readScopeSession
@@ -270,9 +282,17 @@ func (s *session) watch(ctx context.Context) func() {
 func (s *session) run(ctx context.Context, q queryer, st *SQLStatement, maxRows int) (*QueryResult, error) {
 	done := s.watch(ctx)
 	defer done()
-	return runOn(ctx, q, s.dialect.Driver(), st.SQL, st.returnsRows, collectOptions{
+	res, err := runOn(ctx, q, s.dialect.Driver(), st.SQL, st.returnsRows, collectOptions{
 		maxRows: clampRows(maxRows, defaultMaxRows, MaxResultRows),
 	})
+	if err != nil && ctx.Err() != nil {
+		// A statement stopped part-way leaves its connection however the
+		// driver's cancel left it. Oracle's leaves an interruption behind that
+		// the next statement on the connection is the one to receive, and that
+		// statement would be somebody else's.
+		s.dirty = true
+	}
+	return res, err
 }
 
 // read runs fn inside the engine's read-only scope. fn receives what to run
@@ -309,12 +329,52 @@ func (s *session) read(ctx context.Context, fn func(ctx context.Context, q query
 	// Always rolled back, never committed: there is nothing to keep, and a
 	// rollback also undoes a session setting changed from inside a function.
 	defer func() { _ = tx.Rollback() }()
-	if s.dialect.readScope() == readScopeOracle {
-		// Refused by an account that may not, or by a driver that had already
-		// started work: the rollback still stands between a write and the data.
-		_, _ = tx.ExecContext(ctx, "SET TRANSACTION READ ONLY")
+	if s.dialect.readScope() == readScopeQuery {
+		return fn(ctx, queryOnly{tx})
 	}
 	return fn(ctx, tx)
+}
+
+// queryOnly is what a statement runs on inside readScopeQuery: it passes on a
+// query and refuses everything else before it is sent.
+type queryOnly struct{ queryer }
+
+func (q queryOnly) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if !beginsAsQuery(query) {
+		return nil, ErrNotAQuery
+	}
+	return q.queryer.ExecContext(ctx, query, args...)
+}
+
+func (q queryOnly) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if !beginsAsQuery(query) {
+		return nil, ErrNotAQuery
+	}
+	return q.queryer.QueryContext(ctx, query, args...)
+}
+
+// ErrNotAQuery is the refusal of readScopeQuery.
+var ErrNotAQuery = errors.New("this engine cannot be held to reading for a statement that does not begin with SELECT or WITH, " +
+	"so it was not run as a read")
+
+// beginsAsQuery reports whether the text sent to the engine starts with SELECT
+// or WITH, after any opening brackets. It reads the characters and nothing
+// else, on purpose: it is the check that stands when the lexer and the
+// classifier have both been wrong about a statement, so it cannot share their
+// reading of it. A statement is sent from its first token, so there is no
+// comment in front of that word to be argued about.
+func beginsAsQuery(statement string) bool {
+	text := strings.TrimLeft(statement, " \t\r\n(")
+	for _, word := range []string{"select", "with"} {
+		if len(text) <= len(word) || !strings.EqualFold(text[:len(word)], word) {
+			continue
+		}
+		// The word has to end there: SELECTED and WITH$ are names.
+		if next := text[len(word)]; !isWordStart(next) && !isDigit(next) && next != '$' && next != '#' {
+			return true
+		}
+	}
+	return false
 }
 
 // RunStatement runs one statement an operator wrote.
