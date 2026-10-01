@@ -450,7 +450,7 @@ func (mssqlDialect) Statements(ctx context.Context, db *sql.DB, opts StatementsO
 		if err := rows.Scan(&s.ID, &s.Query, &s.Calls, &s.TotalMs, &s.MeanMs, &s.MaxMs, &s.Rows, &s.HitRatio, &out.TotalMs); err != nil {
 			return nil, err
 		}
-		s.Query = clipText(statementShape(s.Query, true), 1000)
+		s.Query = clipStatementText(statementShape(s.Query, true), 1000)
 		out.Statements = append(out.Statements, s)
 	}
 	return out, rows.Err()
@@ -542,6 +542,34 @@ func statementShape(text string, brackets bool) string {
 		}
 		return b.String()[b.Len()-1]
 	}
+	// number returns where the numeric literal starting at i ends: digits with
+	// a fraction and an exponent, or a hexadecimal one.
+	number := func(i int) int {
+		j := i
+		if text[j] == '0' && j+1 < len(text) && (text[j+1] == 'x' || text[j+1] == 'X') {
+			j += 2
+			for j < len(text) && (digit(text[j]) || (text[j]|0x20 >= 'a' && text[j]|0x20 <= 'f')) {
+				j++
+			}
+			return j
+		}
+		for j < len(text) && (digit(text[j]) || text[j] == '.') {
+			j++
+		}
+		if j < len(text) && (text[j] == 'e' || text[j] == 'E') {
+			k := j + 1
+			if k < len(text) && (text[k] == '+' || text[k] == '-') {
+				k++
+			}
+			if k < len(text) && digit(text[k]) {
+				for k < len(text) && digit(text[k]) {
+					k++
+				}
+				j = k
+			}
+		}
+		return j
+	}
 	// copyThrough copies from i up to and including the closing delimiter, a
 	// doubled one being the delimiter itself, and returns where it stopped.
 	copyThrough := func(i int, closing byte) int {
@@ -629,32 +657,14 @@ func statementShape(text string, brackets bool) string {
 			}
 			b.WriteByte('?')
 			i = j
-		case digit(c) && !name(last()):
-			j := i
-			if c == '0' && j+1 < len(text) && (text[j+1] == 'x' || text[j+1] == 'X') {
-				j += 2
-				for j < len(text) && (digit(text[j]) || (text[j]|0x20 >= 'a' && text[j]|0x20 <= 'f')) {
-					j++
-				}
-			} else {
-				for j < len(text) && (digit(text[j]) || text[j] == '.') {
-					j++
-				}
-				if j < len(text) && (text[j] == 'e' || text[j] == 'E') {
-					k := j + 1
-					if k < len(text) && (text[k] == '+' || text[k] == '-') {
-						k++
-					}
-					if k < len(text) && digit(text[k]) {
-						for k < len(text) && digit(text[k]) {
-							k++
-						}
-						j = k
-					}
-				}
-			}
+		case c == '$' && i+1 < len(text) && digit(text[i+1]) && !name(last()):
+			// SQL Server's money literal. A $ inside a name never starts a
+			// token, and neither engine numbers its bind markers with one.
 			b.WriteByte('?')
-			i = j
+			i = number(i + 1)
+		case digit(c) && !name(last()):
+			b.WriteByte('?')
+			i = number(i)
 		default:
 			b.WriteByte(c)
 			i++
@@ -663,8 +673,8 @@ func statementShape(text string, brackets bool) string {
 	return b.String()
 }
 
-// clipText cuts a string to at most n bytes without splitting a character.
-func clipText(s string, n int) string {
+// clipStatementText cuts a string to at most n bytes without splitting a character.
+func clipStatementText(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}

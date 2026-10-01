@@ -1038,13 +1038,15 @@ func TestStatementShapeDropsLiteralsAndNothingElse(t *testing.T) {
 		// A national string, and Oracle's alternative quoting, are literals whole.
 		{`SELECT N'sécret', q'[it's]', nq'{a'b}' FROM dual`, `SELECT ?, ?, ? FROM dual`, false},
 		// Names keep their digits; bind markers keep theirs.
-		{`SELECT c1, "col 2", t1.x FROM t1 WHERE a = :1 AND b = @p2 AND c = $3`, `SELECT c1, "col 2", t1.x FROM t1 WHERE a = :1 AND b = @p2 AND c = $3`, false},
+		{`SELECT c1, "col 2", t1.x FROM t1 WHERE a = :1 AND b = @p2 AND c = :B3`, `SELECT c1, "col 2", t1.x FROM t1 WHERE a = :1 AND b = @p2 AND c = :B3`, false},
 		{`SELECT [order 66], [a]]b] FROM [dbo].[t2] WHERE x = 0x1F`, `SELECT [order 66], [a]]b] FROM [dbo].[t2] WHERE x = ?`, true},
 		// An apostrophe in a comment starts no string.
 		{"SELECT 1 -- don't stop\nFROM t WHERE s = 'x' /* it's 5 */ AND n = 7", "SELECT ? -- don't stop\nFROM t WHERE s = ? /* it's 5 */ AND n = ?", false},
 		// Text the engine cut short: the open string is dropped with its end.
 		{`INSERT INTO sessions (token) VALUES ('eyJhbGciOiJIUzI1NiIsInR5`, `INSERT INTO sessions (token) VALUES (?`, false},
 		{`SELECT TOP (10) name FROM sys.objects`, `SELECT TOP (?) name FROM sys.objects`, true},
+		// SQL Server's money literal is a number; a $ inside a name is the name's.
+		{`UPDATE pay SET amount = $1250.75, n = -3 WHERE SYS_NC00003$ = .5`, `UPDATE pay SET amount = ?, n = -? WHERE SYS_NC00003$ = .?`, true},
 		{``, ``, false},
 	} {
 		if got := statementShape(c.in, c.brackets); got != c.want {
@@ -1057,8 +1059,8 @@ func TestStatementShapeDropsLiteralsAndNothingElse(t *testing.T) {
 			t.Errorf("%q survived in %q", secret, got)
 		}
 	}
-	if got := clipText("héllo", 2); got != "h" {
-		t.Errorf("clipText split a character: %q", got)
+	if got := clipStatementText("héllo", 2); got != "h" {
+		t.Errorf("clipStatementText split a character: %q", got)
 	}
 	// Oracle keeps no longest execution; that order is refused, not guessed.
 	if _, err := (oracleDialect{}).Statements(t.Context(), nil, StatementsOptions{Sort: StatementsByMax, Limit: 5}); err == nil {
