@@ -503,22 +503,25 @@ func (s *sqlGen) verbatim() {
 			s.warn("MySQL's own CREATE TABLE text includes each table's foreign keys; they are kept as the engine wrote them.")
 		}
 	}
-	current := ""
-	for _, m := range s.models {
-		if !s.writable(m) {
-			continue
+	// With tables in several MySQL databases the script moves between them:
+	// each is created once and entered whenever the next statement is in it.
+	current, created := "", map[string]bool{}
+	enter := func(m *ormTable) {
+		if !mysql || !s.multiSchema || m.Schema == current {
+			return
 		}
-		if mysql && s.multiSchema && m.Schema != current {
-			current = m.Schema
+		current = m.Schema
+		if !created[m.Schema] {
+			created[m.Schema] = true
 			s.statement("CREATE DATABASE IF NOT EXISTS " + s.quote(m.Schema))
-			s.statement("USE " + s.quote(m.Schema))
 		}
-		if m.view {
-			if text := s.viewText(m); text != "" {
-				s.statement(text)
-			}
+		s.statement("USE " + s.quote(m.Schema))
+	}
+	for _, m := range s.models {
+		if m.view || !s.writable(m) {
 			continue
 		}
+		enter(m)
 		ddl := strings.TrimSpace(m.CreateSQL)
 		if ddl == "" {
 			s.warn("%s: the engine returned no CREATE statement, so one was assembled from the catalogue; storage options and the like are missing from it.", s.label(m))
@@ -550,6 +553,17 @@ func (s *sqlGen) verbatim() {
 				exists = "IF NOT EXISTS "
 			}
 			s.statement(fmt.Sprintf("CREATE %sINDEX %s%s ON %s (%s)", unique, exists, s.quote(ix.Name), s.quote(m.Name), s.quoteAll(ix.Columns)))
+		}
+	}
+	// Views after every table. A name sorts a view in among the tables it
+	// reads, and MySQL refuses one whose table is not there yet.
+	for _, m := range s.models {
+		if !m.view || !s.writable(m) {
+			continue
+		}
+		if text := s.viewText(m); text != "" {
+			enter(m)
+			s.statement(text)
 		}
 	}
 	if s.opts.IfNotExists && s.driver == DriverOracle {

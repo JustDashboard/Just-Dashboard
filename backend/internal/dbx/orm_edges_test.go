@@ -466,6 +466,35 @@ func TestORMSQLServerViewsAreWrittenAsTheirOwnStatement(t *testing.T) {
 	}
 }
 
+// A view's name sorts it in among the tables it reads. MySQL refuses a view
+// whose table is not there yet, so where the script is the engine's own
+// statements the views are written after every table, in their own database.
+func TestORMSQLWritesViewsAfterTheTablesTheyRead(t *testing.T) {
+	schema := ormMySQLFixture()
+	for i := range schema.Tables {
+		if schema.Tables[i].Name == "published_posts" {
+			schema.Tables[i].CreateSQL = "CREATE VIEW `published_posts` AS select `blog`.`posts`.`id` AS `id`,`blog`.`posts`.`title` AS `title` from `blog`.`posts`"
+		}
+	}
+	res := ormGenerate(t, schema, ORMRequest{Target: ORMSQL, Views: ormYes()})
+	view := strings.Index(res.Schema, "\nCREATE VIEW `published_posts`")
+	if view < 0 || view < strings.LastIndex(res.Schema, "\nCREATE TABLE ") {
+		t.Fatalf("the view is not after the last table:\n%s", res.Schema)
+	}
+	// The script had moved on to another database; it comes back for the view,
+	// and does not create the database a second time.
+	before := res.Schema[:view]
+	if use := strings.LastIndex(before, "\nUSE "); use < 0 || !strings.HasPrefix(before[use:], "\nUSE `blog`;") {
+		t.Errorf("the view is not written in its own database:\n%s", res.Schema)
+	}
+	if n := strings.Count(res.Schema, "CREATE DATABASE IF NOT EXISTS `blog`;"); n != 1 {
+		t.Errorf("blog is created %d times\n%s", n, res.Schema)
+	}
+	if res.Counts.Views != 1 {
+		t.Errorf("counts = %+v", res.Counts)
+	}
+}
+
 // The counts are what the page says the file holds, so a model a target could
 // not write is not in them, and neither is a relation that would have led to it.
 func TestORMCountsWhatIsInTheOutput(t *testing.T) {

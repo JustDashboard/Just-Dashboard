@@ -781,6 +781,75 @@ func TestLiveORMClickHouse(t *testing.T) {
 	}
 }
 
+// MySQL, MariaDB, SQLite and ClickHouse keep a view's statement where they
+// keep a table's. The script has to hold it as a view, and the engine it came
+// from has to take it back.
+func TestLiveORMViewsInTheSQLScript(t *testing.T) {
+	ctx := context.Background()
+	check := func(t *testing.T, db *sql.DB, driver Driver, database string, seed ...string) {
+		t.Helper()
+		drop := []string{`DROP VIEW IF EXISTS jd_orm_named`, `DROP TABLE IF EXISTS jd_orm_people`}
+		ormExec(t, db, drop...)
+		t.Cleanup(func() {
+			for _, s := range drop {
+				_, _ = db.ExecContext(context.Background(), s)
+			}
+		})
+		ormExec(t, db, seed...)
+		req := ORMRequest{Target: ORMSQL, Tables: []string{"jd_orm_people", "jd_orm_named"}, Views: ormYes()}
+		scope, err := req.Scope(driver, database)
+		if err != nil {
+			t.Fatal(err)
+		}
+		schema, err := LoadORMSchema(ctx, db, driver, scope)
+		if err != nil {
+			t.Fatalf("LoadORMSchema: %v", err)
+		}
+		script := ormGenerate(t, schema, req)
+		if script.Counts.Tables != 1 || script.Counts.Views != 1 || len(script.Warnings) != 0 {
+			t.Fatalf("counts = %+v, warnings = %q\n%s", script.Counts, script.Warnings, script.Schema)
+		}
+		ormExec(t, db, drop...)
+		for _, stmt := range splitSQLStatements(driver, script.Schema) {
+			ormExec(t, db, stmt)
+		}
+		ormExec(t, db, `INSERT INTO jd_orm_people (id, name) VALUES (1, 'kept'), (2, 'it''s')`)
+		var named int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jd_orm_named`).Scan(&named); err != nil || named != 1 {
+			t.Errorf("the rebuilt view answers %d rows (%v), want 1\n%s", named, err, script.Schema)
+		}
+	}
+	view := `CREATE VIEW jd_orm_named AS SELECT id, name FROM jd_orm_people WHERE name <> 'it''s'`
+
+	for _, env := range []string{"JD_TEST_MYSQL_DSN", "JD_TEST_ORM_MYSQL8_DSN"} {
+		t.Run(env, func(t *testing.T) {
+			db := ormLiveDB(t, DriverMySQL, env)
+			var database string
+			if err := db.QueryRowContext(ctx, `SELECT DATABASE()`).Scan(&database); err != nil {
+				t.Fatal(err)
+			}
+			check(t, db, DriverMySQL, database, `CREATE TABLE jd_orm_people (id INT PRIMARY KEY, name VARCHAR(20))`, view)
+		})
+	}
+	t.Run("sqlite", func(t *testing.T) {
+		db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "views.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.Close() })
+		check(t, db, DriverSQLite, "", `CREATE TABLE jd_orm_people (id INTEGER PRIMARY KEY, name TEXT)`, view)
+	})
+	t.Run("clickhouse", func(t *testing.T) {
+		db := ormLiveDB(t, DriverClickHouse, "JD_TEST_CLICKHOUSE_DSN")
+		var database string
+		if err := db.QueryRowContext(ctx, `SELECT currentDatabase()`).Scan(&database); err != nil {
+			t.Fatal(err)
+		}
+		check(t, db, DriverClickHouse, database,
+			`CREATE TABLE jd_orm_people (id Int32, name String) ENGINE = MergeTree ORDER BY id`, view)
+	})
+}
+
 // ormLiveSQLServerView is kept by the server exactly as it is sent, which is
 // what lets the test ask for it back word for word.
 const ormLiveSQLServerView = `CREATE VIEW jd_orm.open_accounts AS

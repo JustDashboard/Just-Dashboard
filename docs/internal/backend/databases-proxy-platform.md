@@ -105,10 +105,15 @@ accounts retain partial results. Full table details and mutation preconditions u
   PostgreSQL schema. What a target cannot express — a partial index, a composite foreign key in
   Sequelize, a table with no key in Prisma — comes back in `warnings`, and `schema`/`filename` repeat
   `files[0]` for callers that only know those two. The CREATE statement an engine keeps is read only for
-  the SQL target (`ORMScope.Statements`): on Oracle `DBMS_METADATA` can take seconds a table. The tests
-  are golden files per target, engine and option (`testdata/orm`, rewritten with `-update-orm`),
-  line-level expectations beside them, and live tests that skip unless a DSN is set; the PostgreSQL and
-  SQL Server ones drop their schema, run the generated SQL and require the same Prisma schema back.
+  the SQL target (`ORMScope.Statements`): on Oracle `DBMS_METADATA` can take seconds a table. A view's
+  statement is asked for as a view (`pg_get_viewdef`, `sys.sql_modules`, `DBMS_METADATA` with `'VIEW'`),
+  never taken from the dialect's `CreateSQL`, which on those three engines answers a view with a CREATE
+  TABLE built from its columns; SQL Server's goes into the script inside `EXEC`, because CREATE VIEW has
+  to open its batch. `counts` are what is in the files: a model a target leaves out (and says so) is not
+  counted. The tests are golden files per target, engine and option (`testdata/orm`, rewritten with
+  `-update-orm`), line-level expectations beside them, and live tests that skip unless a DSN is set; the
+  PostgreSQL, SQL Server and Oracle ones drop what they made, run the generated SQL and require the same
+  schema back.
 - **A dump for every engine with no external dependency.** Three have a client tool the image can carry;
   the rest returned `ErrUnsupported` at the moment the operator pressed the button — the worst time to
   learn a backup was never possible. `dump_sql.go` writes DDL then INSERTs over the open connection,
