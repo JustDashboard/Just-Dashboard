@@ -285,14 +285,6 @@ func (s *Server) finishExport(r *http.Request, run exportRun, rows int, truncate
 		_ = http.NewResponseController(run.stream.w).Flush()
 		panic(http.ErrAbortHandler)
 	}
-	if err := run.stream.start(); err != nil {
-		// The client went away with the last of it unsent. There is nobody
-		// to tell, and the export is recorded as it was.
-		return nil
-	}
-	h := run.stream.w.Header()
-	h.Set(exportStatusTrailer, string(status))
-	h.Set(exportRowsTrailer, strconv.Itoa(rows))
 	if r.Method == http.MethodGet {
 		// Written directly: the mutation middleware passes a GET through with
 		// nothing to annotate, and a table leaving the server is worth a line.
@@ -300,6 +292,14 @@ func (s *Server) finishExport(r *http.Request, run exportRun, rows int, truncate
 	} else {
 		httpx.SetAudit(r, run.action, run.conn.Name, detail)
 	}
+	if err := run.stream.start(); err != nil {
+		// The client went away with the last of it unsent. There is nobody
+		// left to tell.
+		return nil
+	}
+	h := run.stream.w.Header()
+	h.Set(exportStatusTrailer, string(status))
+	h.Set(exportRowsTrailer, strconv.Itoa(rows))
 	return nil
 }
 
@@ -642,6 +642,8 @@ const importOptionsBytes = 256 << 10
 // held whole. The options come first because they decide what the bytes that
 // follow are, and whether this caller may do what they ask.
 func (s *Server) handleDBImportUpload(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, s.dbUploadLimit())
+	defer drainUpload(r)
 	id, err := parseID(r)
 	if err != nil {
 		return err
@@ -653,8 +655,6 @@ func (s *Server) handleDBImportUpload(w http.ResponseWriter, r *http.Request) er
 	if conn.Driver == dbx.DriverRedis {
 		return httpx.BadRequest("Redis has no tables to import into; restore a dump instead")
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, s.dbUploadLimit())
-	defer drainUpload(r)
 	reader, err := r.MultipartReader()
 	if err != nil {
 		return httpx.BadRequest("expected a multipart upload: %v", err)
@@ -1001,6 +1001,9 @@ const maxDumpNoteBytes = 500
 // renamed, so a transfer that stops halfway leaves nothing that looks like a
 // dump. Nothing is restored: that is the restore route's, and its capability.
 func (s *Server) handleDBBackupUpload(w http.ResponseWriter, r *http.Request) error {
+	limit := s.dbUploadLimit()
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	defer drainUpload(r)
 	id, err := parseID(r)
 	if err != nil {
 		return err
@@ -1014,9 +1017,6 @@ func (s *Server) handleDBBackupUpload(w http.ResponseWriter, r *http.Request) er
 	if len(note) > maxDumpNoteBytes {
 		return httpx.BadRequest("a note is at most %d bytes", maxDumpNoteBytes)
 	}
-	limit := s.dbUploadLimit()
-	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	defer drainUpload(r)
 	reader, err := r.MultipartReader()
 	if err != nil {
 		return httpx.BadRequest("expected a multipart upload: %v", err)
