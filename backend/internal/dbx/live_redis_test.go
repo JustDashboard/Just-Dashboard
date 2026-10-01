@@ -522,8 +522,6 @@ func TestLiveRedisFarExpiryIsNotADelete(t *testing.T) {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
-
 // HSET clears a field's own expiry the way SET clears a key's, so editing a
 // field's value has to put it back.
 func TestLiveRedisHashFieldKeepsItsExpiry(t *testing.T) {

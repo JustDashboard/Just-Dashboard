@@ -166,13 +166,19 @@ func TestLiveAPIMongo(t *testing.T) {
 	})
 
 	t.Run("browse_and_indexes", func(t *testing.T) {
+		// The database is the one the connection string names, which is where
+		// the inserts above put their documents.
+		database := "jdtest"
+		if info, err := dbx.ParseDSN(dbx.DriverMongo, dsn); err == nil && info.Database != "" {
+			database = info.Database
+		}
 		rec := do(t, r, http.MethodGet,
-			pathf("/databases/%d/browse", id)+"?schema=jdtest&table="+coll+"&limit=10", "")
+			pathf("/databases/%d/browse", id)+"?schema="+database+"&table="+coll+"&limit=10", "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("browse: %d %s", rec.Code, rec.Body.String())
 		}
 		rec = do(t, r, http.MethodGet,
-			pathf("/databases/%d/collections/indexes", id)+"?schema=jdtest&table="+coll, "")
+			pathf("/databases/%d/collections/indexes", id)+"?schema="+database+"&table="+coll, "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("indexes: %d %s", rec.Code, rec.Body.String())
 		}

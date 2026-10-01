@@ -27,6 +27,11 @@ func liveMongo(t *testing.T) (*mongo.Client, string) {
 		t.Skipf("MongoDB unreachable — set JD_TEST_MONGO_DSN to run these (%v)", err)
 	}
 	t.Cleanup(func() { client.Disconnect(context.Background()) })
+	// The database the connection string names, so two checkouts sharing a
+	// server do not share a collection.
+	if info, err := ParseDSN(DriverMongo, dsn); err == nil && info.Database != "" {
+		return client, info.Database
+	}
 	return client, "jdtest"
 }
 

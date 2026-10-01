@@ -1,0 +1,248 @@
+{
+  "set": "jdb5",
+  "date": {
+    "$date": {
+      "$numberLong": "1790851624226"
+    }
+  },
+  "myState": {
+    "$numberInt": "1"
+  },
+  "term": {
+    "$numberLong": "1"
+  },
+  "syncSourceHost": "",
+  "syncSourceId": {
+    "$numberInt": "-1"
+  },
+  "heartbeatIntervalMillis": {
+    "$numberLong": "2000"
+  },
+  "majorityVoteCount": {
+    "$numberInt": "1"
+  },
+  "writeMajorityCount": {
+    "$numberInt": "1"
+  },
+  "votingMembersCount": {
+    "$numberInt": "1"
+  },
+  "writableVotingMembersCount": {
+    "$numberInt": "1"
+  },
+  "optimes": {
+    "lastCommittedOpTime": {
+      "ts": {
+        "$timestamp": {
+          "t": 1790851623,
+          "i": 23
+        }
+      },
+      "t": {
+        "$numberLong": "1"
+      }
+    },
+    "lastCommittedWallTime": {
+      "$date": {
+        "$numberLong": "1790851623841"
+      }
+    },
+    "readConcernMajorityOpTime": {
+      "ts": {
+        "$timestamp": {
+          "t": 1790851623,
+          "i": 23
+        }
+      },
+      "t": {
+        "$numberLong": "1"
+      }
+    },
+    "appliedOpTime": {
+      "ts": {
+        "$timestamp": {
+          "t": 1790851623,
+          "i": 23
+        }
+      },
+      "t": {
+        "$numberLong": "1"
+      }
+    },
+    "durableOpTime": {
+      "ts": {
+        "$timestamp": {
+          "t": 1790851623,
+          "i": 23
+        }
+      },
+      "t": {
+        "$numberLong": "1"
+      }
+    },
+    "lastAppliedWallTime": {
+      "$date": {
+        "$numberLong": "1790851623841"
+      }
+    },
+    "lastDurableWallTime": {
+      "$date": {
+        "$numberLong": "1790851623841"
+      }
+    }
+  },
+  "lastStableRecoveryTimestamp": {
+    "$timestamp": {
+      "t": 1790851623,
+      "i": 1
+    }
+  },
+  "electionCandidateMetrics": {
+    "lastElectionReason": "electionTimeout",
+    "lastElectionDate": {
+      "$date": {
+        "$numberLong": "1790851623725"
+      }
+    },
+    "electionTerm": {
+      "$numberLong": "1"
+    },
+    "lastCommittedOpTimeAtElection": {
+      "ts": {
+        "$timestamp": {
+          "t": 1790851623,
+          "i": 1
+        }
+      },
+      "t": {
+        "$numberLong": "-1"
+      }
+    },
+    "lastSeenOpTimeAtElection": {
+      "ts": {
+        "$timestamp": {
+          "t": 1790851623,
+          "i": 1
+        }
+      },
+      "t": {
+        "$numberLong": "-1"
+      }
+    },
+    "numVotesNeeded": {
+      "$numberInt": "1"
+    },
+    "priorityAtElection": {
+      "$numberDouble": "1.0"
+    },
+    "electionTimeoutMillis": {
+      "$numberLong": "10000"
+    },
+    "newTermStartDate": {
+      "$date": {
+        "$numberLong": "1790851623748"
+      }
+    },
+    "wMajorityWriteAvailabilityDate": {
+      "$date": {
+        "$numberLong": "1790851623766"
+      }
+    }
+  },
+  "members": [
+    {
+      "_id": {
+        "$numberInt": "0"
+      },
+      "name": "127.0.0.1:27017",
+      "health": {
+        "$numberDouble": "1.0"
+      },
+      "state": {
+        "$numberInt": "1"
+      },
+      "stateStr": "PRIMARY",
+      "uptime": {
+        "$numberInt": "64"
+      },
+      "optime": {
+        "ts": {
+          "$timestamp": {
+            "t": 1790851623,
+            "i": 23
+          }
+        },
+        "t": {
+          "$numberLong": "1"
+        }
+      },
+      "optimeDate": {
+        "$date": {
+          "$numberLong": "1790851623000"
+        }
+      },
+      "lastAppliedWallTime": {
+        "$date": {
+          "$numberLong": "1790851623841"
+        }
+      },
+      "lastDurableWallTime": {
+        "$date": {
+          "$numberLong": "1790851623841"
+        }
+      },
+      "syncSourceHost": "",
+      "syncSourceId": {
+        "$numberInt": "-1"
+      },
+      "infoMessage": "Could not find member to sync from",
+      "electionTime": {
+        "$timestamp": {
+          "t": 1790851623,
+          "i": 2
+        }
+      },
+      "electionDate": {
+        "$date": {
+          "$numberLong": "1790851623000"
+        }
+      },
+      "configVersion": {
+        "$numberInt": "1"
+      },
+      "configTerm": {
+        "$numberInt": "1"
+      },
+      "self": true,
+      "lastHeartbeatMessage": ""
+    }
+  ],
+  "ok": {
+    "$numberDouble": "1.0"
+  },
+  "$clusterTime": {
+    "clusterTime": {
+      "$timestamp": {
+        "t": 1790851623,
+        "i": 23
+      }
+    },
+    "signature": {
+      "hash": {
+        "$binary": {
+          "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "subType": "00"
+        }
+      },
+      "keyId": {
+        "$numberLong": "0"
+      }
+    }
+  },
+  "operationTime": {
+    "$timestamp": {
+      "t": 1790851623,
+      "i": 23
+    }
+  }
+}

@@ -96,6 +96,15 @@ every client's arguments) and `GET /databases/{id}/redis/subscribe` (a pattern o
 application publishes). Each records an audit entry at open, runs for a bounded time and a bounded number
 of events, sends an `end` frame saying which bound ended it, and closes.
 
+The MongoDB routes read the request the same way. `POST /databases/{id}/aggregate` parses the pipeline
+and needs the destructive capability when a stage writes (`$out`, `$merge`) or is not known to be a
+read; `POST /databases/{id}/mongo/command` classifies the command by its first key and its arguments
+(`dbx.MongoClassifyCommand`), refuses what is never run, and asks for `system.admin` or the destructive
+capability and budget as the class demands, with anything unlisted treated as destructive and a flag
+taken as set unless it is absent, null, `false` or a zero. The update,
+rename, index and `collMod` routes are `service.control` and check by hand for the one option each has
+that removes data (`mongoNeedsDestructive`).
+
 The log routes decide on the source, not the path. `/logs/stream`, `/search`, `/download`,
 `/retention` and `/source` are `read`, but every one parses its `source` through `logTargetFor`, which
 refuses auth data — `auth.log` and `secure` with their generations and anything resolving to them, a
