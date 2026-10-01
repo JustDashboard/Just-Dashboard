@@ -124,7 +124,7 @@ func (k *mikroGen) scalar(c *ormCol) (mapped, ts string) {
 
 // columnType is the column's type in the database's own spelling.
 func mikroColumnType(c *ormCol) string {
-	return strings.Join(strings.Fields(strings.ToLower(c.Type)), " ")
+	return ormTypeFold(strings.TrimSpace(c.Type), strings.ToLower)
 }
 
 func mikroRule(rule string) string {
@@ -261,7 +261,13 @@ func (k *mikroGen) property(u *tsUnit, m *ormTable, c *ormCol) []string {
 		u.ref(ts)
 		parts = append(parts, "items: () => "+ts)
 		if !e.inline {
-			parts = append(parts, "nativeEnumName: "+jsString(e.Name))
+			native := e.Name
+			if e.Schema != "" && e.Schema != m.Schema && !strings.Contains(e.Schema+e.Name, ".") {
+				// MikroORM looks for the type in the entity's schema unless
+				// the name carries one.
+				native = e.Schema + "." + e.Name
+			}
+			parts = append(parts, "nativeEnumName: "+jsString(native))
 		}
 	} else {
 		var mapped string

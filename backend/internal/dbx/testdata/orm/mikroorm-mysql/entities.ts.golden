@@ -14,6 +14,11 @@ import {
   Unique,
 } from "@mikro-orm/decorators/legacy"
 
+export enum EventsAudience {
+  Public = "Public",
+  Members = "Members",
+}
+
 export enum PostsStatus {
   Draft = "draft",
   Published = "published",
@@ -60,6 +65,15 @@ export class Event {
 
   @Property({ type: "integer", columnType: "year", nullable: true })
   held_in!: number | null
+
+  @Property({ type: "string", columnType: "varchar(32)", default: "rgb(0,0,0)" })
+  colour!: string & Opt
+
+  @Property({ type: "json", columnType: "json", nullable: true, defaultRaw: "(json_object())" })
+  details!: unknown & Opt
+
+  @Enum({ items: () => EventsAudience, default: "Public" })
+  audience!: EventsAudience & Opt
 }
 
 @Entity({ tableName: "post_tags", schema: "blog" })

@@ -10,6 +10,10 @@ pub mod blog {
 
         #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
         #[diesel(mysql_type(name = "Enum"))]
+        pub struct EventsAudience;
+
+        #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
+        #[diesel(mysql_type(name = "Enum"))]
         pub struct PostsStatus;
 
         #[derive(diesel::query_builder::QueryId, diesel::sql_types::SqlType)]
@@ -35,12 +39,17 @@ pub mod blog {
     diesel::table! {
         use diesel::sql_types::*;
         use super::sql_types::Year;
+        use super::sql_types::EventsAudience;
 
         blog.events (id) {
             id -> Bigint,
             #[max_length = 200]
             title -> Varchar,
             held_in -> Nullable<Year>,
+            #[max_length = 32]
+            colour -> Varchar,
+            details -> Nullable<Json>,
+            audience -> EventsAudience,
         }
     }
 

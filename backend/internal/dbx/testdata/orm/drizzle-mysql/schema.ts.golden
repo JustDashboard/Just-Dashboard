@@ -50,6 +50,9 @@ export const events = blog.table("events", {
   id: bigint("id", { mode: "number" }).primaryKey().notNull().autoincrement(),
   title: varchar("title", { length: 200 }).notNull(),
   held_in: year("held_in"),
+  colour: varchar("colour", { length: 32 }).notNull().default("rgb(0,0,0)"),
+  details: json("details").default(sql`(json_object())`),
+  audience: mysqlEnum("audience", ["Public", "Members"]).notNull().default("Public"),
 })
 
 export const post_tags = blog.table(

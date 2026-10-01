@@ -7,6 +7,11 @@ from django.db import models
 from django.db.models.functions import Now
 
 
+class EventsAudience(models.TextChoices):
+    PUBLIC = "Public", "Public"
+    MEMBERS = "Members", "Members"
+
+
 class PostsStatus(models.TextChoices):
     DRAFT = "draft", "Draft"
     PUBLISHED = "published", "Published"
@@ -35,6 +40,9 @@ class Event(models.Model):
     id = models.BigAutoField(primary_key=True)
     title = models.CharField(max_length=200)
     held_in = models.IntegerField(blank=True, null=True)
+    colour = models.CharField(max_length=32, db_default="rgb(0,0,0)")
+    details = models.JSONField(blank=True, null=True)
+    audience = models.CharField(max_length=7, choices=EventsAudience.choices, db_default="Public")
 
     class Meta:
         managed = False

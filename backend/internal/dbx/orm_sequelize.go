@@ -62,7 +62,7 @@ func (s *sequelizeGen) dataType(m *ormTable, c *ormCol) (expr, ts string) {
 	// A type Sequelize has no DataType for is passed as its SQL name, which
 	// Sequelize accepts and writes into the DDL verbatim.
 	raw := func(ts string) (string, string) {
-		name := strings.ToUpper(strings.TrimSuffix(strings.TrimSpace(c.Type), "[]"))
+		name := ormTypeFold(strings.TrimSuffix(strings.TrimSpace(c.Type), "[]"), strings.ToUpper)
 		if s.driver == DriverClickHouse || name == "" {
 			name = strings.ToUpper(t.Name)
 		}

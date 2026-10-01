@@ -195,21 +195,22 @@ func tsEnumUnit(g *ormGen, n *ormNaming) *tsUnit {
 // class per table, members that are always identifiers.
 func tsClassRules(g *ormGen, reservedTop ...string) ormNameRules {
 	rules := ormNameRules{
-		model:     func(s string) string { return pascal(singular(s)) },
-		field:     sanitizeIdent,
-		enum:      pascal,
-		escapeTop: tsTypeName,
-		escapeMember: func(s string) string {
-			if s == "constructor" {
-				return "constructor_"
-			}
-			return s
-		},
-		top:  reservedTop,
-		fold: true,
+		model:        func(s string) string { return pascal(singular(s)) },
+		field:        sanitizeIdent,
+		enum:         pascal,
+		escapeTop:    tsTypeName,
+		escapeMember: jsMember,
+		top:          append([]string(nil), reservedTop...),
+		fold:         true,
 	}
 	if g.opts.Naming == ORMNamingCamel {
 		rules.field = ormCamel
+	}
+	if g.opts.Split {
+		// Split, a class is also a file name, and the layout has file names of
+		// its own: on a file system that folds case, a class called Index
+		// would be written over index.ts.
+		rules.top = append(rules.top, "index", "enums")
 	}
 	return rules
 }

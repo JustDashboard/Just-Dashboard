@@ -5,6 +5,34 @@
 use diesel::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, diesel::expression::AsExpression, diesel::deserialize::FromSqlRow)]
+#[diesel(sql_type = crate::schema::blog::sql_types::EventsAudience)]
+pub enum EventsAudience {
+    Public,
+    Members,
+}
+
+impl diesel::serialize::ToSql<crate::schema::blog::sql_types::EventsAudience, diesel::mysql::Mysql> for EventsAudience {
+    fn to_sql<'b>(&'b self, out: &mut diesel::serialize::Output<'b, '_, diesel::mysql::Mysql>) -> diesel::serialize::Result {
+        use std::io::Write;
+        match *self {
+            EventsAudience::Public => out.write_all(b"Public")?,
+            EventsAudience::Members => out.write_all(b"Members")?,
+        }
+        Ok(diesel::serialize::IsNull::No)
+    }
+}
+
+impl diesel::deserialize::FromSql<crate::schema::blog::sql_types::EventsAudience, diesel::mysql::Mysql> for EventsAudience {
+    fn from_sql(value: diesel::mysql::MysqlValue<'_>) -> diesel::deserialize::Result<Self> {
+        match value.as_bytes() {
+            b"Public" => Ok(EventsAudience::Public),
+            b"Members" => Ok(EventsAudience::Members),
+            _ => Err("unrecognized events_audience value".into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, diesel::expression::AsExpression, diesel::deserialize::FromSqlRow)]
 #[diesel(sql_type = crate::schema::blog::sql_types::PostsStatus)]
 pub enum PostsStatus {
     Draft,
@@ -82,6 +110,9 @@ pub struct Event {
     pub id: i64,
     pub title: String,
     // held_in (year) has no Rust type here and is not selected.
+    pub colour: String,
+    pub details: Option<serde_json::Value>,
+    pub audience: EventsAudience,
 }
 
 #[derive(Queryable, Selectable, Identifiable, Associations, Debug)]

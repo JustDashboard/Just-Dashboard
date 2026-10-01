@@ -10,6 +10,8 @@ export type Numeric = ColumnType<string, string | number, string | number>
 export type Timestamp = ColumnType<Date, Date | string, Date | string>
 export type Json = ColumnType<JsonValue, string, string>
 
+export type EventsAudience = "Public" | "Members"
+
 export type PostsStatus = "draft" | "published" | "archived"
 
 export type EventsKind = "view" | "share"
@@ -27,6 +29,9 @@ export interface EventTable {
   id: Generated<number>
   title: string
   held_in: number | null
+  colour: Generated<string>
+  details: Generated<Json | null>
+  audience: Generated<EventsAudience>
 }
 
 export interface PostTagTable {

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -25,10 +26,26 @@ import (
 // Each case is every golden case, so an option that only breaks one layout is
 // checked too.
 
+// ormGoStd is one importer for every case: it reads the standard library from
+// source, and remembers what it has read.
+var ormGoStd = sync.OnceValue(func() types.Importer {
+	return importer.ForCompiler(token.NewFileSet(), "source", nil)
+})
+
+// ormGoTypeChecks compiles generated Go as far as its types. Only the plain
+// structs can be taken this far: they import nothing but the standard library.
+func ormGoTypeChecks(src string) error {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "models.go", src, parser.AllErrors)
+	if err != nil {
+		return err
+	}
+	conf := types.Config{Importer: ormGoStd()}
+	_, err = conf.Check("models", fset, []*ast.File{file}, nil)
+	return err
+}
+
 func TestORMGeneratedGoCompiles(t *testing.T) {
-	// One importer for every case: it reads the standard library from source,
-	// and remembers what it has read.
-	std := importer.ForCompiler(token.NewFileSet(), "source", nil)
 	for _, c := range ormGoldenCases() {
 		if c.req.Target != ORMGorm && c.req.Target != ORMGoStructs {
 			continue
@@ -36,9 +53,7 @@ func TestORMGeneratedGoCompiles(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			res := ormGenerateCase(t, c)
 			src := res.Schema
-			fset := token.NewFileSet()
-			file, err := parser.ParseFile(fset, "models.go", src, parser.AllErrors)
-			if err != nil {
+			if _, err := parser.ParseFile(token.NewFileSet(), "models.go", src, parser.AllErrors); err != nil {
 				t.Fatalf("does not parse: %v\n%s", err, src)
 			}
 			formatted, err := format.Source([]byte(src))
@@ -58,8 +73,7 @@ func TestORMGeneratedGoCompiles(t *testing.T) {
 			// The plain structs import only the standard library, so they are
 			// type-checked whole: an undeclared Null type or a field of a type
 			// that does not exist fails here.
-			conf := types.Config{Importer: std}
-			if _, err := conf.Check("models", fset, []*ast.File{file}, nil); err != nil {
+			if err := ormGoTypeChecks(src); err != nil {
 				t.Errorf("does not type-check: %v\n%s", err, src)
 			}
 		})

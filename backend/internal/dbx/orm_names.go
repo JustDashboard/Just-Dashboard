@@ -471,9 +471,26 @@ var phpReserved = ormWordSet(`abstract and array as break callable case catch cl
 	readonly require return static switch throw trait try unset use var while xor yield int float
 	bool string true false null void iterable object mixed never self parent model`)
 
+// jsObjectMembers are what every JavaScript object inherits. A column may be
+// called any of them; where an object's type is checked key by key, the
+// inherited function is found under that name unless the object says otherwise.
+var jsObjectMembers = ormWordSet(`constructor toString toLocaleString valueOf hasOwnProperty
+	isPrototypeOf propertyIsEnumerable`)
+
 // jsIdent makes a name usable as a JavaScript binding.
 func jsIdent(name string) string {
 	if jsReserved[name] {
+		return name + "_"
+	}
+	return name
+}
+
+// jsMember makes a name usable as a member of a class or of an object whose
+// keys are free to choose. Neither name below is a reserved word, which is why
+// the reserved list does not catch them: one is every instance's link to its
+// class, and assigning the other replaces the instance's prototype.
+func jsMember(name string) string {
+	if name == "constructor" || name == "__proto__" {
 		return name + "_"
 	}
 	return name
@@ -494,6 +511,17 @@ func pyIdent(name string) string {
 	return name
 }
 
+// pyMember is pyIdent for a name declared in a class body, where two leading
+// underscores are not a spelling but an instruction: Python rewrites __x to
+// _Class__x, and __x__ belongs to whatever reads the class — a column called
+// __tablename__ would replace a declarative model's table name.
+func pyMember(name string) string {
+	if strings.HasPrefix(name, "__") {
+		return "col" + name
+	}
+	return pyIdent(name)
+}
+
 // --- literals -------------------------------------------------------------
 
 // jsString renders a JavaScript string literal. JSON's string syntax is a
@@ -510,9 +538,16 @@ func jsString(s string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// jsKey renders an object key: bare where the name is an identifier, quoted
-// where it is not.
-func jsKey(name string) string { return tsPropertyName(name) }
+// jsKey renders an object-literal key: bare where the name is an identifier,
+// quoted where it is not. __proto__ is the one key a literal does not define —
+// bare or quoted it sets the object's prototype — so it is written computed,
+// which does define it.
+func jsKey(name string) string {
+	if name == "__proto__" {
+		return `["__proto__"]`
+	}
+	return tsPropertyName(name)
+}
 
 // tsPropertyName quotes a key that is not a bare JS identifier, rather than
 // renaming it: the key has to match what the database actually returns.

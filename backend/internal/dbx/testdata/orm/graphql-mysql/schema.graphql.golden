@@ -8,6 +8,11 @@ scalar DateTime
 scalar Decimal
 scalar JSON
 
+enum EventsAudience {
+  Public
+  Members
+}
+
 enum PostsStatus {
   draft
   published
@@ -33,6 +38,9 @@ type Event {
   id: ID!
   title: String!
   held_in: Int
+  colour: String!
+  details: JSON
+  audience: EventsAudience!
 }
 
 type PostTag {

@@ -190,11 +190,27 @@ func (d *dieselGen) sqlTypeIn(m *ormTable, c *ormCol) (sql, rust string, maxLeng
 	// the wire type the column travels as, which is all Diesel's MySQL backend
 	// distinguishes.
 	custom := func(name string) (string, string, int, string) {
+		// Diesel looks a PostgreSQL type up by pg_type.typname and, where one is
+		// given, its schema: the name itself, without the quotes and the schema
+		// prefix format_type prints around a name that needs them.
+		schema := ""
+		if d.driver == DriverPostgres {
+			parts := ormSplitQualified(name)
+			if len(parts) > 1 && parts[len(parts)-2] != d.defaultSchema {
+				schema = parts[len(parts)-2]
+			}
+			name = parts[len(parts)-1]
+		}
 		if i := strings.IndexByte(name, '('); i >= 0 {
 			name = name[:i]
 		}
 		name = strings.TrimSpace(name)
 		attr := fmt.Sprintf("#[diesel(postgres_type(name = %s))]", rustString(name))
+		if schema != "" {
+			attr = fmt.Sprintf("#[diesel(postgres_type(name = %s, schema = %s))]", rustString(name), rustString(schema))
+			// Two schemas may each have a type of this name.
+			name = schema + "_" + name
+		}
 		if d.driver == DriverMySQL {
 			wire := "String"
 			switch {

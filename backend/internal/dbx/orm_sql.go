@@ -70,20 +70,56 @@ func (s *sqlGen) rel(schema, name string) string {
 	return q
 }
 
-// writable reports whether every name in a table can be quoted, warning once
-// when one cannot.
+// writable reports whether a table can be written: every name in it can be
+// quoted, and every type that will be copied into a statement is one. It warns
+// once when the answer is no.
 func (s *sqlGen) writable(m *ormTable) bool {
 	if s.quote(m.Name) == "" || (m.Schema != "" && s.quote(m.Schema) == "") {
 		s.warn("%s has a name that cannot be quoted safely and was left out.", ormOneLine(s.label(m)))
 		return false
 	}
+	// A column's type is copied as the catalogue printed it wherever the
+	// statement is assembled here instead of taken whole from the engine.
+	assembled := !m.view && (s.driver == DriverPostgres || s.driver == DriverMSSQL || strings.TrimSpace(m.CreateSQL) == "")
 	for _, c := range m.cols {
 		if s.quote(c.Name) == "" {
 			s.warn("%s has a column whose name cannot be quoted safely and was left out.", ormOneLine(s.label(m)))
 			return false
 		}
+		if assembled && !sqlFragment(c.Type) {
+			s.warn("%s.%s has a type that cannot be copied into a statement as the catalogue printed it; the table was left out.",
+				ormOneLine(s.label(m)), ormOneLine(c.Name))
+			return false
+		}
 	}
 	return true
+}
+
+// sqlFragment reports whether catalogue text can stand inside a statement as it
+// is: outside its own quotes it holds no statement separator, no comment and no
+// line break. Every engine prints a type that passes, so one that does not was
+// not printed by an engine and is not something to copy into a script.
+func sqlFragment(text string) bool {
+	quote := byte(0)
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
+		switch {
+		case quote != 0:
+			if ch == '\\' && quote == '\'' {
+				// ClickHouse escapes a quote inside an enum label this way.
+				i++
+			} else if ch == quote {
+				quote = 0
+			}
+		case ch == '\'' || ch == '"' || ch == '`':
+			quote = ch
+		case ch == ';' || ch == '\n' || ch == '\r':
+			return false
+		case i+1 < len(text) && (text[i:i+2] == "--" || text[i:i+2] == "/*"):
+			return false
+		}
+	}
+	return quote == 0
 }
 
 func (s *sqlGen) statement(text string) {
@@ -178,7 +214,8 @@ func (s *sqlGen) postgres() {
 		if !guard {
 			return stmt
 		}
-		return "DO $$ BEGIN\n  " + stmt + ";\nEXCEPTION WHEN duplicate_object THEN NULL;\nEND $$"
+		tag := postgresDollarTag(stmt)
+		return "DO " + tag + " BEGIN\n  " + stmt + ";\nEXCEPTION WHEN duplicate_object THEN NULL;\nEND " + tag
 	}
 
 	for _, schema := range s.schemaNames() {
@@ -297,6 +334,22 @@ func (s *sqlGen) postgres() {
 			s.statement(fmt.Sprintf("CREATE VIEW %s AS\n %s", s.rel(m.Schema, m.Name), body))
 		}
 	}
+}
+
+// postgresDollarTag picks the dollar quote for a block that will hold body.
+// Quoting a name or a label does nothing about a `$$` inside it: a dollar-quoted
+// string ends at the first repeat of its opening tag, wherever that falls, and
+// an enum label of `x$$; DROP TABLE t; --` would close the block and run the
+// rest as SQL. So the tag is one the body does not contain.
+func postgresDollarTag(body string) string {
+	tag := "$$"
+	for i := 0; strings.Contains(body, tag); i++ {
+		tag = "$jd$"
+		if i > 0 {
+			tag = fmt.Sprintf("$jd%d$", i)
+		}
+	}
+	return tag
 }
 
 // postgresColumnType is the column's type as it can be written back. A column

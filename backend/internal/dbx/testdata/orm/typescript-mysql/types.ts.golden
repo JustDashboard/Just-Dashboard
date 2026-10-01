@@ -2,6 +2,8 @@
 // Row types as the database returns them. A nullable column is `| null`
 // rather than optional: the key is always present, its value may not be.
 
+export type EventsAudience = "Public" | "Members"
+
 export type PostsStatus = "draft" | "published" | "archived"
 
 export type EventsKind = "view" | "share"
@@ -19,6 +21,9 @@ export interface Event {
   id: string
   title: string
   held_in: number | null
+  colour: string
+  details: unknown | null
+  audience: EventsAudience
 }
 
 export interface PostTag {

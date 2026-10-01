@@ -58,7 +58,7 @@ func (d ormDefault) sql(driver Driver) string {
 		return d.Text
 	case ormDefString:
 		if driver == DriverMySQL {
-			return ormSQLString(d.Text)
+			return ormMySQLString(d.Text)
 		}
 	}
 	return d.Raw
@@ -67,8 +67,10 @@ func (d ormDefault) sql(driver Driver) string {
 var ormNumberRe = regexp.MustCompile(`^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$`)
 
 // parseORMDefault reads a column's default for its engine. A generated column
-// has an expression, not a default, and gets none.
-func parseORMDefault(driver Driver, flavor string, c *ormCol) ormDefault {
+// has an expression, not a default, and gets none. detailed says the engine's
+// own catalogue was read (ORMSchema.Detailed), which on MySQL is what makes
+// DefaultExpr an answer rather than an absence.
+func parseORMDefault(driver Driver, flavor string, detailed bool, c *ormCol) ormDefault {
 	raw := strings.TrimSpace(c.Default)
 	if raw == "" || c.Generated {
 		return ormDefault{}
@@ -78,7 +80,7 @@ func parseORMDefault(driver Driver, flavor string, c *ormCol) ormDefault {
 	case DriverPostgres:
 		d = parsePostgresDefault(raw, c.t)
 	case DriverMySQL:
-		d = parseMySQLDefault(raw, flavor, c)
+		d = parseMySQLDefault(raw, flavor, detailed, c)
 	case DriverSQLite:
 		d = parseSQLiteDefault(raw, c.t)
 	case DriverMSSQL:
@@ -126,13 +128,17 @@ func ormLiteralDefault(text string, t ormType, raw string) ormDefault {
 }
 
 // ormNumberText puts a number the way every target language reads one: no
-// leading plus, a digit on both sides of the point. SQL accepts ".5" and "1.";
-// JSON, and so most of the targets, do not.
+// leading plus, no leading zeros, a digit on both sides of the point. SQL
+// accepts ".5", "1." and "007"; JSON, and so most of the targets, do not — and
+// where 007 is accepted it is an octal literal.
 func ormNumberText(s string) string {
 	s = strings.TrimPrefix(strings.TrimSpace(s), "+")
 	sign := ""
 	if strings.HasPrefix(s, "-") {
 		sign, s = "-", s[1:]
+	}
+	for len(s) > 1 && s[0] == '0' && s[1] >= '0' && s[1] <= '9' {
+		s = s[1:]
 	}
 	if strings.HasPrefix(s, ".") {
 		s = "0" + s
@@ -256,44 +262,72 @@ func parsePostgresDefault(raw string, t ormType) ormDefault {
 
 var mysqlNowRe = regexp.MustCompile(`(?i)^(current_timestamp|now|localtime|localtimestamp)(\(\d*\))?$`)
 
-func parseMySQLDefault(raw, flavor string, c *ormCol) ormDefault {
+func parseMySQLDefault(raw, flavor string, detailed bool, c *ormCol) ormDefault {
+	// MySQL prints a string default bare and flags an expression in EXTRA, which
+	// is what DefaultExpr carries. Once that has been read, an unflagged default
+	// is a literal whatever it looks like: 'rgb(0,0,0)' is a colour and
+	// 'Untitled (1)' a title, not calls. MariaDB has no such flag — it quotes a
+	// string and prints an expression bare — and with no catalogue detail there
+	// is only the shape to go on.
+	literal := detailed && flavor != "mariadb" && !c.DefaultExpr
 	s := ormStripParens(raw)
+	if literal {
+		s = raw
+	}
 	lower := strings.ToLower(s)
+	// Before 8.0.13 nothing is flagged, and the one expression a column could
+	// default to is the current time on a column that holds a time.
+	temporal := c.t.Kind == ormDateTime || c.t.Kind == ormDateTimeTZ
 	switch {
 	case lower == "null":
 		return ormDefault{}
-	case mysqlNowRe.MatchString(s):
+	case mysqlNowRe.MatchString(s) && (!literal || temporal):
 		return ormDefault{Kind: ormDefNow}
-	case lower == "uuid()":
+	case lower == "uuid()" && !literal:
 		return ormDefault{Kind: ormDefUUID, Text: "(uuid())"}
 	}
-	// MariaDB prints a string default quoted and an expression bare. MySQL
-	// prints a string default bare and flags an expression in EXTRA, which is
-	// what DefaultExpr carries; without that flag a call-shaped default is
-	// taken for the expression it looks like.
 	if value, ok := ormUnquoteSQL(s); ok {
 		return ormLiteralDefault(value, c.t, raw)
 	}
-	if c.DefaultExpr || s != strings.TrimSpace(raw) {
-		return ormDefault{Kind: ormDefExpr, Text: raw}
-	}
-	if ormNumberRe.MatchString(s) || lower == "true" || lower == "false" {
-		return ormBareDefault(s, c.t, raw)
+	if c.DefaultExpr || s != raw {
+		return ormDefault{Kind: ormDefExpr, Text: mysqlExprText(raw)}
 	}
 	if strings.HasPrefix(lower, "b'") {
 		return ormLiteralDefault(lower, c.t, raw)
 	}
-	if flavor == "mariadb" || (strings.HasSuffix(s, ")") && strings.Contains(s, "(")) {
-		return ormDefault{Kind: ormDefExpr, Text: raw}
+	// A bare true on a string column is the word, not the boolean: MySQL prints
+	// a boolean default as 1 or 0.
+	if ormNumberRe.MatchString(s) || ((lower == "true" || lower == "false") && !c.t.isString()) {
+		return ormBareDefault(s, c.t, raw)
+	}
+	if !literal && (flavor == "mariadb" || (strings.HasSuffix(s, ")") && strings.Contains(s, "("))) {
+		return ormDefault{Kind: ormDefExpr, Text: mysqlExprText(raw)}
 	}
 	// MySQL's bare literal. Where it has to be passed on as SQL — a date, say —
 	// it needs the quotes the catalogue left off.
-	return ormLiteralDefault(s, c.t, ormSQLString(s))
+	return ormLiteralDefault(s, c.t, ormMySQLString(s))
+}
+
+// mysqlExprText is an expression default the way MySQL takes one back. The
+// catalogue prints DEFAULT (json_object()) as json_object(), and the statement
+// is refused without the parentheses (error 1064); MariaDB accepts them too.
+func mysqlExprText(raw string) string {
+	if ormStripParens(raw) != raw {
+		return raw
+	}
+	return "(" + raw + ")"
 }
 
 // ormSQLString quotes text as a standard SQL string.
 func ormSQLString(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// ormMySQLString quotes text as a MySQL string, where a backslash is an escape
+// character as well: left as it is, one at the end of a value would take the
+// closing quote with it.
+func ormMySQLString(s string) string {
+	return ormSQLString(strings.ReplaceAll(s, `\`, `\\`))
 }
 
 func parseSQLiteDefault(raw string, t ormType) ormDefault {

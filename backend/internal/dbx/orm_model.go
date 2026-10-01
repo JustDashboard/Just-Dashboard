@@ -445,7 +445,7 @@ func (g *ormGen) resolveColumn(m *ormTable, c *ormCol, named map[string]*ORMEnum
 	if c.t.Serial {
 		c.AutoIncrement = true
 	}
-	c.def = parseORMDefault(g.driver, g.flavor, c)
+	c.def = parseORMDefault(g.driver, g.flavor, g.schema.Detailed, c)
 	if c.def.Kind == ormDefAuto {
 		c.AutoIncrement = true
 	}

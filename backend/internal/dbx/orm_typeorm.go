@@ -41,10 +41,26 @@ func generateTypeORM(g *ormGen) []ORMFile {
 	return tsLayout(header, units, g.opts.Split, "entities.ts")
 }
 
+// enumName is the enum type's name as TypeORM has to be given it. TypeORM
+// writes an entity's schema in front of the name, and failing that takes a
+// dotted name as schema and type; so an enum that lives outside its entity's
+// schema can be named when the entity states no schema, and not otherwise.
+func (t *typeormGen) enumName(m *ormTable, c *ormCol, e *ormEnum) string {
+	switch {
+	case e.Schema == "" || e.Schema == m.Schema:
+	case !t.qualified(m) && !strings.Contains(e.Schema+e.Name, "."):
+		return e.Schema + "." + e.Name
+	default:
+		t.warn("%s.%s uses enum type %s.%s, and TypeORM looks for an entity's enum types in the entity's own schema; leave synchronize off, or it creates a second %s there.",
+			t.label(m), c.Name, e.Schema, e.Name, e.Name)
+	}
+	return e.Name
+}
+
 // typeormColumn maps a column onto the type name TypeORM's driver for the
 // engine accepts, the options that go with it, and the property's TypeScript
 // type. known is false for a type the driver has no name for.
-func (t *typeormGen) column(c *ormCol) (typ string, opts []string, ts string, known bool) {
+func (t *typeormGen) column(m *ormTable, c *ormCol) (typ string, opts []string, ts string, known bool) {
 	ct := c.t
 	precision := func() {
 		if ct.HasPrecision {
@@ -68,7 +84,7 @@ func (t *typeormGen) column(c *ormCol) (typ string, opts []string, ts string, kn
 		name := t.names.enum[ct.Enum]
 		opts = append(opts, "enum: "+name)
 		if !ct.Enum.inline {
-			opts = append(opts, "enumName: "+jsString(ct.Enum.Name))
+			opts = append(opts, "enumName: "+jsString(t.enumName(m, c, ct.Enum)))
 		}
 		return "enum", opts, name, true
 	}
@@ -383,7 +399,7 @@ func (t *typeormGen) entity(m *ormTable) *tsUnit {
 
 	for _, c := range m.cols {
 		name := t.names.field[c]
-		typ, opts, ts, known := t.column(c)
+		typ, opts, ts, known := t.column(m, c)
 		if !known {
 			t.warn("%s.%s has type %s, which TypeORM has no column type for; it is declared as text.", t.label(m), c.Name, c.Type)
 			typ, opts, ts = "text", nil, "string"

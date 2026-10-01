@@ -203,6 +203,37 @@ func ormSplitTypeArgs(s string) []string {
 	return out
 }
 
+// ormTypeFold changes the case of a type as its engine wrote it, for the
+// targets that pass one through, and leaves alone whatever is inside quotes.
+// The labels in MySQL's enum('Draft','Published') and a quoted PostgreSQL type
+// name are data: folded with the rest they name labels and a type the database
+// does not have.
+func ormTypeFold(raw string, fold func(string) string) string {
+	var b strings.Builder
+	start := 0
+	for i := 0; i < len(raw); i++ {
+		quote := raw[i]
+		if quote != '\'' && quote != '"' && quote != '`' {
+			continue
+		}
+		b.WriteString(fold(raw[start:i]))
+		start = i
+		for i++; i < len(raw) && raw[i] != quote; i++ {
+			if raw[i] == '\\' && quote == '\'' {
+				// MySQL and ClickHouse escape a quote inside a label this way.
+				i++
+			}
+		}
+		if i >= len(raw) {
+			// Never closed: nothing after the quote is known to be a keyword.
+			return b.String() + raw[start:]
+		}
+		b.WriteString(raw[start : i+1])
+		start = i + 1
+	}
+	return b.String() + fold(raw[start:])
+}
+
 // ormUnquoteSQL reads one single-quoted SQL literal, undoing the doubled
 // quote and the backslash escapes MySQL and ClickHouse use.
 func ormUnquoteSQL(s string) (string, bool) {

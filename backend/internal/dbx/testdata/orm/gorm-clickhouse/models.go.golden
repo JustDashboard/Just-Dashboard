@@ -31,7 +31,7 @@ type PageView struct {
 	Device     PageViewsDevice `gorm:"column:device;type:enum8('desktop' = 1, 'mobile' = 2);not null" json:"device"`
 	Revenue    string          `gorm:"column:revenue;type:decimal(18, 4);not null" json:"revenue"`
 	Session    string          `gorm:"column:session;type:uuid;not null;default:generateUUIDv4()" json:"session"`
-	Seen       time.Time       `gorm:"column:seen;type:datetime64(3, 'utc');not null;default:now64(3)" json:"seen"`
+	Seen       time.Time       `gorm:"column:seen;type:datetime64(3, 'UTC');not null;default:now64(3)" json:"seen"`
 	Props      datatypes.JSON  `gorm:"column:props;type:map(string, string);not null" json:"props"`
 	Big        string          `gorm:"column:big;type:uint128;not null" json:"big"`
 }

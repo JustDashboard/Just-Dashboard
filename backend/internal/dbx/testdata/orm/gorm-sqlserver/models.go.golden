@@ -38,7 +38,7 @@ type Transfer struct {
 	FromAccount int32  `gorm:"column:from_account;type:int;not null;index:IX_transfers_from" json:"from_account"`
 	ToAccount   *int32 `gorm:"column:to_account;type:int" json:"to_account"`
 	Amount      string `gorm:"column:amount;type:decimal(18,2);not null" json:"amount"`
-	Memo        string `gorm:"column:memo;type:varchar(255);not null;default:" json:"memo"`
+	Memo        string `gorm:"column:memo;type:varchar(255);not null;default:''" json:"memo"`
 
 	FromAccountRef *Account `gorm:"foreignKey:FromAccount;references:ID;constraint:OnDelete:CASCADE" json:"from_account_ref,omitempty"`
 	ToAccountRef   *Account `gorm:"foreignKey:ToAccount;references:ID" json:"to_account_ref,omitempty"`

@@ -5,6 +5,9 @@
 
 import { z } from "zod"
 
+export const EventsAudienceSchema = z.enum(["Public", "Members"])
+export type EventsAudience = z.infer<typeof EventsAudienceSchema>
+
 export const PostsStatusSchema = z.enum(["draft", "published", "archived"])
 export type PostsStatus = z.infer<typeof PostsStatusSchema>
 
@@ -26,9 +29,12 @@ export const EventSchema = z.object({
   id: z.string(),
   title: z.string(),
   held_in: z.number().int().nullable(),
+  colour: z.string(),
+  details: z.unknown().nullable(),
+  audience: EventsAudienceSchema,
 })
 export type Event = z.infer<typeof EventSchema>
-export const EventInsertSchema = EventSchema.partial({ "id": true })
+export const EventInsertSchema = EventSchema.partial({ "id": true, "colour": true, "details": true, "audience": true })
 
 export const PostTagSchema = z.object({
   post_id: z.string(),

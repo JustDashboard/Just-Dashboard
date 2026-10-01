@@ -10,7 +10,10 @@ import {
   Model,
   type NonAttribute,
   type Sequelize,
+  literal,
 } from "sequelize"
+
+export type EventsAudience = "Public" | "Members"
 
 export type PostsStatus = "draft" | "published" | "archived"
 
@@ -54,6 +57,9 @@ export class Event extends Model<InferAttributes<Event>, InferCreationAttributes
   declare id: CreationOptional<number>
   declare title: string
   declare held_in: CreationOptional<number | null>
+  declare colour: CreationOptional<string>
+  declare details: CreationOptional<unknown>
+  declare audience: CreationOptional<EventsAudience>
 }
 
 export function initEvent(sequelize: Sequelize): typeof Event {
@@ -62,6 +68,9 @@ export function initEvent(sequelize: Sequelize): typeof Event {
       id: { type: DataTypes.BIGINT, primaryKey: true, autoIncrement: true, allowNull: false },
       title: { type: DataTypes.STRING(200), allowNull: false },
       held_in: { type: "YEAR", allowNull: true },
+      colour: { type: DataTypes.STRING(32), allowNull: false, defaultValue: "rgb(0,0,0)" },
+      details: { type: DataTypes.JSON, allowNull: true, defaultValue: literal("(json_object())") },
+      audience: { type: DataTypes.ENUM("Public", "Members"), allowNull: false, defaultValue: "Public" },
     },
     {
       sequelize,
@@ -127,7 +136,7 @@ export function initPost(sequelize: Sequelize): typeof Post {
       title: { type: DataTypes.STRING(200), allowNull: false },
       body: { type: DataTypes.TEXT("medium"), allowNull: true },
       status: { type: DataTypes.ENUM("draft", "published", "archived"), allowNull: false, defaultValue: "draft" },
-      flags: { type: "SET('PINNED','FEATURED')", allowNull: true },
+      flags: { type: "SET('pinned','featured')", allowNull: true },
       views: { type: DataTypes.INTEGER.UNSIGNED, allowNull: false, defaultValue: 0 },
       rating: { type: DataTypes.DECIMAL(4, 2), allowNull: true },
       meta: { type: DataTypes.JSON, allowNull: true },

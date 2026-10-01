@@ -25,6 +25,9 @@ model events {
   id BigInt @id @default(autoincrement())
   title String @db.VarChar(200)
   held_in Int? @db.Year
+  colour String @default("rgb(0,0,0)") @db.VarChar(32)
+  details Json? @default(dbgenerated("(json_object())"))
+  audience events_audience @default(Public)
 }
 
 model post_tags {
@@ -55,6 +58,11 @@ model posts {
   post_tags post_tags[] @relation("post_tags_post_id")
 
   @@index([status, published_at], map: "idx_posts_status")
+}
+
+enum events_audience {
+  Public
+  Members
 }
 
 enum posts_status {

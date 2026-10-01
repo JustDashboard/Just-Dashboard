@@ -10,6 +10,14 @@ import (
 	"gorm.io/datatypes"
 )
 
+// EventsAudience is the events_audience enum.
+type EventsAudience string
+
+const (
+	EventsAudiencePublic  EventsAudience = "Public"
+	EventsAudienceMembers EventsAudience = "Members"
+)
+
 // PostsStatus is the posts_status enum.
 type PostsStatus string
 
@@ -44,9 +52,12 @@ func (Author) TableName() string { return "blog.authors" }
 
 // Event maps the events table.
 type Event struct {
-	ID     int64  `gorm:"column:id;type:bigint;primaryKey;autoIncrement" json:"id"`
-	Title  string `gorm:"column:title;type:varchar(200);not null" json:"title"`
-	HeldIn *int16 `gorm:"column:held_in;type:year" json:"held_in"`
+	ID       int64          `gorm:"column:id;type:bigint;primaryKey;autoIncrement" json:"id"`
+	Title    string         `gorm:"column:title;type:varchar(200);not null" json:"title"`
+	HeldIn   *int16         `gorm:"column:held_in;type:year" json:"held_in"`
+	Colour   string         `gorm:"column:colour;type:varchar(32);not null;default:'rgb(0,0,0)'" json:"colour"`
+	Details  datatypes.JSON `gorm:"column:details;type:json;default:(json_object())" json:"details"`
+	Audience EventsAudience `gorm:"column:audience;type:enum('Public','Members');not null;default:Public" json:"audience"`
 }
 
 // TableName is the table GORM reads and writes for Event.

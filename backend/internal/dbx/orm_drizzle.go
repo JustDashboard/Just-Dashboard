@@ -65,6 +65,9 @@ func generateDrizzle(g *ormGen) []ORMFile {
 	rules := ormNameRules{
 		model: sanitizeIdent, field: sanitizeIdent, enum: sanitizeIdent,
 		top: drizzleBuilders, escapeTop: jsIdent, modelSuffix: "Table",
+		// A column's key in the table object is free to choose; its name in
+		// the database is the builder's argument.
+		escapeMember: jsMember,
 	}
 	if g.opts.Naming == ORMNamingCamel {
 		rules.model, rules.field, rules.enum = ormCamel, ormCamel, ormCamel

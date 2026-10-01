@@ -164,6 +164,9 @@ func TestORMDefaultsAreReadPerEngine(t *testing.T) {
 		text   string
 		truth  bool
 		expr   bool // the catalogue flagged it as an expression (MySQL)
+		// detailed: the catalogue was read, so on MySQL an unflagged default is
+		// a literal whatever it looks like.
+		detailed bool
 	}{
 		{driver: DriverPostgres, typ: "bigint", raw: "nextval('customers_id_seq'::regclass)", kind: ormDefAuto},
 		{driver: DriverPostgres, typ: "timestamp with time zone", raw: "now()", kind: ormDefNow},
@@ -200,8 +203,28 @@ func TestORMDefaultsAreReadPerEngine(t *testing.T) {
 		{driver: DriverMySQL, typ: "tinyint(1)", raw: "0", kind: ormDefBool},
 		{driver: DriverMySQL, typ: "tinyint(1)", raw: "1", kind: ormDefBool, truth: true},
 		{driver: DriverMySQL, typ: "timestamp(3)", raw: "CURRENT_TIMESTAMP(3)", kind: ormDefNow, expr: true},
-		{driver: DriverMySQL, typ: "varchar(64)", raw: "concat(_utf8mb4'a',_utf8mb4'b')", kind: ormDefExpr, text: "concat(_utf8mb4'a',_utf8mb4'b')", expr: true},
+		// An expression goes back in the parentheses MySQL requires around one.
+		{driver: DriverMySQL, typ: "varchar(64)", raw: "concat(_utf8mb4'a',_utf8mb4'b')", kind: ormDefExpr, text: "(concat(_utf8mb4'a',_utf8mb4'b'))", expr: true},
+		{driver: DriverMySQL, typ: "json", raw: "json_object()", kind: ormDefExpr, text: "(json_object())", expr: true, detailed: true},
+		{driver: DriverMySQL, typ: "int", raw: "(1 + 1)", kind: ormDefExpr, text: "(1 + 1)", expr: true, detailed: true},
+		{driver: DriverMySQL, typ: "varchar(36)", raw: "uuid()", kind: ormDefUUID, text: "(uuid())", expr: true, detailed: true},
+		{driver: DriverMySQL, flavor: "mariadb", typ: "varchar(64)", raw: "concat('a','b')", kind: ormDefExpr, text: "(concat('a','b'))", detailed: true},
 		{driver: DriverMySQL, typ: "datetime", raw: "2020-01-01 00:00:00", kind: ormDefExpr, text: "'2020-01-01 00:00:00'"},
+		// With the catalogue read and no flag, a default is the string it is,
+		// however much it looks like a call.
+		{driver: DriverMySQL, typ: "varchar(32)", raw: "rgb(0,0,0)", kind: ormDefString, text: "rgb(0,0,0)", detailed: true},
+		{driver: DriverMySQL, typ: "varchar(32)", raw: "Untitled (1)", kind: ormDefString, text: "Untitled (1)", detailed: true},
+		{driver: DriverMySQL, typ: "varchar(32)", raw: "(none)", kind: ormDefString, text: "(none)", detailed: true},
+		{driver: DriverMySQL, typ: "varchar(32)", raw: "uuid()", kind: ormDefString, text: "uuid()", detailed: true},
+		{driver: DriverMySQL, typ: "varchar(32)", raw: "now", kind: ormDefString, text: "now", detailed: true},
+		{driver: DriverMySQL, typ: "varchar(32)", raw: "true", kind: ormDefString, text: "true", detailed: true},
+		{driver: DriverMySQL, typ: "varchar(32)", raw: "007", kind: ormDefString, text: "007", detailed: true},
+		{driver: DriverMySQL, typ: "int", raw: "5", kind: ormDefNumber, text: "5", detailed: true},
+		{driver: DriverMySQL, typ: "date", raw: "2020-01-01", kind: ormDefExpr, text: "'2020-01-01'", detailed: true},
+		// MySQL 5.7 flags nothing; the current time on a time column is still that.
+		{driver: DriverMySQL, typ: "datetime", raw: "CURRENT_TIMESTAMP", kind: ormDefNow, detailed: true},
+		// Without the catalogue the shape is all there is to go on.
+		{driver: DriverMySQL, typ: "varchar(32)", raw: "rgb(0,0,0)", kind: ormDefExpr, text: "(rgb(0,0,0))"},
 
 		{driver: DriverSQLite, typ: "TEXT", raw: "'untitled'", kind: ormDefString, text: "untitled"},
 		{driver: DriverSQLite, typ: "BOOLEAN", raw: "0", kind: ormDefBool},
@@ -209,6 +232,13 @@ func TestORMDefaultsAreReadPerEngine(t *testing.T) {
 		{driver: DriverSQLite, typ: "REAL", raw: "1.5", kind: ormDefNumber, text: "1.5"},
 		{driver: DriverSQLite, typ: "TEXT", raw: "(datetime('now'))", kind: ormDefExpr, text: "(datetime('now'))"},
 		{driver: DriverSQLite, typ: "TEXT", raw: "NULL", kind: ormDefNone},
+		// SQLite keeps a default as it was typed; 007 is not a number anywhere else.
+		{driver: DriverSQLite, typ: "INTEGER", raw: "007", kind: ormDefNumber, text: "7"},
+		{driver: DriverSQLite, typ: "INTEGER", raw: "00", kind: ormDefNumber, text: "0"},
+		{driver: DriverSQLite, typ: "INTEGER", raw: "-08", kind: ormDefNumber, text: "-8"},
+		{driver: DriverSQLite, typ: "REAL", raw: "00.5", kind: ormDefNumber, text: "0.5"},
+		{driver: DriverSQLite, typ: "REAL", raw: "0.50", kind: ormDefNumber, text: "0.50"},
+		{driver: DriverSQLite, typ: "TEXT", raw: "'007'", kind: ormDefString, text: "007"},
 
 		// SQL Server wraps everything in parentheses, numbers twice.
 		{driver: DriverMSSQL, typ: "int", raw: "((0))", kind: ormDefNumber, text: "0"},
@@ -232,7 +262,7 @@ func TestORMDefaultsAreReadPerEngine(t *testing.T) {
 	for _, c := range cases {
 		col := &ormCol{ORMColumn: &ORMColumn{Name: "c", Type: c.typ, Default: c.raw, DefaultExpr: c.expr}}
 		col.t = parseORMType(c.driver, c.typ)
-		got := parseORMDefault(c.driver, c.flavor, col)
+		got := parseORMDefault(c.driver, c.flavor, c.detailed, col)
 		if got.Kind != c.kind || got.Bool != c.truth || (c.text != "" && got.Text != c.text) {
 			t.Errorf("%s %s DEFAULT %s = kind %d text %q bool %v, want kind %d text %q bool %v",
 				c.driver, c.typ, c.raw, got.Kind, got.Text, got.Bool, c.kind, c.text, c.truth)

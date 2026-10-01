@@ -9,6 +9,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+enum EventsAudience: string
+{
+    case Public = 'Public';
+    case Members = 'Members';
+}
+
 enum PostsStatus: string
 {
     case Draft = 'draft';
@@ -61,6 +67,9 @@ class Author extends Model
  * @property int $id
  * @property string $title
  * @property int|null $held_in
+ * @property string $colour
+ * @property array|null $details
+ * @property EventsAudience $audience
  */
 class Event extends Model
 {
@@ -71,11 +80,16 @@ class Event extends Model
     protected $fillable = [
         'title',
         'held_in',
+        'colour',
+        'details',
+        'audience',
     ];
 
     protected $casts = [
         'id' => 'integer',
         'held_in' => 'integer',
+        'details' => 'array',
+        'audience' => EventsAudience::class,
     ];
 }
 

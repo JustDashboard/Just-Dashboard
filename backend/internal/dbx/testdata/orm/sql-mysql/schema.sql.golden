@@ -23,6 +23,9 @@ CREATE TABLE `events` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `title` varchar(200) NOT NULL,
   `held_in` year DEFAULT NULL,
+  `colour` varchar(32) NOT NULL DEFAULT 'rgb(0,0,0)',
+  `details` json DEFAULT (json_object()),
+  `audience` enum('Public','Members') NOT NULL DEFAULT 'Public',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

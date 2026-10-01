@@ -92,7 +92,9 @@ func generatePrisma(g *ormGen) []ORMFile {
 	}
 
 	schemas := g.schemaNames()
-	multi := g.multiSchema
+	// An enum type may live outside the one schema its tables are in, and it
+	// is then as much a second schema as a second table would be.
+	multi := g.multiSchema || len(schemas) > 1
 	if multi && p.provider == "mysql" {
 		// Prisma's multi-schema support covers PostgreSQL, CockroachDB and SQL
 		// Server. Its MySQL connector reads the one database in the URL, and

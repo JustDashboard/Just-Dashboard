@@ -11,6 +11,26 @@ import (
 	"time"
 )
 
+// EventsAudience is the events_audience enum.
+type EventsAudience string
+
+const (
+	EventsAudiencePublic  EventsAudience = "Public"
+	EventsAudienceMembers EventsAudience = "Members"
+)
+
+func (e *EventsAudience) Scan(src any) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = EventsAudience(s)
+	case string:
+		*e = EventsAudience(s)
+	default:
+		return fmt.Errorf("unsupported scan type for EventsAudience: %T", src)
+	}
+	return nil
+}
+
 // PostsStatus is the posts_status enum.
 type PostsStatus string
 
@@ -64,9 +84,12 @@ type Author struct {
 
 // Event maps the events table.
 type Event struct {
-	ID     int64         `db:"id" json:"id"`
-	Title  string        `db:"title" json:"title"`
-	HeldIn sql.NullInt16 `db:"held_in" json:"held_in"`
+	ID       int64           `db:"id" json:"id"`
+	Title    string          `db:"title" json:"title"`
+	HeldIn   sql.NullInt16   `db:"held_in" json:"held_in"`
+	Colour   string          `db:"colour" json:"colour"`
+	Details  json.RawMessage `db:"details" json:"details"`
+	Audience EventsAudience  `db:"audience" json:"audience"`
 }
 
 // PostTag maps the post_tags table.

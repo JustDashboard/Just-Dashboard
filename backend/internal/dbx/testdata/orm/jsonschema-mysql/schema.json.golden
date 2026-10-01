@@ -36,6 +36,10 @@
     }
   },
   "$defs": {
+    "EventsAudience": {
+      "type": "string",
+      "enum": ["Public", "Members"]
+    },
     "PostsStatus": {
       "type": "string",
       "enum": ["draft", "published", "archived"]
@@ -91,6 +95,16 @@
         },
         "held_in": {
           "type": ["integer", "null"]
+        },
+        "colour": {
+          "type": "string",
+          "maxLength": 32,
+          "default": "rgb(0,0,0)"
+        },
+        "details": {},
+        "audience": {
+          "$ref": "#/$defs/EventsAudience",
+          "default": "Public"
         }
       },
       "required": ["title"],

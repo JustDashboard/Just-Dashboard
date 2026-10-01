@@ -61,6 +61,9 @@ class Event(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     title: Mapped[str] = mapped_column(String(200))
     held_in: Mapped[Optional[int]] = mapped_column(YEAR)
+    colour: Mapped[str] = mapped_column(String(32), server_default=text("'rgb(0,0,0)'"))
+    details: Mapped[Optional[Any]] = mapped_column(JSON, server_default=text("(json_object())"))
+    audience: Mapped[str] = mapped_column(Enum("Public", "Members"), server_default=text("'Public'"))
 
 
 class PostTag(Base):

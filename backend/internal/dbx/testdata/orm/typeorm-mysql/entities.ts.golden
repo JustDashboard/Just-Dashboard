@@ -14,6 +14,11 @@ import {
   type Relation,
 } from "typeorm"
 
+export enum EventsAudience {
+  Public = "Public",
+  Members = "Members",
+}
+
 export enum PostsStatus {
   Draft = "draft",
   Published = "published",
@@ -60,6 +65,15 @@ export class Event {
 
   @Column({ type: "year", nullable: true })
   held_in!: number | null
+
+  @Column({ type: "varchar", length: 32, default: "rgb(0,0,0)" })
+  colour!: string
+
+  @Column({ type: "json", nullable: true, default: () => "(json_object())" })
+  details!: unknown
+
+  @Column({ type: "enum", enum: EventsAudience, default: EventsAudience.Public })
+  audience!: EventsAudience
 }
 
 @Entity("post_tags", { database: "blog" })

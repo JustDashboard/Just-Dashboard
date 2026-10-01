@@ -263,7 +263,6 @@ func (o *goGen) goType(m *ormTable, c *ormCol) (scalar string, nilable bool) {
 	case ormBytes, ormBit:
 		return "[]byte", true
 	case ormDate, ormDateTime, ormDateTimeTZ:
-		o.imports["time"] = true
 		return "time.Time", false
 	case ormEnumKind:
 		if t.Enum != nil {
@@ -388,9 +387,14 @@ func (o *goGen) structFor(m *ormTable) string {
 		if c.Nullable {
 			typ = o.nullable(c, scalar, nilable)
 		}
+		if strings.Contains(typ, "time.Time") {
+			// Imported for the type as written: a nullable column is a
+			// sql.NullTime, which needs database/sql and not time.
+			o.imports["time"] = true
+		}
 		var tag [][2]string
 		if o.gorm {
-			parts := []string{"column:" + goTagValue(c.Name), "type:" + goTagValue(strings.ToLower(strings.TrimSpace(c.Type)))}
+			parts := []string{"column:" + goTagValue(c.Name), "type:" + goTagValue(ormTypeFold(strings.TrimSpace(c.Type), strings.ToLower))}
 			if m.pk[c.Name] && !m.view {
 				parts = append(parts, "primaryKey")
 				if len(m.PrimaryKey) == 1 && c.t.isInteger() {
@@ -407,7 +411,9 @@ func (o *goGen) structFor(m *ormTable) string {
 			}
 			if o.opts.Defaults && !c.Generated {
 				switch c.def.Kind {
-				case ormDefString, ormDefNumber:
+				case ormDefString:
+					parts = append(parts, "default:"+goTagValue(gormStringDefault(o.driver, c.def.Text)))
+				case ormDefNumber:
 					parts = append(parts, "default:"+goTagValue(c.def.Text))
 				case ormDefBool:
 					parts = append(parts, fmt.Sprintf("default:%t", c.def.Bool))
@@ -496,6 +502,19 @@ func (o *goGen) structFor(m *ormTable) string {
 		fmt.Fprintf(&b, "func (%s) TableName() string { return %s }\n", name, strconv.Quote(table))
 	}
 	return b.String()
+}
+
+// gormStringDefault is a string default as GORM's tag has to be given it. GORM
+// takes a default with parentheses in it for a database expression, and "null"
+// or nothing for no default at all; quoted as SQL, each is the string it is.
+func gormStringDefault(driver Driver, text string) string {
+	if text != "" && !strings.EqualFold(text, "null") && !(strings.Contains(text, "(") && strings.Contains(text, ")")) {
+		return text
+	}
+	if driver == DriverMySQL {
+		return ormMySQLString(text)
+	}
+	return ormSQLString(text)
 }
 
 // goTagValue escapes a value for a gorm tag, whose settings are separated by

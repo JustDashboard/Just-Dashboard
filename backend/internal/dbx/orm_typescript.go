@@ -160,7 +160,7 @@ func generateZod(g *ormGen) []ORMFile {
 			if c.Nullable {
 				expr += ".nullable()"
 			}
-			fmt.Fprintf(&b, "  %s: %s,\n", tsPropertyName(n.field[c]), expr)
+			fmt.Fprintf(&b, "  %s: %s,\n", jsKey(n.field[c]), expr)
 		}
 		b.WriteString("})\n")
 		fmt.Fprintf(&b, "export type %s = z.infer<typeof %sSchema>\n", name, name)
@@ -169,15 +169,25 @@ func generateZod(g *ormGen) []ORMFile {
 		}
 		// The insert variant: anything the database fills in is optional on
 		// the way in.
-		optional := []string{}
+		optional, required := []string{}, []string{}
 		for _, c := range m.cols {
-			if c.dbFills() {
-				optional = append(optional, jsString(n.field[c]))
+			key := jsString(n.field[c])
+			if n.field[c] == "__proto__" {
+				key = jsKey(n.field[c])
+			}
+			switch {
+			case c.dbFills():
+				optional = append(optional, key+": true")
+			case jsObjectMembers[n.field[c]]:
+				// Every object literal already has a member of this name, a
+				// function, and TypeScript checks it against the mask. Said
+				// to be undefined, it is left as it is at run time too.
+				required = append(required, key+": undefined")
 			}
 		}
 		if len(optional) > 0 {
 			fmt.Fprintf(&b, "export const %sInsertSchema = %sSchema.partial({ %s })\n",
-				name, name, strings.Join(optional, ": true, ")+": true")
+				name, name, strings.Join(append(optional, required...), ", "))
 		} else {
 			fmt.Fprintf(&b, "export const %sInsertSchema = %sSchema\n", name, name)
 		}

@@ -387,10 +387,18 @@ func ormMySQLFixture() *ORMSchema {
 					ormColumn("id", "bigint", ormAuto),
 					ormColumn("title", "varchar(200)"),
 					ormColumn("held_in", "year", ormNull),
+					// A string that looks like a call, as MySQL prints it: bare,
+					// and with nothing in EXTRA to say it is an expression.
+					ormColumn("colour", "varchar(32)", ormDef("rgb(0,0,0)")),
+					// And a call that is one: flagged, and printed without the
+					// parentheses it has to be written back in.
+					ormColumn("details", "json", ormNull, ormDef("json_object()"), func(c *ORMColumn) { c.DefaultExpr = true }),
+					// Labels are data; their case is not the generator's to change.
+					ormColumn("audience", "enum('Public','Members')", ormDef("Public")),
 				},
 				PrimaryKey: []string{"id"},
 				Indexes:    []ORMIndex{ormPK("PRIMARY", "id")},
-				CreateSQL:  "CREATE TABLE `events` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `title` varchar(200) NOT NULL,\n  `held_in` year DEFAULT NULL,\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci",
+				CreateSQL:  "CREATE TABLE `events` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `title` varchar(200) NOT NULL,\n  `held_in` year DEFAULT NULL,\n  `colour` varchar(32) NOT NULL DEFAULT 'rgb(0,0,0)',\n  `details` json DEFAULT (json_object()),\n  `audience` enum('Public','Members') NOT NULL DEFAULT 'Public',\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci",
 			},
 			{
 				Schema: "blog", Name: "post_tags", Kind: ORMKindTable,

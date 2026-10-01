@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // SQLAlchemy.
@@ -77,7 +78,7 @@ func generateSQLAlchemy(g *ormGen) []ORMFile {
 		top:          sqlalchemyNames,
 		modelSuffix:  "Model",
 		escapeTop:    pyIdent,
-		escapeMember: pyIdent,
+		escapeMember: pyMember,
 		// Names the declarative base keeps for itself on every mapped class.
 		member: []string{"metadata", "registry"},
 	})
@@ -616,18 +617,49 @@ func (s *sqlalchemyGen) columnArgs(m *ormTable, c *ormCol, t pyType) []string {
 	if c.Generated {
 		if c.GeneratedExpr != "" {
 			s.use(saCore, "Computed")
-			args = append(args, "Computed("+jsString(c.GeneratedExpr)+", persisted=True)")
+			args = append(args, "Computed("+saSQLText(c.GeneratedExpr)+", persisted=True)")
 		}
 	} else if s.opts.Defaults && c.def.Kind != ormDefNone && c.def.Kind != ormDefAuto && c.def.Kind != ormDefAssumedAuto {
 		if expr := c.def.sql(s.driver); expr != "" {
 			s.use(saCore, "text")
-			args = append(args, "server_default=text("+jsString(expr)+")")
+			args = append(args, "server_default=text("+saSQLText(expr)+")")
 		}
 	}
 	if c.Comment != "" {
 		args = append(args, "comment="+jsString(ormOneLine(c.Comment)))
 	}
 	return args
+}
+
+// saSQLText renders SQL as the string SQLAlchemy's text() takes. text() reads
+// :name as a bind parameter wherever it is — '{"a":1}'::jsonb compiles with
+// NULL where :1 was — and takes a backslash before the colon to mean it is
+// only a colon. The backslash is then removed, so one that was already there
+// in front of a colon needs a second to survive.
+func saSQLText(expr string) string {
+	rs := []rune(expr)
+	word := func(r rune) bool { return r == '_' || r == '$' || unicode.IsLetter(r) || unicode.IsDigit(r) }
+	var b strings.Builder
+	for i, r := range rs {
+		if r == ':' {
+			end := i + 1
+			for end < len(rs) && word(rs[end]) {
+				end++
+			}
+			var prev rune
+			if i > 0 {
+				prev = rs[i-1]
+			}
+			switch {
+			case end < len(rs) && rs[end] == ':':
+				// ::cast, or :word: — neither is read as a parameter.
+			case prev == '\\', end > i+1 && prev != ':' && !word(prev):
+				b.WriteRune('\\')
+			}
+		}
+		b.WriteRune(r)
+	}
+	return jsString(b.String())
 }
 
 // inOutput reports whether a table is among the models being written, so a
