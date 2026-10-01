@@ -16,19 +16,22 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// Live tests for the MongoDB surface. Like the others they skip when the
-// server is not there. The database is the one the connection string names,
-// so several checkouts can share one server without sharing a database.
+// Live tests for the MongoDB surface. They run only against a server the
+// environment names: they create and drop collections, make accounts, kill
+// an operation and turn a profiler on, and the address a MongoDB listens on
+// by default is whatever happens to be listening there. The database is the
+// one the connection string names, so several checkouts can share one server
+// without sharing a database.
 
 func liveMongoDB(t *testing.T) (*mongo.Client, string) {
 	t.Helper()
 	dsn := os.Getenv("JD_TEST_MONGO_DSN")
 	if dsn == "" {
-		dsn = "mongodb://127.0.0.1:27017/jdtest"
+		t.Skip("set JD_TEST_MONGO_DSN to a MongoDB these tests may write to")
 	}
 	client, err := MongoClient(context.Background(), dsn)
 	if err != nil {
-		t.Skipf("MongoDB unreachable — set JD_TEST_MONGO_DSN to run these (%v)", err)
+		t.Skipf("MongoDB unreachable (%v)", err)
 	}
 	t.Cleanup(func() { client.Disconnect(context.Background()) })
 	db := "jdtest"
@@ -59,17 +62,6 @@ func liveMongoReplicaSet(t *testing.T) (*mongo.Client, string) {
 	return client, db
 }
 
-// serverWide skips a test that changes something the whole server shares —
-// the profiler's threshold, an operation in flight, an account — unless the
-// environment names the server. The default address is whatever happens to
-// be listening there, and that is not a place to turn a profiler on.
-func serverWide(t *testing.T) {
-	t.Helper()
-	if os.Getenv("JD_TEST_MONGO_DSN") == "" {
-		t.Skip("set JD_TEST_MONGO_DSN to a server this test may change the settings of")
-	}
-}
-
 // liveMongoAccounts is a server the tests may create accounts on: the
 // private replica set when there is one, where they may be made in admin as
 // well, and otherwise the shared server, where they are made only under this
@@ -80,7 +72,6 @@ func liveMongoAccounts(t *testing.T) (client *mongo.Client, db string, private b
 		client, db = liveMongoReplicaSet(t)
 		return client, db, true
 	}
-	serverWide(t)
 	client, db = liveMongoDB(t)
 	return client, db, false
 }
@@ -1471,7 +1462,6 @@ func TestLiveMongoServer(t *testing.T) {
 	})
 
 	t.Run("a running operation is listed and can be killed", func(t *testing.T) {
-		serverWide(t)
 		done := make(chan error, 1)
 		go func() {
 			_, err := MongoFindDocuments(context.Background(), client, db, coll, MongoFindSpec{
@@ -1524,7 +1514,6 @@ func TestLiveMongoServer(t *testing.T) {
 	})
 
 	t.Run("the profiler is read, set and read back", func(t *testing.T) {
-		serverWide(t)
 		before, err := MongoProfilerStatus(ctx, client, db)
 		if err != nil {
 			t.Fatalf("profiler status: %v", err)
@@ -1962,6 +1951,17 @@ func TestLiveMongoViewsOverCredentials(t *testing.T) {
 	}
 	if res, err := MongoRunPipeline(ctx, client, db, plain, MongoAggregateSpec{Pipeline: `[ { $unionWith: "jd_guard_clean" } ]`}); err != nil || res.Returned != 2 {
 		t.Errorf("a pipeline joining an ordinary view: %+v, %v", res, err)
+	}
+	// A stage that names what it joins twice is refused here, whichever of
+	// the two this server would have kept. 7.0 happens to refuse it itself;
+	// the guard does not wait to find out.
+	for _, pipeline := range []string{
+		`[{"$lookup":{"from":"` + plain + `","from":"` + secret + `","as":"s","pipeline":[]}}]`,
+		`[{"$lookup":{"from":"` + plain + `","as":"s","pipeline":[],"pipeline":[{"$unionWith":"jd_guard_direct"}]}}]`,
+	} {
+		if _, err := MongoPreviewPipeline(ctx, client, db, plain, MongoPreviewSpec{Pipeline: pipeline, Stage: 0}); !errors.Is(err, ErrMongoWithheld) {
+			t.Errorf("preview of %s: %v, want ErrMongoWithheld", pipeline, err)
+		}
 	}
 
 	// The console: refused by name before it dials, and by what a name is a

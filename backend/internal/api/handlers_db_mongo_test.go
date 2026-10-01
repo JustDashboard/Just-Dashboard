@@ -381,6 +381,8 @@ func TestMongoConsoleGates(t *testing.T) {
 		// Level -1 asks what the profiler is set to, and the server still
 		// applies whatever is sent beside it.
 		`{ profile: -1, slowms: 100 }`, `{ profile: -1, sampleRate: 0.5 }`, `{ profile: -1, filter: { millis: { $gt: 1 } } }`,
+		// A level that is not a number is level 0 to the server.
+		`{ profile: NaN }`,
 	} {
 		rec := mongoDo(limited, http.MethodPost, "/databases/"+mongoConn+"/mongo/command", command(text))
 		if rec.Code != http.StatusForbidden {
@@ -408,6 +410,8 @@ func TestMongoConsoleGates(t *testing.T) {
 		{"admin", `{ insert: "system.views", documents: [ { _id: "admin.v", viewOn: "system.users", pipeline: [] } ] }`},
 		{"local", `{ find: "oplog.rs" }`},
 		{"jdtest", `{ aggregate: "c", pipeline: [ { $lookup: { from: { db: "local", coll: "oplog.rs" }, as: "o", pipeline: [] } } ], cursor: {} }`},
+		// A join that names its collection twice: a server may keep either.
+		{"admin", `{"aggregate":"c","pipeline":[{"$lookup":{"from":"orders","from":"system.users","as":"u","pipeline":[]}}],"cursor":{}}`},
 	} {
 		body, _ := json.Marshal(map[string]string{"command": c.text, "database": c.database})
 		rec := mongoDo(admin, http.MethodPost, "/databases/"+mongoConn+"/mongo/command", string(body))
@@ -607,6 +611,7 @@ func TestMongoReadOnlyChecks(t *testing.T) {
 		`{ profile: -1, slowms: 101 }`:                          false,
 		`{ profile: -1, sampleRate: 0.5 }`:                      false,
 		`{ profile: -1, filter: {} }`:                           false,
+		`{ profile: NaN }`:                                      false,
 		`{ validate: "c", repair: "yes" }`:                      false,
 		`{ validate: "c", repair: NumberDecimal("1") }`:         false,
 		`{ usersInfo: 1, showCredentials: NumberDecimal("1") }`: false,

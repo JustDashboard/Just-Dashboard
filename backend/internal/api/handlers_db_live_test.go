@@ -102,12 +102,6 @@ func TestLiveAPIMongo(t *testing.T) {
 	dsn := envOr("JD_TEST_MONGO_DSN", "mongodb://127.0.0.1:27017/jdtest")
 	_, r, id := liveAPIRouter(t, dbx.DriverMongo, dsn)
 	const coll = "jd_api_docs"
-	// The database is the one the connection string names, which is where
-	// the insert below puts its documents.
-	database := "jdtest"
-	if info, err := dbx.ParseDSN(dbx.DriverMongo, dsn); err == nil && info.Database != "" {
-		database = info.Database
-	}
 
 	// Start clean, then seed through the product's own insert route.
 	do(t, r, http.MethodDelete, pathf("/databases/%d/collections", id),
@@ -172,6 +166,12 @@ func TestLiveAPIMongo(t *testing.T) {
 	})
 
 	t.Run("browse_and_indexes", func(t *testing.T) {
+		// The database is the one the connection string names, which is where
+		// the inserts above put their documents.
+		database := "jdtest"
+		if info, err := dbx.ParseDSN(dbx.DriverMongo, dsn); err == nil && info.Database != "" {
+			database = info.Database
+		}
 		rec := do(t, r, http.MethodGet,
 			pathf("/databases/%d/browse", id)+"?schema="+database+"&table="+coll+"&limit=10", "")
 		if rec.Code != http.StatusOK {

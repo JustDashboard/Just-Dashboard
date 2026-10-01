@@ -190,6 +190,18 @@ func MongoClassifyCommand(text string) (bson.Raw, MongoVerdict, error) {
 			return cmd, v, nil
 		}
 	}
+	// The command an explain carries is aimed like any other, and the guards
+	// read where it is aimed off its fields, so it is held to the same rule.
+	if explained, ok := elems[0].Value().DocumentOK(); ok && name == "explain" {
+		inner, _ := explained.Elements()
+		seen := map[string]bool{}
+		for _, e := range inner {
+			if seen[e.Key()] {
+				return nil, MongoVerdict{}, fmt.Errorf("the command sets %q twice; say it once", e.Key())
+			}
+			seen[e.Key()] = true
+		}
+	}
 	rule, ok := mongoCommands[name]
 	switch {
 	case ok:
@@ -476,9 +488,23 @@ func inspectValidate(cmd bson.Raw, v *MongoVerdict) {
 // sampleRate, filter — whatever the level beside it says.
 var mongoProfileReads = map[string]bool{"profile": true, "comment": true, "maxTimeMS": true}
 
+// mongoProfileAsks reports whether a profile level only asks what the
+// profiler is set to. The server cuts the level down to an integer and sets
+// the profiler when what is left is 0, 1 or 2, so a level has to still be
+// negative after that: -0.5 is level 0, and so is NaN, which a conversion to
+// an integer here would have read as the most negative number there is.
+func mongoProfileAsks(level bson.RawValue) bool {
+	switch level.Type {
+	case bsontype.Int32, bsontype.Int64:
+		return mongoInt(level) < 0
+	case bsontype.Double:
+		return level.Double() <= -1
+	}
+	return false
+}
+
 func inspectProfile(cmd bson.Raw, v *MongoVerdict) {
-	level := cmd.Lookup("profile")
-	reads := (level.Type == bsontype.Int32 || level.Type == bsontype.Int64 || level.Type == bsontype.Double) && mongoInt(level) < 0
+	reads := mongoProfileAsks(cmd.Lookup("profile"))
 	if elems, err := cmd.Elements(); err == nil {
 		for _, e := range elems {
 			reads = reads && mongoProfileReads[e.Key()]

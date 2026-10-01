@@ -161,15 +161,14 @@ func mongoNestedPipelines(spec bson.RawValue, path string) [][]bson.Raw {
 			if !ok {
 				continue
 			}
-			if part != "*" {
-				if inner, err := doc.LookupErr(part); err == nil {
-					next = append(next, inner)
-				}
-				continue
-			}
+			// Every field of the name, not the first: a stage that says
+			// "pipeline" twice is refused by one server and read at its last
+			// by another.
 			if elems, err := doc.Elements(); err == nil {
 				for _, e := range elems {
-					next = append(next, e.Value())
+					if part == "*" || e.Key() == part {
+						next = append(next, e.Value())
+					}
 				}
 			}
 		}
@@ -262,6 +261,25 @@ func mongoGuardPipelineRead(ctx context.Context, client *mongo.Client, dbName, c
 // is empty for one in the database the pipeline runs in.
 type mongoCollRefTo struct{ db, collection string }
 
+// mongoFieldValues is every value a document gives a field. A document can
+// name a field twice, and which of the two a server reads is the server's
+// business: MongoDB 7.0 refuses most stages that do it, an older or a
+// compatible one may keep the last. What decides whether a request is let
+// through has to have read whichever that is, so it reads them all.
+func mongoFieldValues(doc bson.Raw, key string) []bson.RawValue {
+	elems, err := doc.Elements()
+	if err != nil {
+		return nil
+	}
+	out := []bson.RawValue{}
+	for _, e := range elems {
+		if e.Key() == key {
+			out = append(out, e.Value())
+		}
+	}
+	return out
+}
+
 // mongoPipelineCollections lists the collections a pipeline names: the ones
 // it joins, unions with or walks, at any depth, and the one it writes into.
 func mongoPipelineCollections(stages []bson.Raw, depth int) []mongoCollRefTo {
@@ -272,37 +290,57 @@ func mongoPipelineCollections(stages []bson.Raw, depth int) []mongoCollRefTo {
 	// named reads a collection given as its name or as { db, coll }, which
 	// reaches into another database. $lookup takes that form for a short list
 	// of the server's own collections, and the replication log is on it.
-	named := func(v bson.RawValue) {
-		if coll, ok := v.StringValueOK(); ok {
-			out = append(out, mongoCollRefTo{collection: coll})
-		} else if other, ok := v.DocumentOK(); ok {
-			ref := mongoCollRefTo{}
-			ref.db, _ = other.Lookup("db").StringValueOK()
-			ref.collection, _ = other.Lookup("coll").StringValueOK()
-			out = append(out, ref)
+	named := func(values []bson.RawValue) {
+		for _, v := range values {
+			if coll, ok := v.StringValueOK(); ok {
+				out = append(out, mongoCollRefTo{collection: coll})
+				continue
+			}
+			other, ok := v.DocumentOK()
+			if !ok {
+				continue
+			}
+			// A database or a collection said twice is every pairing of them.
+			dbs := []string{}
+			for _, db := range mongoFieldValues(other, "db") {
+				if name, ok := db.StringValueOK(); ok {
+					dbs = append(dbs, name)
+				}
+			}
+			if len(dbs) == 0 {
+				dbs = []string{""}
+			}
+			for _, coll := range mongoFieldValues(other, "coll") {
+				if name, ok := coll.StringValueOK(); ok {
+					for _, db := range dbs {
+						out = append(out, mongoCollRefTo{db: db, collection: name})
+					}
+				}
+			}
 		}
 	}
 	for _, stage := range stages {
 		name := mongoStageName(stage)
 		spec := stage.Lookup(name)
+		doc, isDoc := spec.DocumentOK()
 		switch name {
 		case "$lookup", "$graphLookup":
-			if doc, ok := spec.DocumentOK(); ok {
-				named(doc.Lookup("from"))
+			if isDoc {
+				named(mongoFieldValues(doc, "from"))
 			}
 		case "$unionWith":
-			if doc, ok := spec.DocumentOK(); ok {
-				named(doc.Lookup("coll"))
+			if isDoc {
+				named(mongoFieldValues(doc, "coll"))
 			} else {
-				named(spec)
+				named([]bson.RawValue{spec})
 			}
 		case "$out":
-			named(spec)
+			named([]bson.RawValue{spec})
 		case "$merge":
-			if doc, ok := spec.DocumentOK(); ok {
-				named(doc.Lookup("into"))
+			if isDoc {
+				named(mongoFieldValues(doc, "into"))
 			} else {
-				named(spec)
+				named([]bson.RawValue{spec})
 			}
 		}
 		for _, sub := range mongoNestedPipelines(spec, mongoReadStages[name]) {

@@ -36,21 +36,18 @@ type mongoLive struct {
 // liveMongoAPI saves the test server as a connection and returns a router
 // that acts as role. The mutation audit middleware is in front of it, as it
 // is in production, so what a handler records can be read back.
+//
+// It runs only against a server the environment names. These tests write
+// documents, drop collections, kill an operation and move the profiler's
+// threshold, and the address a MongoDB listens on by default is whatever
+// happens to be listening there.
 func liveMongoAPI(t *testing.T, role auth.Role) *mongoLive {
 	t.Helper()
-	return liveMongoAPIAt(t, role, envOr("JD_TEST_MONGO_DSN", "mongodb://127.0.0.1:27017/jdtest"))
-}
-
-// liveMongoServerWide is liveMongoAPI for a test that changes something the
-// whole server shares: the profiler's threshold, an operation in flight. It
-// runs only against a server the environment names — the default address is
-// whatever happens to be listening there.
-func liveMongoServerWide(t *testing.T, role auth.Role) *mongoLive {
-	t.Helper()
-	if os.Getenv("JD_TEST_MONGO_DSN") == "" {
-		t.Skip("set JD_TEST_MONGO_DSN to a server this test may change the settings of")
+	dsn := os.Getenv("JD_TEST_MONGO_DSN")
+	if dsn == "" {
+		t.Skip("set JD_TEST_MONGO_DSN to a MongoDB these tests may write to")
 	}
-	return liveMongoAPI(t, role)
+	return liveMongoAPIAt(t, role, dsn)
 }
 
 // liveMongoPrivate is a server that is this test's alone, where it may make
@@ -591,7 +588,7 @@ type breakingWriter struct{ *httptest.ResponseRecorder }
 func (*breakingWriter) Write([]byte) (int, error) { return 0, errors.New("the reader went away") }
 
 func TestLiveAPIMongoServer(t *testing.T) {
-	m := liveMongoServerWide(t, auth.RoleAdmin)
+	m := liveMongoAPI(t, auth.RoleAdmin)
 
 	// The shared stats route: the keys it had, and the counters beside them.
 	var stats struct {
@@ -733,6 +730,59 @@ func TestLiveAPIMongoConsole(t *testing.T) {
 	rec := m.call(http.MethodPost, "/mongo/command", obj{"command": `{ collStats: "jd_api_no_such_collection_` + "x" + `", scale: "big" }`}, http.StatusBadRequest, nil)
 	if mongoErrorCode(rec) != "bad_request" {
 		t.Errorf("a refused command: %s", rec.Body.String())
+	}
+}
+
+// What the console's table once read as harmless, on a server that reads it
+// otherwise: each of these is refused for a role without the capability its
+// real effect needs, and shown not to have happened. The last part runs the
+// same command as an administrator, to show the server does what the table
+// now says it does.
+func TestLiveAPIMongoConsoleFlags(t *testing.T) {
+	admin := liveMongoAPI(t, auth.RoleAdmin)
+	limited := liveMongoAPI(t, auth.RoleLimited)
+	const coll = "jd_api_console_flags"
+	admin.drop(coll)
+	t.Cleanup(func() { admin.drop(coll) })
+	admin.call(http.MethodPost, "/mongo/documents", obj{"collection": coll, "documents": `{ _id: 1 }`}, http.StatusOK, nil)
+
+	var before dbx.MongoProfile
+	admin.call(http.MethodGet, "/mongo/profiler", nil, http.StatusOK, &before)
+	t.Cleanup(func() {
+		admin.call(http.MethodPut, "/mongo/profiler", obj{"level": before.Level, "slowMs": before.SlowMs}, http.StatusOK, nil)
+		if before.Level == 0 {
+			admin.drop("system.profile")
+		}
+	})
+	admin.call(http.MethodPut, "/mongo/profiler", obj{"level": 1}, http.StatusOK, nil)
+
+	for _, text := range []string{
+		`{ findAndModify: "` + coll + `", query: { _id: 1 }, remove: NumberDecimal("1") }`,
+		`{ validate: "` + coll + `", repair: "yes" }`,
+		`{ profile: -1, slowms: ` + fmt.Sprint(before.SlowMs+7) + ` }`,
+		`{ profile: NaN }`,
+	} {
+		limited.call(http.MethodPost, "/mongo/command", obj{"command": text}, http.StatusForbidden, nil)
+	}
+	var found dbx.MongoFindResult
+	admin.call(http.MethodPost, "/mongo/find", obj{"collection": coll}, http.StatusOK, &found)
+	if found.Returned != 1 {
+		t.Errorf("the refused findAndModify removed the document: %d left", found.Returned)
+	}
+	var after dbx.MongoProfile
+	admin.call(http.MethodGet, "/mongo/profiler", nil, http.StatusOK, &after)
+	if after.Level != 1 || after.SlowMs != before.SlowMs {
+		t.Errorf("the refused profile commands left level %d and threshold %d, want 1 and %d", after.Level, after.SlowMs, before.SlowMs)
+	}
+	// Asking is still a read for the same role.
+	limited.call(http.MethodPost, "/mongo/command", obj{"command": `{ profile: -1 }`}, http.StatusOK, nil)
+
+	// A level that is not a number is level 0 to the server: the profiler
+	// goes off, which is why it takes what turning it off takes.
+	admin.call(http.MethodPost, "/mongo/command", obj{"command": `{ profile: NaN }`}, http.StatusOK, nil)
+	admin.call(http.MethodGet, "/mongo/profiler", nil, http.StatusOK, &after)
+	if after.Level != 0 {
+		t.Errorf("{ profile: NaN } left the profiler at level %d; the table classes it as the write that turns it off", after.Level)
 	}
 }
 

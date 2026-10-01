@@ -34,6 +34,8 @@ func TestPipelineClassification(t *testing.T) {
 		{"$unionWith by name", `[{"$unionWith":"other"}]`, false, "", ""},
 		{"a stage nobody listed", `[{"$match":{}},{"$inventedStage":{}}]`, false, "", "$inventedStage"},
 		{"a stage nobody listed, nested", `[{"$lookup":{"from":"b","as":"x","pipeline":[{"$inventedStage":{}}]}}]`, false, "", "$inventedStage"},
+		{"a stage nobody listed, in a pipeline said twice",
+			`[{"$lookup":{"from":"b","as":"x","pipeline":[],"pipeline":[{"$inventedStage":{}}]}}]`, false, "", "$inventedStage"},
 		{"a stage with two operators", `[{"$match":{},"$limit":1}]`, false, "", "a stage that is not a single operator"},
 		{"an empty stage", `[{}]`, false, "", "a stage that is not a single operator"},
 		{"empty pipeline", `[]`, false, "", ""},
@@ -101,6 +103,8 @@ func TestCommandClassification(t *testing.T) {
 		{`{ profile: -1 }`, MongoClassRead, false},
 		{`{ profile: -1, comment: "what is it now" }`, MongoClassRead, false},
 		{`{ profile: NumberLong(-1), maxTimeMS: 500 }`, MongoClassRead, false},
+		{`{ profile: -1.5 }`, MongoClassRead, false},
+		{`{ profile: -Infinity }`, MongoClassRead, false},
 		{`{ features: 1 }`, MongoClassRead, false},
 		{`{ aggregate: "c", pipeline: [ { $match: {} }, { $group: { _id: null, d: { $mergeObjects: "$$ROOT" } } } ], cursor: {} }`, MongoClassRead, false},
 		{`{ explain: { find: "c", filter: {} }, verbosity: "executionStats" }`, MongoClassRead, false},
@@ -161,6 +165,10 @@ func TestCommandClassification(t *testing.T) {
 		{`{ profile: NumberDecimal("-1") }`, MongoClassWrite, true},
 		{`{ profile: "-1" }`, MongoClassWrite, true},
 		{`{ profile: -0.5 }`, MongoClassWrite, true},
+		// The server reads a level that is not a number as 0, which turns the
+		// profiler off (seen on 7.0).
+		{`{ profile: NaN }`, MongoClassWrite, true},
+		{`{ profile: Infinity }`, MongoClassWrite, true},
 		{`{ dropUser: "u" }`, MongoClassDestructive, true},
 		{`{ dropRole: "r" }`, MongoClassDestructive, true},
 		{`{ dropDatabase: 1 }`, MongoClassDestructive, true},
@@ -281,6 +289,9 @@ func TestCommandFieldsGivenTwice(t *testing.T) {
 		`{"collMod":"c","index":{"name":"a","hidden":true},"index":{"name":"t","expireAfterSeconds":1}}`,
 		`{"profile":-1,"profile":2}`,
 		`{"find":"c","find":"system.users"}`,
+		// The command an explain carries is read by the same guards.
+		`{"explain":{"find":"c","find":"system.users"},"verbosity":"executionStats"}`,
+		`{"explain":{"aggregate":"c","pipeline":[],"pipeline":[{"$unionWith":"system.users"}],"cursor":{}}}`,
 	} {
 		if _, v, err := MongoClassifyCommand(text); err == nil || !strings.Contains(err.Error(), "twice") {
 			t.Errorf("%s: classified %+v, %v; want it refused for a field given twice", text, v, err)
@@ -332,6 +343,15 @@ func TestCredentialCollectionsAreWithheld(t *testing.T) {
 		`[ { $lookup: { from: "orders", localField: "a", foreignField: "b", as: "o" } } ]`:                                     false,
 		`[ { $match: { from: "system.users" } } ]`:                                                                             false,
 		`[ { $lookup: "system.users" } ]`:                                                                                      false,
+		// A field said twice is read at both: which of them a server keeps is
+		// the server's business.
+		`[{"$lookup":{"from":"orders","from":"system.users","as":"u","pipeline":[]}}]`:                                                     true,
+		`[{"$lookup":{"from":"system.keys","from":"orders","as":"u","pipeline":[]}}]`:                                                      true,
+		`[{"$lookup":{"from":"orders","as":"u","pipeline":[],"pipeline":[{"$unionWith":"system.users"}]}}]`:                                true,
+		`[{"$unionWith":{"coll":"orders","coll":"system.users"}}]`:                                                                         true,
+		`[{"$graphLookup":{"from":"orders","from":"system.users","startWith":"$a","connectFromField":"a","connectToField":"b","as":"x"}}]`: true,
+		`[{"$merge":{"into":"copy","into":"system.users"}}]`:                                                                               true,
+		`[{"$lookup":{"from":"orders","from":"items","as":"u","pipeline":[]}}]`:                                                            false,
 		// Writing one is managing accounts behind the server's back.
 		`[ { $out: "system.users" } ]`:            true,
 		`[ { $merge: "system.users" } ]`:          true,
@@ -357,6 +377,10 @@ func TestCredentialCollectionsAreWithheld(t *testing.T) {
 		`[ { $lookup: { from: { db: "config", coll: "collections" }, as: "o", pipeline: [] } } ]`:                    false,
 		`[ { $lookup: { from: "oplog.rs", as: "o", pipeline: [] } } ]`:                                               false,
 		`[ { $lookup: { from: "orders", as: "o", pipeline: [ { $match: { ns: "local.oplog.rs" } } ] } } ]`:           false,
+		// The database or the collection said twice.
+		`[{"$lookup":{"from":{"db":"reports","db":"local","coll":"oplog.rs"},"as":"o","pipeline":[]}}]`:               true,
+		`[{"$lookup":{"from":{"db":"local","coll":"startup_log","coll":"oplog.rs"},"as":"o","pipeline":[]}}]`:         true,
+		`[{"$lookup":{"from":{"db":"reports","db":"config","coll":"daily","coll":"weekly"},"as":"o","pipeline":[]}}]`: false,
 	} {
 		if err := mongoGuardPipeline("shop", stages(text)); withheld != errors.Is(err, ErrMongoWithheld) {
 			t.Errorf("pipeline %s in shop: %v, want withheld=%v", text, err, withheld)
