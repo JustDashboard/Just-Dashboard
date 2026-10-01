@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"regexp"
 	"strconv"
@@ -795,6 +796,87 @@ func (g *redisPager) readJSON(page *RedisMembers, o RedisMembersOptions) error {
 	}
 	return nil
 }
+
+// RedisWhole names one value to be read in full: a string key, one field of
+// a hash, or one element of a list.
+type RedisWhole struct {
+	Key RedisBytes
+	// Field is a hash field's name; Index a list position. Neither is given
+	// for a string.
+	Field *RedisBytes
+	Index *int64
+}
+
+// redisWholeTimeout bounds the copy of one value, which may be the half
+// gigabyte Redis allows a string to be.
+const redisWholeTimeout = 5 * time.Minute
+
+// RedisCopyWhole streams one value, all of it, to wherever open says.
+//
+// A page carries the start of a long member and says how long it really is.
+// This is the other half of that: the way to get the rest. The value is
+// copied from the server's reply straight through, a buffer at a time, so its
+// size is the reader's concern and never this process's. open is told the
+// size before the first byte, and is not called at all when there is nothing
+// to send.
+func RedisCopyWhole(ctx context.Context, client *redis.Client, v RedisWhole, open func(size int64) (io.Writer, error)) error {
+	key := string(v.Key)
+	typ, err := client.Type(ctx, key).Result()
+	if err != nil {
+		return RedisExplainError(ctx, client, err)
+	}
+	var args []string
+	switch {
+	case typ == "none":
+		return ErrRedisKeyNotFound
+	case typ == "string" && v.Field == nil && v.Index == nil:
+		args = []string{"GET", key}
+	case typ == "hash" && v.Field != nil:
+		args = []string{"HGET", key, string(*v.Field)}
+	case typ == "list" && v.Index != nil:
+		args = []string{"LINDEX", key, strconv.FormatInt(*v.Index, 10)}
+	case typ == "string", typ == "hash", typ == "list":
+		return fmt.Errorf("say which value of the %s to read: nothing for a string, a field for a hash, a position for a list", typ)
+	default:
+		return fmt.Errorf("only a string, a hash field or a list element can be read whole; a %s has neither", typ)
+	}
+	wire, err := redisDialOptions(ctx, client.Options())
+	if err != nil {
+		return err
+	}
+	defer wire.close()
+	if err := wire.login(client.Options().DB); err != nil {
+		return err
+	}
+	if err := wire.send(redisWholeTimeout, args...); err != nil {
+		return err
+	}
+	header, _, err := redisReadLine(wire.rd, 64<<10)
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(header, "-") {
+		return redisServerError(strings.TrimPrefix(header, "-"))
+	}
+	size, err := strconv.ParseInt(strings.TrimPrefix(header, "$"), 10, 64)
+	if err != nil || !strings.HasPrefix(header, "$") {
+		return fmt.Errorf("the server's answer was not a value")
+	}
+	if size < 0 {
+		// The key was there a moment ago; the field or the position is not.
+		return ErrRedisMemberNotFound
+	}
+	out, err := open(size)
+	if err != nil {
+		return err
+	}
+	_, err = io.CopyN(out, wire.rd, size)
+	return err
+}
+
+// ErrRedisMemberNotFound is a hash field or a list position that is not
+// there, in a key that is.
+var ErrRedisMemberNotFound = errors.New("that field or position is not in the key; it may have been removed")
 
 // RedisKeyMeta is what the server knows about a key without reading it.
 type RedisKeyMeta struct {

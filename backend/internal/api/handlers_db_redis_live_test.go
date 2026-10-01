@@ -299,6 +299,47 @@ func TestLiveAPIRedisKeys(t *testing.T) {
 		}
 	})
 
+	t.Run("a value a page cut short can be had whole", func(t *testing.T) {
+		big := strings.Repeat("0123456789abcdef", 20000) // 320 kB: past what a row carries
+		direct.HSet(ctx, p+"wide", "blob", big, "", "nameless")
+		direct.RPush(ctx, p+"widelist", "first", big)
+		direct.Set(ctx, p+"widestring", big+"\xff", 0)
+		direct.SAdd(ctx, p+"wideset", "m")
+
+		var page dbx.RedisMembers
+		call(t, h, id, http.MethodGet, "/keys/members?key="+p+"wide", "", &page)
+		var cut *dbx.RedisRow
+		for i := range page.Rows {
+			if string(*page.Rows[i].Field) == "blob" {
+				cut = &page.Rows[i]
+			}
+		}
+		if cut == nil || !cut.Truncated || cut.Bytes == nil || *cut.Bytes != int64(len(big)) || len(*cut.Value) >= len(big) {
+			t.Fatalf("the long field's row = %+v", cut)
+		}
+		for path, want := range map[string]string{
+			"/keys/raw?key=" + p + "wide&field=blob":   big,
+			"/keys/raw?key=" + p + "wide&field=":       "nameless",
+			"/keys/raw?key=" + p + "widelist&index=1":  big,
+			"/keys/raw?key=" + p + "widelist&index=0":  "first",
+			"/keys/raw?key=" + p + "widelist&index=-1": big,
+			"/keys/raw?key=" + p + "widestring":        big + "\xff",
+		} {
+			rec := call(t, h, id, http.MethodGet, path, "", nil)
+			if rec.Code != 200 || rec.Body.String() != want {
+				t.Errorf("%s: %d, %d bytes, want %d", path, rec.Code, rec.Body.Len(), len(want))
+			}
+			if got := rec.Header().Get("Content-Length"); got != fmt.Sprint(len(want)) || rec.Header().Get("Content-Type") != "application/octet-stream" {
+				t.Errorf("%s: Content-Length %s, Content-Type %s", path, got, rec.Header().Get("Content-Type"))
+			}
+		}
+		wantStatus(t, call(t, h, id, http.MethodGet, "/keys/raw?key="+p+"nothing", "", nil), 404, "key_not_found", "a missing key")
+		wantStatus(t, call(t, h, id, http.MethodGet, "/keys/raw?key="+p+"wide&field=nope", "", nil), 404, "member_not_found", "a missing field")
+		wantStatus(t, call(t, h, id, http.MethodGet, "/keys/raw?key="+p+"widelist&index=99", "", nil), 404, "member_not_found", "a position past the end")
+		wantStatus(t, call(t, h, id, http.MethodGet, "/keys/raw?key="+p+"wide", "", nil), 400, "bad_request", "a hash with no field named")
+		wantStatus(t, call(t, h, id, http.MethodGet, "/keys/raw?key="+p+"wideset", "", nil), 400, "bad_request", "a set")
+	})
+
 	t.Run("listing, tree, rename, copy", func(t *testing.T) {
 		pipe := direct.Pipeline()
 		for i := 0; i < 20; i++ {

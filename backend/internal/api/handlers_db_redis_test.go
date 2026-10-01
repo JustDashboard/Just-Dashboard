@@ -116,6 +116,7 @@ var redisReads = []redisRoute{
 	{http.MethodGet, "/keys/tree", ``},
 	{http.MethodGet, "/keys/meta?key=k", ``},
 	{http.MethodGet, "/keys/members?key=k", ``},
+	{http.MethodGet, "/keys/raw?key=k", ``},
 	{http.MethodGet, "/keys/stream?key=k", ``},
 	{http.MethodGet, "/keys/stream/pending?key=k&group=g", ``},
 	{http.MethodGet, "/redis/server", ``},
@@ -331,6 +332,9 @@ func TestRedisRequestsAreValidatedBeforeDialling(t *testing.T) {
 		{http.MethodGet, "/keys/members", ``},
 		{http.MethodGet, "/keys/members?keyB64=***", ``},
 		{http.MethodGet, "/keys/members?key=k&order=sideways", ``},
+		{http.MethodGet, "/keys/raw", ``},
+		{http.MethodGet, "/keys/raw?key=k&index=first", ``},
+		{http.MethodGet, "/keys/raw?key=k&fieldB64=***", ``},
 		{http.MethodGet, "/keys/stream/pending?key=k", ``},
 		{http.MethodGet, "/keys/tree?cursor=abc", ``},
 		// The decoder refuses a field it does not know, on every route.

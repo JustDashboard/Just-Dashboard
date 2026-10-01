@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -33,6 +34,8 @@ func (s *Server) mountDatabaseRedisRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/{id}/keys/tree", s.handle(s.handleRedisTree))
 	r.Method(http.MethodGet, "/{id}/keys/meta", s.handle(s.handleRedisMeta))
 	r.Method(http.MethodGet, "/{id}/keys/members", s.handle(s.handleRedisMembers))
+	// The whole of one value, as a download: what a page cut short.
+	r.Method(http.MethodGet, "/{id}/keys/raw", s.handle(s.handleRedisRaw))
 	r.Method(http.MethodGet, "/{id}/keys/stream", s.handle(s.handleRedisStream))
 	r.Method(http.MethodGet, "/{id}/keys/stream/pending", s.handle(s.handleRedisStreamPending))
 	// Reading the server is reading what it prints about itself, which the
@@ -187,6 +190,8 @@ func redisFail(err error, write bool) error {
 	switch {
 	case errors.Is(err, dbx.ErrRedisKeyNotFound):
 		return httpx.Err(http.StatusNotFound, "key_not_found", err.Error())
+	case errors.Is(err, dbx.ErrRedisMemberNotFound):
+		return httpx.Err(http.StatusNotFound, "member_not_found", err.Error())
 	case errors.As(err, &exists):
 		return httpx.Err(http.StatusConflict, "key_exists", err.Error())
 	case errors.As(err, &conflict):
@@ -342,6 +347,63 @@ func (s *Server) handleRedisMembers(w http.ResponseWriter, r *http.Request) erro
 		return redisFail(err, false)
 	}
 	httpx.JSON(w, http.StatusOK, page)
+	return nil
+}
+
+// handleRedisRaw sends one whole value — a string, a hash field or a list
+// element — as a download.
+//
+// It reads nothing a page of the same key does not already show the start
+// of, which is why it sits on the read surface beside the pages. The value
+// goes from the server's reply to the response a buffer at a time; nothing
+// here holds it.
+func (s *Server) handleRedisRaw(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+	key, err := redisKeyParam(q)
+	if err != nil {
+		return err
+	}
+	whole := dbx.RedisWhole{Key: key}
+	switch {
+	case q.Has("fieldB64"):
+		raw, err := base64.StdEncoding.DecodeString(q.Get("fieldB64"))
+		if err != nil {
+			return httpx.BadRequest("fieldB64 is not valid base64")
+		}
+		field := dbx.RedisBytes(raw)
+		whole.Field = &field
+	case q.Has("field"):
+		field := dbx.RedisBytes(q.Get("field"))
+		whole.Field = &field
+	}
+	if q.Has("index") {
+		index, err := strconv.ParseInt(q.Get("index"), 10, 64)
+		if err != nil {
+			return httpx.BadRequest("index must be a list position")
+		}
+		whole.Index = &index
+	}
+	client, _, err := s.redisClient(r)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	started := false
+	err = dbx.RedisCopyWhole(r.Context(), client, whole, func(size int64) (io.Writer, error) {
+		started = true
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+		w.Header().Set("Content-Disposition", `attachment; filename="redis-value.bin"`)
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		return w, nil
+	})
+	if err != nil && !started {
+		return redisFail(err, false)
+	}
+	// Once the body has begun there is no status left to change. A copy that
+	// failed part way ends short of the length it declared, which is how the
+	// browser knows the download is not whole.
 	return nil
 }
 
