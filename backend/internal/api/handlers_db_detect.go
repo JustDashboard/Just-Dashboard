@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
@@ -17,6 +18,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
 	"github.com/docker/docker/errdefs"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // Finding and making database servers, so nobody has to write a DSN by hand.
@@ -81,6 +83,12 @@ func (s *Server) handleDBDetected(w http.ResponseWriter, r *http.Request) error 
 	for _, inst := range inv.Instances {
 		access, ok := inv.Access(inst.Key)
 		if !ok || inst.Kind != dbx.KindServer || inst.State != dbx.StateRunning {
+			continue
+		}
+		if inst.Confidence == dbx.ConfidencePort {
+			// A container known only by a port it exposes is a guess, and this
+			// shape has no field to say so: every row here reads as a server
+			// that was detected. The inventory lists it, labelled.
 			continue
 		}
 		server := detectedServer{Candidate: access.Candidate}
@@ -255,7 +263,7 @@ func (s *Server) containerInstance(ctx context.Context, name string) (*dbx.Insta
 			continue
 		}
 		running = true
-		inst, ok := inv.Find(dbx.ContainerKey(c.Name, c.Labels))
+		inst, ok := inv.FindContainer(c.Name)
 		if !ok {
 			break
 		}
@@ -305,6 +313,9 @@ func (s *Server) handleDBConnectHost(w http.ResponseWriter, r *http.Request) err
 	}
 	if strings.TrimSpace(req.Host) == "" || req.Port <= 0 {
 		return httpx.BadRequest("a host and port are required")
+	}
+	if err := validConnectionNames(req.User, req.Database); err != nil {
+		return err
 	}
 	cand := dbx.Candidate{
 		Driver: req.Driver, Source: dbx.SourceHost, Host: strings.TrimSpace(req.Host),
@@ -452,8 +463,12 @@ func (s *Server) saveConnectionFrom(
 	}
 	id, _ := res.LastInsertId()
 	if origin != "" {
-		if err := s.setIgnored(r.Context(), origin, "", false); err != nil {
+		unignored, err := s.setIgnored(r.Context(), origin, "", false)
+		if err != nil {
 			return err
+		}
+		if unignored {
+			detail["unignored"] = true
 		}
 	}
 	conn, _, err := s.dbConnRow(r.Context(), id)
@@ -493,6 +508,12 @@ func (s *Server) saveConnectionFrom(
 // ignored — by hand, or by forgetting its last connection — is not connected
 // again, which is what makes forgetting one mean something.
 //
+// It does not ask the same thing twice. This runs whenever the page opens, and
+// a server that refused what its container states would otherwise be sent the
+// same failed login on every visit; a refusal is remembered against what was
+// tried (see database_inventory_signin.go) and repeated from memory until the
+// container or its credentials change.
+//
 // It also reports what it recognised and could *not* adopt, which it used to
 // drop on the floor. A Postgres on a compose network with no published port is
 // the commonest database on any server this runs on, and the old behaviour was
@@ -522,11 +543,21 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 		taken[strconv.FormatInt(id, 10)] = name
 	}
 
-	added, skipped, left := []string{}, []string{}, []string{}
+	// Three passes. The first decides, without touching the network, what each
+	// server needs; the second signs in to the ones worth trying, a few at a
+	// time; the third saves what worked and says the rest, in the order the
+	// servers were found — so the answer does not depend on which dial
+	// happened to finish first.
+	added, skipped, left, linked := []string{}, []string{}, []string{}, []string{}
 	unreachable := []unreachableServer{}
 	needsCredentials := []credentialServer{}
+	present := map[string]bool{}
+	attempts := []*syncAttempt{}
+	// outcomes holds, per instance, what the third pass reports for it.
+	outcomes := make([]func(), len(inv.Instances))
 	for i := range inv.Instances {
 		inst := &inv.Instances[i]
+		present[inst.Key] = true
 		if inst.Kind != dbx.KindServer || inst.Driver == "" || inst.State != dbx.StateRunning {
 			// Stopped servers, declared services and engines with no driver
 			// are the inventory's to list; there is nothing here to connect.
@@ -538,9 +569,13 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 			// hand, was matched by where it dials. It learns which server it
 			// is, so it is still known for it when that address changes.
 			for _, id := range inst.Connections {
-				if _, err := s.Store.DB.ExecContext(ctx,
-					`UPDATE db_connections SET origin = ? WHERE id = ? AND origin = ''`, inst.Key, id); err != nil {
+				res, err := s.Store.DB.ExecContext(ctx,
+					`UPDATE db_connections SET origin = ? WHERE id = ? AND origin = ''`, inst.Key, id)
+				if err != nil {
 					return httpx.Internal(err)
+				}
+				if n, _ := res.RowsAffected(); n > 0 {
+					linked = append(linked, names[id])
 				}
 			}
 			continue
@@ -555,27 +590,50 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 				continue
 			}
 			cand := access.Candidate
-			dsn := dbx.BuildDSN(cand, "")
+			asks := func() {
+				needsCredentials = append(needsCredentials, credentialServer{
+					Driver: string(cand.Driver), Host: cand.Host, Port: cand.Port,
+					Process: cand.Process, Name: dbx.HostConnectionName(cand),
+					User: cand.User, Database: cand.Database,
+				})
+			}
 			// An engine that ships with no credentials at all is simply
 			// tried, and kept if it answers. Everything else is asked about
 			// rather than guessed at: a wrong password against the operator's
 			// own server is an authentication failure in their logs, and on a
 			// host running fail2ban it is a step towards banning this
 			// dashboard.
-			if cand.NeedsCredentials || dsn == "" || s.dialDatabase(ctx, cand.Driver, dsn) != nil {
-				needsCredentials = append(needsCredentials, credentialServer{
-					Driver: string(cand.Driver), Host: cand.Host, Port: cand.Port,
-					Process: cand.Process, Name: dbx.HostConnectionName(cand),
-					User: cand.User, Database: cand.Database,
-				})
+			if cand.NeedsCredentials || dbx.BuildDSN(cand, "") == "" {
+				outcomes[i] = asks
 				continue
 			}
-			name, err := s.insertConnection(ctx, inst.Key, uniqueConnectionName(dbx.HostConnectionName(cand), taken), cand.Driver, dsn)
-			if err != nil {
+			attempt := &syncAttempt{inst: inst, access: access, fingerprint: signInFingerprint(inst, access)}
+			if _, refused := s.refusedBefore(inst.Key, attempt.fingerprint); refused {
+				// It was tried as it ships and wanted a password. It is not
+				// tried again until it is another process.
+				outcomes[i] = asks
 				continue
 			}
-			taken["+"+name] = name
-			added = append(added, name)
+			attempts = append(attempts, attempt)
+			outcomes[i] = func() {
+				switch {
+				case attempt.unattempted:
+					unreachable = append(unreachable, unreachableServer{
+						Container: inst.Name, Driver: string(inst.Driver), Reason: syncOutOfTime,
+					})
+				case attempt.err != nil:
+					s.rememberRefusal(inst.Key, attempt.fingerprint, "", credentialRefusal(attempt.err))
+					asks()
+				case attempt.dsn != "":
+					s.forgetRefusal(inst.Key)
+					name, err := s.insertConnection(ctx, inst.Key, uniqueConnectionName(dbx.HostConnectionName(cand), taken), cand.Driver, attempt.dsn)
+					if err != nil {
+						return
+					}
+					taken["+"+name] = name
+					added = append(added, name)
+				}
+			}
 			continue
 		}
 
@@ -586,65 +644,149 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 			// initiative.
 			continue
 		}
-		if !inst.Connectable || !hasAccess {
-			unreachable = append(unreachable, unreachableServer{
-				Container: container, Driver: string(inst.Driver), Reason: unreachableReason(inst.Reason),
-			})
-			continue
-		}
-		password := access.Password
-		switch inst.Credentials {
-		case dbx.CredentialsEnv, dbx.CredentialsArgs, dbx.CredentialsOpen:
-		case dbx.CredentialsSecretFile:
-			secret, err := s.containerSecret(ctx, inst.Container.ID, access.SecretFile)
-			if err != nil {
+		cannot := func(reason string) func() {
+			return func() {
 				unreachable = append(unreachable, unreachableServer{
-					Container: container, Driver: string(inst.Driver),
-					Reason: "its password is kept in " + access.SecretFile + " inside the container, which could not be read — connect it with the password",
+					Container: container, Driver: string(inst.Driver), Reason: reason,
 				})
-				continue
 			}
-			password = secret
+		}
+		if !inst.Connectable || !hasAccess {
+			outcomes[i] = cannot(unreachableReason(inst.Reason))
+			continue
+		}
+		switch inst.Credentials {
+		case dbx.CredentialsEnv, dbx.CredentialsArgs, dbx.CredentialsOpen, dbx.CredentialsSecretFile:
 		default:
-			unreachable = append(unreachable, unreachableServer{
-				Container: container, Driver: string(inst.Driver),
-				Reason: "its container states no password — connect it with the one it uses",
-			})
+			outcomes[i] = cannot("its container states no password — connect it with the one it uses")
 			continue
 		}
-		dsn := dbx.BuildDSN(access.Candidate, password)
-		if dsn == "" {
+		attempt := &syncAttempt{inst: inst, access: access, fingerprint: signInFingerprint(inst, access)}
+		if kept, refused := s.refusedBefore(inst.Key, attempt.fingerprint); refused {
+			// The same container, stating the same credentials, already
+			// refused them. Saying so again costs nothing; asking again is a
+			// failed login in its log every time this page opens.
+			outcomes[i] = cannot(kept.says)
 			continue
 		}
-		if err := s.signIn(ctx, access.Candidate, &dsn, access.Unverified); err != nil {
-			unreachable = append(unreachable, unreachableServer{
-				Container: container, Driver: string(inst.Driver),
-				Reason: fmt.Sprintf("it did not accept the credentials its container states (%v) — connect it with the password it actually uses", err),
-			})
-			continue
+		attempts = append(attempts, attempt)
+		outcomes[i] = func() {
+			switch {
+			case attempt.unattempted:
+				cannot(syncOutOfTime)()
+			case attempt.secretErr != nil:
+				says := "its password is kept in " + access.SecretFile + " inside the container, which could not be read — connect it with the password"
+				s.rememberRefusal(inst.Key, attempt.fingerprint, says, false)
+				cannot(says)()
+			case attempt.err != nil:
+				says := refusalReason(attempt.err)
+				s.rememberRefusal(inst.Key, attempt.fingerprint, says, credentialRefusal(attempt.err))
+				cannot(says)()
+			case attempt.dsn != "":
+				s.forgetRefusal(inst.Key)
+				name, err := s.insertConnection(ctx, inst.Key, uniqueConnectionName(container, taken), inst.Driver, attempt.dsn)
+				if err != nil {
+					return
+				}
+				taken["+"+name] = name
+				added = append(added, name)
+			}
 		}
-		name, err := s.insertConnection(ctx, inst.Key, uniqueConnectionName(container, taken), inst.Driver, dsn)
-		if err != nil {
-			continue
-		}
-		taken["+"+name] = name
-		added = append(added, name)
 	}
 
-	if len(added) == 0 {
+	s.signInAll(ctx, attempts)
+	for _, outcome := range outcomes {
+		if outcome != nil {
+			outcome()
+		}
+	}
+	s.pruneRefusals(present)
+
+	if len(added) == 0 && len(linked) == 0 {
 		// Nothing happened, so nothing is worth a line in the audit log. The
 		// alternative is an entry every time somebody opens the page.
 		httpx.SkipAudit(r)
 	} else {
+		// A connection that learned which server it is changed too, once: it
+		// is what the next forget and the next reconcile will act on.
 		s.dropInventory()
-		httpx.SetAudit(r, "database.connection.sync", strings.Join(added, ", "),
-			map[string]any{"added": added})
+		httpx.SetAudit(r, "database.connection.sync", strings.Join(append(append([]string{}, added...), linked...), ", "),
+			map[string]any{"added": added, "linked": linked})
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"added": added, "already": skipped, "unreachable": unreachable,
 		"needsCredentials": needsCredentials, "ignored": left, "scans": scans,
 	})
 	return nil
+}
+
+// syncOutOfTime is said of a server the reconcile did not get to. It is not a
+// refusal and must not be worded as one.
+const syncOutOfTime = "it was not tried this time: the reconcile ran out of time before reaching it"
+
+// syncAttempt is one sign-in the reconcile makes, and how it went.
+type syncAttempt struct {
+	inst        *dbx.Instance
+	access      dbx.Access
+	fingerprint string
+
+	// dsn is the connection string that signed in. unattempted says the
+	// request's time ran out first; secretErr that the container's password
+	// file could not be read; err that the server answered no.
+	dsn         string
+	unattempted bool
+	secretErr   error
+	err         error
+}
+
+// signInAll makes the reconcile's sign-ins, a few at a time. Each checks the
+// request's clock before it dials: a sign-in started after the deadline would
+// fail with the deadline's own error, and be reported as a refusal by a server
+// that was never asked.
+func (s *Server) signInAll(ctx context.Context, attempts []*syncAttempt) {
+	slots := make(chan struct{}, syncDialWorkers)
+	var wg sync.WaitGroup
+	for _, attempt := range attempts {
+		wg.Add(1)
+		go func(a *syncAttempt) {
+			defer wg.Done()
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-ctx.Done():
+				a.unattempted = true
+				return
+			}
+			if ctx.Err() != nil {
+				a.unattempted = true
+				return
+			}
+			password := a.access.Password
+			if a.inst.Source != dbx.SourceHost && a.inst.Credentials == dbx.CredentialsSecretFile {
+				secret, err := s.containerSecret(ctx, a.inst.Container.ID, a.access.SecretFile)
+				if err != nil {
+					a.secretErr = err
+					return
+				}
+				password = secret
+			}
+			dsn := dbx.BuildDSN(a.access.Candidate, password)
+			if dsn == "" {
+				return
+			}
+			if err := s.signIn(ctx, a.access.Candidate, &dsn, a.access.Unverified); err != nil {
+				if ctx.Err() != nil {
+					// The clock ran out under the dial; the server said nothing.
+					a.unattempted = true
+					return
+				}
+				a.err = err
+				return
+			}
+			a.dsn = dsn
+		}(attempt)
+	}
+	wg.Wait()
 }
 
 // insertConnection stores one connection the reconcile signed in to.
@@ -717,7 +859,19 @@ func (s *Server) probeConnection(ctx context.Context, driver dbx.Driver, dsn str
 		if err != nil {
 			return err
 		}
-		return client.Disconnect(context.Background())
+		defer client.Disconnect(context.Background())
+		if mongoURINamesNobody(contained) {
+			// A ping is the one thing MongoDB answers without asking who is
+			// there, so a connection that names no account passes it against a
+			// server that will refuse everything else. Listing the databases
+			// is refused unless the server really is open. A connection that
+			// names an account was authenticated when it was made, and is not
+			// asked for a privilege it may not have.
+			if _, err := client.ListDatabaseNames(ctx, bson.D{}); err != nil {
+				return err
+			}
+		}
+		return nil
 	case dbx.DriverRedis:
 		client, err := dbx.RedisClient(ctx, contained, 0)
 		if err != nil {
@@ -727,6 +881,23 @@ func (s *Server) probeConnection(ctx context.Context, driver dbx.Driver, dsn str
 	}
 	_, err = dbx.Probe(ctx, driver, contained)
 	return err
+}
+
+// mongoURINamesNobody reports a MongoDB connection string with no account in
+// it: one that signs in as nobody.
+//
+// Read by hand rather than with net/url, which refuses the comma-separated
+// host list a replica set's string has.
+func mongoURINamesNobody(uri string) bool {
+	authority := uri
+	if _, rest, ok := strings.Cut(uri, "://"); ok {
+		authority = rest
+	}
+	if i := strings.IndexAny(authority, "/?"); i >= 0 {
+		authority = authority[:i]
+	}
+	at := strings.LastIndexByte(authority, '@')
+	return at <= 0 || strings.HasPrefix(authority, ":")
 }
 
 // unreachableServer is a database this host is running that could be

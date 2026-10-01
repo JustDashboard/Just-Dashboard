@@ -153,11 +153,20 @@ accounts retain partial results. Full table details and mutation preconditions u
   each reports its own outcome in `scans`, so a missing Docker daemon is a stated silence and never a
   failed request. Containers are read with `all=true` and recognised by a ladder — image name, then the
   variables the stock image sets, then the command, and last a distinctive port, labelled a guess and
-  never connected unasked. Host servers are one instance per process with several endpoints (both
+  never connected unasked. Every rung is read against the program in the command position
+  (`readCommand`): a variable an image sets is inherited by everything built on it, so it is believed
+  only while the command names that engine's server or nothing but the image's own entrypoint, and an
+  image started as its own client (`psql`, `mongosh`, `redis-cli`) is not a server on any rung. The
+  in-container port and `--requirepass` are read from the command line only when it is the server's.
+  A container's key is settled before anything is recorded under it: a `docker compose run` container
+  is keyed by its own name, and a second container stating one service's labels falls back to
+  `docker:<name>`. Host servers are one instance per process with several endpoints (both
   loopback families collapse; MySQL's X port and ClickHouse's HTTP port are side doors), matched on the
   exact process name, joined to their unix sockets (`proxysvc.ListUnixListeners`) and their systemd
-  unit; an installed server that is stopped is listed from its unit, and a Debian PostgreSQL cluster's
-  port is read from its `postgresql.conf`. Files are confirmed by their first sixteen bytes and never
+  unit; an installed server that is stopped is listed from its unit — including one that is disabled,
+  which systemd unloads and only its unit file names (`procs.ListInstalled`, `dbx.InstalledUnits`), and
+  a stopped Debian PostgreSQL cluster, found by its `/etc/postgresql/<version>/<name>` directory — and a
+  cluster's port is read from its `postgresql.conf`. Files are confirmed by their first sixteen bytes and never
   opened with a driver to be listed; the walk is server-chosen roots through `files.Resolve`, bounded by
   depth, visits and time, on a ten-minute cadence or `POST /databases/inventory/scan`. A database kept
   in a container's own writable layer is found through the Engine's diff and archive reads and listed
@@ -172,10 +181,20 @@ accounts retain partial results. Full table details and mutation preconditions u
   account, `409 sign_in_failed` carries the engine's own words when what the container states is
   refused, `400 sign_in_failed` when what the operator typed is. The dashboard's own store is marked
   `self`, refused with `409 self_database`, and refused again in `containDSN` whatever route offers it.
+  A user or database name is joined to a connection string only as a name: `dbx.BuildDSN` builds
+  nothing for one holding `?`, `/` or a control character (or `@`, `:` in a user), writes MySQL's
+  string with the driver's own `FormatDSN`, and a container whose environment states such a name is
+  listed and not connectable — a `?` in `MYSQL_DATABASE` would otherwise set driver options such as
+  `allowAllFiles` on a saved connection. Signing in to MongoDB with no account runs `listDatabases`,
+  because a ping is answered without authentication.
   `POST /databases/inventory/ignore` records a key in `db_inventory_ignored`. `POST /databases/sync`
   keeps its contract and now signs in before saving, records the origin, skips what is ignored and
   reports it, and runs its host half with Docker absent; forgetting the last connection to a found
-  server marks it ignored (`ignoreOriginOnForget`), so it stays forgotten. `/adopt`, `/host` and
+  server marks it ignored (`ignoreOriginOnForget`), so it stays forgotten. It signs in four at a time
+  and remembers a refusal against what was tried (`database_inventory_signin.go`): the same container
+  stating the same credentials is not asked again until either changes or the operator connects it by
+  hand, a server that merely did not answer is retried after two minutes, and a sign-in the request
+  ran out of time for is reported as not tried. `/adopt`, `/host` and
   `/host/grant` sign in the same way and match an existing connection by driver, address identity
   (`dbx.AddressIdentity`: every loopback spelling is one place), database and user.
 - **The section opens on every database at once.** `GET /databases/fleet` dials every saved

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -78,6 +79,9 @@ type dbInventoryState struct {
 	buildingFull    sync.Mutex
 	buildingReduced sync.Mutex
 	files           dbFileScanState
+	// refused is the sign-ins the reconcile tried and was refused, by instance
+	// key, so it does not send the same failed login on every page load.
+	refused map[string]refusedSignIn
 
 	// host, dial and secret are the machine, the sign-in and the secret file
 	// read. Nil means the real ones; a test hands in its own.
@@ -307,19 +311,25 @@ func (s *Server) ignoredOrigins(ctx context.Context) (map[string]bool, error) {
 	return out, rows.Err()
 }
 
-func (s *Server) setIgnored(ctx context.Context, key, by string, ignored bool) error {
-	var err error
+// setIgnored sets or clears the mark on one key, and reports whether that
+// changed anything: clearing a mark that was not there is not an event.
+func (s *Server) setIgnored(ctx context.Context, key, by string, ignored bool) (bool, error) {
+	var (
+		res sql.Result
+		err error
+	)
 	if ignored {
-		_, err = s.Store.DB.ExecContext(ctx,
+		res, err = s.Store.DB.ExecContext(ctx,
 			`INSERT INTO db_inventory_ignored(origin, ignored_at, ignored_by) VALUES(?,?,?)
 			 ON CONFLICT(origin) DO NOTHING`, key, time.Now().Unix(), by)
 	} else {
-		_, err = s.Store.DB.ExecContext(ctx, `DELETE FROM db_inventory_ignored WHERE origin = ?`, key)
+		res, err = s.Store.DB.ExecContext(ctx, `DELETE FROM db_inventory_ignored WHERE origin = ?`, key)
 	}
 	if err != nil {
-		return httpx.Internal(err)
+		return false, httpx.Internal(err)
 	}
-	return nil
+	changed, _ := res.RowsAffected()
+	return changed > 0, nil
 }
 
 type inventoryIgnoreRequest struct {
@@ -341,7 +351,7 @@ func (s *Server) handleDBInventoryIgnore(w http.ResponseWriter, r *http.Request)
 	if req.Ignored == nil {
 		return httpx.BadRequest("ignored must be true or false")
 	}
-	if err := s.setIgnored(r.Context(), req.Key, httpx.MustPrincipal(r).Username(), *req.Ignored); err != nil {
+	if _, err := s.setIgnored(r.Context(), req.Key, httpx.MustPrincipal(r).Username(), *req.Ignored); err != nil {
 		return err
 	}
 	action := "database.inventory.ignore"
@@ -403,7 +413,8 @@ func (s *Server) ignoreOriginOnForget(ctx context.Context, origin, by string) er
 		// Still connected under another login; nothing would come back.
 		return nil
 	}
-	return s.setIgnored(ctx, origin, by, true)
+	_, err := s.setIgnored(ctx, origin, by, true)
+	return err
 }
 
 // dashboardStorePath is the dashboard's own database file.
@@ -516,6 +527,13 @@ func (s *Server) handleDBInventoryConnect(w http.ResponseWriter, r *http.Request
 			return httpx.BadRequest("the password contains a control character")
 		}
 	}
+	if !strings.HasPrefix(req.Key, "file:") {
+		// A file is opened by its path, which the key already is; neither
+		// field is read for one.
+		if err := validConnectionNames(req.User, req.Database); err != nil {
+			return err
+		}
+	}
 	ctx, cancel := timeoutCtx(r, 45*time.Second)
 	defer cancel()
 	inst, access, err := s.resolveInstance(ctx, req.Key)
@@ -597,6 +615,20 @@ func (s *Server) resolveFileInstance(ctx context.Context, path string) (*dbx.Ins
 	return inst, nil, nil
 }
 
+// validConnectionNames refuses a user or a database that a connection string
+// could read as something other than a name. dbx.BuildDSN refuses them too;
+// saying so here is what turns "no connection string could be built" into a
+// sentence about the field that was wrong.
+func validConnectionNames(user, database string) error {
+	if !dbx.ValidDSNUser(strings.TrimSpace(user)) {
+		return httpx.BadRequest("user may not contain control characters or any of ? / @ :")
+	}
+	if !dbx.ValidDSNDatabase(strings.TrimSpace(database)) {
+		return httpx.BadRequest("database may not contain control characters, ? or /")
+	}
+	return nil
+}
+
 type connectOptions struct {
 	name, user, password, database string
 	// action is the audit action a new connection is recorded under.
@@ -669,6 +701,8 @@ func (s *Server) connectInstance(ctx context.Context, w http.ResponseWriter, r *
 		httpx.SetAudit(r, opts.action, inst.Key, map[string]any{"ok": false, "driver": string(cand.Driver), "user": cand.User})
 		return signInError(inst, typed, err)
 	}
+	// Whatever the reconcile remembered being refused, it has been let in now.
+	s.forgetRefusal(inst.Key)
 	name := strings.TrimSpace(opts.name)
 	if name == "" {
 		name = defaultConnectionName(inst, cand)
@@ -737,15 +771,33 @@ func (s *Server) instancePassword(ctx context.Context, inst *dbx.Instance, acces
 
 // keepConnection answers a connect with the connection that already exists,
 // recording which instance it belongs to if it did not say.
+//
+// Nothing new was made, and that is not the same as nothing having changed: a
+// connection learning which server it is, and a server the operator had said
+// to leave alone being taken back, are both changes to what the next
+// reconcile does. Each is recorded; only a request that changed neither is
+// left out of the audit trail.
 func (s *Server) keepConnection(ctx context.Context, w http.ResponseWriter, r *http.Request, inst *dbx.Instance, conn *dbConnection) error {
-	if _, err := s.Store.DB.ExecContext(ctx,
-		`UPDATE db_connections SET origin = ? WHERE id = ? AND origin = ''`, inst.Key, conn.ID); err != nil {
+	res, err := s.Store.DB.ExecContext(ctx,
+		`UPDATE db_connections SET origin = ? WHERE id = ? AND origin = ''`, inst.Key, conn.ID)
+	if err != nil {
 		return httpx.Internal(err)
 	}
-	if err := s.setIgnored(ctx, inst.Key, "", false); err != nil {
+	linked, _ := res.RowsAffected()
+	unignored, err := s.setIgnored(ctx, inst.Key, "", false)
+	if err != nil {
 		return err
 	}
-	httpx.SkipAudit(r)
+	switch {
+	case unignored:
+		httpx.SetAudit(r, "database.inventory.unignore", inst.Key,
+			map[string]any{"connection": conn.Name, "linked": linked > 0, "by": "connect"})
+	case linked > 0:
+		httpx.SetAudit(r, "database.inventory.connect", inst.Key,
+			map[string]any{"connection": conn.Name, "linked": true})
+	default:
+		httpx.SkipAudit(r)
+	}
 	httpx.JSON(w, http.StatusOK, conn)
 	return nil
 }
@@ -766,15 +818,24 @@ func (s *Server) signIn(ctx context.Context, cand dbx.Candidate, dsn *string, re
 	return nil
 }
 
-// signInError words a refused sign-in. A password the operator typed and the
+// signInError words a failed sign-in. A password the operator typed and the
 // engine refused is the request's own fault; credentials the container stated
 // and the engine refused are a disagreement between two things on the server,
 // which is a conflict the operator resolves by typing the real one.
+//
+// Not every failure is a refusal of the credentials. A listener asked for a
+// service it does not have, or a server that is still starting, says nothing
+// about the password, and telling the operator to type another one sends them
+// to fix what is not broken.
 func signInError(inst *dbx.Instance, typed bool, err error) error {
 	if typed || inst.Kind == dbx.KindFile {
 		// The engine's own words: "password authentication failed for user
 		// postgres" is the entire diagnosis and names the account it refused.
 		return httpx.Err(http.StatusBadRequest, "sign_in_failed", err.Error())
+	}
+	if !credentialRefusal(err) {
+		return httpx.Err(http.StatusConflict, "sign_in_failed", fmt.Sprintf(
+			"%s could not be signed in to, and not because of the credentials found for it: %v", inst.Name, err))
 	}
 	return httpx.Err(http.StatusConflict, "sign_in_failed", fmt.Sprintf(
 		"%s did not accept the credentials found for it (%v); type the password it actually uses", inst.Name, err))
@@ -814,9 +875,11 @@ func (s *Server) refreshConnection(
 		sealed, inst.Key, conn.ID); err != nil {
 		return httpx.BadRequest("could not update connection: %v", err)
 	}
-	if err := s.setIgnored(ctx, inst.Key, "", false); err != nil {
+	unignored, err := s.setIgnored(ctx, inst.Key, "", false)
+	if err != nil {
 		return err
 	}
+	s.forgetRefusal(inst.Key)
 	// The pool, if any, was dialled with the old DSN and would keep failing.
 	s.modules.dbs.Close(conn.ID)
 	conn, _, err = s.dbConnRow(ctx, conn.ID)
@@ -826,6 +889,9 @@ func (s *Server) refreshConnection(
 	detail := map[string]any{"key": inst.Key, "driver": cand.Driver, "host": conn.Host, "user": conn.User}
 	if inst.Container != nil {
 		detail["container"], detail["image"] = inst.Container.Name, inst.Container.Image
+	}
+	if unignored {
+		detail["unignored"] = true
 	}
 	httpx.SetAudit(r, "database.connection.refresh", conn.Name, detail)
 	httpx.JSON(w, http.StatusOK, conn)

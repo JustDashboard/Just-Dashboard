@@ -44,13 +44,27 @@ func (s *Systemd) Available() bool { return binaryExists("systemctl") }
 // inactive unit is exactly what an operator opens this page to find, and the
 // default listing hides them.
 func (s *Systemd) List(ctx context.Context) ([]Unit, error) {
+	units, _, err := s.ListInstalled(ctx)
+	return units, err
+}
+
+// ListInstalled is List, with every installed service unit file and its state
+// beside it: enabled, disabled, static, masked, alias and the rest.
+//
+// The listing cannot stand in for the files. `list-units --all` shows what the
+// manager has loaded, and a unit that is both stopped and disabled is
+// unloaded: it is installed, it can be started, and it is in no listing of
+// units. The file is the only thing that says it is there. Both come from the
+// one reading List already makes, because listing the unit files is the slow
+// half of it.
+func (s *Systemd) ListInstalled(ctx context.Context) ([]Unit, map[string]string, error) {
 	if !s.Available() {
-		return nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
+		return nil, nil, fmt.Errorf("systemctl %w", ErrNotInstalled)
 	}
 	res, err := run(ctx, 30*time.Second, "systemctl",
 		"list-units", "--type=service", "--all", "--no-pager", "--no-legend", "--output=json")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var raw []struct {
 		Unit        string `json:"unit"`
@@ -70,10 +84,10 @@ func (s *Systemd) List(ctx context.Context) ([]Unit, error) {
 		if detail == "" {
 			detail = "no output"
 		}
-		return nil, fmt.Errorf("systemctl returned no unit list: %s", detail)
+		return nil, nil, fmt.Errorf("systemctl returned no unit list: %s", detail)
 	}
 	if err := json.Unmarshal([]byte(res.Stdout), &raw); err != nil {
-		return nil, fmt.Errorf("parse systemctl output: %w", err)
+		return nil, nil, fmt.Errorf("parse systemctl output: %w", err)
 	}
 	enabled := s.enabledStates(ctx)
 	out := make([]Unit, 0, len(raw))
@@ -107,7 +121,7 @@ func (s *Systemd) List(ctx context.Context) ([]Unit, error) {
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, nil
+	return out, enabled, nil
 }
 
 func (s *Systemd) enabledStates(ctx context.Context) map[string]string {

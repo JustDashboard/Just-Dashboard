@@ -2,12 +2,16 @@ package api
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,6 +30,9 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/go-chi/chi/v5"
+	mysql "github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5/pgconn"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // The inventory's routes, driven against a machine written out by hand.
@@ -62,6 +69,8 @@ type fakeMachine struct {
 	listeners  []proxysvc.Listener
 	sockets    []proxysvc.UnixListener
 	units      []procs.Unit
+	// unitFiles is every installed unit file and its state, loaded or not.
+	unitFiles map[string]string
 	// refuse maps a fragment of a DSN to the error the engine answers it with.
 	refuse map[string]string
 	dialed []string
@@ -215,9 +224,20 @@ func inventoryRouter(t *testing.T, role auth.Role, m *fakeMachine) (*Server, htt
 			return out, nil
 		},
 		systemd: func() bool { return true },
-		units:   func(context.Context) ([]procs.Unit, error) { return m.units, nil },
-		etc:     filepath.Join(s.Cfg.FileRoots[0], "etc"),
-		roots:   []string{filepath.Join(s.Cfg.FileRoots[0], "srv")},
+		units: func(context.Context) ([]procs.Unit, map[string]string, error) {
+			// Whatever is loaded has a unit file; the test adds the ones that
+			// are installed and not loaded.
+			files := map[string]string{}
+			for _, u := range m.units {
+				files[u.Name] = "enabled"
+			}
+			for name, state := range m.unitFiles {
+				files[name] = state
+			}
+			return m.units, files, nil
+		},
+		etc:   filepath.Join(s.Cfg.FileRoots[0], "etc"),
+		roots: []string{filepath.Join(s.Cfg.FileRoots[0], "srv")},
 	}
 	s.dbInventory.dial = m.dial(s)
 
@@ -1156,6 +1176,13 @@ func TestFileScanFindsDatabasesByTheirFirstBytes(t *testing.T) {
 	write(filepath.Join(root, "pgdata", "PG_VERSION"), []byte("15\n"))
 	write(filepath.Join(root, "pgdata", "base", "1", "inner.db"), append([]byte("SQLite format 3\x00"), 0, 0))
 	write(filepath.Join(root, "pgdata", "global", "pg_control"), []byte("x"))
+	// A Redis's working directory is its data. An application's directory with
+	// one stray dump in it is still the application's, and is walked.
+	write(filepath.Join(root, "kv", "dump.rdb"), []byte("REDIS0011"))
+	write(filepath.Join(root, "kv", "appendonlydir", "appendonly.aof.1.base.rdb"), []byte("REDIS0011"))
+	write(filepath.Join(root, "shop", "dump.rdb"), []byte("REDIS0011"))
+	inventorySQLiteFile(t, filepath.Join(root, "shop", "orders.sqlite3"))
+	inventorySQLiteFile(t, filepath.Join(root, "shop", "var", "sessions.db"))
 	outside := filepath.Join(t.TempDir(), "secret.db")
 	inventorySQLiteFile(t, outside)
 	if err := os.Symlink(outside, filepath.Join(root, "app", "linked.db")); err != nil {
@@ -1170,7 +1197,10 @@ func TestFileScanFindsDatabasesByTheirFirstBytes(t *testing.T) {
 	for _, f := range result.files {
 		found[strings.TrimPrefix(f.Path, root+"/")] = f.Engine
 	}
-	want := map[string]string{"app/data/app.db": "sqlite", "analytics/events.duckdb": "duckdb"}
+	want := map[string]string{
+		"app/data/app.db": "sqlite", "analytics/events.duckdb": "duckdb",
+		"shop/orders.sqlite3": "sqlite", "shop/var/sessions.db": "sqlite",
+	}
 	if len(found) != len(want) {
 		t.Errorf("found %v, want %v", found, want)
 	}
@@ -1179,9 +1209,12 @@ func TestFileScanFindsDatabasesByTheirFirstBytes(t *testing.T) {
 			t.Errorf("%s: %q, want %s", path, found[path], engine)
 		}
 	}
-	if len(result.dirs) != 1 || result.dirs[0].Engine != "postgres" || result.dirs[0].Version != "15" ||
-		result.dirs[0].Path != filepath.Join(root, "pgdata") {
-		t.Errorf("data directories = %+v", result.dirs)
+	dirs := map[string]string{}
+	for _, d := range result.dirs {
+		dirs[strings.TrimPrefix(d.Path, root+"/")] = d.Engine + " " + d.Version
+	}
+	if len(dirs) != 2 || dirs["pgdata"] != "postgres 15" || dirs["kv"] != "redis " {
+		t.Errorf("data directories = %v, want the PostgreSQL and the Redis one and not the application's", dirs)
 	}
 	if !result.scan.OK || result.scan.Truncated {
 		t.Errorf("scan = %+v", result.scan)
@@ -1266,3 +1299,741 @@ func TestComposeImagesReadsOnlyInsideTheRoots(t *testing.T) {
 }
 
 func filesAt(roots ...string) *files.Service { return files.New(roots) }
+
+func auditTrail(t *testing.T, s *Server) []string {
+	t.Helper()
+	rows, err := s.Store.DB.Query(`SELECT action FROM audit_log ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var action string
+		if err := rows.Scan(&action); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, action)
+	}
+	return out
+}
+
+// A container's creator chooses its environment, and creating a container
+// takes far less than the right to make a connection. A database name with the
+// driver's own options in it must never reach a stored connection string —
+// allowAllFiles would let that container's server read this process's files.
+func TestNamesNeverCarryDriverOptionsIntoAConnection(t *testing.T) {
+	m := &fakeMachine{containers: []fakeContainer{
+		{
+			id: "ffffffffffff0001", name: "evil", image: "acme/whatever:1", state: "running",
+			env:        []string{"MYSQL_ROOT_PASSWORD=pw", "MYSQL_DATABASE=app?allowAllFiles=true"},
+			entrypoint: []string{"mysqld"}, ports: []fakePort{{3306, 13306, "127.0.0.1"}},
+		},
+		{
+			id: "ffffffffffff0002", name: "db", image: "mysql:8", state: "running",
+			env: []string{"MYSQL_ROOT_PASSWORD=p@ss/w?rd&allowAllFiles=true"}, ports: []fakePort{{3306, 23306, "127.0.0.1"}},
+		},
+	}}
+	s, r := inventoryRouter(t, auth.RoleAdmin, m)
+
+	rec := do(t, r, http.MethodPost, "/databases/sync", "{}")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "no connection string can carry") {
+		t.Fatalf("sync = %d %s, want the container reported as one that cannot be connected", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"docker:evil"}`); rec.Code != http.StatusConflict || inventoryErrorCode(rec) != "not_connectable" {
+		t.Errorf("connect = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, r, http.MethodPost, "/databases/adopt", `{"container":"evil"}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("adopt = %d %s", rec.Code, rec.Body.String())
+	}
+	for _, body := range []string{
+		`{"key":"docker:db","database":"x?allowAllFiles=true&allowCleartextPasswords=true"}`,
+		`{"key":"docker:db","database":"a/b"}`,
+		`{"key":"docker:db","user":"root:x","password":"pw"}`,
+		`{"key":"docker:db","user":"root@tcp(evil:3306)/","password":"pw"}`,
+		`{"key":"docker:db","user":"ro\not","password":"pw"}`,
+	} {
+		if rec := do(t, r, http.MethodPost, "/databases/inventory/connect", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s answered %d: %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	for _, body := range []string{
+		`{"driver":"mysql","host":"127.0.0.1","port":23306,"user":"root","password":"pw","database":"x?allowAllFiles=true","name":""}`,
+		`{"driver":"mysql","host":"127.0.0.1","port":23306,"user":"a:b","password":"pw","database":"","name":""}`,
+	} {
+		if rec := do(t, r, http.MethodPost, "/databases/host", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("/host %s answered %d: %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := do(t, r, http.MethodPost, "/databases/host/grant",
+		`{"driver":"redis","host":"127.0.0.1","port":6379,"user":"","password":"pw","database":"0?x=y","name":"","superuser":null}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("/host/grant answered %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Every stored string, read the way the driver reads it, has no option set.
+	rows, err := s.Store.DB.Query(`SELECT id FROM db_connections`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []int64{}
+	for rows.Next() {
+		var id int64
+		_ = rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if len(ids) != 1 {
+		t.Fatalf("%d connections, want only the honest container's", len(ids))
+	}
+	_, stored, err := s.dbConnRow(t.Context(), ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := mysql.ParseDSN(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AllowAllFiles || cfg.AllowCleartextPasswords || cfg.Passwd != "p@ss/w?rd&allowAllFiles=true" || cfg.Addr != "127.0.0.1:23306" {
+		t.Errorf("stored DSN reads as %+v", cfg)
+	}
+	for _, dsn := range m.dials() {
+		if strings.Contains(dsn, ":13306") {
+			t.Errorf("the container naming an unusable database was dialled: %q", dsn)
+		}
+	}
+}
+
+// The reconcile runs on every visit to the page. A server that refused what
+// its container states is asked once, and told about from memory after.
+func TestSyncDoesNotAskARefusedServerAgain(t *testing.T) {
+	m := &fakeMachine{
+		containers: []fakeContainer{
+			{
+				id: "ffffffffffff0003", name: "stale", image: "postgres:16", state: "running",
+				env: []string{"POSTGRES_PASSWORD=stale-pw"}, ports: []fakePort{{5432, 45432, "127.0.0.1"}},
+			},
+			{
+				id: "ffffffffffff0004", name: "vault", image: "postgres:16", state: "running",
+				env: []string{"POSTGRES_PASSWORD_FILE=/run/secrets/pg"}, ports: []fakePort{{5432, 46432, "127.0.0.1"}},
+			},
+			{
+				id: "ffffffffffff0005", name: "starting", image: "postgres:16", state: "running",
+				env: []string{"POSTGRES_PASSWORD=fine"}, ports: []fakePort{{5432, 47432, "127.0.0.1"}},
+			},
+		},
+		// A Redis on the host that turns out to want a password.
+		listeners: []proxysvc.Listener{{Protocol: "tcp", Address: "127.0.0.1", Port: 6379, PID: 70, Process: "redis-server"}},
+		refuse: map[string]string{
+			"stale-pw": `password authentication failed for user "postgres"`,
+			"in-file":  `password authentication failed for user "postgres"`,
+			":47432":   "dial tcp 127.0.0.1:47432: connect: connection refused",
+			":6379":    "NOAUTH Authentication required.",
+		},
+	}
+	s, r := inventoryRouter(t, auth.RoleAdmin, m)
+	reads := 0
+	s.dbInventory.secret = func(context.Context, string, string) ([]byte, error) {
+		reads++
+		return []byte("in-file\n"), nil
+	}
+	sync := func() (map[string]string, []credentialServer) {
+		t.Helper()
+		rec := do(t, r, http.MethodPost, "/databases/sync", "{}")
+		var out struct {
+			Unreachable      []unreachableServer `json:"unreachable"`
+			NeedsCredentials []credentialServer  `json:"needsCredentials"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		reasons := map[string]string{}
+		for _, u := range out.Unreachable {
+			reasons[u.Container] = u.Reason
+		}
+		return reasons, out.NeedsCredentials
+	}
+	countDials := func(fragment string) int {
+		n := 0
+		for _, dsn := range m.dials() {
+			if strings.Contains(dsn, fragment) {
+				n++
+			}
+		}
+		return n
+	}
+
+	for range 5 {
+		reasons, asks := sync()
+		if !strings.Contains(reasons["stale"], "did not accept the credentials") || !strings.Contains(reasons["stale"], "password authentication failed") {
+			t.Fatalf("stale: %q", reasons["stale"])
+		}
+		if !strings.Contains(reasons["vault"], "did not accept the credentials") {
+			t.Fatalf("vault: %q", reasons["vault"])
+		}
+		// Not answering is not refusing the password, and is not said to be.
+		if !strings.Contains(reasons["starting"], "did not answer") || strings.Contains(reasons["starting"], "did not accept") {
+			t.Fatalf("starting: %q", reasons["starting"])
+		}
+		if len(asks) != 1 || asks[0].Port != 6379 {
+			t.Fatalf("needsCredentials = %+v", asks)
+		}
+	}
+	for fragment, want := range map[string]int{"stale-pw": 1, "in-file": 1, ":47432": 1, ":6379": 1} {
+		if got := countDials(fragment); got != want {
+			t.Errorf("%s was dialled %d times over five reconciles, want %d", fragment, got, want)
+		}
+	}
+	if reads != 1 {
+		t.Errorf("the secret file was read %d times, want once", reads)
+	}
+
+	// A server that did not answer is tried again once it has had time to start.
+	s.dbInventory.mu.Lock()
+	kept := s.dbInventory.refused["docker:starting"]
+	kept.at = time.Now().Add(-2 * dbUnansweredRetry)
+	s.dbInventory.refused["docker:starting"] = kept
+	s.dbInventory.mu.Unlock()
+	m.mu.Lock()
+	delete(m.refuse, ":47432")
+	m.mu.Unlock()
+	sync()
+	if _, connected := connectionRows(t, s)["starting"]; !connected || countDials(":47432") != 2 {
+		t.Errorf("rows %v dials %d, want the server connected on its second try", connectionRows(t, s), countDials(":47432"))
+	}
+
+	// The container recreated with other credentials is another question.
+	m.mu.Lock()
+	m.containers[0].id, m.containers[0].env = "ffffffffffff00aa", []string{"POSTGRES_PASSWORD=right-pw"}
+	m.mu.Unlock()
+	sync()
+	if _, connected := connectionRows(t, s)["stale"]; !connected || countDials("right-pw") != 1 {
+		t.Errorf("rows %v, want the recreated container connected", connectionRows(t, s))
+	}
+
+	// And connecting by hand asks whatever was remembered.
+	if rec := do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"docker:vault","password":"typed"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("connect = %d %s", rec.Code, rec.Body.String())
+	}
+	s.dbInventory.mu.Lock()
+	_, remembered := s.dbInventory.refused["docker:vault"]
+	s.dbInventory.mu.Unlock()
+	if remembered {
+		t.Error("the refusal outlived a successful sign-in")
+	}
+}
+
+// A password file that cannot be read is not read out of the container again
+// on every visit either; it is tried again after a while, since a file can
+// appear.
+func TestSyncDoesNotRereadAnUnreadableSecret(t *testing.T) {
+	m := &fakeMachine{containers: []fakeContainer{{
+		id: "ffffffffffff000b", name: "vault", image: "postgres:16", state: "running",
+		env: []string{"POSTGRES_PASSWORD_FILE=/run/secrets/pg"}, ports: []fakePort{{5432, 46432, "127.0.0.1"}},
+	}}}
+	s, r := inventoryRouter(t, auth.RoleAdmin, m)
+	reads := 0
+	s.dbInventory.secret = func(context.Context, string, string) ([]byte, error) {
+		reads++
+		return nil, errors.New("no such file")
+	}
+	for range 3 {
+		rec := do(t, r, http.MethodPost, "/databases/sync", "{}")
+		if !strings.Contains(rec.Body.String(), "/run/secrets/pg inside the container, which could not be read") {
+			t.Fatalf("sync = %s", rec.Body.String())
+		}
+	}
+	if reads != 1 || len(m.dials()) != 0 {
+		t.Errorf("the file was read %d times and %d sign-ins were sent, want one read and none", reads, len(m.dials()))
+	}
+	s.dbInventory.mu.Lock()
+	kept := s.dbInventory.refused["docker:vault"]
+	kept.at = time.Now().Add(-2 * dbUnansweredRetry)
+	s.dbInventory.refused["docker:vault"] = kept
+	s.dbInventory.mu.Unlock()
+	s.dbInventory.secret = func(context.Context, string, string) ([]byte, error) { return []byte("now-there"), nil }
+	do(t, r, http.MethodPost, "/databases/sync", "{}")
+	if _, connected := connectionRows(t, s)["vault"]; !connected {
+		t.Errorf("rows = %v, want the container connected once its file could be read", connectionRows(t, s))
+	}
+}
+
+// The reconcile signs in to several servers at once, and a sign-in it did not
+// get to is reported as that — never as a refusal by a server nobody asked.
+func TestSyncSignInsAreBoundedAndHonestAboutTime(t *testing.T) {
+	s := testServer(t)
+	t.Cleanup(s.Shutdown)
+	var (
+		mu               sync.Mutex
+		inFlight, widest int
+	)
+	s.dbInventory.dial = func(ctx context.Context, _ dbx.Driver, _ string) error {
+		mu.Lock()
+		inFlight++
+		widest = max(widest, inFlight)
+		mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+		return nil
+	}
+	attempts := func() []*syncAttempt {
+		out := []*syncAttempt{}
+		for i := range 12 {
+			out = append(out, &syncAttempt{
+				inst: &dbx.Instance{Key: fmt.Sprintf("docker:db%d", i), Source: dbx.SourceDocker, Credentials: dbx.CredentialsOpen},
+				access: dbx.Access{Candidate: dbx.Candidate{
+					Driver: dbx.DriverPostgres, Host: "127.0.0.1", Port: 40000 + i, User: "postgres", Database: "postgres",
+				}},
+			})
+		}
+		return out
+	}
+	list := attempts()
+	s.signInAll(t.Context(), list)
+	for _, a := range list {
+		if a.dsn == "" || a.err != nil || a.unattempted {
+			t.Fatalf("attempt %s = %+v", a.inst.Key, a)
+		}
+	}
+	if widest < 2 || widest > syncDialWorkers {
+		t.Errorf("%d sign-ins ran at once, want more than one and at most %d", widest, syncDialWorkers)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	list, dialled := attempts(), 0
+	s.dbInventory.dial = func(context.Context, dbx.Driver, string) error { dialled++; return nil }
+	s.signInAll(ctx, list)
+	for _, a := range list {
+		if !a.unattempted || a.err != nil || a.dsn != "" {
+			t.Errorf("attempt %s after the deadline = %+v, want it marked as not tried", a.inst.Key, a)
+		}
+	}
+	if dialled != 0 {
+		t.Errorf("%d sign-ins were sent after the request's time ran out", dialled)
+	}
+
+	// The deadline passing under a dial is the clock's failure, not the server's.
+	ctx, cancel = context.WithCancel(t.Context())
+	s.dbInventory.dial = func(context.Context, dbx.Driver, string) error {
+		cancel()
+		return context.Canceled
+	}
+	list = attempts()[:1]
+	s.signInAll(ctx, list)
+	if !list[0].unattempted || list[0].err != nil {
+		t.Errorf("attempt = %+v, want a sign-in cut short by the clock reported as not tried", list[0])
+	}
+}
+
+func TestCredentialRefusalIsToldFromSilence(t *testing.T) {
+	for message, want := range map[string]bool{
+		`password authentication failed for user "postgres"`:             true,
+		"Error 1045 (28000): Access denied for user 'root'@'172.18.0.1'": true,
+		"WRONGPASS invalid username-password pair or user is disabled.":  true,
+		"NOAUTH Authentication required.":                                true,
+		"(Unauthorized) command listDatabases requires authentication":   true,
+		"mssql: login error: Login failed for user 'sa'.":                true,
+		"code: 516, message: default: Authentication failed":             true,
+		"ORA-01017: invalid username/password; logon denied":             true,
+		"dial tcp 127.0.0.1:5432: connect: connection refused":           false,
+		"mssql: login error: Login failed for user 'sa'. Reason: Server is in script upgrade mode. Only administrator can connect at this time.": false,
+		"context deadline exceeded": false,
+		"ORA-12514: TNS:listener does not currently know of service requested":         false,
+		"FATAL: the database system is starting up (SQLSTATE 57P03)":                   false,
+		`FATAL: database "shop" does not exist (SQLSTATE 3D000)`:                       false,
+		"read tcp 127.0.0.1:1->127.0.0.1:2: read: connection reset by peer":            false,
+		"server selection error: context deadline exceeded, current topology: { ... }": false,
+	} {
+		if got := credentialRefusal(errors.New(message)); got != want {
+			t.Errorf("credentialRefusal(%q) = %v", message, got)
+		}
+	}
+	if !credentialRefusal(&pgconn.PgError{Code: "28P01", Message: "nope"}) || credentialRefusal(&pgconn.PgError{Code: "57P03", Message: "authentication failed"}) {
+		t.Error("a PostgreSQL error is read by its code")
+	}
+	if !credentialRefusal(&mysql.MySQLError{Number: 1045, Message: "x"}) || credentialRefusal(&mysql.MySQLError{Number: 1049, Message: "Unknown database"}) {
+		t.Error("a MySQL error is read by its number")
+	}
+	if credentialRefusal(nil) {
+		t.Error("no error is not a refusal")
+	}
+}
+
+// A found server that could not be signed in to for a reason other than its
+// credentials is not answered with "type the password".
+func TestConnectSaysWhenTheCredentialsAreNotTheProblem(t *testing.T) {
+	m := &fakeMachine{
+		containers: []fakeContainer{{
+			id: "ffffffffffff0006", name: "xe", image: "container-registry.oracle.com/database/express:21.3.0-xe", state: "running",
+			env: []string{"ORACLE_PWD=pw", "ORACLE_PDB=NOSUCH"}, ports: []fakePort{{1521, 11521, "127.0.0.1"}},
+		}},
+		refuse: map[string]string{"NOSUCH": "ORA-12514: TNS:listener does not currently know of service requested in connect descriptor"},
+	}
+	_, r := inventoryRouter(t, auth.RoleAdmin, m)
+	rec := do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"docker:xe"}`)
+	if rec.Code != http.StatusConflict || inventoryErrorCode(rec) != "sign_in_failed" {
+		t.Fatalf("connect = %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "type the password") || !strings.Contains(rec.Body.String(), "not because of the credentials") {
+		t.Errorf("connect = %s, want it to say the credentials are not what failed", rec.Body.String())
+	}
+	// Its own default service is the edition's, so a stock container signs in.
+	m.mu.Lock()
+	m.containers[0].env = []string{"ORACLE_PWD=pw"}
+	m.mu.Unlock()
+	rec = do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"docker:xe"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("connect = %d %s", rec.Code, rec.Body.String())
+	}
+	if dials := m.dials(); !strings.HasSuffix(dials[len(dials)-1], "/XEPDB1") {
+		t.Errorf("dialled %q, want the Express edition's own pluggable database", dials[len(dials)-1])
+	}
+}
+
+// Connecting what is already connected makes nothing, and can still change
+// what the next reconcile does. Whatever it changed is in the audit trail.
+func TestConnectingAgainRecordsWhatItChanged(t *testing.T) {
+	m := ordinaryMachine()
+	s, r := inventoryRouter(t, auth.RoleAdmin, m)
+	if rec := do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"docker:shop-db"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("connect: %d %s", rec.Code, rec.Body.String())
+	}
+	do(t, r, http.MethodPost, "/databases/inventory/ignore", `{"key":"docker:shop-db","ignored":true}`)
+	if rec := do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"docker:shop-db"}`); rec.Code != http.StatusOK {
+		t.Fatalf("second connect: %d %s", rec.Code, rec.Body.String())
+	}
+	if ignored, _ := s.ignoredOrigins(t.Context()); ignored["docker:shop-db"] {
+		t.Error("the mark was not taken back")
+	}
+	want := []string{"database.inventory.connect", "database.inventory.ignore", "database.inventory.unignore"}
+	if got := auditTrail(t, s); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("audit trail = %v, want %v", got, want)
+	}
+	// A third time changes nothing, and records nothing.
+	do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"docker:shop-db"}`)
+	if got := auditTrail(t, s); len(got) != len(want) {
+		t.Errorf("audit trail = %v after a connect that changed nothing", got)
+	}
+
+	// A connection typed by hand learns which server it is: once, and on record.
+	sealed, err := s.Sealer.Seal("postgres://postgres:" + secretPassword + "@localhost:25432/postgres?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec(`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES('by-hand','postgres',?,0)`, sealed); err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"docker:fixture"}`); rec.Code != http.StatusOK {
+		t.Fatalf("connect of a server a hand-typed connection covers: %d %s", rec.Code, rec.Body.String())
+	}
+	if rows := connectionRows(t, s); rows["by-hand"] != "docker:fixture" {
+		t.Errorf("rows = %v", rows)
+	}
+	if got := auditTrail(t, s); len(got) != len(want)+1 || got[len(got)-1] != "database.inventory.connect" {
+		t.Errorf("audit trail = %v, want the link recorded", got)
+	}
+}
+
+// The reconcile's own backfill of an origin is a change, and is recorded even
+// when nothing was added.
+func TestSyncRecordsAConnectionLearningItsServer(t *testing.T) {
+	m := &fakeMachine{containers: []fakeContainer{{
+		id: "ffffffffffff0007", name: "db", image: "postgres:16", state: "running",
+		env: []string{"POSTGRES_PASSWORD=pw"}, ports: []fakePort{{5432, 15432, "127.0.0.1"}},
+	}}}
+	s, r := inventoryRouter(t, auth.RoleAdmin, m)
+	sealed, err := s.Sealer.Seal("postgres://postgres:pw@localhost:15432/postgres")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec(`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES('by-hand','postgres',?,0)`, sealed); err != nil {
+		t.Fatal(err)
+	}
+	do(t, r, http.MethodPost, "/databases/sync", "{}")
+	if rows := connectionRows(t, s); rows["by-hand"] != "docker:db" {
+		t.Fatalf("rows = %v", rows)
+	}
+	if got := auditTrail(t, s); len(got) != 1 || got[0] != "database.connection.sync" {
+		t.Fatalf("audit trail = %v, want the backfill recorded", got)
+	}
+	var detail string
+	if err := s.Store.DB.QueryRow(`SELECT detail FROM audit_log`).Scan(&detail); err != nil || !strings.Contains(detail, `"linked":["by-hand"]`) {
+		t.Errorf("detail = %q (%v)", detail, err)
+	}
+	do(t, r, http.MethodPost, "/databases/sync", "{}")
+	if got := auditTrail(t, s); len(got) != 1 {
+		t.Errorf("audit trail = %v after a reconcile that changed nothing", got)
+	}
+	if len(m.dials()) != 0 {
+		t.Errorf("dials = %v; a server that is already connected is not signed in to", m.dials())
+	}
+}
+
+// The legacy listing has no way to say "this is a guess", so it does not list
+// one: every row in it reads as a server that was detected.
+func TestDetectedLeavesOutAGuess(t *testing.T) {
+	m := &fakeMachine{containers: []fakeContainer{
+		{
+			id: "ffffffffffff0008", name: "guess", image: "acme/thing:1", state: "running",
+			entrypoint: []string{"/start"}, ports: []fakePort{{5432, 55432, "127.0.0.1"}},
+		},
+		{
+			id: "ffffffffffff0009", name: "real", image: "postgres:16", state: "running",
+			env: []string{"POSTGRES_PASSWORD=pw"}, ports: []fakePort{{5432, 15432, "127.0.0.1"}},
+		},
+	}}
+	_, r := inventoryRouter(t, auth.RoleAdmin, m)
+	var out detectedResponse
+	rec := do(t, r, http.MethodGet, "/databases/detected", "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Servers) != 1 || out.Servers[0].Container != "real" {
+		t.Errorf("detected = %s", rec.Body.String())
+	}
+	inv := decodeInventory(t, do(t, r, http.MethodGet, "/databases/inventory", ""))
+	if got := inventoryInstance(t, inv, "docker:guess"); got.Confidence != dbx.ConfidencePort {
+		t.Errorf("the inventory lost the guess: %+v", got)
+	}
+}
+
+// A `docker compose run` container carries its service's labels. It takes
+// neither the service's key nor the address the service is dialled at.
+func TestAComposeRunContainerIsNotItsService(t *testing.T) {
+	labels := func(oneoff string) map[string]string {
+		return map[string]string{
+			"com.docker.compose.project": "shop", "com.docker.compose.service": "db",
+			"com.docker.compose.container-number": "1", "com.docker.compose.oneoff": oneoff,
+		}
+	}
+	m := &fakeMachine{containers: []fakeContainer{
+		{
+			id: "ffffffffffff0010", name: "shop-db-run-1a2b3c", image: "postgres:16", state: "running",
+			env: []string{"POSTGRES_PASSWORD=pw"}, entrypoint: []string{"docker-entrypoint.sh"}, cmd: []string{"psql", "-h", "db"},
+			labels: labels("True"), ip: "172.18.0.7",
+		},
+		{
+			id: "ffffffffffff0011", name: "shop-db-1", image: "postgres:16", state: "running",
+			env: []string{"POSTGRES_PASSWORD=pw"}, entrypoint: []string{"docker-entrypoint.sh"}, cmd: []string{"postgres"},
+			labels: labels("False"), ports: []fakePort{{5432, 15432, "127.0.0.1"}}, ip: "172.18.0.2",
+		},
+	}}
+	s, r := inventoryRouter(t, auth.RoleAdmin, m)
+	inv := decodeInventory(t, do(t, r, http.MethodGet, "/databases/inventory", ""))
+	servers := []string{}
+	for _, inst := range inv.Instances {
+		if inst.Kind == dbx.KindServer {
+			servers = append(servers, inst.Key)
+		}
+	}
+	if strings.Join(servers, ",") != "compose:shop/db" {
+		t.Fatalf("servers = %v, want the service and nothing for its one-off", servers)
+	}
+	if rec := do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"compose:shop/db"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("connect = %d %s", rec.Code, rec.Body.String())
+	}
+	if dials := m.dials(); len(dials) != 1 || !strings.Contains(dials[0], "127.0.0.1:15432") {
+		t.Errorf("dials = %v, want the service's own published port", dials)
+	}
+	if rows := connectionRows(t, s); rows["shop-db-1"] != "compose:shop/db" {
+		t.Errorf("rows = %v", rows)
+	}
+	// Adopting the service by its container name finds the same instance.
+	if rec := do(t, r, http.MethodPost, "/databases/adopt", `{"container":"shop-db-1"}`); rec.Code != http.StatusOK {
+		t.Errorf("adopt = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A server that is installed, stopped and disabled is in no listing of units:
+// systemd unloads it. The unit files, and for Debian's PostgreSQL the cluster
+// directories, are what say it is there.
+func TestInstalledAndDisabledServersAreListed(t *testing.T) {
+	m := &fakeMachine{
+		units: []procs.Unit{
+			{Name: "nginx.service", LoadState: "loaded", ActiveState: "active", SubState: "running"},
+			{Name: "mongod.service", LoadState: "loaded", ActiveState: "failed", SubState: "failed"},
+		},
+		unitFiles: map[string]string{
+			"redis-server.service": "disabled",
+			// Another name for the unit above, not a second server.
+			"redis.service": "alias",
+			// A template with no instance, a unit that cannot be started.
+			"mysql@.service":      "disabled",
+			"mariadb.service":     "masked",
+			"postgresql.service":  "enabled",
+			"postgresql@.service": "indirect",
+			"cron.service":        "enabled",
+		},
+	}
+	s, r := inventoryRouter(t, auth.RoleAdmin, m)
+	etc := filepath.Join(s.Cfg.FileRoots[0], "etc", "postgresql")
+	for cluster, conf := range map[string]string{"16/main": "port = 5433\ndata_directory = '/var/lib/postgresql/16/main'\n", "17/reports": "port = 5434\n"} {
+		if err := os.MkdirAll(filepath.Join(etc, cluster), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(etc, cluster, "postgresql.conf"), []byte(conf), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A version directory with no cluster in it is not one.
+	if err := os.MkdirAll(filepath.Join(etc, "15"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	inv := decodeInventory(t, do(t, r, http.MethodGet, "/databases/inventory", ""))
+	redis := inventoryInstance(t, inv, "host:redis-server.service")
+	if redis.State != dbx.StateInactive || redis.Connectable || redis.Host.Enabled || !strings.Contains(redis.Reason, "not running") {
+		t.Errorf("the disabled, stopped server = %+v host %+v", redis, redis.Host)
+	}
+	main := inventoryInstance(t, inv, "host:postgresql@16-main.service")
+	if main.State != dbx.StateInactive || main.Version != "16" || !main.Host.Enabled || main.Host.DataDir != "/var/lib/postgresql/16/main" ||
+		len(main.Endpoints) != 1 || main.Endpoints[0].Port != 5433 {
+		t.Errorf("the stopped cluster = %+v host %+v", main, main.Host)
+	}
+	if reports := inventoryInstance(t, inv, "host:postgresql@17-reports.service"); reports.Endpoints[0].Port != 5434 {
+		t.Errorf("the second cluster = %+v", reports)
+	}
+	if failed := inventoryInstance(t, inv, "host:mongod.service"); failed.State != dbx.StateFailed {
+		t.Errorf("the loaded, failed unit = %+v", failed)
+	}
+	for _, key := range []string{"host:redis.service", "host:mysql@.service", "host:mariadb.service", "host:postgresql.service", "host:postgresql@.service", "host:postgresql@15-.service"} {
+		if inventoryHas(inv, key) {
+			t.Errorf("%s was listed as a server", key)
+		}
+	}
+}
+
+// pingOnlyMongo is a MongoDB that completes the handshake, answers a ping and
+// refuses every other command for want of an account: what a mongod with
+// access control on does to a connection that names nobody. It speaks just
+// enough of the wire protocol for the real driver to talk to it.
+func pingOnlyMongo(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	const opReply, opQuery, opMsg = 1, 2004, 2013
+	serve := func(conn net.Conn) {
+		defer conn.Close()
+		for {
+			header := make([]byte, 16)
+			if _, err := io.ReadFull(conn, header); err != nil {
+				return
+			}
+			length, opcode := int(binary.LittleEndian.Uint32(header)), binary.LittleEndian.Uint32(header[12:])
+			if length < 16 || length > 1<<20 {
+				return
+			}
+			body := make([]byte, length-16)
+			if _, err := io.ReadFull(conn, body); err != nil {
+				return
+			}
+			switch opcode {
+			case opQuery:
+				// Flags, the collection's name, skip and limit, then the command.
+				body = body[4:]
+				body = body[bytes.IndexByte(body, 0)+9:]
+			case opMsg:
+				// Flags and the one section's kind, then the command.
+				body = body[5:]
+			default:
+				return
+			}
+			elements, err := bson.Raw(body[:binary.LittleEndian.Uint32(body)]).Elements()
+			if err != nil || len(elements) == 0 {
+				return
+			}
+			var answer bson.D
+			switch name := elements[0].Key(); strings.ToLower(name) {
+			case "hello", "ismaster":
+				answer = bson.D{
+					{Key: "ismaster", Value: true}, {Key: "isWritablePrimary", Value: true}, {Key: "helloOk", Value: true},
+					{Key: "maxBsonObjectSize", Value: int32(16 << 20)}, {Key: "maxMessageSizeBytes", Value: int32(48_000_000)},
+					{Key: "maxWriteBatchSize", Value: int32(100_000)}, {Key: "minWireVersion", Value: int32(0)},
+					{Key: "maxWireVersion", Value: int32(21)}, {Key: "ok", Value: 1.0},
+				}
+			case "ping":
+				answer = bson.D{{Key: "ok", Value: 1.0}}
+			default:
+				answer = bson.D{
+					{Key: "ok", Value: 0.0}, {Key: "errmsg", Value: "command " + name + " requires authentication"},
+					{Key: "code", Value: int32(13)}, {Key: "codeName", Value: "Unauthorized"},
+				}
+			}
+			doc, err := bson.Marshal(answer)
+			if err != nil {
+				return
+			}
+			var reply []byte
+			if opcode == opQuery {
+				reply = make([]byte, 36, 36+len(doc))
+				binary.LittleEndian.PutUint32(reply[12:], opReply)
+				binary.LittleEndian.PutUint32(reply[32:], 1)
+			} else {
+				reply = make([]byte, 21, 21+len(doc))
+				binary.LittleEndian.PutUint32(reply[12:], opMsg)
+			}
+			reply = append(reply, doc...)
+			binary.LittleEndian.PutUint32(reply, uint32(len(reply)))
+			copy(reply[8:12], header[4:8])
+			if _, err := conn.Write(reply); err != nil {
+				return
+			}
+		}
+	}
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go serve(conn)
+		}
+	}()
+	return "mongodb://" + ln.Addr().String() + "/admin"
+}
+
+// A MongoDB answers a ping from anybody. Signing in to one with no account is
+// therefore proved by a command it refuses unless it really is open — or a
+// server with access control on is saved as a connection that then fails
+// everything asked of it.
+func TestMongoSignInIsNotAPing(t *testing.T) {
+	s := testServer(t)
+	t.Cleanup(s.Shutdown)
+	uri := pingOnlyMongo(t)
+
+	// The driver's own connection check passes: this is the server the old
+	// sign-in called connected.
+	client, err := dbx.MongoClient(t.Context(), uri)
+	if err != nil {
+		t.Fatalf("the ping itself failed, so this proves nothing: %v", err)
+	}
+	_ = client.Disconnect(context.Background())
+
+	err = s.probeConnection(t.Context(), dbx.DriverMongo, uri)
+	if err == nil {
+		t.Fatal("a server that answers only a ping was signed in to with no account")
+	}
+	if !strings.Contains(err.Error(), "requires authentication") || !credentialRefusal(err) {
+		t.Errorf("err = %v, want the server's own refusal, read as one", err)
+	}
+
+	for uri, nobody := range map[string]bool{
+		"mongodb://127.0.0.1:27017/admin":                       true,
+		"mongodb://127.0.0.1:27017":                             true,
+		"mongodb://h1:27017,h2:27017/app?replicaSet=rs0":        true,
+		"mongodb://:pw@127.0.0.1:27017/admin":                   true,
+		"mongodb://root:pw@127.0.0.1:27017/admin":               false,
+		"mongodb://app@h1:27017,h2:27017/app?replicaSet=rs0":    false,
+		"mongodb+srv://app:p%40ss@cluster.example.net/app?w=1":  false,
+		"mongodb://127.0.0.1:27017/app?appName=someone@example": true,
+	} {
+		if got := mongoURINamesNobody(uri); got != nobody {
+			t.Errorf("mongoURINamesNobody(%q) = %v", uri, got)
+		}
+	}
+}

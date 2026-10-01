@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -19,13 +20,15 @@ import (
 // The inventory against the machine the test runs on: its real Docker daemon,
 // socket tables, units and files.
 //
-// Neither test runs unless asked, because neither is hermetic. The first only
+// None of these runs unless asked, because none is hermetic. The first only
 // reads. The second signs in to one container, named by the caller, and to
 // nothing else — it never runs the reconcile, which would sign in to every
-// database the machine has.
+// database the machine has. The third signs in to the two MongoDB servers the
+// caller names: one open, one with access control on.
 //
 //	JD_TEST_INVENTORY_LIVE=1 go test ./internal/api -run TestLiveInventory -count=1 -v
 //	JD_TEST_INVENTORY_CONTAINER=my-throwaway-redis go test ./internal/api -run TestLiveInventoryConnects -count=1 -v
+//	JD_TEST_MONGO_AUTH_DSN=mongodb://root:pw@127.0.0.1:57117/admin go test ./internal/api -run TestLiveMongoSignIn -count=1 -v
 
 func liveInventoryRouter(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
@@ -155,5 +158,49 @@ func TestLiveInventoryConnectsAContainerByKey(t *testing.T) {
 	r.ServeHTTP(again, req)
 	if again.Code != http.StatusOK {
 		t.Errorf("connecting it again answered %d: %s", again.Code, again.Body.String())
+	}
+}
+
+// TestLiveMongoSignInIsNotAPing checks the sign-in against real servers. A
+// MongoDB answers a ping from anybody, so a connection that names no account
+// used to pass against a server that then refused everything asked of it.
+func TestLiveMongoSignInIsNotAPing(t *testing.T) {
+	locked := os.Getenv("JD_TEST_MONGO_AUTH_DSN")
+	if locked == "" {
+		t.Skip("JD_TEST_MONGO_AUTH_DSN not set")
+	}
+	s := testServer(t)
+	t.Cleanup(s.Shutdown)
+	parsed, err := url.Parse(locked)
+	if err != nil || parsed.User == nil {
+		t.Fatalf("JD_TEST_MONGO_AUTH_DSN must name an account: %v", err)
+	}
+
+	if err := s.probeConnection(t.Context(), dbx.DriverMongo, locked); err != nil {
+		t.Fatalf("the server refused its own account: %v", err)
+	}
+	nobody := *parsed
+	nobody.User = nil
+	err = s.probeConnection(t.Context(), dbx.DriverMongo, nobody.String())
+	if err == nil {
+		t.Fatal("a connection naming no account passed against a server with access control on")
+	}
+	if !credentialRefusal(err) {
+		t.Errorf("%v was not read as the server refusing who asked", err)
+	}
+	t.Logf("no account: %v", err)
+	wrong := *parsed
+	wrong.User = url.UserPassword(parsed.User.Username(), "not-the-password")
+	if err := s.probeConnection(t.Context(), dbx.DriverMongo, wrong.String()); err == nil || !credentialRefusal(err) {
+		t.Errorf("a wrong password answered %v", err)
+	} else {
+		t.Logf("wrong password: %v", err)
+	}
+
+	// And an open server still signs in with nothing.
+	if open := os.Getenv("JD_TEST_MONGO_DSN"); open != "" {
+		if err := s.probeConnection(t.Context(), dbx.DriverMongo, open); err != nil {
+			t.Errorf("the open server refused a connection with no account: %v", err)
+		}
 	}
 }

@@ -56,7 +56,10 @@ type dbInventoryHost struct {
 	listeners func(context.Context) ([]proxysvc.Listener, error)
 	sockets   func(context.Context, func(string) bool) ([]proxysvc.UnixListener, error)
 	systemd   func() bool
-	units     func(context.Context) ([]procs.Unit, error)
+	// units is the units systemd has loaded and, beside them, every installed
+	// unit file and its state: the units a listing leaves out because they
+	// are stopped and disabled.
+	units func(context.Context) ([]procs.Unit, map[string]string, error)
 	// etc is where the host's configuration is read from, for a Debian
 	// PostgreSQL cluster's port.
 	etc string
@@ -74,7 +77,7 @@ var hostInventory = dbInventoryHost{
 	listeners: proxysvc.ListListeners,
 	sockets:   proxysvc.ListUnixListeners,
 	systemd:   hostSystemd.Available,
-	units:     hostSystemd.List,
+	units:     hostSystemd.ListInstalled,
 	etc:       "/etc",
 	volumes:   "/var/lib/docker/volumes",
 	roots:     []string{"/home", "/srv", "/opt", "/var/www", "/var/lib", "/root"},
@@ -330,7 +333,7 @@ func (s *Server) collectUnits(ctx context.Context) ([]dbx.HostUnit, inventorySca
 		scan.Reason = "this machine has no systemd to ask"
 		return nil, scan
 	}
-	units, err := host.units(ctx)
+	units, installed, err := host.units(ctx)
 	scan.DurationMs = time.Since(started).Milliseconds()
 	if err != nil {
 		scan.Reason = "systemd's units could not be read: " + err.Error()
@@ -338,20 +341,66 @@ func (s *Server) collectUnits(ctx context.Context) ([]dbx.HostUnit, inventorySca
 	}
 	out := make([]dbx.HostUnit, 0, len(units))
 	for _, u := range units {
-		unit := dbx.HostUnit{
+		out = append(out, dbx.HostUnit{
 			Name: u.Name, LoadState: u.LoadState, ActiveState: u.ActiveState, SubState: u.SubState, Enabled: u.Enabled,
-		}
-		if version, cluster, ok := dbx.DebianCluster(u.Name); ok {
+		})
+	}
+	// The listing is the units systemd has loaded, and one that is stopped and
+	// disabled is not loaded. The unit files say what is installed.
+	if len(installed) > 0 {
+		out = append(out, dbx.InstalledUnits(installed, out, debianClusters(host.etc))...)
+	} else {
+		scan.Reason = "the installed unit files could not be read, so a server that is stopped and disabled may be missing"
+	}
+	for i := range out {
+		if version, cluster, ok := dbx.DebianCluster(out[i].Name); ok {
 			config := filepath.Join(host.etc, "postgresql", version, cluster, "postgresql.conf")
 			if port, dataDir := postgresClusterConfig(config); port > 0 {
-				unit.ConfigFile, unit.Port, unit.DataDir = config, port, dataDir
+				out[i].ConfigFile, out[i].Port, out[i].DataDir = config, port, dataDir
 			}
 		}
-		out = append(out, unit)
 	}
 	scan.OK, scan.Count = true, len(out)
 	scan.DurationMs = time.Since(started).Milliseconds()
 	return out, scan
+}
+
+// maxDebianClusters bounds how many directories are read looking for them.
+const maxDebianClusters = 64
+
+// debianClusters lists the PostgreSQL clusters Debian's packaging has
+// configured, as "<version>-<name>": every /etc/postgresql/<version>/<name>
+// that holds a postgresql.conf. A cluster is an instance of a template unit,
+// so no unit file names it, and one that is stopped is in no unit listing
+// either.
+func debianClusters(etc string) []string {
+	root := filepath.Join(etc, "postgresql")
+	versions, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	out := []string{}
+	for _, version := range versions {
+		if !version.IsDir() {
+			continue
+		}
+		names, err := os.ReadDir(filepath.Join(root, version.Name()))
+		if err != nil {
+			continue
+		}
+		for _, name := range names {
+			if len(out) >= maxDebianClusters {
+				return out
+			}
+			if !name.IsDir() {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(root, version.Name(), name.Name(), "postgresql.conf")); err == nil {
+				out = append(out, version.Name()+"-"+name.Name())
+			}
+		}
+	}
+	return out
 }
 
 // postgresClusterConfig reads where a Debian PostgreSQL cluster listens and

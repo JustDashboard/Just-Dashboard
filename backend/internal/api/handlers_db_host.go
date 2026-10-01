@@ -87,6 +87,9 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 	if err := validateRoleName(account); err != nil {
 		return httpx.BadRequest("%v", err)
 	}
+	if err := validConnectionNames("", req.Database); err != nil {
+		return err
+	}
 	password := req.Password
 	if password == "" {
 		generated, err := generatePassword()
