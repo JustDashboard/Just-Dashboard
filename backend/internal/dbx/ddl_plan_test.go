@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -25,29 +26,99 @@ func planText(t *testing.T) func(*DDLPlan, error) string {
 	}
 }
 
+var allSQLDrivers = []Driver{DriverPostgres, DriverMySQL, DriverSQLite, DriverMSSQL, DriverOracle, DriverClickHouse}
+
 func TestTypeValidationAcceptsTypesAndRefusesClauses(t *testing.T) {
-	for _, typ := range []string{
-		"text[]", "integer[3][]", "numeric(10,2)[]", "timestamp(3) with time zone",
-		"Array(Nullable(String))", "LowCardinality(String)", "DateTime64(3, 'UTC')",
-		"Enum8('a' = 1, 'b' = 2)", "public.citext", "character varying(64)", "bigint unsigned",
-		"Map(String, UInt64)", "double precision",
+	for driver, types := range map[Driver][]string{
+		DriverPostgres: {
+			"text[]", "integer[3][]", "numeric(10,2)[]", "timestamp(3) with time zone", "time without time zone",
+			"public.citext", "character varying(64)", "double precision", "geometry(Point, 4326)", "vector(1536)",
+			"interval day to second", "interval day to second(3)", "bit varying(8)", "serial", "shop.status[]",
+		},
+		DriverMySQL: {
+			"bigint unsigned", "int(11) unsigned zerofill", "enum('a','b')", "set('x', 'y')", "enum('it''s')",
+			"varchar(64) character set utf8mb4", "text charset latin1", "datetime(6)", "double precision",
+			"national varchar(10)", "json",
+		},
+		DriverSQLite: {"INTEGER", "VARCHAR(255)", "UNSIGNED BIG INT", "DECIMAL(10,5)", "DOUBLE PRECISION"},
+		DriverMSSQL:  {"nvarchar(max)", "decimal(18, 2)", "datetime2(7)", "uniqueidentifier", "dbo.PhoneNumber"},
+		DriverOracle: {
+			"VARCHAR2(100 CHAR)", "NUMBER(18,2)", "TIMESTAMP(6) WITH LOCAL TIME ZONE", "LONG RAW",
+			"INTERVAL YEAR(2) TO MONTH", "INTERVAL DAY(2) TO SECOND(6)", "HR.ADDRESS_T",
+		},
+		DriverClickHouse: {
+			"Array(Nullable(String))", "LowCardinality(String)", "DateTime64(3, 'UTC')", "Enum8('a' = 1, 'b' = -2)",
+			"Map(String, UInt64)", "Tuple(a String, b Array(UInt8))", "Decimal(10, 2)", "FixedString(16)",
+			"AggregateFunction(uniq, UInt64)",
+		},
 	} {
-		if err := validateType(typ); err != nil {
-			t.Errorf("rejected legitimate type %q: %v", typ, err)
+		for _, typ := range types {
+			if err := validateType(driver, typ); err != nil {
+				t.Errorf("%s rejected legitimate type %q: %v", driver, typ, err)
+			}
 		}
 	}
-	for _, typ := range []string{
-		// A type is a run of words, and these are where a type ends and a
-		// constraint begins.
-		"int primary key", "int references users", "int not null", "int default 5",
-		"int unique", "int check (1)", "int auto_increment", "int generated always",
-		// And these are where a type ends and another statement begins.
-		"text[]; DROP TABLE x", "text[1", "int)", "int(", "enum('a\\')", "enum('a';)",
-		"int'", "'a'", "text[x]", "varchar(255))", "a(((((1)))))",
-		"int\x00", "", "1int", "int`", `int"`,
+	for _, driver := range allSQLDrivers {
+		for _, typ := range []string{
+			// A type is followed by the rest of the statement. Whatever a
+			// "type" carries after its name is read as that rest: another
+			// action of the same ALTER TABLE …
+			"integer, DROP COLUMN email", "integer, DROP COLUMN email CASCADE", "integer, DISABLE ROW LEVEL SECURITY",
+			"integer, DISABLE TRIGGER ALL", "integer, OWNER TO postgres", "int, CONVERT TO CHARACTER SET latin1",
+			"int, RENAME TO gone", "number, DROP COLUMN email", "UInt8, DROP PARTITION ID 'all'",
+			"int, ADD COLUMN y int", "int ,", "int,",
+			// … another statement, on the engine that needs nothing between two …
+			"int DROP TABLE users", "int EXEC('DROP TABLE dbo.users')", "int TRUNCATE TABLE users",
+			"int) DROP TABLE users", "EXEC('DROP TABLE dbo.users')", "int EXEC sp_who", "int GO",
+			"exec", "drop", "truncate", "int with", "int to", "set", "int set",
+			// … a constraint or a column option …
+			"int primary key", "int references users", "int not null", "int default 5", "default(5)",
+			"int unique", "unique", "int check (1)", "check(1)", "int auto_increment", "int generated always",
+			"int collate x", "int comment 'x'", "int first", "int after id", "int codec(ZSTD)", "int ttl d",
+			"int identity(1,1)", "int as (1)", "references(users)",
+			// … or what a type never is.
+			"text[]; DROP TABLE x", "text[1", "int)", "int(", "enum('a\\')", "enum('a';)", "enum('a'", "int()",
+			"int'", "'a'", "text[x]", "varchar(255))", "a(((((1)))))", "varchar(255)(1)", "a.b.c", "a.", ".a",
+			"int\x00", "", " ", "1int", "int`", `int"`, "int--", "int/**/", "int;", "int = 1", "a=b",
+			"varchar(10) with time zone(3)", "int\tunsigned", "int\nunsigned", strings.Repeat("a", 201),
+		} {
+			if err := validateType(driver, typ); err == nil {
+				t.Errorf("%s accepted %q as a column type", driver, typ)
+			}
+		}
+	}
+	// What one engine's types take is not what another's do.
+	for _, c := range []struct {
+		driver Driver
+		typ    string
+	}{
+		{DriverPostgres, "enum('a','b')"}, {DriverMSSQL, "varchar('max')"}, {DriverOracle, "set('a')"},
+		{DriverPostgres, "Array(Nullable(String))"}, {DriverMSSQL, "Enum8('a' = 1)"},
+		{DriverMySQL, "text[]"}, {DriverMSSQL, "int[]"}, {DriverClickHouse, "String[]"},
+		{DriverMySQL, "app.status"}, {DriverSQLite, "main.thing"}, {DriverClickHouse, "db.Thing"},
+		{DriverPostgres, "varchar(10) character set utf8"}, {DriverPostgres, "set('a')"},
+		{DriverPostgres, "public.citext unsigned"}, {DriverMySQL, "varchar(10) character set utf8; x"},
 	} {
-		if err := validateType(typ); err == nil {
-			t.Errorf("accepted %q as a column type", typ)
+		if err := validateType(c.driver, c.typ); err == nil {
+			t.Errorf("%s accepted %q as a column type", c.driver, c.typ)
+		}
+	}
+	// And the planners that write a type refuse with it: no statement is drawn
+	// up at all, so there is nothing to run and nothing to preview.
+	for _, driver := range allSQLDrivers {
+		const smuggled = "integer, DROP COLUMN email"
+		if p, err := PlanAddColumn(driver, "", "users", NewColumn{Name: "x", Type: smuggled}); err == nil {
+			t.Errorf("%s planned an add-column carrying a second action: %s", driver, p)
+		}
+		if p, err := PlanCreateTable(driver, "", "t", []NewColumn{{Name: "x", Type: "int) DROP TABLE users"}}); err == nil {
+			t.Errorf("%s planned a create-table carrying a second statement: %s", driver, p)
+		}
+		if driver == DriverSQLite {
+			continue
+		}
+		if p, err := PlanAlterColumn(context.Background(), nil, driver,
+			ColumnChange{Table: "users", Column: "x", Type: smuggled}); err == nil {
+			t.Errorf("%s planned an alter-column carrying a second action: %s", driver, p)
 		}
 	}
 }
@@ -82,7 +153,7 @@ func TestDefaultValidationAllowsACallAndNothingWider(t *testing.T) {
 }
 
 func TestFragmentCannotLeaveItsParentheses(t *testing.T) {
-	for _, driver := range []Driver{DriverPostgres, DriverMySQL, DriverSQLite, DriverMSSQL, DriverOracle, DriverClickHouse} {
+	for _, driver := range allSQLDrivers {
 		for _, ok := range []string{
 			"price >= 0", "(a > 0) AND (b < 10)", "status IN ('a', 'b;c', 'it''s')", `"odd;name" > 0`,
 			"length(name) < 100",
@@ -173,10 +244,51 @@ func TestPlansNameTheCallsTheyCannotVouchFor(t *testing.T) {
 		{DriverPostgres, "f(g(x)) AND f(y)", []string{"f", "g"}},
 		{DriverPostgres, "étiquette(x) AND é(y)", []string{"étiquette", "é"}},
 		{DriverPostgres, "EXISTS (SELECT dblink_exec('c', 'q'))", []string{"dblink_exec"}},
-		{DriverMSSQL, "[dbo].[audit](id) = 1", []string{"[audit]"}},
+		{DriverMSSQL, "[dbo].[audit](id) = 1", []string{"[dbo].[audit]"}},
 		{DriverMSSQL, "len([name]) > 0", nil},
 		{DriverMySQL, "`audit`(id) = 1", []string{"`audit`"}},
+		{DriverMySQL, "sleep (5) = 0", []string{"sleep"}},
 		{DriverClickHouse, "notEmpty(toString(id))", nil},
+		// A name is the engine's name however it is spaced: the dot may stand
+		// apart from both parts, and the parenthesis from the name.
+		{DriverPostgres, "public . lower (x) IS NOT NULL", []string{"public.lower"}},
+		{DriverPostgres, "pg_catalog\n.\nlower\t(x) = 'a'", []string{"pg_catalog.lower"}},
+		{DriverPostgres, `"public" . "lower"(x) = 'a'`, []string{`"public"."lower"`}},
+		{DriverPostgres, "a.b.lower(x) = 'a'", []string{"a.b.lower"}},
+		// A character that is part of an identifier on one engine does not end
+		// the name there, so the vouched word after it is not a call of its own.
+		{DriverMSSQL, "dbo.evil#lower(x) = 1", []string{"dbo.evil#lower"}},
+		{DriverMSSQL, "dbo.evil@lower(x) = 1", []string{"dbo.evil@lower"}},
+		{DriverMSSQL, "evil$lower(x) = 1", []string{"evil$lower"}},
+		{DriverMSSQL, "#lower(x) = 1", []string{"#lower"}},
+		{DriverOracle, "evil#lower(x) = 1", []string{"evil#lower"}},
+		{DriverOracle, "evil$lower(x) = 1", []string{"evil$lower"}},
+		{DriverPostgres, "a #lower(x) = 1", nil},
+		// A word that is syntax in one position is a function name in every
+		// other, and Postgres lets a function be named it.
+		{DriverPostgres, "filter(x)", []string{"filter"}},
+		{DriverPostgres, "over(x) > 0", []string{"over"}},
+		{DriverPostgres, "a > 0 AND like(a, b)", []string{"like"}},
+		{DriverPostgres, "ilike(a, b)", []string{"ilike"}},
+		{DriverPostgres, "similar(a)", []string{"similar"}},
+		{DriverPostgres, "is(a)", []string{"is"}},
+		{DriverPostgres, "myschema . filter (x)", []string{"myschema.filter"}},
+		{DriverPostgres, "name LIKE ('a' || '%') AND name NOT ILIKE ('b%')", nil},
+		{DriverPostgres, "\"name\" like ('a%') AND tags[1] like ('b%')", nil},
+		{DriverPostgres, "x = any(array[1,2]) AND NOT (y IN (1, 2))", nil},
+		{DriverPostgres, "EXISTS (SELECT count(*) FILTER (WHERE a > 0) FROM t)", []string{"count"}},
+		{DriverPostgres, "EXISTS (SELECT abs(a) FILTER (WHERE a > 0), abs(b) OVER (PARTITION BY c) FROM t)", nil},
+		// Postgres calls total(t) for `t.total` when t has no such column, so a
+		// dotted name is named whether or not a parenthesis follows it.
+		{DriverPostgres, "t.evil > 0", []string{"t.evil"}},
+		{DriverPostgres, "(t).evil", []string{"evil"}},
+		{DriverPostgres, "(t.*).evil IS NULL", []string{"evil"}},
+		{DriverPostgres, "status = 'new'::shop.status AND CAST(x AS shop.status) IS NOT NULL", nil},
+		{DriverPostgres, "price > 1.5 AND qty < 2e3 AND 1evil(x)", []string{"evil"}},
+		{DriverMySQL, "t.total > 0", nil},
+		// Past ASCII, a byte is part of the name: a no-break space does not
+		// separate a vouched name from its parenthesis.
+		{DriverPostgres, "lower\u00a0(x) is null", []string{"lower\u00a0"}},
 	} {
 		got := unvouchedCalls(c.driver, c.text)
 		if len(got) != len(c.want) {
@@ -443,6 +555,32 @@ func TestConstraintPlans(t *testing.T) {
 	if _, err := PlanDropConstraint(ctx, nil, DriverSQLite, "", "t", "c", ""); err == nil {
 		t.Error("SQLite accepted a constraint drop it cannot perform")
 	}
+	// MySQL's primary key is named PRIMARY on every table and has a statement
+	// of its own; no catalogue read is needed to know it.
+	for _, name := range []string{"PRIMARY", "primary"} {
+		got = planText(t)(PlanDropConstraint(ctx, nil, DriverMySQL, "app", "users", name, ""))
+		if got != "ALTER TABLE `app`.`users` DROP PRIMARY KEY" {
+			t.Errorf("mysql drop primary key = %s", got)
+		}
+	}
+	got = planText(t)(PlanDropConstraint(ctx, nil, DriverPostgres, "public", "users", "PRIMARY", ""))
+	if got != `ALTER TABLE "public"."users" DROP CONSTRAINT "PRIMARY"` {
+		t.Errorf("a constraint that happens to be called PRIMARY elsewhere = %s", got)
+	}
+}
+
+// A plan that failed because the engine would not be read is told apart from
+// one that failed because of what it was asked for.
+func TestPlanReadFailuresAreNotTheRequestsFault(t *testing.T) {
+	cause := errors.New("connection reset")
+	err := planRead("the column as it is now", cause)
+	if !errors.Is(err, ErrPlanRead) || !errors.Is(err, cause) ||
+		err.Error() != "could not read the column as it is now: connection reset" {
+		t.Errorf("plan read error = %v", err)
+	}
+	if _, err := PlanAddColumn(DriverPostgres, "", "t", NewColumn{Name: "c", Type: "int, x"}); err == nil || errors.Is(err, ErrPlanRead) {
+		t.Errorf("a refused request reads as an unreadable catalogue: %v", err)
+	}
 }
 
 func TestViewPlans(t *testing.T) {
@@ -456,11 +594,17 @@ func TestViewPlans(t *testing.T) {
 		{DriverPostgres, true, `CREATE OR REPLACE VIEW "public"."v" AS` + "\n" + query},
 		{DriverMySQL, true, "CREATE OR REPLACE VIEW `public`.`v` AS\n" + query},
 		{DriverMSSQL, true, "CREATE OR ALTER VIEW [public].[v] AS\n" + query},
+		// SQLite's statements carry no schema: there is main, and no other is
+		// changed from a form (ddlRel).
 		{DriverSQLite, false, `CREATE VIEW "v" AS` + "\n" + query},
 		{DriverClickHouse, true, "CREATE OR REPLACE VIEW `public`.`v` AS\n" + query},
 		{DriverOracle, true, `CREATE OR REPLACE VIEW "public"."v" AS` + "\n" + query},
 	} {
-		got := planText(t)(PlanCreateView(c.driver, ViewSpec{Schema: "public", Name: "v", Query: query + " ; ", Replace: c.replace}))
+		schema := "public"
+		if c.driver == DriverSQLite {
+			schema = "main"
+		}
+		got := planText(t)(PlanCreateView(c.driver, ViewSpec{Schema: schema, Name: "v", Query: query + " ; ", Replace: c.replace}))
 		if got != c.want {
 			t.Errorf("%s view =\n%s\nwant\n%s", c.driver, got, c.want)
 		}
@@ -662,7 +806,6 @@ func TestIndexPlans(t *testing.T) {
 		want   string
 	}{
 		{DriverPostgres, `DROP INDEX "s"."i"`},
-		{DriverSQLite, `DROP INDEX "i"`},
 		{DriverOracle, `DROP INDEX "s"."i"`},
 		{DriverMySQL, "DROP INDEX `i` ON `s`.`t`"},
 		{DriverMSSQL, "DROP INDEX [i] ON [s].[t]"},
@@ -671,6 +814,9 @@ func TestIndexPlans(t *testing.T) {
 		if got := planText(t)(PlanDropIndex(c.driver, "s", "t", "i")); got != c.want {
 			t.Errorf("%s drop index = %s, want %s", c.driver, got, c.want)
 		}
+	}
+	if got := planText(t)(PlanDropIndex(DriverSQLite, "main", "t", "i")); got != `DROP INDEX "i"` {
+		t.Errorf("sqlite drop index = %s", got)
 	}
 }
 
@@ -685,13 +831,15 @@ func TestRenamePlansKeepTheTableInItsSchema(t *testing.T) {
 		{DriverMySQL, "RENAME TABLE `shop`.`orders` TO `shop`.`purchases`"},
 		{DriverClickHouse, "RENAME TABLE `shop`.`orders` TO `shop`.`purchases`"},
 		{DriverPostgres, `ALTER TABLE "shop"."orders" RENAME TO "purchases"`},
-		{DriverSQLite, `ALTER TABLE "orders" RENAME TO "purchases"`},
 		{DriverOracle, `ALTER TABLE "shop"."orders" RENAME TO "purchases"`},
 		{DriverMSSQL, "EXEC sp_rename N'[shop].[orders]', N'purchases'"},
 	} {
 		if got := planText(t)(PlanRenameTable(c.driver, "shop", "orders", "purchases")); got != c.want {
 			t.Errorf("%s rename table = %s, want %s", c.driver, got, c.want)
 		}
+	}
+	if got := planText(t)(PlanRenameTable(DriverSQLite, "", "orders", "purchases")); got != `ALTER TABLE "orders" RENAME TO "purchases"` {
+		t.Errorf("sqlite rename table = %s", got)
 	}
 	got := planText(t)(PlanRenameColumn(DriverMSSQL, "dbo", "it's", "a.b", "c'd"))
 	if got != "EXEC sp_rename N'[dbo].[it''s].[a.b]', N'c''d', 'COLUMN'" {

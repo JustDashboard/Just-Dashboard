@@ -3,9 +3,12 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 // Changes to what already exists: a column's type, nullability and default,
@@ -39,10 +42,10 @@ type ColumnChange struct {
 // is the part of an alter that can lose data.
 func (c ColumnChange) ChangesType() bool { return strings.TrimSpace(c.Type) != "" }
 
-func (c ColumnChange) validate() (typ, def string, setDefault bool, err error) {
+func (c ColumnChange) validate(driver Driver) (typ, def string, setDefault bool, err error) {
 	typ = strings.TrimSpace(c.Type)
 	if typ != "" {
-		if err := validateType(typ); err != nil {
+		if err := validateType(driver, typ); err != nil {
 			return "", "", false, err
 		}
 	}
@@ -88,11 +91,11 @@ func planAlterColumn(ctx context.Context, db *sql.DB, driver Driver, c ColumnCha
 	if err != nil {
 		return nil, err
 	}
-	typ, def, setDefault, err := c.validate()
+	typ, def, setDefault, err := c.validate(driver)
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, c.Schema, c.Table)
+	rel, err := ddlRel(d, c.Schema, c.Table)
 	if err != nil {
 		return nil, err
 	}
@@ -150,6 +153,8 @@ func planAlterColumn(ctx context.Context, db *sql.DB, driver Driver, c ColumnCha
 			return nil, err
 		}
 		if typ != "" {
+			// A collation belongs to the type it was declared with; the new
+			// one takes the table's unless it names its own character set.
 			current.columnType, current.collation = typ, ""
 		}
 		if c.Nullable != nil {
@@ -173,29 +178,24 @@ func planAlterColumn(ctx context.Context, db *sql.DB, driver Driver, c ColumnCha
 			// ALTER COLUMN restates the type and the nullability together; one
 			// left out is not "unchanged" but "the default", and the default
 			// nullability is a session setting.
-			currentType, currentNullable, err := mssqlColumnShape(ctx, db, c.Schema, c.Table, c.Column)
+			current, err := readMSSQLColumn(ctx, db, d, c.Schema, c.Table, c.Column)
 			if err != nil {
 				return nil, err
 			}
-			if typ == "" {
-				typ = currentType
+			if typ != "" {
+				current.retype(typ)
 			}
-			nullable := currentNullable
 			if c.Nullable != nil {
-				nullable = *c.Nullable
+				current.nullable = *c.Nullable
 			}
-			null := "NOT NULL"
-			if nullable {
-				null = "NULL"
-			}
-			steps = append(steps, "ALTER TABLE "+rel+" ALTER COLUMN "+col+" "+typ+" "+null)
+			steps = append(steps, "ALTER TABLE "+rel+" ALTER COLUMN "+col+" "+current.render())
 		}
 		if c.DropDefault || setDefault {
 			// A default is a constraint object here, so replacing it is
 			// dropping the one that exists and adding another.
 			existing, err := mssqlDefaultConstraints(ctx, db, c.Schema, c.Table, c.Column)
 			if err != nil {
-				return nil, fmt.Errorf("could not read the column's default: %w", err)
+				return nil, planRead("the column's default", err)
 			}
 			if c.DropDefault && len(existing) == 0 {
 				return nil, fmt.Errorf("%s has no default to drop", c.Column)
@@ -263,27 +263,104 @@ func planAlterColumn(ctx context.Context, db *sql.DB, driver Driver, c ColumnCha
 	return nil, fmt.Errorf("%w: %s", ErrUnsupported, driver)
 }
 
-// mssqlColumnShape returns a column's declared type and nullability.
-func mssqlColumnShape(ctx context.Context, db *sql.DB, schema, table, column string) (string, bool, error) {
-	cols, err := mssqlDialect{}.tableColumns(ctx, db, schema, table)
-	if err != nil {
-		return "", false, fmt.Errorf("could not read the column as it is now: %w", err)
+// mssqlColumn is a column as SQL Server would have it declared again. ALTER
+// COLUMN restates the type, the collation and the nullability together, and
+// one left out is not "unchanged": a missing NULL takes a session setting, and
+// a missing COLLATE takes the database's default, which re-collates a column
+// that was declared with any other.
+type mssqlColumn struct {
+	typ      string
+	nullable bool
+	// collation is set only where the column's differs from the database's,
+	// so a column that follows the default is restated without one and keeps
+	// following it.
+	collation string
+}
+
+var mssqlCollationRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,128}$`)
+
+// mssqlCharacterTypes are the types that carry a collation.
+var mssqlCharacterTypes = stringSet("char", "varchar", "nchar", "nvarchar", "text", "ntext")
+
+// retype gives the column a new type. Its collation goes with it only when
+// the new type is one that has a collation at all.
+func (c *mssqlColumn) retype(typ string) {
+	base := strings.ToLower(typ)
+	if i := strings.IndexAny(base, "( "); i >= 0 {
+		base = base[:i]
 	}
-	for _, c := range cols {
-		if c.Name == column {
-			if c.Generated != "" {
-				return "", false, fmt.Errorf("%s is a computed column; change its expression from the Query tab", column)
-			}
-			return c.Type, c.Nullable, nil
+	if !mssqlCharacterTypes[base] {
+		c.collation = ""
+	}
+	c.typ = typ
+}
+
+func (c *mssqlColumn) render() string {
+	out := c.typ
+	if c.collation != "" {
+		out += " COLLATE " + c.collation
+	}
+	if c.nullable {
+		return out + " NULL"
+	}
+	return out + " NOT NULL"
+}
+
+// readMSSQLColumn reads what ALTER COLUMN has to restate. An alias type is
+// named with its schema and quoted: it is an identifier someone chose, and it
+// is about to be written into a statement.
+func readMSSQLColumn(ctx context.Context, db *sql.DB, d Dialect, schema, table, column string) (*mssqlColumn, error) {
+	var (
+		c                           mssqlColumn
+		typ, typeSchema             string
+		collation, databaseDefault  string
+		maxLength, precision, scale int
+		computed, userDefined       bool
+	)
+	err := db.QueryRowContext(ctx, `
+	  SELECT t.name, ts.name, c.max_length, c.precision, c.scale, c.is_nullable,
+	         ISNULL(c.collation_name, ''),
+	         ISNULL(CONVERT(NVARCHAR(128), DATABASEPROPERTYEX(DB_NAME(), 'Collation')), ''),
+	         c.is_computed, t.is_user_defined
+	  FROM sys.columns c
+	  JOIN sys.objects o ON o.object_id = c.object_id
+	  JOIN sys.schemas s ON s.schema_id = o.schema_id
+	  JOIN sys.types t ON t.user_type_id = c.user_type_id
+	  JOIN sys.schemas ts ON ts.schema_id = t.schema_id
+	  WHERE `+mssqlSchemaIs("s")+` AND o.name = @p2 AND c.name = @p3 AND o.type = 'U'`,
+		schema, table, column).Scan(&typ, &typeSchema, &maxLength, &precision, &scale, &c.nullable,
+		&collation, &databaseDefault, &computed, &userDefined)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("no column %s on %s", column, table)
+	}
+	if err != nil {
+		return nil, planRead("the column as it is now", err)
+	}
+	if computed {
+		return nil, fmt.Errorf("%s is a computed column; change its expression from the Query tab", column)
+	}
+	c.typ = mssqlTypeName(typ, maxLength, precision, scale)
+	if userDefined {
+		// An alias type carries its own length and, being a name, is quoted.
+		if c.typ, err = qualify(d, typeSchema, typ); err != nil {
+			return nil, err
 		}
 	}
-	return "", false, fmt.Errorf("no column %s on %s", column, table)
+	if collation != "" && !strings.EqualFold(collation, databaseDefault) {
+		if !mssqlCollationRe.MatchString(collation) {
+			return nil, fmt.Errorf("the column's collation %q cannot be restated safely; change this column from the Query tab", collation)
+		}
+		c.collation = collation
+	}
+	return &c, nil
 }
 
 // mysqlColumn is a column as MySQL would have it declared again. MODIFY
 // COLUMN replaces the whole definition: anything not restated — the comment,
-// AUTO_INCREMENT, ON UPDATE, the collation — is silently reset, so changing
-// one property means reading the others first.
+// AUTO_INCREMENT, ON UPDATE, the collation, INVISIBLE, a MariaDB column's own
+// CHECK (which is all that makes a MariaDB JSON column one) — is silently
+// reset, so changing one property means reading the others first. What this
+// cannot restate it refuses by name rather than drop.
 type mysqlColumn struct {
 	columnType string
 	nullable   bool
@@ -294,12 +371,34 @@ type mysqlColumn struct {
 	// the declaration rather than a description of it.
 	autoIncrement bool
 	onUpdate      string
+	invisible     bool
+	// unversioned is MariaDB's WITHOUT SYSTEM VERSIONING on one column of a
+	// versioned table.
+	unversioned bool
+	// checks are a MariaDB column's own CHECK clauses. MySQL files a column's
+	// check as a constraint of the table, which MODIFY leaves alone.
+	checks []string
+	// srid is a spatial column's reference system, with the product's own
+	// spelling of the attribute.
+	srid string
 }
 
 var (
 	mysqlOnUpdateRe  = regexp.MustCompile(`(?i)on update (current_timestamp(?:\(\d*\))?)`)
 	mysqlCollationRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+	// mysqlExtraKnownRe are the EXTRA entries readMySQLColumn accounts for.
+	mysqlExtraKnownRe = regexp.MustCompile(`(?i)on update current_timestamp(?:\(\d*\))?|auto_increment|default_generated|invisible|without system versioning`)
 )
+
+// mysqlSpatialTypes are the column types that carry a reference system.
+var mysqlSpatialTypes = stringSet("geometry", "point", "linestring", "polygon", "multipoint",
+	"multilinestring", "multipolygon", "geometrycollection", "geomcollection")
+
+// mysqlUnknownExtra returns what is left of a column's EXTRA once every entry
+// readMySQLColumn accounts for is taken out of it.
+func mysqlUnknownExtra(extra string) string {
+	return strings.Trim(mysqlExtraKnownRe.ReplaceAllString(extra, ""), ", ")
+}
 
 func readMySQLColumn(ctx context.Context, db *sql.DB, schema, table, column string) (*mysqlColumn, error) {
 	var (
@@ -317,24 +416,130 @@ func readMySQLColumn(ctx context.Context, db *sql.DB, schema, table, column stri
 		return nil, fmt.Errorf("no column %s on %s", column, table)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("could not read the column as it is now: %w", err)
+		return nil, planRead("the column as it is now", err)
 	}
 	if generation != "" {
 		return nil, fmt.Errorf("%s is a generated column; change its expression from the Query tab", column)
 	}
+	maria := strings.Contains(strings.ToLower(version), "mariadb")
 	extra = strings.ToLower(extra)
 	c.nullable = nullable == "YES"
-	c.dflt = mysqlDefaultSQL(c.columnType, dflt, extra, strings.Contains(strings.ToLower(version), "mariadb"))
+	c.dflt = mysqlDefaultSQL(c.columnType, dflt, extra, maria)
 	c.collation = collation.String
 	c.autoIncrement = strings.Contains(extra, "auto_increment")
+	c.invisible = strings.Contains(extra, "invisible")
+	c.unversioned = strings.Contains(extra, "without system versioning")
 	if m := mysqlOnUpdateRe.FindStringSubmatch(extra); m != nil {
 		c.onUpdate = strings.ToUpper(m[1])
+	}
+	// EXTRA is where a server says what else a column is. An entry this does
+	// not know is an attribute MODIFY would drop without a word.
+	if rest := mysqlUnknownExtra(extra); rest != "" {
+		return nil, fmt.Errorf("%s is declared %q, which this form cannot restate and MODIFY COLUMN would drop; "+
+			"change this column from the Query tab", column, rest)
+	}
+	if maria {
+		if c.checks, err = mariaColumnChecks(ctx, db, schema, table, column); err != nil {
+			return nil, err
+		}
+	}
+	base := strings.ToLower(c.columnType)
+	if i := strings.IndexAny(base, "( "); i >= 0 {
+		base = base[:i]
+	}
+	if mysqlSpatialTypes[base] {
+		if c.srid, err = mysqlColumnSRID(ctx, db, schema, table, column, maria); err != nil {
+			return nil, err
+		}
 	}
 	return &c, nil
 }
 
+// The two server errors that mean "this server is too old to have that", as
+// opposed to "this server would not answer".
+const (
+	mysqlErrUnknownColumn = 1054
+	mysqlErrUnknownTable  = 1109
+)
+
+// mysqlErrorNumber returns the number the server gave an error, or zero for
+// an error that is not the server's.
+func mysqlErrorNumber(err error) uint16 {
+	var e *mysql.MySQLError
+	if errors.As(err, &e) {
+		return e.Number
+	}
+	return 0
+}
+
+// mariaColumnChecks reads the CHECK clauses declared on a column itself.
+// MariaDB names such a constraint after its column and marks its level.
+func mariaColumnChecks(ctx context.Context, db *sql.DB, schema, table, column string) ([]string, error) {
+	query := `
+	  SELECT CHECK_CLAUSE
+	  FROM information_schema.CHECK_CONSTRAINTS
+	  WHERE ` + mysqlSchemaIs("CONSTRAINT_SCHEMA") + ` AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?`
+	rows, err := db.QueryContext(ctx, query+` AND LEVEL = 'Column'`, schema, table, column)
+	if mysqlErrorNumber(err) == mysqlErrUnknownColumn {
+		// LEVEL arrived in 10.5.10. Before it a column's own check is told from
+		// a table's only by carrying the column's name.
+		rows, err = db.QueryContext(ctx, query, schema, table, column)
+	}
+	if mysqlErrorNumber(err) == mysqlErrUnknownTable {
+		// A server from before check constraints were kept has no such view,
+		// and no check to lose.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, planRead("the column's check constraint", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var clause string
+		if err := rows.Scan(&clause); err != nil {
+			return nil, planRead("the column's check constraint", err)
+		}
+		out = append(out, clause)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, planRead("the column's check constraint", err)
+	}
+	return out, nil
+}
+
+// mysqlColumnSRID returns a spatial column's reference system as the clause
+// that declares it, or nothing for a column that has none. The two products
+// keep it in different views and spell the attribute differently.
+func mysqlColumnSRID(ctx context.Context, db *sql.DB, schema, table, column string, maria bool) (string, error) {
+	query, form := `
+	  SELECT SRS_ID FROM information_schema.COLUMNS
+	  WHERE `+mysqlSchemaIs("TABLE_SCHEMA")+` AND TABLE_NAME = ? AND COLUMN_NAME = ?`, "SRID %d"
+	if maria {
+		query, form = `
+	  SELECT SRID FROM information_schema.GEOMETRY_COLUMNS
+	  WHERE `+mysqlSchemaIs("G_TABLE_SCHEMA")+` AND G_TABLE_NAME = ? AND G_GEOMETRY_COLUMN = ?`, "REF_SYSTEM_ID=%d"
+	}
+	var srid sql.NullInt64
+	err := db.QueryRowContext(ctx, query, schema, table, column).Scan(&srid)
+	if n := mysqlErrorNumber(err); err == sql.ErrNoRows || n == mysqlErrUnknownColumn || n == mysqlErrUnknownTable {
+		// No row, or a server from before a column could declare one.
+		return "", nil
+	}
+	if err != nil {
+		return "", planRead("the column's spatial reference system", err)
+	}
+	if !srid.Valid || (maria && srid.Int64 == 0) {
+		return "", nil
+	}
+	return fmt.Sprintf(form, srid.Int64), nil
+}
+
 func (c *mysqlColumn) render(d Dialect) (string, error) {
 	out := c.columnType
+	if strings.HasPrefix(c.srid, "REF_SYSTEM_ID") {
+		out += " " + c.srid
+	}
 	if c.collation != "" {
 		if !mysqlCollationRe.MatchString(c.collation) {
 			return "", fmt.Errorf("the column's collation %q cannot be restated safely", c.collation)
@@ -346,6 +551,9 @@ func (c *mysqlColumn) render(d Dialect) (string, error) {
 	} else {
 		out += " NOT NULL"
 	}
+	if strings.HasPrefix(c.srid, "SRID") {
+		out += " " + c.srid
+	}
 	if c.dflt != "" {
 		out += " DEFAULT " + c.dflt
 	}
@@ -355,12 +563,23 @@ func (c *mysqlColumn) render(d Dialect) (string, error) {
 	if c.onUpdate != "" {
 		out += " ON UPDATE " + c.onUpdate
 	}
+	if c.invisible {
+		out += " INVISIBLE"
+	}
+	if c.unversioned {
+		out += " WITHOUT SYSTEM VERSIONING"
+	}
 	if c.comment != "" {
 		comment, err := ddlLiteral(d.Driver(), "the comment", c.comment)
 		if err != nil {
 			return "", err
 		}
 		out += " COMMENT " + comment
+	}
+	// The clause is the server's own text for a constraint it already holds,
+	// read back from its catalogue, not anything this request supplied.
+	for _, clause := range c.checks {
+		out += " CHECK (" + clause + ")"
 	}
 	return out, nil
 }
@@ -412,7 +631,7 @@ func PlanAddForeignKey(driver Driver, spec ForeignKeySpec) (*DDLPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, spec.Schema, spec.Table)
+	rel, err := ddlRel(d, spec.Schema, spec.Table)
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +654,7 @@ func PlanAddForeignKey(driver Driver, spec ForeignKeySpec) (*DDLPlan, error) {
 	if refSchema == "" {
 		refSchema = spec.Schema
 	}
-	refRel, err := qualify(d, refSchema, spec.RefTable)
+	refRel, err := ddlRel(d, refSchema, spec.RefTable)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +683,7 @@ func PlanDropForeignKey(driver Driver, schema, table, name string) (*DDLPlan, er
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, schema, table)
+	rel, err := ddlRel(d, schema, table)
 	if err != nil {
 		return nil, err
 	}
@@ -514,7 +733,7 @@ func PlanAddConstraint(driver Driver, spec ConstraintSpec) (*DDLPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, spec.Schema, spec.Table)
+	rel, err := ddlRel(d, spec.Schema, spec.Table)
 	if err != nil {
 		return nil, err
 	}
@@ -555,7 +774,7 @@ func PlanDropConstraint(ctx context.Context, db *sql.DB, driver Driver, schema, 
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, schema, table)
+	rel, err := ddlRel(d, schema, table)
 	if err != nil {
 		return nil, err
 	}
@@ -564,10 +783,15 @@ func PlanDropConstraint(ctx context.Context, db *sql.DB, driver Driver, schema, 
 		return nil, err
 	}
 	constraintType = strings.ToLower(strings.TrimSpace(constraintType))
+	if driver == DriverMySQL && strings.EqualFold(name, "PRIMARY") {
+		// MySQL's primary key has one name on every table and a statement of
+		// its own; it is neither of the two kinds the lookup below knows.
+		return planOf("ALTER TABLE " + rel + " DROP PRIMARY KEY"), nil
+	}
 	if constraintType == "" && driver == DriverMySQL {
 		constraints, err := mysqlDialect{}.tableConstraints(ctx, db, schema, table)
 		if err != nil {
-			return nil, fmt.Errorf("could not read the table's constraints: %w", err)
+			return nil, planRead("the table's constraints", err)
 		}
 		for _, c := range constraints {
 			if c.Name == name {
@@ -621,7 +845,7 @@ func PlanComment(ctx context.Context, db *sql.DB, driver Driver, spec CommentSpe
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, spec.Schema, spec.Table)
+	rel, err := ddlRel(d, spec.Schema, spec.Table)
 	if err != nil {
 		return nil, err
 	}
@@ -789,7 +1013,7 @@ func PlanCreateView(driver Driver, spec ViewSpec) (*DDLPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, spec.Schema, spec.Name)
+	rel, err := ddlRel(d, spec.Schema, spec.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -876,7 +1100,7 @@ func PlanCreateEnum(driver Driver, schema, name string, values []string) (*DDLPl
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, schema, name)
+	rel, err := ddlRel(d, schema, name)
 	if err != nil {
 		return nil, err
 	}
@@ -918,7 +1142,7 @@ func PlanAddEnumValue(driver Driver, spec EnumValueSpec) (*DDLPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, spec.Schema, spec.Name)
+	rel, err := ddlRel(d, spec.Schema, spec.Name)
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -32,11 +33,18 @@ func mysqlSchemaIs(column string) string {
 // isMariaDB asks the server which product it is. The driver cannot say: both
 // speak the same protocol and announce themselves only in the version string.
 func isMariaDB(ctx context.Context, db *sql.DB) bool {
+	maria, _ := mariaDB(ctx, db)
+	return maria
+}
+
+// mariaDB is isMariaDB for a caller that has to tell "this is MySQL" from "the
+// server did not say".
+func mariaDB(ctx context.Context, db *sql.DB) (bool, error) {
 	var version string
 	if err := db.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version); err != nil {
-		return false
+		return false, err
 	}
-	return strings.Contains(strings.ToLower(version), "mariadb")
+	return strings.Contains(strings.ToLower(version), "mariadb"), nil
 }
 
 func (mysqlDialect) catalogSchemas(ctx context.Context, db *sql.DB) ([]CatalogSchema, string, error) {
@@ -313,15 +321,20 @@ func mysqlDefaultSQL(columnType string, raw sql.NullString, extra string, maria 
 		}
 		return raw.String
 	}
-	if strings.Contains(extra, "default_generated") {
-		if strings.HasPrefix(strings.ToUpper(raw.String), "CURRENT_TIMESTAMP") {
-			return raw.String
-		}
-		return "(" + raw.String + ")"
-	}
 	base := strings.ToLower(columnType)
 	if i := strings.IndexAny(base, "( "); i >= 0 {
 		base = base[:i]
+	}
+	// The clock is a keyword on a date and time column whatever EXTRA says: a
+	// server from before 8.0.13 has no DEFAULT_GENERATED to say it with, and
+	// quoted, the default would be a string no such column accepts.
+	if (base == "timestamp" || base == "datetime") && mysqlClockRe.MatchString(raw.String) {
+		return raw.String
+	}
+	if strings.Contains(extra, "default_generated") {
+		// An expression is stored with every quote and backslash escaped once
+		// more than SHOW CREATE TABLE writes it.
+		return "(" + mysqlStoredExpression.Replace(raw.String) + ")"
 	}
 	switch base {
 	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "decimal", "numeric",
@@ -331,6 +344,11 @@ func mysqlDefaultSQL(columnType string, raw sql.NullString, extra string, maria 
 	escaped := strings.ReplaceAll(raw.String, `\`, `\\`)
 	return "'" + strings.ReplaceAll(escaped, "'", "''") + "'"
 }
+
+var (
+	mysqlClockRe          = regexp.MustCompile(`(?i)^current_timestamp(\(\d*\))?$`)
+	mysqlStoredExpression = strings.NewReplacer(`\\`, `\`, `\'`, `'`)
+)
 
 // mysqlEnumValues reads the labels out of an enum('a','b') or set('a','b')
 // column type. MySQL has no enum types, only columns declared with their

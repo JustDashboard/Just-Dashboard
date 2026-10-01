@@ -3,6 +3,7 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -251,101 +252,39 @@ func ddlDialect(driver Driver, op string) (Dialect, error) {
 	return d, nil
 }
 
+// ddlRel names the object a change is aimed at, with its schema.
+//
+// SQLite is the exception qualify makes for every caller: its statements are
+// written unqualified. That is right for the database a connection is and
+// wrong for a file attached beside it, where the bare name would resolve to
+// main's table of the same name — the change would land on a different table
+// from the one it was asked for. So a change aimed at any other schema is
+// refused, by name.
+func ddlRel(d Dialect, schema, name string) (string, error) {
+	if d.Driver() == DriverSQLite && schema != "" && !strings.EqualFold(schema, "main") {
+		return "", fmt.Errorf("this form changes a SQLite connection's main database only: %q is attached beside it, "+
+			"and a statement written here would land on main's object of the same name. Use the Query tab for it", schema)
+	}
+	return qualify(d, schema, name)
+}
+
+// ErrPlanRead marks a plan that could not be drawn up because the engine
+// would not answer a catalogue read the plan depends on. That is the database
+// failing, not the request being wrong, and a route reports it as such.
+var ErrPlanRead = errors.New("the catalogue could not be read")
+
+type planReadError struct {
+	what string
+	err  error
+}
+
+func (e *planReadError) Error() string        { return "could not read " + e.what + ": " + e.err.Error() }
+func (e *planReadError) Unwrap() error        { return e.err }
+func (e *planReadError) Is(target error) bool { return target == ErrPlanRead }
+
+func planRead(what string, err error) error { return &planReadError{what, err} }
+
 // --- validation -------------------------------------------------------------
-
-// typeWordsRefused are words that end a type and start a constraint. A type
-// name is a run of words, so without this a "type" of `int references users`
-// would ride a foreign key in on the add-column form.
-var typeWordsRefused = map[string]bool{
-	"primary": true, "key": true, "references": true, "unique": true, "check": true,
-	"default": true, "not": true, "null": true, "constraint": true, "generated": true,
-	"as": true, "collate": true, "auto_increment": true, "autoincrement": true, "identity": true,
-	"comment": true, "on": true, "foreign": true, "index": true, "codec": true, "ttl": true,
-	"materialized": true, "alias": true,
-}
-
-// validateType accepts a SQL type name: words, an optional argument list that
-// may nest (Array(Nullable(String))) and may hold quoted labels
-// (enum('a','b')), an optional qualifier after it (timestamp(3) with time
-// zone) and optional array brackets (text[]). It admits no semicolon, no
-// comment introducer and no backslash, so a type cannot carry a second
-// statement, and no constraint keyword, so it cannot carry a clause either.
-func validateType(t string) error {
-	t = strings.TrimSpace(t)
-	if t == "" {
-		return fmt.Errorf("a column type is required")
-	}
-	refuse := func() error {
-		return fmt.Errorf("column type %q is not one this form can build; use the Query tab for it", t)
-	}
-	if len(t) > 200 || !isASCIILetter(t[0]) {
-		return refuse()
-	}
-	var (
-		depth   int
-		inQuote bool
-		word    strings.Builder
-	)
-	endWord := func() bool {
-		ok := !typeWordsRefused[strings.ToLower(word.String())]
-		word.Reset()
-		return ok
-	}
-	for i := 0; i < len(t); i++ {
-		c := t[i]
-		if inQuote {
-			switch {
-			case c == '\'':
-				inQuote = false
-			case isASCIILetter(c) || isASCIIDigit(c) || strings.IndexByte("_ .:/+-", c) >= 0:
-			default:
-				return refuse()
-			}
-			continue
-		}
-		switch {
-		case isASCIILetter(c) || isASCIIDigit(c) || c == '_':
-			word.WriteByte(c)
-			continue
-		case c == ' ' || c == ',' || c == '.' || c == '=':
-		case c == '(':
-			if depth++; depth > 4 {
-				return refuse()
-			}
-		case c == ')':
-			if depth--; depth < 0 {
-				return refuse()
-			}
-		case c == '\'':
-			// A label only makes sense inside an argument list.
-			if depth == 0 {
-				return refuse()
-			}
-			inQuote = true
-		case c == '[':
-			// Array brackets close the type: `text[]`, `integer[3][]`.
-			rest := strings.TrimSpace(t[i:])
-			if depth != 0 || !arraySuffixRe.MatchString(rest) {
-				return refuse()
-			}
-			if !endWord() {
-				return refuse()
-			}
-			return nil
-		default:
-			return refuse()
-		}
-		if !endWord() {
-			return refuse()
-		}
-	}
-	if depth != 0 || inQuote || !endWord() {
-		return refuse()
-	}
-	return nil
-}
-
-var arraySuffixRe = regexp.MustCompile(`^(\[[0-9]{0,6}\])+$`)
 
 func isASCIILetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
 func isASCIIDigit(c byte) bool  { return c >= '0' && c <= '9' }
@@ -357,7 +296,7 @@ func isASCIIDigit(c byte) bool  { return c >= '0' && c <= '9' }
 // The backslash is refused because it is an escape inside a string on MySQL
 // and ClickHouse: `'a\'` there is an unterminated literal that swallows the
 // rest of the statement.
-var defaultRe = regexp.MustCompile(`^(-?[0-9]+(\.[0-9]+)?|'[^'\\]*'|NULL|TRUE|FALSE|CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|CURRENT_USER|LOCALTIMESTAMP|SYSDATE|[A-Za-z_][A-Za-z0-9_]{0,62}\(\))$`)
+var defaultRe = regexp.MustCompile(`^(-?[0-9]+(\.[0-9]+)?|'[^'\\]*'|NULL|TRUE|FALSE|CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|CURRENT_USER|SESSION_USER|LOCALTIMESTAMP|LOCALTIME|SYSDATE|SYSTIMESTAMP|[A-Za-z_][A-Za-z0-9_]{0,62}\(\))$`)
 
 func validateDefault(v string) error {
 	v = strings.TrimSpace(v)
@@ -393,12 +332,15 @@ var pureFunctions = stringSet(
 	"numeric", "nvarchar", "timestamp", "varbinary", "varchar", "varchar2", "varying",
 )
 
-// fragmentKeywords are the words that are followed by a parenthesis without
-// being a call: `x IN (…)`, `NOT (…)`, `CASE WHEN (…)`.
+// fragmentKeywords are the reserved words that stand in front of a parenthesis
+// without being a call: `x IN (…)`, `NOT (…)`, `CASE WHEN (…)`. Each is
+// reserved on Postgres — the engine where a condition may call a function of
+// the operator's own by its bare name — so none of them can be one. A word
+// that is a keyword in one position and a legal function name in every other
+// is judged by where it stands instead (keywordBeforeParen).
 var fragmentKeywords = stringSet(
-	"all", "and", "any", "as", "between", "case", "else", "exists", "filter", "from", "ilike", "in", "is",
-	"like", "not", "on", "or", "over", "select", "similar", "some", "then", "to", "using", "values", "when",
-	"where",
+	"all", "and", "any", "as", "between", "case", "else", "exists", "from", "in", "not", "on", "or",
+	"select", "some", "then", "to", "using", "values", "when", "where",
 )
 
 // safeDefaults are the functions with no arguments that a column default may
@@ -422,27 +364,72 @@ func stringSet(values ...string) map[string]bool {
 	return out
 }
 
-// unvouchedCalls lists the functions a validated fragment calls that are not
-// in pureFunctions. A name counts as a call when a parenthesis follows it,
-// whether it is written bare, qualified or quoted: `"lo_unlink"(1)` and
-// `pg_catalog.lo_unlink(1)` are the same call as `lo_unlink(1)`, and a
-// qualified name is never vouched for — `public.lower` is not `lower`.
-func unvouchedCalls(driver Driver, text string) []string {
+// A fragment is read as tokens rather than as characters so that what the
+// engine reads as one name is one name here: `public . lower (x)` is a call to
+// public.lower however it is spaced, and on SQL Server `evil#lower` is a
+// single identifier, not an `evil` followed by a call to lower.
+type fragmentTokenKind int
+
+const (
+	tokenWord   fragmentTokenKind = iota // a bare identifier or keyword, lower-cased
+	tokenQuoted                          // a quoted identifier, as written
+	tokenString
+	tokenNumber
+	tokenDot
+	tokenOpen  // (
+	tokenClose // ) or ]
+	tokenCast  // ::
+	tokenOther
+)
+
+type fragmentToken struct {
+	kind fragmentTokenKind
+	text string
+}
+
+// The methods take a nil token as "nothing there", so a scan can ask about
+// the neighbours of the first and last token without a bounds check each time.
+
+func (t *fragmentToken) is(kind fragmentTokenKind) bool { return t != nil && t.kind == kind }
+
+func (t *fragmentToken) word(text string) bool { return t.is(tokenWord) && t.text == text }
+
+func (t *fragmentToken) name() bool { return t.is(tokenWord) || t.is(tokenQuoted) }
+
+// operand reports whether an expression can end at this token, which is what
+// tells `x LIKE (…)` from `like(…)`.
+func (t *fragmentToken) operand() bool {
+	switch {
+	case t == nil:
+		return false
+	case t.kind == tokenWord:
+		return !fragmentKeywords[t.text]
+	}
+	return t.kind == tokenQuoted || t.kind == tokenString || t.kind == tokenNumber || t.kind == tokenClose
+}
+
+// fragmentNameByte reports whether a byte can be part of a bare identifier.
+// A byte past ASCII always can: every engine here allows letters outside it,
+// and a function named with them is still a call. The punctuation is the
+// engine's own — `#` and `@` are identifier characters on SQL Server and an
+// operator or a comment elsewhere.
+func fragmentNameByte(driver Driver, c byte, first bool) bool {
+	switch {
+	case isASCIILetter(c) || c == '_' || c >= 0x80:
+		return true
+	case c == '#':
+		return driver == DriverMSSQL || driver == DriverOracle && !first
+	case c == '@':
+		return driver == DriverMSSQL
+	case first:
+		return false
+	}
+	return isASCIIDigit(c) || c == '$'
+}
+
+func fragmentTokens(driver Driver, text string) []fragmentToken {
 	quotes := fragmentQuotes(driver)
-	var out []string
-	seen := map[string]bool{}
-	note := func(name string, vouched bool) {
-		if !vouched && !seen[name] {
-			seen[name] = true
-			out = append(out, name)
-		}
-	}
-	followedByCall := func(i int) bool {
-		for i < len(text) && (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' || text[i] == '\r') {
-			i++
-		}
-		return i < len(text) && text[i] == '('
-	}
+	var out []fragmentToken
 	for i := 0; i < len(text); {
 		c := text[i]
 		if closer, ok := quotes[c]; ok {
@@ -456,28 +443,142 @@ func unvouchedCalls(driver Driver, text string) []string {
 					break
 				}
 			}
-			i++
-			// A quoted name in front of a parenthesis is a call by a name
-			// this list was never going to contain.
-			if c != '\'' && followedByCall(i) {
-				note(text[start:min(i, len(text))], false)
+			i = min(i+1, len(text))
+			kind := tokenQuoted
+			if c == '\'' {
+				kind = tokenString
 			}
+			out = append(out, fragmentToken{kind, text[start:i]})
 			continue
 		}
-		// A byte past ASCII is part of a name too: every engine here allows
-		// letters outside it, and a function named with them is still a call.
-		if !isASCIILetter(c) && c != '_' && c < 0x80 {
+		switch {
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			i++
+		case fragmentNameByte(driver, c, true):
+			start := i
+			for i < len(text) && fragmentNameByte(driver, text[i], false) {
+				i++
+			}
+			out = append(out, fragmentToken{tokenWord, strings.ToLower(text[start:i])})
+		case isASCIIDigit(c):
+			start := i
+			i = fragmentNumberEnd(text, i)
+			out = append(out, fragmentToken{tokenNumber, text[start:i]})
+		case c == '.':
+			out = append(out, fragmentToken{tokenDot, "."})
+			i++
+		case c == '(':
+			out = append(out, fragmentToken{tokenOpen, "("})
+			i++
+		case c == ')' || c == ']':
+			out = append(out, fragmentToken{tokenClose, string(c)})
+			i++
+		case c == ':' && i+1 < len(text) && text[i+1] == ':':
+			out = append(out, fragmentToken{tokenCast, "::"})
+			i += 2
+		default:
+			out = append(out, fragmentToken{tokenOther, string(c)})
+			i++
+		}
+	}
+	return out
+}
+
+// fragmentNumberEnd returns where the numeric literal starting at i ends. It
+// takes an exponent only when digits follow it, so the `evil` of `1evil(x)` —
+// which older Postgres reads as a number and then a call — is not swallowed
+// into the number.
+func fragmentNumberEnd(text string, i int) int {
+	digits := func() {
+		for i < len(text) && isASCIIDigit(text[i]) {
+			i++
+		}
+	}
+	digits()
+	if i+1 < len(text) && text[i] == '.' && isASCIIDigit(text[i+1]) {
+		i++
+		digits()
+	}
+	if i < len(text) && (text[i] == 'e' || text[i] == 'E') {
+		j := i + 1
+		if j < len(text) && (text[j] == '+' || text[j] == '-') {
+			j++
+		}
+		if j < len(text) && isASCIIDigit(text[j]) {
+			i = j
+			digits()
+		}
+	}
+	return i
+}
+
+// keywordBeforeParen reports whether a bare word in front of a parenthesis is
+// syntax rather than a call. `prev` is the token before it.
+func keywordBeforeParen(word string, prev *fragmentToken) bool {
+	switch word {
+	case "like", "ilike":
+		// An operator between two operands, and otherwise a function anyone
+		// may have defined: Postgres lets these be function names.
+		return prev.operand() || prev.word("not")
+	case "filter", "over":
+		// A clause after an aggregate's closing parenthesis, and an ordinary
+		// function name anywhere else.
+		return prev.is(tokenClose)
+	}
+	return fragmentKeywords[word]
+}
+
+// unvouchedCalls lists the functions a validated fragment calls that are not
+// in pureFunctions. A name counts as a call when a parenthesis follows it,
+// whether it is written bare, qualified or quoted: `"lo_unlink"(1)` and
+// `pg_catalog . lo_unlink (1)` are the same call as `lo_unlink(1)`, and a
+// qualified name is never vouched for — `public.lower` is not `lower`.
+//
+// On Postgres a dotted name counts with no parenthesis at all. `t.total` is
+// the column total of t when there is one and the function total(t) when
+// there is not, and a scanner cannot know which, so it is named and the
+// caller decides as it would for a call. A dotted type name after a cast is
+// the one dotted name that cannot be either.
+func unvouchedCalls(driver Driver, text string) []string {
+	tokens := fragmentTokens(driver, text)
+	at := func(i int) *fragmentToken {
+		if i < 0 || i >= len(tokens) {
+			return nil
+		}
+		return &tokens[i]
+	}
+	var out []string
+	seen := map[string]bool{}
+	note := func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	for i := 0; i < len(tokens); i++ {
+		if !tokens[i].name() {
 			continue
 		}
 		start := i
-		for i < len(text) && (isASCIILetter(text[i]) || isASCIIDigit(text[i]) || text[i] == '_' ||
-			text[i] == '.' || text[i] == '$' || text[i] >= 0x80) {
-			i++
+		name := tokens[i].text
+		for at(i+1).is(tokenDot) && at(i+2).name() {
+			i += 2
+			name += "." + tokens[i].text
 		}
-		name := strings.ToLower(text[start:i])
-		if followedByCall(i) && !fragmentKeywords[name] {
-			note(name, pureFunctions[name])
+		prev, next := at(start-1), at(i+1)
+		qualified := i > start || prev.is(tokenDot)
+		if next.is(tokenOpen) {
+			switch {
+			case qualified || tokens[start].kind == tokenQuoted:
+				note(name)
+			case keywordBeforeParen(name, prev):
+			case !pureFunctions[name]:
+				note(name)
+			}
+			continue
+		}
+		if driver == DriverPostgres && qualified && !prev.is(tokenCast) && !prev.word("as") {
+			note(name)
 		}
 	}
 	return out
@@ -714,7 +815,7 @@ func renderColumn(d Dialect, c NewColumn, inline bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := validateType(c.Type); err != nil {
+	if err := validateType(d.Driver(), c.Type); err != nil {
 		return "", err
 	}
 	if err := validateDefault(c.Default); err != nil {
@@ -749,7 +850,7 @@ func CreateTableSQL(driver Driver, schema, table string, cols []NewColumn) (stri
 	if len(cols) == 0 {
 		return "", fmt.Errorf("a table needs at least one column")
 	}
-	rel, err := qualify(d, schema, table)
+	rel, err := ddlRel(d, schema, table)
 	if err != nil {
 		return "", err
 	}
@@ -837,7 +938,7 @@ func planRelStatement(driver Driver, op, schema, table, form string) (*DDLPlan, 
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, schema, table)
+	rel, err := ddlRel(d, schema, table)
 	if err != nil {
 		return nil, err
 	}
@@ -850,7 +951,7 @@ func PlanAddColumn(driver Driver, schema, table string, col NewColumn) (*DDLPlan
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, schema, table)
+	rel, err := ddlRel(d, schema, table)
 	if err != nil {
 		return nil, err
 	}
@@ -890,7 +991,7 @@ func PlanDropColumn(ctx context.Context, db *sql.DB, driver Driver, schema, tabl
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, schema, table)
+	rel, err := ddlRel(d, schema, table)
 	if err != nil {
 		return nil, err
 	}
@@ -913,7 +1014,7 @@ func PlanDropColumn(ctx context.Context, db *sql.DB, driver Driver, schema, tabl
 	}
 	defaults, err := mssqlDefaultConstraints(ctx, db, schema, table, column)
 	if err != nil {
-		return nil, fmt.Errorf("could not read what depends on %s: %w", column, err)
+		return nil, planRead("what depends on "+column, err)
 	}
 	if len(defaults) == 0 {
 		return planOf(drop), nil
@@ -970,7 +1071,7 @@ func PlanRenameColumn(driver Driver, schema, table, from, to string) (*DDLPlan, 
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, schema, table)
+	rel, err := ddlRel(d, schema, table)
 	if err != nil {
 		return nil, err
 	}
@@ -1013,7 +1114,7 @@ func PlanRenameTable(driver Driver, schema, table, to string) (*DDLPlan, error) 
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, schema, table)
+	rel, err := ddlRel(d, schema, table)
 	if err != nil {
 		return nil, err
 	}
@@ -1037,7 +1138,7 @@ func PlanRenameTable(driver Driver, schema, table, to string) (*DDLPlan, error) 
 		// unqualified one against the connection's database. Left bare, the
 		// target moved the table into whichever database the pool happened to
 		// be using.
-		target, err := qualify(d, schema, to)
+		target, err := ddlRel(d, schema, to)
 		if err != nil {
 			return nil, err
 		}
@@ -1094,7 +1195,7 @@ func PlanCreateIndex(ctx context.Context, db *sql.DB, driver Driver, spec IndexS
 	if err != nil {
 		return nil, err
 	}
-	rel, err := qualify(d, spec.Schema, spec.Table)
+	rel, err := ddlRel(d, spec.Schema, spec.Table)
 	if err != nil {
 		return nil, err
 	}
@@ -1170,8 +1271,14 @@ func PlanCreateIndex(ctx context.Context, db *sql.DB, driver Driver, spec IndexS
 		return done("CREATE " + unique + "INDEX " + concurrently + ifNotExists + name +
 			" ON " + rel + using + " (" + cols + ")" + where)
 	case DriverMySQL:
-		if spec.IfNotExists && !isMariaDB(ctx, db) {
-			return nil, fmt.Errorf("MySQL has no CREATE INDEX IF NOT EXISTS; MariaDB does")
+		if spec.IfNotExists {
+			maria, err := mariaDB(ctx, db)
+			if err != nil {
+				return nil, planRead("which product this server is", err)
+			}
+			if !maria {
+				return nil, fmt.Errorf("MySQL has no CREATE INDEX IF NOT EXISTS; MariaDB does")
+			}
 		}
 		switch keyword {
 		case "FULLTEXT", "SPATIAL":
@@ -1202,7 +1309,7 @@ func PlanCreateIndex(ctx context.Context, db *sql.DB, driver Driver, spec IndexS
 		}
 		// An unqualified index name lands in the session's schema, which is
 		// not the table's when the table is someone else's.
-		qualified, err := qualify(d, spec.Schema, spec.Name)
+		qualified, err := ddlRel(d, spec.Schema, spec.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -1256,7 +1363,7 @@ func PlanDropIndex(driver Driver, schema, table, name string) (*DDLPlan, error) 
 	}
 	switch driver {
 	case DriverMySQL, DriverMSSQL, DriverClickHouse:
-		rel, err := qualify(d, schema, table)
+		rel, err := ddlRel(d, schema, table)
 		if err != nil {
 			return nil, err
 		}
@@ -1265,7 +1372,7 @@ func PlanDropIndex(driver Driver, schema, table, name string) (*DDLPlan, error) 
 		}
 		return planOf(fmt.Sprintf("DROP INDEX %s ON %s", qName, rel)), nil
 	default:
-		rel, err := qualify(d, schema, name)
+		rel, err := ddlRel(d, schema, name)
 		if err != nil {
 			return nil, err
 		}
