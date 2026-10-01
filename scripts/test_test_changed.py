@@ -65,7 +65,7 @@ class SpecSelectionTest(unittest.TestCase):
 # pages it reaches, and those of them it keeps the specs of.
 SECTION_PROBE = (
     'eval "$(sed -n "/^pages_of() {/,/^}/p; /^address_of() {/,/^}/p; '
-    '/^home_section() {/,/^}/p; /^pages_under() {/,/^}/p" "$1")"\n'
+    '/^home_section() {/,/^}/p; /^pages_under() {/,/^}/p; /^normalise() {/,/^}/p" "$1")"\n'
     'mapfile -t reached < <(pages_of "$2")\n'
     'home=$(home_section "$2")\n'
     'if [ -n "$home" ]; then pages_under "$home" "${reached[@]}"; fi\n'
@@ -86,6 +86,23 @@ SOURCES = {
     ),
     "app/(dashboard)/databases/new/page.tsx": 'import { card } from "@/components/choice-card"\n',
     "app/(dashboard)/deploy/new/page.tsx": 'import { card } from "@/components/choice-card"\n',
+    # The data grid, whose parts import each other relative to themselves, and
+    # a module one directory up that names one of them the same way.
+    "components/database/grid/values.ts": "export const format = 1\n",
+    "components/database/grid/grid-row.tsx": 'import { format } from "./values"\n',
+    "components/database/grid/data-grid.tsx": 'import { Row } from "./grid-row"\n',
+    "components/database/grid/index.ts": 'export { DataGrid } from "./data-grid"\n',
+    "components/database/grid/unused.ts": "export const values = 1\n",
+    "components/database/kit/values.ts": 'import { format } from "../grid/values"\n',
+    "components/database/kit/index.ts": (
+        'export { kind } from "@/components/database/kit/values"\n'
+    ),
+    "app/(dashboard)/databases/[id]/data/page.tsx": (
+        'import { DataGrid } from "@/components/database/grid"\n'
+    ),
+    "app/(dashboard)/databases/[id]/query/page.tsx": (
+        'import { kind } from "@/components/database/kit"\n'
+    ),
 }
 
 
@@ -119,6 +136,15 @@ class SectionSelectionTest(unittest.TestCase):
 
     def test_a_module_of_no_one_section_keeps_none(self):
         self.assertEqual(self.kept("components/choice-card.tsx"), [])
+
+    def test_a_part_imported_relative_to_its_importer_reaches_the_pages_that_mount_it(self):
+        data = "frontend/src/app/(dashboard)/databases/[id]/data/page.tsx"
+        query = "frontend/src/app/(dashboard)/databases/[id]/query/page.tsx"
+        self.assertEqual(self.kept("components/database/grid/values.ts"), [data, query])
+        self.assertEqual(self.kept("components/database/grid/grid-row.tsx"), [data])
+        # A file of the same name in another directory is another module.
+        self.assertEqual(self.kept("components/database/kit/values.ts"), [query])
+        self.assertEqual(self.kept("components/database/grid/unused.ts"), [])
 
 
 if __name__ == "__main__":

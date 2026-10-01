@@ -68,11 +68,12 @@ if [ "${#changed[@]}" -eq 0 ]; then
 fi
 echo "Against $base: ${#changed[@]} changed files."
 
-# The pages and layouts under app/ that reach this file through `@/` imports,
-# the file itself included when it is one.
+# The pages and layouts under app/ that reach this file through imports — by
+# the `@/` alias or relative to the importing file — the file itself included
+# when it is one.
 pages_of() {
 	local -A seen=()
-	local queue=("$1") f spec
+	local queue=("$1") f spec module importer from
 	while [ "${#queue[@]}" -gt 0 ]; do
 		f=${queue[0]}
 		queue=("${queue[@]:1}")
@@ -85,6 +86,16 @@ pages_of() {
 		mapfile -t -O "${#queue[@]}" queue < <(
 			grep -rlF --include='*.ts' --include='*.tsx' "from \"@/$spec\"" frontend/src || true
 		)
+		# And through relative imports: the parts of the data grid and of the
+		# diagram name each other as "./values", and a change to one of them
+		# reaches a page only by way of the files beside it.
+		module=${f%.*}
+		module=${module%/index}
+		while IFS= read -r importer; do
+			while IFS= read -r from; do
+				if [ "$(normalise "$(dirname "$importer")/$from")" = "$module" ]; then queue+=("$importer"); fi
+			done < <(grep -oE 'from "\.\.?/[^"]+"' "$importer" | sed -E 's/^from "(.*)"$/\1/')
+		done < <(grep -rlE --include='*.ts' --include='*.tsx' "from \"\.\.?/([^\"]*/)?$(basename "$module")\"" frontend/src || true)
 	done
 }
 
