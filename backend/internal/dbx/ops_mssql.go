@@ -3,6 +3,8 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -12,6 +14,14 @@ import (
 // application login does not have; each part is therefore read on its own, so
 // a login that may see its own database's sizes but not the server's counters
 // still gets the half it is allowed.
+
+// mssqlRefused reports whether an error is SQL Server refusing a view rather
+// than a query going wrong: "VIEW SERVER STATE permission was denied", "The
+// user does not have permission to perform this action". That is "this login
+// may not", which a page says in a sentence instead of failing.
+func mssqlRefused(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "permission")
+}
 
 // --- snapshot ----------------------------------------------------------------
 
@@ -284,6 +294,10 @@ func (mssqlDialect) Locks(ctx context.Context, db *sql.DB) (*LocksReport, error)
 	  WHERE w.blocking_session_id IS NOT NULL AND w.blocking_session_id <> w.session_id
 	    AND ws.is_user_process = 1
 	  ORDER BY w.wait_duration_ms DESC`)
+	if mssqlRefused(err) {
+		return &LocksReport{Waits: []LockWait{}, Locks: []HeldLock{},
+			Reason: "This login may not read who is waiting on whom (it needs VIEW SERVER STATE): " + err.Error()}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -328,6 +342,10 @@ func (mssqlDialect) TableStats(ctx context.Context, db *sql.DB, opts StatsOption
 	  WHERE (@p1 = '' OR s.name = @p1)
 	  GROUP BY s.name, t.name, t.object_id
 	  ORDER BY SUM(p.reserved_page_count) DESC, s.name, t.name`, opts.Schema, opts.limit()+1)
+	if mssqlRefused(err) {
+		return &TableStatsReport{Schema: opts.Schema, Tables: []TableStat{},
+			Reason: "This login may not read the table statistics (it needs VIEW DATABASE STATE): " + err.Error()}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -374,6 +392,10 @@ func (mssqlDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOption
 	  WHERE i.index_id > 0 AND i.is_hypothetical = 0
 	    AND (@p1 = '' OR s.name = @p1) AND (@p2 = '' OR t.name = @p2)
 	  ORDER BY 10 DESC, s.name, t.name, i.name`, opts.Schema, opts.Table, opts.limit()+1)
+	if mssqlRefused(err) {
+		return &IndexStatsReport{Schema: opts.Schema, Indexes: []IndexStat{},
+			Reason: "This login may not read the index statistics (it needs VIEW DATABASE STATE): " + err.Error()}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -401,4 +423,222 @@ func (mssqlDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOption
 		out.Indexes = append(out.Indexes, ix)
 	}
 	return out, rows.Err()
+}
+
+// --- maintenance -------------------------------------------------------------
+
+func (mssqlDialect) MaintenanceActions() []MaintenanceAction {
+	return []MaintenanceAction{
+		{ID: "update_statistics", Label: "Update statistics", Scope: "either",
+			Description: "Refreshes the statistics the optimiser chooses plans from. With no table it runs sp_updatestats, which updates only the statistics whose tables have changed. Reads a sample; blocks nothing."},
+		{ID: "reorganize", Label: "Reorganize indexes", Scope: "table",
+			Description: "Defragments the leaf level of the table's indexes in place. Always online: it takes short locks, and stopping it keeps what it has done."},
+		{ID: "rebuild", Label: "Rebuild indexes", Scope: "table", Blocking: true, Options: []string{"online"},
+			Description: "Drops and re-creates the table's indexes. Offline, the table cannot be read or written until it finishes. Online — Enterprise and Developer editions only — it blocks briefly at the start and the end, and needs room for a second copy of each index."},
+		{ID: "check", Label: "Check integrity", Scope: "either", ReadOnly: true,
+			Description: "DBCC CHECKTABLE, or CHECKDB with no table: reads every page looking for corruption. It works from a snapshot and changes nothing, and is heavy on the disk while it runs."},
+	}
+}
+
+// mssqlMaintenanceSQL renders the one statement an action is. Every identifier
+// is quoted by the dialect and nothing else in the request reaches the text.
+func mssqlMaintenanceSQL(d mssqlDialect, req MaintenanceRequest) (string, error) {
+	rel := ""
+	if req.Table != "" {
+		schema := req.Schema
+		if schema == "" {
+			schema = d.DefaultSchema()
+		}
+		var err error
+		if rel, err = qualify(d, schema, req.Table); err != nil {
+			return "", err
+		}
+	} else if req.Schema != "" {
+		return "", maintenanceRefused("%s takes a table or the whole database, not a schema", req.Action)
+	}
+	if req.Index != "" && req.Action != "reorganize" && req.Action != "rebuild" {
+		return "", maintenanceRefused("only reorganize and rebuild take an index")
+	}
+	if req.Options.Online && req.Action != "rebuild" {
+		return "", maintenanceRefused("only rebuild can be run online")
+	}
+	switch req.Action {
+	case "update_statistics":
+		if rel == "" {
+			return "EXEC sys.sp_updatestats", nil
+		}
+		return "UPDATE STATISTICS " + rel, nil
+	case "check":
+		// TABLERESULTS hands the report back as rows. Without it DBCC prints
+		// messages, which arrive on a channel this driver's pool does not read.
+		if rel == "" {
+			return "DBCC CHECKDB WITH TABLERESULTS", nil
+		}
+		return "DBCC CHECKTABLE (" + dumpString(DriverMSSQL, rel) + ") WITH TABLERESULTS", nil
+	case "reorganize", "rebuild":
+		index := "ALL"
+		if req.Index != "" {
+			var err error
+			if index, err = d.QuoteIdent(req.Index); err != nil {
+				return "", err
+			}
+		}
+		stmt := "ALTER INDEX " + index + " ON " + rel + " " + strings.ToUpper(req.Action)
+		if req.Options.Online {
+			stmt += " WITH (ONLINE = ON)"
+		}
+		return stmt, nil
+	}
+	return "", maintenanceRefused("unknown action %q", req.Action)
+}
+
+// Maintain runs the statement and reports what it left behind.
+//
+// DBCC answers in rows of its own, one per message, with the severity beside
+// each: anything above 10 is a problem it found. The other three print nothing
+// useful to a client, so what is returned for them is read from the catalogue
+// afterwards — when each statistic was last updated and over how many rows,
+// how fragmented each index now is — which is what an operator would go and
+// look up next.
+//
+// The statement ends with the context: this driver answers a cancelled context
+// by sending the server an attention signal, which stops the batch and rolls
+// its work back.
+func (d mssqlDialect) Maintain(ctx context.Context, db *sql.DB, _ string, req MaintenanceRequest) (*MaintenanceResult, error) {
+	stmt, err := mssqlMaintenanceSQL(d, req)
+	if err != nil {
+		return nil, err
+	}
+	out := &MaintenanceResult{Statements: []string{stmt}, Output: []string{}, OK: true}
+	// One session, so the clock read before the statement and the catalogue
+	// read after it are the same server's.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if req.Action == "check" {
+		rows, err := conn.QueryContext(ctx, stmt)
+		if err != nil {
+			return nil, err
+		}
+		return out, mssqlKeepDBCC(rows, out)
+	}
+	// Kept as the server's own text, and compared there: its clock and its
+	// time zone are not this process's.
+	var before string
+	if err := conn.QueryRowContext(ctx, `SELECT CONVERT(VARCHAR(27), SYSDATETIME(), 121)`).Scan(&before); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, stmt); err != nil {
+		return nil, err
+	}
+	rel := ""
+	if req.Table != "" {
+		rel, _ = qualify(d, orText(req.Schema, d.DefaultSchema()), req.Table)
+	}
+	// What follows is a courtesy: a login that may run the statement and not
+	// read these views still ran the statement.
+	switch {
+	case req.Action == "update_statistics" && req.Table == "":
+		var updated int
+		if err := conn.QueryRowContext(ctx, `
+		  SELECT COUNT(*) FROM sys.stats s
+		  CROSS APPLY sys.dm_db_stats_properties(s.object_id, s.stats_id) p
+		  WHERE OBJECTPROPERTY(s.object_id, 'IsUserTable') = 1
+		    AND p.last_updated >= CONVERT(DATETIME2, @p1, 121)`, before).Scan(&updated); err == nil {
+			out.keep(fmt.Sprintf("%d statistic%s updated; the rest had no changes to account for", updated,
+				map[bool]string{true: " was", false: "s were"}[updated == 1]))
+		}
+	case req.Action == "update_statistics":
+		rows, err := conn.QueryContext(ctx, `
+		  SELECT s.name, CONVERT(VARCHAR(19), p.last_updated, 120), ISNULL(p.rows, 0), ISNULL(p.rows_sampled, 0)
+		  FROM sys.stats s
+		  CROSS APPLY sys.dm_db_stats_properties(s.object_id, s.stats_id) p
+		  WHERE s.object_id = OBJECT_ID(@p1)
+		  ORDER BY s.name`, rel)
+		if err != nil {
+			break
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			var updated sql.NullString
+			var total, sampled int64
+			if rows.Scan(&name, &updated, &total, &sampled) != nil {
+				break
+			}
+			if !updated.Valid {
+				out.keep(name + ": no statistics yet (the table is empty)")
+				continue
+			}
+			out.keep(fmt.Sprintf("%s: updated %s, %d rows, %d sampled", name, updated.String, total, sampled))
+		}
+	default:
+		rows, err := conn.QueryContext(ctx, `
+		  SELECT ISNULL(i.name, '(heap)'), p.avg_fragmentation_in_percent, p.page_count
+		  FROM sys.dm_db_index_physical_stats(DB_ID(), OBJECT_ID(@p1), NULL, NULL, 'LIMITED') p
+		  JOIN sys.indexes i ON i.object_id = p.object_id AND i.index_id = p.index_id
+		  WHERE p.alloc_unit_type_desc = 'IN_ROW_DATA'
+		  ORDER BY i.name`, rel)
+		if err != nil {
+			break
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			var fragmented float64
+			var pages int64
+			if rows.Scan(&name, &fragmented, &pages) != nil {
+				break
+			}
+			out.keep(name + ": " + strconv.FormatFloat(fragmented, 'f', 1, 64) + "% fragmented over " +
+				strconv.FormatInt(pages, 10) + " page" + pluralS(int(pages)))
+		}
+	}
+	return out, nil
+}
+
+// mssqlKeepDBCC reads a DBCC … WITH TABLERESULTS report: the message of each
+// row, and from its level whether DBCC found anything. Every row is read for
+// the verdict even once no more lines are kept. The columns are found by
+// name; their number differs between CHECKDB and CHECKTABLE and by version.
+func mssqlKeepDBCC(rows *sql.Rows, out *MaintenanceResult) error {
+	defer rows.Close()
+	for {
+		cols, err := rows.Columns()
+		if err != nil {
+			return err
+		}
+		text, level := -1, -1
+		for i, c := range cols {
+			switch strings.ToLower(c) {
+			case "messagetext":
+				text = i
+			case "level":
+				level = i
+			}
+		}
+		for rows.Next() {
+			cells := make([]sql.NullString, len(cols))
+			dest := make([]any, len(cols))
+			for i := range cells {
+				dest[i] = &cells[i]
+			}
+			if err := rows.Scan(dest...); err != nil {
+				return err
+			}
+			if text >= 0 {
+				out.keep(cells[text].String)
+			}
+			// Level 10 is information; DBCC reports what is wrong at 16 and up.
+			if level >= 0 && atoiOr(cells[level].String, 0) > 10 {
+				out.OK = false
+			}
+		}
+		if !rows.NextResultSet() {
+			break
+		}
+	}
+	return rows.Err()
 }

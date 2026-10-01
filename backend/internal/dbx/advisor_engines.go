@@ -198,17 +198,34 @@ func (d clickhouseDialect) Advise(ctx context.Context, db *sql.DB, schema string
 		}
 	}
 
-	var readonly int64
-	if err := db.QueryRowContext(ctx, `SELECT toInt64(count()) FROM system.replicas WHERE is_readonly`).Scan(&readonly); err != nil {
+	rows, err = db.QueryContext(ctx, `
+	  SELECT database, table FROM system.replicas WHERE is_readonly ORDER BY database, table LIMIT 50`)
+	if err != nil {
 		silent("Replicas", err)
-	} else if readonly > 0 {
-		out = append(out, Advice{
-			ID: "readonly-replica", Level: "critical", Category: AdviceReliability,
-			Title:   fmt.Sprintf("%d replicated table%s read-only", readonly, pluralS(int(readonly))),
-			Detail:  "A replica that has lost its session with ClickHouse Keeper refuses every insert until it has one again.",
-			Advice:  "Check that Keeper is reachable from this server, then SYSTEM RESTART REPLICA for the tables that stay read-only.",
-			Targets: []AdviceTarget{{Kind: "server", Name: "replication"}}, Link: "performance",
-		})
+	} else {
+		readonly, targets := []string{}, []AdviceTarget{}
+		for rows.Next() {
+			var database, table string
+			if rows.Scan(&database, &table) != nil {
+				continue
+			}
+			readonly = append(readonly, database+"."+table)
+			target := AdviceTarget{Kind: "table", Schema: database, Name: table}
+			if q := rel(database, table); q != "" {
+				target.SQL = "SYSTEM RESTART REPLICA " + q + ";"
+			}
+			targets = append(targets, target)
+		}
+		rows.Close()
+		if len(readonly) > 0 {
+			out = append(out, Advice{
+				ID: "readonly-replica", Level: "critical", Category: AdviceReliability,
+				Title:   fmt.Sprintf("%d replicated table%s read-only", len(readonly), pluralS(len(readonly))),
+				Detail:  "A replica that has lost its session with ClickHouse Keeper refuses every insert until it has one again.",
+				Advice:  "Check that Keeper is reachable from this server first; restarting a replica that still cannot reach it changes nothing.",
+				Objects: readonly, Targets: targets, SQL: targetSQL(targets), Link: "performance",
+			})
+		}
 	}
 
 	rows, err = db.QueryContext(ctx, `
@@ -405,8 +422,12 @@ func (d oracleDialect) Advise(ctx context.Context, db *sql.DB, schema string) ([
 				return nil, nil, err
 			}
 			never = append(never, table)
-			targets = append(targets, AdviceTarget{Kind: "table", Schema: owner, Name: table,
-				SQL: "BEGIN DBMS_STATS.GATHER_TABLE_STATS(" + dumpString(DriverOracle, owner) + ", " + dumpString(DriverOracle, table) + "); END;"})
+			target := AdviceTarget{Kind: "table", Schema: owner, Name: table}
+			// The same block the maintenance action runs.
+			if stmt, err := oracleMaintenanceSQL(d, MaintenanceRequest{Action: "gather_stats", Table: table}, owner); err == nil {
+				target.SQL = stmt
+			}
+			targets = append(targets, target)
 		}
 		rows.Close()
 		if len(never) > 0 {
@@ -422,44 +443,70 @@ func (d oracleDialect) Advise(ctx context.Context, db *sql.DB, schema string) ([
 
 	// The two below read DBA views. An application schema cannot, and that
 	// is said rather than reported as a clean result.
-	rows, err = db.QueryContext(ctx, `SELECT username FROM dba_users_with_defpwd ORDER BY username`)
+	// Only the accounts that can still sign in: a default install leaves most
+	// of the ones on this list locked, and a locked account's password opens
+	// nothing. The session's own account is named and given no statement — the
+	// one offered is a lock, and locking the account this page reads through
+	// would be the last thing it did.
+	rows, err = db.QueryContext(ctx, `
+	  SELECT d.username, CASE WHEN d.username = USER THEN 1 ELSE 0 END
+	  FROM dba_users_with_defpwd d
+	  JOIN dba_users u ON u.username = d.username
+	  WHERE u.account_status NOT LIKE '%LOCKED%'
+	  ORDER BY d.username`)
 	if err != nil {
 		silences = append(silences, "Default passwords could not be assessed without the DBA views.")
 	} else {
 		defaults, targets := []string{}, []AdviceTarget{}
 		for rows.Next() {
 			var name string
-			if rows.Scan(&name) == nil {
-				defaults = append(defaults, name)
-				targets = append(targets, AdviceTarget{Kind: "role", Name: name})
+			var own int
+			if rows.Scan(&name, &own) != nil {
+				continue
 			}
+			defaults = append(defaults, name)
+			target := AdviceTarget{Kind: "role", Name: name}
+			if q, err := d.QuoteIdent(name); err == nil && own == 0 {
+				target.SQL = "ALTER USER " + q + " ACCOUNT LOCK;"
+			}
+			targets = append(targets, target)
 		}
 		rows.Close()
 		if len(defaults) > 0 {
 			out = append(out, Advice{
 				ID: "default-passwords", Level: "critical", Category: AdviceSecurity,
 				Title:   fmt.Sprintf("%d account%s still on the default password", len(defaults), pluralS(len(defaults))),
-				Detail:  "These accounts were installed with a password that is printed in the documentation.",
-				Advice:  "Change each password, or lock the accounts nothing uses.",
-				Objects: defaults, Targets: targets,
+				Detail:  "These accounts were installed with a password that is printed in the documentation, and can sign in with it.",
+				Advice:  "Lock the accounts nothing uses, which is what the statements do, and change the password of any that an application signs in with.",
+				Objects: defaults, Targets: targets, SQL: targetSQL(targets),
 			})
 		}
 	}
+	// A tablespace is full when its files cannot grow any further. One whose
+	// file was given a fixed size can be told to grow; one whose files are
+	// already at their limit needs another file, and where that goes is not
+	// something the catalogue knows.
 	rows, err = db.QueryContext(ctx, `
-	  SELECT tablespace_name, ROUND(used_percent, 1) FROM dba_tablespace_usage_metrics
-	  WHERE used_percent > 90 ORDER BY used_percent DESC`)
+	  SELECT m.tablespace_name, ROUND(m.used_percent, 1),
+	         (SELECT LISTAGG(f.file_name, CHR(31)) WITHIN GROUP (ORDER BY f.file_id)
+	          FROM dba_data_files f
+	          WHERE f.tablespace_name = m.tablespace_name AND f.autoextensible = 'NO')
+	  FROM dba_tablespace_usage_metrics m
+	  WHERE m.used_percent > 90 ORDER BY m.used_percent DESC`)
 	if err != nil {
 		silences = append(silences, "Tablespace usage could not be assessed without the DBA views.")
 	} else {
 		full, targets := []string{}, []AdviceTarget{}
 		for rows.Next() {
-			var name string
+			var name, files string
 			var used float64
-			if rows.Scan(&name, &used) == nil {
-				detail := fmt.Sprintf("%.1f%% used", used)
-				full = append(full, name+" ("+detail+")")
-				targets = append(targets, AdviceTarget{Kind: "server", Name: "tablespace " + name, Detail: detail})
+			if rows.Scan(&name, &used, nullText{&files}) != nil {
+				continue
 			}
+			detail := fmt.Sprintf("%.1f%% used", used)
+			full = append(full, name+" ("+detail+")")
+			targets = append(targets, AdviceTarget{Kind: "server", Name: "tablespace " + name, Detail: detail,
+				SQL: oracleAutoextendSQL(splitUnit(files))})
 		}
 		rows.Close()
 		if len(full) > 0 {
@@ -467,12 +514,22 @@ func (d oracleDialect) Advise(ctx context.Context, db *sql.DB, schema string) ([
 				ID: "tablespace-nearly-full", Level: "critical", Category: AdviceReliability,
 				Title:   fmt.Sprintf("%d tablespace%s over 90%% full", len(full), pluralS(len(full))),
 				Detail:  "When a tablespace cannot extend, every insert into a segment in it fails with ORA-01653.",
-				Advice:  "Add a datafile or let the existing one autoextend.",
-				Objects: full, Targets: targets,
+				Advice:  "Let a fixed-size datafile grow, which is what the statements do where there is one. A tablespace whose files already grow has reached their limit and needs another datafile.",
+				Objects: full, Targets: targets, SQL: targetSQL(targets),
 			})
 		}
 	}
 	return out, silences, nil
+}
+
+// oracleAutoextendSQL renders the statements that let fixed-size datafiles
+// grow. A file name is a value here, quoted as one.
+func oracleAutoextendSQL(files []string) string {
+	stmts := make([]string, 0, len(files))
+	for _, file := range files {
+		stmts = append(stmts, "ALTER DATABASE DATAFILE "+dumpString(DriverOracle, file)+" AUTOEXTEND ON;")
+	}
+	return strings.Join(stmts, "\n")
 }
 
 // oracleCompileSQL renders the statement that recompiles one invalid object.

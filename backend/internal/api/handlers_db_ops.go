@@ -99,6 +99,13 @@ type dbStatsResponse struct {
 // It is polled, so it is one round of cheap queries against the statistics
 // views and nothing that scans a table. The counters are raw; the page keeps
 // the previous reading and divides by the time between the two.
+//
+// A server that refuses the snapshot still gets an answer. This route returned
+// the pool and nothing else before there was a snapshot, and a fork that
+// speaks an engine's protocol without having its statistics views — or an
+// account that may not read them — should lose the snapshot, not the route:
+// the reading comes back unsupported with the engine's refusal as the reason,
+// and the pool beside it as it always was.
 func (s *Server) dbSQLStats(w http.ResponseWriter, r *http.Request, id int64) error {
 	pool, conn, err := s.dbPool(r.Context(), id)
 	if err != nil {
@@ -108,7 +115,10 @@ func (s *Server) dbSQLStats(w http.ResponseWriter, r *http.Request, id int64) er
 	defer cancel()
 	stats, err := dbx.ReadServerStats(ctx, pool, conn.Driver)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		stats = &dbx.ServerStats{
+			At: time.Now().UTC(), Driver: conn.Driver, Reason: err.Error(),
+			Counters: map[string]float64{}, Gauges: map[string]float64{},
+		}
 	}
 	httpx.JSON(w, http.StatusOK, dbStatsResponse{ServerStats: stats, Pool: s.modules.dbs.Stats(id)})
 	return nil
@@ -385,22 +395,61 @@ func (s *Server) handleDBStatementsReset(w http.ResponseWriter, r *http.Request)
 
 // --- settings ----------------------------------------------------------------
 
-// sensitiveSetting matches the parameters whose value can carry a credential:
-// a replication connection string with its password, a command line with a
-// token in it, the passphrase of a private key. The engine shows these to a
-// superuser, which is what the dashboard's connection usually is — so the
-// engine's own guard does not apply to the person looking at this page.
-var sensitiveSetting = regexp.MustCompile(`(?i)conninfo|password|passphrase|secret|token|_command$|private_key`)
+// sensitiveSettings are the engines' own parameters whose value can carry a
+// credential: a replication connection string with its password, a command
+// line with a token in it, the password a replica reports to its source. The
+// engine shows these to a superuser, which is what the dashboard's connection
+// usually is — so the engine's own guard does not apply to the person looking
+// at this page.
+//
+// They are named one by one. A pattern on the word "password" hid
+// password_encryption and default_password_lifetime, which are policy and no
+// secret, from the same viewer the advisor tells "new passwords are hashed
+// with MD5"; one on "token" hid the full-text parser's token sizes.
+var sensitiveSettings = map[dbx.Driver]map[string]bool{
+	dbx.DriverPostgres: {
+		"primary_conninfo": true, "ssl_passphrase_command": true, "archive_command": true,
+		"restore_command": true, "archive_cleanup_command": true, "recovery_end_command": true,
+	},
+	dbx.DriverMySQL: {
+		"report_password": true, "wsrep_sst_auth": true, "file_key_management_filekey": true,
+		"authentication_ldap_simple_bind_root_pwd": true, "authentication_ldap_sasl_bind_root_pwd": true,
+		"hashicorp_key_management_token": true, "keyring_hashicorp_secret_id": true,
+	},
+}
+
+// sensitiveSettingEnding catches what the lists above have not heard of yet: a
+// parameter whose name ends in the word for a secret. The whole last word,
+// so that a name which merely contains one — validate_password.length,
+// innodb_ft_max_token_size, ssl_passphrase_command_supports_reload — is left
+// alone.
+var sensitiveSettingEnding = regexp.MustCompile(`(?i)(^|[_.])(password|passwd|pwd|secret|secret_id|token|passphrase|conninfo|connstring|connection_string|credentials?|private_key|api_?key)$`)
+
+// sensitiveCustomSetting is the rule for a PostgreSQL parameter with a dot in
+// its name. Those are defined by an extension or by the application itself
+// (pgrst.jwt_secret, citus.node_conninfo, app.api_token), so no list can know
+// them and the name is all there is to go on: any of these words anywhere in
+// it withholds the value.
+var sensitiveCustomSetting = regexp.MustCompile(`(?i)secret|token|jwt|passw|pwd|passphrase|conninfo|connstring|credential|key|licen[cs]e`)
+
+// sensitiveSetting reports whether a parameter's value may be a credential.
+func sensitiveSetting(driver dbx.Driver, name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if sensitiveSettings[driver][name] || sensitiveSettingEnding.MatchString(name) {
+		return true
+	}
+	return driver == dbx.DriverPostgres && strings.Contains(name, ".") && sensitiveCustomSetting.MatchString(name)
+}
 
 // redactSettings blanks the values that may hold a credential for a viewer
 // who is not an administrator. The parameter stays in the list, marked, so
 // the list is complete and says what it is not showing.
-func redactSettings(list []dbx.Setting, admin bool) []dbx.Setting {
+func redactSettings(driver dbx.Driver, list []dbx.Setting, admin bool) []dbx.Setting {
 	if admin {
 		return list
 	}
 	for i := range list {
-		if list[i].Value != "" && sensitiveSetting.MatchString(list[i].Name) {
+		if list[i].Value != "" && sensitiveSetting(driver, list[i].Name) {
 			list[i].Value, list[i].Default, list[i].Redacted = "", "", true
 		}
 	}
@@ -443,7 +492,7 @@ func (s *Server) handleDBSettingsList(w http.ResponseWriter, r *http.Request) er
 	}
 	admin := httpx.MustPrincipal(r).Can(auth.CapSystemAdmin)
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"settings": redactSettings(list, admin), "supported": true, "all": all,
+		"settings": redactSettings(conn.Driver, list, admin), "supported": true, "all": all,
 		// Whether the engine can persist a change at all; whether this
 		// viewer may ask for one is the capability's to say.
 		"writable": dbx.SettingsWritable(conn.Driver),
@@ -489,7 +538,7 @@ func (s *Server) handleDBSettingChange(w http.ResponseWriter, r *http.Request) e
 	if req.Reset {
 		action = "database.setting.reset"
 	}
-	sensitive := sensitiveSetting.MatchString(name)
+	sensitive := sensitiveSetting(conn.Driver, name)
 	detail := map[string]any{"name": name, "driver": conn.Driver}
 	if !req.Reset && !sensitive {
 		detail["value"] = req.Value
@@ -555,7 +604,7 @@ func (s *Server) handleDBRoleDetail(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
-	redactRoleConfig(detail, httpx.MustPrincipal(r).Can(auth.CapSystemAdmin))
+	redactRoleConfig(conn.Driver, detail, httpx.MustPrincipal(r).Can(auth.CapSystemAdmin))
 	httpx.JSON(w, http.StatusOK, detail)
 	return nil
 }
@@ -571,14 +620,14 @@ func (s *Server) handleDBRoleDetail(w http.ResponseWriter, r *http.Request) erro
 // knows. The server's own parameters (search_path, statement_timeout) stay.
 // The name remains, in ConfigRedacted, so the page says what it is not
 // showing.
-func redactRoleConfig(detail *dbx.RoleDetail, admin bool) {
+func redactRoleConfig(driver dbx.Driver, detail *dbx.RoleDetail, admin bool) {
 	if admin {
 		return
 	}
 	kept := []string{}
 	for _, entry := range detail.Config {
 		name, _, _ := strings.Cut(entry, "=")
-		if strings.Contains(name, ".") || sensitiveSetting.MatchString(name) {
+		if strings.Contains(name, ".") || sensitiveSetting(driver, name) {
 			detail.ConfigRedacted = append(detail.ConfigRedacted, name)
 			continue
 		}

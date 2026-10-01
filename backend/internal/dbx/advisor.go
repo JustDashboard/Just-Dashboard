@@ -217,6 +217,9 @@ func adviseEndOfLife(eol *EndOfLife) (Advice, bool) {
 // table is fine for a schema of fifty and an outage for one of five thousand.
 const maxAdvisedTables = 300
 
+// maxKeyFixes bounds how many keyless tables have a fix worked out for them.
+const maxKeyFixes = 50
+
 func adviseStructure(ctx context.Context, db *sql.DB, d Dialect, schema string) ([]Advice, int, int, error) {
 	tables, err := d.Tables(ctx, db, schema)
 	if err != nil {
@@ -240,7 +243,15 @@ func adviseStructure(ctx context.Context, db *sql.DB, d Dialect, schema string) 
 			return nil, checked, 0, err
 		}
 		if len(pk) == 0 {
-			noKey = append(noKey, AdviceTarget{Kind: "table", Schema: t.Schema, Name: t.Name})
+			target := AdviceTarget{Kind: "table", Schema: t.Schema, Name: t.Name}
+			// Working out a fix reads the table's columns and indexes, which
+			// on some engines is two slow catalogue queries; a schema with
+			// more keyless tables than this gets the statement for the first
+			// of them and the name of the rest.
+			if len(noKey) < maxKeyFixes {
+				target.SQL, target.Detail = primaryKeyFix(ctx, db, d, t.Schema, t.Name)
+			}
+			noKey = append(noKey, target)
 		}
 		fks, err := d.ForeignKeys(ctx, db, t.Schema, t.Name)
 		if err != nil {
@@ -275,7 +286,7 @@ func adviseStructure(ctx context.Context, db *sql.DB, d Dialect, schema string) 
 			Title:   fmt.Sprintf("%d table%s with no primary key", len(noKey), pluralS(len(noKey))),
 			Detail:  "A table without a primary key cannot be edited row by row from this dashboard, is skipped by logical replication, and gives an ORM nothing to identify a row by.",
 			Advice:  "Add an identity column, or declare the column that already identifies the row as the key.",
-			Objects: objects, Targets: noKey,
+			Objects: objects, Targets: noKey, SQL: targetSQL(noKey),
 		})
 	}
 	if len(unindexed) > 0 {
@@ -292,6 +303,91 @@ func adviseStructure(ctx context.Context, db *sql.DB, d Dialect, schema string) 
 		})
 	}
 	return out, checked, omitted, nil
+}
+
+// primaryKeyFix renders the statement that gives a table a primary key, where
+// there is one that does not need a decision only its owner can make, and says
+// in a few words what the statement does.
+//
+// A table that already has a unique index over columns that cannot be NULL has
+// a key in everything but name, and declaring it is the whole fix. A table
+// with no such index needs a new column. That is offered on PostgreSQL and SQL
+// Server only, where an INSERT that names no columns goes on working with an
+// identity column added: on MySQL and Oracle the same statement breaks every
+// such INSERT in the application, and a fix that does that is not one to hand
+// over ready to run. SQLite cannot add a key to a table that exists, and a
+// ClickHouse table's key is fixed when it is created.
+func primaryKeyFix(ctx context.Context, db *sql.DB, d Dialect, schema, table string) (stmt, detail string) {
+	driver := d.Driver()
+	if driver == DriverSQLite || driver == DriverClickHouse {
+		return "", ""
+	}
+	rel, err := qualify(d, schema, table)
+	if err != nil {
+		return "", ""
+	}
+	columns, err := d.Columns(ctx, db, schema, table)
+	if err != nil {
+		return "", ""
+	}
+	indexes, err := d.Indexes(ctx, db, schema, table)
+	if err != nil {
+		return "", ""
+	}
+	return primaryKeyStatement(d, rel, table, columns, indexes)
+}
+
+// primaryKeyStatement is primaryKeyFix once the catalogue has been read.
+func primaryKeyStatement(d Dialect, rel, table string, columns []Column, indexes []Index) (stmt, detail string) {
+	required := map[string]bool{}
+	hasID := false
+	for _, c := range columns {
+		required[strings.ToLower(c.Name)] = !c.Nullable
+		hasID = hasID || strings.EqualFold(c.Name, "id")
+	}
+	for _, ix := range indexes {
+		if !ix.Unique || ix.Primary || len(ix.Columns) == 0 {
+			continue
+		}
+		quoted := make([]string, 0, len(ix.Columns))
+		for _, c := range ix.Columns {
+			// A column the table does not list is an expression, and one that
+			// may be NULL identifies no row.
+			q, err := d.QuoteIdent(c)
+			if err != nil || !required[strings.ToLower(c)] {
+				quoted = nil
+				break
+			}
+			quoted = append(quoted, q)
+		}
+		if quoted == nil {
+			continue
+		}
+		detail = "declares the unique index " + ix.Name + " as the key"
+		if d.Driver() == DriverPostgres {
+			// The index that is already there becomes the key's, rather than a
+			// second one being built beside it.
+			name, err := d.QuoteIdent(table + "_pkey")
+			index, ierr := d.QuoteIdent(ix.Name)
+			if err != nil || ierr != nil {
+				continue
+			}
+			return "ALTER TABLE " + rel + " ADD CONSTRAINT " + name + " PRIMARY KEY USING INDEX " + index + ";", detail
+		}
+		return "ALTER TABLE " + rel + " ADD PRIMARY KEY (" + strings.Join(quoted, ", ") + ");", detail
+	}
+	if hasID {
+		return "", ""
+	}
+	switch d.Driver() {
+	case DriverPostgres:
+		return "ALTER TABLE " + rel + " ADD COLUMN id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY;",
+			"adds an identity column; the table is rewritten and locked while it is"
+	case DriverMSSQL:
+		return "ALTER TABLE " + rel + " ADD id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY;",
+			"adds an identity column; the table is locked while every row is given a number"
+	}
+	return "", ""
 }
 
 // advisedTable reports whether a catalogue entry is a table the structure
@@ -563,24 +659,39 @@ func (d postgresDialect) Advise(ctx context.Context, db *sql.DB, schema string) 
 	}
 
 	// Integer sequences approaching their ceiling — the failure that arrives
-	// as "duplicate key" on a Tuesday afternoon with no warning.
+	// as "duplicate key" on a Tuesday afternoon with no warning. The column a
+	// sequence feeds is read beside it, because widening one without the other
+	// only moves where the insert fails.
 	rows, err = db.QueryContext(ctx, `
-	  SELECT s.sequencename, COALESCE(s.last_value, 0), s.max_value
+	  SELECT s.sequencename, COALESCE(s.last_value, 0), s.max_value, s.data_type::text,
+	         COALESCE(o.relname, ''), COALESCE(o.attname, ''), COALESCE(o.typname, '')
 	  FROM pg_sequences s
+	  LEFT JOIN LATERAL (
+	    SELECT c.relname, a.attname, format_type(a.atttypid, NULL) AS typname
+	    FROM pg_class q
+	    JOIN pg_namespace qn ON qn.oid = q.relnamespace
+	    JOIN pg_depend d ON d.classid = 'pg_class'::regclass AND d.objid = q.oid
+	                    AND d.refclassid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
+	    JOIN pg_class c ON c.oid = d.refobjid
+	    JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
+	    WHERE q.relkind = 'S' AND q.relname = s.sequencename AND qn.nspname = s.schemaname
+	    LIMIT 1
+	  ) o ON true
 	  WHERE s.schemaname = $1 AND s.last_value IS NOT NULL
 	    AND s.last_value::numeric > s.max_value::numeric * 0.8`, schema)
 	if err == nil {
 		exhausting, targets := []string{}, []AdviceTarget{}
 		for rows.Next() {
-			var name string
+			var name, kind, table, column, columnType string
 			var last, max int64
-			if err := rows.Scan(&name, &last, &max); err != nil {
+			if err := rows.Scan(&name, &last, &max, &kind, &table, &column, &columnType); err != nil {
 				rows.Close()
 				return nil, nil, err
 			}
 			detail := fmt.Sprintf("%d of %d", last, max)
 			exhausting = append(exhausting, name+" ("+detail+")")
-			targets = append(targets, AdviceTarget{Kind: "sequence", Schema: schema, Name: name, Detail: detail})
+			targets = append(targets, AdviceTarget{Kind: "sequence", Schema: schema, Name: name, Table: table, Detail: detail,
+				SQL: pgSequenceFix(d, schema, name, kind, max, table, column, columnType)})
 		}
 		rows.Close()
 		if len(exhausting) > 0 {
@@ -588,14 +699,52 @@ func (d postgresDialect) Advise(ctx context.Context, db *sql.DB, schema string) 
 				ID: "sequence-exhaustion", Level: "critical", Category: AdviceReliability,
 				Title:   fmt.Sprintf("%d sequence%s past 80%% of its ceiling", len(exhausting), pluralS(len(exhausting))),
 				Detail:  "When a sequence reaches its maximum every insert into its table fails.",
-				Advice:  "Change the column and the sequence to bigint before it runs out.",
-				Objects: exhausting, Targets: targets,
+				Advice:  "Change the column and the sequence to bigint before it runs out. Changing a column's type rewrites its table and locks it while it does, so pick a quiet moment.",
+				Objects: exhausting, Targets: targets, SQL: targetSQL(targets),
 			})
 		}
 	}
 
 	out = append(out, pgServerAdvice(ctx, db)...)
 	return out, nil, nil
+}
+
+// pgSequenceFix renders what gives a sequence room: bigint for the sequence
+// and for the column it feeds, or — for a sequence that is already bigint and
+// was given a lower ceiling by hand — the ceiling taken away. A bigint
+// sequence at its natural maximum has no fix and gets none.
+func pgSequenceFix(d postgresDialect, schema, name, kind string, max int64, table, column, columnType string) string {
+	seq, err := qualify(d, schema, name)
+	if err != nil {
+		return ""
+	}
+	if kind == "bigint" {
+		if max == 1<<63-1 {
+			return ""
+		}
+		return "ALTER SEQUENCE " + seq + " NO MAXVALUE;"
+	}
+	stmts := []string{}
+	if table != "" && column != "" && columnType != "bigint" {
+		rel, err := qualify(d, schema, table)
+		col, cerr := d.QuoteIdent(column)
+		if err == nil && cerr == nil {
+			stmts = append(stmts, "ALTER TABLE "+rel+" ALTER COLUMN "+col+" TYPE bigint;")
+		}
+	}
+	return strings.Join(append(stmts, "ALTER SEQUENCE "+seq+" AS bigint;"), "\n")
+}
+
+// raisedConnectionLimit is the limit a "connections near the limit" fix
+// suggests: half as many again, rounded up to the next fifty. Enough to end
+// the refusals, and not so much that the memory each connection may take is
+// suddenly several times what the server was sized for.
+func raisedConnectionLimit(current int) int {
+	raised := current + current/2
+	if rest := raised % 50; rest != 0 {
+		raised += 50 - rest
+	}
+	return raised
 }
 
 // pgSettingFix renders the two statements that persist a parameter and apply
@@ -621,8 +770,9 @@ func pgServerAdvice(ctx context.Context, db *sql.DB) []Advice {
 				ID: "connections-near-limit", Level: "critical", Category: AdviceReliability,
 				Title:   fmt.Sprintf("%d of %d connections in use", used, max),
 				Detail:  "When the limit is reached every new client is refused with \"too many connections\", including this dashboard.",
-				Advice:  "Put a pooler (PgBouncer) in front of the server, or raise max_connections and restart.",
+				Advice:  "Put a pooler (PgBouncer) in front of the server, or raise max_connections and restart: the statement stores the new limit, and only a restart applies it.",
 				Targets: server("max_connections"), Link: "performance",
+				SQL: "ALTER SYSTEM SET max_connections = " + dumpString(DriverPostgres, itoa(raisedConnectionLimit(max))) + ";",
 			})
 		}
 	}
@@ -894,6 +1044,7 @@ func (d mysqlDialect) Advise(ctx context.Context, db *sql.DB, schema string) ([]
 			Detail:  "When the limit is reached every new client is refused with \"Too many connections\", including this dashboard.",
 			Advice:  "Raise max_connections, or put ProxySQL in front of the server.",
 			Targets: setting("max_connections"), Link: "settings",
+			SQL: mysqlConnectionLimitFix(mysqlIsMariaDB(ctx, db), max),
 		})
 	}
 	var slowLog string
@@ -981,6 +1132,16 @@ func (d mysqlDialect) Advise(ctx context.Context, db *sql.DB, schema string) ([]
 		})
 	}
 	return out, silences, nil
+}
+
+// mysqlConnectionLimitFix raises max_connections, which both engines apply
+// at once. MySQL can also persist it; MariaDB cannot from a session, and its
+// statement holds until the next restart.
+func mysqlConnectionLimitFix(mariadb bool, current int) string {
+	if mariadb {
+		return "SET GLOBAL max_connections = " + itoa(raisedConnectionLimit(current)) + ";"
+	}
+	return "SET PERSIST max_connections = " + itoa(raisedConnectionLimit(current)) + ";"
 }
 
 // mysqlAnonymousAccount renders the account whose user half is empty, the

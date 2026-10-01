@@ -78,10 +78,32 @@ var (
 		"19": eolDate("2032-12-31"), "21": eolDate("2027-07-31"), "23": eolDate("2031-12-31"),
 	}
 
-	eolVersionNumber = regexp.MustCompile(`(\d+)\.(\d+)`)
-	mssqlYear        = regexp.MustCompile(`SQL Server (\d{4})`)
-	oracleRelease    = regexp.MustCompile(`(?i)Database (\d+)[a-z]`)
+	// Each engine's banner is read where its own version number stands, and
+	// nowhere else: the first pair of numbers anywhere in a PostgreSQL banner
+	// can be the compiler's ("18beta1 … compiled by gcc (Debian 12.2.0-14)").
+	postgresVersion   = regexp.MustCompile(`^PostgreSQL (\d+)(?:\.(\d+))?`)
+	mysqlVersion      = regexp.MustCompile(`^(?:5\.5\.5-)?(\d+)\.(\d+)`)
+	clickhouseVersion = regexp.MustCompile(`^(?:ClickHouse )?(\d+)\.(\d+)`)
+	mssqlYear         = regexp.MustCompile(`SQL Server (\d{4})`)
+	oracleRelease     = regexp.MustCompile(`(?i)Database (\d+)[a-z]`)
 )
+
+// eolForks are the products that answer with another engine's banner and keep
+// their own release calendar. Each carries the version of the engine it is
+// compatible with — YugabyteDB says "PostgreSQL 11.2-YB-2.20", TiDB says
+// "8.0.11-TiDB-v7.5.0" — and that number says nothing about whether the fork
+// itself is maintained, so no finding is made for them.
+var eolForks = []string{"-yb-", "yugabyte", "cockroach", "greenplum", "redshift", "tidb", "vitess", "oceanbase", "singlestore", "memsql"}
+
+func eolFork(version string) bool {
+	lower := strings.ToLower(version)
+	for _, fork := range eolForks {
+		if strings.Contains(lower, fork) {
+			return true
+		}
+	}
+	return false
+}
 
 // VersionEndOfLife looks a server's version string up in the table. The
 // string is whatever the engine's own version query returned; ok is false
@@ -92,7 +114,13 @@ func VersionEndOfLife(driver Driver, version string, now time.Time) (*EndOfLife,
 		date             time.Time
 		ok               bool
 	)
-	major, minor, found := leadingVersion(version)
+	if eolFork(version) {
+		return nil, false
+	}
+	pattern := map[Driver]*regexp.Regexp{
+		DriverPostgres: postgresVersion, DriverMySQL: mysqlVersion, DriverClickHouse: clickhouseVersion,
+	}[driver]
+	major, minor, found := leadingVersion(pattern, version)
 	switch driver {
 	case DriverPostgres:
 		product = "PostgreSQL"
@@ -148,9 +176,13 @@ func VersionEndOfLife(driver Driver, version string, now time.Time) (*EndOfLife,
 	return &EndOfLife{Product: product, Release: release, Date: date, Past: now.After(date), DaysLeft: days}, true
 }
 
-// leadingVersion finds the first major.minor pair in a version string.
-func leadingVersion(version string) (major, minor int, ok bool) {
-	m := eolVersionNumber.FindStringSubmatch(version)
+// leadingVersion reads the major and minor an engine's banner begins with.
+// The minor is zero where the banner has none — a PostgreSQL beta is "18beta1".
+func leadingVersion(pattern *regexp.Regexp, version string) (major, minor int, ok bool) {
+	if pattern == nil {
+		return 0, 0, false
+	}
+	m := pattern.FindStringSubmatch(strings.TrimSpace(version))
 	if m == nil {
 		return 0, 0, false
 	}

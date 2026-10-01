@@ -39,7 +39,9 @@ func (postgresDialect) ServerStats(ctx context.Context, db *sql.DB) (*ServerStat
 		checkpointer                                      bool
 	)
 	// pg_current_wal_lsn() raises on a standby, which is why the two halves
-	// sit in a CASE: only the branch that applies is evaluated.
+	// sit in a CASE: only the branch that applies is evaluated. A standby that
+	// has replayed nothing yet has no position at all, and answers zero rather
+	// than a NULL the snapshot would fail on.
 	err := db.QueryRowContext(ctx, `
 	  SELECT version(), pg_postmaster_start_time(), pg_is_in_recovery(), current_database(),
 	         pg_database_size(current_database()),
@@ -51,9 +53,9 @@ func (postgresDialect) ServerStats(ctx context.Context, db *sql.DB) (*ServerStat
 	         COALESCE(d.blk_read_time, 0)::float8, COALESCE(d.blk_write_time, 0)::float8,
 	         d.stats_reset, d.numbackends,
 	         (SELECT age(datfrozenxid) FROM pg_database WHERE datname = current_database()),
-	         (CASE WHEN pg_is_in_recovery()
-	               THEN pg_wal_lsn_diff(pg_last_wal_replay_lsn(), '0/0')
-	               ELSE pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0') END)::float8,
+	         COALESCE(CASE WHEN pg_is_in_recovery()
+	                       THEN pg_wal_lsn_diff(pg_last_wal_replay_lsn(), '0/0')
+	                       ELSE pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0') END, 0)::float8,
 	         (SELECT count(*) FROM pg_stat_replication),
 	         to_regclass('pg_catalog.pg_stat_checkpointer') IS NOT NULL
 	  FROM pg_stat_database d

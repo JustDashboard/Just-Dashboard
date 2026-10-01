@@ -495,7 +495,9 @@ func ReadTableStats(ctx context.Context, db *sql.DB, driver Driver, opts StatsOp
 	if err != nil {
 		return nil, err
 	}
-	out.Supported = true
+	// A dialect that was refused the views it reads says why instead of
+	// failing; that is "not available to this account", not a broken page.
+	out.Supported = out.Reason == ""
 	if out.Tables == nil {
 		out.Tables = []TableStat{}
 	}
@@ -521,7 +523,7 @@ func ReadIndexStats(ctx context.Context, db *sql.DB, driver Driver, opts StatsOp
 	if err != nil {
 		return nil, err
 	}
-	out.Supported = true
+	out.Supported = out.Reason == ""
 	if out.Indexes == nil {
 		out.Indexes = []IndexStat{}
 	}
@@ -662,6 +664,10 @@ type MaintenanceAction struct {
 	Blocking bool `json:"blocking,omitempty"`
 	// Destructive marks an action that can discard data it cannot recover.
 	Destructive bool `json:"destructive,omitempty"`
+	// ReadOnly marks an action that reads and reports and changes nothing — a
+	// consistency check. It is what a connection the operator has protected
+	// against changes can still be asked to do.
+	ReadOnly bool `json:"readOnly,omitempty"`
 	// Requires is the capability the route asks for before it runs the
 	// action: "destructive" for one that blocks or can lose data, and
 	// "service.control" for the rest. It is published so the page hides what
@@ -702,6 +708,9 @@ type MaintenanceOptions struct {
 	Mode string `json:"mode,omitempty"`
 	// Final forces a merge to a single part per partition (ClickHouse).
 	Final bool `json:"final,omitempty"`
+	// Online rebuilds indexes while the table stays readable and writable
+	// (SQL Server, on the editions that can).
+	Online bool `json:"online,omitempty"`
 }
 
 type MaintenanceRequest struct {

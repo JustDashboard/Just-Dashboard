@@ -80,6 +80,16 @@ type Activity struct {
 // so the handler renders it as information rather than an error.
 var ErrNoActivityView = fmt.Errorf("this engine has no server-side session list")
 
+// errSessionsRefused is an engine that has a session list and will not show
+// it to this account. To the page that is the same answer as an engine with
+// none — there is nothing to list, and a sentence saying why — so it matches
+// ErrNoActivityView, and its text is the reason the page prints.
+type errSessionsRefused struct{ reason string }
+
+func (e errSessionsRefused) Error() string { return e.reason }
+
+func (errSessionsRefused) Is(target error) bool { return target == ErrNoActivityView }
+
 func scanActivity(rows *sql.Rows) ([]Activity, error) {
 	defer rows.Close()
 	out := []Activity{}

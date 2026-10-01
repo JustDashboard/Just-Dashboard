@@ -154,6 +154,9 @@ var settingBools = map[string]bool{
 // settingNumber splits "64MB" into 64 and MB.
 var settingNumber = regexp.MustCompile(`^([+-]?[0-9]+(?:\.[0-9]+)?)\s*([A-Za-z]*)$`)
 
+// settingRadixNumber is an integer written in octal or hexadecimal.
+var settingRadixNumber = regexp.MustCompile(`^[+-]?0(?:[0-7]+|[xX][0-9a-fA-F]+)$`)
+
 // The units PostgreSQL accepts after a number, as a multiple of the smallest
 // in each family: bytes for memory, microseconds for time.
 var (
@@ -215,6 +218,20 @@ func checkSettingValue(s Setting, value string, units bool) (string, error) {
 		}
 		return "", settingRefused("%s is one of %s", s.Name, strings.Join(s.Enum, ", "))
 	case "integer", "real":
+		// PostgreSQL reads an integer the way C does: a leading 0 is octal and a
+		// leading 0x hexadecimal. Its two file-mode parameters are printed that
+		// way — log_file_mode is "0600" in pg_settings — so the value the list
+		// displays has to be one the form accepts, and 0640 must mean 416.
+		if units && s.Type == "integer" && settingRadixNumber.MatchString(value) {
+			n, err := strconv.ParseInt(value, 0, 64)
+			if err != nil {
+				return "", settingRefused("%s takes a number", s.Name)
+			}
+			if err := checkSettingRange(s, float64(n)); err != nil {
+				return "", err
+			}
+			return value, nil
+		}
 		m := settingNumber.FindStringSubmatch(value)
 		if m == nil {
 			return "", settingRefused("%s takes a number", s.Name)
@@ -236,15 +253,24 @@ func checkSettingValue(s Setting, value string, units bool) (string, error) {
 		} else if s.Type == "integer" && n != math.Trunc(n) {
 			return "", settingRefused("%s takes a whole number", s.Name)
 		}
-		if min, err := strconv.ParseFloat(s.Min, 64); err == nil && n < min {
-			return "", settingRefused("%s is at least %s%s", s.Name, s.Min, unitSuffix(s.Unit))
-		}
-		if max, err := strconv.ParseFloat(s.Max, 64); err == nil && n > max {
-			return "", settingRefused("%s is at most %s%s", s.Name, s.Max, unitSuffix(s.Unit))
+		if err := checkSettingRange(s, n); err != nil {
+			return "", err
 		}
 		return value, nil
 	}
 	return value, nil
+}
+
+// checkSettingRange holds a number, already in the setting's own unit, to the
+// bounds the engine published for it.
+func checkSettingRange(s Setting, n float64) error {
+	if min, err := strconv.ParseFloat(s.Min, 64); err == nil && n < min {
+		return settingRefused("%s is at least %s%s", s.Name, s.Min, unitSuffix(s.Unit))
+	}
+	if max, err := strconv.ParseFloat(s.Max, 64); err == nil && n > max {
+		return settingRefused("%s is at most %s%s", s.Name, s.Max, unitSuffix(s.Unit))
+	}
+	return nil
 }
 
 func unitSuffix(unit string) string {
@@ -867,8 +893,12 @@ func (clickhouseDialect) AllSettings(ctx context.Context, db *sql.DB) ([]Setting
 
 // AllSettings reads sys.configurations. value is what was configured and
 // value_in_use what the server runs with; they differ between an sp_configure
-// and its RECONFIGURE, or its restart for an option that is not dynamic.
+// and its RECONFIGURE, or its restart for an option that is not dynamic. An
+// option is editable from here when the login may run sp_configure with a
+// value, which is the ALTER SETTINGS permission sysadmin and serveradmin hold.
 func (mssqlDialect) AllSettings(ctx context.Context, db *sql.DB) ([]Setting, error) {
+	var mayAlter sql.NullInt64
+	_ = db.QueryRowContext(ctx, `SELECT HAS_PERMS_BY_NAME(NULL, NULL, 'ALTER SETTINGS')`).Scan(&mayAlter)
 	rows, err := db.QueryContext(ctx, `
 	  SELECT name, CAST(value_in_use AS NVARCHAR(64)), CAST(value AS NVARCHAR(64)),
 	         CAST(minimum AS NVARCHAR(64)), CAST(maximum AS NVARCHAR(64)),
@@ -898,9 +928,106 @@ func (mssqlDialect) AllSettings(ctx context.Context, db *sql.DB) ([]Setting, err
 		}
 		s.RestartRequired = !dynamic
 		s.PendingRestart = configured != s.Value
+		s.Editable = mayAlter.Int64 == 1
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// mssqlConfigure renders one sp_configure call. The procedure takes the
+// option's name as a string and its value as a number; the name is the one
+// sys.configurations listed and the value has been checked to be an integer.
+func mssqlConfigure(name string, value int64) string {
+	return "EXEC sys.sp_configure " + dumpString(DriverMSSQL, name) + ", " + strconv.FormatInt(value, 10)
+}
+
+// SetSetting changes a server option with sp_configure and applies it with
+// RECONFIGURE. The configured value is kept in the master database, so it
+// outlasts a restart; an option that is not dynamic is stored now and takes
+// effect at the next one.
+//
+// Most options are "advanced" and sp_configure refuses to name one until show
+// advanced options is on. Where it is off it is turned on for the change and
+// off again after it: a change to one option should not leave another changed.
+// If RECONFIGURE refuses the value — it checks what sp_configure does not —
+// the option is put back, so nothing is left configured and not applied.
+func (mssqlDialect) SetSetting(ctx context.Context, db *sql.DB, current Setting, value string) (*SettingChange, error) {
+	checked, err := checkSettingValue(current, value, false)
+	if err != nil {
+		return nil, err
+	}
+	wanted, err := strconv.ParseInt(checked, 10, 64)
+	if err != nil {
+		return nil, settingRefused("%s takes a whole number", current.Name)
+	}
+	// One session for the whole exchange: the option, its RECONFIGURE and the
+	// advanced switch around them have to happen in that order.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	var advanced bool
+	var previous, shown int64
+	if err := conn.QueryRowContext(ctx, `
+	  SELECT c.is_advanced, CAST(c.value AS BIGINT),
+	         (SELECT CAST(a.value_in_use AS BIGINT) FROM sys.configurations a WHERE a.name = 'show advanced options')
+	  FROM sys.configurations c WHERE c.name = @p1`, current.Name).Scan(&advanced, &previous, &shown); err != nil {
+		return nil, err
+	}
+	out := &SettingChange{Statements: []string{}, Persisted: true}
+	run := func(ctx context.Context, stmt string) error {
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+		out.Statements = append(out.Statements, stmt)
+		return nil
+	}
+	const reconfigure = "RECONFIGURE"
+	reveal := advanced && shown == 0 && !strings.EqualFold(current.Name, "show advanced options")
+	if reveal {
+		if err := run(ctx, mssqlConfigure("show advanced options", 1)); err != nil {
+			return nil, err
+		}
+		if err := run(ctx, reconfigure); err != nil {
+			return nil, err
+		}
+		// Whatever happens next, including the request being abandoned.
+		defer func() {
+			after := context.WithoutCancel(ctx)
+			if run(after, mssqlConfigure("show advanced options", 0)) == nil {
+				_ = run(after, reconfigure)
+			}
+		}()
+	}
+	if err := run(ctx, mssqlConfigure(current.Name, wanted)); err != nil {
+		return nil, err
+	}
+	if err := run(ctx, reconfigure); err != nil {
+		after := context.WithoutCancel(ctx)
+		_, _ = conn.ExecContext(after, mssqlConfigure(current.Name, previous))
+		_, _ = conn.ExecContext(after, reconfigure)
+		return nil, err
+	}
+	var configured, inUse string
+	if err := conn.QueryRowContext(ctx, `
+	  SELECT CAST(value AS NVARCHAR(64)), CAST(value_in_use AS NVARCHAR(64))
+	  FROM sys.configurations WHERE name = @p1`, current.Name).Scan(&configured, &inUse); err != nil {
+		return nil, err
+	}
+	out.Value = configured
+	if configured != inUse {
+		out.RestartRequired = true
+		out.Note = "Stored; SQL Server applies this option when it is next restarted."
+	}
+	return out, nil
+}
+
+// ResetSetting is refused: sys.configurations publishes an option's bounds and
+// not its default, and a default taken from documentation would be the default
+// of whichever version the documentation was read for.
+func (mssqlDialect) ResetSetting(_ context.Context, _ *sql.DB, current Setting) (*SettingChange, error) {
+	return nil, settingRefused("SQL Server does not record the default of %q; set the value it should have", current.Name)
 }
 
 // --- Oracle ------------------------------------------------------------------
@@ -925,21 +1052,42 @@ func (d oracleDialect) Settings(ctx context.Context, db *sql.DB) ([]Setting, err
 
 // AllSettings reads v$parameter, which needs a grant an application schema
 // often lacks; the refusal is the engine's own and is passed on.
+//
+// A parameter is editable from here when three things hold: the instance can
+// change it while it runs (IMMEDIATE, or DEFERRED for the sessions that connect
+// afterwards), the account holds ALTER SYSTEM, and — inside a pluggable
+// database — Oracle lets a container set it for itself. The ones read only at
+// start are listed and left alone: a wrong value there is an instance that
+// does not come back up, and nothing on this page could then put it right.
 func (oracleDialect) AllSettings(ctx context.Context, db *sql.DB) ([]Setting, error) {
+	var mayAlter int
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM session_privs WHERE privilege = 'ALTER SYSTEM'`).Scan(&mayAlter)
+	// 0 is a database with no containers and 1 the root of one; anything above
+	// is a pluggable database. The context does not exist before 12c.
+	var container sql.NullInt64
+	_ = db.QueryRowContext(ctx, `SELECT TO_NUMBER(SYS_CONTEXT('USERENV', 'CON_ID')) FROM dual`).Scan(&container)
 	rows, err := db.QueryContext(ctx, `
-	  SELECT name, display_value, type, isdefault, issys_modifiable, description
+	  SELECT name, display_value, type, isdefault, issys_modifiable, description, ispdb_modifiable, ismodified
 	  FROM v$parameter
 	  ORDER BY name`)
 	if err != nil {
-		return nil, err
+		// 11g has no containers, and so no column saying what one may set.
+		rows, err = db.QueryContext(ctx, `
+		  SELECT name, display_value, type, isdefault, issys_modifiable, description, 'TRUE', ismodified
+		  FROM v$parameter
+		  ORDER BY name`)
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer rows.Close()
 	out := []Setting{}
 	for rows.Next() {
 		var s Setting
 		var kind int
-		var isDefault, modifiable string
-		if err := rows.Scan(&s.Name, nullText{&s.Value}, &kind, nullText{&isDefault}, nullText{&modifiable}, nullText{&s.Description}); err != nil {
+		var isDefault, modifiable, inContainer, modified string
+		if err := rows.Scan(&s.Name, nullText{&s.Value}, &kind, nullText{&isDefault}, nullText{&modifiable},
+			nullText{&s.Description}, nullText{&inContainer}, nullText{&modified}); err != nil {
 			return nil, err
 		}
 		switch kind {
@@ -950,12 +1098,109 @@ func (oracleDialect) AllSettings(ctx context.Context, db *sql.DB) ([]Setting, er
 		default:
 			s.Type = "string"
 		}
-		s.Changed = strings.EqualFold(isDefault, "FALSE")
+		// isdefault says what the parameter file held at start; a change made
+		// since shows only in ismodified.
+		s.Changed = strings.EqualFold(isDefault, "FALSE") || (modified != "" && !strings.EqualFold(modified, "FALSE"))
 		// FALSE means the parameter is only read from the parameter file at
 		// start; IMMEDIATE and DEFERRED can be changed on a running instance.
 		s.RestartRequired = strings.EqualFold(modifiable, "FALSE")
 		s.Context = strings.ToLower(modifiable)
+		s.Editable = mayAlter > 0 && !s.RestartRequired &&
+			(container.Int64 <= 1 || strings.EqualFold(inContainer, "TRUE"))
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+var (
+	// oracleParameterName bounds what reaches ALTER SYSTEM as the parameter's
+	// name: it comes from v$parameter, and is checked anyway because it is
+	// written into the statement rather than bound.
+	oracleParameterName = regexp.MustCompile(`^[a-z][a-z0-9_$#]*$`)
+	// oracleParameterNumber is an integer as ALTER SYSTEM takes one, with the
+	// K, M, G or T a size may end in.
+	oracleParameterNumber = regexp.MustCompile(`^[+-]?[0-9]+[KMGTkmgt]?$`)
+)
+
+// oracleParameterValue renders a checked value for ALTER SYSTEM SET, which
+// takes no bind marker: a boolean as its keyword, a number bare, anything else
+// as a quoted literal.
+func oracleParameterValue(s Setting, value string) (string, error) {
+	switch s.Type {
+	case "bool":
+		checked, err := checkSettingValue(s, value, false)
+		if err != nil {
+			return "", err
+		}
+		if checked == "on" {
+			return "TRUE", nil
+		}
+		return "FALSE", nil
+	case "integer":
+		value = strings.TrimSpace(value)
+		if !oracleParameterNumber.MatchString(value) {
+			return "", settingRefused("%s takes a whole number, optionally ending in K, M, G or T", s.Name)
+		}
+		return strings.ToUpper(value), nil
+	}
+	checked, err := checkSettingValue(s, value, false)
+	if err != nil {
+		return "", err
+	}
+	return dumpString(DriverOracle, checked), nil
+}
+
+// oracleAlterSystem runs one ALTER SYSTEM SET or RESET and reads the value
+// back.
+//
+// SCOPE=BOTH changes the running instance and the server parameter file in one
+// statement, which is what makes the change outlast a restart. An instance
+// started from a text parameter file has no file to write: there the change is
+// made in memory only, and the answer says so rather than letting it quietly
+// disappear at the next start. A DEFERRED parameter takes the keyword, and
+// then applies to sessions that connect from now on.
+func oracleAlterSystem(ctx context.Context, db *sql.DB, current Setting, clause string) (*SettingChange, error) {
+	if !oracleParameterName.MatchString(current.Name) {
+		return nil, settingRefused("%q is not a parameter name", current.Name)
+	}
+	var spfile sql.NullString
+	_ = db.QueryRowContext(ctx, `SELECT value FROM v$parameter WHERE name = 'spfile'`).Scan(&spfile)
+	out := &SettingChange{Persisted: spfile.String != ""}
+	stmt := "ALTER SYSTEM " + clause
+	if current.Context == "deferred" {
+		stmt += " DEFERRED"
+		out.Note = "Applies to sessions that connect from now on; the ones already open keep the old value."
+	}
+	if out.Persisted {
+		stmt += " SCOPE=BOTH"
+	} else {
+		stmt += " SCOPE=MEMORY"
+		out.Note = strings.TrimSpace(out.Note + " This instance was started without a server parameter file, so the change lasts until it restarts.")
+	}
+	if _, err := db.ExecContext(ctx, stmt); err != nil {
+		return nil, err
+	}
+	out.Statements = []string{stmt}
+	// The system-wide value: this session's own may differ, and for a deferred
+	// parameter always does until it reconnects.
+	var now sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT display_value FROM v$system_parameter WHERE name = :1`, current.Name).Scan(&now); err != nil {
+		_ = db.QueryRowContext(ctx, `SELECT display_value FROM v$parameter WHERE name = :1`, current.Name).Scan(&now)
+	}
+	out.Value = now.String
+	return out, nil
+}
+
+func (oracleDialect) SetSetting(ctx context.Context, db *sql.DB, current Setting, value string) (*SettingChange, error) {
+	rendered, err := oracleParameterValue(current, value)
+	if err != nil {
+		return nil, err
+	}
+	return oracleAlterSystem(ctx, db, current, "SET "+current.Name+" = "+rendered)
+}
+
+// ResetSetting removes the parameter's entry, which returns it to the value
+// the instance would have had with none.
+func (oracleDialect) ResetSetting(ctx context.Context, db *sql.DB, current Setting) (*SettingChange, error) {
+	return oracleAlterSystem(ctx, db, current, "RESET "+current.Name)
 }

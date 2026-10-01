@@ -812,7 +812,7 @@ func (mysqlDialect) MaintenanceActions() []MaintenanceAction {
 	return []MaintenanceAction{
 		{ID: "analyze", Label: "Analyze", Scope: "either",
 			Description: "Refreshes the key distribution statistics the optimiser chooses plans from."},
-		{ID: "check", Label: "Check", Scope: "either",
+		{ID: "check", Label: "Check", Scope: "either", ReadOnly: true,
 			Description: "Reads the table and its indexes looking for corruption. Changes nothing."},
 		{ID: "optimize", Label: "Optimize", Scope: "either", Blocking: true,
 			Description: "Rebuilds the table to reclaim free space and defragment it. On InnoDB this is a full copy of the table and needs the disk for it; on MyISAM the table is locked throughout."},

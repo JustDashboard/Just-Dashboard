@@ -292,6 +292,57 @@ func TestMaintenanceStatementsAreRenderedFromTheClosedSet(t *testing.T) {
 		t.Errorf("clickhouse optimize: %q %v", got, err)
 	}
 
+	ms := mssqlDialect{}
+	for _, c := range []struct {
+		req  MaintenanceRequest
+		want string
+	}{
+		{MaintenanceRequest{Action: "update_statistics"}, `EXEC sys.sp_updatestats`},
+		{MaintenanceRequest{Action: "update_statistics", Table: "t"}, `UPDATE STATISTICS [dbo].[t]`},
+		{MaintenanceRequest{Action: "reorganize", Schema: "s", Table: "t"}, `ALTER INDEX ALL ON [s].[t] REORGANIZE`},
+		{MaintenanceRequest{Action: "rebuild", Table: "t", Index: "ix]x"}, `ALTER INDEX [ix]]x] ON [dbo].[t] REBUILD`},
+		{MaintenanceRequest{Action: "rebuild", Table: "t", Options: MaintenanceOptions{Online: true}}, `ALTER INDEX ALL ON [dbo].[t] REBUILD WITH (ONLINE = ON)`},
+		{MaintenanceRequest{Action: "check"}, `DBCC CHECKDB WITH TABLERESULTS`},
+		{MaintenanceRequest{Action: "check", Table: "it's"}, `DBCC CHECKTABLE (N'[dbo].[it''s]') WITH TABLERESULTS`},
+	} {
+		got, err := mssqlMaintenanceSQL(ms, c.req)
+		if err != nil || got != c.want {
+			t.Errorf("sql server %+v: %q %v, want %q", c.req, got, err, c.want)
+		}
+	}
+	for _, bad := range []MaintenanceRequest{
+		{Action: "update_statistics", Schema: "s"},
+		{Action: "check", Table: "t", Index: "i"},
+		{Action: "reorganize", Table: "t", Options: MaintenanceOptions{Online: true}},
+		{Action: "shrink", Table: "t"},
+	} {
+		if got, err := mssqlMaintenanceSQL(ms, bad); err == nil {
+			t.Errorf("sql server %+v rendered %q", bad, got)
+		}
+	}
+
+	// DBMS_STATS takes names as strings; the identifier goes in quoted, so a
+	// table created in lower case is found and a quote in a name stays a name.
+	ora := oracleDialect{}
+	for _, c := range []struct {
+		req  MaintenanceRequest
+		want string
+	}{
+		{MaintenanceRequest{Action: "gather_stats"}, `BEGIN DBMS_STATS.GATHER_SCHEMA_STATS(ownname => '"APP"', cascade => TRUE); END;`},
+		{MaintenanceRequest{Action: "gather_stats", Table: "Orders"}, `BEGIN DBMS_STATS.GATHER_TABLE_STATS(ownname => '"APP"', tabname => '"Orders"', cascade => TRUE); END;`},
+		{MaintenanceRequest{Action: "gather_stats", Table: "o'x"}, `BEGIN DBMS_STATS.GATHER_TABLE_STATS(ownname => '"APP"', tabname => '"o''x"', cascade => TRUE); END;`},
+	} {
+		got, err := oracleMaintenanceSQL(ora, c.req, "APP")
+		if err != nil || got != c.want {
+			t.Errorf("oracle %+v: %q %v, want %q", c.req, got, err, c.want)
+		}
+	}
+	for _, bad := range []MaintenanceRequest{{Action: "gather_stats", Index: "i"}, {Action: "vacuum"}} {
+		if got, err := oracleMaintenanceSQL(ora, bad, "APP"); err == nil {
+			t.Errorf("oracle %+v rendered %q", bad, got)
+		}
+	}
+
 	lite := sqliteDialect{}
 	if got, err := sqliteMaintenanceSQL(lite, MaintenanceRequest{Action: "wal_checkpoint", Options: MaintenanceOptions{Mode: "Restart"}}); err != nil || got != "PRAGMA wal_checkpoint(RESTART)" {
 		t.Errorf("sqlite checkpoint: %q %v", got, err)
@@ -309,8 +360,8 @@ func TestMaintenanceCatalogue(t *testing.T) {
 		DriverMySQL:      {"analyze", "check", "optimize", "repair"},
 		DriverSQLite:     {"analyze", "optimize", "integrity_check", "quick_check", "foreign_key_check", "wal_checkpoint", "reindex", "vacuum"},
 		DriverClickHouse: {"optimize"},
-		DriverMSSQL:      {},
-		DriverOracle:     {},
+		DriverMSSQL:      {"update_statistics", "reorganize", "rebuild", "check"},
+		DriverOracle:     {"gather_stats"},
 		DriverMongo:      {},
 	}
 	for driver, ids := range want {
@@ -331,6 +382,26 @@ func TestMaintenanceCatalogue(t *testing.T) {
 	if a, _ := MaintenanceActionFor(DriverMySQL, "repair"); !a.Destructive {
 		t.Errorf("repair can lose rows and is not marked destructive: %+v", a)
 	}
+	// The checks are the actions that change nothing, and are marked so; an
+	// action that changes nothing never needs the destructive capability.
+	readOnly := map[Driver]string{
+		DriverPostgres: "", DriverMySQL: "check", DriverSQLite: "integrity_check,quick_check,foreign_key_check",
+		DriverClickHouse: "", DriverMSSQL: "check", DriverOracle: "",
+	}
+	for driver, want := range readOnly {
+		got := []string{}
+		for _, a := range MaintenanceActionsFor(driver) {
+			if a.ReadOnly {
+				got = append(got, a.ID)
+				if a.NeedsDestructive() {
+					t.Errorf("%s %s changes nothing and asks for the destructive capability", driver, a.ID)
+				}
+			}
+		}
+		if strings.Join(got, ",") != want {
+			t.Errorf("%s marks %v as changing nothing, want %s", driver, got, want)
+		}
+	}
 	// What the route asks for is published with the action. Everything that
 	// locks a table against the application, or can lose rows, takes what the
 	// SQL console takes for the same statement; the rest is routine upkeep.
@@ -339,6 +410,8 @@ func TestMaintenanceCatalogue(t *testing.T) {
 		DriverMySQL:      "optimize,repair",
 		DriverSQLite:     "vacuum",
 		DriverClickHouse: "",
+		DriverMSSQL:      "rebuild",
+		DriverOracle:     "",
 	}
 	for driver, want := range needs {
 		got := []string{}
@@ -358,10 +431,17 @@ func TestMaintenanceCatalogue(t *testing.T) {
 			t.Errorf("%s asks for the destructive capability on %v, want %s", driver, got, want)
 		}
 	}
-	if _, err := RunMaintenance(t.Context(), nil, DriverMSSQL, "", MaintenanceRequest{Action: "vacuum"}); err == nil {
-		t.Error("SQL Server ran a maintenance action")
-	} else if _, ok := err.(ErrMaintenanceRequest); !ok {
-		t.Errorf("%v is not a request refusal", err)
+	// An action of another engine is refused as a request, before any server
+	// is asked anything.
+	for _, driver := range []Driver{DriverMSSQL, DriverOracle} {
+		if _, err := RunMaintenance(t.Context(), nil, driver, "", MaintenanceRequest{Action: "vacuum"}); err == nil {
+			t.Errorf("%s ran PostgreSQL's vacuum", driver)
+		} else if _, ok := err.(ErrMaintenanceRequest); !ok {
+			t.Errorf("%s: %v is not a request refusal", driver, err)
+		}
+	}
+	if _, err := RunMaintenance(t.Context(), nil, DriverMSSQL, "", MaintenanceRequest{Action: "rebuild"}); err == nil {
+		t.Error("SQL Server rebuilt the indexes of no table")
 	}
 }
 
@@ -417,6 +497,64 @@ func TestSettingValuesAreCheckedAgainstTheEnginesOwnBounds(t *testing.T) {
 	// MySQL takes no units: its SET refuses "16M".
 	if got, err := checkSettingValue(memory, "64MB", false); err == nil {
 		t.Errorf("a unit was accepted where the engine takes none: %q", got)
+	}
+
+	// PostgreSQL reads a leading 0 as octal and 0x as hexadecimal, and prints
+	// its two file-mode parameters that way: the value the list shows has to
+	// be one the form accepts, and is range-checked as the number it means.
+	mode := Setting{Name: "log_file_mode", Type: "integer", Min: "0", Max: "511"}
+	for _, value := range []string{"0600", "0640", "0777", "0x1ff", "416", "0"} {
+		if got, err := checkSettingValue(mode, value, true); err != nil || got != value {
+			t.Errorf("log_file_mode = %q: %q %v", value, got, err)
+		}
+	}
+	for _, value := range []string{"01000", "0x200", "640", "0888", "0x"} {
+		if got, err := checkSettingValue(mode, value, true); err == nil {
+			t.Errorf("log_file_mode = %q was accepted as %q", value, got)
+		}
+	}
+	// Only where the engine reads it so: MySQL's 0600 is six hundred.
+	if got, err := checkSettingValue(mode, "0600", false); err == nil {
+		t.Errorf("an octal value was read as one for an engine that has none: %q", got)
+	}
+}
+
+// Oracle's ALTER SYSTEM takes no bind marker: a boolean goes in as its
+// keyword, a number bare with the suffix a size may carry, and anything else
+// as a quoted literal. The name is the one v$parameter listed, checked anyway.
+func TestOracleParameterValuesAreRenderedByType(t *testing.T) {
+	flag := Setting{Name: "resource_limit", Type: "bool"}
+	count := Setting{Name: "open_cursors", Type: "integer"}
+	text := Setting{Name: "cursor_sharing", Type: "string"}
+	for _, c := range []struct {
+		s     Setting
+		value string
+		want  string
+	}{
+		{flag, "on", "TRUE"}, {flag, "FALSE", "FALSE"}, {count, " 400 ", "400"}, {count, "2g", "2G"},
+		{text, "FORCE", "'FORCE'"}, {text, "it's", "'it''s'"}, {text, "", "''"},
+	} {
+		if got, err := oracleParameterValue(c.s, c.value); err != nil || got != c.want {
+			t.Errorf("%s = %q: %q %v, want %q", c.s.Name, c.value, got, err, c.want)
+		}
+	}
+	for _, c := range []struct {
+		s     Setting
+		value string
+	}{
+		{flag, "maybe"}, {count, "400 SCOPE=SPFILE"}, {count, "1e3"}, {count, "4GB"}, {text, "a\nb"},
+	} {
+		if got, err := oracleParameterValue(c.s, c.value); err == nil {
+			t.Errorf("%s = %q was rendered as %q", c.s.Name, c.value, got)
+		}
+	}
+	if _, err := oracleAlterSystem(t.Context(), nil, Setting{Name: "open_cursors = 1 SCOPE"}, "SET x = 1"); err == nil {
+		t.Error("a name that is not a parameter name reached ALTER SYSTEM")
+	} else if _, ok := err.(ErrSettingRequest); !ok {
+		t.Errorf("%v is not a request refusal", err)
+	}
+	if got := mssqlConfigure("it's", 5); got != "EXEC sys.sp_configure N'it''s', 5" {
+		t.Errorf("sp_configure: %s", got)
 	}
 }
 
@@ -523,6 +661,22 @@ func TestVersionEndOfLife(t *testing.T) {
 		{DriverClickHouse, "ClickHouse 26.8.1.1", "26.8", false, true},
 		{DriverSQLite, "SQLite 3.46.0", "", false, false},
 		{DriverMySQL, "something else", "", false, false},
+		// The release is read where the engine's own number stands. A beta has
+		// no minor, and the first pair of numbers in its banner is the
+		// compiler's.
+		{DriverPostgres, "PostgreSQL 18beta1 on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit", "18", false, true},
+		{DriverPostgres, "PostgreSQL 17rc1 on aarch64-unknown-linux-gnu, compiled by gcc (GCC) 11.4.1", "17", false, true},
+		{DriverPostgres, "EnterpriseDB 12.2.0 compiled by gcc 12.2", "", false, false},
+		// A fork answers with the version of the engine it is compatible with,
+		// which says nothing about the fork's own maintenance.
+		{DriverPostgres, "PostgreSQL 11.2-YB-2.20.1.3-b0 on x86_64-pc-linux-gnu", "", false, false},
+		{DriverPostgres, "CockroachDB CCL v23.2.4 (x86_64-pc-linux-gnu, built 2024/04/08)", "", false, false},
+		{DriverPostgres, "PostgreSQL 12.12 (Greenplum Database 7.0.0 build commit:abc) on x86_64", "", false, false},
+		{DriverMySQL, "8.0.11-TiDB-v7.5.0", "", false, false},
+		{DriverMySQL, "5.7.25-TiDB-v6.1.0", "", false, false},
+		{DriverMySQL, "8.0.30-Vitess", "", false, false},
+		// MariaDB's replication-compatible prefix is not its version.
+		{DriverMySQL, "5.5.5-10.6.12-MariaDB-log", "10.6", true, true},
 	} {
 		got, ok := VersionEndOfLife(c.driver, c.version, now)
 		if ok != c.known {
@@ -668,9 +822,10 @@ func TestOpsCapabilitiesPerEngine(t *testing.T) {
 			"advisor", "engineAdvisor", "sqliteFile"),
 		DriverClickHouse: on("stats", "sessions", "kill", "tableStats", "indexStats", "maintenance", "settings",
 			"roles", "privileges", "statements", "advisor", "engineAdvisor", "clickhouseViews"),
-		DriverMSSQL: on("stats", "sessions", "kill", "locks", "tableStats", "indexStats", "settings", "roles",
-			"privileges", "advisor", "engineAdvisor"),
-		DriverOracle: on("stats", "sessions", "kill", "cancel", "settings", "advisor", "engineAdvisor"),
+		DriverMSSQL: on("stats", "sessions", "kill", "locks", "tableStats", "indexStats", "maintenance", "settings",
+			"settingsWrite", "roles", "privileges", "statements", "advisor", "engineAdvisor"),
+		DriverOracle: on("stats", "sessions", "kill", "cancel", "locks", "tableStats", "indexStats", "maintenance",
+			"settings", "settingsWrite", "statements", "advisor", "engineAdvisor"),
 	}
 	for driver, expected := range want {
 		got := OpsCapabilities(driver, "")
@@ -867,5 +1022,129 @@ func TestWholeDatabaseGrantLeavesPlatformSchemasAlone(t *testing.T) {
 		if (reason != "") != c.skip {
 			t.Errorf("%s (extension %q, supabase %v): reason %q, want skipped %v", c.name, c.extension, c.supabase, reason, c.skip)
 		}
+	}
+}
+
+// The statement list is on the read surface, and SQL Server and Oracle keep a
+// statement's text as it was sent: the literals are taken out before the text
+// leaves this package, and nothing else is.
+func TestStatementShapeDropsLiteralsAndNothingElse(t *testing.T) {
+	for _, c := range []struct {
+		in, want string
+		brackets bool
+	}{
+		{`SELECT * FROM users WHERE email = 'a@b.c' AND id = 42`, `SELECT * FROM users WHERE email = ? AND id = ?`, false},
+		{`UPDATE t SET note = 'it''s here', n = n + 1.5e3 WHERE k IN (1, 2, 3)`, `UPDATE t SET note = ?, n = n + ? WHERE k IN (?, ?, ?)`, false},
+		// A national string, and Oracle's alternative quoting, are literals whole.
+		{`SELECT N'sécret', q'[it's]', nq'{a'b}' FROM dual`, `SELECT ?, ?, ? FROM dual`, false},
+		// Names keep their digits; bind markers keep theirs.
+		{`SELECT c1, "col 2", t1.x FROM t1 WHERE a = :1 AND b = @p2 AND c = $3`, `SELECT c1, "col 2", t1.x FROM t1 WHERE a = :1 AND b = @p2 AND c = $3`, false},
+		{`SELECT [order 66], [a]]b] FROM [dbo].[t2] WHERE x = 0x1F`, `SELECT [order 66], [a]]b] FROM [dbo].[t2] WHERE x = ?`, true},
+		// An apostrophe in a comment starts no string.
+		{"SELECT 1 -- don't stop\nFROM t WHERE s = 'x' /* it's 5 */ AND n = 7", "SELECT ? -- don't stop\nFROM t WHERE s = ? /* it's 5 */ AND n = ?", false},
+		// Text the engine cut short: the open string is dropped with its end.
+		{`INSERT INTO sessions (token) VALUES ('eyJhbGciOiJIUzI1NiIsInR5`, `INSERT INTO sessions (token) VALUES (?`, false},
+		{`SELECT TOP (10) name FROM sys.objects`, `SELECT TOP (?) name FROM sys.objects`, true},
+		{``, ``, false},
+	} {
+		if got := statementShape(c.in, c.brackets); got != c.want {
+			t.Errorf("statementShape(%q)\n got %q\nwant %q", c.in, got, c.want)
+		}
+	}
+	for _, secret := range []string{"hunter2", "4111111111111111", "tok_live"} {
+		text := `SELECT * FROM cards WHERE pan = '4111111111111111' AND pin = N'hunter2' AND t = q'#tok_live#' AND n = 4111111111111111`
+		if got := statementShape(text, true); strings.Contains(got, secret) {
+			t.Errorf("%q survived in %q", secret, got)
+		}
+	}
+	if got := clipText("héllo", 2); got != "h" {
+		t.Errorf("clipText split a character: %q", got)
+	}
+	// Oracle keeps no longest execution; that order is refused, not guessed.
+	if _, err := (oracleDialect{}).Statements(t.Context(), nil, StatementsOptions{Sort: StatementsByMax, Limit: 5}); err == nil {
+		t.Error("Oracle sorted by a maximum it does not keep")
+	} else if _, ok := err.(ErrBadStatementsOption); !ok {
+		t.Errorf("%v is not an option refusal", err)
+	}
+}
+
+// A finding carries the statement that fixes it wherever one can be written
+// without a decision only the operator can make.
+func TestAdvisorFixStatements(t *testing.T) {
+	pg, my, ms, ora := postgresDialect{}, mysqlDialect{}, mssqlDialect{}, oracleDialect{}
+	columns := []Column{{Name: "code", Nullable: false}, {Name: "tenant", Nullable: false}, {Name: "note", Nullable: true}}
+	unique := []Index{{Name: "t_note", Columns: []string{"note"}, Unique: true},
+		{Name: "t_plain", Columns: []string{"code"}},
+		{Name: "t_code", Columns: []string{"tenant", "code"}, Unique: true}}
+	for _, c := range []struct {
+		d    Dialect
+		rel  string
+		want string
+	}{
+		{pg, `"s"."t"`, `ALTER TABLE "s"."t" ADD CONSTRAINT "t_pkey" PRIMARY KEY USING INDEX "t_code";`},
+		{my, "`s`.`t`", "ALTER TABLE `s`.`t` ADD PRIMARY KEY (`tenant`, `code`);"},
+		{ms, `[s].[t]`, `ALTER TABLE [s].[t] ADD PRIMARY KEY ([tenant], [code]);`},
+		{ora, `"S"."T"`, `ALTER TABLE "S"."T" ADD PRIMARY KEY ("tenant", "code");`},
+	} {
+		got, detail := primaryKeyStatement(c.d, c.rel, "t", columns, unique)
+		if got != c.want || !strings.Contains(detail, "t_code") {
+			t.Errorf("%s: %q (%s), want %q", c.d.Driver(), got, detail, c.want)
+		}
+	}
+	// No unique index that can be a key: a new column, where adding one does
+	// not break an INSERT that names no columns — and never a second "id".
+	nullable := []Index{{Name: "t_note", Columns: []string{"note"}, Unique: true}, {Name: "t_expr", Columns: []string{"lower(code)"}, Unique: true}}
+	if got, _ := primaryKeyStatement(pg, `"s"."t"`, "t", columns, nullable); got != `ALTER TABLE "s"."t" ADD COLUMN id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY;` {
+		t.Errorf("postgres identity: %q", got)
+	}
+	if got, _ := primaryKeyStatement(ms, `[s].[t]`, "t", columns, nil); got != `ALTER TABLE [s].[t] ADD id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY;` {
+		t.Errorf("sql server identity: %q", got)
+	}
+	for _, d := range []Dialect{my, ora} {
+		if got, _ := primaryKeyStatement(d, "t", "t", columns, nullable); got != "" {
+			t.Errorf("%s was offered %q", d.Driver(), got)
+		}
+	}
+	if got, _ := primaryKeyStatement(pg, `"t"`, "t", append(columns, Column{Name: "ID", Nullable: true}), nil); got != "" {
+		t.Errorf("a table that has an id column was offered %q", got)
+	}
+
+	// A sequence and the column it feeds are widened together; a bigint
+	// sequence with a ceiling set by hand loses the ceiling; one at bigint's
+	// own maximum has no fix.
+	if got := pgSequenceFix(pg, "public", "orders_id_seq", "integer", 2147483647, "orders", "id", "integer"); got !=
+		"ALTER TABLE \"public\".\"orders\" ALTER COLUMN \"id\" TYPE bigint;\nALTER SEQUENCE \"public\".\"orders_id_seq\" AS bigint;" {
+		t.Errorf("serial: %q", got)
+	}
+	if got := pgSequenceFix(pg, "public", "s", "integer", 2147483647, "orders", "id", "bigint"); got != `ALTER SEQUENCE "public"."s" AS bigint;` {
+		t.Errorf("a sequence narrower than its column: %q", got)
+	}
+	if got := pgSequenceFix(pg, "public", "loose", "smallint", 32767, "", "", ""); got != `ALTER SEQUENCE "public"."loose" AS bigint;` {
+		t.Errorf("a sequence no column owns: %q", got)
+	}
+	if got := pgSequenceFix(pg, "public", "capped", "bigint", 1000, "", "", ""); got != `ALTER SEQUENCE "public"."capped" NO MAXVALUE;` {
+		t.Errorf("a capped bigint sequence: %q", got)
+	}
+	if got := pgSequenceFix(pg, "public", "full", "bigint", 1<<63-1, "t", "id", "bigint"); got != "" {
+		t.Errorf("a bigint sequence at its ceiling was offered %q", got)
+	}
+
+	for current, want := range map[int]int{100: 150, 20: 50, 151: 250, 500: 750, 1: 50} {
+		if got := raisedConnectionLimit(current); got != want {
+			t.Errorf("raisedConnectionLimit(%d) = %d, want %d", current, got, want)
+		}
+	}
+	if got := mysqlConnectionLimitFix(false, 151); got != "SET PERSIST max_connections = 250;" {
+		t.Errorf("mysql: %q", got)
+	}
+	if got := mysqlConnectionLimitFix(true, 151); got != "SET GLOBAL max_connections = 250;" {
+		t.Errorf("mariadb: %q", got)
+	}
+	if got := oracleAutoextendSQL([]string{"/u01/app/users01.dbf", "/u01/it's.dbf"}); got !=
+		"ALTER DATABASE DATAFILE '/u01/app/users01.dbf' AUTOEXTEND ON;\nALTER DATABASE DATAFILE '/u01/it''s.dbf' AUTOEXTEND ON;" {
+		t.Errorf("autoextend: %q", got)
+	}
+	if got := oracleAutoextendSQL(nil); got != "" {
+		t.Errorf("a tablespace with no fixed-size file was offered %q", got)
 	}
 }

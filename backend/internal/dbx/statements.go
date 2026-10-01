@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Statement statistics: which queries cost the server the most, summed over
@@ -16,10 +17,18 @@ import (
 // milliseconds and runs ten thousand times an hour never appears in the
 // activity list and is the top row here.
 //
-// Three engines keep this. Postgres needs pg_stat_statements loaded and the
+// Five engines keep this. Postgres needs pg_stat_statements loaded and the
 // extension created; MySQL and MariaDB keep it in performance_schema;
 // ClickHouse keeps every finished query in its query log, which is summed
-// here by shape. The rest report Supported false and say why.
+// here by shape; SQL Server keeps it beside each cached plan and Oracle beside
+// each cursor in the shared pool. SQLite keeps none and says so.
+//
+// The text returned is the statement's shape, never one execution of it. The
+// list is on the read surface, and a literal in a WHERE clause is somebody's
+// e-mail address or a session token: PostgreSQL and MySQL hand back text with
+// the constants already replaced, ClickHouse is asked to do the same, and for
+// SQL Server and Oracle — which keep the text as it was sent — the constants
+// are replaced here before the text leaves this package.
 
 type Statement struct {
 	ID      string  `json:"id"`
@@ -347,7 +356,8 @@ const clickhouseStatementsWindow = "1 DAY"
 
 // Statements sums the query log by normalised shape. There is nothing to
 // reset: the log is the server's record, and its retention is the server's
-// own setting.
+// own setting. The text shown is the shape too — normalizeQuery puts a ? where
+// each literal was — because the log holds every execution as it was sent.
 func (clickhouseDialect) Statements(ctx context.Context, db *sql.DB, opts StatementsOptions) (*StatementsReport, error) {
 	order := map[string]string{
 		StatementsByTotal: "total", StatementsByMean: "mean", StatementsByCalls: "calls",
@@ -356,7 +366,7 @@ func (clickhouseDialect) Statements(ctx context.Context, db *sql.DB, opts Statem
 	const scope = `type = 'QueryFinish' AND event_time > now() - INTERVAL ` + clickhouseStatementsWindow + `
 	      AND current_database = currentDatabase() AND query NOT LIKE '%system.query_log%'`
 	rows, err := db.QueryContext(ctx, `
-	  SELECT toString(normalized_query_hash), substring(any(query), 1, 1000), toInt64(count()) AS calls,
+	  SELECT toString(normalized_query_hash), substring(normalizeQuery(any(query)), 1, 1000), toInt64(count()) AS calls,
 	         toFloat64(sum(query_duration_ms)) AS total, toFloat64(avg(query_duration_ms)) AS mean,
 	         toFloat64(max(query_duration_ms)) AS longest, toInt64(sum(result_rows)) AS result_rows,
 	         (SELECT toFloat64(sum(query_duration_ms)) FROM system.query_log WHERE `+scope+`)
@@ -380,4 +390,286 @@ func (clickhouseDialect) Statements(ctx context.Context, db *sql.DB, opts Statem
 		out.Statements = append(out.Statements, s)
 	}
 	return out, rows.Err()
+}
+
+// --- SQL Server --------------------------------------------------------------
+
+// Statements sums sys.dm_exec_query_stats by query hash, which is SQL Server's
+// own notion of "the same statement with different constants".
+//
+// The view describes the plan cache: a statement's figures run from when its
+// plan was compiled and go when the plan is evicted or the server restarts, so
+// there is no single moment the statistics started from and nothing here
+// reports one. Zeroing them would mean emptying the plan cache, which makes
+// every statement on the server compile again — not a thing to offer behind a
+// "reset" button, so this engine has none. The view needs VIEW SERVER STATE;
+// a login without it is told so rather than shown an error.
+func (mssqlDialect) Statements(ctx context.Context, db *sql.DB, opts StatementsOptions) (*StatementsReport, error) {
+	order := map[string]string{
+		StatementsByTotal: "total_ms", StatementsByMean: "mean_ms", StatementsByCalls: "calls",
+		StatementsByRows: "rows_", StatementsByMax: "max_ms",
+	}[opts.Sort]
+	// A plan belongs to the database it was compiled in; that is the only place
+	// the view says which database a statement ran against.
+	rows, err := db.QueryContext(ctx, `
+	  SELECT TOP (@p1) id, ISNULL(text, ''), calls, total_ms, ISNULL(mean_ms, 0), max_ms, rows_, hit, grand
+	  FROM (
+	    SELECT CONVERT(VARCHAR(34), a.query_hash, 1) AS id,
+	           a.calls, a.total_ms, a.total_ms / NULLIF(a.calls, 0) AS mean_ms, a.max_ms, a.rows_,
+	           CASE WHEN a.logical_reads > 0
+	                THEN CAST(a.logical_reads - a.physical_reads AS FLOAT) / a.logical_reads ELSE -1 END AS hit,
+	           SUM(a.total_ms) OVER () AS grand,
+	           (SELECT TOP 1 LEFT(SUBSTRING(t.text, r.statement_start_offset / 2 + 1,
+	                     (CASE WHEN r.statement_end_offset = -1 THEN DATALENGTH(t.text)
+	                           ELSE r.statement_end_offset END - r.statement_start_offset) / 2 + 1), 4000)
+	            FROM sys.dm_exec_query_stats r
+	            CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+	            WHERE r.query_hash = a.query_hash
+	            ORDER BY r.total_elapsed_time DESC) AS text
+	    FROM (
+	      SELECT s.query_hash, SUM(s.execution_count) AS calls,
+	             CAST(SUM(s.total_elapsed_time) AS FLOAT) / 1000 AS total_ms,
+	             CAST(MAX(s.max_elapsed_time) AS FLOAT) / 1000 AS max_ms,
+	             SUM(s.total_rows) AS rows_,
+	             SUM(s.total_logical_reads) AS logical_reads,
+	             SUM(s.total_physical_reads) AS physical_reads
+	      FROM sys.dm_exec_query_stats s
+	      CROSS APPLY sys.dm_exec_plan_attributes(s.plan_handle) pa
+	      WHERE pa.attribute = 'dbid' AND CAST(pa.value AS INT) = DB_ID()
+	      GROUP BY s.query_hash
+	    ) a
+	  ) x
+	  ORDER BY `+order+` DESC`, opts.Limit)
+	if err != nil {
+		return &StatementsReport{Statements: []Statement{}, Reason: "The plan cache's statistics could not be read (they need VIEW SERVER STATE): " + err.Error()}, nil
+	}
+	defer rows.Close()
+	out := &StatementsReport{Statements: []Statement{}, Supported: true}
+	for rows.Next() {
+		var s Statement
+		if err := rows.Scan(&s.ID, &s.Query, &s.Calls, &s.TotalMs, &s.MeanMs, &s.MaxMs, &s.Rows, &s.HitRatio, &out.TotalMs); err != nil {
+			return nil, err
+		}
+		s.Query = clipText(statementShape(s.Query, true), 1000)
+		out.Statements = append(out.Statements, s)
+	}
+	return out, rows.Err()
+}
+
+// --- Oracle ------------------------------------------------------------------
+
+// Statements reads v$sqlstats: one row per statement in the shared pool, kept
+// for as long as the cursor is. Oracle records no longest single execution, so
+// that order is refused rather than answered with another; and the recursive
+// statements the server runs on its own behalf are left out where it can be
+// told which they are, because on a quiet database they are most of the list.
+// The view needs a grant an application schema rarely has, and the answer to
+// that is a sentence, not a failed page.
+func (oracleDialect) Statements(ctx context.Context, db *sql.DB, opts StatementsOptions) (*StatementsReport, error) {
+	if opts.Sort == StatementsByMax {
+		return nil, ErrBadStatementsOption{msg: "Oracle keeps no longest execution per statement; sort by total, mean, calls or rows"}
+	}
+	order := map[string]string{
+		StatementsByTotal: "total_ms", StatementsByMean: "mean_ms", StatementsByCalls: "calls", StatementsByRows: "rows_",
+	}[opts.Sort]
+	query := func(scope string) string {
+		return `
+		  SELECT id, text, calls, total_ms, mean_ms, rows_, hit, grand
+		  FROM (
+		    SELECT s.sql_id AS id, SUBSTR(s.sql_text, 1, 1000) AS text, s.executions AS calls,
+		           s.elapsed_time / 1000 AS total_ms,
+		           s.elapsed_time / 1000 / GREATEST(s.executions, 1) AS mean_ms,
+		           s.rows_processed AS rows_,
+		           CASE WHEN s.buffer_gets > 0 THEN GREATEST(s.buffer_gets - s.disk_reads, 0) / s.buffer_gets ELSE -1 END AS hit,
+		           SUM(s.elapsed_time / 1000) OVER () AS grand
+		    FROM v$sqlstats s
+		    WHERE s.executions > 0` + scope + `
+		  )
+		  ORDER BY ` + order + ` DESC
+		  FETCH FIRST :1 ROWS ONLY`
+	}
+	// v$sql is what knows who parsed a statement. The schemas left out are the
+	// ones only the server itself works as; SYSTEM is not among them, because
+	// an administrator — and this dashboard, very often — signs in as it. An
+	// account granted the statistics and not the cursors still gets the list,
+	// with the server's own statements in it.
+	rows, err := db.QueryContext(ctx, query(`
+		      AND NOT EXISTS (SELECT 1 FROM v$sql c WHERE c.sql_id = s.sql_id
+		                      AND c.parsing_schema_name IN ('SYS', 'DBSNMP', 'AUDSYS', 'XDB', 'MDSYS', 'CTXSYS', 'ORDSYS', 'WMSYS', 'LBACSYS', 'GSMADMIN_INTERNAL'))`), opts.Limit)
+	if err != nil {
+		rows, err = db.QueryContext(ctx, query(""), opts.Limit)
+	}
+	if err != nil {
+		return &StatementsReport{Statements: []Statement{}, Reason: "The shared pool's statistics could not be read (they need SELECT on v$sqlstats): " + err.Error()}, nil
+	}
+	defer rows.Close()
+	out := &StatementsReport{Statements: []Statement{}, Supported: true}
+	for rows.Next() {
+		var s Statement
+		if err := rows.Scan(&s.ID, nullText{&s.Query}, &s.Calls, &s.TotalMs, &s.MeanMs, &s.Rows, &s.HitRatio, &out.TotalMs); err != nil {
+			return nil, err
+		}
+		s.Query = statementShape(s.Query, false)
+		out.Statements = append(out.Statements, s)
+	}
+	return out, rows.Err()
+}
+
+// --- the shape of a statement ------------------------------------------------
+
+// statementShape replaces every literal in a statement's text with a ?, for
+// the engines that keep the text as it was sent.
+//
+// It reads the text the way a SQL lexer would, far enough to know what is a
+// literal: a quoted identifier is copied whole, a comment is copied whole (an
+// apostrophe in one is not the start of a string), a string becomes one ?
+// whatever is inside it, and a number becomes one ? unless it is part of a
+// name or of a bind marker. The text an engine hands over may have been cut
+// short; a string still open at the end is a literal like any other and is
+// dropped with the rest. brackets is true for SQL Server, where [..] quotes a
+// name.
+func statementShape(text string, brackets bool) string {
+	var b strings.Builder
+	b.Grow(len(text))
+	name := func(c byte) bool {
+		return c == '_' || c == '$' || c == '#' || c == '@' || c == ':' || c >= 0x80 ||
+			(c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	}
+	digit := func(c byte) bool { return c >= '0' && c <= '9' }
+	last := func() byte {
+		if b.Len() == 0 {
+			return 0
+		}
+		return b.String()[b.Len()-1]
+	}
+	// copyThrough copies from i up to and including the closing delimiter, a
+	// doubled one being the delimiter itself, and returns where it stopped.
+	copyThrough := func(i int, closing byte) int {
+		j := i + 1
+		for j < len(text) {
+			if text[j] == closing {
+				if j+1 < len(text) && text[j+1] == closing {
+					j += 2
+					continue
+				}
+				j++
+				break
+			}
+			j++
+		}
+		b.WriteString(text[i:j])
+		return j
+	}
+	for i := 0; i < len(text); {
+		c := text[i]
+		switch {
+		case c == '-' && i+1 < len(text) && text[i+1] == '-':
+			end := strings.IndexByte(text[i:], '\n')
+			if end < 0 {
+				end = len(text) - i
+			}
+			b.WriteString(text[i : i+end])
+			i += end
+		case c == '/' && i+1 < len(text) && text[i+1] == '*':
+			end := strings.Index(text[i+2:], "*/")
+			if end < 0 {
+				b.WriteString(text[i:])
+				i = len(text)
+				break
+			}
+			b.WriteString(text[i : i+2+end+2])
+			i += 2 + end + 2
+		case c == '"' || c == '`':
+			i = copyThrough(i, c)
+		case c == '[' && brackets:
+			i = copyThrough(i, ']')
+		case c == '\'':
+			// The prefix of a national or an alternatively quoted string is part
+			// of the literal: N'..', q'[..]', nq'{..}'.
+			written := b.String()
+			prefix := len(written)
+			quoted := prefix > 0 && (written[prefix-1] == 'q' || written[prefix-1] == 'Q')
+			if quoted {
+				prefix--
+			}
+			if prefix > 0 && (written[prefix-1] == 'n' || written[prefix-1] == 'N') {
+				prefix--
+			}
+			if prefix > 0 && name(written[prefix-1]) {
+				// The letters end a name; they are not a prefix.
+				prefix, quoted = len(written), false
+			}
+			b.Reset()
+			b.WriteString(written[:prefix])
+			j := i + 1
+			if quoted && j < len(text) {
+				// q'<delimiter> … <delimiter>' — nothing inside is an escape.
+				closing := text[j]
+				if at := strings.IndexByte("[{(<", closing); at >= 0 {
+					closing = "]})>"[at]
+				}
+				end := strings.Index(text[j+1:], string([]byte{closing, '\''}))
+				if end < 0 {
+					j = len(text)
+				} else {
+					j += 1 + end + 2
+				}
+			} else {
+				for j < len(text) {
+					if text[j] == '\'' {
+						if j+1 < len(text) && text[j+1] == '\'' {
+							j += 2
+							continue
+						}
+						j++
+						break
+					}
+					j++
+				}
+			}
+			b.WriteByte('?')
+			i = j
+		case digit(c) && !name(last()):
+			j := i
+			if c == '0' && j+1 < len(text) && (text[j+1] == 'x' || text[j+1] == 'X') {
+				j += 2
+				for j < len(text) && (digit(text[j]) || (text[j]|0x20 >= 'a' && text[j]|0x20 <= 'f')) {
+					j++
+				}
+			} else {
+				for j < len(text) && (digit(text[j]) || text[j] == '.') {
+					j++
+				}
+				if j < len(text) && (text[j] == 'e' || text[j] == 'E') {
+					k := j + 1
+					if k < len(text) && (text[k] == '+' || text[k] == '-') {
+						k++
+					}
+					if k < len(text) && digit(text[k]) {
+						for k < len(text) && digit(text[k]) {
+							k++
+						}
+						j = k
+					}
+				}
+			}
+			b.WriteByte('?')
+			i = j
+		default:
+			b.WriteByte(c)
+			i++
+		}
+	}
+	return b.String()
+}
+
+// clipText cuts a string to at most n bytes without splitting a character.
+func clipText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

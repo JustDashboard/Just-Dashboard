@@ -337,6 +337,16 @@ func TestBlockingMaintenanceIsCheckedByContent(t *testing.T) {
 				`{"action":"reindex","table":"t","options":{"concurrently":true}}`},
 			[]string{`{"action":"vacuum","table":"t"}`, `{"action":"vacuum_analyze"}`, `{"action":"analyze"}`},
 			`{"action":"repair","table":"t"}`, "vacuum, vacuum_analyze, analyze, vacuum_full, reindex"},
+		// A rebuild takes the table away from the application, online or not;
+		// the rest of SQL Server's list works beside it.
+		{dbx.DriverMSSQL, "sqlserver://u:p@127.0.0.1:1?database=x&encrypt=disable&dial+timeout=2",
+			[]string{`{"action":"rebuild","table":"t"}`, `{"action":"rebuild","table":"t","options":{"online":true}}`},
+			[]string{`{"action":"update_statistics"}`, `{"action":"reorganize","table":"t"}`, `{"action":"check"}`},
+			`{"action":"vacuum_full","table":"t"}`, "update_statistics, reorganize, rebuild, check"},
+		{dbx.DriverOracle, "oracle://u:p@127.0.0.1:1/x",
+			nil,
+			[]string{`{"action":"gather_stats"}`, `{"action":"gather_stats","table":"T"}`},
+			`{"action":"rebuild","table":"T"}`, "gather_stats"},
 	} {
 		id := saveOpsConnection(t, h.s, "nowhere-"+string(c.driver), c.driver, c.dsn)
 		base := fmt.Sprintf("/api/v1/databases/%d", id)
@@ -489,7 +499,7 @@ func TestRoleSettingsThatMayBeCredentialsAreWithheld(t *testing.T) {
 			"statement_timeout=5s", "app.api_token=tok_live_123", "app.tenant=acme", "ssl_passphrase_command=echo x"}}
 	}
 	viewer := detail()
-	redactRoleConfig(viewer, false)
+	redactRoleConfig(dbx.DriverPostgres, viewer, false)
 	if got := strings.Join(viewer.Config, "|"); got != "search_path=app, public|statement_timeout=5s" {
 		t.Errorf("a viewer sees %q", got)
 	}
@@ -506,13 +516,13 @@ func TestRoleSettingsThatMayBeCredentialsAreWithheld(t *testing.T) {
 		}
 	}
 	admin := detail()
-	redactRoleConfig(admin, true)
+	redactRoleConfig(dbx.DriverPostgres, admin, true)
 	if len(admin.Config) != 6 || len(admin.ConfigRedacted) != 0 {
 		t.Errorf("an administrator sees %v, withheld %v", admin.Config, admin.ConfigRedacted)
 	}
 	// Nothing set is an empty list, not a missing one.
 	empty := &dbx.RoleDetail{Config: []string{}}
-	redactRoleConfig(empty, false)
+	redactRoleConfig(dbx.DriverPostgres, empty, false)
 	if empty.Config == nil || len(empty.ConfigRedacted) != 0 {
 		t.Errorf("an empty configuration became %v / %v", empty.Config, empty.ConfigRedacted)
 	}
@@ -590,10 +600,11 @@ func TestSensitiveSettingsAreWithheldFromNonAdministrators(t *testing.T) {
 			{Name: "ssl_passphrase_command", Value: "echo hunter2"},
 			{Name: "archive_command", Value: "aws s3 cp --secret"},
 			{Name: "max_connections", Value: "100"},
-			{Name: "password_encryption", Value: ""},
+			{Name: "primary_slot_name", Value: ""},
+			{Name: "password_encryption", Value: "scram-sha-256"},
 		}
 	}
-	redacted := redactSettings(list(), false)
+	redacted := redactSettings(dbx.DriverPostgres, list(), false)
 	for _, s := range redacted[:3] {
 		if s.Value != "" || s.Default != "" || !s.Redacted {
 			t.Errorf("%s reached a viewer: %+v", s.Name, s)
@@ -606,10 +617,89 @@ func TestSensitiveSettingsAreWithheldFromNonAdministrators(t *testing.T) {
 	if redacted[4].Redacted {
 		t.Errorf("an empty value was marked redacted")
 	}
-	for _, s := range redactSettings(list(), true) {
+	// How passwords are hashed is policy, which the advisor reports to the
+	// same viewer; hiding it here said two different things on two pages.
+	if redacted[5].Value != "scram-sha-256" || redacted[5].Redacted {
+		t.Errorf("password_encryption was withheld: %+v", redacted[5])
+	}
+	for _, s := range redactSettings(dbx.DriverPostgres, list(), true) {
 		if s.Redacted {
 			t.Errorf("%s was withheld from an administrator", s.Name)
 		}
+	}
+}
+
+// Which names are a credential's is decided per engine and by the whole last
+// word of the name, not by a word appearing somewhere in it.
+func TestSensitiveSettingNames(t *testing.T) {
+	for driver, names := range map[dbx.Driver][]string{
+		dbx.DriverPostgres: {"primary_conninfo", "ssl_passphrase_command", "archive_command", "restore_command",
+			"archive_cleanup_command", "recovery_end_command", "PRIMARY_CONNINFO",
+			// An extension's or an application's own parameter: the name is
+			// all there is to go on.
+			"pgrst.jwt_secret", "citus.node_conninfo", "app.api_token", "app.settings.jwt", "pgsodium.getkey_script",
+			"timescaledb.license", "myapp.db_passwd"},
+		dbx.DriverMySQL: {"report_password", "wsrep_sst_auth", "file_key_management_filekey",
+			"authentication_ldap_simple_bind_root_pwd", "hashicorp_key_management_token", "keyring_hashicorp_secret_id"},
+		dbx.DriverMSSQL:      {"linked_server_password"},
+		dbx.DriverClickHouse: {"s3_secret", "interserver_http_credentials"},
+	} {
+		for _, name := range names {
+			if !sensitiveSetting(driver, name) {
+				t.Errorf("%s %s is shown to a viewer", driver, name)
+			}
+		}
+	}
+	for driver, names := range map[dbx.Driver][]string{
+		dbx.DriverPostgres: {"password_encryption", "ssl_passphrase_command_supports_reload", "ssl_key_file", "krb_server_keyfile",
+			"max_connections", "log_line_prefix", "shared_preload_libraries", "pg_stat_statements.max",
+			"auto_explain.log_min_duration", "pg_trgm.similarity_threshold", "plpgsql.variable_conflict"},
+		dbx.DriverMySQL: {"default_password_lifetime", "password_history", "password_reuse_interval", "password_require_current",
+			"validate_password.length", "validate_password_policy", "old_passwords", "innodb_ft_max_token_size",
+			"ngram_token_size", "foreign_key_checks", "key_buffer_size", "ssl_key", "sha256_password_private_key_path",
+			"caching_sha2_password_private_key_path", "secure_file_priv", "max_connections"},
+		dbx.DriverMSSQL:  {"cost threshold for parallelism", "max server memory (MB)", "contained database authentication"},
+		dbx.DriverOracle: {"remote_login_passwordfile", "sec_case_sensitive_logon", "open_cursors", "wallet_root"},
+	} {
+		for _, name := range names {
+			if sensitiveSetting(driver, name) {
+				t.Errorf("%s %s is hidden from a viewer and holds no credential", driver, name)
+			}
+		}
+	}
+}
+
+// The snapshot route answered with the dashboard's own pool before there was
+// a snapshot, and still answers when the server refuses one: unsupported, with
+// the engine's refusal as the reason and the pool beside it.
+func TestStatsAnswersWithThePoolWhenTheSnapshotIsRefused(t *testing.T) {
+	h := newOpsHarness(t)
+	if rec := h.viewer.do(http.MethodGet, h.base+"/stats", "", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"supported":true`) {
+		t.Fatalf("stats before: %d %s", rec.Code, rec.Body.String())
+	}
+	// The pool is open; what it reads from is no longer a database.
+	if err := os.WriteFile(h.path, []byte(strings.Repeat("this is not a database\n", 400)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := h.viewer.do(http.MethodGet, h.base+"/stats", "", nil)
+	var stats struct {
+		Supported bool               `json:"supported"`
+		Reason    string             `json:"reason"`
+		At        time.Time          `json:"at"`
+		Driver    string             `json:"driver"`
+		Counters  map[string]float64 `json:"counters"`
+		Gauges    map[string]float64 `json:"gauges"`
+		Pool      *struct {
+			MaxOpen int `json:"maxOpen"`
+		} `json:"pool"`
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stats of a server that refuses the snapshot: %d %s", rec.Code, rec.Body.String())
+	}
+	decodeOps(t, rec, &stats)
+	if stats.Supported || stats.Reason == "" || stats.At.IsZero() || stats.Driver != "sqlite" ||
+		stats.Counters == nil || stats.Gauges == nil || stats.Pool == nil {
+		t.Errorf("stats: %s", rec.Body.String())
 	}
 }
 

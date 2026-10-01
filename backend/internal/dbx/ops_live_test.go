@@ -3,6 +3,8 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +49,31 @@ func opsOpen(t *testing.T, driver Driver, dsn, env string) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// opsLiveAny is opsLive for an engine the environment may name under either of
+// two variables: this file's own, which wins, or the shared fixture's.
+func opsLiveAny(t *testing.T, driver Driver, envs ...string) (*sql.DB, string) {
+	t.Helper()
+	for _, env := range envs {
+		if dsn := os.Getenv(env); dsn != "" {
+			return opsOpen(t, driver, dsn, env), dsn
+		}
+	}
+	t.Skipf("none of %s is set", strings.Join(envs, ", "))
+	return nil, ""
+}
+
+// opsSQLServer opens a database of this file's own on the SQL Server the
+// environment names, and returns the connection string that opened it. The
+// fixture is shared and its connection string opens master; nothing here is
+// made there.
+func opsSQLServer(t *testing.T) (*sql.DB, string) {
+	t.Helper()
+	server, dsn := opsLiveAny(t, DriverMSSQL, "JD_TEST_B3_MSSQL_DSN", "JD_TEST_MSSQL_DSN")
+	opsMustExec(t, server, `IF DB_ID('jd_b3') IS NULL CREATE DATABASE jd_b3`)
+	own := DSNForDatabase(DriverMSSQL, dsn, "jd_b3")
+	return opsOpen(t, DriverMSSQL, own, "the jd_b3 database"), own
 }
 
 // mysqlOpsServers is every MySQL-family server the environment names: the
@@ -1202,6 +1229,114 @@ func TestLiveOpsPostgresAdvisor(t *testing.T) {
 	}
 }
 
+// A fix the advisor hands over has to be one the server accepts and that makes
+// the finding go away: each of these is taken from the report, run as it
+// stands, and the report read again.
+func TestLiveOpsPostgresAdvisorFixesRun(t *testing.T) {
+	db, _ := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
+	ctx := t.Context()
+	drop := func() {
+		for _, table := range []string{"jd_b3_fix_keyed", "jd_b3_fix_bare", "jd_b3_fix_serial", "jd_b3_fix_identity"} {
+			db.Exec(`DROP TABLE IF EXISTS ` + table)
+		}
+		db.Exec(`DROP SEQUENCE IF EXISTS jd_b3_fix_capped`)
+	}
+	drop()
+	t.Cleanup(drop)
+	opsMustExec(t, db,
+		// A key in everything but name, and a table with nothing to be one.
+		`CREATE TABLE jd_b3_fix_keyed (code text NOT NULL, note text)`,
+		`CREATE UNIQUE INDEX jd_b3_fix_keyed_code ON jd_b3_fix_keyed (code)`,
+		`CREATE TABLE jd_b3_fix_bare (v int, note text)`,
+		`INSERT INTO jd_b3_fix_bare VALUES (1, 'a'), (2, 'b')`,
+		// Three sequences near their ceilings: a serial column's, an identity
+		// column's, and a bigint one somebody capped by hand.
+		`CREATE TABLE jd_b3_fix_serial (id serial PRIMARY KEY, v int)`,
+		`SELECT setval('jd_b3_fix_serial_id_seq', 2000000000)`,
+		`CREATE TABLE jd_b3_fix_identity (id int GENERATED ALWAYS AS IDENTITY PRIMARY KEY, v int)`,
+		`SELECT setval('jd_b3_fix_identity_id_seq', 2100000000)`,
+		`CREATE SEQUENCE jd_b3_fix_capped MAXVALUE 1000`,
+		`SELECT setval('jd_b3_fix_capped', 900)`)
+
+	find := func(id string) (Advice, map[string]AdviceTarget) {
+		t.Helper()
+		report, err := Advise(ctx, db, DriverPostgres, "public")
+		if err != nil {
+			t.Fatal(err)
+		}
+		targets := map[string]AdviceTarget{}
+		for _, f := range report.Findings {
+			if f.ID != id {
+				continue
+			}
+			for _, target := range f.Targets {
+				if strings.HasPrefix(target.Name, "jd_b3_fix_") {
+					targets[target.Name] = target
+				}
+			}
+			return f, targets
+		}
+		return Advice{}, targets
+	}
+	runFix := func(target AdviceTarget) {
+		t.Helper()
+		if target.SQL == "" {
+			t.Fatalf("%s carries no fix", target.Name)
+		}
+		for _, stmt := range strings.Split(target.SQL, "\n") {
+			opsMustExec(t, db, stmt)
+		}
+	}
+
+	finding, keyless := find("no-primary-key")
+	if keyed := keyless["jd_b3_fix_keyed"]; keyed.SQL != `ALTER TABLE "public"."jd_b3_fix_keyed" ADD CONSTRAINT "jd_b3_fix_keyed_pkey" PRIMARY KEY USING INDEX "jd_b3_fix_keyed_code";` {
+		t.Errorf("a table with a unique index: %+v", keyed)
+	}
+	if bare := keyless["jd_b3_fix_bare"]; bare.SQL != `ALTER TABLE "public"."jd_b3_fix_bare" ADD COLUMN id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY;` {
+		t.Errorf("a table with nothing to be a key: %+v", bare)
+	}
+	if !strings.Contains(finding.SQL, "jd_b3_fix_keyed_pkey") || !strings.Contains(finding.SQL, "jd_b3_fix_bare") {
+		t.Errorf("the finding's own fix is %q", finding.SQL)
+	}
+	runFix(keyless["jd_b3_fix_keyed"])
+	runFix(keyless["jd_b3_fix_bare"])
+	// The insert the application already makes, naming no columns, still works.
+	opsMustExec(t, db, `INSERT INTO jd_b3_fix_bare VALUES (3, 'c')`)
+	if _, keyless = find("no-primary-key"); len(keyless) != 0 {
+		t.Errorf("still without a key after the fix: %v", keyless)
+	}
+
+	_, sequences := find("sequence-exhaustion")
+	if len(sequences) != 3 {
+		t.Fatalf("sequences near their ceiling: %v", sequences)
+	}
+	if got := sequences["jd_b3_fix_serial_id_seq"]; got.Table != "jd_b3_fix_serial" ||
+		got.SQL != "ALTER TABLE \"public\".\"jd_b3_fix_serial\" ALTER COLUMN \"id\" TYPE bigint;\nALTER SEQUENCE \"public\".\"jd_b3_fix_serial_id_seq\" AS bigint;" {
+		t.Errorf("serial: %+v", got)
+	}
+	if got := sequences["jd_b3_fix_capped"]; got.SQL != `ALTER SEQUENCE "public"."jd_b3_fix_capped" NO MAXVALUE;` {
+		t.Errorf("capped: %+v", got)
+	}
+	for _, target := range sequences {
+		runFix(target)
+	}
+	if _, sequences = find("sequence-exhaustion"); len(sequences) != 0 {
+		t.Errorf("still near their ceiling after the fix: %v", sequences)
+	}
+	for _, table := range []string{"jd_b3_fix_serial", "jd_b3_fix_identity"} {
+		var column, sequence string
+		if err := db.QueryRow(`
+		  SELECT format_type(a.atttypid, NULL), s.data_type::text
+		  FROM pg_attribute a, pg_sequences s
+		  WHERE a.attrelid = $1::regclass AND a.attname = 'id' AND s.sequencename = $1 || '_id_seq'`, table).Scan(&column, &sequence); err != nil {
+			t.Fatal(err)
+		}
+		if column != "bigint" || sequence != "bigint" {
+			t.Errorf("%s: column %s, sequence %s", table, column, sequence)
+		}
+	}
+}
+
 // --- MySQL / MariaDB ---------------------------------------------------------
 
 func TestLiveOpsMySQL(t *testing.T) {
@@ -1762,6 +1897,53 @@ func TestLiveOpsMySQL(t *testing.T) {
 					}
 				}
 			})
+
+			// A table that is keyed in everything but name is offered the
+			// statement that names the key; one that is not is offered none,
+			// because a new column would break every INSERT that names no
+			// columns.
+			t.Run("advisor_fix_runs", func(t *testing.T) {
+				opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_fix_keyed`, `DROP TABLE IF EXISTS jd_b3_fix_bare`,
+					`CREATE TABLE jd_b3_fix_keyed (tenant INT NOT NULL, code VARCHAR(20) NOT NULL, note VARCHAR(20),
+					   UNIQUE KEY jd_b3_fix_keyed_code (tenant, code)) ENGINE=InnoDB`,
+					`CREATE TABLE jd_b3_fix_bare (v INT, note VARCHAR(20), UNIQUE KEY jd_b3_fix_bare_note (note)) ENGINE=InnoDB`)
+				t.Cleanup(func() {
+					db.Exec(`DROP TABLE IF EXISTS jd_b3_fix_keyed`)
+					db.Exec(`DROP TABLE IF EXISTS jd_b3_fix_bare`)
+				})
+				keyless := func() map[string]AdviceTarget {
+					t.Helper()
+					report, err := Advise(ctx, db, DriverMySQL, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					out := map[string]AdviceTarget{}
+					for _, f := range report.Findings {
+						if f.ID == "no-primary-key" {
+							for _, target := range f.Targets {
+								out[target.Name] = target
+							}
+						}
+					}
+					return out
+				}
+				found := keyless()
+				keyed, isKeyless := found["jd_b3_fix_keyed"]
+				// InnoDB already treats a unique index over NOT NULL columns as
+				// the clustered key, and information_schema may report it as one.
+				if isKeyless {
+					if !strings.HasSuffix(keyed.SQL, "ADD PRIMARY KEY (`tenant`, `code`);") || !strings.Contains(keyed.SQL, "`jd_b3_fix_keyed`") {
+						t.Fatalf("a table with a unique index: %+v", keyed)
+					}
+					opsMustExec(t, db, strings.TrimSuffix(keyed.SQL, ";"))
+				}
+				if bare, ok := found["jd_b3_fix_bare"]; !ok || bare.SQL != "" {
+					t.Errorf("a table whose only unique column may be NULL: %+v (found %v)", bare, ok)
+				}
+				if _, still := keyless()["jd_b3_fix_keyed"]; still {
+					t.Error("still without a key after the fix")
+				}
+			})
 		})
 	}
 }
@@ -2200,13 +2382,25 @@ func TestLiveOpsClickHouse(t *testing.T) {
 		t.Errorf("short list: %d %v", len(short), err)
 	}
 
-	opsMustExec(t, db, `SELECT count() FROM jd_b3_ops_events WHERE v = '17'`, `SYSTEM FLUSH LOGS`)
-	statements, err := TopStatements(ctx, db, DriverClickHouse, StatementsOptions{Sort: StatementsByCalls})
+	// The query log keeps each execution as it was sent; the list shows the
+	// shape, with a ? where each literal was.
+	opsMustExec(t, db, `SELECT count() FROM jd_b3_ops_events WHERE v = 'jd-b3-literal-17' AND id > 424242`, `SYSTEM FLUSH LOGS`)
+	statements, err := TopStatements(ctx, db, DriverClickHouse, StatementsOptions{Sort: StatementsByCalls, Limit: 200})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !statements.Supported || statements.Resettable || len(statements.Statements) == 0 || statements.Since == nil {
 		t.Errorf("statements: %+v", statements)
+	}
+	probe := false
+	for _, st := range statements.Statements {
+		if strings.Contains(st.Query, "jd-b3-literal-17") || strings.Contains(st.Query, "424242") {
+			t.Errorf("a literal reached the list: %q", st.Query)
+		}
+		probe = probe || (strings.Contains(st.Query, "jd_b3_ops_events") && strings.Contains(st.Query, "?"))
+	}
+	if !probe {
+		t.Errorf("the probe is not in the list by its shape: %+v", statements.Statements)
 	}
 
 	var user string
@@ -2242,10 +2436,10 @@ func TestLiveOpsClickHouse(t *testing.T) {
 
 // --- SQL Server --------------------------------------------------------------
 
-// SQL Server has no place among the shared fixtures, so this runs against a
-// server named by a variable of this file's own and skips without one.
+// The SQL Server fixture is shared by every stream, so this works in a
+// database of its own and puts back the one server option it changes.
 func TestLiveOpsSQLServer(t *testing.T) {
-	db, _ := opsLive(t, DriverMSSQL, "JD_TEST_B3_MSSQL_DSN")
+	db, dsn := opsSQLServer(t)
 	ctx := t.Context()
 	opsMustExec(t, db, `IF OBJECT_ID('dbo.jd_b3_ops_child') IS NOT NULL DROP TABLE dbo.jd_b3_ops_child`,
 		`IF OBJECT_ID('dbo.jd_b3_ops_t') IS NOT NULL DROP TABLE dbo.jd_b3_ops_t`,
@@ -2409,8 +2603,11 @@ func TestLiveOpsSQLServer(t *testing.T) {
 		if len(all) < 30 {
 			t.Fatalf("%d configuration options", len(all))
 		}
+		by := map[string]Setting{}
 		for _, s := range all {
-			if s.Editable || s.Type != "integer" {
+			by[s.Name] = s
+			// sa holds ALTER SETTINGS, so every option can be set from here.
+			if !s.Editable || s.Type != "integer" || s.Min == "" || s.Max == "" {
 				t.Fatalf("option: %+v", s)
 			}
 		}
@@ -2418,8 +2615,227 @@ func TestLiveOpsSQLServer(t *testing.T) {
 		if err != nil || len(short) == 0 || len(short) > len(mssqlSettingNames) {
 			t.Errorf("short list: %d %v", len(short), err)
 		}
-		if _, err := ChangeSetting(ctx, db, DriverMSSQL, "max degree of parallelism", "2", false); err == nil {
-			t.Error("a SQL Server option was changed")
+		if !SettingsWritable(DriverMSSQL) {
+			t.Error("SQL Server options are reported as not writable")
+		}
+
+		// An advanced option, on a server that hides them: it is revealed for
+		// the change and hidden again after it.
+		const option = "cost threshold for parallelism"
+		inUse := func(name string) string {
+			t.Helper()
+			var v string
+			if err := db.QueryRow(`SELECT CAST(value_in_use AS NVARCHAR(64)) FROM sys.configurations WHERE name = @p1`, name).Scan(&v); err != nil {
+				t.Fatal(err)
+			}
+			return v
+		}
+		before, shown := by[option].Value, inUse("show advanced options")
+		t.Cleanup(func() {
+			db.Exec(`EXEC sys.sp_configure N'show advanced options', 1`)
+			db.Exec(`RECONFIGURE`)
+			db.Exec(`EXEC sys.sp_configure N'` + option + `', ` + before)
+			db.Exec(`EXEC sys.sp_configure N'show advanced options', ` + shown)
+			db.Exec(`RECONFIGURE`)
+		})
+		for value, want := range map[string]string{"99999": "at most 32767", "-1": "at least 0", "seven": "takes a number", "7; SHUTDOWN": "takes a number"} {
+			_, err := ChangeSetting(ctx, db, DriverMSSQL, option, value, false)
+			if _, refused := err.(ErrSettingRequest); !refused || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s = %q: %v, want a refusal with %q", option, value, err, want)
+			}
+		}
+		changed, err := ChangeSetting(ctx, db, DriverMSSQL, option, "7", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantStatements := []string{"EXEC sys.sp_configure N'cost threshold for parallelism', 7", "RECONFIGURE"}
+		if shown == "0" {
+			wantStatements = append(append([]string{"EXEC sys.sp_configure N'show advanced options', 1", "RECONFIGURE"}, wantStatements...),
+				"EXEC sys.sp_configure N'show advanced options', 0", "RECONFIGURE")
+		}
+		if changed.Name != option || changed.Value != "7" || !changed.Persisted || changed.RestartRequired ||
+			strings.Join(changed.Statements, " | ") != strings.Join(wantStatements, " | ") {
+			t.Errorf("change: %+v", changed)
+		}
+		if got := inUse(option); got != "7" {
+			t.Errorf("the server runs with %s", got)
+		}
+		if got := inUse("show advanced options"); got != shown {
+			t.Errorf("show advanced options was %s and is now %s", shown, got)
+		}
+		// SQL Server publishes no default to go back to.
+		if _, err := ChangeSetting(ctx, db, DriverMSSQL, option, "", true); err == nil {
+			t.Error("an option was reset to a default the server does not record")
+		} else if _, refused := err.(ErrSettingRequest); !refused {
+			t.Errorf("reset: %v", err)
+		}
+		if back, err := ChangeSetting(ctx, db, DriverMSSQL, option, before, false); err != nil || back.Value != before {
+			t.Errorf("putting it back: %+v %v", back, err)
+		}
+		// An option that is not advanced takes the two statements and no more.
+		plain, err := ChangeSetting(ctx, db, DriverMSSQL, "backup compression default", by["backup compression default"].Value, false)
+		if err != nil || len(plain.Statements) != 2 {
+			t.Errorf("a plain option: %+v %v", plain, err)
+		}
+		if _, err := ChangeSetting(ctx, db, DriverMSSQL, "no such option", "1", false); err == nil {
+			t.Error("an option the server does not have was set")
+		}
+	})
+
+	t.Run("maintenance", func(t *testing.T) {
+		run := func(req MaintenanceRequest) *MaintenanceResult {
+			t.Helper()
+			out, err := RunMaintenance(ctx, db, DriverMSSQL, "", req)
+			if err != nil {
+				t.Fatalf("%+v: %v", req, err)
+			}
+			if !out.OK || out.Duration == "" || len(out.Statements) != 1 {
+				t.Fatalf("%+v: %+v", req, out)
+			}
+			return out
+		}
+		lines := func(out *MaintenanceResult) string { return strings.Join(out.Output, "\n") }
+
+		stats := run(MaintenanceRequest{Action: "update_statistics", Table: "jd_b3_ops_t"})
+		if stats.Statements[0] != "UPDATE STATISTICS [dbo].[jd_b3_ops_t]" || !strings.Contains(lines(stats), "jd_b3_ops_t_b: updated ") ||
+			!strings.Contains(lines(stats), ", 3 rows, 3 sampled") {
+			t.Errorf("update statistics: %+v", stats)
+		}
+		whole := run(MaintenanceRequest{Action: "update_statistics"})
+		if whole.Statements[0] != "EXEC sys.sp_updatestats" || len(whole.Output) != 1 || !strings.Contains(whole.Output[0], "updated") {
+			t.Errorf("sp_updatestats: %+v", whole)
+		}
+		reorganized := run(MaintenanceRequest{Action: "reorganize", Table: "jd_b3_ops_t"})
+		if reorganized.Statements[0] != "ALTER INDEX ALL ON [dbo].[jd_b3_ops_t] REORGANIZE" || !strings.Contains(lines(reorganized), "% fragmented over ") ||
+			!strings.Contains(lines(reorganized), "jd_b3_ops_t_ba: ") {
+			t.Errorf("reorganize: %+v", reorganized)
+		}
+		one := run(MaintenanceRequest{Action: "rebuild", Schema: "dbo", Table: "jd_b3_ops_t", Index: "jd_b3_ops_t_b"})
+		if one.Statements[0] != "ALTER INDEX [jd_b3_ops_t_b] ON [dbo].[jd_b3_ops_t] REBUILD" {
+			t.Errorf("rebuild of one index: %+v", one)
+		}
+		// Online is an edition's feature; the fixture is a Developer edition.
+		online := run(MaintenanceRequest{Action: "rebuild", Table: "jd_b3_ops_t", Options: MaintenanceOptions{Online: true}})
+		if online.Statements[0] != "ALTER INDEX ALL ON [dbo].[jd_b3_ops_t] REBUILD WITH (ONLINE = ON)" {
+			t.Errorf("online rebuild: %+v", online)
+		}
+		table := run(MaintenanceRequest{Action: "check", Table: "jd_b3_ops_t"})
+		if table.Statements[0] != "DBCC CHECKTABLE (N'[dbo].[jd_b3_ops_t]') WITH TABLERESULTS" || !strings.Contains(lines(table), "jd_b3_ops_t") ||
+			!strings.Contains(lines(table), "3 rows") {
+			t.Errorf("checktable: %+v", table)
+		}
+		database := run(MaintenanceRequest{Action: "check"})
+		if database.Statements[0] != "DBCC CHECKDB WITH TABLERESULTS" ||
+			!strings.Contains(lines(database), "CHECKDB found 0 allocation errors and 0 consistency errors in database 'jd_b3'") {
+			t.Errorf("checkdb: statements %v, %d lines, last %q", database.Statements, len(database.Output), database.Output[len(database.Output)-1])
+		}
+
+		// The request's own mistakes are refusals; the engine's are its words.
+		for _, bad := range []MaintenanceRequest{
+			{Action: "rebuild"}, {Action: "reorganize"}, {Action: "vacuum", Table: "jd_b3_ops_t"},
+			{Action: "update_statistics", Schema: "dbo"}, {Action: "check", Table: "jd_b3_ops_t", Index: "jd_b3_ops_t_b"},
+		} {
+			if _, err := RunMaintenance(ctx, db, DriverMSSQL, "", bad); err == nil {
+				t.Errorf("%+v ran", bad)
+			} else if _, refused := err.(ErrMaintenanceRequest); !refused {
+				t.Errorf("%+v: %v is not a request refusal", bad, err)
+			}
+		}
+		if _, err := RunMaintenance(ctx, db, DriverMSSQL, "", MaintenanceRequest{Action: "rebuild", Table: "jd_b3_no_such_table"}); err == nil {
+			t.Error("the indexes of a table that is not there were rebuilt")
+		} else if _, refused := err.(ErrMaintenanceRequest); refused {
+			t.Errorf("the engine's refusal was reported as the request's: %v", err)
+		}
+	})
+
+	// An offline rebuild waits for the table. Closing the request has to end
+	// the wait on the server, not only in this process.
+	t.Run("maintenance_stops_with_the_request", func(t *testing.T) {
+		holder, err := db.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer holder.Close()
+		if _, err := holder.ExecContext(ctx, `BEGIN TRANSACTION`); err != nil {
+			t.Fatal(err)
+		}
+		defer holder.ExecContext(context.Background(), `IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION`)
+		if _, err := holder.ExecContext(ctx, `UPDATE dbo.jd_b3_ops_t SET b = 30 WHERE id = 3`); err != nil {
+			t.Fatal(err)
+		}
+		rebuilding := func() int {
+			t.Helper()
+			var n int
+			if err := db.QueryRow(`
+			  SELECT COUNT(*) FROM sys.dm_exec_requests r CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) q
+			  WHERE q.text LIKE 'ALTER INDEX ALL ON %jd_b3_ops_t% REBUILD' AND r.session_id <> @@SPID`).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		request, abandon := context.WithCancel(ctx)
+		defer abandon()
+		done := make(chan error, 1)
+		go func() {
+			_, err := RunMaintenance(request, db, DriverMSSQL, "", MaintenanceRequest{Action: "rebuild", Table: "jd_b3_ops_t"})
+			done <- err
+		}()
+		waitFor(t, "the rebuild to be waiting on the table", func() bool { return rebuilding() == 1 })
+		abandon()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Error("an abandoned rebuild reported success")
+			}
+		case <-time.After(15 * time.Second):
+			t.Fatal("the abandoned rebuild never returned")
+		}
+		waitFor(t, "the rebuild to stop on the server", func() bool { return rebuilding() == 0 })
+	})
+
+	// The plan cache keeps a statement as it was sent; what is listed is its
+	// shape.
+	t.Run("statements", func(t *testing.T) {
+		const probe = `SELECT COUNT(*) FROM dbo.jd_b3_ops_t t JOIN dbo.jd_b3_ops_t u ON u.id = t.id WHERE t.a = 'jd-b3-literal' AND u.b = 424242`
+		for i := 0; i < 3; i++ {
+			opsMustExec(t, db, probe)
+		}
+		var cached int
+		if err := db.QueryRow(`
+		  SELECT COUNT(*) FROM sys.dm_exec_query_stats s CROSS APPLY sys.dm_exec_sql_text(s.sql_handle) q
+		  WHERE q.text LIKE '%jd-b3-literal%' AND q.text NOT LIKE '%dm_exec_query_stats%'`).Scan(&cached); err != nil || cached == 0 {
+			t.Fatalf("the probe is not in the plan cache with its literal (%d, %v)", cached, err)
+		}
+		report, err := TopStatements(ctx, db, DriverMSSQL, StatementsOptions{Sort: StatementsByCalls, Limit: 200})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !report.Supported || report.Resettable || report.Sort != StatementsByCalls || report.TotalMs <= 0 {
+			t.Fatalf("report: supported %v resettable %v sort %s total %v reason %q", report.Supported, report.Resettable, report.Sort, report.TotalMs, report.Reason)
+		}
+		var mine *Statement
+		for i := range report.Statements {
+			st := &report.Statements[i]
+			if strings.Contains(st.Query, "jd-b3-literal") || strings.Contains(st.Query, "424242") {
+				t.Errorf("a literal reached the list: %q", st.Query)
+			}
+			if st.Share < 0 || st.Share > 1 || st.ID == "" {
+				t.Errorf("statement: %+v", st)
+			}
+			if strings.Contains(st.Query, "WHERE t.a = ? AND u.b = ?") {
+				mine = st
+			}
+		}
+		if mine == nil || mine.Calls < 3 || mine.TotalMs < 0 || mine.MeanMs < 0 || mine.Rows < 3 {
+			t.Errorf("the probe: %+v", mine)
+		}
+		for _, sort := range StatementSorts() {
+			if sorted, err := TopStatements(ctx, db, DriverMSSQL, StatementsOptions{Sort: sort, Limit: 3}); err != nil || !sorted.Supported || len(sorted.Statements) > 3 {
+				t.Errorf("sort %s: %+v %v", sort, sorted, err)
+			}
+		}
+		if _, err := ResetStatements(ctx, db, DriverMSSQL); err != ErrUnsupported {
+			t.Errorf("reset: %v", err)
 		}
 	})
 
@@ -2549,11 +2965,90 @@ func TestLiveOpsSQLServer(t *testing.T) {
 		if sa, ok := by["sa-enabled"]; !ok || sa.SQL != "ALTER LOGIN [sa] DISABLE;" {
 			t.Errorf("sa finding: %+v", sa)
 		}
-		if _, ok := by["no-primary-key"]; !ok {
-			t.Errorf("the keyless table was not found: %+v", report.Findings)
+		// The keyless table has nothing that could be its key, so the fix is a
+		// new column — and it is one the server accepts as written.
+		keyless, ok := by["no-primary-key"]
+		if !ok || !strings.Contains(keyless.SQL, "ALTER TABLE [dbo].[jd_b3_ops_child] ADD id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY;") {
+			t.Fatalf("the keyless table: %+v in %+v", keyless, report.Findings)
 		}
+		opsMustExec(t, db, `INSERT INTO dbo.jd_b3_ops_child VALUES (1, 1)`,
+			"ALTER TABLE [dbo].[jd_b3_ops_child] ADD id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY",
+			// The insert an application already makes, naming no columns.
+			`INSERT INTO dbo.jd_b3_ops_child VALUES (2, 2)`)
 		if fk, ok := by["unindexed-foreign-key"]; !ok || !strings.Contains(fk.SQL, "ON [dbo].[jd_b3_ops_child] ([parent])") {
 			t.Errorf("unindexed foreign key: %+v", fk)
+		}
+		again, err := Advise(ctx, db, DriverMSSQL, "dbo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range again.Findings {
+			if f.ID == "no-primary-key" && strings.Contains(strings.Join(f.Objects, ","), "jd_b3_ops_child") {
+				t.Errorf("still without a key after the fix: %+v", f)
+			}
+		}
+	})
+
+	// An application's login: a user in its own database and nothing on the
+	// server. What it may not read is a sentence naming the permission, not an
+	// error and not an empty list that reads as "nothing is waiting".
+	t.Run("ordinary_login", func(t *testing.T) {
+		drop := func() {
+			db.Exec(`IF USER_ID('jd_b3_ops_plain') IS NOT NULL DROP USER [jd_b3_ops_plain]`)
+			db.Exec(`IF SUSER_ID('jd_b3_ops_plain') IS NOT NULL DROP LOGIN [jd_b3_ops_plain]`)
+		}
+		drop()
+		t.Cleanup(drop)
+		opsMustExec(t, db, `CREATE LOGIN [jd_b3_ops_plain] WITH PASSWORD = N'Jd-b3-plain#2026', CHECK_POLICY = OFF`,
+			`CREATE USER [jd_b3_ops_plain] FOR LOGIN [jd_b3_ops_plain]`,
+			`ALTER ROLE db_datareader ADD MEMBER [jd_b3_ops_plain]`)
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed.User = url.UserPassword("jd_b3_ops_plain", "Jd-b3-plain#2026")
+		plain := opsOpen(t, DriverMSSQL, parsed.String(), "the ordinary login")
+
+		locks, err := ListLocks(ctx, plain, DriverMSSQL)
+		if err != nil || locks.Supported || !strings.Contains(locks.Reason, "VIEW SERVER STATE") || locks.Waits == nil {
+			t.Errorf("locks: %+v %v", locks, err)
+		}
+		statements, err := TopStatements(ctx, plain, DriverMSSQL, StatementsOptions{})
+		if err != nil || statements.Supported || !strings.Contains(statements.Reason, "VIEW SERVER STATE") || statements.Statements == nil {
+			t.Errorf("statements: %+v %v", statements, err)
+		}
+		tables, err := ReadTableStats(ctx, plain, DriverMSSQL, StatsOptions{})
+		if err != nil || tables.Supported || !strings.Contains(tables.Reason, "VIEW DATABASE STATE") || tables.Tables == nil {
+			t.Errorf("tablestats: %+v %v", tables, err)
+		}
+		indexes, err := ReadIndexStats(ctx, plain, DriverMSSQL, StatsOptions{})
+		if err != nil || indexes.Supported || !strings.Contains(indexes.Reason, "VIEW DATABASE STATE") || indexes.Indexes == nil {
+			t.Errorf("indexstats: %+v %v", indexes, err)
+		}
+		// The snapshot keeps the part it may read and names the rest.
+		stats, err := ReadServerStats(ctx, plain, DriverMSSQL)
+		if err != nil || stats.Version == "" || len(stats.Notes) == 0 {
+			t.Errorf("stats: %+v %v", stats, err)
+		}
+		// The options it may read; none is offered for editing, and a change
+		// is refused before the server is asked.
+		settings, err := ListSettings(ctx, plain, DriverMSSQL, true)
+		if err != nil || len(settings) < 30 {
+			t.Fatalf("settings: %d %v", len(settings), err)
+		}
+		for _, s := range settings {
+			if s.Editable {
+				t.Fatalf("a login without ALTER SETTINGS is offered %+v", s)
+			}
+		}
+		if _, err := ChangeSetting(ctx, plain, DriverMSSQL, "cost threshold for parallelism", "9", false); err == nil {
+			t.Error("a login without ALTER SETTINGS changed an option")
+		} else if _, refused := err.(ErrSettingRequest); !refused {
+			t.Errorf("the refusal reached the server: %v", err)
+		}
+		// Maintenance it has no right to is the engine's refusal, in its words.
+		if _, err := RunMaintenance(ctx, plain, DriverMSSQL, "", MaintenanceRequest{Action: "rebuild", Table: "jd_b3_ops_t"}); err == nil {
+			t.Error("a reader rebuilt an index")
 		}
 	})
 
@@ -2563,21 +3058,23 @@ func TestLiveOpsSQLServer(t *testing.T) {
 	if rep, err := ReadReplication(ctx, db, DriverMSSQL); err != nil || rep.Supported {
 		t.Errorf("replication: %+v %v", rep, err)
 	}
-	if actions := MaintenanceActionsFor(DriverMSSQL); len(actions) != 0 {
-		t.Errorf("maintenance: %+v", actions)
-	}
 }
 
 // --- Oracle ------------------------------------------------------------------
 
-// Oracle has no place among the shared fixtures either. The administrative
-// DSN is an account that may read the V$ views; the plain one is an ordinary
-// application schema, which may not, and has to be told so rather than fail.
+// The Oracle fixture is shared by every stream, so everything made here
+// carries this stream's prefix and every parameter changed is put back. The
+// administrative DSN is an account that may read the V$ views; the plain one
+// is an ordinary application schema, which may not, and has to be told so
+// rather than fail.
 func TestLiveOpsOracle(t *testing.T) {
-	db, _ := opsLive(t, DriverOracle, "JD_TEST_B3_ORACLE_ADMIN_DSN")
+	db, _ := opsLiveAny(t, DriverOracle, "JD_TEST_B3_ORACLE_ADMIN_DSN", "JD_TEST_ORACLE_ADMIN_DSN")
 	ctx := t.Context()
 	db.Exec(`DROP TABLE jd_b3_ops_t PURGE`)
-	opsMustExec(t, db, `CREATE TABLE jd_b3_ops_t (id NUMBER PRIMARY KEY, v NUMBER)`, `INSERT INTO jd_b3_ops_t VALUES (1, 0)`)
+	opsMustExec(t, db, `CREATE TABLE jd_b3_ops_t (id NUMBER PRIMARY KEY, v NUMBER, w VARCHAR2(20))`,
+		`CREATE INDEX jd_b3_ops_t_v ON jd_b3_ops_t (v)`, `CREATE INDEX jd_b3_ops_t_vw ON jd_b3_ops_t (v, w)`,
+		`CREATE INDEX jd_b3_ops_t_f ON jd_b3_ops_t (UPPER(w))`,
+		`INSERT INTO jd_b3_ops_t VALUES (1, 0, 'a')`)
 	t.Cleanup(func() { db.Exec(`DROP TABLE jd_b3_ops_t PURGE`) })
 
 	t.Run("stats", func(t *testing.T) {
@@ -2659,6 +3156,38 @@ func TestLiveOpsOracle(t *testing.T) {
 			}
 			seen[s.PID] = true
 		}
+		// The same wait, from the lock views: who, behind whom, on what.
+		locks, err := ListLocks(ctx, db, DriverOracle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !locks.Supported || locks.Reason != "" {
+			t.Fatalf("locks: %+v", locks)
+		}
+		var wait *LockWait
+		for i := range locks.Waits {
+			if locks.Waits[i].WaitingPID == waiterPID {
+				wait = &locks.Waits[i]
+			}
+		}
+		if wait == nil || wait.BlockingPID != holderPID || !strings.HasSuffix(wait.Object, ".JD_B3_OPS_T") ||
+			wait.LockType != "row (transaction)" || wait.Mode != "exclusive" || wait.BlockingState != "idle in transaction" ||
+			!strings.Contains(wait.WaitingQuery, "jd_b3_ops_t") || !strings.Contains(wait.BlockingQuery, "jd_b3_ops_t") ||
+			wait.WaitingUser == "" || wait.BlockingUser == "" {
+			t.Fatalf("wait: %+v in %+v", wait, locks.Waits)
+		}
+		var held, asked bool
+		for _, l := range locks.Locks {
+			if l.PID == holderPID && l.Granted && l.LockType == "table" && strings.HasSuffix(l.Object, ".JD_B3_OPS_T") && l.Mode == "row exclusive" {
+				held = true
+			}
+			if l.PID == waiterPID && !l.Granted && l.LockType == "row (transaction)" && l.Mode == "exclusive" {
+				asked = true
+			}
+		}
+		if !held || !asked {
+			t.Errorf("the lock table lacks the holder's table lock (%v) or the waiter's request (%v): %+v", held, asked, locks.Locks)
+		}
 		if err := CancelQuery(ctx, db, DriverOracle, waiterPID); err != nil {
 			t.Fatal(err)
 		}
@@ -2687,20 +3216,327 @@ func TestLiveOpsOracle(t *testing.T) {
 		by := map[string]Setting{}
 		for _, s := range all {
 			by[s.Name] = s
-			if s.Editable {
-				t.Fatalf("an Oracle parameter is editable: %+v", s)
+			// Only what the running instance can change is offered.
+			if s.Editable && s.Context != "immediate" && s.Context != "deferred" {
+				t.Fatalf("a parameter read only at start is editable: %+v", s)
 			}
 		}
 		if s := by["processes"]; s.Type != "integer" || s.Value == "" || s.Description == "" {
 			t.Errorf("processes: %+v", s)
 		}
 		// The block size is fixed when the database is created.
-		if s := by["db_block_size"]; !s.RestartRequired || s.Context != "false" {
+		if s := by["db_block_size"]; !s.RestartRequired || s.Context != "false" || s.Editable {
 			t.Errorf("db_block_size: %+v", s)
+		}
+		if s := by["undo_retention"]; !s.Editable || s.Context != "immediate" || s.Type != "integer" {
+			t.Fatalf("undo_retention: %+v", s)
+		}
+		if s := by["sort_area_size"]; !s.Editable || s.Context != "deferred" {
+			t.Errorf("sort_area_size: %+v", s)
+		}
+		// Inside a pluggable database a parameter the container may not set for
+		// itself is listed and not offered.
+		var container int
+		if err := db.QueryRow(`SELECT TO_NUMBER(SYS_CONTEXT('USERENV', 'CON_ID')) FROM dual`).Scan(&container); err == nil && container > 1 {
+			if s := by["processes"]; s.Editable {
+				t.Errorf("processes is offered inside a pluggable database: %+v", s)
+			}
+			if _, err := ChangeSetting(ctx, db, DriverOracle, "processes", "300", false); err == nil {
+				t.Error("processes was changed from inside a pluggable database")
+			}
 		}
 		short, err := ListSettings(ctx, db, DriverOracle, false)
 		if err != nil || len(short) == 0 || len(short) > len(oracleSettingNames) {
 			t.Errorf("short list: %d %v", len(short), err)
+		}
+		if !SettingsWritable(DriverOracle) {
+			t.Error("Oracle parameters are reported as not writable")
+		}
+
+		system := func(name string) string {
+			t.Helper()
+			var v sql.NullString
+			if err := db.QueryRow(`SELECT display_value FROM v$system_parameter WHERE name = :1`, name).Scan(&v); err != nil {
+				t.Fatal(err)
+			}
+			return v.String
+		}
+		t.Cleanup(func() {
+			db.Exec(`ALTER SYSTEM RESET undo_retention SCOPE=BOTH`)
+			db.Exec(`ALTER SYSTEM RESET sort_area_size DEFERRED SCOPE=BOTH`)
+			db.Exec(`ALTER SYSTEM RESET cursor_sharing SCOPE=BOTH`)
+			db.Exec(`ALTER SYSTEM RESET resource_limit SCOPE=BOTH`)
+		})
+		before := system("undo_retention")
+		changed, err := ChangeSetting(ctx, db, DriverOracle, "UNDO_RETENTION", "901", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changed.Name != "undo_retention" || changed.Value != "901" || !changed.Persisted || changed.RestartRequired ||
+			len(changed.Statements) != 1 || changed.Statements[0] != "ALTER SYSTEM SET undo_retention = 901 SCOPE=BOTH" {
+			t.Errorf("change: %+v", changed)
+		}
+		if got := system("undo_retention"); got != "901" {
+			t.Errorf("the instance runs with undo_retention %s", got)
+		}
+		// Written to the parameter file as well, which is what outlasts a restart.
+		var stored sql.NullString
+		if err := db.QueryRow(`SELECT MAX(value) FROM v$spparameter WHERE name = 'undo_retention' AND isspecified = 'TRUE'`).Scan(&stored); err != nil || stored.String != "901" {
+			t.Errorf("the parameter file holds %q (%v)", stored.String, err)
+		}
+		reset, err := ChangeSetting(ctx, db, DriverOracle, "undo_retention", "", true)
+		if err != nil || reset.Statements[0] != "ALTER SYSTEM RESET undo_retention SCOPE=BOTH" || reset.Value != before {
+			t.Errorf("reset: %+v %v (was %s)", reset, err, before)
+		}
+		// A deferred parameter takes the keyword and applies to new sessions.
+		deferred, err := ChangeSetting(ctx, db, DriverOracle, "sort_area_size", "65537", false)
+		if err != nil || deferred.Statements[0] != "ALTER SYSTEM SET sort_area_size = 65537 DEFERRED SCOPE=BOTH" ||
+			deferred.Value != "65537" || !strings.Contains(deferred.Note, "connect from now on") {
+			t.Errorf("deferred: %+v %v", deferred, err)
+		}
+		if back, err := ChangeSetting(ctx, db, DriverOracle, "sort_area_size", "", true); err != nil ||
+			back.Statements[0] != "ALTER SYSTEM RESET sort_area_size DEFERRED SCOPE=BOTH" {
+			t.Errorf("deferred reset: %+v %v", back, err)
+		}
+		// A word goes in quoted, a boolean as its keyword.
+		word, err := ChangeSetting(ctx, db, DriverOracle, "cursor_sharing", by["cursor_sharing"].Value, false)
+		if err != nil || word.Statements[0] != "ALTER SYSTEM SET cursor_sharing = '"+by["cursor_sharing"].Value+"' SCOPE=BOTH" {
+			t.Errorf("a string parameter: %+v %v", word, err)
+		}
+		flag, err := ChangeSetting(ctx, db, DriverOracle, "resource_limit", by["resource_limit"].Value, false)
+		if err != nil || flag.Statements[0] != "ALTER SYSTEM SET resource_limit = "+strings.ToUpper(by["resource_limit"].Value)+" SCOPE=BOTH" {
+			t.Errorf("a boolean parameter: %+v %v", flag, err)
+		}
+		for name, value := range map[string]string{
+			"db_block_size": "16384", "undo_retention": "nine hundred", "no_such_parameter": "1", "resource_limit": "perhaps",
+		} {
+			_, err := ChangeSetting(ctx, db, DriverOracle, name, value, false)
+			if _, refused := err.(ErrSettingRequest); !refused {
+				t.Errorf("%s = %q: %v, want a refusal", name, value, err)
+			}
+		}
+		// A value the engine itself refuses comes back in the engine's words.
+		if _, err := ChangeSetting(ctx, db, DriverOracle, "cursor_sharing", "SIDEWAYS", false); err == nil || !strings.Contains(err.Error(), "ORA-") {
+			t.Errorf("a value outside the parameter's own set: %v", err)
+		}
+	})
+
+	t.Run("table_and_index_stats", func(t *testing.T) {
+		// Statistics another schema's tables are read through DBA_SEGMENTS,
+		// which this account may read.
+		if _, err := RunMaintenance(ctx, db, DriverOracle, "", MaintenanceRequest{Action: "gather_stats", Table: "JD_B3_OPS_T"}); err != nil {
+			t.Fatal(err)
+		}
+		var owner string
+		if err := db.QueryRow(`SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') FROM dual`).Scan(&owner); err != nil {
+			t.Fatal(err)
+		}
+		tables, err := ReadTableStats(ctx, db, DriverOracle, StatsOptions{Limit: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !tables.Supported || tables.Reason != "" {
+			t.Fatalf("tablestats: supported %v reason %q", tables.Supported, tables.Reason)
+		}
+		var stat *TableStat
+		for i := range tables.Tables {
+			if tables.Tables[i].Table == "JD_B3_OPS_T" {
+				stat = &tables.Tables[i]
+			}
+		}
+		if stat == nil || stat.Schema != owner || stat.Rows != 1 || stat.TableBytes <= 0 || stat.IndexBytes <= 0 ||
+			stat.TotalBytes != stat.TableBytes+stat.IndexBytes+stat.ToastBytes || stat.LastAnalyze == nil ||
+			stat.SeqScans != -1 || stat.DeadRows != -1 || stat.Kind != "table" {
+			t.Fatalf("table stat: %+v", stat)
+		}
+		for i := 1; i < len(tables.Tables); i++ {
+			if tables.Tables[i].TotalBytes > tables.Tables[i-1].TotalBytes {
+				t.Fatalf("tables are not largest first: %s after %s", tables.Tables[i].Table, tables.Tables[i-1].Table)
+			}
+		}
+		if cut, err := ReadTableStats(ctx, db, DriverOracle, StatsOptions{Limit: 1}); err != nil || len(cut.Tables) != 1 || !cut.Truncated {
+			t.Errorf("limit 1: %+v %v", cut, err)
+		}
+
+		indexes, err := ReadIndexStats(ctx, db, DriverOracle, StatsOptions{Table: "JD_B3_OPS_T"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !indexes.Supported || len(indexes.Notes) == 0 {
+			t.Fatalf("indexstats: %+v", indexes)
+		}
+		by := map[string]IndexStat{}
+		primary := ""
+		for _, ix := range indexes.Indexes {
+			by[ix.Name] = ix
+			if ix.Primary {
+				primary = ix.Name
+			}
+			if ix.Bytes <= 0 || !ix.Valid || ix.Unused || ix.Table != "JD_B3_OPS_T" {
+				t.Errorf("index: %+v", ix)
+			}
+		}
+		if len(by) != 4 || primary == "" {
+			t.Fatalf("indexes: %+v", indexes.Indexes)
+		}
+		if pk := by[primary]; !pk.Unique || !pk.Constraint || len(pk.Columns) != 1 || pk.Columns[0] != "ID" {
+			t.Errorf("primary key index: %+v", pk)
+		}
+		if narrow, wide := by["JD_B3_OPS_T_V"], by["JD_B3_OPS_T_VW"]; narrow.CoveredBy != "JD_B3_OPS_T_VW" || wide.CoveredBy != "" ||
+			strings.Join(wide.Columns, ",") != "V,W" || narrow.Method != "normal" {
+			t.Errorf("covered index: %+v / %+v", narrow, wide)
+		}
+		// An index on an expression is neither a duplicate of anything nor
+		// covered by anything, whatever its hidden column is called.
+		if f := by["JD_B3_OPS_T_F"]; !strings.Contains(f.Method, "function-based") || f.CoveredBy != "" || f.DuplicateOf != "" {
+			t.Errorf("function-based index: %+v", f)
+		}
+	})
+
+	t.Run("maintenance", func(t *testing.T) {
+		out, err := RunMaintenance(ctx, db, DriverOracle, "", MaintenanceRequest{Action: "gather_stats", Table: "JD_B3_OPS_T"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var owner string
+		if err := db.QueryRow(`SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') FROM dual`).Scan(&owner); err != nil {
+			t.Fatal(err)
+		}
+		want := `BEGIN DBMS_STATS.GATHER_TABLE_STATS(ownname => '"` + owner + `"', tabname => '"JD_B3_OPS_T"', cascade => TRUE); END;`
+		if !out.OK || len(out.Statements) != 1 || out.Statements[0] != want || len(out.Output) != 1 ||
+			!strings.HasPrefix(out.Output[0], "JD_B3_OPS_T: 1 row, ") || !strings.Contains(out.Output[0], "analysed 20") {
+			t.Errorf("gather for a table: %+v", out)
+		}
+
+		// A whole schema, in one of this file's own: two tables, one of them
+		// created with a quoted lower-case name, which is found only because
+		// the name goes to DBMS_STATS quoted.
+		db.Exec(`DROP USER jd_b3_schema CASCADE`)
+		opsMustExec(t, db, `CREATE USER jd_b3_schema IDENTIFIED BY "Jd_b3_pw_2026" QUOTA UNLIMITED ON users`,
+			`CREATE TABLE jd_b3_schema.first_t (id NUMBER PRIMARY KEY)`, `INSERT INTO jd_b3_schema.first_t VALUES (1)`,
+			`INSERT INTO jd_b3_schema.first_t VALUES (2)`,
+			`CREATE TABLE jd_b3_schema."lower_t" (id NUMBER)`, `INSERT INTO jd_b3_schema."lower_t" VALUES (1)`)
+		t.Cleanup(func() { db.Exec(`DROP USER jd_b3_schema CASCADE`) })
+		schema, err := RunMaintenance(ctx, db, DriverOracle, "", MaintenanceRequest{Action: "gather_stats", Schema: "JD_B3_SCHEMA"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if schema.Statements[0] != `BEGIN DBMS_STATS.GATHER_SCHEMA_STATS(ownname => '"JD_B3_SCHEMA"', cascade => TRUE); END;` ||
+			len(schema.Output) != 2 || !strings.HasPrefix(schema.Output[0], "FIRST_T: 2 rows, ") || !strings.HasPrefix(schema.Output[1], "lower_t: 1 row, ") {
+			t.Errorf("gather for a schema: %+v", schema)
+		}
+		lower, err := RunMaintenance(ctx, db, DriverOracle, "", MaintenanceRequest{Action: "gather_stats", Schema: "JD_B3_SCHEMA", Table: "lower_t"})
+		if err != nil || len(lower.Output) != 1 || !strings.HasPrefix(lower.Output[0], "lower_t: 1 row, ") {
+			t.Errorf("a table with a lower-case name: %+v %v", lower, err)
+		}
+		// Another schema's tables are sized from DBA_SEGMENTS.
+		tables, err := ReadTableStats(ctx, db, DriverOracle, StatsOptions{Schema: "JD_B3_SCHEMA"})
+		if err != nil || !tables.Supported || len(tables.Tables) != 2 {
+			t.Fatalf("another schema's tables: %+v %v", tables, err)
+		}
+		for _, table := range tables.Tables {
+			if table.Schema != "JD_B3_SCHEMA" || table.TableBytes <= 0 || table.LastAnalyze == nil || table.Rows < 1 {
+				t.Errorf("table: %+v", table)
+			}
+		}
+
+		for _, bad := range []MaintenanceRequest{{Action: "vacuum"}, {Action: "gather_stats", Table: "JD_B3_OPS_T", Index: "X"}} {
+			if _, err := RunMaintenance(ctx, db, DriverOracle, "", bad); err == nil {
+				t.Errorf("%+v ran", bad)
+			} else if _, refused := err.(ErrMaintenanceRequest); !refused {
+				t.Errorf("%+v: %v is not a request refusal", bad, err)
+			}
+		}
+		if _, err := RunMaintenance(ctx, db, DriverOracle, "", MaintenanceRequest{Action: "gather_stats", Table: "JD_B3_NO_SUCH_TABLE"}); err == nil || !strings.Contains(err.Error(), "ORA-") {
+			t.Errorf("a table that is not there: %v", err)
+		}
+	})
+
+	// What a closed request does to a block that is still running: the driver
+	// sends a break, and the server acts on it when it next looks — some
+	// seconds into a block that is working, and not at all while one sleeps.
+	// The block here only counts for a minute; gathering statistics on these
+	// tables is over before a request could be closed, and it runs through the
+	// same call.
+	t.Run("a_closed_request_stops_the_block", func(t *testing.T) {
+		const busy = `DECLARE n NUMBER := 0; t TIMESTAMP := SYSTIMESTAMP + INTERVAL '60' SECOND; BEGIN WHILE SYSTIMESTAMP < t LOOP n := n + 1; END LOOP; END; -- jd_b3 busy`
+		running := func() bool {
+			t.Helper()
+			var n int
+			if err := db.QueryRow(`
+			  SELECT COUNT(*) FROM v$session s JOIN v$sql q ON q.sql_id = s.sql_id AND q.child_number = s.sql_child_number
+			  WHERE s.status = 'ACTIVE' AND q.sql_text LIKE '%jd_b3 busy%' AND q.sql_text NOT LIKE '%v$session%'`).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n > 0
+		}
+		request, abandon := context.WithCancel(ctx)
+		defer abandon()
+		done := make(chan error, 1)
+		go func() {
+			_, err := db.ExecContext(request, busy)
+			done <- err
+		}()
+		waitFor(t, "the block to be running", running)
+		abandoned := time.Now()
+		abandon()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Error("an abandoned block reported success")
+			}
+			t.Logf("the block stopped %s after the request was closed: %v", time.Since(abandoned).Round(100*time.Millisecond), err)
+		case <-time.After(40 * time.Second):
+			t.Fatal("the abandoned block ran on")
+		}
+		waitFor(t, "the block to stop on the server", func() bool { return !running() })
+	})
+
+	// The shared pool keeps a statement as it was sent; what is listed is its
+	// shape.
+	t.Run("statements", func(t *testing.T) {
+		const probe = `SELECT COUNT(*) FROM jd_b3_ops_t WHERE v = 424242 AND 'jd-b3-literal' = w`
+		for i := 0; i < 3; i++ {
+			opsMustExec(t, db, probe)
+		}
+		var mine *Statement
+		var report *StatementsReport
+		waitFor(t, "the probe to reach v$sqlstats", func() bool {
+			var err error
+			report, err = TopStatements(ctx, db, DriverOracle, StatementsOptions{Sort: StatementsByCalls, Limit: 200})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range report.Statements {
+				if strings.Contains(report.Statements[i].Query, "FROM jd_b3_ops_t WHERE v = ? AND ? = w") {
+					mine = &report.Statements[i]
+				}
+			}
+			return mine != nil
+		})
+		if !report.Supported || report.Resettable || report.TotalMs <= 0 {
+			t.Fatalf("report: supported %v resettable %v total %v reason %q", report.Supported, report.Resettable, report.TotalMs, report.Reason)
+		}
+		if mine.Calls < 3 || mine.ID == "" || mine.MaxMs != 0 || mine.Share < 0 || mine.Share > 1 {
+			t.Errorf("the probe: %+v", mine)
+		}
+		for _, st := range report.Statements {
+			if strings.Contains(st.Query, "jd-b3-literal") || strings.Contains(st.Query, "424242") {
+				t.Errorf("a literal reached the list: %q", st.Query)
+			}
+		}
+		for _, sort := range []string{StatementsByTotal, StatementsByMean, StatementsByRows} {
+			if sorted, err := TopStatements(ctx, db, DriverOracle, StatementsOptions{Sort: sort, Limit: 3}); err != nil || !sorted.Supported || len(sorted.Statements) > 3 {
+				t.Errorf("sort %s: %+v %v", sort, sorted, err)
+			}
+		}
+		if _, err := TopStatements(ctx, db, DriverOracle, StatementsOptions{Sort: StatementsByMax}); err == nil {
+			t.Error("sorted by a maximum Oracle does not keep")
+		} else if _, bad := err.(ErrBadStatementsOption); !bad {
+			t.Errorf("sort max: %v", err)
+		}
+		if _, err := ResetStatements(ctx, db, DriverOracle); err != ErrUnsupported {
+			t.Errorf("reset: %v", err)
 		}
 	})
 
@@ -2727,28 +3563,80 @@ func TestLiveOpsOracle(t *testing.T) {
 		if invalid == nil || !strings.Contains(invalid.SQL, `"JD_B3_OPS_BROKEN" COMPILE;`) {
 			t.Errorf("invalid objects: %+v in %+v", invalid, report.Findings)
 		}
+		// This account may read the DBA views, so the two checks that need
+		// them were made rather than passed over.
+		for _, silence := range report.Silences {
+			if strings.Contains(silence, "Default passwords") || strings.Contains(silence, "Tablespace usage") {
+				t.Errorf("a check an administrator can make was not made: %s", silence)
+			}
+		}
+	})
+
+	// A table that is keyed in everything but name is offered the statement
+	// that names the key, and the statement is one the server accepts.
+	t.Run("advisor_fix_runs", func(t *testing.T) {
+		db.Exec(`DROP USER jd_b3_fix CASCADE`)
+		opsMustExec(t, db, `CREATE USER jd_b3_fix IDENTIFIED BY "Jd_b3_pw_2026" QUOTA UNLIMITED ON users`,
+			`CREATE TABLE jd_b3_fix.keyed (tenant NUMBER NOT NULL, code VARCHAR2(20) NOT NULL, note VARCHAR2(20))`,
+			`CREATE UNIQUE INDEX jd_b3_fix.keyed_code ON jd_b3_fix.keyed (tenant, code)`,
+			`CREATE TABLE jd_b3_fix.bare (v NUMBER, note VARCHAR2(20))`)
+		t.Cleanup(func() { db.Exec(`DROP USER jd_b3_fix CASCADE`) })
+		// Each finding's targets by name, with the fix each carries.
+		targets := func(id string) map[string]AdviceTarget {
+			t.Helper()
+			report, err := Advise(ctx, db, DriverOracle, "JD_B3_FIX")
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := map[string]AdviceTarget{}
+			for _, f := range report.Findings {
+				if f.ID == id {
+					for _, target := range f.Targets {
+						out[target.Name] = target
+					}
+				}
+			}
+			return out
+		}
+		keyless := targets("no-primary-key")
+		if got := keyless["KEYED"].SQL; got != `ALTER TABLE "JD_B3_FIX"."KEYED" ADD PRIMARY KEY ("TENANT", "CODE");` {
+			t.Fatalf("a table with a unique index: %+v", keyless["KEYED"])
+		}
+		// A new column would break every INSERT that names no columns.
+		if bare, ok := keyless["BARE"]; !ok || bare.SQL != "" {
+			t.Errorf("a table with nothing to be a key: %+v (found %v)", bare, ok)
+		}
+		// The statement offered for a table with no statistics is the block the
+		// maintenance action runs.
+		unanalysed := targets("never-analysed")
+		if got := unanalysed["BARE"].SQL; got != `BEGIN DBMS_STATS.GATHER_TABLE_STATS(ownname => '"JD_B3_FIX"', tabname => '"BARE"', cascade => TRUE); END;` {
+			t.Fatalf("a table with no statistics: %+v", unanalysed["BARE"])
+		}
+		opsMustExec(t, db, strings.TrimSuffix(keyless["KEYED"].SQL, ";"), unanalysed["BARE"].SQL)
+		if _, still := targets("no-primary-key")["KEYED"]; still {
+			t.Error("still without a key after the fix")
+		}
+		if _, still := targets("never-analysed")["BARE"]; still {
+			t.Error("still without statistics after the fix")
+		}
 	})
 
 	t.Run("unsupported_surfaces_say_so", func(t *testing.T) {
-		if locks, err := ListLocks(ctx, db, DriverOracle); err != nil || locks.Supported || locks.Reason == "" {
-			t.Errorf("locks: %+v %v", locks, err)
-		}
-		if tables, err := ReadTableStats(ctx, db, DriverOracle, StatsOptions{}); err != nil || tables.Supported {
-			t.Errorf("tablestats: %+v %v", tables, err)
+		if rep, err := ReadReplication(ctx, db, DriverOracle); err != nil || rep.Supported || rep.Reason == "" {
+			t.Errorf("replication: %+v %v", rep, err)
 		}
 		if _, err := AdminFor(DriverOracle); err != ErrUnsupported {
 			t.Errorf("admin: %v", err)
+		}
+		if levels := PrivilegeLevelsFor(DriverOracle); len(levels) != 0 {
+			t.Errorf("privileges: %+v", levels)
 		}
 	})
 
 	// An application schema with no grant on the V$ views gets a snapshot
 	// with the parts it may read and a note for each it may not.
 	t.Run("ordinary_account", func(t *testing.T) {
-		dsn := os.Getenv("JD_TEST_B3_ORACLE_DSN")
-		if dsn == "" {
-			t.Skip("JD_TEST_B3_ORACLE_DSN is not set")
-		}
-		plain := opsOpen(t, DriverOracle, dsn, "JD_TEST_B3_ORACLE_DSN")
+		plain, _ := opsLiveAny(t, DriverOracle, "JD_TEST_B3_ORACLE_DSN", "JD_TEST_ORACLE_DSN")
 		stats, err := ReadServerStats(ctx, plain, DriverOracle)
 		if err != nil {
 			t.Fatalf("an ordinary account got no snapshot at all: %v", err)
@@ -2767,6 +3655,68 @@ func TestLiveOpsOracle(t *testing.T) {
 		}
 		if len(report.Silences) == 0 {
 			t.Errorf("the checks that need DBA views read as passed: %+v", report)
+		}
+
+		// What it may not read is a sentence naming the grant, not an error
+		// and not an empty list that reads as "nothing is waiting".
+		if _, err := ListActivity(ctx, plain, DriverOracle); !errors.Is(err, ErrNoActivityView) || !strings.Contains(err.Error(), "v$session") {
+			t.Errorf("sessions: %v", err)
+		}
+		locks, err := ListLocks(ctx, plain, DriverOracle)
+		if err != nil || locks.Supported || !strings.Contains(locks.Reason, "v$session") || locks.Waits == nil {
+			t.Errorf("locks: %+v %v", locks, err)
+		}
+		statements, err := TopStatements(ctx, plain, DriverOracle, StatementsOptions{})
+		if err != nil || statements.Supported || !strings.Contains(statements.Reason, "v$sqlstats") || statements.Statements == nil {
+			t.Errorf("statements: %+v %v", statements, err)
+		}
+		// Its parameters it may read, where it holds that grant, and none of
+		// them is offered for editing: it has no ALTER SYSTEM.
+		if settings, err := ListSettings(ctx, plain, DriverOracle, true); err == nil {
+			for _, s := range settings {
+				if s.Editable {
+					t.Fatalf("an account without ALTER SYSTEM is offered %+v", s)
+				}
+			}
+			if _, err := ChangeSetting(ctx, plain, DriverOracle, "undo_retention", "901", false); err == nil {
+				t.Error("an account without ALTER SYSTEM changed a parameter")
+			} else if _, refused := err.(ErrSettingRequest); !refused {
+				t.Errorf("the refusal reached the server: %v", err)
+			}
+		}
+
+		// Its own schema it can maintain and measure with no grant at all:
+		// DBMS_STATS on its own tables, sizes from USER_SEGMENTS.
+		plain.Exec(`DROP TABLE jd_b3_plain_t PURGE`)
+		opsMustExec(t, plain, `CREATE TABLE jd_b3_plain_t (id NUMBER PRIMARY KEY, v VARCHAR2(40))`,
+			`INSERT INTO jd_b3_plain_t SELECT LEVEL, 'row ' || LEVEL FROM dual CONNECT BY LEVEL <= 50`)
+		t.Cleanup(func() { plain.Exec(`DROP TABLE jd_b3_plain_t PURGE`) })
+		gathered, err := RunMaintenance(ctx, plain, DriverOracle, "", MaintenanceRequest{Action: "gather_stats", Table: "JD_B3_PLAIN_T"})
+		if err != nil || len(gathered.Output) != 1 || !strings.HasPrefix(gathered.Output[0], "JD_B3_PLAIN_T: 50 rows, ") {
+			t.Fatalf("gather on its own table: %+v %v", gathered, err)
+		}
+		tables, err := ReadTableStats(ctx, plain, DriverOracle, StatsOptions{})
+		if err != nil || !tables.Supported {
+			t.Fatalf("tablestats: %+v %v", tables, err)
+		}
+		var stat *TableStat
+		for i := range tables.Tables {
+			if tables.Tables[i].Table == "JD_B3_PLAIN_T" {
+				stat = &tables.Tables[i]
+			}
+		}
+		if stat == nil || stat.Rows != 50 || stat.TableBytes <= 0 || stat.IndexBytes <= 0 || stat.LastAnalyze == nil {
+			t.Errorf("its own table: %+v", stat)
+		}
+		indexes, err := ReadIndexStats(ctx, plain, DriverOracle, StatsOptions{Table: "JD_B3_PLAIN_T"})
+		if err != nil || !indexes.Supported || len(indexes.Indexes) != 1 || !indexes.Indexes[0].Primary || indexes.Indexes[0].Bytes <= 0 ||
+			indexes.Indexes[0].Scans != -1 || !strings.Contains(strings.Join(indexes.Notes, " "), "DBA_INDEX_USAGE") {
+			t.Errorf("its own index: %+v %v", indexes, err)
+		}
+		// Another schema's tables it may not size; that is a note, with the
+		// size the statistics recorded in its place.
+		if other, err := ReadTableStats(ctx, plain, DriverOracle, StatsOptions{Schema: "SYSTEM"}); err != nil || !other.Supported {
+			t.Errorf("another schema: %+v %v", other, err)
 		}
 	})
 }
