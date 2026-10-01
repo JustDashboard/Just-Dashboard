@@ -508,3 +508,83 @@ func TestLiveORMOverHTTP(t *testing.T) {
 		t.Errorf("empty schema: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestLiveORMGuardedScriptOverHTTP asks the route for the SQL script with
+// ifNotExists over a catalogue whose names hold PostgreSQL's dollar quote, and
+// runs what comes back twice. A DO block quoted with $$ would end at the
+// label's own $$ and run the DROP TABLE after it as a statement.
+func TestLiveORMGuardedScriptOverHTTP(t *testing.T) {
+	dsn := os.Getenv("JD_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set JD_TEST_POSTGRES_DSN to run this against a real PostgreSQL")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Skipf("postgres unavailable: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Ping(); err != nil {
+		t.Skipf("postgres unreachable: %v", err)
+	}
+	drop := func() {
+		_, _ = db.Exec(`DROP SCHEMA IF EXISTS jd_orm_api_guard CASCADE`)
+		_, _ = db.Exec(`DROP SCHEMA IF EXISTS jd_orm_api_canary CASCADE`)
+	}
+	drop()
+	t.Cleanup(drop)
+	for _, stmt := range []string{
+		`CREATE SCHEMA jd_orm_api_canary`,
+		`CREATE TABLE jd_orm_api_canary.kept (id int PRIMARY KEY)`,
+		`CREATE SCHEMA jd_orm_api_guard`,
+		`CREATE TYPE jd_orm_api_guard.tag AS ENUM ('plain', 'x$$; DROP TABLE jd_orm_api_canary.kept; --')`,
+		`CREATE TABLE jd_orm_api_guard.owners (id int PRIMARY KEY)`,
+		`CREATE TABLE jd_orm_api_guard.labels (
+			id int PRIMARY KEY, tag jd_orm_api_guard.tag NOT NULL, owner_id int,
+			CONSTRAINT "fk$$; DROP TABLE jd_orm_api_canary.kept; --" FOREIGN KEY (owner_id) REFERENCES jd_orm_api_guard.owners(id))`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v\n%s", err, stmt)
+		}
+	}
+
+	_, r, id := liveAPIRouter(t, dbx.DriverPostgres, dsn)
+	rec, res := ormPost(t, r, pathf("/databases/%d/orm", id), `{"target":"sql","schema":"jd_orm_api_guard","ifNotExists":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sql: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		"DO $jd$ BEGIN\n  CREATE TYPE \"jd_orm_api_guard\".\"tag\" AS ENUM ('plain', 'x$$; DROP TABLE jd_orm_api_canary.kept; --');",
+		"DO $jd$ BEGIN\n  ALTER TABLE \"jd_orm_api_guard\".\"labels\" ADD CONSTRAINT \"fk$$; DROP TABLE jd_orm_api_canary.kept; --\"",
+		"END $jd$;",
+	} {
+		if !strings.Contains(res.Schema, want) {
+			t.Errorf("sql output missing %q:\n%s", want, res.Schema)
+		}
+	}
+	if strings.Contains(res.Schema, "DO $$") {
+		t.Errorf("a block is quoted with the tag its own statement contains:\n%s", res.Schema)
+	}
+
+	if _, err := db.Exec(`DROP SCHEMA jd_orm_api_guard CASCADE`); err != nil {
+		t.Fatal(err)
+	}
+	for run := 1; run <= 2; run++ {
+		// Statements are separated by a blank line; comment lines are the header.
+		for _, stmt := range strings.Split(res.Schema, "\n\n") {
+			if strings.HasPrefix(strings.TrimSpace(stmt), "--") {
+				continue
+			}
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("run %d of the script failed: %v\n%s", run, err, stmt)
+			}
+		}
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM jd_orm_api_canary.kept`).Scan(&n); err != nil {
+		t.Errorf("the table a label tried to drop is gone: %v", err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+		JOIN pg_namespace ns ON ns.oid = t.typnamespace WHERE ns.nspname = 'jd_orm_api_guard'`).Scan(&n); err != nil || n != 2 {
+		t.Errorf("the rebuilt enum has %d labels (%v), want 2", n, err)
+	}
+}

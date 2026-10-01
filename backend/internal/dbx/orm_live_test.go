@@ -410,19 +410,7 @@ func TestLiveORMPostgres(t *testing.T) {
 		before := ormGenerate(t, schema, ORMRequest{Target: ORMPrisma, Views: ormYes()})
 		script := ormGenerate(t, schema, ORMRequest{Target: ORMSQL, Views: ormYes()})
 		ormExec(t, db, ormLiveShopDrop...)
-		for _, stmt := range strings.Split(script.Schema, "\n\n") {
-			var lines []string
-			for _, line := range strings.Split(stmt, "\n") {
-				if !strings.HasPrefix(line, "--") {
-					lines = append(lines, line)
-				}
-			}
-			if s := strings.TrimSpace(strings.Join(lines, "\n")); s != "" {
-				if _, err := db.ExecContext(ctx, s); err != nil {
-					t.Fatalf("the generated script failed: %v\n%s", err, s)
-				}
-			}
-		}
+		ormRunScript(t, db, script.Schema)
 		rebuilt, err := LoadORMSchema(ctx, db, DriverPostgres, scope)
 		if err != nil {
 			t.Fatalf("LoadORMSchema after rebuild: %v", err)
@@ -448,6 +436,41 @@ func TestLiveORMPostgres(t *testing.T) {
 		ormMustNotContain(t, "warnings", strings.Join(res.Warnings, "\n"), "references", "relation was left out")
 		if _, err := LoadORMSchema(ctx, db, DriverPostgres, ORMScope{Schemas: scope.Schemas, Tables: []string{"nope"}}); err == nil {
 			t.Error("a table that is not there was accepted")
+		}
+	})
+
+	// A generation that will not emit views does not read them, and writes
+	// what it would have written had it read them.
+	t.Run("views_are_read_only_when_wanted", func(t *testing.T) {
+		req := ORMRequest{Target: ORMPrisma, Schemas: scope.Schemas}
+		asked, err := req.Scope(DriverPostgres, "")
+		if err != nil || !asked.SkipViews {
+			t.Fatalf("scope = %+v (%v), want views skipped", asked, err)
+		}
+		lean, err := LoadORMSchema(ctx, db, DriverPostgres, asked)
+		if err != nil {
+			t.Fatalf("LoadORMSchema: %v", err)
+		}
+		for _, name := range []string{"order_summary", "top_products"} {
+			var found *ORMTable
+			for i := range lean.Tables {
+				if lean.Tables[i].Name == name {
+					found = &lean.Tables[i]
+				}
+			}
+			if found == nil || len(found.Columns) != 0 || (found.Kind != ORMKindView && found.Kind != ORMKindMatView) {
+				t.Errorf("%s = %+v, want a view that was listed and not read", name, found)
+			}
+		}
+		// Read afresh: the rebuild above has changed what is there.
+		full, err := LoadORMSchema(ctx, db, DriverPostgres, scope)
+		if err != nil {
+			t.Fatalf("LoadORMSchema: %v", err)
+		}
+		want := ormGenerate(t, full, req)
+		got := ormGenerate(t, lean, req)
+		if got.Schema != want.Schema || strings.Join(got.Warnings, "\n") != strings.Join(want.Warnings, "\n") {
+			t.Errorf("the schema read without its views generates differently.\n--- with\n%s\n--- without\n%s", want.Schema, got.Schema)
 		}
 	})
 }
@@ -558,6 +581,94 @@ func TestLiveORMMySQL(t *testing.T) {
 				}
 				if out := ormGenerate(t, schema, ORMRequest{Target: target, Tables: tables}); strings.TrimSpace(out.Schema) == "" {
 					t.Errorf("%s produced nothing", target)
+				}
+			}
+		})
+	}
+}
+
+// MySQL prints a string default bare, so 'rgb(0,0,0)' and (json_object()) look
+// alike in the catalogue and only EXTRA tells them apart; MariaDB quotes the
+// first and prints the second bare. Both have to come out as what they are —
+// and written back as SQL, both have to be accepted and mean the same again.
+func TestLiveORMMySQLDefaults(t *testing.T) {
+	for _, env := range []string{"JD_TEST_MYSQL_DSN", "JD_TEST_ORM_MYSQL8_DSN"} {
+		t.Run(env, func(t *testing.T) {
+			db := ormLiveDB(t, DriverMySQL, env)
+			ctx := context.Background()
+			drop := []string{`DROP TABLE IF EXISTS jd_orm_looks`, `DROP TABLE IF EXISTS jd_orm_looks_copy`}
+			ormExec(t, db, drop...)
+			t.Cleanup(func() {
+				for _, s := range drop {
+					_, _ = db.ExecContext(context.Background(), s)
+				}
+			})
+			ormExec(t, db, `CREATE TABLE jd_orm_looks (
+				id INT PRIMARY KEY,
+				colour VARCHAR(32) NOT NULL DEFAULT 'rgb(0,0,0)',
+				title VARCHAR(32) NOT NULL DEFAULT 'Untitled (1)',
+				path VARCHAR(64) NOT NULL DEFAULT 'C:\\it''s\\',
+				word VARCHAR(16) NOT NULL DEFAULT 'now',
+				flag VARCHAR(16) NOT NULL DEFAULT 'true',
+				code VARCHAR(16) NOT NULL DEFAULT '007',
+				born DATE NOT NULL DEFAULT '2020-01-02',
+				details JSON DEFAULT (JSON_OBJECT()),
+				token VARCHAR(36) NOT NULL DEFAULT (UUID()),
+				sum INT NOT NULL DEFAULT (1 + 1),
+				seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				audience ENUM('Public','Back\\slash') NOT NULL DEFAULT 'Public'
+			) ENGINE=InnoDB`)
+			var database string
+			if err := db.QueryRowContext(ctx, `SELECT DATABASE()`).Scan(&database); err != nil {
+				t.Fatal(err)
+			}
+			load := func(table string) *ORMSchema {
+				t.Helper()
+				schema, err := LoadORMSchema(ctx, db, DriverMySQL, ORMScope{Schemas: []string{database}, Tables: []string{table}})
+				if err != nil {
+					t.Fatalf("LoadORMSchema: %v", err)
+				}
+				for _, w := range schema.Warnings {
+					t.Errorf("loading reported: %s", w)
+				}
+				return schema
+			}
+			schema := load("jd_orm_looks")
+			req := ORMRequest{Target: ORMPrisma, Tables: []string{"jd_orm_looks"}}
+
+			prisma := ormGenerate(t, schema, req).Schema
+			ormMustContain(t, "schema.prisma", prisma,
+				`colour String @default("rgb(0,0,0)") @db.VarChar(32)`,
+				`title String @default("Untitled (1)") @db.VarChar(32)`,
+				`path String @default("C:\\it's\\") @db.VarChar(64)`,
+				`word String @default("now") @db.VarChar(16)`,
+				`flag String @default("true") @db.VarChar(16)`,
+				`code String @default("007") @db.VarChar(16)`,
+				`@default(dbgenerated("(json_object())"))`,
+				`token String @default(dbgenerated("(uuid())")) @db.VarChar(36)`,
+				`sum Int @default(dbgenerated("(1 + 1)"))`,
+				"seen DateTime @default(now()) @db.DateTime(0)",
+				"audience jd_orm_looks_audience @default(Public)",
+				`Back_slash @map("Back\\slash")`,
+			)
+			ormMustNotContain(t, "schema.prisma", prisma, `dbgenerated("rgb(0,0,0)")`, `dbgenerated("json_object()")`, `dbgenerated("now")`)
+
+			req.Target = ORMGorm
+			ormMustContain(t, "models.go", ormGenerate(t, schema, req).Schema,
+				`type:enum('Public','Back\\\\slash')`, `default:'rgb(0,0,0)'`, `default:(json_object())`)
+
+			// The same table again, assembled from what was read instead of
+			// copied from the engine, defaults written back as SQL.
+			copied := *schema
+			copied.Tables = append([]ORMTable(nil), schema.Tables...)
+			copied.Tables[0].Name, copied.Tables[0].CreateSQL = "jd_orm_looks_copy", ""
+			req.Target = ORMSQL
+			ormRunScript(t, db, ormGenerate(t, &copied, req).Schema)
+			again := ormTableNamed(load("jd_orm_looks_copy"), database, "jd_orm_looks_copy")
+			for _, c := range schema.Tables[0].Columns {
+				twin := ormColumnNamed(again, c.Name)
+				if twin == nil || twin.Default != c.Default || twin.DefaultExpr != c.DefaultExpr || twin.Type != c.Type {
+					t.Errorf("%s came back as %+v, was %+v", c.Name, twin, c)
 				}
 			}
 		})
@@ -767,19 +878,7 @@ func TestLiveORMSQLServer(t *testing.T) {
 	// has to come back out.
 	script := ormGenerate(t, schema, ORMRequest{Target: ORMSQL})
 	ormExec(t, db, drop...)
-	for _, stmt := range strings.Split(script.Schema, "\n\n") {
-		var lines []string
-		for _, line := range strings.Split(stmt, "\n") {
-			if !strings.HasPrefix(line, "--") {
-				lines = append(lines, line)
-			}
-		}
-		if s := strings.TrimSpace(strings.Join(lines, "\n")); s != "" {
-			if _, err := db.ExecContext(ctx, s); err != nil {
-				t.Fatalf("the generated script failed: %v\n%s", err, s)
-			}
-		}
-	}
+	ormRunScript(t, db, script.Schema)
 	rebuilt, err := LoadORMSchema(ctx, db, DriverMSSQL, scope)
 	if err != nil {
 		t.Fatalf("LoadORMSchema after rebuild: %v", err)
@@ -957,5 +1056,267 @@ func TestLiveORMCockroachDB(t *testing.T) {
 		if out := ormGenerate(t, schema, ORMRequest{Target: target, Tables: tables}); strings.TrimSpace(out.Schema) == "" {
 			t.Errorf("%s produced nothing", target)
 		}
+	}
+}
+
+// ormRunScript runs a generated SQL script the way an operator's client would:
+// one statement at a time, in order. The SQL target puts a blank line between
+// statements and none inside one.
+func ormRunScript(t *testing.T, db *sql.DB, script string) {
+	t.Helper()
+	for _, stmt := range strings.Split(script, "\n\n") {
+		var lines []string
+		for _, line := range strings.Split(stmt, "\n") {
+			if !strings.HasPrefix(line, "--") {
+				lines = append(lines, line)
+			}
+		}
+		if s := strings.TrimSpace(strings.Join(lines, "\n")); s != "" {
+			if _, err := db.ExecContext(context.Background(), s); err != nil {
+				t.Fatalf("the generated script failed: %v\n%s", err, s)
+			}
+		}
+	}
+}
+
+// A name can hold PostgreSQL's dollar quote. The guarded script wraps CREATE
+// TYPE and ADD CONSTRAINT in a DO block, and a block quoted with $$ ends at
+// the first $$ inside it — here an enum label and a constraint name, each
+// followed by a DROP TABLE that would then run as a statement of its own.
+func TestLiveORMPostgresDollarQuotes(t *testing.T) {
+	db := ormLiveDB(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
+	ctx := context.Background()
+	// A second schema, a table, a column, an index and a check constraint
+	// whose names hold every other character SQL gives a meaning to.
+	const odd = `jd_orm $$ "q" 'x' \ ; -- */`
+	oddQ := `"` + strings.ReplaceAll(odd, `"`, `""`) + `"`
+	drop := []string{
+		`DROP SCHEMA IF EXISTS jd_orm_dollar CASCADE`, `DROP SCHEMA IF EXISTS ` + oddQ + ` CASCADE`,
+		`DROP SCHEMA IF EXISTS jd_orm_canary CASCADE`,
+	}
+	ormExec(t, db, drop...)
+	t.Cleanup(func() {
+		for _, s := range drop {
+			_, _ = db.ExecContext(context.Background(), s)
+		}
+	})
+	labels := []string{"a", "x$$; DROP TABLE jd_orm_canary.important; --", "price$", "$jd$", "it's"}
+	ormExec(t, db,
+		`CREATE SCHEMA jd_orm_canary`,
+		`CREATE TABLE jd_orm_canary.important (id int PRIMARY KEY)`,
+		`CREATE SCHEMA jd_orm_dollar`,
+		`CREATE TYPE jd_orm_dollar.kind AS ENUM ('a', 'x$$; DROP TABLE jd_orm_canary.important; --', 'price$', '$jd$', 'it''s')`,
+		`CREATE TABLE jd_orm_dollar.owners (id int PRIMARY KEY)`,
+		`CREATE TABLE jd_orm_dollar.things (
+			id int PRIMARY KEY,
+			kind jd_orm_dollar.kind NOT NULL DEFAULT 'a',
+			owner_id int,
+			CONSTRAINT "fk$$; DROP TABLE jd_orm_canary.important; --" FOREIGN KEY (owner_id) REFERENCES jd_orm_dollar.owners(id)
+		)`,
+		`CREATE SCHEMA `+oddQ,
+		`CREATE TABLE `+oddQ+`.`+oddQ+` (
+			id int PRIMARY KEY,
+			`+oddQ+` text NOT NULL DEFAULT 'd$$ ''x'' "q" \ ; -- */',
+			thing_id int,
+			CONSTRAINT `+oddQ+` CHECK (length(`+oddQ+`) >= 0),
+			CONSTRAINT "odd fk $$ ; --" FOREIGN KEY (thing_id) REFERENCES jd_orm_dollar.things(id) ON DELETE SET NULL
+		)`,
+		`CREATE INDEX "odd ix $$ ""q"" ; --" ON `+oddQ+`.`+oddQ+` (`+oddQ+`)`,
+		`COMMENT ON TABLE `+oddQ+`.`+oddQ+` IS 'about $$ ''x'' "q" \ ; -- */'`,
+		`COMMENT ON COLUMN `+oddQ+`.`+oddQ+`.`+oddQ+` IS 'column $$ ''x'' \'`,
+	)
+	scope := ORMScope{Schemas: []string{"jd_orm_dollar", odd}, Statements: true}
+	schema, err := LoadORMSchema(ctx, db, DriverPostgres, scope)
+	if err != nil {
+		t.Fatalf("LoadORMSchema: %v", err)
+	}
+	before := ormGenerate(t, schema, ORMRequest{Target: ORMPrisma})
+	script := ormGenerate(t, schema, ORMRequest{Target: ORMSQL, IfNotExists: ormYes()})
+	ormMustContain(t, "schema.sql", script.Schema,
+		"DO $jd1$ BEGIN\n  CREATE TYPE \"jd_orm_dollar\".\"kind\" AS ENUM",
+		"DO $jd$ BEGIN\n  ALTER TABLE \"jd_orm_dollar\".\"things\" ADD CONSTRAINT \"fk$$; DROP TABLE jd_orm_canary.important; --\"")
+
+	if n := strings.Count(script.Schema, "\nDO $"); n != 3 {
+		t.Errorf("%d DO blocks, want the enum and two foreign keys\n%s", n, script.Schema)
+	}
+	for _, w := range script.Warnings {
+		t.Errorf("the script reported: %s", w)
+	}
+
+	// Rebuild from the script, then run it again over what it built: the
+	// second run is what IF NOT EXISTS and the DO blocks are for.
+	ormExec(t, db, `DROP SCHEMA jd_orm_dollar CASCADE`, `DROP SCHEMA `+oddQ+` CASCADE`)
+	ormRunScript(t, db, script.Schema)
+	ormRunScript(t, db, script.Schema)
+
+	var rows int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM jd_orm_canary.important`).Scan(&rows); err != nil {
+		t.Fatalf("the table a label tried to drop is gone: %v", err)
+	}
+	rebuilt, err := LoadORMSchema(ctx, db, DriverPostgres, scope)
+	if err != nil {
+		t.Fatalf("LoadORMSchema after rebuild: %v", err)
+	}
+	if len(rebuilt.Enums) == 0 {
+		t.Fatal("no enum after the rebuild")
+	}
+	for _, e := range rebuilt.Enums {
+		if e.Schema == "jd_orm_dollar" && strings.Join(e.Values, "\x00") != strings.Join(labels, "\x00") {
+			t.Errorf("labels after the rebuild = %q, want %q", e.Values, labels)
+		}
+	}
+	things := ormTableNamed(rebuilt, "jd_orm_dollar", "things")
+	if things == nil || len(things.ForeignKeys) != 1 || things.ForeignKeys[0].Name != "fk$$; DROP TABLE jd_orm_canary.important; --" {
+		t.Errorf("the foreign key did not come back as it was: %+v", things)
+	}
+	oddTable := ormTableNamed(rebuilt, odd, odd)
+	was := ormTableNamed(schema, odd, odd)
+	if oddTable == nil || was == nil {
+		t.Fatalf("the oddly named table did not come back: %+v", oddTable)
+	}
+	if c, w := ormColumnNamed(oddTable, odd), ormColumnNamed(was, odd); c == nil || w == nil || c.Default != w.Default || c.Comment != w.Comment {
+		t.Errorf("the oddly named column came back as %+v, was %+v", c, w)
+	}
+	if oddTable.Comment != was.Comment || len(oddTable.Checks) != 1 || oddTable.Checks[0].Name != odd ||
+		ormIndexNamed(oddTable, `odd ix $$ "q" ; --`) == nil || len(oddTable.ForeignKeys) != 1 || oddTable.ForeignKeys[0].Name != "odd fk $$ ; --" {
+		t.Errorf("the oddly named table came back as %+v, was %+v", oddTable, was)
+	}
+	after := ormGenerate(t, rebuilt, ORMRequest{Target: ORMPrisma})
+	if before.Schema != after.Schema {
+		t.Errorf("the rebuilt database generates a different Prisma schema.\n--- before\n%s\n--- after\n%s", before.Schema, after.Schema)
+	}
+}
+
+// PostgreSQL releases older than the catalogue queries were written on. A
+// column the server does not have fails the query that names it, and with it
+// every enum, array, domain and identity column of the schema — so each
+// release is read here for real. JD_TEST_ORM_POSTGRES_OLD_DSNS takes the DSNs,
+// separated by spaces.
+func TestLiveORMOlderPostgres(t *testing.T) {
+	dsns := strings.Fields(os.Getenv("JD_TEST_ORM_POSTGRES_OLD_DSNS"))
+	if len(dsns) == 0 {
+		t.Skip("set JD_TEST_ORM_POSTGRES_OLD_DSNS to run this against PostgreSQL 9.6, 10 and 11")
+	}
+	d, err := DialectFor(DriverPostgres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dsn := range dsns {
+		db, err := sql.Open(d.SQLDriverName(), d.NormaliseDSN(dsn))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.Close() })
+		ctx := context.Background()
+		var num string
+		if err := db.QueryRowContext(ctx, `SHOW server_version_num`).Scan(&num); err != nil {
+			t.Fatalf("no PostgreSQL at one of the DSNs: %v", err)
+		}
+		version := ormAtoi(num, 0)
+		t.Run("server_"+num, func(t *testing.T) {
+			drop := `DROP SCHEMA IF EXISTS jd_orm_old CASCADE`
+			ormExec(t, db, drop)
+			t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), drop) })
+			ormExec(t, db,
+				`CREATE SCHEMA jd_orm_old`,
+				`CREATE TYPE jd_orm_old.status AS ENUM ('open', 'closed')`,
+				`CREATE DOMAIN jd_orm_old.email AS varchar(320)`,
+				`CREATE TABLE jd_orm_old.accounts (
+					id bigserial PRIMARY KEY,
+					email jd_orm_old.email NOT NULL,
+					status jd_orm_old.status NOT NULL DEFAULT 'open',
+					tags text[] NOT NULL DEFAULT '{}',
+					balance numeric(12,2) NOT NULL DEFAULT 0,
+					closed_at timestamptz
+				)`,
+				`COMMENT ON COLUMN jd_orm_old.accounts.email IS 'Where statements go'`,
+				`CREATE UNIQUE INDEX accounts_open_email_idx ON jd_orm_old.accounts (email) WHERE closed_at IS NULL`,
+				`CREATE INDEX accounts_lower_email_idx ON jd_orm_old.accounts (lower(email::text))`,
+				`CREATE TABLE jd_orm_old.entries (
+					id serial PRIMARY KEY,
+					account_id bigint NOT NULL REFERENCES jd_orm_old.accounts(id) ON DELETE CASCADE,
+					amount numeric(12,2) NOT NULL CHECK (amount <> 0)
+				)`,
+				`CREATE INDEX entries_amount_idx ON jd_orm_old.entries (amount DESC)`,
+			)
+			if version >= 100000 {
+				ormExec(t, db,
+					`CREATE TABLE jd_orm_old.notes (id int GENERATED ALWAYS AS IDENTITY PRIMARY KEY, body text)`,
+					`CREATE TABLE jd_orm_old.readings (sensor int NOT NULL, taken_at timestamptz NOT NULL) PARTITION BY RANGE (taken_at)`,
+					`CREATE TABLE jd_orm_old.readings_2024 PARTITION OF jd_orm_old.readings FOR VALUES FROM ('2024-01-01') TO ('2025-01-01')`,
+				)
+			}
+			if version >= 110000 {
+				ormExec(t, db, `CREATE INDEX entries_account_idx ON jd_orm_old.entries (account_id) INCLUDE (amount)`)
+			}
+
+			schema, err := LoadORMSchema(ctx, db, DriverPostgres, ORMScope{Schemas: []string{"jd_orm_old"}})
+			if err != nil {
+				t.Fatalf("LoadORMSchema: %v", err)
+			}
+			for _, w := range schema.Warnings {
+				t.Errorf("loading reported: %s", w)
+			}
+			accounts := ormTableNamed(schema, "jd_orm_old", "accounts")
+			if c := ormColumnNamed(accounts, "status"); c == nil || c.EnumName != "status" || c.EnumSchema != "jd_orm_old" {
+				t.Errorf("accounts.status = %+v, want the enum", c)
+			}
+			if c := ormColumnNamed(accounts, "email"); c == nil || c.Type != "character varying(320)" || c.Comment != "Where statements go" {
+				t.Errorf("accounts.email = %+v, want the domain's base type and its comment", c)
+			}
+			if c := ormColumnNamed(accounts, "tags"); c == nil || c.Type != "text[]" {
+				t.Errorf("accounts.tags = %+v, want text[]", c)
+			}
+			if ix := ormIndexNamed(accounts, "accounts_open_email_idx"); ix == nil || !ix.Partial || !ix.Unique {
+				t.Errorf("accounts_open_email_idx = %+v, want a partial unique index", ix)
+			}
+			if ix := ormIndexNamed(accounts, "accounts_lower_email_idx"); ix == nil || !ix.Expression {
+				t.Errorf("accounts_lower_email_idx = %+v, want an expression index", ix)
+			}
+			entries := ormTableNamed(schema, "jd_orm_old", "entries")
+			if ix := ormIndexNamed(entries, "entries_amount_idx"); ix == nil || len(ix.Desc) != 1 || !ix.Desc[0] {
+				t.Errorf("entries_amount_idx = %+v, want descending", ix)
+			}
+			if entries == nil || len(entries.Checks) != 1 {
+				t.Errorf("entries checks = %+v, want one", entries)
+			}
+
+			res := ormGenerate(t, schema, ORMRequest{Target: ORMPrisma})
+			ormMustContain(t, "schema.prisma", res.Schema,
+				"id BigInt @id @default(autoincrement())",
+				"email String @db.VarChar(320)",
+				"status status @default(open)",
+				"tags String[] @default([])",
+				"balance Decimal @default(0) @db.Decimal(12, 2)",
+				`@relation("entries_account_id", fields: [account_id], references: [id], onDelete: Cascade`,
+				"@@index([amount(sort: Desc)])",
+				"enum status {",
+			)
+			ormMustNotContain(t, "schema.prisma", res.Schema, "Unsupported(", "USER-DEFINED", "ARRAY", "email String @unique")
+			ormMustContain(t, "warnings", strings.Join(res.Warnings, "\n"), "Index accounts_open_email_idx on accounts covers only some rows")
+
+			if version >= 100000 {
+				if c := ormColumnNamed(ormTableNamed(schema, "jd_orm_old", "notes"), "id"); c == nil || c.Identity != "always" {
+					t.Errorf("notes.id = %+v, want an identity column", c)
+				}
+				if p := ormTableNamed(schema, "jd_orm_old", "readings_2024"); p == nil || p.Kind != ORMKindPartition {
+					t.Errorf("readings_2024 = %+v, want a partition", p)
+				}
+				if p := ormTableNamed(schema, "jd_orm_old", "readings"); p == nil || p.Kind != ORMKindPartitioned {
+					t.Errorf("readings = %+v, want a partitioned table", p)
+				}
+				ormMustNotContain(t, "schema.prisma", res.Schema, "readings_2024")
+			}
+			if version >= 110000 {
+				if ix := ormIndexNamed(entries, "entries_account_idx"); ix == nil || strings.Join(ix.Columns, ",") != "account_id" {
+					t.Errorf("entries_account_idx = %+v, want its one key column", ix)
+				}
+			}
+			for _, target := range ORMTargets() {
+				if out := ormGenerate(t, schema, ORMRequest{Target: target}); strings.TrimSpace(out.Schema) == "" {
+					t.Errorf("%s produced nothing", target)
+				}
+			}
+		})
 	}
 }
