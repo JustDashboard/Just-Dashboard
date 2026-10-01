@@ -284,12 +284,12 @@ func GenerateORMFiles(s *ORMSchema, o ORMOptions) (*ORMResult, error) {
 		return nil, ormRequestErrorf("%s", reason)
 	}
 	g := newORMGen(s, o)
+	if len(g.models) == 0 {
+		return nil, ormRequestErrorf("%s", g.nothingToGenerate())
+	}
 	files := spec.generate(g)
 	if g.refusal != "" {
 		return nil, ormRequestErrorf("%s", g.refusal)
-	}
-	if len(files) == 0 {
-		return nil, ormRequestErrorf("nothing to generate: no table in the selection could be read")
 	}
 	if o.Target != ORMSQL {
 		g.warnSkippedIndexes()

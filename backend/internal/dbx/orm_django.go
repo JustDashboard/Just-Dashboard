@@ -84,6 +84,10 @@ func generateDjango(g *ormGen) []ORMFile {
 		}
 	}
 
+	if g.driver == DriverMSSQL {
+		g.warn("Django ships no SQL Server backend of its own: these models need the mssql-django package to connect.")
+	}
+
 	var body strings.Builder
 	for _, e := range g.enums {
 		body.WriteString("\n\n" + d.choices(e))

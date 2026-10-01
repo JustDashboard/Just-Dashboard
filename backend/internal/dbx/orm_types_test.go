@@ -454,3 +454,37 @@ func make65(prefix string) []string {
 	}
 	return out
 }
+
+// A generation with no model to write is refused with the reason. An empty
+// file with a header on it would look like an answer.
+func TestORMNothingToGenerate(t *testing.T) {
+	onlyViews := &ORMSchema{Driver: DriverPostgres, Tables: []ORMTable{{
+		Schema: "public", Name: "v", Kind: ORMKindView, Columns: []ORMColumn{ormColumn("id", "integer")},
+	}}}
+	noKeys := &ORMSchema{Driver: DriverPostgres, Tables: []ORMTable{{
+		Schema: "public", Name: "log", Kind: ORMKindTable, Columns: []ORMColumn{ormColumn("at", "timestamptz")},
+	}}}
+	for name, c := range map[string]struct {
+		schema *ORMSchema
+		req    ORMRequest
+		want   string
+	}{
+		"empty":                  {&ORMSchema{Driver: DriverPostgres}, ORMRequest{Target: ORMPrisma}, "there are no tables here to generate from"},
+		"only views":             {onlyViews, ORMRequest{Target: ORMPrisma}, "only 1 view(s); turn on views to include them"},
+		"only views, no option":  {onlyViews, ORMRequest{Target: ORMDjango}, "only 1 view(s), which this target does not model"},
+		"diesel with no key":     {noKeys, ORMRequest{Target: ORMDiesel}, "Diesel needs a primary key on every table it describes"},
+		"views asked for are ok": {onlyViews, ORMRequest{Target: ORMPrisma, Views: ormYes()}, ""},
+	} {
+		opts, err := c.req.Options()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = GenerateORMFiles(c.schema, opts)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: %v", name, err)
+		case c.want != "" && (err == nil || !errors.Is(err, ErrORMRequest) || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: err = %v, want %q", name, err, c.want)
+		}
+	}
+}

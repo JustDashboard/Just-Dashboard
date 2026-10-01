@@ -787,6 +787,29 @@ func (g *ormGen) qualified(t *ormTable) bool {
 	return false
 }
 
+// nothingToGenerate says why a generation has no model to write. An empty file
+// with a header on it would look like an answer; the reason is the answer.
+func (g *ormGen) nothingToGenerate() string {
+	views, unreadable := 0, 0
+	for i := range g.schema.Tables {
+		switch t := &g.schema.Tables[i]; {
+		case t.Kind == ORMKindView || t.Kind == ORMKindMatView:
+			views++
+		case t.Kind != ORMKindPartition && len(t.Columns) == 0:
+			unreadable++
+		}
+	}
+	switch {
+	case views > 0 && !g.opts.Views && ormTargetHasOption(g.opts.Target, "views"):
+		return fmt.Sprintf("there are no tables here to generate from, only %d view(s); turn on views to include them", views)
+	case views > 0 && !g.opts.Views:
+		return fmt.Sprintf("there are no tables here to generate from, only %d view(s), which this target does not model", views)
+	case unreadable > 0:
+		return fmt.Sprintf("none of the %d table(s) here could be read", unreadable)
+	}
+	return "there are no tables here to generate from"
+}
+
 func (g *ormGen) counts() ORMCounts {
 	c := ORMCounts{Enums: len(g.enums)}
 	for _, m := range g.models {

@@ -893,3 +893,69 @@ func TestLiveORMOracle(t *testing.T) {
 		}
 	}
 }
+
+// CockroachDB answers on PostgreSQL's driver and is not PostgreSQL: it has its
+// own Prisma provider, its own serial, and a catalogue that lacks some of the
+// functions the PostgreSQL facts are read with.
+func TestLiveORMCockroachDB(t *testing.T) {
+	db := ormLiveDB(t, DriverPostgres, "JD_TEST_ORM_COCKROACH_DSN")
+	ctx := context.Background()
+	drop := []string{
+		`DROP TABLE IF EXISTS jd_orm_entries`, `DROP TABLE IF EXISTS jd_orm_accounts`, `DROP TYPE IF EXISTS jd_orm_status`,
+	}
+	ormExec(t, db, drop...)
+	t.Cleanup(func() {
+		for _, s := range drop {
+			_, _ = db.ExecContext(context.Background(), s)
+		}
+	})
+	ormExec(t, db,
+		`CREATE TYPE jd_orm_status AS ENUM ('open', 'closed')`,
+		`CREATE TABLE jd_orm_accounts (
+			id INT8 PRIMARY KEY DEFAULT unique_rowid(),
+			email STRING NOT NULL UNIQUE,
+			status jd_orm_status NOT NULL DEFAULT 'open',
+			balance DECIMAL(12,2) NOT NULL DEFAULT 0,
+			small INT2,
+			tags STRING[],
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`,
+		`CREATE TABLE jd_orm_entries (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			account_id INT8 NOT NULL REFERENCES jd_orm_accounts(id) ON DELETE CASCADE,
+			amount DECIMAL(12,2) NOT NULL,
+			INDEX jd_orm_entries_account_idx (account_id)
+		)`,
+	)
+	tables := []string{"jd_orm_accounts", "jd_orm_entries"}
+	schema, err := LoadORMSchema(ctx, db, DriverPostgres, ORMScope{Schemas: []string{"public"}, Tables: tables})
+	if err != nil {
+		t.Fatalf("LoadORMSchema: %v", err)
+	}
+	if schema.Flavor != "cockroachdb" {
+		t.Errorf("flavor = %q", schema.Flavor)
+	}
+	for _, w := range schema.Warnings {
+		t.Errorf("loading reported: %s", w)
+	}
+	res := ormGenerate(t, schema, ORMRequest{Target: ORMPrisma, Tables: tables})
+	ormMustContain(t, "schema.prisma", res.Schema,
+		`provider = "cockroachdb"`,
+		"id BigInt @id @default(autoincrement())",
+		"email String @unique",
+		"status jd_orm_status @default(open)",
+		"balance Decimal @default(0) @db.Decimal(12, 2)",
+		"small Int? @db.Int2",
+		"tags String[]",
+		"created_at DateTime @default(now()) @db.Timestamptz(6)",
+		`id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid`,
+		`account jd_orm_accounts @relation("jd_orm_entries_account_id", fields: [account_id], references: [id], onDelete: Cascade`,
+		`@@index([account_id], map: "jd_orm_entries_account_idx")`,
+		"enum jd_orm_status {",
+	)
+	for _, target := range ORMTargets() {
+		if out := ormGenerate(t, schema, ORMRequest{Target: target, Tables: tables}); strings.TrimSpace(out.Schema) == "" {
+			t.Errorf("%s produced nothing", target)
+		}
+	}
+}

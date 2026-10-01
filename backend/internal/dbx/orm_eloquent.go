@@ -98,9 +98,6 @@ func generateEloquent(g *ormGen) []ORMFile {
 		}
 		bodies = append(bodies, u.body)
 	}
-	if len(bodies) == 0 {
-		return nil
-	}
 	return []ORMFile{{Filename: "Models.php", Content: render(uses, bodies)}}
 }
 

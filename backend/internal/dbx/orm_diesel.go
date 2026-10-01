@@ -99,6 +99,7 @@ func generateDiesel(g *ormGen) []ORMFile {
 		d.tables = append(d.tables, m)
 	}
 	if len(d.tables) == 0 {
+		g.refuse("Diesel needs a primary key on every table it describes, and none of the %d here has one.", len(g.models))
 		return nil
 	}
 

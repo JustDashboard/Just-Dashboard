@@ -43,13 +43,13 @@ func ormGoldenCases() []ormCase {
 		ORMDrizzle:    {"mysql", "sqlite"},
 		ORMTypeScript: {"mysql", "sqlite", "sqlserver", "oracle", "clickhouse"},
 		ORMZod:        {"mysql", "clickhouse"},
-		ORMKysely:     {"mysql", "sqlite", "sqlserver"},
+		ORMKysely:     {"mysql", "sqlite", "sqlserver", "oracle", "clickhouse"},
 		ORMTypeORM:    {"mysql", "sqlite", "sqlserver", "oracle"},
-		ORMMikroORM:   {"mysql", "sqlite", "sqlserver"},
-		ORMSequelize:  {"mysql", "sqlite", "sqlserver"},
+		ORMMikroORM:   {"mysql", "sqlite", "sqlserver", "oracle"},
+		ORMSequelize:  {"mysql", "sqlite", "sqlserver", "oracle"},
 		ORMSQLAlchemy: {"mysql", "sqlite", "sqlserver", "oracle"},
 		ORMDjango:     {"mysql", "sqlite", "sqlserver", "oracle"},
-		ORMGorm:       {"mysql", "sqlite", "sqlserver", "clickhouse"},
+		ORMGorm:       {"mysql", "sqlite", "sqlserver", "oracle", "clickhouse"},
 		ORMGoStructs:  {"mysql", "sqlite", "sqlserver", "oracle", "clickhouse"},
 		ORMDiesel:     {"mysql", "sqlite"},
 		ORMEloquent:   {"mysql", "sqlite", "sqlserver"},
@@ -90,7 +90,7 @@ func ormGoldenCases() []ormCase {
 		ormCase{"gorm-postgres-plain", "postgres", ORMRequest{
 			Target: ORMGorm, Relations: ormNo(), JSONTags: ormNo(), Package: "store"}},
 		ormCase{"go-postgres-pointer", "postgres", ORMRequest{Target: ORMGoStructs, Nulls: "pointer", Enums: ormNo()}},
-		ormCase{"eloquent-postgres-split", "postgres", ORMRequest{Target: ORMEloquent, Split: ormYes()}},
+		ormCase{"eloquent-postgres-split", "postgres", ORMRequest{Target: ORMEloquent, Split: ormYes(), Views: ormYes()}},
 		ormCase{"jsonschema-postgres-camel", "postgres", ORMRequest{
 			Target: ORMJSONSchema, Naming: ORMNamingCamel, Views: ormYes()}},
 		ormCase{"graphql-postgres-inputs", "postgres", ORMRequest{

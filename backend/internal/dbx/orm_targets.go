@@ -237,7 +237,7 @@ func init() {
 			group:       ormGroupORM,
 			description: "SQLAlchemy 2 declarative models with typed Mapped columns.",
 			engines:     ormRelational,
-			refusals:    map[Driver]string{DriverClickHouse: ormNoClickHouse("SQLAlchemy's own dialect set")},
+			refusals:    map[Driver]string{DriverClickHouse: ormNoClickHouse("SQLAlchemy")},
 			options: []ORMOption{
 				ormOptRelations(), ormOptEnums(), ormOptDefaults(), ormOptViews(false),
 			},
@@ -305,7 +305,7 @@ func init() {
 				DriverOracle:     "Laravel ships drivers for PostgreSQL, MySQL, SQLite and SQL Server, and none for Oracle.",
 				DriverClickHouse: ormNoClickHouse("Eloquent"),
 			},
-			options:  []ORMOption{ormOptRelations(), ormOptEnums(), ormOptSplit()},
+			options:  []ORMOption{ormOptRelations(), ormOptEnums(), ormOptViews(false), ormOptSplit()},
 			generate: generateEloquent,
 		},
 		{

@@ -282,7 +282,10 @@ type ormFacts struct {
 	kind      map[string]ORMTableKind
 	viewSQL   map[string]string
 	partKey   map[string]string
-	columns   map[string]map[string]ormColumnFact
+	// comment replaces a table's comment where the catalogue was asked for it
+	// directly; nil means it was not.
+	comment map[string]*string
+	columns map[string]map[string]ormColumnFact
 	// columnOrder is each table's columns in catalogue order.
 	columnOrder map[string][]string
 	indexes     map[string]map[string]ormIndexFact
@@ -295,6 +298,7 @@ type ormFacts struct {
 func (l *ormLoader) facts(schemas []string) *ormFacts {
 	f := &ormFacts{
 		partition: map[string]bool{}, kind: map[string]ORMTableKind{}, viewSQL: map[string]string{},
+		comment: map[string]*string{},
 		partKey: map[string]string{}, columns: map[string]map[string]ormColumnFact{},
 		columnOrder: map[string][]string{},
 		indexes:     map[string]map[string]ormIndexFact{}, indexOrder: map[string][]string{},
@@ -348,6 +352,9 @@ func (f *ormFacts) apply(t *ORMTable) {
 	}
 	if def := f.viewSQL[key]; def != "" {
 		t.CreateSQL = def
+	}
+	if comment := f.comment[key]; comment != nil {
+		t.Comment = *comment
 	}
 	t.PartitionKey = f.partKey[key]
 	t.Checks = f.checks[key]
@@ -464,37 +471,40 @@ func (l *ormLoader) postgresFacts(f *ormFacts, schemas []string) {
 	})
 
 	for _, schema := range schemas {
-		if f.flavor != "cockroachdb" {
-			// Partitions, and the definitions PostgreSQL will print for a view
-			// or a partitioned table. CockroachDB has neither function.
-			l.each("partitions and view definitions in "+schema, `
-			  SELECT c.relname, c.relkind::text, c.relispartition,
-			         CASE WHEN c.relkind = 'p' THEN COALESCE(pg_get_partkeydef(c.oid), '') ELSE '' END,
-			         CASE WHEN c.relkind IN ('v','m') THEN COALESCE(pg_get_viewdef(c.oid), '') ELSE '' END
-			  FROM pg_class c
-			  JOIN pg_namespace n ON n.oid = c.relnamespace
-			  WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f')`, []any{schema}, func(rows *sql.Rows) error {
-				var name, relkind, partKey, viewDef string
-				var partition bool
-				if err := rows.Scan(&name, &relkind, &partition, &partKey, &viewDef); err != nil {
-					return err
-				}
-				key := ormTableKey(schema, name)
-				switch {
-				case partition:
-					f.partition[key] = true
-				case relkind == "p":
-					f.kind[key] = ORMKindPartitioned
-					f.partKey[key] = partKey
-				case relkind == "m":
-					f.kind[key] = ORMKindMatView
-				}
-				if viewDef != "" {
-					f.viewSQL[key] = viewDef
-				}
-				return nil
-			})
-		}
+		// Partitions, the definitions PostgreSQL will print for a view or a
+		// partitioned table, and the table's comment asked for by catalogue:
+		// the one-argument obj_description the table listing uses can answer
+		// with another object's comment that happens to share the OID, which
+		// on CockroachDB it does for every table that has none of its own.
+		l.each("partitions, view definitions and comments in "+schema, `
+		  SELECT c.relname, c.relkind::text, COALESCE(c.relispartition, false),
+		         CASE WHEN c.relkind = 'p' THEN COALESCE(pg_get_partkeydef(c.oid), '') ELSE '' END,
+		         CASE WHEN c.relkind IN ('v','m') THEN COALESCE(pg_get_viewdef(c.oid), '') ELSE '' END,
+		         COALESCE(obj_description(c.oid, 'pg_class'), '')
+		  FROM pg_class c
+		  JOIN pg_namespace n ON n.oid = c.relnamespace
+		  WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f')`, []any{schema}, func(rows *sql.Rows) error {
+			var name, relkind, partKey, viewDef, comment string
+			var partition bool
+			if err := rows.Scan(&name, &relkind, &partition, &partKey, &viewDef, &comment); err != nil {
+				return err
+			}
+			key := ormTableKey(schema, name)
+			f.comment[key] = &comment
+			switch {
+			case partition:
+				f.partition[key] = true
+			case relkind == "p":
+				f.kind[key] = ORMKindPartitioned
+				f.partKey[key] = partKey
+			case relkind == "m":
+				f.kind[key] = ORMKindMatView
+			}
+			if viewDef != "" {
+				f.viewSQL[key] = viewDef
+			}
+			return nil
+		})
 
 		// A column's type as PostgreSQL writes it, with a domain resolved to
 		// what it is a domain over, and the enum named when it is one.
@@ -564,7 +574,12 @@ func (l *ormLoader) postgresFacts(f *ormFacts, schemas []string) {
 				&method, &fact.keyColumns, &options, &definition); err != nil {
 				return err
 			}
-			if method != "btree" {
+			// CockroachDB calls its ordinary index "prefix" and its GIN "inverted".
+			switch method {
+			case "btree", "prefix":
+			case "inverted":
+				fact.method = "gin"
+			default:
 				fact.method = method
 			}
 			fact.definition = definition
