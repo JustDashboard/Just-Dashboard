@@ -18,6 +18,7 @@ import { DATABASE_ENGINE_LABELS } from "@/components/deploy/vocabulary"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import type { DbConnection, DeploymentDatabaseConnectionFormat } from "@/lib/types"
+import { unusableReason } from "@/lib/db-connections"
 
 /** The keys applications read a connection string from, one press each. */
 const VARIABLES = ["DATABASE_URL", "REDIS_URL", "MONGODB_URL"]
@@ -242,14 +243,17 @@ export function ProjectDatabase({
                       verb={`Connect ${connection.name}`}
                       onSelect={() => void connectExisting(connection)}
                       busy={connecting === connection.id}
-                      disabled={!valid}
+                      // One that no longer opens has no address to hand over.
+                      disabled={!valid || Boolean(unusableReason(connection))}
                       index={index}
                       leading={<ProductLogo id={connection.driver} size="sm" fallback={Database} />}
                       title={connection.name}
                       description={
-                        address(connection) && (
-                          <span className="font-mono">{address(connection)}</span>
-                        )
+                        unusableReason(connection)
+                          ? `Cannot be opened: ${unusableReason(connection)}`
+                          : address(connection) && (
+                              <span className="font-mono">{address(connection)}</span>
+                            )
                       }
                       trailing={
                         <span className="text-hint text-muted-foreground max-sm:hidden">

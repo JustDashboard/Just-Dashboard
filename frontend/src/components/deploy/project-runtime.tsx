@@ -21,6 +21,7 @@ import {
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
+import { unusableReason } from "@/lib/db-connections"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
@@ -1174,7 +1175,12 @@ function DependencyCard({
       label={item.available ? "Available" : "Unavailable"}
     />
   )
-  const note = (link || (database && connection)) && (link?.detail ?? item.detail)
+  // A saved connection that no longer opens says so here: the dependency is
+  // on a row nothing can dial, whatever was last observed of it.
+  const unusable = connection && unusableReason(connection)
+  const note = unusable
+    ? `The saved connection cannot be opened: ${unusable}`
+    : (link || (database && connection)) && (link?.detail ?? item.detail)
   return (
     <ChoiceRow
       verb={title}

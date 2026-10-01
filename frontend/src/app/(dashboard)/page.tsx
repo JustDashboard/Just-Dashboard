@@ -14,6 +14,7 @@ import {
   Shield,
 } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
+import { unusableCount } from "@/lib/db-connections"
 import { bytes, clock, duration, percent, rate, relativeTime } from "@/lib/format"
 import type {
   BackupJob,
@@ -473,7 +474,14 @@ function DatabasesCard() {
       loading={loading && !data}
       unavailable={moduleGone(error)}
       value={data ? (data.length === 0 ? "None yet" : `${data.length} connections`) : undefined}
-      hint={data && data.length === 1 ? "1 connection" : undefined}
+      hint={
+        // A saved connection that no longer opens is counted, and said to be one.
+        unusableCount(data) > 0
+          ? `${unusableCount(data)} cannot be opened`
+          : data && data.length === 1
+            ? "1 connection"
+            : undefined
+      }
     />
   )
 }

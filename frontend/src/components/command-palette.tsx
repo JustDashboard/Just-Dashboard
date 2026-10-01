@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { usePathname, useRouter } from "next/navigation"
 import { CheckCircle, CloudUpload, Globe, Logout, Plus, RefreshClockwise } from "@/components/icons"
 import { get, post } from "@/lib/api"
+import { unusableReason } from "@/lib/db-connections"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useSessionState } from "@/lib/view-state"
@@ -169,7 +170,10 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
       : conn
   })
   const current = databases.find((conn) => conn.id === inside)
-  const currentPages = current && !drivers.loading ? engineFor(current, drivers.data).sections : []
+  // A connection that no longer opens has one page, where it is repaired or
+  // forgotten; the rest of its engine's pages would each open on an error.
+  const currentPages =
+    current && !current.broken && !drivers.loading ? engineFor(current, drivers.data).sections : []
 
   const run = useCallback(
     (action: () => void) => {
@@ -272,6 +276,11 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
                   <EngineGlyph engine={engineFor(conn, drivers.data)} className="size-4" />
                   <span className="text-muted-foreground">Open</span>
                   {conn.name}
+                  {unusableReason(conn) && (
+                    <span className="text-muted-foreground" title={unusableReason(conn)}>
+                      cannot be opened
+                    </span>
+                  )}
                 </CommandItem>
               ))}
             </CommandGroup>

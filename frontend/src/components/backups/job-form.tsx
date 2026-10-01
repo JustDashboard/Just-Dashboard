@@ -5,6 +5,8 @@ import { useMemoryState } from "@/lib/view-state"
 import { notify } from "@/lib/toast"
 import { get, post, put } from "@/lib/api"
 import { bytes } from "@/lib/format"
+import { unusableReason } from "@/lib/db-connections"
+import { cn } from "@/lib/utils"
 import type { BackupJob, BackupResource, Container, DbConnection } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Modal } from "@/components/modal"
@@ -455,32 +457,46 @@ export function JobDialog({
                 </FormNote>
               )}
             <div className="grid gap-1.5 sm:grid-cols-2">
-              {connections.data?.map((connection) => (
-                <Label
-                  key={connection.id}
-                  className="flex min-h-8 items-center gap-2 text-xs font-normal"
-                >
-                  <Checkbox
-                    checked={databaseDumps.includes(connection.id)}
-                    onCheckedChange={(checked) =>
-                      setDatabaseDumps((current) =>
-                        checked
-                          ? [...current, connection.id].sort((a, b) => a - b)
-                          : current.filter((id) => id !== connection.id),
-                      )
-                    }
-                    aria-label={`Dump ${connection.name}`}
-                  />
-                  <span className="min-w-0 truncate">
-                    {connection.name}
-                    <span className="text-muted-foreground">
-                      {" "}
-                      · {connection.driver}
-                      {connection.database ? ` · ${connection.database}` : ""}
+              {connections.data?.map((connection) => {
+                // A connection that no longer opens cannot be dumped. It can
+                // still be taken off a job that names it, and not put on one.
+                const unusable = unusableReason(connection)
+                const chosen = databaseDumps.includes(connection.id)
+                return (
+                  <Label
+                    key={connection.id}
+                    className="flex min-h-8 items-center gap-2 text-xs font-normal"
+                  >
+                    <Checkbox
+                      checked={chosen}
+                      disabled={Boolean(unusable) && !chosen}
+                      onCheckedChange={(checked) =>
+                        setDatabaseDumps((current) =>
+                          checked
+                            ? [...current, connection.id].sort((a, b) => a - b)
+                            : current.filter((id) => id !== connection.id),
+                        )
+                      }
+                      aria-label={`Dump ${connection.name}`}
+                    />
+                    <span
+                      className={cn("min-w-0 truncate", unusable && "text-muted-foreground")}
+                      title={unusable}
+                    >
+                      {connection.name}
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {connection.driver}
+                        {unusable
+                          ? ` · cannot be opened: ${unusable}`
+                          : connection.database
+                            ? ` · ${connection.database}`
+                            : ""}
+                      </span>
                     </span>
-                  </span>
-                </Label>
-              ))}
+                  </Label>
+                )
+              })}
             </div>
           </fieldset>
           <fieldset className="space-y-1.5">
