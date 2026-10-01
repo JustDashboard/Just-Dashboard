@@ -1263,10 +1263,11 @@ func TestLiveRedisStreams(t *testing.T) {
 	if _, err := RedisStreamTrimEntries(ctx, client, RedisStreamTrim{Key: key}); err == nil {
 		t.Error("a trim that says nothing about how much to keep was accepted")
 	}
-	if n, err := RedisStreamGroupRemove(ctx, client, key, "workers", "bob"); err != nil || n != 5 {
+	bob := RedisBytes("bob")
+	if n, err := RedisStreamGroupRemove(ctx, client, key, "workers", &bob); err != nil || n != 5 {
 		t.Errorf("removing a consumer reported %d pending, %v", n, err)
 	}
-	if n, err := RedisStreamGroupRemove(ctx, client, key, "workers", ""); err != nil || n != 1 {
+	if n, err := RedisStreamGroupRemove(ctx, client, key, "workers", nil); err != nil || n != 1 {
 		t.Errorf("destroying the group: %d, %v", n, err)
 	}
 	after, err := RedisStreamDescribe(ctx, client, key)
@@ -1276,6 +1277,53 @@ func TestLiveRedisStreams(t *testing.T) {
 	client.Set(ctx, redisTestPrefix+"notstream", "v", 0)
 	if _, err := RedisStreamDescribe(ctx, client, RedisBytes(redisTestPrefix+"notstream")); err == nil {
 		t.Error("describing a string as a stream was accepted")
+	}
+}
+
+// A consumer may be called "". Removing it is removing a consumer: read as
+// "no consumer named", the same request destroyed the group and every other
+// consumer's pending entries with it.
+func TestLiveRedisRemovingAConsumerLeavesItsGroup(t *testing.T) {
+	client, _ := redisTestClient(t, "JD_TEST_REDIS_DSN")
+	ctx := context.Background()
+	key := RedisBytes(redisTestPrefix + "consumers")
+	for i := 0; i < 2; i++ {
+		if _, err := RedisWriteValue(ctx, client, nil, RedisWrite{
+			Key: key, Type: "stream", Entries: [][2]RedisBytes{{"n", "v"}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RedisStreamGroupCreate(ctx, client, key, "workers", "0"); err != nil {
+		t.Fatal(err)
+	}
+	// Each takes one entry; a negative Block keeps a read that finds none
+	// from waiting for one.
+	for _, consumer := range []string{"alice", ""} {
+		err := client.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group: "workers", Consumer: consumer, Streams: []string{string(key), ">"}, Count: 1, Block: -1,
+		}).Err()
+		if err != nil && consumer == "" {
+			t.Skipf("this server has no consumer with an empty name: %v", err)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	unnamed := RedisBytes("")
+	if n, err := RedisStreamGroupRemove(ctx, client, key, "workers", &unnamed); err != nil || n != 1 {
+		t.Errorf("removing the consumer with no name reported %d pending, %v", n, err)
+	}
+	kept, err := RedisStreamDescribe(ctx, client, key)
+	if err != nil || len(kept.Groups) != 1 || kept.Groups[0].Pending != 1 ||
+		len(kept.Groups[0].Consumers) != 1 || kept.Groups[0].Consumers[0].Name != "alice" {
+		t.Fatalf("after removing the consumer with no name the stream has %+v, %v", kept, err)
+	}
+	if n, err := RedisStreamGroupRemove(ctx, client, key, "workers", nil); err != nil || n != 1 {
+		t.Errorf("destroying the group: %d, %v", n, err)
+	}
+	if gone, err := RedisStreamDescribe(ctx, client, key); err != nil || len(gone.Groups) != 0 {
+		t.Errorf("after destroying the group the stream has %+v, %v", gone, err)
 	}
 }
 

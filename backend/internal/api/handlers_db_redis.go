@@ -641,6 +641,11 @@ func (s *Server) handleRedisDelete(w http.ResponseWriter, r *http.Request) error
 		req.Index, members = &idx, nil
 	}
 	switch {
+	case req.Path != nil && *req.Path == "":
+		// An empty path reads as the root everywhere else, and the root of a
+		// document is the document: the same request for the whole key that
+		// an empty list of members used to be.
+		return httpx.BadRequest("name the path to remove; $ is the whole document")
 	case req.Path != nil && req.Type != "" && req.Type != "json":
 		return httpx.BadRequest("a path is part of a JSON document; a %s is addressed by member", req.Type)
 	case req.Path != nil && (len(members) > 0 || req.Index != nil):
@@ -871,9 +876,12 @@ func (s *Server) handleRedisStreamPending(w http.ResponseWriter, r *http.Request
 }
 
 type redisStreamRequest struct {
-	Key      *dbx.RedisBytes `json:"key"`
-	Group    dbx.RedisBytes  `json:"group"`
-	Consumer dbx.RedisBytes  `json:"consumer"`
+	Key   *dbx.RedisBytes `json:"key"`
+	Group dbx.RedisBytes  `json:"group"`
+	// Consumer is a pointer for the reason a member is: a consumer may be
+	// named "", and a removal that names it must not be read as one that
+	// names none — which destroys the whole group.
+	Consumer *dbx.RedisBytes `json:"consumer"`
 	// ID is where a group starts reading: an entry id, "$" for new entries
 	// only, "0" for the whole stream. SetID moves an existing group there
 	// instead of creating one.
@@ -987,12 +995,12 @@ func (s *Server) handleRedisStreamGroupRemove(w http.ResponseWriter, r *http.Req
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	action := "database.redis.stream.group.delete"
-	if req.Consumer != "" {
+	detail := map[string]any{"key": *req.Key, "group": req.Group, "db": client.Options().DB}
+	if req.Consumer != nil {
 		action = "database.redis.stream.consumer.delete"
+		detail["consumer"] = *req.Consumer
 	}
-	httpx.SetAudit(r, action, conn.Name, map[string]any{
-		"key": *req.Key, "group": req.Group, "consumer": req.Consumer, "db": client.Options().DB,
-	})
+	httpx.SetAudit(r, action, conn.Name, detail)
 	n, err := dbx.RedisStreamGroupRemove(ctx, client, *req.Key, req.Group, req.Consumer)
 	if err != nil {
 		return redisFail(err, true)

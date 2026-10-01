@@ -445,6 +445,9 @@ func TestRedisDeleteReadsPresenceNotEmptiness(t *testing.T) {
 		`{"keys":["a","b"],"path":"$.user.email"}`:       "one key at a time",
 		`{"key":"k","type":"set","path":"$.user.email"}`: "JSON document",
 		`{"key":"k","path":"$.user.email","member":"m"}`: "not both",
+		// An empty path is the root, and the root is the whole document.
+		`{"key":"k","path":""}`:               "name the path",
+		`{"key":"k","type":"json","path":""}`: "name the path",
 	} {
 		rec := redisDo(t, h, id, redisRoute{http.MethodDelete, "/keys", body})
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {

@@ -431,6 +431,98 @@ func TestLiveAPIRedisKeys(t *testing.T) {
 	})
 }
 
+// On a server that has JSON, a path removes what it selects and an empty one
+// is refused: read as the root, it removed the document.
+func TestLiveAPIRedisAJSONPathRemovesOnlyWhatItNames(t *testing.T) {
+	_, h, id, direct := redisLive(t, "JD_TEST_REDIS_DSN", auth.RoleAdmin)
+	ctx := context.Background()
+	var server struct {
+		Features dbx.RedisFeatures `json:"features"`
+	}
+	call(t, h, id, http.MethodGet, "/redis/server", "", &server)
+	if !server.Features.JSON {
+		t.Skip("the server at JD_TEST_REDIS_DSN has no JSON commands")
+	}
+	doc := redisAPIPrefix + "inside:j"
+	if err := direct.Do(ctx, "JSON.SET", doc, "$", `{"user":{"email":"a@b","name":"Ann"}}`).Err(); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"key":"` + doc + `","path":""}`,
+		`{"key":"` + doc + `","type":"json","path":""}`,
+		`{"key":"` + doc + `","path":"user.email"}`,
+	} {
+		rec := call(t, h, id, http.MethodDelete, "/keys", body, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d %s", body, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+		if got, _ := direct.Do(ctx, "JSON.GET", doc, "$.user.email").Text(); got != `["a@b"]` {
+			t.Fatalf("%s changed the document: %s", body, got)
+		}
+	}
+	var out struct {
+		Removed int64 `json:"removed"`
+	}
+	wantStatus(t, call(t, h, id, http.MethodDelete, "/keys", `{"key":"`+doc+`","path":"$.user.email"}`, &out), 200, "", "removing one path")
+	if got, _ := direct.Do(ctx, "JSON.GET", doc, "$").Text(); out.Removed != 1 || got != `[{"user":{"name":"Ann"}}]` {
+		t.Errorf("removing one path removed %d and left %s", out.Removed, got)
+	}
+	// The root, asked for by name, is the document.
+	wantStatus(t, call(t, h, id, http.MethodDelete, "/keys", `{"key":"`+doc+`","path":"$"}`, &out), 200, "", "removing the root")
+	if out.Removed != 1 || direct.Exists(ctx, doc).Val() != 0 {
+		t.Errorf("removing the root removed %d and left the key", out.Removed)
+	}
+}
+
+// A consumer may be called "". Naming it removes that consumer; read as
+// naming none, the same request destroyed the group and what every other
+// consumer had pending.
+func TestLiveAPIRedisRemovingAConsumerLeavesItsGroup(t *testing.T) {
+	s, h, id, direct := redisLive(t, "JD_TEST_REDIS_DSN", auth.RoleAdmin)
+	ctx := context.Background()
+	key := redisAPIPrefix + "consumers:x"
+	for i := 0; i < 2; i++ {
+		direct.XAdd(ctx, &redis.XAddArgs{Stream: key, Values: map[string]any{"f": "v"}})
+	}
+	direct.XGroupCreate(ctx, key, "g", "0")
+	// Each takes one entry; a negative Block keeps a read that finds none
+	// from waiting for one.
+	for _, consumer := range []string{"c1", ""} {
+		err := direct.XReadGroup(ctx, &redis.XReadGroupArgs{Group: "g", Consumer: consumer, Streams: []string{key, ">"}, Count: 1, Block: -1}).Err()
+		if err != nil && consumer == "" {
+			t.Skipf("this server has no consumer with an empty name: %v", err)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	groups := func() []dbx.RedisStreamGroup {
+		var info dbx.RedisStreamInfo
+		call(t, h, id, http.MethodGet, "/keys/stream?key="+key, "", &info)
+		return info.Groups
+	}
+	if g := groups(); len(g) != 1 || len(g[0].Consumers) != 2 {
+		t.Fatalf("before: %+v", g)
+	}
+	wantStatus(t, call(t, h, id, http.MethodDelete, "/keys/stream/groups", `{"key":"`+key+`","group":"g","consumer":""}`, nil), 200, "", "removing the consumer with no name")
+	if g := groups(); len(g) != 1 || len(g[0].Consumers) != 1 || g[0].Consumers[0].Name != "c1" || g[0].Pending != 1 {
+		t.Fatalf("removing the consumer with no name left %+v", g)
+	}
+	wantStatus(t, call(t, h, id, http.MethodDelete, "/keys/stream/groups", `{"key":"`+key+`","group":"g","consumer":"c1"}`, nil), 200, "", "removing a named consumer")
+	if g := groups(); len(g) != 1 || len(g[0].Consumers) != 0 {
+		t.Fatalf("removing a named consumer left %+v", g)
+	}
+	// With no consumer in the request at all, it is the group that goes.
+	wantStatus(t, call(t, h, id, http.MethodDelete, "/keys/stream/groups", `{"key":"`+key+`","group":"g"}`, nil), 200, "", "destroying the group")
+	if g := groups(); len(g) != 0 {
+		t.Fatalf("destroying the group left %+v", g)
+	}
+	trail := auditTrail(t, s)
+	if strings.Count(trail, "database.redis.stream.consumer.delete cache 200") != 2 || strings.Count(trail, "database.redis.stream.group.delete cache 200") != 1 {
+		t.Errorf("audit trail:\n%s", trail)
+	}
+}
+
 // The expiries that used to delete: far enough off that the number wrapped
 // on its way to the server. Sent by a role that may edit and may not delete.
 func TestLiveAPIRedisFarExpiryKeepsTheKey(t *testing.T) {

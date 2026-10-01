@@ -314,13 +314,16 @@ func RedisStreamGroupSetID(ctx context.Context, client *redis.Client, key, group
 // RedisStreamGroupRemove destroys a group, or with a consumer named, removes
 // that one consumer and whatever it had pending. It reports what went: groups
 // destroyed, or the consumer's pending entries.
-func RedisStreamGroupRemove(ctx context.Context, client *redis.Client, key, group, consumer RedisBytes) (int64, error) {
+//
+// The consumer is named by being given, not by what it is called: a consumer
+// may be called "", and removing that one is not destroying its group.
+func RedisStreamGroupRemove(ctx context.Context, client *redis.Client, key, group RedisBytes, consumer *RedisBytes) (int64, error) {
 	if group == "" {
 		return 0, fmt.Errorf("a consumer group is required")
 	}
 	args := []any{"XGROUP", "DESTROY", string(key), string(group)}
-	if consumer != "" {
-		args = []any{"XGROUP", "DELCONSUMER", string(key), string(group), string(consumer)}
+	if consumer != nil {
+		args = []any{"XGROUP", "DELCONSUMER", string(key), string(group), string(*consumer)}
 	}
 	n, err := client.Do(ctx, args...).Int64()
 	if err != nil {
