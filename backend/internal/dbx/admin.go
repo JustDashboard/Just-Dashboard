@@ -110,19 +110,79 @@ func (s RoleSpec) Changes() []string {
 	return out
 }
 
+// asked names what a create asks for beyond a plain account that signs in
+// with a password. A form may send every field it has; only the ones that ask
+// for something are a request the engine has to be able to honour.
+func (s RoleSpec) asked() []string {
+	out := []string{}
+	add := func(set bool, name string) {
+		if set {
+			out = append(out, name)
+		}
+	}
+	on := func(v *bool, want bool) bool { return v != nil && *v == want }
+	add(s.SetLogin && !s.Login, "login")
+	add(s.Superuser, "superuser")
+	add(s.CreateDB, "createDb")
+	add(s.CreateRole, "createRole")
+	add(s.ConnLimit > 0, "connectionLimit")
+	add(on(s.Inherit, false), "inherit")
+	add(on(s.Replication, true), "replication")
+	add(on(s.BypassRLS, true), "bypassRls")
+	add(on(s.Locked, true), "locked")
+	add(s.ValidUntil != nil && strings.TrimSpace(*s.ValidUntil) != "" && !strings.EqualFold(strings.TrimSpace(*s.ValidUntil), "infinity"), "validUntil")
+	return out
+}
+
 // ErrRoleAttribute marks an attribute the request set that this engine's
 // accounts do not have. It is the request that is wrong, not the server.
 type ErrRoleAttribute struct{ msg string }
 
 func (e ErrRoleAttribute) Error() string { return e.msg }
 
-// refuseAttributes names the first attribute in a spec that an engine has no
-// way to set, so a request for one is refused rather than silently dropped.
-func refuseAttributes(engine string, unsupported map[string]bool) error {
-	for name, set := range unsupported {
-		if set {
-			return ErrRoleAttribute{msg: fmt.Sprintf("%s accounts have no %s attribute", engine, name)}
+// roleEngineNames is how each engine is named in a refusal.
+var roleEngineNames = map[Driver]string{
+	DriverPostgres: "PostgreSQL", DriverMySQL: "MySQL", DriverMSSQL: "SQL Server",
+	DriverClickHouse: "ClickHouse", DriverMongo: "MongoDB", DriverRedis: "Redis",
+}
+
+// roleGrantOnly are the engines where "administrator" is something an account
+// is granted and this surface has no single act that takes it back, with what
+// to do instead.
+var roleGrantOnly = map[Driver]string{
+	DriverClickHouse: "revoke the grants the account should lose",
+	DriverMongo:      "revoke the roles the account should lose",
+	DriverRedis:      "edit the account's ACL rule",
+}
+
+// CheckRoleRequest refuses a create or an alter that asks an engine's accounts
+// for something they cannot be given.
+//
+// It is one check in front of every engine because the alternative is what
+// each engine's own code does with a field it does not read: nothing. Redis
+// has no way to lock an account from here, and a request to lock one used to
+// be answered "done" — to an operator who then believed a compromised account
+// was shut. A request is honoured whole or refused naming the part that
+// cannot be.
+func CheckRoleRequest(driver Driver, spec RoleSpec, create bool) error {
+	names := spec.Changes()
+	if create {
+		names = spec.asked()
+	} else if len(names) == 0 {
+		return ErrRoleAttribute{msg: "nothing to change"}
+	}
+	editable := EditableRoleAttributes(driver)
+	for _, name := range names {
+		if containsString(editable, name) {
+			continue
 		}
+		if driver == DriverPostgres && name == "locked" {
+			return ErrRoleAttribute{msg: "a PostgreSQL role is suspended by taking away its login, not by locking it"}
+		}
+		return ErrRoleAttribute{msg: fmt.Sprintf("%s accounts have no %s attribute", roleEngineNames[driver], name)}
+	}
+	if instead, only := roleGrantOnly[driver]; only && !create && spec.SetSuperuser && !spec.Superuser {
+		return ErrRoleAttribute{msg: fmt.Sprintf("%s has no administrator flag to clear; %s", roleEngineNames[driver], instead)}
 	}
 	return nil
 }
@@ -155,6 +215,29 @@ type DatabaseGrant struct {
 	// "this database" means to the person asking.
 	Schema string
 	Level  GrantLevel
+	// Preview renders the statements, and works out what they would cover,
+	// without running them.
+	Preview bool
+}
+
+// GrantResult is what a database grant did, or with Preview would do.
+type GrantResult struct {
+	// Statements is the SQL, in the order it ran.
+	Statements []string `json:"statements"`
+	// Schemas are the schemas the grant reached, on the engines that have
+	// them inside a database.
+	Schemas []string `json:"schemas,omitempty"`
+	// SkippedSchemas are the ones a grant on "the database" left alone, each
+	// with why. Naming one in the request grants on it regardless.
+	SkippedSchemas []SkippedSchema `json:"skippedSchemas,omitempty"`
+	// Notes say what the grant could not cover.
+	Notes []string `json:"notes,omitempty"`
+}
+
+// SkippedSchema is a schema a whole-database grant did not touch.
+type SkippedSchema struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
 }
 
 // Extension is one optional module the server offers, installed or not.
@@ -215,11 +298,11 @@ type Admin interface {
 	AlterRole(ctx context.Context, db *sql.DB, spec RoleSpec) error
 	DropRole(ctx context.Context, db *sql.DB, name, host string) error
 	// Grant hands a role a level of access to a database and returns the
-	// statements it ran. The pool it is given is connected to that database
-	// where the engine needs it to be (Postgres grants on tables from inside
-	// the database that holds them); the caller arranges that through
-	// GrantNeedsDatabase.
-	Grant(ctx context.Context, db *sql.DB, grant DatabaseGrant) ([]string, error)
+	// statements it ran and what they covered. The pool it is given is
+	// connected to that database where the engine needs it to be (Postgres
+	// grants on tables from inside the database that holds them); the caller
+	// arranges that through GrantNeedsDatabase.
+	Grant(ctx context.Context, db *sql.DB, grant DatabaseGrant) (*GrantResult, error)
 	// GrantNeedsDatabase reports whether Grant has to run connected to the
 	// target database rather than to whichever one the connection opens.
 	GrantNeedsDatabase() bool
@@ -331,7 +414,9 @@ func pgRoleOptions(spec RoleSpec, create bool) (string, error) {
 	optional(spec.Inherit, "INHERIT")
 	optional(spec.Replication, "REPLICATION")
 	optional(spec.BypassRLS, "BYPASSRLS")
-	if spec.Locked != nil {
+	// A create may carry "not locked" from a form that sends every field; an
+	// alter that names the attribute at all is asking for a change.
+	if spec.Locked != nil && (!create || *spec.Locked) {
 		return "", ErrRoleAttribute{msg: "a PostgreSQL role is suspended by taking away its login, not by locking it"}
 	}
 	if spec.ConnLimit != 0 {
@@ -423,37 +508,142 @@ func (d postgresDialect) DropRole(ctx context.Context, db *sql.DB, name, _ strin
 
 func (postgresDialect) GrantNeedsDatabase() bool { return true }
 
-// pgUserSchemas lists the schemas of the connection's database that are not
-// PostgreSQL's own.
-func pgUserSchemas(ctx context.Context, q interface {
+// pgQuerier is the half of a pool or a transaction the catalogue reads need.
+type pgQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}) ([]string, error) {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// pgSupabaseSchemas are the schemas Supabase keeps its own services' state
+// in. They are ordinary schemas owned by ordinary roles, so nothing in the
+// catalogue marks them; they are recognised by name, and only on a server
+// that has Supabase's administrator role — on any other, a schema called auth
+// is the application's own.
+var pgSupabaseSchemas = map[string]bool{
+	"auth": true, "storage": true, "realtime": true, "_realtime": true, "vault": true,
+	"graphql": true, "graphql_public": true, "extensions": true, "pgbouncer": true, "net": true,
+	"supabase_functions": true, "supabase_migrations": true, "_analytics": true, "_supavisor": true,
+}
+
+// pgGrantSchemas decides which schemas "this database" means for a grant.
+//
+// Every schema that is not PostgreSQL's own was the first answer, and it is
+// too wide: pg_cron keeps its job list in a schema, TimescaleDB its
+// catalogue, Supabase its users and their password hashes, and a role granted
+// "read on this database" for reporting has no business in any of them. A
+// schema an extension created belongs to the extension — the catalogue says
+// so, in pg_depend — and a platform's own are known by name. Those are left
+// out and reported, so the operator sees what was not covered and can name
+// one in the request if it was meant.
+func pgGrantSchemas(ctx context.Context, q pgQuerier) (covered []string, skipped []SkippedSchema, err error) {
+	var supabase bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin')`).Scan(&supabase); err != nil {
+		return nil, nil, err
+	}
 	rows, err := q.QueryContext(ctx, `
-	  SELECT nspname FROM pg_namespace
-	  WHERE nspname NOT IN ('pg_catalog', 'information_schema')
-	    AND nspname NOT LIKE 'pg\_toast%' AND nspname NOT LIKE 'pg\_temp%'
-	  ORDER BY nspname`)
+	  SELECT n.nspname,
+	         COALESCE((SELECT e.extname FROM pg_depend d
+	                   JOIN pg_extension e ON e.oid = d.refobjid
+	                   WHERE d.classid = 'pg_namespace'::regclass AND d.objid = n.oid
+	                     AND d.refclassid = 'pg_extension'::regclass AND d.deptype = 'e'
+	                   LIMIT 1), '')
+	  FROM pg_namespace n
+	  WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+	    AND n.nspname NOT LIKE 'pg\_toast%' AND n.nspname NOT LIKE 'pg\_temp%'
+	  ORDER BY n.nspname`)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
-	out := []string{}
+	covered, skipped = []string{}, []SkippedSchema{}
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
+		var name, extension string
+		if err := rows.Scan(&name, &extension); err != nil {
+			return nil, nil, err
 		}
-		out = append(out, name)
+		if reason := pgSchemaSkipReason(name, extension, supabase); reason != "" {
+			skipped = append(skipped, SkippedSchema{Name: name, Reason: reason})
+			continue
+		}
+		covered = append(covered, name)
 	}
-	return out, rows.Err()
+	return covered, skipped, rows.Err()
+}
+
+// pgSchemaSkipReason says why a whole-database grant leaves a schema alone,
+// or nothing when it does not. extension is the extension the schema is a
+// member of, if any; supabase is whether the server is one of Supabase's.
+func pgSchemaSkipReason(name, extension string, supabase bool) string {
+	switch {
+	case extension != "":
+		return "it belongs to the " + extension + " extension"
+	case name == "hdb_catalog":
+		return "it is Hasura's own catalogue"
+	case supabase && pgSupabaseSchemas[name]:
+		return "it is one of Supabase's own schemas"
+	}
+	return ""
+}
+
+// pgFutureOwners finds, per schema, the roles whose future objects a default
+// privilege has to be written for, beside the connection's own.
+//
+// ALTER DEFAULT PRIVILEGES applies to objects one role creates, and without
+// FOR ROLE that role is whoever runs the statement — the dashboard's own
+// account, which is rarely the one a migration runs as. The roles a migration
+// does run as are the ones that already own something in the schema, and the
+// one that owns the schema itself. Speaking for a role takes being a member of
+// it, and asking for one that is not would abort the whole transaction, so
+// those are returned apart: they cannot be covered, and the caller says so.
+func pgFutureOwners(ctx context.Context, q pgQuerier, schemas []string) (owners, uncovered map[string][]string, err error) {
+	rows, err := q.QueryContext(ctx, `
+	  SELECT DISTINCT n.nspname, r.rolname, pg_has_role(current_user, r.oid, 'MEMBER')
+	  FROM pg_namespace n
+	  JOIN LATERAL (
+	    SELECT c.relowner AS owner FROM pg_class c
+	    WHERE c.relnamespace = n.oid AND c.relkind IN ('r', 'p', 'S')
+	    UNION
+	    SELECT n.nspowner
+	  ) o ON true
+	  JOIN pg_roles r ON r.oid = o.owner
+	  WHERE n.nspname = ANY($1) AND r.rolname <> current_user AND r.rolname NOT LIKE 'pg\_%'
+	  ORDER BY 1, 2`, schemas)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	owners, uncovered = map[string][]string{}, map[string][]string{}
+	for rows.Next() {
+		var schema, owner string
+		var member bool
+		if err := rows.Scan(&schema, &owner, &member); err != nil {
+			return nil, nil, err
+		}
+		if member {
+			owners[schema] = append(owners[schema], owner)
+		} else {
+			uncovered[schema] = append(uncovered[schema], owner)
+		}
+	}
+	return owners, uncovered, rows.Err()
+}
+
+// futureOwnerNotes says which roles' future objects a default privilege could
+// not be written for.
+func futureOwnerNotes(schemas []string, uncovered map[string][]string) []string {
+	notes := []string{}
+	for _, schema := range schemas {
+		if roles := uncovered[schema]; len(roles) > 0 {
+			notes = append(notes, fmt.Sprintf("Objects that %s creates in %s later are not covered: this connection's account is not a member of that role.",
+				strings.Join(roles, ", "), schema))
+		}
+	}
+	return notes
 }
 
 // pgGrantStatements expands a level into the statements that give it, for
 // the given schemas. owners names, per schema, the roles whose future tables
-// should carry the same privileges: ALTER DEFAULT PRIVILEGES applies to
-// objects one role creates, and without FOR ROLE that role is whoever runs
-// the statement — the dashboard's own account, which is rarely the one a
-// migration runs as.
+// should carry the same privileges, as pgFutureOwners found them.
 func pgGrantStatements(d postgresDialect, g DatabaseGrant, schemas []string, owners map[string][]string) ([]string, error) {
 	r, err := d.QuoteIdent(g.Role)
 	if err != nil {
@@ -519,53 +709,35 @@ func pgGrantStatements(d postgresDialect, g DatabaseGrant, schemas []string, own
 // of every level. All of it runs in one transaction: a grant that stopped
 // halfway used to leave an account that could connect and read nothing, and
 // nothing on the page to say which half had run.
-func (d postgresDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGrant) ([]string, error) {
+func (d postgresDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGrant) (*GrantResult, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	schemas := []string{g.Schema}
+	out := &GrantResult{Schemas: []string{g.Schema}}
 	if g.Schema == "" {
-		if schemas, err = pgUserSchemas(ctx, tx); err != nil {
+		if out.Schemas, out.SkippedSchemas, err = pgGrantSchemas(ctx, tx); err != nil {
 			return nil, err
 		}
 	}
-	// The other roles that own tables in each schema and that this account
-	// may speak for. Asking for one it is not a member of is an error that
-	// would abort the whole transaction, so membership is checked first.
-	owners := map[string][]string{}
-	rows, err := tx.QueryContext(ctx, `
-	  SELECT DISTINCT n.nspname, pg_get_userbyid(c.relowner)
-	  FROM pg_class c
-	  JOIN pg_namespace n ON n.oid = c.relnamespace
-	  WHERE c.relkind IN ('r', 'p') AND c.relowner <> (SELECT oid FROM pg_roles WHERE rolname = current_user)
-	    AND pg_has_role(current_user, c.relowner, 'MEMBER')
-	    AND n.nspname = ANY($1)`, schemas)
+	owners, uncovered, err := pgFutureOwners(ctx, tx, out.Schemas)
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var schema, owner string
-		if err := rows.Scan(&schema, &owner); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		owners[schema] = append(owners[schema], owner)
-	}
-	if err := rows.Close(); err != nil {
+	out.Notes = futureOwnerNotes(out.Schemas, uncovered)
+	if out.Statements, err = pgGrantStatements(d, g, out.Schemas, owners); err != nil {
 		return nil, err
 	}
-	stmts, err := pgGrantStatements(d, g, schemas, owners)
-	if err != nil {
-		return nil, err
+	if g.Preview {
+		return out, nil
 	}
-	for _, stmt := range stmts {
+	for _, stmt := range out.Statements {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return nil, err
 		}
 	}
-	return stmts, tx.Commit()
+	return out, tx.Commit()
 }
 
 func (d postgresDialect) CreateDatabase(ctx context.Context, db *sql.DB, name, owner string) error {
@@ -732,38 +904,53 @@ func mysqlAccount(user, host string) (string, error) {
 	return dumpString(DriverMySQL, user) + "@'" + host + "'", nil
 }
 
+// mysqlCreateRoleStatements renders the account and then what it was asked to
+// have. An account that may not sign in is made locked: MySQL has no other
+// way to say it.
+func mysqlCreateRoleStatements(account string, spec RoleSpec) []string {
+	create := "CREATE USER " + account + " IDENTIFIED BY " + passwordLiteral(DriverMySQL, spec.Password)
+	if spec.ConnLimit > 0 {
+		create += " WITH MAX_USER_CONNECTIONS " + itoa(spec.ConnLimit)
+	}
+	if (spec.SetLogin && !spec.Login) || (spec.Locked != nil && *spec.Locked) {
+		create += " ACCOUNT LOCK"
+	}
+	stmts := []string{create}
+	if spec.Superuser {
+		// Every privilege already includes the two below.
+		return append(stmts, "GRANT ALL PRIVILEGES ON *.* TO "+account+" WITH GRANT OPTION")
+	}
+	if spec.CreateDB {
+		stmts = append(stmts, "GRANT CREATE ON *.* TO "+account)
+	}
+	if spec.CreateRole {
+		stmts = append(stmts, "GRANT CREATE USER ON *.* TO "+account)
+	}
+	return stmts
+}
+
 func (mysqlDialect) CreateRole(ctx context.Context, db *sql.DB, spec RoleSpec) error {
 	account, err := mysqlAccount(spec.Name, spec.Host)
 	if err != nil {
 		return err
 	}
+	if err := CheckRoleRequest(DriverMySQL, spec, true); err != nil {
+		return err
+	}
 	if err := validatePassword(spec.Password); err != nil {
 		return err
 	}
-	stmt := "CREATE USER " + account + " IDENTIFIED BY " + passwordLiteral(DriverMySQL, spec.Password)
-	if spec.ConnLimit > 0 {
-		stmt += " WITH MAX_USER_CONNECTIONS " + itoa(spec.ConnLimit)
-	}
-	if _, err := db.ExecContext(ctx, stmt); err != nil {
-		return err
-	}
-	// The account and its privilege are two statements and MySQL commits
-	// each. If the second fails the first is undone by hand: an account left
-	// behind without what it was asked to have cannot be created again, and
-	// nothing on the page says it is there.
-	grant := ""
-	switch {
-	case spec.Superuser:
-		grant = "GRANT ALL PRIVILEGES ON *.* TO " + account + " WITH GRANT OPTION"
-	case spec.CreateDB:
-		grant = "GRANT CREATE ON *.* TO " + account
-	}
-	if grant == "" {
-		return nil
-	}
-	if _, err := db.ExecContext(ctx, grant); err != nil {
-		_, _ = db.ExecContext(context.WithoutCancel(ctx), "DROP USER "+account)
-		return err
+	// The account and its privileges are separate statements and MySQL
+	// commits each. If a later one fails the account is undone by hand: one
+	// left behind without what it was asked to have cannot be created again,
+	// and nothing on the page says it is there.
+	for i, stmt := range mysqlCreateRoleStatements(account, spec) {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			if i > 0 {
+				_, _ = db.ExecContext(context.WithoutCancel(ctx), "DROP USER "+account)
+			}
+			return err
+		}
 	}
 	return nil
 }
@@ -778,14 +965,8 @@ func (mysqlDialect) AlterRole(ctx context.Context, db *sql.DB, spec RoleSpec) er
 	if err != nil {
 		return err
 	}
-	if err := refuseAttributes("MySQL", map[string]bool{
-		"inherit": spec.Inherit != nil, "replication": spec.Replication != nil,
-		"bypassRls": spec.BypassRLS != nil, "validUntil": spec.ValidUntil != nil,
-	}); err != nil {
+	if err := CheckRoleRequest(DriverMySQL, spec, false); err != nil {
 		return err
-	}
-	if len(spec.Changes()) == 0 {
-		return ErrRoleAttribute{msg: "nothing to change"}
 	}
 	stmts := []string{}
 	if spec.SetPassword {
@@ -874,7 +1055,7 @@ func mysqlGrantDatabase(name string) (string, error) {
 	return strings.ReplaceAll(q, "%", `\%`), nil
 }
 
-func (d mysqlDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGrant) ([]string, error) {
+func (d mysqlDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGrant) (*GrantResult, error) {
 	account, err := mysqlAccount(g.Role, g.Host)
 	if err != nil {
 		return nil, err
@@ -894,9 +1075,12 @@ func (d mysqlDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGrant) ([
 	default:
 		return nil, fmt.Errorf("unknown grant level %q", g.Level)
 	}
-	stmt := "GRANT " + privileges + " ON " + dbName + ".* TO " + account
-	_, err = db.ExecContext(ctx, stmt)
-	return []string{stmt}, err
+	out := &GrantResult{Statements: []string{"GRANT " + privileges + " ON " + dbName + ".* TO " + account}}
+	if g.Preview {
+		return out, nil
+	}
+	_, err = db.ExecContext(ctx, out.Statements[0])
+	return out, err
 }
 
 func (d mysqlDialect) CreateDatabase(ctx context.Context, db *sql.DB, name, _ string) error {
@@ -982,6 +1166,9 @@ func (d clickhouseDialect) CreateRole(ctx context.Context, db *sql.DB, spec Role
 	if err != nil {
 		return err
 	}
+	if err := CheckRoleRequest(DriverClickHouse, spec, true); err != nil {
+		return err
+	}
 	if err := validatePassword(spec.Password); err != nil {
 		return err
 	}
@@ -1005,21 +1192,11 @@ func (d clickhouseDialect) AlterRole(ctx context.Context, db *sql.DB, spec RoleS
 	if err != nil {
 		return err
 	}
-	if err := refuseAttributes("ClickHouse", map[string]bool{
-		"login": spec.SetLogin, "createDb": spec.SetCreateDB, "createRole": spec.SetCreateRole,
-		"connectionLimit": spec.ConnLimit != 0, "inherit": spec.Inherit != nil,
-		"replication": spec.Replication != nil, "bypassRls": spec.BypassRLS != nil,
-		"locked": spec.Locked != nil, "validUntil": spec.ValidUntil != nil,
-	}); err != nil {
+	// Among what this refuses is clearing the administrator flag: REVOKE ALL
+	// ON *.* takes every grant the account has, at every level, which is far
+	// more than unticking a box says.
+	if err := CheckRoleRequest(DriverClickHouse, spec, false); err != nil {
 		return err
-	}
-	if spec.SetSuperuser && !spec.Superuser {
-		// REVOKE ALL ON *.* takes every grant the account has, at every
-		// level, which is far more than unticking a box says.
-		return ErrRoleAttribute{msg: "ClickHouse has no administrator flag to clear; revoke the grants the account should lose"}
-	}
-	if len(spec.Changes()) == 0 {
-		return ErrRoleAttribute{msg: "nothing to change"}
 	}
 	if spec.SetPassword {
 		if err := validatePassword(spec.Password); err != nil {
@@ -1046,7 +1223,7 @@ func (d clickhouseDialect) DropRole(ctx context.Context, db *sql.DB, name, _ str
 
 func (clickhouseDialect) GrantNeedsDatabase() bool { return false }
 
-func (d clickhouseDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGrant) ([]string, error) {
+func (d clickhouseDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGrant) (*GrantResult, error) {
 	r, err := d.QuoteIdent(g.Role)
 	if err != nil {
 		return nil, err
@@ -1066,9 +1243,12 @@ func (d clickhouseDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGran
 	default:
 		return nil, fmt.Errorf("unknown grant level %q", g.Level)
 	}
-	stmt := "GRANT " + privileges + " ON " + dbName + ".* TO " + r
-	_, err = db.ExecContext(ctx, stmt)
-	return []string{stmt}, err
+	out := &GrantResult{Statements: []string{"GRANT " + privileges + " ON " + dbName + ".* TO " + r}}
+	if g.Preview {
+		return out, nil
+	}
+	_, err = db.ExecContext(ctx, out.Statements[0])
+	return out, err
 }
 
 func (d clickhouseDialect) CreateDatabase(ctx context.Context, db *sql.DB, name, _ string) error {
@@ -1142,31 +1322,48 @@ func (mssqlDialect) Roles(ctx context.Context, db *sql.DB) ([]Role, error) {
 	return out, rows.Err()
 }
 
+// mssqlCreateRoleStatements renders the login and then what it was asked to
+// have: a membership of a fixed server role for each flag, and a disabled
+// login for an account that may not sign in.
+func mssqlCreateRoleStatements(name string, spec RoleSpec) []string {
+	stmts := []string{"CREATE LOGIN " + name + " WITH PASSWORD = " + passwordLiteral(DriverMSSQL, spec.Password)}
+	switch {
+	case spec.Superuser:
+		// sysadmin already holds what the other two give.
+		stmts = append(stmts, "ALTER SERVER ROLE sysadmin ADD MEMBER "+name)
+	default:
+		if spec.CreateDB {
+			stmts = append(stmts, "ALTER SERVER ROLE dbcreator ADD MEMBER "+name)
+		}
+		if spec.CreateRole {
+			stmts = append(stmts, "ALTER SERVER ROLE securityadmin ADD MEMBER "+name)
+		}
+	}
+	if (spec.SetLogin && !spec.Login) || (spec.Locked != nil && *spec.Locked) {
+		stmts = append(stmts, "ALTER LOGIN "+name+" DISABLE")
+	}
+	return stmts
+}
+
 func (d mssqlDialect) CreateRole(ctx context.Context, db *sql.DB, spec RoleSpec) error {
 	name, err := d.QuoteIdent(spec.Name)
 	if err != nil {
 		return err
 	}
+	if err := CheckRoleRequest(DriverMSSQL, spec, true); err != nil {
+		return err
+	}
 	if err := validatePassword(spec.Password); err != nil {
 		return err
 	}
-	if _, err := db.ExecContext(ctx, "CREATE LOGIN "+name+" WITH PASSWORD = "+passwordLiteral(DriverMSSQL, spec.Password)); err != nil {
-		return err
-	}
-	serverRole := ""
-	switch {
-	case spec.Superuser:
-		serverRole = "sysadmin"
-	case spec.CreateDB:
-		serverRole = "dbcreator"
-	}
-	if serverRole == "" {
-		return nil
-	}
-	if _, err := db.ExecContext(ctx, "ALTER SERVER ROLE "+serverRole+" ADD MEMBER "+name); err != nil {
-		// Undone by hand, as on MySQL: the two statements are not one.
-		_, _ = db.ExecContext(context.WithoutCancel(ctx), "DROP LOGIN "+name)
-		return err
+	for i, stmt := range mssqlCreateRoleStatements(name, spec) {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			if i > 0 {
+				// Undone by hand, as on MySQL: the statements are not one.
+				_, _ = db.ExecContext(context.WithoutCancel(ctx), "DROP LOGIN "+name)
+			}
+			return err
+		}
 	}
 	return nil
 }
@@ -1179,15 +1376,8 @@ func (d mssqlDialect) AlterRole(ctx context.Context, db *sql.DB, spec RoleSpec) 
 	if err != nil {
 		return err
 	}
-	if err := refuseAttributes("SQL Server", map[string]bool{
-		"connectionLimit": spec.ConnLimit != 0, "inherit": spec.Inherit != nil,
-		"replication": spec.Replication != nil, "bypassRls": spec.BypassRLS != nil,
-		"validUntil": spec.ValidUntil != nil,
-	}); err != nil {
+	if err := CheckRoleRequest(DriverMSSQL, spec, false); err != nil {
 		return err
-	}
-	if len(spec.Changes()) == 0 {
-		return ErrRoleAttribute{msg: "nothing to change"}
 	}
 	stmts := []string{}
 	if spec.SetPassword {
@@ -1240,7 +1430,7 @@ func (d mssqlDialect) DropRole(ctx context.Context, db *sql.DB, name, _ string) 
 
 func (mssqlDialect) GrantNeedsDatabase() bool { return true }
 
-func (d mssqlDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGrant) ([]string, error) {
+func (d mssqlDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGrant) (*GrantResult, error) {
 	r, err := d.QuoteIdent(g.Role)
 	if err != nil {
 		return nil, err
@@ -1256,18 +1446,23 @@ func (d mssqlDialect) Grant(ctx context.Context, db *sql.DB, g DatabaseGrant) ([
 	default:
 		return nil, fmt.Errorf("unknown grant level %q", g.Level)
 	}
+	out := &GrantResult{Statements: []string{}}
+	for _, dbRole := range dbRoles {
+		out.Statements = append(out.Statements, "ALTER ROLE "+dbRole+" ADD MEMBER "+r)
+	}
+	if g.Preview {
+		return out, nil
+	}
 	// The login needs a user in the database before it can be a member of
 	// anything; one that already exists is not an error worth failing over.
 	_, _ = db.ExecContext(ctx, "CREATE USER "+r+" FOR LOGIN "+r)
-	stmts := []string{}
-	for _, dbRole := range dbRoles {
-		stmt := "ALTER ROLE " + dbRole + " ADD MEMBER " + r
+	for i, stmt := range out.Statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			return stmts, err
+			out.Statements = out.Statements[:i]
+			return out, err
 		}
-		stmts = append(stmts, stmt)
 	}
-	return stmts, nil
+	return out, nil
 }
 
 func (d mssqlDialect) CreateDatabase(ctx context.Context, db *sql.DB, name, _ string) error {

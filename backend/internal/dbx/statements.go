@@ -263,9 +263,14 @@ func (postgresDialect) Statements(ctx context.Context, db *sql.DB, opts Statemen
 		return nil, err
 	}
 	// When the counters were last zeroed, on the versions that record it (14+).
-	var since sql.NullTime
-	if err := db.QueryRowContext(ctx, `SELECT stats_reset FROM pg_stat_statements_info`).Scan(&since); err == nil {
-		out.Since = timePtr(since)
+	// The catalogue is asked whether the view is there; asking the view itself
+	// would log an error on every older server each time the page opened.
+	var recorded bool
+	if err := db.QueryRowContext(ctx, `SELECT to_regclass('pg_stat_statements_info') IS NOT NULL`).Scan(&recorded); err == nil && recorded {
+		var since sql.NullTime
+		if err := db.QueryRowContext(ctx, `SELECT stats_reset FROM pg_stat_statements_info`).Scan(&since); err == nil {
+			out.Since = timePtr(since)
+		}
 	}
 	return out, nil
 }

@@ -78,9 +78,9 @@ var (
 		"19": eolDate("2032-12-31"), "21": eolDate("2027-07-31"), "23": eolDate("2031-12-31"),
 	}
 
-	versionNumber = regexp.MustCompile(`(\d+)\.(\d+)`)
-	mssqlYear     = regexp.MustCompile(`SQL Server (\d{4})`)
-	oracleRelease = regexp.MustCompile(`(?i)Database (\d+)[a-z]`)
+	eolVersionNumber = regexp.MustCompile(`(\d+)\.(\d+)`)
+	mssqlYear        = regexp.MustCompile(`SQL Server (\d{4})`)
+	oracleRelease    = regexp.MustCompile(`(?i)Database (\d+)[a-z]`)
 )
 
 // VersionEndOfLife looks a server's version string up in the table. The
@@ -150,7 +150,7 @@ func VersionEndOfLife(driver Driver, version string, now time.Time) (*EndOfLife,
 
 // leadingVersion finds the first major.minor pair in a version string.
 func leadingVersion(version string) (major, minor int, ok bool) {
-	m := versionNumber.FindStringSubmatch(version)
+	m := eolVersionNumber.FindStringSubmatch(version)
 	if m == nil {
 		return 0, 0, false
 	}

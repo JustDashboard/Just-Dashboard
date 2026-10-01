@@ -232,6 +232,11 @@ func (s *Server) handleDBRoleCreate(w http.ResponseWriter, r *http.Request) erro
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	spec := req.spec(true)
+	// Before anything is made: an account created without part of what was
+	// asked for is worse than none, because the answer would still be "done".
+	if err := dbx.CheckRoleRequest(conn.Driver, spec, true); err != nil {
+		return roleError(err)
+	}
 	if err := s.withRoleClient(ctx, conn, dsn, admin,
 		func(a dbx.Admin, pool *sql.DB) error { return a.CreateRole(ctx, pool, spec) },
 		func(c *mongo.Client) error { return dbx.MongoCreateUser(ctx, c, spec) },
@@ -240,10 +245,12 @@ func (s *Server) handleDBRoleCreate(w http.ResponseWriter, r *http.Request) erro
 		return roleError(err)
 	}
 	detail := map[string]any{"role": spec.Name, "superuser": spec.Superuser, "driver": conn.Driver}
+	out := map[string]any{"ok": true}
 	if req.Database != "" && req.Level != "" {
 		grant := dbx.DatabaseGrant{Role: spec.Name, Host: spec.Host, Database: req.Database,
 			Schema: strings.TrimSpace(req.Schema), Level: dbx.GrantLevel(req.Level)}
-		if _, err := s.grantRole(ctx, conn, dsn, admin, grant); err != nil {
+		granted, err := s.grantRole(ctx, conn, dsn, admin, grant)
+		if err != nil {
 			// The account exists; say what was not done rather than roll
 			// back an act the operator may want to keep.
 			httpx.SetAudit(r, "database.role.create", conn.Name, detail)
@@ -251,10 +258,31 @@ func (s *Server) handleDBRoleCreate(w http.ResponseWriter, r *http.Request) erro
 				fmt.Sprintf("%s was created but could not be granted %s: %v", spec.Name, req.Database, err))
 		}
 		detail["database"], detail["level"] = req.Database, req.Level
+		grantOutcome(granted, detail, out)
 	}
 	httpx.SetAudit(r, "database.role.create", conn.Name, detail)
-	httpx.JSON(w, http.StatusCreated, map[string]any{"ok": true})
+	httpx.JSON(w, http.StatusCreated, out)
 	return nil
+}
+
+// grantOutcome copies what a database grant covered into the audit detail and
+// the response. The schemas it left alone are in both: an operator reading
+// either should not have to infer them from the statements.
+func grantOutcome(granted *dbx.GrantResult, detail, out map[string]any) {
+	detail["statements"], out["statements"] = granted.Statements, granted.Statements
+	if len(granted.Schemas) > 0 {
+		detail["schemas"], out["schemas"] = granted.Schemas, granted.Schemas
+	}
+	if len(granted.SkippedSchemas) > 0 {
+		names := make([]string, len(granted.SkippedSchemas))
+		for i, skipped := range granted.SkippedSchemas {
+			names[i] = skipped.Name
+		}
+		detail["skippedSchemas"], out["skippedSchemas"] = names, granted.SkippedSchemas
+	}
+	if len(granted.Notes) > 0 {
+		out["notes"] = granted.Notes
+	}
 }
 
 func (s *Server) handleDBRoleAlter(w http.ResponseWriter, r *http.Request) error {
@@ -274,8 +302,14 @@ func (s *Server) handleDBRoleAlter(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	spec := req.spec(false)
 	changes := spec.Changes()
-	if len(changes) == 0 {
-		return httpx.BadRequest("nothing to change")
+	// Checked here, for every engine, before the engine is asked: Redis and
+	// MongoDB read two fields of a request and ignore the rest, and an ignored
+	// "locked" answered 200 is an operator believing an account is shut.
+	if err := dbx.CheckRoleRequest(conn.Driver, spec, false); err != nil {
+		return roleError(err)
+	}
+	if err := ownAccountRefusal(conn, spec); err != nil {
+		return err
 	}
 	if err := s.withRoleClient(ctx, conn, dsn, admin,
 		func(a dbx.Admin, pool *sql.DB) error { return a.AlterRole(ctx, pool, spec) },
@@ -297,6 +331,27 @@ func (s *Server) handleDBRoleAlter(w http.ResponseWriter, r *http.Request) error
 	}
 	httpx.SetAudit(r, "database.role.alter", conn.Name, detail)
 	httpx.JSON(w, http.StatusOK, out)
+	return nil
+}
+
+// ownAccountRefusal refuses the changes that would cut the dashboard off from
+// the server it is making them on: the account this connection signs in with
+// may not be barred from signing in, nor demoted. The open pool would carry
+// on for a while and then every page of this database would fail on its next
+// dial, with nothing here able to undo it. Dropping that account is refused
+// for the same reason; the name is compared the same way, without the host,
+// because on MySQL which of a name's accounts the connection matched is the
+// server's to decide and refusing one too many costs a trip to the console.
+func ownAccountRefusal(conn *dbConnection, spec dbx.RoleSpec) error {
+	if conn.User == "" || !strings.EqualFold(spec.Name, conn.User) {
+		return nil
+	}
+	switch {
+	case (spec.SetLogin && !spec.Login) || (spec.Locked != nil && *spec.Locked):
+		return httpx.BadRequest("%s is the account this connection signs in with; it cannot be kept from signing in from here", spec.Name)
+	case spec.SetSuperuser && !spec.Superuser:
+		return httpx.BadRequest("%s is the account this connection signs in with; its administrator rights cannot be taken away from here", spec.Name)
+	}
 	return nil
 }
 
@@ -362,6 +417,11 @@ type grantRequest struct {
 	Schema string `json:"schema"`
 }
 
+// handleDBRoleGrant hands a role a database at one of three levels.
+//
+// With ?preview=1 nothing runs: the statements come back with the schemas
+// they would reach and the ones they would leave alone, which on PostgreSQL
+// is the only way to know before the fact what "this database" will cover.
 func (s *Server) handleDBRoleGrant(w http.ResponseWriter, r *http.Request) error {
 	var req grantRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -385,32 +445,50 @@ func (s *Server) handleDBRoleGrant(w http.ResponseWriter, r *http.Request) error
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	grant := dbx.DatabaseGrant{Role: name, Host: req.Host, Database: database, Schema: strings.TrimSpace(req.Schema), Level: level}
-	statements, err := s.grantRole(ctx, conn, dsn, admin, grant)
+	preview := r.URL.Query().Get("preview") == "1"
+	if preview {
+		// Nothing changes, whether it answers or fails.
+		httpx.SkipAudit(r)
+	}
+	grant := dbx.DatabaseGrant{Role: name, Host: req.Host, Database: database, Schema: strings.TrimSpace(req.Schema),
+		Level: level, Preview: preview}
+	granted, err := s.grantRole(ctx, conn, dsn, admin, grant)
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
-	httpx.SetAudit(r, "database.role.grant", conn.Name,
-		map[string]any{"role": name, "database": database, "schema": grant.Schema, "level": string(level),
-			"driver": conn.Driver, "statements": statements})
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "statements": statements})
+	detail := map[string]any{"role": name, "database": database, "schema": grant.Schema, "level": string(level),
+		"driver": conn.Driver}
+	out := map[string]any{}
+	grantOutcome(granted, detail, out)
+	if preview {
+		out["preview"] = true
+		httpx.JSON(w, http.StatusOK, out)
+		return nil
+	}
+	out["ok"] = true
+	httpx.SetAudit(r, "database.role.grant", conn.Name, detail)
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
 // grantRole hands a role a database, connected to that database where the
-// engine grants from inside it, and returns the statements that ran. The
+// engine grants from inside it, and returns what ran and what it covered. The
 // sibling pool is opened for the request and closed with it rather than
 // cached: it is one transaction, and a pool per database an operator ever
 // granted would outlive its use.
-func (s *Server) grantRole(ctx context.Context, conn *dbConnection, dsn string, admin dbx.Admin, grant dbx.DatabaseGrant) ([]string, error) {
+func (s *Server) grantRole(ctx context.Context, conn *dbConnection, dsn string, admin dbx.Admin, grant dbx.DatabaseGrant) (*dbx.GrantResult, error) {
 	switch conn.Driver {
 	case dbx.DriverMongo:
+		// A built-in role on the database: there is no statement to show.
+		if grant.Preview {
+			return &dbx.GrantResult{Statements: []string{}}, nil
+		}
 		client, err := dbx.MongoClient(ctx, dsn)
 		if err != nil {
 			return nil, err
 		}
 		defer client.Disconnect(context.Background())
-		return []string{}, dbx.MongoGrant(ctx, client, grant.Role, grant.Database, grant.Level)
+		return &dbx.GrantResult{Statements: []string{}}, dbx.MongoGrant(ctx, client, grant.Role, grant.Database, grant.Level)
 	case dbx.DriverRedis:
 		return nil, errors.New("Redis grants are ACL rules; edit the user's rule instead")
 	}

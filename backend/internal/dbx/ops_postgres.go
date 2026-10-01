@@ -36,6 +36,7 @@ func (postgresDialect) ServerStats(ctx context.Context, db *sql.DB) (*ServerStat
 		returned, fetched, inserted, updated, deleted     float64
 		conflicts, tempFiles, tempBytes, deadlocks        float64
 		readTime, writeTime, backends, xidAge, wal, repls float64
+		checkpointer                                      bool
 	)
 	// pg_current_wal_lsn() raises on a standby, which is why the two halves
 	// sit in a CASE: only the branch that applies is evaluated.
@@ -53,13 +54,14 @@ func (postgresDialect) ServerStats(ctx context.Context, db *sql.DB) (*ServerStat
 	         (CASE WHEN pg_is_in_recovery()
 	               THEN pg_wal_lsn_diff(pg_last_wal_replay_lsn(), '0/0')
 	               ELSE pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0') END)::float8,
-	         (SELECT count(*) FROM pg_stat_replication)
+	         (SELECT count(*) FROM pg_stat_replication),
+	         to_regclass('pg_catalog.pg_stat_checkpointer') IS NOT NULL
 	  FROM pg_stat_database d
 	  WHERE d.datname = current_database()`).Scan(
 		&out.Version, &started, &recovery, &out.Database, &out.DatabaseBytes, &limit, &reserved,
 		&commit, &rollback, &blksRead, &blksHit, &returned, &fetched, &inserted, &updated, &deleted,
 		&conflicts, &tempFiles, &tempBytes, &deadlocks, &readTime, &writeTime, &reset, &backends,
-		&xidAge, &wal, &repls)
+		&xidAge, &wal, &repls, &checkpointer)
 	if err != nil {
 		return nil, err
 	}
@@ -153,16 +155,16 @@ func (postgresDialect) ServerStats(ctx context.Context, db *sql.DB) (*ServerStat
 		}
 	}
 	// The checkpoint counters moved from pg_stat_bgwriter to
-	// pg_stat_checkpointer in 17. The view is asked which it is rather than
-	// the version being parsed, and a server with neither loses two counters.
-	var timed, requested float64
-	if err := db.QueryRowContext(ctx, `SELECT num_timed, num_requested FROM pg_stat_checkpointer`).Scan(&timed, &requested); err != nil {
-		err = db.QueryRowContext(ctx, `SELECT checkpoints_timed, checkpoints_req FROM pg_stat_bgwriter`).Scan(&timed, &requested)
-		if err != nil {
-			timed, requested = -1, -1
-		}
+	// pg_stat_checkpointer in 17. Which view to read was asked above, of the
+	// catalogue: trying the new one and falling back on the error would work,
+	// and would write that error to the server's log on every poll of every
+	// server older than 17.
+	checkpoints := `SELECT checkpoints_timed, checkpoints_req FROM pg_stat_bgwriter`
+	if checkpointer {
+		checkpoints = `SELECT num_timed, num_requested FROM pg_stat_checkpointer`
 	}
-	if timed >= 0 {
+	var timed, requested float64
+	if err := db.QueryRowContext(ctx, checkpoints).Scan(&timed, &requested); err == nil {
 		out.Counters["checkpointsTimed"] = timed
 		out.Counters["checkpointsRequested"] = requested
 	}
@@ -539,9 +541,9 @@ func splitUnit(s string) []string {
 
 // --- table and index statistics ------------------------------------------------
 
-// pgSchemaFilter matches one schema, or every schema that is not the
+// opsPgSchemaFilter matches one schema, or every schema that is not the
 // engine's own when none is named. $1 is the schema.
-const pgSchemaFilter = `(($1 <> '' AND n.nspname = $1)
+const opsPgSchemaFilter = `(($1 <> '' AND n.nspname = $1)
 	   OR ($1 = '' AND n.nspname NOT IN ('pg_catalog', 'information_schema')
 	       AND n.nspname NOT LIKE 'pg\_toast%' AND n.nspname NOT LIKE 'pg\_temp%'))`
 
@@ -556,7 +558,7 @@ func (postgresDialect) TableStats(ctx context.Context, db *sql.DB, opts StatsOpt
 	           COALESCE(pg_total_relation_size(c.oid), 0) AS total
 	    FROM pg_class c
 	    JOIN pg_namespace n ON n.oid = c.relnamespace
-	    WHERE c.relkind IN ('r', 'm', 'p') AND `+pgSchemaFilter+`
+	    WHERE c.relkind IN ('r', 'm', 'p') AND `+opsPgSchemaFilter+`
 	    ORDER BY total DESC, n.nspname, c.relname
 	    LIMIT $2
 	  )
@@ -677,7 +679,7 @@ func (postgresDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOpt
 	  JOIN pg_namespace n ON n.oid = t.relnamespace
 	  JOIN pg_am am ON am.oid = i.relam
 	  LEFT JOIN pg_stat_all_indexes s ON s.indexrelid = i.oid
-	  WHERE t.relkind IN ('r', 'm', 'p') AND `+pgSchemaFilter+`
+	  WHERE t.relkind IN ('r', 'm', 'p') AND `+opsPgSchemaFilter+`
 	    AND ($2 = '' OR t.relname = $2)
 	  ORDER BY pg_relation_size(i.oid) DESC NULLS LAST, n.nspname, t.relname, i.relname
 	  LIMIT $3`, opts.Schema, opts.Table, opts.limit()+1)
@@ -788,9 +790,7 @@ func pgMaintenanceSQL(d postgresDialect, req MaintenanceRequest, database string
 // PostgreSQL reports a maintenance command through notices — the lines
 // VACUUM VERBOSE prints in psql — and a notice goes to a handler fixed when
 // the connection is opened. The pool's connections were opened without one,
-// so the pool cannot hear them. The connection is closed with the request; a
-// VACUUM that outlives it is cancelled by the server, which is the behaviour
-// an operator pressing Stop expects.
+// so the pool cannot hear them.
 func (d postgresDialect) Maintain(ctx context.Context, db *sql.DB, dsn string, req MaintenanceRequest) (*MaintenanceResult, error) {
 	var database string
 	if err := db.QueryRowContext(ctx, `SELECT current_database()`).Scan(&database); err != nil {
@@ -800,25 +800,38 @@ func (d postgresDialect) Maintain(ctx context.Context, db *sql.DB, dsn string, r
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := pgx.ParseConfig(d.NormaliseDSN(dsn))
-	if err != nil {
+	out := &MaintenanceResult{Statements: []string{stmt}, Output: []string{}, OK: true}
+	if err := pgRunWithNotices(ctx, d.NormaliseDSN(dsn), stmt, out); err != nil {
 		return nil, err
 	}
-	out := &MaintenanceResult{Statements: []string{stmt}, Output: []string{}, OK: true}
+	return out, nil
+}
+
+// pgRunWithNotices runs one statement on a connection opened for it and keeps
+// the notices it raises.
+//
+// The statement ends with the context. The driver closes a connection whose
+// context was cancelled mid-statement, and as it does it sends the server a
+// cancel request — what psql sends on Ctrl-C — so a VACUUM FULL whose request
+// was closed stops and gives up its lock rather than running on unwatched.
+// TestLiveOpsPostgresMaintenanceStopsWithTheRequest holds the driver to that.
+func pgRunWithNotices(ctx context.Context, dsn, stmt string, out *MaintenanceResult) error {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return err
+	}
 	cfg.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) {
-		out.Output = append(out.Output, noticeLines(n)...)
+		out.keep(noticeLines(n)...)
 	}
 	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer conn.Close(context.Background())
 	// The simple protocol, one statement: VACUUM refuses to run inside the
 	// implicit transaction a multi-statement or pipelined message opens.
-	if _, err := conn.PgConn().Exec(ctx, stmt).ReadAll(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	_, err = conn.PgConn().Exec(ctx, stmt).ReadAll()
+	return err
 }
 
 // noticeLines renders one notice the way psql prints it: the severity on the

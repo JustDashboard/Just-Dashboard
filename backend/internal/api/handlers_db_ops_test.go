@@ -207,6 +207,7 @@ func TestOpsWritesNeedTheirCapability(t *testing.T) {
 		{http.MethodPost, "/server/roles/app/privileges", `{"level":"table","schema":"s","table":"t","privileges":["SELECT"]}`, false},
 		{http.MethodPost, "/server/roles/app/privileges/revoke", `{"level":"table","schema":"s","table":"t","privileges":["SELECT"]}`, false},
 		{http.MethodPost, "/server/roles/app/privileges?preview=1", `{"level":"table","schema":"s","table":"t","privileges":["SELECT"]}`, false},
+		{http.MethodPost, "/server/roles/app/grant?preview=1", `{"level":"read","database":"x"}`, false},
 		{http.MethodPost, "/activity/cancel", `{"pid":"7"}`, false},
 	} {
 		if rec := h.viewer.do(c.method, h.base+c.path, c.body, nil); rec.Code != http.StatusForbidden {
@@ -293,7 +294,9 @@ func TestMaintenanceRunsOneClosedActionAndIsAudited(t *testing.T) {
 		`{"action":"wal_checkpoint","options":{"mode":"TRUNCATE); DROP"}}`: "mode must be",
 		`{"action":"vacuum","statement":"DROP TABLE parent"}`:              "unknown field",
 	} {
-		rec := h.worker.do(http.MethodPost, h.base+"/maintenance", body, nil)
+		// An administrator's, so that each refusal is about the request and
+		// not about who sent it.
+		rec := h.admin.do(http.MethodPost, h.base+"/maintenance", body, nil)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("%s = %d %s, want 400 with %q", body, rec.Code, rec.Body.String(), want)
 		}
@@ -309,33 +312,209 @@ func TestMaintenanceRunsOneClosedActionAndIsAudited(t *testing.T) {
 	}
 }
 
-// Whether an action is destructive is in the body, so the route cannot know
-// from its path and the handler checks by hand — before anything is dialled,
-// which is why a connection that goes nowhere can prove it.
-func TestDestructiveMaintenanceIsCheckedByContent(t *testing.T) {
+// Whether an action needs the destructive capability is in the body, so the
+// route cannot know from its path and the handler checks by hand — before
+// anything is dialled, which is why a connection that goes nowhere can prove
+// it. The actions that lock a table against the application, or can lose
+// rows, are the ones the SQL console refuses the same account; a form must
+// not be the cheaper way to run them.
+func TestBlockingMaintenanceIsCheckedByContent(t *testing.T) {
 	h := newOpsHarness(t)
-	id := saveOpsConnection(t, h.s, "nowhere", dbx.DriverMySQL, "u:p@tcp(127.0.0.1:1)/x")
-	base := fmt.Sprintf("/api/v1/databases/%d", id)
+	for _, c := range []struct {
+		driver  dbx.Driver
+		dsn     string
+		refused []string // 403 for a limited account
+		allowed []string // reach the dial, which fails: the server is not there
+		foreign string   // an action of another engine
+		ids     string
+	}{
+		{dbx.DriverMySQL, "u:p@tcp(127.0.0.1:1)/x",
+			[]string{`{"action":"repair","table":"t"}`, `{"action":"optimize","table":"t"}`, `{"action":"optimize"}`},
+			[]string{`{"action":"analyze","table":"t"}`, `{"action":"check"}`},
+			`{"action":"vacuum_full","table":"t"}`, "analyze, check, optimize, repair"},
+		{dbx.DriverPostgres, "postgres://u:p@127.0.0.1:1/x?sslmode=disable",
+			[]string{`{"action":"vacuum_full"}`, `{"action":"vacuum_full","table":"t"}`, `{"action":"reindex"}`,
+				`{"action":"reindex","table":"t","options":{"concurrently":true}}`},
+			[]string{`{"action":"vacuum","table":"t"}`, `{"action":"vacuum_analyze"}`, `{"action":"analyze"}`},
+			`{"action":"repair","table":"t"}`, "vacuum, vacuum_analyze, analyze, vacuum_full, reindex"},
+	} {
+		id := saveOpsConnection(t, h.s, "nowhere-"+string(c.driver), c.driver, c.dsn)
+		base := fmt.Sprintf("/api/v1/databases/%d", id)
+		for _, body := range c.refused {
+			rec := h.worker.do(http.MethodPost, base+"/maintenance", body, nil)
+			if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "your role does not permit it") {
+				t.Errorf("%s: a limited account's %s = %d %s, want 403", c.driver, body, rec.Code, rec.Body.String())
+			}
+			if rec := h.admin.do(http.MethodPost, base+"/maintenance", body, nil); rec.Code != http.StatusBadGateway {
+				t.Errorf("%s: an administrator's %s = %d %s, want it to reach the dial", c.driver, body, rec.Code, rec.Body.String())
+			}
+		}
+		// The same account, the same route, an action that works alongside
+		// the application: it gets as far as the server.
+		for _, body := range c.allowed {
+			rec := h.worker.do(http.MethodPost, base+"/maintenance", body, nil)
+			if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "connect_failed") {
+				t.Errorf("%s: a limited account's %s = %d %s, want it to reach the dial", c.driver, body, rec.Code, rec.Body.String())
+			}
+		}
+		// An action this engine does not have never reaches the capability
+		// check or the server.
+		rec := h.worker.do(http.MethodPost, base+"/maintenance", c.foreign, nil)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.ids) {
+			t.Errorf("%s: an action of another engine = %d %s", c.driver, rec.Code, rec.Body.String())
+		}
+	}
 
-	rec := h.worker.do(http.MethodPost, base+"/maintenance", `{"action":"repair","table":"t"}`, nil)
-	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "repair") {
-		t.Errorf("a limited account's REPAIR = %d %s, want 403", rec.Code, rec.Body.String())
+	// SQLite's VACUUM rewrites the whole file with nothing else able to use it.
+	rec := h.worker.do(http.MethodPost, h.base+"/maintenance", `{"action":"vacuum"}`, nil)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("a limited account's SQLite VACUUM = %d %s, want 403", rec.Code, rec.Body.String())
 	}
-	// The same account, the same route, an action that loses nothing: it gets
-	// as far as the server, which is not there.
-	rec = h.worker.do(http.MethodPost, base+"/maintenance", `{"action":"analyze","table":"t"}`, nil)
-	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "connect_failed") {
-		t.Errorf("a limited account's ANALYZE = %d %s, want it to reach the dial", rec.Code, rec.Body.String())
+	if rec := h.admin.do(http.MethodPost, h.base+"/maintenance", `{"action":"vacuum"}`, nil); rec.Code != http.StatusOK {
+		t.Errorf("an administrator's SQLite VACUUM = %d %s", rec.Code, rec.Body.String())
 	}
-	rec = h.admin.do(http.MethodPost, base+"/maintenance", `{"action":"repair","table":"t"}`, nil)
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("an administrator's REPAIR = %d %s, want it to reach the dial", rec.Code, rec.Body.String())
+	// The list says which is which, so the page hides what the route refuses.
+	var list struct {
+		Actions []dbx.MaintenanceAction `json:"actions"`
 	}
-	// An action this engine does not have never reaches the capability check
-	// or the server.
-	rec = h.worker.do(http.MethodPost, base+"/maintenance", `{"action":"vacuum_full","table":"t"}`, nil)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "analyze, check, optimize, repair") {
-		t.Errorf("an action of another engine = %d %s", rec.Code, rec.Body.String())
+	decodeOps(t, h.viewer.do(http.MethodGet, h.base+"/maintenance", "", nil), &list)
+	for _, a := range list.Actions {
+		// The words are the session's capability names, so the page can ask
+		// its own can() the same question.
+		want := string(auth.CapServiceControl)
+		if a.ID == "vacuum" {
+			want = string(auth.CapDestructive)
+		}
+		if a.Requires != want {
+			t.Errorf("%s is published as requiring %q, want %q", a.ID, a.Requires, want)
+		}
+	}
+	// The budget is the destructive one: it runs out.
+	limited := 0
+	for i := 0; i < 40; i++ {
+		if rec := h.admin.do(http.MethodPost, h.base+"/maintenance", `{"action":"vacuum"}`, nil); rec.Code == http.StatusTooManyRequests {
+			limited++
+		}
+	}
+	if limited == 0 {
+		t.Error("forty blocking actions in a row were never rate limited")
+	}
+}
+
+// A request to change an account is honoured whole or refused. Redis and
+// MongoDB read a password and one flag; a request to lock an account there
+// used to be answered 200 and written to the audit trail as a change, with
+// nothing sent to the server. The refusal comes before the dial, so servers
+// that are not there can show it.
+func TestRoleRequestsTheEngineCannotHonourAreRefused(t *testing.T) {
+	h := newOpsHarness(t)
+	redis := fmt.Sprintf("/api/v1/databases/%d", saveOpsConnection(t, h.s, "kv", dbx.DriverRedis, "redis://127.0.0.1:1/0"))
+	mongo := fmt.Sprintf("/api/v1/databases/%d", saveOpsConnection(t, h.s, "doc", dbx.DriverMongo, "mongodb://127.0.0.1:1/x"))
+	clickhouse := fmt.Sprintf("/api/v1/databases/%d", saveOpsConnection(t, h.s, "ch", dbx.DriverClickHouse, "clickhouse://u:p@127.0.0.1:1/x"))
+	for _, c := range []struct {
+		method, path, body, want string
+	}{
+		{http.MethodPut, redis + "/server/roles/app", `{"locked":true}`, "Redis accounts have no locked attribute"},
+		{http.MethodPut, redis + "/server/roles/app", `{"login":false}`, "Redis accounts have no login attribute"},
+		{http.MethodPut, redis + "/server/roles/app", `{"superuser":false}`, "no administrator flag to clear"},
+		{http.MethodPut, redis + "/server/roles/app", `{"password":"new-pw","connectionLimit":5}`, "no connectionLimit attribute"},
+		{http.MethodPut, redis + "/server/roles/app", `{}`, "nothing to change"},
+		{http.MethodPut, mongo + "/server/roles/app", `{"createDb":true}`, "MongoDB accounts have no createDb attribute"},
+		{http.MethodPut, mongo + "/server/roles/app", `{"validUntil":"2030-01-01"}`, "no validUntil attribute"},
+		{http.MethodPut, clickhouse + "/server/roles/app", `{"locked":true}`, "ClickHouse accounts have no locked attribute"},
+		{http.MethodPost, redis + "/server/roles", `{"name":"app","password":"pw-long-enough","locked":true}`, "Redis accounts have no locked attribute"},
+		{http.MethodPost, mongo + "/server/roles", `{"name":"app","password":"pw-long-enough","createRole":true}`, "no createRole attribute"},
+		{http.MethodPost, clickhouse + "/server/roles", `{"name":"app","password":"pw-long-enough","login":false}`, "no login attribute"},
+	} {
+		rec := h.admin.do(c.method, c.path, c.body, nil)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.want) {
+			t.Errorf("%s %s %s = %d %s, want 400 with %q", c.method, c.path, c.body, rec.Code, rec.Body.String(), c.want)
+		}
+	}
+	// Nothing was changed, and nothing says it was.
+	var recorded int
+	if err := h.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action IN ('database.role.alter', 'database.role.create')`).Scan(&recorded); err != nil || recorded != 0 {
+		t.Errorf("%d refused requests were recorded as changes (%v)", recorded, err)
+	}
+	// What these engines can do still goes to the server, which is not there.
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodPut, redis + "/server/roles/app", `{"password":"new-pw-long"}`},
+		{http.MethodPut, mongo + "/server/roles/app", `{"superuser":true}`},
+		// A create that carries a form's every field, none of them asking for anything.
+		{http.MethodPost, redis + "/server/roles", `{"name":"app","password":"pw-long-enough","login":true,"superuser":false,"createDb":false,"createRole":false,"locked":false}`},
+	} {
+		if rec := h.admin.do(c.method, c.path, c.body, nil); rec.Code != http.StatusBadGateway {
+			t.Errorf("%s %s %s = %d %s, want it to reach the dial", c.method, c.path, c.body, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// The account a connection signs in with cannot be barred from signing in,
+// or demoted, from the connection it would cut off. A password change, and
+// anything at all on another account, goes through.
+func TestRoleAlterCannotLockTheConnectionOut(t *testing.T) {
+	h := newOpsHarness(t)
+	pg := fmt.Sprintf("/api/v1/databases/%d", saveOpsConnection(t, h.s, "pg-self", dbx.DriverPostgres, "postgres://dash:pw@127.0.0.1:1/x?sslmode=disable"))
+	my := fmt.Sprintf("/api/v1/databases/%d", saveOpsConnection(t, h.s, "my-self", dbx.DriverMySQL, "dash:pw@tcp(127.0.0.1:1)/x"))
+	for _, c := range []struct{ path, body string }{
+		{pg + "/server/roles/dash", `{"login":false}`},
+		{pg + "/server/roles/dash", `{"superuser":false}`},
+		{pg + "/server/roles/DASH", `{"password":"new-pw-long","superuser":false}`},
+		{my + "/server/roles/dash", `{"locked":true}`},
+		{my + "/server/roles/dash?host=localhost", `{"login":false}`},
+	} {
+		rec := h.admin.do(http.MethodPut, c.path, c.body, nil)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "the account this connection signs in with") {
+			t.Errorf("PUT %s %s = %d %s, want 400", c.path, c.body, rec.Code, rec.Body.String())
+		}
+	}
+	for _, c := range []struct{ path, body string }{
+		{pg + "/server/roles/dash", `{"password":"new-pw-long"}`},
+		{pg + "/server/roles/dash", `{"login":true,"superuser":true,"createDb":false}`},
+		{pg + "/server/roles/other", `{"login":false,"superuser":false}`},
+		{my + "/server/roles/other", `{"locked":true}`},
+	} {
+		if rec := h.admin.do(http.MethodPut, c.path, c.body, nil); rec.Code != http.StatusBadGateway {
+			t.Errorf("PUT %s %s = %d %s, want it to reach the dial", c.path, c.body, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// ALTER ROLE … SET is where an application's secrets end up: PostgREST's
+// documented configuration keeps its JWT signing key there. The role detail is
+// on the read surface, so those values are an administrator's to see.
+func TestRoleSettingsThatMayBeCredentialsAreWithheld(t *testing.T) {
+	detail := func() *dbx.RoleDetail {
+		return &dbx.RoleDetail{Config: []string{"search_path=app, public", "pgrst.jwt_secret=s3cr3t-signing-key",
+			"statement_timeout=5s", "app.api_token=tok_live_123", "app.tenant=acme", "ssl_passphrase_command=echo x"}}
+	}
+	viewer := detail()
+	redactRoleConfig(viewer, false)
+	if got := strings.Join(viewer.Config, "|"); got != "search_path=app, public|statement_timeout=5s" {
+		t.Errorf("a viewer sees %q", got)
+	}
+	if got := strings.Join(viewer.ConfigRedacted, "|"); got != "pgrst.jwt_secret|app.api_token|app.tenant|ssl_passphrase_command" {
+		t.Errorf("a viewer is told %q was withheld", got)
+	}
+	encoded, err := json.Marshal(viewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"s3cr3t-signing-key", "tok_live_123", "echo x"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Errorf("%q reached a viewer: %s", secret, encoded)
+		}
+	}
+	admin := detail()
+	redactRoleConfig(admin, true)
+	if len(admin.Config) != 6 || len(admin.ConfigRedacted) != 0 {
+		t.Errorf("an administrator sees %v, withheld %v", admin.Config, admin.ConfigRedacted)
+	}
+	// Nothing set is an empty list, not a missing one.
+	empty := &dbx.RoleDetail{Config: []string{}}
+	redactRoleConfig(empty, false)
+	if empty.Config == nil || len(empty.ConfigRedacted) != 0 {
+		t.Errorf("an empty configuration became %v / %v", empty.Config, empty.ConfigRedacted)
 	}
 }
 

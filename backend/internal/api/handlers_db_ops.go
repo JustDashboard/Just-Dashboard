@@ -27,9 +27,15 @@ import (
 //     the storage overview do not already hand any role.
 //   - Running a maintenance command and zeroing the statement statistics are
 //     service.control: they change how the server performs and no data. The
-//     one maintenance action that can lose rows — MySQL's REPAIR — demands the
-//     destructive capability by hand, because the route cannot know from its
-//     path which action the body names.
+//     maintenance actions that lock a table against the application while
+//     they run, or can lose rows — VACUUM FULL, REINDEX, OPTIMIZE TABLE,
+//     REPAIR, SQLite's VACUUM — demand the destructive capability and its
+//     budget by hand, because the route cannot know from its path which
+//     action the body names. A form is never a cheaper way to run what the
+//     SQL console would refuse the same role; the actions left on
+//     service.control are the ones that read, or work alongside the
+//     application, and the console's stricter answer to those is its not
+//     knowing what a typed statement does, which a closed list does.
 //   - Stopping a statement sits with ending a session, in the destructive
 //     group: work in flight is thrown away either way.
 //   - Changing a server parameter and granting or revoking a privilege are
@@ -273,6 +279,11 @@ type maintenanceRequest struct {
 // the destructive capability is a property of the action, read from the same
 // closed list the page drew its menu from — so the check cannot be skipped by
 // naming an action the list does not have: that request has already failed.
+//
+// The request is held open for as long as the command runs. Closing it, or
+// its half-hour running out, stops the command on PostgreSQL, MySQL, MariaDB
+// and SQLite; the engine layer sees to that, because none of their drivers
+// does it unasked.
 func (s *Server) handleDBMaintenance(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -300,15 +311,19 @@ func (s *Server) handleDBMaintenance(w http.ResponseWriter, r *http.Request) err
 		}
 		return httpx.BadRequest("action must be one of %s", strings.Join(ids, ", "))
 	}
-	if action.Destructive {
+	if action.NeedsDestructive() {
 		p := httpx.MustPrincipal(r)
 		if !p.Can(auth.CapDestructive) {
+			why := "locks what it works on until it finishes"
+			if action.Destructive {
+				why = "can discard data it cannot recover"
+			}
 			return httpx.Err(http.StatusForbidden, "forbidden",
-				action.ID+" can discard data it cannot recover and your role does not permit it")
+				action.ID+" "+why+" and your role does not permit it")
 		}
 		if !s.destrLim.Allow(p.Username() + "|dbmaintenance") {
 			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many destructive maintenance actions, slow down")
+				"too many blocking maintenance actions, slow down")
 		}
 	}
 	pool, _, err := s.dbPool(r.Context(), id)
@@ -540,8 +555,36 @@ func (s *Server) handleDBRoleDetail(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
+	redactRoleConfig(detail, httpx.MustPrincipal(r).Can(auth.CapSystemAdmin))
 	httpx.JSON(w, http.StatusOK, detail)
 	return nil
+}
+
+// redactRoleConfig withholds, from a viewer who is not an administrator, the
+// per-role settings whose value may be a credential.
+//
+// ALTER ROLE … SET is where PostgREST's documented in-database configuration
+// puts its JWT signing secret, and where applications keep tokens of their
+// own. Two kinds of name are withheld: the ones the server settings list
+// withholds, and any with a dot in it — a parameter PostgreSQL itself does
+// not define, whose meaning only the extension or application that reads it
+// knows. The server's own parameters (search_path, statement_timeout) stay.
+// The name remains, in ConfigRedacted, so the page says what it is not
+// showing.
+func redactRoleConfig(detail *dbx.RoleDetail, admin bool) {
+	if admin {
+		return
+	}
+	kept := []string{}
+	for _, entry := range detail.Config {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.Contains(name, ".") || sensitiveSetting.MatchString(name) {
+			detail.ConfigRedacted = append(detail.ConfigRedacted, name)
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	detail.Config = kept
 }
 
 // documentRoles lists a Redis or MongoDB server's accounts.
@@ -650,7 +693,9 @@ func (s *Server) handleDBPrivilegeRevoke(w http.ResponseWriter, r *http.Request)
 // With ?preview=1 the statements are rendered and returned without being
 // run, so the page can show the server's own SQL before the operator commits
 // to it — the same capability either way, since a preview of a grant is only
-// useful to somebody who may make it.
+// useful to somebody who may make it. A preview dials nothing, with one
+// exception: a change that also covers objects created later depends on who
+// creates objects in that schema, and only the server knows.
 func (s *Server) changePrivileges(w http.ResponseWriter, r *http.Request, revoke bool) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -686,10 +731,14 @@ func (s *Server) changePrivileges(w http.ResponseWriter, r *http.Request, revoke
 	if privilegeElsewhere(conn, change) && !dbNameRe.MatchString(change.Database) {
 		return httpx.BadRequest("a database name is letters, digits and underscores")
 	}
-	if r.URL.Query().Get("preview") == "1" {
+	preview := r.URL.Query().Get("preview") == "1"
+	if preview {
+		// Nothing changes, whether it answers or fails.
 		httpx.SkipAudit(r)
-		httpx.JSON(w, http.StatusOK, map[string]any{"statements": statements, "preview": true})
-		return nil
+		if !change.Future {
+			httpx.JSON(w, http.StatusOK, map[string]any{"statements": statements, "preview": true})
+			return nil
+		}
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
@@ -707,7 +756,7 @@ func (s *Server) changePrivileges(w http.ResponseWriter, r *http.Request, revoke
 	if len(change.Privileges) > 0 {
 		detail["privileges"] = change.Privileges
 	}
-	statements, err = s.runPrivilegeChange(ctx, conn, dsn, change)
+	outcome, err := s.runPrivilegeChange(ctx, conn, dsn, change, preview)
 	if err != nil {
 		var refused dbx.ErrPrivilegeRequest
 		if errors.As(err, &refused) || errors.Is(err, dbx.ErrUnsupported) {
@@ -717,9 +766,22 @@ func (s *Server) changePrivileges(w http.ResponseWriter, r *http.Request, revoke
 		httpx.SetAudit(r, action, conn.Name, detail)
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
-	detail["statements"] = statements
+	out := map[string]any{"statements": outcome.Statements}
+	if len(outcome.FutureOwners) > 0 {
+		out["futureOwners"], detail["futureOwners"] = outcome.FutureOwners, outcome.FutureOwners
+	}
+	if len(outcome.Notes) > 0 {
+		out["notes"] = outcome.Notes
+	}
+	if preview {
+		out["preview"] = true
+		httpx.JSON(w, http.StatusOK, out)
+		return nil
+	}
+	out["ok"] = true
+	detail["statements"] = outcome.Statements
 	httpx.SetAudit(r, action, conn.Name, detail)
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "statements": statements})
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
@@ -736,23 +798,24 @@ func privilegeElsewhere(conn *dbConnection, change dbx.PrivilegeChange) bool {
 	return dbx.PrivilegesNeedDatabase(conn.Driver, change.Level) && change.Database != "" && change.Database != conn.Database
 }
 
-// runPrivilegeChange runs a change connected to the database that holds the
-// object, where the engine keeps its privileges per database. The sibling
-// pool lives for this request, as the one a database grant opens does.
-func (s *Server) runPrivilegeChange(ctx context.Context, conn *dbConnection, dsn string, change dbx.PrivilegeChange) ([]string, error) {
+// runPrivilegeChange runs a change, or previews it, connected to the database
+// that holds the object, where the engine keeps its privileges per database.
+// The sibling pool lives for this request, as the one a database grant opens
+// does.
+func (s *Server) runPrivilegeChange(ctx context.Context, conn *dbConnection, dsn string, change dbx.PrivilegeChange, preview bool) (*dbx.PrivilegeOutcome, error) {
 	if privilegeElsewhere(conn, change) {
 		db, err := dbx.OpenDatabase(ctx, conn.Driver, dsn, change.Database)
 		if err != nil {
 			return nil, err
 		}
 		defer db.Close()
-		return dbx.ChangePrivileges(ctx, db, conn.Driver, change)
+		return dbx.ChangePrivileges(ctx, db, conn.Driver, change, preview)
 	}
 	pool, err := s.modules.dbs.Pool(ctx, conn.ID, conn.Driver, dsn)
 	if err != nil {
 		return nil, err
 	}
-	return dbx.ChangePrivileges(ctx, pool, conn.Driver, change)
+	return dbx.ChangePrivileges(ctx, pool, conn.Driver, change, preview)
 }
 
 // --- engine views ------------------------------------------------------------

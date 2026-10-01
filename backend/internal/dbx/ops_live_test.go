@@ -72,7 +72,7 @@ func mysqlOpsServers(t *testing.T) map[string]string {
 	return out
 }
 
-func mustExec(t *testing.T, db *sql.DB, stmts ...string) {
+func opsMustExec(t *testing.T, db *sql.DB, stmts ...string) {
 	t.Helper()
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
@@ -129,7 +129,7 @@ func TestLiveOpsPostgresStats(t *testing.T) {
 		}
 	}
 	// A counter is a running total: a second reading is never behind the first.
-	mustExec(t, db, `SELECT count(*) FROM pg_class`)
+	opsMustExec(t, db, `SELECT count(*) FROM pg_class`)
 	second, err := ReadServerStats(ctx, db, DriverPostgres)
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestLiveOpsPostgresStats(t *testing.T) {
 func TestLiveOpsPostgresSessionsAndLocks(t *testing.T) {
 	db, _ := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
 	ctx := t.Context()
-	mustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_lock`, `CREATE TABLE jd_b3_ops_lock (id int primary key, v int)`,
+	opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_lock`, `CREATE TABLE jd_b3_ops_lock (id int primary key, v int)`,
 		`INSERT INTO jd_b3_ops_lock VALUES (1, 0)`)
 	t.Cleanup(func() { db.Exec(`DROP TABLE IF EXISTS jd_b3_ops_lock`) })
 
@@ -282,7 +282,7 @@ func TestLiveOpsPostgresReplication(t *testing.T) {
 
 	// A publication and a slot made here must be read back as made.
 	db.Exec(`DROP PUBLICATION IF EXISTS jd_b3_ops_pub`)
-	mustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_pubt`, `CREATE TABLE jd_b3_ops_pubt (id int primary key)`,
+	opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_pubt`, `CREATE TABLE jd_b3_ops_pubt (id int primary key)`,
 		`CREATE PUBLICATION jd_b3_ops_pub FOR TABLE jd_b3_ops_pubt WITH (publish = 'insert, update')`)
 	t.Cleanup(func() {
 		db.Exec(`DROP PUBLICATION IF EXISTS jd_b3_ops_pub`)
@@ -323,7 +323,7 @@ func TestLiveOpsPostgresReplication(t *testing.T) {
 func TestLiveOpsPostgresTableAndIndexStats(t *testing.T) {
 	db, _ := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
 	ctx := t.Context()
-	mustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_stats`, `DROP TABLE IF EXISTS jd_b3_ops_small`,
+	opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_stats`, `DROP TABLE IF EXISTS jd_b3_ops_small`,
 		`CREATE TABLE jd_b3_ops_small (id int primary key)`,
 		`CREATE TABLE jd_b3_ops_stats (id int primary key, a text, b int, CONSTRAINT jd_b3_ops_stats_a_key UNIQUE (a))`,
 		`CREATE INDEX jd_b3_ops_stats_b ON jd_b3_ops_stats (b)`,
@@ -421,7 +421,7 @@ func TestLiveOpsPostgresTableAndIndexStats(t *testing.T) {
 func TestLiveOpsPostgresMaintenance(t *testing.T) {
 	db, dsn := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
 	ctx := t.Context()
-	mustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_maint`,
+	opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_maint`,
 		`CREATE TABLE jd_b3_ops_maint (id int primary key, v text)`,
 		`INSERT INTO jd_b3_ops_maint SELECT g, 'x' FROM generate_series(1, 500) g`)
 	t.Cleanup(func() { db.Exec(`DROP TABLE IF EXISTS jd_b3_ops_maint`) })
@@ -567,7 +567,7 @@ func TestLiveOpsPostgresAlterRoleChangesOnlyWhatWasSent(t *testing.T) {
 	}
 	db.Exec(`DROP ROLE IF EXISTS jd_b3_ops_super`)
 	db.Exec(`DROP ROLE IF EXISTS jd_b3_ops_group`)
-	mustExec(t, db, `CREATE ROLE jd_b3_ops_super WITH LOGIN SUPERUSER CREATEDB CREATEROLE CONNECTION LIMIT 7 PASSWORD 'first'`,
+	opsMustExec(t, db, `CREATE ROLE jd_b3_ops_super WITH LOGIN SUPERUSER CREATEDB CREATEROLE CONNECTION LIMIT 7 PASSWORD 'first'`,
 		`CREATE ROLE jd_b3_ops_group WITH NOLOGIN`)
 	t.Cleanup(func() {
 		db.Exec(`DROP ROLE IF EXISTS jd_b3_ops_super`)
@@ -636,18 +636,18 @@ func TestLiveOpsPostgresPrivileges(t *testing.T) {
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	mustExec(t, db, `CREATE ROLE jd_b3_ops_app WITH LOGIN PASSWORD 'pw'`, `CREATE ROLE jd_b3_ops_team`,
+	opsMustExec(t, db, `CREATE ROLE jd_b3_ops_app WITH LOGIN PASSWORD 'pw'`, `CREATE ROLE jd_b3_ops_team`,
 		`CREATE SCHEMA jd_b3_ops_sch`, `CREATE TABLE jd_b3_ops_sch.orders (id serial primary key, v text)`,
 		`CREATE TABLE jd_b3_ops_sch.items (id int primary key)`)
 
 	change := func(c PrivilegeChange) []string {
 		t.Helper()
 		c.Role = "jd_b3_ops_app"
-		stmts, err := ChangePrivileges(ctx, db, DriverPostgres, c)
+		out, err := ChangePrivileges(ctx, db, DriverPostgres, c, false)
 		if err != nil {
 			t.Fatalf("%+v: %v", c, err)
 		}
-		return stmts
+		return out.Statements
 	}
 	can := func(privilege, table string) bool {
 		t.Helper()
@@ -697,7 +697,7 @@ func TestLiveOpsPostgresPrivileges(t *testing.T) {
 	if len(stmts) != 2 || !strings.HasPrefix(stmts[1], `ALTER DEFAULT PRIVILEGES IN SCHEMA "jd_b3_ops_sch" GRANT SELECT ON TABLES`) {
 		t.Errorf("schema-wide grant ran %v", stmts)
 	}
-	mustExec(t, db, `CREATE TABLE jd_b3_ops_sch.later (id int)`)
+	opsMustExec(t, db, `CREATE TABLE jd_b3_ops_sch.later (id int)`)
 	if !can("SELECT", "jd_b3_ops_sch.items") || !can("SELECT", "jd_b3_ops_sch.later") {
 		t.Error("the schema-wide grant missed an existing or a later table")
 	}
@@ -754,7 +754,7 @@ func TestLiveOpsPostgresPrivileges(t *testing.T) {
 		{Level: GrantOnTable, Schema: "jd_b3_ops_sch", Table: "orders", Privileges: []string{}},
 	} {
 		bad.Role = "jd_b3_ops_app"
-		if _, err := ChangePrivileges(ctx, db, DriverPostgres, bad); err == nil {
+		if _, err := ChangePrivileges(ctx, db, DriverPostgres, bad, false); err == nil {
 			t.Errorf("%+v was accepted", bad)
 		} else if _, ok := err.(ErrPrivilegeRequest); !ok {
 			t.Errorf("%+v reached the server: %v", bad, err)
@@ -779,15 +779,15 @@ func TestLiveOpsPostgresDatabaseGrantCoversEverySchema(t *testing.T) {
 	}
 	cleanup()
 	t.Cleanup(cleanup)
-	mustExec(t, db, `CREATE ROLE jd_b3_ops_reader WITH LOGIN PASSWORD 'pw'`, `CREATE SCHEMA jd_b3_ops_app_data`,
+	opsMustExec(t, db, `CREATE ROLE jd_b3_ops_reader WITH LOGIN PASSWORD 'pw'`, `CREATE SCHEMA jd_b3_ops_app_data`,
 		`CREATE TABLE jd_b3_ops_app_data.events (id int primary key)`)
 	admin, _ := AdminFor(DriverPostgres)
-	stmts, err := admin.Grant(ctx, db, DatabaseGrant{Role: "jd_b3_ops_reader", Database: database, Level: GrantRead})
+	granted, err := admin.Grant(ctx, db, DatabaseGrant{Role: "jd_b3_ops_reader", Database: database, Level: GrantRead})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stmts) < 5 {
-		t.Errorf("the grant ran %v", stmts)
+	if len(granted.Statements) < 5 || !containsString(granted.Schemas, "jd_b3_ops_app_data") || !containsString(granted.Schemas, "public") {
+		t.Errorf("the grant ran %v over %v", granted.Statements, granted.Schemas)
 	}
 	var read, write bool
 	if err := db.QueryRow(`SELECT has_table_privilege('jd_b3_ops_reader', 'jd_b3_ops_app_data.events', 'SELECT'),
@@ -803,6 +803,260 @@ func TestLiveOpsPostgresDatabaseGrantCoversEverySchema(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT has_table_privilege('jd_b3_ops_reader', 'jd_b3_ops_app_data.events', 'INSERT')`).Scan(&write); err != nil || write {
 		t.Errorf("a failed grant left a privilege behind: %v %v", write, err)
+	}
+}
+
+// "This database" stops at a schema an extension owns, says which it left
+// out, and reaches it when it is named. A preview answers the same without
+// granting anything.
+func TestLiveOpsPostgresDatabaseGrantLeavesExtensionSchemasAlone(t *testing.T) {
+	db, _ := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
+	ctx := t.Context()
+	var database string
+	var had bool
+	if err := db.QueryRow(`SELECT current_database(), EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'fuzzystrmatch')`).Scan(&database, &had); err != nil {
+		t.Fatal(err)
+	}
+	cleanup := func() {
+		db.Exec(`ALTER EXTENSION fuzzystrmatch DROP SCHEMA jd_b3_ops_ext`)
+		db.Exec(`DROP SCHEMA IF EXISTS jd_b3_ops_ext CASCADE`)
+		db.Exec(`DROP SCHEMA IF EXISTS jd_b3_ops_own CASCADE`)
+		db.Exec(`DROP OWNED BY jd_b3_ops_scoped`)
+		db.Exec(`DROP ROLE IF EXISTS jd_b3_ops_scoped`)
+		if !had {
+			db.Exec(`DROP EXTENSION IF EXISTS fuzzystrmatch`)
+		}
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	if _, err := db.Exec(`CREATE EXTENSION IF NOT EXISTS fuzzystrmatch`); err != nil {
+		t.Skipf("no contrib extension to own a schema: %v", err)
+	}
+	// A schema is the extension's when the catalogue says it is a member,
+	// which is how pg_cron's and TimescaleDB's come to be theirs.
+	opsMustExec(t, db, `CREATE ROLE jd_b3_ops_scoped WITH LOGIN PASSWORD 'pw'`,
+		`CREATE SCHEMA jd_b3_ops_ext`, `CREATE TABLE jd_b3_ops_ext.job (id int primary key, command text)`,
+		`ALTER EXTENSION fuzzystrmatch ADD SCHEMA jd_b3_ops_ext`,
+		`CREATE SCHEMA jd_b3_ops_own`, `CREATE TABLE jd_b3_ops_own.orders (id int primary key)`)
+	admin, _ := AdminFor(DriverPostgres)
+	can := func(table string) bool {
+		t.Helper()
+		var ok bool
+		if err := db.QueryRow(`SELECT has_table_privilege('jd_b3_ops_scoped', $1, 'SELECT')`, table).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+
+	preview, err := admin.Grant(ctx, db, DatabaseGrant{Role: "jd_b3_ops_scoped", Database: database, Level: GrantRead, Preview: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Statements) == 0 || can("jd_b3_ops_own.orders") {
+		t.Fatalf("a preview granted, or rendered nothing: %v", preview.Statements)
+	}
+	granted, err := admin.Grant(ctx, db, DatabaseGrant{Role: "jd_b3_ops_scoped", Database: database, Level: GrantRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(granted.Statements, "\n") != strings.Join(preview.Statements, "\n") {
+		t.Errorf("the grant ran something other than its preview:\n%v\n%v", granted.Statements, preview.Statements)
+	}
+	if !containsString(granted.Schemas, "jd_b3_ops_own") || containsString(granted.Schemas, "jd_b3_ops_ext") {
+		t.Errorf("schemas covered: %v", granted.Schemas)
+	}
+	var skipped *SkippedSchema
+	for i := range granted.SkippedSchemas {
+		if granted.SkippedSchemas[i].Name == "jd_b3_ops_ext" {
+			skipped = &granted.SkippedSchemas[i]
+		}
+	}
+	if skipped == nil || !strings.Contains(skipped.Reason, "fuzzystrmatch") {
+		t.Errorf("the extension's schema is not reported as left out: %+v", granted.SkippedSchemas)
+	}
+	if !can("jd_b3_ops_own.orders") || can("jd_b3_ops_ext.job") {
+		t.Errorf("after the grant: own schema %v, extension schema %v", can("jd_b3_ops_own.orders"), can("jd_b3_ops_ext.job"))
+	}
+	if strings.Contains(strings.Join(granted.Statements, "\n"), "jd_b3_ops_ext") {
+		t.Errorf("a statement names the extension's schema: %v", granted.Statements)
+	}
+	// Named, it is granted: the operator said which schema they meant.
+	named, err := admin.Grant(ctx, db, DatabaseGrant{Role: "jd_b3_ops_scoped", Database: database, Schema: "jd_b3_ops_ext", Level: GrantRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(named.Schemas) != 1 || named.Schemas[0] != "jd_b3_ops_ext" || len(named.SkippedSchemas) != 0 || !can("jd_b3_ops_ext.job") {
+		t.Errorf("a named schema: %+v, readable %v", named, can("jd_b3_ops_ext.job"))
+	}
+}
+
+// A grant on a schema "and what is created in it later" has to reach the
+// tables somebody else creates there — which is who creates them. It used to
+// cover only what the dashboard's own account made.
+func TestLiveOpsPostgresFutureGrantCoversOtherOwners(t *testing.T) {
+	db, _ := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
+	ctx := t.Context()
+	cleanup := func() {
+		db.Exec(`DROP SCHEMA IF EXISTS jd_b3_ops_fut CASCADE`)
+		for _, role := range []string{"jd_b3_ops_fut_reader", "jd_b3_ops_fut_owner", "jd_b3_ops_fut_migrator"} {
+			db.Exec(`DROP OWNED BY ` + role)
+			db.Exec(`DROP ROLE IF EXISTS ` + role)
+		}
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	// One role owns the schema and has made nothing in it yet; another has a
+	// table there. Neither is the account the dashboard signs in with.
+	opsMustExec(t, db, `CREATE ROLE jd_b3_ops_fut_reader WITH LOGIN PASSWORD 'pw'`, `CREATE ROLE jd_b3_ops_fut_owner`,
+		`CREATE ROLE jd_b3_ops_fut_migrator`, `CREATE SCHEMA jd_b3_ops_fut AUTHORIZATION jd_b3_ops_fut_owner`,
+		`GRANT ALL ON SCHEMA jd_b3_ops_fut TO jd_b3_ops_fut_migrator`,
+		`CREATE TABLE jd_b3_ops_fut.existing (id int primary key)`,
+		`ALTER TABLE jd_b3_ops_fut.existing OWNER TO jd_b3_ops_fut_migrator`)
+	var me string
+	if err := db.QueryRow(`SELECT current_user`).Scan(&me); err != nil {
+		t.Fatal(err)
+	}
+	change := PrivilegeChange{Role: "jd_b3_ops_fut_reader", Level: GrantOnTable, Schema: "jd_b3_ops_fut",
+		Privileges: []string{"SELECT"}, Future: true}
+
+	preview, err := ChangePrivileges(ctx, db, DriverPostgres, change, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{me, "jd_b3_ops_fut_migrator", "jd_b3_ops_fut_owner"}
+	if strings.Join(preview.FutureOwners, ",") != strings.Join(want, ",") || len(preview.Statements) != 4 {
+		t.Fatalf("preview: owners %v, statements %v", preview.FutureOwners, preview.Statements)
+	}
+	var defaults int
+	if err := db.QueryRow(`SELECT count(*) FROM pg_default_acl a JOIN pg_namespace n ON n.oid = a.defaclnamespace WHERE n.nspname = 'jd_b3_ops_fut'`).Scan(&defaults); err != nil || defaults != 0 {
+		t.Fatalf("a preview wrote %d default privileges (%v)", defaults, err)
+	}
+
+	out, err := ChangePrivileges(ctx, db, DriverPostgres, change, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(out.Statements, "\n") != strings.Join(preview.Statements, "\n") ||
+		!containsString(out.Statements, `ALTER DEFAULT PRIVILEGES FOR ROLE "jd_b3_ops_fut_owner" IN SCHEMA "jd_b3_ops_fut" GRANT SELECT ON TABLES TO "jd_b3_ops_fut_reader"`) {
+		t.Errorf("the change ran %v", out.Statements)
+	}
+	// The next migration, as each of the roles that run one.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	for role, table := range map[string]string{"jd_b3_ops_fut_owner": "by_owner", "jd_b3_ops_fut_migrator": "by_migrator"} {
+		for _, stmt := range []string{`SET ROLE ` + role, `CREATE TABLE jd_b3_ops_fut.` + table + ` (id int)`, `RESET ROLE`} {
+			if _, err := conn.ExecContext(ctx, stmt); err != nil {
+				t.Fatalf("%s: %v", stmt, err)
+			}
+		}
+		var ok bool
+		if err := db.QueryRow(`SELECT has_table_privilege('jd_b3_ops_fut_reader', $1, 'SELECT')`, "jd_b3_ops_fut."+table).Scan(&ok); err != nil || !ok {
+			t.Errorf("a table %s created later is not readable (%v)", role, err)
+		}
+	}
+
+	// The revoke takes the same defaults away again.
+	change.Revoke = true
+	if _, err := ChangePrivileges(ctx, db, DriverPostgres, change, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM pg_default_acl a JOIN pg_namespace n ON n.oid = a.defaclnamespace WHERE n.nspname = 'jd_b3_ops_fut'`).Scan(&defaults); err != nil || defaults != 0 {
+		t.Errorf("%d default privileges survived the revoke (%v)", defaults, err)
+	}
+}
+
+// A poll of the snapshot must not make the server log an error. On every
+// version before 17 it used to: the newer checkpoint view was tried first and
+// its absence caught, and PostgreSQL writes a failed statement to its log —
+// thousands of lines a day into the log this dashboard's own Logs page reads.
+// A failed statement is also a rolled-back transaction, which is counted, and
+// in a database nobody else is connected to the count is exact.
+func TestLiveOpsPostgresStatsRaisesNoErrorOnTheServer(t *testing.T) {
+	db, dsn := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
+	ctx := t.Context()
+	var canFlush bool
+	if err := db.QueryRow(`SELECT to_regproc('pg_stat_force_next_flush') IS NOT NULL`).Scan(&canFlush); err != nil || !canFlush {
+		t.Skipf("pg_stat_force_next_flush is not available here (PostgreSQL 15+): %v", err)
+	}
+	db.Exec(`DROP DATABASE IF EXISTS jd_b3_ops_quiet`)
+	opsMustExec(t, db, `CREATE DATABASE jd_b3_ops_quiet`)
+	t.Cleanup(func() { db.Exec(`DROP DATABASE IF EXISTS jd_b3_ops_quiet`) })
+	quiet, err := OpenDatabase(ctx, DriverPostgres, dsn, "jd_b3_ops_quiet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { quiet.Close() })
+	// One backend, so that what it counted is flushed when it is told to.
+	quiet.SetMaxOpenConns(1)
+	rollbacks := func() int64 {
+		t.Helper()
+		opsMustExec(t, quiet, `SELECT pg_stat_force_next_flush()`)
+		var n int64
+		if err := quiet.QueryRow(`SELECT xact_rollback FROM pg_stat_database WHERE datname = current_database()`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := rollbacks()
+	for i := 0; i < 3; i++ {
+		stats, err := ReadServerStats(ctx, quiet, DriverPostgres)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := stats.Counters["checkpointsTimed"]; !ok {
+			t.Errorf("the checkpoint counters are missing: %v", stats.Counters)
+		}
+	}
+	if _, err := TopStatements(ctx, quiet, DriverPostgres, StatementsOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if after := rollbacks(); after != before {
+		t.Errorf("three polls and a statements read made %d statements fail on the server", after-before)
+	}
+}
+
+// Closing the request stops the command on the server, not only the wait for
+// it: a statement left running would hold its lock to the end with nobody
+// watching. The driver sends the cancel request; this is what says it does.
+func TestLiveOpsPostgresMaintenanceStopsWithTheRequest(t *testing.T) {
+	db, dsn := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
+	d := postgresDialect{}
+	// Stands in for a VACUUM FULL of a large table: a statement that would
+	// run for a minute, recognisable in the session list.
+	const long = `SELECT pg_sleep(60) /* jd_b3_ops_stop */`
+	running := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query = $1`, long).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- pgRunWithNotices(ctx, d.NormaliseDSN(dsn), long, &MaintenanceResult{})
+	}()
+	waitFor(t, "the statement to start", func() bool { return running() == 1 })
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("the cancelled statement reported success")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the cancelled statement never returned")
+	}
+	// Well inside the minute it had left.
+	deadline := time.Now().Add(3 * time.Second)
+	for running() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the statement is still running on the server after its request ended")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -825,9 +1079,9 @@ func TestLiveOpsPostgresStatements(t *testing.T) {
 	// The extension stores a statement with its constants replaced, so the
 	// probe is recognised by the table and column it reads.
 	for i := 0; i < 5; i++ {
-		mustExec(t, db, `SELECT count(*) FROM pg_class WHERE relname = 'jd_b3_ops_statement_probe'`)
+		opsMustExec(t, db, `SELECT count(*) FROM pg_class WHERE relname = 'jd_b3_ops_statement_probe'`)
 	}
-	mustExec(t, db, `SELECT pg_sleep(0.05)`)
+	opsMustExec(t, db, `SELECT pg_sleep(0.05)`)
 	byCalls, err := TopStatements(ctx, db, DriverPostgres, StatementsOptions{Sort: StatementsByCalls, Limit: 5})
 	if err != nil {
 		t.Fatal(err)
@@ -865,7 +1119,7 @@ func TestLiveOpsPostgresStatements(t *testing.T) {
 
 func TestLiveOpsPostgresAdvisor(t *testing.T) {
 	db, _ := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
-	mustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_adv_child`, `DROP TABLE IF EXISTS jd_b3_ops_adv`,
+	opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_adv_child`, `DROP TABLE IF EXISTS jd_b3_ops_adv`,
 		`CREATE TABLE jd_b3_ops_adv (id int primary key, a int)`,
 		`CREATE INDEX jd_b3_ops_adv_a ON jd_b3_ops_adv (a)`, `CREATE INDEX jd_b3_ops_adv_a2 ON jd_b3_ops_adv (a)`,
 		`CREATE INDEX jd_b3_ops_adv_e1 ON jd_b3_ops_adv ((a + 1))`, `CREATE INDEX jd_b3_ops_adv_e2 ON jd_b3_ops_adv ((a + 2))`,
@@ -959,7 +1213,7 @@ func TestLiveOpsMySQL(t *testing.T) {
 			if maria != (flavour == "mariadb") {
 				t.Fatalf("%s reports itself as MariaDB: %v", flavour, maria)
 			}
-			mustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_t`,
+			opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_t`,
 				`CREATE TABLE jd_b3_ops_t (id INT PRIMARY KEY, a VARCHAR(64), b INT,
 				   KEY jd_b3_ops_t_b (b), KEY jd_b3_ops_t_b_copy (b), KEY jd_b3_ops_t_ba (b, a)) ENGINE=InnoDB`,
 				`INSERT INTO jd_b3_ops_t VALUES (1, 'x', 1), (2, 'y', 2), (3, 'z', 3)`)
@@ -1087,7 +1341,7 @@ func TestLiveOpsMySQL(t *testing.T) {
 			})
 
 			t.Run("table_and_index_stats", func(t *testing.T) {
-				mustExec(t, db, `ANALYZE TABLE jd_b3_ops_t`)
+				opsMustExec(t, db, `ANALYZE TABLE jd_b3_ops_t`)
 				tables, err := ReadTableStats(ctx, db, DriverMySQL, StatsOptions{})
 				if err != nil {
 					t.Fatal(err)
@@ -1218,17 +1472,18 @@ func TestLiveOpsMySQL(t *testing.T) {
 				if err := admin.CreateRole(ctx, db, RoleSpec{Name: "jd_b3_ops_u", Host: "10.%", Password: "first-pw", SetPassword: true, Login: true}); err != nil {
 					t.Fatal(err)
 				}
-				stmts, err := admin.Grant(ctx, db, DatabaseGrant{Role: "jd_b3_ops_u", Host: "10.%", Database: database, Level: GrantRead})
+				granted, err := admin.Grant(ctx, db, DatabaseGrant{Role: "jd_b3_ops_u", Host: "10.%", Database: database, Level: GrantRead})
 				if err != nil {
 					t.Fatal(err)
 				}
+				stmts := granted.Statements
 				// The underscore in the name is escaped, or the grant would
 				// also cover every database one character different.
 				if want := strings.ReplaceAll(database, "_", `\_`); !strings.Contains(stmts[0], "`"+want+"`.*") {
 					t.Errorf("the database is not escaped in %q", stmts[0])
 				}
 				if _, err := ChangePrivileges(ctx, db, DriverMySQL, PrivilegeChange{Role: "jd_b3_ops_u", Host: "10.%",
-					Level: GrantOnTable, Database: database, Table: "jd_b3_ops_t", Privileges: []string{"update", "DELETE"}}); err != nil {
+					Level: GrantOnTable, Database: database, Table: "jd_b3_ops_t", Privileges: []string{"update", "DELETE"}}, false); err != nil {
 					t.Fatal(err)
 				}
 				detail, err := ReadRoleDetail(ctx, db, DriverMySQL, "jd_b3_ops_u", "10.%")
@@ -1277,13 +1532,13 @@ func TestLiveOpsMySQL(t *testing.T) {
 				}
 
 				if _, err := ChangePrivileges(ctx, db, DriverMySQL, PrivilegeChange{Role: "jd_b3_ops_u", Host: "10.%",
-					Level: GrantOnDatabase, Database: database, Privileges: []string{"ALL"}, Revoke: true}); err != nil {
+					Level: GrantOnDatabase, Database: database, Privileges: []string{"ALL"}, Revoke: true}, false); err != nil {
 					t.Fatalf("revoking the database grant: %v", err)
 				}
 				// A grant made without the escaping, as one made by hand is.
-				mustExec(t, db, "GRANT SELECT ON `"+database+"`.* TO 'jd_b3_ops_u'@'10.%'")
+				opsMustExec(t, db, "GRANT SELECT ON `"+database+"`.* TO 'jd_b3_ops_u'@'10.%'")
 				if _, err := ChangePrivileges(ctx, db, DriverMySQL, PrivilegeChange{Role: "jd_b3_ops_u", Host: "10.%",
-					Level: GrantOnDatabase, Database: database, Privileges: []string{"SELECT"}, Revoke: true}); err != nil {
+					Level: GrantOnDatabase, Database: database, Privileges: []string{"SELECT"}, Revoke: true}, false); err != nil {
 					t.Fatalf("revoking a grant stored without escaping: %v", err)
 				}
 				grants, _, err := ListGrants(ctx, db, DriverMySQL, GrantFilter{Role: "jd_b3_ops_u", Host: "10.%"})
@@ -1306,6 +1561,170 @@ func TestLiveOpsMySQL(t *testing.T) {
 				if !found {
 					t.Errorf("the table's grants do not name the account: %+v", onObject)
 				}
+			})
+
+			// An account is a name and a host. Asked about a name alone, the
+			// list is for every account that name has — not for 'name'@'%',
+			// which need not exist and is an error to ask about.
+			t.Run("grants_for_every_host_of_a_name", func(t *testing.T) {
+				var database string
+				if err := db.QueryRow(`SELECT DATABASE()`).Scan(&database); err != nil {
+					t.Fatal(err)
+				}
+				drop := func() {
+					db.Exec(`DROP USER IF EXISTS 'jd_b3_ops_h'@'localhost'`)
+					db.Exec(`DROP USER IF EXISTS 'jd_b3_ops_h'@'10.1.%'`)
+				}
+				drop()
+				t.Cleanup(drop)
+				opsMustExec(t, db, `CREATE USER 'jd_b3_ops_h'@'localhost' IDENTIFIED BY 'pw-one-1A'`,
+					`CREATE USER 'jd_b3_ops_h'@'10.1.%' IDENTIFIED BY 'pw-two-2B'`,
+					"GRANT SELECT ON `"+database+"`.`jd_b3_ops_t` TO 'jd_b3_ops_h'@'localhost'",
+					"GRANT INSERT ON `"+database+"`.`jd_b3_ops_t` TO 'jd_b3_ops_h'@'10.1.%'")
+				grants, _, err := ListGrants(ctx, db, DriverMySQL, GrantFilter{Role: "jd_b3_ops_h"})
+				if err != nil {
+					t.Fatalf("a name with no account at %%: %v", err)
+				}
+				held := map[string]string{}
+				for _, g := range grants {
+					if g.Level == GrantOnTable && g.Table == "jd_b3_ops_t" {
+						held[g.Host] = strings.Join(g.Privileges, ",")
+					}
+				}
+				if held["localhost"] != "SELECT" || held["10.1.%"] != "INSERT" || len(held) != 2 {
+					t.Errorf("table grants by host: %v", held)
+				}
+				one, _, err := ListGrants(ctx, db, DriverMySQL, GrantFilter{Role: "jd_b3_ops_h", Host: "localhost"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, g := range one {
+					if g.Host != "localhost" {
+						t.Errorf("a grant of another host came back for localhost: %+v", g)
+					}
+				}
+				none, _, err := ListGrants(ctx, db, DriverMySQL, GrantFilter{Role: "jd_b3_ops_nobody"})
+				if err != nil || len(none) != 0 {
+					t.Errorf("a name with no account: %v, %v", none, err)
+				}
+			})
+
+			// Largest first means largest of all of them, not largest of the
+			// first few by name.
+			t.Run("largest_indexes_first", func(t *testing.T) {
+				opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_zz_big`,
+					`CREATE TABLE jd_b3_ops_zz_big (id INT PRIMARY KEY, pad VARCHAR(200), KEY jd_b3_ops_zz_pad (pad)) ENGINE=InnoDB`)
+				t.Cleanup(func() { db.Exec(`DROP TABLE IF EXISTS jd_b3_ops_zz_big`) })
+				// Five thousand rows of 160 characters: an index of about a megabyte,
+				// far past anything else these tests make.
+				const digits = `(SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
+				  UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9)`
+				opsMustExec(t, db, `INSERT INTO jd_b3_ops_zz_big
+				  SELECT a.n + b.n * 10 + c.n * 100 + d.n * 1000, REPEAT(MD5(a.n + b.n * 10 + c.n * 100 + d.n * 1000), 5)
+				  FROM `+digits+` a CROSS JOIN `+digits+` b CROSS JOIN `+digits+` c CROSS JOIN `+digits+` d
+				  WHERE d.n < 5`, `ANALYZE TABLE jd_b3_ops_zz_big`, `ANALYZE TABLE jd_b3_ops_t`)
+				first, err := ReadIndexStats(ctx, db, DriverMySQL, StatsOptions{Limit: 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(first.Indexes) != 1 || !first.Truncated {
+					t.Fatalf("limit 1: %+v", first)
+				}
+				var largest int64
+				if err := db.QueryRow(`SELECT MAX(stat_value * @@innodb_page_size) FROM mysql.innodb_index_stats
+				  WHERE stat_name = 'size' AND database_name = DATABASE()`).Scan(&largest); err != nil {
+					t.Fatal(err)
+				}
+				if first.Indexes[0].Bytes != largest || first.Indexes[0].Table != "jd_b3_ops_zz_big" {
+					t.Errorf("the first index is %s.%s at %d bytes; the largest in the database is %d",
+						first.Indexes[0].Table, first.Indexes[0].Name, first.Indexes[0].Bytes, largest)
+				}
+			})
+
+			// An account is made with what was asked, or not made.
+			t.Run("create_carries_every_attribute", func(t *testing.T) {
+				db.Exec(`DROP USER IF EXISTS 'jd_b3_ops_c'@'%'`)
+				t.Cleanup(func() { db.Exec(`DROP USER IF EXISTS 'jd_b3_ops_c'@'%'`) })
+				admin, _ := AdminFor(DriverMySQL)
+				locked, until := true, "2031-01-01"
+				err := admin.CreateRole(ctx, db, RoleSpec{Name: "jd_b3_ops_c", Password: "first-pw-1A", SetPassword: true, Login: true, ValidUntil: &until})
+				if _, refused := err.(ErrRoleAttribute); !refused {
+					t.Fatalf("an expiry MySQL cannot set: %v", err)
+				}
+				if _, err := ReadRoleDetail(ctx, db, DriverMySQL, "jd_b3_ops_c", "%"); err != ErrNoSuchRole {
+					t.Fatalf("a refused create left an account behind: %v", err)
+				}
+				if err := admin.CreateRole(ctx, db, RoleSpec{Name: "jd_b3_ops_c", Password: "first-pw-1A", SetPassword: true, Login: true,
+					Locked: &locked, CreateRole: true, CreateDB: true, ConnLimit: 3}); err != nil {
+					t.Fatal(err)
+				}
+				detail, err := ReadRoleDetail(ctx, db, DriverMySQL, "jd_b3_ops_c", "%")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !detail.Locked || detail.Login || !detail.CreateRole || !detail.CreateDB || detail.Superuser || detail.ConnLimit != 3 {
+					t.Errorf("created as %+v", detail.Role)
+				}
+			})
+
+			// Closing the request stops the statement on the server; closing
+			// the socket, which is all the driver does, does not.
+			t.Run("maintenance_stops_with_the_request", func(t *testing.T) {
+				const long = `SELECT SLEEP(60) /* jd_b3_ops_stop */`
+				running := func() int {
+					t.Helper()
+					var n int
+					if err := db.QueryRow(`SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE INFO = ?`, long).Scan(&n); err != nil {
+						t.Fatal(err)
+					}
+					return n
+				}
+				stopCtx, cancel := context.WithCancel(ctx)
+				conn, release, err := mysqlStoppableSession(stopCtx, db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				done := make(chan error, 1)
+				go func() {
+					_, err := conn.ExecContext(stopCtx, long)
+					done <- err
+				}()
+				waitFor(t, "the statement to start", func() bool { return running() == 1 })
+				cancel()
+				select {
+				case err := <-done:
+					if err == nil {
+						t.Error("the cancelled statement reported success")
+					}
+				case <-time.After(10 * time.Second):
+					t.Fatal("the cancelled statement never returned")
+				}
+				release()
+				// The server notices a vanished client by itself only every few
+				// seconds, and not at all inside a table rebuild.
+				deadline := time.Now().Add(2 * time.Second)
+				for running() != 0 {
+					if time.Now().After(deadline) {
+						t.Fatal("the statement is still running on the server after its request ended")
+					}
+					time.Sleep(50 * time.Millisecond)
+				}
+				// The pool is whole: the connection that was killed is not in it.
+				var one int
+				for i := 0; i < 5; i++ {
+					if err := db.QueryRowContext(ctx, `SELECT 1`).Scan(&one); err != nil {
+						t.Fatalf("the pool after a stopped session: %v", err)
+					}
+				}
+				// A session nobody cancelled goes back to the pool untouched.
+				conn, release, err = mysqlStoppableSession(ctx, db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := conn.QueryRowContext(ctx, `SELECT 1`).Scan(&one); err != nil {
+					t.Fatal(err)
+				}
+				release()
 			})
 
 			t.Run("statements", func(t *testing.T) {
@@ -1359,7 +1778,7 @@ func TestOpsSQLite(t *testing.T) {
 	d.TunePool(db)
 	t.Cleanup(func() { db.Close() })
 	ctx := t.Context()
-	mustExec(t, db, `CREATE TABLE parent (id INTEGER PRIMARY KEY, name TEXT UNIQUE)`,
+	opsMustExec(t, db, `CREATE TABLE parent (id INTEGER PRIMARY KEY, name TEXT UNIQUE)`,
 		`CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id), v TEXT)`,
 		`CREATE INDEX child_parent ON child (parent_id)`, `CREATE INDEX child_parent_copy ON child (parent_id)`,
 		`CREATE INDEX child_parent_v ON child (parent_id, v)`, `CREATE INDEX child_lower ON child (lower(v))`,
@@ -1441,7 +1860,7 @@ func TestOpsSQLite(t *testing.T) {
 		t.Errorf("integrity check: %+v %v", res, err)
 	}
 	// A row whose parent is gone is what the foreign key check is for.
-	mustExec(t, db, `PRAGMA foreign_keys = OFF`, `INSERT INTO child VALUES (9, 99, 'orphan')`, `PRAGMA foreign_keys = ON`)
+	opsMustExec(t, db, `PRAGMA foreign_keys = OFF`, `INSERT INTO child VALUES (9, 99, 'orphan')`, `PRAGMA foreign_keys = ON`)
 	orphan, err := RunMaintenance(ctx, db, DriverSQLite, path, MaintenanceRequest{Action: "foreign_key_check"})
 	if err != nil {
 		t.Fatal(err)
@@ -1500,7 +1919,7 @@ func TestOpsSQLite(t *testing.T) {
 		}
 	}
 	// In WAL mode now: a checkpoint has a log to fold in.
-	mustExec(t, db, `INSERT INTO parent VALUES (3, 'c')`)
+	opsMustExec(t, db, `INSERT INTO parent VALUES (3, 'c')`)
 	if res, err := RunMaintenance(ctx, db, DriverSQLite, path, MaintenanceRequest{Action: "wal_checkpoint"}); err != nil || !res.OK || res.Statements[0] != "PRAGMA wal_checkpoint(TRUNCATE)" {
 		t.Errorf("checkpoint: %+v %v", res, err)
 	}
@@ -1529,6 +1948,74 @@ func TestOpsSQLite(t *testing.T) {
 	}
 }
 
+// A foreign key check answers a row per orphan. What is kept of it is bounded
+// while it is read, and the result says there was more.
+func TestSQLiteMaintenanceOutputIsBounded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orphans.db")
+	d, _ := DialectFor(DriverSQLite)
+	db, err := sql.Open(d.SQLDriverName(), d.NormaliseDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.TunePool(db)
+	t.Cleanup(func() { db.Close() })
+	opsMustExec(t, db, `PRAGMA foreign_keys = OFF`,
+		`CREATE TABLE parent (id INTEGER PRIMARY KEY)`,
+		`CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id))`,
+		`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
+		 INSERT INTO child SELECT i, i + 100000 FROM n`)
+	res, err := RunMaintenance(t.Context(), db, DriverSQLite, path, MaintenanceRequest{Action: "foreign_key_check"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || !res.OutputTruncated || len(res.Output) != maxMaintenanceLines+1 {
+		t.Fatalf("ok %v, truncated %v, %d lines", res.OK, res.OutputTruncated, len(res.Output))
+	}
+	if !strings.Contains(res.Output[0], "child row 1 ") || !strings.HasPrefix(res.Output[maxMaintenanceLines], "…") {
+		t.Errorf("first line %q, last line %q", res.Output[0], res.Output[maxMaintenanceLines])
+	}
+}
+
+// The largest index is first whatever its name, and a duplicate is found
+// whichever side of the limit it falls.
+func TestSQLiteIndexStatsRankBeforeTheyCut(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "indexes.db")
+	d, _ := DialectFor(DriverSQLite)
+	db, err := sql.Open(d.SQLDriverName(), d.NormaliseDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.TunePool(db)
+	t.Cleanup(func() { db.Close() })
+	opsMustExec(t, db, `CREATE TABLE aaa (id INTEGER PRIMARY KEY, v TEXT)`, `CREATE INDEX aaa_v ON aaa (v)`,
+		`CREATE TABLE zzz (id INTEGER PRIMARY KEY, v TEXT)`, `CREATE INDEX zzz_v ON zzz (v)`, `CREATE INDEX zzz_v_again ON zzz (v)`,
+		`INSERT INTO aaa VALUES (1, 'x')`,
+		`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+		 INSERT INTO zzz SELECT i, hex(randomblob(40)) FROM n`)
+	report, err := ReadIndexStats(t.Context(), db, DriverSQLite, StatsOptions{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Indexes) != 1 || !report.Truncated {
+		t.Fatalf("limit 1: %+v", report)
+	}
+	if size, _ := sqliteObjectSizes(t.Context(), db); size == nil {
+		t.Skip("this SQLite build has no dbstat table, so there are no sizes to rank by")
+	}
+	first := report.Indexes[0]
+	if first.Table != "zzz" || first.Bytes <= 0 {
+		t.Errorf("the first index is %s.%s at %d bytes", first.Table, first.Name, first.Bytes)
+	}
+	two, err := ReadIndexStats(t.Context(), db, DriverSQLite, StatsOptions{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(two.Indexes) != 2 || two.Indexes[0].Table != "zzz" || two.Indexes[1].Table != "zzz" ||
+		(two.Indexes[0].DuplicateOf == "") == (two.Indexes[1].DuplicateOf == "") {
+		t.Errorf("limit 2: %+v", two.Indexes)
+	}
+}
+
 func TestSQLiteAdvisorSaysWhenTheFileIsNotInWALMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plain.db")
 	d, _ := DialectFor(DriverSQLite)
@@ -1538,7 +2025,7 @@ func TestSQLiteAdvisorSaysWhenTheFileIsNotInWALMode(t *testing.T) {
 	}
 	d.TunePool(db)
 	t.Cleanup(func() { db.Close() })
-	mustExec(t, db, `CREATE TABLE t (id INTEGER PRIMARY KEY)`)
+	opsMustExec(t, db, `CREATE TABLE t (id INTEGER PRIMARY KEY)`)
 	report, err := Advise(t.Context(), db, DriverSQLite, "")
 	if err != nil {
 		t.Fatal(err)
@@ -1566,7 +2053,7 @@ func TestLiveOpsClickHouse(t *testing.T) {
 	if err := db.QueryRow(`SELECT currentDatabase()`).Scan(&database); err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_events`,
+	opsMustExec(t, db, `DROP TABLE IF EXISTS jd_b3_ops_events`,
 		`CREATE TABLE jd_b3_ops_events (id UInt64, d Date, v String, INDEX v_idx v TYPE bloom_filter GRANULARITY 4)
 		 ENGINE = MergeTree PARTITION BY toYYYYMM(d) ORDER BY id`,
 		`INSERT INTO jd_b3_ops_events SELECT number, toDate('2026-01-01') + number % 60, toString(number) FROM numbers(2000)`,
@@ -1656,7 +2143,7 @@ func TestLiveOpsClickHouse(t *testing.T) {
 		t.Error("optimize without a table was accepted")
 	}
 
-	mustExec(t, db, `ALTER TABLE jd_b3_ops_events DELETE WHERE id = 1`)
+	opsMustExec(t, db, `ALTER TABLE jd_b3_ops_events DELETE WHERE id = 1`)
 	mutations, err := ClickHouseMutations(ctx, db, "")
 	if err != nil {
 		t.Fatal(err)
@@ -1713,7 +2200,7 @@ func TestLiveOpsClickHouse(t *testing.T) {
 		t.Errorf("short list: %d %v", len(short), err)
 	}
 
-	mustExec(t, db, `SELECT count() FROM jd_b3_ops_events WHERE v = '17'`, `SYSTEM FLUSH LOGS`)
+	opsMustExec(t, db, `SELECT count() FROM jd_b3_ops_events WHERE v = '17'`, `SYSTEM FLUSH LOGS`)
 	statements, err := TopStatements(ctx, db, DriverClickHouse, StatementsOptions{Sort: StatementsByCalls})
 	if err != nil {
 		t.Fatal(err)
@@ -1760,7 +2247,7 @@ func TestLiveOpsClickHouse(t *testing.T) {
 func TestLiveOpsSQLServer(t *testing.T) {
 	db, _ := opsLive(t, DriverMSSQL, "JD_TEST_B3_MSSQL_DSN")
 	ctx := t.Context()
-	mustExec(t, db, `IF OBJECT_ID('dbo.jd_b3_ops_child') IS NOT NULL DROP TABLE dbo.jd_b3_ops_child`,
+	opsMustExec(t, db, `IF OBJECT_ID('dbo.jd_b3_ops_child') IS NOT NULL DROP TABLE dbo.jd_b3_ops_child`,
 		`IF OBJECT_ID('dbo.jd_b3_ops_t') IS NOT NULL DROP TABLE dbo.jd_b3_ops_t`,
 		`CREATE TABLE dbo.jd_b3_ops_t (id INT PRIMARY KEY, a NVARCHAR(64), b INT)`,
 		`CREATE INDEX jd_b3_ops_t_b ON dbo.jd_b3_ops_t (b)`,
@@ -1871,7 +2358,7 @@ func TestLiveOpsSQLServer(t *testing.T) {
 	})
 
 	t.Run("table_and_index_stats", func(t *testing.T) {
-		mustExec(t, db, `SELECT COUNT(*) FROM dbo.jd_b3_ops_t WHERE b = 2`)
+		opsMustExec(t, db, `SELECT COUNT(*) FROM dbo.jd_b3_ops_t WHERE b = 2`)
 		tables, err := ReadTableStats(ctx, db, DriverMSSQL, StatsOptions{Schema: "dbo"})
 		if err != nil {
 			t.Fatal(err)
@@ -1944,6 +2431,27 @@ func TestLiveOpsSQLServer(t *testing.T) {
 		}
 		drop()
 		t.Cleanup(drop)
+		// A login is made with everything it was asked to have, or not made:
+		// disabled, and a member of both server roles.
+		db.Exec(`IF SUSER_ID('jd_b3_ops_made') IS NOT NULL DROP LOGIN [jd_b3_ops_made]`)
+		t.Cleanup(func() { db.Exec(`IF SUSER_ID('jd_b3_ops_made') IS NOT NULL DROP LOGIN [jd_b3_ops_made]`) })
+		made := RoleSpec{Name: "jd_b3_ops_made", Password: "Jd-b3-made#2026", SetPassword: true, SetLogin: true, CreateDB: true, CreateRole: true}
+		limited := made
+		limited.ConnLimit = 3
+		if _, refused := admin.CreateRole(ctx, db, limited).(ErrRoleAttribute); !refused {
+			t.Fatal("a connection limit SQL Server cannot set was not refused")
+		}
+		if _, err := ReadRoleDetail(ctx, db, DriverMSSQL, "jd_b3_ops_made", ""); err != ErrNoSuchRole {
+			t.Fatalf("a refused create left a login behind: %v", err)
+		}
+		if err := admin.CreateRole(ctx, db, made); err != nil {
+			t.Fatal(err)
+		}
+		if created, err := ReadRoleDetail(ctx, db, DriverMSSQL, "jd_b3_ops_made", ""); err != nil || !created.Locked || created.Login ||
+			!created.CreateDB || !created.CreateRole || created.Superuser {
+			t.Errorf("created as %+v (%v)", created, err)
+		}
+
 		if err := admin.CreateRole(ctx, db, RoleSpec{Name: "jd_b3_ops_login", Password: "Jd-b3-first#2026", SetPassword: true, Login: true, CreateDB: true}); err != nil {
 			t.Fatal(err)
 		}
@@ -1966,16 +2474,17 @@ func TestLiveOpsSQLServer(t *testing.T) {
 			t.Errorf("after disabling and dropping dbcreator: %+v %v", detail, err)
 		}
 
-		stmts, err := ChangePrivileges(ctx, db, DriverMSSQL, PrivilegeChange{Role: "jd_b3_ops_login", Level: GrantOnTable,
-			Schema: "dbo", Table: "jd_b3_ops_t", Privileges: []string{"select", "UPDATE"}})
+		changed, err := ChangePrivileges(ctx, db, DriverMSSQL, PrivilegeChange{Role: "jd_b3_ops_login", Level: GrantOnTable,
+			Schema: "dbo", Table: "jd_b3_ops_t", Privileges: []string{"select", "UPDATE"}}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
+		stmts := changed.Statements
 		if len(stmts) != 2 || stmts[1] != "GRANT SELECT, UPDATE ON OBJECT::[dbo].[jd_b3_ops_t] TO [jd_b3_ops_login]" {
 			t.Errorf("grant ran %v", stmts)
 		}
 		if _, err := ChangePrivileges(ctx, db, DriverMSSQL, PrivilegeChange{Role: "jd_b3_ops_login", Level: GrantOnSchema,
-			Schema: "dbo", Privileges: []string{"EXECUTE"}}); err != nil {
+			Schema: "dbo", Privileges: []string{"EXECUTE"}}, false); err != nil {
 			t.Fatal(err)
 		}
 		grants, _, err := ListGrants(ctx, db, DriverMSSQL, GrantFilter{Role: "jd_b3_ops_login"})
@@ -1998,7 +2507,7 @@ func TestLiveOpsSQLServer(t *testing.T) {
 			t.Errorf("schema grant: %+v", onSchema)
 		}
 		if _, err := ChangePrivileges(ctx, db, DriverMSSQL, PrivilegeChange{Role: "jd_b3_ops_login", Level: GrantOnTable,
-			Schema: "dbo", Table: "jd_b3_ops_t", Privileges: []string{"UPDATE"}, Revoke: true}); err != nil {
+			Schema: "dbo", Table: "jd_b3_ops_t", Privileges: []string{"UPDATE"}, Revoke: true}, false); err != nil {
 			t.Fatal(err)
 		}
 		grants, _, err = ListGrants(ctx, db, DriverMSSQL, GrantFilter{Schema: "dbo", Table: "jd_b3_ops_t"})
@@ -2022,7 +2531,7 @@ func TestLiveOpsSQLServer(t *testing.T) {
 	})
 
 	t.Run("advisor", func(t *testing.T) {
-		mustExec(t, db, `CREATE TABLE dbo.jd_b3_ops_child (v INT, parent INT REFERENCES dbo.jd_b3_ops_t(id))`)
+		opsMustExec(t, db, `CREATE TABLE dbo.jd_b3_ops_child (v INT, parent INT REFERENCES dbo.jd_b3_ops_t(id))`)
 		report, err := Advise(ctx, db, DriverMSSQL, "dbo")
 		if err != nil {
 			t.Fatal(err)
@@ -2068,7 +2577,7 @@ func TestLiveOpsOracle(t *testing.T) {
 	db, _ := opsLive(t, DriverOracle, "JD_TEST_B3_ORACLE_ADMIN_DSN")
 	ctx := t.Context()
 	db.Exec(`DROP TABLE jd_b3_ops_t PURGE`)
-	mustExec(t, db, `CREATE TABLE jd_b3_ops_t (id NUMBER PRIMARY KEY, v NUMBER)`, `INSERT INTO jd_b3_ops_t VALUES (1, 0)`)
+	opsMustExec(t, db, `CREATE TABLE jd_b3_ops_t (id NUMBER PRIMARY KEY, v NUMBER)`, `INSERT INTO jd_b3_ops_t VALUES (1, 0)`)
 	t.Cleanup(func() { db.Exec(`DROP TABLE jd_b3_ops_t PURGE`) })
 
 	t.Run("stats", func(t *testing.T) {
@@ -2199,7 +2708,7 @@ func TestLiveOpsOracle(t *testing.T) {
 		db.Exec(`DROP VIEW jd_b3_ops_broken`)
 		db.Exec(`DROP TABLE jd_b3_ops_gone PURGE`)
 		// A view over a table that is then dropped is the classic invalid object.
-		mustExec(t, db, `CREATE TABLE jd_b3_ops_gone (id NUMBER)`, `CREATE VIEW jd_b3_ops_broken AS SELECT id FROM jd_b3_ops_gone`,
+		opsMustExec(t, db, `CREATE TABLE jd_b3_ops_gone (id NUMBER)`, `CREATE VIEW jd_b3_ops_broken AS SELECT id FROM jd_b3_ops_gone`,
 			`DROP TABLE jd_b3_ops_gone PURGE`)
 		t.Cleanup(func() { db.Exec(`DROP VIEW jd_b3_ops_broken`) })
 		report, err := Advise(ctx, db, DriverOracle, "")

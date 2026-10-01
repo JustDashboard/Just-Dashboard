@@ -525,8 +525,8 @@ func ReadIndexStats(ctx context.Context, db *sql.DB, driver Driver, opts StatsOp
 	if out.Indexes == nil {
 		out.Indexes = []IndexStat{}
 	}
-	// Marked before the list is cut, so the row read past the limit can
-	// still be the wider index that covers one of those kept.
+	// Marked before the list is cut, so an index beyond the limit can still
+	// be the wider one that covers one of those kept.
 	markRedundantIndexes(out.Indexes)
 	if limit := opts.limit(); len(out.Indexes) > limit {
 		out.Indexes, out.Truncated = out.Indexes[:limit], true
@@ -601,6 +601,19 @@ func sortIndexStatsBySize(list []IndexStat) {
 	sort.SliceStable(list, func(i, j int) bool { return list[i].Bytes > list[j].Bytes })
 }
 
+// maxIndexCatalogue bounds how many indexes those dialects read before
+// ranking them. They have to read the whole list first: cutting it at the
+// limit in catalogue order and sorting what is left by size shows the first
+// two hundred indexes by name and calls them the largest. Twenty thousand is
+// past any schema this page is useful for and still a bounded read.
+const maxIndexCatalogue = 20000
+
+// indexCatalogueNote is what a report says when even that bound was reached.
+func indexCatalogueNote() string {
+	return fmt.Sprintf("This database has more than %d indexes; only the first %d by name were ranked by size.",
+		maxIndexCatalogue, maxIndexCatalogue)
+}
+
 // keepRank orders a set of duplicates by which one must stay.
 func keepRank(ix IndexStat) int {
 	switch {
@@ -648,10 +661,36 @@ type MaintenanceAction struct {
 	// runs, which on a big table is the application waiting.
 	Blocking bool `json:"blocking,omitempty"`
 	// Destructive marks an action that can discard data it cannot recover.
-	// The route demands the destructive capability for these.
 	Destructive bool `json:"destructive,omitempty"`
+	// Requires is the capability the route asks for before it runs the
+	// action: "destructive" for one that blocks or can lose data, and
+	// "service.control" for the rest. It is published so the page hides what
+	// the viewer cannot run by the same rule the route refuses it by.
+	Requires string `json:"requires"`
 	// Options names the request options this action reads.
 	Options []string `json:"options,omitempty"`
+}
+
+// The two capabilities a maintenance action can ask for, in the words the
+// session's capability list uses.
+const (
+	MaintenanceNeedsControl     = "service.control"
+	MaintenanceNeedsDestructive = "destructive"
+)
+
+// NeedsDestructive reports whether running the action takes the destructive
+// capability rather than the ordinary one.
+//
+// The SQL console treats every statement that is not a recognised read as
+// destructive, because it cannot know what a statement does. This list can:
+// an action here is one of a closed set and its effect is written beside it.
+// So the line is drawn on the effect. An action that can lose rows, or that
+// locks a table against the application for as long as it runs — and, with no
+// table named, every table in turn — is the same act as typing it into the
+// console and takes what the console takes. One that reads, or that works
+// alongside the application's reads and writes, is routine upkeep.
+func (a MaintenanceAction) NeedsDestructive() bool {
+	return a.Destructive || a.Blocking
 }
 
 // MaintenanceOptions are the few switches the actions take. Each is a closed
@@ -682,7 +721,8 @@ type MaintenanceResult struct {
 	// Output is the engine's own lines: VACUUM VERBOSE's notices, CHECK
 	// TABLE's rows, integrity_check's verdict.
 	Output []string `json:"output"`
-	// OutputTruncated is true when the engine printed more than is kept.
+	// OutputTruncated is true when the engine printed more than is kept. The
+	// last line of Output then says so.
 	OutputTruncated bool   `json:"outputTruncated"`
 	Duration        string `json:"duration"`
 	// OK is false when the engine ran the action and reported a problem in
@@ -690,6 +730,25 @@ type MaintenanceResult struct {
 	// corruption, an integrity_check that did not say "ok".
 	OK bool `json:"ok"`
 }
+
+// keep adds the engine's lines to the result up to the bound and records that
+// there were more. The bound is applied as the lines arrive, not afterwards:
+// a foreign key check answers a row per orphan and a verbose vacuum of a whole
+// database several lines per table, and collecting all of that in order to
+// throw most of it away is the dashboard holding millions of strings for one
+// request.
+func (r *MaintenanceResult) keep(lines ...string) {
+	for _, line := range lines {
+		if r.full() {
+			r.OutputTruncated = true
+			return
+		}
+		r.Output = append(r.Output, line)
+	}
+}
+
+// full reports whether the result holds as many lines as it keeps.
+func (r *MaintenanceResult) full() bool { return len(r.Output) >= maxMaintenanceLines }
 
 // Maintainer is the optional dialect half. The DSN is passed beside the pool
 // because PostgreSQL reports a maintenance command's progress as notices, and
@@ -710,7 +769,14 @@ func MaintenanceActionsFor(driver Driver) []MaintenanceAction {
 	if !ok {
 		return []MaintenanceAction{}
 	}
-	return m.MaintenanceActions()
+	actions := m.MaintenanceActions()
+	for i := range actions {
+		actions[i].Requires = MaintenanceNeedsControl
+		if actions[i].NeedsDestructive() {
+			actions[i].Requires = MaintenanceNeedsDestructive
+		}
+	}
+	return actions
 }
 
 // MaintenanceActionFor looks one action up by id.
@@ -777,10 +843,8 @@ func RunMaintenance(ctx context.Context, db *sql.DB, driver Driver, dsn string, 
 	if out.Output == nil {
 		out.Output = []string{}
 	}
-	if len(out.Output) > maxMaintenanceLines {
-		more := len(out.Output) - maxMaintenanceLines
-		out.Output = append(out.Output[:maxMaintenanceLines:maxMaintenanceLines], fmt.Sprintf("… and %d more lines", more))
-		out.OutputTruncated = true
+	if out.OutputTruncated {
+		out.Output = append(out.Output, fmt.Sprintf("… the engine printed more; the first %d lines are kept", maxMaintenanceLines))
 	}
 	return out, nil
 }
@@ -861,20 +925,31 @@ func OpsCapabilities(driver Driver, flavor string) map[string]bool {
 // release adds some. Scanning by position would break on every one of those;
 // asking for a column by either of its names does not.
 func rowMaps(rows *sql.Rows) ([]map[string]string, error) {
+	out, _, err := rowMapsUpTo(rows, 0)
+	return out, err
+}
+
+// rowMapsUpTo is rowMaps for a result whose length the caller does not
+// control: it stops after limit rows and reports whether there were more,
+// leaving them unread. A limit of zero reads everything.
+func rowMapsUpTo(rows *sql.Rows, limit int) ([]map[string]string, bool, error) {
 	defer rows.Close()
 	cols, err := rows.Columns()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := []map[string]string{}
 	for rows.Next() {
+		if limit > 0 && len(out) == limit {
+			return out, true, nil
+		}
 		cells := make([]sql.NullString, len(cols))
 		dest := make([]any, len(cols))
 		for i := range cells {
 			dest[i] = &cells[i]
 		}
 		if err := rows.Scan(dest...); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		row := make(map[string]string, len(cols))
 		for i, c := range cols {
@@ -882,7 +957,7 @@ func rowMaps(rows *sql.Rows) ([]map[string]string, error) {
 		}
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	return out, false, rows.Err()
 }
 
 // firstOf returns the first of several spellings a row has a value under.

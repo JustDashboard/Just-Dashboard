@@ -68,7 +68,23 @@ type PrivilegeChange struct {
 	// Future extends the change to objects created later, where the engine
 	// has default privileges.
 	Future bool
-	Revoke bool
+	// FutureOwners are the roles, beside the connection's own, whose later
+	// objects the default privileges are written for. It is read from the
+	// server by ChangePrivileges and never taken from a request.
+	FutureOwners []string
+	Revoke       bool
+}
+
+// PrivilegeOutcome is what a change did, or with a preview would do.
+type PrivilegeOutcome struct {
+	// Statements is the SQL, in the order it ran.
+	Statements []string `json:"statements"`
+	// FutureOwners are the roles whose later objects a change with Future
+	// covers: the connection's own account first, then every other role that
+	// creates objects in the schema and that this account may speak for.
+	FutureOwners []string `json:"futureOwners,omitempty"`
+	// Notes say what the change could not cover.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // Grant is one thing a role holds: a set of privileges on one object.
@@ -116,6 +132,9 @@ type RoleDetail struct {
 	Members []string `json:"members"`
 	// Config is what the role's sessions start with (ALTER ROLE … SET).
 	Config []string `json:"config"`
+	// ConfigRedacted names the entries of Config whose value was withheld
+	// from this viewer because it may be a credential.
+	ConfigRedacted []string `json:"configRedacted,omitempty"`
 	// AuthPlugin is how the account authenticates, where the engine says.
 	AuthPlugin string  `json:"authPlugin,omitempty"`
 	Grants     []Grant `json:"grants"`
@@ -239,8 +258,11 @@ func checkPrivileges(levels []PrivilegeLevel, c PrivilegeChange) ([]string, erro
 	return out, nil
 }
 
-// PrivilegeStatements renders a change without running it, so the page can
-// show the server's own SQL before anything is sent.
+// PrivilegeStatements renders a change without running it or asking the
+// server anything, which is also how a request is checked before a connection
+// is opened for it. A change with Future is rendered here for the connection's
+// own account only; ChangePrivileges adds the other owners once it has read
+// them.
 func PrivilegeStatements(driver Driver, c PrivilegeChange) ([]string, error) {
 	p, err := privilegeAdmin(driver)
 	if err != nil {
@@ -253,26 +275,54 @@ func PrivilegeStatements(driver Driver, c PrivilegeChange) ([]string, error) {
 	return p.privilegeStatements(c, privileges)
 }
 
-// ChangePrivileges grants or revokes and returns the statements it ran. They
-// run in one transaction where the engine has transactional grants, so a
-// change of three statements is never left a third done.
-func ChangePrivileges(ctx context.Context, db *sql.DB, driver Driver, c PrivilegeChange) ([]string, error) {
+// ChangePrivileges grants or revokes and returns the statements it ran; with
+// preview it returns them without running any. They run in one transaction
+// where the engine has transactional grants, so a change of three statements
+// is never left a third done.
+func ChangePrivileges(ctx context.Context, db *sql.DB, driver Driver, c PrivilegeChange, preview bool) (*PrivilegeOutcome, error) {
 	stmts, err := PrivilegeStatements(driver, c)
 	if err != nil {
 		return nil, err
 	}
+	out := &PrivilegeOutcome{Statements: stmts}
 	if driver == DriverPostgres || driver == DriverMSSQL {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			return nil, err
 		}
 		defer tx.Rollback()
-		for _, stmt := range stmts {
+		if c.Future && driver == DriverPostgres {
+			// Whose future objects: the same question the three-level grant
+			// asks, answered the same way. Without it the default would cover
+			// only what the dashboard's own account creates, and a table the
+			// next migration adds would be the first one the role cannot read.
+			var self string
+			if err := tx.QueryRowContext(ctx, `SELECT current_user`).Scan(&self); err != nil {
+				return nil, err
+			}
+			owners, uncovered, err := pgFutureOwners(ctx, tx, []string{c.Schema})
+			if err != nil {
+				return nil, err
+			}
+			c.FutureOwners = owners[c.Schema]
+			out.FutureOwners = append([]string{self}, c.FutureOwners...)
+			out.Notes = futureOwnerNotes([]string{c.Schema}, uncovered)
+			if out.Statements, err = PrivilegeStatements(driver, c); err != nil {
+				return nil, err
+			}
+		}
+		if preview {
+			return out, nil
+		}
+		for _, stmt := range out.Statements {
 			if _, err := tx.ExecContext(ctx, stmt); err != nil {
 				return nil, err
 			}
 		}
-		return stmts, tx.Commit()
+		return out, tx.Commit()
+	}
+	if preview {
+		return out, nil
 	}
 	for i, stmt := range stmts {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
@@ -289,7 +339,7 @@ func ChangePrivileges(ctx context.Context, db *sql.DB, driver Driver, c Privileg
 			return nil, err
 		}
 	}
-	return stmts, nil
+	return out, nil
 }
 
 // ListGrants lists what roles hold, narrowed by the filter.
@@ -468,10 +518,23 @@ func (d postgresDialect) privilegeStatements(c PrivilegeChange, privileges []str
 			return []string{render(kind + " " + rel)}, nil
 		}
 		stmts := []string{render("ALL " + kinds + " IN SCHEMA " + schema)}
-		if c.Future {
-			// The same clause, inside ALTER DEFAULT PRIVILEGES, without the
-			// schema on the object: the schema is the scope of the default.
-			stmts = append(stmts, "ALTER DEFAULT PRIVILEGES IN SCHEMA "+schema+" "+render(kinds))
+		if !c.Future {
+			return stmts, nil
+		}
+		// The same clause, inside ALTER DEFAULT PRIVILEGES, without the
+		// schema on the object: the schema is the scope of the default. The
+		// plain form covers what this account creates; one FOR ROLE per other
+		// owner covers what they do.
+		for _, owner := range append([]string{""}, c.FutureOwners...) {
+			prefix := "ALTER DEFAULT PRIVILEGES"
+			if owner != "" {
+				o, err := d.QuoteIdent(owner)
+				if err != nil {
+					return nil, err
+				}
+				prefix += " FOR ROLE " + o
+			}
+			stmts = append(stmts, prefix+" IN SCHEMA "+schema+" "+render(kinds))
 		}
 		return stmts, nil
 	}
@@ -661,38 +724,80 @@ func (mysqlDialect) Grants(ctx context.Context, db *sql.DB, f GrantFilter) ([]Gr
 	if f.Role == "" {
 		return mysqlObjectGrants(ctx, db, f)
 	}
-	account, err := mysqlAccount(f.Role, f.Host)
+	hosts, err := mysqlAccountHosts(ctx, db, f.Role, f.Host)
 	if err != nil {
 		return nil, false, err
 	}
-	rows, err := db.QueryContext(ctx, "SHOW GRANTS FOR "+account)
-	if err != nil {
-		return nil, false, err
-	}
-	defer rows.Close()
 	out := []Grant{}
-	for rows.Next() {
-		var line string
-		if err := rows.Scan(&line); err != nil {
+	for _, host := range hosts {
+		account, err := mysqlAccount(f.Role, host)
+		if err != nil {
+			// A host the request named is the request's mistake; one the
+			// server listed that this cannot spell is passed over.
+			if f.Host == "" {
+				continue
+			}
 			return nil, false, err
 		}
-		g, ok := parseMySQLGrant(line)
-		if !ok {
-			continue
+		rows, err := db.QueryContext(ctx, "SHOW GRANTS FOR "+account)
+		if err != nil {
+			return nil, false, err
 		}
-		g.Grantee, g.Host = f.Role, f.Host
-		if f.Schema != "" && g.Database != f.Schema {
-			continue
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				rows.Close()
+				return nil, false, err
+			}
+			g, ok := parseMySQLGrant(line)
+			if !ok {
+				continue
+			}
+			g.Grantee, g.Host = f.Role, host
+			if f.Schema != "" && g.Database != f.Schema {
+				continue
+			}
+			if f.Table != "" && g.Table != f.Table {
+				continue
+			}
+			if len(out) == maxGrants {
+				rows.Close()
+				return out, true, nil
+			}
+			out = append(out, g)
 		}
-		if f.Table != "" && g.Table != f.Table {
-			continue
+		if err := rows.Close(); err != nil {
+			return nil, false, err
 		}
-		if len(out) == maxGrants {
-			return out, true, rows.Err()
-		}
-		out = append(out, g)
 	}
-	return out, false, rows.Err()
+	return out, false, nil
+}
+
+// mysqlAccountHosts names the accounts a user name stands for. An account is
+// a name and a host together, and "app" alone may be 'app'@'localhost',
+// 'app'@'10.%' or both — never necessarily 'app'@'%', which is what leaving
+// the host out used to assume, and SHOW GRANTS for an account that does not
+// exist is an error. With no host given every one the name has is listed; a
+// name the server has no account for has no grants, which is an empty list.
+// A connection that may not read mysql.user is left with the old assumption.
+func mysqlAccountHosts(ctx context.Context, db *sql.DB, user, host string) ([]string, error) {
+	if host != "" {
+		return []string{host}, nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT Host FROM mysql.user WHERE User = ? ORDER BY Host`, user)
+	if err != nil {
+		return []string{"%"}, nil
+	}
+	defer rows.Close()
+	hosts := []string{}
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			return nil, err
+		}
+		hosts = append(hosts, h)
+	}
+	return hosts, rows.Err()
 }
 
 // parseMySQLGrant reads one line of SHOW GRANTS into a grant. It takes what

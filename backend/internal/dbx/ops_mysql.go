@@ -3,6 +3,7 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"math"
 	"strconv"
 	"strings"
@@ -616,10 +617,10 @@ func (mysqlDialect) Replication(ctx context.Context, db *sql.DB) (*ReplicationRe
 
 // --- table and index statistics ------------------------------------------------
 
-// mysqlSchemaFilter matches one database, or the connection's own when none
+// opsMySQLSchemaFilter matches one database, or the connection's own when none
 // is named, or every database that is not the server's when the connection
 // has none either.
-const mysqlSchemaFilter = `((? <> '' AND %[1]s = ?)
+const opsMySQLSchemaFilter = `((? <> '' AND %[1]s = ?)
 	   OR (? = '' AND %[1]s = DATABASE())
 	   OR (? = '' AND DATABASE() IS NULL AND %[1]s NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')))`
 
@@ -635,7 +636,7 @@ func (mysqlDialect) TableStats(ctx context.Context, db *sql.DB, opts StatsOption
 	         COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0),
 	         COALESCE(DATA_LENGTH, 0), COALESCE(INDEX_LENGTH, 0), COALESCE(DATA_FREE, 0)
 	  FROM information_schema.TABLES
-	  WHERE TABLE_TYPE = 'BASE TABLE' AND `+schemaFilterOn(mysqlSchemaFilter, "TABLE_SCHEMA")+`
+	  WHERE TABLE_TYPE = 'BASE TABLE' AND `+schemaFilterOn(opsMySQLSchemaFilter, "TABLE_SCHEMA")+`
 	  ORDER BY 5 DESC, 1, 2
 	  LIMIT ?`, args...)
 	if err != nil {
@@ -664,7 +665,7 @@ func (mysqlDialect) TableStats(ctx context.Context, db *sql.DB, opts StatsOption
 	         SUM(CASE WHEN INDEX_NAME IS NOT NULL THEN COUNT_READ ELSE 0 END),
 	         SUM(COUNT_INSERT), SUM(COUNT_UPDATE), SUM(COUNT_DELETE)
 	  FROM performance_schema.table_io_waits_summary_by_index_usage
-	  WHERE `+schemaFilterOn(mysqlSchemaFilter, "OBJECT_SCHEMA")+`
+	  WHERE `+schemaFilterOn(opsMySQLSchemaFilter, "OBJECT_SCHEMA")+`
 	  GROUP BY OBJECT_SCHEMA, OBJECT_NAME`, mysqlSchemaArgs(opts.Schema)...)
 	if err != nil {
 		out.Notes = append(out.Notes, "Read and write counts need performance_schema, which this server does not offer.")
@@ -706,14 +707,17 @@ func schemaFilterOn(filter, column string) string {
 // InnoDB's own statistics table and their use from performance_schema. The
 // last two are each optional: an account that cannot read the mysql schema
 // gets no sizes, and a server with performance_schema off gets no scan counts.
+//
+// The sizes arrive after the list, so the list is read whole and ranked here;
+// ReadIndexStats cuts it to the limit once it is in order.
 func (mysqlDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOptions) (*IndexStatsReport, error) {
-	args := append(mysqlSchemaArgs(opts.Schema), opts.Table, opts.Table, opts.limit()+1)
+	args := append(mysqlSchemaArgs(opts.Schema), opts.Table, opts.Table, maxIndexCatalogue+1)
 	rows, err := db.QueryContext(ctx, `
 	  SELECT s.TABLE_SCHEMA, s.TABLE_NAME, s.INDEX_NAME, MAX(s.INDEX_TYPE), MAX(s.NON_UNIQUE),
 	         GROUP_CONCAT(COALESCE(s.COLUMN_NAME, '(expression)') ORDER BY s.SEQ_IN_INDEX SEPARATOR 0x1f),
 	         MAX(CASE WHEN s.SUB_PART IS NOT NULL OR s.COLUMN_NAME IS NULL THEN 1 ELSE 0 END)
 	  FROM information_schema.STATISTICS s
-	  WHERE `+schemaFilterOn(mysqlSchemaFilter, "s.TABLE_SCHEMA")+` AND (? = '' OR s.TABLE_NAME = ?)
+	  WHERE `+schemaFilterOn(opsMySQLSchemaFilter, "s.TABLE_SCHEMA")+` AND (? = '' OR s.TABLE_NAME = ?)
 	  GROUP BY s.TABLE_SCHEMA, s.TABLE_NAME, s.INDEX_NAME
 	  ORDER BY s.TABLE_SCHEMA, s.TABLE_NAME, s.INDEX_NAME
 	  LIMIT ?`, args...)
@@ -741,6 +745,10 @@ func (mysqlDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOption
 		if !ix.plain {
 			ix.signature = "partial:" + ix.Name
 		}
+		if len(out.Indexes) == maxIndexCatalogue {
+			out.Notes = append(out.Notes, indexCatalogueNote())
+			break
+		}
 		out.Indexes = append(out.Indexes, ix)
 	}
 	if err := rows.Close(); err != nil {
@@ -751,7 +759,7 @@ func (mysqlDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOption
 	if srows, err := db.QueryContext(ctx, `
 	  SELECT database_name, table_name, index_name, stat_value * @@innodb_page_size
 	  FROM mysql.innodb_index_stats
-	  WHERE stat_name = 'size' AND `+schemaFilterOn(mysqlSchemaFilter, "database_name"), mysqlSchemaArgs(opts.Schema)...); err == nil {
+	  WHERE stat_name = 'size' AND `+schemaFilterOn(opsMySQLSchemaFilter, "database_name"), mysqlSchemaArgs(opts.Schema)...); err == nil {
 		for srows.Next() {
 			var schema, table, index string
 			var size int64
@@ -769,7 +777,7 @@ func (mysqlDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOption
 	if urows, err := db.QueryContext(ctx, `
 	  SELECT OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, COUNT_READ, COUNT_FETCH
 	  FROM performance_schema.table_io_waits_summary_by_index_usage
-	  WHERE INDEX_NAME IS NOT NULL AND `+schemaFilterOn(mysqlSchemaFilter, "OBJECT_SCHEMA"), mysqlSchemaArgs(opts.Schema)...); err == nil {
+	  WHERE INDEX_NAME IS NOT NULL AND `+schemaFilterOn(opsMySQLSchemaFilter, "OBJECT_SCHEMA"), mysqlSchemaArgs(opts.Schema)...); err == nil {
 		for urows.Next() {
 			var schema, table, index string
 			var u usage
@@ -876,6 +884,11 @@ func (d mysqlDialect) Maintain(ctx context.Context, db *sql.DB, _ string, req Ma
 		quoted[i] = rel
 	}
 	out := &MaintenanceResult{Statements: []string{}, Output: []string{}, OK: true}
+	conn, release, err := mysqlStoppableSession(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	// In batches: the statement takes a list, and a list of five hundred
 	// names is one result the operator waits minutes for with nothing to read.
 	const batch = 25
@@ -885,20 +898,21 @@ func (d mysqlDialect) Maintain(ctx context.Context, db *sql.DB, _ string, req Ma
 		if err != nil {
 			return nil, err
 		}
-		rows, err := db.QueryContext(ctx, stmt)
+		rows, err := conn.QueryContext(ctx, stmt)
 		if err != nil {
 			return nil, err
 		}
 		out.Statements = append(out.Statements, stmt)
 		// Table, Op, Msg_type, Msg_text — one or more rows per table, the
-		// last of which is its verdict.
+		// last of which is its verdict. Every row is read for the verdict even
+		// once no more lines are kept.
 		for rows.Next() {
 			var table, op, kind, text sql.NullString
 			if err := rows.Scan(&table, &op, &kind, &text); err != nil {
 				rows.Close()
 				return nil, err
 			}
-			out.Output = append(out.Output, table.String+": "+kind.String+": "+text.String)
+			out.keep(table.String + ": " + kind.String + ": " + text.String)
 			if strings.EqualFold(kind.String, "error") {
 				out.OK = false
 			}
@@ -908,4 +922,42 @@ func (d mysqlDialect) Maintain(ctx context.Context, db *sql.DB, _ string, req Ma
 		}
 	}
 	return out, nil
+}
+
+// mysqlStoppableSession takes one connection out of the pool and arranges for
+// whatever it is running to be stopped on the server if the context ends. The
+// caller runs its statements on the connection and calls release when done.
+//
+// The driver's own answer to a cancelled context is to close the socket. The
+// server does not notice a closed socket while it is busy: an OPTIMIZE TABLE
+// whose request was abandoned carries on rebuilding the table to the end. So
+// the session's id is read first, and on cancellation a second connection
+// sends KILL QUERY for it — the statement stops and its work is rolled back.
+//
+// A connection the kill may have been aimed at is not handed back to the
+// pool. The kill is sent a moment after the context ends, and by then a
+// returned connection could be running somebody else's query.
+func mysqlStoppableSession(ctx context.Context, db *sql.DB) (conn *sql.Conn, release func(), err error) {
+	conn, err = db.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	var id int64
+	if err := conn.QueryRowContext(ctx, `SELECT CONNECTION_ID()`).Scan(&id); err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	unwatch := context.AfterFunc(ctx, func() {
+		// Its own context: the one that asked for the work is the one that
+		// just ended.
+		kill, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_, _ = db.ExecContext(kill, "KILL QUERY "+strconv.FormatInt(id, 10))
+	})
+	return conn, func() {
+		if !unwatch() || ctx.Err() != nil {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+		conn.Close()
+	}, nil
 }

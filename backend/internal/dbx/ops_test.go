@@ -331,6 +331,33 @@ func TestMaintenanceCatalogue(t *testing.T) {
 	if a, _ := MaintenanceActionFor(DriverMySQL, "repair"); !a.Destructive {
 		t.Errorf("repair can lose rows and is not marked destructive: %+v", a)
 	}
+	// What the route asks for is published with the action. Everything that
+	// locks a table against the application, or can lose rows, takes what the
+	// SQL console takes for the same statement; the rest is routine upkeep.
+	needs := map[Driver]string{
+		DriverPostgres:   "vacuum_full,reindex",
+		DriverMySQL:      "optimize,repair",
+		DriverSQLite:     "vacuum",
+		DriverClickHouse: "",
+	}
+	for driver, want := range needs {
+		got := []string{}
+		for _, a := range MaintenanceActionsFor(driver) {
+			switch a.Requires {
+			case MaintenanceNeedsDestructive:
+				got = append(got, a.ID)
+			case MaintenanceNeedsControl:
+			default:
+				t.Errorf("%s %s requires %q", driver, a.ID, a.Requires)
+			}
+			if a.NeedsDestructive() != (a.Requires == MaintenanceNeedsDestructive) {
+				t.Errorf("%s %s publishes %q and is checked as %v", driver, a.ID, a.Requires, a.NeedsDestructive())
+			}
+		}
+		if strings.Join(got, ",") != want {
+			t.Errorf("%s asks for the destructive capability on %v, want %s", driver, got, want)
+		}
+	}
 	if _, err := RunMaintenance(t.Context(), nil, DriverMSSQL, "", MaintenanceRequest{Action: "vacuum"}); err == nil {
 		t.Error("SQL Server ran a maintenance action")
 	} else if _, ok := err.(ErrMaintenanceRequest); !ok {
@@ -670,5 +697,175 @@ func TestOpsCapabilitiesPerEngine(t *testing.T) {
 	}
 	if fork["maintenance"] || fork["locks"] || !fork["sessions"] || !fork["roles"] {
 		t.Errorf("cockroachdb: %v", fork)
+	}
+}
+
+// What an engine prints is kept up to a bound and no further, as it arrives:
+// the lines past the bound are never held.
+func TestMaintenanceOutputIsBoundedAsItArrives(t *testing.T) {
+	out := &MaintenanceResult{Output: []string{}}
+	for i := 0; i < maxMaintenanceLines-1; i++ {
+		out.keep("line")
+	}
+	if out.OutputTruncated || out.full() {
+		t.Fatalf("truncated before the bound: %d lines", len(out.Output))
+	}
+	out.keep("the last one kept", "one too many", "and another")
+	if !out.OutputTruncated || len(out.Output) != maxMaintenanceLines || out.Output[maxMaintenanceLines-1] != "the last one kept" {
+		t.Errorf("after the bound: %d lines, truncated %v", len(out.Output), out.OutputTruncated)
+	}
+	out.keep("later still")
+	if len(out.Output) != maxMaintenanceLines {
+		t.Errorf("a line was kept past the bound: %d", len(out.Output))
+	}
+}
+
+// A request for an account is honoured whole or refused naming the part that
+// cannot be. The engines that read two fields and ignore the rest used to
+// answer "done" to a request to lock an account they had not locked.
+func TestRoleRequestsAreRefusedNotHalfHonoured(t *testing.T) {
+	yes, no := true, false
+	past := "2020-01-01"
+	never := "infinity"
+	for _, c := range []struct {
+		name   string
+		driver Driver
+		spec   RoleSpec
+		create bool
+		want   string // a fragment of the refusal; empty when the request stands
+	}{
+		{"redis lock", DriverRedis, RoleSpec{Locked: &yes}, false, "Redis accounts have no locked attribute"},
+		{"redis no login", DriverRedis, RoleSpec{SetLogin: true}, false, "Redis accounts have no login attribute"},
+		{"redis demote", DriverRedis, RoleSpec{SetSuperuser: true}, false, "Redis has no administrator flag to clear"},
+		{"redis password", DriverRedis, RoleSpec{SetPassword: true, Password: "pw"}, false, ""},
+		{"redis promote", DriverRedis, RoleSpec{SetSuperuser: true, Superuser: true}, false, ""},
+		{"mongo limit", DriverMongo, RoleSpec{ConnLimit: 5}, false, "MongoDB accounts have no connectionLimit attribute"},
+		{"mongo expiry", DriverMongo, RoleSpec{ValidUntil: &past}, false, "MongoDB accounts have no validUntil attribute"},
+		{"mongo demote", DriverMongo, RoleSpec{SetSuperuser: true}, false, "MongoDB has no administrator flag to clear"},
+		{"clickhouse demote", DriverClickHouse, RoleSpec{SetSuperuser: true}, false, "ClickHouse has no administrator flag to clear"},
+		{"clickhouse createDb", DriverClickHouse, RoleSpec{SetCreateDB: true, CreateDB: true}, false, "ClickHouse accounts have no createDb attribute"},
+		{"mysql inherit", DriverMySQL, RoleSpec{Inherit: &no}, false, "MySQL accounts have no inherit attribute"},
+		{"mysql lock", DriverMySQL, RoleSpec{Locked: &yes}, false, ""},
+		{"mssql limit", DriverMSSQL, RoleSpec{ConnLimit: 3}, false, "SQL Server accounts have no connectionLimit attribute"},
+		{"postgres lock", DriverPostgres, RoleSpec{Locked: &yes}, false, "taking away its login"},
+		{"postgres everything", DriverPostgres, RoleSpec{SetLogin: true, Inherit: &no, Replication: &yes, BypassRLS: &yes, ValidUntil: &past, ConnLimit: 4}, false, ""},
+		{"nothing", DriverPostgres, RoleSpec{}, false, "nothing to change"},
+
+		// A create may carry every field a form has. Only the ones that ask
+		// for something have to be something the engine can give.
+		{"create, form defaults", DriverRedis, RoleSpec{Login: true, SetLogin: true, SetSuperuser: true, SetCreateDB: true,
+			SetCreateRole: true, ConnLimit: -1, Locked: &no, Inherit: &yes, ValidUntil: &never}, true, ""},
+		{"create locked on redis", DriverRedis, RoleSpec{Login: true, Locked: &yes}, true, "Redis accounts have no locked attribute"},
+		{"create createDb on mongo", DriverMongo, RoleSpec{Login: true, CreateDB: true}, true, "MongoDB accounts have no createDb attribute"},
+		{"create no-login on clickhouse", DriverClickHouse, RoleSpec{SetLogin: true}, true, "ClickHouse accounts have no login attribute"},
+		{"create expiry on mysql", DriverMySQL, RoleSpec{Login: true, ValidUntil: &past}, true, "MySQL accounts have no validUntil attribute"},
+		{"create locked creator on mysql", DriverMySQL, RoleSpec{Login: true, Locked: &yes, CreateRole: true, ConnLimit: 3}, true, ""},
+		{"create limit on mssql", DriverMSSQL, RoleSpec{Login: true, ConnLimit: 3}, true, "SQL Server accounts have no connectionLimit attribute"},
+		{"create administrator anywhere", DriverMongo, RoleSpec{Login: true, Superuser: true}, true, ""},
+		{"create locked on postgres", DriverPostgres, RoleSpec{Login: true, Locked: &yes}, true, "taking away its login"},
+	} {
+		err := CheckRoleRequest(c.driver, c.spec, c.create)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: refused: %v", c.name, err)
+		case c.want != "" && err == nil:
+			t.Errorf("%s: accepted, want a refusal about %q", c.name, c.want)
+		case c.want != "" && !strings.Contains(err.Error(), c.want):
+			t.Errorf("%s: %v, want it to say %q", c.name, err, c.want)
+		}
+		if err != nil {
+			if _, ok := err.(ErrRoleAttribute); !ok {
+				t.Errorf("%s: %T is not a request refusal", c.name, err)
+			}
+		}
+	}
+}
+
+// A create on MySQL and SQL Server gives the account everything the request
+// asked for that an alter could give it afterwards. Both used to drop the
+// lock and the right to create accounts on the floor.
+func TestCreateRoleStatementsCarryWhatWasAsked(t *testing.T) {
+	yes := true
+	for _, c := range []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{"mysql plain", mysqlCreateRoleStatements("'app'@'%'", RoleSpec{Password: "pw", Login: true}),
+			[]string{"CREATE USER 'app'@'%' IDENTIFIED BY 'pw'"}},
+		{"mysql locked, limited, creator", mysqlCreateRoleStatements("'app'@'%'", RoleSpec{Password: "pw", Login: true, Locked: &yes, ConnLimit: 4, CreateDB: true, CreateRole: true}),
+			[]string{"CREATE USER 'app'@'%' IDENTIFIED BY 'pw' WITH MAX_USER_CONNECTIONS 4 ACCOUNT LOCK",
+				"GRANT CREATE ON *.* TO 'app'@'%'", "GRANT CREATE USER ON *.* TO 'app'@'%'"}},
+		{"mysql no login", mysqlCreateRoleStatements("'app'@'%'", RoleSpec{Password: "pw", SetLogin: true}),
+			[]string{"CREATE USER 'app'@'%' IDENTIFIED BY 'pw' ACCOUNT LOCK"}},
+		{"mysql administrator", mysqlCreateRoleStatements("'app'@'%'", RoleSpec{Password: "pw", Login: true, Superuser: true, CreateDB: true, CreateRole: true}),
+			[]string{"CREATE USER 'app'@'%' IDENTIFIED BY 'pw'", "GRANT ALL PRIVILEGES ON *.* TO 'app'@'%' WITH GRANT OPTION"}},
+		{"mssql plain", mssqlCreateRoleStatements("[app]", RoleSpec{Password: "pw", Login: true}),
+			[]string{"CREATE LOGIN [app] WITH PASSWORD = N'pw'"}},
+		{"mssql creator, disabled", mssqlCreateRoleStatements("[app]", RoleSpec{Password: "pw", SetLogin: true, CreateDB: true, CreateRole: true}),
+			[]string{"CREATE LOGIN [app] WITH PASSWORD = N'pw'", "ALTER SERVER ROLE dbcreator ADD MEMBER [app]",
+				"ALTER SERVER ROLE securityadmin ADD MEMBER [app]", "ALTER LOGIN [app] DISABLE"}},
+		{"mssql administrator", mssqlCreateRoleStatements("[app]", RoleSpec{Password: "pw", Login: true, Superuser: true, CreateDB: true}),
+			[]string{"CREATE LOGIN [app] WITH PASSWORD = N'pw'", "ALTER SERVER ROLE sysadmin ADD MEMBER [app]"}},
+	} {
+		if strings.Join(c.got, "\n") != strings.Join(c.want, "\n") {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, c.got, c.want)
+		}
+	}
+}
+
+// A grant that also covers objects created later is written for every role
+// that creates objects in the schema, not only for the account that happened
+// to run it.
+func TestPostgresFutureGrantNamesEveryOwner(t *testing.T) {
+	c := PrivilegeChange{Role: "reporting", Level: GrantOnTable, Schema: "app", Privileges: []string{"SELECT"}, Future: true,
+		FutureOwners: []string{"app_owner", `mig"rator`}}
+	stmts, err := PrivilegeStatements(DriverPostgres, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		`GRANT SELECT ON ALL TABLES IN SCHEMA "app" TO "reporting"`,
+		`ALTER DEFAULT PRIVILEGES IN SCHEMA "app" GRANT SELECT ON TABLES TO "reporting"`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE "app_owner" IN SCHEMA "app" GRANT SELECT ON TABLES TO "reporting"`,
+		`ALTER DEFAULT PRIVILEGES FOR ROLE "mig""rator" IN SCHEMA "app" GRANT SELECT ON TABLES TO "reporting"`,
+	}
+	if strings.Join(stmts, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got %q\nwant %q", stmts, want)
+	}
+	c.Revoke, c.Level, c.Privileges = true, GrantOnSequence, []string{"usage"}
+	stmts, err = PrivilegeStatements(DriverPostgres, c)
+	if err != nil || len(stmts) != 4 || stmts[2] != `ALTER DEFAULT PRIVILEGES FOR ROLE "app_owner" IN SCHEMA "app" REVOKE USAGE ON SEQUENCES FROM "reporting"` {
+		t.Errorf("revoke: %q %v", stmts, err)
+	}
+	// Without the flag the owners are not consulted at all.
+	c.Future = false
+	if stmts, err = PrivilegeStatements(DriverPostgres, c); err != nil || len(stmts) != 1 {
+		t.Errorf("without future: %q %v", stmts, err)
+	}
+}
+
+// "This database" does not mean an extension's catalogue or a platform's own
+// schemas; and a schema that only shares a platform's name, on a server that
+// is not that platform, is the application's.
+func TestWholeDatabaseGrantLeavesPlatformSchemasAlone(t *testing.T) {
+	for _, c := range []struct {
+		name, extension string
+		supabase, skip  bool
+	}{
+		{"public", "", false, false},
+		{"app", "", true, false},
+		{"cron", "pg_cron", false, true},
+		{"_timescaledb_catalog", "timescaledb", false, true},
+		{"auth", "", true, true},
+		{"auth", "", false, false},
+		{"vault", "", true, true},
+		{"storage", "", false, false},
+		{"hdb_catalog", "", false, true},
+	} {
+		reason := pgSchemaSkipReason(c.name, c.extension, c.supabase)
+		if (reason != "") != c.skip {
+			t.Errorf("%s (extension %q, supabase %v): reason %q, want skipped %v", c.name, c.extension, c.supabase, reason, c.skip)
+		}
 	}
 }

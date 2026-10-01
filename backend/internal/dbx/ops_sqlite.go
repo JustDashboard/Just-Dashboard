@@ -338,6 +338,8 @@ func (d sqliteDialect) TableStats(ctx context.Context, db *sql.DB, opts StatsOpt
 
 // IndexStats walks the index list table by table. SQLite counts no index
 // use, so nothing here is ever called unused; duplicates are still found.
+// Every index is described before any is dropped from the list: the sizes
+// rank them, and ReadIndexStats cuts the ranked list to the limit.
 func (d sqliteDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOptions) (*IndexStatsReport, error) {
 	out := &IndexStatsReport{Schema: "main", Indexes: []IndexStat{}}
 	rows, err := db.QueryContext(ctx, `
@@ -394,9 +396,9 @@ func (d sqliteDialect) IndexStats(ctx context.Context, db *sql.DB, opts StatsOpt
 		}
 		lrows.Close()
 	}
-	limit := opts.limit()
 	for _, e := range entries {
-		if len(out.Indexes) > limit {
+		if len(out.Indexes) == maxIndexCatalogue {
+			out.Notes = append(out.Notes, indexCatalogueNote())
 			break
 		}
 		f := listed[e.table][e.name]
@@ -539,15 +541,19 @@ func (d sqliteDialect) Maintain(ctx context.Context, db *sql.DB, _ string, req M
 	if err != nil {
 		return nil, err
 	}
-	maps, err := rowMaps(rows)
+	// One row past the bound is enough to know there were more. A foreign key
+	// check answers a row per orphan, and SQLite stops looking for them when
+	// the rows stop being read.
+	maps, more, err := rowMapsUpTo(rows, maxMaintenanceLines)
 	if err != nil {
 		return nil, err
 	}
+	out.OutputTruncated = more
 	switch req.Action {
 	case "integrity_check", "quick_check":
 		for _, row := range maps {
 			for _, v := range row {
-				out.Output = append(out.Output, v)
+				out.keep(v)
 			}
 		}
 		// The pragma answers the single word "ok" for a sound file and one
@@ -555,20 +561,20 @@ func (d sqliteDialect) Maintain(ctx context.Context, db *sql.DB, _ string, req M
 		out.OK = len(out.Output) == 1 && out.Output[0] == "ok"
 	case "foreign_key_check":
 		for _, row := range maps {
-			out.Output = append(out.Output, fmt.Sprintf("%s row %s references %s (foreign key %s) and nothing is there",
+			out.keep(fmt.Sprintf("%s row %s references %s (foreign key %s) and nothing is there",
 				row["table"], orText(row["rowid"], "without a rowid"), row["parent"], row["fkid"]))
 		}
 		out.OK = len(maps) == 0
 	case "wal_checkpoint":
 		for _, row := range maps {
-			out.Output = append(out.Output, fmt.Sprintf("busy=%s log=%s checkpointed=%s", row["busy"], row["log"], row["checkpointed"]))
+			out.keep(fmt.Sprintf("busy=%s log=%s checkpointed=%s", row["busy"], row["log"], row["checkpointed"]))
 			// busy is 1 when a reader or writer kept the checkpoint from
 			// finishing, and -1 frames when the file is not in WAL mode.
 			if row["busy"] != "0" {
 				out.OK = false
 			}
 			if row["log"] == "-1" {
-				out.Output = append(out.Output, "the database is not in WAL mode, so there is no log to checkpoint")
+				out.keep("the database is not in WAL mode, so there is no log to checkpoint")
 			}
 		}
 	}

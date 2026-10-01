@@ -11,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/go-chi/chi/v5"
 )
 
 // The operations routes against real servers, through the real handlers.
@@ -224,8 +227,86 @@ func TestLiveAPIOpsPostgres(t *testing.T) {
 		}
 		// The one-step database grant, narrowed to a schema.
 		body := mustStatus(t, r, http.MethodPost, base+"/server/roles/jd_b3_api_app/grant", `{"level":"read","schema":"public"}`, http.StatusOK)
-		if !strings.Contains(body, `GRANT USAGE ON SCHEMA \"public\"`) {
+		if !strings.Contains(body, `GRANT USAGE ON SCHEMA \"public\"`) || !strings.Contains(body, `"schemas":["public"]`) {
 			t.Errorf("database grant: %s", body)
+		}
+	})
+
+	// Before the fact: what a grant on "this database" would reach, and who
+	// else's future tables a schema-wide grant would cover. Neither changes
+	// anything, and neither is on the audit trail.
+	t.Run("previews", func(t *testing.T) {
+		if _, err := direct.Exec(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM jd_b3_api_app`); err != nil {
+			t.Fatal(err)
+		}
+		var before int
+		if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		var grant struct {
+			Statements []string `json:"statements"`
+			Schemas    []string `json:"schemas"`
+			Preview    bool     `json:"preview"`
+			OK         bool     `json:"ok"`
+		}
+		body := mustStatus(t, r, http.MethodPost, base+"/server/roles/jd_b3_api_app/grant?preview=1", `{"level":"write"}`, http.StatusOK)
+		if err := json.Unmarshal([]byte(body), &grant); err != nil {
+			t.Fatal(err)
+		}
+		if !grant.Preview || grant.OK || len(grant.Statements) < 5 || len(grant.Schemas) == 0 {
+			t.Errorf("grant preview: %s", body)
+		}
+		var change struct {
+			Statements   []string `json:"statements"`
+			FutureOwners []string `json:"futureOwners"`
+			Preview      bool     `json:"preview"`
+		}
+		body = mustStatus(t, r, http.MethodPost, base+"/server/roles/jd_b3_api_app/privileges?preview=1",
+			`{"level":"table","schema":"public","privileges":["INSERT"],"future":true}`, http.StatusOK)
+		if err := json.Unmarshal([]byte(body), &change); err != nil {
+			t.Fatal(err)
+		}
+		if !change.Preview || len(change.FutureOwners) == 0 || len(change.Statements) != 1+len(change.FutureOwners) {
+			t.Errorf("privilege preview: %s", body)
+		}
+		var can bool
+		if err := direct.QueryRow(`SELECT has_table_privilege('jd_b3_api_app', 'public.jd_b3_api_t', 'INSERT')`).Scan(&can); err != nil || can {
+			t.Errorf("a preview granted INSERT (%v)", err)
+		}
+		// The audit log is written after the response; give a stray entry
+		// the time it would need to land.
+		time.Sleep(200 * time.Millisecond)
+		var after int
+		if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&after); err != nil || after != before {
+			t.Errorf("two previews left %d audit entries (%v)", after-before, err)
+		}
+	})
+
+	// A role's own settings are where an application's secret ends up. An
+	// administrator reads them; a viewer is told the name and not the value.
+	t.Run("role_settings_are_an_administrators", func(t *testing.T) {
+		for _, stmt := range []string{`ALTER ROLE jd_b3_api_app SET search_path = public`,
+			`ALTER ROLE jd_b3_api_app SET jd_b3.jwt_secret = 'jd-b3-signing-key'`} {
+			if _, err := direct.Exec(stmt); err != nil {
+				t.Fatalf("%s: %v", stmt, err)
+			}
+		}
+		body := mustStatus(t, r, http.MethodGet, base+"/server/roles/jd_b3_api_app", "", http.StatusOK)
+		if !strings.Contains(body, "jd_b3.jwt_secret=jd-b3-signing-key") || strings.Contains(body, "configRedacted") {
+			t.Errorf("an administrator's view: %s", body)
+		}
+		viewer := chi.NewRouter()
+		viewer.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				p := &httpx.Principal{User: &auth.User{ID: 2, Username: "viewer"}, Role: auth.RoleReadOnly, Kind: "session", IP: "127.0.0.1"}
+				next.ServeHTTP(w, req.WithContext(httpx.WithPrincipal(req.Context(), p)))
+			})
+		})
+		s.mountDatabaseRoutes(viewer)
+		body = mustStatus(t, viewer, http.MethodGet, base+"/server/roles/jd_b3_api_app", "", http.StatusOK)
+		if strings.Contains(body, "jd-b3-signing-key") || !strings.Contains(body, `"configRedacted":["jd_b3.jwt_secret"]`) ||
+			!strings.Contains(body, `"config":["search_path=public"]`) {
+			t.Errorf("a viewer's view: %s", body)
 		}
 	})
 
@@ -290,6 +371,15 @@ func TestLiveAPIOpsPostgres(t *testing.T) {
 		if opened, err := s.Sealer.Open(stored); err != nil || !strings.Contains(opened, "self-second") {
 			t.Errorf("the stored connection string was not replaced (%v)", err)
 		}
+		// What it may not do to itself: stop being able to sign in.
+		body = mustStatus(t, r, http.MethodPut, self+"/server/roles/jd_b3_api_self", `{"login":false}`, http.StatusBadRequest)
+		if !strings.Contains(body, "the account this connection signs in with") {
+			t.Errorf("locking its own account out: %s", body)
+		}
+		var login bool
+		if err := direct.QueryRow(`SELECT rolcanlogin FROM pg_roles WHERE rolname = 'jd_b3_api_self'`).Scan(&login); err != nil || !login {
+			t.Errorf("the connection's own account lost its login (%v)", err)
+		}
 	})
 
 	t.Run("drop", func(t *testing.T) {
@@ -317,6 +407,7 @@ func TestLiveAPIOpsMySQL(t *testing.T) {
 	cleanup := func() {
 		direct.Exec(`DROP TABLE IF EXISTS jd_b3_api_t`)
 		direct.Exec(`DROP USER IF EXISTS 'jd_b3_api_u'@'%'`)
+		direct.Exec(`DROP USER IF EXISTS 'jd_b3_api_l'@'localhost'`)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
@@ -361,6 +452,13 @@ func TestLiveAPIOpsMySQL(t *testing.T) {
 		t.Errorf("a password change unlocked the account: %s", detail)
 	}
 	mustStatus(t, r, http.MethodPut, base+"/server/roles/jd_b3_api_u", `{"host":"%","inherit":false}`, http.StatusBadRequest)
+	// An account at one host only, asked about by name alone.
+	if _, err := direct.Exec(`CREATE USER 'jd_b3_api_l'@'localhost' IDENTIFIED BY 'pw-local-1A'`); err != nil {
+		t.Fatal(err)
+	}
+	if body := mustStatus(t, r, http.MethodGet, base+"/server/grants?role=jd_b3_api_l", "", http.StatusOK); !strings.Contains(body, `"host":"localhost"`) {
+		t.Errorf("grants of an account that is not at %%: %s", body)
+	}
 	mustStatus(t, r, http.MethodPost, base+"/server/roles/jd_b3_api_u/privileges/revoke",
 		`{"host":"%","level":"database","database":"`+database+`","privileges":["ALL"]}`, http.StatusOK)
 

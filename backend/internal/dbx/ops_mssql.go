@@ -178,10 +178,10 @@ func (mssqlDialect) Sessions(ctx context.Context, db *sql.DB) ([]Activity, error
 	         CAST(ISNULL(r.total_elapsed_time, 0) / 1000.0 AS FLOAT),
 	         CAST(CASE WHEN r.session_id IS NULL
 	                   THEN DATEDIFF(SECOND, s.last_request_end_time, SYSDATETIME()) ELSE 0 END AS FLOAT),
-	         CAST(ISNULL((SELECT MAX(DATEDIFF(SECOND, a.transaction_begin_time, SYSDATETIME()))
-	                      FROM sys.dm_tran_session_transactions st
-	                      JOIN sys.dm_tran_active_transactions a ON a.transaction_id = st.transaction_id
-	                      WHERE st.session_id = s.session_id), -1) AS FLOAT),
+	         CAST((SELECT MAX(DATEDIFF(SECOND, a.transaction_begin_time, SYSDATETIME()))
+	               FROM sys.dm_tran_session_transactions st
+	               JOIN sys.dm_tran_active_transactions a ON a.transaction_id = st.transaction_id
+	               WHERE st.session_id = s.session_id) AS FLOAT),
 	         ISNULL(SUBSTRING(ISNULL(rt.text, ct.text), 1, 4000), ''),
 	         ISNULL(s.host_name, ''),
 	         ISNULL(s.program_name, ''),
@@ -206,7 +206,11 @@ func (mssqlDialect) Sessions(ctx context.Context, db *sql.DB) ([]Activity, error
 	out := []Activity{}
 	for rows.Next() {
 		var a Activity
-		var running, idle, txSeconds float64
+		var running, idle float64
+		// NULL is "no transaction". A number cannot stand for that: the begin
+		// time is a DATETIME, rounded to a three-hundredth of a second, and
+		// one that rounded up past the clock reads as a second in the future.
+		var txSeconds sql.NullFloat64
 		var hasRequest, openTx, self int
 		if err := rows.Scan(&a.PID, &a.User, &a.Database, &a.State, &running, &idle, &txSeconds, &a.Query,
 			&a.Client, &a.Application, &a.Wait, &a.BlockedBy, &hasRequest, &openTx, &self); err != nil {
@@ -227,9 +231,9 @@ func (mssqlDialect) Sessions(ctx context.Context, db *sql.DB) ([]Activity, error
 			a.Status = SessionIdle
 			a.IdleSeconds = max0(idle)
 		}
-		if txSeconds >= 0 {
-			a.TransactionSeconds = txSeconds
-			start := now.Add(-time.Duration(txSeconds * float64(time.Second)))
+		if txSeconds.Valid {
+			a.TransactionSeconds = max0(txSeconds.Float64)
+			start := now.Add(-time.Duration(a.TransactionSeconds * float64(time.Second)))
 			a.TransactionStart = &start
 		}
 		out = append(out, a)
