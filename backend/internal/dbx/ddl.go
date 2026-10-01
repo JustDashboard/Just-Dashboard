@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	mssql "github.com/microsoft/go-mssqldb"
 )
 
 // DDL is the one place in this package that assembles a statement whose
@@ -80,7 +83,7 @@ func (p *DDLPlan) Exec(ctx context.Context, db *sql.DB) error {
 	}
 	if len(p.Statements) == 1 {
 		_, err := db.ExecContext(ctx, p.Statements[0])
-		return err
+		return engineRefusal(err)
 	}
 	conn, err := db.Conn(ctx)
 	if err != nil {
@@ -89,10 +92,38 @@ func (p *DDLPlan) Exec(ctx context.Context, db *sql.DB) error {
 	defer conn.Close()
 	for i, stmt := range p.Statements {
 		if _, err := conn.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("statement %d of %d failed: %w", i+1, len(p.Statements), err)
+			return fmt.Errorf("statement %d of %d failed: %w", i+1, len(p.Statements), engineRefusal(err))
 		}
 	}
 	return nil
+}
+
+// sqlServerRefusal is a SQL Server error read as everything the server said.
+type sqlServerRefusal struct{ err mssql.Error }
+
+func (e sqlServerRefusal) Unwrap() error { return e.err }
+
+func (e sqlServerRefusal) Error() string {
+	said := []string{}
+	for _, one := range e.err.All {
+		if msg := strings.TrimSpace(one.Message); msg != "" && !slices.Contains(said, msg) {
+			said = append(said, msg)
+		}
+	}
+	return "mssql: " + strings.Join(said, " ")
+}
+
+// engineRefusal returns an engine's refusal of a statement as the operator
+// should read it. SQL Server answers some with two messages, and its driver
+// reports the last: "ALTER TABLE ALTER COLUMN c failed because one or more
+// objects access this column" comes after "The object 'orders_c_check' is
+// dependent on column 'c'", and only the first says what is in the way.
+func engineRefusal(err error) error {
+	var refused mssql.Error
+	if errors.As(err, &refused) && len(refused.All) > 1 {
+		return sqlServerRefusal{refused}
+	}
+	return err
 }
 
 // run executes a plan and returns its text either way, so a failed change
@@ -1020,8 +1051,8 @@ func PlanDropColumn(ctx context.Context, db *sql.DB, driver Driver, schema, tabl
 		return planOf(drop), nil
 	}
 	steps := []string{}
-	for _, name := range defaults {
-		q, err := d.QuoteIdent(name)
+	for _, def := range defaults {
+		q, err := d.QuoteIdent(def.name)
 		if err != nil {
 			return nil, err
 		}

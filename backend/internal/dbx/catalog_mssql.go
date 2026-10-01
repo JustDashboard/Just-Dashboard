@@ -621,12 +621,17 @@ func (mssqlDialect) tableFacts(ctx context.Context, db *sql.DB, schema, table st
 	return nil
 }
 
-// mssqlDefaultConstraints names the default constraints on a column. SQL
+// mssqlDefault is a column's default as SQL Server keeps it: a constraint
+// object with a name, and the expression as the server wrote it down.
+type mssqlDefault struct{ name, definition string }
+
+// mssqlDefaultConstraints reads the default constraints on a column. SQL
 // Server materialises `DEFAULT 0` as a constraint object of its own and then
-// refuses to alter or drop the column while that object references it.
-func mssqlDefaultConstraints(ctx context.Context, db *sql.DB, schema, table, column string) ([]string, error) {
+// refuses to drop the column, or change its data type, while that object
+// references it.
+func mssqlDefaultConstraints(ctx context.Context, db *sql.DB, schema, table, column string) ([]mssqlDefault, error) {
 	rows, err := db.QueryContext(ctx, `
-	  SELECT dc.name
+	  SELECT dc.name, dc.definition
 	  FROM sys.default_constraints dc
 	  JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
 	  JOIN sys.objects o ON o.object_id = dc.parent_object_id
@@ -637,15 +642,15 @@ func mssqlDefaultConstraints(ctx context.Context, db *sql.DB, schema, table, col
 		return nil, err
 	}
 	defer rows.Close()
-	names := []string{}
+	out := []mssqlDefault{}
 	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
+		var d mssqlDefault
+		if err := rows.Scan(&d.name, &d.definition); err != nil {
 			return nil, err
 		}
-		names = append(names, n)
+		out = append(out, d)
 	}
-	return names, rows.Err()
+	return out, rows.Err()
 }
 
 // --- definitions ------------------------------------------------------------

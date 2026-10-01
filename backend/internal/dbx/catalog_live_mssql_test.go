@@ -2,11 +2,56 @@ package dbx
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"net/url"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+// sqlServerLiveDatabase is where these tests build their schemas when the DSN
+// names none of its own. A SQL Server fixture's DSN names master, and master
+// is what every suite pointed at that server shares: schemas made and dropped
+// there are made and dropped beside whatever else is using it. So the tests
+// work in a database of their own, created the first time and kept — it is
+// empty once a test has cleaned up after itself, and creating it is the slow
+// part. A DSN that names any other database is taken at its word.
+const sqlServerLiveDatabase = "jd_schema_live"
+
+func sqlServerLive(t *testing.T) *sql.DB {
+	t.Helper()
+	server := catalogLive(t, DriverMSSQL, "JD_TEST_MSSQL_DSN")
+	dsn, err := url.Parse(os.Getenv("JD_TEST_MSSQL_DSN"))
+	if err != nil {
+		t.Fatalf("JD_TEST_MSSQL_DSN is not a sqlserver:// address: %v", err)
+	}
+	query := dsn.Query()
+	if named := query.Get("database"); named != "" && !strings.EqualFold(named, "master") {
+		return server
+	}
+	ctx := context.Background()
+	if _, err := server.ExecContext(ctx, `IF DB_ID(N'`+sqlServerLiveDatabase+`') IS NULL CREATE DATABASE `+sqlServerLiveDatabase); err != nil {
+		// Another package's tests may have found it missing in the same moment
+		// and created it first.
+		var id sql.NullInt64
+		if scanErr := server.QueryRowContext(ctx, `SELECT DB_ID(N'`+sqlServerLiveDatabase+`')`).Scan(&id); scanErr != nil || !id.Valid {
+			t.Fatalf("could not create %s: %v", sqlServerLiveDatabase, err)
+		}
+	}
+	query.Set("database", sqlServerLiveDatabase)
+	dsn.RawQuery = query.Encode()
+	db, err := sql.Open("sqlserver", dsn.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.PingContext(ctx); err != nil {
+		t.Fatalf("%s: %v", sqlServerLiveDatabase, err)
+	}
+	return db
+}
 
 // SQL Server keeps a default as a constraint object, a comment as an extended
 // property, renames behind a stored procedure and no CREATE text for a table,
@@ -14,7 +59,7 @@ import (
 // that is proved by comparing strings: only the server says whether it parses,
 // and only its catalogue says what it did.
 func TestLiveSQLServerCatalogAndStructureChanges(t *testing.T) {
-	db := catalogLive(t, DriverMSSQL, "JD_TEST_MSSQL_DSN")
+	db := sqlServerLive(t)
 	ctx := context.Background()
 	const d = DriverMSSQL
 	const schema = "jd_cat"
@@ -291,6 +336,46 @@ func TestLiveSQLServerCatalogAndStructureChanges(t *testing.T) {
 		if stmt != "ALTER TABLE [jd_cat].[users] ALTER COLUMN [nick] nvarchar(50) NULL" {
 			t.Errorf("statement = %s", stmt)
 		}
+		// The server refuses to change the data type of a column while a
+		// default's constraint references it, so the default is taken off and
+		// put back as it was, under its own name, around the change.
+		stmt = run(PlanAlterColumn(ctx, db, d, ColumnChange{Schema: schema, Table: "users", Column: "created", Type: "datetimeoffset(3)"}))
+		for _, want := range []string{
+			"BEGIN TRANSACTION", "DROP CONSTRAINT [users_created_df];\n",
+			"ALTER COLUMN [created] datetimeoffset(3) NOT NULL;\n",
+			"ADD CONSTRAINT [users_created_df] DEFAULT (sysutcdatetime()) FOR [created]",
+		} {
+			if !strings.Contains(stmt, want) {
+				t.Errorf("retyping a column with a default: %q is not in\n%s", want, stmt)
+			}
+		}
+		if c := catColumn(t, describe("users"), "created"); c.Type != "datetimeoffset(3)" || c.Nullable || !strings.Contains(c.Default, "sysutcdatetime") {
+			t.Errorf("created after its type changed = %+v", c)
+		}
+		// A new type and a new default at once: the old default goes before
+		// the type changes, and the new one arrives after.
+		stmt = run(PlanAlterColumn(ctx, db, d, ColumnChange{Schema: schema, Table: "users", Column: "code", Type: "nvarchar(40)", Default: ddlString("'x'")}))
+		dropped, altered, added := strings.Index(stmt, "DROP CONSTRAINT [users_code_df]"),
+			strings.Index(stmt, "ALTER COLUMN [code] nvarchar(40) COLLATE Latin1_General_BIN2 NOT NULL"), strings.Index(stmt, "DEFAULT 'x' FOR [code]")
+		if dropped < 0 || altered < dropped || added < altered {
+			t.Errorf("statement = %s", stmt)
+		}
+		if c := catColumn(t, describe("users"), "code"); c.Type != "nvarchar(40)" || c.Default != "('x')" || collation("code") != "Latin1_General_BIN2" {
+			t.Errorf("code after a new type and default = %+v, collation %s", c, collation("code"))
+		}
+		// What cannot be moved out of the way is the server's to refuse, and
+		// its refusal is passed on whole: which object is in the way, not only
+		// that one is.
+		plan, err := PlanAlterColumn(ctx, db, d, ColumnChange{Schema: schema, Table: "users", Column: "score", Type: "bigint"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := plan.Exec(ctx, db); err == nil || !strings.Contains(err.Error(), "users_score_positive") {
+			t.Errorf("retyping a column under a check constraint: %v", err)
+		}
+		if c := catColumn(t, describe("users"), "score"); c.Type != "int" || c.Default != "((5))" {
+			t.Errorf("the refused change left the column as %+v", c)
+		}
 		// An alias type is restated by its own quoted, schema-qualified name.
 		stmt = run(PlanAlterColumn(ctx, db, d, ColumnChange{Schema: schema, Table: "users", Column: "phone", Nullable: ddlBool(true)}))
 		if stmt != "ALTER TABLE [jd_cat].[users] ALTER COLUMN [phone] [jd_cat].[phone] NULL" {
@@ -312,7 +397,7 @@ func TestLiveSQLServerCatalogAndStructureChanges(t *testing.T) {
 			t.Errorf("dropping a default that is not there: %v", err)
 		}
 		// Type, nullability and default at once: all or nothing.
-		plan, err := PlanAlterColumn(ctx, db, d, ColumnChange{
+		plan, err = PlanAlterColumn(ctx, db, d, ColumnChange{
 			Schema: schema, Table: "users", Column: "score", Type: "bigint", Nullable: ddlBool(false), Default: ddlString("1"),
 		})
 		if err != nil {
@@ -507,7 +592,7 @@ func TestLiveSQLServerCatalogAndStructureChanges(t *testing.T) {
 
 // The diagram and the relations map are read in bulk from the same catalogue.
 func TestLiveSQLServerGraph(t *testing.T) {
-	db := catalogLive(t, DriverMSSQL, "JD_TEST_MSSQL_DSN")
+	db := sqlServerLive(t)
 	ctx := context.Background()
 	const d = DriverMSSQL
 	const schema = "jd_graph"

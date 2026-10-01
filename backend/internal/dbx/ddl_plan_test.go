@@ -3,8 +3,11 @@ package dbx
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	mssql "github.com/microsoft/go-mssqldb"
 )
 
 // The plans below never touch a database: every one of them is planned with a
@@ -966,5 +969,36 @@ func TestPlanStopsAtTheFirstFailure(t *testing.T) {
 	}
 	if err := (&DDLPlan{}).Exec(context.Background(), db); err == nil {
 		t.Error("an empty plan ran")
+	}
+}
+
+// SQL Server refuses some changes in two messages and its driver reports the
+// second, which says a change failed and not what stood in its way.
+func TestSQLServerRefusalsSayEverythingTheServerSaid(t *testing.T) {
+	why := mssql.Error{Number: 5074, Message: "The object 'orders_qty_check' is dependent on column 'qty'."}
+	what := mssql.Error{Number: 4922, Message: "ALTER TABLE ALTER COLUMN qty failed because one or more objects access this column."}
+	refused := what
+	refused.All = []mssql.Error{why, what}
+
+	got := engineRefusal(fmt.Errorf("exec: %w", refused))
+	if got.Error() != "mssql: "+why.Message+" "+what.Message {
+		t.Errorf("refusal = %q", got)
+	}
+	var underneath mssql.Error
+	if !errors.As(got, &underneath) || underneath.Number != 4922 {
+		t.Errorf("the server's error is no longer underneath: %v", got)
+	}
+	// One message is the driver's own to report, and so is anyone else's error.
+	single := what
+	single.All = []mssql.Error{what}
+	if got := engineRefusal(single); got.Error() != "mssql: "+what.Message {
+		t.Errorf("a single message = %q", got)
+	}
+	other := errors.New("pq: relation does not exist")
+	if got := engineRefusal(other); got != other {
+		t.Errorf("another engine's error = %v", got)
+	}
+	if engineRefusal(nil) != nil {
+		t.Error("no error became one")
 	}
 }

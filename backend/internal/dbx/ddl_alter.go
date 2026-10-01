@@ -173,7 +173,7 @@ func planAlterColumn(ctx context.Context, db *sql.DB, driver Driver, c ColumnCha
 		return planOf("ALTER TABLE " + rel + " MODIFY COLUMN " + col + " " + definition), nil
 
 	case DriverMSSQL:
-		steps := []string{}
+		alter := ""
 		if typ != "" || c.Nullable != nil {
 			// ALTER COLUMN restates the type and the nullability together; one
 			// left out is not "unchanged" but "the default", and the default
@@ -188,11 +188,15 @@ func planAlterColumn(ctx context.Context, db *sql.DB, driver Driver, c ColumnCha
 			if c.Nullable != nil {
 				current.nullable = *c.Nullable
 			}
-			steps = append(steps, "ALTER TABLE "+rel+" ALTER COLUMN "+col+" "+current.render())
+			alter = "ALTER TABLE " + rel + " ALTER COLUMN " + col + " " + current.render()
 		}
-		if c.DropDefault || setDefault {
-			// A default is a constraint object here, so replacing it is
-			// dropping the one that exists and adding another.
+		// A default is a constraint object here. Replacing it is dropping the
+		// one that exists and adding another; and the server refuses to change
+		// the data type of a column a default still references, so across a
+		// change of type the default is taken off and put back as it was. The
+		// drops go first and the additions last, around the change itself.
+		var drops, adds []string
+		if c.DropDefault || setDefault || typ != "" {
 			existing, err := mssqlDefaultConstraints(ctx, db, c.Schema, c.Table, c.Column)
 			if err != nil {
 				return nil, planRead("the column's default", err)
@@ -200,21 +204,31 @@ func planAlterColumn(ctx context.Context, db *sql.DB, driver Driver, c ColumnCha
 			if c.DropDefault && len(existing) == 0 {
 				return nil, fmt.Errorf("%s has no default to drop", c.Column)
 			}
-			for _, name := range existing {
-				q, err := d.QuoteIdent(name)
+			for _, def := range existing {
+				q, err := d.QuoteIdent(def.name)
 				if err != nil {
 					return nil, err
 				}
-				steps = append(steps, "ALTER TABLE "+rel+" DROP CONSTRAINT "+q)
+				drops = append(drops, "ALTER TABLE "+rel+" DROP CONSTRAINT "+q)
+				if !c.DropDefault && !setDefault {
+					// The definition is the server's own text for a constraint
+					// it already holds, not anything this request supplied.
+					adds = append(adds, "ALTER TABLE "+rel+" ADD CONSTRAINT "+q+" DEFAULT "+def.definition+" FOR "+col)
+				}
 			}
 			if setDefault {
 				name, err := d.QuoteIdent(generatedName("DF_"+c.Table, []string{c.Column}, "df"))
 				if err != nil {
 					return nil, err
 				}
-				steps = append(steps, "ALTER TABLE "+rel+" ADD CONSTRAINT "+name+" DEFAULT "+def+" FOR "+col)
+				adds = append(adds, "ALTER TABLE "+rel+" ADD CONSTRAINT "+name+" DEFAULT "+def+" FOR "+col)
 			}
 		}
+		steps := drops
+		if alter != "" {
+			steps = append(steps, alter)
+		}
+		steps = append(steps, adds...)
 		if len(steps) == 1 {
 			return planOf(steps[0]), nil
 		}
