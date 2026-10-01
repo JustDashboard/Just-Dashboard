@@ -516,6 +516,20 @@ func (g *redisPager) readSet(page *RedisMembers, o RedisMembersOptions, count in
 	})
 }
 
+// redisWholeItems is the items of a reply that can be trusted to be whole,
+// in groups of width. When a reply ran out of room the last group it kept may
+// have been cut to fit what room was left rather than at a member's own
+// limit, so that group is left for the next page — which starts at it — to
+// read properly. The first group is always kept: a page that carries nothing
+// cannot move on.
+func redisWholeItems(reply RedisReply, width int) []RedisReply {
+	items := reply.Items[:len(reply.Items)-len(reply.Items)%width]
+	if reply.Truncated && len(items) > width {
+		items = items[:len(items)-width]
+	}
+	return items
+}
+
 // redisScoredRow is one member and its score, as the older protocol sends
 // them: two strings side by side.
 func redisScoredRow(pair []RedisReply) RedisRow {
@@ -550,7 +564,7 @@ func (g *redisPager) readList(page *RedisMembers, o RedisMembersOptions, count i
 	if err != nil {
 		return err
 	}
-	values := reply.Items
+	values := redisWholeItems(reply, 1)
 	if o.Desc && reply.Truncated {
 		// Read from the tail, the elements nearest the tail are the last in
 		// the reply — the ones that were dropped. The page is asked for again
@@ -621,7 +635,7 @@ func (g *redisPager) readZSet(page *RedisMembers, o RedisMembersOptions, count i
 	if err != nil {
 		return err
 	}
-	items := reply.Items
+	items := redisWholeItems(reply, 2)
 	for i := 0; i+1 < len(items); i += 2 {
 		page.Rows = append(page.Rows, redisScoredRow(items[i:i+2]))
 	}
@@ -675,7 +689,7 @@ func (g *redisPager) readStream(page *RedisMembers, o RedisMembersOptions, count
 	if err != nil {
 		return err
 	}
-	entries := redisStreamEntries(reply)
+	entries := redisStreamEntries(RedisReply{Items: redisWholeItems(reply, 1)})
 	page.Rows = append(page.Rows, entries...)
 	if (len(entries) == count || reply.Truncated) && len(entries) > 0 {
 		// The next page starts at the id after the last one shown, or before

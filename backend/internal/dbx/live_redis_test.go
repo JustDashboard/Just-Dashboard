@@ -1358,6 +1358,19 @@ func TestLiveRedisServerReads(t *testing.T) {
 	if !sort.SliceIsSorted(stats.Commands, func(i, j int) bool { return stats.Commands[i].Usec > stats.Commands[j].Usec }) {
 		t.Error("command stats are not sorted by total time")
 	}
+	// Redis 7 keeps percentiles beside the totals; where it does, a command
+	// that has run has them, in order.
+	if server.Flavor == RedisFlavorRedis && server.atLeast(7, 0) {
+		found := false
+		for _, c := range stats.Commands {
+			if c.Command == "SET" && c.P50 != nil && c.P99 != nil && c.P999 != nil {
+				found = *c.P50 <= *c.P99 && *c.P99 <= *c.P999
+			}
+		}
+		if !found {
+			t.Errorf("SET has no latency percentiles: %+v", stats.Commands)
+		}
+	}
 
 	clients, err := RedisClients(ctx, client)
 	if err != nil || len(clients) == 0 {

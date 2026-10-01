@@ -373,6 +373,12 @@ type RedisCommandStat struct {
 	// ran and returned an error, on a server that counts them.
 	Rejected *int64 `json:"rejected,omitempty"`
 	Failed   *int64 `json:"failed,omitempty"`
+	// P50, P99 and P999 are how long a call took, in microseconds, at those
+	// percentiles — which a mean hides. Redis 7 and Valkey track them; absent
+	// elsewhere.
+	P50  *float64 `json:"p50Us,omitempty"`
+	P99  *float64 `json:"p99Us,omitempty"`
+	P999 *float64 `json:"p999Us,omitempty"`
 }
 
 // RedisCommandStats is what the server has spent its time on.
@@ -384,11 +390,38 @@ type RedisCommandStats struct {
 	SampledAtMs int64              `json:"sampledAtMs"`
 }
 
-// RedisCommandStatistics reads INFO commandstats.
+// RedisCommandStatistics reads INFO commandstats, and the latency percentiles
+// beside it where the server keeps them.
 func RedisCommandStatistics(ctx context.Context, client *redis.Client) (*RedisCommandStats, error) {
-	raw, err := client.Info(ctx, "commandstats").Result()
+	pipe := client.Pipeline()
+	stats := pipe.Info(ctx, "commandstats")
+	latency := pipe.Info(ctx, "latencystats")
+	_, _ = pipe.Exec(ctx)
+	raw, err := stats.Result()
 	if err != nil {
 		return nil, err
+	}
+	// "latency_percentiles_usec_get:p50=1.003,p99=2.007,p99.9=5.023". A
+	// server with no such section answers with nothing, or with an error for
+	// the one command, and the percentiles are simply not there.
+	percentiles := map[string]map[string]string{}
+	for _, s := range parseRedisInfo(latency.Val()) {
+		for _, f := range s.Fields {
+			if name, ok := strings.CutPrefix(f.Name, "latency_percentiles_usec_"); ok {
+				percentiles[name] = redisInfoPairs(f.Value)
+			}
+		}
+	}
+	percentile := func(command, which string) *float64 {
+		v, ok := percentiles[command][which]
+		if !ok {
+			return nil
+		}
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return nil
+		}
+		return &f
 	}
 	out := &RedisCommandStats{Commands: []RedisCommandStat{}, SampledAtMs: time.Now().UnixMilli()}
 	for _, s := range parseRedisInfo(raw) {
@@ -410,6 +443,7 @@ func RedisCommandStatistics(ctx context.Context, client *redis.Client) (*RedisCo
 				n, _ := strconv.ParseInt(v, 10, 64)
 				stat.Failed = &n
 			}
+			stat.P50, stat.P99, stat.P999 = percentile(name, "p50"), percentile(name, "p99"), percentile(name, "p99.9")
 			out.TotalCalls += stat.Calls
 			out.TotalUsec += stat.Usec
 			out.Commands = append(out.Commands, stat)
