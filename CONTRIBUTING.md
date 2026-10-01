@@ -309,9 +309,10 @@ engines report rather than skip. SQLite needs nothing — it is embedded.
 The Redis key and server tests (`TestLiveRedis*`, `TestLiveAPIRedis*`) are the
 exception to the defaults: they run only when `JD_TEST_REDIS_DSN` is set. They
 write, and the port every Redis listens on is as likely to be somebody's real
-data as a fixture. They write only under the `jdb4:` and `jdb4api:` prefixes,
-in the logical database the connection string names. The tests that change a
-server itself have variables of their own, again with no default:
+data as a fixture. They write only under the `jdb4:`, `jdb4api:`, `jdtest:`,
+`jdscan:` and `jdapi:` prefixes, in the logical database the connection string
+names. The tests that change a server itself have variables of their own,
+again with no default:
 
 | Variable | What it must be |
 | --- | --- |

@@ -208,7 +208,13 @@ func TestLiveAPIMongo(t *testing.T) {
 // TestLiveAPIRedis drives the key surface through HTTP, including the member
 // operations added for collection editing.
 func TestLiveAPIRedis(t *testing.T) {
-	dsn := envOr("JD_TEST_REDIS_DSN", "redis://127.0.0.1:6379/0")
+	// No default, unlike the SQL engines: this writes and deletes keys, and
+	// the port every Redis listens on is as likely to be somebody's real data
+	// as a fixture.
+	dsn := os.Getenv("JD_TEST_REDIS_DSN")
+	if dsn == "" {
+		t.Skip("set JD_TEST_REDIS_DSN to run this")
+	}
 	_, r, id := liveAPIRouter(t, dbx.DriverRedis, dsn)
 	const key = "jdapi:hash"
 
