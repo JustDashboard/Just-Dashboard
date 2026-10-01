@@ -438,11 +438,16 @@ func TestRedisStreamNeighbour(t *testing.T) {
 }
 
 func TestRedisStreamEntriesKeepOrderAndDuplicates(t *testing.T) {
-	rows := redisStreamEntries([]any{
-		[]any{"1-1", []any{"b", "2", "a", "1", "b", "3"}},
-		[]any{"1-2", nil},
-	})
-	if len(rows) != 2 || rows[0].ID != "1-1" {
+	// XRANGE's reply: two entries, the first with a field name used twice,
+	// the second with no fields at all.
+	reply, _, _, err := readWire("*2\r\n" +
+		"*2\r\n$3\r\n1-1\r\n*6\r\n$1\r\nb\r\n$1\r\n2\r\n$1\r\na\r\n$1\r\n1\r\n$1\r\nb\r\n$1\r\n3\r\n" +
+		"*2\r\n$3\r\n1-2\r\n*0\r\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := redisStreamEntries(reply)
+	if len(rows) != 2 || rows[0].ID != "1-1" || rows[1].ID != "1-2" {
 		t.Fatalf("rows = %+v", rows)
 	}
 	want := [][2]RedisBytes{{"b", "2"}, {"a", "1"}, {"b", "3"}}
@@ -451,6 +456,9 @@ func TestRedisStreamEntriesKeepOrderAndDuplicates(t *testing.T) {
 	}
 	if rows[1].Fields == nil || len(rows[1].Fields) != 0 {
 		t.Errorf("an entry with no fields = %v, want an empty list", rows[1].Fields)
+	}
+	if rows[0].Truncated || rows[1].Truncated {
+		t.Error("a small entry was marked as cut")
 	}
 }
 

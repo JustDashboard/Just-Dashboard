@@ -52,6 +52,12 @@ type RedisRow struct {
 	// Fields are a stream entry's pairs, in the order they were added. A list
 	// rather than an object: an entry may repeat a field name.
 	Fields [][2]RedisBytes `json:"fields,omitempty"`
+	// Truncated says the row carries only the start of its value, because
+	// the whole of it is more than a page should hold; Bytes is how long the
+	// value really is. A row that says so must not be written back as it is:
+	// that would replace the value with its own first few kilobytes.
+	Truncated bool   `json:"truncated,omitempty"`
+	Bytes     *int64 `json:"bytes,omitempty"`
 }
 
 // RedisStringChunk is a window of a string value.
@@ -137,6 +143,14 @@ var (
 
 // RedisReadMembers reads one page of a key. profile may be nil; it is asked
 // for only when the key turns out to be of a type whose reading depends on it.
+//
+// The page itself is read over a connection of its own, by the same bounded
+// reader the console uses. A page is a bounded number of members, but a
+// member is as large as whoever wrote it made it — a hash of cached pages
+// holds megabytes per field — and the client library would read a hundred of
+// those into memory to hand them over. Here each member is kept up to
+// redisMaxMemberBytes, the rest of it is read past, and the row says it was
+// cut and how long it really is.
 func RedisReadMembers(ctx context.Context, client *redis.Client, profile *RedisProfile, o RedisMembersOptions) (*RedisMembers, error) {
 	key := string(o.Key)
 	pipe := client.Pipeline()
@@ -159,45 +173,55 @@ func RedisReadMembers(ctx context.Context, client *redis.Client, profile *RedisP
 	if count <= 0 {
 		count = redisDefaultPageRows
 	}
-	if count > redisMaxPageRows && typ != "string" {
+	if count > redisMaxPageRows {
 		count = redisMaxPageRows
 	}
-
-	var err error
 	switch typ {
-	case "string":
-		err = redisReadString(ctx, client, page, o)
-	case "hash":
-		if profile == nil && !o.legacy {
-			if profile, err = RedisProbe(ctx, client); err != nil {
-				return nil, err
-			}
-		}
-		err = redisReadHash(ctx, client, profile, page, o, count)
-	case "list":
-		err = redisReadList(ctx, client, page, o, count)
-	case "set":
-		err = redisReadSet(ctx, client, page, o, count)
-	case "zset":
-		err = redisReadZSet(ctx, client, page, o, count)
-	case "stream":
-		err = redisReadStream(ctx, client, page, o, count)
-	case redisJSONType:
-		if profile == nil {
-			if profile, err = RedisProbe(ctx, client); err != nil {
-				return nil, err
-			}
-		}
-		if !profile.Features.JSON {
-			page.Unsupported = "This server reports a JSON document but has no JSON commands to read it with."
-			break
-		}
-		err = redisReadJSON(ctx, client, page, o)
+	case "string", "hash", "list", "set", "zset", "stream", redisJSONType:
 	default:
 		// TimeSeries, Bloom filters, vector sets, whatever the next module
 		// brings. Each has its own commands and none of them is a list of
 		// members, so the page says what it is and points at the console.
 		page.Unsupported = fmt.Sprintf("A %s value belongs to a module with its own commands; open it from the console.", typ)
+		return page, nil
+	}
+	if profile == nil && (typ == redisJSONType || (typ == "hash" && !o.legacy)) {
+		var err error
+		if profile, err = RedisProbe(ctx, client); err != nil {
+			return nil, err
+		}
+	}
+	if typ == redisJSONType && !profile.Features.JSON {
+		page.Unsupported = "This server reports a JSON document but has no JSON commands to read it with."
+		return page, nil
+	}
+
+	wire, err := redisDialOptions(ctx, client.Options())
+	if err != nil {
+		return nil, err
+	}
+	defer wire.close()
+	if err := wire.login(client.Options().DB); err != nil {
+		return nil, err
+	}
+	pager := &redisPager{wire: wire}
+	switch typ {
+	case "string":
+		err = pager.readString(page, o)
+	case "hash":
+		if err = pager.readHash(page, o, count); err == nil {
+			redisHashFieldTTLs(ctx, client, profile, page)
+		}
+	case "list":
+		err = pager.readList(page, o, count)
+	case "set":
+		err = pager.readSet(page, o, count)
+	case "zset":
+		err = pager.readZSet(page, o, count)
+	case "stream":
+		err = pager.readStream(page, o, count)
+	case redisJSONType:
+		err = pager.readJSON(page, o)
 	}
 	if err != nil {
 		return nil, err
@@ -237,7 +261,81 @@ func redisScanCursor(cursor string) (uint64, error) {
 	return n, nil
 }
 
-func redisReadString(ctx context.Context, client *redis.Client, page *RedisMembers, o RedisMembersOptions) error {
+const (
+	// redisMaxMemberBytes is how much of one member a page carries.
+	redisMaxMemberBytes = 64 << 10
+	// redisPageBytes and redisPageNodes are how much one reply may keep in
+	// all: strings, and values of any kind.
+	redisPageBytes = 8 << 20
+	redisPageNodes = 50000
+	// redisPageTimeout bounds one command of a page, including the time it
+	// takes to read past whatever was too long to keep.
+	redisPageTimeout = 20 * time.Second
+)
+
+// redisPager reads the commands a page is made of over one raw connection.
+type redisPager struct {
+	wire *redisWire
+}
+
+// ask sends one command and reads its reply, keeping at most maxString bytes
+// of any one string. Whatever is not kept is read past, so the connection is
+// ready for the next command; an error reply comes back as an error.
+func (g *redisPager) ask(maxString int, args ...string) (RedisReply, error) {
+	if err := g.wire.send(redisPageTimeout, args...); err != nil {
+		return RedisReply{}, err
+	}
+	reader := &redisReplyReader{
+		rd: g.wire.rd, nodes: redisPageNodes, bytes: redisPageBytes,
+		maxString: maxString, drain: true,
+	}
+	reply, err := reader.read(0)
+	if err != nil {
+		return RedisReply{}, err
+	}
+	if reply.Type == "error" {
+		msg := redisText(reply.Value)
+		if sentence, ok := redisExplainCluster(msg); ok {
+			return RedisReply{}, errors.New(sentence)
+		}
+		return RedisReply{}, redisServerError(msg)
+	}
+	return reply, nil
+}
+
+// length asks a command that answers with a number.
+func (g *redisPager) length(args ...string) (int64, error) {
+	reply, err := g.ask(redisMaxMemberBytes, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := redisInt(reply.generic())
+	return n, nil
+}
+
+// redisMember reads one string out of a reply: its bytes, whether they are
+// all of it, and its real size.
+func redisMember(r RedisReply) (RedisBytes, bool, int64) {
+	b, ok := r.Value.(RedisBytes)
+	if !ok {
+		b = RedisBytes(redisText(r.generic()))
+	}
+	if r.Truncated {
+		return b, true, int64(r.Length)
+	}
+	return b, false, int64(len(b))
+}
+
+// value sets a row's value, marking the row when the value was cut.
+func (row *RedisRow) value(r RedisReply) {
+	v, cut, size := redisMember(r)
+	row.Value = &v
+	if cut {
+		row.Truncated, row.Bytes = true, &size
+	}
+}
+
+func (g *redisPager) readString(page *RedisMembers, o RedisMembersOptions) error {
 	key := string(o.Key)
 	offset, err := redisOffset(o.Cursor)
 	if err != nil {
@@ -259,14 +357,15 @@ func redisReadString(ctx context.Context, client *redis.Client, page *RedisMembe
 	if size < utf8.UTFMax {
 		size = utf8.UTFMax
 	}
-	pipe := client.Pipeline()
-	lenCmd := pipe.StrLen(ctx, key)
-	rangeCmd := pipe.GetRange(ctx, key, offset, offset+size-1)
-	if _, err := pipe.Exec(ctx); err != nil {
+	if page.Length, err = g.length("STRLEN", key); err != nil {
 		return err
 	}
-	page.Length = lenCmd.Val()
-	chunk := rangeCmd.Val()
+	reply, err := g.ask(int(size), "GETRANGE", key, strconv.FormatInt(offset, 10), strconv.FormatInt(offset+size-1, 10))
+	if err != nil {
+		return err
+	}
+	value, _, _ := redisMember(reply)
+	chunk := string(value)
 	end := offset + int64(len(chunk))
 	if end < page.Length {
 		// A window that stops inside a multi-byte character would make text
@@ -302,61 +401,139 @@ func redisTrimPartialRune(s string) string {
 	return s
 }
 
-func redisReadHash(ctx context.Context, client *redis.Client, profile *RedisProfile, page *RedisMembers, o RedisMembersOptions, count int) error {
-	key := string(o.Key)
+// scan runs one turn of HSCAN, SSCAN or ZSCAN and returns what it handed
+// over.
+//
+// A turn's reply is all or nothing: its cursor is past everything in it, so
+// items dropped for want of room would never be seen again. When a turn
+// brings more than a page can hold it is asked again for fewer.
+func (g *redisPager) scan(verb, key string, cursor uint64, match string, count int) ([]RedisReply, uint64, error) {
+	for {
+		args := []string{verb, key, strconv.FormatUint(cursor, 10)}
+		if match != "" {
+			args = append(args, "MATCH", match)
+		}
+		args = append(args, "COUNT", strconv.Itoa(count))
+		reply, err := g.ask(redisMaxMemberBytes, args...)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(reply.Items) != 2 {
+			return nil, 0, fmt.Errorf("the server's answer to %s was not a cursor and a list", verb)
+		}
+		if reply.Items[1].Truncated {
+			if count == 1 {
+				return nil, 0, fmt.Errorf("one turn of %s returned more than a page can carry; narrow it with a match pattern", verb)
+			}
+			count = max(count/4, 1)
+			continue
+		}
+		next, err := strconv.ParseUint(redisText(reply.Items[0].generic()), 10, 64)
+		if err != nil {
+			return nil, 0, fmt.Errorf("the server's answer to %s carried no cursor", verb)
+		}
+		return reply.Items[1].Items, next, nil
+	}
+}
+
+// scanPage turns scans into a page: turn after turn until there is a page's
+// worth, the scan ends, or the turns allowed for a selective MATCH run out.
+func (g *redisPager) scanPage(page *RedisMembers, verb string, o RedisMembersOptions, count, width int, row func(items []RedisReply) RedisRow) error {
 	cursor, err := redisScanCursor(o.Cursor)
 	if err != nil {
 		return err
 	}
-	if page.Length, err = client.HLen(ctx, key).Result(); err != nil {
-		return err
-	}
 	for turn := 0; turn < redisMemberScanTurns; turn++ {
-		pairs, next, err := client.HScan(ctx, key, cursor, o.Match, int64(count)).Result()
+		items, next, err := g.scan(verb, string(o.Key), cursor, o.Match, count)
 		if err != nil {
 			return err
 		}
-		for i := 0; i+1 < len(pairs); i += 2 {
-			field, value := RedisBytes(pairs[i]), RedisBytes(pairs[i+1])
-			page.Rows = append(page.Rows, RedisRow{Field: &field, Value: &value})
+		for i := 0; i+width <= len(items); i += width {
+			page.Rows = append(page.Rows, row(items[i:i+width]))
 		}
 		cursor = next
 		if cursor == 0 || len(page.Rows) >= count {
 			break
 		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 	}
 	if cursor != 0 {
 		page.Cursor, page.Done = strconv.FormatUint(cursor, 10), false
 	}
-	if profile != nil && profile.Features.HashFieldTTL && len(page.Rows) > 0 {
-		fields := make([]string, len(page.Rows))
-		for i, r := range page.Rows {
-			fields[i] = string(*r.Field)
-		}
-		// Best effort: a field's expiry is a detail of the row, and a server
-		// that will not say leaves the row as it is.
-		if ttls, err := client.HTTL(ctx, key, fields...).Result(); err == nil && len(ttls) == len(fields) {
-			for i := range page.Rows {
-				if ttls[i] >= -1 {
-					ttl := ttls[i]
-					page.Rows[i].TTL = &ttl
-				}
-			}
-		}
-	}
 	return nil
 }
 
-func redisReadList(ctx context.Context, client *redis.Client, page *RedisMembers, o RedisMembersOptions, count int) error {
+func (g *redisPager) readHash(page *RedisMembers, o RedisMembersOptions, count int) error {
+	var err error
+	if page.Length, err = g.length("HLEN", string(o.Key)); err != nil {
+		return err
+	}
+	return g.scanPage(page, "HSCAN", o, count, 2, func(pair []RedisReply) RedisRow {
+		field, cut, _ := redisMember(pair[0])
+		row := RedisRow{Field: &field}
+		row.value(pair[1])
+		// A field name too long to carry cannot be sent back to name the
+		// field either; the row is marked so nothing tries.
+		row.Truncated = row.Truncated || cut
+		return row
+	})
+}
+
+// redisHashFieldTTLs adds each field's own expiry to a page of a hash, on a
+// server that has such a thing. Best effort: a field's expiry is a detail of
+// the row, and a server that will not say leaves the row as it is.
+func redisHashFieldTTLs(ctx context.Context, client *redis.Client, profile *RedisProfile, page *RedisMembers) {
+	if profile == nil || !profile.Features.HashFieldTTL || len(page.Rows) == 0 {
+		return
+	}
+	fields := make([]string, len(page.Rows))
+	for i, r := range page.Rows {
+		if r.Truncated {
+			return
+		}
+		fields[i] = string(*r.Field)
+	}
+	ttls, err := client.HTTL(ctx, string(page.Key), fields...).Result()
+	if err != nil || len(ttls) != len(fields) {
+		return
+	}
+	for i := range page.Rows {
+		if ttls[i] >= -1 {
+			ttl := ttls[i]
+			page.Rows[i].TTL = &ttl
+		}
+	}
+}
+
+func (g *redisPager) readSet(page *RedisMembers, o RedisMembersOptions, count int) error {
+	var err error
+	if page.Length, err = g.length("SCARD", string(o.Key)); err != nil {
+		return err
+	}
+	return g.scanPage(page, "SSCAN", o, count, 1, func(item []RedisReply) RedisRow {
+		row := RedisRow{}
+		row.value(item[0])
+		return row
+	})
+}
+
+// redisScoredRow is one member and its score, as the older protocol sends
+// them: two strings side by side.
+func redisScoredRow(pair []RedisReply) RedisRow {
+	row := RedisRow{}
+	row.value(pair[0])
+	f, _ := parseRedisScore(redisText(pair[1].generic()))
+	score := RedisScore(f)
+	row.Score = &score
+	return row
+}
+
+func (g *redisPager) readList(page *RedisMembers, o RedisMembersOptions, count int) error {
 	key := string(o.Key)
 	offset, err := redisOffset(o.Cursor)
 	if err != nil {
 		return err
 	}
-	if page.Length, err = client.LLen(ctx, key).Result(); err != nil {
+	if page.Length, err = g.length("LLEN", key); err != nil {
 		return err
 	}
 	if offset >= page.Length {
@@ -367,22 +544,28 @@ func redisReadList(ctx context.Context, client *redis.Client, page *RedisMembers
 	start, stop := offset, offset+int64(count)-1
 	if o.Desc {
 		stop = page.Length - 1 - offset
-		start = stop - int64(count) + 1
-		if start < 0 {
-			start = 0
-		}
+		start = max(stop-int64(count)+1, 0)
 	}
-	values, err := client.LRange(ctx, key, start, stop).Result()
+	reply, err := g.ask(redisMaxMemberBytes, "LRANGE", key, strconv.FormatInt(start, 10), strconv.FormatInt(stop, 10))
 	if err != nil {
 		return err
+	}
+	values := reply.Items
+	if o.Desc && reply.Truncated {
+		// Read from the tail, the elements nearest the tail are the last in
+		// the reply — the ones that were dropped. The page is asked for again
+		// at a size that fits rather than served with its first rows missing.
+		return g.readList(page, o, max(len(values)/2, 1))
 	}
 	for i := range values {
 		at := i
 		if o.Desc {
 			at = len(values) - 1 - i
 		}
-		index, value := start+int64(at), RedisBytes(values[at])
-		page.Rows = append(page.Rows, RedisRow{Index: &index, Value: &value})
+		index := start + int64(at)
+		row := RedisRow{Index: &index}
+		row.value(values[at])
+		page.Rows = append(page.Rows, row)
 	}
 	if next := offset + int64(len(values)); next < page.Length && len(values) > 0 {
 		page.Cursor, page.Done = strconv.FormatInt(next, 10), false
@@ -390,91 +573,30 @@ func redisReadList(ctx context.Context, client *redis.Client, page *RedisMembers
 	return nil
 }
 
-func redisReadSet(ctx context.Context, client *redis.Client, page *RedisMembers, o RedisMembersOptions, count int) error {
-	key := string(o.Key)
-	cursor, err := redisScanCursor(o.Cursor)
-	if err != nil {
-		return err
-	}
-	if page.Length, err = client.SCard(ctx, key).Result(); err != nil {
-		return err
-	}
-	for turn := 0; turn < redisMemberScanTurns; turn++ {
-		members, next, err := client.SScan(ctx, key, cursor, o.Match, int64(count)).Result()
-		if err != nil {
-			return err
-		}
-		for _, m := range members {
-			value := RedisBytes(m)
-			page.Rows = append(page.Rows, RedisRow{Value: &value})
-		}
-		cursor = next
-		if cursor == 0 || len(page.Rows) >= count {
-			break
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-	}
-	if cursor != 0 {
-		page.Cursor, page.Done = strconv.FormatUint(cursor, 10), false
-	}
-	return nil
-}
-
-func redisReadZSet(ctx context.Context, client *redis.Client, page *RedisMembers, o RedisMembersOptions, count int) error {
+func (g *redisPager) readZSet(page *RedisMembers, o RedisMembersOptions, count int) error {
 	key := string(o.Key)
 	var err error
-	if page.Length, err = client.ZCard(ctx, key).Result(); err != nil {
+	if page.Length, err = g.length("ZCARD", key); err != nil {
 		return err
 	}
-	row := func(member string, score float64) {
-		m, s := RedisBytes(member), RedisScore(score)
-		page.Rows = append(page.Rows, RedisRow{Value: &m, Score: &s})
-	}
-
 	// A search by member has to be a scan: a sorted set is ordered by score,
 	// and nothing but ZSCAN looks at member names.
 	if o.Match != "" {
-		cursor, err := redisScanCursor(o.Cursor)
-		if err != nil {
-			return err
-		}
-		for turn := 0; turn < redisMemberScanTurns; turn++ {
-			pairs, next, err := client.ZScan(ctx, key, cursor, o.Match, int64(count)).Result()
-			if err != nil {
-				return err
-			}
-			for i := 0; i+1 < len(pairs); i += 2 {
-				score, _ := parseRedisScore(pairs[i+1])
-				row(pairs[i], score)
-			}
-			cursor = next
-			if cursor == 0 || len(page.Rows) >= count {
-				break
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-		}
-		if cursor != 0 {
-			page.Cursor, page.Done = strconv.FormatUint(cursor, 10), false
-		}
-		return nil
+		return g.scanPage(page, "ZSCAN", o, count, 2, redisScoredRow)
 	}
 
 	offset, err := redisOffset(o.Cursor)
 	if err != nil {
 		return err
 	}
-	var members []redis.Z
 	bounded := o.Min != "" || o.Max != ""
+	var args []string
 	if bounded {
-		by := &redis.ZRangeBy{Min: "-inf", Max: "+inf", Offset: offset, Count: int64(count)}
+		lo, hi := "-inf", "+inf"
 		for _, b := range []struct {
 			given string
 			into  *string
-		}{{o.Min, &by.Min}, {o.Max, &by.Max}} {
+		}{{o.Min, &lo}, {o.Max, &hi}} {
 			if b.given == "" {
 				continue
 			}
@@ -483,39 +605,43 @@ func redisReadZSet(ctx context.Context, client *redis.Client, page *RedisMembers
 			}
 			*b.into = b.given
 		}
+		args = []string{"ZRANGEBYSCORE", key, lo, hi}
 		if o.Desc {
-			members, err = client.ZRevRangeByScoreWithScores(ctx, key, by).Result()
-		} else {
-			members, err = client.ZRangeByScoreWithScores(ctx, key, by).Result()
+			args = []string{"ZREVRANGEBYSCORE", key, hi, lo}
 		}
-	} else if o.Desc {
-		members, err = client.ZRevRangeWithScores(ctx, key, offset, offset+int64(count)-1).Result()
+		args = append(args, "WITHSCORES", "LIMIT", strconv.FormatInt(offset, 10), strconv.Itoa(count))
 	} else {
-		members, err = client.ZRangeWithScores(ctx, key, offset, offset+int64(count)-1).Result()
+		verb := "ZRANGE"
+		if o.Desc {
+			verb = "ZREVRANGE"
+		}
+		args = []string{verb, key, strconv.FormatInt(offset, 10), strconv.FormatInt(offset+int64(count)-1, 10), "WITHSCORES"}
 	}
+	reply, err := g.ask(redisMaxMemberBytes, args...)
 	if err != nil {
 		return err
 	}
-	for _, m := range members {
-		row(redisText(m.Member), m.Score)
+	items := reply.Items
+	for i := 0; i+1 < len(items); i += 2 {
+		page.Rows = append(page.Rows, redisScoredRow(items[i:i+2]))
 	}
-	next := offset + int64(len(members))
+	next := offset + int64(len(page.Rows))
 	more := next < page.Length
 	if bounded {
 		// The size of a score range is not known without counting it; a full
 		// page is the only sign that there may be another.
-		more = len(members) == count
+		more = len(page.Rows) == count || reply.Truncated
 	}
-	if more && len(members) > 0 {
+	if more && len(page.Rows) > 0 {
 		page.Cursor, page.Done = strconv.FormatInt(next, 10), false
 	}
 	return nil
 }
 
-func redisReadStream(ctx context.Context, client *redis.Client, page *RedisMembers, o RedisMembersOptions, count int) error {
+func (g *redisPager) readStream(page *RedisMembers, o RedisMembersOptions, count int) error {
 	key := string(o.Key)
 	var err error
-	if page.Length, err = client.XLen(ctx, key).Result(); err != nil {
+	if page.Length, err = g.length("XLEN", key); err != nil {
 		return err
 	}
 	from, to := "-", "+"
@@ -541,17 +667,17 @@ func redisReadStream(ctx context.Context, client *redis.Client, page *RedisMembe
 			from = o.Cursor
 		}
 	}
-	args := []any{"XRANGE", key, from, to, "COUNT", count}
+	args := []string{"XRANGE", key, from, to, "COUNT", strconv.Itoa(count)}
 	if o.Desc {
-		args = []any{"XREVRANGE", key, to, from, "COUNT", count}
+		args = []string{"XREVRANGE", key, to, from, "COUNT", strconv.Itoa(count)}
 	}
-	reply, err := client.Do(ctx, args...).Result()
-	if err != nil && err != redis.Nil {
+	reply, err := g.ask(redisMaxMemberBytes, args...)
+	if err != nil {
 		return err
 	}
 	entries := redisStreamEntries(reply)
 	page.Rows = append(page.Rows, entries...)
-	if len(entries) == count {
+	if (len(entries) == count || reply.Truncated) && len(entries) > 0 {
 		// The next page starts at the id after the last one shown, or before
 		// it when reading backwards. Computed here rather than written as an
 		// exclusive range, which Redis only learnt in 6.2.
@@ -565,21 +691,21 @@ func redisReadStream(ctx context.Context, client *redis.Client, page *RedisMembe
 // redisStreamEntries reads an XRANGE-shaped reply: a list of [id, [field,
 // value, …]]. The pairs keep their order and their duplicates, both of which
 // the driver's own map-backed type throws away.
-func redisStreamEntries(reply any) []RedisRow {
-	list := redisSlice(reply)
-	out := make([]RedisRow, 0, len(list))
-	for _, item := range list {
-		entry := redisSlice(item)
-		if len(entry) < 1 {
+func redisStreamEntries(reply RedisReply) []RedisRow {
+	out := make([]RedisRow, 0, len(reply.Items))
+	for _, entry := range reply.Items {
+		if len(entry.Items) < 1 {
 			continue
 		}
-		row := RedisRow{ID: redisText(entry[0]), Fields: [][2]RedisBytes{}}
-		if len(entry) > 1 {
-			pairs := redisSlice(entry[1])
-			for i := 0; i+1 < len(pairs); i += 2 {
-				row.Fields = append(row.Fields, [2]RedisBytes{
-					RedisBytes(redisText(pairs[i])), RedisBytes(redisText(pairs[i+1])),
-				})
+		row := RedisRow{ID: redisText(entry.Items[0].generic()), Fields: [][2]RedisBytes{}}
+		if len(entry.Items) > 1 {
+			pairs := entry.Items[1]
+			row.Truncated = pairs.Truncated
+			for i := 0; i+1 < len(pairs.Items); i += 2 {
+				field, fieldCut, _ := redisMember(pairs.Items[i])
+				value, valueCut, _ := redisMember(pairs.Items[i+1])
+				row.Fields = append(row.Fields, [2]RedisBytes{field, value})
+				row.Truncated = row.Truncated || fieldCut || valueCut
 			}
 		}
 		out = append(out, row)
@@ -629,21 +755,25 @@ func redisJSONPath(path string) (string, error) {
 	return path, nil
 }
 
-func redisReadJSON(ctx context.Context, client *redis.Client, page *RedisMembers, o RedisMembersOptions) error {
+func (g *redisPager) readJSON(page *RedisMembers, o RedisMembersOptions) error {
 	path, err := redisJSONPath(o.Path)
 	if err != nil {
 		return err
 	}
-	text, err := client.Do(ctx, "JSON.GET", string(o.Key), path).Text()
-	if err != nil && err != redis.Nil {
+	// The document's size is in the reply's first line, so one that is too
+	// large is known to be before any of it is kept.
+	reply, err := g.ask(redisMaxJSONBytes, "JSON.GET", string(o.Key), path)
+	if err != nil {
 		return err
 	}
-	page.JSON = &RedisJSONValue{Path: path, Bytes: len(text)}
+	text, cut, size := redisMember(reply)
+	page.JSON = &RedisJSONValue{Path: path, Bytes: int(size)}
 	switch {
-	case len(text) > redisMaxJSONBytes:
-		page.JSON.TooLarge = true
-	case text == "":
+	case reply.Type == "nil":
+		page.JSON.Bytes = 0
 		page.JSON.Matches = json.RawMessage("[]")
+	case cut:
+		page.JSON.TooLarge = true
 	case !json.Valid([]byte(text)):
 		return fmt.Errorf("the server's answer for %s was not JSON", path)
 	default:

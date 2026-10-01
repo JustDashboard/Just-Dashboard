@@ -309,6 +309,20 @@ func RedisExplainError(ctx context.Context, client *redis.Client, err error) err
 		return nil
 	}
 	msg := err.Error()
+	if sentence, ok := redisExplainCluster(msg); ok {
+		return errors.New(sentence)
+	}
+	if strings.Contains(msg, "unknown command") {
+		raw, ierr := client.Info(ctx, "server").Result()
+		if ierr == nil && redisInfoMap(parseRedisInfo(raw))["redis_mode"] == "sentinel" {
+			return ErrRedisSentinel
+		}
+	}
+	return err
+}
+
+// redisExplainCluster is the sentence for one of a cluster node's refusals.
+func redisExplainCluster(msg string) (string, bool) {
 	switch {
 	case strings.HasPrefix(msg, "MOVED "), strings.HasPrefix(msg, "ASK "):
 		fields := strings.Fields(msg)
@@ -316,18 +330,13 @@ func RedisExplainError(ctx context.Context, client *redis.Client, err error) err
 		if len(fields) >= 3 {
 			where = fields[2]
 		}
-		return fmt.Errorf("this server is one node of a Redis Cluster and that key lives on %s; the dashboard talks to a single node, so connect to that one to reach it", where)
+		return fmt.Sprintf("this server is one node of a Redis Cluster and that key lives on %s; the dashboard talks to a single node, so connect to that one to reach it", where), true
 	case strings.HasPrefix(msg, "CLUSTERDOWN"):
-		return fmt.Errorf("this server is a Redis Cluster node and the cluster is not serving that slot (%s)", msg)
+		return fmt.Sprintf("this server is a Redis Cluster node and the cluster is not serving that slot (%s)", msg), true
 	case strings.HasPrefix(msg, "CROSSSLOT"):
-		return fmt.Errorf("this server is a Redis Cluster node and those keys hash to different slots, so one command cannot touch them together")
-	case strings.Contains(msg, "unknown command"):
-		raw, ierr := client.Info(ctx, "server").Result()
-		if ierr == nil && redisInfoMap(parseRedisInfo(raw))["redis_mode"] == "sentinel" {
-			return ErrRedisSentinel
-		}
+		return "this server is a Redis Cluster node and those keys hash to different slots, so one command cannot touch them together", true
 	}
-	return err
+	return "", false
 }
 
 // --- reading generic replies ------------------------------------------------

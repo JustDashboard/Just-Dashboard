@@ -1,10 +1,8 @@
 package dbx
 
 import (
+	"bufio"
 	"encoding/json"
-	"errors"
-	"math"
-	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
@@ -349,72 +347,238 @@ func TestRedisCommandSubjectLeavesValuesOut(t *testing.T) {
 	}
 }
 
-func TestRedisReplyTree(t *testing.T) {
-	budget := &redisReplyBudget{nodes: redisReplyMaxNodes, bytes: redisReplyMaxBytes}
-	tree := budget.tree([]any{
-		"text", int64(7), nil, 1.5, true, big.NewInt(9), errors.New("ERR nested"),
-		map[any]any{"b": int64(2), "a": int64(1)},
-		"\xff\xfe",
-		int64(math.MaxInt64), math.Inf(1),
-	})
-	raw, err := json.Marshal(tree)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `{"items":[` +
-		`{"type":"string","value":"text"},` +
-		`{"type":"integer","value":7},` +
-		`{"type":"nil"},` +
-		`{"type":"double","value":1.5},` +
-		`{"type":"boolean","value":true},` +
-		`{"type":"bignumber","value":"9"},` +
-		`{"type":"error","value":"ERR nested"},` +
-		// A map's entries come out in key order, so the same command gives
-		// the same reply twice.
-		`{"entries":[{"key":{"type":"string","value":"a"},"value":{"type":"integer","value":1}},` +
-		`{"key":{"type":"string","value":"b"},"value":{"type":"integer","value":2}}],"type":"map"},` +
-		// Bytes that are not text are carried, not replaced.
-		`{"type":"string","value":{"base64":"//4="}},` +
+// readWire reads one reply out of raw protocol bytes.
+func readWire(wire string) (RedisReply, *redisReplyReader, *bufio.Reader, error) {
+	rd := bufio.NewReader(strings.NewReader(wire))
+	p := &redisReplyReader{rd: rd, nodes: redisReplyMaxNodes, bytes: redisReplyMaxBytes}
+	reply, err := p.read(0)
+	return reply, p, rd, err
+}
+
+func TestRedisReplyReader(t *testing.T) {
+	cases := []struct {
+		name, wire, json string
+	}{
+		// The older protocol: five types.
+		{"status", "+OK\r\n", `{"type":"status","value":"OK"}`},
+		{"error", "-WRONGTYPE not a list\r\n", `{"type":"error","value":"WRONGTYPE not a list"}`},
+		{"integer", ":7\r\n", `{"type":"integer","value":7}`},
+		{"negative integer", ":-3\r\n", `{"type":"integer","value":-3}`},
 		// Past what a JavaScript number holds exactly, the digits travel as
 		// text.
-		`{"type":"integer","value":"9223372036854775807"},` +
-		`{"type":"double","value":"inf"}` +
-		`],"type":"array"}`
-	if string(raw) != want {
-		t.Errorf("reply tree =\n%s\nwant\n%s", raw, want)
+		{"large integer", ":9223372036854775807\r\n", `{"type":"integer","value":"9223372036854775807"}`},
+		{"string", "$5\r\nhello\r\n", `{"type":"string","value":"hello"}`},
+		{"empty string", "$0\r\n\r\n", `{"type":"string","value":""}`},
+		{"string with a line break in it", "$7\r\na\r\nb\r\nc\r\n", `{"type":"string","value":"a\r\nb\r\nc"}`},
+		// Bytes that are not text are carried, not replaced.
+		{"binary string", "$2\r\n\xff\xfe\r\n", `{"type":"string","value":{"base64":"//4="}}`},
+		{"nil string", "$-1\r\n", `{"type":"nil"}`},
+		{"array", "*2\r\n$1\r\na\r\n:1\r\n", `{"items":[{"type":"string","value":"a"},{"type":"integer","value":1}],"type":"array"}`},
+		{"empty array", "*0\r\n", `{"items":[],"type":"array"}`},
+		{"nil array", "*-1\r\n", `{"type":"nil"}`},
+		{"nested", "*1\r\n*1\r\n-ERR inner\r\n", `{"items":[{"items":[{"type":"error","value":"ERR inner"}],"type":"array"}],"type":"array"}`},
+		// The newer protocol.
+		{"null", "_\r\n", `{"type":"nil"}`},
+		{"double", ",1.5\r\n", `{"type":"double","value":1.5}`},
+		{"infinity", ",inf\r\n", `{"type":"double","value":"inf"}`},
+		{"boolean", "#t\r\n", `{"type":"boolean","value":true}`},
+		{"false", "#f\r\n", `{"type":"boolean","value":false}`},
+		{"big number", "(3492890328409238509324850943850943825024385\r\n", `{"type":"bignumber","value":"3492890328409238509324850943850943825024385"}`},
+		// A map keeps the order the server sent, which a Go map would not.
+		{"map", "%2\r\n+b\r\n:2\r\n+a\r\n:1\r\n",
+			`{"entries":[{"key":{"type":"status","value":"b"},"value":{"type":"integer","value":2}},` +
+				`{"key":{"type":"status","value":"a"},"value":{"type":"integer","value":1}}],"type":"map"}`},
+		{"set", "~2\r\n:1\r\n:2\r\n", `{"items":[{"type":"integer","value":1},{"type":"integer","value":2}],"type":"array"}`},
+		{"verbatim string", "=9\r\ntxt:hello\r\n", `{"type":"string","value":"hello"}`},
+		{"blob error", "!9\r\nERR nope!\r\n", `{"type":"error","value":"ERR nope!"}`},
+		// An attribute is a note about the reply after it, and is read past.
+		{"attribute", "|1\r\n+ttl\r\n:3600\r\n:5\r\n", `{"type":"integer","value":5}`},
 	}
-	if budget.truncated {
-		t.Error("a small reply was reported truncated")
+	for _, c := range cases {
+		reply, p, rd, err := readWire(c.wire)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		raw, err := json.Marshal(reply)
+		if err != nil || string(raw) != c.json {
+			t.Errorf("%s = %s (%v), want %s", c.name, raw, err, c.json)
+		}
+		if p.truncated || p.stopped {
+			t.Errorf("%s was reported cut short", c.name)
+		}
+		if rd.Buffered() != 0 {
+			t.Errorf("%s left %d bytes unread", c.name, rd.Buffered())
+		}
 	}
-
-	empty, _ := json.Marshal((&redisReplyBudget{nodes: 10, bytes: 10}).tree([]any{}))
-	if string(empty) != `{"items":[],"type":"array"}` {
-		t.Errorf("an empty array = %s, want its items present and empty", empty)
+	for name, wire := range map[string]string{
+		"nothing at all":         "",
+		"an unknown type":        "?what\r\n",
+		"a length that is text":  "$five\r\nhello\r\n",
+		"a string cut short":     "$50\r\nhello\r\n",
+		"an array cut short":     "*3\r\n:1\r\n",
+		"an integer that is not": ":seven\r\n",
+		"nesting without end":    strings.Repeat("*1\r\n", redisReplyMaxDepth+5) + ":1\r\n",
+	} {
+		if reply, _, _, err := readWire(wire); err == nil {
+			t.Errorf("%s was read as %+v", name, reply)
+		}
 	}
 }
 
-func TestRedisReplyTreeIsBounded(t *testing.T) {
-	long := make([]any, 50000)
-	for i := range long {
-		long[i] = int64(i)
+// A reply is read only as far as a page can show. What matters is not only
+// that the tree is small but that the rest was never pulled off the wire:
+// that is the memory a KEYS * on fifty million keys would have cost.
+func TestRedisReplyReaderStopsAtItsBudget(t *testing.T) {
+	const n = 50000
+	var wire strings.Builder
+	wire.WriteString("*" + strconv.Itoa(n) + "\r\n")
+	for i := 0; i < n; i++ {
+		wire.WriteString(":" + strconv.Itoa(i) + "\r\n")
 	}
-	budget := &redisReplyBudget{nodes: redisReplyMaxNodes, bytes: redisReplyMaxBytes}
-	tree := budget.tree(long)
-	if !budget.truncated || !tree.Truncated || tree.Length != len(long) {
-		t.Fatalf("a long array: truncated=%v/%v length=%d", budget.truncated, tree.Truncated, tree.Length)
+	src := strings.NewReader(wire.String())
+	p := &redisReplyReader{rd: bufio.NewReaderSize(src, 4096), nodes: redisReplyMaxNodes, bytes: redisReplyMaxBytes}
+	reply, err := p.read(0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(tree.Items) >= len(long) || len(tree.Items) == 0 {
-		t.Errorf("a long array kept %d of %d items", len(tree.Items), len(long))
+	if !p.truncated || !p.stopped || !reply.Truncated || reply.Length != n {
+		t.Fatalf("a long array: truncated=%v stopped=%v node=%v length=%d", p.truncated, p.stopped, reply.Truncated, reply.Length)
+	}
+	if len(reply.Items) == 0 || len(reply.Items) > redisReplyMaxNodes {
+		t.Errorf("a long array kept %d of %d items", len(reply.Items), n)
+	}
+	if src.Len() < wire.Len()/2 {
+		t.Errorf("only %d of %d bytes were left unread: the reader went on past its budget", src.Len(), wire.Len())
+	}
+	raw, _ := json.Marshal(reply)
+	if !strings.Contains(string(raw), `"truncated":true`) || !strings.Contains(string(raw), `"length":50000`) {
+		t.Errorf("the cut is not in the JSON: %.200s", raw)
 	}
 
-	budget = &redisReplyBudget{nodes: redisReplyMaxNodes, bytes: redisReplyMaxBytes}
-	big := strings.Repeat("x", redisReplyMaxString+100)
-	node := budget.tree(big)
-	if !node.Truncated || node.Length != len(big) {
-		t.Fatalf("a long string: truncated=%v length=%d", node.Truncated, node.Length)
+	// A string longer than a page shows is cut, and what follows it is still
+	// read: the remainder is small enough to read past.
+	long := strings.Repeat("x", redisReplyMaxString+100)
+	reply, p, _, err = readWire("*2\r\n$" + strconv.Itoa(len(long)) + "\r\n" + long + "\r\n:5\r\n")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := len(node.Value.(RedisBytes)); got != redisReplyMaxString {
-		t.Errorf("a long string kept %d bytes, want %d", got, redisReplyMaxString)
+	if len(reply.Items) != 2 || reply.Items[1].Value != int64(5) || p.stopped || !p.truncated {
+		t.Fatalf("after a long string: %d items, stopped=%v truncated=%v", len(reply.Items), p.stopped, p.truncated)
+	}
+	if s := reply.Items[0]; !s.Truncated || s.Length != len(long) || len(s.Value.(RedisBytes)) != redisReplyMaxString {
+		t.Errorf("a long string: truncated=%v length=%d kept=%d", s.Truncated, s.Length, len(s.Value.(RedisBytes)))
+	}
+
+	// A string far longer than that is not read past at all.
+	huge := redisReplyMaxString + redisReplyMaxDrain + 4096
+	src = strings.NewReader("$" + strconv.Itoa(huge) + "\r\n" + strings.Repeat("y", huge) + "\r\n")
+	p = &redisReplyReader{rd: bufio.NewReaderSize(src, 4096), nodes: redisReplyMaxNodes, bytes: redisReplyMaxBytes}
+	reply, err = p.read(0)
+	if err != nil || !p.stopped || !reply.Truncated || reply.Length != huge {
+		t.Fatalf("a huge string: %v stopped=%v truncated=%v length=%d", err, p.stopped, reply.Truncated, reply.Length)
+	}
+	if src.Len() < redisReplyMaxDrain {
+		t.Errorf("a huge string was read to within %d bytes of its end", src.Len())
+	}
+
+	// Many strings that together exceed the byte budget.
+	var many strings.Builder
+	many.WriteString("*100\r\n")
+	chunk := strings.Repeat("z", 100<<10)
+	for i := 0; i < 100; i++ {
+		many.WriteString("$" + strconv.Itoa(len(chunk)) + "\r\n" + chunk + "\r\n")
+	}
+	reply, p, _, err = readWire(many.String())
+	if err != nil || !p.stopped || !reply.Truncated || reply.Length != 100 || len(reply.Items) >= 100 {
+		t.Fatalf("many strings: %v stopped=%v truncated=%v items=%d", err, p.stopped, reply.Truncated, len(reply.Items))
+	}
+	kept := 0
+	for _, item := range reply.Items {
+		kept += len(item.Value.(RedisBytes))
+	}
+	if kept > redisReplyMaxBytes {
+		t.Errorf("%d bytes of string were kept, over the budget of %d", kept, redisReplyMaxBytes)
+	}
+}
+
+// A page of a key is several commands on one connection, so there the reader
+// reads past what it does not keep instead of abandoning the connection: the
+// tree is as bounded as ever and the next command still gets its own reply.
+func TestRedisReplyReaderDrainsWhenAsked(t *testing.T) {
+	long := strings.Repeat("x", 5000)
+	huge := strings.Repeat("y", redisReplyMaxDrain+redisReplyMaxString)
+	var wire strings.Builder
+	// A list of six: short, long, short, huge, a nested list, short.
+	wire.WriteString("*6\r\n$1\r\na\r\n")
+	wire.WriteString("$" + strconv.Itoa(len(long)) + "\r\n" + long + "\r\n")
+	wire.WriteString("$1\r\nb\r\n")
+	wire.WriteString("$" + strconv.Itoa(len(huge)) + "\r\n" + huge + "\r\n")
+	wire.WriteString("*2\r\n:1\r\n$1\r\nz\r\n")
+	wire.WriteString("$1\r\nc\r\n")
+	// And the reply to the next command.
+	wire.WriteString(":42\r\n")
+
+	rd := bufio.NewReader(strings.NewReader(wire.String()))
+	p := &redisReplyReader{rd: rd, nodes: redisReplyMaxNodes, bytes: redisReplyMaxBytes, maxString: 100, drain: true}
+	reply, err := p.read(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.stopped || !p.truncated || reply.Truncated || len(reply.Items) != 6 {
+		t.Fatalf("stopped=%v truncated=%v list cut=%v items=%d", p.stopped, p.truncated, reply.Truncated, len(reply.Items))
+	}
+	for i, want := range []struct {
+		kept int
+		size int
+	}{{1, 0}, {100, len(long)}, {1, 0}, {100, len(huge)}} {
+		item := reply.Items[i]
+		if len(item.Value.(RedisBytes)) != want.kept || item.Truncated != (want.size > 0) || (item.Truncated && item.Length != want.size) {
+			t.Errorf("item %d: kept %d bytes, truncated=%v, length=%d", i, len(item.Value.(RedisBytes)), item.Truncated, item.Length)
+		}
+	}
+	if reply.Items[5].Value != RedisBytes("c") {
+		t.Errorf("the item after the huge one = %+v", reply.Items[5])
+	}
+	next := &redisReplyReader{rd: rd, nodes: 10, bytes: 100}
+	if after, err := next.read(0); err != nil || after.Value != int64(42) {
+		t.Fatalf("the next reply on the connection = %+v, %v", after, err)
+	}
+
+	// Out of room part way through a list: the list is marked cut with its
+	// real length, the rest of it — nested values and all — is read past, and
+	// the connection is still in step.
+	var deep strings.Builder
+	deep.WriteString("*5\r\n:1\r\n:2\r\n*2\r\n$3\r\nabc\r\n*1\r\n:9\r\n%1\r\n+k\r\n$2\r\nvv\r\n:5\r\n+next\r\n")
+	rd = bufio.NewReader(strings.NewReader(deep.String()))
+	p = &redisReplyReader{rd: rd, nodes: 3, bytes: redisReplyMaxBytes, drain: true}
+	reply, err = p.read(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reply.Truncated || reply.Length != 5 || len(reply.Items) != 2 || p.stopped {
+		t.Fatalf("a list cut for room: truncated=%v length=%d items=%d stopped=%v", reply.Truncated, reply.Length, len(reply.Items), p.stopped)
+	}
+	if after, err := (&redisReplyReader{rd: rd, nodes: 10, bytes: 100}).read(0); err != nil || after.Value != "next" {
+		t.Fatalf("the next reply after a cut list = %+v, %v", after, err)
+	}
+}
+
+// The reply tree read off the wire and the one the client library hands back
+// are read by the same COMMAND parser.
+func TestRedisReplyGeneric(t *testing.T) {
+	reply, _, _, err := readWire("*1\r\n*7\r\n$3\r\nget\r\n:2\r\n*2\r\n+readonly\r\n+fast\r\n:1\r\n:1\r\n:1\r\n*1\r\n+@read\r\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := redisCommandEntry(reply.Items[0].generic())
+	if entry == nil || entry.Name != "get" || entry.Arity != 2 || entry.FirstKey != 1 ||
+		!reflect.DeepEqual(entry.Flags, []string{"readonly", "fast"}) || !reflect.DeepEqual(entry.Categories, []string{"@read"}) {
+		t.Errorf("entry = %+v", entry)
+	}
+	m, _, _, _ := readWire("%1\r\n$4\r\nname\r\n,2.5\r\n")
+	if got := redisPairs(m.generic()); got["name"] != 2.5 {
+		t.Errorf("a map as generic values = %#v", got)
 	}
 }
 

@@ -3,9 +3,7 @@ package dbx
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -706,32 +704,6 @@ func RedisCommandSubject(args []string) []string {
 	return out
 }
 
-// RedisCommandLookup asks the server about one command. It answers nil,
-// without an error, for a command the server does not have or will not
-// describe: the classifier treats both as unknown.
-func RedisCommandLookup(ctx context.Context, client *redis.Client, args []string) *RedisCommandFlags {
-	if len(args) == 0 {
-		return nil
-	}
-	raw, err := client.Do(ctx, "COMMAND", "INFO", args[0]).Slice()
-	if err != nil || len(raw) != 1 {
-		return nil
-	}
-	entry := redisCommandEntry(raw[0])
-	if entry == nil {
-		return nil
-	}
-	if redisContainers[strings.ToUpper(args[0])] && len(args) > 1 {
-		want := strings.ToLower(args[0] + "|" + args[1])
-		for i := range entry.subs {
-			if strings.ToLower(entry.subs[i].Name) == want {
-				return &entry.subs[i].RedisCommandFlags
-			}
-		}
-	}
-	return &entry.RedisCommandFlags
-}
-
 type redisCommandEntryT struct {
 	RedisCommandFlags
 	subs []redisCommandEntryT
@@ -769,9 +741,12 @@ func redisCommandEntry(v any) *redisCommandEntryT {
 // RedisReply is a reply as a tree, so a page can draw a nested answer without
 // knowing which command produced it.
 //
-// Type is one of nil, string, integer, double, boolean, bignumber, array, map
-// and error. An integer too large for a JavaScript number, a double that is
-// not finite and a bignumber all carry their value as text.
+// Type is one of nil, status, string, integer, double, boolean, bignumber,
+// array, map and error. A status is the short acknowledgement — OK, PONG,
+// QUEUED — as opposed to a string of data. An integer too large for a
+// JavaScript number, a double that is not finite and a bignumber all carry
+// their value as text. A map keeps its entries in the order the server sent
+// them.
 type RedisReply struct {
 	Type    string
 	Value   any
@@ -817,89 +792,6 @@ func (r RedisReply) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// redisReplyBudget bounds what one reply may send to a browser. LRANGE 0 -1
-// on a list of ten million is a legitimate command and an illegitimate page.
-type redisReplyBudget struct {
-	nodes     int
-	bytes     int
-	truncated bool
-}
-
-const (
-	redisReplyMaxNodes  = 10000
-	redisReplyMaxBytes  = 2 << 20
-	redisReplyMaxString = 256 << 10
-	// redisSafeInteger is the largest integer a JavaScript number holds
-	// exactly.
-	redisSafeInteger = 1<<53 - 1
-)
-
-func (b *redisReplyBudget) tree(v any) RedisReply {
-	b.nodes--
-	switch x := v.(type) {
-	case nil:
-		return RedisReply{Type: "nil"}
-	case string:
-		limit := redisReplyMaxString
-		if b.bytes < limit {
-			limit = b.bytes
-		}
-		if limit < 0 {
-			limit = 0
-		}
-		if len(x) > limit {
-			b.truncated = true
-			b.bytes -= limit
-			return RedisReply{Type: "string", Value: RedisBytes(redisTrimPartialRune(x[:limit])), Truncated: true, Length: len(x)}
-		}
-		b.bytes -= len(x)
-		return RedisReply{Type: "string", Value: RedisBytes(x)}
-	case int64:
-		if x > redisSafeInteger || x < -redisSafeInteger {
-			return RedisReply{Type: "integer", Value: strconv.FormatInt(x, 10)}
-		}
-		return RedisReply{Type: "integer", Value: x}
-	case float64:
-		return RedisReply{Type: "double", Value: RedisScore(x)}
-	case bool:
-		return RedisReply{Type: "boolean", Value: x}
-	case *big.Int:
-		return RedisReply{Type: "bignumber", Value: x.String()}
-	case error:
-		return RedisReply{Type: "error", Value: x.Error()}
-	case []any:
-		out := RedisReply{Type: "array", Items: make([]RedisReply, 0, min(len(x), 64))}
-		for _, item := range x {
-			if b.nodes <= 0 || b.bytes <= 0 {
-				b.truncated = true
-				out.Truncated, out.Length = true, len(x)
-				break
-			}
-			out.Items = append(out.Items, b.tree(item))
-		}
-		return out
-	case map[any]any:
-		// A Go map has no order and a reply should not change between two
-		// runs of the same command, so entries are sorted by their key.
-		keys := make([]any, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
-		}
-		sort.Slice(keys, func(i, j int) bool { return redisText(keys[i]) < redisText(keys[j]) })
-		out := RedisReply{Type: "map", Entries: make([]RedisReplyEntry, 0, min(len(keys), 64))}
-		for _, k := range keys {
-			if b.nodes <= 0 || b.bytes <= 0 {
-				b.truncated = true
-				out.Truncated, out.Length = true, len(keys)
-				break
-			}
-			out.Entries = append(out.Entries, RedisReplyEntry{Key: b.tree(k), Value: b.tree(x[k])})
-		}
-		return out
-	}
-	return RedisReply{Type: "string", Value: RedisBytes(fmt.Sprint(v))}
-}
-
 // RedisCommandResult is one console command, run.
 type RedisCommandResult struct {
 	RedisVerdict
@@ -909,34 +801,6 @@ type RedisCommandResult struct {
 	Reply RedisReply `json:"reply"`
 	// Truncated says the reply was larger than the console shows.
 	Truncated bool `json:"truncated"`
-}
-
-// RedisRunCommand sends one already-classified command and reads its reply.
-//
-// An error reply from the server — a wrong type, a syntax error — is a result
-// and comes back as a reply of type error. The error this returns is the
-// other kind: the command never got an answer.
-func RedisRunCommand(ctx context.Context, client *redis.Client, args []string) (RedisReply, bool, time.Duration, error) {
-	argv := make([]any, len(args))
-	for i, a := range args {
-		argv[i] = a
-	}
-	started := time.Now()
-	raw, err := client.Do(ctx, argv...).Result()
-	elapsed := time.Since(started)
-	budget := &redisReplyBudget{nodes: redisReplyMaxNodes, bytes: redisReplyMaxBytes}
-	if err != nil {
-		var replied redis.Error
-		switch {
-		case errors.Is(err, redis.Nil):
-			return RedisReply{Type: "nil"}, false, elapsed, nil
-		case errors.As(err, &replied):
-			return RedisReply{Type: "error", Value: RedisExplainError(ctx, client, err).Error()}, false, elapsed, nil
-		}
-		return RedisReply{}, false, elapsed, err
-	}
-	reply := budget.tree(raw)
-	return reply, budget.truncated, elapsed, nil
 }
 
 // RedisCommandRef is one command of the reference a console completes from.

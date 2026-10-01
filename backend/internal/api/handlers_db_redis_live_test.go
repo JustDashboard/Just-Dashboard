@@ -999,6 +999,17 @@ func TestLiveAPIRedisSentinelIsNamedAsOne(t *testing.T) {
 	} {
 		wantStatus(t, redisDo(t, h, id, rt), 400, "sentinel_endpoint", rt.method+" "+rt.path)
 	}
+	// The console still reaches it — it has commands of its own — and a key
+	// command's refusal is the sentence, not "unknown command".
+	var res dbx.RedisCommandResult
+	call(t, h, id, http.MethodPost, "/redis/command", `{"command":"GET k"}`, &res)
+	if res.Reply.Type != "error" || !strings.Contains(fmt.Sprint(res.Reply.Value), "Sentinel") {
+		t.Errorf("GET on a sentinel = %+v", res.Reply)
+	}
+	call(t, h, id, http.MethodPost, "/redis/command", `{"command":"PING"}`, &res)
+	if res.Reply.Type != "status" || res.Reply.Value != "PONG" {
+		t.Errorf("PING on a sentinel = %+v", res.Reply)
+	}
 	// What a sentinel can answer about itself, it does.
 	for _, path := range []string{"/redis/clients", "/redis/config", "/redis/slowlog", "/redis/latency", "/redis/commands", "/stats", "/schemas"} {
 		if rec := call(t, h, id, http.MethodGet, path, "", nil); rec.Code != http.StatusOK {

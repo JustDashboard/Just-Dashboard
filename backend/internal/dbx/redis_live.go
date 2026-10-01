@@ -1,7 +1,6 @@
 package dbx
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -49,59 +48,28 @@ const (
 // It speaks the protocol itself rather than through the client library. The
 // library's MONITOR borrows a pooled connection and polls it from a goroutine
 // nothing joins; this needs the opposite — one connection, owned here, closed
-// the moment the context is — and the whole exchange is three commands.
+// the moment the context is — and the whole exchange is two commands.
 func RedisMonitor(ctx context.Context, dsn string, emit func(RedisMonitorEvent)) error {
-	opt, err := redisOptions(dsn)
+	wire, err := redisDial(ctx, dsn)
 	if err != nil {
 		return err
 	}
-	opt.DialTimeout = 8 * time.Second
-	network := opt.Network
-	if network == "" {
-		network = "tcp"
-	}
-	conn, err := redis.NewDialer(opt)(ctx, network, opt.Addr)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	// A read blocked on a quiet server never sees the context end. Closing
-	// the connection is what wakes it.
-	stop := context.AfterFunc(ctx, func() { conn.Close() })
-	defer stop()
-
-	rd := bufio.NewReaderSize(conn, 64<<10)
-	command := func(args ...string) error {
-		conn.SetDeadline(time.Now().Add(8 * time.Second))
-		if _, err := conn.Write(redisEncodeCommand(args)); err != nil {
-			return err
-		}
-		line, _, err := redisReadLine(rd, redisMonitorMaxLine)
-		if err != nil {
-			return err
-		}
-		if strings.HasPrefix(line, "-") {
-			return errors.New(strings.TrimPrefix(line, "-"))
-		}
-		return nil
-	}
-	// A named user authenticates even with no password, or the feed would
-	// run as the default user instead of the one the connection is for.
-	if opt.Username != "" || opt.Password != "" {
-		auth := []string{"AUTH", opt.Password}
-		if opt.Username != "" {
-			auth = []string{"AUTH", opt.Username, opt.Password}
-		}
-		if err := command(auth...); err != nil {
-			return redisLiveError(ctx, err)
-		}
-	}
-	if err := command("MONITOR"); err != nil {
+	defer wire.close()
+	if err := wire.authenticate(); err != nil {
 		return redisLiveError(ctx, err)
 	}
-	conn.SetDeadline(time.Time{})
+	started, err := wire.ask("MONITOR")
+	if err != nil {
+		return redisLiveError(ctx, err)
+	}
+	if started.Type == "error" {
+		return errors.New(redisText(started.Value))
+	}
+	// From here the server talks and this side only listens, for as long as
+	// the context lasts.
+	wire.conn.SetDeadline(time.Time{})
 	for {
-		line, truncated, err := redisReadLine(rd, redisMonitorMaxLine)
+		line, truncated, err := redisReadLine(wire.rd, redisMonitorMaxLine)
 		if err != nil {
 			return redisLiveError(ctx, err)
 		}
@@ -121,51 +89,6 @@ func redisLiveError(ctx context.Context, err error) error {
 		return nil
 	}
 	return err
-}
-
-// redisEncodeCommand writes a command as a RESP array of bulk strings.
-func redisEncodeCommand(args []string) []byte {
-	var out []byte
-	out = append(out, '*')
-	out = strconv.AppendInt(out, int64(len(args)), 10)
-	out = append(out, '\r', '\n')
-	for _, a := range args {
-		out = append(out, '$')
-		out = strconv.AppendInt(out, int64(len(a)), 10)
-		out = append(out, '\r', '\n')
-		out = append(out, a...)
-		out = append(out, '\r', '\n')
-	}
-	return out
-}
-
-// redisReadLine reads one CRLF-terminated line, keeping at most max bytes of
-// it. A MONITOR line carries its command's arguments whole, so a client
-// writing a hundred-megabyte value produces a hundred-megabyte line; the rest
-// is read and dropped.
-func redisReadLine(rd *bufio.Reader, max int) (string, bool, error) {
-	var (
-		line      []byte
-		truncated bool
-	)
-	for {
-		part, err := rd.ReadSlice('\n')
-		if room := max - len(line); room > 0 {
-			if len(part) > room {
-				part, truncated = part[:room], true
-			}
-			line = append(line, part...)
-		} else if len(part) > 0 {
-			truncated = true
-		}
-		if err == bufio.ErrBufferFull {
-			continue
-		}
-		if err != nil {
-			return "", false, err
-		}
-		return strings.TrimRight(string(line), "\r\n"), truncated, nil
-	}
 }
 
 // parseRedisMonitorLine reads

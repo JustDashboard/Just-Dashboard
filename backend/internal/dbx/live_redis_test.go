@@ -522,6 +522,134 @@ func TestLiveRedisPagesInsideLargeKeys(t *testing.T) {
 	}
 }
 
+// A member is as large as whoever wrote it made it. A page carries the start
+// of a long one and says how long it really is, never the megabytes — and
+// never at the cost of a member going unseen.
+func TestLiveRedisLongMembersAreCutNotLost(t *testing.T) {
+	client, _ := redisTestClient(t, "JD_TEST_REDIS_DSN")
+	ctx := context.Background()
+	p := redisTestPrefix + "wide:"
+	big := strings.Repeat("v", 300<<10)
+
+	pipe := client.Pipeline()
+	pipe.HSet(ctx, p+"h", "small", "x", "big", big)
+	pipe.RPush(ctx, p+"l", "first", big, "last")
+	pipe.SAdd(ctx, p+"s", "small", big)
+	pipe.ZAdd(ctx, p+"z", redis.Z{Score: 1, Member: big}, redis.Z{Score: 2, Member: "small"})
+	pipe.XAdd(ctx, &redis.XAddArgs{Stream: p + "x", ID: "1-0", Values: []string{"blob", big, "n", "1"}})
+	pipe.XAdd(ctx, &redis.XAddArgs{Stream: p + "x", ID: "2-0", Values: []string{"n", "2"}})
+	if _, err := pipe.Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cut := func(what string, r RedisRow) {
+		t.Helper()
+		if !r.Truncated || r.Bytes == nil || *r.Bytes != int64(len(big)) || r.Value == nil || len(*r.Value) != redisMaxMemberBytes {
+			size := int64(-1)
+			if r.Bytes != nil {
+				size = *r.Bytes
+			}
+			t.Errorf("%s: truncated=%v bytes=%d kept=%d", what, r.Truncated, size, len(*r.Value))
+		}
+	}
+	whole := func(what string, r RedisRow, want string) {
+		t.Helper()
+		if r.Truncated || r.Bytes != nil || r.Value == nil || string(*r.Value) != want {
+			t.Errorf("%s = %+v, want %q whole", what, r, want)
+		}
+	}
+
+	hash := map[string]RedisRow{}
+	for _, r := range allMembers(t, client, RedisMembersOptions{Key: RedisBytes(p + "h")}) {
+		hash[string(*r.Field)] = r
+	}
+	cut("hash value", hash["big"])
+	whole("hash value", hash["small"], "x")
+
+	list := allMembers(t, client, RedisMembersOptions{Key: RedisBytes(p + "l")})
+	if len(list) != 3 {
+		t.Fatalf("list rows = %d", len(list))
+	}
+	whole("list head", list[0], "first")
+	cut("list element", list[1])
+	whole("list tail", list[2], "last")
+	// And from the other end, with its positions still counted from the head.
+	back := allMembers(t, client, RedisMembersOptions{Key: RedisBytes(p + "l"), Desc: true})
+	if len(back) != 3 || *back[0].Index != 2 || *back[2].Index != 0 {
+		t.Fatalf("list read backwards = %+v", back)
+	}
+	whole("list tail", back[0], "last")
+	cut("list element", back[1])
+
+	set := allMembers(t, client, RedisMembersOptions{Key: RedisBytes(p + "s")})
+	if len(set) != 2 {
+		t.Fatalf("set rows = %d", len(set))
+	}
+	for _, r := range set {
+		if len(*r.Value) == 5 {
+			whole("set member", r, "small")
+		} else {
+			cut("set member", r)
+		}
+	}
+
+	zset := allMembers(t, client, RedisMembersOptions{Key: RedisBytes(p + "z")})
+	if len(zset) != 2 || float64(*zset[0].Score) != 1 || float64(*zset[1].Score) != 2 {
+		t.Fatalf("zset rows = %+v", len(zset))
+	}
+	cut("sorted-set member", zset[0])
+	whole("sorted-set member", zset[1], "small")
+
+	stream := allMembers(t, client, RedisMembersOptions{Key: RedisBytes(p + "x")})
+	if len(stream) != 2 || !stream[0].Truncated || stream[1].Truncated {
+		t.Fatalf("stream rows: %d, cut %v %v", len(stream), stream[0].Truncated, stream[1].Truncated)
+	}
+	if f := stream[0].Fields; len(f) != 2 || len(f[0][1]) != redisMaxMemberBytes || f[1][0] != "n" || f[1][1] != "1" {
+		t.Errorf("the entry with a long field = %d pairs", len(f))
+	}
+
+	// A hash whose values, even cut, add up to more than one reply may keep.
+	// Every field still arrives, over however many pages that takes.
+	wide := client.Pipeline()
+	const fields = 400
+	for i := 0; i < fields; i++ {
+		wide.HSet(ctx, p+"many", fmt.Sprintf("f%04d", i), strings.Repeat("w", redisMaxMemberBytes))
+	}
+	if _, err := wide.Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, r := range allMembers(t, client, RedisMembersOptions{Key: RedisBytes(p + "many"), Count: redisMaxPageRows}) {
+		if len(*r.Value) != redisMaxMemberBytes || r.Truncated {
+			t.Fatalf("field %s came back as %d bytes, cut=%v", *r.Field, len(*r.Value), r.Truncated)
+		}
+		seen[string(*r.Field)] = true
+	}
+	if len(seen) != fields {
+		t.Errorf("%d of %d fields arrived", len(seen), fields)
+	}
+	// The same for a list, which is read by position.
+	elements := make([]any, 300)
+	for i := range elements {
+		elements[i] = fmt.Sprintf("%05d", i) + strings.Repeat("e", redisMaxMemberBytes-5)
+	}
+	client.RPush(ctx, p+"longlist", elements...)
+	for _, desc := range []bool{false, true} {
+		rows := allMembers(t, client, RedisMembersOptions{Key: RedisBytes(p + "longlist"), Count: redisMaxPageRows, Desc: desc})
+		if len(rows) != len(elements) {
+			t.Fatalf("desc=%v: %d of %d elements arrived", desc, len(rows), len(elements))
+		}
+		for i, r := range rows {
+			at := i
+			if desc {
+				at = len(elements) - 1 - i
+			}
+			if *r.Index != int64(at) || !strings.HasPrefix(string(*r.Value), fmt.Sprintf("%05d", at)) {
+				t.Fatalf("desc=%v: row %d is position %d holding %.5s", desc, i, *r.Index, *r.Value)
+			}
+		}
+	}
+}
+
 func TestLiveRedisStringChunks(t *testing.T) {
 	client, _ := redisTestClient(t, "JD_TEST_REDIS_DSN")
 	ctx := context.Background()
@@ -1044,24 +1172,44 @@ func TestLiveRedisDatabaseSelection(t *testing.T) {
 	}
 }
 
+// redisTestRun runs one console line on a connection of its own, as the
+// console does.
+func redisTestRun(t *testing.T, dsn, line string) (RedisReply, bool) {
+	t.Helper()
+	args, err := RedisParseCommand(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	console, err := RedisConsoleOpen(context.Background(), dsn, RedisDSNDatabase, 10*time.Second)
+	if err != nil {
+		t.Fatalf("%s: %v", line, err)
+	}
+	defer console.Close()
+	reply, truncated, elapsed, err := console.Run(args)
+	if err != nil {
+		t.Fatalf("%s: %v", line, err)
+	}
+	if elapsed <= 0 {
+		t.Errorf("%s took %v", line, elapsed)
+	}
+	return reply, truncated
+}
+
 func TestLiveRedisConsole(t *testing.T) {
-	client, _ := redisTestClient(t, "JD_TEST_REDIS_DSN")
+	client, dsn := redisTestClient(t, "JD_TEST_REDIS_DSN")
 	ctx := context.Background()
 	key := redisTestPrefix + "console"
 	run := func(line string) RedisReply {
 		t.Helper()
-		args, err := RedisParseCommand(line)
-		if err != nil {
-			t.Fatal(err)
-		}
-		reply, _, _, err := RedisRunCommand(ctx, client, args)
-		if err != nil {
-			t.Fatalf("%s: %v", line, err)
-		}
+		reply, _ := redisTestRun(t, dsn, line)
 		return reply
 	}
-	if r := run("SET " + key + ` "two words"`); r.Type != "string" || r.Value != RedisBytes("OK") {
+	if r := run("SET " + key + ` "two words"`); r.Type != "status" || r.Value != "OK" {
 		t.Errorf("SET = %+v", r)
+	}
+	// It ran in the database the connection string names.
+	if client.Get(ctx, key).Val() != "two words" {
+		t.Error("the console's SET is not in the connection string's database")
 	}
 	if r := run("GET " + key); r.Value != RedisBytes("two words") {
 		t.Errorf("GET = %+v", r)
@@ -1085,16 +1233,53 @@ func TestLiveRedisConsole(t *testing.T) {
 	if r := run("NOSUCHCOMMAND"); r.Type != "error" {
 		t.Errorf("an unknown command = %+v", r)
 	}
+	// Bytes that are not text come back as the bytes they are.
+	client.Set(ctx, key+":bin", "\xff\x00\xfe", time.Minute)
+	if r := run("GET " + key + ":bin"); r.Value != RedisBytes("\xff\x00\xfe") {
+		t.Errorf("a binary value = %+v", r)
+	}
+	if r := run(`SET ` + key + `:typed "\xff\x00"`); r.Type != "status" || client.Get(ctx, key+":typed").Val() != "\xff\x00" {
+		t.Errorf("a value typed with \\x escapes was stored as %q", client.Get(ctx, key+":typed").Val())
+	}
+	// A reply longer than a page shows is cut, and says how long it was.
+	members := make([]any, 25000)
+	for i := range members {
+		members[i] = i
+	}
+	client.RPush(ctx, key+":long", members...)
+	long, truncated := redisTestRun(t, dsn, "LRANGE "+key+":long 0 -1")
+	if !truncated || !long.Truncated || long.Length != 25000 || len(long.Items) == 0 || len(long.Items) >= 25000 {
+		t.Errorf("a long reply: truncated=%v/%v length=%d items=%d", truncated, long.Truncated, long.Length, len(long.Items))
+	}
+	client.Set(ctx, key+":big", strings.Repeat("v", redisReplyMaxString*8), time.Minute)
+	big, truncated := redisTestRun(t, dsn, "GET "+key+":big")
+	if !truncated || !big.Truncated || big.Length != redisReplyMaxString*8 || len(big.Value.(RedisBytes)) != redisReplyMaxString {
+		t.Errorf("a long value: truncated=%v length=%d", truncated, big.Length)
+	}
 
-	flags := RedisCommandLookup(ctx, client, []string{"set", key, "v"})
+	console, err := RedisConsoleOpen(ctx, dsn, RedisDSNDatabase, 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer console.Close()
+	if console.DB() != client.Options().DB {
+		t.Errorf("the console is on database %d, want %d", console.DB(), client.Options().DB)
+	}
+	flags := console.Lookup([]string{"set", key, "v"})
 	if flags == nil || flags.FirstKey != 1 {
 		t.Fatalf("COMMAND INFO set = %+v", flags)
 	}
 	if got := RedisCommandKeys([]string{"SET", key, "v"}, flags); len(got) != 1 || string(got[0]) != key {
 		t.Errorf("keys of SET = %q", got)
 	}
-	if RedisCommandLookup(ctx, client, []string{"nosuchcommand"}) != nil {
+	if console.Lookup([]string{"nosuchcommand"}) != nil {
 		t.Error("the server described a command it does not have")
+	}
+	if sub := console.Lookup([]string{"CONFIG", "SET", "x", "y"}); sub == nil {
+		t.Error("the server did not describe CONFIG SET")
+	}
+	if _, err := RedisConsoleOpen(ctx, "redis://127.0.0.1:1/0", RedisDSNDatabase, time.Second); err == nil {
+		t.Error("a console opened on an address nothing listens on")
 	}
 
 	refs, err := RedisCommandReference(ctx, client, nil)
@@ -2029,6 +2214,27 @@ func TestLiveRedisFlavors(t *testing.T) {
 				t.Errorf("%d documented commands with commandDocs=%v", documented, f.CommandDocs)
 			}
 
+			// The console speaks to each of them directly, in whichever
+			// protocol the server has.
+			if r, _ := redisTestRun(t, dsn, "PING"); r.Type != "status" || r.Value != "PONG" {
+				t.Errorf("console PING = %+v", r)
+			}
+			if r, _ := redisTestRun(t, dsn, "LRANGE "+p+"l 0 -1"); r.Type != "array" || len(r.Items) != 2 || r.Items[0].Value != RedisBytes("a") {
+				t.Errorf("console LRANGE = %+v", r)
+			}
+			if r, _ := redisTestRun(t, dsn, "LLEN "+p+"l"); r.Type != "integer" || r.Value != int64(2) {
+				t.Errorf("console LLEN = %+v", r)
+			}
+			if r, _ := redisTestRun(t, dsn, "GET "+p+"nothing"); r.Type != "nil" {
+				t.Errorf("console GET of a missing key = %+v", r)
+			}
+			if r, _ := redisTestRun(t, dsn, "LPUSH "+p+"s x"); r.Type != "error" {
+				t.Errorf("console wrong-type command = %+v", r)
+			}
+			if r, _ := redisTestRun(t, dsn, "HGETALL "+p+"x-not-there"); r.Type != "map" && r.Type != "array" {
+				t.Errorf("console HGETALL = %+v", r)
+			}
+
 			if f.JSON {
 				mustWrite(t, client, RedisWrite{Key: RedisBytes(p + "j"), Type: "json", Value: rb(`{"a":{"b":[1,2,3]},"n":1}`), Create: true})
 				doc, err := RedisReadMembers(ctx, client, profile, RedisMembersOptions{Key: RedisBytes(p + "j"), Path: "$.a.b"})
@@ -2108,6 +2314,9 @@ func TestLiveRedisClusterNodeAndSentinel(t *testing.T) {
 		_, err = RedisKeyMetadata(ctx, client, nil, "somewhere-else")
 		if err != nil && !strings.Contains(err.Error(), "Cluster") && !errors.Is(err, ErrRedisKeyNotFound) {
 			t.Errorf("a key on another node: %v", err)
+		}
+		if r, _ := redisTestRun(t, os.Getenv("JD_TEST_REDIS_CLUSTER_DSN"), "GET somewhere-else"); r.Type == "error" && !strings.Contains(redisText(r.Value), "Cluster") {
+			t.Errorf("the console's GET of a key on another node = %+v", r)
 		}
 	})
 

@@ -10,7 +10,6 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
-	"github.com/redis/go-redis/v9"
 )
 
 // The Redis console.
@@ -44,7 +43,7 @@ type redisConsoleLine struct {
 	dsn     string
 	args    []string
 	db      int
-	client  *redis.Client
+	console *dbx.RedisConsole
 	flags   *dbx.RedisCommandFlags
 	verdict dbx.RedisVerdict
 }
@@ -87,21 +86,19 @@ func (s *Server) redisConsole(r *http.Request) (*redisConsoleLine, error) {
 // is the rest of the classification; for one it does, the answer can only
 // make the verdict stricter, and never as far as needing another capability.
 func (l *redisConsoleLine) connect(r *http.Request) error {
-	client, err := dbx.RedisOpen(r.Context(), l.dsn, dbx.RedisOpenOptions{DB: l.db, ReadTimeout: redisCommandTimeout})
+	console, err := dbx.RedisConsoleOpen(r.Context(), l.dsn, l.db, redisCommandTimeout)
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
 	}
-	l.client, l.db = client, client.Options().DB
-	ctx, cancel := timeoutCtx(r, 15*time.Second)
-	defer cancel()
-	l.flags = dbx.RedisCommandLookup(ctx, client, l.args)
+	l.console, l.db = console, console.DB()
+	l.flags = console.Lookup(l.args)
 	l.verdict = dbx.RedisClassify(l.args, l.flags)
 	return nil
 }
 
 func (l *redisConsoleLine) close() {
-	if l.client != nil {
-		l.client.Close()
+	if l.console != nil {
+		l.console.Close()
 	}
 }
 
@@ -213,9 +210,7 @@ func (s *Server) handleRedisCommand(w http.ResponseWriter, r *http.Request) erro
 		}
 	}
 
-	ctx, cancel := timeoutCtx(r, redisCommandTimeout+5*time.Second)
-	defer cancel()
-	reply, truncated, elapsed, err := dbx.RedisRunCommand(ctx, line.client, line.args)
+	reply, truncated, elapsed, err := line.console.Run(line.args)
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}

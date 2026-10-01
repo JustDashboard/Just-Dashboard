@@ -481,6 +481,11 @@ func RedisGet(ctx context.Context, client *redis.Client, key string) (*RedisValu
 		return nil, fmt.Errorf("unsupported Redis type %q", page.Type)
 	}
 	v := &RedisValue{Key: page.Key, Type: page.Type, TTL: page.TTL, Length: page.Length, Truncated: !page.Done}
+	for _, r := range page.Rows {
+		// This shape has nowhere to say which member was cut short, only that
+		// what it carries is not all there is.
+		v.Truncated = v.Truncated || r.Truncated
+	}
 	switch page.Type {
 	case "string":
 		v.String = page.String.Value
