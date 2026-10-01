@@ -106,6 +106,8 @@ describe("what an engine is", () => {
       })
       expect(engineOf(name)).toMatchObject({ id: name.toLowerCase(), driver: "", label: name })
       expect(engineOf(name).sections).toEqual([])
+      // Nor a product with artwork: the tile keeps the database glyph.
+      expect(engineOf(name).logo).toBeUndefined()
       expect(engineOf("postgres").can(name)).toBe(false)
     }
   })
