@@ -182,6 +182,53 @@ func TestSQLiteCatalogListsWhatTheFileHolds(t *testing.T) {
 	}
 }
 
+// SQLite's estimate is what ANALYZE last wrote down, and there is none until
+// it has run.
+func TestSQLiteRowEstimatesAreTheAnalysedCounts(t *testing.T) {
+	db := catalogSQLite(t)
+	ctx := context.Background()
+	estimate := func(table string) (listed, described int64) {
+		t.Helper()
+		catalog, err := ReadCatalog(ctx, db, DriverSQLite, CatalogOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := catObject(catalog.Objects[GroupTables], table)
+		if o == nil || o.Rows == nil {
+			t.Fatalf("%s is not listed with an estimate: %+v", table, o)
+		}
+		detail, err := DescribeTable(ctx, db, DriverSQLite, "main", table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *o.Rows, detail.Rows
+	}
+	if listed, described := estimate("cat_users"); listed != -1 || described != -1 {
+		t.Errorf("before ANALYZE: listed %d, described %d", listed, described)
+	}
+	for _, s := range []string{
+		`INSERT INTO cat_users(email, name, score) VALUES ('a@x.io', 'Ann', 1), ('b@x.io', 'Bo', 2), ('c@x.io', 'Cy', 3)`,
+		`INSERT INTO cat_posts(id, author_id, title, published) VALUES (1, 1, 'One', 1), (2, 1, 'Two', 0)`,
+		`ANALYZE`,
+	} {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("%v\n%s", err, s)
+		}
+	}
+	if listed, described := estimate("cat_users"); listed != 3 || described != 3 {
+		t.Errorf("cat_users after ANALYZE: listed %d, described %d, want 3", listed, described)
+	}
+	// One of its indexes is partial and holds a single row; the estimate is the
+	// table's, taken from the index that covers every row.
+	if listed, described := estimate("cat_posts"); listed != 2 || described != 2 {
+		t.Errorf("cat_posts after ANALYZE: listed %d, described %d, want 2", listed, described)
+	}
+	// A table ANALYZE found empty has no entry, which reads as unknown.
+	if listed, _ := estimate("cat_kv"); listed != -1 {
+		t.Errorf("cat_kv after ANALYZE: listed %d", listed)
+	}
+}
+
 func TestCatalogGroupsAreBounded(t *testing.T) {
 	db, _ := openTestDB(t)
 	for i := range 7 {
@@ -225,9 +272,12 @@ func TestSQLiteTableDetailCarriesTheWholeDeclaration(t *testing.T) {
 	if shout := catColumn(t, users, "shout"); shout.Generated != "upper(name)" || shout.GeneratedKind != "stored" {
 		t.Errorf("shout = %+v", shout)
 	}
-	if len(users.Constraints) != 1 || users.Constraints[0].Type != ConstraintUnique ||
+	// The unique constraint is read from its index and the check from the
+	// CREATE TABLE text, which is the only place SQLite keeps one.
+	if len(users.Constraints) != 2 || users.Constraints[0].Type != ConstraintUnique ||
 		!reflect.DeepEqual(users.Constraints[0].Columns, []string{"email"}) ||
-		users.Constraints[0].Definition != `UNIQUE ("email")` {
+		users.Constraints[0].Definition != `UNIQUE ("email")` ||
+		!reflect.DeepEqual(users.Constraints[1], Constraint{Type: ConstraintCheck, Columns: []string{"score"}, Definition: "CHECK (score > 0)"}) {
 		t.Errorf("constraints = %+v", users.Constraints)
 	}
 	if len(users.ReferencedBy) != 1 || users.ReferencedBy[0].Table != "cat_posts" ||
@@ -567,6 +617,19 @@ func TestGeneratedCreateTableForReplayAndForReading(t *testing.T) {
 			t.Errorf("the SQL Server form is missing %q in:\n%s", want, mssql)
 		}
 	}
+
+	// A constraint with no name is written without one, not as CONSTRAINT "".
+	unnamed := renderCreateTable(sqliteDialect{}, "", "t", &TableDetail{
+		Columns: []Column{{Name: "qty", Type: "INTEGER", Nullable: true}},
+		Constraints: []Constraint{
+			{Type: ConstraintCheck, Columns: []string{"qty"}, Definition: "CHECK (qty > 0)"},
+			{Name: "qty_small", Type: ConstraintCheck, Definition: "CHECK (qty < 100)"},
+		},
+	}, false)
+	if !strings.Contains(unnamed, "\n  CHECK (qty > 0),") || !strings.Contains(unnamed, `CONSTRAINT "qty_small" CHECK (qty < 100)`) ||
+		strings.Contains(unnamed, "CONSTRAINT  ") {
+		t.Errorf("constraints were written as:\n%s", unnamed)
+	}
 }
 
 func TestPostgresTriggerTiming(t *testing.T) {
@@ -826,6 +889,63 @@ func TestSQLiteDeclarationHelpers(t *testing.T) {
 		if got := sqlitePredicate(create); got != want {
 			t.Errorf("predicate of %q = %q, want %q", create, got, want)
 		}
+	}
+}
+
+// A check constraint is found wherever it is written in the CREATE TABLE and
+// nowhere it is only mentioned.
+func TestCheckConstraintsAreReadOutOfTheCreateStatement(t *testing.T) {
+	sqlite := sqliteCheckConstraints(`CREATE TABLE "orders" (
+		id INTEGER PRIMARY KEY, -- not a CHECK (id > 0), only a comment
+		"check" TEXT DEFAULT 'CHECK (1)',
+		qty INTEGER NOT NULL CHECK (qty > 0) DEFAULT 1,
+		[unit price] REAL CONSTRAINT price_ok CHECK ([unit price] >= 0),
+		note TEXT /* CHECK (note <> '') */ CHECK(length(note) < 10, 'too long (really)'),
+		state TEXT CHECK (state IN ('new', 'it''s, done)')),
+		CONSTRAINT "totals add up" CHECK (qty * [unit price] < 1e9),
+		CHECK ( id <> qty ),
+		FOREIGN KEY (id) REFERENCES other(id)
+	) STRICT`)
+	want := []Constraint{
+		{Type: ConstraintCheck, Columns: []string{"qty"}, Definition: "CHECK (qty > 0)"},
+		{Name: "price_ok", Type: ConstraintCheck, Columns: []string{"unit price"}, Definition: "CHECK ([unit price] >= 0)"},
+		{Type: ConstraintCheck, Columns: []string{"note"}, Definition: "CHECK (length(note) < 10, 'too long (really)')"},
+		{Type: ConstraintCheck, Columns: []string{"state"}, Definition: "CHECK (state IN ('new', 'it''s, done)'))"},
+		{Name: "totals add up", Type: ConstraintCheck, Columns: []string{}, Definition: "CHECK (qty * [unit price] < 1e9)"},
+		{Type: ConstraintCheck, Columns: []string{}, Definition: "CHECK (id <> qty)"},
+	}
+	if !reflect.DeepEqual(sqlite, want) {
+		t.Errorf("SQLite checks:\n got %+v\nwant %+v", sqlite, want)
+	}
+	for _, text := range []string{
+		`CREATE VIEW v AS SELECT a, CHECK (b) FROM t`,
+		`CREATE VIRTUAL TABLE docs USING fts5(body, check (x))`,
+		`CREATE TABLE t (a, b)`,
+		``,
+	} {
+		if got := sqliteCheckConstraints(text); len(got) != 0 {
+			t.Errorf("checks read out of %q: %+v", text, got)
+		}
+	}
+
+	// ClickHouse writes a constraint's expression bare, escapes a quote with a
+	// backslash, and an array literal's commas separate nothing.
+	clickhouse := clickhouseConstraints("CREATE TABLE jd.events\n(\n    `id` UInt64,\n    `CONSTRAINT` String,\n" +
+		"    `tags` Array(String) DEFAULT ['a', 'b'],\n" +
+		"    INDEX kind_idx kind TYPE set(10) GRANULARITY 1,\n" +
+		"    CONSTRAINT mass_sane CHECK mass < 1000,\n" +
+		"    CONSTRAINT `odd name` CHECK (note != 'it\\'s, fine') AND (id IN (1, 2)),\n" +
+		"    CONSTRAINT positive ASSUME id > 0\n)\nENGINE = MergeTree\nORDER BY (kind, id)")
+	wantCH := []Constraint{
+		{Name: "mass_sane", Type: ConstraintCheck, Columns: []string{}, Definition: "CHECK mass < 1000"},
+		{Name: "odd name", Type: ConstraintCheck, Columns: []string{}, Definition: `CHECK (note != 'it\'s, fine') AND (id IN (1, 2))`},
+		{Name: "positive", Type: ConstraintCheck, Columns: []string{}, Definition: "ASSUME id > 0"},
+	}
+	if !reflect.DeepEqual(clickhouse, wantCH) {
+		t.Errorf("ClickHouse constraints:\n got %+v\nwant %+v", clickhouse, wantCH)
+	}
+	if got := clickhouseConstraints("CREATE VIEW jd.v (`id` UInt64) AS SELECT id FROM jd.events"); len(got) != 0 {
+		t.Errorf("constraints read out of a view: %+v", got)
 	}
 }
 

@@ -643,3 +643,168 @@ func sortObjects(objects []CatalogObject) {
 		return a.Signature < b.Signature
 	})
 }
+
+// --- reading a CREATE TABLE's own text ---------------------------------------
+//
+// Two engines keep a table's check constraints nowhere but in the statement it
+// was created with: SQLite, whose catalogue is that statement, and ClickHouse,
+// whose system tables list everything about a table except its constraints.
+// Listing them means reading the statement, and only as far as finding where
+// each item of its body starts and ends — what an expression says is carried
+// over as written.
+
+// quotedEnd returns the index of the character that closes the quoted region
+// opened at i, or the end of the text when nothing closes it.
+func quotedEnd(text string, i int, closer byte, backslash bool) int {
+	for i++; i < len(text); i++ {
+		switch {
+		case backslash && text[i] == '\\':
+			i++
+		case text[i] == closer:
+			if i+1 < len(text) && text[i+1] == closer {
+				i++
+				continue
+			}
+			return i
+		}
+	}
+	return len(text)
+}
+
+// commentEnd returns the index of the last character of the comment starting
+// at i, or -1 when no comment starts there.
+func commentEnd(text string, i int) int {
+	switch {
+	case strings.HasPrefix(text[i:], "--"):
+		if end := strings.IndexByte(text[i:], '\n'); end >= 0 {
+			return i + end
+		}
+		return len(text) - 1
+	case strings.HasPrefix(text[i:], "/*"):
+		if end := strings.Index(text[i+2:], "*/"); end >= 0 {
+			return i + 2 + end + 1
+		}
+		return len(text) - 1
+	}
+	return -1
+}
+
+// createTableItems splits the body of a CREATE TABLE — the first parenthesised
+// list in it — into its comma-separated items: the columns, constraints and
+// indexes. A comma inside parentheses, brackets, a quoted region or a comment
+// separates nothing.
+func createTableItems(driver Driver, createSQL string) []string {
+	quotes, backslash := fragmentQuotes(driver), backslashEscapes(driver)
+	var out []string
+	depth, start := 0, 0
+	for i := 0; i < len(createSQL); i++ {
+		c := createSQL[i]
+		if closer, ok := quotes[c]; ok {
+			i = quotedEnd(createSQL, i, closer, backslash)
+			continue
+		}
+		if end := commentEnd(createSQL, i); end >= 0 {
+			i = end
+			continue
+		}
+		switch c {
+		case '(', '[', '{':
+			if depth++; depth == 1 {
+				start = i + 1
+			}
+		case ')', ']', '}':
+			if depth--; depth == 0 {
+				return append(out, createSQL[start:i])
+			}
+		case ',':
+			if depth == 1 {
+				out = append(out, createSQL[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return out
+}
+
+// An itemToken is one top-level piece of a CREATE TABLE item. A parenthesised
+// group is a single token, so a keyword inside an expression is never mistaken
+// for one of the item's own.
+type itemToken struct {
+	kind itemTokenKind
+	// text is a word as written, a quoted name without its quotes, or the
+	// inside of a group.
+	text string
+	// end is where the token stops in the item, so what follows it can be
+	// taken as written.
+	end int
+}
+
+type itemTokenKind int
+
+const (
+	itemWord itemTokenKind = iota
+	itemQuotedName
+	itemGroup
+	itemOther
+)
+
+// keyword reports whether the token is the bare word given, in any case.
+func (t itemToken) keyword(word string) bool {
+	return t.kind == itemWord && strings.EqualFold(t.text, word)
+}
+
+func (t itemToken) name() bool { return t.kind == itemWord || t.kind == itemQuotedName }
+
+func createItemTokens(driver Driver, item string) []itemToken {
+	quotes, backslash := fragmentQuotes(driver), backslashEscapes(driver)
+	var out []itemToken
+	for i := 0; i < len(item); i++ {
+		c := item[i]
+		if closer, ok := quotes[c]; ok {
+			end := quotedEnd(item, i, closer, backslash)
+			tok := itemToken{kind: itemOther, text: item[i:min(end+1, len(item))], end: min(end+1, len(item))}
+			if c != '\'' && end < len(item) {
+				tok.kind = itemQuotedName
+				tok.text = strings.ReplaceAll(item[i+1:end], string([]byte{closer, closer}), string(closer))
+			}
+			out = append(out, tok)
+			i = end
+			continue
+		}
+		if end := commentEnd(item, i); end >= 0 {
+			i = end
+			continue
+		}
+		switch {
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+		case c == '(':
+			depth, end := 0, len(item)
+			for j := i; j < len(item); j++ {
+				if closer, ok := quotes[item[j]]; ok {
+					j = quotedEnd(item, j, closer, backslash)
+					continue
+				}
+				if item[j] == '(' {
+					depth++
+				} else if item[j] == ')' {
+					if depth--; depth == 0 {
+						end = j
+						break
+					}
+				}
+			}
+			out = append(out, itemToken{kind: itemGroup, text: item[min(i+1, end):end], end: min(end+1, len(item))})
+			i = end
+		case isASCIILetter(c) || isASCIIDigit(c) || c == '_' || c >= 0x80:
+			start := i
+			for i < len(item) && (isASCIILetter(item[i]) || isASCIIDigit(item[i]) || item[i] == '_' || item[i] == '$' || item[i] >= 0x80) {
+				i++
+			}
+			out = append(out, itemToken{kind: itemWord, text: item[start:i], end: i})
+			i--
+		default:
+			out = append(out, itemToken{kind: itemOther, text: string(c), end: i + 1})
+		}
+	}
+	return out
+}

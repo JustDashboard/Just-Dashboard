@@ -100,7 +100,94 @@ func (d oracleDialect) catalogGroups(context.Context, *sql.DB) []catalogGroup {
 	}
 }
 
+// oracleSize is the space behind one table: its own segments and its LOBs',
+// and its indexes'.
+type oracleSize struct{ data, index int64 }
+
+// oracleTableSizes reads how much space the tables of a schema take — or one
+// of them, when table is named — from the segments behind them.
+//
+// Oracle has no ALL_SEGMENTS. A login sees its own segments in USER_SEGMENTS
+// and anyone's only in DBA_SEGMENTS, which takes a grant an application login
+// rarely holds. So this answers from the DBA view where it can be read and for
+// the login's own tables where it cannot, and a table it has no answer for has
+// no size rather than a size of nothing. A table that holds no row yet has no
+// segment either, and reads the same way.
+func oracleTableSizes(ctx context.Context, db *sql.DB, schema, table string) map[catalogTable]oracleSize {
+	query := func(segments string) (string, []any) {
+		// Every placeholder is an argument of its own to this driver, so each
+		// use of the schema and the table is bound again.
+		var args []any
+		is := func(column, value string) string {
+			args = append(args, value)
+			return column + ` = :` + itoa(len(args))
+		}
+		in := func(owner, name string) string {
+			cond := owner + ` NOT IN (` + oracleSystemOwners + `)`
+			if strings.TrimSpace(schema) != "" {
+				cond = is(owner, schema)
+			}
+			if table != "" {
+				cond += ` AND ` + is(name, table)
+			}
+			return cond
+		}
+		// Tables and indexes are named in separate namespaces, so a segment is
+		// matched by its kind as well as its name.
+		text := `
+		  SELECT x.owner, x.table_name, x.kind, SUM(s.bytes)
+		  FROM (
+		    SELECT t.owner, t.table_name AS segment_name, t.table_name, 'T' AS kind
+		    FROM all_tables t WHERE ` + in("t.owner", "t.table_name") + `
+		    UNION ALL
+		    SELECT l.owner, l.segment_name, l.table_name, 'L'
+		    FROM all_lobs l WHERE ` + in("l.owner", "l.table_name") + `
+		    UNION ALL
+		    SELECT i.owner, i.index_name, i.table_name, 'I'
+		    FROM all_indexes i WHERE i.owner = i.table_owner AND ` + in("i.table_owner", "i.table_name") + `
+		  ) x
+		  JOIN ` + segments + ` s ON s.owner = x.owner AND s.segment_name = x.segment_name AND (
+		       (x.kind = 'T' AND s.segment_type LIKE 'TABLE%')
+		    OR (x.kind = 'L' AND s.segment_type LIKE 'LOB%' AND s.segment_type <> 'LOBINDEX')
+		    OR (x.kind = 'I' AND (s.segment_type LIKE 'INDEX%' OR s.segment_type = 'LOBINDEX')))
+		  GROUP BY x.owner, x.table_name, x.kind`
+		return text, args
+	}
+	read := func(segments string) (map[catalogTable]oracleSize, error) {
+		text, args := query(segments)
+		rows, err := db.QueryContext(ctx, text, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := map[catalogTable]oracleSize{}
+		for rows.Next() {
+			var owner, name, kind string
+			var bytes int64
+			if err := rows.Scan(&owner, &name, &kind, &bytes); err != nil {
+				return nil, err
+			}
+			key := catalogTable{owner, name}
+			size := out[key]
+			if kind == "I" {
+				size.index += bytes
+			} else {
+				size.data += bytes
+			}
+			out[key] = size
+		}
+		return out, rows.Err()
+	}
+	if sizes, err := read(`dba_segments`); err == nil {
+		return sizes
+	}
+	sizes, _ := read(`(SELECT SYS_CONTEXT('USERENV','SESSION_USER') AS owner, u.segment_name, u.segment_type, u.bytes
+		    FROM user_segments u)`)
+	return sizes
+}
+
 func (oracleDialect) tables(ctx context.Context, db *sql.DB, schema string, limit int) ([]CatalogObject, error) {
+	sizes := oracleTableSizes(ctx, db, schema, "")
 	// A materialized view's container is a row in ALL_TABLES too, and a
 	// dropped table lingers in the recycle bin under a BIN$ name; neither is a
 	// table anyone created.
@@ -123,6 +210,8 @@ func (oracleDialect) tables(ctx context.Context, db *sql.DB, schema string, limi
 			return o, err
 		}
 		o.Rows = rowEstimate(estimate)
+		size := sizes[catalogTable{o.Schema, o.Name}]
+		o.Size = size.data + size.index
 		switch {
 		case partitioned == "YES":
 			o.Detail = TableTypePartitioned
@@ -291,6 +380,8 @@ func (oracleDialect) tableColumns(ctx context.Context, db *sql.DB, schema, table
 	                WHEN c.data_type = 'RAW' THEN '(' || c.data_length || ')'
 	                WHEN c.data_type = 'NUMBER' AND c.data_precision IS NOT NULL
 	                THEN '(' || c.data_precision || ',' || NVL(c.data_scale,0) || ')'
+	                WHEN c.data_type = 'FLOAT' AND c.data_precision < 126
+	                THEN '(' || c.data_precision || ')'
 	                ELSE '' END,
 	         c.nullable, c.data_default, c.column_id, c.identity_column, c.virtual_column,
 	         cm.comments, ic.generation_type
@@ -569,6 +660,9 @@ func (oracleDialect) tableFacts(ctx context.Context, db *sql.DB, schema, table s
 	detail.Rows = rows
 	if partitioned == "YES" {
 		detail.Type = TableTypePartitioned
+	}
+	if size, ok := oracleTableSizes(ctx, db, owner, table)[catalogTable{owner, table}]; ok {
+		detail.DataSize, detail.IndexSize, detail.Size = size.data, size.index, size.data+size.index
 	}
 	temp := ""
 	if temporary == "Y" {

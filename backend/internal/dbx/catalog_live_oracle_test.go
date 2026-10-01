@@ -31,6 +31,9 @@ func TestLiveOracleCatalogAndStructureChanges(t *testing.T) {
 		`DROP TABLE "JD_CAT_USERS" CASCADE CONSTRAINTS PURGE`, `DROP TABLE "JD_CAT_MADE" CASCADE CONSTRAINTS PURGE`,
 		`DROP TABLE "JD_CAT_MADE2" CASCADE CONSTRAINTS PURGE`,
 		`DROP SEQUENCE "JD_CAT_SEQ"`, `DROP TYPE "JD_CAT_PAIR"`,
+		// A table dropped through a plan goes to the recycle bin; this takes
+		// the test's own out of it and leaves anyone else's.
+		`PURGE TABLE "JD_CAT_MADE2"`,
 	}
 	// Oracle has no DROP … IF EXISTS before 23ai, so a drop of what is not
 	// there is expected to fail and is not a reason to stop.
@@ -116,8 +119,9 @@ func TestLiveOracleCatalogAndStructureChanges(t *testing.T) {
 		if own == nil || own.System || !own.Default || own.Tables != -1 || system == nil || !system.System {
 			t.Errorf("schemas: own = %+v, SYS = %+v", own, system)
 		}
+		// The size is the login's own segments: the table's and its two indexes'.
 		if users := catObject(catalog.Objects[GroupTables], "JD_CAT_USERS"); users == nil || users.Comment != "People" ||
-			users.Rows == nil || users.Schema != schema {
+			users.Rows == nil || users.Schema != schema || users.Size <= 0 {
 			t.Errorf("users = %+v", users)
 		}
 		// A materialized view's container is a table to Oracle and not to
@@ -175,6 +179,9 @@ func TestLiveOracleCatalogAndStructureChanges(t *testing.T) {
 		if users.Type != TableTypeTable || users.Comment != "People" || users.Schema != schema || users.Owner != schema ||
 			!reflect.DeepEqual(users.PrimaryKey, []string{"ID"}) {
 			t.Errorf("users = %+v", users)
+		}
+		if users.DataSize <= 0 || users.IndexSize <= 0 || users.Size != users.DataSize+users.IndexSize {
+			t.Errorf("users takes %d bytes: %d of rows, %d of indexes", users.Size, users.DataSize, users.IndexSize)
 		}
 		if c := catColumn(t, users, "ID"); c.Identity != "by default" || c.Key != "PRI" || c.Type != "NUMBER(10,0)" || c.Default != "" {
 			t.Errorf("ID = %+v", c)
@@ -392,6 +399,7 @@ func TestLiveOracleCatalogAndStructureChanges(t *testing.T) {
 			{Name: "ID", Type: "NUMBER(10)", PrimaryKey: true, NotNull: true},
 			{Name: "LABEL", Type: "VARCHAR2(40 CHAR)"},
 			{Name: "PRICE", Type: "NUMBER(18,2)", NotNull: true, Default: "0"},
+			{Name: "RATIO", Type: "FLOAT(53)"},
 		}))
 		run(PlanAddColumn(d, schema, "JD_CAT_MADE", NewColumn{Name: "SEEN", Type: "TIMESTAMP(6) WITH TIME ZONE", NotNull: true, Default: "SYSTIMESTAMP"}))
 		made := describe("JD_CAT_MADE")
@@ -401,10 +409,15 @@ func TestLiveOracleCatalogAndStructureChanges(t *testing.T) {
 		if c := catColumn(t, made, "SEEN"); !strings.HasPrefix(c.Type, "TIMESTAMP(6) WITH TIME ZONE") || c.Nullable {
 			t.Errorf("SEEN = %+v", c)
 		}
+		// A FLOAT's precision is binary digits, and one that was declared is
+		// part of the type.
+		if c := catColumn(t, made, "RATIO"); c.Type != "FLOAT(53)" {
+			t.Errorf("RATIO = %+v", c)
+		}
 		run(PlanRenameColumn(d, schema, "JD_CAT_MADE", "LABEL", "CAPTION"))
 		run(PlanDropColumn(ctx, db, d, schema, "JD_CAT_MADE", "SEEN"))
 		run(PlanRenameTable(d, schema, "JD_CAT_MADE", "JD_CAT_MADE2"))
-		if made := describe("JD_CAT_MADE2"); made.Schema != schema || len(made.Columns) != 3 || catColumn(t, made, "CAPTION").Type != "VARCHAR2(40)" {
+		if made := describe("JD_CAT_MADE2"); made.Schema != schema || len(made.Columns) != 4 || catColumn(t, made, "CAPTION").Type != "VARCHAR2(40)" {
 			t.Errorf("renamed table = %+v", made)
 		}
 		catalogExec(t, db, `INSERT INTO "JD_CAT_MADE2" ("ID") VALUES (1)`)
@@ -416,6 +429,26 @@ func TestLiveOracleCatalogAndStructureChanges(t *testing.T) {
 		run(PlanDropTable(d, schema, "JD_CAT_MADE2"))
 		if gone := describe("JD_CAT_MADE2"); len(gone.Columns) != 0 || gone.Type != "" {
 			t.Errorf("the dropped table is still there: %+v", gone)
+		}
+	})
+
+	// A login that may read DBA_SEGMENTS is answered from it, for a schema
+	// that is not its own.
+	t.Run("sizes_for_another_schema", func(t *testing.T) {
+		if os.Getenv("JD_TEST_ORACLE_ADMIN_DSN") == "" {
+			t.Skip("set JD_TEST_ORACLE_ADMIN_DSN to run this")
+		}
+		admin := liveSQL(t, d, "JD_TEST_ORACLE_ADMIN_DSN", "")
+		catalog, err := ReadCatalog(ctx, admin, d, CatalogOptions{Schema: schema})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if posts := catObject(catalog.Objects[GroupTables], "JD_CAT_POSTS"); posts == nil || posts.Size <= 0 {
+			t.Errorf("posts as another login sees it = %+v (errors %v)", posts, catalog.Errors)
+		}
+		detail, err := DescribeTable(ctx, admin, d, schema, "JD_CAT_POSTS")
+		if err != nil || detail.DataSize <= 0 || detail.IndexSize <= 0 {
+			t.Errorf("posts as another login describes it: %d of rows, %d of indexes, %v", detail.DataSize, detail.IndexSize, err)
 		}
 	})
 

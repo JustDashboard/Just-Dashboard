@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -122,8 +123,36 @@ func (sqliteDialect) eachSchema(ctx context.Context, db *sql.DB, schema string, 
 	return out, nil
 }
 
+// sqliteRowEstimates returns the row counts ANALYZE last recorded, by table.
+// They are the planner's statistics, which is what an estimate is on every
+// other engine, and they exist only once ANALYZE has run: a database that was
+// never analysed has no sqlite_stat1, and its tables no estimate.
+func sqliteRowEstimates(ctx context.Context, db *sql.DB, prefix string) map[string]int64 {
+	// A stat is "rows in the index, then rows per distinct prefix"; the cast
+	// reads the first number. A partial index counts only its own rows, so the
+	// largest of a table's entries is the one nearest the table.
+	rows, err := db.QueryContext(ctx, `SELECT tbl, max(CAST(stat AS INTEGER)) FROM `+prefix+`sqlite_stat1 GROUP BY tbl`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var table string
+		var n sql.NullInt64
+		if err := rows.Scan(&table, &n); err != nil {
+			return nil
+		}
+		if n.Valid {
+			out[table] = n.Int64
+		}
+	}
+	return out
+}
+
 func (d sqliteDialect) tables(ctx context.Context, db *sql.DB, schema string, limit int) ([]CatalogObject, error) {
-	return d.eachSchema(ctx, db, schema, limit, func(schema, _ string, remaining int) ([]CatalogObject, error) {
+	return d.eachSchema(ctx, db, schema, limit, func(schema, prefix string, remaining int) ([]CatalogObject, error) {
+		estimates := sqliteRowEstimates(ctx, db, prefix)
 		// pragma_table_list knows what sqlite_master only implies: which
 		// tables are virtual, which are the shadow tables a virtual table
 		// keeps its data in, and which were declared STRICT or WITHOUT ROWID.
@@ -142,6 +171,9 @@ func (d sqliteDialect) tables(ctx context.Context, db *sql.DB, schema string, li
 				return o, err
 			}
 			o.Detail = sqliteTableTraits(tableType, withoutRowid == 1, strict == 1)
+			if n, ok := estimates[o.Name]; ok {
+				o.Rows = rowEstimate(n)
+			}
 			return o, nil
 		})
 	})
@@ -264,43 +296,44 @@ func (sqliteDialect) tableColumns(ctx context.Context, db *sql.DB, schema, table
 }
 
 // sqliteColumnDefinitions splits the body of a CREATE TABLE into its
-// comma-separated definitions, respecting parentheses and quotes.
+// comma-separated definitions, respecting parentheses, quotes and comments.
 func sqliteColumnDefinitions(createSQL string) []string {
-	open := strings.IndexByte(createSQL, '(')
-	if open < 0 {
-		return nil
+	return createTableItems(DriverSQLite, createSQL)
+}
+
+// sqliteTableConstraintWords are the words a table constraint starts with.
+// Each is reserved, so an item that starts with anything else is a column.
+var sqliteTableConstraintWords = stringSet("constraint", "primary", "unique", "check", "foreign")
+
+var sqliteCreateTableRe = regexp.MustCompile(`(?i)^\s*CREATE\s+(TEMP\s+|TEMPORARY\s+)?TABLE\b`)
+
+// sqliteCheckConstraints reads the CHECK clauses out of the statement a table
+// was created with, which is the only place SQLite keeps them. One written on
+// a column names that column; one written on the table names none. A check
+// SQLite was given no name for has none here either.
+func sqliteCheckConstraints(createSQL string) []Constraint {
+	out := []Constraint{}
+	if !sqliteCreateTableRe.MatchString(createSQL) {
+		return out
 	}
-	var (
-		out   []string
-		depth int
-		start = open + 1
-		quote byte
-	)
-	for i := open; i < len(createSQL); i++ {
-		c := createSQL[i]
-		if quote != 0 {
-			if c == quote {
-				quote = 0
-			}
+	for _, item := range createTableItems(DriverSQLite, createSQL) {
+		tokens := createItemTokens(DriverSQLite, item)
+		if len(tokens) == 0 {
 			continue
 		}
-		switch c {
-		case '\'', '"', '`':
-			quote = c
-		case '[':
-			quote = ']'
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				return append(out, createSQL[start:i])
+		columns := []string{}
+		if first := tokens[0]; first.name() && !(first.kind == itemWord && sqliteTableConstraintWords[strings.ToLower(first.text)]) {
+			columns = []string{first.text}
+		}
+		for i, tok := range tokens {
+			if !tok.keyword("check") || i+1 >= len(tokens) || tokens[i+1].kind != itemGroup {
+				continue
 			}
-		case ',':
-			if depth == 1 {
-				out = append(out, createSQL[start:i])
-				start = i + 1
+			c := Constraint{Type: ConstraintCheck, Columns: columns, Definition: "CHECK (" + strings.TrimSpace(tokens[i+1].text) + ")"}
+			if i >= 2 && tokens[i-2].keyword("constraint") && tokens[i-1].name() {
+				c.Name = tokens[i-1].text
 			}
+			out = append(out, c)
 		}
 	}
 	return out
@@ -460,8 +493,8 @@ func (sqliteDialect) tableIndexes(ctx context.Context, db *sql.DB, schema, table
 }
 
 // tableConstraints reports the unique constraints, which SQLite materialises
-// as indexes. Check constraints exist only as text inside the CREATE TABLE and
-// are shown there.
+// as indexes, and the check constraints, which it keeps only as text inside
+// the CREATE TABLE.
 func (d sqliteDialect) tableConstraints(ctx context.Context, db *sql.DB, schema, table string) ([]Constraint, error) {
 	indexes, err := d.tableIndexes(ctx, db, schema, table)
 	if err != nil {
@@ -485,7 +518,7 @@ func (d sqliteDialect) tableConstraints(ctx context.Context, db *sql.DB, schema,
 			Definition: "UNIQUE (" + strings.Join(quoted, ", ") + ")",
 		})
 	}
-	return out, nil
+	return append(out, sqliteCheckConstraints(sqliteCreateText(ctx, db, schema, table))...), nil
 }
 
 func (sqliteDialect) tableReferencedBy(ctx context.Context, db *sql.DB, schema, table string) ([]IncomingForeignKey, error) {
@@ -539,6 +572,11 @@ func (sqliteDialect) tableFacts(ctx context.Context, db *sql.DB, schema, table s
 		detail.Type = "virtual table"
 	default:
 		detail.Type = TableTypeTable
+		if prefix, err := sqliteSchemaPrefix(schema); err == nil {
+			if n, ok := sqliteRowEstimates(ctx, db, prefix)[table]; ok {
+				detail.Rows = n
+			}
+		}
 	}
 	if strict == 1 {
 		detail.Facts = append(detail.Facts, ObjectFact{"Strict", "yes"})

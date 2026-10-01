@@ -1536,7 +1536,16 @@ func TestLiveClickHouseCatalogAndStructureChanges(t *testing.T) {
 		if !strings.Contains(describe("jd_cat_events").CreateSQL, "CONSTRAINT mass_sane CHECK") {
 			t.Errorf("the check is not in the definition:\n%s", describe("jd_cat_events").CreateSQL)
 		}
+		// The system tables do not list a constraint, so it is read out of the
+		// CREATE statement — which is what lets a page offer to drop it by name.
+		if c := catConstraint(describe("jd_cat_events"), "mass_sane"); c == nil || c.Type != ConstraintCheck ||
+			c.Definition != "CHECK mass < 1000" {
+			t.Errorf("the check is not listed: %+v", describe("jd_cat_events").Constraints)
+		}
 		run(PlanDropConstraint(ctx, db, d, schema, "jd_cat_events", "mass_sane", ""))
+		if left := describe("jd_cat_events").Constraints; len(left) != 0 {
+			t.Errorf("the dropped check is still listed: %+v", left)
+		}
 		run(PlanDropIndex(d, schema, "jd_cat_events", "kind_idx"))
 		if catIndex(describe("jd_cat_events"), "kind_idx") != nil {
 			t.Error("the dropped index is still there")

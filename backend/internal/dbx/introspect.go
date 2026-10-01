@@ -384,7 +384,12 @@ func renderCreateTable(d Dialect, schema, table string, detail *TableDetail, fai
 		if strings.TrimSpace(c.Definition) == "" {
 			continue
 		}
-		lines = append(lines, "  CONSTRAINT "+quote(c.Name)+" "+c.Definition)
+		// A check SQLite was given no name for has none to write.
+		line := "  "
+		if c.Name != "" {
+			line += "CONSTRAINT " + quote(c.Name) + " "
+		}
+		lines = append(lines, line+c.Definition)
 	}
 	for _, fk := range detail.ForeignKeys {
 		refRel, _ := qualify(d, fk.RefSchema, fk.RefTable)

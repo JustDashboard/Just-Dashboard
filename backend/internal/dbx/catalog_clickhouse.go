@@ -259,10 +259,38 @@ func (d clickhouseDialect) tableIndexes(ctx context.Context, db *sql.DB, schema,
 	return out, nil
 }
 
-// ClickHouse lists no constraints in its system tables — a CHECK is visible
-// only in the CREATE statement — and has no foreign keys at all.
-func (clickhouseDialect) tableConstraints(context.Context, *sql.DB, string, string) ([]Constraint, error) {
-	return []Constraint{}, nil
+// tableConstraints reads a table's constraints out of its CREATE statement:
+// ClickHouse's system tables list everything about a table except these, and
+// it has no unique constraints and no foreign keys to list.
+func (clickhouseDialect) tableConstraints(ctx context.Context, db *sql.DB, schema, table string) ([]Constraint, error) {
+	var text string
+	if err := db.QueryRowContext(ctx, `
+	  SELECT create_table_query FROM system.tables WHERE `+clickhouseSchemaIs()+` AND name = ?`,
+		schema, schema, table).Scan(&text); err != nil {
+		return nil, err
+	}
+	return clickhouseConstraints(text), nil
+}
+
+// clickhouseConstraints finds the `CONSTRAINT name CHECK expr` items in a
+// table's CREATE statement. An ASSUME is listed beside the checks — it is
+// dropped the same way — with a definition that says which it is: the server
+// trusts an assumption and never tests it.
+func clickhouseConstraints(createQuery string) []Constraint {
+	out := []Constraint{}
+	for _, item := range createTableItems(DriverClickHouse, createQuery) {
+		tokens := createItemTokens(DriverClickHouse, item)
+		if len(tokens) < 4 || !tokens[0].keyword("constraint") || !tokens[1].name() {
+			continue
+		}
+		if kind := tokens[2]; kind.keyword("check") || kind.keyword("assume") {
+			out = append(out, Constraint{
+				Name: tokens[1].text, Type: ConstraintCheck, Columns: []string{},
+				Definition: strings.ToUpper(kind.text) + " " + strings.TrimSpace(item[kind.end:]),
+			})
+		}
+	}
+	return out
 }
 
 func (clickhouseDialect) tableReferencedBy(context.Context, *sql.DB, string, string) ([]IncomingForeignKey, error) {
