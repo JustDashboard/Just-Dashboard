@@ -457,6 +457,12 @@ func dumpTableRows(ctx context.Context, w *countingWriter, q dumpQueryer, d Dial
 	}
 	batch := newInsertBatcher(w, d.Driver(), pt.rel, quoted, genericDumpRowsPerStatement)
 	batch.overriding = pt.overriding
+	if len(pt.documents) > 0 {
+		batch.document = make([]bool, len(quoted))
+		for i, name := range quoted {
+			batch.document[i] = pt.documents[name]
+		}
+	}
 
 	var count int64
 	for rows.Next() {
@@ -488,8 +494,11 @@ type insertBatcher struct {
 	// overriding is Postgres's permission to write a column the table would
 	// otherwise generate itself.
 	overriding bool
-	tuples     []string
-	bytes      int
+	// document marks the columns written through XMLTYPE's constructor on
+	// Oracle (dumpTable.documents); nil where there are none.
+	document []bool
+	tuples   []string
+	bytes    int
 }
 
 func newInsertBatcher(w io.Writer, driver Driver, rel string, quotedCols []string, rowsPerStatement int) *insertBatcher {
@@ -503,7 +512,7 @@ func newInsertBatcher(w io.Writer, driver Driver, rel string, quotedCols []strin
 // columns the values came from.
 func (b *insertBatcher) addRow(vals []any, binary []bool, types []string) error {
 	if b.driver == DriverOracle {
-		if block, ok := oracleDumpLongRow(b.rel, b.cols, vals, binary, types); ok {
+		if block, ok := oracleDumpLongRow(b.rel, b.cols, vals, binary, types, b.document); ok {
 			// It is a statement of its own, and goes where the row was read.
 			if err := b.flush(); err != nil {
 				return err
@@ -514,7 +523,7 @@ func (b *insertBatcher) addRow(vals []any, binary []bool, types []string) error 
 	}
 	parts := make([]string, len(vals))
 	for i, v := range vals {
-		parts[i] = dumpColumnValue(b.driver, v, binary[i], types[i])
+		parts[i] = oracleDumpDocument(dumpColumnValue(b.driver, v, binary[i], types[i]), v, b.document, i)
 	}
 	return b.add("(" + strings.Join(parts, ", ") + ")")
 }

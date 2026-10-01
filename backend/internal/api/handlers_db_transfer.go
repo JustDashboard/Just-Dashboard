@@ -320,22 +320,12 @@ func exportError(err error) error {
 	return httpx.BadRequest("%v", err)
 }
 
-// exportBrowseOptions reads which rows an export is of, from the same
-// parameters the grid's page request carries.
-//
-// It is the one place the export reads them, so that the day the grid's own
-// reader learns a new parameter there is one line to change for the export to
-// follow it.
+// exportBrowseOptions reads which rows an export is of, with the reader the
+// grid's own page request goes through, so a download taken from a narrowed,
+// sorted view is that view: the day the grid learns a new parameter, the
+// export has learnt it too.
 func exportBrowseOptions(q url.Values) (dbx.BrowseOptions, error) {
-	filters, err := parseFilters(q.Get("filters"))
-	if err != nil {
-		return dbx.BrowseOptions{}, err
-	}
-	return dbx.BrowseOptions{
-		Schema: q.Get("schema"), Table: q.Get("table"),
-		OrderBy: q.Get("orderBy"), Desc: q.Get("dir") == "desc",
-		Filters: filters,
-	}, nil
+	return browseOptions(q)
 }
 
 // exportColumns reads a projection: a JSON array of names, or a list

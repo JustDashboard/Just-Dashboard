@@ -343,8 +343,6 @@ func importInto(t *testing.T, driver Driver, body string, spec ImportSpec) (*Imp
 	return Import(context.Background(), db, driver, strings.NewReader(body), spec)
 }
 
-func pointerTo[T any](v T) *T { return &v }
-
 func TestImportMapsColumnsAndTellsNullFromEmpty(t *testing.T) {
 	db, _ := openTestDB(t)
 	ctx := context.Background()
@@ -390,7 +388,7 @@ func TestImportMapsColumnsAndTellsNullFromEmpty(t *testing.T) {
 
 	// Told that \N means NULL, it does.
 	if _, err := Import(ctx, db, DriverSQLite, strings.NewReader("id,email,name\n13,m@x.io,\\N\n14,n@x.io,\n"), ImportSpec{
-		Table: "users", NullToken: pointerTo(`\N`),
+		Table: "users", NullToken: ptr(`\N`),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +427,7 @@ func TestImportMatchesColumnsByNameWhenNotTold(t *testing.T) {
 func TestImportWithoutAHeaderGoesInTheTablesOrder(t *testing.T) {
 	db, _ := openTestDB(t)
 	report, err := Import(context.Background(), db, DriverSQLite,
-		strings.NewReader("70,h@x.io,Hal\n71,i@x.io,Ida\n"), ImportSpec{Table: "users", Header: pointerTo(false)})
+		strings.NewReader("70,h@x.io,Hal\n71,i@x.io,Ida\n"), ImportSpec{Table: "users", Header: ptr(false)})
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
@@ -689,7 +687,7 @@ func TestImportRefusesWhatItCannotRead(t *testing.T) {
 		"an unknown format":             {Table: "users", Format: "xlsx"},
 		"an unknown mode":               {Table: "users", Mode: "merge"},
 		"a two-character delimiter":     {Table: "users", Delimiter: "||"},
-		"a quote that is the delimiter": {Table: "users", Delimiter: ";", Quote: pointerTo(";")},
+		"a quote that is the delimiter": {Table: "users", Delimiter: ";", Quote: ptr(";")},
 		"an unknown encoding":           {Table: "users", Encoding: "ebcdic"},
 		"a table that is not there":     {Table: "nowhere"},
 		"upsert into a new table":       {Table: "fresh", Mode: ImportModeUpsert, Create: &ImportCreate{}},

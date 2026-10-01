@@ -230,12 +230,10 @@ func TestLiveDumpMongoWithoutTheTools(t *testing.T) {
 }
 
 func TestLiveDumpRedisRoundTrip(t *testing.T) {
+	// liveRedis skips when the variable is unset: there is no default address.
 	client := liveRedis(t)
 	ctx := context.Background()
 	dsn := os.Getenv("JD_TEST_REDIS_DSN")
-	if dsn == "" {
-		dsn = "redis://127.0.0.1:6379/0"
-	}
 	keys := []string{"jd:dump:str", "jd:dump:hash", "jd:dump:zset", "jd:dump:list"}
 	t.Cleanup(func() { client.Del(context.Background(), keys...) })
 	client.Del(ctx, keys...)

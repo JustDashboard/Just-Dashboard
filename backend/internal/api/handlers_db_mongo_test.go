@@ -567,12 +567,15 @@ func TestMongoRefusalsAreAudited(t *testing.T) {
 // browser saved as the collection.
 func TestMongoExportConnectFailureIsAnError(t *testing.T) {
 	_, router := mongoRouterAs(t, auth.RoleReadOnly)
-	rec := mongoDo(router, http.MethodGet, "/databases/"+mongoConn+"/mongo/export?collection=orders&format=csv", "")
-	if rec.Code != http.StatusBadGateway || mongoErrorCode(rec) != "connect_failed" {
-		t.Errorf("export from an unreachable server: %d %s", rec.Code, strings.TrimSpace(rec.Body.String()))
-	}
-	if rec.Header().Get("Content-Disposition") != "" || strings.Contains(rec.Header().Get("Content-Type"), "csv") {
-		t.Errorf("the failed export still announced a file: %v", rec.Header())
+	// The collection's own export, and the export every engine shares.
+	for _, path := range []string{"/mongo/export?collection=orders&format=csv", "/export?table=orders&format=csv"} {
+		rec := mongoDo(router, http.MethodGet, "/databases/"+mongoConn+path, "")
+		if rec.Code != http.StatusBadGateway || mongoErrorCode(rec) != "connect_failed" {
+			t.Errorf("%s from an unreachable server: %d %s", path, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+		if rec.Header().Get("Content-Disposition") != "" || strings.Contains(rec.Header().Get("Content-Type"), "csv") {
+			t.Errorf("%s: the failed export still announced a file: %v", path, rec.Header())
+		}
 	}
 }
 

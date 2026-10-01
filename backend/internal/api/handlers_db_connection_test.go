@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -1361,6 +1362,52 @@ func TestDriverCatalogueCarriesCapabilitiesAndFlavours(t *testing.T) {
 				t.Errorf("%s/%s: label=%q with %d flags, want %d", d.ID, f.ID, f.Label, len(f.Capabilities), len(d.Capabilities))
 			}
 		}
+	}
+}
+
+// updateDriverCatalogue rewrites the snapshot below from what the route
+// serves: go test ./internal/api -run TestTheDriverCatalogueSnapshotIsCurrent -update-drivers
+var updateDriverCatalogue = flag.Bool("update-drivers", false, "rewrite testdata/database-drivers.json from GET /databases/drivers")
+
+// The frontend's tests draw their pages from what this route answers, and
+// they cannot ask it: they run with no server. So the answer is kept beside
+// this test as a file, which the engine registry's tests and the browser
+// fixture read (frontend/src/components/database/engine.test.js,
+// frontend/tests/browser/database-fixture.ts), and this test holds the file to
+// the route. A capability given to an engine, or taken from one, fails here
+// until the file is written again — and then every frontend test runs against
+// the table the server really serves, not against a copy somebody remembered.
+func TestTheDriverCatalogueSnapshotIsCurrent(t *testing.T) {
+	h := newConnHarness(t)
+	rec := do(t, h.as(auth.RoleReadOnly), http.MethodGet, "/databases/drivers", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /databases/drivers = %d", rec.Code)
+	}
+	var served any
+	if err := json.Unmarshal(rec.Body.Bytes(), &served); err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.MarshalIndent(served, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, '\n')
+	path := filepath.Join("testdata", "database-drivers.json")
+	if *updateDriverCatalogue {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, want, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v: write it with -update-drivers", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("%s is not what GET /databases/drivers serves any more; write it again with -update-drivers and run the frontend's tests", path)
 	}
 }
 

@@ -109,7 +109,7 @@ func planOracleDump(ctx context.Context, q dumpQueryer, schema string, sel dumpS
 		return nil, err
 	}
 
-	columns, err := oracleDumpColumns(ctx, q, schema)
+	columns, documents, err := oracleDumpColumns(ctx, q, schema)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read the columns: %w", err)
 	}
@@ -142,6 +142,7 @@ func planOracleDump(ctx context.Context, q dumpQueryer, schema string, sel dumpS
 			drop:      stmt("DROP TABLE " + rel + " CASCADE CONSTRAINTS PURGE"),
 			selectSQL: "SELECT " + strings.Join(columns[e.name], ", ") + " FROM " + rel,
 			noData:    e.noRows || len(columns[e.name]) == 0,
+			documents: documents[e.name],
 		}
 		if id, ok := identities[e.name]; ok {
 			column := oracleDumpIdent(id.column)
@@ -182,27 +183,45 @@ func planOracleDump(ctx context.Context, q dumpQueryer, schema string, sel dumpS
 }
 
 // oracleDumpColumns lists each table's columns that can be given a
-// value: not the virtual ones, which the server computes, and not the ones it
-// keeps for itself behind a function-based index.
-func oracleDumpColumns(ctx context.Context, q dumpQueryer, schema string) (map[string][]string, error) {
+// value, as they are selected: not the virtual ones, which the server
+// computes, and not the ones it keeps for itself behind a function-based
+// index.
+//
+// An XMLTYPE column is listed as virtual — its document is stored in a hidden
+// column beside it — and is a column with a value all the same, so it is kept:
+// left out with the virtual ones, every document in the table was missing from
+// the dump with nothing said. It is read as the text it was written as
+// (oracleXMLText), because the driver cannot read the type itself: a document
+// comes back laid out afresh and an empty cell fails the statement.
+func oracleDumpColumns(ctx context.Context, q dumpQueryer, schema string) (selected map[string][]string, documents map[string]map[string]bool, err error) {
 	rows, err := q.QueryContext(ctx, `
-	  SELECT table_name, column_name
+	  SELECT table_name, column_name, data_type
 	  FROM all_tab_cols
-	  WHERE owner = :1 AND virtual_column = 'NO' AND user_generated = 'YES'
+	  WHERE owner = :1 AND user_generated = 'YES'
+	    AND (virtual_column = 'NO' OR data_type = 'XMLTYPE')
 	  ORDER BY table_name, internal_column_id`, schema)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
-	out := map[string][]string{}
+	selected, documents = map[string][]string{}, map[string]map[string]bool{}
 	for rows.Next() {
-		var table, column string
-		if err := rows.Scan(&table, &column); err != nil {
-			return nil, err
+		var table, column, dataType string
+		if err := rows.Scan(&table, &column, nullText{&dataType}); err != nil {
+			return nil, nil, err
 		}
-		out[table] = append(out[table], oracleDumpIdent(column))
+		quoted := oracleDumpIdent(column)
+		expr := quoted
+		if dataType == "XMLTYPE" {
+			expr = oracleXMLText(quoted) + " AS " + quoted
+			if documents[table] == nil {
+				documents[table] = map[string]bool{}
+			}
+			documents[table][quoted] = true
+		}
+		selected[table] = append(selected[table], expr)
 	}
-	return out, rows.Err()
+	return selected, documents, rows.Err()
 }
 
 // oracleDumpIdentities reads which column of which table numbers itself, and
@@ -515,7 +534,9 @@ const (
 // seconds over at a megabyte and does not survive at six; bytes past it could
 // not be written at all, so a table with a picture in it restored up to the
 // picture. It reports false for a row every value of which fits a literal.
-func oracleDumpLongRow(rel string, cols []string, vals []any, binary []bool, types []string) (string, bool) {
+// document marks the columns whose text goes back through XMLTYPE's
+// constructor (oracleDumpDocument).
+func oracleDumpLongRow(rel string, cols []string, vals []any, binary []bool, types []string, document []bool) (string, bool) {
 	parts := make([]string, len(vals))
 	var declare, build, free strings.Builder
 	long := 0
@@ -552,7 +573,7 @@ func oracleDumpLongRow(rel string, cols []string, vals []any, binary []bool, typ
 				runes = runes[n:]
 			}
 			fmt.Fprintf(&free, "  DBMS_LOB.FREETEMPORARY(%s);\n", name)
-			parts[i] = name
+			parts[i] = oracleDumpDocument(name, v, document, i)
 		case !isText && len(raw) > oracleDumpLiteralBytes:
 			long++
 			name := fmt.Sprintf("v%d", i+1)
@@ -569,7 +590,7 @@ func oracleDumpLongRow(rel string, cols []string, vals []any, binary []bool, typ
 			fmt.Fprintf(&free, "  DBMS_LOB.FREETEMPORARY(%s);\n", name)
 			parts[i] = name
 		default:
-			parts[i] = dumpColumnValue(DriverOracle, v, binary[i], types[i])
+			parts[i] = oracleDumpDocument(dumpColumnValue(DriverOracle, v, binary[i], types[i]), v, document, i)
 		}
 	}
 	if long == 0 {
@@ -578,6 +599,18 @@ func oracleDumpLongRow(rel string, cols []string, vals []any, binary []bool, typ
 	return "DECLARE\n  s VARCHAR2(32767);\n" + declare.String() + "BEGIN\n" + build.String() +
 		"  INSERT INTO " + rel + " (" + strings.Join(cols, ", ") + ") VALUES (" + strings.Join(parts, ", ") + ");\n" +
 		free.String() + "END;", true
+}
+
+// oracleDumpDocument writes a value of an XMLTYPE column as the type's own
+// constructor over its text. A string short enough for a literal is taken for
+// the column as it is, and a CLOB — which is what a longer document has to be
+// built as — is refused there; written the one way, both go in. A NULL stays
+// a NULL: the constructor refuses one.
+func oracleDumpDocument(expr string, value any, document []bool, i int) string {
+	if value == nil || i >= len(document) || !document[i] {
+		return expr
+	}
+	return "XMLTYPE(" + expr + ")"
 }
 
 var oracleDumpBlockStart = regexp.MustCompile(`(?i)^(DECLARE|BEGIN)\s`)

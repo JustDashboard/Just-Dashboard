@@ -536,6 +536,13 @@ func TestLegacyWritersRefuseCredentialCollections(t *testing.T) {
 			_, err := MongoImport(ctx, nil, "admin", "system.users", "json", `{"user":"x"}`, true)
 			return err
 		}(),
+		// The streamed import, and the emptying a replacing import does first:
+		// refused only at the write, the collection would already be empty.
+		"import stream": func() error {
+			_, err := MongoImportStream(ctx, nil, "admin", "system.users", strings.NewReader(`{"user":"x"}`), ImportSpec{Format: ImportFormatNDJSON})
+			return err
+		}(),
+		"empty": MongoEmptyCollection(ctx, nil, "admin", "system.users"),
 		"count": func() error { _, err := MongoCount(ctx, nil, "admin", "system.users", ``); return err }(),
 		"query": func() error { _, err := MongoQuery(ctx, nil, "local", "oplog.rs", MongoFindOptions{}); return err }(),
 		"export": func() error {

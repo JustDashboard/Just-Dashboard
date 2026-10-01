@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The built-in dump, the import and the export against a real Oracle.
@@ -639,6 +640,48 @@ func TestLiveOracleImport(t *testing.T) {
 		ImportSpec{Schema: schema, Table: "things", Mode: ImportModeReplace})
 	if err == nil || count() != "4" {
 		t.Fatalf("a replace that fails: %v (%s rows)", err, count())
+	}
+}
+
+// An XMLTYPE column is the one Oracle type its driver cannot read as it
+// stands: a document comes back laid out afresh, and an empty cell fails the
+// statement or holds it until its time runs out. The dump reads such a column
+// as the text it was written as, and a restore puts that text back.
+func TestLiveOracleDumpKeepsAnXMLColumn(t *testing.T) {
+	db, dsn, _ := liveOwnOracle(t, "jd_transfer_live")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	execAll(t, db,
+		`CREATE TABLE DOCS (ID NUMBER PRIMARY KEY, X XMLTYPE, NOTE VARCHAR2(20))`,
+		`INSERT INTO DOCS VALUES (1, XMLTYPE('<a><b>1</b></a>'), 'full')`,
+		`INSERT INTO DOCS VALUES (2, NULL, 'empty')`,
+		// Longer than one string literal holds, which is written a piece at a time.
+		`INSERT INTO DOCS VALUES (3, XMLTYPE(TO_CLOB('<r>') || TO_CLOB(RPAD('x', 3000, 'x')) || TO_CLOB(RPAD('y', 3000, 'y')) || TO_CLOB('</r>')), 'long')`,
+	)
+	res, err := DumpWith(ctx, DriverOracle, dsn, t.TempDir(), DumpOptions{})
+	if err != nil {
+		t.Fatalf("DumpWith: %v", err)
+	}
+	text := readDump(t, res.Path)
+	if !strings.Contains(res.Summary, "1 tables, 3 rows") || strings.Contains(res.Summary, "skipped") {
+		t.Errorf("summary = %q", res.Summary)
+	}
+	execAll(t, db, `DELETE FROM DOCS`)
+	if out, err := RestoreWith(ctx, DriverOracle, dsn, res.Path, RestoreOptions{}); err != nil {
+		t.Fatalf("RestoreWith: %v\n%s\n%s", err, out, clipDumpText(text))
+	}
+	for query, want := range map[string]string{
+		`SELECT XMLSERIALIZE(CONTENT X AS VARCHAR2(200) NO INDENT) FROM DOCS WHERE ID = 1`:                     "<a><b>1</b></a>",
+		`SELECT NVL2(X, 'kept', 'null') FROM DOCS WHERE ID = 2`:                                                "null",
+		`SELECT TO_CHAR(DBMS_LOB.GETLENGTH(XMLSERIALIZE(CONTENT X AS CLOB NO INDENT))) FROM DOCS WHERE ID = 3`: "6007",
+		`SELECT TO_CHAR(COUNT(*)) FROM DOCS`:                                                                   "3",
+	} {
+		if got := queryString(t, db, query); got != want {
+			t.Errorf("%s\n got %q\nwant %q", query, got, want)
+		}
+	}
+	if t.Failed() {
+		t.Logf("the dump:\n%s", clipDumpText(text))
 	}
 }
 

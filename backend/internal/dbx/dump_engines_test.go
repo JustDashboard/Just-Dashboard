@@ -285,7 +285,7 @@ func TestOracleDumpLongRowBuildsWhatALiteralCannotHold(t *testing.T) {
 	types := []string{"NUMBER", "LongVarChar", "LongRaw", "NCHAR"}
 
 	// A row whose every value fits a literal is an ordinary INSERT.
-	if block, ok := oracleDumpLongRow(`"S"."T"`, cols, []any{"1", strings.Repeat("é", oracleLiteralChars), make([]byte, oracleDumpLiteralBytes), nil}, binary, types); ok {
+	if block, ok := oracleDumpLongRow(`"S"."T"`, cols, []any{"1", strings.Repeat("é", oracleLiteralChars), make([]byte, oracleDumpLiteralBytes), nil}, binary, types, nil); ok {
 		t.Fatalf("a row of short values was written as a block:\n%.200s", block)
 	}
 
@@ -294,7 +294,7 @@ func TestOracleDumpLongRowBuildsWhatALiteralCannotHold(t *testing.T) {
 	for i := range raw {
 		raw[i] = byte(i)
 	}
-	block, ok := oracleDumpLongRow(`"S"."T"`, cols, []any{"7", text, raw, "o'k"}, binary, types)
+	block, ok := oracleDumpLongRow(`"S"."T"`, cols, []any{"7", text, raw, "o'k"}, binary, types, nil)
 	if !ok {
 		t.Fatal("a row with a long value was not written as a block")
 	}
@@ -330,9 +330,26 @@ func TestOracleDumpLongRowBuildsWhatALiteralCannotHold(t *testing.T) {
 	}
 
 	// Bytes that are not text any literal can carry go as bytes, long or not.
-	block, ok = oracleDumpLongRow(`"S"."T"`, cols, []any{"8", strings.Repeat("a\x00b", 2000), nil, nil}, binary, types)
+	block, ok = oracleDumpLongRow(`"S"."T"`, cols, []any{"8", strings.Repeat("a\x00b", 2000), nil, nil}, binary, types, nil)
 	if !ok || !strings.Contains(block, "v2 BLOB;") {
 		t.Errorf("text with a NUL in it was not written as bytes:\n%.200s", block)
+	}
+
+	// A document column goes back through its type's constructor, whether its
+	// text fits a literal or is built in pieces; a NULL stays a NULL.
+	document := []bool{false, true, false, true}
+	block, ok = oracleDumpLongRow(`"S"."T"`, cols, []any{"9", text, nil, nil}, binary, types, document)
+	if !ok || !strings.Contains(block, ", XMLTYPE(v2), NULL, NULL);") {
+		t.Errorf("a long document was not written through its constructor:\n%.400s", block[max(0, len(block)-400):])
+	}
+	if got := oracleDumpDocument("'<a/>'", "<a/>", document, 1); got != "XMLTYPE('<a/>')" {
+		t.Errorf("a short document = %s", got)
+	}
+	if got := oracleDumpDocument("'<a/>'", "<a/>", document, 0); got != "'<a/>'" {
+		t.Errorf("a column that is not a document = %s", got)
+	}
+	if got := oracleDumpDocument("NULL", nil, document, 1); got != "NULL" {
+		t.Errorf("an empty document = %s", got)
 	}
 
 	for statement, want := range map[string]bool{

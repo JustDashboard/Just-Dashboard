@@ -84,6 +84,13 @@ func mongoInlineFormat(format, data string) ImportFormat {
 // that replaces used to do, and the documents came back into a collection
 // that no longer refused duplicates.
 func MongoEmptyCollection(ctx context.Context, client *mongo.Client, database, collection string) error {
+	// An import that replaces empties the collection before it writes one
+	// document. The collections that hold what accounts sign in with are
+	// refused here, first: refused only at the write, they would already be
+	// empty.
+	if err := mongoNamespace(database, collection); err != nil {
+		return err
+	}
 	_, err := client.Database(database).Collection(collection).DeleteMany(ctx, bson.D{})
 	return err
 }
@@ -168,6 +175,9 @@ func (m *mongoDocuments) next() (bson.D, importRecord, error) {
 // The modes are insert and replace. A dry run reads the start of the file and
 // reports the fields it found; nothing is written.
 func MongoImportStream(ctx context.Context, client *mongo.Client, database, collection string, r io.Reader, spec ImportSpec) (*ImportReport, error) {
+	if err := mongoNamespace(database, collection); err != nil {
+		return nil, err
+	}
 	spec.Table = collection
 	if err := normaliseImportSpec(&spec); err != nil {
 		return nil, err

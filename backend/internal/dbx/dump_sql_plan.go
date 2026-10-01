@@ -82,6 +82,10 @@ type dumpTable struct {
 	// overriding is set when the table generates a column the dump has to
 	// write.
 	overriding bool
+	// documents are the columns, by quoted name, whose value is read as text
+	// and has to be written back through the type's own constructor: Oracle's
+	// XMLTYPE, which takes a short string as it is and a CLOB not at all.
+	documents map[string]bool
 	// beforeData goes in front of this table's rows and afterData follows
 	// them: what lets a column the table numbers itself be written, and what
 	// puts its counter back where it was.

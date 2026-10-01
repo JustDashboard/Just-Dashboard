@@ -1694,6 +1694,50 @@ func TestLiveSQLServerCountsTheStatementNotItsTriggers(t *testing.T) {
 	}
 }
 
+// An export of a table is the page of it, as a file: the same rows, read the
+// same way. On Oracle the page asks the catalogue what each column is — a
+// date compared with a filter has to be told how to read it, and an XMLTYPE
+// cannot be read as SELECT * returns it — and an export that did not ask the
+// same was refused for the filter (ORA-01861) and never came back from a
+// table with an empty XML cell.
+func TestLiveOracleExportReadsATableAsThePageDoes(t *testing.T) {
+	e := workbenchEngines()[4]
+	db, schema := openWorkbench(t, e)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	dropAfter(t, db, "jdwb_export")
+	mustExec(t, db,
+		`CREATE TABLE jdwb_export (id NUMBER(10) PRIMARY KEY, d DATE, x XMLTYPE)`,
+		`INSERT INTO jdwb_export VALUES (1, DATE '2024-05-01', XMLTYPE('<a><b>1</b></a>'))`,
+		`INSERT INTO jdwb_export VALUES (2, DATE '2024-06-01', NULL)`)
+
+	page, err := BrowseTablePage(ctx, db, e.driver, BrowseOptions{Schema: schema, Table: "JDWB_EXPORT"})
+	if err != nil {
+		t.Fatalf("the page: %v", err)
+	}
+	// The date as the grid shows it, which is what a filter sends back.
+	shown := fmt.Sprint(page.Rows[0][indexOf(page.Columns, "D")])
+
+	var whole strings.Builder
+	n, _, err := ExportSelection(ctx, db, e.driver, BrowseOptions{Schema: schema, Table: "JDWB_EXPORT"},
+		ExportOptions{Format: ExportCSV}, &whole)
+	if err != nil || n != 2 {
+		t.Fatalf("the export of a table with a NULL in an XMLTYPE column: %d rows, %v", n, err)
+	}
+	if !strings.Contains(whole.String(), "<a><b>1</b></a>") {
+		t.Errorf("the XML is not in the file as it was written:\n%s", whole.String())
+	}
+
+	var filtered strings.Builder
+	n, _, err = ExportSelection(ctx, db, e.driver, BrowseOptions{
+		Schema: schema, Table: "JDWB_EXPORT",
+		Filters: []Filter{{Column: "D", Op: "eq", Value: shown}},
+	}, ExportOptions{Format: ExportCSV}, &filtered)
+	if err != nil || n != 1 {
+		t.Fatalf("the export of the rows a date filter keeps (%q): %d rows, %v\n%s", shown, n, err, filtered.String())
+	}
+}
+
 // go-ora names a result column by its wire type, which for several of Oracle's
 // types says the wrong thing or nothing: a JSON column is a BLOB locator, a
 // BOOLEAN a NUMBER, a BLOB a long raw. An XMLTYPE it reads laid out afresh,

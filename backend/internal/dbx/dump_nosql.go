@@ -146,13 +146,16 @@ func dumpRedis(ctx context.Context, dsn, outDir string, opts DumpOptions) (*Dump
 				if err != nil {
 					return nil, fmt.Errorf("cannot dump key %q: %w", key, err)
 				}
-				ttl, err := conn.PTTL(ctx, key).Result()
+				// The integer the server answers, not the driver's duration:
+				// that holds 292 years, and an expiry set further off than
+				// that wraps to a negative one, which a restore reads as
+				// "already expired".
+				ms, err := conn.Do(ctx, "PTTL", key).Int64()
 				if err != nil {
 					return nil, err
 				}
-				ms := int64(0)
-				if ttl > 0 {
-					ms = ttl.Milliseconds()
+				if ms < 0 {
+					ms = 0
 				}
 				if err := enc.Encode(redisDumpEntry{
 					Key:     base64.StdEncoding.EncodeToString([]byte(key)),
@@ -306,7 +309,7 @@ func restoreRedis(ctx context.Context, dsn, database, path string, opts RestoreO
 		// REPLACE, because a restore is a restore: without it every key that
 		// already exists fails with BUSYKEY and the operator gets a half-loaded
 		// database and a wall of errors.
-		if err := conn.RestoreReplace(ctx, string(key), time.Duration(e.TTLms)*time.Millisecond, string(payload)).Err(); err != nil {
+		if err := conn.Do(ctx, "RESTORE", string(key), e.TTLms, string(payload), "REPLACE").Err(); err != nil {
 			return "", fmt.Errorf("cannot restore key %q: %w", key, err)
 		}
 		restored++

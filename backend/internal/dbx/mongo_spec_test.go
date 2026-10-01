@@ -99,6 +99,8 @@ func TestCollModCommand(t *testing.T) {
 	}
 }
 
+// ptr is a pointer to a value, for the request fields that tell an absent
+// value from an empty one. Every test in the package uses this one.
 func ptr[T any](v T) *T { return &v }
 
 func TestIndexModel(t *testing.T) {
