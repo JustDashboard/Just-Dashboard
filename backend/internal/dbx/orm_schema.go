@@ -14,23 +14,23 @@ import (
 
 // --- JSON, in order --------------------------------------------------------
 
-// jsonObject is an object whose keys keep the order they were added in. A
+// ormJSONObject is an object whose keys keep the order they were added in. A
 // schema document is read by people, and encoding/json would sort a table's
 // columns alphabetically.
-type jsonObject struct {
+type ormJSONObject struct {
 	keys   []string
 	values []any
 }
 
-func (o *jsonObject) set(key string, value any) *jsonObject {
+func (o *ormJSONObject) set(key string, value any) *ormJSONObject {
 	o.keys = append(o.keys, key)
 	o.values = append(o.values, value)
 	return o
 }
 
-func writeJSON(b *strings.Builder, v any, indent string) {
+func ormWriteJSON(b *strings.Builder, v any, indent string) {
 	switch x := v.(type) {
-	case *jsonObject:
+	case *ormJSONObject:
 		if len(x.keys) == 0 {
 			b.WriteString("{}")
 			return
@@ -38,7 +38,7 @@ func writeJSON(b *strings.Builder, v any, indent string) {
 		b.WriteString("{\n")
 		for i, k := range x.keys {
 			b.WriteString(indent + "  " + jsString(k) + ": ")
-			writeJSON(b, x.values[i], indent+"  ")
+			ormWriteJSON(b, x.values[i], indent+"  ")
 			if i < len(x.keys)-1 {
 				b.WriteString(",")
 			}
@@ -53,7 +53,7 @@ func writeJSON(b *strings.Builder, v any, indent string) {
 		// A list of scalars stays on one line; a list of objects does not.
 		inline := true
 		for _, el := range x {
-			if _, ok := el.(*jsonObject); ok {
+			if _, ok := el.(*ormJSONObject); ok {
 				inline = false
 			}
 		}
@@ -63,7 +63,7 @@ func writeJSON(b *strings.Builder, v any, indent string) {
 				if i > 0 {
 					b.WriteString(", ")
 				}
-				writeJSON(b, el, indent)
+				ormWriteJSON(b, el, indent)
 			}
 			b.WriteString("]")
 			return
@@ -71,7 +71,7 @@ func writeJSON(b *strings.Builder, v any, indent string) {
 		b.WriteString("[\n")
 		for i, el := range x {
 			b.WriteString(indent + "  ")
-			writeJSON(b, el, indent+"  ")
+			ormWriteJSON(b, el, indent+"  ")
 			if i < len(x)-1 {
 				b.WriteString(",")
 			}
@@ -80,7 +80,7 @@ func writeJSON(b *strings.Builder, v any, indent string) {
 		b.WriteString(indent + "]")
 	case string:
 		b.WriteString(jsString(x))
-	case jsonRaw:
+	case ormJSONRaw:
 		b.WriteString(string(x))
 	case bool:
 		fmt.Fprintf(b, "%t", x)
@@ -91,11 +91,11 @@ func writeJSON(b *strings.Builder, v any, indent string) {
 	}
 }
 
-// jsonRaw is text that is already JSON: a number as the catalogue printed it,
+// ormJSONRaw is text that is already JSON: a number as the catalogue printed it,
 // a default that was itself a JSON literal.
-type jsonRaw string
+type ormJSONRaw string
 
-func jsonStrings(values []string) []any {
+func ormJSONStrings(values []string) []any {
 	out := make([]any, len(values))
 	for i, v := range values {
 		out[i] = v
@@ -110,13 +110,13 @@ func generateJSONSchema(g *ormGen) []ORMFile {
 	rules.escapeTop = nil
 	n := g.names(rules)
 
-	defs := &jsonObject{}
+	defs := &ormJSONObject{}
 	for _, e := range g.enums {
-		defs.set(n.enum[e], (&jsonObject{}).set("type", "string").set("enum", jsonStrings(e.Values)))
+		defs.set(n.enum[e], (&ormJSONObject{}).set("type", "string").set("enum", ormJSONStrings(e.Values)))
 	}
-	root := &jsonObject{}
+	root := &ormJSONObject{}
 	for _, m := range g.models {
-		props := &jsonObject{}
+		props := &ormJSONObject{}
 		var required []any
 		refs := map[string]string{}
 		for _, fk := range m.ForeignKeys {
@@ -140,14 +140,14 @@ func generateJSONSchema(g *ormGen) []ORMFile {
 					}
 				case ormDefNumber:
 					if c.t.isInteger() || c.t.Kind == ormFloat32 || c.t.Kind == ormFloat64 {
-						p.set("default", jsonRaw(c.def.Text))
+						p.set("default", ormJSONRaw(c.def.Text))
 					} else {
 						p.set("default", c.def.Text)
 					}
 				case ormDefBool:
 					p.set("default", c.def.Bool)
 				case ormDefJSON:
-					p.set("default", jsonRaw(c.def.Text))
+					p.set("default", ormJSONRaw(c.def.Text))
 				case ormDefEmptyArray:
 					p.set("default", []any{})
 				}
@@ -160,7 +160,7 @@ func generateJSONSchema(g *ormGen) []ORMFile {
 				required = append(required, n.field[c])
 			}
 		}
-		def := &jsonObject{}
+		def := &ormJSONObject{}
 		def.set("title", m.Name)
 		if m.Comment != "" {
 			def.set("description", ormOneLine(m.Comment))
@@ -176,11 +176,11 @@ func generateJSONSchema(g *ormGen) []ORMFile {
 		if g.qualified(m) && !(g.driver == DriverPostgres && m.Schema == g.defaultSchema) {
 			key = m.Schema + "." + m.Name
 		}
-		root.set(key, (&jsonObject{}).set("type", "array").
-			set("items", (&jsonObject{}).set("$ref", "#/$defs/"+n.model[m])))
+		root.set(key, (&ormJSONObject{}).set("type", "array").
+			set("items", (&ormJSONObject{}).set("$ref", "#/$defs/"+n.model[m])))
 	}
 
-	doc := &jsonObject{}
+	doc := &ormJSONObject{}
 	doc.set("$schema", "https://json-schema.org/draft/2020-12/schema")
 	doc.set("title", strings.Join(g.schemaNames(), ", "))
 	if len(g.schemaNames()) == 0 {
@@ -191,7 +191,7 @@ func generateJSONSchema(g *ormGen) []ORMFile {
 	doc.set("type", "object").set("properties", root).set("$defs", defs)
 
 	var b strings.Builder
-	writeJSON(&b, doc, "")
+	ormWriteJSON(&b, doc, "")
 	b.WriteString("\n")
 	return []ORMFile{{Filename: "schema.json", Content: b.String()}}
 }
@@ -199,9 +199,9 @@ func generateJSONSchema(g *ormGen) []ORMFile {
 // jsonSchemaType maps a column onto a JSON Schema. An integer is described as
 // one even where it is 64 bits wide: JSON has no integer size, and the
 // consumers of a schema document are as often Go or Python as JavaScript.
-func jsonSchemaType(g *ormGen, n *ormNaming, m *ormTable, c *ormCol) *jsonObject {
+func jsonSchemaType(g *ormGen, n *ormNaming, m *ormTable, c *ormCol) *ormJSONObject {
 	t := c.t
-	p := &jsonObject{}
+	p := &ormJSONObject{}
 	simple := ""
 	switch t.Kind {
 	case ormBool:
@@ -267,7 +267,7 @@ func jsonSchemaType(g *ormGen, n *ormNaming, m *ormTable, c *ormCol) *jsonObject
 		p.values = append([]any{simple}, p.values...)
 	}
 	if t.Array {
-		p = (&jsonObject{}).set("type", "array").set("items", p)
+		p = (&ormJSONObject{}).set("type", "array").set("items", p)
 		simple = "array"
 	}
 	if !c.Nullable || t.Kind == ormJSON && !t.Array {
@@ -277,7 +277,7 @@ func jsonSchemaType(g *ormGen, n *ormNaming, m *ormTable, c *ormCol) *jsonObject
 		p.values[0] = []any{simple, "null"}
 		return p
 	}
-	return (&jsonObject{}).set("anyOf", []any{p, (&jsonObject{}).set("type", "null")})
+	return (&ormJSONObject{}).set("anyOf", []any{p, (&ormJSONObject{}).set("type", "null")})
 }
 
 // --- GraphQL ---------------------------------------------------------------
