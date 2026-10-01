@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test"
+import catalogue from "../../../backend/internal/api/testdata/database-drivers.json"
 
 /**
  * The Databases section's API, mocked far enough to draw its shell: the
@@ -29,6 +30,7 @@ export type MockConnection = {
   environment?: string
   readOnly?: boolean
   notes?: string
+  origin?: string
   broken?: true
   brokenReason?: string
 }
@@ -53,6 +55,7 @@ function connection(
     environment: "",
     readOnly: false,
     notes: "",
+    origin: "",
   }
 }
 
@@ -73,16 +76,19 @@ const ANSWERS: Record<number, { flavor: string; flavorLabel: string; versionNumb
   7: { flavor: "sqlite", flavorLabel: "SQLite", versionNumber: "3.46.0" },
 }
 
-const DRIVERS = [
-  ["postgres", "PostgreSQL", "sql", true, true],
-  ["mysql", "MySQL / MariaDB", "sql", true, true],
-  ["sqlite", "SQLite", "sql", true, true],
-  ["sqlserver", "SQL Server", "sql", true, true],
-  ["clickhouse", "ClickHouse", "sql", true, false],
-  ["oracle", "Oracle", "sql", true, true],
-  ["mongodb", "MongoDB", "document", false, false],
-  ["redis", "Redis", "keyvalue", false, false],
-].map(([id, label, kind, sql, ddl]) => ({ id, label, kind, placeholder: "", sql, ddl }))
+/**
+ * The driver catalogue, as the server serves it. The file is the backend's
+ * own record of `GET /databases/drivers`, held to the route by its tests
+ * (`TestTheDriverCatalogueSnapshotIsCurrent`), so the pages drawn here are
+ * the pages the real capability table opens and not a copy of it kept by hand.
+ */
+const DRIVERS = catalogue
+
+/** What the server says a product can do: the catalogue's reading for the flavour. */
+function capabilitiesOf(driver: string, flavor: string | undefined) {
+  const info = DRIVERS.find((d) => d.id === driver)
+  return info?.flavors.find((f) => f.id === flavor)?.capabilities ?? info?.capabilities ?? {}
+}
 
 function session(admin: boolean) {
   return {
@@ -108,9 +114,13 @@ function session(admin: boolean) {
   }
 }
 
-/** `GET /databases/{id}` for one connection, as a backend with the route answers it. */
+/**
+ * `GET /databases/{id}` for one connection. `capabilities` in `over` are laid
+ * over the server's reading for the flavour, flag by flag.
+ */
 export function summaryOf(conn: MockConnection, over: Record<string, unknown> = {}) {
   const file = conn.driver === "sqlite"
+  const flavor = (over.flavor as string | undefined) ?? ANSWERS[conn.id]?.flavor
   return {
     ...conn,
     ...ANSWERS[conn.id],
@@ -126,9 +136,12 @@ export function summaryOf(conn: MockConnection, over: Record<string, unknown> = 
     exposure: "local",
     managed: !file,
     consumers: 0,
-    capabilities: {},
     checkedAt: now,
     ...over,
+    capabilities: {
+      ...capabilitiesOf(conn.driver, flavor),
+      ...(over.capabilities as Record<string, unknown> | undefined),
+    },
   }
 }
 
@@ -159,11 +172,8 @@ export type DatabaseMock = {
   viewer?: boolean
   /** Fields laid over a connection's saved row, by id. */
   rows?: Record<number, Partial<MockConnection>>
-  /**
-   * Fields laid over a connection's summary, by id. `null` is a backend from
-   * before the route: it answers 405 and the shell falls back to a ping.
-   */
-  summaries?: Record<number, Record<string, unknown> | null>
+  /** Fields laid over a connection's summary, by id. */
+  summaries?: Record<number, Record<string, unknown>>
   /** Every summary answers only once this settles (`hold()`). */
   summaryHeld?: Promise<unknown>
   /** Fields laid over a connection's fleet entry, by id. */
@@ -250,12 +260,8 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
     }
     const rest = one[2] ?? ""
     if (rest === "") {
-      const over = options.summaries?.[conn.id]
-      if (over === null) {
-        return json(route, { error: { code: "method_not_allowed", message: "" } }, 405)
-      }
       await options.summaryHeld
-      return json(route, summaryOf(conn, over))
+      return json(route, summaryOf(conn, options.summaries?.[conn.id]))
     }
     if (rest === "/ping") return json(route, { ok: true })
     if (rest === "/access") {

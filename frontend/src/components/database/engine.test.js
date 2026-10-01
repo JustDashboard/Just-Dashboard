@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import {
-  CAPABILITY_FLAGS,
+  CAPABILITY_NAMES,
   SECTION_IDS,
   engineFor,
   engineOf,
@@ -33,6 +35,19 @@ const FLAVORS = {
   oracle: ["oracle"],
 }
 
+/**
+ * What `GET /databases/drivers` serves. The file is the backend's own record
+ * of the route, held to it by `TestTheDriverCatalogueSnapshotIsCurrent`, so
+ * what is asserted here about the server's table is asserted about the real
+ * one.
+ */
+const CATALOGUE = JSON.parse(
+  readFileSync(
+    path.join(import.meta.dir, "../../../../backend/internal/api/testdata/database-drivers.json"),
+    "utf8",
+  ),
+)
+
 const ids = (engine) => sectionsFor(engine).map((section) => section.id)
 const titles = (engine) => sectionsFor(engine).map((section) => section.title)
 
@@ -46,7 +61,7 @@ describe("what an engine is", () => {
       expect(engine.logo).toBe(driver)
       expect(engine.cli).not.toBe("")
       expect(engine.dsnExample).not.toBe("")
-      expect(Object.keys(engine.capabilities).sort()).toEqual([...CAPABILITY_FLAGS].sort())
+      expect(Object.keys(engine.capabilities).sort()).toEqual([...CAPABILITY_NAMES].sort())
     }
     expect(engineOf("postgres").defaultPort).toBe("5432")
     expect(engineOf("sqlite").defaultPort).toBe("")
@@ -149,11 +164,11 @@ describe("what an engine is", () => {
 
 describe("which pages an engine has", () => {
   test("a SQL engine has every page", () => {
-    expect(ids(engineOf("postgres"))).toEqual([...SECTION_IDS])
+    expect(ids(engineOf("postgres", CATALOGUE))).toEqual([...SECTION_IDS])
   })
 
   test("Redis has keys and a console, and no SQL page", () => {
-    const redis = engineOf("redis")
+    const redis = engineOf("redis", CATALOGUE)
     expect(ids(redis)).toEqual([
       "home",
       "data",
@@ -170,7 +185,7 @@ describe("which pages an engine has", () => {
   })
 
   test("MongoDB has documents, aggregations and a schema", () => {
-    const mongo = engineOf("mongodb")
+    const mongo = engineOf("mongodb", CATALOGUE)
     expect(ids(mongo)).toEqual([
       "home",
       "data",
@@ -186,87 +201,130 @@ describe("which pages an engine has", () => {
   })
 
   test("a page a capability denies is gone, with the reason its address shows", () => {
-    const sqlite = engineOf("sqlite")
+    const sqlite = engineOf("sqlite", CATALOGUE)
     expect(sqlite.has("access")).toBe(false)
     expect(sqlite.missing("access")).toMatchObject({ thing: "roles" })
     expect(sqlite.missing("access").reason).toContain("file")
-    expect(engineOf("redis").missing("schema")).toEqual({
+    expect(engineOf("oracle", CATALOGUE).has("access")).toBe(false)
+    expect(engineOf("redis", CATALOGUE).missing("schema")).toEqual({
       thing: "schema",
       reason: "Redis is a key–value store. Its keys are under Keys.",
     })
   })
 
   test("the rail's groups hold only what the engine has", () => {
-    expect(sectionGroups(engineOf("postgres")).map((g) => g.label)).toEqual([
+    expect(sectionGroups(engineOf("postgres", CATALOGUE)).map((g) => g.label)).toEqual([
       undefined,
       "Work",
       "Schema",
       "Insights",
       "Operate",
     ])
-    const redis = sectionGroups(engineOf("redis"))
+    const redis = sectionGroups(engineOf("redis", CATALOGUE))
     expect(redis.map((g) => g.label)).toEqual([undefined, "Work", "Insights", "Operate"])
     expect(redis[1].sections.map((s) => s.title)).toEqual(["Keys", "Console"])
   })
 })
 
-describe("the server's word wins", () => {
-  const catalogue = (overrides) => [
-    {
-      id: "redis",
-      label: "Redis",
-      kind: "keyvalue",
-      placeholder: "redis://…",
-      sql: false,
-      ddl: false,
-      ...overrides,
-    },
-  ]
-
-  test("without a catalogue the registry's own table answers", () => {
-    expect(engineOf("redis").can("advisor")).toBe(false)
-    expect(engineOf("postgres").can("locks")).toBe(false)
-    expect(engineOf("postgres").can("roles")).toBe(true)
-    expect(engineOf("postgres").can("no-such-flag")).toBe(false)
+describe("the server's table is the answer", () => {
+  test("the registry names every capability the server states, and no other", () => {
+    expect(CATALOGUE.map((d) => d.id).sort()).toEqual([...DRIVERS].sort())
+    for (const info of CATALOGUE) {
+      expect(info.flavors.map((f) => f.id)).toEqual(FLAVORS[info.id])
+      for (const said of [info, ...info.flavors]) {
+        expect(Object.keys(said.capabilities).sort()).toEqual([...CAPABILITY_NAMES].sort())
+      }
+    }
   })
 
-  test("today's catalogue decides sql and ddl", () => {
-    const drivers = [
-      { id: "clickhouse", label: "ClickHouse", kind: "sql", placeholder: "", sql: true, ddl: true },
-    ]
-    expect(engineOf("clickhouse").can("ddl")).toBe(false)
-    expect(engineOf("clickhouse", drivers).can("ddl")).toBe(true)
+  test("with the catalogue in hand an engine can do exactly what the server says", () => {
+    for (const info of CATALOGUE) {
+      for (const flavor of info.flavors) {
+        const engine = engineFor({ driver: info.id, flavor: flavor.id }, CATALOGUE)
+        expect(engine.capabilities).toEqual(flavor.capabilities)
+        expect(engine.label).toBe(flavor.label)
+      }
+    }
+    // What differs between products of one driver is the server's to say.
+    const mariadb = engineFor({ driver: "mysql", flavor: "mariadb" }, CATALOGUE)
+    const mysql = engineFor({ driver: "mysql", flavor: "mysql" }, CATALOGUE)
+    expect(mariadb.capabilities.catalogGroups).toContain("sequences")
+    expect(mysql.capabilities.catalogGroups).not.toContain("sequences")
+    expect(mariadb.can("sequences")).toBe(true)
+    expect(mysql.can("sequences")).toBe(false)
+    const cockroach = engineFor({ driver: "postgres", flavor: "cockroachdb" }, CATALOGUE)
+    expect(cockroach.can("statements")).toBe(false)
+    expect(engineOf("postgres", CATALOGUE).can("statements")).toBe(true)
   })
 
-  test("a driver's capabilities add the pages they open", () => {
-    const drivers = catalogue({ capabilities: { advisor: true, dump: false } })
-    const redis = engineFor({ driver: "redis" }, drivers)
-    expect(redis.has("advisor")).toBe(true)
+  test("a flag is on, a word is given, a list holds something", () => {
+    const postgres = engineOf("postgres", CATALOGUE)
+    expect(postgres.can("changeSets")).toBe(true)
+    expect(postgres.can("rowIdentity")).toBe(true)
+    expect(postgres.can("ormTargets")).toBe(true)
+    expect(postgres.can("keys")).toBe(false)
+    const clickhouse = engineOf("clickhouse", CATALOGUE)
+    expect(clickhouse.can("changeSets")).toBe(false)
+    expect(clickhouse.capabilities.rowIdentity).toBe("none")
+    expect(clickhouse.can("ddl")).toBe(false)
+    expect(clickhouse.capabilities.ddlOperations).toContain("alterColumn")
+    const redis = engineOf("redis", CATALOGUE)
+    expect(redis.can("keys")).toBe(true)
+    expect(redis.can("ormTargets")).toBe(false)
+    expect(redis.can("exportFormats")).toBe(false)
+    expect(redis.capabilities.json).toBe("module")
+    expect(engineOf("keydb", CATALOGUE).can("json")).toBe(false)
+    expect(postgres.can("no-such-flag")).toBe(false)
+  })
+
+  test("what the connection's own summary resolved wins over the catalogue", () => {
+    const said = { ...CATALOGUE.find((d) => d.id === "redis").capabilities, dump: false }
+    const redis = engineFor({ driver: "redis", flavor: "redis", capabilities: said }, CATALOGUE)
     expect(redis.has("backups")).toBe(false)
-    // A flag the server did not mention keeps the registry's answer.
-    expect(redis.can("roles")).toBe(true)
+    expect(redis.can("keys")).toBe(true)
+    // And stands alone where the catalogue could not be read.
+    const alone = engineFor({ driver: "redis", flavor: "valkey", capabilities: said })
+    expect(alone.capabilities).toEqual(said)
   })
 
-  test("a flavour's capabilities win over its driver's, and the connection's over both", () => {
-    const drivers = catalogue({
-      capabilities: { settings: true },
-      flavors: [
-        { id: "redis", label: "Redis", capabilities: { settings: true } },
-        { id: "keydb", label: "KeyDB", capabilities: { settings: false, locks: "sampled" } },
-      ],
-      defaultPort: 6380,
-      dsnExample: "redis://example",
-    })
+  test("the catalogue's own port and example are the engine's", () => {
+    const drivers = CATALOGUE.map((d) =>
+      d.id === "redis" ? { ...d, defaultPort: 6380, dsnExample: "redis://example" } : d,
+    )
     const keydb = engineFor({ driver: "redis", flavor: "keydb" }, drivers)
-    expect(keydb.can("settings")).toBe(false)
-    expect(keydb.can("locks")).toBe(true)
     expect(keydb.defaultPort).toBe("6380")
     expect(keydb.dsnExample).toBe("redis://example")
-    const own = engineFor(
-      { driver: "redis", flavor: "keydb", capabilities: { settings: true } },
-      drivers,
-    )
-    expect(own.can("settings")).toBe(true)
+    expect(engineOf("sqlite", CATALOGUE).defaultPort).toBe("")
+  })
+})
+
+describe("before the catalogue has been read", () => {
+  test("an engine has the pages the server will confirm, and no other", () => {
+    for (const driver of DRIVERS) {
+      expect(ids(engineOf(driver))).toEqual(ids(engineOf(driver, CATALOGUE)))
+    }
+  })
+
+  test("nothing is on that the server does not vouch for", () => {
+    for (const driver of DRIVERS) {
+      const early = engineOf(driver)
+      const said = engineOf(driver, CATALOGUE)
+      for (const name of CAPABILITY_NAMES) {
+        if (early.can(name)) expect(said.can(name)).toBe(true)
+      }
+    }
+    // The pages are drawn; what is on them waits for the server's word.
+    expect(engineOf("postgres").can("roles")).toBe(true)
+    expect(engineOf("postgres").can("locks")).toBe(false)
+    expect(engineOf("postgres").can("changeSets")).toBe(false)
+    expect(engineOf("redis").can("keys")).toBe(false)
+    expect(engineOf("postgres").capabilities.ddlOperations).toEqual([])
+  })
+
+  test("a catalogue that lacks the driver is no catalogue for it", () => {
+    const others = CATALOGUE.filter((d) => d.id !== "redis")
+    expect(ids(engineOf("redis", others))).toEqual(ids(engineOf("redis")))
+    expect(engineOf("redis", others).can("keys")).toBe(false)
   })
 })
 

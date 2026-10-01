@@ -1821,6 +1821,10 @@ const showcaseConnections: DbConnection[] = [
     user: "app",
     database: "app",
     createdAt: ago(800),
+    environment: "",
+    readOnly: false,
+    notes: "",
+    origin: "",
   },
   {
     id: 12,
@@ -1831,6 +1835,10 @@ const showcaseConnections: DbConnection[] = [
     user: "",
     database: "0",
     createdAt: ago(700),
+    environment: "",
+    readOnly: false,
+    notes: "",
+    origin: "",
   },
 ]
 

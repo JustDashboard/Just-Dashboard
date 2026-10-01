@@ -3,12 +3,9 @@ import type { ConfirmRequest } from "@/components/confirm-dialog"
 import type { Verb } from "@/components/verbs"
 
 /**
- * One connection as `GET /databases/{id}` answers it: the saved row, what the
- * server said it is, where it runs and whether it is up — read without
- * dialling every other connection the way the fleet does.
- *
- * A backend that predates the route has none; the shell then draws from the
- * saved row and a ping, and every field here is simply not known.
+ * What the server behind a connection is doing. A stopped or paused one was
+ * not dialled: its container or unit says it is down. `broken` is the saved
+ * connection itself: its row can no longer be opened.
  */
 export type DbState = "running" | "stopped" | "paused" | "unreachable" | "broken"
 
@@ -38,23 +35,37 @@ export type DbPower = {
   reason?: string
 }
 
+/**
+ * One connection as `GET /databases/{id}` answers it: the saved row, what the
+ * server said it is, where it runs and whether it is up — read without
+ * dialling every other connection the way the fleet does. It answers 200
+ * whatever the server is doing; only an id that names no connection is a 404.
+ */
 export type DbConnectionSummary = DbConnection & {
+  /** The product behind the driver; the driver's own until the server has answered once. */
   flavor: DbFlavor
   flavorLabel: string
+  /** The server's own description of itself ("PostgreSQL 16.4"), and the bare number in it. */
+  version?: string
   versionNumber?: string
   state: DbState
   ok: boolean
+  /** The engine's or the driver's own words when it did not answer, without the password. */
   error?: string
   latencyMs: number
+  /** Where the server is; `unknown` beside a row that cannot be opened. */
   source: "docker" | "host" | "file" | "remote" | "unknown"
   container?: DbContainerRef
   unit?: DbUnitRef
   file?: DbFileRef
   power: DbPower
+  /** How far the server's port reaches, and whether `PUT /access` can change that. */
   exposure: DbAccess["exposure"] | "unknown"
   managed: boolean
+  /** How many deployment environments are bound to it. */
   consumers: number
   lastBackup?: string
+  /** Resolved for this driver and the flavour that answered. Every key is present. */
   capabilities: DbCapabilities
   checkedAt: string
 }

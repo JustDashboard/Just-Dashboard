@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Database } from "@/components/icons"
-import { ApiError, get } from "@/lib/api"
+import { get } from "@/lib/api"
 import { useSessionState } from "@/lib/view-state"
 import type { DbConnection } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -79,9 +79,9 @@ export type DatabaseSelection = {
  */
 export type DatabaseContextValue = {
   id: number
-  /** The saved row, with what the server has since said it is (flavour, version, labels). */
+  /** The saved row, with what the server has since said it is (flavour, version, capabilities). */
   conn: DbConnection
-  /** `GET /databases/{id}` in full, where the backend has the route. */
+  /** `GET /databases/{id}` in full; `undefined` only while a read of it has failed. */
   summary: DbConnectionSummary | undefined
   /** The registry's entry for this connection: its words, its pages, what it can do. */
   engine: Engine
@@ -115,11 +115,6 @@ export function useDatabase() {
   const value = useContext(DatabaseContext)
   if (!value) throw new Error("useDatabase must be used inside a database's layout")
   return value
-}
-
-/** A route older than the summary answers 404 or 405 for an id the list has. */
-function predatesSummary(error: Error | undefined) {
-  return error instanceof ApiError && (error.status === 404 || error.status === 405)
 }
 
 /** A write to the address that the router has not shown yet. */
@@ -158,31 +153,19 @@ export function DatabaseProvider({ id, children }: { id: number; children: React
     if (found && !listed) refresh()
   }, [found, listed, refresh])
 
-  const [summaryMissing, setSummaryMissing] = useState(false)
   const summary = usePoll(
     (signal) => get<DbConnectionSummary>(`/databases/${id}`, undefined, signal),
     30_000,
     [id],
-    { enabled: Boolean(found) && !summaryMissing },
-  )
-  // A backend from before the summary route has only the ping to say whether
-  // the server answers, and is not asked for the summary again.
-  const pingOnly = summaryMissing || predatesSummary(summary.error)
-  if (pingOnly && !summaryMissing) setSummaryMissing(true)
-  const ping = usePoll(
-    (signal) => get<{ ok: boolean; error?: string }>(`/databases/${id}/ping`, undefined, signal),
-    30_000,
-    [id],
-    { enabled: Boolean(found) && pingOnly && !found?.broken },
+    { enabled: Boolean(found) },
   )
   // The saved row says how the server is dialled; only the summary says what
   // answered — MariaDB behind the `mysql` driver — and what that product can
   // do. A page mounted before it would be mounted on the driver's own
   // product: Backups drawn, its requests sent, and then taken away when the
   // server turned out to have no dumps. So the pages wait for the first
-  // answer, whichever it is: the summary, its failure, or that this backend
-  // has no such route.
-  const summarySettled = pingOnly || Boolean(summary.data) || Boolean(summary.error)
+  // answer, whichever it is: the summary, or its failure.
+  const summarySettled = Boolean(summary.data) || Boolean(summary.error)
 
   // The list's row is the newer of the two after an edit; what only the
   // summary knows is laid under it. Every poll hands back new objects that
@@ -210,55 +193,30 @@ export function DatabaseProvider({ id, children }: { id: number; children: React
 
   // What the server said it is goes into the rail's memory of this database,
   // so the panel drawn from the address on the next arrival is this engine's
-  // and not its driver's. A backend with no summary has nothing more to say
-  // than the driver, and that is remembered as the answer too: the rail
-  // draws a database early only once it knows what registered for it. Held
-  // by content, as the connection is.
+  // and not its driver's: the rail draws a database early only once it knows
+  // what registered for it. Held by content, as the connection is.
   const [, setKnown] = useSessionState<Record<string, KnownDatabase>>(KNOWN_DATABASES_KEY, {})
   const answered = about
     ? JSON.stringify({ flavor: about.flavor, capabilities: about.capabilities })
     : ""
-  const driverAlone = pingOnly ? found?.driver : undefined
   const learned = useMemo<Pick<KnownDatabase, "flavor" | "capabilities"> | undefined>(
-    () => (answered ? JSON.parse(answered) : driverAlone && { flavor: driverAlone }),
-    [answered, driverAlone],
+    () => (answered ? JSON.parse(answered) : undefined),
+    [answered],
   )
   useEffect(() => {
     if (learned) setKnown((held) => learnedDatabase(held, id, learned))
   }, [id, learned, setKnown])
 
-  const refreshSummary = summary.refresh
-  const refreshPing = ping.refresh
+  const check = summary.refresh
   const status = useMemo<DatabaseStatus>(() => {
-    const check = () => (pingOnly ? refreshPing() : refreshSummary())
     if (found?.broken) return { state: "broken", error: found.brokenReason, refresh: check }
     if (summary.data) {
       const { state, error: why, latencyMs } = summary.data
       return { state, error: why, latencyMs, refresh: check }
     }
-    if (pingOnly) {
-      if (ping.data) {
-        return {
-          state: ping.data.ok ? "running" : "unreachable",
-          error: ping.data.error,
-          refresh: check,
-        }
-      }
-      if (ping.error) return { state: "unknown", error: ping.error.message, refresh: check }
-    } else if (summary.error) {
-      return { state: "unknown", error: summary.error.message, refresh: check }
-    }
+    if (summary.error) return { state: "unknown", error: summary.error.message, refresh: check }
     return { state: "checking", refresh: check }
-  }, [
-    found,
-    summary.data,
-    summary.error,
-    pingOnly,
-    ping.data,
-    ping.error,
-    refreshSummary,
-    refreshPing,
-  ])
+  }, [found, summary.data, summary.error, check])
 
   // The address, as the pages read it. Two things can put it ahead of what
   // the router shows. A write (`select`) is read back at once and reaches the

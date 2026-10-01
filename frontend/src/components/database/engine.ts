@@ -20,7 +20,14 @@ import {
 } from "@/components/icons"
 import { hasProductLogo } from "@/components/product-logo"
 import { DEFAULT_PORT } from "@/lib/db-dsn"
-import type { DbCapabilities, DbConnection, DbDriver, DbDriverInfo } from "@/lib/types"
+import type {
+  DbCapabilities,
+  DbCapabilityFlag,
+  DbCapabilityName,
+  DbConnection,
+  DbDriver,
+  DbDriverInfo,
+} from "@/lib/types"
 
 /**
  * Everything the frontend knows about a database engine, once.
@@ -34,13 +41,13 @@ import type { DbCapabilities, DbConnection, DbDriver, DbDriverInfo } from "@/lib
  * pages it has or what it can do asks here, and no other file branches on a
  * driver's name.
  *
- * What an engine *can do* is the server's to say: `GET /databases/drivers`
- * carries a `capabilities` object per driver and per flavour, and a
- * connection's own summary carries it resolved. Wherever the server answers,
- * its answer wins. The table below is the floor under that — what each engine
- * could do before the server said so, with everything newer than that off —
- * so a backend that sends less still gets a truthful page rather than a
- * control that 400s.
+ * What an engine *can do* is the server's to say, and only the server's:
+ * `GET /databases/drivers` carries a `capabilities` object per driver and per
+ * flavour, and a connection's own summary carries it resolved. Nothing here
+ * states a capability a second time. What this file holds is how an engine is
+ * presented — its name and logo, its words, which page a flag opens, how a
+ * program connects to it — and one short list per driver (`FLOOR`) of the
+ * pages to draw in the moment before the catalogue has been read.
  *
  * A connection has a `driver`, which is how the dashboard talks to it, and a
  * `flavor`, which is what it is: MariaDB answers the `mysql` driver, Valkey
@@ -165,8 +172,11 @@ export type Engine = {
   capabilities: DbCapabilities
   /** The pages this engine has, in the rail's order. */
   sections: EngineSection[]
-  /** Whether the engine offers a feature (`roles`, `ddl`, `locks`, …). Unknown is no. */
-  can: (flag: string) => boolean
+  /**
+   * Whether the engine offers a feature (`roles`, `changeSets`, `streams`, …).
+   * A list answers whether it holds anything, a word whether there is one.
+   */
+  can: (flag: DbCapabilityName) => boolean
   /** Whether the engine has a page. */
   has: (section: SectionId) => boolean
   section: (id: SectionId) => EngineSection | undefined
@@ -201,44 +211,156 @@ export function kindWord(kind: EngineKind): string {
 }
 
 /**
- * Every capability flag the pages gate on. An engine's resolved capabilities
- * always carry all of them, so a missing flag is a spelling mistake rather
- * than a quiet "no".
+ * Every capability the server states, with nothing on: what an engine that
+ * has not been heard from can do. Written out in full so that a flag the type
+ * gains and this lacks, or the other way round, does not compile; the names
+ * are held to what the server serves by the registry's tests.
  */
-export const CAPABILITY_FLAGS = [
-  "sql",
-  "console",
-  "ddl",
-  "schemas",
-  "views",
-  "routines",
-  "triggers",
-  "sequences",
-  "enums",
-  "extensions",
-  "roles",
-  "sessions",
-  "cancel",
-  "locks",
-  "maintenance",
-  "replication",
-  "statements",
-  "settings",
-  "explainJSON",
-  "explainAnalyze",
-  "changeSets",
-  "transactions",
-  "queryLog",
-  "advisor",
-  "dump",
-  "orm",
-  "server",
-  "provision",
-] as const
+const NO_CAPABILITIES: DbCapabilities = {
+  server: false,
+  provision: false,
+  inventoryConnect: false,
+  hostAccount: false,
+  fileBased: false,
+  openByDefault: false,
+  dump: false,
+  sql: false,
+  console: false,
+  changeSets: false,
+  keylessEdits: false,
+  updateDefault: false,
+  script: false,
+  transactions: false,
+  queryCancel: false,
+  dollarQuoting: false,
+  regexFilter: false,
+  rowEstimate: false,
+  cellRead: false,
+  explainJSON: false,
+  explainAnalyze: false,
+  ddl: false,
+  schemas: false,
+  catalog: false,
+  views: false,
+  materializedViews: false,
+  routines: false,
+  triggers: false,
+  sequences: false,
+  enums: false,
+  comments: false,
+  indexes: false,
+  extensions: false,
+  stats: false,
+  sessions: false,
+  kill: false,
+  cancel: false,
+  locks: false,
+  replication: false,
+  tableStats: false,
+  indexStats: false,
+  maintenance: false,
+  settings: false,
+  settingsWrite: false,
+  roles: false,
+  privileges: false,
+  statements: false,
+  statementsReset: false,
+  advisor: false,
+  engineAdvisor: false,
+  queryLog: false,
+  clickhouseViews: false,
+  sqliteFile: false,
+  keys: false,
+  keyTree: false,
+  keyTypeFilter: false,
+  keyMeta: false,
+  valueDownload: false,
+  keyEncoding: false,
+  bulkKeys: false,
+  streams: false,
+  logicalDatabases: false,
+  consoleClassify: false,
+  serverInfo: false,
+  commandStats: false,
+  latency: false,
+  queryLogReset: false,
+  persistence: false,
+  aofRewrite: false,
+  memoryAnalysis: false,
+  aclRules: false,
+  pubsub: false,
+  pubsubLive: false,
+  monitor: false,
+  documents: false,
+  shellSyntax: false,
+  collections: false,
+  collectionOptions: false,
+  aggregation: false,
+  schemaAnalysis: false,
+  indexUsage: false,
+  indexHide: false,
+  validation: false,
+  profiler: false,
+  orm: false,
+  export: false,
+  exportColumns: false,
+  exportQuery: false,
+  import: false,
+  importMapping: false,
+  importUpsert: false,
+  importReplace: false,
+  importCreateTable: false,
+  dumpSchemaOnly: false,
+  dumpDataOnly: false,
+  dumpTables: false,
+  dumpCompression: false,
+  dumpDatabases: false,
+  dumpUpload: false,
+  restoreNewDatabase: false,
+  copy: false,
+  copyStructureOnly: false,
+  catalogGroups: [],
+  ddlOperations: [],
+  maintenanceActions: [],
+  ormTargets: [],
+  exportFormats: [],
+  importFormats: [],
+  rowIdentity: false,
+  returnsChangedRow: false,
+  readOnlyScope: false,
+  importAtomic: false,
+  json: false,
+  hashFieldTtl: false,
+  commandReference: false,
+}
 
-function flags(...on: (typeof CAPABILITY_FLAGS)[number][]): DbCapabilities {
-  const set = new Set<string>(on)
-  return Object.fromEntries(CAPABILITY_FLAGS.map((flag) => [flag, set.has(flag)]))
+/**
+ * The name of every capability the server states. An engine's resolved
+ * capabilities always carry all of them.
+ */
+export const CAPABILITY_NAMES = Object.keys(NO_CAPABILITIES) as DbCapabilityName[]
+
+/**
+ * The pages to draw for a driver before the catalogue has been read, as the
+ * flags that open a page or a control of the shell itself. It is used when
+ * there is nothing from the server to go on — the rail drawn from an address
+ * on arrival, a catalogue that failed — and never once the catalogue is in
+ * hand: there the server's table is the whole answer. Every other capability
+ * is off until then, so nothing is offered that the server has not vouched for.
+ */
+const FLOOR: Record<DbDriver, readonly DbCapabilityFlag[]> = {
+  postgres: ["sql", "console", "server", "dump", "orm", "advisor", "roles"],
+  mysql: ["sql", "console", "server", "dump", "orm", "advisor", "roles"],
+  sqlite: ["sql", "console", "dump", "orm", "advisor"],
+  sqlserver: ["sql", "console", "server", "dump", "orm", "advisor", "roles"],
+  clickhouse: ["sql", "console", "server", "dump", "orm", "advisor", "roles"],
+  oracle: ["sql", "console", "server", "dump", "orm", "advisor"],
+  mongodb: ["console", "server", "dump", "roles"],
+  redis: ["console", "server", "dump", "roles"],
+}
+
+function floorOf(driver: DbDriver): Partial<DbCapabilities> {
+  return Object.fromEntries(FLOOR[driver].map((flag) => [flag, true]))
 }
 
 const TABLES: EngineNouns = {
@@ -262,8 +384,6 @@ const TABLES_BY_DATABASE: EngineNouns = {
 type Flavor = {
   label: string
   cli?: string
-  /** Where this product differs from its driver's own. */
-  capabilities?: DbCapabilities
 }
 
 type DriverSpec = {
@@ -275,8 +395,6 @@ type DriverSpec = {
   cli: string
   env: string
   editor: string
-  /** What the engine could do before the server said so. */
-  capabilities: DbCapabilities
   /** Why a page a capability denies is not there. */
   absent?: Partial<Record<SectionId, string>>
   url?: (dsn: string) => string
@@ -305,17 +423,6 @@ function literal(value: string): string {
   return JSON.stringify(value)
 }
 
-/** What every SQL engine but ClickHouse, which runs no generated DDL, starts from. */
-const SQL_FLAGS = [
-  "sql",
-  "console",
-  "ddl",
-  "views",
-  "advisor",
-  "dump",
-  "orm",
-] as const satisfies readonly (typeof CAPABILITY_FLAGS)[number][]
-
 const DRIVERS: Record<DbDriver, DriverSpec> = {
   postgres: {
     label: "PostgreSQL",
@@ -326,18 +433,6 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     cli: "psql",
     env: "DATABASE_URL",
     editor: "pgsql",
-    capabilities: flags(
-      ...SQL_FLAGS,
-      "schemas",
-      "extensions",
-      "roles",
-      "sessions",
-      "statements",
-      "settings",
-      "queryLog",
-      "server",
-      "provision",
-    ),
     command: (cli, { url }) => `${cli} ${shellWord(url)}`,
     clients: [
       {
@@ -355,11 +450,8 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     flavors: {
       postgres: { label: "PostgreSQL" },
       timescaledb: { label: "TimescaleDB" },
-      cockroachdb: {
-        label: "CockroachDB",
-        capabilities: { extensions: false, statements: false, provision: false },
-      },
-      yugabytedb: { label: "YugabyteDB", capabilities: { provision: false } },
+      cockroachdb: { label: "CockroachDB" },
+      yugabytedb: { label: "YugabyteDB" },
     },
   },
   mysql: {
@@ -371,18 +463,6 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     cli: "mysql",
     env: "DATABASE_URL",
     editor: "mysql",
-    capabilities: flags(
-      ...SQL_FLAGS,
-      "schemas",
-      "extensions",
-      "roles",
-      "sessions",
-      "statements",
-      "settings",
-      "queryLog",
-      "server",
-      "provision",
-    ),
     // The Go driver's own `user:pass@tcp(host)/db` is not a URL; every
     // application expects one. The driver takes the name and the password as
     // typed, and a URL does not: an `@` or a `:` in either would move where
@@ -415,8 +495,8 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     flavors: {
       mysql: { label: "MySQL" },
       mariadb: { label: "MariaDB", cli: "mariadb" },
-      percona: { label: "Percona Server", capabilities: { provision: false } },
-      tidb: { label: "TiDB", capabilities: { extensions: false, provision: false } },
+      percona: { label: "Percona Server" },
+      tidb: { label: "TiDB" },
     },
   },
   sqlite: {
@@ -428,7 +508,6 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     cli: "sqlite3",
     env: "DATABASE_URL",
     editor: "sql",
-    capabilities: flags(...SQL_FLAGS),
     absent: {
       access:
         "A SQLite database is a file. Whoever can read the file reads everything in it, so there are no roles to manage.",
@@ -458,7 +537,6 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     cli: "sqlcmd",
     env: "DATABASE_URL",
     editor: "sql",
-    capabilities: flags(...SQL_FLAGS, "schemas", "roles", "sessions", "settings", "server"),
     command: (cli, { host, port, user, database }) =>
       `${cli} -S ${shellWord(`${host},${port}`)} -U ${shellWord(user || "sa")}${database ? ` -d ${shellWord(database)}` : ""}`,
     clients: [
@@ -483,21 +561,6 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     cli: "clickhouse-client",
     env: "CLICKHOUSE_URL",
     editor: "sql",
-    capabilities: flags(
-      "sql",
-      "console",
-      "views",
-      "advisor",
-      "dump",
-      "orm",
-      "schemas",
-      "roles",
-      "sessions",
-      "settings",
-      "queryLog",
-      "server",
-      "provision",
-    ),
     command: (cli, { host, port, user, database }) =>
       `${cli} --host ${shellWord(host)} --port ${port} --user ${shellWord(user || "default")} --database ${shellWord(database || "default")} --ask-password`,
     clients: [
@@ -525,7 +588,6 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     cli: "sqlplus",
     env: "DATABASE_URL",
     editor: "sql",
-    capabilities: flags(...SQL_FLAGS, "schemas", "sessions", "server"),
     absent: { access: "This dashboard does not manage Oracle's roles." },
     command: (cli, { host, port, user, database }) =>
       `${cli} ${shellWord(`${user || "system"}@//${host}:${port}/${database}`)}`,
@@ -557,7 +619,6 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     cli: "mongosh",
     env: "MONGODB_URI",
     editor: "json",
-    capabilities: flags("roles", "settings", "queryLog", "dump", "server", "provision"),
     absent: { advisor: "The advisor's checks are written for SQL engines." },
     command: (cli, { url }) => `${cli} ${shellWord(url)}`,
     clients: [
@@ -576,7 +637,7 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     ],
     flavors: {
       mongodb: { label: "MongoDB" },
-      ferretdb: { label: "FerretDB", capabilities: { provision: false } },
+      ferretdb: { label: "FerretDB" },
     },
   },
   redis: {
@@ -597,7 +658,6 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     cli: "redis-cli",
     env: "REDIS_URL",
     editor: "redis",
-    capabilities: flags("roles", "settings", "queryLog", "dump", "server", "provision"),
     absent: { advisor: "The advisor's checks are written for SQL engines." },
     command: (cli, { url }) => `${cli} -u ${shellWord(url)}`,
     clients: [
@@ -616,8 +676,7 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     flavors: {
       redis: { label: "Redis" },
       valkey: { label: "Valkey", cli: "valkey-cli" },
-      // KeyDB refuses the multi-section INFO the settings read sends.
-      keydb: { label: "KeyDB", cli: "keydb-cli", capabilities: { settings: false } },
+      keydb: { label: "KeyDB", cli: "keydb-cli" },
       dragonfly: { label: "Dragonfly" },
     },
   },
@@ -664,7 +723,7 @@ type SectionSpec = {
   /** The kinds of engine that have the page at all. */
   kinds: readonly EngineKind[]
   /** A capability the engine must also have. Absent: the kind alone decides. */
-  needs?: string
+  needs?: DbCapabilityFlag
   workbench?: boolean
   /** What the page is, in the sentence that says an engine has none. */
   thing: string
@@ -842,7 +901,9 @@ const CARRIES: Partial<Record<EngineKind, Partial<Record<SectionId, readonly Sel
 
 const NOTHING: readonly SelectionKey[] = []
 
-function allowed(value: boolean | string | undefined): boolean {
+/** A flag is on, a word is given, a list holds something. */
+function allowed(value: boolean | string | readonly string[] | undefined): boolean {
+  if (Array.isArray(value)) return value.length > 0
   return value === true || (typeof value === "string" && value !== "")
 }
 
@@ -869,7 +930,9 @@ function build(
   return {
     ...fields,
     sections,
-    can: (flag) => allowed(fields.capabilities[flag]),
+    // An own key only: a name that came from outside (`constructor`) is not
+    // a capability for being something every object has.
+    can: (flag) => Object.hasOwn(fields.capabilities, flag) && allowed(fields.capabilities[flag]),
     has: (id) => byId.has(id),
     section: (id) => byId.get(id),
     missing: (id) => {
@@ -924,7 +987,7 @@ export function engineOf(id: string, drivers?: DbDriverInfo[], given?: DbCapabil
       cli: "",
       env: "DATABASE_URL",
       editor: "plaintext",
-      capabilities: flags(),
+      capabilities: NO_CAPABILITIES,
       url: (dsn) => dsn,
       command: () => "",
       clients: [],
@@ -935,15 +998,14 @@ export function engineOf(id: string, drivers?: DbDriverInfo[], given?: DbCapabil
   const flavor = own(spec.flavors, key) ?? spec.flavors[driver]
   const flavorId = Object.hasOwn(spec.flavors, key) ? key : driver
   const info = drivers?.find((d) => d.id === driver)
-  // Later wins: the registry's floor, the product's own differences, what
-  // the driver catalogue says of the driver, of this flavour, and last what
-  // the connection's own summary resolved.
+  // The server's table is the answer: what the catalogue says of this
+  // flavour, and over it what the connection's own summary resolved, which
+  // is the same reading for the product that actually answered. The floor
+  // stands in only where no catalogue has been read.
+  const served = info?.flavors.find((f) => f.id === flavorId)?.capabilities ?? info?.capabilities
   const capabilities: DbCapabilities = {
-    ...spec.capabilities,
-    ...flavor.capabilities,
-    ...(info ? { sql: info.sql, ddl: info.ddl } : {}),
-    ...info?.capabilities,
-    ...info?.flavors?.find((f) => f.id === flavorId)?.capabilities,
+    ...NO_CAPABILITIES,
+    ...(served ?? floorOf(driver)),
     ...given,
   }
   const cli = flavor.cli ?? spec.cli
@@ -953,7 +1015,7 @@ export function engineOf(id: string, drivers?: DbDriverInfo[], given?: DbCapabil
       driver,
       // The catalogue's own label for a driver covers every product it talks
       // to ("MySQL / MariaDB"); a connection is one of them.
-      label: info?.flavors?.find((f) => f.id === flavorId)?.label ?? flavor.label,
+      label: info?.flavors.find((f) => f.id === flavorId)?.label ?? flavor.label,
       // The driver's logo is its own product's alone; see `Engine.logo`.
       logo: hasProductLogo(flavorId) ? flavorId : undefined,
       kind: spec.kind,
@@ -961,7 +1023,7 @@ export function engineOf(id: string, drivers?: DbDriverInfo[], given?: DbCapabil
       kindPhrase: KIND_PHRASE[spec.kind],
       nouns: spec.nouns,
       defaultPort: info?.defaultPort ? String(info.defaultPort) : DEFAULT_PORT[driver],
-      dsnExample: info?.dsnExample ?? info?.placeholder ?? spec.dsnExample,
+      dsnExample: info?.dsnExample || spec.dsnExample,
       databaseField: spec.databaseField,
       cli,
       env: spec.env,

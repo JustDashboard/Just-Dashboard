@@ -141,14 +141,6 @@ test("the pages wait for what the server is, and are never mounted on its driver
   expect(await railPages(page)).not.toContain("Backups")
 })
 
-test("a backend with no summary route still opens a database, on a ping", async ({ page }) => {
-  await mockDatabases(page, { summaries: { 1: null } })
-  await page.goto("/databases/1/performance")
-
-  await expect(strip(page)).toContainText("shop")
-  await expect(strip(page).locator("[data-slot=database-status]")).toHaveText("connected")
-})
-
 test("an address that names no database says so and opens no other", async ({ page }) => {
   await mockDatabases(page)
 

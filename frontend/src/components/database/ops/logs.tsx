@@ -57,9 +57,10 @@ export function Logs() {
   const latest = found.data
   if (latest && latest.sources.length > 0 && held !== latest) setHeld(latest)
 
-  // A statement from the log opens in the query console, on an engine that
-  // has one for it.
-  const onQuery = engine.can("console") ? (sql: string) => goto("query", { sql }) : undefined
+  // A statement from the log opens in the SQL editor, on an engine whose log
+  // holds SQL. Every engine has a console of its own kind; what is handed
+  // over here is a statement.
+  const onQuery = engine.can("sql") ? (sql: string) => goto("query", { sql }) : undefined
 
   return (
     <SectionFrame section="logs">
