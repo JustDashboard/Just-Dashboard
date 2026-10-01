@@ -514,6 +514,49 @@ func TestQueryRouteClampsRecordsAndClassifies(t *testing.T) {
 	}
 }
 
+// The workbench reads and writes SQL. A connection to an engine that has none
+// is told so by every route before anything is read, classified or stopped,
+// and a connection that does not exist is not found by any of them.
+func TestTheWorkbenchRoutesAreForAnSQLConnectionThatExists(t *testing.T) {
+	w := newWorkbench(t)
+	// Never dialled: the refusal comes from the record.
+	sealed, err := w.server.Sealer.Seal("redis://127.0.0.1:1/0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := w.server.Store.DB.Exec(
+		`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES(?,?,?,?)`,
+		"cache", string(dbx.DriverRedis), sealed, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	redis, _ := res.LastInsertId()
+	admin := w.as(auth.RoleAdmin, "admin")
+
+	for _, c := range []struct{ method, suffix, body string }{
+		{http.MethodPost, "/changes", `{"table":"t","changes":[{"op":"insert","values":{}}]}`},
+		{http.MethodPost, "/rows", `{"table":"t","values":{"a":1}}`},
+		{http.MethodPatch, "/rows", `{"table":"t","key":{"id":1},"values":{"a":1}}`},
+		{http.MethodDelete, "/rows", `{"table":"t","key":{"id":1}}`},
+		{http.MethodGet, "/count?table=t", ""},
+		{http.MethodGet, "/cell?table=t&column=c&key=" + url.QueryEscape(`{"id":1}`), ""},
+		{http.MethodPost, "/query", `{"query":"SELECT 1"}`},
+		{http.MethodPost, "/script", `{"script":"SELECT 1"}`},
+		{http.MethodPost, "/query/cancel", `{"queryId":"q1"}`},
+		{http.MethodPost, "/classify", `{"query":"SELECT 1"}`},
+		{http.MethodPost, "/explain", `{"query":"SELECT 1"}`},
+	} {
+		rec := do(t, admin, c.method, "/databases/"+strconv.FormatInt(redis, 10)+c.suffix, c.body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "SQL engines") {
+			t.Errorf("%s %s on a Redis connection = %d %s", c.method, c.suffix, rec.Code, rec.Body.String())
+		}
+		rec = do(t, admin, c.method, "/databases/9999"+c.suffix, c.body)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s on a connection that does not exist = %d %s", c.method, c.suffix, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 // A run its client named can be stopped by that client, and by nobody else.
 func TestARunCanBeCancelledByWhoeverStartedIt(t *testing.T) {
 	w := newWorkbench(t)

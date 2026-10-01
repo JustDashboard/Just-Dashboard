@@ -418,7 +418,8 @@ type cancelRequest struct {
 //
 // It answers 200 either way: a run that has already finished is not an error,
 // it is the race every stop button loses some of the time, and `cancelled`
-// says which happened.
+// says which happened. A connection that does not exist, or has no statements
+// to stop, is answered as it is on the routes that start a run.
 func (s *Server) handleDBQueryCancel(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -430,6 +431,9 @@ func (s *Server) handleDBQueryCancel(w http.ResponseWriter, r *http.Request) err
 	}
 	if !queryIDRe.MatchString(req.QueryID) {
 		return httpx.BadRequest("queryId must be 1 to 64 letters, digits, underscores or hyphens")
+	}
+	if _, err := s.sqlConnection(r, id); err != nil {
+		return err
 	}
 	key := dbRunKey{server: s, conn: id, user: httpx.MustPrincipal(r).Username(), id: req.QueryID}
 	dbRuns.Lock()

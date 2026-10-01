@@ -781,7 +781,7 @@ func (s *Server) handleDBClassify(w http.ResponseWriter, r *http.Request) error 
 	httpx.SkipAudit(r)
 	// The engine decides how the text is read — a backtick is a quote on one
 	// and an operator on another — so the connection is looked up, not dialled.
-	conn, _, err := s.dbConnRow(r.Context(), id)
+	conn, err := s.sqlConnection(r, id)
 	if err != nil {
 		return err
 	}
