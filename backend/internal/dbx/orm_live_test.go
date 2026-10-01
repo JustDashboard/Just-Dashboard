@@ -861,6 +861,7 @@ func TestLiveORMSQLServer(t *testing.T) {
 	db := ormLiveDB(t, DriverMSSQL, "JD_TEST_ORM_MSSQL_DSN")
 	ctx := context.Background()
 	drop := []string{
+		`IF OBJECT_ID('jd_orm.sealed_accounts', 'V') IS NOT NULL DROP VIEW jd_orm.sealed_accounts`,
 		`IF OBJECT_ID('jd_orm.open_accounts', 'V') IS NOT NULL DROP VIEW jd_orm.open_accounts`,
 		`IF OBJECT_ID('jd_orm.transfers', 'U') IS NOT NULL DROP TABLE jd_orm.transfers`,
 		`IF OBJECT_ID('jd_orm.accounts', 'U') IS NOT NULL DROP TABLE jd_orm.accounts`,
@@ -1009,6 +1010,32 @@ func TestLiveORMSQLServer(t *testing.T) {
 		}
 		if after := prismaOf(read()); after != before {
 			t.Errorf("the rebuilt database generates a different Prisma schema.\n--- before\n%s\n--- after\n%s", before, after)
+		}
+	})
+
+	// A view created WITH ENCRYPTION is one the server will not show the text
+	// of. It is left out and said, and it is not counted as written.
+	t.Run("a_sealed_view_is_left_out_and_said", func(t *testing.T) {
+		ormExec(t, db, `CREATE VIEW jd_orm.sealed_accounts WITH ENCRYPTION AS SELECT id FROM jd_orm.accounts`)
+		req := ORMRequest{Target: ORMSQL, Schema: "jd_orm", Views: ormYes()}
+		asked, err := req.Scope(DriverMSSQL, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed, err := LoadORMSchema(ctx, db, DriverMSSQL, asked)
+		if err != nil {
+			t.Fatalf("LoadORMSchema: %v", err)
+		}
+		if v := ormTableNamed(sealed, "jd_orm", "sealed_accounts"); v == nil || v.Kind != ORMKindView || v.CreateSQL != "" {
+			t.Fatalf("sealed view = %+v, want a view with no statement", v)
+		}
+		script := ormGenerate(t, sealed, req)
+		ormMustNotContain(t, "schema.sql", script.Schema, "sealed_accounts")
+		ormMustContain(t, "schema.sql", script.Schema, "CREATE VIEW jd_orm.open_accounts")
+		ormMustContain(t, "warnings", strings.Join(script.Warnings, "\n"),
+			"The definition of view sealed_accounts could not be read; it was left out.")
+		if script.Counts.Views != 1 || script.Counts.Tables != 2 {
+			t.Errorf("counts = %+v, want the one view that was written", script.Counts)
 		}
 	})
 
