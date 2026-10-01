@@ -65,6 +65,14 @@ Referenced network drivers and named-volume drivers/options are inspected too; a
 host bind or plugin mount from this policy. Local filesystem volume backing paths must be absolute and
 pass the configured file-root check, including for administrators.
 
+The MongoDB routes read the request the same way. `POST /databases/{id}/aggregate` parses the pipeline
+and needs the destructive capability when a stage writes (`$out`, `$merge`) or is not known to be a
+read; `POST /databases/{id}/mongo/command` classifies the command by its first key and its arguments
+(`dbx.MongoClassifyCommand`), refuses what is never run, and asks for `system.admin` or the destructive
+capability and budget as the class demands, with anything unlisted treated as destructive. The update,
+rename, index and `collMod` routes are `service.control` and check by hand for the one option each has
+that removes data (`mongoNeedsDestructive`).
+
 The log routes decide on the source, not the path. `/logs/stream`, `/search`, `/download`,
 `/retention` and `/source` are `read`, but every one parses its `source` through `logTargetFor`, which
 refuses auth data — `auth.log` and `secure` with their generations and anything resolving to them, a

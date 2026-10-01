@@ -268,6 +268,53 @@ accounts retain partial results. Full table details and mutation preconditions u
   `TestLiveHostPostgresAccount` exercises it as root against a real native server
   (`JD_TEST_HOST_PG_PORT`).
 
+- **MongoDB has a surface of its own.** Routes under `/databases/{id}/mongo/` (`api/handlers_db_mongo*.go`,
+  `dbx/mongo_*.go`) do not pass documents through the SQL grid. A document crosses the wire as
+  **canonical Extended JSON** with a relaxed copy for display (`dbx.MongoDoc`), is addressed by its
+  `_id` as Extended JSON whatever type that is, and is decoded into `bson.Raw`, so a document read and
+  saved back unchanged is byte-identical (`TestCanonicalRoundTripIsByteIdentical`, and live in
+  `TestLiveMongoDocuments`). The display copy leaves a 64-bit integer too large for a double in its
+  `$numberLong` form, because a browser would show a different number. Every text field — filter, sort,
+  document, pipeline, command — is Extended JSON or the shell's spelling (`ObjectId("…")`,
+  `ISODate("…")`, unquoted keys, single quotes): `mongo_shell.go` rewrites the shell form into Extended
+  JSON and is tried only when the text is not valid JSON already, since the driver's reader stops at the
+  end of the first value and would accept `{} garbage`.
+  - *Reads are on the read surface* even where they are POSTs (a filter is a document, not a URL
+    parameter): `find` (with a count that is exact when it can be had in five seconds and the
+    collection's estimate otherwise), `count`, `document`, `explain`, `aggregate/preview`, `schema`,
+    `validation/check`, `export`, and the GETs for collections, indexes, validation, the server
+    snapshot, per-database `dbStats`, `currentOp`, the profiler, replication, users and roles. Each
+    carries a Max time the server enforces (default 30 s, at most 5 min).
+  - *Writes need `service.control`*; `DELETE`s of documents, collections, indexes and `killop` are
+    under `s.destructive`; the profiler and accounts need `system.admin`. Several routine routes have
+    one option that removes data and check it by hand with `mongoNeedsDestructive` (capability and
+    `destrLim`): an update of every document (an empty filter with `many`, which must also say
+    `all: true`), a rename with `dropTarget`, a TTL index or a new TTL limit, a smaller cap or a new
+    expiry through `collMod`, and a pipeline that writes.
+  - *A pipeline is classified after it is parsed* (`dbx.MongoClassifyPipeline`): stage names are read
+    off the parsed stages, sub-pipelines of `$lookup`, `$unionWith` and `$facet` included, so
+    `$mergeObjects` is not `$merge` and `"$\u006fut"` is `$out`. A stage that is not on the list of
+    known reads makes the pipeline destructive. A preview never runs a writing stage and refuses an
+    unknown one, which is why it needs no capability.
+  - *The console* (`POST …/mongo/command`) classifies a command by its first key against
+    `mongoCommands`: read, write, destructive or blocked, plus an `admin` flag for what the forms keep
+    to `system.admin` (accounts, the profiler, server parameters). Arguments can raise the class
+    (`aggregate` with `$out`, `update` with an empty filter and `multi`, `findAndModify` with `remove`,
+    `createIndexes` with a TTL). A command not in the table is destructive; `shutdown`, the `replSet*`
+    reconfiguration commands, `eval`/`mapReduce`, `applyOps`, sessions and transactions, and
+    `usersInfo` with `showCredentials` are never run. The audit entry is the command's name and the
+    collection it names, never its body, and is set before the gate so a refusal is recorded under
+    the command's own name.
+  - The first Mongo browser's routes (`/documents`, `/collections`, `/collections/indexes`,
+    `/aggregate`) still answer in their old shapes. `/stats` returns the keys it had plus the counters
+    a chart is drawn from and the server's own clock (`timestamp`), so rates are a difference of two
+    snapshots. Audited as `database.document.insert/replace/update/delete/clone`,
+    `database.collection.create/rename/modify/drop`, `database.index.create/modify/drop`,
+    `database.validation.set`, `database.aggregate`, `database.mongo.command/killop/profiler`,
+    `database.role.create/alter/grant/revoke/drop`, and `database.export` for the Mongo export, which
+    connects and opens its cursor before the first header so a failure is an error response rather
+    than an empty file.
+
 ### Database provisioning for deployments
 
 Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explicit admin URL read.
