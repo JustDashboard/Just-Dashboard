@@ -240,7 +240,37 @@ func (s *Server) scanDatabaseFiles(ctx context.Context) dbFileScanResult {
 	for _, root := range host.roots {
 		broad = append(broad, scanRoot{root, scanDepthRoot, scanVisitsRoot})
 	}
-	walk(broad)
+	// The file roots themselves, where the operator has narrowed them. A broad
+	// root above a file root is outside the roots as a whole and is skipped,
+	// and one nowhere near it was never going to reach it — so with
+	// JD_FILE_ROOTS narrower than the directories above, nothing was walked,
+	// and the list showed no file although each one could be connected by its
+	// path. A file root is walked as itself unless a broad root lies inside
+	// it: that one resolves and is walked, and walking down from a root as
+	// wide as / is the scan of the whole machine this list of roots replaces.
+	narrowed, replaced := []scanRoot{}, map[string]bool{}
+	for _, fileRoot := range s.modules.files.Roots() {
+		wide := false
+		for _, root := range broad {
+			visible := hostVisible(host.hostRoot, root.path)
+			wide = wide || pathInside(visible, fileRoot)
+			if visible != fileRoot && pathInside(fileRoot, visible) {
+				// Scanned as far as the roots allow, so not reported as left out.
+				replaced[root.path] = true
+			}
+		}
+		if !wide {
+			narrowed = append(narrowed, scanRoot{fileRoot, scanDepthRoot, scanVisitsRoot})
+		}
+	}
+	reachable := broad[:0:0]
+	for _, root := range broad {
+		if !replaced[root.path] {
+			reachable = append(reachable, root)
+		}
+	}
+	walk(reachable)
+	walk(narrowed)
 
 	inside := <-layers
 	result.embedded = inside.found
@@ -262,6 +292,11 @@ func (s *Server) scanDatabaseFiles(ctx context.Context) dbFileScanResult {
 	}
 	result.scan.Reason = strings.Join(notes, "; ")
 	return result
+}
+
+// pathInside reports whether path is dir or something beneath it.
+func pathInside(path, dir string) bool {
+	return path == dir || dir == "/" || strings.HasPrefix(path, strings.TrimSuffix(dir, "/")+"/")
 }
 
 func counted(n int, one, many string) string {

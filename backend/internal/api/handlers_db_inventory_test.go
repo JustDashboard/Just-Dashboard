@@ -1372,8 +1372,57 @@ func TestFileScanFindsDatabasesByTheirFirstBytes(t *testing.T) {
 	// A root outside the file roots is not scanned, and the answer says so.
 	s.dbInventory.host.roots = []string{filepath.Dir(outside)}
 	result = s.scanDatabaseFiles(t.Context())
-	if len(result.files) != 0 || !strings.Contains(result.scan.Reason, "outside the file roots") {
-		t.Errorf("a root outside JD_FILE_ROOTS: files %v reason %q", result.files, result.scan.Reason)
+	for _, f := range result.files {
+		if f.Path == outside {
+			t.Errorf("a root outside JD_FILE_ROOTS was scanned: %s", f.Path)
+		}
+	}
+	if !strings.Contains(result.scan.Reason, "outside the file roots") {
+		t.Errorf("a root outside JD_FILE_ROOTS: reason %q", result.scan.Reason)
+	}
+}
+
+// The file roots an operator narrowed the dashboard to are walked themselves.
+// The walk used to start only from the fixed directories applications are
+// installed under, each skipped when it was outside the roots: with
+// JD_FILE_ROOTS set beneath one of them, or beside all of them, the scan
+// walked nothing and listed no file, while every file under the roots could
+// still be connected by its path.
+func TestFileScanWalksTheFileRootsWhereTheyAreNarrowerThanItsOwn(t *testing.T) {
+	m := &fakeMachine{}
+	s, _ := inventoryRouter(t, auth.RoleAdmin, m)
+	fileRoot := s.Cfg.FileRoots[0]
+	inventorySQLiteFile(t, filepath.Join(fileRoot, "notes.db"))
+	inventorySQLiteFile(t, filepath.Join(fileRoot, "apps", "shop", "orders.sqlite3"))
+	found := func() map[string]bool {
+		out := map[string]bool{}
+		for _, f := range s.scanDatabaseFiles(t.Context()).files {
+			out[strings.TrimPrefix(f.Path, fileRoot+"/")] = true
+		}
+		return out
+	}
+	// Beneath a directory the scan starts from, as /home/app/files is beneath
+	// /home; and beside all of them, as /data is.
+	for name, roots := range map[string][]string{
+		"above the file root":  {filepath.Dir(fileRoot)},
+		"beside the file root": {t.TempDir()},
+	} {
+		s.dbInventory.host.roots = roots
+		if got := found(); !got["notes.db"] || !got["apps/shop/orders.sqlite3"] {
+			t.Errorf("with the scan's own root %s, found %v, want both files under the file root", name, got)
+		}
+	}
+	// A root above the file roots was replaced by them, not left out, and is
+	// not reported as a directory nobody looked in.
+	s.dbInventory.host.roots = []string{filepath.Dir(fileRoot)}
+	if reason := s.scanDatabaseFiles(t.Context()).scan.Reason; strings.Contains(reason, "outside the file roots") {
+		t.Errorf("a root the file roots are beneath was reported as not scanned: %q", reason)
+	}
+	// A root inside the file roots is still the place the walk starts: the
+	// file root above it is not walked from its top.
+	s.dbInventory.host.roots = []string{filepath.Join(fileRoot, "apps")}
+	if got := found(); got["notes.db"] || !got["apps/shop/orders.sqlite3"] {
+		t.Errorf("with a root inside the file root, found %v, want only what is under that root", got)
 	}
 }
 
