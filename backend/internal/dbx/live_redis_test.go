@@ -1979,7 +1979,10 @@ func TestLiveRedisAdminACL(t *testing.T) {
 
 	// The rule works as written: the user reads its own keys and nothing else.
 	opt := client.Options()
-	as := redis.NewClient(&redis.Options{Addr: opt.Addr, Username: name, Password: password, DB: opt.DB})
+	as := redis.NewClient(&redis.Options{
+		Network: opt.Network, Addr: opt.Addr, TLSConfig: opt.TLSConfig,
+		Username: name, Password: password, DB: opt.DB,
+	})
 	defer as.Close()
 	client.Set(ctx, "app:k", "v", time.Minute)
 	t.Cleanup(func() { client.Del(context.Background(), "app:k") })
