@@ -873,7 +873,9 @@ func (s *Server) runPrivilegeChange(ctx context.Context, conn *dbConnection, dsn
 	}
 	pool, err := s.modules.dbs.Pool(ctx, conn.ID, conn.Driver, dsn)
 	if err != nil {
-		return nil, err
+		// What the driver said goes into the answer, the audit entry and the
+		// log, and a driver that cannot use a connection string quotes it.
+		return nil, withoutSecrets(dsn, err)
 	}
 	return dbx.ChangePrivileges(ctx, pool, conn.Driver, change, preview)
 }
