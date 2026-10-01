@@ -62,7 +62,10 @@ type Config struct {
 	DeployLightSlots int
 	DeployLeaseTTL   time.Duration
 	BackupLocalDir   string
-	Dev              bool
+	// DBUploadMaxMB is the most one uploaded import file or database dump may
+	// hold, in MiB.
+	DBUploadMaxMB int
+	Dev           bool
 
 	// MetricsInterval is how often the backend samples the host into its
 	// own history, independently of any browser. MetricsRetention of 0
@@ -120,6 +123,7 @@ func Load() (*Config, error) {
 		DeployLightSlots: l.integer("JD_DEPLOY_LIGHT_SLOTS", 2, 1, 8),
 		DeployLeaseTTL:   l.boundedDuration("JD_DEPLOY_LEASE_TTL", 30*time.Second, 5*time.Second, 5*time.Minute),
 		BackupLocalDir:   env("JD_BACKUP_DIR", "/var/backups/just-dashboard"),
+		DBUploadMaxMB:    l.integer("JD_DB_UPLOAD_MAX_MB", 2048, 1, 1<<20),
 		Dev:              l.boolean("JD_DEV", false),
 		MetricsInterval:  l.window("JD_METRICS_INTERVAL", metrics.DefaultInterval),
 		MetricsRetention: l.optionalWindow("JD_METRICS_RETENTION", metrics.DefaultRetention),

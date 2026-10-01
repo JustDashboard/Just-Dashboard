@@ -52,8 +52,10 @@ func (s *Server) handleDBBackupDownload(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 	name := r.URL.Query().Get("file")
-	if name == "" {
-		return httpx.BadRequest("file is required")
+	// A dump's name and nothing else: not a path, and not the description
+	// kept beside a dump.
+	if err := validDumpName(name); err != nil {
+		return httpx.BadRequest("%v", err)
 	}
 	dir := s.dbDumpDir(conn.Name)
 	f, st, err := files.New([]string{dir}).Open(filepath.Join(dir, name))
@@ -65,6 +67,9 @@ func (s *Server) handleDBBackupDownload(w http.ResponseWriter, r *http.Request) 
 		return httpx.BadRequest("%s is a directory", name)
 	}
 	base := filepath.Base(st.Name())
+	// A whole database leaving the server is worth a line, and a GET never
+	// reaches the mutation middleware's record, so it is written here.
+	s.recordAudit(r, "database.backup.download", conn.Name, map[string]any{"file": base, "size": st.Size()})
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition",
 		mime.FormatMediaType("attachment", map[string]string{"filename": base}))

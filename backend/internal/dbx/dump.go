@@ -2,17 +2,20 @@ package dbx
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"modernc.org/sqlite"
 )
 
 // ConnInfo is the parsed form of a DSN, used to build dump and restore command
@@ -133,6 +136,132 @@ func parseMySQLDSN(dsn string) (*ConnInfo, error) {
 	return info, nil
 }
 
+// DumpOptions is what a dump can be asked for beyond "this database".
+//
+// Not every engine can honour every option, and an option that is quietly
+// ignored is worse than one that is refused: a "schema only" dump that carries
+// the data anyway is a file somebody will send to the wrong person.
+// ValidateDumpOptions is what a caller runs first.
+type DumpOptions struct {
+	// Database is the one to dump; empty means the connection's own. Redis
+	// names its databases with integers and takes them in RedisDatabases.
+	Database string
+	// SchemaOnly writes the structure without a row; DataOnly the rows without
+	// the structure they go into.
+	SchemaOnly bool
+	DataOnly   bool
+	// Tables keeps only these (Mongo: collections); ExcludeTables leaves these
+	// out. Each is "table" or "schema.table".
+	Tables        []string
+	ExcludeTables []string
+	// Compression is "" for whatever the tool does by default, "gzip" or
+	// "none".
+	Compression string
+	// RedisDatabases is which numbered databases to cover. Empty means every
+	// one that holds a key.
+	RedisDatabases []int
+	// Progress receives the tool's own lines as it works, and one line per
+	// table from the built-in dumper.
+	Progress func(line string)
+
+	// builtIn skips the engine's own tool. The built-in path is the one that
+	// has to work on a machine with nothing installed, so it has to be
+	// testable on a machine that has everything.
+	builtIn bool
+}
+
+func (o DumpOptions) progress(format string, args ...any) {
+	if o.Progress != nil {
+		o.Progress(fmt.Sprintf(format, args...))
+	}
+}
+
+func (o DumpOptions) selective() bool {
+	return o.SchemaOnly || o.DataOnly || len(o.Tables) > 0 || len(o.ExcludeTables) > 0
+}
+
+// The compression settings a dump accepts.
+const (
+	CompressionDefault = ""
+	CompressionGzip    = "gzip"
+	CompressionNone    = "none"
+)
+
+// DumpCapability says which options a driver's dump honours, so the form
+// offers what the request will not refuse.
+type DumpCapability struct {
+	SchemaOnly  bool `json:"schemaOnly"`
+	DataOnly    bool `json:"dataOnly"`
+	Tables      bool `json:"tables"`
+	Compression bool `json:"compression"`
+	// Databases is Redis's choice of numbered databases.
+	Databases bool `json:"databases"`
+	// NewDatabase is whether a dump can be restored into a database made for
+	// it rather than over the one it came from.
+	NewDatabase bool `json:"newDatabase"`
+}
+
+// DumpCapabilities reports what a dump of this engine can be asked for.
+func DumpCapabilities(driver Driver) DumpCapability {
+	switch driver {
+	case DriverPostgres, DriverMySQL, DriverMSSQL:
+		return DumpCapability{SchemaOnly: true, DataOnly: true, Tables: true, Compression: true, NewDatabase: true}
+	case DriverClickHouse, DriverOracle:
+		// ClickHouse statements name their database and Oracle's "database" is
+		// a user, so neither dump can be pointed at another one on the way in.
+		return DumpCapability{SchemaOnly: true, DataOnly: true, Tables: true, Compression: true}
+	case DriverSQLite:
+		// A SQLite database is one file; a second one is a second connection.
+		return DumpCapability{SchemaOnly: true, DataOnly: true, Tables: true, Compression: true}
+	case DriverMongo:
+		// mongodump has no way to leave the documents out, and nothing to put
+		// in a dump of documents with no collections.
+		return DumpCapability{Tables: true, Compression: true, NewDatabase: true}
+	case DriverRedis:
+		return DumpCapability{Databases: true, NewDatabase: true}
+	}
+	return DumpCapability{}
+}
+
+// ValidateDumpOptions refuses a combination the engine cannot honour, before
+// anything is written.
+func ValidateDumpOptions(driver Driver, opts DumpOptions) error {
+	has := DumpCapabilities(driver)
+	if opts.SchemaOnly && opts.DataOnly {
+		return fmt.Errorf("schema only and data only together leave nothing to dump")
+	}
+	if opts.SchemaOnly && !has.SchemaOnly {
+		return fmt.Errorf("a %s dump cannot leave the data out", driver)
+	}
+	if opts.DataOnly && !has.DataOnly {
+		return fmt.Errorf("a %s dump cannot leave the structure out", driver)
+	}
+	if (len(opts.Tables) > 0 || len(opts.ExcludeTables) > 0) && !has.Tables {
+		return fmt.Errorf("a %s dump cannot be narrowed to some tables", driver)
+	}
+	if len(opts.RedisDatabases) > 0 && !has.Databases {
+		return fmt.Errorf("only a Redis dump chooses numbered databases")
+	}
+	for _, n := range opts.RedisDatabases {
+		if n < 0 {
+			return fmt.Errorf("redis databases are numbered from 0; %d is not one", n)
+		}
+	}
+	switch opts.Compression {
+	case CompressionDefault:
+	case CompressionGzip, CompressionNone:
+		if !has.Compression {
+			return fmt.Errorf("a %s dump has one format; compression is not a choice", driver)
+		}
+	default:
+		return fmt.Errorf("compression is gzip or none, not %q", opts.Compression)
+	}
+	if _, err := newDumpSelection(opts.Tables, opts.ExcludeTables); err != nil {
+		return err
+	}
+	return nil
+}
+
 type DumpResult struct {
 	Path string `json:"path"`
 	// File is the base name of Path. The browser needs it to ask for the dump
@@ -151,7 +280,16 @@ type DumpResult struct {
 	Summary   string    `json:"summary,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
 	Output    string    `json:"output,omitempty"`
+	// Tool is what wrote the file — pg_dump, mysqldump, mongodump — or
+	// "built-in" for the dashboard's own dumper. ToolVersion is the tool's own
+	// word for its version; the built-in dumper's is the dashboard's, which the
+	// caller knows and this package does not.
+	Tool        string `json:"tool,omitempty"`
+	ToolVersion string `json:"toolVersion,omitempty"`
 }
+
+// BuiltInDumpTool is the Tool of a dump the dashboard wrote itself.
+const BuiltInDumpTool = "built-in"
 
 // Dump writes a backup of one database into outDir and returns where it landed.
 //
@@ -166,31 +304,52 @@ type DumpResult struct {
 // the backup they were relying on had never been possible — which is the worst
 // time to find out and the reason a backup feature exists at all.
 func Dump(ctx context.Context, driver Driver, dsn, database, outDir string) (*DumpResult, error) {
-	res, err := runDump(ctx, driver, dsn, database, outDir)
+	return DumpWith(ctx, driver, dsn, outDir, DumpOptions{Database: database})
+}
+
+// DumpWith is Dump with the options a caller may pass.
+func DumpWith(ctx context.Context, driver Driver, dsn, outDir string, opts DumpOptions) (*DumpResult, error) {
+	if err := ValidateDumpOptions(driver, opts); err != nil {
+		return nil, err
+	}
+	res, err := runDump(ctx, driver, dsn, outDir, opts)
 	if res != nil {
 		res.File = filepath.Base(res.Path)
+		if res.Tool == "" {
+			res.Tool = BuiltInDumpTool
+		}
+	}
+	if err != nil && ctx.Err() != nil {
+		// The tool's last words when it is killed are "terminated by signal",
+		// which is true and says nothing about why.
+		return nil, fmt.Errorf("dump stopped: %w", context.Cause(ctx))
 	}
 	return res, err
 }
 
 // runDump is Dump without the bookkeeping, so the several places that build a
 // result do not each have to remember to fill in every derived field.
-func runDump(ctx context.Context, driver Driver, dsn, database, outDir string) (*DumpResult, error) {
+func runDump(ctx context.Context, driver Driver, dsn, outDir string, opts DumpOptions) (*DumpResult, error) {
 	info, err := ParseDSN(driver, dsn)
 	if err != nil {
 		return nil, err
 	}
 	if driver == DriverSQLite {
+		if opts.selective() || opts.Compression == CompressionGzip {
+			// VACUUM INTO copies the file whole. Anything narrower is the SQL
+			// dump, which reads the same file through the same engine.
+			return dumpBuiltInSQL(ctx, driver, dsn, outDir, opts)
+		}
 		return dumpSQLite(ctx, dsn, info.Database, outDir)
-	}
-	if database == "" {
-		database = info.Database
 	}
 	if driver == DriverRedis {
 		// Redis names its databases with integers, so it validates its own.
-		return dumpRedis(ctx, dsn, database, outDir)
+		return dumpRedis(ctx, dsn, outDir, opts)
 	}
-	if err := validateDumpDatabase(database); err != nil {
+	if opts.Database == "" {
+		opts.Database = info.Database
+	}
+	if err := validateDumpDatabase(opts.Database); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(outDir, 0o700); err != nil {
@@ -199,11 +358,14 @@ func runDump(ctx context.Context, driver Driver, dsn, database, outDir string) (
 
 	fallback := func() (*DumpResult, error) {
 		if driver == DriverMongo {
-			return dumpMongoDriver(ctx, dsn, database, outDir)
+			return dumpMongoDriver(ctx, dsn, outDir, opts)
 		}
-		return dumpGenericSQL(ctx, driver, dsn, database, outDir)
+		return dumpBuiltInSQL(ctx, driver, dsn, outDir, opts)
 	}
-	native, tool := nativeDumpCommand(ctx, driver, dsn, info, database, outDir)
+	if opts.builtIn {
+		return fallback()
+	}
+	native, tool := nativeDumpCommand(ctx, driver, dsn, info, outDir, opts)
 	if native == nil {
 		return fallback()
 	}
@@ -211,10 +373,16 @@ func runDump(ctx context.Context, driver Driver, dsn, database, outDir string) (
 	if err == nil {
 		return res, nil
 	}
+	if ctx.Err() != nil {
+		// Stopped, not refused: a second attempt by another route is exactly
+		// what whoever stopped it did not ask for.
+		return nil, err
+	}
 	// The native tool is there and refused. Everything that makes it refuse a
 	// dump — a version it will not read, a feature the server has and it does
 	// not, a missing helper of its own — is something the driver path does not
 	// care about, so it is worth the second attempt before reporting a failure.
+	opts.progress("%s refused (%v); writing the dump over the dashboard's own connection instead", tool, err)
 	fb, ferr := fallback()
 	if ferr != nil {
 		return nil, fmt.Errorf("%w (and the built-in dump also failed: %v)", err, ferr)
@@ -228,77 +396,155 @@ func runDump(ctx context.Context, driver Driver, dsn, database, outDir string) (
 // nil when that tool is not installed. Deciding here rather than inside Dump
 // keeps "which tool, and is it present" in one place for the three engines that
 // have one.
-func nativeDumpCommand(ctx context.Context, driver Driver, dsn string, info *ConnInfo, database, outDir string) (func() (*DumpResult, error), string) {
+func nativeDumpCommand(ctx context.Context, driver Driver, dsn string, info *ConnInfo, outDir string, opts DumpOptions) (func() (*DumpResult, error), string) {
 	start := time.Now()
+	database := opts.Database
+	sel, err := newDumpSelection(opts.Tables, opts.ExcludeTables)
+	if err != nil {
+		return nil, ""
+	}
 	switch driver {
 	case DriverPostgres:
 		tool := postgresTool("pg_dump", postgresServerMajor(ctx, dsn))
 		if !toolAvailable(tool) {
 			return nil, ""
 		}
-		path := filepath.Join(outDir, dumpFilename(database, "postgres", "dump", start))
+		path := freeDumpPath(outDir, dumpFilename(database, "postgres", "dump", start))
 		return func() (*DumpResult, error) {
-			cmd := exec.CommandContext(ctx, tool,
+			args := []string{
 				"--host", info.Host, "--port", info.Port, "--username", info.User,
-				"--format", "custom", "--no-password", "--file", path, database)
-			cmd.Env = append(os.Environ(), "PGPASSWORD="+info.Password)
-			return runDumpCommand(cmd, tool, path, driver, database, start)
-		}, tool
+				"--format", "custom", "--no-password", "--verbose", "--file", path,
+			}
+			if opts.SchemaOnly {
+				args = append(args, "--schema-only")
+			}
+			if opts.DataOnly {
+				args = append(args, "--data-only")
+			}
+			if opts.Compression == CompressionNone {
+				args = append(args, "--compress", "0")
+			}
+			// pg_dump reads these as patterns. Quoting each part makes it the
+			// one name it spells: inside double quotes a star is a star.
+			for _, t := range sel.include {
+				args = append(args, "--table", t.postgresPattern())
+			}
+			for _, t := range sel.exclude {
+				args = append(args, "--exclude-table", t.postgresPattern())
+			}
+			args = append(args, database)
+			run := toolRun{name: tool, args: args, env: []string{"PGPASSWORD=" + info.Password}, progress: opts.Progress}
+			return runDumpCommand(ctx, run, path, driver, database, start)
+		}, filepath.Base(tool)
 	case DriverMySQL:
-		if !toolAvailable("mysqldump") {
+		tool := firstAvailableTool("mysqldump", "mariadb-dump")
+		if tool == "" {
 			return nil, ""
 		}
-		path := filepath.Join(outDir, dumpFilename(database, "mysql", "sql", start))
+		ext := "sql"
+		if opts.Compression == CompressionGzip {
+			ext = "sql.gz"
+		}
+		path := freeDumpPath(outDir, dumpFilename(database, "mysql", ext, start))
 		return func() (*DumpResult, error) {
 			defaults, cleanup, err := mysqlDefaultsFile(info)
 			if err != nil {
 				return nil, err
 			}
 			defer cleanup()
-			cmd := exec.CommandContext(ctx, "mysqldump",
-				"--defaults-extra-file="+defaults,
-				"--single-transaction", "--quick", "--routines", "--triggers",
+			args := []string{
+				"--defaults-extra-file=" + defaults,
+				"--single-transaction", "--quick", "--verbose",
 				// Tablespace metadata needs the PROCESS privilege, which is
 				// server-wide and which no sensible application login has. Asking
 				// for it put "mysqldump: Error: Access denied" on the end of a
 				// dump that had otherwise worked perfectly.
 				"--no-tablespaces",
-				"--result-file="+path, database)
-			return runDumpCommand(cmd, "mysqldump", path, driver, database, start)
-		}, "mysqldump"
+			}
+			switch {
+			case opts.SchemaOnly:
+				args = append(args, "--no-data", "--routines", "--triggers")
+			case opts.DataOnly:
+				// Routines and triggers are structure. Left on, a data-only
+				// dump recreates every trigger over the ones already there.
+				args = append(args, "--no-create-info", "--skip-triggers")
+			default:
+				args = append(args, "--routines", "--triggers")
+			}
+			for _, t := range sel.exclude {
+				args = append(args, "--ignore-table="+database+"."+t.table)
+			}
+			args = append(args, database)
+			for _, t := range sel.include {
+				args = append(args, t.table)
+			}
+			// The dump goes to this process rather than to a file of the
+			// tool's own, which is what lets it be compressed on the way.
+			out, err := newDumpFile(path, opts.Compression == CompressionGzip)
+			if err != nil {
+				return nil, err
+			}
+			run := toolRun{name: tool, args: args, stdout: out, progress: opts.Progress}
+			res, err := runDumpCommand(ctx, run, path, driver, database, start)
+			if cerr := out.Close(); cerr != nil && err == nil {
+				os.Remove(path)
+				return nil, cerr
+			}
+			if err == nil {
+				if st, serr := os.Stat(path); serr == nil {
+					res.Size = st.Size()
+				}
+			}
+			return res, err
+		}, tool
 	case DriverMongo:
 		if !toolAvailable("mongodump") {
 			return nil, ""
 		}
-		path := filepath.Join(outDir, dumpFilename(database, "mongo", "archive", start))
+		ext := "archive"
+		path := freeDumpPath(outDir, dumpFilename(database, "mongo", ext, start))
 		return func() (*DumpResult, error) {
-			conf, cleanup, err := mongoConfigFile(dsn)
+			// The tool refuses a --db that differs from the database the
+			// connection string names, so the string is pointed at the one
+			// being dumped.
+			conf, cleanup, err := mongoConfigFile(mongoURIForDatabase(dsn, database))
 			if err != nil {
 				return nil, err
 			}
 			defer cleanup()
-			cmd := exec.CommandContext(ctx, "mongodump",
-				"--config", conf, "--db", database, "--archive="+path, "--gzip")
-			return runDumpCommand(cmd, "mongodump", path, driver, database, start)
+			args := []string{"--config", conf, "--db", database, "--archive=" + path}
+			if opts.Compression != CompressionNone {
+				args = append(args, "--gzip")
+			}
+			include, exclude, err := mongoToolSelection(ctx, dsn, database, sel)
+			if err != nil {
+				return nil, err
+			}
+			if include != "" {
+				args = append(args, "--collection", include)
+			}
+			for _, name := range exclude {
+				args = append(args, "--excludeCollection", name)
+			}
+			run := toolRun{name: "mongodump", args: args, progress: opts.Progress}
+			return runDumpCommand(ctx, run, path, driver, database, start)
 		}, "mongodump"
 	}
 	return nil, ""
 }
 
 // runDumpCommand executes one dump tool and turns its exit into a result.
-func runDumpCommand(cmd *exec.Cmd, tool, path string, driver Driver, database string, start time.Time) (*DumpResult, error) {
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	if err := cmd.Run(); err != nil {
+func runDumpCommand(ctx context.Context, run toolRun, path string, driver Driver, database string, start time.Time) (*DumpResult, error) {
+	output, err := run.run(ctx)
+	if err != nil {
 		os.Remove(path)
 		// The tool's own output when it produced any, and the exec error when
 		// it did not. A missing binary writes nothing to stderr at all, so the
 		// message was "dump failed:" followed by nothing — which says something
 		// went wrong and withholds the only useful part, the name of the tool
 		// that is not installed.
-		if detail := strings.TrimSpace(buf.String()); detail != "" {
-			return nil, fmt.Errorf("dump failed: %s", detail)
+		if detail := strings.TrimSpace(output); detail != "" {
+			return nil, fmt.Errorf("dump failed: %s", lastLines(detail, 12))
 		}
 		return nil, fmt.Errorf("dump failed: %w", err)
 	}
@@ -306,28 +552,25 @@ func runDumpCommand(cmd *exec.Cmd, tool, path string, driver Driver, database st
 	if err != nil {
 		return nil, err
 	}
+	tool := filepath.Base(run.name)
 	return &DumpResult{
 		Path: path, Size: st.Size(), Driver: driver, Database: database,
 		Duration:  time.Since(start).Round(time.Millisecond).String(),
-		StartedAt: start.UTC(), Summary: "written by " + filepath.Base(tool),
-		Output: strings.TrimSpace(buf.String()),
+		StartedAt: start.UTC(), Summary: "written by " + tool,
+		Output: lastLines(strings.TrimSpace(output), 40),
+		Tool:   tool, ToolVersion: toolVersion(ctx, run.name),
 	}, nil
 }
 
-// toolAvailable reports whether a dump tool can actually be executed. An
-// absolute path is one postgresTool already found on disk; a bare name has to
-// be looked up, and not finding it is the ordinary case on a machine that never
-// installed it rather than an error worth reporting.
-func toolAvailable(name string) bool {
-	if name == "" {
-		return false
+// lastLines keeps the end of a tool's output. A verbose dump of a thousand
+// tables says a thousand things, and the part worth keeping in a result or an
+// error is how it finished.
+func lastLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
 	}
-	if strings.ContainsRune(name, os.PathSeparator) {
-		st, err := os.Stat(name)
-		return err == nil && !st.IsDir()
-	}
-	_, err := exec.LookPath(name)
-	return err == nil
+	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 // validateDumpDatabase refuses only what cannot be handled safely rather than a
@@ -346,14 +589,43 @@ func validateDumpDatabase(database string) error {
 	return validateIdent(database)
 }
 
+// RestoreOptions is what a restore can be told beyond which file.
+type RestoreOptions struct {
+	// Database is the one to load into; empty means the connection's own.
+	Database string
+	// SourceDatabase is the database the dump was taken of, when the caller
+	// knows it. Only a mongodump archive needs it, and only to be loaded under
+	// another name: its documents carry the name they came from.
+	SourceDatabase string
+	Progress       func(line string)
+}
+
+func (o RestoreOptions) progress(format string, args ...any) {
+	if o.Progress != nil {
+		o.Progress(fmt.Sprintf(format, args...))
+	}
+}
+
 // Restore loads a dump back into a database. This overwrites live data, which
-// is why the handler in front of it requires a typed confirmation naming the
-// target database.
+// is why the route in front of it sits in the destructive group.
 //
 // Which reader to use is decided by the file rather than by the engine: a
 // Postgres connection may hold either a pg_dump archive or the SQL text this
 // package writes, and picking by driver would refuse one of them for no reason.
 func Restore(ctx context.Context, driver Driver, dsn, database, dumpPath string) (string, error) {
+	return RestoreWith(ctx, driver, dsn, dumpPath, RestoreOptions{Database: database})
+}
+
+// RestoreWith is Restore with the options a caller may pass.
+func RestoreWith(ctx context.Context, driver Driver, dsn, dumpPath string, opts RestoreOptions) (string, error) {
+	out, err := runRestore(ctx, driver, dsn, dumpPath, opts)
+	if err != nil && ctx.Err() != nil {
+		return out, fmt.Errorf("restore stopped: %w", context.Cause(ctx))
+	}
+	return out, err
+}
+
+func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts RestoreOptions) (string, error) {
 	info, err := ParseDSN(driver, dsn)
 	if err != nil {
 		return "", err
@@ -361,82 +633,123 @@ func Restore(ctx context.Context, driver Driver, dsn, database, dumpPath string)
 	if _, err := os.Stat(dumpPath); err != nil {
 		return "", fmt.Errorf("dump file not readable: %w", err)
 	}
+	format := dumpFormatOf(dumpPath)
 	if driver == DriverSQLite {
+		if format == dumpFormatSQLText {
+			return restoreGenericSQL(ctx, driver, dsn, "", dumpPath, opts)
+		}
 		return restoreSQLite(dumpPath, info.Database)
+	}
+	database := opts.Database
+	if driver == DriverRedis {
+		return restoreRedis(ctx, dsn, database, dumpPath, opts)
 	}
 	if database == "" {
 		database = info.Database
 	}
-	if driver == DriverRedis {
-		return restoreRedis(ctx, dsn, database, dumpPath)
-	}
 	if err := validateDumpDatabase(database); err != nil {
 		return "", err
 	}
-	switch dumpFormatOf(dumpPath) {
+	switch format {
 	case dumpFormatArchive:
 		if driver != DriverMongo {
 			return "", fmt.Errorf("this is a Mongo archive; the connection is %s", driver)
 		}
-		return restoreMongoDriver(ctx, dsn, database, dumpPath)
+		return restoreMongoDriver(ctx, dsn, database, dumpPath, opts)
 	case dumpFormatSQLText:
-		return restoreGenericSQL(ctx, driver, dsn, database, dumpPath)
+		return restoreGenericSQL(ctx, driver, dsn, database, dumpPath, opts)
 	}
 
-	var cmd *exec.Cmd
+	var run toolRun
 	switch driver {
 	case DriverPostgres:
-		tool := postgresTool("pg_restore", postgresServerMajor(ctx, dsn))
+		major := postgresServerMajor(ctx, dsn)
+		if format == dumpFormatForeignSQL || format == dumpFormatNativeGzip {
+			// A plain-format pg_dump is a psql script: its rows travel as COPY
+			// blocks, which are not statements and which only psql reads.
+			tool := postgresTool("psql", major)
+			if !toolAvailable(tool) {
+				return "", fmt.Errorf("this is a plain SQL dump and psql is not installed to replay it")
+			}
+			f, closeDump, err := openDumpText(dumpPath)
+			if err != nil {
+				return "", err
+			}
+			defer closeDump()
+			run = toolRun{
+				name: tool, stdin: f, env: []string{"PGPASSWORD=" + info.Password},
+				args: []string{
+					"--host", info.Host, "--port", info.Port, "--username", info.User,
+					"--no-password", "--no-psqlrc", "--quiet", "--set", "ON_ERROR_STOP=1",
+					"--single-transaction", "--dbname", database,
+				},
+			}
+			break
+		}
+		tool := postgresTool("pg_restore", major)
 		if !toolAvailable(tool) {
 			return "", fmt.Errorf("this is a pg_dump custom-format archive and pg_restore is not installed; " +
 				"re-take the backup to get one this dashboard can restore on its own")
 		}
-		cmd = exec.CommandContext(ctx, tool,
-			"--host", info.Host, "--port", info.Port, "--username", info.User,
-			"--no-password", "--clean", "--if-exists", "--dbname", database, dumpPath)
-		cmd.Env = append(os.Environ(), "PGPASSWORD="+info.Password)
+		run = toolRun{
+			name: tool, env: []string{"PGPASSWORD=" + info.Password},
+			args: []string{
+				"--host", info.Host, "--port", info.Port, "--username", info.User,
+				"--no-password", "--verbose", "--clean", "--if-exists", "--dbname", database, dumpPath,
+			},
+		}
 	case DriverMySQL:
-		if !toolAvailable("mysql") {
-			return restoreGenericSQL(ctx, driver, dsn, database, dumpPath)
+		tool := firstAvailableTool("mysql", "mariadb")
+		if tool == "" {
+			return restoreGenericSQL(ctx, driver, dsn, database, dumpPath, opts)
 		}
 		defaults, cleanup, err := mysqlDefaultsFile(info)
 		if err != nil {
 			return "", err
 		}
 		defer cleanup()
-		f, err := os.Open(dumpPath)
+		f, closeDump, err := openDumpText(dumpPath)
 		if err != nil {
 			return "", err
 		}
-		defer f.Close()
-		cmd = exec.CommandContext(ctx, "mysql", "--defaults-extra-file="+defaults, database)
-		cmd.Stdin = f
+		defer closeDump()
+		run = toolRun{name: tool, args: []string{"--defaults-extra-file=" + defaults, database}, stdin: f}
 	case DriverMongo:
 		if !toolAvailable("mongorestore") {
 			return "", fmt.Errorf("this is a mongodump archive and mongorestore is not installed; " +
 				"re-take the backup to get one this dashboard can restore on its own")
 		}
-		conf, cleanup, err := mongoConfigFile(dsn)
+		// With no database in the connection string the tool takes the
+		// archive's own word for where each collection belongs, which is the
+		// only thing the options below can then redirect.
+		conf, cleanup, err := mongoConfigFile(mongoURIForDatabase(dsn, ""))
 		if err != nil {
 			return "", err
 		}
 		defer cleanup()
-		cmd = exec.CommandContext(ctx, "mongorestore",
-			"--config", conf, "--archive="+dumpPath, "--gzip", "--drop")
+		args := []string{"--config", conf, "--archive=" + dumpPath, "--drop"}
+		if format == dumpFormatNativeGzip {
+			args = append(args, "--gzip")
+		}
+		if opts.SourceDatabase != "" && opts.SourceDatabase != database {
+			// The archive's documents name the database they were dumped from,
+			// and mongorestore puts them back there unless told otherwise.
+			args = append(args, "--nsFrom", opts.SourceDatabase+".*", "--nsTo", database+".*")
+		}
+		run = toolRun{name: "mongorestore", args: args}
 	default:
 		return "", fmt.Errorf("%w: %s", ErrUnsupported, driver)
 	}
 
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	if err := cmd.Run(); err != nil {
-		if detail := strings.TrimSpace(buf.String()); detail != "" {
-			return buf.String(), fmt.Errorf("restore failed: %s", detail)
+	run.progress = opts.Progress
+	output, err := run.run(ctx)
+	if err != nil {
+		if detail := strings.TrimSpace(output); detail != "" {
+			return output, fmt.Errorf("restore failed: %s", lastLines(detail, 12))
 		}
-		return buf.String(), fmt.Errorf("restore failed: %w", err)
+		return output, fmt.Errorf("restore failed: %w", err)
 	}
-	return strings.TrimSpace(buf.String()), nil
+	return lastLines(strings.TrimSpace(output), 40), nil
 }
 
 // dumpFormat is what a dump file turns out to be.
@@ -446,12 +759,22 @@ const (
 	// dumpFormatNative is a tool's own format — a pg_dump custom archive, a
 	// mongodump archive, a mysqldump script — and is replayed by that tool.
 	dumpFormatNative dumpFormat = iota
-	// dumpFormatSQLText is the SQL this package writes.
+	// dumpFormatSQLText is the SQL this package writes, gzipped or not.
 	dumpFormatSQLText
 	// dumpFormatArchive is the gzipped JSON Lines this package writes for the
 	// engines that are not SQL.
 	dumpFormatArchive
+	// dumpFormatNativeGzip is a tool's own format, gzipped: a mongodump
+	// archive taken with --gzip, a mysqldump script compressed on the way out.
+	dumpFormatNativeGzip
+	// dumpFormatForeignSQL is SQL text something else wrote: a plain pg_dump,
+	// a mysqldump, a script somebody uploaded.
+	dumpFormatForeignSQL
 )
+
+// dumpHeader is the first line of every SQL dump this package writes, and what
+// tells one of them from SQL anybody else wrote.
+const dumpHeader = "-- Just Dashboard dump"
 
 // dumpFormatOf reads the first bytes of the file rather than trusting its name.
 // A dump gets renamed, and restoring a file with the wrong reader produces an
@@ -469,20 +792,122 @@ func dumpFormatOf(path string) dumpFormat {
 	case bytes.HasPrefix(head, []byte("PGDMP")):
 		// pg_dump's custom format, which only pg_restore reads.
 		return dumpFormatNative
-	case bytes.HasPrefix(head, []byte("-- Just Dashboard dump")):
+	case bytes.HasPrefix(head, []byte(dumpHeader)):
 		return dumpFormatSQLText
 	case bytes.HasPrefix(head, []byte{0x1f, 0x8b}):
-		// gzip: either this package's JSON Lines archive or a gzipped
-		// mongodump. Only the first has a header naming itself, and reading it
-		// means decompressing, so the cheap discriminator is the extension the
-		// writer chose alongside it.
+		// gzip: this package's JSON Lines archive, its SQL text compressed, or
+		// a tool's own output. The archive is told by the extension its writer
+		// chose; the SQL by the header inside, which is one small read away.
 		if strings.HasSuffix(path, ".jsonl.gz") {
 			return dumpFormatArchive
 		}
-		return dumpFormatNative
+		if inner := gzipHead(path, len(dumpHeader)); bytes.Equal(inner, []byte(dumpHeader)) {
+			return dumpFormatSQLText
+		}
+		return dumpFormatNativeGzip
+	case looksLikeSQLText(head):
+		return dumpFormatForeignSQL
 	default:
 		return dumpFormatNative
 	}
+}
+
+// gzipHead reads the first n bytes inside a gzip file.
+func gzipHead(path string, n int) []byte {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return nil
+	}
+	defer gz.Close()
+	head := make([]byte, n)
+	got, _ := io.ReadFull(gz, head)
+	return head[:got]
+}
+
+// looksLikeSQLText tells a script from an archive by what an archive is not:
+// text. A tar or a mongodump archive has a NUL in its first block.
+func looksLikeSQLText(head []byte) bool {
+	return len(head) > 0 && !bytes.ContainsRune(head, 0) && isPrintableText(head[:validPrefix(head)])
+}
+
+// validPrefix trims a head that was cut in the middle of a multi-byte
+// character, which is the buffer's doing and not the file's.
+func validPrefix(b []byte) int {
+	for i := len(b); i > 0 && i > len(b)-4; i-- {
+		if isPrintableText(b[:i]) {
+			return i
+		}
+	}
+	return len(b)
+}
+
+// openDumpText opens a SQL script for a client's standard input, decompressing
+// it on the way when it was written compressed.
+func openDumpText(path string) (io.Reader, func(), error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	head := make([]byte, 2)
+	n, _ := io.ReadFull(f, head)
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	if n == 2 && head[0] == 0x1f && head[1] == 0x8b {
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			f.Close()
+			return nil, nil, err
+		}
+		return gz, func() { gz.Close(); f.Close() }, nil
+	}
+	return f, func() { f.Close() }, nil
+}
+
+// dumpFile is where a dump is written when this process holds the pen: a file
+// created private, optionally gzipped, and synced before it is called written.
+type dumpFile struct {
+	f  *os.File
+	gz *gzip.Writer
+}
+
+func newDumpFile(path string, compress bool) (*dumpFile, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	d := &dumpFile{f: f}
+	if compress {
+		d.gz = gzip.NewWriter(f)
+	}
+	return d, nil
+}
+
+func (d *dumpFile) Write(p []byte) (int, error) {
+	if d.gz != nil {
+		return d.gz.Write(p)
+	}
+	return d.f.Write(p)
+}
+
+func (d *dumpFile) Close() error {
+	var first error
+	if d.gz != nil {
+		first = d.gz.Close()
+	}
+	if err := d.f.Sync(); err != nil && first == nil {
+		first = err
+	}
+	if err := d.f.Close(); err != nil && first == nil {
+		first = err
+	}
+	return first
 }
 
 // dumpSQLite writes a consistent snapshot of a SQLite file with VACUUM INTO,
@@ -502,7 +927,7 @@ func dumpSQLite(ctx context.Context, dsn, path, outDir string) (*DumpResult, err
 	if base == "" {
 		base = "sqlite"
 	}
-	out := filepath.Join(outDir, fmt.Sprintf("%s-%s.sqlite", base, stamp))
+	out := freeDumpPath(outDir, fmt.Sprintf("%s-%s.sqlite", base, stamp))
 
 	db, err := sql.Open("sqlite", sqliteDialect{}.NormaliseDSN(dsn))
 	if err != nil {
@@ -522,8 +947,10 @@ func dumpSQLite(ctx context.Context, dsn, path, outDir string) (*DumpResult, err
 		return nil, err
 	}
 	var tables int
+	// The underscore is escaped: bare, it is a wildcard, and a table called
+	// "sqlitex" was counted out as one of the engine's own.
 	_ = db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`).
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\_%' ESCAPE '\'`).
 		Scan(&tables)
 	return &DumpResult{
 		Path: out, Size: st.Size(), Driver: DriverSQLite, Database: filepath.Base(path),
@@ -532,33 +959,226 @@ func dumpSQLite(ctx context.Context, dsn, path, outDir string) (*DumpResult, err
 	}, nil
 }
 
-// restoreSQLite replaces the live database file with a dump. The previous file
-// is kept alongside as <name>.bak-<stamp> rather than deleted, so a restore
-// from the wrong dump is recoverable — the same guard WriteComposeFile applies.
+// sqliteMagic is the sixteen bytes every SQLite database file starts with.
+const sqliteMagic = "SQLite format 3\x00"
+
+// restoreSQLite replaces the contents of the live database with a dump's. The
+// previous contents are kept alongside as <name>.bak-<stamp> rather than
+// discarded, so a restore from the wrong dump is recoverable — the same guard
+// WriteComposeFile applies.
+//
+// The dump is loaded through SQLite's own online backup, into the file that is
+// already there, under the engine's locks. Writing over that file by hand is
+// what this used to do, and it is wrong whichever way it is done: truncate and
+// copy, and a program with the database open reads a file that is half one
+// database and half another; rename a new file into place, and that program
+// goes on writing to the old one, which no longer has a name. Loaded through
+// the engine, every connection — the dashboard's and anybody else's — sees the
+// old database, then the new one, and nothing in between.
 func restoreSQLite(dumpPath, target string) (string, error) {
 	if target == "" {
 		return "", fmt.Errorf("connection has no database file path")
 	}
-	src, err := os.Open(dumpPath)
+	if err := checkSQLiteFile(dumpPath); err != nil {
+		return "", err
+	}
+	st, err := os.Stat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		// Nothing is there to be open or to keep: the dump becomes the file.
+		if err := copyFile(dumpPath, target, 0o600); err != nil {
+			return "", fmt.Errorf("restore failed: %w", err)
+		}
+		return "restored " + target, nil
+	}
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
-	if _, err := os.Stat(target); err == nil {
-		backup := fmt.Sprintf("%s.bak-%s", target, time.Now().UTC().Format("20060102-150405"))
-		if data, err := os.ReadFile(target); err == nil {
-			_ = os.WriteFile(backup, data, 0o600)
+
+	kept, err := keepSQLiteCopy(target, st.Mode().Perm())
+	if err != nil {
+		// A restore with no way back is not one to carry on with.
+		return "", fmt.Errorf("could not keep a copy of the current database, so nothing was replaced: %w", err)
+	}
+	if err := restoreSQLiteOnline(dumpPath, target); err != nil {
+		// The file that is there cannot be opened as a database — which may be
+		// exactly why it is being restored. It is replaced whole, along with
+		// the write-ahead log that belonged to it: left behind, SQLite would
+		// replay the old database's last transactions into the new one.
+		if rerr := replaceSQLiteFile(dumpPath, target, st.Mode().Perm()); rerr != nil {
+			return "", fmt.Errorf("restore failed: %v (and replacing the file also failed: %w)", err, rerr)
 		}
 	}
-	dst, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	return fmt.Sprintf("restored %s (the previous contents are kept as %s)", target, filepath.Base(kept)), nil
+}
+
+func checkSQLiteFile(path string) error {
+	f, err := os.Open(path)
 	if err != nil {
+		return err
+	}
+	defer f.Close()
+	head := make([]byte, len(sqliteMagic))
+	if _, err := io.ReadFull(f, head); err != nil || string(head) != sqliteMagic {
+		return fmt.Errorf("%s is not a SQLite database file", filepath.Base(path))
+	}
+	return nil
+}
+
+// sqliteFileURI names a file to the driver without letting anything in the
+// name be read as a parameter.
+func sqliteFileURI(path, query string) string {
+	escaped := strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(path)
+	return "file:" + escaped + "?" + query
+}
+
+// keepSQLiteCopy copies the current database aside and returns where. The
+// engine's own snapshot is preferred, since it is whole whatever is being
+// written at the time; a database too damaged to be read that way is copied
+// byte for byte, which keeps whatever is there to be recovered from.
+func keepSQLiteCopy(target string, perm os.FileMode) (string, error) {
+	kept := fmt.Sprintf("%s.bak-%s", target, time.Now().UTC().Format("20060102-150405"))
+	for n := 2; ; n++ {
+		if _, err := os.Lstat(kept); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		// Two restores inside one second each keep their own copy.
+		kept = fmt.Sprintf("%s.bak-%s-%d", target, time.Now().UTC().Format("20060102-150405"), n)
+	}
+	db, err := sql.Open("sqlite", sqliteFileURI(target, "_pragma=busy_timeout(15000)"))
+	if err == nil {
+		_, err = db.Exec("VACUUM INTO '" + strings.ReplaceAll(kept, "'", "''") + "'")
+		db.Close()
+		if err == nil {
+			return kept, os.Chmod(kept, perm)
+		}
+		os.Remove(kept)
+	}
+	if err := copyFile(target, kept, perm); err != nil {
+		os.Remove(kept)
 		return "", err
 	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, src); err != nil {
-		return "", fmt.Errorf("restore failed: %w", err)
+	return kept, nil
+}
+
+// sqliteRestorer is the driver connection's online restore.
+type sqliteRestorer interface {
+	NewRestore(srcURI string) (*sqlite.Backup, error)
+}
+
+// restoreSQLiteOnline loads the dump into the database file through the
+// engine. The dump is opened read-only and as a file that will not change, so
+// reading it leaves nothing beside it.
+func restoreSQLiteOnline(dumpPath, target string) error {
+	db, err := sql.Open("sqlite", sqliteFileURI(target, "_pragma=busy_timeout(15000)"))
+	if err != nil {
+		return err
 	}
-	return "restored " + target, nil
+	defer db.Close()
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return conn.Raw(func(driverConn any) error {
+		restorer, ok := driverConn.(sqliteRestorer)
+		if !ok {
+			return fmt.Errorf("this SQLite driver has no online restore")
+		}
+		backup, err := restorer.NewRestore(sqliteFileURI(dumpPath, "mode=ro&immutable=1"))
+		if err != nil {
+			return err
+		}
+		// Somebody else may hold the database for a moment. That is a reason
+		// to wait, not to fail.
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			more, err := backup.Step(-1)
+			if err != nil {
+				busy := strings.Contains(err.Error(), "locked") || strings.Contains(err.Error(), "busy")
+				if busy && time.Now().Before(deadline) {
+					time.Sleep(200 * time.Millisecond)
+					continue
+				}
+				backup.Finish()
+				return err
+			}
+			if !more {
+				return backup.Finish()
+			}
+		}
+	})
+}
+
+// replaceSQLiteFile puts the dump where the database was, written beside it
+// and renamed into place so an interrupted restore leaves the old file rather
+// than half of the new one.
+func replaceSQLiteFile(dumpPath, target string, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".jd-restore-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	tmp.Close()
+	os.Remove(tmpName)
+	defer os.Remove(tmpName)
+	if err := copyFile(dumpPath, tmpName, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, target); err != nil {
+		return err
+	}
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		if err := os.Remove(target + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("the database was replaced, but its old %s file could not be removed: %w", suffix, err)
+		}
+	}
+	return nil
+}
+
+func copyFile(from, to string, perm os.FileMode) error {
+	src, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(to, os.O_CREATE|os.O_WRONLY|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		return err
+	}
+	if err := dst.Sync(); err != nil {
+		dst.Close()
+		return err
+	}
+	return dst.Close()
+}
+
+// mongoURIForDatabase points a Mongo connection string at another database, or
+// at none.
+//
+// The database in the string is also where the account is looked up when the
+// string does not say otherwise, so moving it would move the sign-in with it.
+// The original is therefore kept as the authentication source, explicitly.
+func mongoURIForDatabase(dsn, database string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return dsn
+	}
+	original := strings.TrimPrefix(u.Path, "/")
+	if original == database {
+		return dsn
+	}
+	q := u.Query()
+	if original != "" && u.User != nil && q.Get("authSource") == "" {
+		q.Set("authSource", original)
+		u.RawQuery = q.Encode()
+	}
+	u.Path = "/" + database
+	return u.String()
 }
 
 // mongoConfigFile writes the connection string to a mode-0600 temporary file

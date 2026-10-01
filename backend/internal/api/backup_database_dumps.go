@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
@@ -35,8 +34,8 @@ func (d *backupDatabaseDumper) DumpDatabase(ctx context.Context, id int64, direc
 	if err != nil {
 		return backups.DatabaseDumpResult{}, err
 	}
-	method := strings.TrimPrefix(result.Summary, "written by ")
-	if method == "" {
+	method := result.Tool
+	if method == "" || method == dbx.BuiltInDumpTool {
 		method = "built-in dump"
 	}
 	return backups.DatabaseDumpResult{
@@ -49,6 +48,13 @@ func (d *backupDatabaseDumper) RestoreDatabase(ctx context.Context, id int64, da
 	conn, dsn, err := d.server.dbConnRow(ctx, id)
 	if err != nil {
 		return "", errors.New("database connection was not found")
+	}
+	// The dashboard's own sessions go first, as they do for a restore started
+	// from the Databases page: a pooled one would carry plans for tables that
+	// are about to be replaced, and on SQLite would hold a lock on the file.
+	if conn.Driver.IsSQL() {
+		d.server.modules.dbs.Close(id)
+		defer d.server.modules.dbs.Close(id)
 	}
 	return dbx.Restore(ctx, conn.Driver, dsn, database, dumpPath)
 }

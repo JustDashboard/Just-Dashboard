@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -202,7 +203,7 @@ func TestLiveDumpMongoWithoutTheTools(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	res, err := dumpMongoDriver(ctx, dsn, dbName, dir)
+	res, err := dumpMongoDriver(ctx, dsn, dir, DumpOptions{Database: dbName})
 	if err != nil {
 		t.Fatalf("dumpMongoDriver: %v", err)
 	}
@@ -250,13 +251,25 @@ func TestLiveDumpRedisRoundTrip(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
+	// The connection's own numbered database, by name. Left unnamed a dump is
+	// of every database on the server, and this server is shared: restoring
+	// that would write into databases this test has no business in.
+	own, err := redisDatabaseIndex(dsn, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	database := strconv.Itoa(own)
+
 	dir := t.TempDir()
-	res, err := Dump(ctx, DriverRedis, dsn, "", dir)
+	res, err := Dump(ctx, DriverRedis, dsn, database, dir)
 	if err != nil {
 		t.Fatalf("Dump: %v", err)
 	}
 	if res.Size == 0 {
 		t.Fatal("dump is empty")
+	}
+	if res.Database != database {
+		t.Fatalf("dump covers %q, want only database %s", res.Database, database)
 	}
 	if err := client.Del(ctx, keys...).Err(); err != nil {
 		t.Fatalf("wipe: %v", err)
