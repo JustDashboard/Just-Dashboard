@@ -28,7 +28,26 @@ func TestClassifyForReadsEachEngine(t *testing.T) {
 		{DriverPostgres, "BEGIN", "high"},
 		{DriverSQLite, "PRAGMA journal_mode = WAL", "high"},
 		{DriverMySQL, "INSERT t VALUES (1)", "medium"},
-		{DriverMySQL, "REPLACE INTO t VALUES (1)", "medium"},
+		// These add, and take away what was there to make room.
+		{DriverMySQL, "REPLACE INTO t VALUES (1)", "high"},
+		{DriverSQLite, "INSERT OR REPLACE INTO t VALUES (1)", "high"},
+		{DriverMySQL, "CREATE OR REPLACE TABLE t (id INT)", "high"},
+		{DriverPostgres, "CREATE OR REPLACE VIEW v AS SELECT 1", "high"},
+		{DriverPostgres, "CREATE VIEW v AS SELECT 1", "medium"},
+		{DriverMySQL, "CREATE OR /* not a way round */ REPLACE TABLE t (id INT)", "high"},
+		{DriverPostgres, "SELECT replace(name, 'or replace', 'x') FROM t", "read"},
+		// An account is a permission, however it is spelled.
+		{DriverPostgres, "CREATE ROLE app SUPERUSER LOGIN PASSWORD 'x'", "high"},
+		{DriverMySQL, "CREATE USER 'app'@'%' IDENTIFIED BY 'x'", "high"},
+		{DriverPostgres, "CREATE /* x */ ROLE app", "high"},
+		// A column called role is not an account.
+		{DriverPostgres, "CREATE TABLE members (id int, role text, login text)", "medium"},
+		// A SELECT that ends somebody's session, or writes a file, is not a
+		// read; the routes that do those things by name are destructive.
+		{DriverPostgres, "SELECT pg_terminate_backend(1234)", "high"},
+		{DriverPostgres, "SELECT lo_export(1, '/tmp/x')", "high"},
+		{DriverPostgres, "SELECT * FROM dblink('dbname=x', 'SELECT 1') AS t(a int)", "high"},
+		{DriverPostgres, "SELECT pg_size_pretty(pg_database_size(current_database()))", "read"},
 
 		// Valid SQL the engine-blind splitter refused outright.
 		{DriverPostgres, "SELECT doc #>> '{a,b}' FROM t", "read"},

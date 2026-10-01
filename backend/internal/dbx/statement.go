@@ -221,6 +221,22 @@ var batchWords = []string{
 	"load", "dump",
 }
 
+// serverFunctions are the PostgreSQL functions that act on the server rather
+// than return something about it: end another session, write a file, run a
+// statement over a second connection. A SELECT is all it takes to call one, the
+// read-only transaction does not stop them, and the routes that do the same
+// things by name are in the destructive group — so calling one from the
+// console costs what those routes cost.
+var serverFunctions = []string{
+	"pg_terminate_backend", "pg_cancel_backend", "pg_reload_conf", "pg_rotate_logfile",
+	"pg_promote", "pg_switch_wal", "pg_create_restore_point",
+	"pg_backup_start", "pg_backup_stop", "pg_start_backup", "pg_stop_backup",
+	"pg_drop_replication_slot", "pg_create_physical_replication_slot",
+	"pg_create_logical_replication_slot", "pg_replication_origin_drop",
+	"lo_import", "lo_export", "lo_unlink", "pg_file_write", "pg_file_unlink",
+	"pg_file_rename", "dblink", "dblink_exec", "dblink_connect", "set_config",
+}
+
 // read fills in everything the runner asks of a statement.
 //
 // Two different readings are used on purpose. The *tokens* — the lexer's view
@@ -233,6 +249,9 @@ var batchWords = []string{
 // every byte of that text is looked at whatever this lexer made of the quotes.
 func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 	keywords := map[string]bool{}
+	// code is the statement's words in order, with the comments between them
+	// gone — which is what two words being next to each other has to mean.
+	var code []string
 	// Leading parentheses do not hide the verb: (SELECT 1) UNION … leads with
 	// SELECT. Anything else in front of the first word means there is no
 	// leading verb to trust.
@@ -242,6 +261,7 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 		case t.kind == tokWord:
 			word := strings.ToLower(st.SQL[t.start:t.end])
 			keywords[word] = true
+			code = append(code, word)
 			if leading {
 				st.leader, leading = word, false
 			}
@@ -319,9 +339,39 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 			}
 		}
 	}
-	if words.has("insert") || words.follows("replace", "into") {
+	if driver == DriverPostgres {
+		for _, name := range serverFunctions {
+			if words.has(name) {
+				add("high", "calls a function that acts on the server ("+name+")")
+				break
+			}
+		}
+	}
+	// REPLACE INTO and INSERT OR REPLACE delete the row that was in the way,
+	// and CREATE OR REPLACE discards the definition that was there — on
+	// MariaDB, the table. REPLACE on its own is a string function, so it is
+	// the pair of words that counts.
+	replaces, account := false, false
+	for i := 0; i+1 < len(code); i++ {
+		switch {
+		case code[i] == "replace" && code[i+1] == "into", code[i] == "or" && code[i+1] == "replace":
+			replaces = true
+		case code[i] == "create":
+			switch code[i+1] {
+			case "role", "user", "login", "group":
+				account = true
+			}
+		}
+	}
+	if replaces {
+		add("high", "replaces what is already there")
+	}
+	if account {
+		add("high", "creates a database account")
+	}
+	if words.has("insert") {
 		add("medium", "inserts rows")
-	} else if words.has("into") && !words.has("merge") {
+	} else if words.has("into") && !words.has("merge") && !replaces {
 		add("medium", "stores its result (INTO)")
 	}
 	if words.has("create") {
@@ -339,10 +389,9 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 	st.Risk = risk
 }
 
-// wordSet is every word in a statement's raw text, in order.
+// wordSet is every word in a statement's raw text.
 type wordSet struct {
 	seen map[string]bool
-	list []string
 	// glued holds the runs that start with a digit. `1DELETE` is a number and
 	// a keyword to SQL Server and an identifier to MySQL, so a verb anywhere
 	// inside one counts.
@@ -355,17 +404,6 @@ func (w *wordSet) has(word string) bool {
 	}
 	for _, run := range w.glued {
 		if strings.Contains(run, word) {
-			return true
-		}
-	}
-	return false
-}
-
-// follows reports word b directly after word a. REPLACE is a function far more
-// often than it is a statement, and only the statement is followed by INTO.
-func (w *wordSet) follows(a, b string) bool {
-	for i := 0; i+1 < len(w.list); i++ {
-		if w.list[i] == a && w.list[i+1] == b {
 			return true
 		}
 	}
@@ -395,7 +433,6 @@ func rawWords(text string) *wordSet {
 			w.glued = append(w.glued, run)
 		} else {
 			w.seen[run] = true
-			w.list = append(w.list, run)
 		}
 		i = j
 	}

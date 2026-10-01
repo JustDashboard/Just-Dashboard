@@ -18,7 +18,10 @@ Classification is per statement and keeps the strongest verdict. The shape (lead
 text and comments included, so no disagreement about where a quote ends can put one out of sight —
 it over-reports instead (`SELECT 'delete'` is destructive), which is the direction it may be wrong in.
 A dollar-quoted body is at least `high`. SQL Server needs no separator between statements, so there
-any batch keyword anywhere (`EXEC`, `SET`, `BEGIN`…) ends a statement's claim to be a read.
+any batch keyword anywhere (`EXEC`, `SET`, `BEGIN`…) ends a statement's claim to be a read. What
+replaces rather than adds (`REPLACE INTO`, `… OR REPLACE`), what creates an account, and a PostgreSQL
+function that acts on the server (`pg_terminate_backend`, `lo_export`, `dblink`…) are `high` too: the
+console must not be a cheaper way to do what the kill and drop routes charge for.
 
 A statement classified `read` runs inside the engine's own read-only scope (`dbx/run.go`), so a wrong
 verdict fails instead of writing: a read-only transaction on PostgreSQL, a read-only *session* on
