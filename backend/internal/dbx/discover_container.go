@@ -58,6 +58,7 @@ const (
 	labelComposeProject = "com.docker.compose.project"
 	labelComposeService = "com.docker.compose.service"
 	labelComposeNumber  = "com.docker.compose.container-number"
+	labelComposeOneOff  = "com.docker.compose.oneoff"
 	labelEnvironmentID  = "io.just-dashboard.environment-id"
 )
 
@@ -67,9 +68,13 @@ const (
 // container, because the container's name is compose's to choose and its
 // service is the operator's: the instance is the same one before the stack
 // has ever been brought up and after it has been recreated.
+//
+// A `docker compose run` container carries its service's labels and is not
+// the service: it is one command run beside it, under a name of its own, and
+// it is keyed by that name so it can never stand in for the server.
 func ContainerKey(name string, labels map[string]string) string {
 	project, service := labels[labelComposeProject], labels[labelComposeService]
-	if project == "" || service == "" {
+	if project == "" || service == "" || strings.EqualFold(labels[labelComposeOneOff], "true") {
 		return "docker:" + name
 	}
 	key := "compose:" + project + "/" + service
@@ -90,14 +95,18 @@ type containerMatch struct {
 }
 
 // classifyContainer walks the ladder, strongest evidence first.
+//
+// Every rung but the image's own name is checked against what the container
+// runs. The variables an image sets are inherited by everything built on it,
+// so a backup sidecar built FROM postgres states PG_MAJOR as plainly as the
+// server does; what tells them apart is the program in the command position.
 func classifyContainer(c ContainerFacts) (containerMatch, bool) {
-	argv := c.Argv
-	if len(argv) == 0 {
-		argv = strings.Fields(c.Command)
-	}
-	if runsNonServer(argv) {
+	argv := containerArgv(c)
+	cmd := readCommand(argv)
+	if runsNonServer(argv) || cmd.client {
 		// A database's image started as something else: a Redis image running
-		// a sentinel is not a Redis to connect to.
+		// a sentinel, a Postgres image running psql, is not a server to
+		// connect to.
 		return containerMatch{}, false
 	}
 	if rule, ok := imageRuleFor(c.Image); ok {
@@ -106,29 +115,55 @@ func classifyContainer(c ContainerFacts) (containerMatch, bool) {
 			confidence: ConfidenceImage, evidence: "the image is " + imageRepo(c.Image),
 		}, true
 	}
-	if p, name := productFromEnv(c.Env); p != nil {
+	built, name := productFromEnv(c.Env)
+	if built != nil && cmd.agrees(built) {
 		return containerMatch{
-			product: p, style: styleFor(p.id, c.Env),
+			product: built, style: styleFor(built.id, c.Env),
 			confidence: ConfidenceFingerprint,
-			evidence:   "its environment has " + name + ", which the " + p.label + " image sets",
+			evidence:   "its environment has " + name + ", which the " + built.label + " image sets",
 		}, true
 	}
-	if p, word := productFromCommand(argv); p != nil {
+	if cmd.product != nil {
 		return containerMatch{
-			product: p, style: styleFor(p.id, c.Env),
-			confidence: ConfidenceCommand, evidence: "it runs " + word,
+			product: cmd.product, style: styleFor(cmd.product.id, c.Env),
+			confidence: ConfidenceCommand, evidence: "it runs " + cmd.word,
 		}, true
 	}
 	for _, port := range c.Ports {
-		if p := productForPort(port.ContainerPort); p != nil {
-			return containerMatch{
-				product: p, style: styleNone, confidence: ConfidencePort,
-				evidence: "it exposes port " + strconv.Itoa(port.ContainerPort) + ", which is " + p.label +
-					"'s — nothing else about it says so, so this is a guess",
-			}, true
+		p := productForPort(port.ContainerPort)
+		if p == nil {
+			continue
 		}
+		evidence := "it exposes port " + strconv.Itoa(port.ContainerPort) + ", which is " + p.label +
+			"'s — nothing else about it says so, so this is a guess"
+		if built != nil && built.engine == p.engine {
+			// The port is as inherited as the variable was.
+			evidence = "it is built on the " + built.label + " image and exposes port " +
+				strconv.Itoa(port.ContainerPort) + ", but it runs " + cmd.word +
+				" rather than the server — so this is a guess"
+		}
+		return containerMatch{product: p, style: styleNone, confidence: ConfidencePort, evidence: evidence}, true
 	}
 	return containerMatch{}, false
+}
+
+// containerArgv is the command line a container was started with: the
+// inspect's, or the listing's one line where it was not inspected.
+func containerArgv(c ContainerFacts) []string {
+	if len(c.Argv) > 0 {
+		return c.Argv
+	}
+	return strings.Fields(c.Command)
+}
+
+// serverArgv is a container's command line where it is the server's own, and
+// nothing where it is somebody else's: `go-cron -p 8080` under an image built
+// on Postgres states a port, and it is not Postgres's.
+func serverArgv(c *ContainerFacts, p *product) []string {
+	if !readCommand(c.Argv).agrees(p) {
+		return nil
+	}
+	return c.Argv
 }
 
 // credentials is what a container states about signing in to it.
@@ -180,7 +215,7 @@ func (c *credentials) stated(value, file, name string) {
 // readCredentials reads the variables one publisher's image documents. Only
 // what the image documents is looked at: nothing is inferred that the
 // container did not state.
-func readCredentials(style credentialStyle, p *product, env map[string]string, argv []string) credentials {
+func readCredentials(style credentialStyle, p *product, variant string, env map[string]string, argv []string) credentials {
 	c := credentials{class: CredentialsUnknown}
 	switch style {
 	case stylePostgres:
@@ -224,6 +259,13 @@ func readCredentials(style credentialStyle, p *product, env map[string]string, a
 		c.database = firstNonEmpty(env["MONGO_INITDB_DATABASE"], "admin")
 		c.user = env["MONGO_INITDB_ROOT_USERNAME"]
 		if c.user == "" && strings.TrimSpace(env["MONGO_INITDB_ROOT_USERNAME_FILE"]) == "" {
+			if flag := mongoAccessControl(argv); flag != "" {
+				// Access control was turned on by hand, and whoever did it made
+				// the accounts by hand too: a replica set member with a key
+				// file is the ordinary case.
+				c.class, c.evidence = CredentialsNeeded, "it was started with "+flag+", and its container states no account"
+				break
+			}
 			// No root user was asked for, so the image starts with access
 			// control off.
 			c.class, c.evidence = CredentialsOpen, "no root user is configured, so it asks for no password"
@@ -303,7 +345,7 @@ func readCredentials(style credentialStyle, p *product, env map[string]string, a
 			c.class, c.evidence = CredentialsOpen, "ALLOW_EMPTY_PASSWORD is set, so it asks for no password"
 		}
 	case styleOracleGvenzl:
-		c.database, c.class = firstNonEmpty(env["ORACLE_DATABASE"], "FREEPDB1"), CredentialsNeeded
+		c.database, c.class = firstNonEmpty(env["ORACLE_DATABASE"], oracleService(variant, env)), CredentialsNeeded
 		// The image creates an application account when asked, which is the
 		// one to prefer over SYSTEM for the same reason as MySQL.
 		if u := env["APP_USER"]; u != "" {
@@ -314,7 +356,7 @@ func readCredentials(style credentialStyle, p *product, env map[string]string, a
 		c.user = "system"
 		c.stated(envOrFile(env, "ORACLE_PASSWORD"))
 	case styleOracleOfficial:
-		c.user, c.database, c.class = "system", firstNonEmpty(env["ORACLE_PDB"], "FREEPDB1"), CredentialsNeeded
+		c.user, c.database, c.class = "system", firstNonEmpty(env["ORACLE_PDB"], oracleService(variant, env)), CredentialsNeeded
 		c.stated(envOrFile(env, "ORACLE_PWD"))
 	case styleCockroach:
 		c.user, c.database, c.class = "root", "defaultdb", CredentialsNeeded
@@ -336,6 +378,42 @@ func readCredentials(style credentialStyle, p *product, env map[string]string, a
 		}
 	}
 	return c
+}
+
+// mongoAccessControl is the flag a mongod was started with that turns access
+// control on, or empty. A key file implies it.
+func mongoAccessControl(argv []string) string {
+	for _, flag := range []string{"--auth", "--keyFile", "--clusterAuthMode"} {
+		if hasArg(argv, flag) {
+			return flag
+		}
+	}
+	return ""
+}
+
+// oracleService is the pluggable database an Oracle image creates when it is
+// not told a name, which differs by edition: Free makes FREEPDB1, Express
+// XEPDB1 and Enterprise ORCLPDB1. Asking the listener for one it does not have
+// is refused with ORA-12514, which reads like a wrong password and is not one.
+//
+// The edition is the image's where the image was recognised, and otherwise
+// what the image set ORACLE_SID to, which each edition does differently.
+func oracleService(variant string, env map[string]string) string {
+	switch variant {
+	case "xe":
+		return "XEPDB1"
+	case "enterprise":
+		return "ORCLPDB1"
+	case "free":
+		return "FREEPDB1"
+	}
+	switch strings.ToUpper(strings.TrimSpace(env["ORACLE_SID"])) {
+	case "XE":
+		return "XEPDB1"
+	case "ORCLCDB":
+		return "ORCLPDB1"
+	}
+	return "FREEPDB1"
 }
 
 // argValue reads "--flag value" or "--flag=value" out of a command line.
@@ -511,12 +589,29 @@ func discoverContainers(list []ContainerFacts, inv *Inventory) {
 		if !ok {
 			continue
 		}
-		inst, access := containerInstance(c, match, byRef)
-		inv.Instances = append(inv.Instances, inst)
-		if access != nil {
-			inv.access[inst.Key] = *access
-		}
+		addContainerInstance(c, match, byRef, inv)
 	}
+}
+
+// addContainerInstance lists one recognised container, under a key no other
+// instance has.
+//
+// A key names one instance, and how it is signed in to is kept under the same
+// key. Two containers can carry one compose service's labels — a container
+// left over from before the project was renamed, a label copied by hand — and
+// the second used to take the first one's key and, with it, replace the
+// address the first is dialled at. The second is keyed by its own name, which
+// Docker keeps unique, before anything is recorded under either.
+func addContainerInstance(c *ContainerFacts, match containerMatch, byRef map[string]*ContainerFacts, inv *Inventory) int {
+	inst, access := containerInstance(c, match, byRef)
+	if _, taken := inv.Find(inst.Key); taken {
+		inst.Key = "docker:" + c.Name
+	}
+	inv.Instances = append(inv.Instances, inst)
+	if access != nil {
+		inv.access[inst.Key] = *access
+	}
+	return len(inv.Instances) - 1
 }
 
 // containerInstance describes one recognised container and, where it can be
@@ -545,8 +640,9 @@ func containerInstance(c *ContainerFacts, match containerMatch, byRef map[string
 	creds := credentials{class: CredentialsUnknown}
 	port := p.port
 	if c.Inspected {
-		creds = readCredentials(match.style, p, c.Env, c.Argv)
-		port = enginePort(p, c.Env, c.Argv)
+		argv := serverArgv(c, p)
+		creds = readCredentials(match.style, p, match.variant, c.Env, argv)
+		port = enginePort(p, c.Env, argv)
 		if p.versionEnv != "" {
 			inst.Version = cleanVersion(c.Env[p.versionEnv])
 		}
@@ -574,6 +670,14 @@ func containerInstance(c *ContainerFacts, match containerMatch, byRef map[string
 
 	if inst.State != StateRunning {
 		inst.Reason = "the container is " + inst.State + " — start it to connect"
+		return inst, nil
+	}
+	if p.driver != "" && (!ValidDSNUser(creds.user) || !ValidDSNDatabase(creds.database)) {
+		// What a container's environment says is whatever its creator wrote,
+		// and a name with a "?" in it is the start of the driver's options
+		// rather than a name. It is listed, and nothing is built from it.
+		inst.Reason = "its environment names a user or a database with characters no connection string can carry as a name"
+		inst.Evidence = append(inst.Evidence, "the user or database its environment names is not usable as one")
 		return inst, nil
 	}
 

@@ -4,6 +4,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 // Recognising a database server from the container running it.
@@ -95,7 +97,7 @@ func Detect(container, image string, env map[string]string, ports []PublishedPor
 	if p.driver == "" {
 		return nil, ""
 	}
-	creds := readCredentials(rule.style, p, env, nil)
+	creds := readCredentials(rule.style, p, rule.variant, env, nil)
 	c := &Candidate{
 		Driver: p.driver, Container: container, Image: image,
 		User: creds.user, Database: creds.database, Source: SourceDocker,
@@ -172,7 +174,19 @@ func hostAddress(ip string) string {
 
 // BuildDSN renders the connection string for a detected server. It is the one
 // place the password is joined to the rest, and it runs on the server.
+//
+// It is also the one place a name somebody else chose is joined to it. The
+// user and the database come from a container's environment or from a request,
+// and a connection string is a small language: in the MySQL driver's, whatever
+// follows the first "?" is the driver's own options, allowAllFiles among them —
+// which lets the server on the other end name any file this process can read
+// and be sent it. So a name that could be read as anything but a name builds
+// no string at all, and each part is escaped by the driver's own writer rather
+// than concatenated.
 func BuildDSN(c Candidate, password string) string {
+	if !ValidDSNUser(c.User) || !ValidDSNDatabase(c.Database) {
+		return ""
+	}
 	host := c.Host + ":" + strconv.Itoa(c.Port)
 	switch c.Driver {
 	case DriverPostgres:
@@ -184,7 +198,9 @@ func BuildDSN(c Candidate, password string) string {
 		return u.String()
 	case DriverMySQL:
 		// The MySQL driver takes its own format rather than a URL.
-		return c.User + ":" + password + "@tcp(" + host + ")/" + c.Database
+		cfg := mysql.NewConfig()
+		cfg.User, cfg.Passwd, cfg.Net, cfg.Addr, cfg.DBName = c.User, password, "tcp", host, c.Database
+		return cfg.FormatDSN()
 	case DriverMongo:
 		u := url.URL{Scheme: "mongodb", Host: host, Path: "/" + c.Database}
 		u.User = userInfo(c.User, password)
@@ -211,6 +227,30 @@ func BuildDSN(c Candidate, password string) string {
 		return u.String()
 	}
 	return ""
+}
+
+// maxDSNName bounds a user or database name. Every engine here stops well
+// short of it.
+const maxDSNName = 255
+
+// ValidDSNUser reports an account name a connection string can carry as a
+// name: nothing that ends the user part of one, and nothing unprintable.
+func ValidDSNUser(user string) bool { return dsnName(user, "?/@:") }
+
+// ValidDSNDatabase reports a database name a connection string can carry as a
+// name: nothing that ends the path of one and starts its options.
+func ValidDSNDatabase(database string) bool { return dsnName(database, "?/") }
+
+func dsnName(name, reserved string) bool {
+	if len(name) > maxDSNName {
+		return false
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f || strings.ContainsRune(reserved, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // userInfo keeps url.URL from rendering a "@" for a connection that has no

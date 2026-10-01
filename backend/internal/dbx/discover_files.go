@@ -82,6 +82,14 @@ func FileCandidate(name string) bool {
 
 // DataDirMarker recognises an engine's data directory from the names in it,
 // returning the product and the file that carries its version, if one does.
+//
+// A directory recognised here is recorded and not walked into, so being wrong
+// costs more than a mislabel: every database file below it goes unlisted. The
+// first three engines keep files nothing else is called. Redis does not — its
+// whole footprint is a dump.rdb, and a dump.rdb is also what a redis-server
+// once run from an application's directory leaves there. So a directory is
+// Redis's only when everything in it is: one stray dump beside an
+// application's own files does not make the application a Redis.
 func DataDirMarker(names map[string]bool) (engine, versionFile string, ok bool) {
 	switch {
 	case names["PG_VERSION"] && (names["base"] || names["global"]):
@@ -90,10 +98,28 @@ func DataDirMarker(names map[string]bool) (engine, versionFile string, ok bool) 
 		return "mysql", "", true
 	case names["WiredTiger"] || names["WiredTiger.wt"]:
 		return "mongodb", "", true
-	case names["dump.rdb"] || names["appendonlydir"]:
+	case (names["dump.rdb"] || names["appendonlydir"]) && onlyRedisFiles(names):
 		return "redis", "", true
 	}
 	return "", "", false
+}
+
+// redisFiles are what a Redis, a Valkey or a KeyDB writes into its working
+// directory, and the configuration people keep beside it.
+var redisFiles = map[string]bool{
+	"dump.rdb": true, "appendonlydir": true, "appendonly.aof": true, "nodes.conf": true,
+	"redis.conf": true, "valkey.conf": true, "keydb.conf": true, "users.acl": true, "lost+found": true,
+}
+
+func onlyRedisFiles(names map[string]bool) bool {
+	for name := range names {
+		// temp-<pid>.rdb and temp-rewriteaof-<pid>.aof are a save in progress.
+		temporary := strings.HasPrefix(name, "temp-") && (strings.HasSuffix(name, ".rdb") || strings.HasSuffix(name, ".aof"))
+		if !redisFiles[name] && !temporary {
+			return false
+		}
+	}
+	return true
 }
 
 var scanSkipDirs = map[string]bool{

@@ -49,6 +49,63 @@ type HostUnit struct {
 	ConfigFile string
 }
 
+// debianClusterTemplate is the unit file every Debian PostgreSQL cluster is an
+// instance of.
+const debianClusterTemplate = "postgresql@.service"
+
+// InstalledUnits is the database servers systemd has a unit file for and has
+// not loaded, as the stopped units they are.
+//
+// systemd unloads a unit that is neither running nor enabled, so the server
+// somebody stopped and disabled — exactly the installed, idle database an
+// inventory exists to show — is in no listing of units. Its unit file still
+// is. files maps every installed unit file to its state; loaded is what the
+// unit listing already returned; clusters are the Debian PostgreSQL clusters
+// configured on the machine, as "<version>-<name>", which are instances of a
+// template and have no file of their own.
+//
+// An alias is another name for a unit that is listed under its own, and a
+// masked unit cannot be started: neither is a second server.
+func InstalledUnits(files map[string]string, loaded []HostUnit, clusters []string) []HostUnit {
+	known := map[string]bool{}
+	for _, u := range loaded {
+		known[u.Name] = true
+	}
+	enabled := func(state string) bool {
+		return state == "enabled" || state == "enabled-runtime" || state == "static"
+	}
+	out := []HostUnit{}
+	add := func(name string, on bool) {
+		if known[name] || productForUnit(name) == nil {
+			return
+		}
+		known[name] = true
+		out = append(out, HostUnit{Name: name, LoadState: "loaded", ActiveState: "inactive", SubState: "dead", Enabled: on})
+	}
+	for name, state := range files {
+		switch state {
+		case "alias", "masked", "masked-runtime", "transient", "generated", "bad":
+			continue
+		}
+		if !strings.HasSuffix(name, ".service") || strings.Contains(name, "@.") {
+			// A template is not a unit until it is given an instance.
+			continue
+		}
+		add(name, enabled(state))
+	}
+	if _, ok := files[debianClusterTemplate]; ok {
+		for _, cluster := range clusters {
+			name := "postgresql@" + cluster + ".service"
+			if _, _, ok := DebianCluster(name); ok {
+				// The umbrella unit is what starts the clusters at boot.
+				add(name, enabled(files["postgresql.service"]))
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 var (
 	pgSocketRe    = regexp.MustCompile(`^\.s\.PGSQL\.([0-9]+)$`)
 	mongoSocketRe = regexp.MustCompile(`^mongodb-([0-9]+)\.sock$`)
@@ -273,11 +330,14 @@ func discoverHost(listeners []HostListener, sockets []UnixSocket, units []HostUn
 	}
 
 	// Two servers of one engine bound to the same port on different addresses
-	// would otherwise share a key, and a key names exactly one instance.
+	// would otherwise share a key, and a key names exactly one instance. Only
+	// the host's own servers can collide here — a container's key was settled
+	// when it was listed — and how they are signed in to is recorded below,
+	// under the key each ends up with.
 	taken := map[string]int{}
 	for i := range inv.Instances {
 		key := inv.Instances[i].Key
-		if taken[key]++; taken[key] > 1 {
+		if taken[key]++; taken[key] > 1 && inv.Instances[i].Source == SourceHost {
 			inv.Instances[i].Key = key + "#" + strconv.Itoa(taken[key])
 		}
 	}
@@ -288,11 +348,10 @@ func discoverHost(listeners []HostListener, sockets []UnixSocket, units []HostUn
 		}
 		settleHostCredentials(inst)
 		if primary := primaryEndpoint(inst); primary != nil && inst.Driver != "" {
-			p := productByID[inst.Flavor]
 			inv.access[inst.Key] = Access{Candidate: Candidate{
 				Driver: inst.Driver, Source: SourceHost, Process: inst.Host.Process,
 				Host: primary.Host, Port: primary.Port, User: inst.User, Database: inst.Database,
-				NeedsCredentials: p == nil || !p.open,
+				NeedsCredentials: inst.Credentials != CredentialsOpen,
 			}}
 		}
 	}
@@ -384,6 +443,11 @@ func hostInstance(p *product, process, cmdline, user string, pid int32, manager,
 	if inst.Version == "" {
 		inst.Version = processVersion(p, cmdline)
 	}
+	if p.engine == "mongodb" && mongoAccessControl(strings.Fields(cmdline)) != "" {
+		// The one case a command line settles: a mongod told to check who is
+		// asking is not the open server the product ships as.
+		inst.Credentials = CredentialsNeeded
+	}
 	return inst
 }
 
@@ -406,6 +470,8 @@ func settleHostCredentials(inst *Instance) {
 	switch {
 	case inst.Driver == "":
 		inst.Credentials = CredentialsUnknown
+	case inst.Credentials != "":
+		// Its own command line already said.
 	case p != nil && p.open:
 		inst.Credentials = CredentialsOpen
 	case inst.Engine == "postgres" || inst.Engine == "mysql":
@@ -585,27 +651,15 @@ func attachToContainer(g *hostGroup, endpoints []Endpoint, containers map[string
 		}
 		return
 	}
-	key := ContainerKey(c.Name, c.Labels)
-	index := -1
-	for i := range inv.Instances {
-		if inv.Instances[i].Key == key {
-			index = i
-			break
-		}
-	}
-	if index < 0 {
+	inst, found := inv.FindContainer(c.Name)
+	if !found {
 		// Nothing about the container said what it was; the process does.
-		inst, access := containerInstance(c, containerMatch{
+		index := addContainerInstance(c, containerMatch{
 			product: g.product, style: styleFor(g.product.id, c.Env), confidence: ConfidenceProcess,
 			evidence: "a " + g.first.Process + " process in it is listening on the host's network",
-		}, map[string]*ContainerFacts{})
-		inv.Instances = append(inv.Instances, inst)
-		if access != nil {
-			inv.access[inst.Key] = *access
-		}
-		index = len(inv.Instances) - 1
+		}, map[string]*ContainerFacts{}, inv)
+		inst = &inv.Instances[index]
 	}
-	inst := &inv.Instances[index]
 	if len(inst.Endpoints) > 0 || len(endpoints) == 0 {
 		return
 	}

@@ -2,9 +2,12 @@ package dbx
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 // The inventory is a claim about somebody's machine, and every wrong claim is
@@ -163,6 +166,183 @@ func TestARetaggedImageIsRecognisedByWhatItSets(t *testing.T) {
 		if len(got.Evidence) == 0 || got.Evidence[0] == "" {
 			t.Errorf("%s: no evidence for the classification", tc.name)
 		}
+	}
+}
+
+// What an image sets, everything built on it inherits. A fingerprint is
+// believed only while the program the container runs does not say otherwise,
+// and a variable other products set too is not a fingerprint at all.
+func TestAFingerprintIsNotBelievedAgainstTheCommand(t *testing.T) {
+	for _, c := range []ContainerFacts{
+		// Both state ELASTIC_CONTAINER, as the Elasticsearch image does.
+		running("kibana", "registry.internal/elastic/kibana:8.15.0", map[string]string{"ELASTIC_CONTAINER": "true"},
+			"/bin/tini", "--", "/usr/local/bin/kibana-docker"),
+		running("logstash", "registry.internal/elastic/logstash:8.15.0", map[string]string{"ELASTIC_CONTAINER": "true"},
+			"/usr/local/bin/docker-entrypoint"),
+		// Everything Oracle ships has an ORACLE_HOME.
+		running("weblogic", "registry.internal/middleware/weblogic:14", map[string]string{"ORACLE_HOME": "/u01/oracle"},
+			"/u01/oracle/createAndStartEmptyDomain.sh"),
+		// PGDATA is a variable operators set on anything that talks to Postgres.
+		running("worker", "acme/worker:1", map[string]string{"PGDATA": "/var/lib/postgresql/data"}, "/app/worker"),
+		// Built FROM postgres, running a scheduler: no port of its own exposed.
+		running("backup", "acme/pg-backup:1", map[string]string{"PG_MAJOR": "16", "PG_VERSION": "16.4", "POSTGRES_PASSWORD": "pw"},
+			"/init.sh", "exec", "/usr/local/bin/go-cron", "-s", "@daily", "-p", "8080", "--", "/backup.sh"),
+		// The image itself, started as its own client.
+		running("migrate", "postgres:16", map[string]string{"PG_MAJOR": "16", "POSTGRES_PASSWORD": "pw"},
+			"docker-entrypoint.sh", "psql", "-h", "db", "-c", "select 1"),
+		running("rs-init", "mongo:7", map[string]string{"MONGO_VERSION": "7.0.12"},
+			"docker-entrypoint.sh", "mongosh", "--host", "db", "--eval", "rs.initiate()"),
+		running("cluster-init", "redis:7", map[string]string{"REDIS_VERSION": "7.4.0"},
+			"docker-entrypoint.sh", "sh", "-c", "redis-cli --cluster create a:6379 b:6379"),
+	} {
+		if inv := Discover(Facts{Containers: []ContainerFacts{c}}); len(inv.Instances) != 0 {
+			t.Errorf("%s was taken for %s (%v)", c.Name, inv.Instances[0].Label, inv.Instances[0].Evidence)
+		}
+	}
+
+	// The sidecar inherits the server image's exposed port as well. It is a
+	// guess at most: nothing its environment states is believed, and the port
+	// its scheduler was given is not Postgres's.
+	sidecar := running("backup", "acme/pg-backup:1", map[string]string{"PG_MAJOR": "16", "PG_VERSION": "16.4", "POSTGRES_PASSWORD": "pw"},
+		"/init.sh", "exec", "/usr/local/bin/go-cron", "-s", "@daily", "-p", "8080", "--", "/backup.sh")
+	sidecar.Ports = []PublishedPort{{ContainerPort: 5432}, {ContainerPort: 8080}}
+	sidecar.IPs = []string{"172.18.0.9"}
+	inv := Discover(Facts{Containers: []ContainerFacts{sidecar}})
+	got := find(t, inv, "docker:backup")
+	if got.Confidence != ConfidencePort || got.Credentials != CredentialsUnknown {
+		t.Errorf("confidence %q credentials %q, want a guess that knows no password", got.Confidence, got.Credentials)
+	}
+	if !strings.Contains(got.Evidence[0], "go-cron") || !strings.Contains(got.Evidence[0], "guess") {
+		t.Errorf("evidence %q does not say what it runs instead", got.Evidence[0])
+	}
+	access, _ := inv.Access("docker:backup")
+	if access.Password != "" || access.Candidate.Port != 5432 {
+		t.Errorf("access = %+v, want no password and the engine's own port", access)
+	}
+
+	// Still the server: the stock entrypoint handed flags, a variable the shell
+	// has yet to expand, and a retagged image started as it was built.
+	for _, c := range []ContainerFacts{
+		running("flags", "jdcc/fixture-pg:16", map[string]string{"PG_MAJOR": "16"}, "docker-entrypoint.sh", "-c", "shared_buffers=1GB"),
+		running("redis-flags", "internal/kv:7", map[string]string{"REDIS_VERSION": "7.4.0"}, "docker-entrypoint.sh", "--appendonly", "yes"),
+		running("oracle", "internal/oracle:23", map[string]string{"ORACLE_SID": "FREE"}, "/bin/bash", "-c", "exec $ORACLE_BASE/$RUN_FILE"),
+		running("plain", "internal/ch:24", map[string]string{"CLICKHOUSE_CONFIG": "/etc/clickhouse-server/config.xml"}, "/entrypoint.sh"),
+		running("assigned", "internal/pg:16", map[string]string{"PG_MAJOR": "16"}, "env", "PGPORT=5433", "postgres"),
+	} {
+		inv := Discover(Facts{Containers: []ContainerFacts{c}})
+		if len(inv.Instances) != 1 || inv.Instances[0].Confidence != ConfidenceFingerprint {
+			t.Errorf("%s: %v was not recognised by what its image sets", c.Name, c.Argv)
+		}
+	}
+}
+
+// A name a container's creator wrote is joined to a connection string, and a
+// connection string is a small language. One that could be read as anything
+// but a name builds nothing.
+func TestBuildDSNCarriesNamesAsNames(t *testing.T) {
+	base := Candidate{Driver: DriverMySQL, Host: "127.0.0.1", Port: 3306, User: "root", Database: "app"}
+	password := "p@ss/w?rd&allowAllFiles=true"
+	cfg, err := mysql.ParseDSN(BuildDSN(base, password))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.User != "root" || cfg.Passwd != password || cfg.DBName != "app" || cfg.Addr != "127.0.0.1:3306" || cfg.AllowAllFiles {
+		t.Errorf("parsed back as %+v", cfg)
+	}
+	if got := BuildDSN(base, "pw"); got != "root:pw@tcp(127.0.0.1:3306)/app" {
+		t.Errorf("an ordinary DSN changed shape: %q", got)
+	}
+	for _, c := range []Candidate{
+		{Driver: DriverMySQL, Host: "127.0.0.1", Port: 3306, User: "root", Database: "app?allowAllFiles=true"},
+		{Driver: DriverMySQL, Host: "127.0.0.1", Port: 3306, User: "root", Database: "a/b"},
+		{Driver: DriverMySQL, Host: "127.0.0.1", Port: 3306, User: "root:x", Database: "app"},
+		{Driver: DriverMySQL, Host: "127.0.0.1", Port: 3306, User: "root@tcp(evil:3306)/", Database: "app"},
+		{Driver: DriverPostgres, Host: "127.0.0.1", Port: 5432, User: "postgres", Database: "app?sslmode=require"},
+		{Driver: DriverMongo, Host: "127.0.0.1", Port: 27017, User: "root", Database: "admin\n"},
+		{Driver: DriverRedis, Host: "127.0.0.1", Port: 6379, Database: strings.Repeat("0", 300)},
+	} {
+		if dsn := BuildDSN(c, "pw"); dsn != "" {
+			t.Errorf("user %q database %q built %q", c.User, c.Database, dsn)
+		}
+	}
+
+	// And a container that states such a name is listed, with nothing to dial.
+	evil := published(running("evil", "acme/whatever:1",
+		map[string]string{"MYSQL_ROOT_PASSWORD": "pw", "MYSQL_DATABASE": "app?allowAllFiles=true"}, "mysqld"), 3306, 13306)
+	inv := Discover(Facts{Containers: []ContainerFacts{evil}})
+	got := find(t, inv, "docker:evil")
+	if got.Connectable || !strings.Contains(got.Reason, "no connection string can carry") {
+		t.Errorf("connectable %v reason %q", got.Connectable, got.Reason)
+	}
+	if _, ok := inv.Access("docker:evil"); ok {
+		t.Error("a container naming an unusable database was given something to dial")
+	}
+}
+
+// A MongoDB told to check who is asking is not the open server the image
+// starts as, whatever its environment leaves out.
+func TestMongoStartedWithAccessControlWantsCredentials(t *testing.T) {
+	for _, argv := range [][]string{
+		{"docker-entrypoint.sh", "mongod", "--auth"},
+		{"docker-entrypoint.sh", "mongod", "--replSet", "rs0", "--keyFile", "/etc/kf"},
+		{"docker-entrypoint.sh", "--keyFile=/etc/kf"},
+	} {
+		c := published(running("doc", "mongo:7", map[string]string{}, argv...), 27017, 27017)
+		inv := Discover(Facts{Containers: []ContainerFacts{c}})
+		if got := find(t, inv, "docker:doc"); got.Credentials != CredentialsNeeded {
+			t.Errorf("%v: credentials %q, want needed", argv, got.Credentials)
+		}
+	}
+	open := published(running("doc", "mongo:7", map[string]string{}, "docker-entrypoint.sh", "mongod", "--bind_ip_all"), 27017, 27017)
+	if got := find(t, Discover(Facts{Containers: []ContainerFacts{open}}), "docker:doc"); got.Credentials != CredentialsOpen {
+		t.Errorf("credentials %q, want open", got.Credentials)
+	}
+
+	inv := Discover(Facts{Listeners: []HostListener{
+		{Protocol: "tcp", Address: "127.0.0.1", Port: 27017, Process: "mongod", PID: 70, Cmdline: "/usr/bin/mongod --auth --config /etc/mongod.conf"},
+		{Protocol: "tcp", Address: "127.0.0.1", Port: 27018, Process: "mongod", PID: 71, Cmdline: "/usr/bin/mongod --config /etc/mongod.conf --port 27018"},
+	}})
+	locked, plain := find(t, inv, "host:mongodb:27017"), find(t, inv, "host:mongodb:27018")
+	if locked.Credentials != CredentialsNeeded || plain.Credentials != CredentialsOpen {
+		t.Errorf("credentials %q and %q, want needed and open", locked.Credentials, plain.Credentials)
+	}
+	if access, _ := inv.Access(locked.Key); !access.Candidate.NeedsCredentials {
+		t.Error("a mongod started with --auth is not one to try with nothing")
+	}
+	if access, _ := inv.Access(plain.Key); access.Candidate.NeedsCredentials {
+		t.Error("a mongod with no access control stated is tried as it ships")
+	}
+}
+
+// Each Oracle edition creates a pluggable database of its own name, and asking
+// the listener for another edition's is refused like a wrong password.
+func TestOracleEditionsNameTheirOwnService(t *testing.T) {
+	cases := []struct {
+		image, variant, database string
+		env                      map[string]string
+	}{
+		{"gvenzl/oracle-free:23-slim", "free", "FREEPDB1", map[string]string{"ORACLE_PASSWORD": "pw"}},
+		{"gvenzl/oracle-xe:21-slim", "xe", "XEPDB1", map[string]string{"ORACLE_PASSWORD": "pw"}},
+		{"gvenzl/oracle-xe:21-slim", "xe", "SHOP", map[string]string{"ORACLE_PASSWORD": "pw", "ORACLE_DATABASE": "SHOP"}},
+		{"container-registry.oracle.com/database/free:latest", "free", "FREEPDB1", map[string]string{"ORACLE_PWD": "pw"}},
+		{"container-registry.oracle.com/database/express:21.3.0-xe", "xe", "XEPDB1", map[string]string{"ORACLE_PWD": "pw"}},
+		{"container-registry.oracle.com/database/enterprise:19.3.0.0", "enterprise", "ORCLPDB1", map[string]string{"ORACLE_PWD": "pw"}},
+		{"container-registry.oracle.com/database/enterprise:19.3.0.0", "enterprise", "SALES", map[string]string{"ORACLE_PWD": "pw", "ORACLE_PDB": "SALES"}},
+		// Retagged: the edition is what the image set ORACLE_SID to.
+		{"internal/oracle:21", "", "XEPDB1", map[string]string{"ORACLE_PASSWORD": "pw", "ORACLE_SID": "XE"}},
+		{"internal/oracle:19", "", "ORCLPDB1", map[string]string{"ORACLE_PASSWORD": "pw", "ORACLE_SID": "ORCLCDB"}},
+		{"internal/oracle:23", "", "FREEPDB1", map[string]string{"ORACLE_PASSWORD": "pw", "ORACLE_SID": "FREE"}},
+	}
+	for _, tc := range cases {
+		c := published(running("ora", tc.image, tc.env, "container-entrypoint.sh"), 1521, 1521)
+		inv := Discover(Facts{Containers: []ContainerFacts{c}})
+		got := find(t, inv, "docker:ora")
+		if got.Database != tc.database || got.Variant != tc.variant {
+			t.Errorf("%s %v: database %q variant %q, want %q %q", tc.image, tc.env, got.Database, got.Variant, tc.database, tc.variant)
+		}
+	}
+	if cand, _ := Detect("ora", "gvenzl/oracle-xe:21", map[string]string{"ORACLE_PASSWORD": "pw"}, ports(1521, 1521), nil); cand == nil || cand.Database != "XEPDB1" {
+		t.Errorf("Detect = %+v", cand)
 	}
 }
 
@@ -482,6 +662,10 @@ func TestContainerKeysSurviveARecreate(t *testing.T) {
 	if got := ContainerKey("shop-db-2", labels); got != "compose:shop/db#2" {
 		t.Errorf("a second replica is a second server: %q", got)
 	}
+	labels[labelComposeNumber], labels[labelComposeOneOff] = "1", "True"
+	if got := ContainerKey("shop-db-run-1a2b3c", labels); got != "docker:shop-db-run-1a2b3c" {
+		t.Errorf("a compose run container took its service's key: %q", got)
+	}
 	for key, want := range map[string]bool{
 		"docker:jd-postgres": true, "compose:shop/db": true, "host:postgresql@17-main.service": true,
 		"host:postgres:5438": true, "file:/srv/app/data.db": true, "data:/var/lib/docker/volumes/x/_data": true,
@@ -490,6 +674,60 @@ func TestContainerKeysSurviveARecreate(t *testing.T) {
 		if got := ValidInstanceKey(key); got != want {
 			t.Errorf("ValidInstanceKey(%q) = %v", key, got)
 		}
+	}
+}
+
+// A key names one instance, and how that instance is signed in to is kept
+// under it. A container that carries its service's labels without being the
+// service — a `docker compose run`, a leftover with the same labels — must
+// take neither the key nor what is dialled under it, in whichever order
+// Docker lists the two.
+func TestContainersNeverShareAKey(t *testing.T) {
+	labels := func(extra ...string) map[string]string {
+		out := map[string]string{labelComposeProject: "shop", labelComposeService: "db", labelComposeNumber: "1"}
+		for i := 0; i+1 < len(extra); i += 2 {
+			out[extra[i]] = extra[i+1]
+		}
+		return out
+	}
+	service := published(running("shop-db-1", "postgres:16", map[string]string{"POSTGRES_PASSWORD": "pw"}, "docker-entrypoint.sh", "postgres"), 5432, 15432)
+	service.Labels, service.IPs = labels(), []string{"172.18.0.2"}
+	// The service's own command, run beside it: a server in its own right.
+	oneoff := running("shop-db-run-1a2b3c", "postgres:16", map[string]string{"POSTGRES_PASSWORD": "pw"}, "docker-entrypoint.sh", "postgres")
+	oneoff.Labels, oneoff.IPs = labels(labelComposeOneOff, "True"), []string{"172.18.0.7"}
+	// The same labels on a container compose no longer knows about.
+	leftover := running("old_shop_db_1", "postgres:16", map[string]string{"POSTGRES_PASSWORD": "pw"}, "docker-entrypoint.sh", "postgres")
+	leftover.Labels, leftover.IPs = labels(), []string{"172.18.0.8"}
+
+	for _, order := range [][]ContainerFacts{{service, oneoff, leftover}, {oneoff, service, leftover}} {
+		inv := Discover(Facts{Containers: order})
+		if len(inv.Instances) != 3 {
+			t.Fatalf("%d instances, want three", len(inv.Instances))
+		}
+		want := map[string]string{
+			"compose:shop/db":           "127.0.0.1:15432",
+			"docker:shop-db-run-1a2b3c": "172.18.0.7:5432",
+			"docker:old_shop_db_1":      "172.18.0.8:5432",
+		}
+		for key, address := range want {
+			access, ok := inv.Access(key)
+			if !ok {
+				t.Fatalf("%s: nothing to dial", key)
+			}
+			if got := access.Candidate.Host + ":" + strconv.Itoa(access.Candidate.Port); got != address {
+				t.Errorf("%s dials %s, want %s", key, got, address)
+			}
+		}
+		if inst, ok := inv.FindContainer("old_shop_db_1"); !ok || inst.Key != "docker:old_shop_db_1" {
+			t.Errorf("the leftover is not found by its name: %+v", inst)
+		}
+	}
+	// A one-off running the image's client is no server at all.
+	client := running("shop-db-run-9f8e7d", "postgres:16", map[string]string{"POSTGRES_PASSWORD": "pw"}, "docker-entrypoint.sh", "psql", "-h", "db")
+	client.Labels, client.IPs = labels(labelComposeOneOff, "True"), []string{"172.18.0.9"}
+	inv := Discover(Facts{Containers: []ContainerFacts{service, client}})
+	if len(inv.Instances) != 1 || inv.Instances[0].Key != "compose:shop/db" {
+		t.Errorf("instances = %+v", inv.Instances)
 	}
 }
 
@@ -709,6 +947,61 @@ func TestStoppedAndFailedUnitsAreListed(t *testing.T) {
 	find(t, inv, "host:postgresql-16.service")
 }
 
+// systemd unloads a unit that is stopped and disabled, so the listing of units
+// has no line for the server somebody installed and turned off. Its unit file
+// is still there, and for a Debian PostgreSQL cluster its directory is.
+func TestInstalledUnitsAreFoundByTheirFiles(t *testing.T) {
+	files := map[string]string{
+		"redis-server.service":  "disabled",
+		"redis.service":         "alias",
+		"mysql.service":         "enabled",
+		"mysql@.service":        "disabled",
+		"mariadb.service":       "masked",
+		"mongod.service":        "disabled",
+		"postgresql.service":    "enabled",
+		"postgresql@.service":   "indirect",
+		"nginx.service":         "enabled",
+		"redis-server.socket":   "enabled",
+		"postgresql-16.service": "static",
+	}
+	loaded := []HostUnit{{Name: "mysql.service", LoadState: "loaded", ActiveState: "active", SubState: "running"}}
+	got := InstalledUnits(files, loaded, []string{"16-main", "17-main", "../x-y", "nodash"})
+	names := []string{}
+	for _, u := range got {
+		names = append(names, u.Name)
+		if u.LoadState != "loaded" || u.ActiveState != "inactive" {
+			t.Errorf("%s = %+v, want a loaded, inactive unit", u.Name, u)
+		}
+	}
+	want := "mongod.service,postgresql-16.service,postgresql.service,postgresql@16-main.service,postgresql@17-main.service,redis-server.service"
+	if strings.Join(names, ",") != want {
+		t.Fatalf("units = %v, want %s", names, want)
+	}
+	enabled := map[string]bool{}
+	for _, u := range got {
+		enabled[u.Name] = u.Enabled
+	}
+	if enabled["redis-server.service"] || !enabled["postgresql@16-main.service"] || !enabled["postgresql-16.service"] {
+		t.Errorf("enabled = %v", enabled)
+	}
+
+	// Listed through to an instance: stopped, saying so, and the umbrella unit
+	// left out beside its clusters.
+	inv := Discover(Facts{Units: append(loaded, got...)})
+	redis := find(t, inv, "host:redis-server.service")
+	if redis.State != StateInactive || redis.Connectable || !strings.Contains(redis.Reason, "not running") {
+		t.Errorf("redis = %+v", redis)
+	}
+	find(t, inv, "host:postgresql@17-main.service")
+	if _, ok := inv.Find("host:postgresql.service"); ok {
+		t.Error("the umbrella unit was listed beside its clusters")
+	}
+	// No template, no clusters: Debian's packaging is not what is installed.
+	if got := InstalledUnits(map[string]string{"postgresql.service": "disabled"}, nil, []string{"16-main"}); len(got) != 1 || got[0].Name != "postgresql.service" {
+		t.Errorf("units = %+v", got)
+	}
+}
+
 // A dashboard that is not root cannot read which process holds another
 // account's socket. The kernel still says a socket is listening and the unit
 // still says which port it was configured for, and that is enough to list the
@@ -840,6 +1133,25 @@ func TestDataDirMarkers(t *testing.T) {
 	// A stray PG_VERSION is not a cluster.
 	if engine, _, ok := DataDirMarker(names("PG_VERSION", "README")); ok {
 		t.Errorf("read as %s", engine)
+	}
+	// Redis's whole footprint is a file any directory can end up holding. A
+	// directory is its data only when nothing in it is anybody else's.
+	for _, redis := range []map[string]bool{
+		names("dump.rdb", "appendonlydir", "temp-1234.rdb", "nodes.conf"),
+		names("appendonly.aof", "dump.rdb", "redis.conf"),
+	} {
+		if engine, _, ok := DataDirMarker(redis); !ok || engine != "redis" {
+			t.Errorf("%v read as %q %v", redis, engine, ok)
+		}
+	}
+	for _, app := range []map[string]bool{
+		names("dump.rdb", "app.db", "package.json", "src"),
+		names("appendonlydir", "uploads", "data.sqlite3"),
+		names("dump.rdb", "temp-notes.txt"),
+	} {
+		if engine, _, ok := DataDirMarker(app); ok {
+			t.Errorf("%v: an application's directory was read as %s data", app, engine)
+		}
 	}
 	if _, _, ok := DataDirMarker(names("index.html", "app.js")); ok {
 		t.Error("an ordinary directory was read as data")

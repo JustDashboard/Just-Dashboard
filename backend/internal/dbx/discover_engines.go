@@ -55,7 +55,9 @@ type product struct {
 	units []string
 	// envNames are variables the product's own image sets — not ones an
 	// operator supplies — so their presence says what the image was built
-	// from whatever it has been tagged as since.
+	// from whatever it has been tagged as since. Only names no other image
+	// sets belong here: ELASTIC_CONTAINER is on Kibana and Logstash as much as
+	// on Elasticsearch, and ORACLE_HOME on everything Oracle ships.
 	envNames []string
 	// versionEnv is the one of those that carries the version.
 	versionEnv string
@@ -74,7 +76,7 @@ var products = []product{
 		id: "postgres", engine: "postgres", driver: DriverPostgres, label: "PostgreSQL",
 		port: 5432, portHint: true, procs: []string{"postgres", "postmaster"},
 		units:    []string{"postgresql"},
-		envNames: []string{"PG_MAJOR", "PG_VERSION", "PGDATA"}, versionEnv: "PG_VERSION",
+		envNames: []string{"PG_MAJOR", "PG_VERSION"}, versionEnv: "PG_VERSION",
 		user: "postgres", database: "postgres",
 	},
 	{id: "timescaledb", engine: "postgres", driver: DriverPostgres, label: "TimescaleDB", port: 5432, user: "postgres", database: "postgres"},
@@ -167,7 +169,7 @@ var products = []product{
 		// itself is behind it and always wants credentials.
 		id: "oracle", engine: "oracle", driver: DriverOracle, label: "Oracle Database",
 		port: 1521, sidePorts: []int{5500}, portHint: true,
-		procs: []string{"tnslsnr"}, envNames: []string{"ORACLE_SID", "ORACLE_HOME"},
+		procs: []string{"tnslsnr"}, envNames: []string{"ORACLE_SID"},
 		user: "system",
 	},
 
@@ -180,7 +182,7 @@ var products = []product{
 	{
 		id: "elasticsearch", engine: "elasticsearch", label: "Elasticsearch", port: 9200, sidePorts: []int{9300}, portHint: true,
 		runtimes: []string{"java"}, markers: []string{"org.elasticsearch.", "-Des.path.home"},
-		units: []string{"elasticsearch"}, envNames: []string{"ELASTIC_CONTAINER"},
+		units: []string{"elasticsearch"},
 	},
 	{
 		id: "opensearch", engine: "opensearch", label: "OpenSearch", port: 9200, sidePorts: []int{9300, 9600, 9650},
@@ -382,11 +384,13 @@ var imageRules = []imageRule{
 	{"bitnami/clickhouse", "clickhouse", "bitnami", styleBitnamiClickHouse},
 	{"bitnamilegacy/clickhouse", "clickhouse", "bitnami", styleBitnamiClickHouse},
 
-	{"gvenzl/oracle-free", "oracle", "", styleOracleGvenzl},
-	{"gvenzl/oracle-xe", "oracle", "", styleOracleGvenzl},
-	{"container-registry.oracle.com/database/free", "oracle", "", styleOracleOfficial},
-	{"container-registry.oracle.com/database/express", "oracle", "", styleOracleOfficial},
-	{"container-registry.oracle.com/database/enterprise", "oracle", "", styleOracleOfficial},
+	// The edition is the variant: it decides which pluggable database the
+	// image creates, and so which service a connection asks the listener for.
+	{"gvenzl/oracle-free", "oracle", "free", styleOracleGvenzl},
+	{"gvenzl/oracle-xe", "oracle", "xe", styleOracleGvenzl},
+	{"container-registry.oracle.com/database/free", "oracle", "free", styleOracleOfficial},
+	{"container-registry.oracle.com/database/express", "oracle", "xe", styleOracleOfficial},
+	{"container-registry.oracle.com/database/enterprise", "oracle", "enterprise", styleOracleOfficial},
 
 	{"memcached", "memcached", "", styleNone},
 	{"bitnami/memcached", "memcached", "bitnami", styleNone},
@@ -550,14 +554,55 @@ var commandRunsAs = map[string]bool{"gosu": true, "su-exec": true, "setpriv": tr
 
 var bitnamiScriptRe = regexp.MustCompile(`^/opt/bitnami/scripts/([a-z0-9-]+)/`)
 
-// productFromCommand reads which product a container runs from its command
-// line: the first word that is a program, past the init, the shell and the
-// entrypoint script in front of it.
+// clientPrograms are what a database's image ships beside its server: the
+// shells, the dump tools, the benchmarks. A container started from the image
+// to run one of them — a compose one-off, a backup sidecar, the job that
+// initialises a replica set — holds no database, however much its image and
+// its environment look like one that does.
+var clientPrograms = map[string]bool{
+	"psql": true, "pg_dump": true, "pg_dumpall": true, "pg_restore": true, "pg_basebackup": true,
+	"pg_isready": true, "pgbench": true, "mysql": true, "mysqldump": true, "mysqladmin": true,
+	"mysqlsh": true, "mariadb": true, "mariadb-dump": true, "mariadb-admin": true, "mongosh": true,
+	"mongo": true, "mongodump": true, "mongorestore": true, "mongoexport": true, "mongoimport": true,
+	"redis-cli": true, "redis-benchmark": true, "valkey-cli": true, "keydb-cli": true,
+	"clickhouse-client": true, "clickhouse-local": true, "sqlcmd": true, "bcp": true, "sqlplus": true,
+	"cqlsh": true, "etcdctl": true, "influx": true, "rabbitmqctl": true,
+}
+
+// command is what the command position of a container's command line says.
+//
+// It says one of three things, and the third is the one a single "which
+// product" answer could not carry: the server it runs; nothing, because only
+// an init, a shell and the image's own entrypoint script stand there, which is
+// what an image started as it was built looks like; or a program that is not a
+// database server at all.
+type command struct {
+	// product is the server the container runs, where the command names one,
+	// and word the program standing in the command position.
+	product *product
+	word    string
+	// other marks a program that is not a server, and client one of those that
+	// is a database's own tool.
+	other  bool
+	client bool
+}
+
+// agrees reports a command that does not contradict the container being p:
+// it names p's own engine, or it names nothing.
+func (c command) agrees(p *product) bool {
+	if c.other {
+		return false
+	}
+	return c.product == nil || c.product.engine == p.engine
+}
+
+// readCommand reads a container's command line: the first word that is a
+// program, past the init, the shell and the entrypoint script in front of it.
 //
 // Only the command position is read. "myapp migrate postgres" names a
 // database as an argument and is not one, so the walk stops at the first word
 // that is neither a wrapper nor a server.
-func productFromCommand(argv []string) (*product, string) {
+func readCommand(argv []string) command {
 	words := []string{}
 	for _, arg := range argv {
 		// `sh -c "exec mysqld --user=mysql"` carries the program inside one
@@ -567,7 +612,7 @@ func productFromCommand(argv []string) (*product, string) {
 			break
 		}
 	}
-	skipNext := false
+	skipNext, afterScript := false, false
 	for i, word := range words {
 		if i >= 12 {
 			break
@@ -577,30 +622,58 @@ func productFromCommand(argv []string) (*product, string) {
 			continue
 		}
 		if strings.HasPrefix(word, "-") {
+			if afterScript {
+				// Flags handed straight to an image's entrypoint script are the
+				// server's own: the stock scripts put the server in front of
+				// them. `docker-entrypoint.sh -c shared_buffers=1GB` is a
+				// Postgres, and what follows the flag is its value, not a
+				// program.
+				return command{}
+			}
+			continue
+		}
+		if strings.Contains(word, "$") {
+			// A variable the shell has yet to expand: `exec $ORACLE_BASE/$RUN_FILE`
+			// names a program this cannot read.
+			return command{}
+		}
+		if strings.Contains(word, "=") {
+			// An assignment in front of the program: `env PGPORT=5433 postgres`.
 			continue
 		}
 		if m := bitnamiScriptRe.FindStringSubmatch(word); m != nil {
 			if id, ok := bitnamiApps[m[1]]; ok {
-				return productByID[id], word
+				return command{product: productByID[id], word: word}
 			}
 		}
-		name := path.Base(word)
+		name := path.Base(strings.Trim(word, `"';`))
 		if p := productForProcess(name, ""); p != nil {
-			return p, name
+			return command{product: p, word: name}
 		}
 		if id, ok := commandNames[name]; ok {
-			return productByID[id], name
+			return command{product: productByID[id], word: name}
 		}
 		switch {
 		case commandRunsAs[name]:
-			skipNext = true
-		case commandWrappers[name], strings.HasSuffix(name, ".sh"), strings.HasSuffix(name, ".py"),
-			strings.Contains(name, "entrypoint"), name == "run":
+			skipNext, afterScript = true, false
+		case commandWrappers[name]:
+			afterScript = false
+		case strings.HasSuffix(name, ".sh"), strings.HasSuffix(name, ".py"), strings.Contains(name, "entrypoint"), name == "run":
+			afterScript = true
 		default:
-			return nil, ""
+			return command{word: name, other: true, client: clientPrograms[name]}
 		}
 	}
-	return nil, ""
+	return command{}
+}
+
+// productFromCommand is the server a command line starts, where it names one.
+func productFromCommand(argv []string) (*product, string) {
+	c := readCommand(argv)
+	if c.product == nil {
+		return nil, ""
+	}
+	return c.product, c.word
 }
 
 // nonServers are programs named after a database that are not one: exporters,

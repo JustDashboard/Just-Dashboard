@@ -290,6 +290,20 @@ func (inv Inventory) Find(key string) (*Instance, bool) {
 	return nil, false
 }
 
+// FindContainer returns the server found in the container with that name. A
+// container is looked for by its name rather than by the key its labels would
+// give it, because two containers can state the same labels and only one of
+// them holds that key.
+func (inv Inventory) FindContainer(name string) (*Instance, bool) {
+	for i := range inv.Instances {
+		inst := &inv.Instances[i]
+		if inst.Kind == KindServer && inst.State != StateDeclared && inst.Container != nil && inst.Container.Name == name {
+			return inst, true
+		}
+	}
+	return nil, false
+}
+
 // Discover turns the facts about a machine into the list of what holds a
 // database on it.
 //
