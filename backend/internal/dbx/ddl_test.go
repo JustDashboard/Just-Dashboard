@@ -70,13 +70,17 @@ func TestDDLRejectsInjectedTypesAndDefaults(t *testing.T) {
 }
 
 func TestDDLAcceptsRealTypes(t *testing.T) {
-	ok := []string{
-		"varchar(255)", "numeric(10,2)", "int unsigned", "timestamp with time zone",
-		"enum('a','b')", "TEXT", "DateTime64(3)", "NUMBER(18,2)",
+	ok := map[Driver][]string{
+		DriverPostgres:   {"varchar(255)", "numeric(10,2)", "timestamp with time zone", "TEXT"},
+		DriverMySQL:      {"varchar(255)", "int unsigned", "enum('a','b')", "TEXT"},
+		DriverClickHouse: {"DateTime64(3)"},
+		DriverOracle:     {"NUMBER(18,2)"},
 	}
-	for _, typ := range ok {
-		if err := validateType(typ); err != nil {
-			t.Errorf("rejected legitimate type %q: %v", typ, err)
+	for driver, types := range ok {
+		for _, typ := range types {
+			if err := validateType(driver, typ); err != nil {
+				t.Errorf("%s rejected legitimate type %q: %v", driver, typ, err)
+			}
 		}
 	}
 	for _, def := range []string{"0", "-1.5", "'draft'", "NULL", "CURRENT_TIMESTAMP", "true"} {

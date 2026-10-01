@@ -159,7 +159,7 @@ func TestOutlineListsTablesAndColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cols, ok := outline.Tables["users"]
+	cols, ok := outline.Tables[TableKey("main", "users")]
 	if !ok {
 		t.Fatalf("outline missing users: %v", outline.Tables)
 	}
@@ -174,7 +174,7 @@ func TestRelationsBuildsTheGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fks, ok := rels["posts"]
+	fks, ok := rels[TableKey("main", "posts")]
 	if !ok || len(fks) == 0 {
 		t.Fatalf("expected posts to have a foreign key, got %v", rels)
 	}

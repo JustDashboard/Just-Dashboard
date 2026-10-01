@@ -1240,7 +1240,8 @@ func (s *Server) handleDBConnUpdate(w http.ResponseWriter, r *http.Request) erro
 }
 
 // handleDBTableDetail returns a table's structure: columns, primary key,
-// indexes, foreign keys and the DDL that would recreate it.
+// indexes, constraints, foreign keys in both directions and the DDL that
+// would recreate it.
 func (s *Server) handleDBTableDetail(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -1253,9 +1254,16 @@ func (s *Server) handleDBTableDetail(w http.ResponseWriter, r *http.Request) err
 	q := r.URL.Query()
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	detail, err := dbx.Detail(ctx, pool, conn.Driver, q.Get("schema"), q.Get("table"))
+	detail, err := dbx.DescribeTable(ctx, pool, conn.Driver, q.Get("schema"), q.Get("table"))
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+	}
+	// No columns and no catalogue entry is a table that is not there. It used
+	// to come back as an empty structure, which a page drew as a table with
+	// nothing in it.
+	if len(detail.Columns) == 0 && detail.Type == "" {
+		return httpx.Err(http.StatusNotFound, "not_found",
+			fmt.Sprintf("no table or view named %s", q.Get("table")))
 	}
 	httpx.JSON(w, http.StatusOK, detail)
 	return nil
@@ -1843,7 +1851,8 @@ func (s *Server) handleDBOutline(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	outline, err := dbx.Outline(ctx, pool, conn.Driver, r.URL.Query().Get("schema"))
+	q := r.URL.Query()
+	outline, err := dbx.OutlineWithLimit(ctx, pool, conn.Driver, q.Get("schema"), atoiDefault(q.Get("limit"), 0))
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
@@ -1851,7 +1860,8 @@ func (s *Server) handleDBOutline(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// handleDBRelations returns the foreign-key graph the entity diagram draws.
+// handleDBRelations returns every foreign key in a schema, keyed by the
+// schema-qualified name of the table that holds it (dbx.TableKey).
 func (s *Server) handleDBRelations(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -2229,9 +2239,12 @@ func (s *Server) handleDBGraph(w http.ResponseWriter, r *http.Request) error {
 	// longer budget than a page of rows and a bound on how much it will do.
 	ctx, cancel := timeoutCtx(r, 90*time.Second)
 	defer cancel()
-	graph, err := dbx.BuildSchemaGraph(ctx, pool, conn.Driver, r.URL.Query().Get("schema"))
+	q := r.URL.Query()
+	graph, err := dbx.BuildSchemaGraphWithLimit(ctx, pool, conn.Driver, q.Get("schema"), atoiDefault(q.Get("limit"), 0))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		// A catalogue the engine would not read is the engine failing, not the
+		// request being wrong, and is reported the way its sibling reads are.
+		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
 	httpx.JSON(w, http.StatusOK, graph)
 	return nil

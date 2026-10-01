@@ -69,7 +69,7 @@ type engineFixture struct {
 }
 
 func sqlFixtures() []engineFixture {
-	fixtures := []engineFixture{
+	return inDSNSchema([]engineFixture{
 		{
 			driver: DriverPostgres, env: "JD_TEST_POSTGRES_DSN",
 			dsn:    "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable",
@@ -208,20 +208,7 @@ func sqlFixtures() []engineFixture {
 				`INSERT INTO jd_posts(id,title,author_id) VALUES (1,'Hello',1),(2,'World',2)`,
 			},
 		},
-	}
-	// On MySQL and ClickHouse the schema is the database, so a DSN that names a
-	// different one — a fixture server shared between several runs gives each
-	// its own — moves the fixture with it. The unqualified seed statements
-	// already land there; only the name the assertions qualify by has to follow.
-	for i, f := range fixtures {
-		if f.driver != DriverMySQL && f.driver != DriverClickHouse {
-			continue
-		}
-		if info, err := ParseDSN(f.driver, os.Getenv(f.env)); err == nil && info.Database != "" {
-			fixtures[i].schema = info.Database
-		}
-	}
-	return fixtures
+	})
 }
 
 func setupFixture(t *testing.T, db *sql.DB, f engineFixture) {
@@ -394,8 +381,8 @@ func TestLiveSQLEngines(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Outline: %v", err)
 				}
-				if cols, ok := outline.Tables["jd_users"]; !ok || !contains(cols, "email") {
-					t.Errorf("outline for jd_users = %v", outline.Tables["jd_users"])
+				if cols, ok := outlineColumns(outline, "jd_users"); !ok || !contains(cols, "email") {
+					t.Errorf("outline for jd_users = %v in %v", cols, outline.Tables)
 				}
 
 				// Generate ORM schemas from genuinely introspected structure.
