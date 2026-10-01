@@ -133,7 +133,11 @@ accounts retain partial results. Full table details and mutation preconditions u
   not. `dumpLiteral` is the second place putting a value into SQL text (unavoidable — a dump is text) and
   is per-engine, since a backslash escapes on MySQL and ClickHouse and is a plain character on the other
   four. `Restore` picks its reader from the file's first bytes, not the driver: a Postgres connection may
-  hold a `PGDMP` archive, our SQL, or a plain script somebody uploaded, which goes to `psql`.
+  hold a `PGDMP` archive, our SQL, or a plain script somebody uploaded, which goes to `psql`. A
+  restore stays in the database it was pointed at: a psql script with a `\connect` or a MySQL script
+  with a `USE` of another database is refused before a client is started, and a mongodump archive is
+  read for the database it came from (`mongoArchiveDatabases`) and confined and redirected with
+  `--nsInclude`/`--nsFrom`/`--nsTo` — it used to be written back over whichever database it named.
 - **The built-in dump is a plan, read before a row is** (`dump_sql_plan.go` and the per-engine files).
   The tables alone restore into a database with no unique constraint, no index and no view, so the plan
   carries those and the order they replay in: sequences, tables parents-first, rows, then constraints

@@ -375,6 +375,17 @@ func TestLivePostgresRestoresAPlainSQLDump(t *testing.T) {
 		t.Errorf("row = %q", got)
 	}
 
+	// A script that reconnects to another database would carry on there. It
+	// is refused before psql is started.
+	elsewhere := t.TempDir() + "/create.sql"
+	if err := os.WriteFile(elsewhere, []byte("CREATE DATABASE other;\n\\connect other\nCREATE TABLE public.jd_elsewhere (id integer);\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreWith(ctx, DriverPostgres, dsn, elsewhere, RestoreOptions{Database: target}); err == nil ||
+		!strings.Contains(err.Error(), "connects to another database") {
+		t.Fatalf("a script with \\connect: %v", err)
+	}
+
 	// A script that fails changes nothing: it is replayed as one transaction.
 	bad := t.TempDir() + "/bad.sql"
 	if err := os.WriteFile(bad, []byte("CREATE TABLE public.jd_half (id integer);\nSELECT no_such_function();\n"), 0o600); err != nil {
@@ -1029,8 +1040,24 @@ func TestLiveMongoNativeTools(t *testing.T) {
 	if err != nil || exists {
 		t.Fatalf("DatabaseExists before the restore = %v, %v", exists, err)
 	}
-	if _, err := RestoreWith(ctx, DriverMongo, dsn, res.Path, RestoreOptions{Database: copyName, SourceDatabase: dbName}); err != nil {
+	// The archive says which database it is of, so nobody has to remember.
+	if got := mongoArchiveDatabases(res.Path); len(got) != 1 || got[0] != dbName {
+		t.Fatalf("the archive is read as holding %v, want [%s]", got, dbName)
+	}
+	// Restored under another name with nothing said about where it came
+	// from: it goes where it was told, and the database it came from is not
+	// written to.
+	if _, err := db.Collection(keep).DeleteMany(ctx, bson.D{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RestoreWith(ctx, DriverMongo, dsn, res.Path, RestoreOptions{Database: copyName}); err != nil {
 		t.Fatalf("RestoreWith: %v", err)
+	}
+	if n, _ := db.Collection(keep).CountDocuments(ctx, bson.D{}); n != 0 {
+		t.Fatalf("a restore into %s wrote %d documents into %s", copyName, n, dbName)
+	}
+	if _, err := db.Collection(keep).InsertMany(ctx, []any{bson.D{{Key: "n", Value: 1}}, bson.D{{Key: "n", Value: 2}}}); err != nil {
+		t.Fatal(err)
 	}
 	if n, _ := client.Database(copyName).Collection(keep).CountDocuments(ctx, bson.D{}); n != 2 {
 		t.Errorf("the copy holds %d documents, want 2", n)
@@ -1050,7 +1077,10 @@ func TestLiveMongoNativeTools(t *testing.T) {
 	if _, err := db.Collection(keep).DeleteMany(ctx, bson.D{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RestoreWith(ctx, DriverMongo, dsn, res.Path, RestoreOptions{Database: dbName, SourceDatabase: dbName}); err != nil {
+	if got := mongoArchiveDatabases(res.Path); len(got) != 1 || got[0] != dbName {
+		t.Fatalf("the uncompressed archive is read as holding %v, want [%s]", got, dbName)
+	}
+	if _, err := RestoreWith(ctx, DriverMongo, dsn, res.Path, RestoreOptions{Database: dbName}); err != nil {
 		t.Fatalf("RestoreWith(same database): %v", err)
 	}
 	if n, _ := db.Collection(keep).CountDocuments(ctx, bson.D{}); n != 2 {

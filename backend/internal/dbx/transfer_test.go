@@ -637,6 +637,20 @@ func TestToolArgumentsCannotBeTurnedIntoOptions(t *testing.T) {
 			}
 		}
 	}
+	// mongorestore is confined to the database it was asked to restore into,
+	// whichever one the archive came from.
+	if got := strings.Join(mongorestoreArgs("/c", "/d/x.archive", true, "prod", "staging"), " "); got !=
+		"--config=/c --archive=/d/x.archive --drop --gzip --nsInclude=prod.* --nsFrom=prod.* --nsTo=staging.*" {
+		t.Errorf("mongorestore arguments = %s", got)
+	}
+	if got := strings.Join(mongorestoreArgs("/c", "/d/x.archive", false, "", "staging"), " "); got !=
+		"--config=/c --archive=/d/x.archive --drop --nsInclude=staging.*" {
+		t.Errorf("mongorestore arguments = %s", got)
+	}
+	if got := mongoArchiveDatabases("/nonexistent"); got != nil {
+		t.Errorf("a file that is not there holds %v", got)
+	}
+
 	// mysqldump takes its database and tables as bare words, so they follow
 	// the end of the options.
 	args := mysqldumpArgs("/tmp/my.cnf", "shop", opts, sel)
@@ -663,5 +677,44 @@ func TestToolArgumentsCannotBeTurnedIntoOptions(t *testing.T) {
 	}
 	if err := validateDumpDatabase("my-app"); err != nil {
 		t.Errorf("a dash inside a name was refused: %v", err)
+	}
+}
+
+// A script that changes database is found by its line, and one that names the
+// database it is being restored into is not that.
+func TestScriptsThatLeaveTheirDatabaseAreFound(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	long := strings.Repeat("x", 200_000)
+	for _, c := range []struct{ script, target, want string }{
+		{"CREATE TABLE t (id int);\nINSERT INTO t VALUES (1);\n", "shop", ""},
+		{"USE `shop`;\nCREATE TABLE t (id int);\n", "shop", ""},
+		{"CREATE DATABASE `other`;\n\nUSE `other`;\nCREATE TABLE t (id int);\n", "shop", "USE `other`;"},
+		{"use other ;\n", "shop", "use other ;"},
+		// A value that mentions USE is on its statement's line, not its own.
+		{"INSERT INTO t VALUES ('" + long + "\\nUSE `other`;');\n", "shop", ""},
+	} {
+		got, err := mysqlScriptSwitches(write("my.sql", c.script), c.target)
+		if err != nil || got != c.want {
+			t.Errorf("mysqlScriptSwitches(%.40q) = %q, %v; want %q", c.script, got, err, c.want)
+		}
+	}
+	for script, want := range map[string]string{
+		"CREATE TABLE t (id int);\nCOPY t (id) FROM stdin;\n1\n\\.\n": "",
+		"\\connect other\nCREATE TABLE t (id int);\n":                 `\connect other`,
+		"SELECT 1;\n\\c other\n":                                      `\c other`,
+		// COPY data with a backslash in it is written with two.
+		"COPY t (v) FROM stdin;\n\\\\connect other\n\\.\n": "",
+	} {
+		got, err := psqlScriptReconnects(write("pg.sql", script))
+		if err != nil || got != want {
+			t.Errorf("psqlScriptReconnects(%q) = %q, %v; want %q", script, got, err, want)
+		}
 	}
 }

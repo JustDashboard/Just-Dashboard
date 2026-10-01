@@ -1,6 +1,7 @@
 package dbx
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -623,6 +625,12 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 			if !toolAvailable(tool) {
 				return "", fmt.Errorf("this is a plain SQL dump and psql is not installed to replay it")
 			}
+			if other, err := psqlScriptReconnects(dumpPath); err != nil {
+				return "", err
+			} else if other != "" {
+				return "", fmt.Errorf("this script connects to another database (%s), so it cannot be restored into %s; "+
+					"take the dump of one database without --create, or replay it with psql yourself", other, database)
+			}
 			f, closeDump, err := openDumpText(dumpPath)
 			if err != nil {
 				return "", err
@@ -648,6 +656,12 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 		if tool == "" {
 			return restoreGenericSQL(ctx, driver, dsn, database, dumpPath, opts)
 		}
+		if other, err := mysqlScriptSwitches(dumpPath, database); err != nil {
+			return "", err
+		} else if other != "" {
+			return "", fmt.Errorf("this script switches to another database (%s), so it cannot be restored into %s; "+
+				"take the dump of one database without --databases, or replay it with the mysql client yourself", other, database)
+		}
 		defaults, cleanup, err := mysqlDefaultsFile(info)
 		if err != nil {
 			return "", err
@@ -664,9 +678,21 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 			return "", fmt.Errorf("this is a mongodump archive and mongorestore is not installed; " +
 				"re-take the backup to get one this dashboard can restore on its own")
 		}
+		// An archive names the database each collection came from, and the
+		// tool puts it back there unless told otherwise. Where it came from
+		// is read out of the archive itself, so that "restore into this
+		// database" never writes to another one: a dump of prod uploaded to
+		// the staging connection used to be restored over prod.
+		source := opts.SourceDatabase
+		if names := mongoArchiveDatabases(dumpPath); len(names) == 1 {
+			source = names[0]
+		} else if len(names) > 1 {
+			// A dump of several databases: only the part that is this one's.
+			source = database
+		}
 		// With no database in the connection string the tool takes the
-		// archive's own word for where each collection belongs, which is the
-		// only thing the options below can then redirect.
+		// archive's own word for the namespaces, which is the only thing the
+		// options can then confine and redirect.
 		conf, cleanup, err := mongoConfigFile(mongoURIForDatabase(dsn, ""))
 		if err != nil {
 			return "", err
@@ -674,10 +700,11 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 		defer cleanup()
 		run = toolRun{
 			name: "mongorestore",
-			args: mongorestoreArgs(conf, dumpPath, format == dumpFormatNativeGzip, opts.SourceDatabase, database),
+			args: mongorestoreArgs(conf, dumpPath, format == dumpFormatNativeGzip, source, database),
 		}
 	default:
-		return "", fmt.Errorf("%w: %s", ErrUnsupported, driver)
+		return "", fmt.Errorf("%s is not a dump this dashboard wrote, and there is no %s client here to replay it",
+			filepath.Base(dumpPath), driver)
 	}
 
 	run.progress = opts.Progress
@@ -783,6 +810,62 @@ func validPrefix(b []byte) int {
 		}
 	}
 	return len(b)
+}
+
+// A script that changes database carries on in whichever one it named, and
+// that is not a restore into this one. pg_dump writes a \connect when asked to
+// recreate the database (--create) and pg_dumpall one per database; mysqldump
+// writes a USE when given --databases. The clients have no option that keeps
+// a script where it was started — mysql's --one-database skips everything
+// until the first USE — so the script is read for the line first.
+//
+// A line of row data cannot be mistaken for either: both tools write a line
+// break inside a value as an escape, and pg_dump writes a backslash as two.
+
+// psqlScriptReconnects returns the \connect line of a psql script, if any.
+func psqlScriptReconnects(path string) (string, error) {
+	return scriptLine(path, func(line []byte) bool {
+		return bytes.HasPrefix(line, []byte(`\connect`)) || bytes.HasPrefix(line, []byte(`\c `))
+	})
+}
+
+// mysqlUseLine matches a USE statement on a line of its own.
+var mysqlUseLine = regexp.MustCompile("(?i)^USE\\s+`?([^`;\\s]+)`?\\s*;")
+
+// mysqlScriptSwitches returns the USE line of a MySQL script that names a
+// database other than the target.
+func mysqlScriptSwitches(path, target string) (string, error) {
+	return scriptLine(path, func(line []byte) bool {
+		m := mysqlUseLine.FindSubmatch(line)
+		return m != nil && string(m[1]) != target
+	})
+}
+
+// scriptLine returns the first line of a script that match accepts. Only the
+// start of a line is looked at, so a line longer than the buffer is read in
+// pieces and all but the first let go.
+func scriptLine(path string, match func(line []byte) bool) (string, error) {
+	text, closeDump, err := openDumpText(path)
+	if err != nil {
+		return "", err
+	}
+	defer closeDump()
+	r := bufio.NewReaderSize(text, 64<<10)
+	for {
+		line, isPrefix, err := r.ReadLine()
+		if err == io.EOF {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if match(line) {
+			return strings.TrimSpace(string(line[:min(len(line), 120)])), nil
+		}
+		for isPrefix && err == nil {
+			_, isPrefix, err = r.ReadLine()
+		}
+	}
 }
 
 // openDumpText opens a SQL script for a client's standard input, decompressing

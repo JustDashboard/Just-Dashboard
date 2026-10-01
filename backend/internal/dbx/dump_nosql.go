@@ -5,8 +5,10 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -684,6 +686,60 @@ func mongoToolSelection(ctx context.Context, dsn, database string, sel dumpSelec
 	}
 	sort.Strings(out)
 	return "", out, nil
+}
+
+// mongoArchiveMagic opens a mongodump archive.
+const mongoArchiveMagic = 0x8199e26d
+
+// mongoArchiveDatabases reads which databases a mongodump archive holds, from
+// the prelude the tool writes ahead of the documents: a header, then one small
+// document per collection naming its database. It returns nothing for a file
+// it cannot read that way, which the caller treats as not knowing.
+func mongoArchiveDatabases(path string) []string {
+	text, closeArchive, err := openDumpText(path)
+	if err != nil {
+		return nil
+	}
+	defer closeArchive()
+	r := bufio.NewReader(text)
+
+	word := make([]byte, 4)
+	if _, err := io.ReadFull(r, word); err != nil || binary.LittleEndian.Uint32(word) != mongoArchiveMagic {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	// The header document, then the collections, then a terminator. A
+	// collection's metadata is small; a length past this is not a prelude.
+	const maxPreludeDocument = 16 << 20
+	for i := 0; i < 100_000; i++ {
+		if _, err := io.ReadFull(r, word); err != nil {
+			return out
+		}
+		size := binary.LittleEndian.Uint32(word)
+		if size == 0xffffffff {
+			return out
+		}
+		if size < 5 || size > maxPreludeDocument {
+			return out
+		}
+		doc := make([]byte, size)
+		copy(doc, word)
+		if _, err := io.ReadFull(r, doc[4:]); err != nil {
+			return out
+		}
+		var entry struct {
+			DB string `bson:"db"`
+		}
+		if err := bson.Unmarshal(doc, &entry); err != nil {
+			return out
+		}
+		if entry.DB != "" && !seen[entry.DB] {
+			seen[entry.DB] = true
+			out = append(out, entry.DB)
+		}
+	}
+	return out
 }
 
 // --- archive plumbing -----------------------------------------------------

@@ -295,14 +295,19 @@ func mongodumpArgs(conf, database, path string, gzip bool, include string, exclu
 	return args
 }
 
+// mongorestoreArgs restores the collections of one database of an archive
+// into the target database, and nothing else. source is the database they
+// were dumped from; unknown, it is taken to be the target.
 func mongorestoreArgs(conf, dumpPath string, gzip bool, source, database string) []string {
 	args := []string{"--config=" + conf, "--archive=" + dumpPath, "--drop"}
 	if gzip {
 		args = append(args, "--gzip")
 	}
-	if source != "" && source != database {
-		// The archive's documents name the database they were dumped from,
-		// and mongorestore puts them back there unless told otherwise.
+	if source == "" {
+		source = database
+	}
+	args = append(args, "--nsInclude="+source+".*")
+	if source != database {
 		args = append(args, "--nsFrom="+source+".*", "--nsTo="+database+".*")
 	}
 	return args
