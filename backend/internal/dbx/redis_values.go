@@ -933,10 +933,15 @@ func RedisKeyMetadata(ctx context.Context, client *redis.Client, profile *RedisP
 	if f.ObjectFreq {
 		freqCmd = pipe.ObjectFreq(ctx, k)
 	}
-	read := time.Now()
 	if _, err := pipe.Exec(ctx); err != nil && typeCmd.Err() != nil {
 		return nil, RedisExplainError(ctx, client, typeCmd.Err())
 	}
+	// Taken once the reply is in, not before the request went out: the
+	// server's own clock was read in between, so this plus what it said is
+	// left can only land on or after the moment the key expires. Taken
+	// before, a key expiring on the first millisecond of the year 10000 was
+	// given a date in 9999 whenever the round trip crossed a millisecond.
+	read := time.Now()
 	typ := typeCmd.Val()
 	if typ == "none" || typ == "" {
 		return nil, ErrRedisKeyNotFound
