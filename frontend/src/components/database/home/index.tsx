@@ -1,112 +1,52 @@
 "use client"
 
-import { Fragment } from "react"
-import Link from "next/link"
-import { Warning } from "@/components/icons"
-import { relativeTime } from "@/lib/format"
-import { cn } from "@/lib/utils"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Notice } from "@/components/state"
-import { sectionGroups } from "@/components/database/engine"
-import { EngineMark, EnvironmentTag, ProtectedTag, SectionFrame } from "@/components/database/kit"
-import { ConnectPopover } from "@/components/database/shell/connect-popover"
-import { ConnectionSwitcher } from "@/components/database/shell/connection-switcher"
+import type { ComponentType } from "react"
+import type { EngineKind } from "@/components/database/engine"
+import { SectionFrame } from "@/components/database/kit"
+import { DownHome } from "@/components/database/home/down"
+import { DocumentHome } from "@/components/database/home/mongo-home"
+import { KeyValueHome } from "@/components/database/home/redis-home"
+import { SqlHome } from "@/components/database/home/sql-home"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { DatabaseVerbs } from "@/components/database/shell/database-verbs"
-import { connectionFacts } from "@/components/database/shell/facts"
-import { DatabaseStatusMark } from "@/components/database/shell/status"
 
 /**
- * A database's front page.
+ * The home each family of engine has. The registry says which family a
+ * connection is; nothing here asks what the driver is called.
+ */
+const HOMES: Partial<Record<EngineKind, ComponentType>> = {
+  sql: SqlHome,
+  keyvalue: KeyValueHome,
+  document: DocumentHome,
+}
+
+/**
+ * A database's front page: this engine's control panel.
  *
- * It opens on the identity line the host Overview and a project open on
- * (`HostIdentity`): the engine as the mark, the name — which is also the
- * control that goes to another database — what it is and where, and at the
- * line's end whether it answers, how to connect to it, and its verbs. The
- * strip the other pages carry is this line made small, so the home draws the
- * line and no strip.
+ * It reads top to bottom as the host Overview does (§15) — what this is
+ * (`HomeIdentity`), its headline figures as tiles with a ceiling or a trend
+ * where one exists, one chart of what it has been doing while the page was
+ * open, what needs somebody beside what it spends its time on, what it holds
+ * beside what uses it, and the reference facts last. Which figures, and which
+ * blocks, are the engine family's own: a SQL server, a key–value store and a
+ * document database each have a home built from the same blocks.
  *
- * Under it are the database's pages as things you take, in the rail's own
- * groups and the engine's own words. The readings a front page is for — what
- * it holds, what is using it, whether it is backed up — are the home area's
- * to add, above these.
+ * A server that is not answering — stopped, paused, refusing, or a saved
+ * connection that can no longer be opened — keeps its home: the same line,
+ * what state it is in, the one thing to do about it, and the facts that need
+ * no dial. Its engine is asked nothing until it is back.
+ *
+ * The page's name is the `h1` `SectionFrame` writes for assistive technology
+ * (§14); the name drawn on the line is the switcher, which is a control.
  */
 export function DatabaseHome() {
-  const { conn, summary, engine, status, readOnly, href } = useDatabase()
-  const down = status.state === "unreachable" || status.state === "broken"
+  const { engine, status } = useDatabase()
+  const Home = HOMES[engine.kind]
+  const answering = status.state === "running"
   return (
     <SectionFrame section="home">
-      <HostIdentity
-        logo={<EngineMark engine={engine} size="lg" />}
-        // The title's box truncates, which clips a ring drawn outside it.
-        title={<ConnectionSwitcher inset className="text-title font-semibold tracking-tight" />}
-        facts={
-          <>
-            {connectionFacts(conn, engine, summary).map((fact, index) => (
-              <Fragment key={fact.key}>
-                {index > 0 && <FactDot />}
-                <span title={fact.title} className={cn("truncate", fact.mono && "font-mono")}>
-                  {fact.text}
-                </span>
-              </Fragment>
-            ))}
-            {conn.user && (
-              <>
-                <FactDot />
-                <span>as {conn.user}</span>
-              </>
-            )}
-            <FactDot />
-            <span>added {relativeTime(conn.createdAt)}</span>
-          </>
-        }
-        aside={
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <EnvironmentTag environment={conn.environment} />
-            {readOnly && <ProtectedTag />}
-            <DatabaseStatusMark status={status} />
-            <ConnectPopover />
-            <DatabaseVerbs />
-          </div>
-        }
-      />
-
-      {down && (
-        <Notice tone="danger" icon={Warning} title="This database is not answering">
-          {status.error ? <p className="font-mono wrap-anywhere">{status.error}</p> : null}
-          <p>
-            The stored address and password are under{" "}
-            <Link href={href("settings")} className="underline">
-              Settings
-            </Link>
-            .
-          </p>
-        </Notice>
-      )}
-
-      <div className="grid gap-8">
-        {sectionGroups(engine)
-          .filter((group) => group.id !== "home")
-          .map((group) => (
-            <section key={group.id} className="flex min-w-0 flex-col gap-3">
-              <GroupRule label={group.label ?? ""} />
-              {/* A list of lit cards sits on the page, never in a frame (§12). */}
-              <ChoiceList className="grid gap-2 space-y-0 md:grid-cols-2 xl:grid-cols-3">
-                {group.sections.map((section, index) => (
-                  <ChoiceRow
-                    key={section.id}
-                    index={index}
-                    href={href(section.id)}
-                    verb={`Open ${section.title}`}
-                    title={section.title}
-                    leading={<section.icon className="size-4 text-muted-foreground" />}
-                  />
-                ))}
-              </ChoiceList>
-            </section>
-          ))}
-      </div>
+      {/* Keyed on whether the server answers: a home that comes back starts
+          its samples again rather than joining them across the gap. */}
+      {answering && Home ? <Home key="answering" /> : <DownHome key="down" />}
     </SectionFrame>
   )
 }
