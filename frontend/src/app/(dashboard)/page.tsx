@@ -41,6 +41,7 @@ import type { Tone } from "@/components/tone"
 import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import { Sparkline } from "@/components/metrics/sparkline"
+import { engineFor } from "@/components/database/engine"
 import { eventColor } from "@/components/metrics/metric-chart"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import {
@@ -460,9 +461,9 @@ function DatabasesCard() {
     (signal) => get<DbConnection[]>("/databases/", undefined, signal),
     60_000,
   )
-  const engines = [
-    ...new Set((data ?? []).map((c) => (c.driver === "postgres" ? "postgresql" : c.driver))),
-  ]
+  // Drawn as what each one is, in the registry's words: the glyph of its
+  // flavour where the server has said one, of its driver otherwise.
+  const engines = [...new Set((data ?? []).flatMap((conn) => engineFor(conn).logo ?? []))]
   return (
     <ServiceTile
       icon={Database}

@@ -40,6 +40,7 @@ import type {
 import { serviceViews, useServiceFinds } from "@/components/logs/service-views"
 import { RecordColumn, recordQueryKey, useRequestRecords } from "@/components/logs/request-records"
 import { railSourceFor } from "@/components/logs/service-views-model"
+import { sectionHref } from "@/components/database/engine"
 import type { RequestsView } from "@/components/deploy/requests-workspace"
 import {
   EMPTY_REQUEST_QUERY,
@@ -311,7 +312,7 @@ export default function LogsPage() {
     ? serviceViews(viewSource, finds, {
         openLog,
         onQuery: (conn: DbFleetEntry, sql: string) =>
-          router.push(`/databases/query?${new URLSearchParams({ conn: String(conn.id), sql })}`),
+          router.push(sectionHref(conn.id, "query", { sql })),
       })
     : []
   // A view the source does not have — Events kept from a container, now on
