@@ -1,13 +1,18 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
@@ -323,6 +328,143 @@ func TestSQLInAFormIsHeldToTheConsolesRule(t *testing.T) {
 	}
 }
 
+// A column type is written into the statement as it is given, so whatever a
+// "type" carries after the type is the rest of the statement: `integer, DROP
+// COLUMN email` on the add-column form was an ALTER TABLE that added one
+// column and dropped another, for an account that is refused the drop on its
+// own route and in the console. The form now takes a type and nothing else.
+func TestATypeCannotCarryASecondChange(t *testing.T) {
+	_, router, db := schemaRouter(t, auth.RoleLimited)
+	before := schemaText(t, db)
+
+	// What this account is refused directly …
+	rec, body := schemaSend(t, router, http.MethodDelete, "/databases/1/ddl/column", `{"table":"customers","name":"name"}`)
+	if rec.Code != http.StatusForbidden || schemaErrCode(body) != "forbidden" {
+		t.Fatalf("dropping a column without the destructive capability = %d %s", rec.Code, rec.Body.String())
+	}
+	// … it is refused inside a type as well, shown or run.
+	for _, typ := range []string{
+		"TEXT, DROP COLUMN name", "INTEGER, RENAME TO gone", "TEXT DROP TABLE orders", "TEXT) ; DROP TABLE orders",
+		"TEXT EXEC('DROP TABLE orders')", "TEXT REFERENCES orders", "TEXT DEFAULT (load_extension('x'))", "check(1)",
+	} {
+		quoted, err := json.Marshal(typ)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct{ path, body string }{
+			{"/databases/1/ddl/column", `{"table":"customers","column":{"name":"x","type":` + string(quoted) + `}}`},
+			{"/databases/1/ddl/table", `{"table":"made","columns":[{"name":"x","type":` + string(quoted) + `}]}`},
+		} {
+			for _, suffix := range []string{"", "?preview=1"} {
+				rec, body := schemaSend(t, router, http.MethodPost, c.path+suffix, c.body)
+				if rec.Code != http.StatusBadRequest || !strings.Contains(schemaErrMessage(body), "not one this form can build") {
+					t.Errorf("POST %s%s with the type %q = %d %s", c.path, suffix, typ, rec.Code, strings.TrimSpace(rec.Body.String()))
+				}
+			}
+		}
+	}
+	if after := schemaText(t, db); after != before {
+		t.Fatalf("a refused type changed the database:\n%s", after)
+	}
+	// A type that is only a type still goes through.
+	rec, body = schemaSend(t, router, http.MethodPost, "/databases/1/ddl/column",
+		`{"table":"customers","column":{"name":"x","type":"VARCHAR(40)"}}`)
+	if rec.Code != http.StatusOK || body["statement"] != `ALTER TABLE "customers" ADD COLUMN "x" VARCHAR(40)` {
+		t.Errorf("a plain add-column = %d %s", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+}
+
+// A dialog previews as the operator types, and a preview the server could not
+// draw up is neither a change nor an attempt at one: it leaves the audit trail
+// alone. The same request sent to run is on it, and so is a preview that was
+// refused for who asked rather than for what was asked.
+func TestARefusedPreviewIsOnTheTrailOnlyWhenItWasRefusedForTheRole(t *testing.T) {
+	s, router, _ := schemaRouter(t, auth.RoleLimited)
+	audited := func() (n int, last string) {
+		t.Helper()
+		if err := s.Store.DB.QueryRow(`SELECT count(*) FROM audit_log`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			var action, detail string
+			if err := s.Store.DB.QueryRow(`SELECT action, detail FROM audit_log ORDER BY id DESC LIMIT 1`).Scan(&action, &detail); err != nil {
+				t.Fatal(err)
+			}
+			last = action + " " + detail
+		}
+		return n, last
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodPost, "/databases/1/ddl/index", `{"table":"orders","fields":["total"],"where":"(total > 0"}`},
+		{http.MethodPost, "/databases/1/ddl/index", `{"table":"orders","fields":["total"],"where":"total > 0;"}`},
+		{http.MethodPost, "/databases/1/ddl/column", `{"table":"customers","column":{"name":"x","type":"TEXT, DROP COLUMN name"}}`},
+		{http.MethodPost, "/databases/1/ddl/view", `{"query":"SELECT 1"}`},
+		{http.MethodPost, "/databases/1/ddl/view", `{"name":"v","query":"SELECT 1","cascade":true}`},
+		{http.MethodPost, "/databases/1/ddl/rename", `{"table":"orders"}`},
+		{http.MethodPatch, "/databases/1/ddl/column", `{"table":"customers","name":"name","nullable":false}`},
+		{http.MethodPost, "/databases/1/ddl/comment", `{"comment":"x"}`},
+	} {
+		rec, _ := schemaSend(t, router, c.method, c.path+"?preview=1", c.body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s %s?preview=1 %s = %d %s", c.method, c.path, c.body, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+	}
+	if n, last := audited(); n != 0 {
+		t.Errorf("refused previews left %d audit entries, the last %s", n, last)
+	}
+
+	// Run rather than previewed, the same refused request is recorded.
+	rec, _ := schemaSend(t, router, http.MethodPost, "/databases/1/ddl/index", `{"table":"orders","fields":["total"],"where":"(total > 0"}`)
+	if n, _ := audited(); rec.Code != http.StatusBadRequest || n != 1 {
+		t.Errorf("a refused change = %d, %d audit entries", rec.Code, n)
+	}
+
+	// A preview refused for the capability it would need is recorded under
+	// the change's own name, whether the route or the body decided it.
+	for i, c := range []struct{ method, path, body, action, says string }{
+		{http.MethodPatch, "/databases/1/ddl/column?preview=1", `{"table":"customers","name":"name","type":"INTEGER"}`,
+			"database.ddl.alter_column", `"preview":true`},
+		{http.MethodPost, "/databases/1/ddl/index?preview=1", `{"table":"orders","fields":["total"],"where":"load_extension(total) IS NULL"}`,
+			"database.ddl.create_index", `"calls":["load_extension"]`},
+	} {
+		rec, body := schemaSend(t, router, c.method, c.path, c.body)
+		n, last := audited()
+		if rec.Code != http.StatusForbidden || schemaErrCode(body) != "forbidden" || n != i+2 ||
+			!strings.HasPrefix(last, c.action+" ") || !strings.Contains(last, c.says) {
+			t.Errorf("%s %s = %d; %d audit entries, the last %s", c.method, c.path, rec.Code, n, last)
+		}
+	}
+}
+
+// Some plans read the catalogue to restate what they do not change. When the
+// engine refuses that read the request was not wrong, and answering 400 would
+// have a form blame the operator's input for it.
+func TestAPlanTheEngineWouldNotBeReadForIsNotABadRequest(t *testing.T) {
+	s, _, _ := schemaRouter(t, auth.RoleAdmin)
+	conn, _, err := s.dbConnRow(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal := &httpx.Principal{User: &auth.User{ID: 1, Username: "operator"}, Role: auth.RoleAdmin, Kind: "session", IP: "127.0.0.1"}
+	for _, suffix := range []string{"", "?preview=1"} {
+		req := httptest.NewRequest(http.MethodPost, "/databases/1/ddl/comment"+suffix, nil)
+		req = req.WithContext(httpx.WithPrincipal(req.Context(), principal))
+		err := s.runDDL(httptest.NewRecorder(), req, conn, time.Second, "database.ddl.comment", nil, "",
+			func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
+				return nil, fmt.Errorf("could not read the column as it is now: %w", dbx.ErrPlanRead)
+			})
+		var refused *httpx.APIError
+		if !errors.As(err, &refused) || refused.Status != http.StatusBadGateway || refused.Code != "query_failed" {
+			t.Errorf("an unreadable catalogue%s = %v", suffix, err)
+		}
+		err = s.runDDL(httptest.NewRecorder(), req, conn, time.Second, "database.ddl.comment", nil, "",
+			func(context.Context, *sql.DB) (*dbx.DDLPlan, error) { return nil, errors.New("no column c on t") })
+		if !errors.As(err, &refused) || refused.Status != http.StatusBadRequest {
+			t.Errorf("a refused request%s = %v", suffix, err)
+		}
+	}
+}
+
 // With ?preview=1 every schema route answers with the statement it would run
 // and runs nothing. That is what lets a confirmation dialog show the server's
 // SQL rather than the page's guess at it.
@@ -441,6 +583,10 @@ func TestStructureRoutesValidateAndDoNotAskForAPhrase(t *testing.T) {
 		{http.MethodPost, "/databases/1/ddl/index", `{"table":"orders","fields":["total"],"concurrently":true}`, "no CONCURRENTLY"},
 		{http.MethodPost, "/databases/1/ddl/index", `{"table":"orders","fields":[]}`, "at least one column"},
 		{http.MethodPost, "/databases/1/ddl/column", `{"table":"customers","column":{"name":"x","type":"TEXT REFERENCES orders"}}`, "not one this form can build"},
+		// SQLite statements are written unqualified, so one aimed at an
+		// attached file would land on main's table of the same name.
+		{http.MethodDelete, "/databases/1/ddl/table", `{"schema":"other","table":"orders"}`, "main database only"},
+		{http.MethodPost, "/databases/1/ddl/column", `{"schema":"other","table":"customers","column":{"name":"x","type":"TEXT"}}`, "main database only"},
 		{http.MethodPatch, "/databases/1/ddl/column", `{"table":"customers"}`, "name are required"},
 		{http.MethodDelete, "/databases/1/ddl/constraint", `{"table":"customers"}`, "name are required"},
 		{http.MethodDelete, "/databases/1/ddl/foreign-key", `{"name":"fk_0"}`, "name are required"},
@@ -509,7 +655,12 @@ func TestSchemaRoutesAreForSQLEngines(t *testing.T) {
 // Postgres: a schema is built through the forms, read back through the
 // catalogue, and changed with the statement the preview showed.
 func TestLiveAPISchemaSurface(t *testing.T) {
-	dsn := envOr("JD_TEST_POSTGRES_DSN", "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable")
+	// It creates and drops a schema, so it runs only against a server it was
+	// pointed at and never against whatever answers on the default port.
+	dsn := os.Getenv("JD_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set JD_TEST_POSTGRES_DSN to run this")
+	}
 	_, r, id := liveAPIRouter(t, dbx.DriverPostgres, dsn)
 	const schema = "jd_api_schema"
 	path := func(suffix string) string { return pathf("/databases/%d", id) + suffix }
@@ -628,6 +779,23 @@ func TestLiveAPISchemaSurface(t *testing.T) {
 			if c.Name == "effort" && (c.Type != "integer" || c.Nullable || c.Default != "1") {
 				t.Errorf("effort after the change = %+v", c)
 			}
+		}
+	})
+
+	// On Postgres a comma after the type starts another action of the same
+	// ALTER TABLE, so this is the request that used to drop a column from the
+	// add-column form.
+	t.Run("a_type_carries_no_second_action", func(t *testing.T) {
+		for _, suffix := range []string{"?preview=1", ""} {
+			rec := do(t, r, http.MethodPost, path("/ddl/column"+suffix),
+				`{"schema":"`+schema+`","table":"owners","column":{"name":"x","type":"integer, DROP COLUMN name"}}`)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "not one this form can build") {
+				t.Errorf("add column%s with a second action in its type = %d %s", suffix, rec.Code, rec.Body.String())
+			}
+		}
+		var owners dbx.TableDetail
+		if code := getJSON(t, r, path("/table?schema="+schema+"&table=owners"), &owners); code != http.StatusOK || len(owners.Columns) != 2 {
+			t.Errorf("owners after the refused requests = %d %+v", code, owners.Columns)
 		}
 	})
 

@@ -54,7 +54,7 @@ func (s *Server) ddlContext(r *http.Request) (*ddlRequest, *dbConnection, error)
 		return nil, nil, err
 	}
 	if strings.TrimSpace(req.Table) == "" {
-		return nil, nil, httpx.BadRequest("table is required")
+		return nil, nil, ddlInvalid(r, "table is required")
 	}
 	return &req, conn, nil
 }
@@ -104,12 +104,12 @@ func (s *Server) handleDDLRename(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if strings.TrimSpace(req.To) == "" {
-		return httpx.BadRequest("a new name is required")
+		return ddlInvalid(r, "a new name is required")
 	}
 	plan := planned(dbx.PlanRenameTable(conn.Driver, req.Schema, req.Table, req.To))
 	if req.Kind == "column" {
 		if strings.TrimSpace(req.Name) == "" {
-			return httpx.BadRequest("the column to rename is required")
+			return ddlInvalid(r, "the column to rename is required")
 		}
 		plan = planned(dbx.PlanRenameColumn(conn.Driver, req.Schema, req.Table, req.Name, req.To))
 	}
@@ -135,7 +135,7 @@ func (s *Server) handleDDLDropColumn(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("the column to drop is required")
+		return ddlInvalid(r, "the column to drop is required")
 	}
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_column",
 		map[string]any{"table": req.Table, "column": req.Name}, "",
@@ -148,7 +148,7 @@ func (s *Server) handleDDLDropIndex(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("the index to drop is required")
+		return ddlInvalid(r, "the index to drop is required")
 	}
 	// No typed phrase: an index holds no data of its own and the Structure tab
 	// shows the definition that recreates it. Dropping one costs a rebuild, not

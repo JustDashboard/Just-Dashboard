@@ -130,6 +130,21 @@ func (s *Server) handleDBObject(w http.ResponseWriter, r *http.Request) error {
 // rather than have it run.
 func ddlPreview(r *http.Request) bool { return queryFlag(r, "preview") }
 
+// ddlInvalid refuses a schema-change request for what it says.
+//
+// A preview that could not be drawn up is not a change and not an attempt at
+// one: a dialog asks for it again as the operator edits an expression, and
+// every half-typed condition used to be a failed entry on the audit trail. So
+// a refused preview leaves the trail alone. The same request sent to run is
+// recorded like any other refused mutation, and a preview refused for who is
+// asking rather than for what it says is recorded too (runDDL).
+func ddlInvalid(r *http.Request, format string, args ...any) error {
+	if ddlPreview(r) {
+		httpx.SkipAudit(r)
+	}
+	return httpx.BadRequest(format, args...)
+}
+
 // ddlDecode reads a schema-change request and identifies the connection,
 // without opening a pool: a request that is malformed, or aimed at an engine
 // with no schema to edit, does not dial the database.
@@ -139,6 +154,9 @@ func (s *Server) ddlDecode(r *http.Request, req any) (*dbConnection, error) {
 		return nil, err
 	}
 	if err := httpx.DecodeJSON(r, req); err != nil {
+		if ddlPreview(r) {
+			httpx.SkipAudit(r)
+		}
 		return nil, err
 	}
 	conn, _, err := s.dbConnRow(r.Context(), id)
@@ -146,7 +164,7 @@ func (s *Server) ddlDecode(r *http.Request, req any) (*dbConnection, error) {
 		return nil, err
 	}
 	if !conn.Driver.IsSQL() {
-		return nil, httpx.BadRequest("schema editing is for SQL engines; %s has its own surface", conn.Driver)
+		return nil, ddlInvalid(r, "schema editing is for SQL engines; %s has its own surface", conn.Driver)
 	}
 	return conn, nil
 }
@@ -165,9 +183,11 @@ type ddlPlanner func(ctx context.Context, pool *sql.DB) (*dbx.DDLPlan, error)
 // operator approved was not what happened. Now the statement in the dialog is
 // this function's, and it is the same text whether it is shown or run.
 //
-// A preview changes nothing, so it is not on the audit trail. A change is,
-// whether or not the engine accepted it: the statement that was refused is as
-// much a part of the record as the one that ran.
+// A preview changes nothing, so it is not on the audit trail — unless it was
+// refused for the capability it would have needed, which is worth a record
+// whether or not anything would have run. A change is on the trail whether or
+// not the engine accepted it: the statement that was refused is as much a
+// part of the record as the one that ran.
 //
 // destructive is the reason the request's own content makes it destructive,
 // or empty when the route's group has already decided. The path cannot know —
@@ -180,21 +200,42 @@ type ddlPlanner func(ctx context.Context, pool *sql.DB) (*dbx.DDLPlan, error)
 func (s *Server) runDDL(w http.ResponseWriter, r *http.Request, conn *dbConnection, timeout time.Duration,
 	action string, detail map[string]any, destructive string, plan ddlPlanner) error {
 	principal := httpx.MustPrincipal(r)
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	if ddlPreview(r) {
+		detail["preview"] = true
+	}
+	forbidden := func(why string) error {
+		httpx.SetAudit(r, action, conn.Name, detail)
+		return httpx.Err(http.StatusForbidden, "forbidden", why+"; your role does not permit it")
+	}
 	if destructive != "" && !principal.Can(auth.CapDestructive) {
-		return httpx.Err(http.StatusForbidden, "forbidden", destructive+"; your role does not permit it")
+		return forbidden(destructive)
+	}
+	// A preview that the database could not be reached or read for showed
+	// nothing and changed nothing.
+	unreadable := func(err error) error {
+		if ddlPreview(r) {
+			httpx.SkipAudit(r)
+		}
+		return err
 	}
 	pool, _, err := s.dbPool(r.Context(), conn.ID)
 	if err != nil {
-		return err
+		return unreadable(err)
 	}
 	ctx, cancel := timeoutCtx(r, timeout)
 	defer cancel()
 	p, err := plan(ctx, pool)
-	if err != nil {
-		return httpx.BadRequest("%v", err)
+	if errors.Is(err, dbx.ErrPlanRead) {
+		// Some plans restate what they do not change and read it first. The
+		// engine refusing that read is the engine's failure, and blaming the
+		// request for it would send the operator looking for a mistake in it.
+		return unreadable(httpx.Err(http.StatusBadGateway, "query_failed", err.Error()))
 	}
-	if detail == nil {
-		detail = map[string]any{}
+	if err != nil {
+		return ddlInvalid(r, "%v", err)
 	}
 	if len(p.Unvouched) > 0 {
 		detail["calls"] = p.Unvouched
@@ -202,7 +243,7 @@ func (s *Server) runDDL(w http.ResponseWriter, r *http.Request, conn *dbConnecti
 			destructive = "this change calls " + strings.Join(p.Unvouched, ", ") +
 				", which the engine runs for every row it checks or fills and which this form cannot vouch for"
 			if !principal.Can(auth.CapDestructive) {
-				return httpx.Err(http.StatusForbidden, "forbidden", destructive+"; your role does not permit it")
+				return forbidden(destructive)
 			}
 		}
 	}
@@ -274,7 +315,7 @@ func (s *Server) handleDDLAlterColumn(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	if strings.TrimSpace(req.Table) == "" || strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("table and the column's name are required")
+		return ddlInvalid(r, "table and the column's name are required")
 	}
 	change := dbx.ColumnChange{
 		Schema: req.Schema, Table: req.Table, Column: req.Name,
@@ -311,7 +352,7 @@ func (s *Server) handleDDLAddForeignKey(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 	if strings.TrimSpace(req.Table) == "" {
-		return httpx.BadRequest("table is required")
+		return ddlInvalid(r, "table is required")
 	}
 	// Adding a key validates every existing row against the referenced table,
 	// which on a large one is as long as building an index.
@@ -333,7 +374,7 @@ func (s *Server) handleDDLDropForeignKey(w http.ResponseWriter, r *http.Request)
 		return err
 	}
 	if strings.TrimSpace(req.Table) == "" || strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("table and the foreign key's name are required")
+		return ddlInvalid(r, "table and the foreign key's name are required")
 	}
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_foreign_key",
 		map[string]any{"table": req.Table, "constraint": req.Name}, "",
@@ -358,7 +399,7 @@ func (s *Server) handleDDLAddConstraint(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 	if strings.TrimSpace(req.Table) == "" {
-		return httpx.BadRequest("table is required")
+		return ddlInvalid(r, "table is required")
 	}
 	return s.runDDL(w, r, conn, 30*time.Minute, "database.ddl.add_constraint",
 		map[string]any{"table": req.Table, "type": req.Type}, "",
@@ -377,7 +418,7 @@ func (s *Server) handleDDLDropConstraint(w http.ResponseWriter, r *http.Request)
 		return err
 	}
 	if strings.TrimSpace(req.Table) == "" || strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("table and the constraint's name are required")
+		return ddlInvalid(r, "table and the constraint's name are required")
 	}
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_constraint",
 		map[string]any{"table": req.Table, "constraint": req.Name}, "",
@@ -404,7 +445,7 @@ func (s *Server) handleDDLCreateView(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("the view's name is required")
+		return ddlInvalid(r, "the view's name is required")
 	}
 	// A materialized view runs its query to completion as it is created.
 	return s.runDDL(w, r, conn, 30*time.Minute, "database.ddl.create_view",
@@ -424,7 +465,7 @@ func (s *Server) handleDDLDropView(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("the view's name is required")
+		return ddlInvalid(r, "the view's name is required")
 	}
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_view",
 		map[string]any{"view": req.Name, "materialized": req.Materialized}, "",
@@ -444,7 +485,7 @@ func (s *Server) handleDDLCreateSchema(w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("the schema's name is required")
+		return ddlInvalid(r, "the schema's name is required")
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.create_schema",
 		map[string]any{"schema": req.Name}, "",
@@ -465,7 +506,7 @@ func (s *Server) handleDDLDropSchema(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("the schema's name is required")
+		return ddlInvalid(r, "the schema's name is required")
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.drop_schema",
 		map[string]any{"schema": req.Name}, "",
@@ -488,7 +529,7 @@ func (s *Server) handleDDLComment(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	if strings.TrimSpace(req.Table) == "" {
-		return httpx.BadRequest("table is required")
+		return ddlInvalid(r, "table is required")
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.comment",
 		map[string]any{"table": req.Table, "column": req.Column}, "",
@@ -516,7 +557,7 @@ func (s *Server) handleDDLCreateEnum(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("the type's name is required")
+		return ddlInvalid(r, "the type's name is required")
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.create_enum",
 		map[string]any{"type": req.Name, "labels": len(req.Values)}, "",
@@ -532,7 +573,7 @@ func (s *Server) handleDDLAddEnumValue(w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return httpx.BadRequest("the type's name is required")
+		return ddlInvalid(r, "the type's name is required")
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.add_enum_value",
 		map[string]any{"type": req.Name, "label": req.Value}, "",
