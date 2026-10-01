@@ -1,3 +1,5 @@
+import { kindFromType } from "@/components/database/grid/kinds"
+
 /**
  * What kind of thing one value is, and how it reads on one line.
  *
@@ -19,14 +21,6 @@ const INSTANT =
   /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?: ?(?:Z|[+-]\d{2}(?::?\d{2})?))?$/i
 const BOOLEAN = /^(?:true|false|t|f)$/i
 
-const JSON_TYPE = /json/
-// Oracle's BINARY_DOUBLE and BINARY_FLOAT are numbers that say how they are stored.
-const BINARY_TYPE = /binary(?!_(?:double|float))|bytea|blob|\braw\b|image|bytes/
-const BOOLEAN_TYPE = /^bool/
-const NUMBER_TYPE = /int|serial|numeric|decimal|number|real|double|float|money/
-const NOT_A_NUMBER_TYPE = /interval|point/
-const TIME_TYPE = /date|time|year/
-
 /**
  * The kind of a value. `type` is what the column holds — the engine's own
  * type name (`bigint`, `character varying(255)`, `BLOB`) or the server's word
@@ -34,6 +28,10 @@ const TIME_TYPE = /date|time|year/
  * decides what a string is: digits in a `bigint` column are a number and the
  * same digits in a `text` column are text; `\x41` is a byte in a `bytea`
  * column and four characters in a `varchar` one.
+ *
+ * What a type name means is the grid's to say (`kindFromType`): a column is
+ * read one way whether it is a cell of a grid or a field beside one, and a
+ * type the grid learns to read is read here from the same line.
  *
  * With no type there is only the value to go on, so only what cannot be
  * mistaken is claimed: the server's byte preview, and a string that is a
@@ -47,19 +45,32 @@ export function valueKind(value: unknown, type = ""): ValueKind {
   if (typeof value === "object") return "json"
   const text = String(value)
   if (text === "") return "empty"
-  const column = type.toLowerCase()
-  if (!column) {
+  if (!type.trim()) {
     if (BINARY.test(text)) return "binary"
     return INSTANT.test(text) ? "date" : "string"
   }
-  if (JSON_TYPE.test(column)) return "json"
-  if (BINARY_TYPE.test(column)) return BINARY.test(text) ? "binary" : "string"
-  if (BOOLEAN_TYPE.test(column)) return BOOLEAN.test(text) ? "boolean" : "string"
-  if (NUMBER_TYPE.test(column) && !NOT_A_NUMBER_TYPE.test(column)) {
-    return NUMERIC.test(text) ? "number" : "string"
+  // The column says what the text is; the text still has to look like it. A
+  // number column that holds "n/a" is holding text.
+  switch (kindFromType(type)) {
+    case "json":
+      return "json"
+    case "binary":
+      return BINARY.test(text) ? "binary" : "string"
+    case "boolean":
+      if (BOOLEAN.test(text)) return "boolean"
+      // MySQL's tinyint(1) is its boolean, and arrives as 0 or 1.
+      return NUMERIC.test(text) ? "number" : "string"
+    case "number":
+      return NUMERIC.test(text) ? "number" : "string"
+    case "datetime":
+    case "date":
+    case "time":
+      return /^\d/.test(text) ? "date" : "string"
+    default:
+      // Text, and what is drawn as the engine prints it: a uuid, an enum's
+      // label, an array, a range.
+      return "string"
   }
-  if (TIME_TYPE.test(column)) return /^\d/.test(text) ? "date" : "string"
-  return "string"
 }
 
 /** How many bytes a binary preview stands for. */

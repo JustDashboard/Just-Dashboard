@@ -45,7 +45,14 @@ describe("what kind of thing a value is", () => {
     // A note that opens with a date is a note.
     expect(valueKind("2024-01-01 10:00 call the bank", "text")).toBe("string")
     expect(valueKind("2024-01-01 10:00:00+00", "timestamptz")).toBe("date")
-    expect(valueKind("2024", "year")).toBe("date")
+    // MySQL's YEAR is a whole number between two bounds, which is how the
+    // grid edits it and so how it is read everywhere.
+    expect(valueKind("2024", "year")).toBe("number")
+    // MySQL's boolean arrives as 0 or 1.
+    expect(valueKind("1", "tinyint(1)")).toBe("number")
+    // A range is its bounds as the engine prints them, not a number or a date.
+    expect(valueKind("[1,10)", "int4range")).toBe("string")
+    expect(valueKind("101", "bit(3)")).toBe("string")
     // A boolean some drivers hand over as its word.
     expect(valueKind("true", "boolean")).toBe("boolean")
     expect(valueKind("f", "bool")).toBe("boolean")

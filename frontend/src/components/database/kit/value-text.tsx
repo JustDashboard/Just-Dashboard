@@ -1,5 +1,6 @@
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { KIND_HUE } from "@/components/database/grid/legend"
 import {
   binarySize,
   valueKind,
@@ -8,23 +9,24 @@ import {
 } from "@/components/database/kit/values"
 
 /**
- * The legend of value kinds, one hue each from the `--tag-*` set — the same
- * ones the log console gives a number and a string, so a kind keeps its
- * colour across the product. They sit at one lightness; none of them is a
- * status hue, because none of them is a reading of state.
+ * How each kind of value is drawn. The hues are the grid's legend
+ * (`KIND_HUE`), so a number, a moment or a document is the same colour as a
+ * field here and as a cell there: text and numbers in the foreground, since
+ * they are most of what there is, and none of green, amber or red, which on
+ * these pages mean a row added, a cell changed and a row going.
  *
- * Text is the foreground: it is what a row is mostly made of, and a grid in
- * which every cell is tinted has no figure left to find.
+ * NULL and the empty string are not kinds of value and have no hue: they are
+ * words about one, in the quiet voice.
  */
 export const VALUE_KIND_CLASS: Record<ValueKind, string> = {
   null: "text-muted-foreground/60",
   empty: "text-muted-foreground/60 italic",
-  string: "",
-  number: "numeric text-[var(--tag-pink)]",
-  boolean: "text-[var(--tag-violet)]",
-  date: "text-[var(--tag-cyan)]",
-  json: "text-[var(--tag-slate)]",
-  binary: "text-[var(--tag-amber)]",
+  string: KIND_HUE.text,
+  number: KIND_HUE.number,
+  boolean: KIND_HUE.boolean,
+  date: KIND_HUE.datetime,
+  json: KIND_HUE.json,
+  binary: KIND_HUE.binary,
 }
 
 /** Whether a kind is set against the right edge of a column, as figures are. */

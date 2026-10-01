@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import type { InsertedRow, UpdatedRow } from "./change-set"
 import { CellEditor } from "./cell-editor"
 import type { OrderedColumn } from "./layout"
+import { KIND_HUE } from "./legend"
 import { formatCell, isTruncatedValue, type EditValue } from "./values"
 import type { CellValue, GridColumn, GridColumnKind, GridRow } from "./types"
 
@@ -25,30 +26,6 @@ import type { CellValue, GridColumn, GridColumnKind, GridRow } from "./types"
  * elements, why its classes are looked up rather than merged, and why the tick
  * in the gutter is a span and not the form checkbox.
  */
-
-/**
- * The legend: which sanctioned `--tag-*` hue a kind of value is drawn in.
- *
- * Text and numbers keep the foreground — they are most of any table, and a
- * grid where everything is coloured is a grid where nothing is. Green, amber
- * and red are left out on purpose: in this grid those three hues mean a row
- * was added, a cell was changed and a row is going, and a boolean drawn green
- * beside an inserted row would be two meanings for one colour.
- */
-const KIND_HUE: Record<GridColumnKind, string> = {
-  number: "numeric",
-  text: "",
-  unknown: "",
-  boolean: "text-(--tag-violet)",
-  datetime: "text-(--tag-cyan)",
-  date: "text-(--tag-cyan)",
-  time: "text-(--tag-cyan)",
-  json: "text-(--tag-blue)",
-  array: "text-(--tag-blue)",
-  enum: "text-(--tag-pink)",
-  uuid: "text-(--tag-slate)",
-  binary: "text-(--tag-slate)",
-}
 
 const VALUE_TEXT = Object.fromEntries(
   Object.entries(KIND_HUE).map(([kind, hue]) => [

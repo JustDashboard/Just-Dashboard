@@ -65,6 +65,7 @@ export {
 export { EMPTY_SELECTION } from "./selection"
 export { cycleSort } from "./sort"
 export { columnKind, kindFromServer, kindFromType } from "./kinds"
+export { KIND_HUE } from "./legend"
 export { describeAggregate, describeStatus } from "./status"
 export type { GridStatus } from "./status"
 export type { Aggregate } from "./decimal"

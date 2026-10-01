@@ -61,6 +61,8 @@ export function kindFromType(typeName: string): GridColumnKind {
   if (/^bool|^tinyint\(1\)$/.test(type)) return "boolean"
   if (/json/.test(type)) return "json"
   if (/uuid|uniqueidentifier/.test(type)) return "uuid"
+  // Oracle's BINARY_DOUBLE and BINARY_FLOAT are numbers that say how they are stored.
+  if (/^binary_(double|float)$/.test(type)) return "number"
   if (/bytea|blob|binary|^raw|^image$|^bytes$/.test(type)) return "binary"
   if (/timestamp|datetime|^smalldatetime/.test(type)) return "datetime"
   if (/^date/.test(type)) return "date"

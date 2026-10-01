@@ -102,6 +102,10 @@ describe("what a declared type is", () => {
     expect(columnKind({ typeName: "BIT", serverKind: "binary" })).toBe("binary")
     expect(kindFromType("tinyint(1)")).toBe("boolean")
     expect(kindFromType("boolean")).toBe("boolean")
+    // Oracle's BINARY_DOUBLE and BINARY_FLOAT say how a number is stored.
+    expect(kindFromType("BINARY_DOUBLE")).toBe("number")
+    expect(kindFromType("binary_float")).toBe("number")
+    expect(kindFromType("binary(16)")).toBe("binary")
   })
 
   test("a wrapper type is read through to what it wraps", () => {
