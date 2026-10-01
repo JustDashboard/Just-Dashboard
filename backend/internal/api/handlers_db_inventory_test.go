@@ -1010,6 +1010,91 @@ func TestAForgottenServerStaysForgotten(t *testing.T) {
 	}
 }
 
+// The fleet's list of what is on the machine and not connected is the
+// inventory's reading by the sync's rules, without the dialling: a container
+// it cannot reach is listed with the reason, a server installed on the host is
+// offered for its password, and what the sync leaves alone — a stopped
+// container, one the operator set aside, one that is connected — is not listed
+// as something waiting to be dealt with.
+func TestTheFleetListsWhatIsNotConnectedAsTheInventorySeesIt(t *testing.T) {
+	m := ordinaryMachine()
+	m.containers = append(m.containers, fakeContainer{
+		id: "aaaaaaaaaaaa0006", name: "nowhere", image: "postgres:16", state: "running",
+		env: []string{"POSTGRES_PASSWORD=" + secretPassword}, entrypoint: []string{"docker-entrypoint.sh"}, cmd: []string{"postgres"},
+	})
+	s, r := inventoryRouter(t, auth.RoleAdmin, m)
+	listed := func() (map[string]string, []credentialServer) {
+		t.Helper()
+		s.dropInventory()
+		rec := do(t, r, http.MethodGet, "/databases/fleet", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("fleet = %d %s", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Unreachable      []unreachableServer `json:"unreachable"`
+			NeedsCredentials []credentialServer  `json:"needsCredentials"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		reasons := map[string]string{}
+		for _, u := range out.Unreachable {
+			reasons[u.Container] = u.Reason
+		}
+		return reasons, out.NeedsCredentials
+	}
+
+	reasons, needs := listed()
+	if !strings.Contains(reasons["nowhere"], "no published port") {
+		t.Errorf("nowhere: %q, want the reason it cannot be reached", reasons["nowhere"])
+	}
+	for _, name := range []string{"shop-db", "fixture", "old-cache", "cache", "notes-app"} {
+		if reason, reported := reasons[name]; reported {
+			t.Errorf("%s is listed as unreachable (%q): the sync can connect it, or leaves it alone", name, reason)
+		}
+	}
+	if len(needs) != 1 || needs[0].Port != 5438 || needs[0].Driver != "postgres" || needs[0].User != "postgres" || needs[0].Name != "postgres on this host" {
+		t.Fatalf("needsCredentials = %+v, want the host's PostgreSQL offered for its password", needs)
+	}
+
+	// Set aside by the operator: the sync leaves it alone, and so does this.
+	inv := decodeInventory(t, do(t, r, http.MethodGet, "/databases/inventory", ""))
+	var hostKey string
+	for _, inst := range inv.Instances {
+		if inst.Source == dbx.SourceHost && inst.Driver == dbx.DriverPostgres {
+			hostKey = inst.Key
+		}
+	}
+	if hostKey == "" {
+		t.Fatal("the inventory does not list the host's PostgreSQL")
+	}
+	for _, key := range []string{hostKey, "docker:nowhere"} {
+		if rec := do(t, r, http.MethodPost, "/databases/inventory/ignore", fmt.Sprintf(`{"key":%q,"ignored":true}`, key)); rec.Code != http.StatusOK {
+			t.Fatalf("ignore %s = %d %s", key, rec.Code, rec.Body.String())
+		}
+	}
+	if reasons, needs := listed(); len(reasons) != 0 || len(needs) != 0 {
+		t.Errorf("servers that were set aside are still listed: %v %+v", reasons, needs)
+	}
+
+	// And none of it is shown to somebody who could not act on it.
+	for _, key := range []string{hostKey, "docker:nowhere"} {
+		do(t, r, http.MethodPost, "/databases/inventory/ignore", fmt.Sprintf(`{"key":%q,"ignored":false}`, key))
+	}
+	viewer := chi.NewRouter()
+	viewer.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			p := &httpx.Principal{User: &auth.User{ID: 2, Username: "viewer"}, Role: auth.RoleReadOnly, Kind: "session", IP: "127.0.0.1"}
+			next.ServeHTTP(w, req.WithContext(httpx.WithPrincipal(req.Context(), p)))
+		})
+	})
+	s.mountDatabaseRoutes(viewer)
+	rec := do(t, viewer, http.MethodGet, "/databases/fleet", "")
+	if !strings.Contains(rec.Body.String(), `"unreachable":[]`) || !strings.Contains(rec.Body.String(), `"needsCredentials":[]`) {
+		t.Errorf("a viewer's fleet lists what is not connected: %s", rec.Body.String())
+	}
+}
+
 func TestIgnoreIsSetClearedAndAudited(t *testing.T) {
 	m := ordinaryMachine()
 	s, r := inventoryRouter(t, auth.RoleAdmin, m)

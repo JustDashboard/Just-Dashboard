@@ -379,52 +379,81 @@ func (s *Server) bindingCounts(ctx context.Context) (map[int64]int, error) {
 	return out, rows.Err()
 }
 
-// undetectedServers is the sync's report of what it could see and not
-// connect, read without writing anything: a listing, not a reconcile.
+// undetectedServers is what the sync would report of the servers on this
+// machine that nothing is connected to, read from discovery's inventory
+// without writing or dialling anything: a listing, not a reconcile.
+//
+// It is the inventory's reading and the sync's rules, so the fleet, the sync
+// and the list of what was found cannot tell three stories about one server:
+// a stopped one, one the operator set aside and one recognised only by its
+// port are left out here as they are left alone there.
 func (s *Server) undetectedServers(ctx context.Context) ([]unreachableServer, []credentialServer) {
 	unreachable, needs := []unreachableServer{}, []credentialServer{}
-	existing, err := s.existingDSNs(ctx)
+	instances, _, err := s.annotateInventory(ctx, s.inventory(ctx, true, false).instances)
 	if err != nil {
 		return unreachable, needs
 	}
-	var containers []dockerx.Container
-	if s.modules.docker != nil {
-		containers, _ = s.modules.docker.ListContainers(ctx, false)
-	}
-	for _, c := range containers {
-		cand, _ := dbx.Detect(c.Name, c.Image, nil, publishedPorts(c.Ports), nil)
-		if cand == nil {
+	for _, inst := range instances {
+		if inst.Kind != dbx.KindServer || inst.Driver == "" || inst.State != dbx.StateRunning ||
+			len(inst.Connections) > 0 || inst.Ignored || inst.Self {
 			continue
 		}
-		if _, ok := existing[addressKey(cand.Host, cand.Port)]; ok {
+		if inst.Source == dbx.SourceHost {
+			// A server installed on the machine keeps its password where
+			// nothing here reads it: it is offered with everything filled in
+			// but that.
+			host, port, reachable := dialledAt(inst)
+			if !inst.Connectable || !reachable {
+				continue
+			}
+			cand := dbx.Candidate{
+				Driver: inst.Driver, Source: dbx.SourceHost, Host: host, Port: port,
+				User: inst.User, Database: inst.Database,
+			}
+			if inst.Host != nil {
+				cand.Process = inst.Host.Process
+			}
+			needs = append(needs, credentialServer{
+				Driver: string(cand.Driver), Host: cand.Host, Port: cand.Port,
+				Process: cand.Process, Name: dbx.HostConnectionName(cand),
+				User: cand.User, Database: cand.Database,
+			})
 			continue
 		}
-		detail, err := s.modules.docker.Inspect(ctx, c.ID)
-		if err != nil {
+		if inst.Confidence == dbx.ConfidencePort {
 			continue
 		}
-		cand, _ = dbx.Detect(c.Name, c.Image, envMap(detail.Env), publishedPorts(c.Ports), containerIPs(detail))
-		if cand == nil {
-			continue
+		switch inst.Credentials {
+		case dbx.CredentialsEnv, dbx.CredentialsArgs, dbx.CredentialsOpen, dbx.CredentialsSecretFile:
+			// It states what a connection needs, so the sync connects it; it
+			// is only worth a line here when it cannot be reached at all.
+			if inst.Connectable {
+				continue
+			}
+			unreachable = append(unreachable, unreachableServer{
+				Container: inst.Name, Driver: string(inst.Driver), Reason: unreachableReason(inst.Reason),
+			})
+		default:
+			reason := containerStatesNoPassword
+			if !inst.Connectable {
+				reason = unreachableReason(inst.Reason)
+			}
+			unreachable = append(unreachable, unreachableServer{
+				Container: inst.Name, Driver: string(inst.Driver), Reason: reason,
+			})
 		}
-		if _, ok := existing[addressKey(cand.Host, cand.Port)]; ok {
-			continue
-		}
-		if row, ok := unreachableFrom(cand); ok {
-			unreachable = append(unreachable, row)
-		}
-	}
-	for _, cand := range s.hostCandidates(ctx, detectedFrom(containers)) {
-		if _, ok := existing[addressKey(cand.Host, cand.Port)]; ok {
-			continue
-		}
-		needs = append(needs, credentialServer{
-			Driver: string(cand.Driver), Host: cand.Host, Port: cand.Port,
-			Process: cand.Process, Name: dbx.HostConnectionName(cand),
-			User: cand.User, Database: cand.Database,
-		})
 	}
 	return unreachable, needs
+}
+
+// dialledAt is the address a connection to a found server is made to.
+func dialledAt(inst dbx.Instance) (host string, port int, ok bool) {
+	for _, e := range inst.Endpoints {
+		if e.Primary && e.Kind == "tcp" {
+			return e.Host, e.Port, true
+		}
+	}
+	return "", 0, false
 }
 
 // newestDump is when the last dump of a connection landed, read off the

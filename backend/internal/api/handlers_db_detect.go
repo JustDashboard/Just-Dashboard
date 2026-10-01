@@ -659,7 +659,7 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 		switch inst.Credentials {
 		case dbx.CredentialsEnv, dbx.CredentialsArgs, dbx.CredentialsOpen, dbx.CredentialsSecretFile:
 		default:
-			outcomes[i] = cannot("its container states no password — connect it with the one it uses")
+			outcomes[i] = cannot(containerStatesNoPassword)
 			continue
 		}
 		attempt := &syncAttempt{inst: inst, access: access, fingerprint: signInFingerprint(inst, access)}
@@ -720,6 +720,11 @@ func (s *Server) handleDBSync(w http.ResponseWriter, r *http.Request) error {
 	})
 	return nil
 }
+
+// containerStatesNoPassword is said of a container that is recognised and
+// states no credentials: the sync does not guess at one, and the fleet lists
+// it under the same words.
+const containerStatesNoPassword = "its container states no password — connect it with the one it uses"
 
 // syncOutOfTime is said of a server the reconcile did not get to. It is not a
 // refusal and must not be worded as one.
@@ -828,21 +833,6 @@ type credentialServer struct {
 	Database string `json:"database,omitempty"`
 }
 
-// detectedFrom is the addresses the Docker half already accounts for, so the
-// host half does not report the same server a second time. It reads the
-// published ports only — an inspect per container is what the caller pays for
-// when it actually needs the credentials, and this needs nothing but addresses.
-func detectedFrom(containers []dockerx.Container) []detectedServer {
-	out := []detectedServer{}
-	for _, c := range containers {
-		cand, _ := dbx.Detect(c.Name, c.Image, nil, publishedPorts(c.Ports), nil)
-		if cand != nil {
-			out = append(out, detectedServer{Candidate: *cand})
-		}
-	}
-	return out
-}
-
 // probeConnection dials a DSN once, without keeping anything. Every engine
 // answers something, including the two that are not SQL — a Redis reported as
 // unreachable because the SQL path refused it would be exactly the silence
@@ -922,26 +912,6 @@ type unreachableServer struct {
 	Container string `json:"container"`
 	Driver    string `json:"driver"`
 	Reason    string `json:"reason"`
-}
-
-// unreachableFrom projects a detected candidate into the row the sync response
-// carries, reporting false for one that can simply be adopted.
-//
-// A pure function, and tested as one, for the reason updaterArgs is: the whole
-// defect this replaces was a branch that fell through to `continue`, and a
-// test that needed a Docker daemon to notice it coming back is a test nobody
-// runs. The fallback reason matters too — a candidate that is unconnectable
-// for a reason dbx did not name would otherwise be reported as a blank line,
-// which is the same silence in a different shape.
-func unreachableFrom(c *dbx.Candidate) (unreachableServer, bool) {
-	if c == nil || c.Connectable() {
-		return unreachableServer{}, false
-	}
-	return unreachableServer{
-		Container: c.Container,
-		Driver:    string(c.Driver),
-		Reason:    unreachableReason(c.Reason),
-	}, true
 }
 
 // unreachableReason never lets a server be reported with nothing said about it.
