@@ -113,7 +113,7 @@ var engineRules = []engineRule{
 	},
 	{
 		driver: DriverRedis,
-		images: []string{"redis", "valkey/valkey", "redis/redis-stack-server"},
+		images: []string{"redis", "valkey/valkey", "redis/redis-stack-server", "eqalpha/keydb", "dragonflydb/dragonfly"},
 		port:   6379,
 		read: func(e map[string]string) (string, string, string) {
 			// Redis has no user in the common configuration, and the password

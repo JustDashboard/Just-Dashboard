@@ -69,6 +69,11 @@ type Server struct {
 	// for the page's two polls to share (handlers_db_logs.go).
 	dbLogSourcesKept sync.Map
 
+	// What the connection routes remember between requests: each server's
+	// answer about what it is, its last fleet reading, and the unit it was
+	// last seen running under (handlers_db_connection.go).
+	dbConns dbConnState
+
 	modules moduleSet
 }
 

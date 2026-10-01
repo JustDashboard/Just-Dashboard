@@ -65,6 +65,9 @@ func (s *Server) handleDBBackupDownload(w http.ResponseWriter, r *http.Request) 
 		return httpx.BadRequest("%s is a directory", name)
 	}
 	base := filepath.Base(st.Name())
+	// A whole database leaving the server is worth a line, and a GET never
+	// reaches the mutation middleware's record, so it is written here.
+	s.recordRead(r, "database.backup.download", conn.Name, map[string]any{"file": base, "size": st.Size()}, nil)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition",
 		mime.FormatMediaType("attachment", map[string]string{"filename": base}))
@@ -146,13 +149,10 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 	if removed {
 		// A deployment may have linked the connection during the engine call.
 		// Retain that identity rather than reporting a successful drop as failed.
-		result, err := s.Store.DB.ExecContext(r.Context(),
-			`DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
+		removed, err = s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 		if err != nil {
-			return httpx.Internal(err)
+			return err
 		}
-		affected, _ := result.RowsAffected()
-		removed = affected == 1
 	}
 	httpx.SetAudit(r, "database.drop", conn.Name, map[string]any{
 		"database": target, "detail": res.Detail, "connectionRemoved": removed,
@@ -223,13 +223,10 @@ func (s *Server) removeDatabaseContainer(
 		}
 		removedVolumes = append(removedVolumes, name)
 	}
-	result, err := s.Store.DB.ExecContext(r.Context(),
-		`DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
+	removed, err := s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 	if err != nil {
-		return httpx.Internal(err)
+		return err
 	}
-	affected, _ := result.RowsAffected()
-	removed := affected == 1
 	summary := "container " + server.container.Name + " removed"
 	if len(removedVolumes) > 0 {
 		summary += " with its data"
@@ -352,8 +349,11 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpx.SetAudit(r, "database.connection.reveal", conn.Name,
-		map[string]any{"driver": string(conn.Driver), "target": target, "format": format})
+	// Written directly. This is a GET, which the mutation middleware passes
+	// through with nothing to annotate: the SetAudit that used to stand here
+	// recorded nothing, and "deliberate and recorded" was half true.
+	s.recordRead(r, "database.connection.reveal", conn.Name,
+		map[string]any{"driver": string(conn.Driver), "target": target, "format": format}, nil)
 	reference := ""
 	if target == "container" {
 		reference = fmt.Sprintf("${{database.%d}}", conn.ID)

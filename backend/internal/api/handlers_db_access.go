@@ -384,6 +384,7 @@ func (s *Server) handleDBAccessUpdate(w http.ResponseWriter, r *http.Request) er
 		detail["warnings"] = res.Warnings
 		// The pool dialled the old container; the new one has a new socket.
 		s.modules.dbs.Close(id)
+		s.dbConns.stale(id)
 	}
 
 	firewall, ferr := s.setDBFirewall(ctx, r, int(server.binding.PublicPort), req.Exposure == exposurePublic)

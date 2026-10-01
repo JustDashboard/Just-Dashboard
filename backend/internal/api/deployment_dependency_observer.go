@@ -95,7 +95,8 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 				return nil, lastErr
 			}
 		case "database_connection":
-			// Databases selects a connection by query, not by path.
+			// The control center until the connection is known to exist; its
+			// own settings page after.
 			observed.DeepLink = "/databases"
 			id, err := strconv.ParseInt(dependency.ResourceID, 10, 64)
 			if err != nil || id <= 0 || o.store == nil {
@@ -110,7 +111,7 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 				}
 				return nil, err
 			}
-			observed.DeepLink = "/databases/connection?conn=" + strconv.FormatInt(id, 10)
+			observed.DeepLink = "/databases/" + strconv.FormatInt(id, 10) + "/settings"
 			observed.Available, observed.Status = true, name
 		case "docker_volume":
 			observed.DeepLink = "/docker/volumes/" + dependency.ResourceID

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"net"
 	"net/http"
@@ -41,11 +42,18 @@ import (
 // from detection, which reads container environment, so that part of the
 // answer is only filled in for an administrator.
 
-type fleetEntry struct {
-	*dbConnection
+// fleetReading is what dialling a connection's server found: the part of a
+// fleet tile that costs a connection to learn, and so the part that is kept
+// for a few seconds between polls.
+type fleetReading struct {
 	OK      bool   `json:"ok"`
 	Error   string `json:"error,omitempty"`
 	Version string `json:"version,omitempty"`
+	// VersionNumber is the bare number inside Version, and Flavor the product
+	// that answered: mariadb behind the mysql driver, valkey behind redis.
+	// Until a server has answered once the flavour is the driver's own.
+	VersionNumber string `json:"versionNumber,omitempty"`
+	Flavor        string `json:"flavor"`
 	// LatencyMs is how long the dial and version read took, which on a
 	// server across a VPN is the number that explains a slow page.
 	LatencyMs int64 `json:"latencyMs"`
@@ -59,12 +67,23 @@ type fleetEntry struct {
 	// Sessions is what the server reports connected, less this dashboard's
 	// own pool, so the figure is the application's.
 	Sessions int `json:"sessions"`
+}
+
+type fleetEntry struct {
+	*dbConnection
+	fleetReading
+	// State is running, stopped, paused, unreachable or broken. A stopped or
+	// paused server was not dialled: its container or unit says it is down,
+	// and a dial would only have spent its timeout finding that out.
+	State string `json:"state"`
 	// Source is where the server is: a container here, a process on this
-	// machine, a file, or somewhere else.
+	// machine, a file, or somewhere else; unknown for a broken row.
 	Source         string `json:"source"`
 	Container      string `json:"container,omitempty"`
 	ComposeProject string `json:"composeProject,omitempty"`
-	Exposure       string `json:"exposure"`
+	// Unit is the systemd unit a native server runs under, where one does.
+	Unit     string `json:"unit,omitempty"`
+	Exposure string `json:"exposure"`
 	// Consumers is how many deployment environments are bound to it.
 	Consumers int `json:"consumers"`
 	// LastBackup is when the newest dump of it was taken; nil for never.
@@ -86,7 +105,7 @@ func (s *Server) handleDBFleet(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 45*time.Second)
 	defer cancel()
 	ctx = s.modules.docker.WithReadSnapshot(ctx)
-	conns, err := s.existingConnections(ctx)
+	conns, err := s.allConnections(ctx)
 	if err != nil {
 		return err
 	}
@@ -94,6 +113,7 @@ func (s *Server) handleDBFleet(w http.ResponseWriter, r *http.Request) error {
 
 	out := fleetResponse{Connections: make([]fleetEntry, len(conns)), Unreachable: []unreachableServer{},
 		NeedsCredentials: []credentialServer{}, CheckedAt: time.Now().UTC()}
+	view := s.newDBHostView(ctx)
 	var wg sync.WaitGroup
 	// A handful at a time: nine dials in parallel is fine, ninety is a
 	// connection storm against every server on the machine at once.
@@ -105,7 +125,7 @@ func (s *Server) handleDBFleet(w http.ResponseWriter, r *http.Request) error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			entry := fleetEntry{dbConnection: conn, Exposure: "remote", Consumers: bindings[conn.ID]}
-			s.fillFleetEntry(ctx, &entry)
+			s.fillFleetEntry(ctx, view, &entry)
 			out.Connections[i] = entry
 		}(i, conn)
 	}
@@ -118,32 +138,128 @@ func (s *Server) handleDBFleet(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// fillFleetEntry dials one connection and reads the readings the fleet tile
-// draws. Everything past the dial is best effort: a version query that fails
-// is an empty version, not a red row.
-func (s *Server) fillFleetEntry(ctx context.Context, e *fleetEntry) {
+// fleetReadingFresh is how long one dial of a connection answers for. The
+// landing page, the overview and a board each poll the fleet, and each poll
+// used to dial every server again: three pages open on nine connections was
+// twenty-seven connections every half minute to learn what one would have
+// said. Long enough to cover pages loading together, short enough that a
+// tile is never more stale than its own polling interval.
+const fleetReadingFresh = 10 * time.Second
+
+type fleetReadingKept struct {
+	dsn     [sha256.Size]byte
+	mark    string
+	at      time.Time
+	reading fleetReading
+}
+
+// fillFleetEntry reads where a connection's server runs and, unless that says
+// it is down, dials it for the readings the fleet tile draws.
+func (s *Server) fillFleetEntry(ctx context.Context, view *dbHostView, e *fleetEntry) {
+	e.Flavor, e.ObjectWord = dbx.DefaultFlavor(e.Driver), fleetObjectWord(e.Driver)
+	if e.Broken {
+		// Listed, flagged, and never dialled: there is no DSN to dial with.
+		e.State, e.Error = dbStateBroken, e.BrokenReason
+		e.Source, e.Exposure = dbSourceUnknown, dbSourceUnknown
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	conn, dsn, err := s.dbConnRow(ctx, e.ID)
 	if err != nil {
-		e.Error = "the connection could not be read"
+		e.State, e.Error = dbStateBroken, "the connection could not be read"
+		e.Source, e.Exposure = dbSourceUnknown, dbSourceUnknown
 		return
 	}
-	e.ObjectWord = "tables"
+	place := view.place(ctx, conn, dsn)
+	e.Source, e.Exposure = place.Source, string(place.Exposure)
+	if place.Container != nil {
+		e.Container, e.ComposeProject = place.Container.Name, place.Container.ComposeProject
+	}
+	if place.Unit != nil {
+		e.Unit = place.Unit.Name
+	}
+	if newest := s.newestDump(conn.Name); newest != nil {
+		e.LastBackup = newest
+	}
+	if place.Down != "" {
+		e.State = place.Down
+		// What it said it was the last time it answered still names it.
+		if identity, _, ok := s.lastIdentity(conn.ID, dsn); ok {
+			e.Flavor, e.Version, e.VersionNumber = identity.Flavor, identity.Version, identity.Number
+		}
+		return
+	}
+	e.fleetReading = s.fleetReadingFor(ctx, conn, dsn, place.Mark)
+	e.State = dbStateUnreachable
+	if e.OK {
+		e.State = dbStateRunning
+	}
+}
+
+// fleetReadingFor is a connection's dial, shared between the requests that
+// ask for it within a few seconds of each other. The lock is per connection
+// and held across the dial, so a second poll arriving mid-dial waits for the
+// first one's answer instead of opening a second connection to get the same.
+func (s *Server) fleetReadingFor(ctx context.Context, conn *dbConnection, dsn, mark string) fleetReading {
+	sum := sha256.Sum256([]byte(dsn))
+	fresh := func() (fleetReading, bool) {
+		v, ok := s.dbConns.readings.Load(conn.ID)
+		if !ok {
+			return fleetReading{}, false
+		}
+		kept := v.(fleetReadingKept)
+		return kept.reading, kept.dsn == sum && kept.mark == mark && time.Since(kept.at) < fleetReadingFresh
+	}
+	if reading, ok := fresh(); ok {
+		return reading
+	}
+	mu := s.dbConns.lock(conn.ID)
+	mu.Lock()
+	defer mu.Unlock()
+	if reading, ok := fresh(); ok {
+		return reading
+	}
+	reading := s.dialFleetReading(ctx, conn, dsn)
+	// A dial the request's own deadline cut short is not an answer about the
+	// server, and keeping it would hand the next poll the same non-answer.
+	if ctx.Err() == nil {
+		s.dbConns.readings.Store(conn.ID, fleetReadingKept{dsn: sum, mark: mark, at: time.Now(), reading: reading})
+	}
+	return reading
+}
+
+func fleetObjectWord(driver dbx.Driver) string {
+	switch driver {
+	case dbx.DriverMongo:
+		return "collections"
+	case dbx.DriverRedis:
+		return "keys"
+	}
+	return "tables"
+}
+
+// dialFleetReading dials one connection and reads what the tile draws.
+// Everything past the dial is best effort: a version query that fails is an
+// empty version, not a red row.
+func (s *Server) dialFleetReading(ctx context.Context, conn *dbConnection, dsn string) fleetReading {
+	e := fleetReading{Flavor: dbx.DefaultFlavor(conn.Driver), ObjectWord: fleetObjectWord(conn.Driver)}
+	identify := func(identity dbx.Identity) {
+		e.Flavor, e.Version, e.VersionNumber = identity.Flavor, identity.Version, identity.Number
+	}
 	started := time.Now()
 	switch conn.Driver {
 	case dbx.DriverMongo:
-		e.ObjectWord = "collections"
 		client, err := dbx.MongoClient(ctx, dsn)
 		if err != nil {
-			e.Error = err.Error()
+			e.Error = connectError(dsn, err)
 			break
 		}
 		defer client.Disconnect(context.Background())
 		e.OK = true
 		e.LatencyMs = time.Since(started).Milliseconds()
+		identify(s.identityOf(conn.ID, dsn, func() dbx.Identity { return dbx.IdentifyMongo(ctx, client) }))
 		if status, err := dbx.MongoServerStatus(ctx, client); err == nil {
-			e.Version, _ = status["version"].(string)
 			if c, ok := status["connections"].(map[string]any); ok {
 				e.Sessions = intOf(c["current"])
 			}
@@ -159,17 +275,16 @@ func (s *Server) fillFleetEntry(ctx context.Context, e *fleetEntry) {
 			e.Objects = len(cols)
 		}
 	case dbx.DriverRedis:
-		e.ObjectWord = "keys"
 		client, err := dbx.RedisClient(ctx, dsn, 0)
 		if err != nil {
-			e.Error = err.Error()
+			e.Error = connectError(dsn, err)
 			break
 		}
 		defer client.Close()
 		e.OK = true
 		e.LatencyMs = time.Since(started).Milliseconds()
+		identify(s.identityOf(conn.ID, dsn, func() dbx.Identity { return dbx.IdentifyRedis(ctx, client) }))
 		if info, err := dbx.RedisInfo(ctx, client); err == nil {
-			e.Version, _ = info["redis_version"].(string)
 			e.Sessions = intOf(info["connected_clients"]) - 1
 			if e.Sessions < 0 {
 				e.Sessions = 0
@@ -189,28 +304,31 @@ func (s *Server) fillFleetEntry(ctx context.Context, e *fleetEntry) {
 			err = pool.PingContext(ctx)
 		}
 		if err != nil {
-			s.modules.dbs.Close(conn.ID)
-			e.Error = err.Error()
+			s.dropPoolAfter(conn.ID, err)
+			e.Error = connectError(dsn, err)
 			break
 		}
 		e.OK = true
 		e.LatencyMs = time.Since(started).Milliseconds()
-		s.fillSQLReadings(ctx, pool, conn, e)
+		identify(s.identityOf(conn.ID, dsn, func() dbx.Identity { return dbx.IdentifySQL(ctx, pool, conn.Driver) }))
+		s.fillSQLReadings(ctx, pool, conn, &e)
 	}
-	e.Source, e.Container, e.ComposeProject, e.Exposure = s.describeSource(ctx, conn, dsn)
-	if newest := s.newestDump(conn.Name); newest != nil {
-		e.LastBackup = newest
+	if !e.OK {
+		// A server that has stopped answering is still the product it was.
+		// Falling back to the driver's own here turned a MariaDB tile into a
+		// MySQL one at the moment its server went away, while the connection's
+		// own page went on saying MariaDB.
+		if identity, _, known := s.lastIdentity(conn.ID, dsn); known {
+			identify(identity)
+		}
 	}
+	return e
 }
 
-func (s *Server) fillSQLReadings(ctx context.Context, pool *sql.DB, conn *dbConnection, e *fleetEntry) {
+func (s *Server) fillSQLReadings(ctx context.Context, pool *sql.DB, conn *dbConnection, e *fleetReading) {
 	d, err := dbx.DialectFor(conn.Driver)
 	if err != nil {
 		return
-	}
-	var version string
-	if err := pool.QueryRowContext(ctx, d.VersionQuery()).Scan(&version); err == nil {
-		e.Version = shortVersion(version)
 	}
 	if dbs, err := dbx.ListDatabases(ctx, pool, conn.Driver); err == nil {
 		for _, db := range dbs {
@@ -235,24 +353,6 @@ func (s *Server) fillSQLReadings(ctx context.Context, pool *sql.DB, conn *dbConn
 		if e.Sessions < 0 {
 			e.Sessions = 0
 		}
-	}
-}
-
-// describeSource classifies where the server is, reusing the access reading
-// so the fleet and the Connection page agree.
-func (s *Server) describeSource(ctx context.Context, conn *dbConnection, dsn string) (source, container, compose, exposure string) {
-	if conn.Driver == dbx.DriverSQLite {
-		return "file", "", "", "local"
-	}
-	access := s.describeDBAccess(ctx, conn, dsn)
-	exposure = string(access.Exposure)
-	switch {
-	case access.Container != "":
-		return "docker", access.Container, access.ComposeProject, exposure
-	case access.Exposure == exposureRemote:
-		return "remote", "", "", exposure
-	default:
-		return "host", "", "", exposure
 	}
 }
 
@@ -334,21 +434,6 @@ func (s *Server) newestDump(connName string) *time.Time {
 	}
 	t := entries[0].TakenAt
 	return &t
-}
-
-func shortVersion(v string) string {
-	v = strings.TrimSpace(v)
-	// "PostgreSQL 16.4 on x86_64-pc-linux-musl, compiled by gcc ..." → "PostgreSQL 16.4"
-	if i := strings.Index(v, " on "); i > 0 {
-		v = v[:i]
-	}
-	if i := strings.Index(v, ","); i > 0 {
-		v = v[:i]
-	}
-	if len(v) > 40 {
-		v = v[:40]
-	}
-	return v
 }
 
 func intOf(v any) int {
@@ -622,7 +707,7 @@ func (s *Server) topology(ctx context.Context, conns []*dbConnection) (*topology
 		dbID := "db:" + strconv.FormatInt(conn.ID, 10)
 		node := addNode(topoNode{
 			ID: dbID, Kind: "database", Name: conn.Name, Product: string(conn.Driver),
-			Detail: conn.Database, ConnID: conn.ID, Href: "/databases/overview?conn=" + strconv.FormatInt(conn.ID, 10),
+			Detail: conn.Database, ConnID: conn.ID, Href: "/databases/" + strconv.FormatInt(conn.ID, 10),
 		})
 		_, dsn, err := s.dbConnRow(ctx, conn.ID)
 		if err != nil {

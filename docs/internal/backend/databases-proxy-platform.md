@@ -126,14 +126,111 @@ accounts retain partial results. Full table details and mutation preconditions u
   audited decision, the same one the Docker page already allows; invariant 7 is about what the
   dashboard itself binds. `GET /databases/{id}/url?target=public` hands back the saved string with the
   machine's public address (IPv4 preferred) in place of loopback, for pasting on another machine.
-- **A database made from the Databases page is reachable from anywhere unless the switch says
-  otherwise.** `POST /databases/provision` takes the same `exposure` (`provisionBinding`; empty means
-  `public`): the port is published on `0.0.0.0` and the same `setDBFirewall` opens it, with the
-  exposure, the firewall's word and any firewall error in the `database.server.provision` audit and in
-  the `202` reply (`firewallError` is surfaced as a warning by the dialog). The saved connection still
-  dials loopback — `hostAddress` maps a `0.0.0.0` binding to `127.0.0.1` — so the string under "From
-  anywhere" is the public-address form of the same row. Deployment quick setup sends `exposure: local`
-  because its database is reached over the deployment network.
+- **A database made from the Databases page stays on this server unless the request says otherwise.**
+  `POST /databases/provision` takes the same `exposure` (`provisionBinding`; empty means `local`). The
+  default used to be every interface with the firewall opened for it, which is what happened to every
+  operator who did not read the switch, and the exposure the fleet then flags. `public` still publishes
+  on `0.0.0.0` and opens the port through the same `setDBFirewall`, with the exposure, the firewall's
+  word and any firewall error in the `database.server.provision` audit and in the `202` reply. The saved
+  connection dials loopback either way — `hostAddress` maps a `0.0.0.0` binding to `127.0.0.1`.
+  The templates are a closed, server-side list (`provisionTemplates`, offered in `provisionOrder`):
+  PostgreSQL, PostgreSQL with pgvector or PostGIS, TimescaleDB, MySQL, MariaDB, Redis, Valkey, KeyDB,
+  Dragonfly, MongoDB and ClickHouse. Each carries its own closed list of releases; a request names a
+  `version` from it and never an image reference, so what is pulled is always a reference written in
+  that file. `user` and `password` are optional: the account name is held to `provisionUserRe` (and may
+  not be `root` on MySQL or MariaDB, nor given at all to the password-only engines), a supplied password
+  to `provisionPasswordRe` — deliberately narrow, because it is written into a Redis configuration
+  line, a ClickHouse XML file and a MySQL DSN, and a character that means something in any of those is
+  refused rather than escaped three ways. A password the request did not supply is generated and never
+  returned. Every template's every release has to be one `dbx.Detect` recognises and reads the same
+  account back from (`TestProvisionTemplatesAreCoherent`), or the adopt that follows cannot connect it.
+  The Redis-protocol engines that do not read a password from their environment are started through a
+  constant bootstrap (`passwordProvisionBootstrap`) that writes a private configuration and removes it
+  first: the kernel refuses to reopen a file in `/tmp` that was handed to the server's account
+  (`fs.protected_regular`), and without the `rm` the container started once and died on every restart.
+- **A connection is a thing with a state, not only a row.** `db_connections` carries what the operator
+  says about one — `environment` (a short tag), `read_only`, `notes` — beside what its DSN says, set
+  through `PUT /databases/{id}` field by field (a field left out keeps its value). `GET /databases/`
+  and the fleet list a row whose DSN no longer unseals or whose SQLite file left the file roots as
+  `broken` with the reason, instead of dropping it; `PUT` with a new DSN repairs one and `DELETE`
+  forgets one. A row is removed in one place, `forgetConnection`, whichever route asked for it —
+  forgetting the connection, dropping the database it pointed at, removing the container that served
+  it: the row goes unless a deployment is bound to it, the pool is closed, what was kept under the id
+  is dropped, and discovery is told where the connection came from so the next sync does not connect
+  the same server again. Deployment resource removal still runs its own `DELETE`
+  (`deployment_resource_remover.go`) and is to call the same function. The connection's JSON carries
+  `origin`, the key of the found server it was made from; the column is discovery's, and the field
+  is empty until `dbConnColumns` and `scanDBConn` read it. `GET /databases/{id}` (read surface) is one connection's reading without dialling any
+  other: what the server says it is, whether it answers, where it runs, which power actions apply, its
+  exposure, bound deployments and the capability flags for its driver and flavour. It answers 200 for a
+  stopped, unreachable or broken connection; those are states, not errors. Where a server runs is read
+  off the machine each time (`dbHostView.place`), never stored: the container that publishes or answers
+  at the address, then the process listening on the port and its unit, then a stopped container whose
+  configuration publishes that port, then — for a native server that has stopped — a unit on evidence
+  only: the one the connection was last seen running under (kept in memory), or the engine's only unit
+  when the connection is to the engine's own port. A connection to another port that nothing answers on
+  is a dropped tunnel or a removed container; it is dialled, reads `unreachable`, and is given no unit,
+  because what is decided there is what Start starts. A container or unit known to be down is not
+  dialled. One request reads the listening sockets, the unit list and each stopped container's
+  published ports once and shares them across its connections (`dbHostView`). What a failed dial said
+  goes out through `connectError`, which takes the connection's password out of it: a driver reports a
+  connection string it could not use by quoting it.
+- **Power.** `POST /databases/{id}/power` `{action: start|stop|restart}` acts on that container
+  (`dockerx.Lifecycle`) or unit (`systemctl` on the host through `hostexec`, the unit name validated,
+  an argument vector). The route is in the `service.control` group; `stop` and `restart` additionally
+  need `destructive` and spend `destrLim`, checked by hand because they share the path with `start`.
+  A container is given `dbStopGrace` (90 s) to shut down before Docker kills it, not Docker's own ten —
+  a database answers SIGTERM by writing what it holds — and a request may ask for up to ten minutes
+  with `timeoutSeconds`. An action the summary does not offer for the state the server is in (restart
+  of a stopped one, start of a running one) is refused with `409 power_unavailable` before Docker or
+  systemctl is asked. systemctl is reached through `dbSystemctl`, which a test replaces.
+  Audited as `database.power.<action>`. It never guesses: a unit is taken for the server only when it
+  is named for the engine (what listens on a database's port may be an ssh tunnel, whose unit is
+  sshd's, or `docker-proxy`, whose unit is Docker's), a container found only by its port only when its
+  image is the engine's, and a remote server or a file is refused with `409 power_unavailable` and the
+  reason the summary gave. A compose-owned container is not refused, as it is not on the Docker page:
+  nothing here recreates it.
+- **Protected connections.** With `read_only` set, one middleware in front of every database route
+  (`protectReadOnlyConnections`, `handlers_db_protect.go`) refuses each request under
+  `/databases/{id}` that is not a read with `409 connection_read_only`, unless its route is on the
+  short list in that file: the connection's own record, power and reachability, taking a dump, saved
+  queries, the diagram's arrangement, and the POSTs that only read. It is an allowlist so that a
+  mutating route added later is refused until somebody decides otherwise, and
+  `TestProtectionCoversEveryMutatingRoute` walks the real router against a second hand-written list.
+  `/query`, `/script`, `/explain` with `analyze`, and `/aggregate` are read or write by content: the
+  middleware reads the body, lets through only statements `dbx.Classify` calls `read` and pipelines
+  with no `$out`/`$merge` key at any depth, and refuses any field it does not recognise that could
+  hold one. The body is read as the handler's decoder will read it (`protectedFields`): encoding/json
+  fills a field from a key in any case and from the last of two that name it, so names are folded, and
+  a body that names a field twice or with a letter outside ASCII is refused. A statement that
+  classifies as a read is refused all the same when it contains `INTO`, `MERGE` or `INSERT` anywhere in
+  its text (`protectedWriteWords`): `SELECT … INTO` makes a table or writes a file, and a `WITH` leads
+  into a `MERGE` or an `INSERT`, and each starts with a verb the classifier calls a read. It guards
+  the dashboard's own controls and is as strong as the classification — a `SELECT` that calls a
+  function which writes passes; it is not a sandbox around the server. Restoring a backup run into a
+  connection goes through `/backups`, outside that middleware, and `handleBackupRestoreDatabase`
+  refuses a protected connection with the same `409`.
+- **Drivers, flavours and capabilities.** A driver is a wire protocol; a flavour is the product behind
+  it (`dbx/flavor.go`: MariaDB, Percona and TiDB behind `mysql`; Valkey, KeyDB and Dragonfly behind
+  `redis`; TimescaleDB, CockroachDB and YugabyteDB behind `postgres`; FerretDB; Azure SQL Edge).
+  `dbx.DetectFlavor` and `VersionNumber` are pure functions over what the server said — its version
+  string, MySQL's `version_comment`, a Postgres database's extensions, the text of Redis `INFO`, the
+  keys of Mongo's `buildInfo` — and the probes that read those are `IdentifySQL`, `IdentifyRedis`,
+  `IdentifyMongo` and `ProbeIdentity`. The answer is kept per connection for ten minutes and outlives
+  a stop, so a stopped Valkey is still drawn as Valkey, and one that has stopped answering is too, in
+  the fleet as in its own summary. `dbx.Capabilities(driver, flavor)` is one
+  table of feature flags (`dbx/capabilities.go`); `GET /databases/drivers` serves it per driver and
+  per flavour, with the default port and a DSN example, so the page gates on what the server enforces.
+  A flag is one row; a file that owns a feature may register its rows with `RegisterCapabilities`.
+  `POST /databases/test` uses the same probe for every engine (Redis used to be reported unreachable
+  for having no SQL dialect), and `POST /databases/` takes `probe: true` to dial before saving.
+- **Reads that leave the server leave a trail.** `GET /databases/{id}/url`, `/export`, `/search` and
+  `/backup/download` are written to the audit log with `recordRead`, as
+  `database.connection.reveal`, `database.export`, `database.search` and `database.backup.download`,
+  before the read runs. They used to call `SetAudit`, which does nothing on a GET. `recordRead` writes
+  on a context that outlives the request, so a client that drops the connection does not take the
+  entry with it. An export is closed by a second entry, `database.export.finished`, with the rows sent
+  and whether it was cut short, recorded as a failure (`502`, with the error) when the stream broke.
 - **Live tests skip rather than fail**, or a suite failing for want of a database teaches people to ignore
   it. Every bug this feature shipped was a catalogue query a unit test string-matched identically and only
   the engine rejected — SQL Server refusing `ADD COLUMN`, a size query summing every index_id and
@@ -143,11 +240,15 @@ accounts retain partial results. Full table details and mutation preconditions u
 
 - **The section opens on every database at once.** `GET /databases/fleet` dials every saved
   connection concurrently (six at a time, twelve seconds each) and hands back the row's facts with
-  what the server answered: reachable, version, latency, the database's size where the engine
-  reports one, its tables/collections/keys, sessions less this dashboard's own pool, where it runs
-  (`docker`, `host`, `remote`, `file` — read through the same `describeDBAccess` the Connection
-  page uses, so the two agree), its exposure, how many deployment environments are bound to it,
-  and when its newest dump landed. For an administrator it also lists what the sync would report
+  what the server answered: reachable, version, flavour, latency, the database's size where the
+  engine reports one, its tables/collections/keys, sessions less this dashboard's own pool, where it
+  runs (`docker`, `host`, `remote`, `file` — read through the same placement the connection's own
+  summary uses, so the two agree), its `state`, its exposure, how many deployment environments are
+  bound to it, and when its newest dump landed. A server whose container or unit is down is `stopped`
+  or `paused` and is not dialled; a row that cannot be opened is `broken` and listed all the same. A
+  dial's result is kept for ten seconds per connection (`fleetReadingFor`), under a lock held across
+  the dial, so several pages polling at once cost one connection rather than one each; a restart or
+  replacement of the container drops it. For an administrator it also lists what the sync would report
   and could not connect — a container with no reachable port, a native server waiting for a
   password — read without writing anything. `GET /databases/topology` (and `/{id}/consumers` for
   one connection) joins four sources into nodes and edges: `deploy_database_bindings` with the
@@ -274,8 +375,8 @@ Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explic
 A project's Databases settings reuses the same two reads for a linked connection: `/ping` behind its
 Test connection verb, and `?target=container` behind Copy application URL, which stays admin-only and
 audited there as everywhere else.
-Quick setup provisions with `exposure: local`, so those ports are published to host loopback only;
-the Databases page's own dialog defaults to every interface (above). The data volume is named
+Quick setup provisions with `exposure: local`, so those ports are published to host loopback only,
+which is also what a request that names no exposure now gets (above). The data volume is named
 `<container>-data`. With no name supplied, provisioning reserves the first available `jd-<engine>`,
 `jd-<engine>-2`, etc., checking both containers and retained data volumes. In-flight requests reserve
 distinct names before pulling images. Explicit names remain exact and provisioning refuses with

@@ -59,7 +59,12 @@ the mount site is only the conversion.
 
 Some routes apply additional checks to request **content**, because the path cannot know:
 `POST /databases/{id}/query` uses `dbx.Classify`, fails closed and applies capability + budget in the
-handler. Container creation and recreation use `api.authoriseSpec`: privileged mode, added
+handler. `POST /databases/{id}/power` starts, stops or restarts by its body, so it asks for
+`destructive` and spends `destrLim` by hand for `stop` and `restart`. A connection marked read-only
+refuses every non-read request under `/databases/{id}` in one middleware
+(`protectReadOnlyConnections`), by an allowlist of routes and, for the statement routes, by the same
+classification applied to the body as the handler's decoder will read it (field names folded, a
+repeated field refused). Container creation and recreation use `api.authoriseSpec`: privileged mode, added
 capabilities/devices, host/shared network namespaces and bind mounts require `system.admin`.
 Referenced network drivers and named-volume drivers/options are inspected too; a named volume cannot hide a
 host bind or plugin mount from this policy. Local filesystem volume backing paths must be absolute and
