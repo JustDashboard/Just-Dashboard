@@ -171,38 +171,77 @@ func siblingConnectionName(parent, database string) string {
 // connectionOrigin and afterConnectionForgotten are the two ends of
 // forgetting a connection that discovery cares about: where the connection
 // came from, read while its row is still there, and the moment the row is
-// gone. Discovery fills them in so that a server the sync connected on its own
-// is put on its ignore list and does not come back the next time the page
-// loads; on their own they do nothing. forgetConnection is their one caller.
-func (s *Server) connectionOrigin(ctx context.Context, id int64) string { return "" }
+// gone. A server the sync connected on its own is put on discovery's ignore
+// list at that moment, so it does not come back the next time the page loads.
+// forgetConnection is their one caller.
+func (s *Server) connectionOrigin(ctx context.Context, id int64) string {
+	return s.originOfConnection(ctx, id)
+}
 
-func (s *Server) afterConnectionForgotten(ctx context.Context, id int64, origin, actor string) {}
+// afterConnectionForgotten reports whether the server was marked ignored. A
+// mark that could not be written is not a reason to fail the request: the row
+// is already gone, and the worst that follows is the server being offered
+// again.
+func (s *Server) afterConnectionForgotten(ctx context.Context, id int64, origin, actor string) bool {
+	marked, _ := s.ignoreOriginOnForget(ctx, origin, actor)
+	return marked
+}
+
+// forgottenConnection is what forgetting a connection did.
+type forgottenConnection struct {
+	// removed is false, with nothing changed, when a deployment is bound to
+	// the connection.
+	removed bool
+	// origin is the found server the connection pointed at, and ignored
+	// whether that server went onto discovery's ignore list because this was
+	// the last connection to it.
+	origin  string
+	ignored bool
+}
+
+// audited adds the mark to the audit detail of the request that forgot the
+// connection. The mark is a second thing that request changed, and it decides
+// what the next sync does, so the entry that records the one records the
+// other.
+func (f forgottenConnection) audited(detail map[string]any) map[string]any {
+	if !f.ignored {
+		return detail
+	}
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	detail["origin"], detail["ignored"] = f.origin, true
+	return detail
+}
 
 // forgetConnection removes a saved connection's row and everything kept about
-// it, and reports whether there was a row to remove. It leaves a connection a
-// deployment is bound to exactly as it was and reports false.
+// it, and reports what that did. It leaves a connection a deployment is bound
+// to exactly as it was.
 //
 // A row goes away by more than one road: the operator forgets the connection,
-// drops the database it pointed at, or removes the container that served it.
-// Each used to run its own DELETE, and only the first went on to close the
-// pool, drop what was remembered under the id and tell discovery — so a server
-// whose database was dropped was connected again by the next sync, which
-// forgetting it by hand would have prevented. Every one of them comes through
-// here now, and a road added later has one thing to call.
-func (s *Server) forgetConnection(ctx context.Context, id int64, actor string) (bool, error) {
+// drops the database it pointed at, removes the container that served it, or
+// removes a deployment's resources. Each used to run its own DELETE, and only
+// the first went on to close the pool, drop what was remembered under the id
+// and tell discovery — so a server whose database was dropped was connected
+// again by the next sync, which forgetting it by hand would have prevented.
+// Every one of them comes through here now, and a road added later has one
+// thing to call.
+func (s *Server) forgetConnection(ctx context.Context, id int64, actor string) (forgottenConnection, error) {
 	origin := s.connectionOrigin(ctx, id)
 	result, err := s.Store.DB.ExecContext(ctx,
 		`DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
 	if err != nil {
-		return false, httpx.Internal(err)
+		return forgottenConnection{}, httpx.Internal(err)
 	}
 	if affected, _ := result.RowsAffected(); affected != 1 {
-		return false, nil
+		return forgottenConnection{}, nil
 	}
 	s.modules.dbs.Close(id)
 	s.dbConns.forget(id)
-	s.afterConnectionForgotten(ctx, id, origin, actor)
-	return true, nil
+	return forgottenConnection{
+		removed: true, origin: origin,
+		ignored: s.afterConnectionForgotten(ctx, id, origin, actor),
+	}, nil
 }
 
 // dropPoolAfter lets go of a connection's pool when its server refused a

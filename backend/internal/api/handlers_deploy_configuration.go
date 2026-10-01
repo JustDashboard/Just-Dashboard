@@ -112,8 +112,9 @@ func (s *Server) handleDeploymentRemoveManaged(w http.ResponseWriter, r *http.Re
 			return err
 		}
 	}
+	remover := newDeploymentResourceRemover(s, principal.Username())
 	execution, err := s.modules.deployPlanning.RemoveManaged(
-		r.Context(), projectID, principal.Username(), request, newDeploymentResourceRemover(s),
+		r.Context(), projectID, principal.Username(), request, remover,
 	)
 	// A removal-plan or precondition failure (not archived, stale digest, bad
 	// target) has no partial execution at all; only a RemovalFailure from the
@@ -127,6 +128,11 @@ func (s *Server) handleDeploymentRemoveManaged(w http.ResponseWriter, r *http.Re
 		targets = append(targets, map[string]string{"kind": target.Kind, "resourceId": target.ResourceID})
 	}
 	detail := map[string]any{"targets": targets, "remaining": len(execution.Remaining)}
+	if len(remover.ignored) > 0 {
+		// Removing a connection that was the last one to a found server also
+		// tells discovery to leave that server alone from now on.
+		detail["ignoredServers"] = remover.ignored
+	}
 	if err == nil {
 		httpx.SetAudit(r, "deploy.resources.remove", strconv.FormatInt(projectID, 10), detail)
 		httpx.JSON(w, http.StatusOK, execution)

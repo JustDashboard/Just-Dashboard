@@ -939,16 +939,21 @@ func TestAForgottenServerStaysForgotten(t *testing.T) {
 		t.Fatalf("the reconcile did not connect shop-db: %v", err)
 	}
 
-	// What the route that forgets a connection does.
+	// Forgotten through the route, as an operator forgets it.
 	origin := s.originOfConnection(t.Context(), id)
 	if origin != "docker:shop-db" {
 		t.Fatalf("origin = %q", origin)
 	}
-	if _, err := s.Store.DB.Exec(`DELETE FROM db_connections WHERE id = ?`, id); err != nil {
-		t.Fatal(err)
+	if rec := do(t, r, http.MethodDelete, pathf("/databases/%d", id), ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("forget = %d %s", rec.Code, rec.Body.String())
 	}
-	if marked, err := s.ignoreOriginOnForget(t.Context(), origin, "tester"); err != nil || !marked {
-		t.Fatalf("forgetting the last connection marked the server ignored = %v, %v", marked, err)
+	if ignored, _ := s.ignoredOrigins(t.Context()); !ignored[origin] {
+		t.Fatal("forgetting the last connection did not mark the server ignored")
+	}
+	// The mark is a second thing the request changed, so its entry says so.
+	if trail := auditTrail(t, s); !strings.Contains(trail, "database.connection.delete shop-db 204") ||
+		!strings.Contains(trail, `"ignored":true`) || !strings.Contains(trail, `"origin":"docker:shop-db"`) {
+		t.Errorf("the forget's audit entry does not say the server was marked ignored:\n%s", trail)
 	}
 	// Forgetting is not counted twice: the mark was already there.
 	if marked, err := s.ignoreOriginOnForget(t.Context(), origin, "tester"); err != nil || marked {

@@ -117,15 +117,27 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 	switch req.Driver {
 	case dbx.DriverPostgres:
 		cand.Database = firstNonEmpty(strings.TrimSpace(req.Database), "postgres")
+		if err := s.refuseGrantOnProtected(ctx, cand); err != nil {
+			return err
+		}
 		out, err = hostPostgresAccount(ctx, req.Port, account, password, superuser)
 	case dbx.DriverMySQL:
 		cand.Database = strings.TrimSpace(req.Database)
+		if err := s.refuseGrantOnProtected(ctx, cand); err != nil {
+			return err
+		}
 		out, err = hostMySQLAccount(ctx, s.hostSocket(ctx, req.Driver, req.Port), account, password, superuser)
 	case dbx.DriverMongo:
 		cand.Database = firstNonEmpty(strings.TrimSpace(req.Database), "admin")
+		if err := s.refuseGrantOnProtected(ctx, cand); err != nil {
+			return err
+		}
 		out, err = hostMongoAccount(ctx, req.Port, account, password, superuser)
 	case dbx.DriverClickHouse:
 		cand.Database = firstNonEmpty(strings.TrimSpace(req.Database), "default")
+		if err := s.refuseGrantOnProtected(ctx, cand); err != nil {
+			return err
+		}
 		out, err = hostClickHouseAccount(ctx, req.Port, account, password, superuser)
 	case dbx.DriverRedis:
 		// Redis has one password, not accounts: it is in the server's own
@@ -186,6 +198,33 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 	}
 	name = uniqueConnectionName(name, names)
 	return s.saveConnectionFrom(w, r, s.hostOrigin(ctx, cand), name, req.Driver, dsn, "database.connection.host.grant", audit)
+}
+
+// refuseGrantOnProtected keeps this route from resetting the account a
+// protected connection signs in with.
+//
+// The route is a section route, so the middleware that guards a protected
+// connection never sees it; and what it does to an account that exists is
+// change its password on the server, which is the role change that middleware
+// refuses under /databases/{id}/server. The saved connection is found the way
+// the re-seal below finds it — same engine, address, database and account —
+// and before the host command runs, because afterwards the password is already
+// changed. A match that cannot be told apart is refused as it would be below,
+// while nothing has been touched yet.
+func (s *Server) refuseGrantOnProtected(ctx context.Context, cand dbx.Candidate) error {
+	// Any password: the lookup compares everything in the string but that.
+	lookup := dbx.BuildDSN(cand, "x")
+	if lookup == "" {
+		return nil
+	}
+	conn, _, _, err := s.adoptedDatabaseConnection(ctx, cand.Driver, lookup)
+	if err != nil {
+		return err
+	}
+	if conn != nil && conn.ReadOnly {
+		return protectedRefusal("%s is protected, and setting this account up again would change its password on the server; turn protection off in the connection's settings first", conn.Name)
+	}
+	return nil
 }
 
 // hostSocket is the unix socket of the server of that engine listening on a

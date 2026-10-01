@@ -147,22 +147,22 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 	// on every tab. It goes with the database it pointed at — but only then:
 	// dropping some *other* database on the same server leaves the connection
 	// perfectly usable.
-	removed := res.Gone && sameDatabase(conn, target)
-	if removed {
+	var forgotten forgottenConnection
+	if res.Gone && sameDatabase(conn, target) {
 		// A deployment may have linked the connection during the engine call.
 		// Retain that identity rather than reporting a successful drop as failed.
-		removed, err = s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
+		forgotten, err = s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 		if err != nil {
 			return err
 		}
 	}
-	httpx.SetAudit(r, "database.drop", conn.Name, map[string]any{
-		"database": target, "detail": res.Detail, "connectionRemoved": removed,
-	})
+	httpx.SetAudit(r, "database.drop", conn.Name, forgotten.audited(map[string]any{
+		"database": target, "detail": res.Detail, "connectionRemoved": forgotten.removed,
+	}))
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"detail":            res.Detail,
 		"database":          target,
-		"connectionRemoved": removed,
+		"connectionRemoved": forgotten.removed,
 	})
 	return nil
 }
@@ -225,7 +225,7 @@ func (s *Server) removeDatabaseContainer(
 		}
 		removedVolumes = append(removedVolumes, name)
 	}
-	removed, err := s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
+	forgotten, err := s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 	if err != nil {
 		return err
 	}
@@ -233,17 +233,17 @@ func (s *Server) removeDatabaseContainer(
 	if len(removedVolumes) > 0 {
 		summary += " with its data"
 	}
-	httpx.SetAudit(r, "database.drop", conn.Name, map[string]any{
+	httpx.SetAudit(r, "database.drop", conn.Name, forgotten.audited(map[string]any{
 		"database": target, "container": server.container.Name, "volumes": removedVolumes,
-		"warnings": warnings, "connectionRemoved": removed,
-	})
+		"warnings": warnings, "connectionRemoved": forgotten.removed,
+	}))
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"detail":            summary,
 		"database":          target,
 		"container":         server.container.Name,
 		"volumes":           removedVolumes,
 		"warnings":          warnings,
-		"connectionRemoved": removed,
+		"connectionRemoved": forgotten.removed,
 	})
 	return nil
 }

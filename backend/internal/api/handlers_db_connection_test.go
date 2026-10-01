@@ -22,6 +22,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
@@ -278,22 +279,6 @@ func (h *connHarness) add(name string, driver dbx.Driver, dsn string) int64 {
 	}
 	id, _ := res.LastInsertId()
 	return id
-}
-
-// discoveryStore reports whether this build's store has what discovery adds
-// to it: the column a connection's origin is kept in, and the list of found
-// servers that are to be left alone. The tests that depend on it say what they
-// expect of the connection routes once both are there.
-func (h *connHarness) discoveryStore() bool {
-	h.t.Helper()
-	var column, table int
-	if err := h.s.Store.DB.QueryRow(
-		`SELECT (SELECT COUNT(*) FROM pragma_table_info('db_connections') WHERE name = 'origin'),
-		        (SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'db_inventory_ignored')`,
-	).Scan(&column, &table); err != nil {
-		h.t.Fatal(err)
-	}
-	return column == 1 && table == 1
 }
 
 // deafPort is a port that accepts a connection and says nothing, counting
@@ -1575,11 +1560,12 @@ func TestTopologyLinksADatabaseToItsOwnPage(t *testing.T) {
 	}
 }
 
-// A connection's row goes away by three roads: forgetting it, dropping the
-// database it pointed at, and removing the container that served it. Each ran
-// its own DELETE, and only the first went on to drop what is kept under the id
-// and to tell discovery. The other two left a reading of nothing behind, and a
-// server the next sync would have connected again.
+// A connection's row goes away by four roads: forgetting it, dropping the
+// database it pointed at, removing the container that served it, and removing
+// a deployment's resources. Each ran its own DELETE, and only the first went
+// on to drop what is kept under the id and to tell discovery. The others left
+// a reading of nothing behind, and a server the next sync would have connected
+// again.
 func TestEveryRoadThatRemovesAConnectionForgetsIt(t *testing.T) {
 	h := newConnHarness(t)
 	router := h.as(auth.RoleAdmin)
@@ -1589,8 +1575,6 @@ func TestEveryRoadThatRemovesAConnectionForgetsIt(t *testing.T) {
 		id: "c0ffee", name: "jd-redis", image: "redis:7-alpine", state: "running",
 		hostIP: "127.0.0.1", hostPort: port, port: 6379,
 	}}
-	discovery := h.discoveryStore()
-
 	for _, road := range []struct {
 		name   string
 		driver dbx.Driver
@@ -1603,13 +1587,14 @@ func TestEveryRoadThatRemovesAConnectionForgetsIt(t *testing.T) {
 		{"forgotten", dbx.DriverSQLite, filepath.Join(root, "forgotten.db"), "", "", "", http.StatusNoContent},
 		{"dropped", dbx.DriverSQLite, filepath.Join(root, "dropped.db"), "/database", `{}`, "dropped.db", http.StatusOK},
 		{"removed", dbx.DriverRedis, fmt.Sprintf("redis://127.0.0.1:%d/0", port), "/database", `{"removeContainer":true}`, "db0", http.StatusOK},
+		// No route of its own: the deployment removal hands the connection to
+		// its remover, which is what is asked here.
+		{"undeployed", dbx.DriverSQLite, filepath.Join(root, "undeployed.db"), "", "", "", 0},
 	} {
 		id := h.add(road.name, road.driver, road.dsn)
 		origin := "docker:" + road.name
-		if discovery {
-			if _, err := h.s.Store.DB.Exec(`UPDATE db_connections SET origin = ? WHERE id = ?`, origin, id); err != nil {
-				t.Fatal(err)
-			}
+		if _, err := h.s.Store.DB.Exec(`UPDATE db_connections SET origin = ? WHERE id = ?`, origin, id); err != nil {
+			t.Fatal(err)
 		}
 		// Everything the routes keep about a connection between requests.
 		if road.driver.IsSQL() {
@@ -1621,14 +1606,26 @@ func TestEveryRoadThatRemovesAConnectionForgetsIt(t *testing.T) {
 		h.s.dbConns.readings.Store(id, fleetReadingKept{})
 		h.s.dbConns.units.Store(id, "redis-server.service")
 
-		req := httptest.NewRequest(http.MethodDelete, pathf("/databases/%d", id)+road.path, strings.NewReader(road.body))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set(httpx.ConfirmHeader, road.confirm)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != road.want {
-			t.Errorf("%s: %d %s", road.name, rec.Code, rec.Body.String())
-			continue
+		if road.want == 0 {
+			remover := newDeploymentResourceRemover(h.s, "tester")
+			target := deploy.RemovalTarget{Kind: "database_connection", ResourceID: strconv.FormatInt(id, 10)}
+			if err := remover.RemoveManagedResource(context.Background(), target); err != nil {
+				t.Errorf("%s: %v", road.name, err)
+				continue
+			}
+			if len(remover.ignored) != 1 || remover.ignored[0] != origin {
+				t.Errorf("%s: the remover reports %v as ignored, want %s for the audit entry", road.name, remover.ignored, origin)
+			}
+		} else {
+			req := httptest.NewRequest(http.MethodDelete, pathf("/databases/%d", id)+road.path, strings.NewReader(road.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set(httpx.ConfirmHeader, road.confirm)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != road.want {
+				t.Errorf("%s: %d %s", road.name, rec.Code, rec.Body.String())
+				continue
+			}
 		}
 		var rows int
 		if err := h.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM db_connections WHERE id = ?`, id).Scan(&rows); err != nil || rows != 0 {
@@ -1646,17 +1643,12 @@ func TestEveryRoadThatRemovesAConnectionForgetsIt(t *testing.T) {
 				t.Errorf("%s: %s is still kept under its id", road.name, what)
 			}
 		}
-		if !discovery {
-			continue
-		}
-		// With discovery's store here, the two hooks forgetConnection calls
-		// have to be discovery's: the server the connection was made from is
-		// put on the list the sync leaves alone, by whoever removed it.
+		// The server the connection was made from is put on the list the sync
+		// leaves alone, by whoever removed it.
 		var by string
 		err := h.s.Store.DB.QueryRow(`SELECT ignored_by FROM db_inventory_ignored WHERE origin = ?`, origin).Scan(&by)
 		if err != nil || by != "tester" {
-			t.Errorf("%s: its server %s is not on discovery's ignore list (by %q, %v): connectionOrigin and afterConnectionForgotten in handlers_db_connection.go are still the no-ops they were before discovery was merged",
-				road.name, origin, by, err)
+			t.Errorf("%s: its server %s is not on discovery's ignore list (by %q, %v)", road.name, origin, by, err)
 		}
 	}
 	if did := h.engine.did(); len(did) != 1 || did[0] != "remove jd-redis" {
@@ -1664,24 +1656,21 @@ func TestEveryRoadThatRemovesAConnectionForgetsIt(t *testing.T) {
 	}
 }
 
-// A connection says which found server it was made from, in its own summary
-// and in the list. The column is discovery's: until it is in this store the
-// field is there and empty, and once it is, the value has to come through.
+// A connection says which found server it was made from, in its own summary,
+// in the list and in the fleet; one typed in by hand says it came from none.
 func TestAConnectionCarriesItsOrigin(t *testing.T) {
 	h := newConnHarness(t)
 	router := h.as(auth.RoleReadOnly)
 	id := h.add("found", dbx.DriverSQLite, filepath.Join(h.s.Cfg.FileRoots[0], "found.db"))
-	want, hint := "", "the field is missing"
-	if h.discoveryStore() {
-		want, hint = "docker:found", "dbConnColumns and scanDBConn in handlers_db.go do not read db_connections.origin yet"
+	for _, want := range []string{"", "docker:found"} {
 		if _, err := h.s.Store.DB.Exec(`UPDATE db_connections SET origin = ? WHERE id = ?`, want, id); err != nil {
 			t.Fatal(err)
 		}
-	}
-	for _, path := range []string{pathf("/databases/%d", id), "/databases/", "/databases/fleet"} {
-		rec := do(t, router, http.MethodGet, path, "")
-		if !strings.Contains(rec.Body.String(), `"origin":"`+want+`"`) {
-			t.Errorf("GET %s does not carry origin %q (%s): %s", path, want, hint, rec.Body.String())
+		for _, path := range []string{pathf("/databases/%d", id), "/databases/", "/databases/fleet"} {
+			rec := do(t, router, http.MethodGet, path, "")
+			if !strings.Contains(rec.Body.String(), `"origin":"`+want+`"`) {
+				t.Errorf("GET %s does not carry origin %q: %s", path, want, rec.Body.String())
+			}
 		}
 	}
 }

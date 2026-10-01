@@ -39,9 +39,7 @@ type dbConnection struct {
 	Notes       string `json:"notes"`
 	// Origin is the key of the server or file on this machine the connection
 	// was made from, as discovery lists it, and empty for one typed in by
-	// hand. The column is discovery's and is not in this store until that
-	// work is merged: the field stays empty until dbConnColumns names the
-	// column and scanDBConn reads it.
+	// hand.
 	Origin string `json:"origin"`
 	// Broken marks a row this process cannot use, with the reason: its sealed
 	// DSN no longer opens, or its file is outside the file roots. The address
@@ -186,7 +184,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 }
 
 // dbConnColumns is a row of db_connections in the order scanDBConn reads it.
-const dbConnColumns = `id, name, driver, dsn_enc, created_at, environment, read_only, notes`
+const dbConnColumns = `id, name, driver, dsn_enc, created_at, environment, read_only, notes, origin`
 
 // dbConnRecord is a connection as stored: everything but the address, which
 // is inside the sealed DSN.
@@ -203,7 +201,7 @@ func scanDBConn(scan func(...any) error) (*dbConnRecord, error) {
 		readOnly int
 	)
 	if err := scan(&rec.conn.ID, &rec.conn.Name, &driver, &rec.dsnEnc, &created,
-		&rec.conn.Environment, &readOnly, &rec.conn.Notes); err != nil {
+		&rec.conn.Environment, &readOnly, &rec.conn.Notes, &rec.conn.Origin); err != nil {
 		return nil, err
 	}
 	rec.conn.Driver = dbx.Driver(driver)
@@ -485,14 +483,14 @@ func (s *Server) handleDBConnDelete(w http.ResponseWriter, r *http.Request) erro
 	}
 	// No typed phrase: this forgets a connection string, it does not touch the
 	// server at the other end of it. Re-adding one is a form, not a restore.
-	removed, err := s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
+	forgotten, err := s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 	if err != nil {
 		return err
 	}
-	if !removed {
+	if !forgotten.removed {
 		return httpx.Err(http.StatusConflict, "database_linked", "remove the deployment's managed database network before forgetting this linked connection")
 	}
-	httpx.SetAudit(r, "database.connection.delete", conn.Name, nil)
+	httpx.SetAudit(r, "database.connection.delete", conn.Name, forgotten.audited(nil))
 	httpx.NoContent(w)
 	return nil
 }
