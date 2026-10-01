@@ -334,6 +334,16 @@ func (mysqlDialect) rowEstimate(ctx context.Context, db *sql.DB, schema, table s
 	return n.Int64, err
 }
 
+// keyExpr compares a JSON column through its text. MySQL compares a JSON value
+// with a string as two different types, which is never equal, so a keyless row
+// holding a document could not be found by the document it was read with.
+func (d mysqlDialect) keyExpr(column Column, quoted string) string {
+	if strings.EqualFold(column.Type, "json") {
+		return d.CastText(quoted)
+	}
+	return quoted
+}
+
 func (mysqlDialect) byteLength(_ Column, quoted string) string {
 	return "OCTET_LENGTH(" + quoted + ")"
 }

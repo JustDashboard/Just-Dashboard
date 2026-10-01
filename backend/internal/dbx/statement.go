@@ -186,15 +186,25 @@ var readOnlyLeaders = map[string]bool{
 	"desc": true, "explain": true, "table": true, "values": true,
 }
 
-// rowLeaders are the statements whose answer is a result set. It is wider than
-// the read-only list: a CALL or a maintenance command changes things and still
-// answers in rows, and running it through Exec would throw them away.
+// rowLeaders are the statements whose answer is a result set on every engine.
 var rowLeaders = map[string]bool{
 	"select": true, "with": true, "show": true, "describe": true, "desc": true,
 	"explain": true, "table": true, "values": true, "pragma": true,
-	"call": true, "exec": true, "execute": true, "check": true, "checksum": true,
-	"analyze": true, "optimize": true, "repair": true, "exists": true, "help": true,
-	"fetch": true,
+}
+
+// engineRowLeaders are the ones that answer in rows on one engine only: a
+// MySQL CALL or maintenance command, a SQL Server EXEC, a ClickHouse EXISTS.
+// Run through Exec their rows are thrown away. They are per engine because the
+// same word elsewhere returns nothing, and not every driver takes a statement
+// with no result set through its query path.
+var engineRowLeaders = map[Driver]map[string]bool{
+	DriverMySQL: {
+		"call": true, "check": true, "checksum": true, "analyze": true,
+		"optimize": true, "repair": true, "help": true,
+	},
+	DriverMSSQL:      {"exec": true, "execute": true},
+	DriverClickHouse: {"exists": true, "check": true},
+	DriverPostgres:   {"fetch": true},
 }
 
 // batchWords are the words that start a second statement on SQL Server, which
@@ -243,8 +253,8 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 	}
 
 	writes := keywords["insert"] || keywords["update"] || keywords["delete"] || keywords["merge"]
-	st.returnsRows = rowLeaders[st.leader] || keywords["returning"] ||
-		driver == DriverMSSQL && keywords["output"]
+	st.returnsRows = rowLeaders[st.leader] || engineRowLeaders[driver][st.leader] ||
+		keywords["returning"] || driver == DriverMSSQL && keywords["output"]
 	if st.leader == "with" && writes && !keywords["returning"] && !keywords["output"] {
 		st.returnsRows = false
 	}

@@ -266,6 +266,37 @@ func TestLivePostgresKeylessJSON(t *testing.T) {
 	}
 }
 
+// MySQL compares a JSON value with a string as different types. A keyless row
+// is matched through the document's text instead.
+func TestLiveMySQLKeylessJSON(t *testing.T) {
+	for _, e := range workbenchEngines()[1:] {
+		t.Run(e.name, func(t *testing.T) {
+			db, schema := openWorkbench(t, e)
+			dropAfter(t, db, "jdwb_events")
+			mustExec(t, db,
+				`CREATE TABLE jdwb_events (kind VARCHAR(10), payload JSON)`,
+				`INSERT INTO jdwb_events VALUES ('a', '{"k": 1}'), ('a', '{"k": 2}')`)
+			page, err := Browse(context.Background(), db, DriverMySQL, BrowseOptions{Schema: schema, Table: "jdwb_events"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := map[string]any{}
+			for i, c := range page.Columns {
+				key[c] = page.Rows[0][i]
+			}
+			if _, err := ApplyChanges(context.Background(), db, DriverMySQL, ChangeSet{
+				Schema: schema, Table: "jdwb_events", Changes: []Change{{Op: ChangeDelete, Key: key}},
+			}); err != nil {
+				t.Fatalf("delete by a row holding json (%v): %v", key, err)
+			}
+			var n int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM jdwb_events`).Scan(&n); err != nil || n != 1 {
+				t.Errorf("rows left = %d (%v), want 1", n, err)
+			}
+		})
+	}
+}
+
 // A serialization failure is the engine asking for the transaction to be run
 // again. It is, a bounded number of times.
 func TestLiveChangeSetRetriesSerializationFailures(t *testing.T) {
@@ -485,6 +516,15 @@ func TestLiveReadOnlyScope(t *testing.T) {
 			}
 			if _, err := db.Exec(`SELECT 1 FROM jdwb_smuggled`); err == nil {
 				t.Error("a CREATE TABLE got through the read-only scope")
+			}
+
+			// A statement that answers in rows on this engine has them returned.
+			probe := map[string]string{"mariadb": `CHECK TABLE jdwb_guard`, "mysql8": `CHECK TABLE jdwb_guard`, "clickhouse": `EXISTS TABLE jdwb_guard`}[e.name]
+			if probe != "" {
+				res, err := RunStatement(ctx, db, e.driver, mustStatement(t, e.driver, probe), 10)
+				if err != nil || res.RowCount == 0 {
+					t.Errorf("%s returned %+v %v, want its rows", probe, res, err)
+				}
 			}
 
 			// A read still reads, and the connection it used writes afterwards.

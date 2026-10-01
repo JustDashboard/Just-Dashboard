@@ -74,11 +74,37 @@ func TestReturnsRows(t *testing.T) {
 		// A CTE that only writes has no rows to hand back.
 		"WITH old AS (SELECT 1) DELETE FROM t WHERE id IN (SELECT * FROM old)": false,
 		"WITH gone AS (DELETE FROM t RETURNING id) SELECT * FROM gone":         true,
-		"CALL report()": true,
 	}
 	for query, want := range cases {
 		if got := returnsRows(query); got != want {
 			t.Errorf("returnsRows(%q) = %v, want %v", query, got, want)
+		}
+	}
+}
+
+// The same word answers in rows on one engine and in nothing on another.
+func TestRowReturningStatementsPerEngine(t *testing.T) {
+	for _, c := range []struct {
+		driver Driver
+		query  string
+		want   bool
+	}{
+		{DriverMySQL, "CALL report()", true},
+		{DriverMySQL, "CHECK TABLE t", true},
+		{DriverOracle, "CALL report()", false},
+		{DriverPostgres, "CALL report()", false},
+		{DriverMSSQL, "EXEC sp_who", true},
+		{DriverMSSQL, "UPDATE t SET a = 1 OUTPUT inserted.a WHERE id = 1", true},
+		{DriverPostgres, "UPDATE t SET output = 1 WHERE id = 1", false},
+		{DriverClickHouse, "EXISTS TABLE t", true},
+		{DriverMySQL, "DELETE FROM t WHERE id = 1 RETURNING id", true},
+	} {
+		st, err := SingleStatementFor(c.driver, c.query)
+		if err != nil {
+			t.Fatalf("%s %q: %v", c.driver, c.query, err)
+		}
+		if st.returnsRows != c.want {
+			t.Errorf("%s %q returns rows = %v, want %v", c.driver, c.query, st.returnsRows, c.want)
 		}
 	}
 }

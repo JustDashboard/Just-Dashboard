@@ -135,9 +135,14 @@ func TestRunStatementStopsWhenItsContextEnds(t *testing.T) {
 	if took := time.Since(start); took > 5*time.Second {
 		t.Errorf("the query ran %s after its context ended", took)
 	}
-	// The pool is usable afterwards.
+	// The pool is usable afterwards, and the read-only scope the cancelled
+	// statement ran in did not outlive it.
 	if n := rowCount(t, db, `SELECT COUNT(*) FROM people`); n != 3 {
 		t.Errorf("rows = %d", n)
+	}
+	if _, err := RunStatement(context.Background(), db, DriverSQLite,
+		mustStatement(t, DriverSQLite, `INSERT INTO people(name) VALUES ('after')`), 10); err != nil {
+		t.Errorf("a write after a cancelled read was refused: %v", err)
 	}
 }
 
