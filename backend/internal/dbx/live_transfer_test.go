@@ -343,19 +343,20 @@ func TestLivePostgresDumpStopsWhenCancelled(t *testing.T) {
 
 // A plain-format pg_dump is a psql script. An operator who uploads one has a
 // dump, and "pg_restore: input file appears to be a text format dump" is not
-// an answer to that.
+// an answer to that. It is replayed over the dashboard's own connection: no
+// psql has to be installed for it, and none is run.
 func TestLivePostgresRestoresAPlainSQLDump(t *testing.T) {
 	const env, fallback = "JD_TEST_POSTGRES_DSN", "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable"
 	liveSQL(t, DriverPostgres, env, fallback)
 	dsn := liveDSN(t, env, fallback)
 	ctx := context.Background()
-	if !toolAvailable(postgresTool("psql", postgresServerMajor(ctx, dsn))) {
-		t.Skip("psql is not installed here")
-	}
 	path := t.TempDir() + "/plain.sql"
-	script := "--\n-- PostgreSQL database dump\n--\n\n" +
+	script := "--\n-- PostgreSQL database dump\n--\n\n\\restrict k3y\n\n" +
+		"SET standard_conforming_strings = on;\n" +
 		"CREATE TABLE public.jd_plain (id integer, name text);\n" +
-		"COPY public.jd_plain (id, name) FROM stdin;\n1\tone\n2\ttwo; still two\n\\.\n"
+		"CREATE FUNCTION public.jd_plain_two() RETURNS integer\n    LANGUAGE sql\n    BEGIN ATOMIC\n SELECT 1;\n SELECT 2;\nEND;\n" +
+		"COPY public.jd_plain (id, name) FROM stdin;\n1\tone\n2\ttwo; still two\n3\t\\\\! not a command\n\\.\n\n" +
+		"\\unrestrict k3y\n"
 	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -363,39 +364,159 @@ func TestLivePostgresRestoresAPlainSQLDump(t *testing.T) {
 		t.Fatalf("dumpFormatOf = %v, want SQL somebody else wrote", got)
 	}
 	target := scratchDatabase(t, DriverPostgres, dsn, "r3")
-	if _, err := RestoreWith(ctx, DriverPostgres, dsn, path, RestoreOptions{Database: target}); err != nil {
+	out, err := RestoreWith(ctx, DriverPostgres, dsn, path, RestoreOptions{Database: target})
+	if err != nil {
 		t.Fatalf("RestoreWith: %v", err)
+	}
+	if !strings.Contains(out, "3 rows loaded") {
+		t.Errorf("the restore reported %q, want the rows it loaded", out)
 	}
 	restored, err := OpenDatabase(ctx, DriverPostgres, dsn, target)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	if got := queryString(t, restored, `SELECT name FROM public.jd_plain WHERE id = 2`); got != "two; still two" {
-		t.Errorf("row = %q", got)
+	for query, want := range map[string]string{
+		`SELECT name FROM public.jd_plain WHERE id = 2`: "two; still two",
+		`SELECT name FROM public.jd_plain WHERE id = 3`: `\! not a command`,
+		`SELECT public.jd_plain_two()::text`:            "2",
+	} {
+		if got := queryString(t, restored, query); got != want {
+			t.Errorf("%s = %q, want %q", query, got, want)
+		}
 	}
 
-	// A script that reconnects to another database would carry on there. It
-	// is refused before psql is started.
-	elsewhere := t.TempDir() + "/create.sql"
-	if err := os.WriteFile(elsewhere, []byte("CREATE DATABASE other;\n\\connect other\nCREATE TABLE public.jd_elsewhere (id integer);\n"), 0o600); err != nil {
-		t.Fatal(err)
+	// refused restores a script that begins by creating a table and must not
+	// be left with it.
+	refused := func(name, script, want string) {
+		t.Helper()
+		path := t.TempDir() + "/" + name
+		if err := os.WriteFile(path, []byte("CREATE TABLE public.jd_half (id integer);\n"+script), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := RestoreWith(ctx, DriverPostgres, dsn, path, RestoreOptions{Database: target})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want it refused: %s", name, err, want)
+		}
+		if got := queryString(t, restored, `SELECT count(*)::text FROM pg_class WHERE relname = 'jd_half'`); got != "0" {
+			t.Errorf("%s: a refused restore left its first table behind", name)
+		}
 	}
-	if _, err := RestoreWith(ctx, DriverPostgres, dsn, elsewhere, RestoreOptions{Database: target}); err == nil ||
-		!strings.Contains(err.Error(), "connects to another database") {
-		t.Fatalf("a script with \\connect: %v", err)
+	// A script that reconnects to another database would carry on there,
+	// wherever on a line it says so.
+	refused("create.sql", "CREATE DATABASE other;\n\\connect other\nCREATE TABLE public.jd_elsewhere (id integer);\n", "connects to another database")
+	refused("midline.sql", "SELECT 1 \\connect other\n", "connects to another database")
+	// What psql would have run on this machine is not run by anything: not
+	// when it is in plain sight, and not when the script changes how a string
+	// is read so that a reader takes the command for part of one.
+	marker := t.TempDir() + "/ran"
+	refused("shell.sql", "\\! touch "+marker+"\n", "only psql runs")
+	refused("hidden.sql", "SET standard_conforming_strings = off;\nSELECT 'a\\' || ' \\! touch "+marker+" ';\n", "nothing was changed")
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a line of the script was run as a command on this machine")
 	}
-
 	// A script that fails changes nothing: it is replayed as one transaction.
-	bad := t.TempDir() + "/bad.sql"
-	if err := os.WriteFile(bad, []byte("CREATE TABLE public.jd_half (id integer);\nSELECT no_such_function();\n"), 0o600); err != nil {
+	refused("bad.sql", "SELECT no_such_function();\n", "statement 2 (line 2) failed, and nothing was changed")
+	// Rows the table will not take stop it too, and by the line of their COPY.
+	refused("rows.sql", "COPY public.jd_plain (id, name) FROM stdin;\nnot a number\tx\n\\.\n", "statement 2 (line 2) failed, and nothing was changed")
+
+	// A script that commits for itself has kept that much, and is not told
+	// otherwise.
+	own := t.TempDir() + "/commits.sql"
+	if err := os.WriteFile(own, []byte("CREATE TABLE public.jd_kept (id integer);\nCOMMIT;\nSELECT no_such_function();\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RestoreWith(ctx, DriverPostgres, dsn, bad, RestoreOptions{Database: target}); err == nil {
-		t.Fatal("a failing script was reported as restored")
+	if _, err := RestoreWith(ctx, DriverPostgres, dsn, own, RestoreOptions{Database: target}); err == nil || strings.Contains(err.Error(), "nothing was changed") {
+		t.Errorf("a script that committed and then failed: %v", err)
 	}
-	if got := queryString(t, restored, `SELECT count(*)::text FROM pg_class WHERE relname = 'jd_half'`); got != "0" {
-		t.Error("a failed restore left its first table behind")
+	if got := queryString(t, restored, `SELECT count(*)::text FROM pg_class WHERE relname = 'jd_kept'`); got != "1" {
+		t.Error("what the script committed is gone")
+	}
+}
+
+// TestLivePostgresRestoresWhatPgDumpWritesAsText takes real plain-format
+// dumps, with whatever this pg_dump puts in one, and replays them.
+func TestLivePostgresRestoresWhatPgDumpWritesAsText(t *testing.T) {
+	const env, fallback = "JD_TEST_POSTGRES_DSN", "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable"
+	db := liveSQL(t, DriverPostgres, env, fallback)
+	dsn := liveDSN(t, env, fallback)
+	ctx := context.Background()
+	tool := postgresTool("pg_dump", postgresServerMajor(ctx, dsn))
+	if !toolAvailable(tool) {
+		t.Skip("pg_dump is not installed here")
+	}
+	info, err := ParseDSN(DriverPostgres, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedPostgresRich(t, db)
+	t.Cleanup(func() { db.Exec(`DROP SCHEMA IF EXISTS ` + pgRichSchema + ` CASCADE`) })
+	execAll(t, db,
+		`CREATE FUNCTION jd_rich.shout(v text) RETURNS text LANGUAGE plpgsql AS $fn$
+			BEGIN
+				RETURN upper(v) || '; \!';
+			END;
+		$fn$`,
+		`CREATE FUNCTION jd_rich.three() RETURNS integer LANGUAGE sql BEGIN ATOMIC SELECT 1; SELECT 3; END`,
+		"INSERT INTO jd_rich.notes (person_id, body) VALUES (2, E'a\\\\b\\ttab \\\\. and a ''quote''')",
+	)
+
+	for _, c := range []struct {
+		name string
+		args []string
+		gzip bool
+	}{
+		{"copy", nil, false},
+		{"inserts", []string{"--inserts", "--rows-per-insert=2"}, true},
+	} {
+		path := t.TempDir() + "/" + c.name + ".sql"
+		args := append(pgConnArgs(info), "--format=plain", "--no-owner", "--schema="+pgRichSchema, "--file="+path)
+		args = append(append(args, c.args...), "--dbname="+info.Database)
+		if out, err := (toolRun{name: tool, args: args, env: []string{"PGPASSWORD=" + info.Password}}).run(ctx); err != nil {
+			t.Fatalf("pg_dump: %v\n%s", err, out)
+		}
+		if c.gzip {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var packed bytes.Buffer
+			gz := gzip.NewWriter(&packed)
+			gz.Write(raw)
+			gz.Close()
+			path += ".gz"
+			if err := os.WriteFile(path, packed.Bytes(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		target := scratchDatabase(t, DriverPostgres, dsn, "r4"+c.name)
+		if _, err := RestoreWith(ctx, DriverPostgres, dsn, path, RestoreOptions{Database: target}); err != nil {
+			t.Fatalf("%s: RestoreWith: %v", c.name, err)
+		}
+		restored, err := OpenDatabase(ctx, DriverPostgres, dsn, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for query, want := range map[string]string{
+			`SELECT count(*)::text FROM jd_rich.people`:                                 "2",
+			`SELECT count(*)::text FROM jd_rich.notes`:                                  "4",
+			`SELECT count(*)::text FROM jd_rich.events_2025`:                            "1",
+			`SELECT mood::text FROM jd_rich.people WHERE id = 2`:                        "it's complicated",
+			`SELECT encode(avatar, 'hex') FROM jd_rich.people WHERE id = 1`:             "00ff41",
+			`SELECT body FROM jd_rich.notes WHERE id = 2`:                               "two\nlines",
+			`SELECT body FROM jd_rich.notes WHERE id = 4`:                               "a\\b\ttab \\. and a 'quote'",
+			`SELECT n::text FROM jd_rich.calm_count`:                                    "1",
+			`SELECT notes::text FROM jd_rich.note_totals WHERE person_id = 1`:           "2",
+			`SELECT jd_rich.shout('a')`:                                                 `A; \!`,
+			`SELECT jd_rich.three()::text`:                                              "3",
+			`SELECT nextval('jd_rich.ticket_seq')::text`:                                "115",
+			`SELECT relkind::text FROM pg_class WHERE oid = 'jd_rich.events'::regclass`: "p",
+		} {
+			if got := queryString(t, restored, query); got != want {
+				t.Errorf("%s: %s = %q, want %q", c.name, query, got, want)
+			}
+		}
+		restored.Close()
 	}
 }
 
@@ -526,16 +647,15 @@ func TestLiveBuiltInMySQLDumpStaysInItsDatabase(t *testing.T) {
 	checkMySQLRich(t, db)
 }
 
-// TestLiveMySQLNativeDump drives mysqldump and the mysql client, where they
-// are installed: a narrowed, compressed dump, restored into a database made
-// for it.
+// TestLiveMySQLNativeDump drives mysqldump, where it is installed: a narrowed,
+// compressed dump, and what it wrote replayed without a client.
 func TestLiveMySQLNativeDump(t *testing.T) {
 	const env = "JD_TEST_MYSQL8_DSN"
 	if os.Getenv(env) == "" {
 		t.Skipf("set %s to a MySQL server this test may write to", env)
 	}
-	if firstAvailableTool("mysqldump", "mariadb-dump") == "" || firstAvailableTool("mysql", "mariadb") == "" {
-		t.Skip("mysqldump and mysql are not installed here")
+	if firstAvailableTool("mysqldump", "mariadb-dump") == "" {
+		t.Skip("mysqldump is not installed here")
 	}
 	db := liveSQL(t, DriverMySQL, env, "")
 	dsn := os.Getenv(env)
@@ -574,6 +694,147 @@ func TestLiveMySQLNativeDump(t *testing.T) {
 	}
 	if text := readDump(t, res.Path); strings.Contains(text, "CREATE TABLE") || !strings.Contains(text, "INSERT INTO") {
 		t.Errorf("a data-only dump holds:\n%.600s", text)
+	}
+}
+
+// TestLiveMySQLReplaysAScript restores a script written the way mysqldump
+// writes one — conditional comments, a trigger between DELIMITER lines, rows
+// with everything in them that is not the end of a statement — with no client
+// installed, and refuses the ones that would leave the database or run
+// something on this machine.
+func TestLiveMySQLReplaysAScript(t *testing.T) {
+	for _, env := range []string{"JD_TEST_MYSQL_DSN", "JD_TEST_MYSQL8_DSN"} {
+		t.Run(env, func(t *testing.T) {
+			const fallback = "jdtest:jdtest@tcp(127.0.0.1:3306)/jdtest"
+			if env != "JD_TEST_MYSQL_DSN" && os.Getenv(env) == "" {
+				t.Skipf("set %s to a second MySQL server this test may write to", env)
+			}
+			db := liveSQL(t, DriverMySQL, env, fallback)
+			dsn := liveDSN(t, env, fallback)
+			ctx := context.Background()
+			info, err := ParseDSN(DriverMySQL, dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			drop := func() {
+				db.Exec("DROP PROCEDURE IF EXISTS jd_rp_count")
+				db.Exec("DROP TABLE IF EXISTS jd_rp_item")
+				db.Exec("DROP TABLE IF EXISTS jd_rp_probe")
+			}
+			drop()
+			t.Cleanup(drop)
+
+			// A server that writes a binary log lets only a privileged account
+			// define a trigger. Where this one may not, the script goes
+			// without.
+			execAll(t, db, "CREATE TABLE jd_rp_probe (id int)")
+			_, probe := db.Exec("CREATE TRIGGER jd_rp_probe_bi BEFORE INSERT ON jd_rp_probe FOR EACH ROW SET NEW.id = NEW.id")
+			routines := probe == nil
+			if !routines {
+				t.Logf("this account cannot define a trigger here (%v); the script is replayed without one", probe)
+			}
+
+			script := "-- MySQL dump 10.13  Distrib 8.4.2, for Linux (x86_64)\n--\n" +
+				"-- Host: localhost    Database: shop\n-- ------------------------------------------------------\n\n" +
+				"/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;\n" +
+				"/*!50503 SET NAMES utf8mb4 */;\n" +
+				"/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;\n" +
+				"/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;\n\n" +
+				"USE `" + info.Database + "`;\n" +
+				"DROP TABLE IF EXISTS `jd_rp_item`;\n" +
+				"/*!40101 SET @saved_cs_client     = @@character_set_client */;\n" +
+				"CREATE TABLE `jd_rp_item` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `name` varchar(50) NOT NULL,\n" +
+				"  `note` text,\n  `raw` blob,\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n" +
+				"/*!40101 SET character_set_client = @saved_cs_client */;\n\n" +
+				"LOCK TABLES `jd_rp_item` WRITE;\n" +
+				"/*!40000 ALTER TABLE `jd_rp_item` DISABLE KEYS */;\n" +
+				"INSERT INTO `jd_rp_item` VALUES (1,'O\\'Brien; \\\\','line one\\nUSE `other`;\\n# not a comment',_binary '\\0\xffA'),(2,'two',NULL,NULL);\n" +
+				"/*!40000 ALTER TABLE `jd_rp_item` ENABLE KEYS */;\n" +
+				"UNLOCK TABLES;\n"
+			if routines {
+				script += "/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;\n" +
+					"/*!50003 SET sql_mode              = 'STRICT_TRANS_TABLES' */ ;\n" +
+					"DELIMITER ;;\n" +
+					"/*!50003 CREATE*/ /*!50003 TRIGGER `jd_rp_item_bi` BEFORE INSERT ON `jd_rp_item` FOR EACH ROW BEGIN\n" +
+					"  IF NEW.note IS NULL THEN SET NEW.note = 'none; given'; END IF;\nEND */;;\n" +
+					"DELIMITER ;\n" +
+					"/*!50003 SET sql_mode              = @saved_sql_mode */ ;\n" +
+					"DELIMITER ;;\n" +
+					"CREATE PROCEDURE `jd_rp_count`()\nBEGIN\n  SELECT COUNT(*) FROM jd_rp_item;\nEND ;;\n" +
+					"DELIMITER ;\n"
+			}
+			// A conditional comment for a version no server is comes to an
+			// empty statement, which is not a failure.
+			script += "/*!99999 SET what_no_server_has = 1 */;\n" +
+				"/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;\n" +
+				"/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;\n\n" +
+				"-- Dump completed on 2026-01-02  3:04:05\n"
+			dir := t.TempDir()
+			write := func(name, content string) string {
+				path := dir + "/" + name
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			}
+			path := write("shop.sql", script)
+			if got := dumpFormatOf(path); got != dumpFormatForeignSQL {
+				t.Fatalf("dumpFormatOf = %v, want SQL somebody else wrote", got)
+			}
+			if _, err := RestoreWith(ctx, DriverMySQL, dsn, path, RestoreOptions{}); err != nil {
+				t.Fatalf("RestoreWith: %v", err)
+			}
+			for query, want := range map[string]string{
+				`SELECT COUNT(*) FROM jd_rp_item`:                            "2",
+				`SELECT name FROM jd_rp_item WHERE id = 1`:                   `O'Brien; \`,
+				`SELECT note FROM jd_rp_item WHERE id = 1`:                   "line one\nUSE `other`;\n# not a comment",
+				`SELECT HEX(raw) FROM jd_rp_item WHERE id = 1`:               "00FF41",
+				`SELECT COALESCE(note, 'null') FROM jd_rp_item WHERE id = 2`: "null",
+			} {
+				if got := queryString(t, db, query); got != want {
+					t.Errorf("%s = %q, want %q", query, got, want)
+				}
+			}
+			if routines {
+				execAll(t, db, "INSERT INTO jd_rp_item (name) VALUES ('three')")
+				if got := queryString(t, db, `SELECT note FROM jd_rp_item WHERE name = 'three'`); got != "none; given" {
+					t.Errorf("the trigger did not come back: note = %q", got)
+				}
+				if got := queryString(t, db, `SELECT COUNT(*) FROM information_schema.ROUTINES
+					WHERE ROUTINE_SCHEMA = DATABASE() AND ROUTINE_NAME = 'jd_rp_count'`); got != "1" {
+					t.Error("the procedure did not come back")
+				}
+			}
+
+			// Refused before anything is run: each of these begins by dropping
+			// the table, and the table has to be there afterwards.
+			marker := dir + "/ran"
+			for name, c := range map[string]struct{ script, want string }{
+				"a USE in the middle of a line":  {"SELECT 1;USE `mysql`;\nCREATE TABLE jd_rp_elsewhere (id int);\n", "switches to another database"},
+				"a USE inside a comment it runs": {"/*!50000 USE mysql */;\n", "switches to another database"},
+				"a command of the client's":      {"\\! touch " + marker + "\n", "only the client runs"},
+				"the same, spelt out":            {"SELECT 1;\nsystem touch " + marker + "\n", "only the client runs"},
+				"a file of this machine's":       {"source /etc/hostname\n", "only the client runs"},
+				"a USE the client would take":    {"use mysql\nCREATE TABLE jd_rp_elsewhere (id int);\n", "switches to another database"},
+			} {
+				_, err := RestoreWith(ctx, DriverMySQL, dsn, write("refused.sql", "DROP TABLE IF EXISTS `jd_rp_item`;\n"+c.script), RestoreOptions{})
+				if err == nil || !strings.Contains(err.Error(), c.want) {
+					t.Errorf("%s: %v, want it refused: %s", name, err, c.want)
+				}
+				if got := queryString(t, db, `SELECT COUNT(*) FROM information_schema.TABLES
+					WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'jd_rp_item'`); got != "1" {
+					t.Fatalf("%s: the script was refused after its first statement had run", name)
+				}
+			}
+			if _, err := os.Stat(marker); err == nil {
+				t.Fatal("a line of the script was run as a command on this machine")
+			}
+			// A file dressed as one of the dashboard's own is held to the same.
+			if _, err := RestoreWith(ctx, DriverMySQL, dsn, write("own.sql", dumpHeader+"\nUSE `mysql`;\nCREATE TABLE jd_rp_elsewhere (id int);\n"),
+				RestoreOptions{}); err == nil || !strings.Contains(err.Error(), "switches to another database") {
+				t.Errorf("a dashboard-format file with a USE: %v", err)
+			}
+		})
 	}
 }
 
@@ -1221,4 +1482,30 @@ func TestLiveMySQLRestoreIntoANewDatabase(t *testing.T) {
 	if got := queryString(t, restored, `SELECT n FROM jd_dx_summary`); got != "2" {
 		t.Errorf("the copy's view reads %s rows after the original was emptied, want its own 2", got)
 	}
+
+	// The engine's own tool writes a script that names no database either,
+	// which is what a copy relies on: it is replayed into the one made for it.
+	if firstAvailableTool("mysqldump", "mariadb-dump") == "" {
+		return
+	}
+	seedMySQLRich(t, db)
+	res, err = DumpWith(ctx, DriverMySQL, dsn, t.TempDir(), DumpOptions{
+		Tables: []string{"jd_dx_parent", "jd_dx_child", "jd_dx_view", "jd_dx_summary"},
+	})
+	if err != nil {
+		t.Fatalf("DumpWith: %v", err)
+	}
+	if res.Tool == BuiltInDumpTool {
+		t.Logf("the installed tool refused this server (%s); its script is not what was replayed", res.Summary)
+	}
+	second := scratchDatabase(t, DriverMySQL, dsn, "r2")
+	if _, err := RestoreWith(ctx, DriverMySQL, dsn, res.Path, RestoreOptions{Database: second}); err != nil {
+		t.Fatalf("RestoreWith(%s): %v", res.Tool, err)
+	}
+	copied, err := OpenDatabase(ctx, DriverMySQL, dsn, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copied.Close()
+	checkMySQLRich(t, copied)
 }

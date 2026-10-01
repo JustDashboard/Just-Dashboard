@@ -133,11 +133,27 @@ accounts retain partial results. Full table details and mutation preconditions u
   not. `dumpLiteral` is the second place putting a value into SQL text (unavoidable — a dump is text) and
   is per-engine, since a backslash escapes on MySQL and ClickHouse and is a plain character on the other
   four. `Restore` picks its reader from the file's first bytes, not the driver: a Postgres connection may
-  hold a `PGDMP` archive, our SQL, or a plain script somebody uploaded, which goes to `psql`. A
-  restore stays in the database it was pointed at: a psql script with a `\connect` or a MySQL script
-  with a `USE` of another database is refused before a client is started, and a mongodump archive is
-  read for the database it came from (`mongoArchiveDatabases`) and confined and redirected with
+  hold a `PGDMP` archive, our SQL, or a plain script somebody uploaded. A mongodump archive is read
+  for the database it came from (`mongoArchiveDatabases`) and confined and redirected with
   `--nsInclude`/`--nsFrom`/`--nsTo` — it used to be written back over whichever database it named.
+- **A script somebody else wrote is replayed here, never by the engine's client** (`dump_script.go`). A
+  plain pg_dump or a mysqldump used to be piped to `psql` or `mysql`, and a client does more with a
+  script than send it: `\!` and `system` run a shell, both read other files, both reconnect elsewhere.
+  A dump is a file anybody with `service.control` can upload, so restoring one was a second
+  request-defined shell (invariant 6). Reading the script first cannot close that, because where a
+  string ends depends on settings the script changes as it runs (`standard_conforming_strings`,
+  `NO_BACKSLASH_ESCAPES`). So `postgresScript` and `mysqlScript` cut the file into statements by the
+  clients' own rules — dollar quotes, `BEGIN ATOMIC` bodies and `COPY … FROM stdin` blocks (sent with
+  `PgConn.CopyFrom`); `DELIMITER` and conditional comments, which are statement text — and the
+  statements go over the dashboard's connection. A reader that disagrees with the server gets a syntax
+  error and nothing else. The script is read through once before anything runs: a psql meta-command
+  other than `\restrict`/`\unrestrict`, a mysql client command, `\connect`, or a MySQL statement that
+  is a `USE` of another database (wherever on a line, and inside a conditional comment) is refused
+  with the database untouched. Postgres replays as one transaction; a MySQL connection used for a
+  replay has multi-statement queries switched off, so what one statement is stays decided here. The
+  only tools a restore runs are `pg_restore` and `mongorestore`, on archives. This confines the
+  session, not the script: a statement that names another database explicitly still reaches it with
+  the connection's rights, as it would from the query runner.
 - **The built-in dump is a plan, read before a row is** (`dump_sql_plan.go` and the per-engine files).
   The tables alone restore into a database with no unique constraint, no index and no view, so the plan
   carries those and the order they replay in: sequences, tables parents-first, rows, then constraints

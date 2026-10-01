@@ -1,7 +1,6 @@
 package dbx
 
 import (
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -13,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -699,35 +697,17 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 		return restoreGenericSQL(ctx, driver, dsn, database, dumpPath, opts)
 	}
 
+	// A script is replayed over the dashboard's own connection, never through
+	// the engine's client: psql and mysql each run a shell for a line of one
+	// (dump_script.go).
+	script := format == dumpFormatForeignSQL || format == dumpFormatNativeGzip
 	var run toolRun
 	switch driver {
 	case DriverPostgres:
-		major := postgresServerMajor(ctx, dsn)
-		if format == dumpFormatForeignSQL || format == dumpFormatNativeGzip {
-			// A plain-format pg_dump is a psql script: its rows travel as COPY
-			// blocks, which are not statements and which only psql reads.
-			tool := postgresTool("psql", major)
-			if !toolAvailable(tool) {
-				return "", fmt.Errorf("this is a plain SQL dump and psql is not installed to replay it")
-			}
-			if other, err := psqlScriptReconnects(dumpPath); err != nil {
-				return "", err
-			} else if other != "" {
-				return "", fmt.Errorf("this script connects to another database (%s), so it cannot be restored into %s; "+
-					"take the dump of one database without --create, or replay it with psql yourself", other, database)
-			}
-			f, closeDump, err := openDumpText(dumpPath)
-			if err != nil {
-				return "", err
-			}
-			defer closeDump()
-			run = toolRun{
-				name: tool, stdin: f, env: []string{"PGPASSWORD=" + info.Password},
-				args: psqlArgs(info, database),
-			}
-			break
+		if script {
+			return restoreScript(ctx, driver, dsn, database, dumpPath, opts)
 		}
-		tool := postgresTool("pg_restore", major)
+		tool := postgresTool("pg_restore", postgresServerMajor(ctx, dsn))
 		if !toolAvailable(tool) {
 			return "", fmt.Errorf("this is a pg_dump custom-format archive and pg_restore is not installed; " +
 				"re-take the backup to get one this dashboard can restore on its own")
@@ -737,27 +717,10 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 			args: pgRestoreArgs(info, database, dumpPath),
 		}
 	case DriverMySQL:
-		tool := firstAvailableTool("mysql", "mariadb")
-		if tool == "" {
-			return restoreGenericSQL(ctx, driver, dsn, database, dumpPath, opts)
+		if !script {
+			return "", fmt.Errorf("%s is not a SQL script, which is the only kind of dump MySQL has", filepath.Base(dumpPath))
 		}
-		if other, err := mysqlScriptSwitches(dumpPath, database); err != nil {
-			return "", err
-		} else if other != "" {
-			return "", fmt.Errorf("this script switches to another database (%s), so it cannot be restored into %s; "+
-				"take the dump of one database without --databases, or replay it with the mysql client yourself", other, database)
-		}
-		defaults, cleanup, err := mysqlDefaultsFile(info)
-		if err != nil {
-			return "", err
-		}
-		defer cleanup()
-		f, closeDump, err := openDumpText(dumpPath)
-		if err != nil {
-			return "", err
-		}
-		defer closeDump()
-		run = toolRun{name: tool, args: mysqlArgs(defaults, database), stdin: f}
+		return restoreScript(ctx, driver, dsn, database, dumpPath, opts)
 	case DriverMongo:
 		if !toolAvailable("mongorestore") {
 			return "", fmt.Errorf("this is a mongodump archive and mongorestore is not installed; " +
@@ -807,19 +770,20 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 type dumpFormat int
 
 const (
-	// dumpFormatNative is a tool's own format — a pg_dump custom archive, a
-	// mongodump archive, a mysqldump script — and is replayed by that tool.
+	// dumpFormatNative is a tool's own archive — pg_dump's custom format,
+	// mongodump's — and is loaded by that tool.
 	dumpFormatNative dumpFormat = iota
 	// dumpFormatSQLText is the SQL this package writes, gzipped or not.
 	dumpFormatSQLText
 	// dumpFormatArchive is the gzipped JSON Lines this package writes for the
 	// engines that are not SQL.
 	dumpFormatArchive
-	// dumpFormatNativeGzip is a tool's own format, gzipped: a mongodump
-	// archive taken with --gzip, a mysqldump script compressed on the way out.
+	// dumpFormatNativeGzip is something a tool wrote, gzipped: a mongodump
+	// archive taken with --gzip, or a script compressed on the way out.
 	dumpFormatNativeGzip
 	// dumpFormatForeignSQL is SQL text something else wrote: a plain pg_dump,
-	// a mysqldump, a script somebody uploaded.
+	// a mysqldump, a script somebody uploaded. It is replayed here, a
+	// statement at a time (dump_script.go).
 	dumpFormatForeignSQL
 )
 
@@ -897,64 +861,8 @@ func validPrefix(b []byte) int {
 	return len(b)
 }
 
-// A script that changes database carries on in whichever one it named, and
-// that is not a restore into this one. pg_dump writes a \connect when asked to
-// recreate the database (--create) and pg_dumpall one per database; mysqldump
-// writes a USE when given --databases. The clients have no option that keeps
-// a script where it was started — mysql's --one-database skips everything
-// until the first USE — so the script is read for the line first.
-//
-// A line of row data cannot be mistaken for either: both tools write a line
-// break inside a value as an escape, and pg_dump writes a backslash as two.
-
-// psqlScriptReconnects returns the \connect line of a psql script, if any.
-func psqlScriptReconnects(path string) (string, error) {
-	return scriptLine(path, func(line []byte) bool {
-		return bytes.HasPrefix(line, []byte(`\connect`)) || bytes.HasPrefix(line, []byte(`\c `))
-	})
-}
-
-// mysqlUseLine matches a USE statement on a line of its own.
-var mysqlUseLine = regexp.MustCompile("(?i)^USE\\s+`?([^`;\\s]+)`?\\s*;")
-
-// mysqlScriptSwitches returns the USE line of a MySQL script that names a
-// database other than the target.
-func mysqlScriptSwitches(path, target string) (string, error) {
-	return scriptLine(path, func(line []byte) bool {
-		m := mysqlUseLine.FindSubmatch(line)
-		return m != nil && string(m[1]) != target
-	})
-}
-
-// scriptLine returns the first line of a script that match accepts. Only the
-// start of a line is looked at, so a line longer than the buffer is read in
-// pieces and all but the first let go.
-func scriptLine(path string, match func(line []byte) bool) (string, error) {
-	text, closeDump, err := openDumpText(path)
-	if err != nil {
-		return "", err
-	}
-	defer closeDump()
-	r := bufio.NewReaderSize(text, 64<<10)
-	for {
-		line, isPrefix, err := r.ReadLine()
-		if err == io.EOF {
-			return "", nil
-		}
-		if err != nil {
-			return "", err
-		}
-		if match(line) {
-			return strings.TrimSpace(string(line[:min(len(line), 120)])), nil
-		}
-		for isPrefix && err == nil {
-			_, isPrefix, err = r.ReadLine()
-		}
-	}
-}
-
-// openDumpText opens a SQL script for a client's standard input, decompressing
-// it on the way when it was written compressed.
+// openDumpText opens a SQL script to be read, decompressing it on the way
+// when it was written compressed.
 func openDumpText(path string) (io.Reader, func(), error) {
 	f, err := os.Open(path)
 	if err != nil {

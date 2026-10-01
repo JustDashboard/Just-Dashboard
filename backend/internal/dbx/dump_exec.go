@@ -34,10 +34,8 @@ type toolRun struct {
 	// env is added to this process's environment, for the one secret Postgres
 	// takes there rather than in a file.
 	env []string
-	// stdin feeds a script to a client; stdout receives a dump from a tool
-	// that writes it there. Unset, the tool's standard output is read as
-	// messages like its standard error.
-	stdin  io.Reader
+	// stdout receives a dump from a tool that writes it there. Unset, the
+	// tool's standard output is read as messages like its standard error.
 	stdout io.Writer
 	// progress receives each line the tool prints as it prints it.
 	progress func(line string)
@@ -59,7 +57,6 @@ func (t toolRun) run(ctx context.Context) (string, error) {
 		cmd.Env = append(os.Environ(), t.env...)
 	}
 	messages := newLineSink(t.progress)
-	cmd.Stdin = t.stdin
 	cmd.Stderr = messages
 	if t.stdout != nil {
 		cmd.Stdout = t.stdout
@@ -242,11 +239,6 @@ func pgRestoreArgs(info *ConnInfo, database, dumpPath string) []string {
 	return append(pgConnArgs(info), "--verbose", "--clean", "--if-exists", "--dbname="+database, "--", dumpPath)
 }
 
-func psqlArgs(info *ConnInfo, database string) []string {
-	return append(pgConnArgs(info), "--no-psqlrc", "--quiet", "--set=ON_ERROR_STOP=1",
-		"--single-transaction", "--dbname="+database)
-}
-
 func mysqldumpArgs(defaults, database string, opts DumpOptions, sel dumpSelection) []string {
 	args := []string{
 		"--defaults-extra-file=" + defaults,
@@ -275,10 +267,6 @@ func mysqldumpArgs(defaults, database string, opts DumpOptions, sel dumpSelectio
 		args = append(args, t.table)
 	}
 	return args
-}
-
-func mysqlArgs(defaults, database string) []string {
-	return []string{"--defaults-extra-file=" + defaults, "--database=" + database}
 }
 
 func mongodumpArgs(conf, database, path string, gzip bool, include string, exclude []string) []string {

@@ -518,6 +518,9 @@ func restoreGenericSQL(ctx context.Context, driver Driver, dsn, database, path s
 		return "", err
 	}
 	defer closeDump()
+	if driver == DriverMySQL {
+		dsn = mysqlOneStatementDSN(dsn)
+	}
 	db, err := openForDump(ctx, d, dsnForDatabase(driver, dsn, database))
 	if err != nil {
 		return "", err
@@ -574,6 +577,15 @@ func restoreGenericSQL(ctx context.Context, driver Driver, dsn, database, path s
 		if err != nil {
 			rollback()
 			return "", fmt.Errorf("could not read the dump after statement %d: %w", ran, err)
+		}
+		if driver == DriverMySQL {
+			// A MySQL dump names no database, so its statements land in
+			// whichever one the session is in. No dump written here moves the
+			// session; a file made to look like one does not get to either.
+			if name, ok := mysqlUse(statement); ok && name != database {
+				rollback()
+				return "", errScriptSwitches(statement, database)
+			}
 		}
 		if _, err := conn.ExecContext(ctx, statement); err != nil {
 			// A DROP that fails is the table not being there yet, which is the
