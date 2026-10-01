@@ -2,7 +2,9 @@ package dbx
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -49,6 +51,19 @@ func outlineColumns(outline *SchemaOutline, table string) ([]string, bool) {
 // The unit tests prove a plan is the statement intended. Only a server proves
 // it is a statement that server accepts, and that what it did can be read back
 // through the catalogue — which is the round trip a schema editor makes.
+
+// catalogLive opens the server a variable names, and skips the test when the
+// variable is unset. These tests create and drop schemas, tables and a login,
+// so they never fall back to an engine's default address: on a host where that
+// port is somebody's real server, "nothing configured" has to mean "do not
+// run", not "run against whatever answers".
+func catalogLive(t *testing.T, driver Driver, env string) *sql.DB {
+	t.Helper()
+	if os.Getenv(env) == "" {
+		t.Skipf("set %s to run these", env)
+	}
+	return liveSQL(t, driver, env, "")
+}
 
 func catalogExec(t *testing.T, db *sql.DB, statements ...string) {
 	t.Helper()
@@ -142,7 +157,7 @@ func postgresCatalogFixture(t *testing.T, db *sql.DB) {
 }
 
 func TestLivePostgresCatalog(t *testing.T) {
-	db := liveSQL(t, DriverPostgres, "JD_TEST_POSTGRES_DSN", "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable")
+	db := catalogLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
 	postgresCatalogFixture(t, db)
 	ctx := context.Background()
 
@@ -558,17 +573,25 @@ func TestLivePostgresCatalog(t *testing.T) {
 				_, _ = db.ExecContext(context.Background(), s)
 			}
 		})
+		// A login that exists for the length of this test, with a password
+		// nobody else has: a fixed one would be a known credential on whichever
+		// server the test was pointed at, for as long as a failed run left it.
+		secret := make([]byte, 16)
+		if _, err := rand.Read(secret); err != nil {
+			t.Fatal(err)
+		}
+		password := hex.EncodeToString(secret)
 		catalogExec(t, db,
-			`CREATE ROLE `+role+` LOGIN PASSWORD 'reader'`,
+			`CREATE ROLE `+role+` LOGIN PASSWORD '`+password+`'`,
 			`GRANT USAGE ON SCHEMA jd_cat TO `+role,
 			`GRANT SELECT ON ALL TABLES IN SCHEMA jd_cat TO `+role,
 		)
-		info, err := ParseDSN(DriverPostgres, liveDSN(t, "JD_TEST_POSTGRES_DSN", ""))
+		info, err := ParseDSN(DriverPostgres, os.Getenv("JD_TEST_POSTGRES_DSN"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		reader, err := sql.Open("pgx", fmt.Sprintf("postgres://%s:reader@%s:%s/%s?sslmode=disable",
-			role, info.Host, info.Port, info.Database))
+		reader, err := sql.Open("pgx", fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+			role, password, info.Host, info.Port, info.Database))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -596,7 +619,7 @@ func TestLivePostgresCatalog(t *testing.T) {
 }
 
 func TestLivePostgresStructureChanges(t *testing.T) {
-	db := liveSQL(t, DriverPostgres, "JD_TEST_POSTGRES_DSN", "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable")
+	db := catalogLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
 	ctx := context.Background()
 	const d = DriverPostgres
 	drop := []string{`DROP SCHEMA IF EXISTS jd_ddl CASCADE`, `DROP SCHEMA IF EXISTS jd_ddl_made CASCADE`}
@@ -810,7 +833,7 @@ func TestLivePostgresStructureChanges(t *testing.T) {
 // to stay insertable: an identity or generated column refuses the value the
 // dump is about to give it.
 func TestLivePostgresGeneratedDDLReplays(t *testing.T) {
-	db := liveSQL(t, DriverPostgres, "JD_TEST_POSTGRES_DSN", "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable")
+	db := catalogLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
 	ctx := context.Background()
 	catalogExec(t, db, `DROP TABLE IF EXISTS public.jd_replay`)
 	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DROP TABLE IF EXISTS public.jd_replay`) })
@@ -888,10 +911,7 @@ var mysqlFlavours = []struct{ name, env, adminEnv string }{
 func TestLiveMySQLCatalogAndStructureChanges(t *testing.T) {
 	for _, flavour := range mysqlFlavours {
 		t.Run(flavour.name, func(t *testing.T) {
-			if os.Getenv(flavour.env) == "" {
-				t.Skipf("set %s to run these", flavour.env)
-			}
-			db := liveSQL(t, DriverMySQL, flavour.env, "")
+			db := catalogLive(t, DriverMySQL, flavour.env)
 			ctx := context.Background()
 			const d = DriverMySQL
 			maria := isMariaDB(ctx, db)
@@ -907,7 +927,7 @@ func TestLiveMySQLCatalogAndStructureChanges(t *testing.T) {
 				`DROP VIEW IF EXISTS jd_cat_active`, `DROP VIEW IF EXISTS jd_cat_titles`,
 				`DROP PROCEDURE IF EXISTS jd_cat_noop`, `DROP EVENT IF EXISTS jd_cat_tick`,
 				`DROP TABLE IF EXISTS jd_cat_posts`, `DROP TABLE IF EXISTS jd_cat_articles`, `DROP TABLE IF EXISTS jd_cat_users`,
-				`DROP TABLE IF EXISTS jd_cat_counters`,
+				`DROP TABLE IF EXISTS jd_cat_counters`, `DROP TABLE IF EXISTS jd_cat_attrs`,
 			}
 			if maria {
 				drop = append(drop, `DROP SEQUENCE IF EXISTS jd_cat_seq`)
@@ -939,9 +959,21 @@ func TestLiveMySQLCatalogAndStructureChanges(t *testing.T) {
 				`CREATE PROCEDURE jd_cat_noop(IN x INT, OUT y INT) SET y = x`,
 				`CREATE EVENT jd_cat_tick ON SCHEDULE EVERY 1 DAY DISABLE DO SELECT 1`,
 			)
+			// One column for each thing MODIFY COLUMN drops when it is not
+			// restated. The two products spell a reference system differently.
+			srid, compressed := "SRID 4326", ""
 			if maria {
 				catalogExec(t, db, `CREATE SEQUENCE jd_cat_seq START WITH 100 INCREMENT BY 5`)
+				srid, compressed = "REF_SYSTEM_ID=4326", "COMPRESSED"
 			}
+			catalogExec(t, db, `CREATE TABLE jd_cat_attrs (
+			  id INT PRIMARY KEY,
+			  qty INT CHECK (qty > 0),
+			  doc JSON,
+			  hid INT INVISIBLE DEFAULT 7,
+			  label VARCHAR(20) DEFAULT (concat('a\\', 'it''s')),
+			  note VARCHAR(200) `+compressed+`,
+			  spot POINT `+srid+` NOT NULL)`)
 			// A function and a trigger need SUPER on a MySQL that keeps a
 			// binary log, so they are made by the administrator where one is
 			// given and their assertions are skipped where the server refuses.
@@ -1174,6 +1206,83 @@ func TestLiveMySQLCatalogAndStructureChanges(t *testing.T) {
 				}
 			})
 
+			// A comment or a nullability is one property, and the statement
+			// that changes it replaces all of them. What it does not say again
+			// is gone, and none of these would have been missed until the day
+			// a row that should have been refused was not.
+			t.Run("restating_keeps_what_modify_would_drop", func(t *testing.T) {
+				attribute := func(column, expression string) string {
+					t.Helper()
+					var value sql.NullString
+					if err := db.QueryRowContext(ctx, `SELECT `+expression+` FROM information_schema.COLUMNS
+					  WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'jd_cat_attrs' AND COLUMN_NAME = ?`, schema, column).Scan(&value); err != nil {
+						t.Fatal(err)
+					}
+					return strings.ToLower(value.String)
+				}
+				for _, column := range []string{"qty", "doc", "hid", "label", "note", "spot"} {
+					stmt := run(PlanComment(ctx, db, d, CommentSpec{Schema: schema, Table: "jd_cat_attrs", Column: column, Comment: "kept"}))
+					if got := attribute(column, "COLUMN_COMMENT"); got != "kept" {
+						t.Errorf("after %s the comment is %q", stmt, got)
+					}
+				}
+				run(PlanAlterColumn(ctx, db, d, ColumnChange{Schema: schema, Table: "jd_cat_attrs", Column: "qty", Nullable: ddlBool(true)}))
+				run(PlanAlterColumn(ctx, db, d, ColumnChange{Schema: schema, Table: "jd_cat_attrs", Column: "hid", Type: "bigint"}))
+
+				insert := func(columns, values string) error {
+					_, err := db.ExecContext(ctx, `INSERT INTO jd_cat_attrs (`+columns+`) VALUES (`+values+`)`)
+					return err
+				}
+				const spot = "ST_GeomFromText('POINT(1 2)', 4326)"
+				if err := insert("id, qty, spot", "1, -5, "+spot); err == nil {
+					t.Error("the column's CHECK (qty > 0) was dropped with the comment change")
+				}
+				if err := insert("id, doc, spot", "2, 'not json', "+spot); err == nil {
+					t.Error("the JSON column accepts text that is not JSON after the comment change")
+				}
+				if err := insert("id, qty, doc, spot", `3, 4, '{"a": 1}', `+spot); err != nil {
+					t.Fatalf("a valid row was refused: %v", err)
+				}
+				if got := attribute("hid", "EXTRA"); !strings.Contains(got, "invisible") {
+					t.Errorf("INVISIBLE was lost: EXTRA = %q", got)
+				}
+				if got := attribute("hid", "COLUMN_TYPE"); !strings.HasPrefix(got, "bigint") {
+					t.Errorf("hid's type = %q", got)
+				}
+				var hid int
+				var label string
+				if err := db.QueryRowContext(ctx, `SELECT hid, label FROM jd_cat_attrs WHERE id = 3`).Scan(&hid, &label); err != nil ||
+					hid != 7 || label != `a\it's` {
+					t.Errorf("defaults after restating: hid = %d, label = %q, %v", hid, label, err)
+				}
+				// The reference system: MySQL refuses a point in another one,
+				// and both products say what the column's is.
+				sridQuery := `SELECT SRS_ID FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'jd_cat_attrs' AND COLUMN_NAME = 'spot'`
+				if maria {
+					sridQuery = `SELECT SRID FROM information_schema.GEOMETRY_COLUMNS WHERE G_TABLE_SCHEMA = ? AND G_TABLE_NAME = 'jd_cat_attrs' AND G_GEOMETRY_COLUMN = 'spot'`
+					if got := attribute("note", "COLUMN_TYPE"); !strings.Contains(got, "compressed") {
+						t.Errorf("COMPRESSED was lost: COLUMN_TYPE = %q", got)
+					}
+				}
+				var srid sql.NullInt64
+				if err := db.QueryRowContext(ctx, sridQuery, schema).Scan(&srid); err != nil || srid.Int64 != 4326 {
+					t.Errorf("the reference system after restating = %v, %v", srid, err)
+				}
+				// An expression default is read back as SQL that can be written
+				// again: MySQL stores it with every quote escaped once more.
+				if c := catColumn(t, describe("jd_cat_attrs"), "label"); !strings.Contains(c.Default, `'a\\'`) ||
+					!strings.Contains(c.Default, `'it\'s'`) || strings.Contains(c.Default, `\'a`) {
+					t.Errorf("label's default reads back as %s", c.Default)
+				}
+
+				// MySQL's primary key has one name and its own statement, and
+				// is not one of the constraints the catalogue lists.
+				stmt := run(PlanDropConstraint(ctx, db, d, schema, "jd_cat_attrs", "PRIMARY", ""))
+				if !strings.HasSuffix(stmt, "DROP PRIMARY KEY") || len(describe("jd_cat_attrs").PrimaryKey) != 0 {
+					t.Errorf("after %s the primary key is %v", stmt, describe("jd_cat_attrs").PrimaryKey)
+				}
+			})
+
 			t.Run("comments", func(t *testing.T) {
 				run(PlanComment(ctx, db, d, CommentSpec{Schema: schema, Table: "jd_cat_posts", Comment: `What's \ written`}))
 				run(PlanComment(ctx, db, d, CommentSpec{Schema: schema, Table: "jd_cat_posts", Column: "title", Comment: "Headline"}))
@@ -1282,10 +1391,10 @@ func TestLiveMySQLCatalogAndStructureChanges(t *testing.T) {
 }
 
 func TestLiveClickHouseCatalogAndStructureChanges(t *testing.T) {
-	db := liveSQL(t, DriverClickHouse, "JD_TEST_CLICKHOUSE_DSN", "clickhouse://default@127.0.0.1:9000/default")
+	db := catalogLive(t, DriverClickHouse, "JD_TEST_CLICKHOUSE_DSN")
 	ctx := context.Background()
 	const d = DriverClickHouse
-	info, err := ParseDSN(d, liveDSN(t, "JD_TEST_CLICKHOUSE_DSN", "clickhouse://default@127.0.0.1:9000/default"))
+	info, err := ParseDSN(d, os.Getenv("JD_TEST_CLICKHOUSE_DSN"))
 	if err != nil || info.Database == "" {
 		t.Fatalf("the DSN names no database: %v", err)
 	}

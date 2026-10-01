@@ -561,7 +561,7 @@ func TestGeneratedCreateTableForReplayAndForReading(t *testing.T) {
 	}, true)
 	for _, want := range []string{
 		"CREATE TABLE [dbo].[orders] (", "[id] int IDENTITY(1,1) NOT NULL,",
-		"[gross] AS ([net]*(1.2)) PERSISTED,", "[note] nvarchar(MAX) DEFAULT (N'')",
+		"[gross] AS ([net]*(1.2)) PERSISTED,", "[note] nvarchar(MAX) NULL DEFAULT (N'')",
 	} {
 		if !strings.Contains(mssql, want) {
 			t.Errorf("the SQL Server form is missing %q in:\n%s", want, mssql)
@@ -621,7 +621,18 @@ func TestMySQLDefaultsBecomeSQLText(t *testing.T) {
 		{"int(11)", text("0"), "", false, "0"},
 		{"decimal(10,2) unsigned", text("1.50"), "", false, "1.50"},
 		{"timestamp", text("CURRENT_TIMESTAMP"), "default_generated", false, "CURRENT_TIMESTAMP"},
+		{"datetime(3)", text("CURRENT_TIMESTAMP(3)"), "default_generated on update current_timestamp(3)", false, "CURRENT_TIMESTAMP(3)"},
+		// A server from before 8.0.13 has no DEFAULT_GENERATED to mark the
+		// clock with, and a quoted one is a string no timestamp accepts.
+		{"timestamp", text("CURRENT_TIMESTAMP"), "", false, "CURRENT_TIMESTAMP"},
+		{"datetime(6)", text("CURRENT_TIMESTAMP(6)"), "on update current_timestamp(6)", false, "CURRENT_TIMESTAMP(6)"},
+		{"timestamp", text("2020-01-01 00:00:00"), "", false, "'2020-01-01 00:00:00'"},
+		{"varchar(30)", text("CURRENT_TIMESTAMP"), "", false, "'CURRENT_TIMESTAMP'"},
 		{"char(36)", text("uuid()"), "default_generated", false, "(uuid())"},
+		// An expression is stored with its quotes and backslashes escaped once
+		// more than the statement writes them.
+		{"varchar(20)", text(`concat(_utf8mb4\'a\\\\\',_utf8mb4\'it\\\'s\')`), "default_generated", false,
+			`(concat(_utf8mb4'a\\',_utf8mb4'it\'s'))`},
 		{"enum('a','b')", text("a"), "", false, "'a'"},
 		// MariaDB already wrote SQL.
 		{"varchar(20)", text("'ok'"), "", true, "'ok'"},
@@ -632,6 +643,68 @@ func TestMySQLDefaultsBecomeSQLText(t *testing.T) {
 		if got := mysqlDefaultSQL(c.typ, c.raw, c.extra, c.maria); got != c.want {
 			t.Errorf("default of %s %+v (maria=%v) = %q, want %q", c.typ, c.raw, c.maria, got, c.want)
 		}
+	}
+}
+
+// MODIFY COLUMN and ALTER COLUMN replace a whole declaration, so the one
+// written back has to say everything the old one did.
+func TestRestatedColumnsSayEverythingAgain(t *testing.T) {
+	d, err := DialectFor(DriverMySQL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		column mysqlColumn
+		want   string
+	}{
+		{mysqlColumn{columnType: "int(11)", nullable: true}, "int(11) NULL"},
+		{mysqlColumn{columnType: "bigint", autoIncrement: true}, "bigint NOT NULL AUTO_INCREMENT"},
+		{mysqlColumn{columnType: "longtext", collation: "utf8mb4_bin", nullable: true, comment: "it's",
+			checks: []string{"json_valid(`doc`)"}},
+			"longtext COLLATE utf8mb4_bin NULL COMMENT 'it''s' CHECK (json_valid(`doc`))"},
+		{mysqlColumn{columnType: "int(11)", nullable: true, dflt: "7", invisible: true, unversioned: true},
+			"int(11) NULL DEFAULT 7 INVISIBLE WITHOUT SYSTEM VERSIONING"},
+		{mysqlColumn{columnType: "timestamp", dflt: "CURRENT_TIMESTAMP", onUpdate: "CURRENT_TIMESTAMP"},
+			"timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"},
+		{mysqlColumn{columnType: "point", srid: "SRID 4326"}, "point NOT NULL SRID 4326"},
+		{mysqlColumn{columnType: "point", srid: "REF_SYSTEM_ID=4326"}, "point REF_SYSTEM_ID=4326 NOT NULL"},
+	} {
+		if got, err := c.column.render(d); err != nil || got != c.want {
+			t.Errorf("restated as %q, %v; want %q", got, err, c.want)
+		}
+	}
+	if _, err := (&mysqlColumn{columnType: "text", collation: "x; DROP TABLE y"}).render(d); err == nil {
+		t.Error("a collation that is not a name was restated")
+	}
+	// An EXTRA entry nobody accounted for is an attribute about to be lost.
+	for extra, want := range map[string]string{
+		"":               "",
+		"auto_increment": "",
+		"default_generated on update current_timestamp(3)": "",
+		"invisible, without system versioning":             "",
+		"DEFAULT_GENERATED INVISIBLE":                      "",
+		"invisible, some new attribute":                    "some new attribute",
+		"not secondary":                                    "not secondary",
+	} {
+		if got := mysqlUnknownExtra(strings.ToLower(extra)); got != want {
+			t.Errorf("unknown part of EXTRA %q = %q, want %q", extra, got, want)
+		}
+	}
+
+	column := mssqlColumn{typ: "varchar(20)", collation: "Latin1_General_BIN2"}
+	if got := column.render(); got != "varchar(20) COLLATE Latin1_General_BIN2 NOT NULL" {
+		t.Errorf("sql server column = %s", got)
+	}
+	// A new character type keeps the collation the column was declared with;
+	// a type that has none drops it.
+	column.retype("nvarchar(max)")
+	column.nullable = true
+	if got := column.render(); got != "nvarchar(max) COLLATE Latin1_General_BIN2 NULL" {
+		t.Errorf("sql server column retyped = %s", got)
+	}
+	column.retype("int")
+	if got := column.render(); got != "int NULL" {
+		t.Errorf("sql server column as a number = %s", got)
 	}
 }
 
@@ -675,6 +748,20 @@ func TestSQLServerTypeNames(t *testing.T) {
 	}
 }
 
+func TestSQLServerAliasTypesCarryTheirSchema(t *testing.T) {
+	for _, c := range []struct{ schema, name, want string }{
+		{"dbo", "phone", "phone"},
+		{"", "phone", "phone"},
+		{"shop", "phone", "shop.phone"},
+		{"shop", "phone number", "shop.[phone number]"},
+		{"my shop", "a]b", "[my shop].[a]]b]"},
+	} {
+		if got := mssqlAliasTypeName(c.schema, c.name); got != c.want {
+			t.Errorf("alias type %s.%s = %q, want %q", c.schema, c.name, got, c.want)
+		}
+	}
+}
+
 func TestOracleCatalogueHelpers(t *testing.T) {
 	for _, c := range []struct{ triggerType, event, status, want string }{
 		{"BEFORE EACH ROW", "INSERT OR UPDATE", "ENABLED", "BEFORE INSERT OR UPDATE, each row"},
@@ -692,6 +779,16 @@ func TestOracleCatalogueHelpers(t *testing.T) {
 	// nullability, not a constraint worth listing.
 	if !oracleNotNullCheck.MatchString(`"EMAIL" IS NOT NULL`) || oracleNotNullCheck.MatchString(`"A" IS NOT NULL AND "B" > 0`) {
 		t.Error("the NOT NULL check is not told apart from a real one")
+	}
+	// The driver counts every placeholder in the text, so the schema is bound
+	// once or not at all, and what follows it keeps its place after it.
+	cond, args := oracleSchemaFilter("t.owner", "APP", "FUNCTION", 5)
+	if cond != "t.owner = :1" || !reflect.DeepEqual(args, []any{"APP", "FUNCTION", 5}) {
+		t.Errorf("one schema: %s with %v", cond, args)
+	}
+	cond, args = oracleSchemaFilter("t.owner", " ", 5)
+	if strings.Contains(cond, ":") || !strings.HasPrefix(cond, "t.owner NOT IN ('SYS',") || !reflect.DeepEqual(args, []any{5}) {
+		t.Errorf("every schema: %s with %v", cond, args)
 	}
 }
 
@@ -791,5 +888,27 @@ func TestSQLiteStructureChanges(t *testing.T) {
 	}
 	if after := sqliteCreateText(ctx, db, "main", "cat_users"); after != before {
 		t.Errorf("a refused change altered the table:\n%s", after)
+	}
+
+	// A statement is written unqualified, so one aimed at an attached file
+	// would land on main's table of the same name. It is refused instead.
+	for name, err := range map[string]error{
+		"drop table":   planErr(PlanDropTable(DriverSQLite, "other", "cat_users")),
+		"truncate":     planErr(PlanTruncate(DriverSQLite, "other", "cat_users")),
+		"add column":   planErr(PlanAddColumn(DriverSQLite, "other", "cat_users", NewColumn{Name: "x", Type: "TEXT"})),
+		"create table": planErr(PlanCreateTable(DriverSQLite, "other", "t", []NewColumn{{Name: "x", Type: "TEXT"}})),
+		"drop column":  planErr(PlanDropColumn(ctx, db, DriverSQLite, "temp", "cat_users", "name")),
+		"rename":       planErr(PlanRenameTable(DriverSQLite, "other", "cat_users", "people")),
+		"create index": planErr(PlanCreateIndex(ctx, db, DriverSQLite, IndexSpec{Schema: "other", Table: "cat_users", Columns: []string{"name"}})),
+		"drop index":   planErr(PlanDropIndex(DriverSQLite, "other", "cat_users", "i")),
+		"create view":  planErr(PlanCreateView(DriverSQLite, ViewSpec{Schema: "other", Name: "v", Query: "SELECT 1"})),
+		"drop view":    planErr(PlanDropView(DriverSQLite, "other", "v", false)),
+	} {
+		if err == nil || !strings.Contains(err.Error(), "main database only") {
+			t.Errorf("%s in an attached database: error = %v", name, err)
+		}
+	}
+	if _, err := PlanDropTable(DriverSQLite, "MAIN", "cat_users"); err != nil {
+		t.Errorf("main by name was refused: %v", err)
 	}
 }

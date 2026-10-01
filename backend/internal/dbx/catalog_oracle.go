@@ -24,12 +24,19 @@ const oracleSystemOwners = `'SYS','SYSTEM','OUTLN','XDB','MDSYS','CTXSYS','DBSNM
 	'REMOTE_SCHEDULER_AGENT','ORDPLUGINS','SI_INFORMTN_SCHEMA','ANONYMOUS','GGSYS','DIP','ORACLE_OCM'`
 
 // oracleSchemaFilter narrows to one owner, or to every owner that is not one
-// of Oracle's own when the bound value is NULL. It reuses bind :1, and every
-// query here numbers its binds in the order they first appear: the driver
-// sends arguments by position, and the server matches a position to the next
-// name it has not yet seen.
-func oracleSchemaFilter(column string) string {
-	return `((:1 IS NULL AND ` + column + ` NOT IN (` + oracleSystemOwners + `)) OR ` + column + ` = :1)`
+// of Oracle's own when none is named, and returns the condition with the
+// arguments that follow it bound after the schema's.
+//
+// The driver sends arguments by position and counts every placeholder in the
+// text, whatever it is called: `:1 IS NULL OR owner = :1` is two arguments,
+// not one, and with a third placeholder after it the statement was refused
+// with ORA-01008 on every server. So a bind is never named twice — the two
+// cases are two conditions, and the unnamed one binds nothing.
+func oracleSchemaFilter(column, schema string, rest ...any) (string, []any) {
+	if strings.TrimSpace(schema) == "" {
+		return column + ` NOT IN (` + oracleSystemOwners + `)`, rest
+	}
+	return column + ` = :1`, append([]any{schema}, rest...)
 }
 
 // oracleSchemaIs matches one owner, the session's current schema when none is
@@ -97,16 +104,17 @@ func (oracleDialect) tables(ctx context.Context, db *sql.DB, schema string, limi
 	// A materialized view's container is a row in ALL_TABLES too, and a
 	// dropped table lingers in the recycle bin under a BIN$ name; neither is a
 	// table anyone created.
+	owner, args := oracleSchemaFilter("t.owner", schema, limit)
 	return scanObjects(ctx, db, `
 	  SELECT t.owner, t.table_name, NVL(t.num_rows, -1), c.comments, t.partitioned, t.temporary
 	  FROM all_tables t
 	  LEFT JOIN all_tab_comments c
 	    ON c.owner = t.owner AND c.table_name = t.table_name AND c.table_type = 'TABLE'
-	  WHERE `+oracleSchemaFilter("t.owner")+`
+	  WHERE `+owner+`
 	    AND t.dropped = 'NO' AND t.nested = 'NO'
 	    AND NOT EXISTS (SELECT 1 FROM all_mviews m WHERE m.owner = t.owner AND m.mview_name = t.table_name)
 	  ORDER BY t.owner, t.table_name
-	  FETCH FIRST :2 ROWS ONLY`, []any{oracleSchemaArg(schema), limit}, func(rows *sql.Rows) (CatalogObject, error) {
+	  FETCH FIRST :2 ROWS ONLY`, args, func(rows *sql.Rows) (CatalogObject, error) {
 		o := CatalogObject{Kind: KindTable}
 		var estimate int64
 		var partitioned, temporary string
@@ -126,26 +134,28 @@ func (oracleDialect) tables(ctx context.Context, db *sql.DB, schema string, limi
 }
 
 func (oracleDialect) views(ctx context.Context, db *sql.DB, schema string, limit int) ([]CatalogObject, error) {
+	owner, args := oracleSchemaFilter("v.owner", schema, limit)
 	return scanObjects(ctx, db, `
 	  SELECT v.owner, v.view_name, c.comments
 	  FROM all_views v
 	  LEFT JOIN all_tab_comments c
 	    ON c.owner = v.owner AND c.table_name = v.view_name AND c.table_type = 'VIEW'
-	  WHERE `+oracleSchemaFilter("v.owner")+`
+	  WHERE `+owner+`
 	  ORDER BY v.owner, v.view_name
-	  FETCH FIRST :2 ROWS ONLY`, []any{oracleSchemaArg(schema), limit}, func(rows *sql.Rows) (CatalogObject, error) {
+	  FETCH FIRST :2 ROWS ONLY`, args, func(rows *sql.Rows) (CatalogObject, error) {
 		o := CatalogObject{Kind: KindView}
 		return o, rows.Scan(&o.Schema, &o.Name, nullText{&o.Comment})
 	})
 }
 
 func (oracleDialect) materializedViews(ctx context.Context, db *sql.DB, schema string, limit int) ([]CatalogObject, error) {
+	owner, args := oracleSchemaFilter("m.owner", schema, limit)
 	return scanObjects(ctx, db, `
 	  SELECT m.owner, m.mview_name, m.refresh_mode, m.refresh_method, m.staleness
 	  FROM all_mviews m
-	  WHERE `+oracleSchemaFilter("m.owner")+`
+	  WHERE `+owner+`
 	  ORDER BY m.owner, m.mview_name
-	  FETCH FIRST :2 ROWS ONLY`, []any{oracleSchemaArg(schema), limit}, func(rows *sql.Rows) (CatalogObject, error) {
+	  FETCH FIRST :2 ROWS ONLY`, args, func(rows *sql.Rows) (CatalogObject, error) {
 		o := CatalogObject{Kind: KindMaterializedView}
 		var mode, method, staleness string
 		if err := rows.Scan(&o.Schema, &o.Name, nullText{&mode}, nullText{&method}, nullText{&staleness}); err != nil {
@@ -159,12 +169,13 @@ func (oracleDialect) materializedViews(ctx context.Context, db *sql.DB, schema s
 // objects lists one kind of code object from ALL_OBJECTS. objectType is a
 // constant written by the caller above, bound rather than concatenated.
 func (oracleDialect) objects(ctx context.Context, db *sql.DB, schema string, limit int, kind, objectType string) ([]CatalogObject, error) {
+	owner, args := oracleSchemaFilter("o.owner", schema, objectType, limit)
 	return scanObjects(ctx, db, `
 	  SELECT o.owner, o.object_name, o.status
 	  FROM all_objects o
-	  WHERE `+oracleSchemaFilter("o.owner")+` AND o.object_type = :2
+	  WHERE `+owner+` AND o.object_type = :2
 	  ORDER BY o.owner, o.object_name
-	  FETCH FIRST :3 ROWS ONLY`, []any{oracleSchemaArg(schema), objectType, limit}, func(rows *sql.Rows) (CatalogObject, error) {
+	  FETCH FIRST :3 ROWS ONLY`, args, func(rows *sql.Rows) (CatalogObject, error) {
 		o := CatalogObject{Kind: kind}
 		var status string
 		if err := rows.Scan(&o.Schema, &o.Name, nullText{&status}); err != nil {
@@ -183,12 +194,13 @@ func (oracleDialect) objects(ctx context.Context, db *sql.DB, schema string, lim
 }
 
 func (oracleDialect) triggers(ctx context.Context, db *sql.DB, schema string, limit int) ([]CatalogObject, error) {
+	owner, args := oracleSchemaFilter("t.owner", schema, limit)
 	return scanObjects(ctx, db, `
 	  SELECT t.owner, t.trigger_name, t.table_name, t.trigger_type, t.triggering_event, t.status
 	  FROM all_triggers t
-	  WHERE `+oracleSchemaFilter("t.owner")+`
+	  WHERE `+owner+`
 	  ORDER BY t.owner, t.table_name, t.trigger_name
-	  FETCH FIRST :2 ROWS ONLY`, []any{oracleSchemaArg(schema), limit}, func(rows *sql.Rows) (CatalogObject, error) {
+	  FETCH FIRST :2 ROWS ONLY`, args, func(rows *sql.Rows) (CatalogObject, error) {
 		o := CatalogObject{Kind: KindTrigger}
 		var triggerType, event, status string
 		if err := rows.Scan(&o.Schema, &o.Name, nullText{&o.Table}, nullText{&triggerType},
@@ -217,12 +229,13 @@ func oracleTriggerTiming(triggerType, event, status string) string {
 }
 
 func (oracleDialect) sequences(ctx context.Context, db *sql.DB, schema string, limit int) ([]CatalogObject, error) {
+	owner, args := oracleSchemaFilter("s.sequence_owner", schema, limit)
 	return scanObjects(ctx, db, `
 	  SELECT s.sequence_owner, s.sequence_name, s.increment_by
 	  FROM all_sequences s
-	  WHERE `+oracleSchemaFilter("s.sequence_owner")+`
+	  WHERE `+owner+`
 	  ORDER BY s.sequence_owner, s.sequence_name
-	  FETCH FIRST :2 ROWS ONLY`, []any{oracleSchemaArg(schema), limit}, func(rows *sql.Rows) (CatalogObject, error) {
+	  FETCH FIRST :2 ROWS ONLY`, args, func(rows *sql.Rows) (CatalogObject, error) {
 		o := CatalogObject{Kind: KindSequence}
 		var increment string
 		if err := rows.Scan(&o.Schema, &o.Name, nullText{&increment}); err != nil {
@@ -234,12 +247,13 @@ func (oracleDialect) sequences(ctx context.Context, db *sql.DB, schema string, l
 }
 
 func (oracleDialect) synonyms(ctx context.Context, db *sql.DB, schema string, limit int) ([]CatalogObject, error) {
+	owner, args := oracleSchemaFilter("s.owner", schema, limit)
 	return scanObjects(ctx, db, `
 	  SELECT s.owner, s.synonym_name, s.table_owner, s.table_name, s.db_link
 	  FROM all_synonyms s
-	  WHERE `+oracleSchemaFilter("s.owner")+`
+	  WHERE `+owner+`
 	  ORDER BY s.owner, s.synonym_name
-	  FETCH FIRST :2 ROWS ONLY`, []any{oracleSchemaArg(schema), limit}, func(rows *sql.Rows) (CatalogObject, error) {
+	  FETCH FIRST :2 ROWS ONLY`, args, func(rows *sql.Rows) (CatalogObject, error) {
 		o := CatalogObject{Kind: KindSynonym}
 		var owner, name, link string
 		if err := rows.Scan(&o.Schema, &o.Name, nullText{&owner}, nullText{&name}, nullText{&link}); err != nil {
@@ -301,6 +315,12 @@ func (oracleDialect) tableColumns(ctx context.Context, db *sql.DB, schema, table
 		}
 		c.Nullable = nullable == "Y"
 		expr = strings.TrimSpace(expr)
+		// Oracle has no DROP DEFAULT: a default is removed by setting it to
+		// NULL, and the catalogue then says NULL where every other engine says
+		// nothing.
+		if strings.EqualFold(expr, "NULL") {
+			expr = ""
+		}
 		switch {
 		case virtual == "YES":
 			c.Generated, c.GeneratedKind = expr, "virtual"

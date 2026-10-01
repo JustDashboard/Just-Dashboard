@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -322,6 +323,27 @@ func mssqlTypeName(name string, maxLength, precision, scale int) string {
 	return name
 }
 
+var mssqlRegularNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// mssqlAliasTypeName spells an alias type the way a column declares it. SQL
+// Server looks a bare type name up in dbo and in the login's default schema
+// and nowhere else, so a type that lives in any other schema carries it: the
+// generated CREATE TABLE named such a type bare, and replaying it failed with
+// "cannot find data type". A part is bracketed only where it has to be, which
+// keeps the common case reading as it was declared.
+func mssqlAliasTypeName(schema, name string) string {
+	part := func(p string) string {
+		if mssqlRegularNameRe.MatchString(p) {
+			return p
+		}
+		return "[" + strings.ReplaceAll(p, "]", "]]") + "]"
+	}
+	if schema == "" || strings.EqualFold(schema, "dbo") {
+		return part(name)
+	}
+	return part(schema) + "." + part(name)
+}
+
 func (mssqlDialect) tableColumns(ctx context.Context, db *sql.DB, schema, table string) ([]Column, error) {
 	rows, err := db.QueryContext(ctx, `
 	  SELECT c.name, t.name, c.max_length, c.precision, c.scale, c.is_nullable,
@@ -330,11 +352,12 @@ func (mssqlDialect) tableColumns(ctx context.Context, db *sql.DB, schema, table 
 	         c.is_identity,
 	         ISNULL(CAST(ic.seed_value AS BIGINT), 1), ISNULL(CAST(ic.increment_value AS BIGINT), 1),
 	         c.is_computed, ISNULL(cc.definition, ''), ISNULL(cc.is_persisted, 0),
-	         t.is_user_defined
+	         t.is_user_defined, ts.name
 	  FROM sys.columns c
 	  JOIN sys.objects o ON o.object_id = c.object_id
 	  JOIN sys.schemas s ON s.schema_id = o.schema_id
 	  JOIN sys.types t ON t.user_type_id = c.user_type_id
+	  JOIN sys.schemas ts ON ts.schema_id = t.schema_id
 	  LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
 	  LEFT JOIN sys.identity_columns ic ON ic.object_id = c.object_id AND ic.column_id = c.column_id
 	  LEFT JOIN sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
@@ -351,7 +374,7 @@ func (mssqlDialect) tableColumns(ctx context.Context, db *sql.DB, schema, table 
 	for rows.Next() {
 		var (
 			c                             Column
-			typ, computed                 string
+			typ, typeSchema, computed     string
 			maxLength, precision, scale   int
 			identity, isComputed, persist bool
 			userDefined                   bool
@@ -359,14 +382,14 @@ func (mssqlDialect) tableColumns(ctx context.Context, db *sql.DB, schema, table 
 		)
 		if err := rows.Scan(&c.Name, &typ, &maxLength, &precision, &scale, &c.Nullable,
 			&c.Default, &c.Position, &c.Comment, &identity, &seed, &increment,
-			&isComputed, &computed, &persist, &userDefined); err != nil {
+			&isComputed, &computed, &persist, &userDefined, &typeSchema); err != nil {
 			return nil, err
 		}
 		c.Type = mssqlTypeName(typ, maxLength, precision, scale)
 		if userDefined {
 			// An alias type is used by its own name; its length belongs to the
 			// type's definition, not to the column.
-			c.Type, c.TypeKind = typ, "domain"
+			c.Type, c.TypeKind = mssqlAliasTypeName(typeSchema, typ), "domain"
 		}
 		if identity {
 			c.Identity = fmt.Sprintf("identity(%d,%d)", seed, increment)

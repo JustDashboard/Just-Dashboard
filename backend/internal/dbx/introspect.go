@@ -457,8 +457,14 @@ func renderColumnDefinition(driver Driver, quoted string, c Column, faithful boo
 			line += " GENERATED " + strings.ToUpper(c.Identity) + " AS IDENTITY"
 		}
 	}
-	if !c.Nullable {
+	switch {
+	case !c.Nullable:
 		line += " NOT NULL"
+	case driver == DriverMSSQL:
+		// Left unsaid, SQL Server takes a column's nullability from a session
+		// setting and, for an alias type, from the type: a nullable column of
+		// a type declared NOT NULL came back from a replay refusing NULL.
+		line += " NULL"
 	}
 	if c.Default != "" {
 		line += " DEFAULT " + c.Default
