@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { DATABASE_SURFACES, mockDatabases } from "./database-fixture"
 import { mockProject } from "./deploy-fixture"
 
 /**
@@ -414,6 +415,69 @@ test.describe("at a phone's width", () => {
     })
   }
 })
+
+/**
+ * A database's pages need a connection to draw anything — its strip, its
+ * rail, the page under them — so they are walked with the database fixture,
+ * on a connection that carries both of its labels: the strip's tags, its
+ * status and its three controls are the row these rules are most easily
+ * broken on, and they are on every page.
+ */
+const LABELLED = { rows: { 1: { environment: "production", readOnly: true } } }
+
+for (const [label, viewport] of [
+  ["", { width: 1280, height: 800 }],
+  [" at a phone's width", { width: 390, height: 844 }],
+] as const) {
+  test(`the databases pages keep the rules${label}`, async ({ page }) => {
+    test.setTimeout(DATABASE_SURFACES.length * 10_000)
+    await page.setViewportSize(viewport)
+    await mockDatabases(page, LABELLED)
+
+    for (const path of DATABASE_SURFACES) {
+      await page.goto(path)
+      await page.waitForLoadState("networkidle")
+      await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
+
+      expect(await unnamedControls(page), `unlabelled icon-only controls on ${path}`).toEqual([])
+      expect(await offCentreText(page), `text off its row's centre line on ${path}`).toEqual([])
+      expect(await filledPills(page), `fully rounded filled chips on ${path}`).toEqual([])
+      const seen = await registers(page)
+      expectOneRegister(path, seen)
+      // Adding a database is the section's one sequence with an outcome.
+      expect(seen.registers.includes("flow"), `${path} is in the wrong register`).toBe(
+        path === "/databases/new",
+      )
+      const sideways = await page.evaluate(() =>
+        [document.documentElement, ...document.querySelectorAll("[data-slot=page]")]
+          .map((el) => el.parentElement ?? el)
+          .some((el) => el.scrollWidth > el.clientWidth + 1),
+      )
+      expect(sideways, `${path} scrolls sideways`).toBe(false)
+    }
+  })
+
+  test(`a database's switcher and its Connect popover keep the rules${label}`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await mockDatabases(page, LABELLED)
+    await page.goto("/databases/1/performance")
+
+    await page.getByRole("button", { name: /^Database: shop/ }).click()
+    await expect(page.getByRole("option").first()).toBeVisible()
+    await page.waitForLoadState("networkidle")
+    expect(await unnamedControls(page), "unlabelled controls in the switcher").toEqual([])
+    expect(await offCentreText(page), "text off its centre line in the switcher").toEqual([])
+    expect(await filledPills(page), "a filled chip in the switcher").toEqual([])
+    await page.keyboard.press("Escape")
+
+    await page.getByRole("button", { name: "Connect" }).click()
+    await expect(page.locator("[data-slot=connection-string]")).toBeVisible()
+    await page.waitForLoadState("networkidle")
+    expect(await unnamedControls(page), "unlabelled controls in Connect").toEqual([])
+    expect(await offCentreText(page), "text off its centre line in Connect").toEqual([])
+    expect(await filledPills(page), "a filled chip in Connect").toEqual([])
+  })
+}
 
 /**
  * The reveal rule's touch clause. A cluster shown only on `group-hover` is
