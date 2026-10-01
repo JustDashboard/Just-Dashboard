@@ -1,0 +1,3 @@
+One partition was left out: a partition holds a slice of its parent table's rows, and the parent is the model.
+public.measurements is a partitioned table. It is emitted as an ordinary model; its partitioning is not something this target can describe.
+public.measurements is partitioned: its partitions are not in this script and have to be created with PARTITION OF before it can hold a row.

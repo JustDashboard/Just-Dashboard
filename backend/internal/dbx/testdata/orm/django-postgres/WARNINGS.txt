@@ -1,0 +1,10 @@
+One partition was left out: a partition holds a slice of its parent table's rows, and the parent is the model.
+public.measurements is a partitioned table. It is emitted as an ordinary model; its partitioning is not something this target can describe.
+public.shipments.order_id, line_no is a composite foreign key, which Django has no field for; its columns are plain fields.
+public.audit_log has no primary key. Django will assume an id column that is not there; queries that select or filter on pk will fail.
+public.type_samples.price has type money, which Django has no field for; it is declared as a TextField.
+public.type_samples.flags has type bit(8), which Django has no field for; it is declared as a TextField.
+public.type_samples.search has type tsvector, which Django has no field for; it is declared as a TextField.
+public.type_samples.total is a generated column. Django will try to write it on insert; turn it into a GeneratedField with the database's expression before saving through this model.
+Index customers_lower_email_idx on public.customers is over an expression and was left out; it still exists in the database.
+Index customers_active_idx on public.customers covers only some rows and was left out; it still exists in the database.

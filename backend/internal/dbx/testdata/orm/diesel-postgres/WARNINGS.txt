@@ -1,0 +1,9 @@
+One partition was left out: a partition holds a slice of its parent table's rows, and the parent is the model.
+public.measurements is a partitioned table. It is emitted as an ordinary model; its partitioning is not something this target can describe.
+public.audit_log has no primary key. Diesel cannot describe a table without one, so it was left out.
+public.type_samples.starts_tz has type time with time zone, which Diesel has no Rust type for; it is in schema.rs and left out of the model struct.
+public.type_samples.doc has type xml, which Diesel has no Rust type for; it is in schema.rs and left out of the model struct.
+public.type_samples.flags has type bit(8), which Diesel has no Rust type for; it is in schema.rs and left out of the model struct.
+public.type_samples.search has type tsvector, which Diesel has no Rust type for; it is in schema.rs and left out of the model struct.
+Index customers_lower_email_idx on public.customers is over an expression and was left out; it still exists in the database.
+Index customers_active_idx on public.customers covers only some rows and was left out; it still exists in the database.

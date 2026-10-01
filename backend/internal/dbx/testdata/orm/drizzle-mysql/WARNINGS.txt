@@ -1,0 +1,3 @@
+blog.posts.flags has type set('pinned','featured'), which Drizzle ships no builder for; it is declared as a custom type.
+blog.posts.cover has type mediumblob, which Drizzle ships no builder for; it is declared as a custom type.
+Index ft_posts_body on blog.posts is a full-text index and was left out; it still exists in the database.
