@@ -34,10 +34,56 @@ Redis on pure-Go drivers, so the image still needs no CGO.
 Pool initialization is coordinated per connection ID. Dialing and pinging do not hold the manager's
 map lock, and waiters can cancel independently. Closing or editing a connection invalidates an
 initialization already in progress; its old credentials cannot publish a pool afterwards.
-Completion and diagram reads batch catalogue facts for up to 500 table names per query, with the
-diagram's existing 120-table cap applied first. Each dialect keeps its type spelling, key order and
-referential actions. A refused bulk read falls back to the existing per-table reads so restricted
-accounts retain partial results. Full table details and mutation preconditions use fresh dialect reads.
+Completion, relations and diagram reads batch catalogue facts for up to 500 table names per query
+(`schema_catalog.go`). The diagram draws 120 tables unless `?limit=` asks for more (up to 1000) and the
+outline 5000 (up to 20000); both answer with `truncated`, `total` and `limit`, so a page says how much it
+left out rather than drawing a third of a schema as if it were all of it. Every map key and node id names
+a table by `dbx.TableKey(schema, name)`: keyed by the bare name, a table called `users` in two schemas was
+one entry, and one of them silently took the other's place. Partitions are listed as `partition` and are
+not drawn; views and materialized views are not asked for foreign keys. Each dialect keeps its type
+spelling, key order and referential actions. A refused bulk read falls back to per-table reads so
+restricted accounts retain partial results. Full table details use fresh reads.
+
+**The catalogue is per engine, and optional per group.** `GET /databases/{id}/catalog` lists the schemas
+and, for one of them, the tables, views, materialized views, routines, triggers, sequences and types;
+`GET /databases/{id}/object` returns one object's CREATE text. Both are on the read surface. The queries
+live in `dbx/catalog_<engine>.go` as methods on the dialect types behind `catalogDialect` — a second
+interface, so the browse, mutate and dump paths do not grow with it. A group an engine lacks is absent
+from the reply, which is how a tree knows not to draw an empty "Sequences" under MySQL; a group that could
+not be read is an empty list with its reason under `errors`, because the least-privileged logins are
+exactly the ones that can read `pg_class` and not `pg_proc`. Each group is bounded (5000, `?limit=` up to
+20000) and says when it was cut. Postgres is read from `pg_catalog`, never `information_schema`: the
+standard views have no row for a materialized view's columns, spell every array `ARRAY` and every enum
+`USER-DEFINED`, and hide a constraint from a login that holds only SELECT on its table — a read-only
+account saw every table as keyless.
+
+**A table's DDL has two readers.** Where the engine keeps no text of its own (Postgres, SQL Server) the
+CREATE TABLE is generated. `dbx.Detail` returns the form a dump replays ahead of the rows: columns,
+defaults, keys, constraints and indexes, and deliberately not identity or generated-column clauses, which
+refuse the value an INSERT is about to supply. `dbx.DescribeTable` — what `GET /databases/{id}/table`
+serves — is the same read with the DDL written as the table is declared, and a view answered with its own
+definition. Both carry check, unique and exclusion constraints, incoming foreign keys, comments, real
+type names with enum labels, and each index's method, predicate, included columns and size.
+
+**A schema change is planned, then shown or run.** Every `/databases/{id}/ddl/*` handler builds a
+`dbx.DDLPlan` — the exact statements, in order — and `runDDL` returns it for `?preview=1` or executes it,
+so the statement a dialog shows is the server's own and not a page's approximation of it. Each planner
+starts at `ddlDialect(driver, op)`, which refuses an operation the engine does not have in words that
+name the engine (`ddlRefusals`): SQLite cannot alter a column or add a constraint to an existing table,
+and ClickHouse is sent its own form (`RENAME TABLE`, `MODIFY COLUMN`, `ALTER TABLE … DROP INDEX`) or a
+refusal, never generic DDL. Capability follows cost. A change that only adds needs `service.control`;
+every drop is behind `s.destructive`; and what depends on the body is decided in `runDDL` and fails
+closed, for a preview as much as for a run — a new column type, which rewrites the column, and any call in
+the operator's own SQL (a CHECK condition, an index predicate, a USING conversion, a function default)
+outside the short lists `pureFunctions` and `safeDefaults`. The engine runs such SQL against rows, and a
+form must not be a cheaper way to run a function than the console is. Free SQL fragments are wrapped in
+the server's own parentheses and held there by `validateFragment`, which follows each engine's own
+quoting — a bracket quotes an identifier on SQL Server and is a subscript on Postgres, and a scanner that
+treated it alike on both would let text hide from one of them. A view's query goes through the query
+runner's own splitter and classifier. MySQL's `MODIFY COLUMN` replaces a whole column definition and SQL
+Server keeps a default as a constraint object, so those plans read the catalogue to restate what they do
+not change. No schema route takes a typed phrase, and dropping a schema never cascades: the engine's
+refusal of a schema that still holds something is the guard.
 
 - **`Dialect` is the whole abstraction**: driver name, quote character, bind marker, pagination tail,
   catalogue queries, DDL keywords, session list, size query — one method each, six implementations. The

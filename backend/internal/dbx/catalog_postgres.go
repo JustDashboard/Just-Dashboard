@@ -356,7 +356,6 @@ func (postgresDialect) tableColumns(ctx context.Context, db *sql.DB, schema, tab
 	         COALESCE(to_jsonb(a)->>'attgenerated', ''),
 	         t.typtype::text,
 	         t.typcategory::text,
-	         COALESCE(et.typtype::text, ''),
 	         COALESCE((SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
 	                    WHERE e.enumtypid = CASE WHEN t.typtype = 'e' THEN t.oid
 	                                             WHEN et.typtype = 'e' THEN et.oid
@@ -378,12 +377,12 @@ func (postgresDialect) tableColumns(ctx context.Context, db *sql.DB, schema, tab
 	out := []Column{}
 	for rows.Next() {
 		var (
-			c                                   Column
-			expr, identity, generated           string
-			typtype, category, elemType, labels string
+			c                         Column
+			expr, identity, generated string
+			typtype, category, labels string
 		)
 		if err := rows.Scan(&c.Name, &c.Type, &c.Nullable, &expr, &c.Position, &c.Comment,
-			&identity, &generated, &typtype, &category, &elemType, &labels); err != nil {
+			&identity, &generated, &typtype, &category, &labels); err != nil {
 			return nil, err
 		}
 		switch {
