@@ -15,11 +15,14 @@ A change that weakens any of these has to say so explicitly.
    operations — the deployment run route's `stop`/`restart` alongside `deploy`/`redeploy` — cannot be
    wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
-   request, the handler checks by hand and fails closed: `dbx.Classify` for SQL, `api.authoriseSpec` for a
-   container spec that is privileged or mounts a host path, `api.logTargetFor` for a log source that is
-   login and sudo records (auth data needs `system.admin` on every `/logs` route that reads a source —
-   except the whole journal (`journal:`), which stays `read` as it was before the gate; those lines are in
-   it unfiltered, a known gap rather than the boundary
+   request, the handler checks by hand and fails closed: `dbx.Classify` for SQL, `api.runDDL` for a schema
+   form that changes a column's type or whose own SQL (a CHECK condition, an index predicate, a USING
+   conversion, a function default) calls anything `dbx` does not vouch for — either needs the destructive
+   capability on a route that otherwise asks for `service.control`, for a preview as much as for a run —
+   `api.authoriseSpec` for a container spec that is privileged or mounts a host path, `api.logTargetFor`
+   for a log source that is login and sudo records (auth data needs `system.admin` on every `/logs` route
+   that reads a source — except the whole journal (`journal:`), which stays `read` as it was before the
+   gate; those lines are in it unfiltered, a known gap rather than the boundary
    ([observability-security](../backend/observability-security.md))).
 5. Every state-changing request lands in the audit log.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file

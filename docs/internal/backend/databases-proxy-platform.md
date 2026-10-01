@@ -76,14 +76,34 @@ every drop is behind `s.destructive`; and what depends on the body is decided in
 closed, for a preview as much as for a run — a new column type, which rewrites the column, and any call in
 the operator's own SQL (a CHECK condition, an index predicate, a USING conversion, a function default)
 outside the short lists `pureFunctions` and `safeDefaults`. The engine runs such SQL against rows, and a
-form must not be a cheaper way to run a function than the console is. Free SQL fragments are wrapped in
+form must not be a cheaper way to run a function than the console is. `unvouchedCalls` reads the fragment
+as the engine's tokens, so a name is one name however it is spaced or qualified, and on Postgres names a
+dotted reference whether or not a parenthesis follows it, because `t.total` there is `total(t)` when `t`
+has no such column.
+
+**What a form writes into a statement cannot leave its place.** A column type is the one fragment that
+is neither quoted nor bound nor wrapped: it follows the column's name, and what follows it is the rest
+of the statement. `validateType` (`ddl_type.go`) therefore matches a type against what a type is — a
+name, one argument list held to what that engine's types take, one of a closed set of qualifiers, array
+brackets — rather than refusing a list of words: `integer, DROP COLUMN email` was a second action of the
+same ALTER TABLE, for an account refused that drop on its own route. Free SQL fragments are wrapped in
 the server's own parentheses and held there by `validateFragment`, which follows each engine's own
 quoting — a bracket quotes an identifier on SQL Server and is a subscript on Postgres, and a scanner that
 treated it alike on both would let text hide from one of them. A view's query goes through the query
-runner's own splitter and classifier. MySQL's `MODIFY COLUMN` replaces a whole column definition and SQL
-Server keeps a default as a constraint object, so those plans read the catalogue to restate what they do
-not change. No schema route takes a typed phrase, and dropping a schema never cascades: the engine's
-refusal of a schema that still holds something is the guard.
+runner's own splitter and classifier. SQLite statements are written unqualified, so a change aimed at an
+attached database is refused rather than landing on main's table of the same name.
+
+**A plan that restates a column says everything again.** MySQL's `MODIFY COLUMN` replaces a whole
+column definition, SQL Server's `ALTER COLUMN` restates type, collation and nullability together and
+keeps a default as a constraint object, so those plans read the catalogue first. `readMySQLColumn`
+carries the collation, default, `AUTO_INCREMENT`, `ON UPDATE`, `INVISIBLE`, a spatial reference system
+and a MariaDB column's own `CHECK` — which is all that makes a MariaDB JSON column one — and refuses,
+by name, a column whose `EXTRA` holds an attribute it does not know rather than drop it. A read the
+engine refuses is `dbx.ErrPlanRead` and answers `502`, not `400`: the request was not wrong. A preview
+that could not be drawn up leaves no audit entry — a dialog previews as the operator types — while one
+refused for the capability it would need is recorded under the change's own action. No schema route
+takes a typed phrase, and dropping a schema never cascades: the engine's refusal of a schema that still
+holds something is the guard.
 
 - **`Dialect` is the whole abstraction**: driver name, quote character, bind marker, pagination tail,
   catalogue queries, DDL keywords, session list, size query — one method each, six implementations. The
