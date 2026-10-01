@@ -128,7 +128,7 @@ type MongoSchema struct {
 
 // MongoAnalyseSchema samples a collection and describes its fields.
 func MongoAnalyseSchema(ctx context.Context, client *mongo.Client, dbName, collection string, spec MongoSchemaSpec) (*MongoSchema, error) {
-	if err := mongoNamespace(dbName, collection); err != nil {
+	if err := mongoReadable(ctx, client, dbName, collection); err != nil {
 		return nil, err
 	}
 	filter, err := mongoParseOptionalDocument("filter", spec.Filter)

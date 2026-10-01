@@ -226,27 +226,61 @@ func mongoFindWriteKey(v bson.RawValue, depth int) string {
 	return ""
 }
 
-// mongoGuardPipeline refuses a pipeline that reaches a credential collection
-// through a stage that reads another collection, which would otherwise be a
-// way around the refusal to open it directly.
+// mongoGuardPipeline refuses a pipeline that names a credential collection in
+// a stage that reads another collection, which would otherwise be a way
+// around the refusal to open it directly. It reads the pipeline only; what
+// the names it finds are views of is mongoGuardPipelineRead's to ask.
 func mongoGuardPipeline(dbName string, stages []bson.Raw) error {
-	if dbName != "admin" {
-		return nil
-	}
-	for _, name := range mongoPipelineCollections(stages, 0) {
-		if err := mongoGuardCredentials(dbName, name); err != nil {
+	for _, ref := range mongoPipelineCollections(stages, 0) {
+		if ref.db == "" {
+			ref.db = dbName
+		}
+		if err := mongoGuardCredentials(ref.db, ref.collection); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// mongoGuardPipelineRead is mongoGuardPipeline for a pipeline about to be
+// run: the collection it starts from and every one it joins are also
+// followed through the views they may be.
+func mongoGuardPipelineRead(ctx context.Context, client *mongo.Client, dbName, collection string, stages []bson.Raw) error {
+	if err := mongoGuardPipeline(dbName, stages); err != nil {
+		return err
+	}
+	names := []string{collection}
+	for _, ref := range mongoPipelineCollections(stages, 0) {
+		if ref.db == "" || ref.db == dbName {
+			names = append(names, ref.collection)
+		}
+	}
+	return mongoGuardRead(ctx, client, dbName, names...)
+}
+
+// mongoCollRefTo is a collection a pipeline stage reads besides its own. db
+// is empty for one in the database the pipeline runs in.
+type mongoCollRefTo struct{ db, collection string }
+
 // mongoPipelineCollections lists the collections a pipeline names: the ones
-// it joins, unions with or walks, at any depth.
-func mongoPipelineCollections(stages []bson.Raw, depth int) []string {
-	out := []string{}
+// it joins, unions with or walks, at any depth, and the one it writes into.
+func mongoPipelineCollections(stages []bson.Raw, depth int) []mongoCollRefTo {
+	out := []mongoCollRefTo{}
 	if depth > mongoMaxDepth {
 		return out
+	}
+	// named reads a collection given as its name or as { db, coll }, which
+	// reaches into another database. $lookup takes that form for a short list
+	// of the server's own collections, and the replication log is on it.
+	named := func(v bson.RawValue) {
+		if coll, ok := v.StringValueOK(); ok {
+			out = append(out, mongoCollRefTo{collection: coll})
+		} else if other, ok := v.DocumentOK(); ok {
+			ref := mongoCollRefTo{}
+			ref.db, _ = other.Lookup("db").StringValueOK()
+			ref.collection, _ = other.Lookup("coll").StringValueOK()
+			out = append(out, ref)
+		}
 	}
 	for _, stage := range stages {
 		name := mongoStageName(stage)
@@ -254,17 +288,21 @@ func mongoPipelineCollections(stages []bson.Raw, depth int) []string {
 		switch name {
 		case "$lookup", "$graphLookup":
 			if doc, ok := spec.DocumentOK(); ok {
-				if from, ok := doc.Lookup("from").StringValueOK(); ok {
-					out = append(out, from)
-				}
+				named(doc.Lookup("from"))
 			}
 		case "$unionWith":
-			if coll, ok := spec.StringValueOK(); ok {
-				out = append(out, coll)
-			} else if doc, ok := spec.DocumentOK(); ok {
-				if coll, ok := doc.Lookup("coll").StringValueOK(); ok {
-					out = append(out, coll)
-				}
+			if doc, ok := spec.DocumentOK(); ok {
+				named(doc.Lookup("coll"))
+			} else {
+				named(spec)
+			}
+		case "$out":
+			named(spec)
+		case "$merge":
+			if doc, ok := spec.DocumentOK(); ok {
+				named(doc.Lookup("into"))
+			} else {
+				named(spec)
 			}
 		}
 		for _, sub := range mongoNestedPipelines(spec, mongoReadStages[name]) {
@@ -306,7 +344,7 @@ func MongoRunPipeline(ctx context.Context, client *mongo.Client, dbName, collect
 	if err != nil {
 		return nil, err
 	}
-	if err := mongoGuardPipeline(dbName, stages); err != nil {
+	if err := mongoGuardPipelineRead(ctx, client, dbName, collection, stages); err != nil {
 		return nil, err
 	}
 	limit := mongoClampLimit(spec.Limit)
@@ -447,7 +485,7 @@ func MongoPreviewPipeline(ctx context.Context, client *mongo.Client, dbName, col
 	if err != nil {
 		return nil, err
 	}
-	if err := mongoGuardPipeline(dbName, stages); err != nil {
+	if err := mongoGuardPipelineRead(ctx, client, dbName, collection, stages); err != nil {
 		return nil, err
 	}
 	if spec.Stage < -1 || spec.Stage >= len(stages) {

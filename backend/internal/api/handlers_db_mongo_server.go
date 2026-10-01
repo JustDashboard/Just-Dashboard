@@ -433,6 +433,11 @@ func (s *Server) handleMongoCommand(w http.ResponseWriter, r *http.Request) erro
 	defer client.Disconnect(context.Background())
 	ctx, cancel := timeoutCtx(r, mongoCommandTimeout)
 	defer cancel()
+	// The one check that needs the server: a collection the command names
+	// may be a view over the credentials the guard above refused by name.
+	if err := dbx.MongoGuardCommandViews(ctx, client, db, cmd); err != nil {
+		return mongoFailure(err)
+	}
 	reply, err := dbx.MongoRunCommand(ctx, client, db, cmd)
 	if err != nil {
 		return mongoFailure(err)

@@ -95,7 +95,7 @@ var mongoVerbosities = map[string]bool{"queryPlanner": true, "executionStats": t
 
 // MongoExplain explains a find or an aggregation.
 func MongoExplain(ctx context.Context, client *mongo.Client, dbName, collection string, spec MongoExplainSpec) (*MongoExplainResult, error) {
-	if err := mongoNamespace(dbName, collection); err != nil {
+	if err := mongoReadable(ctx, client, dbName, collection); err != nil {
 		return nil, err
 	}
 	verbosity := spec.Verbosity
@@ -120,7 +120,7 @@ func MongoExplain(ctx context.Context, client *mongo.Client, dbName, collection 
 		if err != nil {
 			return nil, err
 		}
-		if err := mongoGuardPipeline(dbName, stages); err != nil {
+		if err := mongoGuardPipelineRead(ctx, client, dbName, collection, stages); err != nil {
 			return nil, err
 		}
 		info := mongoClassifyStages(stages)

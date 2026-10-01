@@ -212,6 +212,16 @@ func mongoReadFailure(err error) error {
 	return mongoFailure(err)
 }
 
+// mongoLegacyFailure is for the routes the first Mongo browser used, which
+// answer 400 for whatever went wrong and are kept answering so. The one
+// thing they did not refuse then and do now gets the code it has everywhere.
+func mongoLegacyFailure(err error) error {
+	if errors.Is(err, dbx.ErrMongoWithheld) {
+		return mongoFailure(err)
+	}
+	return httpx.BadRequest("%v", err)
+}
+
 // mongoNeedsDestructive applies, by hand, what s.destructive applies to a
 // whole route: the capability and the tighter budget. It is for the routes
 // that are routine by default and destructive by one option.
@@ -286,7 +296,7 @@ func (s *Server) handleMongoInsert(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	id, err := dbx.MongoInsert(ctx, client, db, collection, req.Document)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return mongoLegacyFailure(err)
 	}
 	httpx.SetAudit(r, "database.document.insert", conn.Name,
 		map[string]any{"database": db, "collection": collection, "id": id})
@@ -312,7 +322,7 @@ func (s *Server) handleMongoReplace(w http.ResponseWriter, r *http.Request) erro
 	defer cancel()
 	n, err := dbx.MongoReplace(ctx, client, db, collection, req.Filter, req.Document)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return mongoLegacyFailure(err)
 	}
 	httpx.SetAudit(r, "database.document.replace", conn.Name,
 		map[string]any{"database": db, "collection": collection, "filter": req.Filter, "modified": n})
@@ -341,7 +351,7 @@ func (s *Server) handleMongoDelete(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	n, err := dbx.MongoDelete(ctx, client, db, collection, req.Filter, req.Many)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return mongoLegacyFailure(err)
 	}
 	httpx.SetAudit(r, "database.document.delete", conn.Name,
 		map[string]any{"database": db, "collection": collection, "filter": req.Filter, "deleted": n})
@@ -440,7 +450,7 @@ func (s *Server) handleMongoCreateCollection(w http.ResponseWriter, r *http.Requ
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	if err := dbx.MongoCreateCollection(ctx, client, db, collection); err != nil {
-		return httpx.BadRequest("%v", err)
+		return mongoLegacyFailure(err)
 	}
 	httpx.SetAudit(r, "database.collection.create", conn.Name,
 		map[string]any{"database": db, "collection": collection})
@@ -465,7 +475,7 @@ func (s *Server) handleMongoDropCollection(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
 	if err := dbx.MongoDropCollection(ctx, client, db, collection); err != nil {
-		return httpx.BadRequest("%v", err)
+		return mongoLegacyFailure(err)
 	}
 	httpx.SetAudit(r, "database.collection.drop", conn.Name,
 		map[string]any{"database": db, "collection": collection})

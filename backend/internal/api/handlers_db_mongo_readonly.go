@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,33 +19,33 @@ import (
 // an error saying why not otherwise, worded to follow "this connection is
 // protected, and …".
 //
-// They use the classifiers the handlers use, so a request cannot be a read
-// to one and a write to the other. And they fail closed: a body that cannot
-// be read is not a read.
+// They read the body into the type the handler reads it into, with the
+// decoder set as the handler's is, and then use the classifier the handler
+// uses — so a request cannot be a read to one and a write to the other. The
+// first half matters as much as the second: encoding/json matches a field
+// name without regard to case and keeps the last one it finds, so a body
+// read any other way (as a map of exact keys, say) is a different request
+// from the one the handler runs as soon as a key appears twice in two
+// spellings. And they fail closed: a body that cannot be read is not a read.
 
-func mongoBodyField(body []byte, field string) (string, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &fields); err != nil {
-		return "", errors.New("the request could not be read to see what it does")
+// mongoReadOnlyBody decodes a body the way httpx.DecodeJSON will when the
+// handler asks.
+func mongoReadOnlyBody(body []byte, dst any) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return errors.New("the request could not be read to see what it does")
 	}
-	raw, ok := fields[field]
-	if !ok {
-		return "", nil
-	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err != nil {
-		return "", fmt.Errorf("the request's %s could not be read to see what it does", field)
-	}
-	return text, nil
+	return nil
 }
 
 // mongoReadOnlyPipeline allows POST /aggregate when the pipeline only reads.
 func mongoReadOnlyPipeline(body []byte) error {
-	pipeline, err := mongoBodyField(body, "pipeline")
-	if err != nil {
+	var req mongoAggregateRequest
+	if err := mongoReadOnlyBody(body, &req); err != nil {
 		return err
 	}
-	info, err := dbx.MongoClassifyPipeline(pipeline)
+	info, err := dbx.MongoClassifyPipeline(req.Pipeline)
 	if err != nil {
 		return errors.New("the pipeline could not be read to see whether it writes")
 	}
@@ -60,11 +61,11 @@ func mongoReadOnlyPipeline(body []byte) error {
 // mongoReadOnlyCommand allows POST /mongo/command when the command is one
 // the console classifies as a read.
 func mongoReadOnlyCommand(body []byte) error {
-	command, err := mongoBodyField(body, "command")
-	if err != nil {
+	var req mongoCommandRequest
+	if err := mongoReadOnlyBody(body, &req); err != nil {
 		return err
 	}
-	_, verdict, err := dbx.MongoClassifyCommand(command)
+	_, verdict, err := dbx.MongoClassifyCommand(req.Command)
 	if err != nil {
 		return errors.New("the command could not be read to see what it does")
 	}
@@ -75,7 +76,9 @@ func mongoReadOnlyCommand(body []byte) error {
 }
 
 // mongoReadOnlyDryRun allows PATCH and DELETE /mongo/documents when the
-// request only counts what it would reach.
+// request only counts what it would reach. The two routes read their bodies
+// into different types, so this reads the one field they share, named and
+// typed as both have it.
 func mongoReadOnlyDryRun(body []byte) error {
 	var fields struct {
 		DryRun bool `json:"dryRun"`

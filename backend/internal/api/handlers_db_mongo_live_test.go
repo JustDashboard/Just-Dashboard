@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // The Mongo routes driven over HTTP against a real server: the request and
@@ -34,7 +38,35 @@ type mongoLive struct {
 // is in production, so what a handler records can be read back.
 func liveMongoAPI(t *testing.T, role auth.Role) *mongoLive {
 	t.Helper()
-	dsn := envOr("JD_TEST_MONGO_DSN", "mongodb://127.0.0.1:27017/jdtest")
+	return liveMongoAPIAt(t, role, envOr("JD_TEST_MONGO_DSN", "mongodb://127.0.0.1:27017/jdtest"))
+}
+
+// liveMongoServerWide is liveMongoAPI for a test that changes something the
+// whole server shares: the profiler's threshold, an operation in flight. It
+// runs only against a server the environment names — the default address is
+// whatever happens to be listening there.
+func liveMongoServerWide(t *testing.T, role auth.Role) *mongoLive {
+	t.Helper()
+	if os.Getenv("JD_TEST_MONGO_DSN") == "" {
+		t.Skip("set JD_TEST_MONGO_DSN to a server this test may change the settings of")
+	}
+	return liveMongoAPI(t, role)
+}
+
+// liveMongoPrivate is a server that is this test's alone, where it may make
+// accounts and views in the admin database. It is the replica set the dbx
+// tests use for the same reason.
+func liveMongoPrivate(t *testing.T, role auth.Role) *mongoLive {
+	t.Helper()
+	dsn := os.Getenv("JD_TEST_MONGO_RS_DSN")
+	if dsn == "" {
+		t.Skip("set JD_TEST_MONGO_RS_DSN to a private replica set to run this")
+	}
+	return liveMongoAPIAt(t, role, dsn)
+}
+
+func liveMongoAPIAt(t *testing.T, role auth.Role, dsn string) *mongoLive {
+	t.Helper()
 	s := testServer(t)
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
@@ -176,13 +208,24 @@ func TestLiveAPIMongoDocuments(t *testing.T) {
 		t.Errorf("a missing document: %s", rec.Body.String())
 	}
 
-	// Replace: unchanged, then guarded against a change made in between.
+	// Replace: unchanged, then guarded against a change made in between,
+	// whichever way the editor says what it read.
 	var written dbx.MongoWriteResult
-	m.call(http.MethodPut, "/mongo/documents", obj{
-		"collection": coll, "id": ann.ID, "document": ann.Canonical, "expected": ann.Canonical,
-	}, http.StatusOK, &written)
-	if written.Matched != 1 || written.Modified != 0 {
-		t.Errorf("replacing a document with itself = %+v", written)
+	if len(ann.Digest) != 64 {
+		t.Errorf("digest = %q", ann.Digest)
+	}
+	for _, guard := range []obj{{"expectedDigest": ann.Digest}, {"expected": ann.Canonical}} {
+		body := obj{"collection": coll, "id": ann.ID, "document": ann.Canonical}
+		for k, v := range guard {
+			body[k] = v
+		}
+		m.call(http.MethodPut, "/mongo/documents", body, http.StatusOK, &written)
+		if written.Matched != 1 || written.Modified != 0 {
+			t.Errorf("replacing a document with itself, guarded by %v = %+v", guard, written)
+		}
+	}
+	if d := m.audited("database.document.replace"); !strings.Contains(d, `"guarded":true`) || strings.Contains(d, secretMarker) {
+		t.Errorf("replace audit = %s", d)
 	}
 	m.call(http.MethodPatch, "/mongo/documents", obj{
 		"collection": coll, "filter": `{ name: "Ann" }`, "update": `{ $set: { touched: "` + secretMarker + `" } }`,
@@ -193,12 +236,19 @@ func TestLiveAPIMongoDocuments(t *testing.T) {
 	if d := m.audited("database.document.update"); !strings.Contains(d, `"matched":1`) || !strings.Contains(d, `name`) || strings.Contains(d, secretMarker) {
 		t.Errorf("update audit = %s", d)
 	}
-	rec = m.call(http.MethodPut, "/mongo/documents", obj{
-		"collection": coll, "id": ann.ID, "document": ann.Canonical, "expected": ann.Canonical,
-	}, http.StatusConflict, nil)
-	if mongoErrorCode(rec) != "document_changed" {
-		t.Errorf("a stale replace: %s", rec.Body.String())
+	for _, guard := range []obj{{"expectedDigest": ann.Digest}, {"expected": ann.Canonical}} {
+		body := obj{"collection": coll, "id": ann.ID, "document": ann.Canonical}
+		for k, v := range guard {
+			body[k] = v
+		}
+		rec = m.call(http.MethodPut, "/mongo/documents", body, http.StatusConflict, nil)
+		if mongoErrorCode(rec) != "document_changed" {
+			t.Errorf("a stale replace: %s", rec.Body.String())
+		}
 	}
+	m.call(http.MethodPut, "/mongo/documents", obj{
+		"collection": coll, "id": ann.ID, "document": ann.Canonical, "expectedDigest": ann.Digest, "expected": ann.Canonical,
+	}, http.StatusBadRequest, nil)
 
 	// A dry run counts and writes nothing, and is not on the audit trail.
 	var before int
@@ -504,10 +554,44 @@ func TestLiveAPIMongoQueries(t *testing.T) {
 	if exports != 3 {
 		t.Errorf("%d exports on the audit trail, want the 3 that ran", exports)
 	}
+	if d := m.audited("database.export"); !strings.Contains(d, `"collection":"`+coll+`"`) || !strings.Contains(d, `"format":"csv"`) || !strings.Contains(d, `"limit":3`) {
+		t.Errorf("export audit = %s", d)
+	}
+
+	// An export that breaks off after its first byte is on the trail twice:
+	// once as begun, when it was, and once as the failure it became.
+	broken := &breakingWriter{ResponseRecorder: httptest.NewRecorder()}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != http.ErrAbortHandler {
+				t.Errorf("an export whose reader went away ended with %v, want the response broken off", recovered)
+			}
+		}()
+		m.router.ServeHTTP(broken, httptest.NewRequest(http.MethodGet, m.base+"/mongo/export?collection="+coll, nil))
+	}()
+	var (
+		failures int
+		detail   string
+		status   int
+	)
+	_ = m.s.Store.DB.QueryRow(`SELECT COUNT(*), COALESCE(MAX(detail), ''), COALESCE(MAX(status), 0) FROM audit_log WHERE action = 'database.export' AND success = 0`).
+		Scan(&failures, &detail, &status)
+	if failures != 1 || status != http.StatusBadGateway || !strings.Contains(detail, `"error":"the reader went away"`) || !strings.Contains(detail, `"rows"`) {
+		t.Errorf("%d failed exports on the trail, status %d, detail %s", failures, status, detail)
+	}
+	_ = m.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'database.export' AND success = 1`).Scan(&exports)
+	if exports != 4 {
+		t.Errorf("%d exports recorded as begun, want 4", exports)
+	}
 }
 
+// breakingWriter is a client that reads nothing of a download.
+type breakingWriter struct{ *httptest.ResponseRecorder }
+
+func (*breakingWriter) Write([]byte) (int, error) { return 0, errors.New("the reader went away") }
+
 func TestLiveAPIMongoServer(t *testing.T) {
-	m := liveMongoAPI(t, auth.RoleAdmin)
+	m := liveMongoServerWide(t, auth.RoleAdmin)
 
 	// The shared stats route: the keys it had, and the counters beside them.
 	var stats struct {
@@ -564,6 +648,22 @@ func TestLiveAPIMongoServer(t *testing.T) {
 		t.Errorf("profiler audit = %s", d)
 	}
 	m.call(http.MethodPut, "/mongo/profiler", obj{"level": 7}, http.StatusBadRequest, nil)
+	// A change that names no level leaves the level alone. It used to be
+	// read as level 0, so moving the threshold turned the profiler off.
+	m.call(http.MethodPut, "/mongo/profiler", obj{"level": 1, "slowMs": profile.SlowMs}, http.StatusOK, &set)
+	t.Cleanup(func() {
+		m.call(http.MethodPut, "/mongo/profiler", obj{"level": profile.Level, "slowMs": profile.SlowMs}, http.StatusOK, nil)
+		// Turning the profiler on made the collection it writes to; a server
+		// that had it off is left without one.
+		if profile.Level == 0 {
+			m.drop("system.profile")
+		}
+	})
+	m.call(http.MethodPut, "/mongo/profiler", obj{"slowMs": profile.SlowMs + 1}, http.StatusOK, &set)
+	if set.Level != 1 || set.SlowMs != profile.SlowMs+1 {
+		t.Errorf("moving only the threshold = %+v, want level 1 kept", set)
+	}
+	m.call(http.MethodPut, "/mongo/profiler", obj{}, http.StatusBadRequest, nil)
 
 	var repl dbx.MongoReplication
 	m.call(http.MethodGet, "/mongo/replication", nil, http.StatusOK, &repl)
@@ -683,5 +783,137 @@ func TestLiveAPIMongoReadOnlyRole(t *testing.T) {
 	admin.call(http.MethodPost, "/mongo/find", obj{"collection": coll}, http.StatusOK, &left)
 	if left.Returned != 2 {
 		t.Errorf("the refused writes changed the collection: %d documents", left.Returned)
+	}
+}
+
+// The credential guards, against a server that has credentials to guard: a
+// real account, and a view somebody made over admin.system.users outside the
+// dashboard. Nothing the routes answer may carry a password verifier.
+func TestLiveAPIMongoCredentialGuards(t *testing.T) {
+	m := liveMongoPrivate(t, auth.RoleAdmin)
+	const user, view, coll = "jd_api_guard_user", "jd_api_guard_view", "jd_api_guard"
+	command := func(m *mongoLive, database, text string, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		return m.call(http.MethodPost, "/mongo/command", obj{"database": database, "command": text}, want, nil)
+	}
+	cleanup := func() {
+		mongoDo(m.router, http.MethodDelete, m.base+"/mongo/users", `{"user":"`+user+`"}`)
+		mongoDo(m.router, http.MethodPost, m.base+"/mongo/command", `{"database":"admin","command":"{ drop: '`+view+`' }"}`)
+		m.drop(coll)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	m.call(http.MethodPost, "/mongo/users", obj{"user": user, "password": "pw-" + secretMarker, "roles": []obj{{"role": "read", "db": m.db}}}, http.StatusOK, nil)
+	m.call(http.MethodPost, "/mongo/documents", obj{"collection": coll, "documents": `{ _id: 1 }`}, http.StatusOK, nil)
+
+	// The console refuses to make the view, in either spelling of making one.
+	for _, text := range []string{
+		`{ create: "` + view + `", viewOn: "system.users", pipeline: [] }`,
+		`{ create: "` + view + `", viewOn: "` + coll + `", pipeline: [ { $unionWith: "system.users" } ] }`,
+	} {
+		if rec := command(m, "admin", text, http.StatusBadRequest); mongoErrorCode(rec) != "command_blocked" {
+			t.Errorf("%s: %s", text, rec.Body.String())
+		}
+	}
+	// So it is made the way somebody with a shell would have made it.
+	client, err := dbx.MongoClient(context.Background(), os.Getenv("JD_TEST_MONGO_RS_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	if err := client.Database("admin").RunCommand(context.Background(), bson.D{
+		{Key: "create", Value: view}, {Key: "viewOn", Value: "system.users"}, {Key: "pipeline", Value: bson.A{}},
+	}).Err(); err != nil {
+		t.Fatalf("making the view: %v", err)
+	}
+	// The view is there and the server reads through it: this is what the
+	// guard stands in front of.
+	raw, err := client.Database("admin").Collection(view).FindOne(context.Background(), bson.D{{Key: "user", Value: user}}).Raw()
+	if err != nil || !strings.Contains(raw.String(), "storedKey") {
+		t.Fatalf("the view does not show credentials, so there is nothing to guard: %v", err)
+	}
+
+	withheld := func(rec *httptest.ResponseRecorder, what string) {
+		t.Helper()
+		if mongoErrorCode(rec) != "credentials_withheld" {
+			t.Errorf("%s: %s", what, rec.Body.String())
+		}
+		for _, secret := range []string{"storedKey", "serverKey", "SCRAM-SHA"} {
+			if strings.Contains(rec.Body.String(), secret) {
+				t.Errorf("%s answered with %q", what, secret)
+			}
+		}
+	}
+	ro := liveMongoPrivate(t, auth.RoleReadOnly)
+	for _, path := range []string{"/mongo/find", "/mongo/count", "/mongo/schema", "/mongo/explain", "/mongo/validation/check"} {
+		withheld(ro.call(http.MethodPost, path, obj{"database": "admin", "collection": view}, http.StatusForbidden, nil), path+" on the view")
+	}
+	withheld(ro.call(http.MethodPost, "/mongo/aggregate/preview", obj{
+		"database": "admin", "collection": "system.version", "pipeline": `[ { $unionWith: "` + view + `" } ]`, "stage": 0,
+	}, http.StatusForbidden, nil), "a preview joining the view")
+	withheld(ro.call(http.MethodGet, "/mongo/export?database=admin&collection="+view, nil, http.StatusForbidden, nil), "export of the view")
+	if rec := mongoDo(ro.router, http.MethodGet, ro.base+"/browse?schema=admin&table="+view, ""); rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "storedKey") {
+		t.Errorf("the shared browse route opened the view: %d %s", rec.Code, rec.Body.String())
+	}
+	withheld(m.call(http.MethodPost, "/aggregate", obj{
+		"database": "admin", "collection": "system.version", "pipeline": `[ { $lookup: { from: "` + view + `", as: "u", pipeline: [] } } ]`,
+	}, http.StatusForbidden, nil), "a pipeline joining the view")
+	for _, text := range []string{
+		`{ find: "` + view + `" }`,
+		`{ count: "` + view + `", query: { "credentials.SCRAM-SHA-256.storedKey": /^a/ } }`,
+		`{ aggregate: "system.version", pipeline: [ { $unionWith: "` + view + `" } ], cursor: {} }`,
+		`{ explain: { find: "` + view + `" }, verbosity: "executionStats" }`,
+	} {
+		withheld(command(m, "admin", text, http.StatusForbidden), text)
+	}
+	// The replication log records the account being made, verifier and all.
+	withheld(ro.call(http.MethodPost, "/mongo/find", obj{"database": "local", "collection": "oplog.rs"}, http.StatusForbidden, nil), "find on the replication log")
+	withheld(ro.call(http.MethodPost, "/mongo/aggregate/preview", obj{
+		"collection": coll, "stage": 0,
+		"pipeline": `[ { $lookup: { from: { db: "local", coll: "oplog.rs" }, as: "log", pipeline: [] } } ]`,
+	}, http.StatusForbidden, nil), "a preview joining the replication log")
+	// And the first browser's writers no longer take the collection either.
+	for _, rq := range []mongoRoute{
+		{http.MethodPost, "/documents", `{"database":"admin","collection":"system.users","document":"{\"user\":\"x\"}"}`},
+		{http.MethodPatch, "/documents", `{"database":"admin","collection":"system.users","filter":"{\"user\":\"` + user + `\"}","document":"{}"}`},
+		{http.MethodDelete, "/documents", `{"database":"admin","collection":"system.users","filter":"{\"user\":\"` + user + `\"}"}`},
+		{http.MethodDelete, "/collections", `{"database":"admin","collection":"system.users"}`},
+	} {
+		rec := mongoDo(m.router, rq.method, m.base+rq.path, rq.body)
+		if rec.Code != http.StatusForbidden || mongoErrorCode(rec) != "credentials_withheld" {
+			t.Errorf("%s %s on admin.system.users: %d %s", rq.method, rq.path, rec.Code, rec.Body.String())
+		}
+	}
+
+	// What the console's table read as harmless when a flag was not a
+	// boolean, on a server that takes the flag that way.
+	if rec := command(m, "admin", `{ usersInfo: "`+user+`", showCredentials: NumberDecimal("1") }`, http.StatusBadRequest); mongoErrorCode(rec) != "command_blocked" || strings.Contains(rec.Body.String(), "storedKey") {
+		t.Errorf("usersInfo with showCredentials as a decimal: %s", rec.Body.String())
+	}
+	limited := liveMongoPrivate(t, auth.RoleLimited)
+	for _, text := range []string{
+		`{ findAndModify: "` + coll + `", query: { _id: 1 }, remove: NumberDecimal("1") }`,
+		`{ validate: "` + coll + `", repair: "yes" }`,
+	} {
+		command(limited, "", text, http.StatusForbidden)
+	}
+	command(limited, "", `{ profile: -1, slowms: 123 }`, http.StatusForbidden)
+	var found dbx.MongoFindResult
+	m.call(http.MethodPost, "/mongo/find", obj{"collection": coll}, http.StatusOK, &found)
+	if found.Returned != 1 {
+		t.Errorf("the refused findAndModify removed the document: %d left", found.Returned)
+	}
+	var profile dbx.MongoProfile
+	m.call(http.MethodGet, "/mongo/profiler", nil, http.StatusOK, &profile)
+	if profile.SlowMs == 123 {
+		t.Error("the refused profile command moved the slow threshold")
+	}
+	// The account list still answers, without them.
+	var users struct {
+		Users []dbx.MongoUser `json:"users"`
+	}
+	rec := ro.call(http.MethodGet, "/mongo/users", nil, http.StatusOK, &users)
+	if len(users.Users) == 0 || strings.Contains(rec.Body.String(), "storedKey") || strings.Contains(rec.Body.String(), secretMarker) {
+		t.Errorf("users = %s", rec.Body.String())
 	}
 }

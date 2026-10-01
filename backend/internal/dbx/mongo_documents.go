@@ -3,6 +3,8 @@ package dbx
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -259,18 +261,110 @@ func mongoNamespace(dbName, collection string) error {
 	return mongoGuardCredentials(dbName, collection)
 }
 
-// mongoCredentialCollections are the collections of the admin database that
-// hold what accounts and cluster members authenticate with: password
-// verifiers, and the keys members sign with.
-var mongoCredentialCollections = map[string]bool{"system.users": true, "system.keys": true}
+// mongoCredentialCollections are the collections that hold what accounts and
+// cluster members authenticate with, by database: password verifiers, the
+// keys members sign with, and the replication log, whose entry for an account
+// being made or changed carries the verifier that was written.
+var mongoCredentialCollections = map[string]map[string]bool{
+	"admin": {"system.users": true, "system.keys": true},
+	"local": {"oplog.rs": true},
+}
+
+func mongoHoldsCredentials(dbName, collection string) bool {
+	return mongoCredentialCollections[dbName][collection]
+}
 
 // mongoGuardCredentials refuses the collections that hold credentials. A
 // document browser pointed at admin.system.users would hand every account's
 // password verifier to whoever may read documents, which is every role; the
 // accounts themselves are listed, without them, by MongoListUsers.
 func mongoGuardCredentials(dbName, collection string) error {
-	if dbName == "admin" && mongoCredentialCollections[collection] {
-		return fmt.Errorf("admin.%s: %w", collection, ErrMongoWithheld)
+	if mongoHoldsCredentials(dbName, collection) {
+		return fmt.Errorf("%s.%s: %w", dbName, collection, ErrMongoWithheld)
+	}
+	return nil
+}
+
+// mongoReadable is mongoNamespace for a request that answers with what a
+// collection holds, or with a count of it: it also refuses a view that ends
+// at a credential collection.
+func mongoReadable(ctx context.Context, client *mongo.Client, dbName, collection string) error {
+	if err := mongoNamespace(dbName, collection); err != nil {
+		return err
+	}
+	return mongoGuardRead(ctx, client, dbName, collection)
+}
+
+// mongoViewDef is what a view reads: a collection or another view, through a
+// pipeline. unreadable marks a definition this code could not follow.
+type mongoViewDef struct {
+	on         string
+	pipeline   []bson.Raw
+	unreadable bool
+}
+
+// mongoGuardRead refuses a read that would reach a credential collection
+// under another name. A view is a second name for what it reads, and one is
+// made with a single command by anyone who can reach the server, so refusing
+// only the collection's own name would refuse only the honest spelling.
+//
+// The views are asked for when the request arrives rather than remembered,
+// and only in the databases that have such a collection, so a read anywhere
+// else costs nothing. A database whose views cannot be listed is not read:
+// "could not tell" is not "it is not one".
+func mongoGuardRead(ctx context.Context, client *mongo.Client, dbName string, collections ...string) error {
+	if len(mongoCredentialCollections[dbName]) == 0 {
+		return nil
+	}
+	entries, err := mongoCollectionEntries(ctx, client.Database(dbName), bson.D{{Key: "type", Value: "view"}})
+	if err != nil {
+		return fmt.Errorf("%s holds credentials, and its views could not be listed to see that this is not one over them: %w", dbName, err)
+	}
+	views := map[string]mongoViewDef{}
+	for _, e := range entries {
+		def := mongoViewDef{on: e.ViewOn}
+		if def.pipeline, err = mongoParseArray("pipeline", e.Pipeline); err != nil {
+			def.unreadable = true
+		}
+		views[e.Name] = def
+	}
+	seen := map[string]bool{}
+	for _, name := range collections {
+		if err := mongoViewReaches(dbName, name, views, seen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mongoViewReaches follows a name through the views it is made of and
+// reports the credential collection it ends at, if it does. seen keeps a
+// definition that names itself from being followed forever.
+func mongoViewReaches(dbName, name string, views map[string]mongoViewDef, seen map[string]bool) error {
+	if err := mongoGuardCredentials(dbName, name); err != nil {
+		return err
+	}
+	view, isView := views[name]
+	if !isView || seen[name] {
+		return nil
+	}
+	seen[name] = true
+	if view.unreadable {
+		return fmt.Errorf("%s.%s is a view whose definition could not be read, in a database that holds credentials: %w", dbName, name, ErrMongoWithheld)
+	}
+	if err := mongoViewReaches(dbName, view.on, views, seen); err != nil {
+		return fmt.Errorf("%s.%s is a view over %w", dbName, name, err)
+	}
+	for _, ref := range mongoPipelineCollections(view.pipeline, 0) {
+		var err error
+		if ref.db != "" && ref.db != dbName {
+			err = mongoGuardCredentials(ref.db, ref.collection)
+		} else {
+			err = mongoViewReaches(dbName, ref.collection, views, seen)
+		}
+		if err != nil {
+			return fmt.Errorf("%s.%s is a view over %w", dbName, name, err)
+		}
 	}
 	return nil
 }
@@ -321,7 +415,7 @@ func mongoCollRef(collection string) string {
 // MongoFindDocuments runs the query bar: one page of documents and, when
 // asked, how many there are in all.
 func MongoFindDocuments(ctx context.Context, client *mongo.Client, dbName, collection string, q MongoFindSpec, withCount bool) (*MongoFindResult, error) {
-	if err := mongoNamespace(dbName, collection); err != nil {
+	if err := mongoReadable(ctx, client, dbName, collection); err != nil {
 		return nil, err
 	}
 	pq, err := q.parse()
@@ -447,7 +541,7 @@ func mongoCount(ctx context.Context, coll *mongo.Collection, pq *mongoParsedQuer
 // MongoCountDocuments counts what a filter matches, on its own request, for
 // the page that wants the number after the documents.
 func MongoCountDocuments(ctx context.Context, client *mongo.Client, dbName, collection string, q MongoFindSpec) (*MongoCounted, error) {
-	if err := mongoNamespace(dbName, collection); err != nil {
+	if err := mongoReadable(ctx, client, dbName, collection); err != nil {
 		return nil, err
 	}
 	pq, err := q.parse()
@@ -476,7 +570,7 @@ func mongoIDFilter(idText string) (bson.D, bson.RawValue, error) {
 
 // MongoGetDocument reads one document by its _id.
 func MongoGetDocument(ctx context.Context, client *mongo.Client, dbName, collection, idText string) (*MongoDoc, error) {
-	if err := mongoNamespace(dbName, collection); err != nil {
+	if err := mongoReadable(ctx, client, dbName, collection); err != nil {
 		return nil, err
 	}
 	filter, _, err := mongoIDFilter(idText)
@@ -596,21 +690,45 @@ type MongoWriteResult struct {
 	UpsertedID string `json:"upsertedId,omitempty"`
 }
 
+// MongoReplacement is one document's replacement, as its editor sends it.
+type MongoReplacement struct {
+	// ID is the _id of the document being replaced, as Extended JSON.
+	ID string `json:"id"`
+	// Document is the whole replacement as Extended JSON.
+	Document string `json:"document"`
+	// ExpectedDigest is the digest the document had when it was read. When
+	// sent, the replacement is made only if the stored document still has it.
+	ExpectedDigest string `json:"expectedDigest"`
+	// Expected says the same with the whole document as it was read. It is
+	// the older of the two ways and doubles the request; one or the other.
+	Expected string `json:"expected"`
+}
+
+// mongoAtomicReplaceBytes is how much the stored document and its
+// replacement may come to together for the comparison to ride in the same
+// operation as the write. That operation is one BSON document holding both,
+// and the server takes none over 16 MiB.
+const mongoAtomicReplaceBytes = 15 << 20
+
 // MongoReplaceDocument replaces the one document with this _id.
 //
-// expected, when given, is the document as the editor read it. The replace
-// then happens only if the stored document is still exactly that, compared
-// by the server in the same operation as the write, so an edit never
-// silently overwrites a change somebody else made in between.
-func MongoReplaceDocument(ctx context.Context, client *mongo.Client, dbName, collection, idText, docText, expectedText string) (*MongoWriteResult, error) {
+// With ExpectedDigest or Expected the replace happens only if the stored
+// document is still the one the editor read, so an edit never silently
+// overwrites a change somebody else made in between. The stored document is
+// read and compared here, byte for byte, and then compared again by the
+// server in the same operation as the write — unless the two documents are
+// too large to travel in one operation, when the first comparison is the
+// only one and a change made in the moment between it and the write is
+// overwritten.
+func MongoReplaceDocument(ctx context.Context, client *mongo.Client, dbName, collection string, r MongoReplacement) (*MongoWriteResult, error) {
 	if err := mongoNamespace(dbName, collection); err != nil {
 		return nil, err
 	}
-	filter, id, err := mongoIDFilter(idText)
+	filter, id, err := mongoIDFilter(r.ID)
 	if err != nil {
 		return nil, err
 	}
-	doc, err := mongoParseDocument("document", docText)
+	doc, err := mongoParseDocument("document", r.Document)
 	if err != nil {
 		return nil, err
 	}
@@ -620,27 +738,54 @@ func MongoReplaceDocument(ctx context.Context, client *mongo.Client, dbName, col
 	if own, err := doc.LookupErr("_id"); err == nil && !(own.Type == id.Type && bytes.Equal(own.Value, id.Value)) {
 		return nil, fmt.Errorf("the document's _id is not the one being replaced; an _id cannot be changed — clone the document and delete the original instead")
 	}
-	if strings.TrimSpace(expectedText) != "" {
-		expected, err := mongoParseDocument("expected", expectedText)
+	var unchanged func(stored bson.Raw) bool
+	digest := strings.ToLower(strings.TrimSpace(r.ExpectedDigest))
+	switch {
+	case digest != "" && strings.TrimSpace(r.Expected) != "":
+		return nil, fmt.Errorf("send expectedDigest or expected, not both")
+	case digest != "":
+		if raw, err := hex.DecodeString(digest); err != nil || len(raw) != sha256.Size {
+			return nil, fmt.Errorf("expectedDigest is not a document's digest; send the one the document was read with")
+		}
+		unchanged = func(stored bson.Raw) bool { return mongoDigest(stored) == digest }
+	case strings.TrimSpace(r.Expected) != "":
+		expected, err := mongoParseDocument("expected", r.Expected)
 		if err != nil {
 			return nil, err
 		}
-		// $literal keeps a stored value that starts with "$" from being read
-		// as a field path.
-		filter = append(filter, bson.E{Key: "$expr", Value: bson.D{{Key: "$eq", Value: bson.A{
-			"$$ROOT", bson.D{{Key: "$literal", Value: expected}},
-		}}}})
+		unchanged = func(stored bson.Raw) bool { return bytes.Equal(stored, expected) }
 	}
 	coll := client.Database(dbName).Collection(collection)
+	byID := filter
+	if unchanged != nil {
+		stored, err := coll.FindOne(ctx, byID).Raw()
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrMongoNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !unchanged(stored) {
+			return nil, ErrMongoChanged
+		}
+		if len(stored)+len(doc) <= mongoAtomicReplaceBytes {
+			// $literal keeps a stored value that starts with "$" from being
+			// read as a field path.
+			filter = append(bson.D{}, byID...)
+			filter = append(filter, bson.E{Key: "$expr", Value: bson.D{{Key: "$eq", Value: bson.A{
+				"$$ROOT", bson.D{{Key: "$literal", Value: stored}},
+			}}}})
+		}
+	}
 	res, err := coll.ReplaceOne(ctx, filter, doc)
 	if err != nil {
 		return nil, err
 	}
 	if res.MatchedCount == 0 {
-		if len(filter) > 1 {
+		if len(filter) > len(byID) {
 			// Told apart by asking again without the comparison: gone, or
 			// only different.
-			err := coll.FindOne(ctx, filter[:1], options.FindOne().SetProjection(bson.D{{Key: "_id", Value: 1}})).Err()
+			err := coll.FindOne(ctx, byID, options.FindOne().SetProjection(bson.D{{Key: "_id", Value: 1}})).Err()
 			if err == nil {
 				return nil, ErrMongoChanged
 			}
@@ -670,7 +815,7 @@ type MongoUpdate struct {
 // MongoUpdateDocuments applies update operators, or a pipeline, to the first
 // document a filter matches or to all of them. With DryRun it only counts.
 func MongoUpdateDocuments(ctx context.Context, client *mongo.Client, dbName, collection string, u MongoUpdate) (*MongoWriteResult, error) {
-	if err := mongoNamespace(dbName, collection); err != nil {
+	if err := mongoReadable(ctx, client, dbName, collection); err != nil {
 		return nil, err
 	}
 	filter, err := mongoParseOptionalDocument("filter", u.Filter)
@@ -805,7 +950,7 @@ type MongoDeletion struct {
 // MongoDeleteDocuments removes the first document a filter matches, or all of
 // them. With DryRun it only counts.
 func MongoDeleteDocuments(ctx context.Context, client *mongo.Client, dbName, collection string, d MongoDeletion) (*MongoWriteResult, error) {
-	if err := mongoNamespace(dbName, collection); err != nil {
+	if err := mongoReadable(ctx, client, dbName, collection); err != nil {
 		return nil, err
 	}
 	var filter any

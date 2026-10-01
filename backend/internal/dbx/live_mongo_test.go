@@ -59,6 +59,32 @@ func liveMongoReplicaSet(t *testing.T) (*mongo.Client, string) {
 	return client, db
 }
 
+// serverWide skips a test that changes something the whole server shares —
+// the profiler's threshold, an operation in flight, an account — unless the
+// environment names the server. The default address is whatever happens to
+// be listening there, and that is not a place to turn a profiler on.
+func serverWide(t *testing.T) {
+	t.Helper()
+	if os.Getenv("JD_TEST_MONGO_DSN") == "" {
+		t.Skip("set JD_TEST_MONGO_DSN to a server this test may change the settings of")
+	}
+}
+
+// liveMongoAccounts is a server the tests may create accounts on: the
+// private replica set when there is one, where they may be made in admin as
+// well, and otherwise the shared server, where they are made only under this
+// checkout's own database name.
+func liveMongoAccounts(t *testing.T) (client *mongo.Client, db string, private bool) {
+	t.Helper()
+	if os.Getenv("JD_TEST_MONGO_RS_DSN") != "" {
+		client, db = liveMongoReplicaSet(t)
+		return client, db, true
+	}
+	serverWide(t)
+	client, db = liveMongoDB(t)
+	return client, db, false
+}
+
 func freshCollection(t *testing.T, client *mongo.Client, db, name string) {
 	t.Helper()
 	_ = MongoDropCollection(context.Background(), client, db, name)
@@ -128,12 +154,22 @@ func TestLiveMongoDocuments(t *testing.T) {
 		if !json.Valid(doc.Relaxed) {
 			t.Errorf("relaxed form is not JSON: %s", doc.Relaxed)
 		}
-		if _, err := MongoReplaceDocument(ctx, client, db, coll, doc.ID, doc.Canonical, doc.Canonical); err != nil {
-			t.Fatalf("replace with what was read: %v", err)
+		// Both ways of saying which version was read, on a document of every
+		// type: the comparison the server repeats has to hold for all of them.
+		for _, r := range []MongoReplacement{
+			{ID: doc.ID, Document: doc.Canonical, Expected: doc.Canonical},
+			{ID: doc.ID, Document: doc.Canonical, ExpectedDigest: doc.Digest},
+		} {
+			if _, err := MongoReplaceDocument(ctx, client, db, coll, r); err != nil {
+				t.Fatalf("replace with what was read: %v", err)
+			}
+			after := rawByID(t, client, db, coll, idValue(t, doc.ID))
+			if !bytes.Equal(before, after) {
+				t.Errorf("saving a document back changed it\n was %s\n now %s", before, after)
+			}
 		}
-		after := rawByID(t, client, db, coll, idValue(t, doc.ID))
-		if !bytes.Equal(before, after) {
-			t.Errorf("saving a document back changed it\n was %s\n now %s", before, after)
+		if doc.Digest != mongoDigest(before) || len(doc.Digest) != 64 {
+			t.Errorf("digest = %q, want that of the stored bytes", doc.Digest)
 		}
 		if res.Count == nil || !res.Count.Exact || res.Count.Value != 1 || res.Count.Scope != "filter" {
 			t.Errorf("count = %+v, want exactly 1", res.Count)
@@ -159,7 +195,7 @@ func TestLiveMongoDocuments(t *testing.T) {
 			if !sameValue(idValue(t, got.ID), idValue(t, id)) {
 				t.Errorf("get _id %s returned %s", id, got.ID)
 			}
-			if _, err := MongoReplaceDocument(ctx, client, db, coll, id, `{"kind":"typed-id","edited":true}`, ""); err != nil {
+			if _, err := MongoReplaceDocument(ctx, client, db, coll, MongoReplacement{ID: id, Document: `{"kind":"typed-id","edited":true}`}); err != nil {
 				t.Errorf("replace _id %s: %v", id, err)
 			}
 			res, err := MongoDeleteDocuments(ctx, client, db, coll, MongoDeletion{ID: id})
@@ -189,24 +225,88 @@ func TestLiveMongoDocuments(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		_, err = MongoReplaceDocument(ctx, client, db, coll, `"guarded"`, `{"_id":"guarded","n":100}`, read.Canonical)
-		if !errors.Is(err, ErrMongoChanged) {
-			t.Errorf("replace over a changed document: %v, want ErrMongoChanged", err)
+		// Refused whichever way the editor says what it read.
+		for name, stale := range map[string]MongoReplacement{
+			"the document": {ID: `"guarded"`, Document: `{"_id":"guarded","n":100}`, Expected: read.Canonical},
+			"its digest":   {ID: `"guarded"`, Document: `{"_id":"guarded","n":100}`, ExpectedDigest: read.Digest},
+		} {
+			if _, err := MongoReplaceDocument(ctx, client, db, coll, stale); !errors.Is(err, ErrMongoChanged) {
+				t.Errorf("replace over a changed document, guarded by %s: %v, want ErrMongoChanged", name, err)
+			}
 		}
 		if n := rawByID(t, client, db, coll, "guarded").Lookup("n"); mongoInt(n) != 2 {
 			t.Errorf("the stale replace was applied: n = %v", n)
 		}
 		// Reloaded, the same edit goes through.
 		fresh, _ := MongoGetDocument(ctx, client, db, coll, `"guarded"`)
-		if _, err := MongoReplaceDocument(ctx, client, db, coll, `"guarded"`, `{"_id":"guarded","n":100}`, fresh.Canonical); err != nil {
+		if fresh.Digest == read.Digest {
+			t.Error("a changed document kept its digest")
+		}
+		if _, err := MongoReplaceDocument(ctx, client, db, coll, MongoReplacement{
+			ID: `"guarded"`, Document: `{"_id":"guarded","n":100}`, ExpectedDigest: fresh.Digest,
+		}); err != nil {
 			t.Errorf("replace over the current document: %v", err)
 		}
-		if _, err := MongoReplaceDocument(ctx, client, db, coll, `"gone"`, `{"n":1}`, `{"_id":"gone","n":0}`); !errors.Is(err, ErrMongoNotFound) {
-			t.Errorf("replace of a missing document: %v, want ErrMongoNotFound", err)
+		// The same number in another type is another document: the comparison
+		// is of bytes, where the server's own $eq would call 100 and
+		// NumberLong(100) equal.
+		if _, err := MongoReplaceDocument(ctx, client, db, coll, MongoReplacement{
+			ID: `"guarded"`, Document: `{"_id":"guarded","n":101}`, Expected: `{"_id":"guarded","n":{"$numberLong":"100"}}`,
+		}); !errors.Is(err, ErrMongoChanged) {
+			t.Errorf("replace expecting a long where an int is stored: %v, want ErrMongoChanged", err)
 		}
-		if _, err := MongoReplaceDocument(ctx, client, db, coll, `"guarded"`, `{"_id":"other","n":1}`, ""); err == nil ||
+		for name, r := range map[string]MongoReplacement{
+			"the document": {ID: `"gone"`, Document: `{"n":1}`, Expected: `{"_id":"gone","n":0}`},
+			"its digest":   {ID: `"gone"`, Document: `{"n":1}`, ExpectedDigest: read.Digest},
+		} {
+			if _, err := MongoReplaceDocument(ctx, client, db, coll, r); !errors.Is(err, ErrMongoNotFound) {
+				t.Errorf("replace of a missing document, guarded by %s: %v, want ErrMongoNotFound", name, err)
+			}
+		}
+		if _, err := MongoReplaceDocument(ctx, client, db, coll, MongoReplacement{ID: `"guarded"`, Document: `{"_id":"other","n":1}`}); err == nil ||
 			!strings.Contains(err.Error(), "cannot be changed") {
 			t.Errorf("replace carrying another _id: %v", err)
+		}
+		for name, r := range map[string]MongoReplacement{
+			"both guards":              {ID: `"guarded"`, Document: `{"n":1}`, Expected: `{"_id":"guarded"}`, ExpectedDigest: fresh.Digest},
+			"a digest that is not one": {ID: `"guarded"`, Document: `{"n":1}`, ExpectedDigest: "abc"},
+		} {
+			if _, err := MongoReplaceDocument(ctx, client, db, coll, r); err == nil || errors.Is(err, ErrMongoChanged) {
+				t.Errorf("replace with %s: %v, want a refusal of the request", name, err)
+			}
+		}
+	})
+
+	t.Run("a large document is saved under its digest", func(t *testing.T) {
+		// Two sizes: one where the document and its replacement still fit one
+		// operation, so the server repeats the comparison, and one where
+		// they do not. Canonical text of either is past what a request used
+		// to be allowed, with the document sent twice.
+		for name, size := range map[string]int{"5 MiB": 5 << 20, "9 MiB": 9 << 20} {
+			id := `"large-` + name + `"`
+			body := strings.Repeat("x", size)
+			if _, err := MongoInsertDocuments(ctx, client, db, coll, `{"_id":`+id+`,"rev":1,"body":"`+body+`"}`, true); err != nil {
+				t.Fatalf("%s: insert: %v", name, err)
+			}
+			read, err := MongoGetDocument(ctx, client, db, coll, id)
+			if err != nil || read.Size < size {
+				t.Fatalf("%s: read: %v", name, err)
+			}
+			next := `{"_id":` + id + `,"rev":2,"body":"` + body + `"}`
+			res, err := MongoReplaceDocument(ctx, client, db, coll, MongoReplacement{ID: id, Document: next, ExpectedDigest: read.Digest})
+			if err != nil || res.Matched != 1 || res.Modified != 1 {
+				t.Fatalf("%s: replace under its digest: %+v, %v", name, res, err)
+			}
+			// The digest is now stale, and says so at either size.
+			if _, err := MongoReplaceDocument(ctx, client, db, coll, MongoReplacement{ID: id, Document: next, ExpectedDigest: read.Digest}); !errors.Is(err, ErrMongoChanged) {
+				t.Errorf("%s: replace under a stale digest: %v, want ErrMongoChanged", name, err)
+			}
+			if rev := rawByID(t, client, db, coll, "large-"+name).Lookup("rev"); mongoInt(rev) != 2 {
+				t.Errorf("%s: rev = %v", name, rev)
+			}
+			if _, err := MongoDeleteDocuments(ctx, client, db, coll, MongoDeletion{ID: id}); err != nil {
+				t.Errorf("%s: delete: %v", name, err)
+			}
 		}
 	})
 
@@ -1371,6 +1471,7 @@ func TestLiveMongoServer(t *testing.T) {
 	})
 
 	t.Run("a running operation is listed and can be killed", func(t *testing.T) {
+		serverWide(t)
 		done := make(chan error, 1)
 		go func() {
 			_, err := MongoFindDocuments(context.Background(), client, db, coll, MongoFindSpec{
@@ -1423,16 +1524,18 @@ func TestLiveMongoServer(t *testing.T) {
 	})
 
 	t.Run("the profiler is read, set and read back", func(t *testing.T) {
+		serverWide(t)
 		before, err := MongoProfilerStatus(ctx, client, db)
 		if err != nil {
 			t.Fatalf("profiler status: %v", err)
 		}
 		// Whatever this sets on a shared server is put back.
 		t.Cleanup(func() {
-			_, _ = MongoSetProfiler(context.Background(), client, db, MongoProfilerChange{Level: before.Level, SlowMs: &before.SlowMs, SampleRate: &before.SampleRate})
+			_, _ = MongoSetProfiler(context.Background(), client, db, MongoProfilerChange{Level: &before.Level, SlowMs: &before.SlowMs, SampleRate: &before.SampleRate})
 			_ = MongoDropCollection(context.Background(), client, db, "system.profile")
 		})
-		set, err := MongoSetProfiler(ctx, client, db, MongoProfilerChange{Level: 2, SlowMs: &before.SlowMs})
+		level := func(n int) *int { return &n }
+		set, err := MongoSetProfiler(ctx, client, db, MongoProfilerChange{Level: level(2), SlowMs: &before.SlowMs})
 		if err != nil || set.Level != 2 || set.SlowMs != before.SlowMs {
 			t.Fatalf("set profiler: %+v, %v", set, err)
 		}
@@ -1459,13 +1562,20 @@ func TestLiveMongoServer(t *testing.T) {
 		if slow, err := MongoProfileRead(ctx, client, db, 50, 1<<40); err != nil || len(slow.Entries) != 0 {
 			t.Errorf("entries slower than forever: %d, %v", len(slow.Entries), err)
 		}
-		off, err := MongoSetProfiler(ctx, client, db, MongoProfilerChange{Level: 0})
-		if err != nil || off.Level != 0 {
+		// A change that names no level leaves the level where it is: it used
+		// to be read as level 0 and turned the profiler off.
+		threshold := before.SlowMs + 1
+		moved, err := MongoSetProfiler(ctx, client, db, MongoProfilerChange{SlowMs: &threshold})
+		if err != nil || moved.Level != 2 || moved.SlowMs != threshold {
+			t.Errorf("moving only the threshold: %+v, %v; want level 2 kept", moved, err)
+		}
+		off, err := MongoSetProfiler(ctx, client, db, MongoProfilerChange{Level: level(0), SlowMs: &before.SlowMs})
+		if err != nil || off.Level != 0 || off.SlowMs != before.SlowMs {
 			t.Errorf("turning the profiler off: %+v, %v", off, err)
 		}
-		for _, bad := range []MongoProfilerChange{{Level: 3}, {Level: -1}} {
+		for _, bad := range []MongoProfilerChange{{Level: level(3)}, {Level: level(-1)}, {}} {
 			if _, err := MongoSetProfiler(ctx, client, db, bad); err == nil {
-				t.Errorf("profiler level %d was accepted", bad.Level)
+				t.Errorf("profiler change %+v was accepted", bad)
 			}
 		}
 	})
@@ -1486,7 +1596,7 @@ func TestLiveMongoServer(t *testing.T) {
 }
 
 func TestLiveMongoReplicaSet(t *testing.T) {
-	client, _ := liveMongoReplicaSet(t)
+	client, db := liveMongoReplicaSet(t)
 	ctx := context.Background()
 	status, err := MongoReplicationStatus(ctx, client)
 	if err != nil {
@@ -1506,17 +1616,54 @@ func TestLiveMongoReplicaSet(t *testing.T) {
 	if err != nil || snap.Topology != "replicaset" || snap.Role != "primary" || snap.SetName != status.SetName {
 		t.Errorf("snapshot of a replica set = %+v, %v", snap, err)
 	}
+	// The log this server replicates from records every account made, with
+	// its verifier. It is measured above and never opened: not by name, and
+	// not through the join the server allows from any database.
+	if _, err := MongoFindDocuments(ctx, client, "local", "oplog.rs", MongoFindSpec{Limit: 1}, false); !errors.Is(err, ErrMongoWithheld) {
+		t.Errorf("find on the replication log: %v, want ErrMongoWithheld", err)
+	}
+	freshCollection(t, client, db, "jd_oplog_join")
+	if _, err := MongoInsertDocuments(ctx, client, db, "jd_oplog_join", `{ a: 1 }`, true); err != nil {
+		t.Fatal(err)
+	}
+	join := `[ { $lookup: { from: { db: "local", coll: "oplog.rs" }, as: "log", pipeline: [ { $limit: 1 } ] } } ]`
+	if _, err := MongoRunPipeline(ctx, client, db, "jd_oplog_join", MongoAggregateSpec{Pipeline: join}); !errors.Is(err, ErrMongoWithheld) {
+		t.Errorf("a join to the replication log: %v, want ErrMongoWithheld", err)
+	}
+	// The server does take that join, which is why it has to be refused here.
+	cur, err := client.Database(db).Collection("jd_oplog_join").Aggregate(ctx, mongoArray(mustStages(t, join)))
+	if err != nil {
+		t.Fatalf("the server no longer takes a join to its log, so the check above guards nothing: %v", err)
+	}
+	defer cur.Close(ctx)
+	if !cur.Next(ctx) || len(cur.Current.Lookup("log").Array()) <= 5 {
+		t.Errorf("the join returned no log entries: %s", cur.Current)
+	}
+}
+
+func mustStages(t *testing.T, text string) []bson.Raw {
+	t.Helper()
+	stages, err := mongoParseArray("pipeline", text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stages
 }
 
 func TestLiveMongoUsersAndRoles(t *testing.T) {
-	// Accounts are made on the private server only: the shared one is other
-	// people's too.
-	client, db := liveMongoReplicaSet(t)
+	client, db, private := liveMongoAccounts(t)
 	ctx := context.Background()
-	const user, role = "jd_test_user", "jd_test_role"
+	// Named after the database, so two checkouts sharing a server do not
+	// share an account. The second database is admin only on a server that
+	// is this test's alone.
+	user, role := "jd_user_"+db, "jd_role_"+db
+	second, secondRole := db+"_acl", "dbOwner"
+	if private {
+		second, secondRole = "admin", "root"
+	}
 	drop := func() {
 		_ = MongoDropUserIn(context.Background(), client, db, user)
-		_ = MongoDropUserIn(context.Background(), client, "admin", user)
+		_ = MongoDropUserIn(context.Background(), client, second, user)
 		_ = client.Database(db).RunCommand(context.Background(), bson.D{{Key: "dropRole", Value: role}}).Err()
 	}
 	drop()
@@ -1575,8 +1722,8 @@ func TestLiveMongoUsersAndRoles(t *testing.T) {
 		if err := MongoCreateUserIn(ctx, client, db, user, "s3cret-pass", []MongoRoleRef{{Role: "read", DB: db}}); err != nil {
 			t.Fatalf("create user in %s: %v", db, err)
 		}
-		if err := MongoCreateUserIn(ctx, client, "admin", user, "s3cret-pass", []MongoRoleRef{{Role: "root", DB: "admin"}}); err != nil {
-			t.Fatalf("create user in admin: %v", err)
+		if err := MongoCreateUserIn(ctx, client, second, user, "s3cret-pass", []MongoRoleRef{{Role: secondRole, DB: second}}); err != nil {
+			t.Fatalf("create user in %s: %v", second, err)
 		}
 		all, err := MongoListUsers(ctx, client, "")
 		if err != nil {
@@ -1594,8 +1741,8 @@ func TestLiveMongoUsersAndRoles(t *testing.T) {
 		if u := found[db]; u.Superuser || len(u.Roles) != 1 || u.Roles[0] != (MongoRoleRef{Role: "read", DB: db}) || len(u.Mechanisms) == 0 {
 			t.Errorf("user in %s = %+v", db, u)
 		}
-		if u := found["admin"]; !u.Superuser {
-			t.Errorf("user in admin = %+v", u)
+		if u := found[second]; u.Superuser != private || len(u.Roles) != 1 || u.Roles[0] != (MongoRoleRef{Role: secondRole, DB: second}) {
+			t.Errorf("user in %s = %+v", second, u)
 		}
 		encoded, _ := json.Marshal(all)
 		for _, secret := range []string{"s3cret-pass", "credentials", "storedKey", "salt"} {
@@ -1648,12 +1795,230 @@ func TestLiveMongoUsersAndRoles(t *testing.T) {
 		if left, _ := MongoListUsers(ctx, client, db); len(left) != 0 {
 			t.Errorf("users left in %s: %+v", db, left)
 		}
-		// The admin-only list the shared roles page reads still works.
+		// The admin-only list the shared roles page reads still works, and
+		// sees the account exactly when it is one of admin's.
 		legacy, err := MongoUsers(ctx, client)
-		if err != nil || len(legacy) != 1 || legacy[0].Name != user || !legacy[0].Superuser {
-			t.Errorf("legacy list = %+v, %v", legacy, err)
+		if err != nil {
+			t.Fatalf("legacy list: %v", err)
+		}
+		listed := false
+		for _, u := range legacy {
+			if u.Name == user {
+				listed = true
+				if !u.Superuser {
+					t.Errorf("legacy entry = %+v", u)
+				}
+			}
+		}
+		if listed != private {
+			t.Errorf("the admin-only list has the account: %v, want %v", listed, private)
 		}
 	})
+}
+
+// A view over a credential collection is refused wherever its documents, or
+// a count of them, would come back. The collections that really hold
+// credentials are not this test's to make views over, so for its duration a
+// collection of its own, in its own database, is declared to be one.
+func TestLiveMongoViewsOverCredentials(t *testing.T) {
+	client, db := liveMongoDB(t)
+	ctx := context.Background()
+	const secret, plain = "jd_guard_secret", "jd_guard_plain"
+	views := map[string]bson.D{
+		"jd_guard_direct": {{Key: "viewOn", Value: secret}, {Key: "pipeline", Value: bson.A{}}},
+		"jd_guard_second": {{Key: "viewOn", Value: "jd_guard_direct"}, {Key: "pipeline", Value: bson.A{bson.D{{Key: "$project", Value: bson.D{{Key: "verifier", Value: 1}}}}}}},
+		"jd_guard_joined": {{Key: "viewOn", Value: plain}, {Key: "pipeline", Value: bson.A{bson.D{{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: secret}, {Key: "as", Value: "s"}, {Key: "pipeline", Value: bson.A{}}}}}}}},
+		"jd_guard_clean": {{Key: "viewOn", Value: plain}, {Key: "pipeline", Value: bson.A{bson.D{{Key: "$match", Value: bson.D{{Key: "n", Value: 1}}}}}}},
+	}
+	d := client.Database(db)
+	cleanup := func() {
+		for name := range views {
+			_ = d.Collection(name).Drop(context.Background())
+		}
+		_ = d.Collection(secret).Drop(context.Background())
+		_ = d.Collection(plain).Drop(context.Background())
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	if _, err := d.Collection(secret).InsertOne(ctx, bson.D{{Key: "_id", Value: 1}, {Key: "verifier", Value: "s3cret"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Collection(plain).InsertOne(ctx, bson.D{{Key: "_id", Value: 1}, {Key: "n", Value: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	for name, def := range views {
+		if err := d.RunCommand(ctx, append(bson.D{{Key: "create", Value: name}}, def...)).Err(); err != nil {
+			t.Fatalf("create view %s: %v", name, err)
+		}
+	}
+	// Before the collection is declared, the views read like any other.
+	if res, err := MongoFindDocuments(ctx, client, db, "jd_guard_second", MongoFindSpec{}, true); err != nil || res.Returned != 1 {
+		t.Fatalf("an ordinary view: %+v, %v", res, err)
+	}
+	mongoCredentialCollections[db] = map[string]bool{secret: true}
+	t.Cleanup(func() { delete(mongoCredentialCollections, db) })
+
+	reads := map[string]func(coll string) error{
+		"find": func(coll string) error {
+			_, err := MongoFindDocuments(ctx, client, db, coll, MongoFindSpec{}, true)
+			return err
+		},
+		"count": func(coll string) error {
+			_, err := MongoCountDocuments(ctx, client, db, coll, MongoFindSpec{Filter: `{ verifier: /^s/ }`})
+			return err
+		},
+		"get": func(coll string) error {
+			_, err := MongoGetDocument(ctx, client, db, coll, `1`)
+			return err
+		},
+		"aggregate": func(coll string) error {
+			_, err := MongoRunPipeline(ctx, client, db, coll, MongoAggregateSpec{Pipeline: `[ { $match: {} } ]`})
+			return err
+		},
+		"preview": func(coll string) error {
+			_, err := MongoPreviewPipeline(ctx, client, db, coll, MongoPreviewSpec{Pipeline: `[ { $match: {} } ]`, Stage: 0})
+			return err
+		},
+		"explain": func(coll string) error {
+			_, err := MongoExplain(ctx, client, db, coll, MongoExplainSpec{MongoFindSpec: MongoFindSpec{Filter: `{ verifier: /^s/ }`}, Verbosity: "executionStats"})
+			return err
+		},
+		"explain of a pipeline": func(coll string) error {
+			_, err := MongoExplain(ctx, client, db, coll, MongoExplainSpec{Pipeline: `[ { $match: {} } ]`})
+			return err
+		},
+		"schema": func(coll string) error {
+			_, err := MongoAnalyseSchema(ctx, client, db, coll, MongoSchemaSpec{})
+			return err
+		},
+		"validation check": func(coll string) error {
+			_, err := MongoCheckValidation(ctx, client, db, coll, `{ verifier: { $type: "int" } }`, 5, 0)
+			return err
+		},
+		"export": func(coll string) error {
+			export, err := MongoOpenExport(ctx, client, db, coll, MongoExportSpec{})
+			if err == nil {
+				export.Close()
+			}
+			return err
+		},
+		"the first browser's page": func(coll string) error {
+			_, err := MongoQuery(ctx, client, db, coll, MongoFindOptions{})
+			return err
+		},
+		"the first browser's export": func(coll string) error {
+			_, _, err := MongoExport(ctx, client, db, coll, MongoFindOptions{}, ExportJSON, &bytes.Buffer{}, 10)
+			return err
+		},
+		"the first browser's count": func(coll string) error {
+			_, err := MongoCount(ctx, client, db, coll, ``)
+			return err
+		},
+		"a dry run of an update": func(coll string) error {
+			_, err := MongoUpdateDocuments(ctx, client, db, coll, MongoUpdate{Filter: `{ verifier: /^s/ }`, Update: `{ $set: { a: 1 } }`, Many: true, DryRun: true})
+			return err
+		},
+		"a dry run of a delete": func(coll string) error {
+			_, err := MongoDeleteDocuments(ctx, client, db, coll, MongoDeletion{Filter: `{ verifier: /^s/ }`, Many: true, DryRun: true})
+			return err
+		},
+	}
+	for name, read := range reads {
+		for _, coll := range []string{secret, "jd_guard_direct", "jd_guard_second", "jd_guard_joined"} {
+			if err := read(coll); !errors.Is(err, ErrMongoWithheld) {
+				t.Errorf("%s of %s: %v, want ErrMongoWithheld", name, coll, err)
+			}
+		}
+	}
+	// What is not over the collection reads as before. A view takes no
+	// validator, so that one is asked of the collection alone.
+	for name, read := range reads {
+		for _, coll := range []string{plain, "jd_guard_clean"} {
+			if name == "validation check" && coll != plain {
+				continue
+			}
+			if err := read(coll); err != nil {
+				t.Errorf("%s of %s: %v", name, coll, err)
+			}
+		}
+	}
+
+	// A pipeline that joins a view is followed through it as well.
+	for _, pipeline := range []string{
+		`[ { $unionWith: "jd_guard_second" } ]`,
+		`[ { $lookup: { from: "jd_guard_direct", as: "s", pipeline: [] } } ]`,
+		`[ { $facet: { a: [ { $unionWith: { coll: "jd_guard_joined", pipeline: [] } } ] } } ]`,
+	} {
+		if _, err := MongoRunPipeline(ctx, client, db, plain, MongoAggregateSpec{Pipeline: pipeline}); !errors.Is(err, ErrMongoWithheld) {
+			t.Errorf("pipeline %s: %v, want ErrMongoWithheld", pipeline, err)
+		}
+		if _, err := MongoPreviewPipeline(ctx, client, db, plain, MongoPreviewSpec{Pipeline: pipeline, Stage: 0}); !errors.Is(err, ErrMongoWithheld) {
+			t.Errorf("preview of %s: %v, want ErrMongoWithheld", pipeline, err)
+		}
+		if _, err := MongoExplain(ctx, client, db, plain, MongoExplainSpec{Pipeline: pipeline}); !errors.Is(err, ErrMongoWithheld) {
+			t.Errorf("explain of %s: %v, want ErrMongoWithheld", pipeline, err)
+		}
+	}
+	if res, err := MongoRunPipeline(ctx, client, db, plain, MongoAggregateSpec{Pipeline: `[ { $unionWith: "jd_guard_clean" } ]`}); err != nil || res.Returned != 2 {
+		t.Errorf("a pipeline joining an ordinary view: %+v, %v", res, err)
+	}
+
+	// The console: refused by name before it dials, and by what a name is a
+	// view of once it has.
+	for text, withheld := range map[string]bool{
+		`{ find: "jd_guard_second" }`:                                                                 true,
+		`{ count: "jd_guard_direct", query: { verifier: /^s/ } }`:                                     true,
+		`{ distinct: "jd_guard_joined", key: "s.verifier" }`:                                          true,
+		`{ explain: { find: "jd_guard_second" }, verbosity: "executionStats" }`:                       true,
+		`{ aggregate: "` + plain + `", pipeline: [ { $unionWith: "jd_guard_second" } ], cursor: {} }`: true,
+		`{ create: "jd_guard_third", viewOn: "jd_guard_second", pipeline: [] }`:                       true,
+		`{ find: "jd_guard_clean" }`:                                                                  false,
+		`{ find: "` + plain + `" }`:                                                                   false,
+		`{ ping: 1 }`:                                                                                 false,
+	} {
+		cmd, verdict, err := MongoClassifyCommand(text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		MongoGuardCommand(db, cmd, &verdict)
+		if verdict.Class == MongoClassBlocked {
+			t.Errorf("%s was refused by name: %s", text, verdict.Reason)
+		}
+		if err := MongoGuardCommandViews(ctx, client, db, cmd); withheld != errors.Is(err, ErrMongoWithheld) {
+			t.Errorf("%s: %v, want withheld=%v", text, err, withheld)
+		}
+	}
+	// By UUID a collection is not named at all, and in a database that holds
+	// credentials that is refused outright — the server would take it.
+	listed, err := d.RunCommand(ctx, bson.D{{Key: "listCollections", Value: 1}, {Key: "filter", Value: bson.D{{Key: "name", Value: secret}}}}).Raw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	uuid := listed.Lookup("cursor", "firstBatch", "0", "info", "uuid")
+	byUUID, err := bson.Marshal(bson.D{{Key: "find", Value: uuid}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := MongoRunCommand(ctx, client, db, byUUID); err != nil || !strings.Contains(reply.Canonical, "s3cret") {
+		t.Fatalf("the server no longer reads a collection by UUID, so this check has nothing to guard: %v", err)
+	}
+	verdict := MongoVerdict{Command: "find", Class: MongoClassRead, Known: true}
+	if MongoGuardCommand(db, byUUID, &verdict); verdict.Class != MongoClassBlocked {
+		t.Errorf("find by UUID in a database that holds credentials: %s", verdict.Class)
+	}
+
+	// Making such a view through the form is refused too.
+	if err := MongoCreateCollectionWith(ctx, client, db, "jd_guard_made", MongoCollectionSpec{ViewOn: secret}); !errors.Is(err, ErrMongoWithheld) {
+		t.Errorf("creating a view over the collection: %v", err)
+	}
+	// And the writes that name it.
+	if _, err := MongoInsertDocuments(ctx, client, db, secret, `{ a: 1 }`, true); !errors.Is(err, ErrMongoWithheld) {
+		t.Errorf("insert into the collection: %v", err)
+	}
+	if _, err := MongoInsert(ctx, client, db, secret, `{ "a": 1 }`); !errors.Is(err, ErrMongoWithheld) {
+		t.Errorf("the first browser's insert into the collection: %v", err)
+	}
 }
 
 func TestLiveMongoCommand(t *testing.T) {

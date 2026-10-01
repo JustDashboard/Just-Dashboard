@@ -657,9 +657,11 @@ func MongoProfileRead(ctx context.Context, client *mongo.Client, dbName string, 
 	return out, cur.Err()
 }
 
-// MongoProfilerChange is a new profiler setting. A nil field is left alone.
+// MongoProfilerChange is a new profiler setting. A nil field is left alone,
+// the level included: a change of the slow threshold that named no level must
+// not be read as "level 0" and turn the profiler off.
 type MongoProfilerChange struct {
-	Level      int      `json:"level"`
+	Level      *int     `json:"level"`
 	SlowMs     *int64   `json:"slowMs"`
 	SampleRate *float64 `json:"sampleRate"`
 }
@@ -671,10 +673,19 @@ func MongoSetProfiler(ctx context.Context, client *mongo.Client, dbName string, 
 	if err := mongoDatabaseName(dbName); err != nil {
 		return nil, err
 	}
-	if change.Level < 0 || change.Level > 2 {
-		return nil, fmt.Errorf("profiler level is 0 (off), 1 (slow operations) or 2 (every operation)")
+	if change.Level == nil && change.SlowMs == nil && change.SampleRate == nil {
+		return nil, fmt.Errorf("nothing to change: send a level, a slow threshold or a sample rate")
 	}
-	cmd := bson.D{{Key: "profile", Value: change.Level}}
+	// -1 is the level that asks for the current settings, and the server
+	// still applies whatever else the command carries: it is how the
+	// threshold is moved with the level left where it is.
+	level := -1
+	if change.Level != nil {
+		if level = *change.Level; level < 0 || level > 2 {
+			return nil, fmt.Errorf("profiler level is 0 (off), 1 (slow operations) or 2 (every operation)")
+		}
+	}
+	cmd := bson.D{{Key: "profile", Value: level}}
 	if change.SlowMs != nil {
 		if *change.SlowMs < 0 {
 			return nil, fmt.Errorf("the slow threshold cannot be negative")
@@ -752,17 +763,27 @@ func MongoReplicationStatus(ctx context.Context, client *mongo.Client) (*MongoRe
 		}
 		return nil, err
 	}
-	out.ReplicaSet = true
+	out = mongoReplicationFrom(raw)
+	out.Oplog = mongoOplog(ctx, client)
+	return out, nil
+}
+
+// mongoReplicationFrom reads a replSetGetStatus reply.
+func mongoReplicationFrom(raw bson.Raw) *MongoReplication {
+	out := &MongoReplication{ReplicaSet: true, Members: []MongoReplicaMember{}}
 	out.SetName, _ = raw.Lookup("set").StringValueOK()
 	members, _ := raw.Lookup("members").ArrayOK()
 	values, _ := members.Values()
 	var primaryOptime time.Time
-	optimes := make([]time.Time, len(values))
-	for i, v := range values {
+	// One per member kept, so the two stay in step past an entry that is
+	// not a document.
+	optimes := []time.Time{}
+	for _, v := range values {
 		doc, ok := v.DocumentOK()
 		if !ok {
 			continue
 		}
+		var optime time.Time
 		m := MongoReplicaMember{
 			ID: mongoLookupInt(doc, "_id"), Uptime: mongoLookupInt(doc, "uptime"),
 			PingMs: mongoLookupInt(doc, "pingMs"), Health: mongoLookupInt(doc, "health") == 1,
@@ -774,7 +795,7 @@ func MongoReplicationStatus(ctx context.Context, client *mongo.Client) (*MongoRe
 		m.Message, _ = doc.Lookup("lastHeartbeatMessage").StringValueOK()
 		if t, ok := doc.Lookup("optimeDate").TimeOK(); ok {
 			m.OptimeDate = t.UTC().Format(time.RFC3339)
-			optimes[i] = t
+			optime = t
 			if m.State == "PRIMARY" {
 				primaryOptime = t
 			}
@@ -786,17 +807,17 @@ func MongoReplicationStatus(ctx context.Context, client *mongo.Client) (*MongoRe
 			out.MyState = m.State
 		}
 		out.Members = append(out.Members, m)
+		optimes = append(optimes, optime)
 	}
 	if !primaryOptime.IsZero() {
 		for i := range out.Members {
-			if i < len(optimes) && !optimes[i].IsZero() {
+			if !optimes[i].IsZero() {
 				lag := math.Max(0, primaryOptime.Sub(optimes[i]).Seconds())
 				out.Members[i].LagSeconds = &lag
 			}
 		}
 	}
-	out.Oplog = mongoOplog(ctx, client)
-	return out, nil
+	return out
 }
 
 // mongoOplog measures the replication log. It needs read access to the local

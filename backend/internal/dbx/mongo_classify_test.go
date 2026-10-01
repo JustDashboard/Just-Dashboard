@@ -1,6 +1,7 @@
 package dbx
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -24,8 +25,8 @@ func TestPipelineClassification(t *testing.T) {
 		{"the text $out inside a string", `[{"$match":{"note":"\"$out\" and \"$merge\" are stages"}}]`, false, "", ""},
 		{"$out", `[{"$match":{}},{"$out":"copy"}]`, true, "$out", ""},
 		{"$merge", `[{"$merge":{"into":"copy"}}]`, true, "$merge", ""},
-		{"$out spelled with an escape", `[{"$match":{}},{"$out":"copy"}]`, true, "$out", ""},
-		{"$out spelled with an escaped letter", `[{"$out":"copy"}]`, true, "$out", ""},
+		{"$out spelled with an escape", `[{"$match":{}},{"\u0024out":"copy"}]`, true, "$out", ""},
+		{"$out spelled with an escaped letter", `[{"$\u006fut":"copy"}]`, true, "$out", ""},
 		{"shell syntax", `[ { $match: { a: 1 } }, { $out: 'copy' } ]`, true, "$out", ""},
 		{"$out inside $lookup", `[{"$lookup":{"from":"b","as":"x","pipeline":[{"$out":"copy"}]}}]`, true, "$out", ""},
 		{"$merge inside $unionWith", `[{"$unionWith":{"coll":"b","pipeline":[{"$merge":{"into":"c"}}]}}]`, true, "$merge", ""},
@@ -98,6 +99,9 @@ func TestCommandClassification(t *testing.T) {
 		{`{ validate: "c", full: true }`, MongoClassRead, false},
 		{`{ replSetGetStatus: 1 }`, MongoClassRead, false},
 		{`{ profile: -1 }`, MongoClassRead, false},
+		{`{ profile: -1, comment: "what is it now" }`, MongoClassRead, false},
+		{`{ profile: NumberLong(-1), maxTimeMS: 500 }`, MongoClassRead, false},
+		{`{ features: 1 }`, MongoClassRead, false},
 		{`{ aggregate: "c", pipeline: [ { $match: {} }, { $group: { _id: null, d: { $mergeObjects: "$$ROOT" } } } ], cursor: {} }`, MongoClassRead, false},
 		{`{ explain: { find: "c", filter: {} }, verbosity: "executionStats" }`, MongoClassRead, false},
 		{`{ explain: { delete: "c", deletes: [ { q: {}, limit: 0 } ] } }`, MongoClassRead, false},
@@ -112,6 +116,7 @@ func TestCommandClassification(t *testing.T) {
 		{`{ collMod: "c", index: { name: "a_1", hidden: true } }`, MongoClassWrite, false},
 		{`{ renameCollection: "d.a", to: "d.b" }`, MongoClassWrite, false},
 		{`{ fsync: 1 }`, MongoClassWrite, false},
+		{`{ features: 1, oidReset: 1 }`, MongoClassWrite, false},
 		// Destructive by what they are.
 		{`{ delete: "c", deletes: [ { q: { a: 1 }, limit: 1 } ] }`, MongoClassDestructive, false},
 		{`{ drop: "c" }`, MongoClassDestructive, false},
@@ -146,6 +151,16 @@ func TestCommandClassification(t *testing.T) {
 		{`{ createRole: "r", privileges: [], roles: [] }`, MongoClassWrite, true},
 		{`{ profile: 2, slowms: 50 }`, MongoClassWrite, true},
 		{`{ profile: 0 }`, MongoClassWrite, true},
+		// The server applies what rides beside the level, whatever the level
+		// is: -1 with a threshold moves the threshold.
+		{`{ profile: -1, slowms: 101 }`, MongoClassWrite, true},
+		{`{ profile: -1, sampleRate: 0.5 }`, MongoClassWrite, true},
+		{`{ profile: -1, filter: { millis: { $gt: 5 } } }`, MongoClassWrite, true},
+		{`{ profile: -1, filter: "unset" }`, MongoClassWrite, true},
+		{`{ profile: -1, somethingNew: 1 }`, MongoClassWrite, true},
+		{`{ profile: NumberDecimal("-1") }`, MongoClassWrite, true},
+		{`{ profile: "-1" }`, MongoClassWrite, true},
+		{`{ profile: -0.5 }`, MongoClassWrite, true},
 		{`{ dropUser: "u" }`, MongoClassDestructive, true},
 		{`{ dropRole: "r" }`, MongoClassDestructive, true},
 		{`{ dropDatabase: 1 }`, MongoClassDestructive, true},
@@ -184,13 +199,115 @@ func TestCommandClassification(t *testing.T) {
 	}
 }
 
+// A flag decides a command's class, and servers do not agree on what a flag
+// set looks like: 7.0 takes a Decimal128 for showCredentials and a string for
+// repair. So a flag is set unless it is something no server reads as set.
+// Every flag the table reads is tried with every spelling of both.
+func TestCommandFlagsFailClosed(t *testing.T) {
+	set := []string{
+		`true`, `1`, `-1`, `NumberLong(1)`, `NumberInt(2)`, `1.5`, `NumberDecimal("1")`, `NumberDecimal("0.1")`,
+		`NumberDecimal("NaN")`, `NaN`, `"yes"`, `"true"`, `"false"`, `""`, `{}`, `{ a: 1 }`, `[]`, `[ false ]`,
+		`ObjectId("65f1c0ffee0123456789abcd")`, `ISODate("2024-01-01")`, `undefined`,
+	}
+	unset := []string{`false`, `0`, `NumberLong(0)`, `NumberInt(0)`, `0.0`, `-0.0`, `NumberDecimal("0")`, `NumberDecimal("0.00")`, `NumberDecimal("-0")`, `null`}
+	for _, c := range []struct {
+		name, command  string // %s is where the flag's value goes
+		without, with  MongoCommandClass
+		withoutAdmin   bool
+		blockedOnAdmin bool
+	}{
+		{"usersInfo showCredentials", `{ usersInfo: 1, showCredentials: %s }`, MongoClassRead, MongoClassBlocked, false, false},
+		{"findAndModify remove", `{ findAndModify: "c", query: { a: 1 }, remove: %s }`, MongoClassWrite, MongoClassDestructive, false, false},
+		{"validate repair", `{ validate: "c", repair: %s }`, MongoClassRead, MongoClassDestructive, false, false},
+		{"validate fixMultikey", `{ validate: "c", fixMultikey: %s }`, MongoClassRead, MongoClassDestructive, false, false},
+		{"fsync lock", `{ fsync: 1, lock: %s }`, MongoClassWrite, MongoClassDestructive, false, false},
+		{"renameCollection dropTarget", `{ renameCollection: "d.a", to: "d.b", dropTarget: %s }`, MongoClassWrite, MongoClassDestructive, false, false},
+		{"update multi", `{ update: "c", updates: [ { q: {}, u: { $set: { a: 1 } }, multi: %s } ] }`, MongoClassWrite, MongoClassDestructive, false, false},
+		{"features oidReset", `{ features: 1, oidReset: %s }`, MongoClassRead, MongoClassWrite, false, false},
+	} {
+		for _, value := range set {
+			text := strings.Replace(c.command, "%s", value, 1)
+			_, v, err := MongoClassifyCommand(text)
+			if err != nil {
+				t.Errorf("%s: %v", text, err)
+				continue
+			}
+			if v.Class != c.with {
+				t.Errorf("%s = %s: classified %s, want %s\n %s", c.name, value, v.Class, c.with, text)
+			}
+		}
+		for _, value := range unset {
+			text := strings.Replace(c.command, "%s", value, 1)
+			_, v, err := MongoClassifyCommand(text)
+			if err != nil {
+				t.Errorf("%s: %v", text, err)
+				continue
+			}
+			if v.Class != c.without {
+				t.Errorf("%s = %s: classified %s, want %s\n %s", c.name, value, v.Class, c.without, text)
+			}
+		}
+	}
+	// The values themselves, so a flag added to the table later inherits a
+	// reading that has been checked.
+	value := func(text string) bson.RawValue {
+		v, err := mongoParseValue("flag", text)
+		if err != nil {
+			t.Fatalf("%s: %v", text, err)
+		}
+		return v
+	}
+	for _, text := range set {
+		if !mongoFlagSet(value(text)) {
+			t.Errorf("mongoFlagSet(%s) = false", text)
+		}
+	}
+	for _, text := range unset {
+		if mongoFlagSet(value(text)) {
+			t.Errorf("mongoFlagSet(%s) = true", text)
+		}
+	}
+}
+
+// A field given twice is read as its first value here and may be read as its
+// last by the server. The command is refused rather than classified by
+// either, and inside an update, where it cannot be refused as cheaply, the
+// widest reading is the one taken.
+func TestCommandFieldsGivenTwice(t *testing.T) {
+	for _, text := range []string{
+		`{"findAndModify":"c","query":{"a":1},"remove":false,"remove":true}`,
+		`{"aggregate":"c","pipeline":[],"pipeline":[{"$out":"x"}],"cursor":{}}`,
+		`{"validate":"c","repair":false,"repair":true}`,
+		`{"collMod":"c","index":{"name":"a","hidden":true},"index":{"name":"t","expireAfterSeconds":1}}`,
+		`{"profile":-1,"profile":2}`,
+		`{"find":"c","find":"system.users"}`,
+	} {
+		if _, v, err := MongoClassifyCommand(text); err == nil || !strings.Contains(err.Error(), "twice") {
+			t.Errorf("%s: classified %+v, %v; want it refused for a field given twice", text, v, err)
+		}
+	}
+	for text, want := range map[string]MongoCommandClass{
+		`{"update":"c","updates":[{"q":{"a":1},"q":{},"u":{"$set":{"b":1}},"multi":true}]}`:                 MongoClassDestructive,
+		`{"update":"c","updates":[{"q":{},"u":{"$set":{"b":1}},"multi":false,"multi":true}]}`:               MongoClassDestructive,
+		`{"update":"c","updates":[{"q":{},"u":{"$set":{"b":1}},"multi":true,"multi":false}]}`:               MongoClassDestructive,
+		`{"update":"c","updates":[{"q":"everything","u":{"$set":{"b":1}},"multi":true}]}`:                   MongoClassDestructive,
+		`{"update":"c","updates":[{"q":{"a":1},"u":{"$set":{"b":1}},"multi":false,"multi":true}]}`:          MongoClassWrite,
+		`{"update":"c","updates":[{"q":{},"u":{"$set":{"b":1}},"multi":false},{"q":{"a":1},"multi":true}]}`: MongoClassWrite,
+	} {
+		if _, v, err := MongoClassifyCommand(text); err != nil || v.Class != want {
+			t.Errorf("%s: classified %s, %v; want %s", text, v.Class, err, want)
+		}
+	}
+}
+
 // The collections that hold credentials are not opened: not directly, not
 // through a stage that reads another collection, not through the console,
 // and not by making a view over them.
 func TestCredentialCollectionsAreWithheld(t *testing.T) {
 	for ns, withheld := range map[string]bool{
-		"admin.system.users": true, "admin.system.keys": true,
+		"admin.system.users": true, "admin.system.keys": true, "local.oplog.rs": true,
 		"admin.system.roles": false, "admin.orders": false, "shop.system.users": false,
+		"shop.oplog.rs": false, "local.startup_log": false,
 	} {
 		db, coll, _ := strings.Cut(ns, ".")
 		err := mongoNamespace(db, coll)
@@ -215,6 +332,11 @@ func TestCredentialCollectionsAreWithheld(t *testing.T) {
 		`[ { $lookup: { from: "orders", localField: "a", foreignField: "b", as: "o" } } ]`:                                     false,
 		`[ { $match: { from: "system.users" } } ]`:                                                                             false,
 		`[ { $lookup: "system.users" } ]`:                                                                                      false,
+		// Writing one is managing accounts behind the server's back.
+		`[ { $out: "system.users" } ]`:            true,
+		`[ { $merge: "system.users" } ]`:          true,
+		`[ { $merge: { into: "system.keys" } } ]`: true,
+		`[ { $out: "copy" } ]`:                    false,
 	} {
 		if err := mongoGuardPipeline("admin", stages(text)); withheld != errors.Is(err, ErrMongoWithheld) {
 			t.Errorf("pipeline %s in admin: %v, want withheld=%v", text, err, withheld)
@@ -222,6 +344,26 @@ func TestCredentialCollectionsAreWithheld(t *testing.T) {
 		if err := mongoGuardPipeline("shop", stages(text)); err != nil {
 			t.Errorf("pipeline %s in another database: %v", text, err)
 		}
+	}
+	// The replication log is reached from any database: the server takes a
+	// { db, coll } in $lookup for it.
+	for text, withheld := range map[string]bool{
+		`[ { $lookup: { from: { db: "local", coll: "oplog.rs" }, as: "o", pipeline: [] } } ]`:                        true,
+		`[ { $facet: { a: [ { $lookup: { from: { db: "local", coll: "oplog.rs" }, as: "o", pipeline: [] } } ] } } ]`: true,
+		`[ { $lookup: { from: { db: "admin", coll: "system.users" }, as: "o", pipeline: [] } } ]`:                    true,
+		`[ { $out: { db: "admin", coll: "system.users" } } ]`:                                                        true,
+		`[ { $merge: { into: { db: "admin", coll: "system.users" } } } ]`:                                            true,
+		`[ { $merge: { into: { db: "reports", coll: "daily" } } } ]`:                                                 false,
+		`[ { $lookup: { from: { db: "config", coll: "collections" }, as: "o", pipeline: [] } } ]`:                    false,
+		`[ { $lookup: { from: "oplog.rs", as: "o", pipeline: [] } } ]`:                                               false,
+		`[ { $lookup: { from: "orders", as: "o", pipeline: [ { $match: { ns: "local.oplog.rs" } } ] } } ]`:           false,
+	} {
+		if err := mongoGuardPipeline("shop", stages(text)); withheld != errors.Is(err, ErrMongoWithheld) {
+			t.Errorf("pipeline %s in shop: %v, want withheld=%v", text, err, withheld)
+		}
+	}
+	if err := mongoGuardPipeline("local", stages(`[ { $unionWith: "oplog.rs" } ]`)); !errors.Is(err, ErrMongoWithheld) {
+		t.Errorf("a union with the replication log, in local: %v", err)
 	}
 	for text, blocked := range map[string]bool{
 		`{ find: "system.users" }`:                                                          true,
@@ -232,22 +374,65 @@ func TestCredentialCollectionsAreWithheld(t *testing.T) {
 		`{ explain: { aggregate: "x", pipeline: [ { $lookup: { from: "system.users", as: "u", pipeline: [] } } ], cursor: {} } }`: true,
 		`{ insert: "system.users", documents: [ {} ] }`:                true,
 		`{ renameCollection: "admin.system.users", to: "admin.copy" }`: true,
-		`{ find: "system.roles" }`:                                     false,
-		`{ usersInfo: 1 }`:                                             false,
-		`{ ping: 1 }`:                                                  false,
+		`{ renameCollection: "admin.copy", to: "admin.system.users" }`: true,
+		// A view is a second name for what it reads.
+		`{ create: "v", viewOn: "system.users", pipeline: [] }`:                                                         true,
+		`{ create: "v", viewOn: "system.keys" }`:                                                                        true,
+		`{ collMod: "v", viewOn: "system.users", pipeline: [] }`:                                                        true,
+		`{ create: "v", viewOn: "orders", pipeline: [ { $unionWith: "system.users" } ] }`:                               true,
+		`{ collMod: "v", viewOn: "orders", pipeline: [ { $lookup: { from: "system.keys", as: "k", pipeline: [] } } ] }`: true,
+		`{ insert: "system.views", documents: [ { _id: "admin.v", viewOn: "system.users", pipeline: [] } ] }`:           true,
+		`{ update: "system.views", updates: [ { q: { _id: "admin.v" }, u: { $set: { viewOn: "system.users" } } } ] }`:   true,
+		// find, count and distinct take a UUID in place of a name.
+		`{ find: UUID("00112233-4455-6677-8899-aabbccddeeff") }`:                  true,
+		`{ count: UUID("00112233-4455-6677-8899-aabbccddeeff") }`:                 true,
+		`{ distinct: UUID("00112233-4455-6677-8899-aabbccddeeff"), key: "user" }`: true,
+		`{ explain: { find: UUID("00112233-4455-6677-8899-aabbccddeeff") } }`:     true,
+		`{ create: "v", viewOn: "orders", pipeline: [] }`:                         false,
+		`{ find: "system.views" }`:                                                false,
+		`{ find: "system.roles" }`:                                                false,
+		`{ usersInfo: 1 }`:                                                        false,
+		`{ ping: 1 }`:                                                             false,
 	} {
 		cmd, v, err := MongoClassifyCommand(text)
 		if err != nil {
 			t.Fatal(err)
 		}
+		// The same names mean nothing in another database — unless the
+		// command spells the database out, as renameCollection does.
 		elsewhere := v
 		MongoGuardCommand("shop", cmd, &elsewhere)
-		if elsewhere.Class != v.Class {
-			t.Errorf("%s in another database changed class to %s", text, elsewhere.Class)
+		if spelled := strings.HasPrefix(text, `{ renameCollection:`) && blocked; (elsewhere.Class == MongoClassBlocked) != spelled {
+			t.Errorf("%s in another database: %s, want blocked=%v", text, elsewhere.Class, spelled)
 		}
 		MongoGuardCommand("admin", cmd, &v)
 		if blocked != (v.Class == MongoClassBlocked) || (blocked && v.Reason == "") {
 			t.Errorf("%s in admin: %s (%s), want blocked=%v", text, v.Class, v.Reason, blocked)
+		}
+	}
+	// The replication log, from the database it is in and from any other.
+	for _, c := range []struct {
+		db, text string
+		blocked  bool
+	}{
+		{"local", `{ find: "oplog.rs" }`, true},
+		{"local", `{ aggregate: "oplog.rs", pipeline: [], cursor: {} }`, true},
+		{"local", `{ create: "v", viewOn: "oplog.rs", pipeline: [] }`, true},
+		{"local", `{ find: UUID("00112233-4455-6677-8899-aabbccddeeff") }`, true},
+		{"local", `{ find: "startup_log" }`, false},
+		{"shop", `{ aggregate: "c", pipeline: [ { $lookup: { from: { db: "local", coll: "oplog.rs" }, as: "o", pipeline: [] } } ], cursor: {} }`, true},
+		{"shop", `{ create: "v", viewOn: "c", pipeline: [ { $lookup: { from: { db: "local", coll: "oplog.rs" }, as: "o", pipeline: [] } } ] }`, true},
+		{"shop", `{ find: "oplog.rs" }`, false},
+		{"shop", `{ find: UUID("00112233-4455-6677-8899-aabbccddeeff") }`, false},
+		{"shop", `{ insert: "system.views", documents: [ {} ] }`, false},
+	} {
+		cmd, v, err := MongoClassifyCommand(c.text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		MongoGuardCommand(c.db, cmd, &v)
+		if c.blocked != (v.Class == MongoClassBlocked) || (c.blocked && v.Reason == "") {
+			t.Errorf("%s in %s: %s (%s), want blocked=%v", c.text, c.db, v.Class, v.Reason, c.blocked)
 		}
 	}
 	if err := mongoGuardView("admin", "system.users", ""); !errors.Is(err, ErrMongoWithheld) {
@@ -258,6 +443,85 @@ func TestCredentialCollectionsAreWithheld(t *testing.T) {
 	}
 	if err := mongoGuardView("admin", "orders", `[ { $match: {} } ]`); err != nil {
 		t.Errorf("an ordinary view in admin: %v", err)
+	}
+}
+
+// A view that already exists is followed to what it reads, through other
+// views and through the stages of its pipeline, before it is read.
+func TestViewsOverCredentialsAreFollowed(t *testing.T) {
+	stages := func(text string) []bson.Raw {
+		out, err := mongoParseArray("pipeline", text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	views := map[string]mongoViewDef{
+		"direct":   {on: "system.users"},
+		"second":   {on: "direct"},
+		"third":    {on: "second", pipeline: stages(`[ { $project: { user: 1 } } ]`)},
+		"joined":   {on: "orders", pipeline: stages(`[ { $lookup: { from: "system.keys", as: "k", pipeline: [] } } ]`)},
+		"viaView":  {on: "orders", pipeline: stages(`[ { $unionWith: "second" } ]`)},
+		"nested":   {on: "orders", pipeline: stages(`[ { $facet: { a: [ { $lookup: { from: "orders", as: "o", pipeline: [ { $unionWith: "direct" } ] } } ] } } ]`)},
+		"oplog":    {on: "orders", pipeline: stages(`[ { $lookup: { from: { db: "local", coll: "oplog.rs" }, as: "o", pipeline: [] } } ]`)},
+		"clean":    {on: "orders", pipeline: stages(`[ { $match: { paid: true } }, { $lookup: { from: "items", as: "i", pipeline: [] } } ]`)},
+		"onClean":  {on: "clean"},
+		"loopA":    {on: "loopB"},
+		"loopB":    {on: "loopA"},
+		"selfJoin": {on: "orders", pipeline: stages(`[ { $unionWith: "selfJoin" } ]`)},
+		"broken":   {on: "orders", unreadable: true},
+		"onBroken": {on: "broken"},
+	}
+	for name, withheld := range map[string]bool{
+		"system.users": true, "system.keys": true,
+		"direct": true, "second": true, "third": true, "joined": true, "viaView": true, "nested": true, "oplog": true,
+		"broken": true, "onBroken": true,
+		"clean": false, "onClean": false, "orders": false, "nothing-by-this-name": false,
+		"loopA": false, "loopB": false, "selfJoin": false,
+	} {
+		err := mongoViewReaches("admin", name, views, map[string]bool{})
+		if withheld != errors.Is(err, ErrMongoWithheld) {
+			t.Errorf("admin.%s: %v, want withheld=%v", name, err, withheld)
+		}
+	}
+	// The refusal says what the view is over, so it can be found and dropped.
+	err := mongoViewReaches("admin", "third", views, map[string]bool{})
+	if err == nil || !strings.Contains(err.Error(), "admin.third is a view over admin.second is a view over admin.direct is a view over admin.system.users") {
+		t.Errorf("the refusal reads %v", err)
+	}
+}
+
+// The routes the first Mongo browser wrote through refuse the credential
+// collections before they touch the server, as the newer ones do. A nil
+// client is enough to show it: none of them gets as far as using one.
+func TestLegacyWritersRefuseCredentialCollections(t *testing.T) {
+	ctx := context.Background()
+	for name, err := range map[string]error{
+		"insert": func() error { _, err := MongoInsert(ctx, nil, "admin", "system.users", `{"user":"x"}`); return err }(),
+		"replace": func() error {
+			_, err := MongoReplace(ctx, nil, "admin", "system.users", `{"user":"x"}`, `{}`)
+			return err
+		}(),
+		"delete": func() error {
+			_, err := MongoDelete(ctx, nil, "admin", "system.users", `{"user":"x"}`, true)
+			return err
+		}(),
+		"drop":   MongoDropCollection(ctx, nil, "admin", "system.keys"),
+		"create": MongoCreateCollection(ctx, nil, "admin", "system.users"),
+		"import": func() error {
+			_, err := MongoImport(ctx, nil, "admin", "system.users", "json", `{"user":"x"}`, true)
+			return err
+		}(),
+		"count": func() error { _, err := MongoCount(ctx, nil, "admin", "system.users", ``); return err }(),
+		"query": func() error { _, err := MongoQuery(ctx, nil, "local", "oplog.rs", MongoFindOptions{}); return err }(),
+		"export": func() error {
+			_, _, err := MongoExport(ctx, nil, "local", "oplog.rs", MongoFindOptions{}, ExportJSON, nil, 0)
+			return err
+		}(),
+	} {
+		if !errors.Is(err, ErrMongoWithheld) {
+			t.Errorf("%s: %v, want ErrMongoWithheld", name, err)
+		}
 	}
 }
 

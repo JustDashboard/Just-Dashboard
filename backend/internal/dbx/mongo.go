@@ -94,6 +94,9 @@ func MongoQuery(ctx context.Context, client *mongo.Client, dbName, collection st
 	if err := mongoGuardCredentials(dbName, collection); err != nil {
 		return nil, err
 	}
+	if err := mongoGuardRead(ctx, client, dbName, collection); err != nil {
+		return nil, err
+	}
 	if opts.Limit <= 0 {
 		opts.Limit = 100
 	}
@@ -269,6 +272,9 @@ func mongoParseDoc(docJSON string) (bson.D, error) {
 
 // MongoInsert adds one document and reports the id it was stored under.
 func MongoInsert(ctx context.Context, client *mongo.Client, dbName, collection, docJSON string) (string, error) {
+	if err := mongoNamespace(dbName, collection); err != nil {
+		return "", err
+	}
 	doc, err := mongoParseDoc(docJSON)
 	if err != nil {
 		return "", err
@@ -294,6 +300,9 @@ func MongoInsert(ctx context.Context, client *mongo.Client, dbName, collection, 
 // UPDATE with no primary key is — it would silently rewrite the first document
 // in the collection, which is never what editing a record meant.
 func MongoReplace(ctx context.Context, client *mongo.Client, dbName, collection, filterJSON, docJSON string) (int64, error) {
+	if err := mongoNamespace(dbName, collection); err != nil {
+		return 0, err
+	}
 	filter, err := mongoParseFilter(filterJSON)
 	if err != nil {
 		return 0, err
@@ -331,6 +340,9 @@ func MongoReplace(ctx context.Context, client *mongo.Client, dbName, collection,
 // here too: "delete everything in this collection" is a different, louder
 // action than deleting a document, and it goes through DropCollection.
 func MongoDelete(ctx context.Context, client *mongo.Client, dbName, collection, filterJSON string, many bool) (int64, error) {
+	if err := mongoNamespace(dbName, collection); err != nil {
+		return 0, err
+	}
 	filter, err := mongoParseFilter(filterJSON)
 	if err != nil {
 		return 0, err
@@ -355,6 +367,9 @@ func MongoDelete(ctx context.Context, client *mongo.Client, dbName, collection, 
 
 // MongoCount reports how many documents match a filter.
 func MongoCount(ctx context.Context, client *mongo.Client, dbName, collection, filterJSON string) (int64, error) {
+	if err := mongoReadable(ctx, client, dbName, collection); err != nil {
+		return 0, err
+	}
 	filter, err := mongoParseFilter(filterJSON)
 	if err != nil {
 		return 0, err
@@ -414,11 +429,17 @@ func MongoAggregate(ctx context.Context, client *mongo.Client, dbName, collectio
 // MongoCreateCollection makes an empty collection, which Mongo otherwise only
 // creates implicitly on first write — leaving no way to set one up in advance.
 func MongoCreateCollection(ctx context.Context, client *mongo.Client, dbName, collection string) error {
+	if err := mongoNamespace(dbName, collection); err != nil {
+		return err
+	}
 	return client.Database(dbName).CreateCollection(ctx, collection)
 }
 
 // MongoDropCollection removes a collection and everything in it.
 func MongoDropCollection(ctx context.Context, client *mongo.Client, dbName, collection string) error {
+	if err := mongoNamespace(dbName, collection); err != nil {
+		return err
+	}
 	return client.Database(dbName).Collection(collection).Drop(ctx)
 }
 
@@ -462,6 +483,9 @@ func MongoExport(
 		maxRows = 100_000
 	}
 	if err := mongoGuardCredentials(dbName, collection); err != nil {
+		return 0, false, err
+	}
+	if err := mongoGuardRead(ctx, client, dbName, collection); err != nil {
 		return 0, false, err
 	}
 	filter, err := mongoParseFilter(opts.Filter)
@@ -628,6 +652,9 @@ func MongoImport(
 	dbName, collection, format, data string,
 	stopOnError bool,
 ) (*ImportResult, error) {
+	if err := mongoNamespace(dbName, collection); err != nil {
+		return nil, err
+	}
 	docs, err := parseImportDocuments(format, data)
 	if err != nil {
 		return nil, err

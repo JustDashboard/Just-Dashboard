@@ -2,6 +2,8 @@ package dbx
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -40,6 +42,18 @@ type MongoDoc struct {
 	// Size is the document's size in BSON bytes, which is what the 16 MiB
 	// limit is measured in.
 	Size int `json:"size"`
+	// Digest is the SHA-256 of the document's BSON, in hex. A replace sends
+	// it back to say which version of the document the edit was made on,
+	// which costs 64 characters where sending the document back costs the
+	// document.
+	Digest string `json:"digest"`
+}
+
+// mongoDigest names one version of a document: any change to a value, a
+// type or the order of the fields changes it.
+func mongoDigest(raw bson.Raw) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 // mongoSafeInteger is the largest integer a JavaScript number holds exactly.
@@ -54,7 +68,7 @@ func newMongoDoc(raw bson.Raw) (MongoDoc, error) {
 	if err != nil {
 		return MongoDoc{}, fmt.Errorf("a document could not be read: %w", err)
 	}
-	doc := MongoDoc{Canonical: string(canonical), Relaxed: relaxed, Size: len(raw)}
+	doc := MongoDoc{Canonical: string(canonical), Relaxed: relaxed, Size: len(raw), Digest: mongoDigest(raw)}
 	if id, err := raw.LookupErr("_id"); err == nil {
 		doc.ID = mongoValueJSON(id, true)
 	}

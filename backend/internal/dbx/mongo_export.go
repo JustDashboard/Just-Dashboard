@@ -84,7 +84,7 @@ func (e *MongoDocumentExport) Close() { e.cursor.Close(context.Background()) }
 
 // MongoOpenExport validates an export and opens its cursor.
 func MongoOpenExport(ctx context.Context, client *mongo.Client, dbName, collection string, spec MongoExportSpec) (*MongoDocumentExport, error) {
-	if err := mongoNamespace(dbName, collection); err != nil {
+	if err := mongoReadable(ctx, client, dbName, collection); err != nil {
 		return nil, err
 	}
 	format := spec.Format

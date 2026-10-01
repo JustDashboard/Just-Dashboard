@@ -92,7 +92,7 @@ func init() {
 		"collStats", "collstats", "dbStats", "dbstats", "serverStatus", "buildInfo", "buildinfo",
 		"hello", "isMaster", "ismaster", "getParameter", "connectionStatus", "rolesInfo", "top",
 		"ping", "hostInfo", "getCmdLineOpts", "getLog", "whatsmyuri", "currentOp", "dataSize",
-		"dbHash", "listCommands", "features", "connPoolStats", "replSetGetStatus",
+		"dbHash", "listCommands", "connPoolStats", "replSetGetStatus",
 		"replSetGetConfig", "getDefaultRWConcern", "lockInfo", "getMore", "planCacheListFilters",
 		"listShards", "balancerStatus", "getClusterParameter", "filemd5")
 	add(mongoCommandRule{class: MongoClassRead, inspect: inspectAggregate}, "aggregate")
@@ -100,6 +100,7 @@ func init() {
 	add(mongoCommandRule{class: MongoClassRead, inspect: inspectUsersInfo}, "usersInfo")
 	add(mongoCommandRule{class: MongoClassRead, inspect: inspectValidate}, "validate")
 	add(mongoCommandRule{class: MongoClassRead, inspect: inspectProfile}, "profile")
+	add(mongoCommandRule{class: MongoClassRead, inspect: inspectFeatures}, "features")
 
 	add(write, "insert", "create", "killCursors", "planCacheClear", "planCacheSetFilter",
 		"planCacheClearFilters", "fsyncUnlock", "setIndexCommitQuorum",
@@ -171,8 +172,16 @@ func MongoClassifyCommand(text string) (bson.Raw, MongoVerdict, error) {
 	if target, ok := elems[0].Value().StringValueOK(); ok {
 		v.Target = target
 	}
+	// A field given twice is read as its first value by one server and as its
+	// last by another, and refused by a third. Whichever this code read, a
+	// server could read the other, so the command is not classified at all.
+	fields := map[string]bool{name: true}
 	for _, e := range elems[1:] {
 		key := e.Key()
+		if fields[key] {
+			return nil, MongoVerdict{}, fmt.Errorf("the command sets %q twice; say it once", key)
+		}
+		fields[key] = true
 		if strings.HasPrefix(key, "$") {
 			return nil, MongoVerdict{}, fmt.Errorf("%q cannot be set on a command here; choose the database in the console instead", key)
 		}
@@ -205,48 +214,131 @@ func MongoClassifyCommand(text string) (bson.Raw, MongoVerdict, error) {
 }
 
 // MongoGuardCommand applies the one rule that depends on where a command
-// runs rather than on what it is: in the admin database, a command aimed at
-// a collection that holds credentials is never run, whatever it would do
-// there. Reading it would return password verifiers, and writing it is
-// managing accounts behind the server's back.
+// runs rather than on what it is: a command aimed at a collection that holds
+// credentials is never run, whatever it would do there. Reading it would
+// return password verifiers, and writing it is managing accounts behind the
+// server's back.
+//
+// It reads the command only. What the collections it names are views of is
+// asked of the server, by MongoGuardCommandViews, once there is a connection.
 func MongoGuardCommand(dbName string, cmd bson.Raw, v *MongoVerdict) {
-	if dbName != "admin" || v.Class == MongoClassBlocked {
+	if v.Class == MongoClassBlocked {
 		return
 	}
-	block := func(collection string) {
-		v.Class = MongoClassBlocked
-		v.Reason = "admin." + collection + " holds credentials and is not opened from here"
+	block := func(reason string) { v.Class, v.Reason = MongoClassBlocked, reason }
+	withheld := func(db, collection string) bool {
+		if !mongoHoldsCredentials(db, collection) {
+			return false
+		}
+		block(db + "." + collection + " holds credentials and is not opened from here")
+		return true
 	}
-	target := strings.TrimPrefix(v.Target, "admin.")
-	if mongoCredentialCollections[target] {
-		block(target)
-		return
-	}
-	// An aggregation reaches other collections through its stages, and an
-	// explain carries the command it explains.
+	guarded := len(mongoCredentialCollections[dbName]) > 0
+	// An explain carries the command it explains, and that one is aimed too.
 	explained, _ := cmd.Lookup("explain").DocumentOK()
 	for _, doc := range []bson.Raw{cmd, explained} {
-		pipeline, ok := doc.Lookup("pipeline").ArrayOK()
-		if !ok {
-			continue
-		}
-		values, err := pipeline.Values()
+		first, err := doc.IndexErr(0)
 		if err != nil {
 			continue
 		}
-		stages := []bson.Raw{}
-		for _, item := range values {
-			if stage, ok := item.DocumentOK(); ok {
-				stages = append(stages, stage)
+		switch target := first.Value(); target.Type {
+		case bsontype.String:
+			name := target.StringValue()
+			if withheld(dbName, name) {
+				return
+			}
+			// renameCollection and a few others name a collection with its
+			// database, from whichever database they are sent to.
+			if db, collection, ok := strings.Cut(name, "."); ok && withheld(db, collection) {
+				return
+			}
+			// A view is defined by a document in system.views, and writing
+			// that document by hand is making the view without saying so.
+			if guarded && name == "system.views" && v.Class != MongoClassRead {
+				block(dbName + ".system.views defines the views of a database that holds credentials; it is not written from here")
+				return
+			}
+		case bsontype.Binary:
+			// find, count and distinct take a collection's UUID in place of
+			// its name, and a UUID says nothing about which collection it is.
+			if guarded {
+				block("it names a collection by UUID, which in " + dbName + " could be one that holds credentials; name the collection instead")
+				return
 			}
 		}
-		for _, name := range mongoPipelineCollections(stages, 0) {
-			if mongoCredentialCollections[name] {
-				block(name)
+		for _, key := range []string{"viewOn", "to"} {
+			name, ok := doc.Lookup(key).StringValueOK()
+			if !ok {
+				continue
+			}
+			if withheld(dbName, name) {
+				return
+			}
+			if db, collection, ok := strings.Cut(name, "."); ok && withheld(db, collection) {
+				return
+			}
+		}
+		// An aggregation, and a view's definition, reach other collections
+		// through their stages.
+		for _, ref := range mongoPipelineCollections(mongoCommandPipeline(doc), 0) {
+			if ref.db == "" {
+				ref.db = dbName
+			}
+			if withheld(ref.db, ref.collection) {
 				return
 			}
 		}
 	}
+}
+
+// mongoCommandPipeline is the pipeline a command carries, as far as it can
+// be read.
+func mongoCommandPipeline(cmd bson.Raw) []bson.Raw {
+	pipeline, ok := cmd.Lookup("pipeline").ArrayOK()
+	if !ok {
+		return nil
+	}
+	values, err := pipeline.Values()
+	if err != nil {
+		return nil
+	}
+	stages := []bson.Raw{}
+	for _, item := range values {
+		if stage, ok := item.DocumentOK(); ok {
+			stages = append(stages, stage)
+		}
+	}
+	return stages
+}
+
+// MongoGuardCommandViews is the half of MongoGuardCommand that needs the
+// server: the collections a command names are followed through the views
+// they may be, and a command that would end at a credential collection that
+// way is refused with ErrMongoWithheld.
+func MongoGuardCommandViews(ctx context.Context, client *mongo.Client, dbName string, cmd bson.Raw) error {
+	names := []string{}
+	explained, _ := cmd.Lookup("explain").DocumentOK()
+	for _, doc := range []bson.Raw{cmd, explained} {
+		first, err := doc.IndexErr(0)
+		if err != nil {
+			continue
+		}
+		if name, ok := first.Value().StringValueOK(); ok {
+			names = append(names, name)
+		}
+		if name, ok := doc.Lookup("viewOn").StringValueOK(); ok {
+			names = append(names, name)
+		}
+		for _, ref := range mongoPipelineCollections(mongoCommandPipeline(doc), 0) {
+			if ref.db == "" || ref.db == dbName {
+				names = append(names, ref.collection)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	return mongoGuardRead(ctx, client, dbName, names...)
 }
 
 func mongoCommandSpelling(name string) string {
@@ -275,16 +367,40 @@ func MongoCommandNames() []MongoVerdict {
 	return out
 }
 
-// mongoTruthy reads a flag the way the server does: true, or any number but
-// zero.
-func mongoTruthy(v bson.RawValue) bool {
+// mongoFlagSet reads a flag so that it cannot be wrong in the dangerous
+// direction. Servers differ in what they take for true — MongoDB 7.0 reads a
+// Decimal128 as one on usersInfo and a string as one on validate, where an
+// older one wanted a boolean — so the only values read as "not set" are the
+// ones no server reads as set: null, false, and a zero of any numeric type.
+// Everything else counts as set, including what the server would refuse.
+func mongoFlagSet(v bson.RawValue) bool {
 	switch v.Type {
+	case bsontype.Null:
+		return false
 	case bsontype.Boolean:
 		return v.Boolean()
 	case bsontype.Int32, bsontype.Int64:
 		return mongoInt(v) != 0
 	case bsontype.Double:
 		return v.Double() != 0
+	case bsontype.Decimal128:
+		n, _, err := v.Decimal128().BigInt()
+		return err != nil || n.Sign() != 0
+	}
+	return true
+}
+
+// mongoHasFlag reports whether a document sets a flag. Every field of that
+// name is read, so one given twice is set when either says so.
+func mongoHasFlag(doc bson.Raw, key string) bool {
+	elems, err := doc.Elements()
+	if err != nil {
+		return true
+	}
+	for _, e := range elems {
+		if e.Key() == key && mongoFlagSet(e.Value()) {
+			return true
+		}
 	}
 	return false
 }
@@ -341,27 +457,46 @@ func inspectExplain(cmd bson.Raw, v *MongoVerdict) {
 }
 
 func inspectUsersInfo(cmd bson.Raw, v *MongoVerdict) {
-	if flag, err := cmd.LookupErr("showCredentials"); err == nil && mongoTruthy(flag) {
+	if mongoHasFlag(cmd, "showCredentials") {
 		v.raise(MongoClassBlocked, "showCredentials returns password hashes, which this dashboard never does")
 	}
 }
 
 func inspectValidate(cmd bson.Raw, v *MongoVerdict) {
 	for _, key := range []string{"repair", "fixMultikey"} {
-		if flag, err := cmd.LookupErr(key); err == nil && mongoTruthy(flag) {
+		if mongoHasFlag(cmd, key) {
 			v.raise(MongoClassDestructive, "with "+key+" it rewrites the collection instead of only checking it")
 			return
 		}
 	}
 }
 
+// mongoProfileReads are the fields a profile command can carry and still
+// only read. The server applies every other one it is given — slowms,
+// sampleRate, filter — whatever the level beside it says.
+var mongoProfileReads = map[string]bool{"profile": true, "comment": true, "maxTimeMS": true}
+
 func inspectProfile(cmd bson.Raw, v *MongoVerdict) {
 	level := cmd.Lookup("profile")
-	if level.IsNumber() && mongoInt(level) < 0 {
+	reads := (level.Type == bsontype.Int32 || level.Type == bsontype.Int64 || level.Type == bsontype.Double) && mongoInt(level) < 0
+	if elems, err := cmd.Elements(); err == nil {
+		for _, e := range elems {
+			reads = reads && mongoProfileReads[e.Key()]
+		}
+	} else {
+		reads = false
+	}
+	if reads {
 		return
 	}
 	v.Class, v.Admin = MongoClassWrite, true
 	v.Reason = "it changes the profiler, which the server keeps one slow threshold of for every database"
+}
+
+func inspectFeatures(cmd bson.Raw, v *MongoVerdict) {
+	if mongoHasFlag(cmd, "oidReset") {
+		v.raise(MongoClassWrite, "with oidReset it changes the machine part of the ids the server generates")
+	}
 }
 
 func inspectUpdate(cmd bson.Raw, v *MongoVerdict) {
@@ -381,9 +516,23 @@ func inspectUpdate(cmd bson.Raw, v *MongoVerdict) {
 			v.raise(MongoClassDestructive, "its updates could not be read")
 			return
 		}
-		filter, hasFilter := doc.Lookup("q").DocumentOK()
-		multi, err := doc.LookupErr("multi")
-		if (!hasFilter || mongoIsEmpty(filter)) && err == nil && mongoTruthy(multi) {
+		// Every q and every multi of the entry is read: one given twice is
+		// taken at its widest.
+		fields, err := doc.Elements()
+		if err != nil {
+			v.raise(MongoClassDestructive, "its updates could not be read")
+			return
+		}
+		filtered, everything := false, false
+		for _, f := range fields {
+			if f.Key() != "q" {
+				continue
+			}
+			filter, ok := f.Value().DocumentOK()
+			filtered = true
+			everything = everything || !ok || mongoIsEmpty(filter)
+		}
+		if (everything || !filtered) && mongoHasFlag(doc, "multi") {
 			v.raise(MongoClassDestructive, "it updates every document in the collection: multi with an empty filter")
 			return
 		}
@@ -391,7 +540,7 @@ func inspectUpdate(cmd bson.Raw, v *MongoVerdict) {
 }
 
 func inspectFindAndModify(cmd bson.Raw, v *MongoVerdict) {
-	if flag, err := cmd.LookupErr("remove"); err == nil && mongoTruthy(flag) {
+	if mongoHasFlag(cmd, "remove") {
 		v.raise(MongoClassDestructive, "with remove it deletes the document it finds")
 	}
 }
@@ -434,13 +583,13 @@ func inspectCollMod(cmd bson.Raw, v *MongoVerdict) {
 }
 
 func inspectRename(cmd bson.Raw, v *MongoVerdict) {
-	if flag, err := cmd.LookupErr("dropTarget"); err == nil && mongoTruthy(flag) {
+	if mongoHasFlag(cmd, "dropTarget") {
 		v.raise(MongoClassDestructive, "with dropTarget it drops the collection that already has the new name")
 	}
 }
 
 func inspectFsync(cmd bson.Raw, v *MongoVerdict) {
-	if flag, err := cmd.LookupErr("lock"); err == nil && mongoTruthy(flag) {
+	if mongoHasFlag(cmd, "lock") {
 		v.raise(MongoClassDestructive, "with lock it blocks every write on the server until it is unlocked")
 	}
 }

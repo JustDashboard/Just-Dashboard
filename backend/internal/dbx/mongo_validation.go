@@ -116,7 +116,7 @@ const (
 // validator, or a proposed one when validator is not empty, and returns a few
 // of them.
 func MongoCheckValidation(ctx context.Context, client *mongo.Client, dbName, collection, validator string, samples int, maxTimeMS int64) (*MongoValidationCheck, error) {
-	if err := mongoNamespace(dbName, collection); err != nil {
+	if err := mongoReadable(ctx, client, dbName, collection); err != nil {
 		return nil, err
 	}
 	out := &MongoValidationCheck{Samples: []MongoDoc{}, Exact: true, Total: -1}

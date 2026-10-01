@@ -2,12 +2,17 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
@@ -130,6 +135,38 @@ func (s *Server) handleMongoDocument(w http.ResponseWriter, r *http.Request) err
 	return nil
 }
 
+// mongoDocumentBody is how large a request that carries whole documents may
+// be. httpx.DecodeJSON stops at 4 MiB, which is less than one document can
+// need: 16 MiB of BSON is, as canonical Extended JSON inside a JSON string,
+// about as much for a document of long strings and four times as much for
+// one of small numbers.
+const mongoDocumentBody = 64 << 20
+
+// decodeMongoDocuments is httpx.DecodeJSON with that limit and nothing else
+// changed: the same content type, the same refusal of a field the request
+// type does not have, the same refusal of a second value.
+func decodeMongoDocuments(w http.ResponseWriter, r *http.Request, dst any) error {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return httpx.Err(http.StatusUnsupportedMediaType, "json_content_type_required",
+			"request body must use application/json")
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, mongoDocumentBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return httpx.Err(http.StatusRequestEntityTooLarge, "document_too_large",
+				"the request is larger than 64 MiB, which is what a document of 16 MiB usually needs as text; change the document with update operators instead of sending it whole")
+		}
+		return httpx.BadRequest("malformed request body: %v", err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return httpx.BadRequest("request body must contain exactly one JSON value")
+	}
+	return nil
+}
+
 type mongoInsertRequest struct {
 	mongoNamespaceRequest
 	// Documents is one document, or a list of documents, as text.
@@ -141,7 +178,7 @@ type mongoInsertRequest struct {
 
 func (s *Server) handleMongoInsertDocuments(w http.ResponseWriter, r *http.Request) error {
 	var req mongoInsertRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := decodeMongoDocuments(w, r, &req); err != nil {
 		return err
 	}
 	client, conn, err := s.mongoClient(r)
@@ -175,17 +212,12 @@ func (s *Server) handleMongoInsertDocuments(w http.ResponseWriter, r *http.Reque
 
 type mongoReplaceRequest struct {
 	mongoNamespaceRequest
-	ID string `json:"id"`
-	// Document is the whole replacement as Extended JSON.
-	Document string `json:"document"`
-	// Expected is the document as it was read. When sent, the replacement
-	// is made only if the stored document is still exactly that.
-	Expected string `json:"expected"`
+	dbx.MongoReplacement
 }
 
 func (s *Server) handleMongoReplaceDocument(w http.ResponseWriter, r *http.Request) error {
 	var req mongoReplaceRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	if err := decodeMongoDocuments(w, r, &req); err != nil {
 		return err
 	}
 	client, conn, err := s.mongoClient(r)
@@ -199,12 +231,12 @@ func (s *Server) handleMongoReplaceDocument(w http.ResponseWriter, r *http.Reque
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	res, err := dbx.MongoReplaceDocument(ctx, client, db, collection, req.ID, req.Document, req.Expected)
+	res, err := dbx.MongoReplaceDocument(ctx, client, db, collection, req.MongoReplacement)
 	// The audit entry is set before the error is returned: a replace that
 	// found the document changed or gone is worth a line saying which.
 	detail := map[string]any{
 		"database": db, "collection": collection, "id": mongoAuditText(req.ID),
-		"guarded": strings.TrimSpace(req.Expected) != "",
+		"guarded": strings.TrimSpace(req.ExpectedDigest) != "" || strings.TrimSpace(req.Expected) != "",
 	}
 	if err != nil {
 		httpx.SetAudit(r, "database.document.replace", conn.Name, detail)
@@ -405,22 +437,52 @@ func (s *Server) handleMongoExport(w http.ResponseWriter, r *http.Request) error
 	if export.Total != nil {
 		h.Set("X-Export-Total", strconv.FormatInt(*export.Total, 10))
 	}
-	rows, err := export.Write(ctx, w)
+	// A GET is not recorded by the mutation middleware, and a collection
+	// leaving the server is worth a line. It is written once the cursor is
+	// open and before the first byte, when httpx.AuditRead writes its own, so
+	// an export that hangs or outlives the process is still on record.
+	// AuditRead takes no detail, though, and which collection left is the
+	// whole point of this entry, so it is written here with one.
 	detail := map[string]any{
 		"database": db, "collection": collection, "format": export.Extension(),
-		"rows": rows, "truncated": export.Truncated(), "filtered": strings.TrimSpace(spec.Filter) != "",
+		"limit": export.Limit, "truncated": export.Truncated(), "filtered": strings.TrimSpace(spec.Filter) != "",
 	}
-	if err != nil {
-		detail["error"] = err.Error()
+	if export.Total != nil {
+		detail["total"] = *export.Total
 	}
-	// A GET is not recorded by the mutation middleware, and a collection
-	// leaving the server is worth a line.
 	s.recordAudit(r, "database.export", conn.Name, detail)
+	rows, err := export.Write(ctx, w)
 	if err != nil {
 		// The status has gone out, so the failure cannot be a body. Breaking
 		// the response off is what a client can see: a download that failed,
-		// rather than a short file that looks whole.
+		// rather than a short file that looks whole. The trail gets a second
+		// entry saying how far it got, marked as the failure it is.
+		detail["rows"], detail["error"] = rows, err.Error()
+		s.recordExportFailure(r, conn.Name, detail)
 		panic(http.ErrAbortHandler)
 	}
 	return nil
+}
+
+// recordExportFailure records an export that broke off after its first byte.
+// The usual reason is the browser going away, which cancels the request's
+// context, so the entry is written on one that is not cancelled with it.
+func (s *Server) recordExportFailure(r *http.Request, target string, detail any) {
+	p := httpx.MustPrincipal(r)
+	s.Audit.Record(context.WithoutCancel(r.Context()), audit.Entry{
+		UserID:   p.UserID(),
+		Username: p.Username(),
+		Role:     string(p.Role),
+		IP:       httpx.ClientIP(r),
+		Actor:    p.Kind,
+		Action:   "database.export",
+		Target:   target,
+		Method:   r.Method,
+		Path:     r.URL.Path,
+		// What the request would have answered had it failed a moment
+		// earlier, before its headers went out.
+		Status:  http.StatusBadGateway,
+		Success: false,
+		Detail:  audit.Detail(detail),
+	})
 }

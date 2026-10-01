@@ -265,6 +265,21 @@ func TestMongoContentDecidesDestructiveness(t *testing.T) {
 		{"console: a TTL index", http.MethodPost, "/mongo/command",
 			`{"command":"{ createIndexes: 'c', indexes: [ { key: { at: 1 }, name: 't', expireAfterSeconds: 1 } ] }"}`},
 		{"console: a command nobody listed", http.MethodPost, "/mongo/command", `{"command":"{ someNewCommand: 1 }"}`},
+		// A flag is set unless it is something no server reads as set. Each
+		// of these reached the server as a routine write, or a read, when
+		// only true and a number counted.
+		{"console: findAndModify that removes, said with a decimal", http.MethodPost, "/mongo/command",
+			`{"command":"{ findAndModify: 'c', query: { a: 1 }, remove: NumberDecimal('1') }"}`},
+		{"console: validate that repairs, said with a string", http.MethodPost, "/mongo/command",
+			`{"command":"{ validate: 'c', repair: 'yes' }"}`},
+		{"console: fsync that locks, said with a string", http.MethodPost, "/mongo/command",
+			`{"command":"{ fsync: 1, lock: 'yes' }"}`},
+		{"console: rename over a collection, said with a document", http.MethodPost, "/mongo/command",
+			`{"command":"{ renameCollection: 'd.a', to: 'd.b', dropTarget: {} }"}`},
+		{"console: update every document, said with a long", http.MethodPost, "/mongo/command",
+			`{"command":"{ update: 'c', updates: [ { q: {}, u: { $set: { a: 1 } }, multi: NumberLong(1) } ] }"}`},
+		{"console: update every document, the filter said twice", http.MethodPost, "/mongo/command",
+			`{"command":"{\"update\":\"c\",\"updates\":[{\"q\":{\"a\":1},\"q\":{},\"u\":{\"$set\":{\"a\":1}},\"multi\":true}]}"}`},
 		{"console: compact", http.MethodPost, "/mongo/command", `{"command":"{ compact: 'c' }"}`},
 	}
 	_, limited := mongoRouterAs(t, auth.RoleLimited)
@@ -350,6 +365,9 @@ func TestMongoConsoleGates(t *testing.T) {
 		`{ mapReduce: "c", map: "f", reduce: "g", out: "x" }`, `{ applyOps: [] }`,
 		`{ usersInfo: 1, showCredentials: true }`, `{ _internalCommand: 1 }`,
 		`{ find: "c", lsid: { id: 1 } }`,
+		// The server takes a decimal for this flag, and answered with every
+		// account's password verifiers.
+		`{ usersInfo: 1, showCredentials: NumberDecimal("1") }`, `{ usersInfo: 1, showCredentials: "yes" }`,
 	} {
 		rec := mongoDo(admin, http.MethodPost, "/databases/"+mongoConn+"/mongo/command", command(text))
 		if rec.Code != http.StatusBadRequest || mongoErrorCode(rec) != "command_blocked" {
@@ -360,6 +378,9 @@ func TestMongoConsoleGates(t *testing.T) {
 	for _, text := range []string{
 		`{ createUser: "u", pwd: "p", roles: [] }`, `{ grantRolesToUser: "u", roles: ["root"] }`,
 		`{ profile: 2 }`, `{ dropUser: "u" }`, `{ dropDatabase: 1 }`, `{ setParameter: 1, logLevel: 5 }`,
+		// Level -1 asks what the profiler is set to, and the server still
+		// applies whatever is sent beside it.
+		`{ profile: -1, slowms: 100 }`, `{ profile: -1, sampleRate: 0.5 }`, `{ profile: -1, filter: { millis: { $gt: 1 } } }`,
 	} {
 		rec := mongoDo(limited, http.MethodPost, "/databases/"+mongoConn+"/mongo/command", command(text))
 		if rec.Code != http.StatusForbidden {
@@ -369,18 +390,36 @@ func TestMongoConsoleGates(t *testing.T) {
 			t.Errorf("%s as an administrator: %d %s", text, rec.Code, strings.TrimSpace(rec.Body.String()))
 		}
 	}
-	// The collections that hold credentials, in the database that has them.
-	for _, text := range []string{`{ find: "system.users" }`, `{ aggregate: "c", pipeline: [ { $unionWith: "system.users" } ], cursor: {} }`} {
-		body, _ := json.Marshal(map[string]string{"command": text, "database": "admin"})
+	// Asking only what the profiler is set to is a read, for the role that
+	// reaches the console at all.
+	if rec := mongoDo(limited, http.MethodPost, "/databases/"+mongoConn+"/mongo/command", command(`{ profile: -1 }`)); !passedTheGate(rec) {
+		t.Errorf("{ profile: -1 } as a limited role: %d %s", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+	// The collections that hold credentials, in the databases that have
+	// them: by name, through a stage, through a view made over them, and by
+	// the UUID the server takes in place of a name.
+	for _, c := range []struct{ database, text string }{
+		{"admin", `{ find: "system.users" }`},
+		{"admin", `{ aggregate: "c", pipeline: [ { $unionWith: "system.users" } ], cursor: {} }`},
+		{"admin", `{ create: "v", viewOn: "system.users", pipeline: [] }`},
+		{"admin", `{ collMod: "v", viewOn: "system.users", pipeline: [] }`},
+		{"admin", `{ create: "v", viewOn: "orders", pipeline: [ { $lookup: { from: "system.keys", as: "k", pipeline: [] } } ] }`},
+		{"admin", `{ find: UUID("00112233-4455-6677-8899-aabbccddeeff") }`},
+		{"admin", `{ insert: "system.views", documents: [ { _id: "admin.v", viewOn: "system.users", pipeline: [] } ] }`},
+		{"local", `{ find: "oplog.rs" }`},
+		{"jdtest", `{ aggregate: "c", pipeline: [ { $lookup: { from: { db: "local", coll: "oplog.rs" }, as: "o", pipeline: [] } } ], cursor: {} }`},
+	} {
+		body, _ := json.Marshal(map[string]string{"command": c.text, "database": c.database})
 		rec := mongoDo(admin, http.MethodPost, "/databases/"+mongoConn+"/mongo/command", string(body))
 		if rec.Code != http.StatusBadRequest || mongoErrorCode(rec) != "command_blocked" || !strings.Contains(rec.Body.String(), "credentials") {
-			t.Errorf("%s in admin was not blocked: %d %s", text, rec.Code, strings.TrimSpace(rec.Body.String()))
+			t.Errorf("%s in %s was not blocked: %d %s", c.text, c.database, rec.Code, strings.TrimSpace(rec.Body.String()))
 		}
 	}
 	// What cannot be read is refused as a request, not run as a guess.
 	for text, want := range map[string]string{
 		``: "required", `{}`: "empty", `[1]`: "document", `{ Find: "c" }`: "did you mean",
-		`{ find: "c", $db: "admin" }`: "choose the database",
+		`{ find: "c", $db: "admin" }`:                                        "choose the database",
+		`{"findAndModify":"c","query":{"a":1},"remove":false,"remove":true}`: "twice",
 	} {
 		rec := mongoDo(admin, http.MethodPost, "/databases/"+mongoConn+"/mongo/command", command(text))
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
@@ -536,8 +575,8 @@ func TestMongoExportConnectFailureIsAnError(t *testing.T) {
 // The checks a protected connection applies to the Mongo routes that read or
 // write by what they carry.
 func TestMongoReadOnlyChecks(t *testing.T) {
-	body := func(field, text string) []byte {
-		b, _ := json.Marshal(map[string]string{"collection": "c", field: text})
+	body := func(fields map[string]string) []byte {
+		b, _ := json.Marshal(fields)
 		return b
 	}
 	for text, reads := range map[string]bool{
@@ -551,23 +590,34 @@ func TestMongoReadOnlyChecks(t *testing.T) {
 		`[{"$match":`:                   false,
 		``:                              false,
 	} {
-		if err := mongoReadOnlyPipeline(body("pipeline", text)); (err == nil) != reads {
+		if err := mongoReadOnlyPipeline(body(map[string]string{"collection": "c", "pipeline": text})); (err == nil) != reads {
 			t.Errorf("pipeline %s: %v, want reads=%v", text, err, reads)
 		}
 	}
 	for text, reads := range map[string]bool{
 		`{ find: "c" }`: true, `{ ping: 1 }`: true, `{ explain: { find: "c" } }`: true,
 		`{ aggregate: "c", pipeline: [ { $match: {} } ], cursor: {} }`: true,
-		`{ aggregate: "c", pipeline: [ { $out: "x" } ], cursor: {} }`:  false,
-		`{ insert: "c", documents: [] }`:                               false,
-		`{ drop: "c" }`:                                                false,
-		`{ profile: 1 }`:                                               false,
-		`{ shutdown: 1 }`:                                              false,
-		`{ somethingNew: 1 }`:                                          false,
-		`{ find: `:                                                     false,
-		``:                                                             false,
+		`{ profile: -1 }`:   true,
+		`{ validate: "c" }`: true,
+		`{ aggregate: "c", pipeline: [ { $out: "x" } ], cursor: {} }`: false,
+		`{ insert: "c", documents: [] }`:                              false,
+		`{ drop: "c" }`:                                               false,
+		`{ profile: 1 }`:                                              false,
+		// What the server changes although the command reads like a question.
+		`{ profile: -1, slowms: 101 }`:                          false,
+		`{ profile: -1, sampleRate: 0.5 }`:                      false,
+		`{ profile: -1, filter: {} }`:                           false,
+		`{ validate: "c", repair: "yes" }`:                      false,
+		`{ validate: "c", repair: NumberDecimal("1") }`:         false,
+		`{ usersInfo: 1, showCredentials: NumberDecimal("1") }`: false,
+		`{ features: 1, oidReset: 1 }`:                          false,
+		`{"find":"c","find":"d"}`:                               false,
+		`{ shutdown: 1 }`:                                       false,
+		`{ somethingNew: 1 }`:                                   false,
+		`{ find: `:                                              false,
+		``:                                                      false,
 	} {
-		if err := mongoReadOnlyCommand(body("command", text)); (err == nil) != reads {
+		if err := mongoReadOnlyCommand(body(map[string]string{"database": "d", "command": text})); (err == nil) != reads {
 			t.Errorf("command %s: %v, want reads=%v", text, err, reads)
 		}
 	}
@@ -576,18 +626,124 @@ func TestMongoReadOnlyChecks(t *testing.T) {
 		`{"collection":"c","filter":"{}","many":true}`:               false,
 		`{"collection":"c","dryRun":false}`:                          false,
 		`{"collection":"c","dryRun":"yes"}`:                          false,
-		`not json`:                                                   false,
+		`{"collection":"c","dryRun":true,"DRYRUN":false}`:            false,
+		`{"collection":"c","dryrun":false,"dryRun":true}`:            true,
+		`not json`: false,
 	} {
 		if err := mongoReadOnlyDryRun([]byte(raw)); (err == nil) != reads {
 			t.Errorf("dry run check of %s: %v, want reads=%v", raw, err, reads)
 		}
 	}
-	// A body that is not an object, or carries the field as something other
-	// than text, is not a read.
-	for _, raw := range []string{`[]`, `{"pipeline":[{"$match":{}}]}`, `{"pipeline":5}`} {
+	// A body that is not an object, carries the field as something other
+	// than text, or carries a field the handler would refuse, is not a read.
+	for _, raw := range []string{`[]`, `{"pipeline":[{"$match":{}}]}`, `{"pipeline":5}`, `{"pipeline":"[]","stages":"[]"}`} {
 		if err := mongoReadOnlyPipeline([]byte(raw)); err == nil {
 			t.Errorf("pipeline body %s was allowed", raw)
 		}
+	}
+}
+
+// The check and the handler have to read the same request. encoding/json
+// matches a field's name without regard to case and keeps the last value it
+// finds, so a key sent twice in two spellings is one field to the handler —
+// and was two to a check that looked its key up by its exact spelling: the
+// check passed the first value and the handler ran the second.
+func TestMongoReadOnlyChecksReadWhatTheHandlerRuns(t *testing.T) {
+	decode := func(raw string, dst any) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		if err := httpx.DecodeJSON(req, dst); err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+	}
+	for raw, reads := range map[string]bool{
+		`{"command":"{ping:1}","Command":"{dropDatabase:1}"}`:  false,
+		`{"command":"{ping:1}","COMMAND":"{ drop: 'c' }"}`:     false,
+		`{"Command":"{dropDatabase:1}","command":"{ping:1}"}`:  true,
+		`{"command":"{dropDatabase:1}","cOmMaNd":"{ping:1}"}`:  true,
+		`{"command":"{ping:1}","command":"{dropDatabase:1}"}`:  false,
+		`{"COMMAND":"{ find: 'c' }"}`:                          true,
+		`{"command":"{ping:1}","database":"d","DataBase":"e"}`: true,
+	} {
+		if err := mongoReadOnlyCommand([]byte(raw)); (err == nil) != reads {
+			t.Errorf("command body %s: %v, want reads=%v", raw, err, reads)
+		}
+		// What the handler decodes from the same bytes is what was judged.
+		var decoded mongoCommandRequest
+		decode(raw, &decoded)
+		_, verdict, err := dbx.MongoClassifyCommand(decoded.Command)
+		if err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		if (verdict.Class == dbx.MongoClassRead) != reads {
+			t.Errorf("command body %s: the handler would run a %s command", raw, verdict.Class)
+		}
+	}
+	for raw, reads := range map[string]bool{
+		`{"collection":"c","pipeline":"[]","PIPELINE":"[{$out:'x'}]"}`:                  false,
+		`{"collection":"c","pipeline":"[]","Pipeline":"[ { $merge: { into: 'x' } } ]"}`: false,
+		`{"collection":"c","PIPELINE":"[{$out:'x'}]","pipeline":"[]"}`:                  true,
+		`{"collection":"c","Pipeline":"[ { $match: {} } ]"}`:                            true,
+	} {
+		if err := mongoReadOnlyPipeline([]byte(raw)); (err == nil) != reads {
+			t.Errorf("pipeline body %s: %v, want reads=%v", raw, err, reads)
+		}
+		var decoded mongoAggregateRequest
+		decode(raw, &decoded)
+		if dbx.MongoWritesInPipeline(decoded.Pipeline) == reads {
+			t.Errorf("pipeline body %s: the handler would run a pipeline that writes=%v", raw, reads)
+		}
+	}
+}
+
+// A request that carries a whole document may be as large as a document's
+// text is, which the 4 MiB every other route stops at is not.
+func TestMongoDocumentRoutesTakeADocumentsWorth(t *testing.T) {
+	_, limited := mongoRouterAs(t, auth.RoleLimited)
+	brief := func(rec *httptest.ResponseRecorder) string {
+		text := strings.TrimSpace(rec.Body.String())
+		return text[:min(200, len(text))]
+	}
+	large := func(bytes int) string {
+		text, _ := json.Marshal(`{"body":"` + strings.Repeat("x", bytes) + `"}`)
+		return string(text)
+	}
+	for _, rq := range []mongoRoute{
+		{http.MethodPut, "/mongo/documents", `{"collection":"c","id":"1","document":` + large(6<<20) + `}`},
+		{http.MethodPost, "/mongo/documents", `{"collection":"c","documents":` + large(6<<20) + `}`},
+	} {
+		if rec := mongoDo(limited, rq.method, "/databases/"+mongoConn+rq.path, rq.body); !passedTheGate(rec) {
+			t.Errorf("%s %s with a 6 MiB document: %d %s", rq.method, rq.path, rec.Code, brief(rec))
+		}
+	}
+	rec := mongoDo(limited, http.MethodPut, "/databases/"+mongoConn+"/mongo/documents",
+		`{"collection":"c","id":"1","document":`+large(mongoDocumentBody)+`}`)
+	if rec.Code != http.StatusRequestEntityTooLarge || mongoErrorCode(rec) != "document_too_large" {
+		t.Errorf("a request past the limit: %d %s", rec.Code, brief(rec))
+	}
+	// The rules httpx.DecodeJSON keeps are kept: a content type, no unknown
+	// field, one value.
+	req := httptest.NewRequest(http.MethodPut, "/databases/"+mongoConn+"/mongo/documents", strings.NewReader(`{"collection":"c","id":"1","document":"{}"}`))
+	rec = httptest.NewRecorder()
+	limited.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("a replace without a content type: %d", rec.Code)
+	}
+	for body, want := range map[string]string{
+		`{"collection":"c","id":"1","document":"{}","expectedDigset":"00"}`: "unknown field",
+		`{"collection":"c","id":"1","document":"{}"} {}`:                    "exactly one JSON value",
+	} {
+		rec := mongoDo(limited, http.MethodPut, "/databases/"+mongoConn+"/mongo/documents", body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("replace with body %s: %d %s; want a 400 mentioning %q", body, rec.Code, brief(rec), want)
+		}
+	}
+	// A route that carries no document keeps the ordinary limit.
+	rec = mongoDo(limited, http.MethodPatch, "/databases/"+mongoConn+"/mongo/documents",
+		`{"collection":"c","update":"{}","filter":`+large(6<<20)+`}`)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "too large") {
+		t.Errorf("an update with a 6 MiB filter: %d %s", rec.Code, brief(rec))
 	}
 }
 
