@@ -39,7 +39,8 @@ export function DatabaseHome() {
     <SectionFrame section="home">
       <HostIdentity
         logo={<EngineMark engine={engine} size="lg" />}
-        title={<ConnectionSwitcher className="text-title font-semibold tracking-tight" />}
+        // The title's box truncates, which clips a ring drawn outside it.
+        title={<ConnectionSwitcher inset className="text-title font-semibold tracking-tight" />}
         facts={
           <>
             {connectionFacts(conn, engine, summary).map((fact, index) => (

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Check, Copy, Eye, EyeOff, Linked } from "@/components/icons"
 import { get } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -75,8 +75,18 @@ export function ConnectPopover({ className }: { className?: string }) {
   const text = connectSnippet(engine, real ? revealedParts(masked, engine, real) : masked, shape)
   const secret = holdsSecret(connectSnippet(engine, masked, shape))
 
-  const read = async () =>
-    (await get<{ url: string }>(`/databases/${conn.id}/url`, { target: target.id })).url
+  // Which opening of the popover this is. The real string is asked for while
+  // it is open and may arrive after it has closed; an answer that belongs to
+  // an earlier opening is dropped, so a password is never put on the screen
+  // or the clipboard of somebody who has already looked away from it.
+  const opening = useRef(0)
+
+  /** The real string, or `null` when the popover closed while it was being read. */
+  const read = async () => {
+    const asked = opening.current
+    const { url } = await get<{ url: string }>(`/databases/${conn.id}/url`, { target: target.id })
+    return asked === opening.current ? url : null
+  }
 
   const reveal = async () => {
     if (real) {
@@ -86,7 +96,7 @@ export function ConnectPopover({ className }: { className?: string }) {
     setBusy(true)
     try {
       const url = await read()
-      setShown((s) => ({ ...s, [target.id]: url }))
+      if (url !== null) setShown((s) => ({ ...s, [target.id]: url }))
     } catch (err) {
       notify.error("Could not read the connection string", err)
     } finally {
@@ -102,10 +112,12 @@ export function ConnectPopover({ className }: { className?: string }) {
     setBusy(true)
     try {
       const url = real ?? (await read())
-      await copy(
-        connectSnippet(engine, revealedParts(masked, engine, url), shape),
-        "Connection string copied",
-      )
+      if (url !== null) {
+        await copy(
+          connectSnippet(engine, revealedParts(masked, engine, url), shape),
+          "Connection string copied",
+        )
+      }
     } catch (err) {
       notify.error("Could not read the connection string", err)
     } finally {
@@ -118,8 +130,12 @@ export function ConnectPopover({ className }: { className?: string }) {
       open={open}
       onOpenChange={(next) => {
         setOpen(next)
-        // A revealed password does not outlive the popover it was shown in.
-        if (!next) setShown({})
+        // A revealed password does not outlive the popover it was shown in,
+        // and one still on its way is not shown in the next.
+        if (!next) {
+          opening.current += 1
+          setShown({})
+        }
       }}
     >
       <PopoverTrigger asChild>

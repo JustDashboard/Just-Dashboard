@@ -63,11 +63,15 @@ game-only pages and which of its settings pages hold a saved change that is not 
 (`PENDING_KIND_PAGE`) are not in the URL. Both sit a level *below* their section (`/databases/<id>`
 under Databases, `/deploy/<id>` under Deployments), so the back control leads to the section. The rail
 draws a project's rows from the route alone until that registration lands, so the panel does not reflow —
-only the name fills in. It draws a database's from the route and its memory of the last connection list
-(`useViewState("databases.known")`: name and engine by id), so a database this browser has opened before
-is its own panel at once; an id the list never held gets none until its layout registers one, since a
-rail of pages for a database that does not exist is worse than the section's panel standing a moment
-longer. The alternative was the rail polling the driver catalogue and a project on every page in the
+only the name fills in. It draws a database's from the route and what the tab remembers of it
+(`useSessionState("databases.known")`: by id, the name from the last connection list and — once its pages
+have been open — the flavour and capabilities its summary answered with), so a database opened before in
+this tab is its own panel at once, with exactly the pages that then register. One the tab has not opened,
+or an id the list never held, gets none until its layout registers one: a saved row knows only its
+driver, and a rail of MySQL's pages for a MariaDB server, or of any pages for a database that does not
+exist, is worse than the section's panel standing a moment longer. The memory is the tab's and not the
+browser's because connection names are the server's data and must not outlive a sign-out. The
+alternative was the rail polling the driver catalogue and a project on every page in the
 product to draw a list the page beneath it already holds. A project's run page keeps the project's
 panel, with Deployments marked as where you are, because a run is opened from there.
 

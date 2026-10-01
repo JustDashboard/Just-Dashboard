@@ -1,5 +1,6 @@
 import { LockClosed } from "@/components/icons"
 import { LANES, hueFor } from "@/lib/hue"
+import { cn } from "@/lib/utils"
 import { Tag } from "@/components/tag"
 
 /**
@@ -17,7 +18,7 @@ const KNOWN: Record<string, string> = {
 /** The label's colour: the known four, and one stable hue for any other word. */
 export function environmentHue(environment: string): string {
   const word = environment.trim().toLowerCase()
-  return KNOWN[word] ?? hueFor(word, LANES)
+  return Object.hasOwn(KNOWN, word) ? KNOWN[word] : hueFor(word, LANES)
 }
 
 /**
@@ -29,6 +30,11 @@ export function environmentHue(environment: string): string {
  * its own all the same, the exception §14 makes for a label somebody applied:
  * "the red one is production" is exactly what it is for, on a page where a
  * wrong database is the expensive mistake.
+ *
+ * It is the literal kind of tag, not the small-caps one: the word is whatever
+ * the operator typed, and small caps would print `eu-west qa` as EU-WEST QA —
+ * a name nobody gave it (§8). A long one is cut rather than allowed to push
+ * the row it annotates apart, with the whole word on the pointer.
  */
 export function EnvironmentTag({
   environment,
@@ -40,8 +46,13 @@ export function EnvironmentTag({
   const word = environment?.trim()
   if (!word) return null
   return (
-    <Tag className={className} style={{ color: environmentHue(word) }}>
-      {word}
+    <Tag
+      mono
+      title={word}
+      className={cn("max-w-48 min-w-0 shrink", className)}
+      style={{ color: environmentHue(word) }}
+    >
+      <span className="truncate">{word}</span>
     </Tag>
   )
 }

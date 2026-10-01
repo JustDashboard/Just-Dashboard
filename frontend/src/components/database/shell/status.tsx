@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import type { DbFleetEntry } from "@/lib/types"
 import { Status, type DotTone } from "@/components/status-dot"
 import type { DatabaseStatus } from "@/components/database/shell/database-context"
 
@@ -22,6 +23,24 @@ export function statusTone(state: DatabaseStatus["state"]): DotTone {
   return READING[state].tone
 }
 
+/** The word for a state, as the name of a dot drawn without one. */
+export function statusLabel(state: DatabaseStatus["state"]): string {
+  return READING[state].label
+}
+
+/**
+ * The same reading for one row of the fleet, so a list says of a database
+ * what its own strip says. The fleet does not dial a server it knows to be
+ * stopped: such a row is `ok: false` without having failed, and only `state`
+ * tells the two apart. A backend from before `state` has `ok` alone.
+ */
+export function fleetStatus(
+  entry: Pick<DbFleetEntry, "ok" | "state" | "error" | "broken" | "brokenReason">,
+): Pick<DatabaseStatus, "state" | "error"> {
+  if (entry.broken) return { state: "broken", error: entry.brokenReason ?? entry.error }
+  return { state: entry.state ?? (entry.ok ? "running" : "unreachable"), error: entry.error }
+}
+
 /**
  * Whether the database answers, as a dot and a word (§4): the one reading
  * the strip, the home and the switcher share. What the server said when it
@@ -39,7 +58,11 @@ export function DatabaseStatusMark({
   return (
     // A flex box, not a bare span: a block wrapper keeps a 16px line box and
     // sets the 12px status below the centre line its neighbours sit on.
-    <span title={status.error} className={cn("flex shrink-0", className)}>
+    <span
+      data-slot="database-status"
+      title={status.error}
+      className={cn("flex shrink-0", className)}
+    >
       <Status tone={reading.tone} label={reading.label} />
     </span>
   )

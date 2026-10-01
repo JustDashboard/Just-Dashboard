@@ -1,7 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { useState } from "react"
 import { Warning } from "@/components/icons"
 import { get } from "@/lib/api"
 import type { DbConnection, DbLogSources } from "@/lib/types"
@@ -103,30 +102,10 @@ function ServerLogs({
   found: DbLogSources
   onQuery?: (sql: string) => void
 }) {
-  const router = useRouter()
-  const pathname = usePathname()
-  const params = useSearchParams()
+  const { select, param } = useDatabase()
   const noun = queryNoun(conn.driver)
   const sources = found.sources
   const primary = sources.find((s) => s.primary)
-
-  // The page owns its address: the view and the source are in it, so a link
-  // opens on the same reading. One press can change both — "Server log
-  // around this" opens History on the server's own log — and two replaces
-  // built from the same address would each undo the other, so the changes
-  // of one press are gathered and written once.
-  const pending = useRef<URLSearchParams | null>(null)
-  const write = (key: string, value: string) => {
-    if (!pending.current) {
-      const next = new URLSearchParams(params.toString())
-      pending.current = next
-      queueMicrotask(() => {
-        pending.current = null
-        router.replace(`${pathname}?${next.toString()}`, { scroll: false })
-      })
-    }
-    pending.current.set(key, value)
-  }
 
   // A statement's rows came from the server's own log, so the log around one
   // is that log — not the journal beside it, which holds systemd's starts and
@@ -158,10 +137,14 @@ function ServerLogs({
       ))}
       <ServiceLogs
         sources={sources}
-        source={params.get("source")}
-        onSourceChange={(id) => write("source", id)}
-        view={params.get("view")}
-        onViewChange={(id) => write("view", id)}
+        // The page owns its address: the view and the source are in it, so
+        // a link opens on the same reading. One press can change both —
+        // "Server log around this" opens History on the server's own log —
+        // and the context's writer makes one change of the two.
+        source={param("source") || null}
+        onSourceChange={(id) => select({ source: id })}
+        view={param("view") || null}
+        onViewChange={(id) => select({ view: id })}
         storageKey={`databases.${conn.id}.logs`}
         views={views}
         readings="chips"

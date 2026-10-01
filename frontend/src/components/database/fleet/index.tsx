@@ -10,12 +10,12 @@ import { usePoll } from "@/hooks/use-poll"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
-import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { sectionHref } from "@/components/database/engine"
 import { sortFleet } from "@/components/database/fleet/fleet"
 import { EngineMark, EnvironmentTag, ProtectedTag } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import { DatabaseStatusMark, fleetStatus } from "@/components/database/shell/status"
 
 /**
  * The control center: every database this dashboard knows, each a press from
@@ -80,10 +80,7 @@ export function ControlCenter() {
                     <span className="flex items-center gap-3">
                       <EnvironmentTag environment={entry.environment} />
                       {entry.readOnly && <ProtectedTag />}
-                      <Status
-                        tone={entry.ok ? "running" : "danger"}
-                        label={entry.ok ? "connected" : "unreachable"}
-                      />
+                      <DatabaseStatusMark status={fleetStatus(entry)} />
                     </span>
                   }
                 />

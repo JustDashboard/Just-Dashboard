@@ -6,6 +6,7 @@ import { CheckCircle, CloudUpload, Globe, Logout, Plus, RefreshClockwise } from 
 import { get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { useSessionState } from "@/lib/view-state"
 import type {
   Capability,
   DbConnection,
@@ -23,6 +24,11 @@ import type { ProxyStatus } from "@/components/proxy/proxy-context"
 import { warningCount } from "@/components/proxy/config-test"
 import { engineFor, sectionHref } from "@/components/database/engine"
 import { EngineGlyph } from "@/components/database/kit/engine-mark"
+import {
+  KNOWN_DATABASES_KEY,
+  knownDatabase,
+  type KnownDatabase,
+} from "@/components/database/shell/nav-groups"
 import { databaseIdFrom } from "@/components/database/shell/routes"
 import {
   Command,
@@ -152,7 +158,16 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
     [],
     { enabled: open && inside !== null },
   )
-  const databases = connections.data ?? []
+  // A saved row says how a server is dialled, not what answered; what the
+  // tab has learned of each (MariaDB behind the `mysql` driver, and what it
+  // can do) is laid over it, so the pages listed here are the rail's.
+  const [known] = useSessionState<Record<string, KnownDatabase>>(KNOWN_DATABASES_KEY, {})
+  const databases = (connections.data ?? []).map((conn) => {
+    const learned = knownDatabase(known, conn.id)
+    return learned?.driver === conn.driver
+      ? { ...conn, flavor: learned.flavor, capabilities: learned.capabilities }
+      : conn
+  })
   const current = databases.find((conn) => conn.id === inside)
   const currentPages = current && !drivers.loading ? engineFor(current, drivers.data).sections : []
 

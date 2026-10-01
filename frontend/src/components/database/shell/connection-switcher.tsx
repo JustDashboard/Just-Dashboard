@@ -1,11 +1,12 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { Check, ChevronDown, Layers, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { useSessionState } from "@/lib/view-state"
 import type { DbConnection, DbFleet } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { FormNote } from "@/components/form"
@@ -24,7 +25,13 @@ import { EngineMark } from "@/components/database/kit/engine-mark"
 import { EnvironmentTag } from "@/components/database/kit/environment-tag"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import {
+  KNOWN_DATABASES_KEY,
+  knownDatabase,
+  type KnownDatabase,
+} from "@/components/database/shell/nav-groups"
 import { DATABASES_HREF, databasePlace } from "@/components/database/shell/routes"
+import { fleetStatus, statusLabel, statusTone } from "@/components/database/shell/status"
 
 /** A row at the foot of the list, drawn as the rows above it are. */
 const FOOT =
@@ -36,6 +43,26 @@ const FOOT =
  */
 function contains(value: string, search: string) {
   return value.toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0
+}
+
+/**
+ * When a database was last chosen here. Going to another database mounts its
+ * pages afresh, this control with them, and the keyboard's place — which was
+ * on this control — would be left on nothing. The one that mounts next takes
+ * it back, if it mounts soon enough to be the result of that choice.
+ */
+const handover = { at: 0 }
+const HANDOVER_MS = 15_000
+
+function leaveFocus() {
+  handover.at = Date.now()
+}
+
+/** Whether the control that just mounted is the one a choice led to. Asked once. */
+function takeFocus() {
+  const chosen = Date.now() - handover.at < HANDOVER_MS
+  handover.at = 0
+  return chosen
 }
 
 /**
@@ -51,13 +78,27 @@ function contains(value: string, search: string) {
  * Choosing one opens the page being looked at on that database, or its home
  * where its engine has no such page: a Redis server is never opened on a
  * schema browser because the last database had one. The selection does not
- * travel; a table of this database is not one of that one's.
+ * travel; a table of this database is not one of that one's. Choosing the
+ * one already open closes the list and changes nothing — it is where the
+ * reader is, table and all.
  */
-export function ConnectionSwitcher({ className }: { className?: string }) {
+export function ConnectionSwitcher({
+  inset,
+  className,
+}: {
+  /**
+   * Draw the focus ring inside the control. For a place that clips what
+   * leaves its box — the title of an identity line truncates, and a ring
+   * drawn outside the name was cut on three sides.
+   */
+  inset?: boolean
+  className?: string
+}) {
   const router = useRouter()
   const pathname = usePathname()
   const { conn } = useDatabase()
   const { connections, error, engineFor, admin, newHref } = useDatabases()
+  const [known] = useSessionState<Record<string, KnownDatabase>>(KNOWN_DATABASES_KEY, {})
   const [open, setOpen] = useState(false)
 
   const fleet = usePoll((signal) => get<DbFleet>("/databases/fleet", undefined, signal), 0, [], {
@@ -71,17 +112,31 @@ export function ConnectionSwitcher({ className }: { className?: string }) {
   const groups = useMemo(() => {
     const byEngine = new Map<string, { engine: Engine; rows: DbConnection[] }>()
     for (const row of connections) {
-      // The fleet knows what answered; the saved row only how it is dialled.
-      const engine = engineFor({ ...row, flavor: row.flavor ?? answering.get(row.id)?.flavor })
+      // The saved row says only how a server is dialled. What answered is
+      // known for the one that is open, for every one the fleet has dialled,
+      // and for those opened earlier in this tab — which is what keeps a row
+      // under the same heading before and after the fleet lands.
+      const flavor =
+        row.flavor ??
+        (row.id === conn.id ? conn.flavor : undefined) ??
+        answering.get(row.id)?.flavor ??
+        knownDatabase(known, row.id)?.flavor
+      const engine = engineFor({ ...row, flavor })
       const group = byEngine.get(engine.label) ?? { engine, rows: [] }
       group.rows.push(row)
       byEngine.set(engine.label, group)
     }
     return [...byEngine.values()].sort((a, b) => a.engine.label.localeCompare(b.engine.label))
-  }, [connections, engineFor, answering])
+  }, [connections, engineFor, answering, known, conn.id, conn.flavor])
+
+  const trigger = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (takeFocus()) trigger.current?.focus()
+  }, [])
 
   const section = databasePlace(pathname)?.section ?? "home"
   const go = (href: string) => {
+    leaveFocus()
     setOpen(false)
     router.push(href)
   }
@@ -90,10 +145,12 @@ export function ConnectionSwitcher({ className }: { className?: string }) {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
+          ref={trigger}
           type="button"
           aria-label={`Database: ${conn.name}. Switch database`}
           className={cn(
-            "group flex max-w-full min-w-0 items-center gap-1.5 rounded-md text-left text-sm font-medium focus-ring",
+            "group flex max-w-full min-w-0 items-center gap-1.5 rounded-md text-left text-sm font-medium",
+            inset ? "focus-ring-inset" : "focus-ring",
             className,
           )}
         >
@@ -114,6 +171,7 @@ export function ConnectionSwitcher({ className }: { className?: string }) {
               <CommandGroup key={engine.label} heading={engine.label}>
                 {rows.map((row) => {
                   const entry = answering.get(row.id)
+                  const reading = entry && fleetStatus(entry)
                   return (
                     <CommandItem
                       key={row.id}
@@ -121,7 +179,9 @@ export function ConnectionSwitcher({ className }: { className?: string }) {
                       // may share a name, never an id.
                       value={`${row.name} ${engine.label} ${row.host}:${row.port} ${row.database} #${row.id}`}
                       onSelect={() =>
-                        go(sectionHref(row.id, engine.has(section) ? section : "home"))
+                        row.id === conn.id
+                          ? setOpen(false)
+                          : go(sectionHref(row.id, engine.has(section) ? section : "home"))
                       }
                       className="gap-2.5"
                     >
@@ -135,13 +195,14 @@ export function ConnectionSwitcher({ className }: { className?: string }) {
                           {row.port ? `${row.host}:${row.port}` : row.database}
                         </span>
                       </span>
-                      {entry && (
+                      {reading && (
                         <span
                           role="img"
-                          aria-label={entry.ok ? "connected" : "not answering"}
+                          aria-label={statusLabel(reading.state)}
+                          title={reading.error}
                           className="flex shrink-0"
                         >
-                          <StatusDot tone={entry.ok ? "running" : "danger"} />
+                          <StatusDot tone={statusTone(reading.state)} />
                         </span>
                       )}
                       <Check

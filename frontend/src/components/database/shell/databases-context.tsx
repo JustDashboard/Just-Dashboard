@@ -3,12 +3,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { get } from "@/lib/api"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState } from "@/lib/view-state"
 import type { DbConnection, DbDriverInfo } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { engineFor as registryEngineFor, type Engine } from "@/components/database/engine"
-import { KNOWN_DATABASES_KEY, type KnownDatabase } from "@/components/database/shell/nav-groups"
+import {
+  KNOWN_DATABASES_KEY,
+  knownDatabases,
+  type KnownDatabase,
+} from "@/components/database/shell/nav-groups"
 import { newDatabaseHref, type AddMode } from "@/components/database/shell/routes"
 
 /**
@@ -56,20 +60,20 @@ export function DatabasesProvider({ children }: { children: React.ReactNode }) {
   )
 
   // The rail draws a database's panel from the address before this list has
-  // been read (a pasted link, a reload). What it needs for that — the name
-  // and the engine — is remembered from the last list, so the panel that
-  // arrives is the one already drawn rather than a different shape of list.
-  const [known, setKnown] = useViewState<Record<string, KnownDatabase>>(KNOWN_DATABASES_KEY, {})
+  // been read (a reload, a link opened in this tab). What it needs for that —
+  // the name and the engine — is remembered from the last list, so the panel
+  // that arrives is the one already drawn rather than a different shape of
+  // list.
+  const [known, setKnown] = useSessionState<Record<string, KnownDatabase>>(KNOWN_DATABASES_KEY, {})
+  const listed = list.data
   useEffect(() => {
-    if (!list.data) return
-    const next = Object.fromEntries(
-      list.data.map((conn) => [
-        String(conn.id),
-        { name: conn.name, driver: conn.driver, ...(conn.flavor ? { flavor: conn.flavor } : {}) },
-      ]),
-    )
-    if (JSON.stringify(next) !== JSON.stringify(known)) setKnown(next)
-  }, [list.data, known, setKnown])
+    // Written against what the store holds at that moment, not what this
+    // render saw: a database's own layout adds what its server answered to
+    // the same memory, and may have done so in this very commit.
+    if (listed && knownDatabases(listed, known) !== known) {
+      setKnown((held) => knownDatabases(listed, held))
+    }
+  }, [listed, known, setKnown])
 
   const drivers = catalogue.data
   const admin = can("system.admin")

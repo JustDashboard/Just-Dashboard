@@ -5,7 +5,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { PageState } from "@/components/page"
 import { DatabaseNotFound, DatabaseProvider } from "@/components/database/shell/database-context"
 import { DatabaseShell } from "@/components/database/shell/database-shell"
-import { legacyDatabasesHref } from "@/components/database/shell/routes"
+import { DATABASE_ID, legacyDatabasesHref } from "@/components/database/shell/routes"
 
 /**
  * One database: `/databases/<id>` and every page under it.
@@ -22,9 +22,11 @@ import { legacyDatabasesHref } from "@/components/database/shell/routes"
  */
 export default function DatabaseLayout({ children }: { children: React.ReactNode }) {
   const { id } = useParams<{ id: string }>()
-  if (!/^[1-9]\d*$/.test(id)) return <FormerAddress />
+  if (!DATABASE_ID.test(id)) return <FormerAddress />
   return (
-    <DatabaseProvider id={Number(id)}>
+    // Keyed on the id: what the provider holds about one database — its
+    // status, a write on its way to the address — is not another's.
+    <DatabaseProvider key={id} id={Number(id)}>
       <DatabaseShell>{children}</DatabaseShell>
     </DatabaseProvider>
   )
