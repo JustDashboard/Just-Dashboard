@@ -38,6 +38,12 @@ export function kindFromServer(kind: string | undefined): GridColumnKind | undef
  *
  * Order matters: `timestamp` contains `time`, `interval` contains `int`,
  * `point` contains `int`, and `tinyint(1)` is MySQL's boolean.
+ *
+ * A name that reads two ways is given the kind that assumes least. Finding a
+ * word inside a name is how `int4range` became a number and `daterange` a
+ * date; and `bit` is SQL Server's boolean but a string of bits on Postgres and
+ * MySQL, where a true/false list would write 1 over `BIT(8)`. Only the server
+ * knows which engine it is talking to, and it says so in its own kind.
  */
 export function kindFromType(typeName: string): GridColumnKind {
   const type = typeName.trim().toLowerCase()
@@ -49,7 +55,10 @@ export function kindFromType(typeName: string): GridColumnKind {
     return kindFromType(type.replace(/^(nullable|lowcardinality)\((.*)\)$/, "$2"))
   }
   if (/^enum|^set\(/.test(type)) return "enum"
-  if (/^bool|^bit$|^bit\(1\)$|^tinyint\(1\)$/.test(type)) return "boolean"
+  // A range and a multirange are bounds in brackets, whatever they are ranges of.
+  if (/range$/.test(type)) return "unknown"
+  if (/^(bit|varbit)\b/.test(type)) return "unknown"
+  if (/^bool|^tinyint\(1\)$/.test(type)) return "boolean"
   if (/json/.test(type)) return "json"
   if (/uuid|uniqueidentifier/.test(type)) return "uuid"
   if (/bytea|blob|binary|^raw|^image$|^bytes$/.test(type)) return "binary"
@@ -89,6 +98,13 @@ export type NumberSpec =
   | { class: "integer"; min: bigint; max: bigint }
   | { class: "decimal"; precision?: number; scale?: number }
   | { class: "float" }
+  /**
+   * An amount the engine may print with a currency sign and separators.
+   * Postgres writes and reads `money` in the server's locale (`$1,234.56`,
+   * `1.234,56 €`), which the grid cannot know, so it has no shape to hold a
+   * typed amount to.
+   */
+  | { class: "money" }
 
 const INTEGER_BITS: [RegExp, number][] = [
   [/^(tinyint|int1)$/, 8],
@@ -129,7 +145,8 @@ export function numberSpec(typeName: string): NumberSpec {
     .replace(/\b(unsigned|signed|zerofill)\b/g, "")
     .trim()
 
-  if (/^(numeric|decimal|number|dec|money|smallmoney)/.test(base)) {
+  if (/^(money|smallmoney)$/.test(base)) return { class: "money" }
+  if (/^(numeric|decimal|number|dec)/.test(base)) {
     if (!args) return { class: "decimal" }
     const [precision, scale] = args.split(",").map((part) => Number(part.trim()))
     if (!Number.isInteger(precision) || precision <= 0) return { class: "decimal" }

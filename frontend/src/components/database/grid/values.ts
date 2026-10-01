@@ -296,6 +296,13 @@ function parseNumber(text: string, column: GridColumn): ParseResult {
     }
     return { ok: true, value: value.toString() }
   }
+  if (spec.class === "money") {
+    // Plain digits are an amount everywhere. Anything else is taken as typed —
+    // the cell itself may read `$1,234.56`, and a reader who changes one digit
+    // of that must be able to stage it — and the engine has the last word.
+    if (DECIMAL.test(text)) return { ok: true, value: plain }
+    return /\d/.test(text) ? { ok: true, value: text } : fail("An amount")
+  }
   if (spec.class === "float") {
     if (FLOAT_SPECIAL.test(text)) return { ok: true, value: plain }
     if (!FLOAT.test(text)) return fail("Not a number")

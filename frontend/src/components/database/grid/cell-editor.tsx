@@ -91,6 +91,7 @@ function columnHint(column: GridColumn): string {
     case "number": {
       const spec = numberSpec(column.typeName)
       if (spec.class === "integer") return `${column.typeName} · ${spec.min} to ${spec.max}`
+      if (spec.class === "money") return `${column.typeName} · digits, or as the engine prints it`
       return column.typeName
     }
     case "date":

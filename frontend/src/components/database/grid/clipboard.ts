@@ -31,21 +31,16 @@ export function toTSV(matrix: readonly (readonly string[])[]): string {
 export interface CSVOptions {
   /** Column names for a first line. */
   header?: readonly string[]
-  /**
-   * Put an apostrophe in front of a field a spreadsheet would run as a formula
-   * (one that begins `=`, `+`, `-` or `@`). Off by default: it changes the data,
-   * which is wrong for a file another program will read, and right for one a
-   * person is about to open in a spreadsheet.
-   */
-  guardFormulas?: boolean
 }
 
-/** RFC 4180: comma-separated, CRLF line ends, quotes doubled. */
+/**
+ * RFC 4180: comma-separated, CRLF line ends, quotes doubled. The fields are the
+ * values and nothing else: one that begins `=` goes out beginning `=`, as it
+ * does in the tab-separated copy, because a copy that rewrote the data would be
+ * wrong for every reader that is not a spreadsheet.
+ */
 export function toCSV(matrix: readonly (readonly string[])[], options: CSVOptions = {}): string {
-  const encode = (field: string) => {
-    const guarded = options.guardFormulas && /^[=+\-@\t\r]/.test(field) ? `'${field}` : field
-    return NEEDS_QUOTES_CSV.test(guarded) ? quote(guarded) : guarded
-  }
+  const encode = (field: string) => (NEEDS_QUOTES_CSV.test(field) ? quote(field) : field)
   const lines = matrix.map((row) => row.map(encode).join(","))
   if (options.header) lines.unshift(options.header.map(encode).join(","))
   return lines.join("\r\n")

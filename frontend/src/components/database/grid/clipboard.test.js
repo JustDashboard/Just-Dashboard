@@ -103,10 +103,8 @@ describe("comma-separated text", () => {
     ).toBe('id,full name,note\r\n1,"Smith, Ann","the ""boss"""\r\n2,"two\nlines",')
   })
 
-  test("the formula guard is off unless asked for, and then marks only what a spreadsheet would run", () => {
-    const matrix = [["=1+1", "+1", "-1", "@x", "plain", "a=b"]]
-    expect(toCSV(matrix)).toBe("=1+1,+1,-1,@x,plain,a=b")
-    expect(toCSV(matrix, { guardFormulas: true })).toBe("'=1+1,'+1,'-1,'@x,plain,a=b")
+  test("a field that a spreadsheet would read as a formula goes out as the value it is", () => {
+    expect(toCSV([["=1+1", "+1", "-1", "@x", "plain", "a=b"]])).toBe("=1+1,+1,-1,@x,plain,a=b")
   })
 
   test("written CSV reads back through the same parser", () => {

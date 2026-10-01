@@ -69,6 +69,41 @@ describe("what a declared type is", () => {
     }
   })
 
+  test("a name that only contains a number's or a date's word is not one", () => {
+    const cases = {
+      int4range: "unknown",
+      INT8RANGE: "unknown",
+      numrange: "unknown",
+      daterange: "unknown",
+      tsrange: "unknown",
+      tstzrange: "unknown",
+      int4multirange: "unknown",
+      datemultirange: "unknown",
+      // An array of ranges is still an array.
+      "int4range[]": "array",
+      _DATERANGE: "array",
+      // And the neighbours the range rule must not take with it.
+      interval: "text",
+      "INTERVAL DAY TO SECOND": "text",
+      integer: "number",
+      date: "date",
+    }
+    for (const [type, kind] of Object.entries(cases)) {
+      expect([type, kindFromType(type)]).toEqual([type, kind])
+    }
+  })
+
+  test("a string of bits is not a boolean, whatever its length; the server says when it is", () => {
+    for (const type of ["bit", "BIT", "bit(1)", "bit(8)", "BIT(64)", "bit varying(16)", "VARBIT"]) {
+      expect([type, kindFromType(type)]).toEqual([type, "unknown"])
+    }
+    // SQL Server's bit is its boolean, and only the server knows it is SQL Server.
+    expect(columnKind({ typeName: "BIT", serverKind: "boolean" })).toBe("boolean")
+    expect(columnKind({ typeName: "BIT", serverKind: "binary" })).toBe("binary")
+    expect(kindFromType("tinyint(1)")).toBe("boolean")
+    expect(kindFromType("boolean")).toBe("boolean")
+  })
+
   test("a wrapper type is read through to what it wraps", () => {
     expect(kindFromType("Nullable(Int32)")).toBe("number")
     expect(kindFromType("LowCardinality(String)")).toBe("text")
@@ -109,6 +144,12 @@ describe("the bounds of a number column", () => {
     expect(numberSpec("numeric")).toEqual({ class: "decimal" })
     expect(numberSpec("double precision")).toEqual({ class: "float" })
     expect(numberSpec("FLOAT4")).toEqual({ class: "float" })
+  })
+
+  test("money is an amount with no shape the grid can hold it to", () => {
+    expect(numberSpec("money")).toEqual({ class: "money" })
+    expect(numberSpec("MONEY")).toEqual({ class: "money" })
+    expect(numberSpec("smallmoney")).toEqual({ class: "money" })
   })
 })
 
@@ -343,6 +384,26 @@ describe("turning what was typed into a value", () => {
       ok: true,
       value: "12345678901234567890.1234567890",
     })
+  })
+
+  test("money takes plain digits, or the engine's own spelling as it was typed", () => {
+    const money = col("number", "money", { nullable: true })
+    expect(parseInput("1234.5", money)).toEqual({ ok: true, value: "1234.5" })
+    expect(parseInput("+7", money)).toEqual({ ok: true, value: "7" })
+    // What a Postgres money cell reads, in two locales, with one digit changed.
+    expect(parseInput("$1,300.00", money)).toEqual({ ok: true, value: "$1,300.00" })
+    expect(parseInput("-$5.00", money)).toEqual({ ok: true, value: "-$5.00" })
+    expect(parseInput(" 1.234,56 € ", money)).toEqual({ ok: true, value: "1.234,56 €" })
+    expect(parseInput("$", money).ok).toBe(false)
+    expect(parseInput("lots", money).ok).toBe(false)
+    expect(parseInput("", money)).toEqual({ ok: true, value: null })
+    // The cell as it was read, put back, is not an edit; another spelling is one.
+    expect(sameValue("$1,234.56", "$1,234.56", "number")).toBe(true)
+    expect(sameValue("$1,300.00", "$1,234.56", "number")).toBe(false)
+    // SQL Server prints money as plain digits, and those are still compared as numbers.
+    expect(sameValue("1234.5", "1234.5000", "number")).toBe(true)
+    // A decimal column is still held to its digits.
+    expect(parseInput("$5", col("number", "numeric(10,2)")).ok).toBe(false)
   })
 
   test("a float takes an exponent and the specials, as the text that was typed", () => {

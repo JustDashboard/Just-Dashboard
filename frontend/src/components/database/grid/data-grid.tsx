@@ -72,6 +72,7 @@ import {
   lockReason,
   originOf,
   pendingOf,
+  positionalTicks,
   previewKeys,
   rowRecord,
   rowValues,
@@ -155,9 +156,10 @@ export interface DataGridProps {
   /** One array of wire values per row, aligned to `columns`. */
   rows: readonly GridRow[]
   /**
-   * A stable id for a row — its primary key, joined. Defaults to the row's
-   * index, which is right for a query result and for a table with no key.
-   * Pass a stable function.
+   * A stable id for a row — its primary key, joined. Pass a stable function.
+   * Leave it out for a query result and for a table with no key: the default
+   * is the row's index, and with it the grid knows that a tick is on a
+   * position, and takes it off when new rows put another row there.
    */
   rowId?: (row: GridRow, index: number) => string
   /** Cells the server cut for display (`QueryResult.clipped`). They are never editable. */
@@ -543,6 +545,20 @@ export function DataGrid({
     onCopySQL,
     findable,
   })
+
+  // With the default `rowId` a tick is on a position, and new rows put other
+  // rows in the same positions — a sort, a page turn, a refetch after someone
+  // else's delete. The ticks that no longer mean the row they were put on are
+  // dropped before the frame is painted, so no key can act on them.
+  const tickedOver = useRef(rows)
+  useLayoutEffect(() => {
+    const before = tickedOver.current
+    tickedOver.current = rows
+    if (rowId !== indexId || before === rows) return
+    const state = liveRef.current
+    const kept = positionalTicks(state.sel.rows, before, rows)
+    if (kept !== state.sel.rows) state.setSelection({ ...state.sel, rows: kept })
+  }, [rows, rowId, liveRef])
 
   // What to do once the next render has landed: where to scroll, and whether
   // the active cell should take the keyboard.

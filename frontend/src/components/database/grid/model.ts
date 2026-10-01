@@ -246,6 +246,44 @@ export function tickedRows(model: GridModel, selection: GridSelection): number[]
   return model.ids.flatMap((id, row) => (ticked.has(id) ? [row] : []))
 }
 
+function sameRead(a: GridRow | undefined, b: GridRow | undefined): boolean {
+  if (a === b) return a !== undefined
+  if (!a || !b || a.length !== b.length) return false
+  return a.every((value, i) => {
+    const other = b[i]
+    if (value === other) return true
+    // Only ClickHouse sends arrays and maps; they are compared as they are written.
+    return (
+      typeof value === "object" &&
+      typeof other === "object" &&
+      JSON.stringify(value) === JSON.stringify(other)
+    )
+  })
+}
+
+/**
+ * The ticks that still mean what they meant once the rows have been replaced,
+ * for a grid whose row ids are positions — a table with no key, a result.
+ *
+ * There a tick says "the third row", and after a sort or a page turn the third
+ * row is another row: Delete would then mark rows the reader never chose. A
+ * position keeps its tick only while the row in it reads exactly as it did,
+ * which is all the identity a row without a key has. Rows that are only staged
+ * have ids of their own and keep theirs.
+ */
+export function positionalTicks(
+  ticked: readonly string[],
+  before: readonly GridRow[],
+  after: readonly GridRow[],
+): readonly string[] {
+  const kept = ticked.filter((id) => {
+    if (!/^\d+$/.test(id)) return true
+    const at = Number(id)
+    return sameRead(before[at], after[at])
+  })
+  return kept.length === ticked.length ? ticked : kept
+}
+
 /**
  * The rows a row verb acts on, given the row it was invoked from: every ticked
  * row when that row is one of them, every row of the range when it is inside

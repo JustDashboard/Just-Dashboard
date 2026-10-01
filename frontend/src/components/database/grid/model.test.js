@@ -8,6 +8,7 @@ import {
   lockReason,
   originOf,
   pendingOf,
+  positionalTicks,
   previewKeys,
   actionBlock,
   defaultAllowed,
@@ -283,5 +284,51 @@ describe("what an action applies to", () => {
     const edited = build(changes)
     expect(rowValues(edited, 0)[1]).toBeNull()
     expect(rowRecord(edited, 0).name).toEqual({ $default: true })
+  })
+})
+
+describe("ticks on rows that have no key", () => {
+  const before = [
+    ["ann", "10"],
+    ["bob", "20"],
+    ["cy", null],
+    ["di", "40"],
+  ]
+
+  test("a sort or a page turn takes the tick off a position that now holds another row", () => {
+    const sorted = [before[3], before[1], before[0], before[2]]
+    // Only row 1 is still where it was.
+    expect(positionalTicks(["0", "1", "2"], before, sorted)).toEqual(["1"])
+    const nextPage = [
+      ["ed", "50"],
+      ["flo", "60"],
+    ]
+    expect(positionalTicks(["0", "1", "3"], before, nextPage)).toEqual([])
+  })
+
+  test("a refetch that brings the same rows back keeps every tick, and the same list", () => {
+    const again = before.map((row) => [...row])
+    const ticked = ["0", "2"]
+    expect(positionalTicks(ticked, before, again)).toBe(ticked)
+  })
+
+  test("a row that changed under its tick loses it; its neighbours do not", () => {
+    const again = before.map((row) => [...row])
+    again[2] = ["cy", "30"]
+    expect(positionalTicks(["1", "2", "3"], before, again)).toEqual(["1", "3"])
+    // A row someone else deleted moves every later row up by one.
+    const shifted = [before[0], before[2], before[3]]
+    expect(positionalTicks(["0", "1", "3"], before, shifted)).toEqual(["0"])
+  })
+
+  test("a staged row has an id of its own and keeps its tick", () => {
+    expect(positionalTicks(["new:abc-1", "0"], before, [["zed", "1"]])).toEqual(["new:abc-1"])
+  })
+
+  test("documents are compared as they are written", () => {
+    const was = [[{ a: [1, 2] }, "x"]]
+    expect(positionalTicks(["0"], was, [[{ a: [1, 2] }, "x"]])).toEqual(["0"])
+    expect(positionalTicks(["0"], was, [[{ a: [1, 3] }, "x"]])).toEqual([])
+    expect(positionalTicks(["0"], was, [[null, "x"]])).toEqual([])
   })
 })

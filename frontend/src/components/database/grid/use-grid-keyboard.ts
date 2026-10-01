@@ -226,14 +226,18 @@ export function useGridKeyboard({
           }
           return
         case "Delete":
-        case "Backspace":
+        case "Backspace": {
           if (onHeader || !state.canEdit) return
           handled()
-          // Ticked rows are what Delete is about, wherever the cursor is;
-          // with none ticked it clears the cells under the selection.
-          if (state.sel.rows.length > 0) deleteRows(tickedRows(state.model, state.sel))
+          // Ticked rows are what Delete is about, wherever the cursor is; with
+          // none ticked on this page it clears the cells under the selection.
+          // A tick can outlive its page — the ids are the owner's — and one
+          // that is not here must not turn the key into nothing at all.
+          const ticked = tickedRows(state.model, state.sel)
+          if (ticked.length > 0) deleteRows(ticked)
           else clearCells()
           return
+        }
       }
 
       // Typing on a cell starts editing it, with what was typed.
