@@ -1304,7 +1304,7 @@ func TestComposeImagesReadsOnlyInsideTheRoots(t *testing.T) {
 
 func filesAt(roots ...string) *files.Service { return files.New(roots) }
 
-func auditTrail(t *testing.T, s *Server) []string {
+func auditActions(t *testing.T, s *Server) []string {
 	t.Helper()
 	rows, err := s.Store.DB.Query(`SELECT action FROM audit_log ORDER BY id`)
 	if err != nil {
@@ -1712,12 +1712,12 @@ func TestConnectingAgainRecordsWhatItChanged(t *testing.T) {
 		t.Error("the mark was not taken back")
 	}
 	want := []string{"database.inventory.connect", "database.inventory.ignore", "database.inventory.unignore"}
-	if got := auditTrail(t, s); strings.Join(got, ",") != strings.Join(want, ",") {
+	if got := auditActions(t, s); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("audit trail = %v, want %v", got, want)
 	}
 	// A third time changes nothing, and records nothing.
 	do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"docker:shop-db"}`)
-	if got := auditTrail(t, s); len(got) != len(want) {
+	if got := auditActions(t, s); len(got) != len(want) {
 		t.Errorf("audit trail = %v after a connect that changed nothing", got)
 	}
 
@@ -1735,7 +1735,7 @@ func TestConnectingAgainRecordsWhatItChanged(t *testing.T) {
 	if rows := connectionRows(t, s); rows["by-hand"] != "docker:fixture" {
 		t.Errorf("rows = %v", rows)
 	}
-	if got := auditTrail(t, s); len(got) != len(want)+1 || got[len(got)-1] != "database.inventory.connect" {
+	if got := auditActions(t, s); len(got) != len(want)+1 || got[len(got)-1] != "database.inventory.connect" {
 		t.Errorf("audit trail = %v, want the link recorded", got)
 	}
 }
@@ -1759,7 +1759,7 @@ func TestSyncRecordsAConnectionLearningItsServer(t *testing.T) {
 	if rows := connectionRows(t, s); rows["by-hand"] != "docker:db" {
 		t.Fatalf("rows = %v", rows)
 	}
-	if got := auditTrail(t, s); len(got) != 1 || got[0] != "database.connection.sync" {
+	if got := auditActions(t, s); len(got) != 1 || got[0] != "database.connection.sync" {
 		t.Fatalf("audit trail = %v, want the backfill recorded", got)
 	}
 	var detail string
@@ -1767,7 +1767,7 @@ func TestSyncRecordsAConnectionLearningItsServer(t *testing.T) {
 		t.Errorf("detail = %q (%v)", detail, err)
 	}
 	do(t, r, http.MethodPost, "/databases/sync", "{}")
-	if got := auditTrail(t, s); len(got) != 1 {
+	if got := auditActions(t, s); len(got) != 1 {
 		t.Errorf("audit trail = %v after a reconcile that changed nothing", got)
 	}
 	if len(m.dials()) != 0 {

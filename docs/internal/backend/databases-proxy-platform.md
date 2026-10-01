@@ -587,6 +587,40 @@ holds something is the guard.
     Audit `database.setting.set` / `database.setting.reset`.
   - `POST /{id}/statements/reset` (`service.control`) zeroes `pg_stat_statements` or the
     performance_schema digest table for the whole server. Audit `database.statements.reset`.
+- **Redis.** Routes under `/databases/{id}/keys` are about what is stored and under
+  `/databases/{id}/redis` about the server (`handlers_db_redis*.go`; `dbx/redis*.go`). They serve
+  Redis, Valkey, KeyDB and Dragonfly. No `?db=` means the logical database the connection string
+  names (`dbx.RedisDSNDatabase`), which is not database 0; a database the server will not select is
+  a `400` when the request named it and `connect_failed` when the connection string did. Every key,
+  value, member and field is a `dbx.RedisBytes`: a JSON string when the bytes are UTF-8 and
+  `{"base64": …}` when they are not, in both directions, so nothing is mangled. A request
+  distinguishes an absent field from an empty one: on `DELETE /keys`, `member`, `members`, `index`,
+  `expect` or `path` being present makes it a request about the inside of one key, and one that then
+  names nothing there (`"members": []`) is refused rather than read as a request for the key.
+  Reads inside a key are pages (`/keys/members`: `HSCAN`/`SSCAN`/`ZSCAN` cursors, `LRANGE`/`ZRANGE`
+  windows, `XRANGE`, `GETRANGE`); writes name one member and run under `WATCH`, a string save keeps
+  its expiry (`KEEPTTL`), a list is edited by position with the element the caller saw there
+  (`expect`), and renaming a member or field onto one that exists is a `409`, not a removal. An
+  expiry reaches the server as the integer it was given and is read back as the integer the server
+  answers: the driver's `time.Duration` holds 292 years, and an expiry set for the year 9999 wrapped
+  to a negative one, which Redis reads as a delete. One further off than `redisMaxExpiryMs`
+  (2^53−1 ms since the epoch) is refused, because servers before 6.2 overflow near the top of the
+  range. The console and the paged read speak the protocol themselves through `redisReplyReader`
+  (`dbx/redis_wire.go`), which keeps only what a page shows — a console reply is abandoned past
+  10 000 values or 2 MiB, a member is carried up to 64 KiB with its real size — because the client
+  library reads a whole reply into memory first. `dbx.RedisProbe` asks each server what it is
+  (flavour; standalone, cluster node, sentinel) and which optional commands it has, and a command the
+  server lacks is not sent: the field is absent and the response says why. Redis values never enter
+  the audit log: entries carry key names, types and counts, and for administrative commands the
+  parameter or account name; a refusal's sentence, which is recorded, quotes no member, field or
+  value. Configuration secrets (`requirepass`, `masterauth`, anything named like a password) and ACL
+  password hashes are never returned. `PUT /redis/acl/{name}` refuses to switch off, or take commands
+  or keys away from, the account the dashboard itself connects as, and says so when that account's
+  password changes under the saved connection. `GET /redis/config` is the configuration proper;
+  `/server/settings` for Redis is `INFO`, now with a `counters.*` group.
+  `redisCommandWrites` and `redisBulkWrites` (`handlers_db_redis_readonly.go`) say from a request
+  body alone whether the console or the bulk route would change anything, for a guard that stands
+  in front of the handlers.
 - **The advisor and statement statistics.** `GET /databases/{id}/advisor?schema=` runs
   `dbx.Advise`: generic checks over the introspected structure on every SQL engine (tables with no
   primary key, foreign keys no index begins with; the first 300 tables, with `truncated` and

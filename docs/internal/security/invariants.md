@@ -15,14 +15,16 @@ A change that weakens any of these has to say so explicitly.
    operations — the deployment run route's `stop`/`restart` alongside `deploy`/`redeploy` — cannot be
    wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
-   request, the handler checks by hand and fails closed: `dbx.Classify` for SQL, `api.runDDL` for a schema
-   form that changes a column's type or whose own SQL (a CHECK condition, an index predicate, a USING
-   conversion, a function default) calls anything `dbx` does not vouch for — either needs the destructive
-   capability on a route that otherwise asks for `service.control`, for a preview as much as for a run —
-   `api.authoriseSpec` for a container spec that is privileged or mounts a host path, `api.logTargetFor`
-   for a log source that is login and sudo records (auth data needs `system.admin` on every `/logs` route
-   that reads a source — except the whole journal (`journal:`), which stays `read` as it was before the
-   gate; those lines are in it unfiltered, a known gap rather than the boundary
+   request, the handler checks by hand and fails closed: `dbx.Classify` for SQL, `dbx.RedisClassify` for a
+   Redis console command (and the body of the Redis bulk, rename and copy routes, where
+   `action: delete|expire` and `overwrite` are what make the request destructive), `api.runDDL` for a
+   schema form that changes a column's type or whose own SQL (a CHECK condition, an index predicate, a
+   USING conversion, a function default) calls anything `dbx` does not vouch for — either needs the
+   destructive capability on a route that otherwise asks for `service.control`, for a preview as much as
+   for a run — `api.authoriseSpec` for a container spec that is privileged or mounts a host path,
+   `api.logTargetFor` for a log source that is login and sudo records (auth data needs `system.admin` on
+   every `/logs` route that reads a source — except the whole journal (`journal:`), which stays `read` as
+   it was before the gate; those lines are in it unfiltered, a known gap rather than the boundary
    ([observability-security](../backend/observability-security.md))).
 5. Every state-changing request lands in the audit log.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
@@ -118,6 +120,15 @@ board deletion, Git discard/reset, firewall and SSH changes, package changes, ce
 revocation, and self-update, use an ordinary confirmation in the UI. Read-only actions and routine
 mutations may need no dialog. The absence of a typed phrase does not relax capability checks, the
 `destrLim` rate budget, audit entries, path containment, or host command rules.
+
+Dropping a Redis logical database is the same drop route, where it is a `FLUSHDB`. The Redis bulk route
+(`POST /databases/{id}/keys/bulk`) will not stand in for it: `delete` or `expire` with a pattern that is
+every key (`*` and no `type`) is refused with `400 whole_database` and a pointer to the drop route, so a
+pattern box left at its default is not a database emptied on an ordinary confirmation. A narrower pattern
+that happens to match everything is not caught; the dry run that precedes a bulk action reports `matched`
+beside `total`, which is what its confirmation has to show. The Redis console's `FLUSHDB` and `FLUSHALL`,
+like `DROP DATABASE` through the SQL query route, take the destructive capability and no phrase: a console
+is where an operator types the statement itself.
 
 The server enforces the four phrases inside their handlers. The browser sends an
 `encodeURIComponent`-encoded value in `X-Confirm` with `X-Confirm-Encoding: uri`; the backend decodes
