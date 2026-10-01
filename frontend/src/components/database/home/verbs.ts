@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useMemo, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react"
+import { useRouter } from "next/navigation"
 import { LockClosed, LockOpen, Play, RotateClockwise, StopCircle } from "@/components/icons"
 import { get, post, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -10,7 +11,10 @@ import type { Verb } from "@/components/verbs"
 import {
   POWER,
   changePower,
+  endPower,
+  powerCarried,
   powerChange,
+  powerEnded,
   subscribePower,
   type PowerAction,
   type PowerChange,
@@ -29,9 +33,10 @@ const noChange = () => undefined
 
 /**
  * The change of power in flight for a connection, wherever it was begun: the
- * home's Start, the menu on another of the database's pages, another tab of
- * this one. A surface that draws the database reads it to say "Stopping…" and
- * to run its beam.
+ * home's Start, the menu on another of the database's pages, this tab before
+ * it was reloaded, or another tab of the dashboard (`power.ts` keeps it in
+ * the tab's session and tells the other tabs). A surface that draws the
+ * database reads it to say "Stopping…" and to run its beam.
  */
 export function usePowerChange(id: number): PowerChange | undefined {
   return useSyncExternalStore(subscribePower, () => powerChange(id), noChange)
@@ -49,10 +54,12 @@ export function usePowerChange(id: number): PowerChange | undefined {
  * caller's to confirm first where the action interrupts.
  */
 export function usePower() {
-  const { id, conn, summary, status } = useDatabase()
+  const { id, conn, summary, engine, status, href } = useDatabase()
   const { can } = useAuth()
+  const router = useRouter()
   const change = usePowerChange(id)
   const power = summary?.power
+  const logs = engine.has("logs") ? href("logs") : undefined
   const mayStart = can("service.control")
   const mayInterrupt = mayStart && can("destructive")
   const check = status.refresh
@@ -61,13 +68,29 @@ export function usePower() {
   const run = useCallback(
     async (action: PowerAction) => {
       try {
-        const answer = await changePower(id, action, {
+        const { answer, settled } = await changePower(id, action, {
           request: () => post<PowerResponse>(`/databases/${id}/power`, { action }),
           read: async () => (await get<DbConnectionSummary>(`/databases/${id}`)).state,
         })
-        notify.success(`${name} ${POWER[action].done}`, {
-          description: `${answer.via === "docker" ? "Container" : "Unit"} ${answer.target}${answer.state ? ` is ${answer.state}` : ""}.`,
-        })
+        const target = `${answer.via === "docker" ? "Container" : "Unit"} ${answer.target}`
+        if (settled) {
+          notify.success(`${name} ${POWER[action].done}`, {
+            description: `${target}${answer.state ? ` is ${answer.state}` : ""}.`,
+          })
+        } else if (action === "stop") {
+          notify.warning(`${name} has not stopped yet`, {
+            description: `${target} was asked to stop and the server still answers.`,
+          })
+        } else {
+          // The request succeeded and the engine is still not there: a
+          // container that starts and an engine that crashes inside it. Its
+          // log is where the reason is.
+          notify.warning(`${name} is not answering yet`, {
+            description: `${target} was ${POWER[action].done}, but the engine is not accepting connections.`,
+            duration: 12_000,
+            action: logs ? { label: "Logs", onClick: () => router.push(logs) } : undefined,
+          })
+        }
       } catch (err) {
         notify.error(`Could not ${action} ${name}`, err)
       } finally {
@@ -75,7 +98,7 @@ export function usePower() {
         check()
       }
     },
-    [id, name, check],
+    [id, name, check, logs, router],
   )
 
   return useMemo(
@@ -90,6 +113,82 @@ export function usePower() {
     }),
     [change, power?.start, power?.stop, power?.restart, mayStart, mayInterrupt, run],
   )
+}
+
+/** How often the server is read while it is being changed. Its own poll is every thirty seconds. */
+const WATCH_EVERY_MS = 3_000
+
+/**
+ * Keeps the page's reading of the server fresh for as long as a change is in
+ * flight, and ends a change nobody here is waiting on.
+ *
+ * The summary is polled twice a minute, which is right for a server at rest
+ * and wrong for one being stopped: "Runs as" went on saying what Docker said
+ * before the change, under a notice saying "Starting…". And a change this tab
+ * did not send — the page was reloaded mid-stop, or another tab began it —
+ * has no request to end it, so it ends here, on what the server reads.
+ *
+ * Mounted once per page, by the database's menu.
+ */
+function usePowerWatch() {
+  const { id, status } = useDatabase()
+  const change = usePowerChange(id)
+  const check = status.refresh
+  const state = status.state
+  const seenDown = useRef(false)
+  const held = useRef(false)
+
+  useEffect(() => {
+    if (!change) {
+      seenDown.current = false
+      // A change that has just ended, wherever it was ended from — another
+      // tab's request among them: what the server is now is the next thing
+      // to read, not the last thing read while it was changing.
+      if (held.current) check()
+      held.current = false
+      return
+    }
+    held.current = true
+    if (state !== "running" && state !== "checking" && state !== "unknown") seenDown.current = true
+    const settle = () => {
+      if (!powerCarried(id) && powerEnded(change, state, seenDown.current, Date.now())) endPower(id)
+    }
+    settle()
+    const timer = setInterval(() => {
+      check()
+      settle()
+    }, WATCH_EVERY_MS)
+    return () => clearInterval(timer)
+  }, [id, change, check, state])
+}
+
+/**
+ * Hands the keyboard back to the menu a verb was chosen from once the
+ * confirmation it opened has closed.
+ *
+ * The dialog is opened by a menu item that is gone by the time it closes, so
+ * the dialog has nowhere to return focus to and leaves it on the page's body:
+ * cancel a Stop and the next Tab starts again from the top of the window.
+ * The menu's trigger is still there, and is where the reader was.
+ */
+function returnFocusToMenu() {
+  const menu = document.activeElement?.closest('[role="menu"]')
+  const trigger = document.getElementById(menu?.getAttribute("aria-labelledby") ?? "")
+  if (!trigger) return
+  let opened = false
+  const observer = new MutationObserver(() => {
+    if (document.querySelector('[role="dialog"]')) {
+      opened = true
+      return
+    }
+    if (!opened) return
+    observer.disconnect()
+    // After the dialog's own teardown, which leaves focus where it fell.
+    setTimeout(() => {
+      if (document.activeElement === document.body && trigger.isConnected) trigger.focus()
+    })
+  })
+  observer.observe(document.body, { childList: true })
 }
 
 /**
@@ -114,6 +213,7 @@ export const useLifecycleVerbs: DatabaseVerbSource = ({ confirm }: DatabaseVerbT
   const { refresh } = useDatabases()
   const { can } = useAuth()
   const power = usePower()
+  usePowerWatch()
   const admin = can("system.admin")
   const check = status.refresh
   const name = conn.name
@@ -162,14 +262,16 @@ export const useLifecycleVerbs: DatabaseVerbSource = ({ confirm }: DatabaseVerbT
         group: "Server",
         progressive: POWER[action].progressive,
         disabled: busy,
-        run: () =>
+        run: () => {
+          returnFocusToMenu()
           confirm({
             ...powerConfirmation(action, engine, summary),
             action: async () => {
               void power.run(action)
               return "reported"
             },
-          }),
+          })
+        },
       })
     }
     if (admin) {

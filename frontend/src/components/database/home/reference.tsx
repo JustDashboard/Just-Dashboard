@@ -6,30 +6,33 @@ import { Archive, Plus } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { DbAccess, DbConnection } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import type { Container, DbAccess, DbConnection } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { OutcomeStrip, type Outcome } from "@/components/outcome-strip"
 import { Detail, DetailList } from "@/components/page"
-import { Row, RowList } from "@/components/row-list"
+import { ChoiceRow } from "@/components/flow"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { sectionHref } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
 import {
   Block,
   BlockLink,
+  CardsSkeleton,
   FactsSkeleton,
   Quiet,
   Read,
-  RowsSkeleton,
   staleOf,
 } from "@/components/database/home/blocks"
+import { nameHue } from "@/components/database/home/kinds"
 import { read, record } from "@/components/database/home/read"
 import { compact } from "@/components/database/home/readings"
 import type {
@@ -51,6 +54,22 @@ import { useDatabases } from "@/components/database/shell/databases-context"
 /** What the server runs as: its container, its unit, its file, or another machine. */
 export function RunsAs() {
   const { conn, summary, engine, href } = useDatabase()
+  const inspected = summary?.container?.id
+  // What the container was told it may use is Docker's to say, not the
+  // summary's: asked of the container's own record, and only for a database
+  // that runs in one.
+  const limits = usePoll(
+    (signal) =>
+      read<Container>(
+        `/docker/containers/${encodeURIComponent(inspected ?? "")}`,
+        (answer) => typeof answer.id === "string",
+        undefined,
+        signal,
+      ),
+    60_000,
+    [inspected],
+    { enabled: Boolean(inspected) },
+  )
   if (!summary) return null
   const container = summary.container
   const unit = summary.unit
@@ -65,16 +84,16 @@ export function RunsAs() {
         <>
           {container && (
             <BlockLink href={`/docker/containers/${encodeURIComponent(container.name)}`}>
-              Container
+              Open container
             </BlockLink>
           )}
           {!container && unit && (
             <BlockLink href={`/processes/services?unit=${encodeURIComponent(unit.name)}`}>
-              Unit
+              Open unit
             </BlockLink>
           )}
           {file && (
-            <BlockLink href={`/files?path=${encodeURIComponent(directory)}`}>Folder</BlockLink>
+            <BlockLink href={`/files?path=${encodeURIComponent(directory)}`}>Open folder</BlockLink>
           )}
           {logs && <BlockLink href={href("logs")}>Logs</BlockLink>}
         </>
@@ -97,6 +116,14 @@ export function RunsAs() {
               <Detail label="Compose" className="font-mono wrap-anywhere">
                 {container.composeProject}
                 {container.composeService ? ` / ${container.composeService}` : ""}
+              </Detail>
+            )}
+            <Detail label="Limits">
+              <ContainerLimits poll={limits} />
+            </Detail>
+            {limits.data?.restartPolicy && (
+              <Detail label="Restarts" className="font-mono">
+                {limits.data.restartPolicy}
               </Detail>
             )}
           </>
@@ -154,6 +181,40 @@ export function RunsAs() {
         </Detail>
       </DetailList>
     </Block>
+  )
+}
+
+/**
+ * What the container may use of the machine. Docker inspects only a running
+ * container for its limits, so one that is not says that rather than "none"
+ * — which is an answer, and a different one.
+ */
+function ContainerLimits({ poll }: { poll: PollState<Container> }) {
+  const data = poll.data
+  if (!data) {
+    return poll.error ? (
+      <>
+        <span className="text-muted-foreground">Could not be read: {poll.error.message}</span>{" "}
+        <button type="button" className="rounded-sm underline focus-ring" onClick={poll.refresh}>
+          Try again
+        </button>
+      </>
+    ) : (
+      <Skeleton className="my-0.5 h-3 w-32" />
+    )
+  }
+  if (!data.inspected) {
+    return <span className="text-muted-foreground">Not read while the container is down</span>
+  }
+  const memory = data.memoryLimit ? `${bytes(data.memoryLimit, 0)} of memory` : undefined
+  const cpu = data.cpuLimit
+    ? `${Number(data.cpuLimit.toFixed(2))} ${data.cpuLimit === 1 ? "core" : "cores"}`
+    : undefined
+  if (!memory && !cpu) return "None: it may use all of this machine's memory and processors"
+  return (
+    <span className="numeric">
+      {memory ?? "no memory limit"} · {cpu ?? "no processor quota"}
+    </span>
   )
 }
 
@@ -432,9 +493,27 @@ export function BackupsBlock({
 const LISTED = 6
 
 /**
+ * A run of cards as many across as the block is wide: three at a desktop's
+ * width, two from a tablet's, one on a phone. The cards are `ChoiceRow`s,
+ * which bring their own list items.
+ */
+function CardGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <ul data-slot="choice-list" className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+      {children}
+    </ul>
+  )
+}
+
+/**
  * What else the same server holds. A database that already has a connection
  * is a way to it; one that does not can be given one by an administrator —
  * the same credentials, the other name — and a new one can be made.
+ *
+ * It runs the page's width as cards (§16): each is a database, drawn as its
+ * engine, and the ones that are places to go have the lit edge and the arrow.
+ * One with no connection yet keeps its card, quieter, with the verb that
+ * gives it one; every card carries the mark, so the names start on one line.
  */
 export function ServerDatabases() {
   const { id, conn, engine, readOnly } = useDatabase()
@@ -444,6 +523,7 @@ export function ServerDatabases() {
   const [all, setAll] = useState(false)
   const [creating, setCreating] = useState(false)
   const [connecting, setConnecting] = useState<string>()
+  const create = useRef<HTMLButtonElement>(null)
   const list = usePoll(
     (signal) =>
       read<DbServerDatabase[]>(
@@ -503,51 +583,66 @@ export function ServerDatabases() {
       setConnecting(undefined)
     }
   }
+  // The dialog has no trigger of its own to hand the keyboard back to, and
+  // left it on the page's body: the button that opened it takes it instead.
+  const close = () => {
+    setCreating(false)
+    requestAnimationFrame(() => create.current?.focus())
+  }
 
   const shown = all ? rows : rows.slice(0, LISTED)
   return (
     <Block
       title="Databases on this server"
       stale={staleOf(list)}
-      bodyClassName="group-data-[plain]/panel:py-1"
       actions={
         adds && (
-          <Button size="xs" variant="ghost" onClick={() => setCreating(true)}>
+          <Button ref={create} size="xs" variant="ghost" onClick={() => setCreating(true)}>
             <Plus />
             New database
           </Button>
         )
       }
     >
-      <Read poll={list} what="the server's databases" skeleton={<RowsSkeleton mark={false} />}>
+      <Read
+        poll={list}
+        what="the server's databases"
+        skeleton={<CardsSkeleton className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" />}
+      >
         {() =>
           rows.length === 0 ? (
-            <Quiet className="py-3">The server lists no database to this account.</Quiet>
+            <Quiet>The server lists no database to this account.</Quiet>
           ) : (
             <>
-              <RowList>
+              <CardGrid>
                 {shown.map(({ database, saved }) => {
                   const current = database.name === conn.database
-                  const facts = [
-                    database.size ? bytes(database.size) : undefined,
-                    database.owner ? `owned by ${database.owner}` : undefined,
-                    saved && !current ? `saved as ${saved.name}` : undefined,
-                  ].filter(Boolean)
+                  const goes = saved && !current ? saved : undefined
                   return (
-                    <Row
+                    <ChoiceRow
                       key={database.name}
-                      href={saved && !current ? sectionHref(saved.id) : undefined}
+                      href={goes ? sectionHref(goes.id) : undefined}
+                      disabled={!goes}
+                      verb={goes ? `Open ${goes.name}` : database.name}
                       leading={
-                        saved && !current ? (
-                          <EngineMark engine={engineFor(saved)} size="sm" />
-                        ) : undefined
+                        // The same engine on every card: these are databases
+                        // of one server. One nobody has connected is drawn
+                        // back a step, as a thing not here yet.
+                        <span className={cn("flex", !saved && !current && "opacity-45")}>
+                          <EngineMark engine={goes ? engineFor(goes) : engine} size="sm" />
+                        </span>
                       }
                       title={<span className="font-mono text-xs">{database.name}</span>}
-                      subtitle={facts.length > 0 ? facts.join(" · ") : undefined}
-                      trailing={
-                        current ? (
-                          <Tag>this one</Tag>
-                        ) : !saved && adds ? (
+                      description={
+                        <SiblingFacts
+                          size={database.size}
+                          owner={database.owner}
+                          saved={goes?.name}
+                        />
+                      }
+                      trailing={current ? <Tag>this one</Tag> : undefined}
+                      actions={
+                        !saved && !current && adds ? (
                           <Button
                             size="xs"
                             variant="outline"
@@ -560,11 +655,10 @@ export function ServerDatabases() {
                           </Button>
                         ) : undefined
                       }
-                      className="py-2.5"
                     />
                   )
                 })}
-              </RowList>
+              </CardGrid>
               <ShowAll count={rows.length} all={all} onToggle={setAll} />
             </>
           )
@@ -572,7 +666,7 @@ export function ServerDatabases() {
       </Read>
       {creating && (
         <CreateDatabase
-          onClose={() => setCreating(false)}
+          onClose={close}
           onCreated={(saved) => {
             setCreating(false)
             list.refresh()
@@ -582,6 +676,27 @@ export function ServerDatabases() {
       )}
     </Block>
   )
+}
+
+/** What a sibling database is, on its card's second line: its weight, whose it is, what it is saved as. */
+function SiblingFacts({ size, owner, saved }: { size?: number; owner?: string; saved?: string }) {
+  const facts: React.ReactNode[] = []
+  if (size) facts.push(`${bytes(size)} on disk`)
+  if (owner) {
+    facts.push(
+      <>
+        owned by <span style={{ color: nameHue(owner) }}>{owner}</span>
+      </>,
+    )
+  }
+  if (saved) facts.push(`saved as ${saved}`)
+  if (facts.length === 0) return null
+  return facts.map((fact, index) => (
+    <span key={index}>
+      {index > 0 && " · "}
+      {fact}
+    </span>
+  ))
 }
 
 /** The fold under a list cut at `LISTED`: every row, or the first few again. */
@@ -599,7 +714,7 @@ function ShowAll({
     <Button
       size="xs"
       variant="ghost"
-      className="my-1 -ml-2"
+      className="mt-2 -ml-2"
       aria-expanded={all}
       onClick={() => onToggle(!all)}
     >
@@ -707,39 +822,37 @@ function CreateDatabase({
 /**
  * A key–value server's numbered databases that hold keys. They are not made
  * or connected: every one is a number away from the same connection, so each
- * row opens the keys of that number.
+ * card opens the keys of that number.
  */
 export function Keyspaces({ server }: { server: PollState<RedisServer> }) {
   const { href } = useDatabase()
   const [all, setAll] = useState(false)
   return (
-    <Block
-      title="Databases on this server"
-      stale={staleOf(server)}
-      bodyClassName="group-data-[plain]/panel:py-1"
-    >
-      <Read poll={server} what="the keyspace" skeleton={<RowsSkeleton mark={false} />}>
+    <Block title="Databases on this server" stale={staleOf(server)}>
+      <Read
+        poll={server}
+        what="the keyspace"
+        skeleton={<CardsSkeleton className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" />}
+      >
         {(data) =>
           data.keyspace.length === 0 ? (
-            <Quiet className="py-3">
-              None of its {data.databases} numbered databases holds a key yet.
-            </Quiet>
+            <Quiet>None of its {data.databases} numbered databases holds a key yet.</Quiet>
           ) : (
             <>
-              <RowList>
+              <CardGrid>
                 {keyspacesOf(data, all).map((space) => (
-                  <Row
+                  <ChoiceRow
                     key={space.db}
                     href={href("data", { db: String(space.db) })}
+                    verb={`Browse the keys of database ${space.db}`}
                     title={<span className="font-mono text-xs">db {space.db}</span>}
-                    subtitle={`${compact(space.keys)} keys · ${compact(space.expires)} with an expiry`}
+                    description={`${plural(space.keys, "key")} · ${compact(space.expires)} with an expiry`}
                     trailing={space.db === data.db ? <Tag>this one</Tag> : undefined}
-                    className="py-2.5"
                   />
                 ))}
-              </RowList>
+              </CardGrid>
               <ShowAll count={data.keyspace.length} all={all} onToggle={setAll} />
-              <p className="py-2 text-hint text-muted-foreground">
+              <p className="mt-2 text-hint text-muted-foreground">
                 {data.keyspace.length} of its {data.databases} numbered databases hold keys.
               </p>
             </>

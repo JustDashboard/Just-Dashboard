@@ -156,6 +156,8 @@ export type RedisTree = {
   keyCount: number
   /** Keys this call examined. */
   count: number
+  /** Those keys by type, as the server names each. */
+  types?: Record<string, number>
   scanned: number
   complete: boolean
   /** DBSIZE. */

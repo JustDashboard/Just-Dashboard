@@ -52,8 +52,78 @@ export type Reading = {
   tone?: Tone
   /** The figure's shape over the samples held, where it moves. */
   trend?: { values: number[]; color: string; label: string; max?: number }
+  /**
+   * What the figure is made of, largest first: a size by the tables that
+   * weigh the most. Drawn as one bar in the series colours with the names
+   * under it, in place of the hint.
+   */
+  parts?: Part[]
   /** Not read yet: the tile holds its place. */
   pending?: boolean
+  /**
+   * The figure is the last one read, not now: the poll after it failed. It
+   * is drawn in the quiet ink, and the hint says when it was true.
+   */
+  stale?: boolean
+}
+
+/** One part of a figure that is a sum. */
+export type Part = {
+  key: string
+  label: string
+  /** 0–1 of the whole figure. */
+  share: number
+  /** The part's own figure, for the pointer. */
+  value: string
+  color: string
+}
+
+/** The colours a composition is drawn in, largest part first. Never the failure series' magenta. */
+export const PART_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+] as const
+
+/**
+ * The largest parts of a whole, as shares of it. The whole is never smaller
+ * than its parts together — a database's size is read a moment apart from
+ * its tables' — and what the named parts leave is the bar's empty track.
+ */
+export function composition(
+  entries: readonly { key: string; label: string; bytes: number }[],
+  whole: number | undefined,
+): Part[] | undefined {
+  const sized = entries.filter((entry) => entry.bytes > 0)
+  if (sized.length < 2) return undefined
+  const sum = sized.reduce((total, entry) => total + entry.bytes, 0)
+  const of = Math.max(whole ?? 0, sum)
+  return [...sized]
+    .sort((a, b) => b.bytes - a.bytes)
+    .slice(0, PART_COLORS.length)
+    .map((entry, index) => ({
+      key: entry.key,
+      label: entry.label,
+      share: entry.bytes / of,
+      value: bytes(entry.bytes),
+      color: PART_COLORS[index],
+    }))
+}
+
+/**
+ * The readings of a snapshot whose poll has failed since: each keeps its
+ * figure, quietened, and says when it was read — a rate from a minute ago
+ * drawn as if it were now is the one thing a live tile must not do.
+ */
+export function staled(readings: Reading[], at: number | undefined): Reading[] {
+  const when =
+    at === undefined
+      ? "Not updating"
+      : `as of ${new Date(at).toLocaleTimeString(undefined, { hour12: false })} · not updating`
+  return readings.map((reading) =>
+    reading.value === undefined ? reading : { ...reading, stale: true, hint: when },
+  )
 }
 
 const COMPACT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
@@ -94,15 +164,32 @@ function rateTrend(samples: readonly Sample[], keys: string | readonly string[],
 /** The line a rate's tile carries until its second sample lands. */
 const NEEDS_SECOND = "The rate needs a second reading"
 
-/** Sessions on the server against its limit. */
+/** "1 statement a second", "2.5 statements a second": a rate with its noun in the right number. */
+function rated(value: number, one: string, many: string): string {
+  const figure = perSecond(value)
+  return `${figure} ${figure === "1" ? one : many} a second`
+}
+
+/**
+ * Sessions on the server against its limit.
+ *
+ * A server that answers has at least the session that asked, so a count of
+ * none is an account that may not list them (`sqlSample` leaves it out) and
+ * is said as that, never drawn as a zero. Where the engine still reports how
+ * many threads are running, the hint has that much.
+ */
 function sessionsReading(samples: readonly Sample[]): Reading {
   const open = gauge(samples, "sessions")
   if (open === undefined) {
+    const threads = gauge(samples, "threadsRunning")
     return {
       key: "sessions",
       label: "Sessions",
       value: undefined,
-      hint: "Not reported to this account",
+      hint:
+        threads === undefined
+          ? "Not reported to this account"
+          : `Not listed to this account · ${plural(threads, "thread")} running`,
     }
   }
   const max = gauge(samples, "sessionsMax") ?? 0
@@ -154,8 +241,9 @@ function sizeReading(samples: readonly Sample[], label = "Size"): Reading {
     key: "size",
     label,
     value: bytes(size),
+    trailing: "on disk",
     hint:
-      grown === 0 ? "on disk" : `${grown > 0 ? "+" : "−"}${bytes(Math.abs(grown))} ${SINCE_OPENED}`,
+      grown === 0 ? undefined : `${grown > 0 ? "+" : "−"}${bytes(Math.abs(grown))} ${SINCE_OPENED}`,
   }
 }
 
@@ -190,7 +278,7 @@ export function sqlReadings(samples: readonly Sample[], stats?: DbServerStats): 
               : read !== undefined && written !== undefined
                 ? `${perSecond(read)} rows read · ${perSecond(written)} written`
                 : queries !== undefined
-                  ? `${perSecond(queries)} statements a second`
+                  ? rated(queries, "statement", "statements")
                   : `${compact(counted)} counted in all`,
         }
   return [sessionsReading(samples), transactions, cacheReading(samples), sizeReading(samples)]
@@ -309,7 +397,7 @@ export function clickhouseReadings(samples: readonly Sample[]): Reading[] {
           ? "Not reported to this account"
           : selected === undefined
             ? NEEDS_SECOND
-            : `${perSecond(selected)} rows read a second`,
+            : rated(selected, "row read", "rows read"),
     },
     {
       key: "parts",
@@ -422,6 +510,11 @@ export function redisReadings(samples: readonly Sample[], server?: RedisServer):
       key: "keys",
       label: "Keys",
       value: keys === undefined ? undefined : compact(keys),
+      trend: {
+        values: gauges(samples, "keys"),
+        color: "var(--chart-5)",
+        label: `Keys ${SINCE_OPENED}`,
+      },
       hint:
         expiring !== undefined
           ? `${compact(expiring)} with an expiry · every database`
@@ -526,9 +619,11 @@ export function holdingsReading(
     value: `${compact(holdings.objects)}${holdings.more ? "+" : ""}`,
     count: holdings.more ? undefined : holdings.objects,
     hint:
-      holdings.rows === undefined
-        ? `the engine keeps no ${nouns.row} estimate`
-        : `about ${compact(holdings.rows)} ${holdings.rows === 1 ? nouns.row : nouns.rows}`,
+      holdings.objects === 0
+        ? `no ${nouns.objects} yet`
+        : holdings.rows === undefined
+          ? `the engine keeps no ${nouns.row} estimate`
+          : `about ${compact(holdings.rows)} ${holdings.rows === 1 ? nouns.row : nouns.rows}`,
   }
 }
 
@@ -550,12 +645,25 @@ export function collectionReadings(
   const measured = own.filter((collection) => collection.statsKnown)
   const sum = (pick: (collection: (typeof own)[number]) => number) =>
     measured.reduce((total, collection) => total + pick(collection), 0)
+  const weight = sum((collection) => collection.size)
   return [
     {
       key: "size",
       label: "Data size",
-      value: bytes(sum((collection) => collection.size)),
+      value: bytes(weight),
+      // The documents as the server counts them, before the storage engine
+      // compresses them: the figure the server's list of databases gives for
+      // the same database is what that takes on disk, and is smaller.
+      trailing: "uncompressed",
       hint: `${bytes(sum((collection) => collection.storageSize))} on disk · ${bytes(sum((collection) => collection.indexSize))} of indexes`,
+      parts: composition(
+        measured.map((collection) => ({
+          key: collection.name,
+          label: collection.name,
+          bytes: collection.size,
+        })),
+        weight,
+      ),
     },
     holdingsReading(nouns, {
       objects: own.length,

@@ -246,7 +246,10 @@ export function sqlSample(stats: DbServerStats): Sample | undefined {
       // A snapshot the engine refused carries no size; a zero there is the
       // absence of an answer, and is left out rather than drawn as one.
       ...(stats.supported === false ? {} : { databaseBytes: stats.databaseBytes }),
-      ...(sessions
+      // A server that answers has the session that asked on it. A count of
+      // none is an account that may not list sessions (MySQL without
+      // PROCESS answers a list with nothing in it): no reading, not a zero.
+      ...(sessions && sessions.total > 0
         ? numbers({
             sessions: sessions.total,
             sessionsActive: sessions.active,

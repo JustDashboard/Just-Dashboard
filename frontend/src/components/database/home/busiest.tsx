@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { post, put } from "@/lib/api"
-import { bytes, percent, relativeTime, timestamp } from "@/lib/format"
+import { bytes, percent, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -18,6 +18,8 @@ import {
   Read,
   staleOf,
 } from "@/components/database/home/blocks"
+import { housekeeping } from "@/components/database/home/housekeeping"
+import { statementVerb } from "@/components/database/home/kinds"
 import { read, record } from "@/components/database/home/read"
 import { compact } from "@/components/database/home/readings"
 import type {
@@ -34,6 +36,31 @@ const TOP = 6
 /** A statement on one line, as a list has room for it. The whole of it is the row's title. */
 function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim()
+}
+
+/** As much of a statement as names it aloud: its opening, cut at a word. */
+function opening(text: string, length = 60): string {
+  const line = oneLine(text)
+  if (line.length <= length) return line
+  const cut = line.slice(0, length)
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), length / 2))}…`
+}
+
+/** "1 call", "3,200 calls", "16.1M calls": a count in a row's width, with its noun in the right number. */
+function calls(count: number): string {
+  return count === 1 ? "1 call" : `${compact(count)} calls`
+}
+
+/** A statement with its first word in the hue of what it does. */
+function Statement({ text }: { text: string }) {
+  const verb = statementVerb(text)
+  if (!verb) return text
+  return (
+    <>
+      <span style={{ color: verb.color }}>{verb.word}</span>
+      {verb.rest}
+    </>
+  )
 }
 
 /** Milliseconds at the precision a reader compares them at. */
@@ -85,15 +112,20 @@ export function BusiestStatements() {
   const items = useMemo<BarListItem[]>(() => {
     const list = statements.data?.statements ?? []
     const longest = Math.max(...list.map((statement) => statement.share), 0)
-    return list.map((statement) => ({
-      key: statement.id,
-      label: oneLine(statement.query),
-      title: `Open Performance · ${oneLine(statement.query).slice(0, 400)}`,
-      value: percent(statement.share * 100, statement.share >= 0.1 ? 0 : 1),
-      share: longest > 0 ? statement.share / longest : 0,
-      hint: `${compact(statement.calls)} calls · ${millis(statement.meanMs)} each`,
-      onClick: () => goto("performance", { view: "statements" }),
-    }))
+    return list.map((statement) => {
+      const share = percent(statement.share * 100, statement.share >= 0.1 ? 0 : 1)
+      return {
+        key: statement.id,
+        label: <Statement text={oneLine(statement.query)} />,
+        // Named by its opening and its share: the whole text is four hundred
+        // characters a screen reader would read on every one of six rows.
+        title: `${opening(statement.query)} — ${share} of runtime. Open Performance`,
+        value: share,
+        share: longest > 0 ? statement.share / longest : 0,
+        hint: `${calls(statement.calls)} · ${millis(statement.meanMs)} each`,
+        onClick: () => goto("performance", { view: "statements" }),
+      }
+    })
   }, [statements.data, goto])
 
   const words = engine.nouns.statements
@@ -109,18 +141,17 @@ export function BusiestStatements() {
     >
       <Read poll={statements} what={`the busiest ${words}`} skeleton={<BarsSkeleton rows={TOP} />}>
         {(data) =>
-          data.supported ? (
+          data.supported && items.length === 0 ? (
+            <Quiet>
+              No {engine.nouns.statement} has been counted yet. The list fills as they run.
+            </Quiet>
+          ) : data.supported ? (
             <>
-              <BarList
-                items={items}
-                emptyLabel={`No ${engine.nouns.statement} has been counted yet.`}
-              />
-              {items.length > 0 && (
-                <p className="mt-2 px-2 text-hint text-muted-foreground">
-                  Share of the runtime of every {engine.nouns.statement} counted
-                  {data.since ? ` since ${relativeTime(data.since)}` : ""}.
-                </p>
-              )}
+              <BarList items={items} />
+              <p className="mt-2 px-2 text-hint text-muted-foreground">
+                Share of the runtime of every {engine.nouns.statement} counted
+                {data.since ? `, starting ${relativeTime(data.since)}` : ""}.
+              </p>
             </>
           ) : (
             <div className="space-y-3">
@@ -128,7 +159,7 @@ export function BusiestStatements() {
                 {data.enable
                   ? `This server is not counting its ${words}.`
                   : `The ${words} this server has run could not be read.`}{" "}
-                <span className="wrap-anywhere">{data.enable?.note ?? data.reason}</span>
+                <span className="wrap-anywhere">{sentence(data.enable?.note ?? data.reason)}</span>
               </Quiet>
               {data.enable?.sql && data.enable.extension && can("system.admin") && !readOnly && (
                 <Button
@@ -148,6 +179,12 @@ export function BusiestStatements() {
   )
 }
 
+/** A reason in the server's words, closed as the sentence it is. */
+function sentence(text: string | undefined): string {
+  const trimmed = (text ?? "").trim()
+  return !trimmed || /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`
+}
+
 /** A Redis server's commands, by the time it has spent in each since it started. */
 export function BusiestCommands() {
   const { id, href, goto } = useDatabase()
@@ -162,21 +199,31 @@ export function BusiestCommands() {
     15_000,
     [id],
   )
-  const items = useMemo<BarListItem[]>(() => {
+  const ranked = useMemo(() => {
     const data = stats.data
-    if (!data) return []
-    const list = data.commands.slice(0, TOP)
+    if (!data) return undefined
+    const work = data.commands.filter((entry) => !housekeeping(entry.command))
+    const usec = work.reduce((total, entry) => total + entry.usec, 0)
+    const count = work.reduce((total, entry) => total + entry.calls, 0)
+    return { work, usec, count, apart: data.totalUsec - usec }
+  }, [stats.data])
+  const items = useMemo<BarListItem[]>(() => {
+    if (!ranked) return []
+    const list = ranked.work.slice(0, TOP)
     const longest = list[0]?.usec ?? 0
-    return list.map((entry) => ({
-      key: entry.command,
-      label: entry.command,
-      title: `Open Performance · ${entry.command}`,
-      value: percent(data.totalUsec > 0 ? (entry.usec / data.totalUsec) * 100 : 0, 0),
-      share: longest > 0 ? entry.usec / longest : 0,
-      hint: `${compact(entry.calls)} calls · ${entry.usecPerCall.toFixed(entry.usecPerCall >= 10 ? 0 : 1)} µs each`,
-      onClick: () => goto("performance", { view: "commands" }),
-    }))
-  }, [stats.data, goto])
+    return list.map((entry) => {
+      const share = percent(ranked.usec > 0 ? (entry.usec / ranked.usec) * 100 : 0, 0)
+      return {
+        key: entry.command,
+        label: entry.command,
+        title: `${entry.command} — ${share} of the time. Open Performance`,
+        value: share,
+        share: longest > 0 ? entry.usec / longest : 0,
+        hint: `${calls(entry.calls)} · ${entry.usecPerCall.toFixed(entry.usecPerCall >= 10 ? 0 : 1)} µs each`,
+        onClick: () => goto("performance", { view: "commands" }),
+      }
+    })
+  }, [ranked, goto])
   return (
     <Block
       title="Busiest commands"
@@ -184,17 +231,24 @@ export function BusiestCommands() {
       actions={<BlockLink href={href("performance", { view: "commands" })}>Performance</BlockLink>}
     >
       <Read poll={stats} what="the command statistics" skeleton={<BarsSkeleton rows={TOP} />}>
-        {(data) => (
-          <>
-            <BarList items={items} emptyLabel="No command has been counted yet." />
-            {items.length > 0 && (
+        {(data) =>
+          items.length === 0 ? (
+            <Quiet>
+              No command that reads or writes a key has been counted since the server started.
+            </Quiet>
+          ) : (
+            <>
+              <BarList items={items} />
               <p className="mt-2 px-2 text-hint text-muted-foreground">
-                Share of the time spent in all {compact(data.totalCalls)} commands since the server
-                started.
+                Share of the time spent in {plural(ranked?.count ?? 0, "command")} on keys since the
+                server started.
+                {ranked && ranked.apart > 0 && data.totalUsec > 0
+                  ? ` INFO, COMMAND and the other commands that ask about the server — this dashboard's own among them — took another ${percent((ranked.apart / data.totalUsec) * 100, 0)} of the server's time and are left out.`
+                  : ""}
               </p>
-            )}
-          </>
-        )}
+            </>
+          )
+        }
       </Read>
     </Block>
   )
@@ -244,7 +298,7 @@ export function SlowOperations() {
     return list.map((entry, index) => ({
       key: `${entry.time}:${index}`,
       label: `${entry.op} ${entry.ns}`,
-      title: `Open Performance · ${oneLine(entry.command).slice(0, 400)}`,
+      title: `${entry.op} ${entry.ns} — ${millis(entry.millis)}. Open Performance`,
       value: millis(entry.millis),
       share: longest > 0 ? entry.millis / longest : 0,
       hint: [entry.planSummary, `${compact(entry.docsExamined)} examined`]

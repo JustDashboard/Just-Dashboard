@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import { usePoll } from "@/hooks/use-poll"
 import { Activity } from "@/components/database/home/activity"
 import { ConcernAttention } from "@/components/database/home/attention-block"
@@ -7,14 +8,16 @@ import { mongoConcerns, placementConcerns } from "@/components/database/home/att
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { SlowOperations } from "@/components/database/home/busiest"
 import { MONGO_VIEWS } from "@/components/database/home/charts"
+import { chartEvents } from "@/components/database/home/events"
 import { HomeIdentity } from "@/components/database/home/identity"
-import { Pair } from "@/components/database/home/layout"
+import { Columns, Pair } from "@/components/database/home/layout"
 import { LargestCollectionsBlock } from "@/components/database/home/largest"
 import { read } from "@/components/database/home/read"
 import {
   backupReading,
   collectionReadings,
   mongoReadings,
+  staled,
 } from "@/components/database/home/readings"
 import {
   BackupsBlock,
@@ -24,6 +27,7 @@ import {
   useBackups,
 } from "@/components/database/home/reference"
 import { gauge, mongoSample } from "@/components/database/home/samples"
+import { StateRegion } from "@/components/database/home/state-region"
 import { ReadingTiles } from "@/components/database/home/tiles"
 import type { MongoCollections, MongoStats } from "@/components/database/home/types"
 import { UsedBy } from "@/components/database/home/used-by"
@@ -61,20 +65,25 @@ export function DocumentHome() {
   const samples = stats.samples
   const now = samples[samples.length - 1]?.at ?? Date.parse(summary?.checkedAt ?? conn.createdAt)
   const unread = stats.error && samples.length === 0 ? stats.error : undefined
-  const own = mongoReadings(samples).map((reading) =>
+  const stale = Boolean(stats.error) && samples.length > 0
+  const figures = mongoReadings(samples)
+  const own = (stale ? staled(figures, samples[samples.length - 1]?.at) : figures).map((reading) =>
     stats.loading
       ? { ...reading, value: undefined, hint: undefined, pending: true }
       : unread
         ? { ...reading, value: undefined, hint: "Could not be read", trend: undefined }
         : reading,
   )
+  const held = collectionReadings(
+    engine.nouns,
+    collections.data,
+    collections.error && !collections.data ? collections.error.message : undefined,
+  )
+  const dumps = backups.data?.files
+  const events = useMemo(() => chartEvents(samples, "uptimeSeconds", dumps), [samples, dumps])
   const readings = [
     ...own,
-    ...collectionReadings(
-      engine.nouns,
-      collections.data,
-      collections.error && !collections.data ? collections.error.message : undefined,
-    ),
+    ...held,
     backupReading(
       {
         lastBackup: summary?.lastBackup,
@@ -101,6 +110,7 @@ export function DocumentHome() {
   return (
     <>
       <HomeIdentity uptimeSeconds={gauge(samples, "uptimeSeconds")} />
+      <StateRegion />
       <ReadingTiles readings={readings} />
       {unread && (
         <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
@@ -111,6 +121,7 @@ export function DocumentHome() {
         samples={samples}
         loading={stats.loading}
         error={stats.error}
+        events={events}
       />
       <Pair>
         <ConcernAttention
@@ -118,18 +129,20 @@ export function DocumentHome() {
           pending={stats.loading}
           quiet="Connections, the cache, locks and where it listens are all within limits"
         />
-        {engine.can("profiler") && <SlowOperations />}
-      </Pair>
-      <Pair>
-        {engine.can("collections") && <LargestCollectionsBlock poll={collections} />}
         <UsedBy />
       </Pair>
       <Pair>
+        {engine.can("profiler") && <SlowOperations />}
+        {engine.can("collections") && (
+          <LargestCollectionsBlock poll={collections} parts={held[0]?.parts} />
+        )}
+      </Pair>
+      <Columns>
         <RunsAs />
         {engine.can("server") && <ReachableFrom />}
         {engine.can("dump") && <BackupsBlock backups={backups} />}
-        {engine.can("server") && <ServerDatabases />}
-      </Pair>
+      </Columns>
+      {engine.can("server") && <ServerDatabases />}
     </>
   )
 }

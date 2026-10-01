@@ -147,6 +147,22 @@ describe("each engine's answer as a sample", () => {
     expect(gauge([sample], "databaseBytes")).toBe(2048)
   })
 
+  test("a session list with nobody on it is an account that may not read it, not a zero", () => {
+    // The server answered, so at least the session that asked is on it.
+    const sample = sqlSample({
+      at: "2026-10-01T09:00:00Z",
+      supported: true,
+      databaseBytes: 1,
+      connections: { total: 0, active: 0, idle: 0, idleInTransaction: 0, waiting: 0, max: 151 },
+      counters: {},
+      gauges: { threadsRunning: 2 },
+    })
+    expect(sample.gauges.sessions).toBeUndefined()
+    expect(sample.gauges.sessionsMax).toBeUndefined()
+    expect(sample.gauges.threadsRunning).toBe(2)
+    expect(sourced(sample, { key: "open", gauge: "sessions" })).toBe(false)
+  })
+
   test("an engine that counts every transaction in one total is read from that total", () => {
     const sample = sqlSample({
       supported: true,

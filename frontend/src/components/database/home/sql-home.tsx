@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import type { DbOverview } from "@/lib/types"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { Notice } from "@/components/state"
@@ -9,16 +10,23 @@ import { placementConcerns } from "@/components/database/home/attention"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { BusiestStatements, FileFacts } from "@/components/database/home/busiest"
 import { CLICKHOUSE_VIEWS, SQL_VIEWS } from "@/components/database/home/charts"
+import { chartEvents } from "@/components/database/home/events"
 import { HomeIdentity } from "@/components/database/home/identity"
-import { Pair } from "@/components/database/home/layout"
-import { LargestTablesBlock, type LargestTables } from "@/components/database/home/largest"
+import { Columns, Pair } from "@/components/database/home/layout"
+import {
+  LargestTablesBlock,
+  tableKey,
+  type LargestTables,
+} from "@/components/database/home/largest"
 import { read } from "@/components/database/home/read"
 import {
   backupReading,
   clickhouseReadings,
+  composition,
   holdingsReading,
   sqlReadings,
   sqliteReadings,
+  staled,
   type Holdings,
   type Reading,
 } from "@/components/database/home/readings"
@@ -29,7 +37,8 @@ import {
   ServerDatabases,
   useBackups,
 } from "@/components/database/home/reference"
-import { sqlSample } from "@/components/database/home/samples"
+import { gauge, sqlSample } from "@/components/database/home/samples"
+import { StateRegion } from "@/components/database/home/state-region"
 import { ReadingTiles } from "@/components/database/home/tiles"
 import type { DbServerStats, DbTableStats } from "@/components/database/home/types"
 import { UsedBy } from "@/components/database/home/used-by"
@@ -46,6 +55,10 @@ import { useDatabase } from "@/components/database/shell/database-context"
  * SQL server is sessions against the limit, transactions, the cache, its
  * size, what it holds and when it was last backed up. The blocks under the
  * figures are the same for all three.
+ *
+ * What the database weighs is drawn by what it is made of: the size tile's
+ * bar is its largest tables in the series colours, and the list of largest
+ * tables further down carries the same colours as that bar's legend.
  */
 export function SqlHome() {
   const { id, conn, engine, summary } = useDatabase()
@@ -77,25 +90,49 @@ export function SqlHome() {
     largest.error && !largest.data ? largest.error.message : undefined,
   )
   const pending = engine.can("stats") && stats.loading
-  const own: Reading[] = file
+  // The poll after the figures on screen failed: they are the reading before.
+  const stale = Boolean(stats.error) && samples.length > 0
+  const tables = largest.data
+  const parts = useMemo(
+    () =>
+      tables?.sizesKnown
+        ? composition(
+            tables.tables.map((table) => ({
+              key: tableKey(table),
+              label: table.table,
+              bytes: table.bytes,
+            })),
+            gauge(samples, file ? "fileBytes" : "databaseBytes"),
+          )
+        : undefined,
+    [tables, samples, file],
+  )
+  const figures: Reading[] = file
     ? sqliteReadings(samples, answer)
     : analytic
       ? clickhouseReadings(samples)
       : sqlReadings(samples, answer)
-  const readings = (analytic ? own : file ? [...own, backup] : [...own, held, backup]).map(
-    (reading) =>
-      // The figures of a snapshot that has not landed hold their place; the
-      // ones read elsewhere say what they have as soon as they have it.
-      pending && own.includes(reading)
-        ? { ...reading, value: undefined, hint: undefined, pending: true }
-        : unread && own.includes(reading)
-          ? { ...reading, value: undefined, hint: "Could not be read", trend: undefined }
+  const own = (stale ? staled(figures, samples[samples.length - 1]?.at) : figures).map((reading) =>
+    // The figures of a snapshot that has not landed hold their place; the
+    // ones read elsewhere say what they have as soon as they have it.
+    pending
+      ? { ...reading, value: undefined, hint: undefined, pending: true }
+      : unread
+        ? { ...reading, value: undefined, hint: "Could not be read", trend: undefined }
+        : (reading.key === "size" || reading.key === "file") && parts && !stale
+          ? { ...reading, parts }
           : reading,
   )
+  // The list of largest tables is the bar's legend only while a tile draws the bar.
+  const drawn = own.find((reading) => reading.parts)?.parts
+  const readings = analytic ? own : file ? [...own, backup] : [...own, held, backup]
+  const dumps = backups.data?.files
+  const events = useMemo(() => chartEvents(samples, "uptimeSeconds", dumps), [samples, dumps])
 
   return (
     <>
       <HomeIdentity uptimeSeconds={answer?.uptimeSeconds} />
+      <StateRegion />
       {refused && (
         <Notice title="This server's statistics are not available">
           <p className="wrap-anywhere">{refused.reason}</p>
@@ -112,6 +149,7 @@ export function SqlHome() {
           samples={samples}
           loading={stats.loading}
           error={stats.error}
+          events={events}
         />
       )}
       <Pair>
@@ -133,22 +171,22 @@ export function SqlHome() {
             )}
           />
         )}
+        <UsedBy />
+      </Pair>
+      <Pair>
         {engine.can("statements") ? (
           <BusiestStatements />
         ) : engine.can("sqliteFile") ? (
           <FileFacts />
         ) : null}
+        <LargestTablesBlock poll={largest} parts={drawn} />
       </Pair>
-      <Pair>
-        <LargestTablesBlock poll={largest} />
-        <UsedBy />
-      </Pair>
-      <Pair>
+      <Columns>
         <RunsAs />
         {engine.can("server") && <ReachableFrom />}
         {engine.can("dump") && <BackupsBlock backups={backups} />}
-        {engine.can("server") && <ServerDatabases />}
-      </Pair>
+      </Columns>
+      {engine.can("server") && <ServerDatabases />}
     </>
   )
 }

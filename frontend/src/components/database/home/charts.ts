@@ -256,6 +256,12 @@ export function offeredViews(views: readonly ChartView[], newest: Sample | undef
 const PERCENT_DOMAIN: [number, number] = [0, 100]
 const PERCENT_TICKS = [0, 25, 50, 75, 100]
 
+/** A rate on the axis: as many decimals as tell two ticks apart, and no more. */
+function rateTick(value: number): string {
+  if (value >= 10 || value === 0) return `${perSecond(value)}/s`
+  return `${Number(value.toFixed(value < 1 ? 2 : 1))}/s`
+}
+
 /** How a unit's numbers are printed: in the tooltip and the legend, and shorter on the axis. */
 export const CHART_UNITS: Record<
   ChartUnit,
@@ -265,11 +271,65 @@ export const CHART_UNITS: Record<
     axisFormat?: (value: number) => string
     domain?: [number, number]
     yTicks?: number[]
+    /**
+     * The axis is stepped by the page (`roundTicks`) rather than fitted by
+     * the chart: `whole` for a unit that has no fractions. A scale fitted to
+     * three sessions put its ticks at 2.25 and 1.5 and printed "3, 2, 2, 1".
+     */
+    stepped?: "whole" | "round"
   }
 > = {
-  count: { format: (value) => compact(value) },
-  rate: { format: (value) => `${perSecond(value)}/s` },
+  count: { format: (value) => compact(value), stepped: "whole" },
+  rate: { format: (value) => `${perSecond(value)}/s`, axisFormat: rateTick, stepped: "round" },
   bytes: { format: (value) => bytes(value), axisFormat: (value) => bytes(value, 0) },
   bytesRate: { format: (value) => rate(value), axisFormat: (value) => `${bytes(value, 0)}/s` },
   percent: { unit: "%", domain: PERCENT_DOMAIN, yTicks: PERCENT_TICKS },
+}
+
+/**
+ * The ticks of an axis that starts at zero and ends on a round figure at or
+ * past `max`: at most five of them, a step of one, two or five times a power
+ * of ten apart (and never less than one where the unit has no fractions).
+ * A window with nothing above zero still gets an axis: zero to one.
+ */
+export function roundTicks(max: number, whole: boolean): number[] {
+  if (!(max > 0)) return [0, 1]
+  const rough = max / 4
+  const power = 10 ** Math.floor(Math.log10(rough))
+  const step = Math.max(
+    whole ? 1 : 0,
+    [1, 2, 5, 10].map((times) => times * power).find((size) => size >= rough) ?? rough,
+  )
+  const count = Math.ceil(max / step - 1e-9)
+  // Multiplied out, not added up: 0.1 three times over is not 0.3.
+  return Array.from({ length: count + 1 }, (_, index) => Number((index * step).toPrecision(12)))
+}
+
+/** The largest figure any of the drawn lines reaches in the rows on screen. */
+export function highest(
+  rows: readonly Record<string, unknown>[],
+  series: readonly { key: string }[],
+): number {
+  let top = 0
+  for (const row of rows) {
+    for (const line of series) {
+      const value = row[line.key]
+      if (typeof value === "number" && value > top) top = value
+    }
+  }
+  return top
+}
+
+/**
+ * The rows a view has something to draw in. A rate belongs to the interval
+ * that ends at a sample, so the first row of a view made only of rates is
+ * empty — and a line with one value and an empty row before it is a line of
+ * one point the chart does not draw. Without that row the one point is the
+ * whole plot, and is drawn as the dot it is.
+ */
+export function drawnRows<Row extends Record<string, unknown>>(
+  rows: readonly Row[],
+  series: readonly { key: string }[],
+): Row[] {
+  return rows.filter((row) => series.some((line) => typeof row[line.key] === "number"))
 }

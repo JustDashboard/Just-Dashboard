@@ -5,12 +5,14 @@ import {
   clickhouseReadings,
   collectionReadings,
   compact,
+  composition,
   holdingsReading,
   mongoReadings,
   perSecond,
   redisReadings,
   sqlReadings,
   sqliteReadings,
+  staled,
 } from "./readings"
 import { TRANSACTIONS } from "./samples"
 
@@ -127,7 +129,9 @@ describe("a SQL server's readings", () => {
   test("size says how far it moved while the page was open", () => {
     expect(by(sqlReadings(run)).size.value).toBe("1.0 MB")
     expect(by(sqlReadings(run)).size.hint).toBe("+2.0 KB since this page was opened")
-    expect(by(sqlReadings(run.slice(0, 1))).size.hint).toBe("on disk")
+    // What kind of size it is rides beside the figure; with nothing moved there is nothing to add.
+    expect(by(sqlReadings(run.slice(0, 1))).size.trailing).toBe("on disk")
+    expect(by(sqlReadings(run.slice(0, 1))).size.hint).toBeUndefined()
   })
 })
 
@@ -365,5 +369,135 @@ describe("when it was last backed up", () => {
     const stale = backupReading({ lastBackup: "2026-09-20T12:00:00Z", running: true }, now)
     expect(stale.tone).toBe("warning")
     expect(stale.hint).toBe("A dump is being taken now")
+  })
+})
+
+describe("a server that lists no session to the account", () => {
+  test("is a dash with the reason, and the threads the engine still reports", () => {
+    const reading = by(sqlReadings([at(0, {}, { threadsRunning: 2 })])).sessions
+    expect(reading.value).toBeUndefined()
+    expect(reading.meter).toBeUndefined()
+    expect(reading.hint).toBe("Not listed to this account · 2 threads running")
+    expect(by(sqlReadings([at(0, {}, { threadsRunning: 1 })])).sessions.hint).toBe(
+      "Not listed to this account · 1 thread running",
+    )
+  })
+
+  test("with nothing else to go on, says only that it was not reported", () => {
+    expect(by(sqlReadings([at(0)])).sessions.hint).toBe("Not reported to this account")
+  })
+})
+
+describe("a rate says its noun in the right number", () => {
+  const rated = (queries) =>
+    by(
+      sqlReadings([
+        at(0, { [TRANSACTIONS]: 0, queries: 0 }),
+        at(5, { [TRANSACTIONS]: 0, queries }),
+      ]),
+    ).transactions.hint
+
+  test("one statement, several statements", () => {
+    expect(rated(5)).toBe("1 statement a second")
+    expect(rated(10)).toBe("2 statements a second")
+    expect(rated(2)).toBe("0.4 statements a second")
+  })
+})
+
+describe("what a figure is made of", () => {
+  const tables = [
+    { key: "public.orders", label: "orders", bytes: 300 },
+    { key: "analytics.events", label: "events", bytes: 500 },
+    { key: "public.empty", label: "empty", bytes: 0 },
+    { key: "public.a", label: "a", bytes: 50 },
+    { key: "public.b", label: "b", bytes: 40 },
+    { key: "public.c", label: "c", bytes: 10 },
+  ]
+
+  test("the four largest parts, largest first, as shares of the whole", () => {
+    const parts = composition(tables, 1000)
+    expect(parts.map((part) => part.label)).toEqual(["events", "orders", "a", "b"])
+    expect(parts.map((part) => part.share)).toEqual([0.5, 0.3, 0.05, 0.04])
+    expect(parts[0].color).toBe("var(--chart-1)")
+    expect(new Set(parts.map((part) => part.color)).size).toBe(4)
+    // What the named parts leave is the bar's empty track.
+    expect(parts.reduce((sum, part) => sum + part.share, 0)).toBeLessThan(1)
+  })
+
+  test("a whole read a moment before its parts is never smaller than them", () => {
+    const parts = composition(tables, 600)
+    expect(parts.reduce((sum, part) => sum + part.share, 0)).toBeLessThanOrEqual(1)
+    expect(composition(tables, undefined)[0].share).toBeCloseTo(500 / 900)
+  })
+
+  test("one part is not a composition, and no part is no bar", () => {
+    expect(composition(tables.slice(0, 1), 1000)).toBeUndefined()
+    expect(composition([], 1000)).toBeUndefined()
+    expect(composition([tables[0], tables[2]], 1000)).toBeUndefined()
+  })
+})
+
+describe("figures whose poll has failed since", () => {
+  test("keep their value, quieten, and say when they were read", () => {
+    const [sessions, missing] = staled(
+      [
+        { key: "sessions", label: "Sessions", value: "4", hint: "1 active", tone: "warning" },
+        { key: "size", label: "Size", value: undefined, hint: "Not reported" },
+      ],
+      Date.UTC(2026, 9, 1, 9, 0, 5),
+    )
+    expect(sessions.value).toBe("4")
+    expect(sessions.stale).toBe(true)
+    expect(sessions.hint).toMatch(/^as of \d\d:\d\d:\d\d · not updating$/)
+    // A figure that was never read has nothing to go stale.
+    expect(missing.stale).toBeUndefined()
+    expect(missing.hint).toBe("Not reported")
+  })
+
+  test("with no reading to date them by, they say only that they stopped", () => {
+    expect(staled([{ key: "a", label: "A", value: "1" }], undefined)[0].hint).toBe("Not updating")
+  })
+})
+
+describe("an empty database", () => {
+  test("has no tables yet, which is not an engine that keeps no estimate", () => {
+    expect(holdingsReading(TABLES, { objects: 0, more: false, rows: undefined }).hint).toBe(
+      "no tables yet",
+    )
+    expect(holdingsReading(TABLES, { objects: 3, more: false, rows: undefined }).hint).toBe(
+      "the engine keeps no row estimate",
+    )
+  })
+})
+
+describe("a document database's weight", () => {
+  test("is the documents before compression, and says so beside what they take on disk", () => {
+    const [size] = collectionReadings(COLLECTIONS, {
+      database: "app",
+      collections: [
+        {
+          name: "orders",
+          system: false,
+          statsKnown: true,
+          count: 6,
+          size: 1024,
+          storageSize: 512,
+          indexSize: 100,
+        },
+        {
+          name: "users",
+          system: false,
+          statsKnown: true,
+          count: 2,
+          size: 512,
+          storageSize: 256,
+          indexSize: 100,
+        },
+      ],
+    })
+    expect(size.value).toBe("1.5 KB")
+    expect(size.trailing).toBe("uncompressed")
+    expect(size.hint).toBe("768 B on disk · 200 B of indexes")
+    expect(size.parts.map((part) => part.label)).toEqual(["orders", "users"])
   })
 })

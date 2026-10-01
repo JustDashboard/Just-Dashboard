@@ -169,6 +169,26 @@ export function RowsSkeleton({ rows = 3, mark = true }: { rows?: number; mark?: 
   )
 }
 
+/**
+ * Cards that have not arrived: a mark and two lines in each. Stacked unless
+ * the caller lays them out as the cards themselves will be.
+ */
+export function CardsSkeleton({ count = 3, className }: { count?: number; className?: string }) {
+  return (
+    <div className={className ?? "space-y-2"} aria-hidden>
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className="flex min-h-14 items-center gap-3 rounded-xl border px-3 py-2.5">
+          <Skeleton className="size-8 shrink-0 rounded-lg" />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <Skeleton className="h-3.5" style={{ width: `${52 - index * 9}%` }} />
+            <Skeleton className="h-3" style={{ width: `${70 - index * 12}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** A list of facts that has not arrived: labels down one side, values down the other. */
 export function FactsSkeleton({ rows = 4, className }: { rows?: number; className?: string }) {
   return (

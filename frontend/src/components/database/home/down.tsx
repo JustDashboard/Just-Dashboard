@@ -2,13 +2,12 @@
 
 import Link from "next/link"
 import { Pause, Play, Stop, Warning } from "@/components/icons"
+import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { BorderBeam } from "@/components/ui/border-beam"
-import { TextShimmer } from "@/components/ui/text-shimmer"
 import { HomeIdentity } from "@/components/database/home/identity"
-import { Pair } from "@/components/database/home/layout"
+import { Columns } from "@/components/database/home/layout"
 import { POWER } from "@/components/database/home/power"
 import {
   BackupsBlock,
@@ -16,6 +15,7 @@ import {
   RunsAs,
   useBackups,
 } from "@/components/database/home/reference"
+import { StateRegion } from "@/components/database/home/state-region"
 import { usePower } from "@/components/database/home/verbs"
 import { useDatabase } from "@/components/database/shell/database-context"
 
@@ -37,13 +37,15 @@ export function DownHome() {
   return (
     <>
       <HomeIdentity />
-      <StateNotice />
+      <StateRegion>
+        <StateNotice />
+      </StateRegion>
       {known && (
-        <Pair>
+        <Columns>
           <RunsAs />
           {engine.can("server") && <ReachableFrom />}
           {engine.can("dump") && <BackupsBlock backups={backups} answering={false} />}
-        </Pair>
+        </Columns>
       )}
     </>
   )
@@ -54,13 +56,16 @@ export function DownHome() {
  * page (§14: a notice is for what the reader has to act on). A server
  * somebody stopped is said plainly and offered its Start; one that refuses is
  * red, with the engine's own words; a saved connection that can no longer be
- * opened points at where it is repaired. While a change begun from the
- * dashboard is in flight the notice is that change, with its beam (§11).
+ * opened points at where it is repaired. A change begun from the dashboard
+ * stands in its place for as long as it lasts (`StateRegion`).
+ *
+ * The summary counts the deployment environments bound to the database, so a
+ * server that is down says who is without it: that is the fact that decides
+ * how soon it has to be back, and it costs no dial to state.
  */
 function StateNotice() {
   const { conn, summary, status, href } = useDatabase()
   const power = usePower()
-  const change = power.change
   const container = summary?.container
   const unit = summary?.unit
   const where = container
@@ -68,6 +73,13 @@ function StateNotice() {
     : unit
       ? `Its unit ${unit.name}`
       : "The server"
+  const bound = summary?.consumers ?? 0
+  const without = bound > 0 && (
+    <p>
+      {plural(bound, "deployment environment")} {bound === 1 ? "is" : "are"} bound to it and{" "}
+      {bound === 1 ? "is" : "are"} without a database until it is back.
+    </p>
+  )
 
   const start = power.can.start && (
     <Button size="sm" onClick={() => void power.run("start")}>
@@ -81,30 +93,10 @@ function StateNotice() {
     </Button>
   )
   const settings = (
-    <Link href={href("settings")} className="underline">
+    <Link href={href("settings")} className="rounded-sm underline focus-ring">
       Settings
     </Link>
   )
-  // A change begun from here is the reason the server is not answering, and
-  // is said in place of whatever a reading taken mid-change found: a server
-  // being restarted reads "unreachable" for a moment, and that is not a fault.
-  if (change) {
-    return (
-      <Notice
-        title={<TextShimmer>{POWER[change.action].progressive}</TextShimmer>}
-        className="relative"
-      >
-        <span aria-hidden className="pointer-events-none absolute -inset-px rounded-lg">
-          <BorderBeam size={80} duration={4} />
-        </span>
-        <p>
-          {change.action === "stop"
-            ? `${where} is being given time to shut down cleanly.`
-            : `${where} is coming up. This page fills in once the engine accepts connections.`}
-        </p>
-      </Notice>
-    )
-  }
 
   if (status.state === "stopped") {
     return (
@@ -115,6 +107,7 @@ function StateNotice() {
           {!container && unit ? ` — systemd says ${unit.activeState}` : ""}. It was not dialled, so
           nothing below was asked of it.
         </p>
+        {without}
         {!power.can.start && summary?.power.reason && <p>{summary.power.reason}</p>}
         <Actions>{start}</Actions>
       </Notice>
@@ -127,6 +120,7 @@ function StateNotice() {
           {where} is frozen: its sessions are held open and nothing they ask is answered. Resume it
           from the container&rsquo;s own page; from here a paused container can only be stopped.
         </p>
+        {without}
         {container && (
           <Actions>
             <Button size="sm" variant="outline" asChild>
@@ -155,6 +149,7 @@ function StateNotice() {
           Nothing says the server was stopped, and it refused or did not reply. The address and the
           password the dashboard dials it with are under {settings}.
         </p>
+        {without}
         <Actions>
           {start}
           {check}

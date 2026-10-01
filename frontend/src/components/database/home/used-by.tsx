@@ -1,19 +1,20 @@
 "use client"
 
 import { useMemo } from "react"
-import { Box, Globe, Servers, type Icon } from "@/components/icons"
+import { Box, Globe, type Icon } from "@/components/icons"
 import { plural } from "@/lib/format"
 import type { DbTopoEdge, DbTopoNode, DbTopology } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { LogoGlyph } from "@/components/logo"
 import { ProductLogo } from "@/components/product-logo"
-import { Row, RowList } from "@/components/row-list"
 import { Status } from "@/components/status-dot"
 import {
   Block,
   BlockLink,
+  CardsSkeleton,
   Quiet,
   Read,
-  RowsSkeleton,
   staleOf,
 } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
@@ -24,7 +25,7 @@ const KIND: Record<DbTopoNode["kind"], { glyph: Icon; word: string }> = {
   database: { glyph: Box, word: "database" },
   deployment: { glyph: Box, word: "deployment" },
   container: { glyph: Box, word: "container" },
-  host: { glyph: Servers, word: "this server" },
+  host: { glyph: Box, word: "this server" },
   remote: { glyph: Globe, word: "another machine" },
 }
 
@@ -44,6 +45,10 @@ type Consumer = { node: DbTopoNode; edge: DbTopoEdge }
  * hold its address, and whatever has a session open on it now — each drawn as
  * itself, with how it is known and how many sessions it holds. The whole
  * picture, for every database at once, is the map.
+ *
+ * A consumer with a page of its own is a place to go, so the list is cards
+ * with the lit edge (§16) rather than rows to read; one with nowhere to go —
+ * the processes on this machine — keeps its card and loses the arrow.
  */
 export function UsedBy() {
   const { id, conn } = useDatabase()
@@ -76,27 +81,32 @@ export function UsedBy() {
       title="Used by"
       stale={staleOf(topology)}
       actions={<BlockLink href={DATABASES_MAP_HREF}>Map</BlockLink>}
-      bodyClassName="group-data-[plain]/panel:py-1"
     >
-      <Read poll={topology} what="what uses it" skeleton={<RowsSkeleton />}>
+      <Read poll={topology} what="what uses it" skeleton={<CardsSkeleton count={2} />}>
         {() =>
           consumers.length === 0 ? (
-            <Quiet className="py-3">
+            <Quiet>
               Nothing is bound to {conn.name} and nothing has a session open on it. Link it to a
               deployment from that project&rsquo;s settings, or hand an application its address from
               Connect.
             </Quiet>
           ) : (
-            <RowList>
+            <ChoiceList>
               {consumers.map(({ node, edge }) => (
-                <Row
+                <ChoiceRow
                   key={node.id}
                   href={node.href}
+                  disabled={!node.href}
+                  verb={`Open ${node.name}`}
                   leading={
-                    <ProductLogo id={node.product} size="sm" fallback={KIND[node.kind].glyph} />
+                    node.kind === "host" ? (
+                      <HostMark />
+                    ) : (
+                      <ProductLogo id={node.product} size="sm" fallback={KIND[node.kind].glyph} />
+                    )
                   }
                   title={node.name}
-                  subtitle={[
+                  description={[
                     node.detail ?? KIND[node.kind].word,
                     ...edge.via.map((via) => VIA[via] ?? via),
                   ].join(" · ")}
@@ -110,13 +120,26 @@ export function UsedBy() {
                       </span>
                     </>
                   }
-                  className="py-2.5"
                 />
               ))}
-            </RowList>
+            </ChoiceList>
           )
         }
       </Read>
     </Block>
+  )
+}
+
+/**
+ * This server, where a product's logo would be: the dashboard's own mark in
+ * its own blue on the brand's tint, the way the wiring pictures draw the
+ * machine the reader is standing on. No product names "processes on this
+ * machine", and a grey box in the slot said nothing at all.
+ */
+function HostMark() {
+  return (
+    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-rule-brand bg-wash-brand text-brand">
+      <LogoGlyph className="h-4" />
+    </span>
   )
 }
