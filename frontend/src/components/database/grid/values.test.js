@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { aggregate, formatDecimal, groupDigits, parseDecimal, sameNumber } from "./decimal"
+import { compactJSON, indentJSON } from "./json-text"
 import { columnKind, kindFromServer, kindFromType, numberSpec } from "./kinds"
 import {
   CELL_TEXT_LIMIT,
@@ -7,6 +8,7 @@ import {
   DEFAULT_VALUE,
   editText,
   formatCell,
+  holdsText,
   isDefault,
   isTruncatedValue,
   parseBinary,
@@ -235,6 +237,64 @@ describe("the text an editor opens on", () => {
     expect(editText('"scalar"', col("json"))).toBe('"scalar"')
     expect(editText("{broken", col("json"))).toBe("{broken")
   })
+
+  test("opening a JSON document changes nothing in it but the whitespace", () => {
+    const stored =
+      '{"discord_id": 1234567890123456789, "plan": "free", "amount": 12345678901234567890.123456789}'
+    const opened = editText(stored, col("json"))
+    expect(opened).toBe(
+      '{\n  "discord_id": 1234567890123456789,\n  "plan": "free",\n  "amount": 12345678901234567890.123456789\n}',
+    )
+    // Changing one field and staging the text leaves the others digit for digit.
+    const staged = parseInput(opened.replace('"free"', '"pro"'), col("json"))
+    expect(staged.value).toContain("1234567890123456789,")
+    expect(staged.value).toContain("12345678901234567890.123456789")
+  })
+
+  test("keys that look like numbers keep their place, and a repeated key is not dropped", () => {
+    expect(editText('{"b":1,"10":2,"2":3}', col("json"))).toBe(
+      '{\n  "b": 1,\n  "10": 2,\n  "2": 3\n}',
+    )
+    expect(editText('{"a":1,"a":2}', col("json"))).toBe('{\n  "a": 1,\n  "a": 2\n}')
+  })
+
+  test("a document that already has a layout is opened in it", () => {
+    const laid = '{\n\t"a": [1,\n\t2]\n}'
+    expect(editText(laid, col("json"))).toBe(laid)
+  })
+})
+
+describe("JSON as text", () => {
+  test("indenting matches what JSON.stringify would lay out, for a document it can hold", () => {
+    const documents = [
+      '{"a":1,"b":[true,false,null],"c":{"d":"x","e":[]},"f":{}}',
+      '[1,2,{"a":[{"b":[]}]}]',
+      '"just a string"',
+      "125",
+      "[]",
+      '{"quote":"she said \\"hi\\"","brace":"}{][,:","slash":"a\\\\"}',
+    ]
+    for (const text of documents) {
+      expect(indentJSON(text)).toBe(JSON.stringify(JSON.parse(text), null, 2))
+    }
+  })
+
+  test("a number keeps every digit and every spelling", () => {
+    expect(indentJSON("[9007199254740993, 1.10, 1E5, -0]")).toBe(
+      "[\n  9007199254740993,\n  1.10,\n  1E5,\n  -0\n]",
+    )
+    expect(compactJSON('{ "n" : 12345678901234567890 }')).toBe('{"n":12345678901234567890}')
+  })
+
+  test("a string is carried through untouched, escapes and all", () => {
+    expect(compactJSON('{ "a" : "x  y\\u0041\\n" }')).toBe('{"a":"x  y\\u0041\\n"}')
+  })
+
+  test("text that is not JSON is neither indented nor compacted", () => {
+    expect(indentJSON("{broken")).toBeNull()
+    expect(compactJSON("{a,b}")).toBeNull()
+    expect(indentJSON("")).toBeNull()
+  })
 })
 
 describe("turning what was typed into a value", () => {
@@ -348,13 +408,30 @@ describe("turning what was typed into a value", () => {
     expect(parseInput("\\x00f", col("binary")).ok).toBe(false)
   })
 
-  test("an array is the engine's literal, or JSON that has to parse", () => {
+  test("an array is the engine's own literal, staged as the text that was typed", () => {
     expect(parseInput("{a,b}", col("array", "text[]"))).toEqual({ ok: true, value: "{a,b}" })
-    expect(parseInput('["a","b"]', col("array", "Array(String)"))).toEqual({
+    expect(parseInput("{9223372036854775807,1}", col("array", "_int8"))).toEqual({
       ok: true,
-      value: ["a", "b"],
+      value: "{9223372036854775807,1}",
     })
-    expect(parseInput("[1,", col("array")).ok).toBe(false)
+    // JSON is not that literal: bound as JSON text, an array column refuses it.
+    expect(parseInput("[9223372036854775807, 1]", col("array", "bigint[]"))).toEqual({
+      ok: false,
+      error: "An array literal: {a,b}",
+    })
+    expect(parseInput('["a","b"]', col("array", "ARRAY")).ok).toBe(false)
+    // Another engine's literal is its own business; it is never parsed here.
+    expect(parseInput("[1, 2]", col("array", "Array(UInt64)"))).toEqual({
+      ok: true,
+      value: "[1, 2]",
+    })
+  })
+
+  test("only free text has an empty string that is a value of its own", () => {
+    expect(holdsText(col("text"))).toBe(true)
+    expect(holdsText(col("unknown"))).toBe(true)
+    expect(holdsText(col("json"))).toBe(false)
+    expect(holdsText(col("number"))).toBe(false)
   })
 
   test("a pasted empty field is NULL wherever the column allows it, text included", () => {
@@ -398,6 +475,10 @@ describe("whether an edit changed anything", () => {
     expect(sameValue('{ "a": 1 }', '{"a":1}', "json")).toBe(true)
     expect(sameValue('{"a":1}', { a: 1 }, "json")).toBe(true)
     expect(sameValue('{"a":2}', '{"a":1}', "json")).toBe(false)
+    // One digit past what a float can tell apart is still a different document.
+    expect(sameValue('{"a":9007199254740993}', '{"a":9007199254740992}', "json")).toBe(false)
+    expect(sameValue('{"a":1,"a":2}', '{"a":2}', "json")).toBe(false)
+    expect(sameValue('{\n  "a": 9007199254740993\n}', '{"a":9007199254740993}', "json")).toBe(true)
     expect(
       sameValue(
         "AEE68060-3389-42d1-b87e-f29e8aacb145",

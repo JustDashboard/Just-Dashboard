@@ -1,5 +1,6 @@
 import { bytes } from "@/lib/format"
 import { parseDecimal, compareDecimal, sameNumber } from "./decimal"
+import { compactJSON, indentJSON } from "./json-text"
 import { numberSpec } from "./kinds"
 import type { CellValue, GridColumn, GridColumnKind } from "./types"
 
@@ -257,18 +258,12 @@ export function editText(value: EditValue | undefined, column: GridColumn): stri
     case "date":
     case "time":
       return editableTemporal(value, column.kind)
-    case "json": {
-      // Pretty-printed for the editor only when it is a document; a scalar or
-      // text that does not parse is shown as it is and left for the reader.
-      try {
-        const parsed: unknown = JSON.parse(value)
-        return typeof parsed === "object" && parsed !== null
-          ? JSON.stringify(parsed, null, 2)
-          : value
-      } catch {
-        return value
-      }
-    }
+    case "json":
+      // A document with a layout of its own is opened in it. One that arrived
+      // on a single line is indented for reading — by moving whitespace alone,
+      // so a number too large for a float and the order of the keys are still
+      // what the engine stored when the reader changes something else.
+      return value.includes("\n") ? value : (indentJSON(value) ?? value)
     default:
       return value
   }
@@ -322,6 +317,20 @@ function parseNumber(text: string, column: GridColumn): ParseResult {
   return { ok: true, value: plain }
 }
 
+/** Postgres spells an array type `text[]` when declared and `_text` on the wire. */
+function isPostgresArray(typeName: string): boolean {
+  const type = typeName.trim().toLowerCase()
+  return type.endsWith("[]") || type.startsWith("_") || type === "array"
+}
+
+/**
+ * Whether a column holds free text, where the empty string is a value of its
+ * own. Everywhere else an empty field can only mean NULL.
+ */
+export function holdsText(column: Pick<GridColumn, "kind">): boolean {
+  return column.kind === "text" || column.kind === "unknown"
+}
+
 /**
  * Turns what was typed into what is staged, or says why it cannot be.
  *
@@ -331,7 +340,7 @@ function parseNumber(text: string, column: GridColumn): ParseResult {
  */
 export function parseInput(text: string, column: GridColumn): ParseResult {
   const kind = column.kind
-  if (kind === "text" || kind === "unknown") return { ok: true, value: text }
+  if (holdsText(column)) return { ok: true, value: text }
 
   const trimmed = text.trim()
   if (trimmed === "") {
@@ -381,13 +390,11 @@ export function parseInput(text: string, column: GridColumn): ParseResult {
       return { ok: true, value: `\\x${hex.toLowerCase()}` }
     }
     case "array":
-      // Either the engine's own literal ({a,b}) or JSON; only the second can be checked.
-      if (trimmed.startsWith("[")) {
-        try {
-          return { ok: true, value: JSON.parse(trimmed) as CellValue }
-        } catch (err) {
-          return fail(err instanceof Error ? err.message : "Not valid JSON")
-        }
+      // The engine's own literal, as typed. JSON is not taken for one: the
+      // changes route binds a JSON array as JSON text, which an array column
+      // refuses, and reading it here would put its numbers through a float.
+      if (isPostgresArray(column.typeName) && !/^\{[\s\S]*\}$/.test(trimmed)) {
+        return fail("An array literal: {a,b}")
       }
       return { ok: true, value: text }
   }
@@ -406,13 +413,9 @@ export function parsePasted(text: string, column: GridColumn): ParseResult {
 
 /* -------------------------------------------------------------- comparison */
 
+/** A document as the text two spellings of it are compared by: its tokens, untouched. */
 function canonicalJSON(value: CellValue): string | null {
-  if (typeof value !== "string") return JSON.stringify(value)
-  try {
-    return JSON.stringify(JSON.parse(value))
-  } catch {
-    return null
-  }
+  return compactJSON(typeof value === "string" ? value : JSON.stringify(value))
 }
 
 /**

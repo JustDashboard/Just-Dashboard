@@ -9,9 +9,13 @@ import {
   originOf,
   pendingOf,
   previewKeys,
+  actionBlock,
+  defaultAllowed,
+  keyIsPreview,
+  keySources,
   rowRecord,
   rowValues,
-  selectedBlock,
+  selectedRows,
   targetRows,
   tickedRows,
   valueAt,
@@ -45,6 +49,8 @@ function build(changes = EMPTY_CHANGES, extra = {}) {
     changes,
     clipped: CLIPPED,
     editable: true,
+    defaultOnUpdate: true,
+    keys: keySources(extra.model?.columns ?? COLUMNS),
     ...extra.model,
   }
 }
@@ -125,7 +131,43 @@ describe("previews", () => {
   })
 })
 
+describe("a key that arrived cut", () => {
+  // The same rows under a table whose key is the long text column.
+  const columns = COLUMNS.map((column) => ({ ...column, primaryKey: column.key === "body" }))
+  const keyed = () => build(EMPTY_CHANGES, { model: { columns, keys: keySources(columns) } })
+
+  test("locks every cell of its row, and no other row", () => {
+    const model = keyed()
+    expect(keyIsPreview(model, 1)).toBe(true)
+    expect(keyIsPreview(model, 0)).toBe(false)
+    expect(lockReason(model, 1, col(model, "name"))).toMatch(/start of this row's key/)
+    expect(lockReason(model, 0, col(model, "name"))).toBeNull()
+  })
+
+  test("is not a lock when the cut column is not the key", () => {
+    const model = build()
+    expect(keyIsPreview(model, 1)).toBe(false)
+  })
+
+  test("is nothing an inserted row has", () => {
+    const changes = applyChange(EMPTY_CHANGES, { type: "insert", rows: [{ id: "new:1" }] })
+    const model = build(changes, { model: { columns, keys: keySources(columns) } })
+    expect(keyIsPreview(model, 3)).toBe(false)
+  })
+})
+
 describe("what can be edited", () => {
+  test("the column default is offered on an existing row only where the engine can set it", () => {
+    const changes = applyChange(EMPTY_CHANGES, { type: "insert", rows: [{ id: "new:1" }] })
+    const withDefault = { ...COLUMNS[1], defaultExpr: "'anon'" }
+    const anywhere = build(changes)
+    expect(defaultAllowed(anywhere, 0, withDefault)).toBe(true)
+    expect(defaultAllowed(anywhere, 0, COLUMNS[1])).toBe(false)
+    const sqlite = build(changes, { model: { defaultOnUpdate: false } })
+    expect(defaultAllowed(sqlite, 0, withDefault)).toBe(false)
+    expect(defaultAllowed(sqlite, 3, withDefault)).toBe(true)
+  })
+
   test("a preview is refused, a whole value is not", () => {
     const model = build()
     expect(lockReason(model, 1, col(model, "blob"))).toMatch(/Only the start of this value/)
@@ -161,30 +203,67 @@ describe("what can be edited", () => {
 describe("what an action applies to", () => {
   const model = build()
   const at = (row, colIndex) => ({ row, col: colIndex })
+  const keysOf = (block) => block.cols.map((entry) => entry.column.key)
 
-  test("a range wins, then the ticked rows, then the active cell alone", () => {
+  test("invoked inside the range, a cell verb takes the range", () => {
     const range = { active: at(1, 2), anchor: at(0, 1), rows: ["3"] }
-    const block = selectedBlock(model, range)
+    const block = actionBlock(model, range, at(0, 2))
     expect(block.rows).toEqual([0, 1])
-    expect(block.cols.map((entry) => entry.column.key)).toEqual(["name", "blob"])
+    expect(keysOf(block)).toEqual(["name", "blob"])
+  })
 
-    const ticked = selectedBlock(model, { active: at(0, 0), anchor: null, rows: ["3", "1"] })
-    expect(ticked.rows).toEqual([0, 2])
-    expect(ticked.cols).toHaveLength(COLUMNS.length)
+  test("invoked on a ticked row, it takes every ticked row across the visible columns", () => {
+    const ticked = { active: at(0, 0), anchor: null, rows: ["3", "1"] }
+    const block = actionBlock(model, ticked, at(2, 3))
+    expect(block.rows).toEqual([0, 2])
+    expect(block.cols).toHaveLength(COLUMNS.length)
+  })
 
-    const single = selectedBlock(model, { active: at(2, 3), anchor: null, rows: [] })
-    expect(single.rows).toEqual([2])
-    expect(single.cols.map((entry) => entry.column.key)).toEqual(["body"])
+  test("invoked anywhere else, it takes that cell alone, whatever is ticked or selected", () => {
+    const ticked = { active: at(0, 0), anchor: null, rows: ["1", "3"] }
+    const outside = actionBlock(model, ticked, at(1, 1))
+    expect(outside.rows).toEqual([1])
+    expect(keysOf(outside)).toEqual(["name"])
 
-    expect(selectedBlock(model, { active: null, anchor: null, rows: [] })).toBeNull()
-    expect(selectedBlock(model, { active: at(-1, 0), anchor: null, rows: [] })).toBeNull()
+    const range = { active: at(1, 2), anchor: at(0, 1), rows: [] }
+    const beside = actionBlock(model, range, at(2, 3))
+    expect(beside.rows).toEqual([2])
+    expect(keysOf(beside)).toEqual(["body"])
+  })
+
+  test("a range wins over a tick when the cell is in both", () => {
+    const both = { active: at(1, 2), anchor: at(0, 1), rows: ["1"] }
+    expect(keysOf(actionBlock(model, both, at(0, 1)))).toEqual(["name", "blob"])
+  })
+
+  test("with no cell to go by it is the range, then the ticked rows, then nothing", () => {
+    const range = { active: at(1, 2), anchor: at(0, 1), rows: ["3"] }
+    expect(actionBlock(model, range, null).rows).toEqual([0, 1])
+    expect(actionBlock(model, { active: at(1, 1), anchor: null, rows: ["3"] }, null).rows).toEqual([
+      2,
+    ])
+    expect(actionBlock(model, { active: at(1, 1), anchor: null, rows: [] }, null)).toBeNull()
+  })
+
+  test("the header and a cell that is not there are no target at all", () => {
+    const none = { active: at(0, 0), anchor: null, rows: [] }
+    expect(actionBlock(model, none, at(-1, 0))).toBeNull()
+    expect(actionBlock(model, none, at(9, 0))).toBeNull()
+    expect(actionBlock(model, none, at(0, 99))).toBeNull()
   })
 
   test("ticked rows that are not on this page are not acted on", () => {
     expect(tickedRows(model, { active: null, anchor: null, rows: ["elsewhere", "2"] })).toEqual([1])
     expect(
-      selectedBlock(model, { active: at(0, 0), anchor: null, rows: ["elsewhere"] }).rows,
+      actionBlock(model, { active: at(0, 0), anchor: null, rows: ["elsewhere"] }, at(0, 0)).rows,
     ).toEqual([0])
+  })
+
+  test("the owner's own row buttons take the ticked rows, else the rows the selection crosses", () => {
+    expect(selectedRows(model, { active: at(2, 1), anchor: at(1, 0), rows: ["1"] })).toEqual([0])
+    expect(selectedRows(model, { active: at(2, 1), anchor: at(1, 0), rows: [] })).toEqual([1, 2])
+    expect(selectedRows(model, { active: at(1, 1), anchor: null, rows: [] })).toEqual([1])
+    expect(selectedRows(model, { active: null, anchor: null, rows: [] })).toEqual([])
   })
 
   test("a row verb takes the ticked rows or the range only when invoked from inside them", () => {

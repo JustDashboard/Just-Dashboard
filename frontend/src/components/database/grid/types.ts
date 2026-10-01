@@ -129,6 +129,12 @@ export interface GridFilterRequest {
   value?: CellValue
 }
 
+/** A cell of a copied block, by its place in the block. */
+export interface GridBlockCell {
+  row: number
+  column: number
+}
+
 /** The rows and columns an action was taken on, as raw values. */
 export interface GridSelectionData {
   columns: GridColumn[]
@@ -136,6 +142,12 @@ export interface GridSelectionData {
   rows: CellValue[][]
   /** The ids of those rows, aligned to `rows`. */
   rowIds: string[]
+  /**
+   * The cells of `rows` that hold only the start of their value, because the
+   * server cut it. What is in them must not be written anywhere as if it were
+   * the value.
+   */
+  previews: GridBlockCell[]
 }
 
 /** A row handed to the owner: its id, where it is drawn, and its values as drawn. */
@@ -146,6 +158,8 @@ export interface GridRowRef {
   values: CellValue[]
   /** The row as the server sent it; null for a row that is only staged. */
   original: GridRow | null
+  /** Keys of the columns whose value here is only its start; fetch those whole before showing them. */
+  previews: string[]
 }
 
 export interface GridForeignKeyTarget {

@@ -5,8 +5,10 @@ import {
   encodeGridClip,
   parseDelimited,
   parseTSV,
+  previewNote,
   toCSV,
   toJSONRows,
+  toMarkdown,
   toTSV,
   uniqueNames,
 } from "./clipboard"
@@ -132,7 +134,7 @@ describe("values on the clipboard", () => {
       [null, "", "12", 12, true],
       [{ a: 1 }, ["x"], "\\x00ff", "", null],
     ]
-    expect(decodeGridClip(encodeGridClip(cells))).toEqual(cells)
+    expect(decodeGridClip(encodeGridClip(cells))).toEqual({ cells, previews: [] })
   })
 
   test("anything that is not that format is refused rather than guessed at", () => {
@@ -140,6 +142,51 @@ describe("values on the clipboard", () => {
     expect(decodeGridClip('{"v":2,"cells":[]}')).toBeNull()
     expect(decodeGridClip('{"v":1,"cells":[1,2]}')).toBeNull()
     expect(decodeGridClip('{"v":1}')).toBeNull()
+  })
+})
+
+describe("a Markdown table", () => {
+  test("has a header, a rule and a row per row", () => {
+    expect(
+      toMarkdown(
+        ["id", "name"],
+        [
+          ["1", "Ann"],
+          ["2", ""],
+        ],
+      ),
+    ).toBe("| id | name |\n| --- | --- |\n| 1 | Ann |\n| 2 |  |")
+  })
+
+  test("a pipe is escaped and a line break does not end the row", () => {
+    expect(toMarkdown(["a"], [["x | y"], ["one\ntwo\r\nthree"]])).toBe(
+      "| a |\n| --- |\n| x \\| y |\n| one<br>two<br>three |",
+    )
+  })
+})
+
+describe("previews on the clipboard", () => {
+  test("a copy says how much of it is only the start of a value", () => {
+    expect(previewNote(0)).toBe("")
+    expect(previewNote(1)).toBe(" — one value is only its start")
+    expect(previewNote(1200)).toBe(" — 1,200 values are only their start")
+  })
+
+  test("the cells that were only the start of a value travel marked", () => {
+    const cells = [
+      ["1", "whole"],
+      ["2", "cut…"],
+    ]
+    const text = encodeGridClip(cells, [{ row: 1, column: 1 }])
+    expect(decodeGridClip(text)).toEqual({ cells, previews: [{ row: 1, column: 1 }] })
+  })
+
+  test("a block with none says nothing about them, and a mangled mark is dropped", () => {
+    expect(encodeGridClip([["a"]])).toBe('{"v":1,"cells":[["a"]]}')
+    expect(decodeGridClip('{"v":1,"cells":[["a"]],"previews":[[0,"x"],"no",[0,0]]}')).toEqual({
+      cells: [["a"]],
+      previews: [{ row: 0, column: 0 }],
+    })
   })
 })
 

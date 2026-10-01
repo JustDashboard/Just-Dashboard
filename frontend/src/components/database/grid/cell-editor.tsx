@@ -6,10 +6,12 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { indentJSON } from "./json-text"
 import { numberSpec } from "./kinds"
 import {
   DEFAULT_VALUE,
   editText,
+  holdsText,
   isDefault,
   parseInput,
   randomUUID,
@@ -44,19 +46,45 @@ export interface GridEditorApi {
   expanded: boolean
   /** True when more than one cell is selected, so one value can fill them all. */
   canFill: boolean
+  /** Whether this cell may be sent back to its column default (not every engine can, for a row that exists). */
+  canDefault: boolean
   /**
    * Closes the editor. `result` is the value to stage, or null when nothing
    * changed. `fill` carries the typed text for every other cell of the range.
+   * False when the grid would not stage it; the editor then stays open.
    */
-  finish: (result: { value: EditValue } | null, move: EditMove, fill?: string) => void
-  /** Lets the grid ask the open editor to settle before it moves somewhere else. */
-  register: (handle: { settle: () => boolean } | null) => void
+  finish: (result: { value: EditValue } | null, move: EditMove, fill?: string) => boolean
+  /**
+   * Lets the grid ask the open editor to settle before it moves somewhere
+   * else, and to take the keyboard back — the menu that opened it hands focus
+   * to wherever it was before, which is the cell and not the field in it.
+   */
+  register: (handle: GridEditorHandle | null) => void
+}
+
+export interface GridEditorHandle {
+  /** False when the editor holds something it cannot stage. */
+  settle: () => boolean
+  focus: () => void
 }
 
 export const GridEditorContext = createContext<GridEditorApi | null>(null)
 
-/** What marks an element as part of an editor, so the grid leaves its keys and clicks alone. */
-export const EDITOR_ATTR = { "data-grid-editor": "" } as const
+/**
+ * What every editor surface carries.
+ *
+ * The attribute marks it as part of an editor, so the grid leaves its keys and
+ * clicks alone. The two handlers keep its pointer to itself: an editor is a
+ * child of its cell, in the document or through a portal, and the cells sit
+ * inside the element that opens the grid's context menu — which would answer a
+ * right-click or a long press in the field by opening that menu over it,
+ * taking the browser's own (the one with Paste in it) and the focus with it.
+ */
+export const EDITOR_PROPS = {
+  "data-grid-editor": "",
+  onContextMenu: (event: React.MouseEvent) => event.stopPropagation(),
+  onPointerDown: (event: React.PointerEvent) => event.stopPropagation(),
+} as const
 
 function columnHint(column: GridColumn): string {
   switch (column.kind) {
@@ -76,7 +104,7 @@ function columnHint(column: GridColumn): string {
     case "json":
       return "JSON"
     case "array":
-      return column.typeName
+      return `${column.typeName} · written as the engine writes it, {a,b}`
     default:
       return column.typeName
   }
@@ -116,10 +144,12 @@ function TextEditor({
 }) {
   const [initial] = useState(() => editText(value, column))
   const [text, setText] = useState(() => editor.seed ?? initial)
-  const structured =
-    column.kind === "json" || (column.kind === "array" && typeof value === "object")
   const [expanded, setExpanded] = useState(
-    () => editor.expanded || structured || initial.includes("\n") || initial.length > LONG_TEXT,
+    () =>
+      editor.expanded ||
+      column.kind === "json" ||
+      initial.includes("\n") ||
+      initial.length > LONG_TEXT,
   )
 
   const parsed = useMemo(() => parseInput(text, column), [text, column])
@@ -129,21 +159,23 @@ function TextEditor({
   const starting = value === null || value === undefined || isDefault(value)
 
   const settle = (move: EditMove, fill?: boolean): boolean => {
-    if (!dirty) {
-      editor.finish(null, move)
-      return true
-    }
+    if (!dirty) return editor.finish(null, move)
     if (!parsed.ok) return false
-    editor.finish({ value: parsed.value }, move, fill ? text : undefined)
-    return true
+    return editor.finish({ value: parsed.value }, move, fill ? text : undefined)
   }
   const settleRef = useRef(settle)
   useEffect(() => {
     settleRef.current = settle
   })
+  // The field, in whichever of the two shapes is open.
+  const inputRef = useRef<HTMLInputElement>(null)
+  const areaRef = useRef<HTMLTextAreaElement>(null)
   const { register } = editor
   useEffect(() => {
-    register({ settle: () => settleRef.current("none") })
+    register({
+      settle: () => settleRef.current("none"),
+      focus: () => (areaRef.current ?? inputRef.current)?.focus({ preventScroll: true }),
+    })
     return () => register(null)
   }, [register])
 
@@ -154,17 +186,18 @@ function TextEditor({
     error: dirty && !parsed.ok ? parsed.error : null,
     settle,
     setNull: column.nullable ? () => editor.finish({ value: null }, "stay") : null,
-    setDefault:
-      column.defaultExpr !== undefined
-        ? () => editor.finish({ value: DEFAULT_VALUE }, "stay")
-        : null,
-    cancel: () => editor.finish(null, "stay"),
+    // An empty field on a cell that holds nothing is read as "left alone", so
+    // the empty string has to be asked for by name, as NULL is.
+    setEmpty: holdsText(column) && starting ? () => editor.finish({ value: "" }, "stay") : null,
+    setDefault: editor.canDefault ? () => editor.finish({ value: DEFAULT_VALUE }, "stay") : null,
+    cancel: () => void editor.finish(null, "stay"),
   }
 
-  if (expanded) return <AreaEditor {...shared} />
+  if (expanded) return <AreaEditor {...shared} fieldRef={areaRef} />
   return (
     <InlineEditor
       {...shared}
+      fieldRef={inputRef}
       caret={editor.seed !== null ? "end" : editor.caret}
       canFill={editor.canFill}
       placeholder={starting ? (value === null ? "NULL" : "default") : ""}
@@ -181,17 +214,35 @@ interface TextEditorShared {
   setText: (text: string) => void
   error: string | null
   settle: (move: EditMove, fill?: boolean) => boolean
-  setNull: (() => void) | null
-  setDefault: (() => void) | null
+  /** These three stage a value by name and close the editor; false when the grid refused. */
+  setNull: (() => boolean) | null
+  setEmpty: (() => boolean) | null
+  setDefault: (() => boolean) | null
   cancel: () => void
 }
 
 /** Keeps a press on a strip button from taking focus out of the field it belongs to. */
 const keepFocus = (event: React.PointerEvent) => event.preventDefault()
 
-function ValueButtons({ setNull, setDefault }: Pick<TextEditorShared, "setNull" | "setDefault">) {
+function ValueButtons({
+  setNull,
+  setEmpty,
+  setDefault,
+}: Pick<TextEditorShared, "setNull" | "setEmpty" | "setDefault">) {
   return (
     <>
+      {setEmpty && (
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          title="Set the empty string"
+          onPointerDown={keepFocus}
+          onClick={setEmpty}
+        >
+          Empty
+        </Button>
+      )}
       {setNull && (
         <Button
           type="button"
@@ -220,18 +271,20 @@ function ValueButtons({ setNull, setDefault }: Pick<TextEditorShared, "setNull" 
   )
 }
 
-/** Ctrl+Alt+N and Ctrl+Alt+D, wherever an editor has the keyboard. */
+/**
+ * Ctrl+Alt+N and Ctrl+Alt+D, wherever an editor has the keyboard. Null when the
+ * key is neither; otherwise whether the value was staged and the editor closed.
+ */
 function valueShortcut(
   event: React.KeyboardEvent,
   { setNull, setDefault }: Pick<TextEditorShared, "setNull" | "setDefault">,
-): boolean {
-  if (!(event.ctrlKey || event.metaKey) || !event.altKey) return false
+): boolean | null {
+  if (!(event.ctrlKey || event.metaKey) || !event.altKey) return null
   const key = event.key.toLowerCase()
-  if (key === "n" && setNull) setNull()
-  else if (key === "d" && setDefault) setDefault()
-  else return false
+  const stage = key === "n" ? setNull : key === "d" ? setDefault : null
+  if (!stage) return null
   event.preventDefault()
-  return true
+  return stage()
 }
 
 function InlineEditor({
@@ -241,31 +294,33 @@ function InlineEditor({
   error,
   settle,
   setNull,
+  setEmpty,
   setDefault,
   cancel,
+  fieldRef,
   caret,
   canFill,
   placeholder,
   onExpand,
 }: TextEditorShared & {
+  fieldRef: React.RefObject<HTMLInputElement | null>
   caret: "select" | "end"
   canFill: boolean
   placeholder: string
   onExpand: (() => void) | null
 }) {
-  const ref = useRef<HTMLInputElement>(null)
   const hintId = useId()
   // The editor is unmounted by the same call that settles it, and the blur that
   // follows must not settle it a second time.
   const closed = useRef(false)
 
   useEffect(() => {
-    const input = ref.current
+    const input = fieldRef.current
     if (!input) return
     input.focus({ preventScroll: true })
     if (caret === "select") input.select()
     else input.setSelectionRange(input.value.length, input.value.length)
-  }, [caret])
+  }, [caret, fieldRef])
 
   const finish = (move: EditMove, fill?: boolean) => {
     if (settle(move, fill)) closed.current = true
@@ -275,8 +330,8 @@ function InlineEditor({
     <Popover open>
       <PopoverAnchor asChild>
         <input
-          {...EDITOR_ATTR}
-          ref={ref}
+          {...EDITOR_PROPS}
+          ref={fieldRef}
           value={text}
           placeholder={placeholder}
           spellCheck={false}
@@ -297,8 +352,9 @@ function InlineEditor({
           }}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return
-            if (valueShortcut(event, { setNull, setDefault })) {
-              closed.current = true
+            const staged = valueShortcut(event, { setNull, setDefault })
+            if (staged !== null) {
+              if (staged) closed.current = true
               return
             }
             if (event.key === "Escape") {
@@ -318,7 +374,7 @@ function InlineEditor({
         />
       </PopoverAnchor>
       <PopoverContent
-        {...EDITOR_ATTR}
+        {...EDITOR_PROPS}
         side="bottom"
         align="start"
         sideOffset={2}
@@ -338,7 +394,7 @@ function InlineEditor({
         >
           {error ?? columnHint(column)}
         </span>
-        <ValueButtons setNull={setNull} setDefault={setDefault} />
+        <ValueButtons setNull={setNull} setEmpty={setEmpty} setDefault={setDefault} />
         {column.kind === "uuid" && (
           <Button
             type="button"
@@ -374,20 +430,17 @@ function AreaEditor({
   error,
   settle,
   setNull,
+  setEmpty,
   setDefault,
   cancel,
-}: TextEditorShared) {
-  const ref = useRef<HTMLTextAreaElement>(null)
+  fieldRef,
+}: TextEditorShared & { fieldRef: React.RefObject<HTMLTextAreaElement | null> }) {
   const hintId = useId()
-  const json = column.kind === "json" || column.kind === "array"
+  const json = column.kind === "json"
 
-  const format = () => {
-    try {
-      setText(JSON.stringify(JSON.parse(text), null, 2))
-    } catch {
-      // The error under the field already says why it will not format.
-    }
-  }
+  // Whitespace only: the numbers and the order of the keys stay as typed. Text
+  // that is not JSON is left alone — the line under the field already says why.
+  const format = () => setText(indentJSON(text.trim()) ?? text)
 
   return (
     <Popover open>
@@ -395,7 +448,7 @@ function AreaEditor({
         <span aria-hidden className="pointer-events-none absolute inset-0" />
       </PopoverAnchor>
       <PopoverContent
-        {...EDITOR_ATTR}
+        {...EDITOR_PROPS}
         side="bottom"
         align="start"
         sideOffset={2}
@@ -404,7 +457,7 @@ function AreaEditor({
         className="flex w-[min(36rem,calc(100vw-1rem))] flex-col gap-0 p-0"
         onOpenAutoFocus={(event) => {
           event.preventDefault()
-          const area = ref.current
+          const area = fieldRef.current
           if (!area) return
           area.focus({ preventScroll: true })
           area.setSelectionRange(area.value.length, area.value.length)
@@ -421,7 +474,7 @@ function AreaEditor({
           settle("none")
         }}
         onKeyDown={(event) => {
-          if (valueShortcut(event, { setNull, setDefault })) return
+          if (valueShortcut(event, { setNull, setDefault }) !== null) return
           if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
             event.preventDefault()
             settle("stay")
@@ -440,7 +493,7 @@ function AreaEditor({
           )}
         </div>
         <textarea
-          ref={ref}
+          ref={fieldRef}
           value={text}
           spellCheck={false}
           aria-label={`Edit ${column.name}`}
@@ -460,7 +513,7 @@ function AreaEditor({
           >
             {error ?? (json ? "Checked when applied" : columnHint(column))}
           </span>
-          <ValueButtons setNull={setNull} setDefault={setDefault} />
+          <ValueButtons setNull={setNull} setEmpty={setEmpty} setDefault={setDefault} />
           <Button type="button" size="xs" variant="outline" onClick={cancel}>
             Cancel
           </Button>
@@ -507,11 +560,11 @@ function ListEditor({
       value: column.kind === "boolean" ? label === "true" : label,
     }))
     if (column.nullable) list.push({ key: "null", label: "NULL", value: null, special: true })
-    if (column.defaultExpr !== undefined) {
+    if (editor.canDefault) {
       list.push({ key: "default", label: "Default", value: DEFAULT_VALUE, special: true })
     }
     return list
-  }, [labels, column])
+  }, [labels, column, editor.canDefault])
 
   const current = options.findIndex((option) =>
     option.special
@@ -549,6 +602,7 @@ function ListEditor({
         editor.finish(null, "none")
         return true
       },
+      focus: () => listRef.current?.focus({ preventScroll: true }),
     })
     return () => register(null)
   }, [register, editor])
@@ -559,7 +613,7 @@ function ListEditor({
         <span aria-hidden className="pointer-events-none absolute inset-0" />
       </PopoverAnchor>
       <PopoverContent
-        {...EDITOR_ATTR}
+        {...EDITOR_PROPS}
         side="bottom"
         align="start"
         sideOffset={2}

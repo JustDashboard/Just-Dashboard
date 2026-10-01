@@ -1,5 +1,5 @@
 import { isDefault, type EditValue } from "./values"
-import type { CellValue, GridColumn } from "./types"
+import type { CellValue, GridBlockCell, GridColumn } from "./types"
 
 /**
  * A block of cells as text, and back.
@@ -49,6 +49,20 @@ export function toCSV(matrix: readonly (readonly string[])[], options: CSVOption
   const lines = matrix.map((row) => row.map(encode).join(","))
   if (options.header) lines.unshift(options.header.map(encode).join(","))
   return lines.join("\r\n")
+}
+
+/**
+ * A GitHub-flavoured Markdown table, for pasting rows into an issue or a note.
+ * A pipe would end the cell and a line break would end the row, so the one is
+ * escaped and the other becomes `<br>`.
+ */
+export function toMarkdown(
+  header: readonly string[],
+  matrix: readonly (readonly string[])[],
+): string {
+  const encode = (field: string) => field.replace(/\|/g, "\\|").replace(/\r?\n|\r/g, "<br>")
+  const line = (row: readonly string[]) => `| ${row.map(encode).join(" | ")} |`
+  return [line(header), line(header.map(() => "---")), ...matrix.map(line)].join("\n")
 }
 
 /**
@@ -144,19 +158,57 @@ export function clipText(value: EditValue | undefined): string {
  */
 export const GRID_MIME = "application/x-jd-grid+json"
 
-export function encodeGridClip(matrix: readonly (readonly CellValue[])[]): string {
-  return JSON.stringify({ v: 1, cells: matrix })
+/** A copied block in the grid's own format. */
+export interface GridClip {
+  cells: CellValue[][]
+  /**
+   * The cells that are only the start of a value the server cut. They travel
+   * marked, so that pasting one somewhere is refused instead of writing the
+   * first few kilobytes of a value as if they were all of it.
+   */
+  previews: GridBlockCell[]
 }
 
-export function decodeGridClip(text: string): CellValue[][] | null {
+export function encodeGridClip(
+  matrix: readonly (readonly CellValue[])[],
+  previews: readonly GridBlockCell[] = [],
+): string {
+  return JSON.stringify({
+    v: 1,
+    cells: matrix,
+    ...(previews.length > 0 && { previews: previews.map((cell) => [cell.row, cell.column]) }),
+  })
+}
+
+export function decodeGridClip(text: string): GridClip | null {
   try {
-    const parsed = JSON.parse(text) as { v?: unknown; cells?: unknown }
+    const parsed = JSON.parse(text) as { v?: unknown; cells?: unknown; previews?: unknown }
     if (parsed?.v !== 1 || !Array.isArray(parsed.cells)) return null
     if (!parsed.cells.every((row) => Array.isArray(row))) return null
-    return parsed.cells as CellValue[][]
+    const marks = Array.isArray(parsed.previews) ? parsed.previews : []
+    return {
+      cells: parsed.cells as CellValue[][],
+      previews: marks.flatMap((mark) =>
+        Array.isArray(mark) && Number.isInteger(mark[0]) && Number.isInteger(mark[1])
+          ? [{ row: mark[0] as number, column: mark[1] as number }]
+          : [],
+      ),
+    }
   } catch {
     return null
   }
+}
+
+/**
+ * What a copy adds to its announcement when some of what it took is only the
+ * start of a value. On the clipboard a preview looks like any other text, so
+ * this is the one moment it can be said.
+ */
+export function previewNote(count: number): string {
+  if (count === 0) return ""
+  return count === 1
+    ? " — one value is only its start"
+    : ` — ${count.toLocaleString("en-US")} values are only their start`
 }
 
 /**

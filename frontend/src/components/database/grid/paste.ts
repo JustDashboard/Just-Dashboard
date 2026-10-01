@@ -1,5 +1,5 @@
 import type { CellEdit, ChangeAction, RowInsertion } from "./change-set"
-import { clipText } from "./clipboard"
+import { clipText, type GridClip } from "./clipboard"
 import { editFor, lockReason, type GridModel } from "./model"
 import { isRange, rangeOf } from "./selection"
 import { parseInput, parsePasted, type EditValue, type ParseResult } from "./values"
@@ -16,8 +16,19 @@ import type { CellValue, GridColumn, GridRange, GridSelection } from "./types"
  * undo, however many cells it touched.
  */
 
-/** A field from the clipboard: text from anywhere, or an exact value from another grid. */
-export type PastedCell = { text: string } | { value: CellValue }
+/**
+ * A field from the clipboard: text from anywhere, an exact value from another
+ * grid, or the mark of a cell that grid only held the start of.
+ */
+export type PastedCell = { text: string } | { value: CellValue } | { preview: true }
+
+/** A block copied from a grid, as the fields a paste lays down. */
+export function clipCells(clip: GridClip): PastedCell[][] {
+  const previews = new Set(clip.previews.map((cell) => `${cell.row}:${cell.column}`))
+  return clip.cells.map((row, r) =>
+    row.map((value, c) => (previews.has(`${r}:${c}`) ? { preview: true } : { value })),
+  )
+}
 
 export interface PastePlan {
   /** What to stage. Empty when nothing could be pasted. */
@@ -33,6 +44,9 @@ export interface PastePlan {
 }
 
 function resolve(cell: PastedCell, column: GridColumn): ParseResult {
+  if ("preview" in cell) {
+    return { ok: false, error: "only the start of the copied value was loaded" }
+  }
   if (!("value" in cell)) return parsePasted(cell.text, column)
   // The grid's own format: NULL is NULL and "" is "", so neither is guessed at.
   if (cell.value === null) {

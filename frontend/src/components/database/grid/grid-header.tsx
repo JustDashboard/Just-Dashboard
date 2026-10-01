@@ -284,11 +284,26 @@ export const GridHeader = memo(function GridHeader({
       <div
         role="columnheader"
         aria-colindex={1}
-        data-select-all={selectable ? "" : undefined}
-        aria-label={selectable ? "Select every row on this page" : undefined}
-        className="sticky left-0 z-10 flex h-full cursor-default items-center border-r border-hairline bg-(--jd-grid-ground) px-2"
+        className="sticky left-0 z-10 flex h-full items-center border-r border-hairline bg-(--jd-grid-ground)"
       >
-        {selectable ? <Tick state={allRows} /> : <span className="sr-only">Row</span>}
+        {selectable ? (
+          // A real control, so it has a name and a state to be read by. Not a
+          // tab stop: the grid has one, and from the keyboard the same thing
+          // is Ctrl+A then Shift+Space.
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={allRows}
+            aria-label="Select every row on this page"
+            tabIndex={-1}
+            data-select-all=""
+            className="flex size-full cursor-default items-center px-2 focus-ring-inset"
+          >
+            <Tick state={allRows} />
+          </button>
+        ) : (
+          <span className="sr-only">Row</span>
+        )}
       </div>
       {pinned.map((entry, i) => head(entry, i, i === pinned.length - 1))}
       <div role="presentation" />

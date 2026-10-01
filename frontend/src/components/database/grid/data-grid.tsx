@@ -4,6 +4,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -20,17 +21,24 @@ import { errorMessage } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import { GridEditorContext, type EditMove, type GridEditorApi } from "./cell-editor"
+import {
+  GridEditorContext,
+  type EditMove,
+  type GridEditorApi,
+  type GridEditorHandle,
+} from "./cell-editor"
 import {
   duplicateValues,
   EMPTY_CHANGES,
+  exceedsLimit,
+  MAX_CHANGES,
   type CellEdit,
   type ChangeAction,
   type ChangeSetController,
   type RowInsertion,
 } from "./change-set"
-import { toJSONRows } from "./clipboard"
-import { hitTest, measureColumn, trackPointer } from "./dom"
+import { previewNote, toJSONRows } from "./clipboard"
+import { hitTest, measureColumn, trackPointer, type Hit } from "./dom"
 import { GridHeader, type ColumnActions } from "./grid-header"
 import {
   CellMenuItems,
@@ -53,15 +61,21 @@ import {
 } from "./layout"
 import { useLive, type AfterRender, type Editing } from "./live"
 import {
+  actionBlock,
+  defaultAllowed,
   editFor,
   insertedAt,
+  isPreview,
+  KEY_PREVIEW,
+  keyIsPreview,
+  keySources,
   lockReason,
   originOf,
   pendingOf,
   previewKeys,
   rowRecord,
   rowValues,
-  selectedBlock,
+  selectedRows,
   targetRows,
   valueAt,
   type GridModel,
@@ -90,7 +104,7 @@ import { rangeAggregate, type GridStatus } from "./status"
 import { useGridClipboard } from "./use-grid-clipboard"
 import { useGridKeyboard } from "./use-grid-keyboard"
 import { useHeaderGestures } from "./use-header-gestures"
-import { DEFAULT_VALUE, isDefault, parseInput, type EditValue } from "./values"
+import { DEFAULT_VALUE, holdsText, isDefault, parseInput, type EditValue } from "./values"
 import { columnSlice, offsetsOf, revealOffset, rowSlice, sameSlice } from "./window"
 import type {
   CellValue,
@@ -119,9 +133,9 @@ export interface DataGridHandle {
   focus: () => void
   /** Stages a new row and moves to it. Returns its temporary id, or null when rows cannot be added. */
   insertRow: (values?: Readonly<Record<string, EditValue>>) => string | null
-  /** Stages copies of the selected rows. */
+  /** Stages copies of the ticked rows — or, with none ticked, of the rows the selection crosses. */
   duplicateSelected: () => void
-  /** Marks the selected rows for deletion. */
+  /** Marks the same rows for deletion. */
   deleteSelected: () => void
   /** Copies the selection in a given form. */
   copy: (format: CopyFormat) => void
@@ -174,6 +188,12 @@ export interface DataGridProps {
   canInsert?: boolean
   /** Whether rows can be marked for deletion. False for a role without `destructive`. */
   canDelete?: boolean
+  /**
+   * Whether a row that already exists can be sent back to a column's default.
+   * False for SQLite, which has no `SET column = DEFAULT`: "Default" is then
+   * offered on new rows only, where it means leaving the column out.
+   */
+  defaultOnUpdate?: boolean
   /** Why this cannot be edited, stated above the rows: no primary key, a view, the engine. */
   readOnlyReason?: React.ReactNode
   /** Row id → why the server refused that row's change. Drawn in the gutter. */
@@ -287,6 +307,7 @@ export function DataGrid({
   editable = false,
   canInsert = editable,
   canDelete = editable,
+  defaultOnUpdate = true,
   readOnlyReason,
   rowErrors,
   findable = false,
@@ -312,6 +333,7 @@ export function DataGrid({
 }: DataGridProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const findRef = useRef<HTMLInputElement>(null)
+  const keysId = useId()
 
   const [sort, setSort] = useControlled(sortProp, EMPTY_SORT, onSortChange)
   const [layout, setLayout] = useControlled(layoutProp, EMPTY_LAYOUT, onLayoutChange)
@@ -378,6 +400,7 @@ export function DataGrid({
   const offsets = useMemo(() => offsetsOf(widths), [widths])
   const total = offsets[offsets.length - 1]
 
+  const keys = useMemo(() => keySources(columns), [columns])
   const model = useMemo<GridModel>(
     () => ({
       columns,
@@ -389,8 +412,10 @@ export function DataGrid({
       changes,
       clipped: clippedMap,
       editable: canEdit,
+      defaultOnUpdate,
+      keys,
     }),
-    [columns, rows, ordered, display, changes, clippedMap, canEdit],
+    [columns, rows, ordered, display, changes, clippedMap, canEdit, defaultOnUpdate, keys],
   )
 
   /* ------------------------------------------------------------ the window */
@@ -525,11 +550,18 @@ export function DataGrid({
   // Whether the keyboard is in the grid, kept by hand because an element that
   // is removed while focused says nothing on its way out.
   const ownsFocus = useRef(false)
-  const editorHandle = useRef<{ settle: () => boolean } | null>(null)
+  const editorHandle = useRef<GridEditorHandle | null>(null)
   const lastTicked = useRef<number | null>(null)
   // Escape with nothing left to clear lets the next Tab leave the grid.
   const tabOut = useRef(false)
   const messageTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  // The cell last pressed with a finger or a pen, for a long press (see
+  // `onMenuOpenChange`), and whether a `contextmenu` has already said which
+  // cell the menu that is opening is for.
+  const pressed = useRef<Hit | null>(null)
+  const menuPlaced = useRef(false)
+  // Whether the way out of the grid has been said yet.
+  const hinted = useRef(false)
   const drag = useRef<{ x: number; y: number; frame: number } | null>(null)
   const dragCleanup = useRef<(() => void) | null>(null)
 
@@ -703,14 +735,30 @@ export function DataGrid({
         index: row,
         values: rowValues(current, row),
         original: from >= 0 ? current.rows[from] : null,
+        previews: previewKeys(current, row),
       }
     },
     [liveRef],
   )
 
+  /**
+   * Hands an action to the change set — unless it would leave more rows
+   * changed than one apply can carry. The set goes in one transaction or not
+   * at all, so a set past the limit is one that could never be applied; it is
+   * refused here, while the reader can still do something about it.
+   */
   const stage = useCallback(
-    (action: ChangeAction) => {
-      liveRef.current.changeSet?.dispatch(action)
+    (action: ChangeAction): boolean => {
+      const staged = liveRef.current.changeSet
+      if (!staged) return false
+      if (exceedsLimit(staged.changes, action)) {
+        notify.warning("Too many changes for one apply", {
+          description: `At most ${MAX_CHANGES.toLocaleString("en-US")} rows can be changed at once. Apply or discard what is staged, then carry on.`,
+        })
+        return false
+      }
+      staged.dispatch(action)
+      return true
     },
     [liveRef],
   )
@@ -734,17 +782,17 @@ export function DataGrid({
         caret: how.caret ?? "select",
         expanded: how.expanded ?? false,
         canFill: isRange(state.sel),
+        canDefault: defaultAllowed(state.model, cell.row, entry.column),
       })
     },
     [announce, liveRef],
   )
 
   const finishEdit = useCallback(
-    (result: { value: EditValue } | null, move: EditMove, fill?: string) => {
+    (result: { value: EditValue } | null, move: EditMove, fill?: string): boolean => {
       const state = liveRef.current
       const current = state.editing
-      if (!current) return
-      setEditing(null)
+      if (!current) return true
       const row = state.model.ids.indexOf(current.rowId)
       const entry = state.ordered.find((candidate) => candidate.column.key === current.column)
       if (result && row >= 0 && entry) {
@@ -762,21 +810,30 @@ export function DataGrid({
             }
           }
         }
-        stage({ type: "edit", edits })
+        // Refused, the editor stays open: what was typed is still in it, and
+        // the reader has just been told why it could not be staged.
+        if (!stage({ type: "edit", edits })) return false
       }
-      if (move === "none") return
-      const here = state.sel.active
+      setEditing(null)
+      if (move === "none") return true
+      // The move is from the cell that was edited, which the menu's Edit can
+      // open somewhere other than the active one.
+      const here = row >= 0 && entry ? { row, col: entry.index } : state.sel.active
       const next =
         move === "stay" || !here
           ? here
           : (moveCell(here, MOVES[move], { rows: state.count, cols: state.ordered.length }) ?? here)
-      if (next && !sameCell(next, here)) state.setSelection(selectCell(state.sel, next))
+      const settled = move === "stay" && rangeContains(rangeOf(state.sel), row, entry?.index ?? -1)
+      if (next && !settled && !sameCell(next, state.sel.active)) {
+        state.setSelection(selectCell(state.sel, next))
+      }
       after.current = { reveal: next, focus: true }
+      return true
     },
     [liveRef, stage],
   )
 
-  const registerEditor = useCallback((handle: { settle: () => boolean } | null) => {
+  const registerEditor = useCallback((handle: GridEditorHandle | null) => {
     editorHandle.current = handle
   }, [])
 
@@ -787,6 +844,7 @@ export function DataGrid({
         caret: editing.caret,
         expanded: editing.expanded,
         canFill: editing.canFill,
+        canDefault: editing.canDefault,
         finish: finishEdit,
         register: registerEditor,
       },
@@ -799,17 +857,24 @@ export function DataGrid({
     return editorHandle.current?.settle() ?? true
   }, [liveRef])
 
-  /** Writes one value into every editable cell of the selection. */
-  const fillSelection = useCallback(
-    (value: (column: GridColumn) => EditValue | undefined, verb: string) => {
+  /**
+   * Writes a value into every cell a verb reaches from the cell it was invoked
+   * on, leaving alone the ones that cannot take it.
+   */
+  const fill = useCallback(
+    (
+      at: GridCellRef | null,
+      value: (column: GridColumn, row: number) => EditValue | undefined,
+      verb: string,
+    ) => {
       const state = liveRef.current
-      const block = selectedBlock(state.model, state.sel)
+      const block = actionBlock(state.model, state.sel, at)
       if (!block || !state.canEdit) return
       const edits: CellEdit[] = []
       let skipped = 0
       for (const row of block.rows) {
         for (const entry of block.cols) {
-          const next = lockReason(state.model, row, entry) ? undefined : value(entry.column)
+          const next = lockReason(state.model, row, entry) ? undefined : value(entry.column, row)
           if (next === undefined) skipped++
           else edits.push(editFor(state.model, row, entry, next))
         }
@@ -821,25 +886,34 @@ export function DataGrid({
   )
 
   const setNull = useCallback(
-    () => fillSelection((column) => (column.nullable ? null : undefined), "set to NULL"),
-    [fillSelection],
+    (at: GridCellRef | null = liveRef.current.sel.active) =>
+      fill(at, (column) => (column.nullable ? null : undefined), "set to NULL"),
+    [fill, liveRef],
+  )
+  const setEmpty = useCallback(
+    (at: GridCellRef | null = liveRef.current.sel.active) =>
+      fill(at, (column) => (holdsText(column) ? "" : undefined), "set to the empty string"),
+    [fill, liveRef],
   )
   const setDefault = useCallback(
-    () =>
-      fillSelection(
-        (column) => (column.defaultExpr !== undefined ? DEFAULT_VALUE : undefined),
+    (at: GridCellRef | null = liveRef.current.sel.active) =>
+      fill(
+        at,
+        (column, row) =>
+          defaultAllowed(liveRef.current.model, row, column) ? DEFAULT_VALUE : undefined,
         "set to its default",
       ),
-    [fillSelection],
+    [fill, liveRef],
   )
   /** Delete on a selection of cells: NULL where the column allows it, empty text where it does not. */
-  const clearSelection = useCallback(
-    () =>
-      fillSelection(
-        (column) => (column.nullable ? null : column.kind === "text" ? "" : undefined),
+  const clearCells = useCallback(
+    (at: GridCellRef | null = liveRef.current.sel.active) =>
+      fill(
+        at,
+        (column) => (column.nullable ? null : holdsText(column) ? "" : undefined),
         "cleared",
       ),
-    [fillSelection],
+    [fill, liveRef],
   )
 
   /* ------------------------------------------------------------------- rows */
@@ -851,16 +925,23 @@ export function DataGrid({
         announce("Rows cannot be deleted here")
         return
       }
-      const removals = rowsToDelete.map((row) => ({
+      // A row whose key arrived cut cannot be found again to be deleted.
+      const reachable = rowsToDelete.filter((row) => !keyIsPreview(state.model, row))
+      const removals = reachable.map((row) => ({
         rowId: state.model.ids[row],
         origin: originOf(state.model, row),
       }))
-      if (removals.length === 0) return
-      stage({ type: "delete", rows: removals })
+      if (removals.length === 0) {
+        if (rowsToDelete.length > 0) announce(KEY_PREVIEW)
+        return
+      }
+      if (!stage({ type: "delete", rows: removals })) return
+      const left = rowsToDelete.length - removals.length
       announce(
-        removals.length === 1
+        (removals.length === 1
           ? "Row marked for deletion"
-          : `${removals.length} rows marked for deletion`,
+          : `${removals.length} rows marked for deletion`) +
+          (left > 0 ? ` — ${left} left alone, their key was only partly loaded` : ""),
       )
     },
     [announce, liveRef, stage],
@@ -875,7 +956,7 @@ export function DataGrid({
         return []
       }
       const inserts: RowInsertion[] = list.map((values) => ({ id: staged.newRowId(), values }))
-      stage({ type: "insert", rows: inserts })
+      if (!stage({ type: "insert", rows: inserts })) return []
       // New rows land after everything drawn now; go to the first of them.
       const first = state.ordered.findIndex(
         (entry) => !entry.column.generated && entry.column.editable !== false,
@@ -951,7 +1032,7 @@ export function DataGrid({
     fromGrid,
     announce,
     stage,
-    clearSelection,
+    clearCells,
   })
 
   /* ---------------------------------------------------------------- columns */
@@ -1091,6 +1172,7 @@ export function DataGrid({
       if (event.button !== 0 || !fromGrid(event.target)) return
       const hit = hitTest(event.target)
       if (!hit) return
+      pressed.current = event.pointerType === "mouse" ? null : hit
       // An editor holding something it cannot stage keeps the keyboard.
       if (!settleEditor()) {
         event.preventDefault()
@@ -1112,9 +1194,19 @@ export function DataGrid({
               )
             : toggleRow(state.sel.rows, id)
         lastTicked.current = hit.row
-        state.setSelection({ ...state.sel, rows: rowsNext })
+        // The cursor goes to the row that was pressed, as it would for a press
+        // on one of its cells. A key pressed next acts from where the cursor
+        // is: on every ticked row when this one was just ticked, on this row
+        // alone when it was just unticked.
+        state.setSelection({
+          rows: rowsNext,
+          active: { row: hit.row, col: state.sel.active?.col ?? 0 },
+          anchor: null,
+        })
+        // The gutter is not focusable, so the press would hand focus to the
+        // grid itself, after the cell has taken it; the cell is to keep it.
+        event.preventDefault()
         after.current = { reveal: null, focus: true }
-        focusActive()
         return
       }
       const cell = { row: hit.row, col: hit.col }
@@ -1126,7 +1218,7 @@ export function DataGrid({
       // A finger drags to scroll; only a mouse drags out a range.
       if (event.pointerType === "mouse") startRangeDrag(event)
     },
-    [focusActive, follow, fromGrid, liveRef, moveTo, settleEditor, startRangeDrag],
+    [follow, fromGrid, liveRef, moveTo, settleEditor, startRangeDrag],
   )
 
   const onBodyDoubleClick = useCallback(
@@ -1142,26 +1234,50 @@ export function DataGrid({
     [fromGrid, liveRef, openRow, startEdit],
   )
 
-  const onBodyContextMenu = useCallback(
-    (event: React.MouseEvent) => {
-      // Inside an editor the browser's own menu is the right one: it has paste.
-      if (!fromGrid(event.target)) return
-      const hit = hitTest(event.target)
+  /**
+   * Opens the cell menu on a cell. Inside the selection — the range, or a
+   * ticked row — the menu is about the selection; anywhere else the cursor
+   * moves there first, and the menu is about that cell.
+   */
+  const openMenuAt = useCallback(
+    (hit: Hit): boolean => {
       const state = liveRef.current
-      if (!hit || state.ordered.length === 0 || !settleEditor()) {
-        event.preventDefault()
-        return
-      }
+      if (state.ordered.length === 0 || !settleEditor()) return false
       const cell = { row: hit.row, col: hit.gutter ? (state.sel.active?.col ?? 0) : hit.col }
-      // A right-click inside the selection acts on the selection; outside it,
-      // it moves there first.
       const inside =
         rangeContains(rangeOf(state.sel), cell.row, cell.col) ||
         state.sel.rows.includes(state.model.ids[cell.row])
       if (!inside) state.setSelection(selectCell(state.sel, cell))
       setMenu(cell)
+      return true
     },
-    [fromGrid, liveRef, settleEditor],
+    [liveRef, settleEditor],
+  )
+
+  // An editor never reaches this: it keeps its right-click to itself (see
+  // `EDITOR_PROPS`), so the browser's own menu, with Paste in it, opens there.
+  const onBodyContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      const hit = hitTest(event.target)
+      // Prevented, the menu primitive stays shut — and so does the browser's.
+      if (hit && openMenuAt(hit)) menuPlaced.current = true
+      else event.preventDefault()
+    },
+    [openMenuAt],
+  )
+
+  /**
+   * A long press opens the menu too, and on a browser that raises no
+   * `contextmenu` for one the menu primitive opens on its own timer, without
+   * asking what was pressed. The cell under the finger is kept for that.
+   */
+  const onMenuOpenChange = useCallback(
+    (open: boolean) => {
+      if (open && !menuPlaced.current && pressed.current) openMenuAt(pressed.current)
+      if (!open) setMenu(null)
+      menuPlaced.current = false
+    },
+    [openMenuAt],
   )
 
   const onKeyDown = useGridKeyboard({
@@ -1176,7 +1292,7 @@ export function DataGrid({
     setNull,
     setDefault,
     deleteRows,
-    clearSelection,
+    clearCells,
   })
 
   /* ------------------------------------------------------------ the handle */
@@ -1191,13 +1307,11 @@ export function DataGrid({
       insertRow: (values) => insertRows([values ?? {}])[0] ?? null,
       duplicateSelected: () => {
         const state = liveRef.current
-        const block = selectedBlock(state.model, state.sel)
-        if (block) duplicateRows(block.rows)
+        duplicateRows(selectedRows(state.model, state.sel))
       },
       deleteSelected: () => {
         const state = liveRef.current
-        const block = selectedBlock(state.model, state.sel)
-        if (block) deleteRows(block.rows)
+        deleteRows(selectedRows(state.model, state.sel))
       },
       copy: copyAs,
       revealRow: (index) => {
@@ -1218,20 +1332,36 @@ export function DataGrid({
     const lock = lockReason(model, menu.row, entry)
     const state = pendingOf(model, menu.row)
     const edited = model.changes.updates[model.ids[menu.row]]?.values
+    // What the cell verbs would reach from here, and whether any of it can
+    // take each value: the menu offers what it will do, to what it will do it.
+    const block = actionBlock(model, sel, menu)
+    let canNull = false
+    let canEmpty = false
+    let canDefault = false
+    for (const row of block?.rows ?? []) {
+      for (const other of block?.cols ?? []) {
+        if (canNull && canEmpty && canDefault) break
+        if (lockReason(model, row, other)) continue
+        canNull ||= other.column.nullable === true
+        canEmpty ||= holdsText(other.column) && valueAt(model, row, other) !== ""
+        canDefault ||= defaultAllowed(model, row, other.column)
+      }
+    }
     return {
       column: entry.column,
-      multi: isRange(sel) || sel.rows.length > 0,
+      cells: block ? block.rows.length * block.cols.length : 1,
       rows: targetRows(model, sel, menu.row).length,
       isNull: value === null || value === undefined,
       editable: lock === null,
-      canNull: lock === null && entry.column.nullable === true,
-      canDefault: lock === null && entry.column.defaultExpr !== undefined,
+      canNull,
+      canEmpty,
+      canDefault,
       changed:
         (edited !== undefined && entry.column.key in edited) ||
         (state === "inserted" && value !== undefined),
       rowState: state,
       canInsert: canInsert && canEdit,
-      canDelete: canDelete && canEdit,
+      canDelete: canDelete && canEdit && !keyIsPreview(model, menu.row),
       canFilter: onFilter !== undefined && !isDefault(value),
       canOpen: onOpenRow !== undefined,
       canFollow:
@@ -1262,7 +1392,7 @@ export function DataGrid({
   const menuActions = useMemo<CellMenuActions>(() => {
     const at = () => liveRef.current.menu
     return {
-      copy: copyAs,
+      copy: (format) => copyAs(format, at()),
       copyRowJSON: () => {
         const state = liveRef.current
         const cell = at()
@@ -1272,11 +1402,14 @@ export function DataGrid({
           state.model.columns,
           list.map((row) => rowValues(state.model, row)),
         )
+        const cut = list.reduce((n, row) => n + previewKeys(state.model, row).length, 0)
         void copyText(text).then(
           (ok) =>
             ok &&
             announce(
-              list.length === 1 ? "Copied the row as JSON" : `Copied ${list.length} rows as JSON`,
+              (list.length === 1
+                ? "Copied the row as JSON"
+                : `Copied ${list.length} rows as JSON`) + previewNote(cut),
             ),
         )
       },
@@ -1285,10 +1418,17 @@ export function DataGrid({
         const cell = at()
         if (!cell) return
         const list = targetRows(state.model, state.sel, cell.row)
+        // Whole rows, whatever columns are showing: an INSERT is of a row.
+        const previews = list.flatMap((row, r) =>
+          state.model.columns.flatMap((_, column) =>
+            isPreview(state.model, row, column) ? [{ row: r, column }] : [],
+          ),
+        )
         state.onCopySQL?.({
           columns: [...state.model.columns],
           rowIds: list.map((row) => state.model.ids[row]),
           rows: list.map((row) => rowValues(state.model, row)),
+          previews,
         })
       },
       paste: () => {
@@ -1319,8 +1459,9 @@ export function DataGrid({
         const cell = at()
         if (cell) startEdit(cell, { caret: "select" })
       },
-      setNull,
-      setDefault,
+      setNull: () => setNull(at()),
+      setEmpty: () => setEmpty(at()),
+      setDefault: () => setDefault(at()),
       revertCell: () => {
         const state = liveRef.current
         const cell = at()
@@ -1360,6 +1501,7 @@ export function DataGrid({
     pasteText,
     revertRows,
     setDefault,
+    setEmpty,
     setNull,
     stage,
     startEdit,
@@ -1367,13 +1509,22 @@ export function DataGrid({
 
   /* ------------------------------------------------------------- rendering */
 
+  // The active row stays mounted wherever the scroll is, so the keyboard is
+  // never unmounted from under the reader. So does a row being edited that is
+  // not the active one — the menu's Edit opens the cell it was asked on — or
+  // its editor would go with it, taking what was typed and leaving the
+  // keyboard switched off for nothing.
+  const kept = new Set<number>()
+  const outside = (row: number) => row >= 0 && (row < rowWin.start || row >= rowWin.end)
+  if (active && outside(active.row)) kept.add(active.row)
+  if (editing && outside(editingRow)) kept.add(editingRow)
+  // Always in row order, kept rows included: rows that stay keep their order
+  // among themselves, so none is ever moved in the document — and an element
+  // that is moved loses focus, which an open editor reads as being left.
   const drawn: number[] = []
+  for (const row of [...kept].sort((a, b) => a - b)) if (row < rowWin.start) drawn.push(row)
   for (let row = rowWin.start; row < rowWin.end; row++) drawn.push(row)
-  // The active row stays mounted wherever the scroll is, so the keyboard and an
-  // open editor are never unmounted from under the reader.
-  const keepRow =
-    active && active.row >= 0 && (active.row < rowWin.start || active.row >= rowWin.end)
-  if (keepRow) drawn.push(active.row)
+  for (const row of [...kept].sort((a, b) => a - b)) if (row >= rowWin.end) drawn.push(row)
   // And within it one cell is held in place: the one being edited, or the
   // active one once it has scrolled out of the drawn columns.
   const inWindow = (col: number) =>
@@ -1486,15 +1637,23 @@ export function DataGrid({
       )}
       {banner}
       <GridEditorContext.Provider value={editorApi}>
-        <ContextMenu onOpenChange={(open) => !open && setMenu(null)}>
+        <ContextMenu onOpenChange={onMenuOpenChange}>
           <div
             ref={viewportRef}
             data-slot="data-grid-viewport"
             style={style as React.CSSProperties}
             className="group/grid relative min-h-0 flex-1 overflow-auto overscroll-contain"
             onScroll={syncWindow}
-            onFocus={() => {
+            onFocus={(event) => {
               ownsFocus.current = true
+              // Tab walks the cells here, which is not what Tab does anywhere
+              // else; the first time the keyboard arrives on a cell, the way
+              // out is said where it can be seen as well as heard. (A text
+              // field is always `:focus-visible`, so an editor does not count.)
+              if (hinted.current || !fromGrid(event.target)) return
+              if (!event.target.matches(":focus-visible")) return
+              hinted.current = true
+              announce("Tab moves between cells. Escape, then Tab, leaves the grid.")
             }}
             onBlur={(event) => {
               // A cell unmounted while it had focus is not the reader leaving.
@@ -1517,6 +1676,7 @@ export function DataGrid({
               aria-multiselectable
               aria-readonly={!canEdit}
               aria-busy={loading || undefined}
+              aria-describedby={keysId}
               // The one tab stop is the active cell; until there is one, the grid itself.
               tabIndex={active ? -1 : 0}
               className="w-(--jd-grid-width) min-w-full focus-ring-inset"
@@ -1524,6 +1684,10 @@ export function DataGrid({
                 if (event.target === event.currentTarget) enterGrid()
               }}
             >
+              <p id={keysId} className="sr-only">
+                Arrow keys and Tab move between cells. Shift with Space ticks the row. Escape, then
+                Tab, leaves the grid.
+              </p>
               <div role="rowgroup" className="sticky top-0 z-20" {...headerHandlers}>
                 <GridHeader
                   template={template}
@@ -1585,6 +1749,7 @@ export function DataGrid({
                           update={from < 0 ? undefined : changes.updates[id]}
                           deleted={from >= 0 && changes.deletes[id] !== undefined}
                           clipped={from < 0 ? undefined : clippedMap.get(from)}
+                          keyCut={keyIsPreview(model, row)}
                           error={rowErrors?.[id]}
                           pinned={pinnedCols}
                           cols={windowCols}
@@ -1612,6 +1777,12 @@ export function DataGrid({
             className="min-w-52"
             onCloseAutoFocus={(event) => {
               event.preventDefault()
+              // The menu's Edit has opened an editor by now, and the keyboard
+              // belongs in it; after anything else it goes back to the cell.
+              if (liveRef.current.editing) {
+                editorHandle.current?.focus()
+                return
+              }
               after.current.focus = true
               focusActive()
             }}

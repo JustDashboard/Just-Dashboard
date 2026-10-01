@@ -220,7 +220,10 @@ const GridCell = memo(function GridCell({
   const right = column.kind === "number"
   const title = changed
     ? `Was ${original === undefined ? "unset" : formatCell(original, column).text}`
-    : display.title
+    : display.tone === "default" && column.defaultExpr !== undefined
+      ? // What "DEFAULT" will come to, where the column says.
+        `Default: ${column.defaultExpr}`
+      : display.title
   const target = follow && column.foreignKey && value !== null && value !== undefined
   const bits =
     (right ? RIGHT : 0) |
@@ -315,6 +318,8 @@ export interface GridRowProps {
   deleted: boolean
   /** Source column index → whole size in bytes, for the cells the server cut. */
   clipped: ReadonlyMap<number, number> | undefined
+  /** The row's key arrived cut, so nothing in the row can be changed. */
+  keyCut: boolean
   /** Why the server refused this row's change, when it did. */
   error: string | undefined
   pinned: readonly OrderedColumn[]
@@ -371,6 +376,7 @@ export const GridRowView = memo(function GridRowView(props: GridRowProps) {
         locked={
           !props.editable ||
           deleted ||
+          props.keyCut ||
           column.generated === true ||
           column.editable === false ||
           (!insert && preview)

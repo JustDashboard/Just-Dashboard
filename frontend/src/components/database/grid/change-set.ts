@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { isDefault, sameValue, type EditValue } from "./values"
 import type { CellValue, GridColumn, GridColumnKind } from "./types"
 
@@ -69,6 +69,13 @@ export interface ChangeSetState {
   present: ChangeSet
   past: readonly ChangeSet[]
   future: readonly ChangeSet[]
+  /**
+   * The table the set was staged against, as `useChangeSet` was told it. A
+   * state read under any other scope is an empty one: row ids repeat from table
+   * to table, and an edit to `customers` row 7 must never be found again as an
+   * edit to `orders` row 7.
+   */
+  scope?: string
 }
 
 export const EMPTY_CHANGES: ChangeSet = { inserts: [], updates: {}, deletes: {} }
@@ -76,6 +83,14 @@ export const EMPTY_CHANGE_STATE: ChangeSetState = { present: EMPTY_CHANGES, past
 
 /** How many steps back Ctrl+Z goes. Each step shares structure with the next, so this is cheap. */
 export const HISTORY_LIMIT = 200
+
+/**
+ * The most rows one request to the changes route may change. The set is
+ * applied in one transaction and cannot be split, so a set past this could
+ * never be applied at all — which is why the grid stops staging at it rather
+ * than letting the reader find out at the end.
+ */
+export const MAX_CHANGES = 1000
 
 export interface CellEdit {
   rowId: string
@@ -265,6 +280,7 @@ export function changeSetReducer(state: ChangeSetState, action: ChangeAction): C
     case "undo": {
       if (state.past.length === 0) return state
       return {
+        ...state,
         present: state.past[state.past.length - 1],
         past: state.past.slice(0, -1),
         future: [state.present, ...state.future],
@@ -273,20 +289,21 @@ export function changeSetReducer(state: ChangeSetState, action: ChangeAction): C
     case "redo": {
       if (state.future.length === 0) return state
       return {
+        ...state,
         present: state.future[0],
         past: [...state.past, state.present],
         future: state.future.slice(1),
       }
     }
     case "reset":
-      return state === EMPTY_CHANGE_STATE ||
-        (isEmpty(state.present) && !state.past.length && !state.future.length)
+      return isEmpty(state.present) && !state.past.length && !state.future.length
         ? state
-        : EMPTY_CHANGE_STATE
+        : { ...state, ...EMPTY_CHANGE_STATE }
     default: {
       const present = applyChange(state.present, action)
       if (present === state.present) return state
       return {
+        ...state,
         present,
         past: [...state.past, state.present].slice(-HISTORY_LIMIT),
         future: [],
@@ -321,6 +338,39 @@ export function changeCounts(changes: ChangeSet): ChangeCounts {
   let cells = 0
   for (const row of Object.values(changes.updates)) cells += Object.keys(row.values).length
   return { inserts, updates, deletes, cells, total: inserts + updates + deletes }
+}
+
+/** The most rows an action could add to the set, without working out what it would do. */
+function rowsTouched(action: ChangeAction): number {
+  switch (action.type) {
+    case "edit":
+      return new Set(action.edits.map((edit) => edit.rowId)).size
+    case "insert":
+    case "delete":
+      return action.rows.length
+    case "batch":
+      return action.actions.reduce((sum, inner) => sum + rowsTouched(inner), 0)
+    default:
+      return 0
+  }
+}
+
+/**
+ * Whether staging an action would leave more rows changed than one request can
+ * carry. An action that does not grow the set is never refused, so a set that
+ * is somehow already too large can still be edited down.
+ */
+export function exceedsLimit(
+  changes: ChangeSet,
+  action: ChangeAction,
+  limit = MAX_CHANGES,
+): boolean {
+  const before = changeCounts(changes).total
+  // Most actions are nowhere near the limit; only one that might cross it is
+  // worth applying to find out.
+  if (before + rowsTouched(action) <= limit) return false
+  const after = changeCounts(applyChange(changes, action)).total
+  return after > limit && after > before
 }
 
 /** A new row's values from an existing one: "the same as that, but different". */
@@ -366,6 +416,13 @@ export interface ChangeRef {
   rowId: string
 }
 
+/** Why a staged set cannot be sent as it stands. */
+export interface ChangeProblem {
+  /** The staged row it is about, or null when it is about the set as a whole. */
+  rowId: string | null
+  reason: string
+}
+
 export interface ChangesTarget {
   schema?: string
   table: string
@@ -397,17 +454,51 @@ export function rowKey(
 }
 
 /**
+ * Why a row as it was read cannot be found again, or null when it can.
+ *
+ * A key built from the first bytes of a value is worse than no key: it matches
+ * nothing, or it matches the one other row whose whole key is those bytes.
+ * And a row read from a table with other columns has no key in this one.
+ */
+export function keyProblem(
+  columns: readonly ChangeColumn[],
+  original: RowSnapshot,
+  clipped: readonly string[] = [],
+): string | null {
+  const primary = columns.filter((column) => column.primaryKey)
+  const skip = new Set(clipped)
+  if (primary.length === 0) {
+    const whole = columns.filter((column) => !skip.has(column.key) && column.key in original)
+    return whole.length > 0
+      ? null
+      : "Nothing identifies this row: none of its values was loaded whole"
+  }
+  const missing = primary.filter((column) => !(column.key in original))
+  if (missing.length > 0) return "This row was staged against a table with other columns"
+  const cut = primary.filter((column) => skip.has(column.key))
+  if (cut.length === 0) return null
+  const names = cut.map((column) => column.name).join(", ")
+  return `Only the start of this row's key (${names}) was loaded, so the row cannot be found again`
+}
+
+/**
  * The staged set as the request that applies it.
  *
  * Deletes go first, then updates, then inserts: a unique value freed by a
  * delete or an update is then free by the time a later row wants it, which is
  * the order a person doing it by hand would choose. Column keys become column
  * names here and nowhere else.
+ *
+ * `payload` is null when the set cannot be sent as it stands, and `problems`
+ * says why: more rows than one request takes, or a row that cannot be found
+ * again. There is no request to send in that case, on purpose — the set is
+ * applied whole or not at all, and a body with the awkward rows left out would
+ * be a different set from the one the reader reviewed.
  */
 export function buildChanges(
   changes: ChangeSet,
   target: ChangesTarget,
-): { payload: ChangesPayload; refs: ChangeRef[] } {
+): { payload: ChangesPayload | null; refs: ChangeRef[]; problems: ChangeProblem[] } {
   const names = new Map(target.columns.map((column) => [column.key, column.name]))
   const named = (values: Readonly<Record<string, EditValue>>) => {
     const out: Record<string, EditValue> = {}
@@ -420,15 +511,22 @@ export function buildChanges(
 
   const list: Change[] = []
   const refs: ChangeRef[] = []
+  const problems: ChangeProblem[] = []
   const push = (change: Change, rowId: string) => {
     refs.push({ index: list.length, op: change.op, rowId })
     list.push(change)
   }
+  const findable = (rowId: string, row: DeletedRow) => {
+    const reason = keyProblem(target.columns, row.original, row.clipped)
+    if (reason) problems.push({ rowId, reason })
+  }
 
   for (const [rowId, row] of Object.entries(changes.deletes)) {
+    findable(rowId, row)
     push({ op: "delete", key: rowKey(target.columns, row.original, row.clipped) }, rowId)
   }
   for (const [rowId, row] of Object.entries(changes.updates)) {
+    findable(rowId, row)
     const key = rowKey(target.columns, row.original, row.clipped)
     if (target.guard) {
       const skip = new Set(row.clipped ?? [])
@@ -443,7 +541,21 @@ export function buildChanges(
     push({ op: "insert", values: named(row.values) }, row.id)
   }
 
-  return { payload: { schema: target.schema ?? "", table: target.table, changes: list }, refs }
+  if (list.length > MAX_CHANGES) {
+    problems.unshift({
+      rowId: null,
+      reason: `${list.length.toLocaleString("en-US")} rows are changed, and one apply takes at most ${MAX_CHANGES.toLocaleString("en-US")}`,
+    })
+  }
+
+  return {
+    payload:
+      problems.length > 0
+        ? null
+        : { schema: target.schema ?? "", table: target.table, changes: list },
+    refs,
+    problems,
+  }
 }
 
 /* ------------------------------------------------------------------- hook */
@@ -469,6 +581,10 @@ export interface ChangeSetController {
   deleteRows: (rows: readonly RowRemoval[]) => void
   revertCell: (rowId: string, column: string) => void
   revertRow: (rowId: string) => void
+  /**
+   * Empties the set as one more step of history, so Ctrl+Z brings it back.
+   * For "throw these edits away"; leaving the table for another is `scope`'s job.
+   */
   discardAll: () => void
   undo: () => void
   redo: () => void
@@ -487,6 +603,32 @@ export function isNewRowId(rowId: string): boolean {
   return rowId.startsWith(NEW_ROW_PREFIX)
 }
 
+export interface ChangeSetOptions {
+  /**
+   * What the edits are for: one table of one database, spelled however the
+   * owner likes as long as two tables never share it
+   * (`${id}.${schema}.${table}`). When it changes, the set and its history
+   * are gone — not discarded, which could be undone into the next table, but
+   * never there as far as the new scope is concerned.
+   */
+  scope: string
+  /** Somewhere else to keep the state. It is stamped with the scope it was staged under. */
+  store?: ChangeSetStore
+}
+
+/**
+ * A state as one scope sees it: itself when it was staged under that scope,
+ * and otherwise empty — history included, so nothing staged for one table can
+ * be undone back into another.
+ */
+export function scopedState(state: ChangeSetState, scope: string): ChangeSetState {
+  return state.scope === scope ? state : { ...EMPTY_CHANGE_STATE, scope }
+}
+
+function untouched(state: ChangeSetState): boolean {
+  return isEmpty(state.present) && state.past.length === 0 && state.future.length === 0
+}
+
 /**
  * The change set as a hook.
  *
@@ -494,14 +636,23 @@ export function isNewRowId(rowId: string): boolean {
  * `useSessionState` and a half-finished edit survives leaving the page, which
  * is what staged work should do.
  */
-export function useChangeSet(store?: ChangeSetStore): ChangeSetController {
+export function useChangeSet({ scope, store }: ChangeSetOptions): ChangeSetController {
   const [inner, setInner] = useState(EMPTY_CHANGE_STATE)
-  const state = store?.state ?? inner
+  const stored = store?.state ?? inner
   const setState = store?.setState ?? setInner
+  const state = useMemo(() => scopedState(stored, scope), [stored, scope])
+
+  // What another table left behind is erased, not merely hidden: coming back
+  // to that table must not bring back edits the reader was told were gone.
+  const stale = stored.scope !== scope && !untouched(stored)
+  useEffect(() => {
+    if (stale) setState((previous) => scopedState(previous, scope))
+  }, [stale, setState, scope])
 
   const dispatch = useCallback(
-    (action: ChangeAction) => setState((previous) => changeSetReducer(previous, action)),
-    [setState],
+    (action: ChangeAction) =>
+      setState((previous) => changeSetReducer(scopedState(previous, scope), action)),
+    [setState, scope],
   )
 
   const newRowId = useCallback(() => `${NEW_ROW_PREFIX}${SESSION}-${++sequence}`, [])

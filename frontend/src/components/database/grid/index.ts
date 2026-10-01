@@ -19,9 +19,13 @@ export {
   duplicateValues,
   EMPTY_CHANGE_STATE,
   EMPTY_CHANGES,
+  exceedsLimit,
   isEmpty as isEmptyChangeSet,
   isNewRowId,
+  keyProblem,
+  MAX_CHANGES,
   rowKey,
+  scopedState,
   useChangeSet,
 } from "./change-set"
 export type {
@@ -30,9 +34,11 @@ export type {
   ChangeAction,
   ChangeColumn,
   ChangeCounts,
+  ChangeProblem,
   ChangeRef,
   ChangeSet,
   ChangeSetController,
+  ChangeSetOptions,
   ChangeSetState,
   ChangeSetStore,
   ChangesPayload,
@@ -63,7 +69,7 @@ export { describeAggregate, describeStatus } from "./status"
 export type { GridStatus } from "./status"
 export type { Aggregate } from "./decimal"
 
-export { clipText, parseTSV, toCSV, toJSONRows, toTSV } from "./clipboard"
+export { clipText, parseTSV, toCSV, toJSONRows, toMarkdown, toTSV } from "./clipboard"
 export {
   DEFAULT_VALUE,
   formatCell,
@@ -77,6 +83,7 @@ export type { CellDisplay, EditValue, ParseResult } from "./values"
 export type {
   CellValue,
   ClippedCell,
+  GridBlockCell,
   GridCellRef,
   GridColumn,
   GridColumnKind,

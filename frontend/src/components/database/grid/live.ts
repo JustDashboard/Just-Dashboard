@@ -26,6 +26,7 @@ export interface Editing {
   caret: "select" | "end"
   expanded: boolean
   canFill: boolean
+  canDefault: boolean
 }
 
 /**

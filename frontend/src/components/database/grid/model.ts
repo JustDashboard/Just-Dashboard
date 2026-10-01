@@ -1,8 +1,8 @@
 import type { CellEdit, ChangeSet, InsertedRow, RowOrigin } from "./change-set"
 import type { OrderedColumn } from "./layout"
-import { isRange, rangeOf } from "./selection"
+import { isRange, rangeContains, rangeOf } from "./selection"
 import { isDefault, isTruncatedValue, type EditValue } from "./values"
-import type { CellValue, GridColumn, GridRow, GridSelection } from "./types"
+import type { CellValue, GridCellRef, GridColumn, GridRow, GridSelection } from "./types"
 
 /**
  * The grid as data: the rows in the order they are drawn, with the staged
@@ -29,6 +29,15 @@ export interface GridModel {
   /** Row index in `rows` → column index → the whole value's size, for cells the server cut. */
   clipped: ReadonlyMap<number, ReadonlyMap<number, number>>
   editable: boolean
+  /** Whether a row that already exists can be sent back to its column default. */
+  defaultOnUpdate: boolean
+  /** Where the primary-key columns sit in a row. Empty for a table without one. */
+  keys: readonly number[]
+}
+
+/** The positions of the primary-key columns, for `GridModel.keys`. */
+export function keySources(columns: readonly GridColumn[]): number[] {
+  return columns.flatMap((column, i) => (column.primaryKey ? [i] : []))
 }
 
 export function insertedAt(model: GridModel, row: number): InsertedRow | undefined {
@@ -55,6 +64,16 @@ export function isPreview(model: GridModel, row: number, source: number): boolea
   if (model.clipped.get(from)?.has(source)) return true
   const value = model.rows[from]?.[source]
   return typeof value === "string" && isTruncatedValue(value)
+}
+
+/**
+ * Whether a row's primary key arrived cut. Such a row can be read and copied
+ * but not changed: the key is how the change finds the row again, and the
+ * first bytes of a key find nothing — or find another row.
+ */
+export function keyIsPreview(model: GridModel, row: number): boolean {
+  if (model.sources[row] < 0) return false
+  return model.keys.some((source) => isPreview(model, row, source))
 }
 
 /** A server row as it was read, in the shape the change set keeps. */
@@ -97,7 +116,21 @@ export function lockReason(model: GridModel, row: number, entry: OrderedColumn):
   if (isPreview(model, row, entry.source)) {
     return "Only the start of this value was loaded, so it cannot be edited here"
   }
+  if (keyIsPreview(model, row)) return KEY_PREVIEW
   return null
+}
+
+/** Why a row whose key was cut is left alone. */
+export const KEY_PREVIEW =
+  "Only the start of this row's key was loaded, so the row cannot be changed here"
+
+/**
+ * Whether "use the column's default" can be staged for a cell. A new row can
+ * always leave a column to its default; an existing one only where the engine
+ * has `SET column = DEFAULT`, which SQLite does not.
+ */
+export function defaultAllowed(model: GridModel, row: number, column: GridColumn): boolean {
+  return column.defaultExpr !== undefined && (model.defaultOnUpdate || model.sources[row] < 0)
 }
 
 /** One staged edit for a cell, carrying the row as read when the set does not hold it yet. */
@@ -140,25 +173,70 @@ export function previewKeys(model: GridModel, row: number): string[] {
   return model.columns.filter((_, i) => isPreview(model, row, i)).map((column) => column.key)
 }
 
+export interface GridBlock {
+  rows: number[]
+  cols: OrderedColumn[]
+}
+
 /**
- * The block an action applies to: the cell range when there is one, otherwise
- * the rows ticked in the selector column across every visible column,
- * otherwise the one active cell.
+ * The cells a verb acts on, given the cell it was invoked from — the one under
+ * the menu, or the active one for a key.
+ *
+ * The range when that cell is inside it; every visible column of the ticked
+ * rows when that cell's row is one of them; and otherwise that cell alone.
+ * What is selected somewhere else is never the target of something done here:
+ * "Set NULL" on a cell in the fourth row does not empty three ticked rows
+ * above it. With no cell to go by (the owner's toolbar asking for a copy) it
+ * is the range, or failing that the ticked rows.
  */
-export function selectedBlock(
+export function actionBlock(
   model: GridModel,
   selection: GridSelection,
-): { rows: number[]; cols: OrderedColumn[] } | null {
-  const range = rangeOf(selection)
-  if (range && isRange(selection)) {
+  at: GridCellRef | null,
+): GridBlock | null {
+  const range = isRange(selection) ? rangeOf(selection) : null
+  const span = (top: number, bottom: number) => {
     const rows: number[] = []
-    for (let row = range.top; row <= range.bottom; row++) rows.push(row)
-    return { rows, cols: model.ordered.slice(range.left, range.right + 1) }
+    for (let row = top; row <= bottom; row++) rows.push(row)
+    return rows
   }
+  if (!at) {
+    if (range) {
+      return {
+        rows: span(range.top, range.bottom),
+        cols: model.ordered.slice(range.left, range.right + 1),
+      }
+    }
+    const ticked = tickedRows(model, selection)
+    return ticked.length > 0 ? { rows: ticked, cols: [...model.ordered] } : null
+  }
+  if (at.row < 0 || at.row >= model.ids.length || !model.ordered[at.col]) return null
+  if (range && rangeContains(range, at.row, at.col)) {
+    return {
+      rows: span(range.top, range.bottom),
+      cols: model.ordered.slice(range.left, range.right + 1),
+    }
+  }
+  if (selection.rows.includes(model.ids[at.row])) {
+    return { rows: tickedRows(model, selection), cols: [...model.ordered] }
+  }
+  return { rows: [at.row], cols: [model.ordered[at.col]] }
+}
+
+/**
+ * The rows a row verb acts on when it is asked for from outside the grid — the
+ * owner's own Delete or Duplicate button, which has no cell to go by: the
+ * ticked rows, which is what ticking is for; failing that the rows the range
+ * crosses, or the active one.
+ */
+export function selectedRows(model: GridModel, selection: GridSelection): number[] {
   const ticked = tickedRows(model, selection)
-  if (ticked.length > 0) return { rows: ticked, cols: [...model.ordered] }
-  if (!range) return null
-  return { rows: [range.top], cols: model.ordered.slice(range.left, range.left + 1) }
+  if (ticked.length > 0) return ticked
+  const range = rangeOf(selection)
+  if (!range) return []
+  const rows: number[] = []
+  for (let row = range.top; row <= range.bottom; row++) rows.push(row)
+  return rows
 }
 
 /** The rows ticked in the selector column, as display indexes in display order. */

@@ -7,10 +7,14 @@ import {
   duplicateValues,
   EMPTY_CHANGE_STATE,
   EMPTY_CHANGES,
+  exceedsLimit,
   HISTORY_LIMIT,
   isEmpty,
   isNewRowId,
+  keyProblem,
+  MAX_CHANGES,
   rowKey,
+  scopedState,
 } from "./change-set"
 import { DEFAULT_VALUE } from "./values"
 
@@ -301,13 +305,175 @@ describe("undo and redo", () => {
       state = changeSetReducer(state, { type: "edit", edits: [edit("1", "note", `v${i}`)] })
     }
     expect(state.past).toHaveLength(HISTORY_LIMIT)
-    expect(changeSetReducer(state, { type: "reset" })).toBe(EMPTY_CHANGE_STATE)
+    expect(changeSetReducer(state, { type: "reset" })).toEqual(EMPTY_CHANGE_STATE)
     expect(changeSetReducer(EMPTY_CHANGE_STATE, { type: "reset" })).toBe(EMPTY_CHANGE_STATE)
   })
 
   test("applyChange alone has no history to move through", () => {
     const changes = applyChange(EMPTY_CHANGES, { type: "edit", edits: [edit("1", "note", "x")] })
     expect(applyChange(changes, { type: "undo" })).toBe(changes)
+  })
+})
+
+describe("the table a set was staged for", () => {
+  const customers = scopedState(EMPTY_CHANGE_STATE, "1.public.customers")
+  const staged = [
+    { type: "edit", edits: [edit("1", "email", "a@b.c")] },
+    { type: "delete", rows: [{ rowId: "2", origin: origin(BO) }] },
+  ].reduce(changeSetReducer, customers)
+
+  test("every step of the reducer keeps the scope the state was staged under", () => {
+    expect(staged.scope).toBe("1.public.customers")
+    const steps = [
+      { type: "undo" },
+      { type: "redo" },
+      { type: "discard" },
+      { type: "insert", rows: [{ id: "new:1" }] },
+      { type: "reset" },
+    ]
+    let state = staged
+    for (const action of steps) {
+      state = changeSetReducer(state, action)
+      expect(state.scope).toBe("1.public.customers")
+    }
+  })
+
+  test("the same scope reads the state as it is", () => {
+    expect(scopedState(staged, "1.public.customers")).toBe(staged)
+  })
+
+  test("another table reads it as empty, with no history to undo into", () => {
+    const orders = scopedState(staged, "1.public.orders")
+    expect(isEmpty(orders.present)).toBe(true)
+    expect(orders.past).toEqual([])
+    expect(orders.scope).toBe("1.public.orders")
+    // Ctrl+Z in the next table has nothing of the last one to bring back.
+    expect(changeSetReducer(orders, { type: "undo" })).toBe(orders)
+  })
+
+  test("a discard that was undoable in its own table is not undoable from another", () => {
+    const discarded = changeSetReducer(staged, { type: "discard" })
+    expect(changeSetReducer(discarded, { type: "undo" }).present).toBe(staged.present)
+    const orders = scopedState(discarded, "1.public.orders")
+    expect(isEmpty(changeSetReducer(orders, { type: "undo" }).present)).toBe(true)
+  })
+
+  test("a state that was never given a scope belongs to none", () => {
+    const loose = run({ type: "edit", edits: [edit("1", "email", "a@b.c")] })
+    expect(isEmpty(scopedState(loose, "1.public.customers").present)).toBe(true)
+  })
+})
+
+describe("how much one apply can carry", () => {
+  const rows = (count, from = 0) =>
+    Array.from({ length: count }, (_, i) => ({ id: `new:${from + i}` }))
+  const full = applyChange(EMPTY_CHANGES, { type: "insert", rows: rows(MAX_CHANGES) })
+
+  test("an action that stays within the limit is not refused, on it included", () => {
+    expect(exceedsLimit(EMPTY_CHANGES, { type: "insert", rows: rows(MAX_CHANGES) })).toBe(false)
+    expect(exceedsLimit(EMPTY_CHANGES, { type: "insert", rows: rows(3) })).toBe(false)
+  })
+
+  test("one row past it is refused, however it gets there", () => {
+    expect(exceedsLimit(EMPTY_CHANGES, { type: "insert", rows: rows(MAX_CHANGES + 1) })).toBe(true)
+    expect(exceedsLimit(full, { type: "insert", rows: rows(1, MAX_CHANGES) })).toBe(true)
+    expect(exceedsLimit(full, { type: "edit", edits: [edit("1", "email", "a@b.c")] })).toBe(true)
+    expect(exceedsLimit(full, { type: "delete", rows: [{ rowId: "2", origin: origin(BO) }] })).toBe(
+      true,
+    )
+    const paste = {
+      type: "batch",
+      actions: [
+        { type: "insert", rows: rows(600) },
+        { type: "insert", rows: rows(600, 600) },
+      ],
+    }
+    expect(exceedsLimit(EMPTY_CHANGES, paste)).toBe(true)
+  })
+
+  test("what does not add a row is never refused, at the limit or past it", () => {
+    // Many cells of one row are one change.
+    const cells = { type: "edit", edits: COLUMNS.map((c) => edit("1", c.key, "x")) }
+    const nearly = applyChange(EMPTY_CHANGES, { type: "insert", rows: rows(MAX_CHANGES - 1) })
+    expect(exceedsLimit(nearly, cells)).toBe(false)
+    expect(
+      exceedsLimit(full, {
+        type: "edit",
+        edits: [{ rowId: "new:5", column: "email", value: "x" }],
+      }),
+    ).toBe(false)
+    expect(exceedsLimit(full, { type: "revertRow", rowId: "new:5" })).toBe(false)
+    expect(exceedsLimit(full, { type: "discard" })).toBe(false)
+    // An edit that puts back the original adds nothing, though it names a new row.
+    expect(
+      exceedsLimit(full, { type: "edit", edits: [edit("1", "email", "ann@example.com")] }),
+    ).toBe(false)
+    const over = applyChange(full, { type: "insert", rows: rows(5, MAX_CHANGES) })
+    expect(exceedsLimit(over, { type: "revertRow", rowId: "new:5" })).toBe(false)
+  })
+
+  test("a set past the limit has no request, and says why", () => {
+    const over = applyChange(full, { type: "insert", rows: rows(1, MAX_CHANGES) })
+    const built = buildChanges(over, { table: "customers", columns: COLUMNS })
+    expect(built.payload).toBeNull()
+    expect(built.problems).toEqual([
+      { rowId: null, reason: "1,001 rows are changed, and one apply takes at most 1,000" },
+    ])
+    expect(
+      buildChanges(full, { table: "customers", columns: COLUMNS }).payload.changes,
+    ).toHaveLength(MAX_CHANGES)
+  })
+})
+
+describe("a row that cannot be found again", () => {
+  const columns = [
+    { key: "slug", name: "slug", primaryKey: true },
+    { key: "title", name: "title" },
+  ]
+  const row = { slug: "the-first-four-thousand-bytes", title: "A long story" }
+
+  test("a primary key that arrived cut is not a key", () => {
+    expect(keyProblem(columns, row, ["slug"])).toBe(
+      "Only the start of this row's key (slug) was loaded, so the row cannot be found again",
+    )
+    expect(keyProblem(columns, row, ["title"])).toBeNull()
+    expect(keyProblem(columns, row)).toBeNull()
+  })
+
+  test("an update or a delete of such a row leaves no request to send", () => {
+    const { present } = run(
+      {
+        type: "edit",
+        edits: [
+          { rowId: "a", column: "title", value: "x", kind: "text", origin: origin(row, ["slug"]) },
+        ],
+      },
+      { type: "delete", rows: [{ rowId: "b", origin: origin({ ...row, slug: "other" }) }] },
+    )
+    const built = buildChanges(present, { table: "posts", columns })
+    expect(built.payload).toBeNull()
+    expect(built.problems).toHaveLength(1)
+    expect(built.problems[0].rowId).toBe("a")
+    // Which staged row each change came from is still told, to mark the row.
+    expect(built.refs.map((ref) => ref.rowId)).toEqual(["b", "a"])
+  })
+
+  test("a keyless row whose every value was cut has nothing to be matched on", () => {
+    const keyless = columns.map((column) => ({ ...column, primaryKey: false }))
+    expect(keyProblem(keyless, row, ["slug", "title"])).toMatch(/Nothing identifies this row/)
+    expect(keyProblem(keyless, row, ["slug"])).toBeNull()
+  })
+
+  test("a row staged against a table with other columns has no key in this one", () => {
+    const { present } = run({ type: "edit", edits: [edit("1", "email", "a@b.c")] })
+    const built = buildChanges(present, { table: "posts", columns })
+    expect(built.payload).toBeNull()
+    expect(built.problems[0].reason).toBe("This row was staged against a table with other columns")
+  })
+
+  test("a set with nothing wrong in it has no problems", () => {
+    const { present } = run({ type: "edit", edits: [edit("1", "email", "a@b.c")] })
+    expect(buildChanges(present, { table: "customers", columns: COLUMNS }).problems).toEqual([])
   })
 })
 

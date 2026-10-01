@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { applyChange, changeCounts, EMPTY_CHANGES } from "./change-set"
 import { orderColumns } from "./layout"
-import { planPaste } from "./paste"
+import { clipCells, planPaste } from "./paste"
 
 const COLUMNS = [
   { key: "id", name: "id", typeName: "bigint", kind: "number", primaryKey: true },
@@ -27,6 +27,8 @@ function model(changes = EMPTY_CHANGES) {
     changes,
     clipped: new Map(),
     editable: true,
+    defaultOnUpdate: true,
+    keys: [0],
   }
 }
 
@@ -169,6 +171,23 @@ describe("pasting from another grid", () => {
     expect(changes.updates["1"].values).toEqual({ name: "12", city: "true" })
     const bad = planPaste(model(), cell(0, 3), exact([{ a: 1 }]), allow())
     expect(bad.skipped).toBe(1)
+  })
+})
+
+describe("pasting what was only a preview", () => {
+  test("a cell the other grid held the start of is refused, and its neighbours still land", () => {
+    const clip = { cells: [["first 4096 bytes", "Lyon"]], previews: [{ row: 0, column: 0 }] }
+    const plan = planPaste(model(), cell(0, 1), clipCells(clip), allow())
+    expect(plan.pasted).toBe(1)
+    expect(plan.skipped).toBe(1)
+    expect(plan.reason).toBe("name: only the start of the copied value was loaded")
+    expect(stage(plan).updates["1"].values).toEqual({ city: "Lyon" })
+  })
+
+  test("a block with no previews is its values, NULL included", () => {
+    expect(clipCells({ cells: [[null, "a"]], previews: [] })).toEqual([
+      [{ value: null }, { value: "a" }],
+    ])
   })
 })
 

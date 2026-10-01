@@ -42,7 +42,7 @@ export function useGridKeyboard({
   setNull,
   setDefault,
   deleteRows,
-  clearSelection,
+  clearCells,
 }: {
   liveRef: GridLiveRef
   /** Set by an Escape with nothing to clear: the next Tab leaves the grid. */
@@ -56,10 +56,11 @@ export function useGridKeyboard({
   ) => void
   openRow: (row: number) => void
   sortBy: (column: GridColumn, additive: boolean) => void
+  /** These three act from the active cell: on the selection it is part of, or on it alone. */
   setNull: () => void
   setDefault: () => void
+  clearCells: () => void
   deleteRows: (rows: readonly number[]) => void
-  clearSelection: () => void
 }) {
   return useCallback(
     (event: React.KeyboardEvent) => {
@@ -231,7 +232,7 @@ export function useGridKeyboard({
           // Ticked rows are what Delete is about, wherever the cursor is;
           // with none ticked it clears the cells under the selection.
           if (state.sel.rows.length > 0) deleteRows(tickedRows(state.model, state.sel))
-          else clearSelection()
+          else clearCells()
           return
       }
 
@@ -242,7 +243,7 @@ export function useGridKeyboard({
       }
     },
     [
-      clearSelection,
+      clearCells,
       deleteRows,
       findRef,
       fromGrid,

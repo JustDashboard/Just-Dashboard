@@ -25,18 +25,23 @@ import type { RowState } from "./grid-row"
 import type { GridColumn, GridLayout } from "./types"
 
 /** The forms a selection can be copied in. SQL is the owner's: only a server knows the dialect. */
-export type CopyFormat = "tsv" | "tsv-header" | "csv" | "json"
+export type CopyFormat = "tsv" | "tsv-header" | "csv" | "json" | "markdown"
 
 /** What the cell under the menu is, and what can be done to it. Decided by the grid. */
 export interface CellMenuTarget {
   column: GridColumn
-  /** More than the one cell is selected, so "Copy" means the selection. */
-  multi: boolean
+  /**
+   * How many cells the cell verbs would act on: the range or the ticked rows
+   * when the menu was opened inside them, otherwise the one cell under it.
+   */
+  cells: number
   /** How many rows the row verbs would act on. */
   rows: number
   isNull: boolean
   editable: boolean
+  /** Whether any of those cells can take NULL, the empty string, its default. */
   canNull: boolean
+  canEmpty: boolean
   canDefault: boolean
   changed: boolean
   rowState: RowState
@@ -58,6 +63,7 @@ export interface CellMenuActions {
   follow: () => void
   edit: () => void
   setNull: () => void
+  setEmpty: () => void
   setDefault: () => void
   revertCell: () => void
   revertRows: () => void
@@ -83,10 +89,13 @@ export function CellMenuItems({
   const many = target.rows > 1
   const gone = target.rowState === "deleted"
   const pending = target.rowState !== "none"
+  // A verb that reaches past the cell under the pointer says how far.
+  const block = target.cells > 1 ? ` in ${target.cells.toLocaleString("en-US")} cells` : ""
+  const writes = target.canNull || target.canEmpty || target.canDefault
   return (
     <>
       <ContextMenuItem onSelect={() => actions.copy("tsv")}>
-        {target.multi ? "Copy" : "Copy value"}
+        {target.cells > 1 ? "Copy" : "Copy value"}
         <ContextMenuShortcut>Ctrl C</ContextMenuShortcut>
       </ContextMenuItem>
       <ContextMenuSub>
@@ -97,6 +106,9 @@ export function CellMenuItems({
           </ContextMenuItem>
           <ContextMenuItem onSelect={() => actions.copy("csv")}>CSV</ContextMenuItem>
           <ContextMenuItem onSelect={() => actions.copy("json")}>JSON</ContextMenuItem>
+          <ContextMenuItem onSelect={() => actions.copy("markdown")}>
+            Markdown table
+          </ContextMenuItem>
           {target.canCopySQL && (
             <ContextMenuItem onSelect={actions.copySQL}>SQL INSERT</ContextMenuItem>
           )}
@@ -129,18 +141,21 @@ export function CellMenuItems({
         </ContextMenuItem>
       )}
 
-      {(target.editable || target.changed) && <ContextMenuSeparator />}
+      {(target.editable || writes || target.changed) && <ContextMenuSeparator />}
       {target.editable && (
-        <>
-          <ContextMenuItem onSelect={actions.edit}>
-            Edit
-            <ContextMenuShortcut>Enter</ContextMenuShortcut>
-          </ContextMenuItem>
-          {target.canNull && <ContextMenuItem onSelect={actions.setNull}>Set NULL</ContextMenuItem>}
-          {target.canDefault && (
-            <ContextMenuItem onSelect={actions.setDefault}>Set default</ContextMenuItem>
-          )}
-        </>
+        <ContextMenuItem onSelect={actions.edit}>
+          Edit
+          <ContextMenuShortcut>Enter</ContextMenuShortcut>
+        </ContextMenuItem>
+      )}
+      {target.canNull && (
+        <ContextMenuItem onSelect={actions.setNull}>Set NULL{block}</ContextMenuItem>
+      )}
+      {target.canEmpty && (
+        <ContextMenuItem onSelect={actions.setEmpty}>Set empty string{block}</ContextMenuItem>
+      )}
+      {target.canDefault && (
+        <ContextMenuItem onSelect={actions.setDefault}>Set default{block}</ContextMenuItem>
       )}
       {target.changed && (
         <ContextMenuItem onSelect={actions.revertCell}>Revert cell</ContextMenuItem>

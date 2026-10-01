@@ -10,16 +10,32 @@ import {
   encodeGridClip,
   GRID_MIME,
   parseTSV,
+  previewNote,
   toCSV,
   toJSONRows,
+  toMarkdown,
   toTSV,
+  type GridClip,
 } from "./clipboard"
 import type { CopyFormat } from "./grid-menus"
 import type { GridLiveRef } from "./live"
-import { selectedBlock, valueAt } from "./model"
-import { planPaste, type PastedCell } from "./paste"
+import { actionBlock, isPreview, valueAt } from "./model"
+import { clipCells, planPaste, type PastedCell } from "./paste"
 import { isDefault } from "./values"
-import type { GridSelectionData } from "./types"
+import type { GridBlockCell, GridCellRef, GridSelectionData } from "./types"
+
+/**
+ * What this page last put on the clipboard as plain text, and the cells it was.
+ *
+ * Two paths carry text alone: the menu's "Copy as", which goes through the
+ * asynchronous clipboard, and the menu's "Paste", which reads it back the same
+ * way. Text cannot say that a field was NULL rather than empty, or that it was
+ * only the first four kilobytes of a value. So when the text that comes back
+ * is the text that went out, the cells remembered here are pasted in its place.
+ */
+let lastCopy: { text: string; clip: GridClip } | null = null
+
+const sameText = (a: string, b: string) => a.replace(/\r\n/g, "\n") === b.replace(/\r\n/g, "\n")
 
 /**
  * Copy, cut and paste.
@@ -34,49 +50,59 @@ import type { GridSelectionData } from "./types"
  *
  * What is written is tab-separated text, which every spreadsheet reads, and
  * beside it the same cells in the grid's own format, so a copy pasted back into
- * a grid keeps NULL apart from the empty string.
+ * a grid keeps NULL apart from the empty string — and a cell that was only a
+ * preview is refused rather than written somewhere as the whole value.
  */
 export function useGridClipboard({
   liveRef,
   fromGrid,
   announce,
   stage,
-  clearSelection,
+  clearCells,
 }: {
   liveRef: GridLiveRef
   fromGrid: (target: EventTarget | null) => boolean
   announce: (text: string) => void
-  stage: (action: ChangeAction) => void
-  clearSelection: () => void
+  /** Stages an action; false when the grid refused it. */
+  stage: (action: ChangeAction) => boolean
+  clearCells: (at: GridCellRef | null) => void
 }) {
-  /** The selection as raw values, with pending edits applied. */
-  const selectionData = useCallback((): GridSelectionData | null => {
-    const state = liveRef.current
-    const block = selectedBlock(state.model, state.sel)
-    if (!block) return null
-    return {
-      columns: block.cols.map((entry) => entry.column),
-      rowIds: block.rows.map((row) => state.model.ids[row]),
-      rows: block.rows.map((row) =>
-        block.cols.map((entry) => {
+  /** The cells a copy takes, as raw values with pending edits applied. */
+  const selectionData = useCallback(
+    (at: GridCellRef | null): GridSelectionData | null => {
+      const state = liveRef.current
+      const block = actionBlock(state.model, state.sel, at)
+      if (!block) return null
+      const previews: GridBlockCell[] = []
+      const rows = block.rows.map((row, r) =>
+        block.cols.map((entry, c) => {
+          if (isPreview(state.model, row, entry.source)) previews.push({ row: r, column: c })
           const value = valueAt(state.model, row, entry)
           return value === undefined || isDefault(value) ? null : value
         }),
-      ),
-    }
-  }, [liveRef])
+      )
+      return {
+        columns: block.cols.map((entry) => entry.column),
+        rowIds: block.rows.map((row) => state.model.ids[row]),
+        rows,
+        previews,
+      }
+    },
+    [liveRef],
+  )
 
   const copied = useCallback(
     (data: GridSelectionData) => {
       const cells = data.rows.length * data.columns.length
-      announce(cells === 1 ? "Copied 1 cell" : `Copied ${cells} cells`)
+      const said = cells === 1 ? "Copied 1 cell" : `Copied ${cells} cells`
+      announce(said + previewNote(data.previews.length))
     },
     [announce],
   )
 
   const copyAs = useCallback(
-    (format: CopyFormat) => {
-      const data = selectionData()
+    (format: CopyFormat, at: GridCellRef | null = liveRef.current.sel.active) => {
+      const data = selectionData(at)
       if (!data) return
       const matrix = data.rows.map((row) => row.map(clipText))
       const names = data.columns.map((column) => column.name)
@@ -85,10 +111,18 @@ export function useGridClipboard({
           ? toJSONRows(data.columns, data.rows)
           : format === "csv"
             ? toCSV(matrix, { header: names })
-            : toTSV(format === "tsv-header" ? [names, ...matrix] : matrix)
-      void copyText(text).then((ok) => ok && copied(data))
+            : format === "markdown"
+              ? toMarkdown(names, matrix)
+              : toTSV(format === "tsv-header" ? [names, ...matrix] : matrix)
+      void copyText(text).then((ok) => {
+        if (!ok) return
+        // Only the plain block is something a grid can take back cell for cell.
+        lastCopy =
+          format === "tsv" ? { text, clip: { cells: data.rows, previews: data.previews } } : null
+        copied(data)
+      })
     },
-    [copied, selectionData],
+    [copied, liveRef, selectionData],
   )
 
   const pasteCells = useCallback(
@@ -104,7 +138,7 @@ export function useGridClipboard({
         announce("Choose a cell to paste into")
         return
       }
-      if (plan.actions.length > 0) stage({ type: "batch", actions: plan.actions })
+      if (plan.actions.length > 0 && !stage({ type: "batch", actions: plan.actions })) return
       // What was pasted is left selected, so it can be seen and pasted over.
       if (plan.block) {
         state.setSelection({
@@ -125,21 +159,26 @@ export function useGridClipboard({
   )
 
   const pasteText = useCallback(
-    (text: string) =>
-      pasteCells(parseTSV(text).map((row) => row.map((field) => ({ text: field })))),
+    (text: string) => {
+      if (lastCopy && sameText(lastCopy.text, text)) pasteCells(clipCells(lastCopy.clip))
+      else pasteCells(parseTSV(text).map((row) => row.map((field) => ({ text: field }))))
+    },
     [pasteCells],
   )
 
   const onCopy = useCallback(
     (event: React.ClipboardEvent) => {
-      if (!fromGrid(event.target) || liveRef.current.editing) return
-      const data = selectionData()
+      const state = liveRef.current
+      if (!fromGrid(event.target) || state.editing) return
+      const data = selectionData(state.sel.active)
       if (!data) return
       // Written in the event itself rather than through the async clipboard,
       // which a page reached over plain HTTP does not have.
       event.preventDefault()
-      event.clipboardData.setData("text/plain", toTSV(data.rows.map((row) => row.map(clipText))))
-      event.clipboardData.setData(GRID_MIME, encodeGridClip(data.rows))
+      const text = toTSV(data.rows.map((row) => row.map(clipText)))
+      event.clipboardData.setData("text/plain", text)
+      event.clipboardData.setData(GRID_MIME, encodeGridClip(data.rows, data.previews))
+      lastCopy = { text, clip: { cells: data.rows, previews: data.previews } }
       copied(data)
     },
     [copied, fromGrid, liveRef, selectionData],
@@ -148,9 +187,10 @@ export function useGridClipboard({
   const onCut = useCallback(
     (event: React.ClipboardEvent) => {
       onCopy(event)
-      if (event.defaultPrevented && liveRef.current.canEdit) clearSelection()
+      const state = liveRef.current
+      if (event.defaultPrevented && state.canEdit) clearCells(state.sel.active)
     },
-    [clearSelection, liveRef, onCopy],
+    [clearCells, liveRef, onCopy],
   )
 
   const onPaste = useCallback(
@@ -159,7 +199,7 @@ export function useGridClipboard({
       if (!fromGrid(event.target) || state.editing || !state.canEdit) return
       event.preventDefault()
       const exact = decodeGridClip(event.clipboardData.getData(GRID_MIME))
-      if (exact) pasteCells(exact.map((row) => row.map((value) => ({ value }))))
+      if (exact) pasteCells(clipCells(exact))
       else pasteText(event.clipboardData.getData("text/plain"))
     },
     [fromGrid, liveRef, pasteCells, pasteText],
