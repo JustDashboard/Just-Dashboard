@@ -75,12 +75,14 @@ func (sqliteDialect) Databases(ctx context.Context, db *sql.DB) ([]Database, err
 func (sqliteDialect) Tables(ctx context.Context, db *sql.DB, _ string) ([]Table, error) {
 	// -1, not 0: the catalogue saying nothing must not read as it saying the
 	// table is empty. Size stays 0, which `omitempty` drops from the wire.
+	// The underscore is escaped because it is a wildcard: unescaped, the
+	// filter that hides SQLite's own tables also hid one named "sqliteXfoo".
 	rows, err := db.QueryContext(ctx, `SELECT 'main', name,
 	                CASE type WHEN 'table' THEN 'table' ELSE type END,
 	                -1, 0, ''
 	         FROM sqlite_master
 	         WHERE type IN ('table','view')
-	           AND name NOT LIKE 'sqlite_%'
+	           AND name NOT LIKE 'sqlite!_%' ESCAPE '!'
 	         ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -262,12 +264,12 @@ func (sqliteDialect) BeforeDropColumn(context.Context, *sql.DB, string, string, 
 	return nil
 }
 
-func (sqliteDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
-	checked, checkErr := ExplainStatement(query)
+func (d sqliteDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := explainStatement(d.Driver(), query)
 	if checkErr != nil {
 		return nil, checkErr
 	}
-	query = checked
+	query = checked.SQL
 	// Bare EXPLAIN in SQLite dumps bytecode; QUERY PLAN is the readable form.
 	return RunQuery(ctx, db, "EXPLAIN QUERY PLAN "+query, 500)
 }
@@ -364,3 +366,23 @@ func (sqliteDialect) DropDatabaseSQL(string) ([]DropStatement, error) {
 }
 
 func (sqliteDialect) AdminDatabase() string { return "" }
+
+// --- the workbench ---------------------------------------------------------
+
+func (sqliteDialect) readScope() readScope { return readScopeSession }
+
+// enterRead turns query_only on. SQLite has no read-only transaction; the
+// pragma makes the connection refuse every write for as long as it is set.
+func (sqliteDialect) enterRead(ctx context.Context, conn *sql.Conn) (func(context.Context) error, error) {
+	if _, err := conn.ExecContext(ctx, "PRAGMA query_only = ON"); err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context) error {
+		_, err := conn.ExecContext(ctx, "PRAGMA query_only = OFF")
+		return err
+	}, nil
+}
+
+func (sqliteDialect) byteLength(_ Column, quoted string) string {
+	return "length(CAST(" + quoted + " AS BLOB))"
+}

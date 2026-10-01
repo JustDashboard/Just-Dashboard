@@ -13,11 +13,11 @@ import (
 //
 //  1. Column and table names are validated identifiers, quoted, never bound —
 //     the same choke point BrowseTable uses. Values are always bound.
-//  2. Every UPDATE and DELETE is scoped by the table's primary key. A mutation
-//     with no key columns is refused rather than run, because an UPDATE or
-//     DELETE the caller believes touches one row would otherwise touch all of
-//     them. This is why the handlers fetch the primary key before editing and
-//     fail when a table has none.
+//  2. Every UPDATE and DELETE names one row and is held to it. The key is the
+//     table's primary key as the catalogue reports it, not whatever columns the
+//     request chose, and the statement runs in a transaction that is rolled
+//     back unless it touched exactly one row. ApplyChanges is where both are
+//     enforced; the single-row functions below are that with a set of one.
 
 // ErrNoPrimaryKey is returned when an edit is attempted on a table the caller
 // could not supply key columns for. The handler turns it into advice to use the
@@ -50,64 +50,6 @@ func buildInsert(d Dialect, schema, table string, cols []string, returning bool)
 	return q, nil
 }
 
-// buildUpdate renders an UPDATE that sets setCols and is scoped by whereCols.
-// Placeholders run continuously across the SET list and then the WHERE list, so
-// the caller appends its args in the same order.
-func buildUpdate(d Dialect, schema, table string, setCols, whereCols []string, returning bool) (string, error) {
-	if len(whereCols) == 0 {
-		return "", ErrNoPrimaryKey
-	}
-	rel, err := qualify(d, schema, table)
-	if err != nil {
-		return "", err
-	}
-	n := 0
-	sets := make([]string, len(setCols))
-	for i, c := range setCols {
-		q, err := d.QuoteIdent(c)
-		if err != nil {
-			return "", err
-		}
-		n++
-		sets[i] = q + " = " + d.Placeholder(n)
-	}
-	wheres := make([]string, len(whereCols))
-	for i, c := range whereCols {
-		q, err := d.QuoteIdent(c)
-		if err != nil {
-			return "", err
-		}
-		n++
-		wheres[i] = q + " = " + d.Placeholder(n)
-	}
-	q := fmt.Sprintf("UPDATE %s SET %s WHERE %s", rel,
-		joinComma(sets), joinAnd(wheres))
-	if returning && d.SupportsReturning() {
-		q += " RETURNING *"
-	}
-	return q, nil
-}
-
-// buildDelete renders a DELETE scoped by whereCols.
-func buildDelete(d Dialect, schema, table string, whereCols []string) (string, error) {
-	if len(whereCols) == 0 {
-		return "", ErrNoPrimaryKey
-	}
-	rel, err := qualify(d, schema, table)
-	if err != nil {
-		return "", err
-	}
-	wheres := make([]string, len(whereCols))
-	for i, c := range whereCols {
-		q, err := d.QuoteIdent(c)
-		if err != nil {
-			return "", err
-		}
-		wheres[i] = q + " = " + d.Placeholder(i+1)
-	}
-	return fmt.Sprintf("DELETE FROM %s WHERE %s", rel, joinAnd(wheres)), nil
-}
-
 // sortedKeys gives the columns a stable order so the generated SQL and the
 // argument slice cannot drift apart, and so a builder is deterministic to test.
 func sortedKeys(m map[string]any) []string {
@@ -124,20 +66,7 @@ func InsertRow(ctx context.Context, db *sql.DB, driver Driver, schema, table str
 	if len(values) == 0 {
 		return nil, fmt.Errorf("no column values supplied")
 	}
-	d, err := DialectFor(driver)
-	if err != nil {
-		return nil, err
-	}
-	cols := sortedKeys(values)
-	query, err := buildInsert(d, schema, table, cols, true)
-	if err != nil {
-		return nil, err
-	}
-	args := make([]any, len(cols))
-	for i, c := range cols {
-		args[i] = values[c]
-	}
-	return RunQuery(ctx, db, query, 1000, args...)
+	return applyOneChange(ctx, db, driver, schema, table, Change{Op: ChangeInsert, Values: values})
 }
 
 // UpdateRow updates the row identified by key with the given values.
@@ -148,24 +77,7 @@ func UpdateRow(ctx context.Context, db *sql.DB, driver Driver, schema, table str
 	if len(key) == 0 {
 		return nil, ErrNoPrimaryKey
 	}
-	d, err := DialectFor(driver)
-	if err != nil {
-		return nil, err
-	}
-	setCols := sortedKeys(values)
-	whereCols := sortedKeys(key)
-	query, err := buildUpdate(d, schema, table, setCols, whereCols, true)
-	if err != nil {
-		return nil, err
-	}
-	args := make([]any, 0, len(setCols)+len(whereCols))
-	for _, c := range setCols {
-		args = append(args, values[c])
-	}
-	for _, c := range whereCols {
-		args = append(args, key[c])
-	}
-	return RunQuery(ctx, db, query, 1000, args...)
+	return applyOneChange(ctx, db, driver, schema, table, Change{Op: ChangeUpdate, Key: key, Values: values})
 }
 
 // DeleteRow removes the row identified by key.
@@ -173,24 +85,34 @@ func DeleteRow(ctx context.Context, db *sql.DB, driver Driver, schema, table str
 	if len(key) == 0 {
 		return nil, ErrNoPrimaryKey
 	}
-	d, err := DialectFor(driver)
+	return applyOneChange(ctx, db, driver, schema, table, Change{Op: ChangeDelete, Key: key})
+}
+
+// applyOneChange runs a change set of one and answers in the shape the
+// single-row routes have always answered in: the statement, what it affected,
+// and the row where the engine hands one back.
+func applyOneChange(ctx context.Context, db *sql.DB, driver Driver, schema, table string, change Change) (*QueryResult, error) {
+	set, err := ApplyChanges(ctx, db, driver, ChangeSet{Schema: schema, Table: table, Changes: []Change{change}})
 	if err != nil {
 		return nil, err
 	}
-	whereCols := sortedKeys(key)
-	query, err := buildDelete(d, schema, table, whereCols)
-	if err != nil {
-		return nil, err
+	out := set.Results[0]
+	res := &QueryResult{
+		Columns: []string{}, Types: []string{}, Rows: [][]any{},
+		Affected: out.Affected, Duration: set.Duration, Statement: out.Statement,
 	}
-	args := make([]any, len(whereCols))
-	for i, c := range whereCols {
-		args[i] = key[c]
+	if out.Row != nil {
+		res.Columns = sortedKeys(out.Row)
+		row := make([]any, len(res.Columns))
+		for i, c := range res.Columns {
+			row[i] = out.Row[c]
+		}
+		res.Rows, res.RowCount = [][]any{row}, 1
 	}
-	return RunQuery(ctx, db, query, 1000, args...)
+	return res, nil
 }
 
 func joinComma(parts []string) string { return joinWith(parts, ", ") }
-func joinAnd(parts []string) string   { return joinWith(parts, " AND ") }
 
 func joinWith(parts []string, sep string) string {
 	out := ""

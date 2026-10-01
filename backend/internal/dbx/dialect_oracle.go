@@ -73,17 +73,20 @@ func (oracleDialect) Databases(ctx context.Context, db *sql.DB) ([]Database, err
 	return scanDatabases(rows)
 }
 
+// Tables lists one schema. With none named that is the session's current
+// schema, the same default every other catalogue read here uses: it used to be
+// every owner the account could see, so a search or a dump with no schema
+// chosen walked the whole instance while the column reads beside it looked in
+// one place.
 func (oracleDialect) Tables(ctx context.Context, db *sql.DB, schema string) ([]Table, error) {
 	rows, err := db.QueryContext(ctx, `
 	  SELECT owner, table_name, 'table', NVL(num_rows, -1), 0, NULL
 	  FROM all_tables
-	  WHERE (:1 IS NULL OR owner = :1)
-	    AND owner NOT IN ('SYS','SYSTEM','OUTLN','XDB','MDSYS','CTXSYS','DBSNMP')
+	  WHERE owner = NVL(:1, SYS_CONTEXT('USERENV','CURRENT_SCHEMA'))
 	  UNION ALL
 	  SELECT owner, view_name, 'view', -1, 0, NULL
 	  FROM all_views
-	  WHERE (:1 IS NULL OR owner = :1)
-	    AND owner NOT IN ('SYS','SYSTEM','OUTLN','XDB','MDSYS','CTXSYS','DBSNMP')
+	  WHERE owner = NVL(:1, SYS_CONTEXT('USERENV','CURRENT_SCHEMA'))
 	  ORDER BY 1, 2`, oracleSchemaArg(schema))
 	if err != nil {
 		return nil, err
@@ -104,8 +107,12 @@ func oracleSchemaArg(schema string) any {
 func (oracleDialect) Columns(ctx context.Context, db *sql.DB, schema, table string) ([]Column, error) {
 	rows, err := db.QueryContext(ctx, `
 	  SELECT column_name,
+	         -- char_length, not data_length: the latter is bytes, so a
+	         -- VARCHAR2(255 CHAR) in a UTF-8 database read as VARCHAR2(1020).
 	         data_type ||
-	           CASE WHEN data_type IN ('VARCHAR2','NVARCHAR2','CHAR','RAW')
+	           CASE WHEN data_type IN ('VARCHAR2','NVARCHAR2','CHAR','NCHAR')
+	                THEN '(' || char_length || ')'
+	                WHEN data_type = 'RAW'
 	                THEN '(' || data_length || ')'
 	                WHEN data_type = 'NUMBER' AND data_precision IS NOT NULL
 	                THEN '(' || data_precision || ',' || NVL(data_scale,0) || ')'
@@ -247,12 +254,12 @@ func (oracleDialect) BeforeDropColumn(context.Context, *sql.DB, string, string, 
 // ExplainPlan writes the plan to Oracle's plan table and then formats it, which
 // is the only way Oracle exposes one. EXPLAIN PLAN FOR does not execute the
 // statement it describes.
-func (oracleDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
-	checked, checkErr := ExplainStatement(query)
+func (d oracleDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := explainStatement(d.Driver(), query)
 	if checkErr != nil {
 		return nil, checkErr
 	}
-	query = checked
+	query = checked.SQL
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -287,7 +294,9 @@ func (oracleDialect) Activity(ctx context.Context, db *sql.DB) ([]Activity, erro
 	         TO_CHAR(s.blocking_session),
 	         CASE WHEN s.sid = SYS_CONTEXT('USERENV','SID') THEN 1 ELSE 0 END
 	  FROM v$session s
-	  LEFT JOIN v$sql q ON q.sql_id = s.sql_id
+	  -- A statement has one row in v$sql per child cursor; joining on the id
+	  -- alone listed the session once for each.
+	  LEFT JOIN v$sql q ON q.sql_id = s.sql_id AND q.child_number = s.sql_child_number
 	  WHERE s.type = 'USER'
 	  ORDER BY s.last_call_et DESC`)
 	if err != nil {
@@ -312,7 +321,9 @@ func (oracleDialect) TableSizes(ctx context.Context, db *sql.DB, schema string) 
 	// user_segments rather than dba_segments: the dashboard connects as an
 	// ordinary account far more often than as one with the DBA role, and a
 	// storage panel that errors for everyone but a DBA is worse than one that
-	// reports the schema the connection is already in.
+	// reports the schema the connection is already in. Those segments are the
+	// connected user's own, so they are only joined to that user's tables —
+	// another schema's table of the same name used to be given their size.
 	rows, err := db.QueryContext(ctx, `
 		SELECT t.owner, t.table_name,
 		       NVL(t.num_rows, 0),
@@ -322,11 +333,11 @@ func (oracleDialect) TableSizes(ctx context.Context, db *sql.DB, schema string) 
 		FROM all_tables t
 		LEFT JOIN (SELECT segment_name, SUM(bytes) bytes FROM user_segments
 		           WHERE segment_type = 'TABLE' GROUP BY segment_name) s
-		  ON s.segment_name = t.table_name
+		  ON s.segment_name = t.table_name AND t.owner = USER
 		LEFT JOIN (SELECT ui.table_name, SUM(us.bytes) bytes
 		           FROM user_indexes ui JOIN user_segments us ON us.segment_name = ui.index_name
 		           GROUP BY ui.table_name) i
-		  ON i.table_name = t.table_name
+		  ON i.table_name = t.table_name AND t.owner = USER
 		WHERE t.owner = NVL(:1, SYS_CONTEXT('USERENV','CURRENT_SCHEMA'))`,
 		oracleSchemaArg(schema))
 	if err != nil {
@@ -349,3 +360,22 @@ func (d oracleDialect) DropDatabaseSQL(name string) ([]DropStatement, error) {
 }
 
 func (oracleDialect) AdminDatabase() string { return "" }
+
+// --- the workbench ---------------------------------------------------------
+
+func (oracleDialect) readScope() readScope { return readScopeOracle }
+
+func (d oracleDialect) regexMatch(expr, ph string) string {
+	return "REGEXP_LIKE(" + d.CastText(expr) + ", " + ph + ")"
+}
+
+func (oracleDialect) rowEstimate(ctx context.Context, db *sql.DB, schema, table string) (int64, error) {
+	var n sql.NullInt64
+	err := db.QueryRowContext(ctx, `SELECT num_rows FROM all_tables
+	         WHERE owner = NVL(:1, SYS_CONTEXT('USERENV','CURRENT_SCHEMA')) AND table_name = :2`,
+		oracleSchemaArg(schema), table).Scan(&n)
+	if err == sql.ErrNoRows || err == nil && !n.Valid {
+		return -1, nil
+	}
+	return n.Int64, err
+}

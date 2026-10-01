@@ -3,7 +3,10 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 type clickhouseDialect struct{}
@@ -115,8 +118,9 @@ func (clickhouseDialect) Columns(ctx context.Context, db *sql.DB, schema, table 
 
 // PrimaryKey reports the sorting key columns. ClickHouse has no primary-key
 // constraint in the relational sense — the key orders parts and is not unique —
-// so a row edit keyed on it could match more than one row. That is why the
-// mutation path checks uniqueness separately rather than trusting this.
+// so it identifies a place in the table, not a row. Nothing may edit by it:
+// ApplyChanges refuses this engine outright, and the key is reported only so
+// the Structure tab can show what the table is ordered by.
 func (clickhouseDialect) PrimaryKey(ctx context.Context, db *sql.DB, schema, table string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `
 	  SELECT name FROM system.columns
@@ -200,12 +204,12 @@ func (clickhouseDialect) BeforeDropColumn(context.Context, *sql.DB, string, stri
 	return nil
 }
 
-func (clickhouseDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
-	checked, checkErr := ExplainStatement(query)
+func (d clickhouseDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := explainStatement(d.Driver(), query)
 	if checkErr != nil {
 		return nil, checkErr
 	}
-	query = checked
+	query = checked.SQL
 	return RunQuery(ctx, db, "EXPLAIN "+query, 500)
 }
 
@@ -273,3 +277,71 @@ func (d clickhouseDialect) DropDatabaseSQL(name string) ([]DropStatement, error)
 // ClickHouse's connection database is only a default for unqualified names, so
 // there is nothing to move away from.
 func (clickhouseDialect) AdminDatabase() string { return "" }
+
+// --- the workbench ---------------------------------------------------------
+
+func (clickhouseDialect) readScope() readScope { return readScopeSetting }
+
+// clickhouseReadOnly attaches readonly=2 to a query: reads only, and — unlike
+// readonly=1 — the other settings a connection string carries may still be
+// sent along with it.
+func clickhouseReadOnly(ctx context.Context) context.Context {
+	return clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{"readonly": 2}))
+}
+
+// clickhouseRefusedSetting reports that the server would not let this account
+// set readonly at all. That happens when the account is already restricted to
+// reads, or when its profile pins the setting; either way the request that was
+// refused is the setting, not the statement.
+func clickhouseRefusedSetting(err error) bool {
+	var ex *clickhouse.Exception
+	if !errors.As(err, &ex) {
+		return false
+	}
+	switch ex.Code {
+	case 164: // READONLY
+		return strings.Contains(ex.Message, "readonly") && strings.Contains(ex.Message, "setting")
+	case 452: // SETTING_CONSTRAINT_VIOLATION
+		return strings.Contains(ex.Message, "readonly")
+	}
+	return false
+}
+
+// textMatch uses the position functions instead of LIKE. ClickHouse's LIKE has
+// no ESCAPE clause, and these take the operator's text as text.
+func (d clickhouseDialect) textMatch(expr string, kind matchKind, fold bool, ph string) (string, func(string) string) {
+	text, verbatim := d.CastText(expr), func(value string) string { return value }
+	if fold {
+		text, ph = "lowerUTF8("+text+")", "lowerUTF8("+ph+")"
+	}
+	switch kind {
+	case matchPrefix:
+		return "startsWith(" + text + ", " + ph + ")", verbatim
+	case matchSuffix:
+		return "endsWith(" + text + ", " + ph + ")", verbatim
+	}
+	return "position(" + text + ", " + ph + ") > 0", verbatim
+}
+
+func (d clickhouseDialect) regexMatch(expr, ph string) string {
+	return "match(" + d.CastText(expr) + ", " + ph + ")"
+}
+
+// rowEstimate reads total_rows, which the MergeTree family keeps exactly.
+func (clickhouseDialect) rowEstimate(ctx context.Context, db *sql.DB, schema, table string) (int64, error) {
+	if schema == "" {
+		schema = "default"
+	}
+	var n int64
+	err := db.QueryRowContext(ctx,
+		`SELECT ifNull(toInt64(total_rows), -1) FROM system.tables WHERE database = ? AND name = ?`,
+		schema, table).Scan(&n)
+	if err == sql.ErrNoRows {
+		return -1, nil
+	}
+	return n, err
+}
+
+func (d clickhouseDialect) byteLength(_ Column, quoted string) string {
+	return "length(" + d.CastText(quoted) + ")"
+}

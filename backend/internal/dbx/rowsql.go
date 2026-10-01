@@ -1,13 +1,14 @@
 package dbx
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Copying a row out of the browser as an INSERT is the small thing a developer
@@ -55,8 +56,12 @@ func RowInsertSQL(driver Driver, schema, table string, row map[string]any) (stri
 		if err != nil {
 			return "", err
 		}
+		literal, err := sqlLiteral(d, row[c])
+		if err != nil {
+			return "", fmt.Errorf("column %s %w", c, err)
+		}
 		names = append(names, q)
-		values = append(values, sqlLiteral(d, row[c]))
+		values = append(values, literal)
 	}
 	if len(names) == 0 {
 		return "", fmt.Errorf("row has no columns")
@@ -81,51 +86,59 @@ func RowsInsertSQL(driver Driver, schema, table string, rows []map[string]any) (
 	return strings.Join(out, "\n"), nil
 }
 
-// sqlLiteral renders one value as SQL text.
+// previewPattern is the form the grid shows for a binary value it cut short.
+// It is a description of a value, not the value, and rendering it into a
+// statement would write the description into the column.
+var previewPattern = regexp.MustCompile(`^\\x[0-9a-f]*… \(\d+ bytes\)$`)
+
+// sqlLiteral renders one value as SQL text for an engine.
 //
-// Strings are single-quoted with the quote doubled, which is the escape every
-// engine here accepts and the only one they all agree on — a backslash escape
-// is MySQL-specific and would be a literal backslash on Postgres.
-func sqlLiteral(d Dialect, v any) string {
+// The rules are the dump's, because they have to be: a string is quoted with
+// the quote doubled, and on the engines where a backslash escapes — MySQL,
+// ClickHouse — a backslash is doubled too, or a value ending in one would
+// swallow the closing quote. A boolean is TRUE/FALSE where the engine has the
+// type and 1/0 where it does not; rendering 1 for PostgreSQL produced an INSERT
+// its own boolean column refused.
+func sqlLiteral(d Dialect, v any) (string, error) {
+	driver := d.Driver()
 	switch t := v.(type) {
 	case nil:
-		return "NULL"
-	case bool:
-		// SQLite, SQL Server and Oracle have no boolean literal; 1/0 is
-		// accepted by all six and means the same thing in each.
-		if t {
-			return "1"
-		}
-		return "0"
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprint(t)
-	case float32:
-		return formatFloat(float64(t))
-	case float64:
-		return formatFloat(t)
+		return "NULL", nil
 	case json.Number:
-		return t.String()
-	case time.Time:
-		return quoteLiteral(t.UTC().Format("2006-01-02 15:04:05.999999"))
+		return t.String(), nil
+	case float32:
+		return formatFloat(float64(t)), nil
+	case float64:
+		return formatFloat(t), nil
+	case string:
+		if previewPattern.MatchString(t) {
+			return "", fmt.Errorf("holds a preview of a larger binary value, not the value; open the cell to copy it")
+		}
+		// The grid shows a binary value as \x and its hex digits. Copied back
+		// out it is the bytes it stood for, not a string that begins with a
+		// backslash.
+		if hexValuePattern.MatchString(t) && len(t) > 2 {
+			if b, err := hex.DecodeString(t[2:]); err == nil {
+				return dumpBytes(driver, b), nil
+			}
+		}
+		return dumpString(driver, t), nil
 	case []byte:
 		// A byte slice reaching here is either text the driver did not decode
 		// or genuine binary. Rendering it as a hex literal is correct for the
 		// second and legible for neither, so text is preferred when it is text.
-		if s := string(t); isPrintable(s) {
-			return quoteLiteral(s)
+		if isPrintableText(t) {
+			return dumpString(driver, string(t)), nil
 		}
-		return hexLiteral(d, t)
-	case string:
-		return quoteLiteral(t)
+		return dumpBytes(driver, t), nil
 	case map[string]any, []any:
 		b, err := json.Marshal(t)
 		if err != nil {
-			return "NULL"
+			return "", err
 		}
-		return quoteLiteral(string(b))
-	default:
-		return quoteLiteral(fmt.Sprint(t))
+		return dumpString(driver, string(b)), nil
 	}
+	return dumpLiteral(driver, v), nil
 }
 
 func formatFloat(f float64) string {
@@ -140,25 +153,4 @@ func formatFloat(f float64) string {
 
 func quoteLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
-func hexLiteral(d Dialect, b []byte) string {
-	h := fmt.Sprintf("%x", b)
-	switch d.Driver() {
-	case DriverPostgres:
-		return "'\\x" + h + "'::bytea"
-	case DriverMySQL, DriverSQLite, DriverMSSQL:
-		return "0x" + h
-	default:
-		return quoteLiteral(h)
-	}
-}
-
-func isPrintable(s string) bool {
-	for _, r := range s {
-		if r == 0 || (r < 0x20 && r != '\t' && r != '\n' && r != '\r') {
-			return false
-		}
-	}
-	return true
 }

@@ -50,7 +50,8 @@ const (
 // Comparison is a case-insensitive substring against the text form of each
 // column, which is why every column is cast first: an integer id and a uuid are
 // exactly the values people search for, and `LIKE` against them is an error on
-// the stricter engines rather than a coercion.
+// the stricter engines rather than a coercion. The needle is matched as text:
+// a % or an _ in it is that character, not a wildcard.
 func Search(ctx context.Context, db *sql.DB, driver Driver, schema, needle string) (*SearchResult, error) {
 	if strings.TrimSpace(needle) == "" {
 		return nil, fmt.Errorf("a value to search for is required")
@@ -65,7 +66,6 @@ func Search(ctx context.Context, db *sql.DB, driver Driver, schema, needle strin
 	}
 
 	out := &SearchResult{Matches: []SearchMatch{}, Skipped: []string{}}
-	pattern := "%" + needle + "%"
 
 	for _, t := range tables {
 		if out.Scanned >= searchMaxTables || len(out.Matches) >= searchMaxTotalMatches {
@@ -82,7 +82,16 @@ func Search(ctx context.Context, db *sql.DB, driver Driver, schema, needle strin
 			out.Skipped = append(out.Skipped, t.Name)
 			continue
 		}
-		matches, err := searchTable(ctx, db, d, t, cols, pattern)
+		if len(cols) > searchMaxColumns {
+			cols = cols[:searchMaxColumns]
+		}
+		matches, err := searchTable(ctx, db, d, t, cols, needle)
+		if err != nil {
+			// One column the engine will not cast — an image, a spatial type —
+			// used to cost the whole table. Asked one at a time, the columns
+			// that can be compared still are.
+			matches, err = searchColumns(ctx, db, d, t, cols, needle)
+		}
 		if err != nil {
 			// One unreadable table must not end the search — a permission error
 			// on an audit table is normal and the other forty still matter.
@@ -99,24 +108,49 @@ func Search(ctx context.Context, db *sql.DB, driver Driver, schema, needle strin
 	return out, nil
 }
 
-func searchTable(ctx context.Context, db *sql.DB, d Dialect, t Table, cols []Column, pattern string) ([]SearchMatch, error) {
+// searchColumns is searchTable one column at a time, for a table where the
+// combined statement failed. It errors only when no column could be searched.
+func searchColumns(ctx context.Context, db *sql.DB, d Dialect, t Table, cols []Column, needle string) ([]SearchMatch, error) {
+	var out []SearchMatch
+	searched := 0
+	for _, c := range cols {
+		matches, err := searchTable(ctx, db, d, t, []Column{c}, needle)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		searched++
+		out = append(out, matches...)
+		if len(out) >= searchMaxPerTable {
+			return out[:searchMaxPerTable], nil
+		}
+	}
+	if searched == 0 {
+		return nil, fmt.Errorf("no comparable columns")
+	}
+	return out, nil
+}
+
+func searchTable(ctx context.Context, db *sql.DB, d Dialect, t Table, cols []Column, needle string) ([]SearchMatch, error) {
 	rel, err := qualify(d, t.Schema, t.Name)
 	if err != nil {
 		return nil, err
 	}
-	if len(cols) > searchMaxColumns {
-		cols = cols[:searchMaxColumns]
-	}
 
 	preds := make([]string, 0, len(cols))
 	args := make([]any, 0, len(cols))
-	for i, c := range cols {
+	for _, c := range cols {
 		q, err := d.QuoteIdent(c.Name)
 		if err != nil {
 			continue
 		}
-		preds = append(preds, fmt.Sprintf("%s LIKE %s", d.CastText(q), d.Placeholder(i+1)))
-		args = append(args, pattern)
+		// The marker is numbered by what has been bound, not by the column's
+		// position, so a skipped column leaves no gap.
+		pred, pattern := textMatchFor(d, q, matchContains, true, d.Placeholder(len(args)+1))
+		preds = append(preds, pred)
+		args = append(args, pattern(needle))
 	}
 	if len(preds) == 0 {
 		return nil, fmt.Errorf("no comparable columns")
@@ -126,13 +160,13 @@ func searchTable(ctx context.Context, db *sql.DB, d Dialect, t Table, cols []Col
 	args = append(args, tailArgs...)
 	query := fmt.Sprintf("SELECT * FROM %s WHERE %s %s", rel, strings.Join(preds, " OR "), tail)
 
-	res, err := RunQuery(ctx, db, query, searchMaxPerTable, args...)
+	res, err := runOn(ctx, db, d.Driver(), query, true, collectOptions{maxRows: searchMaxPerTable}, args...)
 	if err != nil {
 		return nil, err
 	}
 
 	out := make([]SearchMatch, 0, res.RowCount)
-	lower := strings.ToLower(strings.Trim(pattern, "%"))
+	lower := strings.ToLower(needle)
 	for _, row := range res.Rows {
 		rec := map[string]any{}
 		for i, c := range res.Columns {
@@ -150,7 +184,10 @@ func searchTable(ctx context.Context, db *sql.DB, d Dialect, t Table, cols []Col
 			}
 		}
 		if len(value) > 200 {
-			value = value[:200] + "…"
+			// Cut on a character boundary: slicing bytes left half a rune at
+			// the end of every long non-ASCII value.
+			cut, _ := clipString(value, 200)
+			value = cut.(string) + "…"
 		}
 		out = append(out, SearchMatch{
 			Schema: t.Schema, Table: t.Name, Column: column, Value: value, Row: rec,

@@ -92,7 +92,9 @@ func TestRowInsertSQLLiterals(t *testing.T) {
 		{"injection", map[string]any{"a": "'); DROP TABLE t; --"}, "'''); DROP TABLE t; --'"},
 		{"int", map[string]any{"a": int64(7)}, "7"},
 		{"float", map[string]any{"a": 1.5}, "1.5"},
-		{"bool", map[string]any{"a": true}, "1"},
+		// PostgreSQL has a boolean type and will not take an integer for it.
+		{"bool", map[string]any{"a": true}, "TRUE"},
+		{"binary as the grid shows it", map[string]any{"a": `\x00ff`}, `'\x00ff'::bytea`},
 		{"json", map[string]any{"a": map[string]any{"k": "v"}}, `'{"k":"v"}'`},
 	}
 	for _, c := range cases {
