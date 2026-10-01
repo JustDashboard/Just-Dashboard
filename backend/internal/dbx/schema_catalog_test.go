@@ -174,3 +174,46 @@ func TestSchemaCatalogRetainsUnreadableTables(t *testing.T) {
 		t.Fatalf("partial graph: %+v, %v", graph, err)
 	}
 }
+
+// SQL Server's bulk read and its per-table read are two queries, and the
+// columns information_schema describes differently from sys.columns are the
+// ones they used to disagree about: an alias type, which it names by the type
+// underneath, and a datetime2 or a time with a precision, which it leaves
+// out. The database is the test's own, so the check does not depend on which
+// one the fixture's connection string happens to name.
+func TestLiveSQLServerSchemaCatalogSpellsTypesAsTheTableReadDoes(t *testing.T) {
+	db, _ := liveOwnMSSQL(t, "jd_catalog_types")
+	execAll(t, db,
+		`CREATE SCHEMA sales`,
+		`CREATE TYPE dbo.email FROM nvarchar(320) NOT NULL`,
+		`CREATE TYPE sales.code FROM char(8)`,
+		`CREATE TABLE dbo.typed (
+			id int NOT NULL PRIMARY KEY,
+			contact dbo.email,
+			sku sales.code NULL,
+			system_name sysname,
+			seen datetime2(3) NULL,
+			at_time time(0) NULL,
+			note nvarchar(max) NULL,
+			amount decimal(12,2) NULL)`,
+		`CREATE VIEW dbo.typed_view AS SELECT id, contact, seen FROM dbo.typed`,
+	)
+	checkSchemaCatalog(t, db, mssqlDialect{}, "dbo")
+	tables, err := mssqlDialect{}.Tables(t.Context(), db, "dbo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := withSchemaCatalog(t.Context(), db, mssqlDialect{}, tables, catalogColumns)
+	types := map[string]string{}
+	for _, c := range got.columns[catalogTable{"dbo", "typed"}] {
+		types[c.Name] = c.Type
+	}
+	for column, want := range map[string]string{
+		"contact": "email", "sku": "sales.code", "system_name": "sysname",
+		"seen": "datetime2(3)", "at_time": "time(0)", "note": "nvarchar(MAX)", "amount": "decimal(12,2)",
+	} {
+		if types[column] != want {
+			t.Errorf("the bulk read says %s is %q, want %q", column, types[column], want)
+		}
+	}
+}

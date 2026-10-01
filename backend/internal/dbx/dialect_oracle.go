@@ -316,6 +316,19 @@ func (oracleDialect) Kill(ctx context.Context, db *sql.DB, pid string) error {
 		}
 	}
 	_, err := db.ExecContext(ctx, "ALTER SYSTEM KILL SESSION '"+pid+"' IMMEDIATE")
+	return oracleKillOutcome(err)
+}
+
+// oracleKillOutcome reads what Oracle answers a kill with. A session in the
+// middle of a statement cannot be removed on the spot: it is marked, the
+// statement is interrupted, and the session goes once it has rolled back. The
+// server reports that as ORA-00031 "session marked for kill", which is an
+// error to the driver and the kill having worked to everybody else — the
+// page used to show a failure for a session that was gone a second later.
+func oracleKillOutcome(err error) error {
+	if err != nil && strings.Contains(err.Error(), "ORA-00031") {
+		return nil
+	}
 	return err
 }
 

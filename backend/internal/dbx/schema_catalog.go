@@ -13,6 +13,9 @@ type schemaQueries struct {
 	columns, primary, indexes, foreign string
 	action                             func(string) string
 	nullIndexColumns                   bool
+	// scanColumn reads a row of columns for an engine whose query is not in
+	// the standard seven-column shape, and returns the table it belongs to.
+	scanColumn func(*sql.Rows) (string, Column, error)
 }
 
 type catalogTable struct{ schema, name string }
@@ -110,6 +113,14 @@ func withSchemaCatalog(ctx context.Context, db *sql.DB, d Dialect, tables []Tabl
 			}
 			columns := map[string][]Column{}
 			if err := read(catalogColumns, queries.columns, func(rows *sql.Rows) error {
+				if queries.scanColumn != nil {
+					table, column, err := queries.scanColumn(rows)
+					if err != nil {
+						return err
+					}
+					columns[table] = append(columns[table], column)
+					return nil
+				}
 				var table, nullable string
 				var column Column
 				var length, precision, scale sql.NullInt64

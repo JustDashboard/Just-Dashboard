@@ -344,6 +344,16 @@ func mssqlAliasTypeName(schema, name string) string {
 	return part(schema) + "." + part(name)
 }
 
+// mssqlColumnType is a column's type as the catalogue describes it, and what
+// kind of type it is when it is not built in. An alias type is used by its
+// own name; its length belongs to the type's definition, not to the column.
+func mssqlColumnType(name, schema string, userDefined bool, maxLength, precision, scale int) (typ, kind string) {
+	if userDefined {
+		return mssqlAliasTypeName(schema, name), "domain"
+	}
+	return mssqlTypeName(name, maxLength, precision, scale), ""
+}
+
 func (mssqlDialect) tableColumns(ctx context.Context, db *sql.DB, schema, table string) ([]Column, error) {
 	rows, err := db.QueryContext(ctx, `
 	  SELECT c.name, t.name, c.max_length, c.precision, c.scale, c.is_nullable,
@@ -385,12 +395,7 @@ func (mssqlDialect) tableColumns(ctx context.Context, db *sql.DB, schema, table 
 			&isComputed, &computed, &persist, &userDefined, &typeSchema); err != nil {
 			return nil, err
 		}
-		c.Type = mssqlTypeName(typ, maxLength, precision, scale)
-		if userDefined {
-			// An alias type is used by its own name; its length belongs to the
-			// type's definition, not to the column.
-			c.Type, c.TypeKind = mssqlAliasTypeName(typeSchema, typ), "domain"
-		}
+		c.Type, c.TypeKind = mssqlColumnType(typ, typeSchema, userDefined, maxLength, precision, scale)
 		if identity {
 			c.Identity = fmt.Sprintf("identity(%d,%d)", seed, increment)
 		}

@@ -1,5 +1,7 @@
 package dbx
 
+import "database/sql"
+
 // Templates bind the schema and selected table names. They deliberately use the
 // same catalogues, type spelling, constraint order and referential actions as
 // each dialect's table reads. No user text is interpolated into SQL.
@@ -90,9 +92,35 @@ func (mysqlDialect) schemaQueries() schemaQueries {
 	}
 }
 
+// SQL Server's columns are read from sys.columns, as a table's own detail
+// reads them (mssqlDialect.tableColumns), and spelled by the same function.
+// information_schema names an alias type by the type under it — master's
+// sysname columns came back as nvarchar(128) — and leaves the precision of a
+// datetime2 out, so the diagram and the table it was drawn from disagreed
+// about what a column is.
 func (mssqlDialect) schemaQueries() schemaQueries {
 	return schemaQueries{
-		columns: standardSchemaColumns,
+		columns: `SELECT o.name, c.name, t.name, c.max_length, c.precision, c.scale, c.is_nullable,
+ t.is_user_defined, ts.name
+ FROM sys.columns c
+ JOIN sys.objects o ON o.object_id = c.object_id
+ JOIN sys.schemas s ON s.schema_id = o.schema_id
+ JOIN sys.types t ON t.user_type_id = c.user_type_id
+ JOIN sys.schemas ts ON ts.schema_id = t.schema_id
+ WHERE s.name = {schema} AND o.name IN ({tables}) AND o.type IN ('U','V')
+ ORDER BY o.name, c.column_id`,
+		scanColumn: func(rows *sql.Rows) (string, Column, error) {
+			var (
+				table, typ, typeSchema      string
+				column                      Column
+				maxLength, precision, scale int
+				userDefined                 bool
+			)
+			err := rows.Scan(&table, &column.Name, &typ, &maxLength, &precision, &scale, &column.Nullable,
+				&userDefined, &typeSchema)
+			column.Type, column.TypeKind = mssqlColumnType(typ, typeSchema, userDefined, maxLength, precision, scale)
+			return table, column, err
+		},
 		primary: standardSchemaPrimary,
 		// Included columns are stored in the index and are not part of its key,
 		// and a filtered index is unique only among the rows it covers.
