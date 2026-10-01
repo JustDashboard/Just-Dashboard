@@ -11,7 +11,9 @@ import { mockDatabases, type DatabaseMock } from "./database-fixture"
  * what it never has is another product's mark with its own name beside it.
  * These are the claims that makes, checked where the mark is drawn: the
  * identity tile a database's home opens on, the strip over its other pages,
- * the rail's panel head and the switcher's rows.
+ * the rail's panel head and the switcher's rows — and, for the servers the
+ * dashboard cannot open, the one page that already lists them by name: the
+ * machine's services.
  *
  * The files themselves are checked too: that each is served as an image the
  * page's own origin may load, and that the dark ground shows it — a navy or a
@@ -185,6 +187,71 @@ test("the switcher draws every database as what answered", async ({ page }) => {
 })
 
 /**
+ * A server the dashboard has no driver for is still a unit on the machine,
+ * and the Services page draws a unit as the product its name says it runs.
+ * It is where these marks are on a page today, on the row tile a database's
+ * strip uses.
+ */
+const UNITS: Record<string, string> = {
+  "memcached.service": "memcached.svg",
+  "elasticsearch.service": "elasticsearch.svg",
+  "opensearch.service": "opensearch.svg",
+  "etcd.service": "etcd.svg",
+  "cassandra.service": "cassandra.svg",
+  "scylla-server.service": "scylladb.svg",
+  "neo4j.service": "neo4j.svg",
+  "couchdb.service": "couchdb.svg",
+  "nats-server.service": "nats.svg",
+  "kafka.service": "kafka.svg",
+  "cockroach.service": "cockroachdb.svg",
+  "tidb.service": "tidb.svg",
+  "yb-tserver.service": "yugabytedb.svg",
+  "ferretdb.service": "ferretdb.svg",
+}
+
+/** No mark of its own, or beside a server and not it: the page's glyph. */
+const UNMARKED_UNITS = [
+  "keydb-server.service",
+  "dragonfly.service",
+  "redpanda.service",
+  "kafka-ui.service",
+  "memcached-exporter.service",
+  "opensearch-dashboards.service",
+]
+
+test("a server with no driver is drawn as itself on the machine's services", async ({ page }) => {
+  await mockDatabases(page)
+  await page.route("**/api/v1/systemd/", (route) =>
+    route.fulfill({
+      json: {
+        available: true,
+        units: [...Object.keys(UNITS), ...UNMARKED_UNITS].map((name) => ({
+          name,
+          description: "A unit on this machine",
+          loadState: "loaded",
+          activeState: "active",
+          subState: "running",
+          unitFileState: "enabled",
+          enabled: true,
+        })),
+      },
+    }),
+  )
+  await page.goto("/processes/services")
+
+  const row = (unit: string) =>
+    page.getByRole("row").filter({ has: page.getByText(unit, { exact: true }) })
+  for (const [unit, file] of Object.entries(UNITS)) {
+    expect(await drawn(logo(row(unit), file)), unit).toBe(18)
+    await expect(anyLogo(row(unit)), `${unit} carries one mark`).toHaveCount(1)
+  }
+  for (const unit of UNMARKED_UNITS) {
+    await expect(row(unit)).toBeVisible()
+    await expect(anyLogo(row(unit)), unit).toHaveCount(0)
+  }
+})
+
+/**
  * The files this section's engines brought into the bundle. A flavour's or an
  * engine's id is its file's name, as the registry looks it up.
  */
@@ -207,10 +274,17 @@ const ENGINE_FILES = [
   "kafka",
 ].map((id) => `${id}.svg`)
 
+/**
+ * And the one it redrew: SQL Server's, which Azure SQL Edge is drawn with too.
+ * It was the collection's single-colour outline, a red wireframe that covered
+ * half a per cent of the smallest glyph.
+ */
+const MEASURED_FILES = [...ENGINE_FILES, "sqlserver.svg"]
+
 test("every engine's mark is an image this origin serves, with nothing in it but a drawing", async ({
   page,
 }) => {
-  for (const file of ENGINE_FILES) {
+  for (const file of MEASURED_FILES) {
     const response = await page.request.get(`/logos/${file}`)
     expect(response.status(), file).toBe(200)
     expect(response.headers()["content-type"], file).toContain("image/svg+xml")
@@ -227,9 +301,13 @@ test("every engine's mark is an image this origin serves, with nothing in it but
  * standing 3:1 or more against it, at the three sizes a mark is drawn: bare
  * in a line (14px), on a row's tile (18px) and on the identity tile (28px).
  *
- * MySQL's dolphin, a thin line, covers six per cent of the smallest; a mark
- * left in its navy or its black covers none, which is the failure this is
- * for. The floor is half the thinnest mark here (ScyllaDB's outline).
+ * What this guards is a file dropped in unlifted: a mark left in its navy or
+ * its black covers none of the square. It is not a measure of legibility, and
+ * its floor is not a bar a mark has cleared: it is half of what the thinnest
+ * one here covers — ScyllaDB's hairline outline, the only rendition a licensed
+ * collection has, which is faint at 14px on a screen of ordinary density and
+ * passes. A mark lifted in one of its two colours passes too. Whether a mark
+ * reads is looked at, on a sheet, when the file is added.
  */
 test("the dark ground shows every engine's mark at the sizes it is drawn", async ({ page }) => {
   await mockDatabases(page)
@@ -277,7 +355,7 @@ test("the dark ground shows every engine's mark at the sizes it is drawn", async
       })
     }
     return out
-  }, ENGINE_FILES)
+  }, MEASURED_FILES)
 
   for (const [file, sizes] of Object.entries(shares)) {
     for (const [index, size] of [14, 18, 28].entries()) {

@@ -15,6 +15,7 @@ import {
   imageProduct,
   issuerProduct,
   packageManagerProduct,
+  platformProduct,
   pm2Product,
   portProduct,
   processProduct,
@@ -555,12 +556,43 @@ describe("the database engines", () => {
     expect(unitProduct("dragonfly.service")).toBeUndefined()
   })
 
+  test("what runs beside a server under its name is not the server", () => {
+    // The same names `imageProduct` refuses on a container.
+    for (const unit of [
+      "kafka-ui.service",
+      "memcached-exporter.service",
+      "opensearch-dashboards.service",
+      "redis-exporter.service",
+      "nats-exporter.service",
+    ]) {
+      expect({ unit, product: unitProduct(unit) }).toEqual({ unit, product: undefined })
+    }
+    // An exporter is Prometheus's, and Debian names its packages so.
+    expect(seen(unitProduct("prometheus-node-exporter.service"))).toBe("prometheus")
+    expect(seen(unitProduct("prometheus-nats-exporter.service"))).toBe("prometheus")
+    // A first word in front of something else is still read.
+    expect(seen(unitProduct("etcd-defrag.timer"))).toBe("etcd")
+    expect(seen(unitProduct("kafka-connect.service"))).toBe("kafka")
+  })
+
+  test("a name every object carries is no product", () => {
+    for (const name of ["constructor", "toString", "hasOwnProperty", "__proto__", "valueOf"]) {
+      expect({ name, image: imageProduct(name) }).toEqual({ name, image: "docker" })
+      expect({ name, process: processProduct(name) }).toEqual({ name, process: undefined })
+      expect({ name, unit: unitProduct(`${name}.service`) }).toEqual({ name, unit: undefined })
+      expect({ name, program: programProduct(name) }).toEqual({ name, program: undefined })
+      expect({ name, platform: platformProduct(name) }).toEqual({ name, platform: undefined })
+      expect({ name, drawn: hasProductLogo(name) }).toEqual({ name, drawn: false })
+      expect(ProductGlyph({ id: name })).toBeNull()
+    }
+  })
+
   test("the ports the attention list names and the shells a terminal runs", () => {
     expect(seen(portProduct(11211))).toBe("memcached")
     expect(seen(portProduct(9200))).toBe("elasticsearch")
-    // The finding says "Memcached" and "Elasticsearch" of those two by number.
-    // It names neither of these, and each is two products' default: 9042 is
-    // Cassandra's and ScyllaDB's, 9092 Kafka's and Redpanda's.
+    // The finding says "Memcached" and "Elasticsearch" of those two by number,
+    // and the mark goes with that word. It has no word for these two, and
+    // nothing says whether 9042 is Cassandra or ScyllaDB, 9092 Kafka or Redpanda.
     expect(portProduct(9042)).toBeUndefined()
     expect(portProduct(9092)).toBeUndefined()
     const programs = {
