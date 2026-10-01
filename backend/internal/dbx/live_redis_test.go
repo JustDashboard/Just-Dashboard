@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -359,7 +360,169 @@ func TestLiveRedisRenamingAMember(t *testing.T) {
 	if got := client.ZRange(ctx, string(zset), 0, -1).Val(); len(got) != 1 || got[0] != "new" {
 		t.Errorf("sorted set after renaming a member = %v", got)
 	}
+	// Renaming onto a member that is already there is not a rename: it would
+	// take the old member out and put nothing in, or overwrite a score.
+	client.ZAdd(ctx, string(zset), redis.Z{Score: 9, Member: "taken"})
+	conflict = nil
+	_, err = RedisWriteValue(ctx, client, nil, RedisWrite{Key: zset, Type: "zset", Value: rb("taken"), Score: &score, Replace: rb("new")})
+	if !errors.As(err, &conflict) {
+		t.Errorf("renaming a sorted-set member onto an existing one: %v", err)
+	}
+	if got := client.ZRangeWithScores(ctx, string(zset), 0, -1).Val(); len(got) != 2 || got[0].Member != "new" || got[1].Score != 9 {
+		t.Errorf("sorted set after the refused rename = %v", got)
+	}
+	// The same member sent as its own replacement is a change of score.
+	seven := RedisScore(7)
+	mustWrite(t, client, RedisWrite{Key: zset, Type: "zset", Value: rb("new"), Score: &seven, Replace: rb("new")})
+	if got := client.ZScore(ctx, string(zset), "new").Val(); got != 7 {
+		t.Errorf("score after re-sending the member = %v", got)
+	}
+
+	set := RedisBytes(redisTestPrefix + "rename:s")
+	client.SAdd(ctx, string(set), "a", "b")
+	mustWrite(t, client, RedisWrite{Key: set, Type: "set", Value: rb("c"), Replace: rb("a")})
+	if got := client.SMembers(ctx, string(set)).Val(); len(got) != 2 || !client.SIsMember(ctx, string(set), "c").Val() {
+		t.Errorf("set after renaming a member = %v", got)
+	}
+	conflict = nil
+	_, err = RedisWriteValue(ctx, client, nil, RedisWrite{Key: set, Type: "set", Value: rb("c"), Replace: rb("b")})
+	if !errors.As(err, &conflict) {
+		t.Errorf("renaming a set member onto an existing one: %v", err)
+	}
+	if got := client.SCard(ctx, string(set)).Val(); got != 2 || !client.SIsMember(ctx, string(set), "b").Val() {
+		t.Errorf("the refused rename removed a member: %d left", got)
+	}
+	// A refusal names no member: the sentence is recorded, and members are not.
+	if conflict != nil && (strings.Contains(conflict.Error(), `"c"`) || strings.Contains(conflict.Error(), `"b"`)) {
+		t.Errorf("the refusal quotes a member: %v", conflict)
+	}
 }
+
+// An expiry further off than a time.Duration holds — 292 years — used to wrap
+// to a negative one on its way to the server, and Redis reads a negative
+// expiry as a delete: "expires in the year 9999" removed the key, and on a
+// hash write removed the whole hash. The number now goes as it was given.
+func TestLiveRedisFarExpiryIsNotADelete(t *testing.T) {
+	client, _ := redisTestClient(t, "JD_TEST_REDIS_DSN")
+	ctx := context.Background()
+	p := redisTestPrefix + "far:"
+	key := RedisBytes(p + "k")
+	client.Set(ctx, string(key), "v", 0)
+	left := func(k RedisBytes) int64 {
+		ms, _ := client.Do(ctx, "PTTL", string(k)).Int64()
+		return ms
+	}
+
+	year10000 := int64(253402300800000)
+	wide, wideMs := int64(9223372037), int64(9223372036855)
+	for name, e := range map[string]RedisExpiry{
+		"at the year 10000":            {At: &year10000},
+		"in 292 years, in seconds":     {Seconds: &wide},
+		"in 292 years, in millis":      {Millis: &wideMs},
+		"at the last moment there is":  {At: ptr(int64(redisMaxExpiryMs))},
+		"as many seconds as there are": {Seconds: ptr((redisMaxExpiryMs - time.Now().UnixMilli()) / 1000)},
+	} {
+		pttl, err := RedisSetExpiry(ctx, client, key, e)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if client.Exists(ctx, string(key)).Val() != 1 {
+			t.Fatalf("%s: the key is gone", name)
+		}
+		// What is reported is what the server holds, not that number folded
+		// through a duration.
+		if server := left(key); pttl <= 9_000_000_000_000 || server > pttl || pttl-server > 5000 {
+			t.Errorf("%s: reported %d ms, the server says %d", name, pttl, server)
+		}
+	}
+	// Past what any server is trusted to hold: refused, and nothing changes.
+	before := left(key)
+	for name, e := range map[string]RedisExpiry{
+		"a moment past the last": {At: ptr(int64(redisMaxExpiryMs + 1))},
+		"every second there is":  {Seconds: ptr(int64(math.MaxInt64 / 1000))},
+		"every millisecond":      {Millis: ptr(int64(math.MaxInt64))},
+	} {
+		if _, err := RedisSetExpiry(ctx, client, key, e); !errors.Is(err, errRedisExpiryTooFar) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if after := left(key); client.Exists(ctx, string(key)).Val() != 1 || before-after > 5000 {
+		t.Errorf("a refused expiry changed the key: %d ms before, %d after", before, after)
+	}
+
+	// Read back everywhere a TTL is shown.
+	if _, err := RedisSetExpiry(ctx, client, key, RedisExpiry{At: &year10000}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := RedisKeyMetadata(ctx, client, nil, key)
+	if err != nil || meta.PTTL < 200_000_000_000_000 || meta.TTL < 200_000_000_000 {
+		t.Errorf("metadata of a key expiring in the year 10000: %+v, %v", meta, err)
+	} else if meta.ExpiresAt != nil {
+		// No date with a four-digit year names that moment.
+		t.Errorf("expiresAt = %v for a moment past the year 9999", meta.ExpiresAt)
+	}
+	if _, err := RedisSetExpiry(ctx, client, key, RedisExpiry{Seconds: &wide}); err != nil {
+		t.Fatal(err)
+	}
+	if meta, err = RedisKeyMetadata(ctx, client, nil, key); err != nil || meta.ExpiresAt == nil || meta.ExpiresAt.Year() < 2300 {
+		t.Errorf("metadata of a key expiring in 292 years: %+v, %v", meta, err)
+	}
+	page, err := RedisScanKeys(ctx, client, nil, RedisScanOptions{Pattern: string(key)})
+	if err != nil || len(page.Keys) != 1 || page.Keys[0].TTL < 9_000_000_000 {
+		t.Errorf("listing a key expiring in 292 years: %+v, %v", page, err)
+	}
+	members, err := RedisReadMembers(ctx, client, nil, RedisMembersOptions{Key: key})
+	if err != nil || members.PTTL < 9_000_000_000_000 || members.TTL < 9_000_000_000 {
+		t.Errorf("reading a key expiring in 292 years: ttl %d pttl %d, %v", members.TTL, members.PTTL, err)
+	}
+	copied := RedisBytes(p + "copy")
+	if err := RedisCopyKey(ctx, client, nil, RedisCopy{From: key, To: copied}); err != nil || left(copied) < 9_000_000_000_000 {
+		t.Errorf("a copy of it: %d ms left, %v", left(copied), err)
+	}
+
+	// The same number on a write. On a collection it is a command of its
+	// own, and it was the collection that went.
+	hash := RedisBytes(p + "h")
+	client.HSet(ctx, string(hash), "a", "1", "b", "2")
+	mustWrite(t, client, RedisWrite{Key: hash, Type: "hash", Field: rb("c"), Value: rb("3"), TTL: &wide})
+	if n := client.HLen(ctx, string(hash)).Val(); n != 3 || left(hash) < 9_000_000_000_000 {
+		t.Errorf("hash after a write with a far expiry: %d fields, %d ms left", n, left(hash))
+	}
+	str := RedisBytes(p + "s")
+	mustWrite(t, client, RedisWrite{Key: str, Value: rb("v"), TTL: &wide})
+	if client.Get(ctx, string(str)).Val() != "v" || left(str) < 9_000_000_000_000 {
+		t.Errorf("string after a write with a far expiry: %d ms left", left(str))
+	}
+	// And a short one still is one.
+	short := int64(90)
+	mustWrite(t, client, RedisWrite{Key: str, Value: rb("w"), TTL: &short})
+	if ms := left(str); ms <= 0 || ms > 90_000 {
+		t.Errorf("string after a write with a 90 s expiry: %d ms left", ms)
+	}
+	tooFar := int64(math.MaxInt64 / 1000)
+	if _, err := RedisWriteValue(ctx, client, nil, RedisWrite{Key: hash, Type: "hash", Field: rb("d"), Value: rb("4"), TTL: &tooFar}); !errors.Is(err, errRedisExpiryTooFar) {
+		t.Errorf("a hash write with an expiry past what a server holds: %v", err)
+	}
+	if client.HLen(ctx, string(hash)).Val() != 3 {
+		t.Error("the refused write changed the hash")
+	}
+
+	// And on every key a pattern matches.
+	res, err := RedisBulk(ctx, client, nil, RedisBulkOptions{Pattern: redisGlobEscape(p) + "*", Action: "expire", TTL: wide})
+	if err != nil || res.Affected != 4 {
+		t.Fatalf("bulk expiry in 292 years: %+v, %v", res, err)
+	}
+	for _, k := range []RedisBytes{key, copied, hash, str} {
+		if client.Exists(ctx, string(k)).Val() != 1 || left(k) < 9_000_000_000_000 {
+			t.Errorf("%s after the bulk expiry: %d ms left", k, left(k))
+		}
+	}
+	if _, err := RedisBulk(ctx, client, nil, RedisBulkOptions{Pattern: redisGlobEscape(p) + "*", Action: "expire", TTL: tooFar}); !errors.Is(err, errRedisExpiryTooFar) {
+		t.Errorf("bulk expiry past what a server holds: %v", err)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
 
 // HSET clears a field's own expiry the way SET clears a key's, so editing a
 // field's value has to put it back.
@@ -1169,6 +1332,27 @@ func TestLiveRedisDatabaseSelection(t *testing.T) {
 	defer other.Close()
 	if other.Exists(ctx, key).Val() != 1 {
 		t.Error("asking for the database by number did not reach it")
+	}
+
+	// A database the server does not have is a fault in what was asked for,
+	// and is told apart from a server that cannot be reached.
+	var refused *RedisDatabaseError
+	if c, err := RedisOpen(ctx, dsn, RedisOpenOptions{DB: 9999}); !errors.As(err, &refused) || refused.DB != 9999 {
+		if c != nil {
+			c.Close()
+		}
+		t.Errorf("opening database 9999: %v", err)
+	}
+	refused = nil
+	if c, err := RedisConsoleOpen(ctx, dsn, 9999, time.Second); !errors.As(err, &refused) || refused.DB != 9999 {
+		if c != nil {
+			c.Close()
+		}
+		t.Errorf("a console on database 9999: %v", err)
+	}
+	var misread *RedisDatabaseError
+	if _, err := RedisOpen(ctx, "redis://127.0.0.1:1/0", RedisOpenOptions{DB: 3}); err == nil || errors.As(err, &misread) {
+		t.Errorf("a server that is not there: %v", err)
 	}
 }
 
@@ -2056,6 +2240,67 @@ func TestLiveRedisAdminACL(t *testing.T) {
 	if _, err := RedisACLDeleteUser(ctx, client, "default"); err == nil {
 		t.Error("removing the default user was accepted")
 	}
+
+	// Nor is it one to take commands or keys away from: the command that
+	// would give them back is one of them. Tried as an account made for the
+	// purpose, so that nothing here touches the one the other tests use.
+	const dash = "jdb4-dashboard"
+	client.Do(ctx, "ACL", "DELUSER", dash)
+	t.Cleanup(func() { client.Do(context.Background(), "ACL", "DELUSER", dash) })
+	if _, err := RedisACLSetUser(ctx, client, RedisACLSpec{
+		Name: dash, Create: true, Enabled: &on, Password: &password,
+		Keys: &[]string{"*"}, Channels: &[]string{"*"}, Commands: &[]string{"+@all"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	own := redis.NewClient(&redis.Options{
+		Network: opt.Network, Addr: opt.Addr, TLSConfig: opt.TLSConfig,
+		Username: dash, Password: password, DB: opt.DB,
+	})
+	defer own.Close()
+	for what, change := range map[string]RedisACLSpec{
+		"no commands":                {Commands: &[]string{}},
+		"all but the dangerous ones": {Commands: &[]string{"+@all", "-@dangerous"}},
+		"no keys":                    {Keys: &[]string{}},
+		"some keys":                  {Keys: &[]string{"app:*"}},
+		"switched off":               {Enabled: &off},
+	} {
+		change.Name = dash
+		if _, err := RedisACLSetUser(ctx, own, change); err == nil || !strings.Contains(err.Error(), "the dashboard connects as") {
+			t.Errorf("leaving the dashboard's own account with %s: %v", what, err)
+		}
+	}
+	if after, err := RedisACLUsers(ctx, own); err != nil {
+		t.Fatalf("the dashboard's own account can no longer read the users: %v", err)
+	} else {
+		for _, u := range after {
+			if u.Name == dash && (!u.Self || !u.Unrestricted || !u.Enabled) {
+				t.Errorf("the dashboard's own account after the refused changes: %+v", u)
+			}
+		}
+	}
+	// The same changes to another account are that account's business.
+	if _, err := RedisACLSetUser(ctx, client, RedisACLSpec{Name: dash, Channels: &[]string{"events.*"}}); err != nil {
+		t.Errorf("changing its channels from another account: %v", err)
+	}
+	// What keeps everything is accepted, and a new password comes with a
+	// warning that the saved connection now holds the old one.
+	kept, err := RedisACLSetUser(ctx, own, RedisACLSpec{Name: dash, Commands: &[]string{"+@all"}, Keys: &[]string{"allkeys"}})
+	if err != nil || !kept.User.Unrestricted || strings.Contains(kept.Notice, "old password") {
+		t.Errorf("re-stating full access on the dashboard's own account: %+v, %v", kept, err)
+	}
+	next := "another long password"
+	rotated, err := RedisACLSetUser(ctx, own, RedisACLSpec{Name: dash, Password: &next})
+	if err != nil || rotated.User.Name != dash || !strings.Contains(rotated.Notice, "old password") {
+		t.Errorf("changing the dashboard's own password: %+v, %v", rotated, err)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", rotated), next) {
+		t.Error("the new password is in the reply")
+	}
+	// Somebody else's password is theirs; nothing of the dashboard's changed.
+	if other, err := RedisACLSetUser(ctx, client, RedisACLSpec{Name: dash, Password: &password}); err != nil || strings.Contains(other.Notice, "old password") {
+		t.Errorf("changing another account's password: %+v, %v", other, err)
+	}
 	if _, err := RedisACLDeleteUser(ctx, client, name); err != nil {
 		t.Fatal(err)
 	}
@@ -2134,6 +2379,39 @@ func TestLiveRedisFlavors(t *testing.T) {
 				t.Errorf("list after an insert = %v", got)
 			}
 			mustWrite(t, client, RedisWrite{Key: RedisBytes(p + "x"), Type: "stream", Entries: [][2]RedisBytes{{"f", "v"}}})
+
+			// An expiry centuries off is never a delete, on any of them. The
+			// servers differ in what they make of one — Redis 5 keeps it as
+			// given, Dragonfly cuts a span short at eight years and refuses a
+			// moment that far away — and whichever it is, the key is still
+			// there and what is reported is what the server holds.
+			far, year10000 := int64(9223372037), int64(253402300800000)
+			for what, e := range map[string]RedisExpiry{
+				"seconds":   {Seconds: &far},
+				"millis":    {Millis: ptr(far * 1000)},
+				"a moment":  {At: &year10000},
+				"the limit": {At: ptr(int64(redisMaxExpiryMs))},
+			} {
+				pttl, err := RedisSetExpiry(ctx, client, RedisBytes(p+"s"), e)
+				server, _ := client.Do(ctx, "PTTL", p+"s").Int64()
+				if client.Get(ctx, p+"s").Val() != "v2" {
+					t.Fatalf("a far expiry in %s deleted the key (%v)", what, err)
+				}
+				if err == nil && (pttl <= 0 || server > pttl || pttl-server > 5000) {
+					t.Errorf("a far expiry in %s reported %d ms, the server says %d", what, pttl, server)
+				}
+			}
+			mustWrite(t, client, RedisWrite{Key: RedisBytes(p + "h"), Type: "hash", Field: rb("f"), Value: rb("v"), TTL: &far})
+			mustWrite(t, client, RedisWrite{Key: RedisBytes(p + "s"), Value: rb("v3"), TTL: &far})
+			if client.HGet(ctx, p+"h", "f").Val() != "v" || client.Get(ctx, p+"s").Val() != "v3" {
+				t.Fatal("a write with a far expiry deleted what it wrote to")
+			}
+			for _, k := range []string{p + "h", p + "s"} {
+				if ms, _ := client.Do(ctx, "PTTL", k).Int64(); ms <= 0 {
+					t.Errorf("%s has %d ms left after a write with a far expiry", k, ms)
+				}
+			}
+			client.Persist(ctx, p+"h")
 
 			meta, err := RedisKeyMetadata(ctx, client, profile, RedisBytes(p+"h"))
 			if err != nil {

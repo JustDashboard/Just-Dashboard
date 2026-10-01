@@ -141,6 +141,57 @@ func TestRedisClassify(t *testing.T) {
 		// A field that happens to be called maxlen is not the option.
 		{"XADD s * maxlen 5", RedisClassWrite, false},
 
+		// Storing a result over another key replaces that key, and an empty
+		// result deletes it: SINTERSTORE victim nosuch is DEL victim.
+		{"SINTERSTORE dst a b", RedisClassDangerous, false},
+		{"SUNIONSTORE dst a b", RedisClassDangerous, false},
+		{"SDIFFSTORE dst a b", RedisClassDangerous, false},
+		{"ZINTERSTORE dst 2 a b", RedisClassDangerous, false},
+		{"ZUNIONSTORE dst 2 a b", RedisClassDangerous, false},
+		{"ZDIFFSTORE dst 2 a b", RedisClassDangerous, false},
+		{"ZRANGESTORE dst src 0 -1", RedisClassDangerous, false},
+		{"GEOSEARCHSTORE dst src FROMLONLAT 0 0 BYRADIUS 1 km", RedisClassDangerous, false},
+		{"BITOP AND dst a b", RedisClassDangerous, false},
+		{"SORT l", RedisClassWrite, false},
+		{"SORT l LIMIT 0 5 store dst", RedisClassDangerous, false},
+		{"GEORADIUS g 0 0 1 km", RedisClassWrite, false},
+		{"GEORADIUS g 0 0 1 km STORE dst", RedisClassDangerous, false},
+		{"GEORADIUSBYMEMBER g m 1 km STOREDIST dst", RedisClassDangerous, false},
+		{"JSON.MERGE doc $ null", RedisClassDangerous, false},
+
+		// An expiry is a write while it is still to come, however soon, and a
+		// delete once it has passed — whichever command carries it.
+		{"PEXPIRE k 1", RedisClassWrite, false},
+		{"PEXPIREAT k 1", RedisClassDangerous, false},
+		{"SET k v EX 60", RedisClassWrite, false},
+		{"SET k v PXAT 1", RedisClassDangerous, false},
+		{"SET k v NX exat 1", RedisClassDangerous, false},
+		{"SET k v EX 0", RedisClassDangerous, false},
+		// A value that happens to be called EXAT is not the option.
+		{"SET k EXAT 1", RedisClassWrite, false},
+		{"SETEX k 0 v", RedisClassDangerous, false},
+		{"PSETEX k 5000 v", RedisClassWrite, false},
+		{"GETEX k EX 100", RedisClassWrite, false},
+		{"GETEX k PXAT 1", RedisClassDangerous, false},
+		{"GETEX k PERSIST", RedisClassWrite, false},
+		{"HEXPIRE h 60 FIELDS 1 f", RedisClassWrite, false},
+		{"HEXPIRE h 0 FIELDS 1 f", RedisClassDangerous, false},
+		{"HPEXPIREAT h 1 FIELDS 1 f", RedisClassDangerous, false},
+		{"HEXPIREAT h " + future + " FIELDS 1 f", RedisClassWrite, false},
+		{"HSETEX h EX 0 FIELDS 1 f v", RedisClassDangerous, false},
+		{"HSETEX h EX 60 FIELDS 1 f v", RedisClassWrite, false},
+		// After FIELDS it is a field and its value, whatever they spell.
+		{"HSETEX h FIELDS 1 EX 0", RedisClassWrite, false},
+		{"HGETEX h PXAT 1 FIELDS 1 f", RedisClassDangerous, false},
+		{"MSETEX 1 k v PXAT 1", RedisClassDangerous, false},
+		{"MSETEX 1 EX 0", RedisClassWrite, false},
+		// Far enough off to overflow the sum an older server makes, which
+		// leaves a moment long past.
+		{"EXPIRE k 9223372036854775807", RedisClassDangerous, false},
+		{"PEXPIRE k 9223372036854775807", RedisClassDangerous, false},
+		{"SET k v EX 9223372036854775807", RedisClassDangerous, false},
+		{"EXPIREAT k 253402300800", RedisClassWrite, false},
+
 		// Nothing here can be a request and a reply.
 		{"SUBSCRIBE ch", RedisClassBlocked, false},
 		{"PSUBSCRIBE *", RedisClassBlocked, false},
@@ -177,6 +228,18 @@ func TestRedisClassify(t *testing.T) {
 		{"XREAD BLOCK 2000 STREAMS s $", RedisClassRead, false},
 		{"XREADGROUP GROUP g c BLOCK 0 STREAMS s >", RedisClassBlocked, false},
 		{"XREADGROUP GROUP g c STREAMS s >", RedisClassWrite, false},
+		// A group or a consumer may be named anything, an option included.
+		{"XREADGROUP GROUP STREAMS c BLOCK 0 STREAMS s >", RedisClassBlocked, false},
+		{"XREADGROUP GROUP g STREAMS BLOCK 0 STREAMS s >", RedisClassBlocked, false},
+		{"XREADGROUP GROUP BLOCK 0 STREAMS s >", RedisClassWrite, false},
+		// The server takes the options in any order and acts on the last
+		// BLOCK; every one of them is held to the rule.
+		{"XREADGROUP BLOCK 0 GROUP g c STREAMS s >", RedisClassBlocked, false},
+		{"XREAD BLOCK 100 BLOCK 0 STREAMS s $", RedisClassBlocked, false},
+		{"XREAD BLOCK 0 BLOCK 100 STREAMS s $", RedisClassBlocked, false},
+		{"XREAD COUNT STREAMS BLOCK 0 STREAMS s $", RedisClassBlocked, false},
+		{"XREAD COUNT 5 BLOCK 100 STREAMS s $", RedisClassRead, false},
+		{"XREAD BLOCK", RedisClassBlocked, false},
 		{"WAIT 1 0", RedisClassBlocked, false},
 		{"WAIT 1 100", RedisClassWrite, false},
 
@@ -233,8 +296,26 @@ func TestRedisClassifyFailsClosed(t *testing.T) {
 	}
 	for _, c := range cases {
 		flags := c.flags
-		if got := RedisClassify([]string{"MODULE.NEWCOMMAND", "k"}, &flags); got.Class != c.want {
+		got := RedisClassify([]string{"MODULE.NEWCOMMAND", "k"}, &flags)
+		if got.Class != c.want {
 			t.Errorf("%s: classified %s, want %s", c.name, got.Class, c.want)
+		}
+		// What the server keeps to its administrators needs the dashboard's.
+		administrative := strings.Contains(c.name, "administrative") || strings.Contains(c.name, "upper-case")
+		if got.Admin != administrative {
+			t.Errorf("%s: admin = %v, want %v", c.name, got.Admin, administrative)
+		}
+	}
+	// One quoted word that spells a subcommand's row is not that subcommand:
+	// the server is sent a single word it does not know. It is nobody's
+	// command, and is placed as one.
+	for _, word := range []string{"CONFIG GET", "config set", "ACL DELUSER", "acl\tlist", "XINFO STREAM", "GET k"} {
+		got := RedisClassify([]string{word}, nil)
+		if got.Known || got.Class != RedisClassDangerous {
+			t.Errorf("the single word %q classified %s known=%v, want dangerous and unknown", word, got.Class, got.Known)
+		}
+		if got := RedisClassify([]string{word, "x", "y"}, nil); got.Known || got.Class != RedisClassDangerous {
+			t.Errorf("the word %q with arguments classified %s known=%v, want dangerous and unknown", word, got.Class, got.Known)
 		}
 	}
 	// For a command the table does hold, the server's flags can only make it
@@ -330,6 +411,18 @@ func TestRedisCommandSubjectLeavesValuesOut(t *testing.T) {
 		"ACL DELUSER a b":                           {"a", "b"},
 		"GET k":                                     {},
 		"SET session:1 the-token-that-must-not-log": {},
+		// With nothing after them there is nothing to name — and nothing to
+		// read past the end of.
+		"CONFIG GET":  {},
+		"CONFIG SET":  {},
+		"ACL DELUSER": {},
+		"ACL SETUSER": {},
+		"CONFIG":      {},
+		// One quoted word is not a container and its subcommand.
+		`"CONFIG GET"`:               {},
+		`'acl deluser'`:              {},
+		`"CONFIG SET" requirepass x`: {},
+		`"ACL DELUSER" a b`:          {},
 	}
 	for line, want := range cases {
 		args, _ := RedisParseCommand(line)

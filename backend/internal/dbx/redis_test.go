@@ -2,12 +2,16 @@ package dbx
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // Pure-logic tests for the Redis layer: everything here runs without a
@@ -673,5 +677,112 @@ func TestRedisWireHelpers(t *testing.T) {
 	}
 	if _, _, err := redisReadLine(rd, 100); err == nil {
 		t.Error("reading past the end returned no error")
+	}
+}
+
+// An expiry reaches the server as the number it was given, and only when the
+// moment it names is one every server can hold.
+func TestRedisExpiryRange(t *testing.T) {
+	now := time.UnixMilli(1_760_000_000_000)
+	room := redisMaxExpiryMs - now.UnixMilli()
+	cases := []struct {
+		n, unitMs int64
+		want      bool
+	}{
+		{1, 1000, true},
+		{60, 1000, true},
+		// The year 9999, in seconds and in milliseconds from now.
+		{251_642_300_800, 1000, true},
+		{251_642_300_800_000, 1, true},
+		// What used to wrap a time.Duration and delete the key.
+		{9_223_372_037, 1000, true},
+		{9_223_372_036_855, 1, true},
+		// The last moment allowed, and the first one that is not.
+		{room, 1, true},
+		{room + 1, 1, false},
+		{room / 1000, 1000, true},
+		{room/1000 + 1, 1000, false},
+		{math.MaxInt64, 1000, false},
+		{math.MaxInt64, 1, false},
+		// Not an expiry at all; what a caller does with it is its own rule.
+		{0, 1000, true},
+		{-5, 1, true},
+	}
+	for _, c := range cases {
+		if got := redisExpiryInRange(c.n, c.unitMs, now); got != c.want {
+			t.Errorf("redisExpiryInRange(%d, %d) = %v, want %v", c.n, c.unitMs, got, c.want)
+		}
+	}
+
+	far, near := int64(math.MaxInt64/1000), int64(9_223_372_037)
+	for _, typ := range []string{"string", "hash", "set", "stream"} {
+		w := RedisWrite{Key: "k", Type: typ, Value: rb("v"), Field: rb("f"), TTL: &far, Entries: [][2]RedisBytes{{"f", "v"}}}
+		if err := w.normalise(); !errors.Is(err, errRedisExpiryTooFar) {
+			t.Errorf("a %s write with an expiry past what a server holds: %v", typ, err)
+		}
+		w.TTL = &near
+		if err := w.normalise(); err != nil {
+			t.Errorf("a %s write expiring in 292 years: %v", typ, err)
+		}
+	}
+}
+
+// The number a TTL reply carries is the number reported: a time.Duration in
+// between holds 292 years and turns anything longer into a negative one.
+func TestRedisTTLKeepsTheServersNumber(t *testing.T) {
+	ctx := context.Background()
+	for _, n := range []int64{-2, -1, 0, 1, 86400, 9_223_372_037, 251_642_300_800_000, math.MaxInt64} {
+		cmd := redis.NewIntCmd(ctx, "pttl", "k")
+		cmd.SetVal(n)
+		if got := redisTTL(cmd); got != n {
+			t.Errorf("redisTTL(%d) = %d", n, got)
+		}
+	}
+	failed := redis.NewIntCmd(ctx, "pttl", "k")
+	failed.SetErr(errors.New("connection reset"))
+	if got := redisTTL(failed); got != -2 {
+		t.Errorf("a reply that could not be read = %d, want -2", got)
+	}
+}
+
+// The dashboard's own account keeps every command on every key. Anything
+// less, and the command that would give them back is among what it lost.
+func TestRedisACLSpecNarrowsSelf(t *testing.T) {
+	on, off := true, false
+	password := "a-long-enough-password"
+	list := func(items ...string) *[]string { return &items }
+	cases := []struct {
+		name   string
+		spec   RedisACLSpec
+		refuse bool
+	}{
+		{"switched off", RedisACLSpec{Enabled: &off}, true},
+		{"switched on", RedisACLSpec{Enabled: &on}, false},
+		{"no commands at all", RedisACLSpec{Commands: list()}, true},
+		{"every command but the dangerous ones", RedisACLSpec{Commands: list("+@all", "-@dangerous")}, true},
+		{"reads only", RedisACLSpec{Commands: list("+@read")}, true},
+		{"every command", RedisACLSpec{Commands: list("+@all")}, false},
+		{"every command, by its other name", RedisACLSpec{Commands: list("allcommands")}, false},
+		{"taken away and given back", RedisACLSpec{Commands: list("-@dangerous", "+@all")}, false},
+		{"no keys", RedisACLSpec{Keys: list()}, true},
+		{"some keys", RedisACLSpec{Keys: list("app:*")}, true},
+		{"every key", RedisACLSpec{Keys: list("*")}, false},
+		{"every key, by its other name", RedisACLSpec{Keys: list("allkeys")}, false},
+		{"every key among others", RedisACLSpec{Keys: list("app:*", "~*")}, false},
+		{"every command on some keys", RedisACLSpec{Commands: list("+@all"), Keys: list("app:*")}, true},
+		// Neither is access to keys or commands.
+		{"a new password", RedisACLSpec{Password: &password}, false},
+		{"other channels", RedisACLSpec{Channels: list("events.*")}, false},
+		{"a new password and fewer commands", RedisACLSpec{Password: &password, Commands: list("+@read")}, true},
+	}
+	for _, c := range cases {
+		c.spec.Name = "dashboard"
+		why := c.spec.narrowsSelf()
+		if (why != "") != c.refuse {
+			t.Errorf("%s: narrowsSelf() = %q, want refused=%v", c.name, why, c.refuse)
+		}
+		if strings.Contains(why, password) {
+			t.Errorf("%s: the refusal carries the password", c.name)
+		}
 	}
 }

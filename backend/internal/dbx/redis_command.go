@@ -25,11 +25,13 @@ import (
 // There are four classes:
 //
 //   - read       cannot change anything.
-//   - write      adds or overwrites data, or changes an expiry.
+//   - write      adds data, overwrites the value it names, or sets an expiry
+//     that has yet to arrive.
 //   - dangerous  removes data, runs code, or changes the server itself. The
 //     same things the key browser's delete button and the configuration page
 //     ask the destructive capability for, so the console is not a cheaper way
-//     to do them.
+//     to do them. A command that stores its result over another key is here
+//     too: an empty result deletes that key.
 //   - blocked    cannot work over one request and one reply: a subscription,
 //     a transaction, MONITOR, a pop that waits forever — or would take the
 //     server down from a text box.
@@ -253,6 +255,7 @@ func buildRedisRules() (map[string]redisRule, map[string]bool) {
 	const (
 		removesKeys    = "deletes keys"
 		removesMembers = "removes members from a collection"
+		replacesTarget = "replaces whatever key is at the destination, and deletes it when there is nothing to store"
 		runsCode       = "runs a script on the server, which can do anything a client can"
 		changesServer  = "changes the server itself, for every client"
 		noSession      = "needs a connection that stays open, and each console command gets its own"
@@ -264,8 +267,13 @@ func buildRedisRules() (map[string]redisRule, map[string]bool) {
 	write("string", "SET", "SETNX", "SETEX", "PSETEX", "MSET", "MSETNX", "MSETEX", "GETSET", "GETEX",
 		"APPEND", "SETRANGE", "INCR", "INCRBY", "INCRBYFLOAT", "DECR", "DECRBY")
 	danger("string", removesKeys, "GETDEL", "DELEX")
+	check(redisCheckExpiry, "SETEX", "PSETEX")
+	check(redisCheckExpiryOptions(3, ""), "SET")
+	check(redisCheckExpiryOptions(2, ""), "GETEX")
+	check(redisCheckMSetEx, "MSETEX")
 	read("bitmap", "BITCOUNT", "BITPOS", "GETBIT", "BITFIELD_RO")
-	write("bitmap", "SETBIT", "BITOP", "BITFIELD")
+	write("bitmap", "SETBIT", "BITFIELD")
+	danger("bitmap", replacesTarget, "BITOP")
 
 	// --- generic ---
 	read("generic", "EXISTS", "TYPE", "TTL", "PTTL", "EXPIRETIME", "PEXPIRETIME", "SCAN", "KEYS",
@@ -277,6 +285,7 @@ func buildRedisRules() (map[string]redisRule, map[string]bool) {
 	slow("KEYS")
 	check(redisCheckExpiry, "EXPIRE", "PEXPIRE", "EXPIREAT", "PEXPIREAT")
 	check(redisCheckReplace, "COPY", "RESTORE")
+	check(redisCheckStore, "SORT")
 	container(RedisClassRead, "generic", "", "OBJECT")
 	read("generic", "OBJECT ENCODING", "OBJECT FREQ", "OBJECT IDLETIME", "OBJECT REFCOUNT", "OBJECT HELP")
 	write("generic", "WAIT", "WAITAOF")
@@ -289,6 +298,8 @@ func buildRedisRules() (map[string]redisRule, map[string]bool) {
 	write("hash", "HSET", "HSETNX", "HMSET", "HSETEX", "HGETEX", "HINCRBY", "HINCRBYFLOAT",
 		"HEXPIRE", "HPEXPIRE", "HEXPIREAT", "HPEXPIREAT", "HPERSIST")
 	danger("hash", removesMembers, "HDEL", "HGETDEL")
+	check(redisCheckExpiry, "HEXPIRE", "HPEXPIRE", "HEXPIREAT", "HPEXPIREAT")
+	check(redisCheckExpiryOptions(2, "FIELDS"), "HSETEX", "HGETEX")
 
 	// --- lists ---
 	read("list", "LRANGE", "LINDEX", "LLEN", "LPOS")
@@ -304,14 +315,16 @@ func buildRedisRules() (map[string]redisRule, map[string]bool) {
 	// --- sets ---
 	read("set", "SMEMBERS", "SISMEMBER", "SMISMEMBER", "SCARD", "SRANDMEMBER", "SSCAN",
 		"SINTER", "SUNION", "SDIFF", "SINTERCARD")
-	write("set", "SADD", "SMOVE", "SINTERSTORE", "SUNIONSTORE", "SDIFFSTORE")
+	write("set", "SADD", "SMOVE")
 	danger("set", removesMembers, "SREM", "SPOP")
+	danger("set", replacesTarget, "SINTERSTORE", "SUNIONSTORE", "SDIFFSTORE")
 
 	// --- sorted sets ---
 	read("sorted-set", "ZRANGE", "ZREVRANGE", "ZRANGEBYSCORE", "ZREVRANGEBYSCORE", "ZRANGEBYLEX",
 		"ZREVRANGEBYLEX", "ZSCORE", "ZMSCORE", "ZRANK", "ZREVRANK", "ZCARD", "ZCOUNT", "ZLEXCOUNT",
 		"ZRANDMEMBER", "ZSCAN", "ZINTER", "ZUNION", "ZDIFF", "ZINTERCARD")
-	write("sorted-set", "ZADD", "ZINCRBY", "ZINTERSTORE", "ZUNIONSTORE", "ZDIFFSTORE", "ZRANGESTORE")
+	write("sorted-set", "ZADD", "ZINCRBY")
+	danger("sorted-set", replacesTarget, "ZINTERSTORE", "ZUNIONSTORE", "ZDIFFSTORE", "ZRANGESTORE")
 	danger("sorted-set", removesMembers, "ZREM", "ZPOPMIN", "ZPOPMAX", "ZMPOP", "ZREMRANGEBYRANK",
 		"ZREMRANGEBYSCORE", "ZREMRANGEBYLEX", "BZPOPMIN", "BZPOPMAX", "BZMPOP")
 	check(redisCheckBlockLast, "BZPOPMIN", "BZPOPMAX")
@@ -333,7 +346,9 @@ func buildRedisRules() (map[string]redisRule, map[string]bool) {
 
 	// --- geo and hyperloglog ---
 	read("geo", "GEODIST", "GEOHASH", "GEOPOS", "GEOSEARCH", "GEORADIUS_RO", "GEORADIUSBYMEMBER_RO")
-	write("geo", "GEOADD", "GEOSEARCHSTORE", "GEORADIUS", "GEORADIUSBYMEMBER")
+	write("geo", "GEOADD", "GEORADIUS", "GEORADIUSBYMEMBER")
+	danger("geo", replacesTarget, "GEOSEARCHSTORE")
+	check(redisCheckStore, "GEORADIUS", "GEORADIUSBYMEMBER")
 	read("hyperloglog", "PFCOUNT")
 	write("hyperloglog", "PFADD", "PFMERGE")
 	danger("hyperloglog", "is an internal debugging command", "PFDEBUG", "PFSELFTEST")
@@ -432,10 +447,11 @@ func buildRedisRules() (map[string]redisRule, map[string]bool) {
 	// --- modules: JSON, search, time series, probabilistic, vector sets ---
 	read("json", "JSON.GET", "JSON.MGET", "JSON.TYPE", "JSON.OBJKEYS", "JSON.OBJLEN", "JSON.ARRLEN",
 		"JSON.ARRINDEX", "JSON.STRLEN", "JSON.RESP", "JSON.DEBUG")
-	write("json", "JSON.SET", "JSON.MSET", "JSON.MERGE", "JSON.ARRAPPEND", "JSON.ARRINSERT",
+	write("json", "JSON.SET", "JSON.MSET", "JSON.ARRAPPEND", "JSON.ARRINSERT",
 		"JSON.NUMINCRBY", "JSON.NUMMULTBY", "JSON.STRAPPEND", "JSON.TOGGLE")
 	danger("json", "removes part of a JSON document", "JSON.DEL", "JSON.FORGET", "JSON.CLEAR",
 		"JSON.ARRPOP", "JSON.ARRTRIM")
+	danger("json", "removes whatever part of a JSON document the patch sets to null", "JSON.MERGE")
 	read("search", "FT._LIST", "FT.INFO", "FT.SEARCH", "FT.AGGREGATE", "FT.EXPLAIN", "FT.EXPLAINCLI",
 		"FT.PROFILE", "FT.TAGVALS", "FT.SPELLCHECK", "FT.SYNDUMP", "FT.DICTDUMP", "FT.SUGGET", "FT.SUGLEN")
 	write("search", "FT.CREATE", "FT.ALTER", "FT.ALIASADD", "FT.ALIASUPDATE", "FT.SYNUPDATE",
@@ -491,6 +507,13 @@ func RedisClassify(args []string, server *RedisCommandFlags) RedisVerdict {
 		// An unlisted subcommand takes its container's answer.
 		rule, known = redisRules[strings.ToUpper(args[0])]
 	}
+	if strings.ContainsAny(args[0], " \t\r\n") {
+		// A subcommand's row is keyed "CONFIG GET", and one quoted word with
+		// a space in it spells the same key without being that command: the
+		// server is sent a single word it has never heard of. It is placed
+		// like any other command nobody knows.
+		known = false
+	}
 	if known {
 		v.Known = true
 		v.Class, v.Admin, v.Slow = rule.class, rule.admin, rule.slow
@@ -536,6 +559,12 @@ func RedisClassify(args []string, server *RedisCommandFlags) RedisVerdict {
 	for _, c := range server.Categories {
 		flags[strings.ToLower(c)] = true
 	}
+	if flags["admin"] || flags["@admin"] {
+		// What the server keeps to its own administrators, the dashboard
+		// keeps to its.
+		v.Admin = true
+		v.Reasons = append(v.Reasons, "is administrative, by the server's own description of it")
+	}
 	switch {
 	case flags["pubsub"] || flags["@pubsub"] || flags["blocking"] || flags["@blocking"]:
 		v.Class = RedisClassBlocked
@@ -560,25 +589,100 @@ func redisClassRank(class string) int {
 	return 0
 }
 
-// redisCheckExpiry catches the expiry that is really a delete: zero or a
-// negative number of seconds, or a moment already past.
+// redisExpiryVerdict is the rule for an expiry a command sets. One that is
+// still to come is a write. One that has already passed removes what it is
+// set on at once, which is a delete under another name; and one so far off
+// that an older server's arithmetic overflows comes out as a moment long
+// past, with the same result.
+//
+// unitMs is the length of the number's unit in milliseconds, and absolute
+// says it counts from the epoch rather than from now.
+func redisExpiryVerdict(text string, absolute bool, unitMs int64) (string, string) {
+	n, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		// Not a number, or past what one holds: the server refuses it.
+		return "", ""
+	}
+	now := time.Now()
+	past, far := n <= 0, !redisExpiryInRange(n, unitMs, now)
+	if absolute {
+		past, far = n <= now.UnixMilli()/unitMs, n > redisMaxExpiryMs/unitMs
+	}
+	switch {
+	case past:
+		return RedisClassDangerous, "an expiry that has already passed removes what it is set on at once"
+	case far:
+		return RedisClassDangerous, "an expiry that far off overflows on an older server, which then removes what it is set on at once"
+	}
+	return "", ""
+}
+
+// redisCheckExpiry reads the expiry of the commands that take it as their
+// second argument: seconds or milliseconds, from now or from the epoch.
 func redisCheckExpiry(args []string) (string, string) {
 	if len(args) < 3 {
 		return "", ""
 	}
-	n, err := strconv.ParseInt(args[2], 10, 64)
-	if err != nil {
+	switch strings.ToUpper(args[0]) {
+	case "PEXPIRE", "HPEXPIRE", "PSETEX":
+		return redisExpiryVerdict(args[2], false, 1)
+	case "EXPIREAT", "HEXPIREAT":
+		return redisExpiryVerdict(args[2], true, 1000)
+	case "PEXPIREAT", "HPEXPIREAT":
+		return redisExpiryVerdict(args[2], true, 1)
+	}
+	return redisExpiryVerdict(args[2], false, 1000)
+}
+
+// redisCheckExpiryOptions reads the expiry of the commands that take it as
+// an option — SET k v PXAT 1 deletes k as surely as PEXPIREAT k 1. The
+// options start at from and, where the command has a list of fields after
+// them, end at stop.
+func redisCheckExpiryOptions(from int, stop string) func(args []string) (string, string) {
+	return func(args []string) (string, string) {
+		class, reason := "", ""
+		for i := from; i+1 < len(args); i++ {
+			var c, r string
+			switch option := strings.ToUpper(args[i]); {
+			case stop != "" && option == stop:
+				return class, reason
+			case option == "EX":
+				c, r = redisExpiryVerdict(args[i+1], false, 1000)
+			case option == "PX":
+				c, r = redisExpiryVerdict(args[i+1], false, 1)
+			case option == "EXAT":
+				c, r = redisExpiryVerdict(args[i+1], true, 1000)
+			case option == "PXAT":
+				c, r = redisExpiryVerdict(args[i+1], true, 1)
+			}
+			if c != "" {
+				class, reason = c, r
+			}
+		}
+		return class, reason
+	}
+}
+
+// redisCheckMSetEx finds MSETEX's options, which come after as many pairs as
+// its first argument counts.
+func redisCheckMSetEx(args []string) (string, string) {
+	if len(args) < 2 {
 		return "", ""
 	}
-	past := n <= 0
-	switch strings.ToUpper(args[0]) {
-	case "EXPIREAT":
-		past = n <= time.Now().Unix()
-	case "PEXPIREAT":
-		past = n <= time.Now().UnixMilli()
+	pairs, err := strconv.Atoi(args[1])
+	if err != nil || pairs < 0 || pairs > len(args) {
+		return "", ""
 	}
-	if past {
-		return RedisClassDangerous, "an expiry that has already passed deletes the key at once"
+	return redisCheckExpiryOptions(2+2*pairs, "")(args)
+}
+
+// redisCheckStore catches the option that turns a read of one key into a
+// write over another.
+func redisCheckStore(args []string) (string, string) {
+	for _, a := range args[1:] {
+		if strings.EqualFold(a, "STORE") || strings.EqualFold(a, "STOREDIST") {
+			return RedisClassDangerous, "its STORE option replaces whatever key is at the destination, and deletes it when there is nothing to store"
+		}
 	}
 	return "", ""
 }
@@ -633,16 +737,43 @@ func redisCheckWait(args []string) (string, string) {
 	return redisBlockVerdict(args[at], 0.001)
 }
 
+// redisCheckXRead finds how long XREAD or XREADGROUP would wait. The options
+// are walked the way the server walks them — in any order, up to STREAMS —
+// because two of them take arguments that can spell anything: a group named
+// STREAMS would otherwise end the search before BLOCK was reached. The
+// server acts on the last BLOCK it is given, and every one of them is held to
+// the rule.
 func redisCheckXRead(args []string) (string, string) {
-	for i := 1; i+1 < len(args); i++ {
+	class, reason := "", ""
+	for i := 1; i < len(args); i++ {
 		switch strings.ToUpper(args[i]) {
 		case "STREAMS":
-			return "", ""
+			return class, reason
+		case "GROUP":
+			// The group's name and the consumer's.
+			i += 2
+		case "COUNT", "CLAIM":
+			// A number. One that is not is a command the server refuses, and
+			// until it has, nothing after it can be trusted to mean what it
+			// says.
+			if i+1 >= len(args) {
+				return class, reason
+			}
+			if _, err := strconv.ParseInt(args[i+1], 10, 64); err != nil {
+				return RedisClassBlocked, "its options could not be read"
+			}
+			i++
 		case "BLOCK":
-			return redisBlockVerdict(args[i+1], 0.001)
+			if i+1 >= len(args) {
+				return RedisClassBlocked, "needs a timeout"
+			}
+			if c, r := redisBlockVerdict(args[i+1], 0.001); c != "" {
+				class, reason = c, r
+			}
+			i++
 		}
 	}
-	return "", ""
+	return class, reason
 }
 
 // redisCheckXAdd finds the trimming options, which sit between the key and
@@ -682,8 +813,17 @@ func RedisCommandKeys(args []string, server *RedisCommandFlags) []RedisBytes {
 // parameter a CONFIG SET changed, the account an ACL SETUSER edited — again
 // without the value it was given.
 func RedisCommandSubject(args []string) []string {
-	name, _ := redisCommandName(args)
 	out := []string{}
+	if len(args) == 0 {
+		return out
+	}
+	// Each of these is a container's subcommand, so two words at least. One
+	// quoted word that spells both — "CONFIG GET" — is neither, and has
+	// nothing after it to name.
+	name, sub := redisCommandName(args)
+	if !sub {
+		return out
+	}
 	switch name {
 	case "CONFIG SET":
 		for i := 2; i < len(args); i += 2 {

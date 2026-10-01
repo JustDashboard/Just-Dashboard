@@ -46,11 +46,15 @@ type RedisACLUser struct {
 	// System marks the default user, which every server has and which cannot
 	// be removed.
 	System bool `json:"system"`
-	// Self marks the user the dashboard itself connects as. Disabling or
-	// removing it would cut the dashboard off, and both are refused.
+	// Self marks the user the dashboard itself connects as. Disabling it,
+	// removing it or narrowing what it may do would cut the dashboard off, and
+	// each is refused.
 	Self bool `json:"self"`
 	// Rule is the whole rule as one line, without its passwords.
 	Rule string `json:"rule"`
+
+	// allCommands and allKeys are the two halves of Unrestricted.
+	allCommands, allKeys bool
 }
 
 // parseRedisACL reads one line of ACL LIST:
@@ -110,6 +114,7 @@ func parseRedisACL(line string) (RedisACLUser, bool) {
 		}
 		kept = append(kept, t)
 	}
+	u.allCommands, u.allKeys = allCommands, allKeys
 	u.Unrestricted = allCommands && allKeys
 	u.Rule = strings.Join(kept, " ")
 	return u, true
@@ -352,6 +357,41 @@ func (s RedisACLSpec) Validate() error {
 	return err
 }
 
+// narrowsSelf is why a change may not be made to the account the dashboard
+// itself connects as, or empty when it may.
+//
+// Switching that account off locks the dashboard out, and so does taking
+// commands or keys away from it: the ACL SETUSER that would put them back is
+// one of the commands. Which commands the dashboard could do without is not
+// something to guess at, so its own account keeps all of them on every key,
+// or is edited from somewhere that does not depend on it.
+func (s RedisACLSpec) narrowsSelf() string {
+	if s.Enabled != nil && !*s.Enabled {
+		return "switching it off would cut the dashboard off from this server"
+	}
+	rules, err := s.rules()
+	if err != nil {
+		return ""
+	}
+	// Read back by the reader the user list is read with, so "every command"
+	// means here what it means there. Passwords are not rules about access.
+	kept := make([]string, 0, len(rules))
+	for _, r := range rules {
+		if !strings.HasPrefix(r, ">") {
+			kept = append(kept, r)
+		}
+	}
+	after, _ := parseRedisACL("user self " + strings.Join(kept, " "))
+	if (s.Commands != nil && !after.allCommands) || (s.Keys != nil && !after.allKeys) {
+		return "taking commands or keys away from it would cut the dashboard off from part of this server, including the command that gives them back. Connect the dashboard as another user first"
+	}
+	return ""
+}
+
+// redisACLSelfPasswordNotice is what the operator is told when the password
+// of the dashboard's own account changes under the connection that holds it.
+const redisACLSelfPasswordNotice = "The dashboard connects as this user, and its connection still holds the old password; update it under Settings or the dashboard will lose access."
+
 // RedisACLResult is what a change to a user left behind.
 type RedisACLResult struct {
 	User RedisACLUser `json:"user"`
@@ -386,10 +426,13 @@ func RedisACLSetUser(ctx context.Context, client *redis.Client, spec RedisACLSpe
 		return nil, fmt.Errorf("a user named %q already exists", spec.Name)
 	case !spec.Create && existing == nil:
 		return nil, fmt.Errorf("there is no user named %q", spec.Name)
-	case existing != nil && existing.Self && spec.Enabled != nil && !*spec.Enabled:
-		return nil, fmt.Errorf("the dashboard connects as %q; switching it off would cut the dashboard off from this server", spec.Name)
 	case len(rules) == 0 && !spec.Create:
 		return nil, fmt.Errorf("nothing to change")
+	}
+	if existing != nil && existing.Self {
+		if why := spec.narrowsSelf(); why != "" {
+			return nil, fmt.Errorf("the dashboard connects as %q; %s", spec.Name, why)
+		}
 	}
 	args := make([]any, 0, len(rules)+3)
 	args = append(args, "ACL", "SETUSER", spec.Name)
@@ -401,8 +444,17 @@ func RedisACLSetUser(ctx context.Context, client *redis.Client, spec RedisACLSpe
 	}
 	out := &RedisACLResult{}
 	out.Persisted, out.Notice = redisACLPersist(ctx, client)
+	if existing != nil && existing.Self && spec.Password != nil {
+		// Said before the user list is read again: with the old password
+		// gone, that read is the first request the server may refuse.
+		out.Notice = strings.TrimSpace(redisACLSelfPasswordNotice + " " + out.Notice)
+		out.User = *existing
+	}
 	users, err = RedisACLUsers(ctx, client)
 	if err != nil {
+		if out.User.Name != "" {
+			return out, nil
+		}
 		return nil, err
 	}
 	for _, u := range users {
