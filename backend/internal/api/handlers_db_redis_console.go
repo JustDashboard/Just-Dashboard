@@ -88,7 +88,7 @@ func (s *Server) redisConsole(r *http.Request) (*redisConsoleLine, error) {
 func (l *redisConsoleLine) connect(r *http.Request) error {
 	console, err := dbx.RedisConsoleOpen(r.Context(), l.dsn, l.db, redisCommandTimeout)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+		return redisConnectFailed(err, l.db)
 	}
 	l.console, l.db = console, console.DB()
 	l.flags = console.Lookup(l.args)

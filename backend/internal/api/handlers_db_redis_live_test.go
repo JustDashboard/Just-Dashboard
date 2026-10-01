@@ -142,6 +142,17 @@ func TestLiveAPIRedisDatabaseDefaultsToTheConnectionStrings(t *testing.T) {
 	if server.DB != own {
 		t.Errorf("/redis/server says the connection's database is %d, want %d", server.DB, own)
 	}
+	// It is where a picker starts, so it does not follow the picker.
+	server.DB = -1
+	call(t, h, id, http.MethodGet, "/redis/server?db=0", "", &server)
+	if server.DB != own {
+		t.Errorf("/redis/server?db=0 says the connection's database is %d, want %d", server.DB, own)
+	}
+	// A database the server does not have is a fault in the request, not a
+	// server that cannot be reached.
+	wantStatus(t, call(t, h, id, http.MethodGet, "/keys?db=9999", "", nil), 400, "bad_request", "listing database 9999")
+	wantStatus(t, call(t, h, id, http.MethodPost, "/redis/command", `{"command":"PING","db":9999}`, nil), 400, "bad_request", "a console on database 9999")
+	wantStatus(t, call(t, h, id, http.MethodPost, "/redis/command?db=9999", `{"command":"PING"}`, nil), 400, "bad_request", "a console on ?db=9999")
 	var result dbx.RedisCommandResult
 	call(t, h, id, http.MethodPost, "/redis/command", `{"command":"EXISTS `+key+`"}`, &result)
 	if result.DB != own || result.Reply.Value != float64(1) {
@@ -420,6 +431,122 @@ func TestLiveAPIRedisKeys(t *testing.T) {
 	})
 }
 
+// The expiries that used to delete: far enough off that the number wrapped
+// on its way to the server. Sent by a role that may edit and may not delete.
+func TestLiveAPIRedisFarExpiryKeepsTheKey(t *testing.T) {
+	_, _, _, direct := redisLive(t, "JD_TEST_REDIS_DSN", auth.RoleAdmin)
+	_, h, id := redisRouter(t, auth.RoleLimited, os.Getenv("JD_TEST_REDIS_DSN"))
+	ctx := context.Background()
+	p := redisAPIPrefix + "far:"
+	key := p + "k"
+	direct.Set(ctx, key, "v", 0)
+	direct.HSet(ctx, p+"h", "a", "1", "b", "2")
+	left := func(k string) int64 {
+		ms, _ := direct.Do(ctx, "PTTL", k).Int64()
+		return ms
+	}
+
+	for _, body := range []string{
+		`{"key":"` + key + `","at":253402300800000}`,
+		`{"key":"` + key + `","ttl":9223372037}`,
+		`{"key":"` + key + `","ttlMs":9223372036855}`,
+	} {
+		var out struct {
+			OK   bool  `json:"ok"`
+			PTTL int64 `json:"pttl"`
+		}
+		rec := call(t, h, id, http.MethodPost, "/keys/expire", body, &out)
+		if rec.Code != 200 || !out.OK || out.PTTL < 9_000_000_000_000 {
+			t.Errorf("%s = %d %s", body, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+		if direct.Get(ctx, key).Val() != "v" || left(key) < 9_000_000_000_000 {
+			t.Fatalf("%s: the key is gone, or has %d ms left", body, left(key))
+		}
+	}
+	rec := call(t, h, id, http.MethodPost, "/keys/value", `{"key":"`+p+`h","type":"hash","field":"c","value":"3","ttl":9223372037}`, nil)
+	wantStatus(t, rec, 200, "", "a hash write with a far expiry")
+	if direct.HLen(ctx, p+"h").Val() != 3 || left(p+"h") < 9_000_000_000_000 {
+		t.Fatalf("the hash has %d fields and %d ms left", direct.HLen(ctx, p+"h").Val(), left(p+"h"))
+	}
+	direct.Persist(ctx, key)
+	rec = call(t, h, id, http.MethodPost, "/keys/value", `{"key":"`+key+`","value":"w","ttl":9223372037}`, nil)
+	wantStatus(t, rec, 200, "", "a string write with a far expiry")
+	if direct.Get(ctx, key).Val() != "w" || left(key) < 9_000_000_000_000 {
+		t.Errorf("the string has %d ms left", left(key))
+	}
+	var meta dbx.RedisKeyMeta
+	call(t, h, id, http.MethodGet, "/keys/meta?key="+key, "", &meta)
+	if meta.PTTL < 9_000_000_000_000 || meta.TTL < 9_000_000_000 || meta.ExpiresAt == nil {
+		t.Errorf("metadata of a key expiring in 292 years: %+v", meta)
+	}
+
+	// Past what a server is trusted to hold: refused, and nothing changes.
+	for _, rt := range []redisRoute{
+		{http.MethodPost, "/keys/expire", `{"key":"` + key + `","ttl":9223372036854775}`},
+		{http.MethodPost, "/keys/expire", `{"key":"` + key + `","ttlMs":9223372036854775807}`},
+		{http.MethodPost, "/keys/expire", `{"key":"` + key + `","at":9223372036854775807}`},
+		{http.MethodPost, "/keys/value", `{"key":"` + p + `h","type":"hash","field":"d","value":"4","ttl":9223372036854775}`},
+		{http.MethodPost, "/keys/value", `{"key":"` + key + `","value":"x","ttl":9223372036854775}`},
+	} {
+		rec := redisDo(t, h, id, rt)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "too far off") {
+			t.Errorf("%s %s = %d %s", rt.path, rt.body, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+	}
+	if direct.Get(ctx, key).Val() != "w" || direct.HLen(ctx, p+"h").Val() != 3 {
+		t.Error("a refused expiry changed a key")
+	}
+}
+
+// A request that addresses the inside of a key and names nothing there is
+// refused. It is never read as a request for the key.
+func TestLiveAPIRedisMemberRequestsNeverRemoveTheKey(t *testing.T) {
+	s, h, id, direct := redisLive(t, "JD_TEST_REDIS_DSN", auth.RoleAdmin)
+	ctx := context.Background()
+	key := redisAPIPrefix + "inside:s"
+	direct.SAdd(ctx, key, "a", "b", "")
+	for _, body := range []string{
+		`{"key":"` + key + `","members":[]}`,
+		`{"key":"` + key + `","type":"set","members":[]}`,
+		`{"key":"` + key + `","expect":"a"}`,
+		// A path is a JSON document's; the server says this key is not one.
+		`{"key":"` + key + `","path":"$.user.email"}`,
+		`{"key":"` + key + `","type":"json","path":"$"}`,
+		`{"key":"` + key + `","type":"set","path":"$"}`,
+	} {
+		rec := call(t, h, id, http.MethodDelete, "/keys", body, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d %s", body, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+		if direct.SCard(ctx, key).Val() != 3 {
+			t.Fatalf("%s removed the key or a member: %d left", body, direct.SCard(ctx, key).Val())
+		}
+	}
+	var out struct {
+		Removed int64 `json:"removed"`
+	}
+	call(t, h, id, http.MethodDelete, "/keys", `{"key":"`+key+`","members":[""]}`, &out)
+	if out.Removed != 1 || direct.SCard(ctx, key).Val() != 2 {
+		t.Errorf("removing the empty member removed %d and left %d", out.Removed, direct.SCard(ctx, key).Val())
+	}
+	// A stream entry that is not an id is refused without being quoted: the
+	// sentence is recorded, and what stood in a member's place is not.
+	stream := redisAPIPrefix + "inside:x"
+	direct.XAdd(ctx, &redis.XAddArgs{Stream: stream, Values: map[string]any{"f": "v"}})
+	rec := call(t, h, id, http.MethodDelete, "/keys", `{"key":"`+stream+`","type":"stream","members":["S3CRET-not-an-id"]}`, nil)
+	wantStatus(t, rec, 400, "bad_request", "removing a stream entry by something that is not an id")
+	hash := redisAPIPrefix + "inside:h"
+	direct.HSet(ctx, hash, "S3CRET-field", "1", "other", "2")
+	rec = call(t, h, id, http.MethodPost, "/keys/value", `{"key":"`+hash+`","type":"hash","field":"S3CRET-field","value":"9","replace":"other"}`, nil)
+	wantStatus(t, rec, 409, "conflict", "renaming a field onto an existing one")
+	if strings.Contains(rec.Body.String(), "S3CRET") {
+		t.Errorf("the refusal quotes the field: %s", rec.Body.String())
+	}
+	if trail := auditTrail(t, s); strings.Contains(trail, "S3CRET") {
+		t.Errorf("a member or field name reached the audit trail:\n%s", trail)
+	}
+}
+
 func TestLiveAPIRedisBulkAndConsoleFollowTheCallersRole(t *testing.T) {
 	_, admin, adminID, direct := redisLive(t, "JD_TEST_REDIS_DSN", auth.RoleAdmin)
 	ctx := context.Background()
@@ -500,6 +627,58 @@ func TestLiveAPIRedisBulkAndConsoleFollowTheCallersRole(t *testing.T) {
 	}
 	if direct.Exists(ctx, p+"k:1", p+"h").Val() != 2 {
 		t.Fatal("a refused console command ran")
+	}
+	// Removing by another name is still removing. Storing an empty result
+	// over a key deletes it; an expiry already past deletes whichever command
+	// sets it; and one quoted word that spells a subcommand is a command
+	// nobody knows, not that subcommand.
+	direct.SAdd(ctx, p+"victim", "a", "b", "c")
+	for _, command := range []string{
+		"SINTERSTORE " + p + "victim " + p + "nosuch",
+		"SUNIONSTORE " + p + "victim " + p + "nosuch",
+		"ZRANGESTORE " + p + "victim " + p + "nosuch 0 -1",
+		"SORT " + p + "nosuch STORE " + p + "victim",
+		"BITOP AND " + p + "victim " + p + "nosuch",
+		"SET " + p + "victim x PXAT 1",
+		"GETEX " + p + "k:1 PXAT 1",
+		"HEXPIRE " + p + "h 0 FIELDS 1 f",
+		`"CONFIG GET"`, `'acl deluser'`, `"FLUSHDB"`,
+	} {
+		rec, _ = console(limited, limitedID, command)
+		wantStatus(t, rec, 403, "forbidden", command+" as limited")
+	}
+	// Waiting on a stream for good is refused whatever the group is called.
+	rec, _ = console(limited, limitedID, "XREADGROUP GROUP STREAMS c BLOCK 0 STREAMS "+p+"nostream >")
+	wantStatus(t, rec, 400, "command_blocked", "XREADGROUP with a group named STREAMS")
+	if direct.SCard(ctx, p+"victim").Val() != 3 || direct.Exists(ctx, p+"k:1", p+"h").Val() != 2 || direct.HExists(ctx, p+"h", "f").Val() != true {
+		t.Fatal("a refused console command ran")
+	}
+	// Renaming a member onto one that is there would only remove the old
+	// one: a removal, and refused as an edit.
+	rec = call(t, limited, limitedID, http.MethodPost, "/keys/value", `{"key":"`+p+`victim","type":"set","value":"a","replace":"b"}`, nil)
+	wantStatus(t, rec, 409, "conflict", "renaming a set member onto an existing one as limited")
+	direct.ZAdd(ctx, p+"z", redis.Z{Score: 1, Member: "a"}, redis.Z{Score: 2, Member: "b"})
+	rec = call(t, limited, limitedID, http.MethodPost, "/keys/value", `{"key":"`+p+`z","type":"zset","value":"a","score":5,"replace":"b"}`, nil)
+	wantStatus(t, rec, 409, "conflict", "renaming a sorted-set member onto an existing one as limited")
+	if direct.SCard(ctx, p+"victim").Val() != 3 || direct.ZCard(ctx, p+"z").Val() != 2 || direct.ZScore(ctx, p+"z", "a").Val() != 1 {
+		t.Fatal("a refused rename changed the collection")
+	}
+	// An expiry still to come is the edit it has always been, however soon.
+	rec, res = console(limited, limitedID, "PEXPIRE "+p+"k:2 600000")
+	if rec.Code != 200 || res.Class != dbx.RedisClassWrite {
+		t.Errorf("PEXPIRE as limited = %d %+v", rec.Code, res)
+	}
+	// Listening to what is published is kept with MONITOR.
+	wantStatus(t, call(t, limited, limitedID, http.MethodGet, "/redis/subscribe?pattern=*", "", nil), 403, "forbidden", "subscribing as limited")
+	wantStatus(t, call(t, limited, limitedID, http.MethodGet, "/redis/monitor", "", nil), 403, "forbidden", "MONITOR as limited")
+
+	rec, res = console(admin, adminID, `"CONFIG GET"`)
+	if rec.Code != 200 || res.Known || res.Class != dbx.RedisClassDangerous || res.Reply.Type != "error" {
+		t.Errorf("a quoted two-word name as admin = %d %+v", rec.Code, res)
+	}
+	rec, res = console(admin, adminID, "SINTERSTORE "+p+"victim "+p+"nosuch")
+	if rec.Code != 200 || res.Class != dbx.RedisClassDangerous || direct.Exists(ctx, p+"victim").Val() != 0 {
+		t.Errorf("SINTERSTORE as admin = %d %+v", rec.Code, res)
 	}
 
 	rec, res = console(admin, adminID, "DEL "+p+"k:1 "+p+"k:2")
@@ -800,6 +979,19 @@ func TestLiveAPIRedisAdmin(t *testing.T) {
 		}
 		wantStatus(t, call(t, h, id, http.MethodPut, "/redis/acl/"+self, `{"enabled":false}`, nil), 400, "bad_request", "switching off the dashboard's own user")
 		wantStatus(t, call(t, h, id, http.MethodDelete, "/redis/acl/"+self, "", nil), 400, "bad_request", "removing the dashboard's own user")
+		// Nor is it one to take commands or keys away from.
+		for _, body := range []string{`{"commands":[]}`, `{"commands":["+@all","-@dangerous"]}`, `{"keys":[]}`, `{"keys":["app:*"]}`} {
+			rec := call(t, h, id, http.MethodPut, "/redis/acl/"+self, body, nil)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "the dashboard connects as") {
+				t.Errorf("PUT /redis/acl/%s %s = %d %s", self, body, rec.Code, strings.TrimSpace(rec.Body.String()))
+			}
+		}
+		call(t, h, id, http.MethodGet, "/redis/acl", "", &list)
+		for _, u := range list.Users {
+			if u.Self && (!u.Unrestricted || !u.Enabled) {
+				t.Fatalf("the dashboard's own user after the refused changes: %+v", u)
+			}
+		}
 		wantStatus(t, call(t, h, id, http.MethodDelete, "/redis/acl/default", "", nil), 400, "bad_request", "removing the default user")
 		wantStatus(t, call(t, h, id, http.MethodDelete, "/redis/acl/jdb4api-app", "", nil), 200, "", "remove the user")
 		wantStatus(t, call(t, h, id, http.MethodDelete, "/redis/acl/jdb4api-app", "", nil), 400, "bad_request", "remove it again")
@@ -964,7 +1156,7 @@ func TestLiveAPIRedisMonitorIsBoundedAndClosesCleanly(t *testing.T) {
 }
 
 func TestLiveAPIRedisSubscribeIsBoundedAndClosesCleanly(t *testing.T) {
-	s, h, id, direct := redisLive(t, "JD_TEST_REDIS_ADMIN_DSN", auth.RoleLimited)
+	s, h, id, direct := redisLive(t, "JD_TEST_REDIS_ADMIN_DSN", auth.RoleAdmin)
 	ctx := context.Background()
 	path := pathf("/databases/%d/redis/subscribe", id) + "?channel=jdb4api.exact&pattern=jdb4api.p.*&seconds=15&max=3"
 	frames, closed := feed(t, h, path, func() {

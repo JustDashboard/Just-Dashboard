@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -74,9 +75,6 @@ func (s *Server) mountDatabaseRedisRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/{id}/redis/command", s.handle(s.handleRedisCommand))
 		r.Method(http.MethodPost, "/{id}/redis/save", s.handle(s.handleRedisSave))
 		r.Method(http.MethodPost, "/{id}/redis/publish", s.handle(s.handleRedisPublish))
-		// Published messages are application data in flight. Listening to
-		// them sits with the console, which could read the same data at rest.
-		r.Method(http.MethodGet, "/{id}/redis/subscribe", s.handle(s.handleRedisSubscribe))
 	})
 	s.destructive(r, func(r chi.Router) {
 		r.Method(http.MethodDelete, "/{id}/keys", s.handle(s.handleRedisDelete))
@@ -95,6 +93,11 @@ func (s *Server) mountDatabaseRedisRoutes(r chi.Router) {
 		// session tokens being written, passwords being checked. That is a
 		// read of everything, and it is kept to administrators.
 		r.Method(http.MethodGet, "/{id}/redis/monitor", s.handle(s.handleRedisMonitor))
+		// A subscription is the other live feed, and a pattern of * is every
+		// message any application on the server publishes, for as long as the
+		// socket stays open. A key is read once, by name; this is whatever
+		// comes next, from whoever sends it, and it is kept with MONITOR.
+		r.Method(http.MethodGet, "/{id}/redis/subscribe", s.handle(s.handleRedisSubscribe))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/{id}/redis/acl/{name}", s.handle(s.handleRedisACLDelete))
 		})
@@ -148,9 +151,24 @@ func (s *Server) redisClient(r *http.Request) (*redis.Client, *dbConnection, err
 	}
 	client, err := dbx.RedisOpen(r.Context(), dsn, dbx.RedisOpenOptions{DB: db})
 	if err != nil {
-		return nil, conn, httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+		return nil, conn, redisConnectFailed(err, db)
 	}
 	return client, conn, nil
+}
+
+// redisConnectFailed is the answer for a connection that could not be
+// opened. db is the database the request asked for.
+//
+// A server that will not select the database the request named has nothing
+// wrong with it; the request has, and is told so. The same refusal for the
+// database the connection string names is the connection that is wrong, and
+// reads as one that does not work.
+func redisConnectFailed(err error, db int) error {
+	var refused *dbx.RedisDatabaseError
+	if db != dbx.RedisDSNDatabase && errors.As(err, &refused) {
+		return httpx.BadRequest("%v", err)
+	}
+	return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
 }
 
 // redisKeyParam reads a key name from the query string. A key is bytes and a
@@ -427,7 +445,7 @@ type redisKeyRequest struct {
 	Replace  *dbx.RedisBytes     `json:"replace"`
 	ID       string              `json:"id"`
 	Entries  [][2]dbx.RedisBytes `json:"entries"`
-	Path     string              `json:"path"`
+	Path     *string             `json:"path"`
 	Create   bool                `json:"create"`
 	// TTL is seconds. On a write, absent or zero keeps the key's expiry.
 	TTL   *int64 `json:"ttl"`
@@ -436,11 +454,12 @@ type redisKeyRequest struct {
 	// Keys removes whole keys, several at once.
 	Keys []dbx.RedisBytes `json:"keys"`
 	// Member and Members name entries of a collection to remove, leaving the
-	// rest of it alone. They are pointers and a list for the same reason Key
-	// is: the member named "" is a member, and a request that names it must
-	// not be read as a request that names none — which removed the whole key.
-	Member  *dbx.RedisBytes  `json:"member"`
-	Members []dbx.RedisBytes `json:"members"`
+	// rest of it alone. Both are pointers for the same reason Key is: the
+	// member named "" is a member, an empty list is a list, and a request
+	// that carries either must not be read as a request that carries none —
+	// which removed the whole key.
+	Member  *dbx.RedisBytes   `json:"member"`
+	Members *[]dbx.RedisBytes `json:"members"`
 	// To is the new name of a rename or the name of a copy, ToDB the logical
 	// database a copy goes into, and Overwrite lets either land on a key that
 	// is already there — which deletes that key.
@@ -482,12 +501,16 @@ func (s *Server) handleRedisSet(w http.ResponseWriter, r *http.Request) error {
 	httpx.SetAudit(r, "database.redis.set", conn.Name, map[string]any{
 		"key": key, "type": defaultStr(req.Type, "string"), "db": client.Options().DB, "create": req.Create,
 	})
-	res, err := dbx.RedisWriteValue(ctx, client, nil, dbx.RedisWrite{
+	write := dbx.RedisWrite{
 		Key: key, Type: req.Type, Create: req.Create, Value: req.Value, Field: req.Field,
 		Score: req.Score, Index: req.Index, Insert: req.Insert, Head: req.Position == "head",
 		Expect: req.Expect, Replace: req.Replace, TTL: req.TTL, ID: req.ID,
-		Entries: req.Entries, Path: req.Path,
-	})
+		Entries: req.Entries,
+	}
+	if req.Path != nil {
+		write.Path = *req.Path
+	}
+	res, err := dbx.RedisWriteValue(ctx, client, nil, write)
 	if err != nil {
 		return redisFail(err, true)
 	}
@@ -574,33 +597,18 @@ func (s *Server) handleRedisDelete(w http.ResponseWriter, r *http.Request) error
 		return httpx.BadRequest("at least one key is required")
 	}
 	// Which of the two this is comes from which fields are present, never
-	// from whether one is empty.
-	members := req.Members
-	if req.Member != nil {
-		members = append([]dbx.RedisBytes{*req.Member}, members...)
-	}
-	if req.Type == "list" && req.Index == nil && len(members) == 1 {
-		// The older form of the request names a list element by its position
-		// written as text.
-		idx, err := strconv.ParseInt(string(members[0]), 10, 64)
-		if err != nil {
-			return httpx.BadRequest("a list position must be a number")
-		}
-		req.Index, members = &idx, nil
-	}
-	inside := len(members) > 0 || req.Index != nil || (req.Type == "json" && req.Path != "")
-	if inside && len(keys) != 1 {
-		return httpx.BadRequest("members are removed from one key at a time")
-	}
-	client, conn, err := s.redisClient(r)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-	ctx, cancel := timeoutCtx(r, 30*time.Second)
-	defer cancel()
-
+	// from what they hold. A field that addresses the inside of a key makes
+	// the request one about the inside of a key, and if it then names nothing
+	// there the request is refused — it does not fall back to the whole key.
+	inside := req.Member != nil || req.Members != nil || req.Index != nil || req.Expect != nil || req.Path != nil
 	if !inside {
+		client, conn, err := s.redisClient(r)
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+		ctx, cancel := timeoutCtx(r, 30*time.Second)
+		defer cancel()
 		httpx.SetAudit(r, "database.redis.delete", conn.Name,
 			map[string]any{"keys": keys, "db": client.Options().DB})
 		removed, err := dbx.RedisDeleteKeys(ctx, client, nil, keys)
@@ -613,13 +621,50 @@ func (s *Server) handleRedisDelete(w http.ResponseWriter, r *http.Request) error
 		return nil
 	}
 
+	if len(keys) != 1 {
+		return httpx.BadRequest("members are removed from one key at a time")
+	}
+	var members []dbx.RedisBytes
+	if req.Member != nil {
+		members = append(members, *req.Member)
+	}
+	if req.Members != nil {
+		members = append(members, *req.Members...)
+	}
+	if req.Type == "list" && req.Index == nil && len(members) == 1 {
+		// The older form of the request names a list element by its position
+		// written as text.
+		idx, err := strconv.ParseInt(string(members[0]), 10, 64)
+		if err != nil {
+			return httpx.BadRequest("a list position must be a number")
+		}
+		req.Index, members = &idx, nil
+	}
+	switch {
+	case req.Path != nil && req.Type != "" && req.Type != "json":
+		return httpx.BadRequest("a path is part of a JSON document; a %s is addressed by member", req.Type)
+	case req.Path != nil && (len(members) > 0 || req.Index != nil):
+		return httpx.BadRequest("name a path or members, not both")
+	case req.Path == nil && req.Index == nil && len(members) == 0:
+		return httpx.BadRequest("name at least one member to remove")
+	}
+	client, conn, err := s.redisClient(r)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+
 	// A member is a value as often as it is a name — a set's members are its
 	// data — so the audit entry counts them and does not list them.
 	detail := map[string]any{"key": keys[0], "type": req.Type, "db": client.Options().DB, "members": len(members)}
 	httpx.SetAudit(r, "database.redis.member.delete", conn.Name, detail)
 	var removed int64
-	if req.Type == "json" && req.Path != "" {
-		removed, err = dbx.RedisJSONDelete(ctx, client, keys[0], req.Path)
+	if req.Path != nil {
+		// JSON.DEL refuses a key that is not a JSON document, so a path sent
+		// without its type is checked by the server rather than guessed at.
+		removed, err = dbx.RedisJSONDelete(ctx, client, keys[0], *req.Path)
 	} else {
 		removed, err = dbx.RedisRemoveMembers(ctx, client, dbx.RedisRemoval{
 			Key: keys[0], Type: req.Type, Members: members, Index: req.Index, Expect: req.Expect,
@@ -720,6 +765,10 @@ type redisBulkRequest struct {
 // Both therefore need the destructive capability and spend its budget, which
 // the route cannot demand on its own because persist and the dry run share
 // its path.
+//
+// One request they do not serve: every key there is. That is emptying the
+// database, which has a route of its own that asks for the database's name,
+// and a pattern box left at * is not somebody typing that name.
 func (s *Server) handleRedisBulk(w http.ResponseWriter, r *http.Request) error {
 	var req redisBulkRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -733,6 +782,10 @@ func (s *Server) handleRedisBulk(w http.ResponseWriter, r *http.Request) error {
 		return httpx.BadRequest("invalid Redis cursor")
 	}
 	if !req.DryRun && req.Action != "persist" {
+		if req.Type == "" && req.Pattern != "" && strings.Trim(req.Pattern, "*") == "" {
+			return httpx.Err(http.StatusBadRequest, "whole_database",
+				"that pattern is every key in the database, and emptying a database is done from its settings, which ask for its name. Narrow the pattern or name a type to remove part of it")
+		}
 		if err := s.redisDestructive(r, "this removes every key the pattern matches"); err != nil {
 			return err
 		}

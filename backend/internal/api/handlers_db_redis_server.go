@@ -13,10 +13,21 @@ import (
 // The Redis server's own pages: what it is, what it is doing, who is
 // connected, how it is configured, who may log in.
 
+// handleRedisServer describes the server. Nothing in the answer belongs to
+// one logical database, and the one field that names a database names the
+// connection string's — where a database picker starts — so the connection is
+// opened there whatever ?db= says.
 func (s *Server) handleRedisServer(w http.ResponseWriter, r *http.Request) error {
-	client, _, err := s.redisClient(r)
+	_, dsn, err := s.redisRow(r)
 	if err != nil {
 		return err
+	}
+	if _, err := redisDB(r.URL.Query().Get("db")); err != nil {
+		return err
+	}
+	client, err := dbx.RedisOpen(r.Context(), dsn, dbx.RedisOpenOptions{DB: dbx.RedisDSNDatabase})
+	if err != nil {
+		return redisConnectFailed(err, dbx.RedisDSNDatabase)
 	}
 	defer client.Close()
 	ctx, cancel := timeoutCtx(r, 30*time.Second)

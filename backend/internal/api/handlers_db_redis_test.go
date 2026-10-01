@@ -75,7 +75,9 @@ var redisMutations = map[auth.Capability][]redisRoute{
 		{http.MethodPost, "/redis/command", `{"command":"GET k"}`},
 		{http.MethodPost, "/redis/save", `{"mode":"bgsave"}`},
 		{http.MethodPost, "/redis/publish", `{"channel":"c","message":"m"}`},
-		{http.MethodGet, "/redis/subscribe?channel=c", ``},
+		// An expiry that is still to come is a write, however soon.
+		{http.MethodPost, "/keys/expire", `{"key":"k","ttlMs":1}`},
+		{http.MethodPost, "/redis/command", `{"command":"PEXPIRE k 1"}`},
 	},
 	auth.CapDestructive: {
 		{http.MethodDelete, "/keys", `{"key":"k"}`},
@@ -95,12 +97,23 @@ var redisMutations = map[auth.Capability][]redisRoute{
 		{http.MethodPost, "/redis/command", `{"command":"FLUSHALL"}`},
 		{http.MethodPost, "/redis/command", `{"command":"EVAL \"return 1\" 0"}`},
 		{http.MethodPost, "/redis/command", `{"command":"EXPIRE k 0"}`},
+		// Storing over a key deletes it when there is nothing to store, and
+		// an expiry that has passed is a delete whichever command sets it.
+		{http.MethodPost, "/redis/command", `{"command":"SINTERSTORE victim nosuch"}`},
+		{http.MethodPost, "/redis/command", `{"command":"ZRANGESTORE victim nosuch 0 -1"}`},
+		{http.MethodPost, "/redis/command", `{"command":"SORT nosuch STORE victim"}`},
+		{http.MethodPost, "/redis/command", `{"command":"BITOP AND victim nosuch"}`},
+		{http.MethodPost, "/redis/command", `{"command":"SET k v PXAT 1"}`},
+		{http.MethodPost, "/redis/command", `{"command":"GETEX k PXAT 1"}`},
+		{http.MethodPost, "/redis/command", `{"command":"HEXPIRE h 0 FIELDS 1 f"}`},
 	},
 	auth.CapSystemAdmin: {
 		{http.MethodPut, "/redis/config", `{"name":"maxmemory","value":"1gb"}`},
 		{http.MethodPut, "/redis/acl/app", `{"create":true,"password":"s3cret-password"}`},
 		{http.MethodDelete, "/redis/acl/app", ``},
 		{http.MethodGet, "/redis/monitor", ``},
+		{http.MethodGet, "/redis/subscribe?channel=c", ``},
+		{http.MethodGet, "/redis/subscribe?pattern=*", ``},
 		{http.MethodPost, "/redis/command", `{"command":"CONFIG SET maxmemory 1gb"}`},
 		{http.MethodPost, "/redis/command", `{"command":"CONFIG GET requirepass"}`},
 		{http.MethodPost, "/redis/command", `{"command":"ACL LIST"}`},
@@ -271,7 +284,7 @@ func TestRedisClassifyAnswersForTheCallersRole(t *testing.T) {
 func TestRedisContentDependentRoutesSpendTheDestructiveBudget(t *testing.T) {
 	for _, rt := range []redisRoute{
 		{http.MethodPost, "/redis/command", `{"command":"FLUSHALL"}`},
-		{http.MethodPost, "/keys/bulk", `{"pattern":"*","action":"delete"}`},
+		{http.MethodPost, "/keys/bulk", `{"pattern":"k*","action":"delete"}`},
 		{http.MethodPost, "/keys/rename", `{"key":"a","to":"b","overwrite":true}`},
 	} {
 		_, h, id := redisRouter(t, auth.RoleAdmin, nowhere)
@@ -350,6 +363,9 @@ func TestRedisRequestsAreValidatedBeforeDialling(t *testing.T) {
 		{http.MethodDelete, "/keys", `{}`},
 		{http.MethodDelete, "/keys", `{"keys":["a","b"],"member":"m"}`},
 		{http.MethodDelete, "/keys", `{"key":"l","type":"list","member":"first"}`},
+		// Every key there is: that is the database, and it has its own route.
+		{http.MethodPost, "/keys/bulk", `{"pattern":"*","action":"delete"}`},
+		{http.MethodPost, "/keys/bulk", `{"pattern":"**","action":"expire","ttl":5}`},
 		{http.MethodPost, "/keys/stream/trim", `{"maxLen":5}`},
 		{http.MethodPost, "/redis/save", `{"mode":"save"}`},
 		{http.MethodPost, "/redis/publish", `{"message":"m"}`},
@@ -411,6 +427,157 @@ func TestRedisKeyParam(t *testing.T) {
 	for _, raw := range []string{"", "key=", "keyB64=%%%"} {
 		if k, err := q(raw); err == nil {
 			t.Errorf("%q was accepted as %q", raw, k)
+		}
+	}
+}
+
+// A request that addresses the inside of a key never reaches the whole of
+// it. Which of the two a request is comes from the fields it carries, and one
+// that carries a member field naming nothing is refused: the same bodies used
+// to be read as "delete the key".
+func TestRedisDeleteReadsPresenceNotEmptiness(t *testing.T) {
+	_, h, id := redisRouter(t, auth.RoleAdmin, nowhere)
+	for body, want := range map[string]string{
+		`{"key":"k","members":[]}`:                       "at least one member",
+		`{"key":"k","type":"set","members":[]}`:          "at least one member",
+		`{"key":"k","expect":"x"}`:                       "at least one member",
+		`{"keys":["a","b"],"members":[]}`:                "one key at a time",
+		`{"keys":["a","b"],"path":"$.user.email"}`:       "one key at a time",
+		`{"key":"k","type":"set","path":"$.user.email"}`: "JSON document",
+		`{"key":"k","path":"$.user.email","member":"m"}`: "not both",
+	} {
+		rec := redisDo(t, h, id, redisRoute{http.MethodDelete, "/keys", body})
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("%s answered %d %s", body, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+	}
+	// These get past validation, so here they stop at the server that is not
+	// there — on their way to remove a member, not a key.
+	_, h, id = redisRouter(t, auth.RoleAdmin, nowhere)
+	for _, body := range []string{
+		`{"key":"k","member":""}`,
+		`{"key":"k","members":[""]}`,
+		`{"key":"k","index":0}`,
+		`{"key":"k","path":"$.user.email"}`,
+		`{"key":"k","type":"json","path":"$"}`,
+		// null is how a client spells "not sent".
+		`{"key":"k","members":null,"member":null,"path":null}`,
+	} {
+		rec := redisDo(t, h, id, redisRoute{http.MethodDelete, "/keys", body})
+		if rec.Code != http.StatusBadGateway || redisErrorCode(rec) != "connect_failed" {
+			t.Errorf("%s answered %d %s", body, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+	}
+}
+
+// Every key in the database is the database. Emptying one asks for its name
+// on a route of its own, and the pattern box is not that route.
+func TestRedisBulkRefusesTheWholeDatabase(t *testing.T) {
+	_, h, id := redisRouter(t, auth.RoleAdmin, nowhere)
+	for body, whole := range map[string]bool{
+		`{"pattern":"*","action":"delete"}`:               true,
+		`{"pattern":"***","action":"delete"}`:             true,
+		`{"pattern":"*","action":"expire","ttl":60}`:      true,
+		`{"pattern":"*","action":"delete","dryRun":true}`: false,
+		`{"pattern":"*","action":"persist"}`:              false,
+		`{"pattern":"*","type":"hash","action":"delete"}`: false,
+		`{"pattern":"session:*","action":"delete"}`:       false,
+		`{"pattern":"\\*","action":"delete"}`:             false,
+	} {
+		rec := redisDo(t, h, id, redisRoute{http.MethodPost, "/keys/bulk", body})
+		if got := rec.Code == http.StatusBadRequest && redisErrorCode(rec) == "whole_database"; got != whole {
+			t.Errorf("%s answered %d %s", body, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+	}
+}
+
+// One quoted word that spells "CONFIG GET" used to be read as that command
+// and index past the end of its arguments. It is a command nobody knows.
+func TestRedisConsoleSurvivesAQuotedCommandName(t *testing.T) {
+	for _, role := range []auth.Role{auth.RoleLimited, auth.RoleAdmin} {
+		s, h, id := redisRouter(t, role, nowhere)
+		for _, command := range []string{`"CONFIG GET"`, `'acl deluser'`, `"CONFIG SET" a b`, `"ACL DELUSER"`, `"XINFO STREAM" s`} {
+			body, _ := json.Marshal(map[string]string{"command": command})
+			for _, path := range []string{"/redis/command", "/redis/classify"} {
+				rec := redisDo(t, h, id, redisRoute{http.MethodPost, path, string(body)})
+				// Unknown to the table, so the server is asked, and it is not
+				// there. Anything but a 500.
+				if rec.Code != http.StatusBadGateway || redisErrorCode(rec) != "connect_failed" {
+					t.Errorf("%s %s as %s answered %d %s", path, command, role, rec.Code, strings.TrimSpace(rec.Body.String()))
+				}
+			}
+		}
+		// The attempt is on the trail, which a panic used to unwind past.
+		var recorded int
+		if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'database.redis.command'`).Scan(&recorded); err != nil || recorded != 5 {
+			t.Errorf("%d of 5 console attempts as %s were recorded, %v", recorded, role, err)
+		}
+	}
+}
+
+// The guard for protected connections judges a body before its handler sees
+// it. These are what it is given to judge with, and they read the body as
+// the handler will.
+func TestRedisReadOnlyChecksJudgeWhatTheHandlerDecodes(t *testing.T) {
+	commands := map[string]bool{
+		`{"command":"GET k"}`:                            true,
+		`{"command":"hgetall h","db":3}`:                 true,
+		`{"command":"SCAN 0 MATCH x*"}`:                  true,
+		`{"command":"XREAD COUNT 5 STREAMS s 0"}`:        true,
+		`{"command":"SET k v"}`:                          false,
+		`{"command":"DEL k"}`:                            false,
+		`{"command":"FLUSHALL"}`:                         false,
+		`{"command":"CONFIG SET maxmemory 1"}`:           false,
+		`{"command":"SUBSCRIBE c"}`:                      false,
+		`{"command":"EVAL_RO \"return 1\" 0"}`:           false,
+		`{"command":"XREADGROUP GROUP g c STREAMS s >"}`: false,
+		// Not in the table: the server would have to vouch for it, and a
+		// guard does not dial.
+		`{"command":"MODULE.READ k"}`:  false,
+		`{"command":"\"CONFIG GET\""}`: false,
+		// The decoder takes a field in any case and the last of two, so the
+		// judgement is made on what it yields, not on a lookup by name.
+		`{"command":"GET k","Command":"FLUSHALL"}`: false,
+		`{"COMMAND":"FLUSHALL"}`:                   false,
+		`{"Command":"GET k"}`:                      true,
+		// Nothing to judge is not a read.
+		`{}`:                               false,
+		`{"command":""}`:                   false,
+		`{"command":"GET k","extra":true}`: false,
+		`[{"command":"GET k"}]`:            false,
+		`{"command":"GET k"} {}`:           false,
+		`not json`:                         false,
+	}
+	for body, read := range commands {
+		why := redisCommandWrites([]byte(body))
+		if (why == "") != read {
+			t.Errorf("redisCommandWrites(%s) = %q, want read=%v", body, why, read)
+		}
+	}
+	// The reason is recorded with the refusal, so it carries the command's
+	// name and never what was typed after it or in its place.
+	for _, body := range []string{`{"command":"SET session:9 S3CRET-token"}`, `{"command":"S3CRET-token"}`} {
+		if why := redisCommandWrites([]byte(body)); why == "" || strings.Contains(why, "S3CRET") {
+			t.Errorf("redisCommandWrites(%s) = %q", body, why)
+		}
+	}
+
+	bulk := map[string]bool{
+		`{"pattern":"k*","action":"delete","dryRun":true}`:                 true,
+		`{"pattern":"k*","action":"expire","ttl":5,"dryRun":true}`:         true,
+		`{"pattern":"k*","action":"delete"}`:                               false,
+		`{"pattern":"k*","action":"persist"}`:                              false,
+		`{"pattern":"k*","action":"delete","dryRun":false}`:                false,
+		`{"pattern":"k*","action":"delete","dryRun":true,"DryRun":false}`:  false,
+		`{"pattern":"k*","action":"delete","dryrun":true}`:                 true,
+		`{"pattern":"k*","action":"delete","dryRun":true,"confirm":"yes"}`: false,
+		`{"pattern":"k*","action":"delete","dryRun":"true"}`:               false,
+		``: false,
+	}
+	for body, harmless := range bulk {
+		why := redisBulkWrites([]byte(body))
+		if (why == "") != harmless {
+			t.Errorf("redisBulkWrites(%s) = %q, want harmless=%v", body, why, harmless)
 		}
 	}
 }
