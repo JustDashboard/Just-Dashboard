@@ -422,7 +422,9 @@ func TestLiveORMOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable: %v", err)
 	}
-	defer db.Close()
+	// Closed in a cleanup, not a defer: cleanups run after the function's
+	// defers, and the one below still needs the connection to drop the schema.
+	t.Cleanup(func() { db.Close() })
 	if err := db.Ping(); err != nil {
 		t.Skipf("postgres unreachable: %v", err)
 	}
