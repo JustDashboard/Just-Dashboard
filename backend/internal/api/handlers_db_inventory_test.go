@@ -1119,6 +1119,41 @@ func TestHostConnectMatchesTheAccountNotJustTheAddress(t *testing.T) {
 	}
 }
 
+// Resetting an account changes its password on the server, which a protected
+// connection's own routes refuse. The account route concerns no connection by
+// its path, so it has to ask: the account a protected connection signs in with
+// is left alone, and another account on the same server is not held back.
+//
+// The check is asked directly rather than through the route: past it the route
+// runs psql on this machine, and a test must never get that far.
+func TestHostGrantLeavesAProtectedConnectionsAccountAlone(t *testing.T) {
+	s := testServer(t)
+	sealed, _ := s.Sealer.Seal("postgres://app:" + secretPassword + "@localhost:25432/shop?sslmode=disable")
+	if _, err := s.Store.DB.Exec(
+		`INSERT INTO db_connections(name, driver, dsn_enc, created_at, read_only) VALUES('shop','postgres',?,0,1)`, sealed); err != nil {
+		t.Fatal(err)
+	}
+	account := func(user, database string) dbx.Candidate {
+		return dbx.Candidate{Driver: dbx.DriverPostgres, Source: dbx.SourceHost, Host: "127.0.0.1", Port: 25432, User: user, Database: database}
+	}
+	err := s.refuseGrantOnProtected(t.Context(), account("app", "shop"))
+	var refused *httpx.APIError
+	if !errors.As(err, &refused) || refused.Status != http.StatusConflict || refused.Code != "connection_read_only" {
+		t.Fatalf("resetting a protected connection's account = %v, want 409 connection_read_only", err)
+	}
+	for _, other := range []dbx.Candidate{account("reports", "shop"), account("app", "billing")} {
+		if err := s.refuseGrantOnProtected(t.Context(), other); err != nil {
+			t.Errorf("%s on %s is not the protected connection's and was refused: %v", other.User, other.Database, err)
+		}
+	}
+	if _, err := s.Store.DB.Exec(`UPDATE db_connections SET read_only = 0`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.refuseGrantOnProtected(t.Context(), account("app", "shop")); err != nil {
+		t.Errorf("with protection off the account was still refused: %v", err)
+	}
+}
+
 // The account route ends the same way: it re-seals the connection as that
 // account, and leaves any other connection to the same server alone. Redis has
 // one password rather than accounts, so with the password given there is no

@@ -451,7 +451,10 @@ func TestBackupsRestoreIntoAProtectedConnectionIsRefused(t *testing.T) {
 func TestProtectionLeavesSectionRoutesAlone(t *testing.T) {
 	s := testServer(t)
 	protectTestConnection(t, s, "protected", true)
-	for _, path := range []string{"/", "/test", "/sync", "/adopt", "/host", "/host/grant", "/provision"} {
+	for _, path := range []string{
+		"/", "/test", "/sync", "/adopt", "/host", "/host/grant", "/provision",
+		"/inventory/scan", "/inventory/connect", "/inventory/ignore",
+	} {
 		if why := refusal(t, s, http.MethodPost, "/api/v1/databases"+path, `{}`); why != "" {
 			t.Errorf("POST /databases%s was refused: %s", path, why)
 		}
