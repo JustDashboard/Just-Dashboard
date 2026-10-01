@@ -507,7 +507,10 @@ holds something is the guard.
   through `PUT /databases/{id}` field by field (a field left out keeps its value). `GET /databases/`
   and the fleet list a row whose DSN no longer unseals or whose SQLite file left the file roots as
   `broken` with the reason, instead of dropping it; `PUT` with a new DSN repairs one and `DELETE`
-  forgets one. A row is removed in one place, `forgetConnection`, whichever road asked for it —
+  forgets one. Every data route under its id still fails, so the pages outside the section that
+  pick from `GET /databases/` — the backup job form, a deployment's database pickers and
+  dependencies, the command palette, the overview card — draw such a row as one that cannot be
+  opened, with its reason, rather than offer it (`frontend/src/lib/db-connections.ts`). A row is removed in one place, `forgetConnection`, whichever road asked for it —
   forgetting the connection, dropping the database it pointed at, removing the container that served
   it, removing a deployment's resources (`deployment_resource_remover.go`): the row goes unless a
   deployment is bound to it, the pool is closed, what was kept under the id is dropped, and discovery
@@ -536,7 +539,13 @@ holds something is the guard.
   and a copy, the role and privilege routes, maintenance, the drop, the probe every connect path
   runs (`connectFailed`, `withoutSecrets`) — and `TestNoRouteQuotesAConnectionStringsPassword` asks
   every route under a connection, with a string its driver refuses, and looks for the password in
-  the answer, the audit trail and the log. A Redis connection is pinged, tested, summarised and
+  the answer, the audit trail, the log and the jobs it started. It asks each route twice: with
+  `{}`, and with a request written to pass that route's validation (`dialingRequests`), because a
+  route that reads its body before it dials is never put to the test by an empty one — the
+  privilege routes quoted a password for exactly that reason. The test lifts the request budgets
+  (`apiLim`, `destrLim`): several hundred requests from one account in a second were being turned
+  away at the door after the first hundred and twenty, and a `429` proves nothing. `GET /{id}/url`,
+  whose purpose is to hand the string to an administrator, is the one answer exempt. A Redis connection is pinged, tested, summarised and
   read for the fleet in the logical database its connection string names (`dbx.RedisDSNDatabase`),
   which is where every key route goes: a string naming a database the server does not have used to
   test healthy and then fail each of them.
