@@ -17,17 +17,41 @@ const standardSchemaPrimary = `SELECT tc.table_name, kcu.column_name
  WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = {schema}
  AND tc.table_name IN ({tables}) ORDER BY tc.table_name, kcu.ordinal_position`
 
+// Postgres reads pg_catalog rather than information_schema for three reasons
+// the standard views cannot be argued out of: they have no row for a
+// materialized view's columns, they spell every array as ARRAY and every enum
+// as USER-DEFINED, and they hide a constraint from a login that holds only
+// SELECT on its table — so a read-only account saw a schema with no keys.
 func (postgresDialect) schemaQueries() schemaQueries {
 	return schemaQueries{
-		columns: standardSchemaColumns,
-		primary: standardSchemaPrimary,
-		indexes: `SELECT t.relname, i.relname, a.attname, ix.indisunique
+		columns: `SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod),
+ CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END, NULL::int, NULL::int, NULL::int
+ FROM pg_attribute a
+ JOIN pg_class c ON c.oid = a.attrelid
+ JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = {schema} AND c.relname IN ({tables}) AND a.attnum > 0 AND NOT a.attisdropped
+ ORDER BY c.relname, a.attnum`,
+		primary: `SELECT t.relname, a.attname
+ FROM pg_index ix
+ JOIN pg_class t ON t.oid = ix.indrelid
+ JOIN pg_namespace n ON n.oid = t.relnamespace
+ JOIN unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+ JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+ WHERE ix.indisprimary AND n.nspname = {schema} AND t.relname IN ({tables})
+ ORDER BY t.relname, k.ord`,
+		// Key columns only, so an INCLUDE column is not mistaken for part of
+		// the key; an expression is reported as its text, so an index on
+		// (lower(email), id) is not mistaken for one on (id); and a partial
+		// index is not reported unique, because it is not.
+		indexes: `SELECT t.relname, i.relname,
+ COALESCE(a.attname, pg_get_indexdef(ix.indexrelid, k.ord::int, true)),
+ ix.indisunique AND ix.indpred IS NULL
  FROM pg_class t
  JOIN pg_namespace n ON n.oid = t.relnamespace
  JOIN pg_index ix ON t.oid = ix.indrelid
  JOIN pg_class i ON i.oid = ix.indexrelid
- JOIN unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
- JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+ JOIN unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON k.ord <= ix.indnkeyatts
+ LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum AND k.attnum > 0
  WHERE n.nspname = {schema} AND t.relname IN ({tables})
  ORDER BY t.relname, i.relname, k.ord`,
 		foreign: `SELECT rel.relname, con.conname, att.attname, nsp.nspname, cl.relname, att2.attname,
@@ -70,13 +94,17 @@ func (mssqlDialect) schemaQueries() schemaQueries {
 	return schemaQueries{
 		columns: standardSchemaColumns,
 		primary: standardSchemaPrimary,
-		indexes: `SELECT o.name, i.name, c.name, i.is_unique
+		// Included columns are stored in the index and are not part of its key,
+		// and a filtered index is unique only among the rows it covers.
+		indexes: `SELECT o.name, i.name, c.name,
+ CAST(CASE WHEN i.is_unique = 1 AND i.has_filter = 0 THEN 1 ELSE 0 END AS BIT)
  FROM sys.indexes i
  JOIN sys.objects o ON o.object_id = i.object_id
  JOIN sys.schemas s ON s.schema_id = o.schema_id
  JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
  JOIN sys.columns c ON c.object_id = i.object_id AND c.column_id = ic.column_id
  WHERE s.name = {schema} AND o.name IN ({tables}) AND i.name IS NOT NULL
+ AND ic.is_included_column = 0
  ORDER BY o.name, i.name, ic.key_ordinal`,
 		foreign: `SELECT pt.name, fk.name, pc.name, rs.name, rt.name, rc.name,
  fk.update_referential_action_desc, fk.delete_referential_action_desc
@@ -96,7 +124,8 @@ func (mssqlDialect) schemaQueries() schemaQueries {
 func (oracleDialect) schemaQueries() schemaQueries {
 	return schemaQueries{
 		columns: `SELECT table_name, column_name,
- data_type || CASE WHEN data_type IN ('VARCHAR2','NVARCHAR2','CHAR','RAW') THEN '(' || data_length || ')'
+ data_type || CASE WHEN data_type IN ('VARCHAR2','NVARCHAR2','CHAR','NCHAR') THEN '(' || char_length || ')'
+ WHEN data_type = 'RAW' THEN '(' || data_length || ')'
  WHEN data_type = 'NUMBER' AND data_precision IS NOT NULL
  THEN '(' || data_precision || ',' || NVL(data_scale,0) || ')' ELSE '' END,
  nullable, NULL, NULL, NULL
@@ -126,11 +155,12 @@ func (sqliteDialect) schemaQueries() schemaQueries {
 	return schemaQueries{
 		nullIndexColumns: true,
 		columns: `SELECT m.name, p.name, p.type, CASE p."notnull" WHEN 0 THEN 'YES' ELSE 'NO' END, NULL, NULL, NULL
- FROM sqlite_master m JOIN pragma_table_info(m.name) p
- WHERE {schema} = 'main' AND m.name IN ({tables}) ORDER BY m.name, p.cid`,
+ FROM sqlite_master m JOIN pragma_table_xinfo(m.name) p
+ WHERE {schema} = 'main' AND m.name IN ({tables}) AND p.hidden <> 1 ORDER BY m.name, p.cid`,
 		primary: `SELECT m.name, p.name FROM sqlite_master m JOIN pragma_table_info(m.name) p
  WHERE {schema} = 'main' AND m.name IN ({tables}) AND p.pk > 0 ORDER BY m.name, p.pk`,
-		indexes: `SELECT m.name, i.name, p.name, i."unique"
+		// A partial index is unique only among the rows it covers.
+		indexes: `SELECT m.name, i.name, p.name, i."unique" AND NOT i.partial
  FROM sqlite_master m JOIN pragma_index_list(m.name) i LEFT JOIN pragma_index_info(i.name) p ON true
  WHERE {schema} = 'main' AND m.name IN ({tables}) ORDER BY m.name, i.seq, p.seqno`,
 		foreign: `SELECT m.name, 'fk_' || p.id, p."from", '', p."table", p."to", p.on_update, p.on_delete

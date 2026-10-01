@@ -69,7 +69,7 @@ type engineFixture struct {
 }
 
 func sqlFixtures() []engineFixture {
-	return []engineFixture{
+	return inDSNSchema([]engineFixture{
 		{
 			driver: DriverPostgres, env: "JD_TEST_POSTGRES_DSN",
 			dsn:    "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable",
@@ -208,7 +208,7 @@ func sqlFixtures() []engineFixture {
 				`INSERT INTO jd_posts(id,title,author_id) VALUES (1,'Hello',1),(2,'World',2)`,
 			},
 		},
-	}
+	})
 }
 
 func setupFixture(t *testing.T, db *sql.DB, f engineFixture) {
@@ -381,8 +381,8 @@ func TestLiveSQLEngines(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Outline: %v", err)
 				}
-				if cols, ok := outline.Tables["jd_users"]; !ok || !contains(cols, "email") {
-					t.Errorf("outline for jd_users = %v", outline.Tables["jd_users"])
+				if cols, ok := outlineColumns(outline, "jd_users"); !ok || !contains(cols, "email") {
+					t.Errorf("outline for jd_users = %v in %v", cols, outline.Tables)
 				}
 
 				// Generate ORM schemas from genuinely introspected structure.

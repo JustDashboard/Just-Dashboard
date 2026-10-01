@@ -311,7 +311,7 @@ func ListTables(ctx context.Context, db *sql.DB, driver Driver, schema string) (
 	if err != nil {
 		return nil, err
 	}
-	return d.Tables(ctx, db, schema)
+	return listTables(ctx, db, d, schema)
 }
 
 type Column struct {
@@ -321,6 +321,23 @@ type Column struct {
 	Default  string `json:"default,omitempty"`
 	Key      string `json:"key,omitempty"`
 	Position int    `json:"position"`
+	// The rest is what a table read asks the catalogue for beyond the
+	// declaration (catalog_<engine>.go). A read that does not ask leaves it
+	// empty, so none of it may be taken as "the column has none".
+	Comment string `json:"comment,omitempty"`
+	// Identity is the engine's own word for a column that numbers itself:
+	// "always" or "by default" on Postgres and Oracle, "auto_increment" on
+	// MySQL, "identity(1,1)" on SQL Server, "autoincrement" or "rowid" on SQLite.
+	Identity string `json:"identity,omitempty"`
+	// Generated is the expression of a computed column, which no insert may
+	// supply a value for; GeneratedKind says whether it is "stored" or "virtual".
+	Generated     string `json:"generated,omitempty"`
+	GeneratedKind string `json:"generatedKind,omitempty"`
+	// TypeKind names a type that is not built in — "enum", "domain", "array",
+	// "composite", "range" — and EnumValues carries an enum's labels in their
+	// declared order, so an editor can offer them instead of a free-text field.
+	TypeKind   string   `json:"typeKind,omitempty"`
+	EnumValues []string `json:"enumValues,omitempty"`
 }
 
 func ListColumns(ctx context.Context, db *sql.DB, driver Driver, schema, table string) ([]Column, error) {
@@ -328,7 +345,7 @@ func ListColumns(ctx context.Context, db *sql.DB, driver Driver, schema, table s
 	if err != nil {
 		return nil, err
 	}
-	return d.Columns(ctx, db, schema, table)
+	return tableColumns(ctx, db, d, schema, table)
 }
 
 // identifierRe is the strict form, used where a name becomes a path segment or

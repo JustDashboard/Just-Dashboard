@@ -76,14 +76,14 @@ func checkSchemaCatalog(t *testing.T, db *sql.DB, d Dialect, schema string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := withSchemaCatalog(t.Context(), db, d, tables, true)
+	got := withSchemaCatalog(t.Context(), db, d, tables, catalogEverything)
 	for _, table := range tables {
 		key := catalogTable{table.Schema, table.Name}
 		columns, ok := got.columns[key]
 		if !ok {
 			t.Fatalf("bulk columns fell back for %s", table.Name)
 		}
-		want, err := d.Columns(t.Context(), db, table.Schema, table.Name)
+		want, err := tableColumns(t.Context(), db, d, table.Schema, table.Name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,11 +102,13 @@ func checkSchemaCatalog(t *testing.T, db *sql.DB, d Dialect, schema string) {
 		if !ok {
 			t.Fatalf("bulk indexes fell back for %s", table.Name)
 		}
-		wantIX, err := d.Indexes(t.Context(), db, table.Schema, table.Name)
+		wantIX, err := tableIndexes(t.Context(), db, d, table.Schema, table.Name)
+		// The graph's rule, not a looser one: a partial index and an index
+		// over an expression promise nothing about a column.
 		unique := func(list []Index) map[string]bool {
 			out := map[string]bool{}
 			for _, ix := range list {
-				if ix.Unique && len(ix.Columns) == 1 {
+				if ix.Unique && len(ix.Columns) == 1 && ix.Predicate == "" && !ix.Expression {
 					out[ix.Columns[0]] = true
 				}
 			}
@@ -161,10 +163,10 @@ func TestSchemaCatalogRetainsUnreadableTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if names, ok := outline.Tables["broken"]; !ok || len(names) != 0 {
+	if names, ok := outline.Tables[TableKey("main", "broken")]; !ok || len(names) != 0 {
 		t.Fatalf("unreadable view lost: %v", outline.Tables)
 	}
-	if len(outline.Tables["users"]) != 3 {
+	if len(outline.Tables[TableKey("main", "users")]) != 3 {
 		t.Fatal("failed bulk read hid readable columns")
 	}
 	graph, err := BuildSchemaGraph(t.Context(), db, DriverSQLite, "main")
