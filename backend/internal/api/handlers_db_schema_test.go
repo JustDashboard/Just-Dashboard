@@ -403,11 +403,19 @@ func TestARefusedPreviewIsOnTheTrailOnlyWhenItWasRefusedForTheRole(t *testing.T)
 		{http.MethodPost, "/databases/1/ddl/rename", `{"table":"orders"}`},
 		{http.MethodPatch, "/databases/1/ddl/column", `{"table":"customers","name":"name","nullable":false}`},
 		{http.MethodPost, "/databases/1/ddl/comment", `{"comment":"x"}`},
+		// Stopped before the request was even read: not an id, and not JSON.
+		{http.MethodPost, "/databases/one/ddl/view", `{"name":"v","query":"SELECT 1"}`},
+		{http.MethodPost, "/databases/1/ddl/view", `{"name":`},
 	} {
 		rec, _ := schemaSend(t, router, c.method, c.path+"?preview=1", c.body)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("%s %s?preview=1 %s = %d %s", c.method, c.path, c.body, rec.Code, strings.TrimSpace(rec.Body.String()))
 		}
+	}
+	// A connection that is not there is not the request's wording at fault,
+	// and a preview of a change to it is still not a change.
+	if rec, _ := schemaSend(t, router, http.MethodPost, "/databases/999/ddl/view?preview=1", `{"name":"v","query":"SELECT 1"}`); rec.Code != http.StatusNotFound {
+		t.Errorf("a preview on a connection that is not there = %d", rec.Code)
 	}
 	if n, last := audited(); n != 0 {
 		t.Errorf("refused previews left %d audit entries, the last %s", n, last)
@@ -543,6 +551,90 @@ func TestPreviewShowsTheStatementAndRunsNothing(t *testing.T) {
 	if err := s.Store.DB.QueryRow(`SELECT detail FROM audit_log WHERE action = 'database.ddl.drop_table' AND success = 0`).Scan(&detail); err != nil ||
 		!strings.Contains(detail, `DROP TABLE \"never_was\"`) {
 		t.Errorf("the refused statement on the trail = %q, %v", detail, err)
+	}
+}
+
+// A schema form can be shown on a connection it may not be run on — a
+// protected one, once the streams are merged — and what decides that is where
+// the route is mounted: under /ddl/, asked with ?preview=1. So every route
+// mounted there has to honour the flag; one that ran anyway would be a write
+// to a database the operator marked read-only. The routes are taken from the
+// real router, so one added under /ddl/ tomorrow is held to this before it is
+// held to anything else.
+func TestEveryStructureRouteCanBeShownWithoutRunning(t *testing.T) {
+	s, router, db := schemaRouter(t, auth.RoleAdmin)
+	// One request per route that is valid as far as the form can tell. SQLite
+	// has no statement for half of them, and says so for a preview exactly as
+	// it would for a run.
+	requests := map[string]string{
+		"POST /ddl/table":         `{"table":"notes","columns":[{"name":"id","type":"INTEGER"}]}`,
+		"POST /ddl/column":        `{"table":"customers","column":{"name":"phone","type":"TEXT"}}`,
+		"PATCH /ddl/column":       `{"table":"customers","name":"name","nullable":false}`,
+		"POST /ddl/index":         `{"table":"orders","fields":["total"]}`,
+		"POST /ddl/rename":        `{"table":"orders","to":"purchases"}`,
+		"POST /ddl/foreign-key":   `{"table":"orders","columns":["total"],"refTable":"customers","refColumns":["id"]}`,
+		"POST /ddl/constraint":    `{"table":"orders","type":"check","expression":"total > 0"}`,
+		"POST /ddl/view":          `{"name":"named","query":"SELECT id FROM customers"}`,
+		"POST /ddl/schema":        `{"name":"extra"}`,
+		"POST /ddl/comment":       `{"table":"orders","comment":"x"}`,
+		"POST /ddl/enum":          `{"name":"state","values":["new"]}`,
+		"POST /ddl/enum/value":    `{"name":"state","value":"done"}`,
+		"POST /ddl/truncate":      `{"table":"customers"}`,
+		"DELETE /ddl/table":       `{"table":"orders"}`,
+		"DELETE /ddl/column":      `{"table":"customers","name":"name"}`,
+		"DELETE /ddl/index":       `{"table":"orders","name":"orders_customer"}`,
+		"DELETE /ddl/foreign-key": `{"table":"orders","name":"fk_0"}`,
+		"DELETE /ddl/constraint":  `{"table":"orders","name":"c","type":"check"}`,
+		"DELETE /ddl/view":        `{"name":"big_orders"}`,
+		"DELETE /ddl/schema":      `{"name":"extra"}`,
+	}
+	const prefix = "/api/v1/databases/{id}"
+	before := schemaText(t, db)
+	shown, seen := 0, map[string]bool{}
+	for _, rt := range apiRoutes(t, s.Routes()) {
+		rest, ok := strings.CutPrefix(rt.pattern, prefix)
+		if !ok || !strings.HasPrefix(rest, "/ddl/") {
+			continue
+		}
+		key := rt.method + " " + rest
+		seen[key] = true
+		body, ok := requests[key]
+		if !ok {
+			t.Errorf("%s is a structure route and this test has no request for it", key)
+			continue
+		}
+		rec, reply := schemaSend(t, router, rt.method, "/databases/1"+rest+"?preview=1", body)
+		switch rec.Code {
+		case http.StatusOK:
+			shown++
+			if reply["preview"] != true || reply["statement"] == "" {
+				t.Errorf("%s?preview=1 = %s", key, strings.TrimSpace(rec.Body.String()))
+			}
+		case http.StatusBadRequest:
+			if !strings.Contains(schemaErrMessage(reply), "SQLite") {
+				t.Errorf("%s?preview=1 was refused for the request, not for the engine: %s", key, schemaErrMessage(reply))
+			}
+		default:
+			t.Errorf("%s?preview=1 = %d %s", key, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+	}
+	for key := range requests {
+		if !seen[key] {
+			t.Errorf("%q is in this test and is not a route", key)
+		}
+	}
+	if shown != 10 {
+		t.Errorf("%d routes showed a statement, want the ten SQLite has one for", shown)
+	}
+	if after := schemaText(t, db); after != before {
+		t.Errorf("a preview changed the database:\n%s\n---\n%s", before, after)
+	}
+	var rows, audited int
+	if err := db.QueryRow(`SELECT count(*) FROM customers`).Scan(&rows); err != nil || rows != 1 {
+		t.Errorf("a preview emptied a table: %d, %v", rows, err)
+	}
+	if err := s.Store.DB.QueryRow(`SELECT count(*) FROM audit_log`).Scan(&audited); err != nil || audited != 0 {
+		t.Errorf("previews left %d audit entries, %v", audited, err)
 	}
 }
 
@@ -683,7 +775,13 @@ func TestLiveAPISchemaSurface(t *testing.T) {
 	}
 
 	send(http.MethodPost, "/ddl/schema", `{"name":"`+schema+`"}`)
-	send(http.MethodPost, "/ddl/enum", `{"schema":"`+schema+`","name":"state","values":["new","done"]}`)
+	// The two forms only this engine has are shown before they are run, like
+	// every other.
+	enum := `{"schema":"` + schema + `","name":"state","values":["new","done"]}`
+	if shown := send(http.MethodPost, "/ddl/enum?preview=1", enum); shown["preview"] != true ||
+		shown["statement"] != send(http.MethodPost, "/ddl/enum", enum)["statement"] {
+		t.Errorf("the enum form previewed %v", shown)
+	}
 	send(http.MethodPost, "/ddl/table", `{"schema":"`+schema+`","table":"owners","columns":[
 		{"name":"id","type":"integer","primaryKey":true,"notNull":true},{"name":"name","type":"text"}]}`)
 	send(http.MethodPost, "/ddl/table", `{"schema":"`+schema+`","table":"tasks","columns":[
@@ -701,7 +799,11 @@ func TestLiveAPISchemaSurface(t *testing.T) {
 	send(http.MethodPost, "/ddl/comment", `{"schema":"`+schema+`","table":"tasks","column":"effort","comment":"In hours"}`)
 	send(http.MethodPost, "/ddl/view", `{"schema":"`+schema+`","name":"open_tasks","query":"SELECT id FROM `+schema+`.tasks WHERE state = 'new'"}`)
 	send(http.MethodPost, "/ddl/index", `{"schema":"`+schema+`","table":"tasks","fields":["owner_id"],"method":"hash","ifNotExists":true}`)
-	send(http.MethodPost, "/ddl/enum/value", `{"schema":"`+schema+`","name":"state","value":"doing","before":"done"}`)
+	label := `{"schema":"` + schema + `","name":"state","value":"doing","before":"done"}`
+	if shown := send(http.MethodPost, "/ddl/enum/value?preview=1", label); shown["preview"] != true ||
+		shown["statement"] != send(http.MethodPost, "/ddl/enum/value", label)["statement"] {
+		t.Errorf("the enum label form previewed %v", shown)
+	}
 
 	t.Run("catalogue", func(t *testing.T) {
 		var catalog dbx.Catalog

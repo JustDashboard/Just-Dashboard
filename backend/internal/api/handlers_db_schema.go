@@ -148,23 +148,30 @@ func ddlInvalid(r *http.Request, format string, args ...any) error {
 // ddlDecode reads a schema-change request and identifies the connection,
 // without opening a pool: a request that is malformed, or aimed at an engine
 // with no schema to edit, does not dial the database.
+//
+// A preview that gets no further than this showed nothing and changed
+// nothing, whatever stopped it — an id that is not one, a body that does not
+// parse, a connection that is not there — so none of them is on the trail.
 func (s *Server) ddlDecode(r *http.Request, req any) (*dbConnection, error) {
-	id, err := parseID(r)
-	if err != nil {
-		return nil, err
-	}
-	if err := httpx.DecodeJSON(r, req); err != nil {
+	stopped := func(err error) (*dbConnection, error) {
 		if ddlPreview(r) {
 			httpx.SkipAudit(r)
 		}
 		return nil, err
 	}
+	id, err := parseID(r)
+	if err != nil {
+		return stopped(err)
+	}
+	if err := httpx.DecodeJSON(r, req); err != nil {
+		return stopped(err)
+	}
 	conn, _, err := s.dbConnRow(r.Context(), id)
 	if err != nil {
-		return nil, err
+		return stopped(err)
 	}
 	if !conn.Driver.IsSQL() {
-		return nil, ddlInvalid(r, "schema editing is for SQL engines; %s has its own surface", conn.Driver)
+		return stopped(httpx.BadRequest("schema editing is for SQL engines; %s has its own surface", conn.Driver))
 	}
 	return conn, nil
 }
