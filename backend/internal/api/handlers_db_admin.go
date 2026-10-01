@@ -309,6 +309,11 @@ func (s *Server) handleDBRoleAlter(w http.ResponseWriter, r *http.Request) error
 	if err := ownAccountRefusal(conn, spec); err != nil {
 		return err
 	}
+	// An account is the server's: one a protected connection signs in with is
+	// not changed through a neighbour either.
+	if err := s.refuseNeighbourAccount(ctx, conn, spec.Name); err != nil {
+		return err
+	}
 	if err := s.withRoleClient(ctx, conn, dsn, admin,
 		func(a dbx.Admin, pool *sql.DB) error { return a.AlterRole(ctx, pool, spec) },
 		func(c *mongo.Client) error { return dbx.MongoAlterUser(ctx, c, spec) },
@@ -394,6 +399,9 @@ func (s *Server) handleDBRoleDrop(w http.ResponseWriter, r *http.Request) error 
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
+	if err := s.refuseNeighbourAccount(ctx, conn, name); err != nil {
+		return err
+	}
 	if err := s.withRoleClient(ctx, conn, dsn, admin,
 		func(a dbx.Admin, pool *sql.DB) error { return a.DropRole(ctx, pool, name, host) },
 		func(c *mongo.Client) error { return dbx.MongoDropUser(ctx, c, name) },

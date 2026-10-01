@@ -343,6 +343,11 @@ func (s *Server) handleRedisACLSet(w http.ResponseWriter, r *http.Request) error
 	if err := spec.Validate(); err != nil {
 		return httpx.BadRequest("%v", err)
 	}
+	// The user a protected connection to this server signs in as is not
+	// re-ruled through a neighbour.
+	if err := s.refuseNeighbourAccountOn(r, name); err != nil {
+		return err
+	}
 	client, conn, err := s.redisClient(r)
 	if err != nil {
 		return err
@@ -376,6 +381,9 @@ func (s *Server) handleRedisACLSet(w http.ResponseWriter, r *http.Request) error
 func (s *Server) handleRedisACLDelete(w http.ResponseWriter, r *http.Request) error {
 	name, err := redisACLName(r)
 	if err != nil {
+		return err
+	}
+	if err := s.refuseNeighbourAccountOn(r, name); err != nil {
 		return err
 	}
 	client, conn, err := s.redisClient(r)

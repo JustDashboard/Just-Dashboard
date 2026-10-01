@@ -1209,6 +1209,12 @@ func TestHostConnectMatchesTheAccountNotJustTheAddress(t *testing.T) {
 // its path, so it has to ask: the account a protected connection signs in with
 // is left alone, and another account on the same server is not held back.
 //
+// An account belongs to the server and not to a database, so the database the
+// request names decides nothing: one that names another database, or none and
+// so the engine's default, would reset the same account. It used to get
+// through, because the protected connection was looked for by its database
+// too.
+//
 // The check is asked directly rather than through the route: past it the route
 // runs psql on this machine, and a test must never get that far.
 func TestHostGrantLeavesAProtectedConnectionsAccountAlone(t *testing.T) {
@@ -1221,20 +1227,29 @@ func TestHostGrantLeavesAProtectedConnectionsAccountAlone(t *testing.T) {
 	account := func(user, database string) dbx.Candidate {
 		return dbx.Candidate{Driver: dbx.DriverPostgres, Source: dbx.SourceHost, Host: "127.0.0.1", Port: 25432, User: user, Database: database}
 	}
-	err := s.refuseGrantOnProtected(t.Context(), account("app", "shop"))
-	var refused *httpx.APIError
-	if !errors.As(err, &refused) || refused.Status != http.StatusConflict || refused.Code != "connection_read_only" {
-		t.Fatalf("resetting a protected connection's account = %v, want 409 connection_read_only", err)
+	// Its own database, the one the handler falls back to when the request
+	// names none, another one, and the account spelled in another case, which
+	// an unquoted name in ALTER ROLE folds back to the same role.
+	for _, same := range []dbx.Candidate{account("app", "shop"), account("app", "postgres"), account("app", "billing"), account("app", ""), account("APP", "shop")} {
+		err := s.refuseGrantOnProtected(t.Context(), same)
+		var refused *httpx.APIError
+		if !errors.As(err, &refused) || refused.Status != http.StatusConflict || refused.Code != "connection_read_only" {
+			t.Errorf("resetting %s, asked with database %q = %v, want 409 connection_read_only", same.User, same.Database, err)
+		}
 	}
-	for _, other := range []dbx.Candidate{account("reports", "shop"), account("app", "billing")} {
+	elsewhere := account("app", "shop")
+	elsewhere.Port = 25433
+	otherEngine := account("app", "shop")
+	otherEngine.Driver = dbx.DriverMySQL
+	for _, other := range []dbx.Candidate{account("reports", "shop"), elsewhere, otherEngine} {
 		if err := s.refuseGrantOnProtected(t.Context(), other); err != nil {
-			t.Errorf("%s on %s is not the protected connection's and was refused: %v", other.User, other.Database, err)
+			t.Errorf("%s %s on port %d is not the protected connection's account and was refused: %v", other.Driver, other.User, other.Port, err)
 		}
 	}
 	if _, err := s.Store.DB.Exec(`UPDATE db_connections SET read_only = 0`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.refuseGrantOnProtected(t.Context(), account("app", "shop")); err != nil {
+	if err := s.refuseGrantOnProtected(t.Context(), account("app", "billing")); err != nil {
 		t.Errorf("with protection off the account was still refused: %v", err)
 	}
 }

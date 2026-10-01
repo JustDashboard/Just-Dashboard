@@ -327,6 +327,25 @@ func restoreRedis(ctx context.Context, dsn, database, path string, opts RestoreO
 	return fmt.Sprintf("%d keys restored into db%d", restored, current), nil
 }
 
+// RedisArchiveDatabases is the numbered databases a Redis archive was taken
+// of, as its header names them: where restoreRedis puts the keys when no
+// database is named. It is empty for a file that is not such an archive, and
+// for a version 1 archive that names none and goes to the connection's own.
+func RedisArchiveDatabases(path string) []string {
+	_, header, closeArchive, err := openArchive(path, "jd-redis")
+	if err != nil {
+		return nil
+	}
+	closeArchive()
+	var out []string
+	for _, name := range strings.Split(header.Database, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // redisDatabaseIndex resolves which numbered database to act on. Redis names
 // them with integers, so the "database" the rest of the product passes around
 // as a string is one here — and an empty one means the connection's own, which

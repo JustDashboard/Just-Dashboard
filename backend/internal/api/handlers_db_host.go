@@ -206,25 +206,15 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 // The route is a section route, so the middleware that guards a protected
 // connection never sees it; and what it does to an account that exists is
 // change its password on the server, which is the role change that middleware
-// refuses under /databases/{id}/server. The saved connection is found the way
-// the re-seal below finds it — same engine, address, database and account —
-// and before the host command runs, because afterwards the password is already
-// changed. A match that cannot be told apart is refused as it would be below,
-// while nothing has been touched yet.
+// refuses under /databases/{id}/server. An account is the server's, not one
+// database's: the request's database only says where the new connection will
+// land, so a protected connection is found by engine, address and account
+// alone. Matching the database as well let a request that named another one,
+// or none and so the engine's default, reset the account all the same. It is
+// asked before the host command runs, because afterwards the password is
+// already changed.
 func (s *Server) refuseGrantOnProtected(ctx context.Context, cand dbx.Candidate) error {
-	// Any password: the lookup compares everything in the string but that.
-	lookup := dbx.BuildDSN(cand, "x")
-	if lookup == "" {
-		return nil
-	}
-	conn, _, _, err := s.adoptedDatabaseConnection(ctx, cand.Driver, lookup)
-	if err != nil {
-		return err
-	}
-	if conn != nil && conn.ReadOnly {
-		return protectedRefusal("%s is protected, and setting this account up again would change its password on the server; turn protection off in the connection's settings first", conn.Name)
-	}
-	return nil
+	return s.refuseAccountOfProtected(ctx, cand.Driver, cand.Host, strconv.Itoa(cand.Port), 0, cand.User)
 }
 
 // hostSocket is the unix socket of the server of that engine listening on a

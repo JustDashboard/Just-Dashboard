@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
@@ -56,6 +57,14 @@ func (d *backupDatabaseDumper) RestoreDatabase(ctx context.Context, id int64, da
 	// restore replaces what is in the database, by whichever road it arrives.
 	if conn.ReadOnly {
 		return "", fmt.Errorf("%s is protected: a dump cannot be restored into it until protection is turned off in its settings", conn.Name)
+	}
+	// And where the dump lands in a database a protected connection to the
+	// same server is on: the dump is in hand here, so a Redis archive is asked
+	// which numbered databases it will write into.
+	for _, into := range restoreDestinations(conn, strings.TrimSpace(database), dumpPath) {
+		if err := d.server.refuseDatabaseOfProtected(ctx, conn, into); err != nil {
+			return "", err
+		}
 	}
 	// The dashboard's own sessions go first, as they do for a restore started
 	// from the Databases page: a pooled one would carry plans for tables that

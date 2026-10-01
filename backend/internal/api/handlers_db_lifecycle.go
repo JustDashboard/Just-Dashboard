@@ -113,6 +113,16 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 	if target == "" {
 		return httpx.BadRequest("this connection names no database to drop")
 	}
+	// Asked through this connection, done to another: a database a protected
+	// connection is on, or the container every database of the server is in.
+	if req.RemoveContainer {
+		err = s.refuseServerOfProtected(r.Context(), conn)
+	} else {
+		err = s.refuseDatabaseOfProtected(r.Context(), conn, dropArgument(conn, req.Database))
+	}
+	if err != nil {
+		return err
+	}
 	if err := httpx.RequireTypedConfirmation(w, r, target); err != nil {
 		return err
 	}

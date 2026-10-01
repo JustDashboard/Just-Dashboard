@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -533,4 +534,134 @@ func protectedMongo(check func([]byte) error) func(dbx.Driver, []byte) error {
 		}
 		return nil
 	}
+}
+
+// Protection that follows the server.
+//
+// The middleware above stands in front of the protected connection's own
+// routes. A few requests are addressed to one connection, or to none, and act
+// on what another one stands for: an account is the server's and not a
+// database's, and a restore or a drop may name a database other than the one
+// its connection is on. Asked through an unprotected neighbour, each would do
+// to a protected connection exactly what its own routes refuse. So those
+// handlers ask here first.
+//
+// A server is an engine at an address, compared as an identity (localhost is
+// 127.0.0.1). A row whose connection string no longer opens has no address to
+// compare and protects nothing; a SQLite file is its own server and has no
+// neighbours.
+
+// protectedNeighbour is a protected saved connection to the server at that
+// address which concerns picks, or nil. except is the connection the request
+// came through, whose own protection the middleware has already answered for.
+func (s *Server) protectedNeighbour(ctx context.Context, driver dbx.Driver, host, port string, except int64, concerns func(*dbConnection) bool) (*dbConnection, error) {
+	if driver == dbx.DriverSQLite {
+		return nil, nil
+	}
+	all, err := s.allConnections(ctx)
+	if err != nil {
+		return nil, err
+	}
+	server := addressKey(host, atoiDefault(port, 0))
+	for _, other := range all {
+		if other.Broken || !other.ReadOnly || other.ID == except || other.Driver != driver ||
+			addressKey(other.Host, atoiDefault(other.Port, 0)) != server {
+			continue
+		}
+		if concerns(other) {
+			return other, nil
+		}
+	}
+	return nil, nil
+}
+
+// refuseAccountOfProtected refuses a change to the account a protected
+// connection to that server signs in with, whichever of the server's databases
+// that connection is on: resetting its password, locking it or dropping it
+// leaves the protected connection, and every application sharing the account,
+// unable to sign in. The name is compared without case, as ownAccountRefusal
+// compares it and for its reason: refusing one too many costs a trip to the
+// connection's settings.
+func (s *Server) refuseAccountOfProtected(ctx context.Context, driver dbx.Driver, host, port string, except int64, account string) error {
+	account = protectedAccountName(driver, account)
+	if account == "" {
+		return nil
+	}
+	held, err := s.protectedNeighbour(ctx, driver, host, port, except, func(other *dbConnection) bool {
+		return strings.EqualFold(protectedAccountName(other.Driver, other.User), account)
+	})
+	if err != nil || held == nil {
+		return err
+	}
+	return protectedRefusal("%s is protected and signs in as %s; that account cannot be changed from the dashboard until protection is turned off in the connection's settings", held.Name, account)
+}
+
+// refuseNeighbourAccount is refuseAccountOfProtected for a request that came
+// through a connection: the other connections to its server are asked about.
+func (s *Server) refuseNeighbourAccount(ctx context.Context, through *dbConnection, account string) error {
+	return s.refuseAccountOfProtected(ctx, through.Driver, through.Host, through.Port, through.ID, account)
+}
+
+// refuseNeighbourAccountOn is the same for a handler that opens its client
+// before it has the connection in hand: asked first, a refusal costs no dial.
+func (s *Server) refuseNeighbourAccountOn(r *http.Request, account string) error {
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	through, _, err := s.dbConnRow(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	return s.refuseNeighbourAccount(r.Context(), through, account)
+}
+
+// protectedAccountName is an account's name as two spellings of it agree on:
+// a Redis connection that names no user signs in as the one called default.
+func protectedAccountName(driver dbx.Driver, name string) string {
+	if driver == dbx.DriverRedis && name == "" {
+		return "default"
+	}
+	return name
+}
+
+// refuseDatabaseOfProtected refuses a request made through one connection that
+// replaces or removes another database on its server when a protected
+// connection is on that database. The connection's own database is its own
+// routes' business: it is not protected, or the middleware would have answered.
+func (s *Server) refuseDatabaseOfProtected(ctx context.Context, through *dbConnection, database string) error {
+	database = protectedDatabaseName(through.Driver, database)
+	if strings.EqualFold(database, protectedDatabaseName(through.Driver, through.Database)) {
+		return nil
+	}
+	held, err := s.protectedNeighbour(ctx, through.Driver, through.Host, through.Port, through.ID, func(other *dbConnection) bool {
+		return strings.EqualFold(protectedDatabaseName(other.Driver, other.Database), database)
+	})
+	if err != nil || held == nil {
+		return err
+	}
+	return protectedRefusal("%s is protected and is on %s; that database cannot be replaced or removed from the dashboard until protection is turned off in the connection's settings", held.Name, dropTargetName(held, ""))
+}
+
+// refuseServerOfProtected refuses taking a whole server away while a protected
+// connection is on any of its databases.
+func (s *Server) refuseServerOfProtected(ctx context.Context, through *dbConnection) error {
+	held, err := s.protectedNeighbour(ctx, through.Driver, through.Host, through.Port, through.ID, func(*dbConnection) bool { return true })
+	if err != nil || held == nil {
+		return err
+	}
+	return protectedRefusal("%s is protected and is on this server; the server cannot be removed from the dashboard until protection is turned off in the connection's settings", held.Name)
+}
+
+// protectedDatabaseName is a database's name as two spellings of it agree on.
+// Redis numbers its databases, a connection that names none is on 0, and a
+// number is also written db3.
+func protectedDatabaseName(driver dbx.Driver, name string) string {
+	name = strings.TrimSpace(name)
+	if driver == dbx.DriverRedis {
+		if name = strings.TrimPrefix(name, "db"); name == "" {
+			return "0"
+		}
+	}
+	return name
 }

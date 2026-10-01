@@ -425,12 +425,23 @@ func (s *Server) handleBackupRestoreDatabase(w http.ResponseWriter, r *http.Requ
 	if target == "" {
 		return httpx.BadRequest("the connection names no database; specify one explicitly")
 	}
+	// A drill database named here may be the one a protected connection to
+	// the same server is on.
+	if err := s.refuseDatabaseOfProtected(r.Context(), conn, target); err != nil {
+		return err
+	}
 	ctx, cancel := timeoutCtx(r, 60*time.Minute)
 	defer cancel()
 	output, err := s.modules.backupRunner.RestoreDatabase(ctx, runID, req.ConnectionID, req.Database)
 	if err != nil {
 		httpx.SetAudit(r, "backup.restore.database", strconv.FormatInt(runID, 10),
 			map[string]any{"connectionId": req.ConnectionID, "connection": conn.Name, "database": target, "error": err.Error()})
+		// The adapter refuses a protected database by whichever road it is
+		// reached, and that refusal keeps its own status.
+		var refused *httpx.APIError
+		if errors.As(err, &refused) && refused.Code == "connection_read_only" {
+			return refused
+		}
 		return httpx.Err(http.StatusBadGateway, "restore_failed", err.Error())
 	}
 	httpx.SetAudit(r, "backup.restore.database", strconv.FormatInt(runID, 10),

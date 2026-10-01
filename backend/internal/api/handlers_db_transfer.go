@@ -1421,10 +1421,16 @@ func (s *Server) startDBRestore(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	shown := target
-	if shown == "" {
-		shown = conn.Database
+	// A database other than the connection's own may be the one a protected
+	// connection is on, and replacing it from here is what that connection's
+	// own restore refuses.
+	into := restoreDestinations(conn, target, dumpPath)
+	for _, database := range into {
+		if err := s.refuseDatabaseOfProtected(r.Context(), conn, database); err != nil {
+			return err
+		}
 	}
+	shown := strings.Join(into, ",")
 	file := filepath.Base(dumpPath)
 	base, by := auditBaseOf(r), httpx.MustPrincipal(r).Username()
 	detail := map[string]any{"database": shown, "file": file, "dumpFirst": req.DumpFirst, "newDatabase": create != ""}
@@ -1453,6 +1459,23 @@ func (s *Server) startDBRestore(w http.ResponseWriter, r *http.Request) error {
 		s.recordTransfer(base, "database.restore.finish", conn.Name, outcome, nil)
 		return nil
 	})
+}
+
+// restoreDestinations is the databases a restore writes into: the one named,
+// or the connection's own. A Redis archive restored with none named is the
+// exception: each key goes back to the numbered database it came from, which
+// need not be the one the connection is on, so the archive's own list is the
+// answer — the same list its backup reported, "8" or "0,3".
+func restoreDestinations(conn *dbConnection, target, dumpPath string) []string {
+	if target != "" {
+		return []string{target}
+	}
+	if conn.Driver == dbx.DriverRedis {
+		if from := dbx.RedisArchiveDatabases(dumpPath); len(from) > 0 {
+			return from
+		}
+	}
+	return []string{conn.Database}
 }
 
 // runRestore is the work of a restore job: the optional dump of what is

@@ -235,6 +235,14 @@ func (s *Server) mongoUserOp(w http.ResponseWriter, r *http.Request, action stri
 		return err
 	}
 	req.normalise()
+	// Making an account and giving it more take nothing from anybody. The rest
+	// change one that exists, and the one a protected connection to this
+	// server signs in with is not changed through a neighbour.
+	if action != "database.role.create" && action != "database.role.grant" {
+		if err := s.refuseNeighbourAccountOn(r, req.User); err != nil {
+			return err
+		}
+	}
 	client, conn, err := s.mongoClient(r)
 	if err != nil {
 		return err
