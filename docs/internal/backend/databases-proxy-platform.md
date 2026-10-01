@@ -2,13 +2,41 @@
 
 ## Databases: eight engines, one shape
 
-The query runner accepts one statement per request. A trailing semicolon and quoted semicolons are
-supported; executable/nested comments, ambiguous backslash escapes, hash comments, dollar quoting and
-ambiguous double-dash syntax are refused at this authorization boundary. Classification computes the
-strongest risk independently for each statement, so a recognized CREATE/INSERT cannot suppress an
-unknown operation's risk. Every dialect validates explain input as exactly one supported statement
-before adding its fixed plan syntax; user-supplied EXPLAIN/ANALYZE options and additional statements
-never reach the connection.
+The query runner reads SQL with one lexer per engine (`dbx/sqltoken.go`), and splitting, the leading
+word, the row-returning test and the plan gate all read its tokens — there used to be a splitter and a
+separate comment stripper, and text one called a comment the other called code. Each engine is read its
+own way (a backtick is a quote on MySQL and an operator on PostgreSQL; `#` is a comment on MySQL, a JSON
+operator on PostgreSQL, part of a name on SQL Server and Oracle; PostgreSQL's `$tag$…$tag$` bodies are
+read by PostgreSQL's own rule). What depends on something the text does not say is refused: a quote an
+odd run of backslashes would escape, an executable or nested comment, a bare carriage return inside a
+line comment, a NUL, `--x` on MySQL, Oracle's `q'[…]'`, a `$` or a typographic quote on ClickHouse. A
+refusal classifies as destructive. A statement is sent from its first token to its last, so the
+comments around it never reach the engine.
+
+Classification is per statement and keeps the strongest verdict. The shape (leading word, `WHERE`,
+`RETURNING`) comes from the tokens; the *verbs* are looked for in the statement's raw text, quoted
+text and comments included, so no disagreement about where a quote ends can put one out of sight —
+it over-reports instead (`SELECT 'delete'` is destructive), which is the direction it may be wrong in.
+A dollar-quoted body is at least `high`. SQL Server needs no separator between statements, so there
+any batch keyword anywhere (`EXEC`, `SET`, `BEGIN`…) ends a statement's claim to be a read.
+
+A statement classified `read` runs inside the engine's own read-only scope (`dbx/run.go`), so a wrong
+verdict fails instead of writing: a read-only transaction on PostgreSQL, a read-only *session* on
+MySQL/MariaDB (`START TRANSACTION READ ONLY` lets DDL through — it commits implicitly first),
+`query_only` on SQLite, `readonly=2` sent with the query on ClickHouse, `SET TRANSACTION READ ONLY` on
+Oracle, and on SQL Server — which has none — a transaction that is always rolled back. Anything else
+runs on a connection of its own that is closed afterwards rather than pooled, because a pooled
+connection carries a `SET`, an open transaction or a temporary table into somebody else's request.
+
+`POST /databases/{id}/query` takes exactly one statement. `POST …/script` takes several: one
+connection, in order, stop at the first error, optionally one transaction, one result per statement,
+and the capability is decided by the worst statement in it. Both accept a client-chosen `queryId`
+that `POST …/query/cancel` stops; the entry exists only while its request is open, and the statement
+is stopped on the server (MySQL needs a `KILL QUERY` from a second connection; the other drivers
+cancel on the wire). Every dialect validates explain input as exactly one supported statement before
+adding its fixed plan syntax; user-supplied EXPLAIN/ANALYZE options never reach the connection.
+`analyze: true` on `POST …/explain` executes the statement, so the handler asks of it what the query
+route would, and a data-changing statement is measured inside a transaction that is rolled back.
 
 SQL Server resets SHOWPLAN using a bounded cancellation-independent context, including after query
 failure. An uncertain enable/reset outcome discards the connection instead of returning its mode to
@@ -45,13 +73,26 @@ accounts retain partial results. Full table details and mutation preconditions u
   because a missed switch failed at runtime rather than compile time.
 - **Identifiers quoted, values bound, always.** `validateIdent` refuses only what quoting cannot fix (NUL,
   control characters) rather than a conservative character class — a table called `user-profiles` was
-  listed and then refused to open. Row edits are scoped by primary key and refused without one, or an
-  UPDATE the caller thinks touches one row touches all of them.
+  listed and then refused to open.
+- **A row edit names one row and is held to it** (`dbx/changes.go`). `POST /databases/{id}/changes`
+  applies the grid's staged inserts, updates and deletes in one transaction. The key is the table's
+  primary key *as the catalogue reports it* — a request cannot choose a looser one — and for a table
+  with none it is the row as it was read, a NULL compared as a NULL. Every UPDATE and DELETE must touch
+  exactly one row or the whole set is rolled back and answered `409 change_conflict` naming the change
+  (`field: changes[i]`, `reason: matched N rows`). MySQL counts rows *changed*, so there the match is
+  counted and locked first. A set containing a delete needs the destructive capability, checked in the
+  handler. ClickHouse is refused: its sorting key orders rows without identifying one. The older
+  single-row routes are this with a set of one. Row values and keys never reach the audit log.
+- **A cell is typed by its column, not its content.** A binary column is hex whatever its bytes spell
+  (`\x…`, which an edit may send straight back), a result carries each column's `kinds`, and a value
+  cut for the page — a long text, a blob past the preview — is listed in `clipped` with its size and
+  fetched whole by `GET /databases/{id}/cell`.
 - `rowsql.go` is the one exception and does not generalise: it renders a row as an INSERT **for the
   clipboard**. Nothing executes what it produces, and no code path may call it and then run the result.
   `TestLiveRowInsertSQLQuoting` feeds `'); DROP TABLE …` to every live engine and checks the table stands.
-- **Reading is separated from running**: `dbx.Classify` decides destructiveness and fails closed; the
-  handler applies capability and budget by hand. Every dialect's `ExplainPlan` must describe a statement
+- **Reading is separated from running**: `dbx.ClassifyFor` decides destructiveness for the
+  connection's engine and fails closed; the handler applies capability and budget by hand
+  (`authoriseSQL`, shared by the query, script and analysed-plan routes). Every dialect's `ExplainPlan` must describe a statement
   *without executing it* — asserted in the interface, proved by `TestLiveExplainDoesNotExecute`.
 - **The diagnostic surface is what a data browser usually lacks.** `activity.go` lists what the server is
   running now with the blocking session named, turning twenty "slow" sessions into one culprit, and can
