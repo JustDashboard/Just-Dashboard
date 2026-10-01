@@ -47,6 +47,10 @@ type Server struct {
 	databaseProvisionMu    sync.Mutex
 	databaseProvisionNames map[string]bool
 
+	// How the table exports each account started and named ended, for the
+	// page to ask after a download (handlers_db_transfer.go).
+	dbExports exportRegistry
+
 	// The dashboard's own address, for links that leave the dashboard
 	// (notifications, commit statuses). See dashboardEndpoint.
 	endpointMu       sync.Mutex

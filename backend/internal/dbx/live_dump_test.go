@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -25,9 +26,10 @@ import (
 const dumpFixtureRows = 2
 
 func TestLiveDumpRoundTrip(t *testing.T) {
-	for _, f := range sqlFixtures() {
+	for _, f := range dumpFixtures() {
 		t.Run(string(f.driver), func(t *testing.T) {
 			db := liveSQL(t, f.driver, f.env, f.dsn)
+			ownsItsDatabase(t, db, f)
 			setupFixture(t, db, f)
 			ctx := context.Background()
 			dsn := liveDSN(t, f.env, f.dsn)
@@ -87,7 +89,7 @@ func TestLiveDumpRoundTrip(t *testing.T) {
 // literal renderer has to escape rather than print, and each of them broke a
 // different engine at some point in an earlier life of this code.
 func TestLiveDumpKeepsAwkwardValues(t *testing.T) {
-	for _, f := range sqlFixtures() {
+	for _, f := range dumpFixtures() {
 		if !f.relational {
 			// ClickHouse's fixture has no nullable text column to put these in
 			// without rewriting the schema, and its own escaping is covered by
@@ -96,6 +98,7 @@ func TestLiveDumpKeepsAwkwardValues(t *testing.T) {
 		}
 		t.Run(string(f.driver), func(t *testing.T) {
 			db := liveSQL(t, f.driver, f.env, f.dsn)
+			ownsItsDatabase(t, db, f)
 			setupFixture(t, db, f)
 			ctx := context.Background()
 			dsn := liveDSN(t, f.env, f.dsn)
@@ -202,7 +205,7 @@ func TestLiveDumpMongoWithoutTheTools(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	res, err := dumpMongoDriver(ctx, dsn, dbName, dir)
+	res, err := dumpMongoDriver(ctx, dsn, dir, DumpOptions{Database: dbName})
 	if err != nil {
 		t.Fatalf("dumpMongoDriver: %v", err)
 	}
@@ -250,13 +253,25 @@ func TestLiveDumpRedisRoundTrip(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
+	// The connection's own numbered database, by name. Left unnamed a dump is
+	// of every database on the server, and this server is shared: restoring
+	// that would write into databases this test has no business in.
+	own, err := redisDatabaseIndex(dsn, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	database := strconv.Itoa(own)
+
 	dir := t.TempDir()
-	res, err := Dump(ctx, DriverRedis, dsn, "", dir)
+	res, err := Dump(ctx, DriverRedis, dsn, database, dir)
 	if err != nil {
 		t.Fatalf("Dump: %v", err)
 	}
 	if res.Size == 0 {
 		t.Fatal("dump is empty")
+	}
+	if res.Database != database {
+		t.Fatalf("dump covers %q, want only database %s", res.Database, database)
 	}
 	if err := client.Del(ctx, keys...).Err(); err != nil {
 		t.Fatalf("wipe: %v", err)
@@ -285,6 +300,57 @@ func TestLiveDumpRedisRoundTrip(t *testing.T) {
 }
 
 // --- helpers --------------------------------------------------------------
+
+// dumpFixtures are the SQL fixtures as a dump test addresses them. An Oracle
+// schema is a user, so a run given a user of its own finds its tables under
+// that name and not under the one the fixture list spells.
+func dumpFixtures() []engineFixture {
+	fixtures := sqlFixtures()
+	for i, f := range fixtures {
+		if f.driver != DriverOracle {
+			continue
+		}
+		if info, err := ParseDSN(f.driver, os.Getenv(f.env)); err == nil && info.User != "" {
+			fixtures[i].schema = strings.ToUpper(info.User)
+		}
+	}
+	return fixtures
+}
+
+// ownsItsDatabase skips a round trip in a database that holds anything the
+// fixture did not make.
+//
+// A dump is of a whole database and its restore drops and recreates every
+// table in the file. On the two engines whose fixture server is one database
+// shared by whoever is testing — SQL Server, where a connection string names
+// master unless it says otherwise, and Oracle, where the unit is a user — that
+// is somebody else's tables dropped. The test runs where the database is its
+// own and says what it found where it is not.
+func ownsItsDatabase(t *testing.T, db *sql.DB, f engineFixture) {
+	t.Helper()
+	if f.driver != DriverMSSQL && f.driver != DriverOracle {
+		return
+	}
+	schema := ""
+	if f.driver == DriverOracle {
+		schema = f.schema
+	}
+	tables, err := mustDialect(t, f.driver).Tables(context.Background(), db, schema)
+	if err != nil {
+		t.Fatalf("listing the tables already there: %v", err)
+	}
+	mine := map[string]bool{"jd_users": true, "jd_posts": true, "jd_widgets": true}
+	var others []string
+	for _, table := range tables {
+		if !mine[table.Name] {
+			others = append(others, table.Name)
+		}
+	}
+	if len(others) > 0 {
+		t.Skipf("%s points at a database holding tables this test did not make (%s); a dump round trip replaces every table, so give it a database of its own",
+			f.env, strings.Join(others, ", "))
+	}
+}
 
 // dumpTestDatabase is which database to dump for a fixture. It is the schema
 // for the engines where those are the same thing, and the connection string's

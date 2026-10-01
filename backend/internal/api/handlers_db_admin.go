@@ -8,14 +8,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
@@ -996,9 +994,20 @@ type dbBackupFile struct {
 	File    string    `json:"file"`
 	Size    int64     `json:"size"`
 	TakenAt time.Time `json:"takenAt"`
-	// Format is what the file's name says it is: a pg_dump archive, SQL text,
-	// a gzipped JSON Lines document set.
+	// Format is what the file is, read from its first bytes: a pg_dump
+	// archive, SQL text, a gzipped JSON Lines document set.
 	Format string `json:"format"`
+	// The rest is what the dump's description says, where it has one. A file
+	// put in the directory by hand has none of it.
+	DurationMs  *int64            `json:"durationMs,omitempty"`
+	Database    string            `json:"database,omitempty"`
+	Tool        string            `json:"tool,omitempty"`
+	ToolVersion string            `json:"toolVersion,omitempty"`
+	Summary     string            `json:"summary,omitempty"`
+	Contents    *dbx.DumpContents `json:"contents,omitempty"`
+	Note        string            `json:"note,omitempty"`
+	Origin      string            `json:"origin,omitempty"`
+	By          string            `json:"by,omitempty"`
 }
 
 func (s *Server) handleDBBackupList(w http.ResponseWriter, r *http.Request) error {
@@ -1016,53 +1025,27 @@ func (s *Server) handleDBBackupList(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"dir": dir, "files": out})
+	answer := map[string]any{"dir": dir, "files": out, "options": dbx.DumpCapabilities(conn.Driver)}
+	if job, running := s.runningTransfer(conn.ID); running {
+		answer["job"] = job
+	}
+	httpx.JSON(w, http.StatusOK, answer)
 	return nil
 }
 
 // readDirSorted lists a connection's dumps, newest first; a directory that
 // does not exist yet is an empty list, not an error.
 func readDirSorted(dir string) ([]dbBackupFile, error) {
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return []dbBackupFile{}, nil
-	}
+	entries, err := dumpEntries(dir)
 	if err != nil {
 		return nil, err
 	}
-	out := []dbBackupFile{}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		out = append(out, dbBackupFile{
-			File: e.Name(), Size: info.Size(), TakenAt: info.ModTime().UTC(), Format: dumpFormat(e.Name()),
-		})
+	out := make([]dbBackupFile, 0, len(entries))
+	for _, info := range entries {
+		out = append(out, describeDump(dir, info.Name(), info))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].TakenAt.After(out[j].TakenAt) })
 	return out, nil
-}
-
-func dumpFormat(name string) string {
-	switch {
-	case strings.HasSuffix(name, ".dump"), strings.HasSuffix(name, ".pgdump"):
-		return "pg_dump archive"
-	case strings.HasSuffix(name, ".sql.gz"):
-		return "compressed SQL"
-	case strings.HasSuffix(name, ".sql"):
-		return "SQL"
-	case strings.HasSuffix(name, ".jsonl.gz"):
-		return "JSON Lines"
-	case strings.HasSuffix(name, ".archive"), strings.HasSuffix(name, ".gz"):
-		return "archive"
-	case strings.HasSuffix(name, ".db"), strings.HasSuffix(name, ".sqlite"):
-		return "SQLite file"
-	}
-	return filepath.Ext(name)
 }
 
 type deleteBackupRequest struct {
@@ -1082,20 +1065,17 @@ func (s *Server) handleDBBackupDelete(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
-	if req.File == "" {
-		return httpx.BadRequest("file is required")
-	}
 	// Contained against the connection's own dump directory, exactly as the
 	// download is, so a name cannot walk out of it.
-	dir := s.dbDumpDir(conn.Name)
-	fs := files.New([]string{dir})
-	path, err := fs.Resolve(filepath.Join(dir, req.File))
+	path, err := s.resolveDumpName(conn.Name, req.File)
 	if err != nil {
-		return mapFileError(err)
+		return err
 	}
 	if err := os.Remove(path); err != nil {
 		return mapFileError(err)
 	}
+	// Its description goes with it. One left behind describes nothing.
+	_ = dbx.RemoveDumpMeta(path)
 	httpx.SetAudit(r, "database.backup.delete", conn.Name, map[string]any{"file": req.File})
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	return nil

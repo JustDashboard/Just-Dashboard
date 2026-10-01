@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -1025,78 +1024,17 @@ func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-type dbBackupRequest struct {
-	Database string `json:"database"`
-}
-
+// handleDBBackup starts a dump of the connection's database as a job and
+// answers at once with the job (handlers_db_transfer.go).
 func (s *Server) handleDBBackup(w http.ResponseWriter, r *http.Request) error {
-	id, err := parseID(r)
-	if err != nil {
-		return err
-	}
-	var req dbBackupRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	conn, dsn, err := s.dbConnRow(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := timeoutCtx(r, 30*time.Minute)
-	defer cancel()
-	outDir := filepath.Join(s.Cfg.BackupLocalDir, "databases", conn.Name)
-	res, err := dbx.Dump(ctx, conn.Driver, dsn, req.Database, outDir)
-	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "dump_failed", err.Error())
-	}
-	httpx.SetAudit(r, "database.backup", conn.Name,
-		map[string]any{"database": res.Database, "path": res.Path, "size": res.Size})
-	httpx.JSON(w, http.StatusOK, res)
-	return nil
+	return s.startDBBackup(w, r)
 }
 
-type dbRestoreRequest struct {
-	Database string `json:"database"`
-	DumpPath string `json:"dumpPath"`
-}
-
+// handleDBRestore starts a restore as a job. It replaces live data, so it
+// sits in the destructive group; like every restore it takes an ordinary
+// confirmation and no typed phrase.
 func (s *Server) handleDBRestore(w http.ResponseWriter, r *http.Request) error {
-	id, err := parseID(r)
-	if err != nil {
-		return err
-	}
-	var req dbRestoreRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	conn, dsn, err := s.dbConnRow(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	target := req.Database
-	if target == "" {
-		target = conn.Database
-	}
-	// Invariant 6: a client-supplied path goes through files.Resolve, which is
-	// the only thing in the codebase that checks both the literal path and its
-	// symlink-resolved form against JD_FILE_ROOTS. "It stats" was the whole of
-	// the previous check.
-	dumpPath, err := s.modules.files.Resolve(req.DumpPath)
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	ctx, cancel := timeoutCtx(r, 60*time.Minute)
-	defer cancel()
-	out, err := dbx.Restore(ctx, conn.Driver, dsn, req.Database, dumpPath)
-	if err != nil {
-		httpx.SetAudit(r, "database.restore", conn.Name,
-			map[string]any{"database": target, "dumpPath": req.DumpPath, "error": err.Error()})
-		return httpx.Err(http.StatusBadGateway, "restore_failed", err.Error())
-	}
-	httpx.SetAudit(r, "database.restore", conn.Name,
-		map[string]any{"database": target, "dumpPath": req.DumpPath})
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
+	return s.startDBRestore(w, r)
 }
 
 // handleDBConnTest verifies a DSN before it is saved. It reports what answered
@@ -1267,96 +1205,12 @@ func (s *Server) handleDBTableDetail(w http.ResponseWriter, r *http.Request) err
 	return nil
 }
 
-// handleDBExport streams an entire table as CSV or JSON. It is a read, so it
-// needs no capability beyond the browse routes; the row cap is high and a
-// truncated download is flagged in a trailing header rather than silently cut.
+// handleDBExport streams a table, or the rows of it the grid is showing, as a
+// file. It is a read, so it needs no capability beyond the browse routes; the
+// row cap is high, and a download that was cut at it or failed partway says so
+// rather than passing for the whole table (handlers_db_transfer.go).
 func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
-	id, err := parseID(r)
-	if err != nil {
-		return err
-	}
-	q := r.URL.Query()
-	table := q.Get("table")
-	if table == "" {
-		return httpx.BadRequest("table is required")
-	}
-	format := dbx.ExportFormat(q.Get("format"))
-	if !format.Valid() {
-		format = dbx.ExportCSV
-	}
-	// The grid's conditions travel with the export, so a download taken from a
-	// narrowed view is that view rather than the whole table. They are parsed
-	// before a single response header is written: once the body has started, a
-	// rejected filter can only arrive as JSON inside a file called .csv.
-	filters, err := parseFilters(q.Get("filters"))
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	conn, dsn, err := s.dbConnRow(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := timeoutCtx(r, 10*time.Minute)
-	defer cancel()
-
-	// On the trail before the first row leaves, by hand: this is a GET, which
-	// the mutation middleware passes through with nothing to annotate. A
-	// second entry closes it with how much was sent, and that one is written
-	// even when the client has gone — a download dropped at the last byte it
-	// wanted is still a table that left the server.
-	s.recordRead(r, "database.export", conn.Name, map[string]any{
-		"schema": q.Get("schema"), "table": table, "format": string(format),
-		"filtered": q.Get("filters") != "" || q.Get("filter") != "",
-	}, nil)
-	finished := func(rows int, truncated bool, failed error) {
-		detail := map[string]any{"table": table, "rows": rows, "truncated": truncated}
-		if failed != nil {
-			detail["error"] = connectError(dsn, failed)
-		}
-		s.recordRead(r, "database.export.finished", conn.Name, detail, failed)
-	}
-
-	filename := fmt.Sprintf("%s.%s", table, format.Extension())
-	w.Header().Set("Content-Type", format.ContentType())
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-
-	var (
-		count     int
-		truncated bool
-	)
-	if conn.Driver == dbx.DriverMongo {
-		// A collection exports through its own path: the column set is the
-		// union of the documents' keys rather than a fixed result shape, and
-		// the filter is a document rather than a WHERE clause.
-		client, cerr := dbx.MongoClient(ctx, dsn)
-		if cerr != nil {
-			finished(0, false, cerr)
-			return nil
-		}
-		defer client.Disconnect(context.Background())
-		database := q.Get("schema")
-		if database == "" {
-			database = conn.Database
-		}
-		count, truncated, err = dbx.MongoExport(ctx, client, database, table,
-			dbx.MongoFindOptions{Filter: q.Get("filter"), Sort: q.Get("sort")},
-			format, w, atoiDefault(q.Get("limit"), 0))
-	} else {
-		pool, _, perr := s.dbPool(r.Context(), id)
-		if perr != nil {
-			finished(0, false, perr)
-			return perr
-		}
-		count, truncated, err = dbx.ExportBrowse(ctx, pool, conn.Driver, dbx.BrowseOptions{
-			Schema: q.Get("schema"), Table: table,
-			OrderBy: q.Get("orderBy"), Desc: q.Get("dir") == "desc",
-			Filters: filters,
-		}, format, w, atoiDefault(q.Get("limit"), 0))
-	}
-	// Headers are already sent, so a failure cannot become a JSON body: the
-	// client sees a short file, and the closing entry says why.
-	finished(count, truncated, err)
-	return nil
+	return s.exportTable(w, r)
 }
 
 // handleDBGenerateORM introspects the connection and returns generated code

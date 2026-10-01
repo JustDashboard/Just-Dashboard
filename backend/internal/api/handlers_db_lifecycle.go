@@ -52,8 +52,10 @@ func (s *Server) handleDBBackupDownload(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 	name := r.URL.Query().Get("file")
-	if name == "" {
-		return httpx.BadRequest("file is required")
+	// A dump's name and nothing else: not a path, and not the description
+	// kept beside a dump.
+	if err := validDumpName(name); err != nil {
+		return httpx.BadRequest("%v", err)
 	}
 	dir := s.dbDumpDir(conn.Name)
 	f, st, err := files.New([]string{dir}).Open(filepath.Join(dir, name))

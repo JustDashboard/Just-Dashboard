@@ -217,10 +217,69 @@ holds something is the guard.
   `orderBy` and `dir` and assembles the statement through the same `browseSelect` the page fetch uses,
   so a download taken from a narrowed grid is that grid. It was an unconditional `SELECT * FROM`, which
   made the panel's own promise — "applied on the server, across the whole table" — the reason the file
-  looked right. The filters are parsed **before** any response header is written: once the body has
+  looked right. The parameters are parsed **before** any response header is written: once the body has
   started, a rejected filter can only arrive as JSON inside a file named `.csv`. `ExportTable` remains
-  as the unfiltered form. The row cap is still 100 000 and still reported only to the audit trail, so
-  the page states the cap in the menu item that spends it and sends it as the request's own `limit`.
+  as the unfiltered form. The formats are `csv`, `tsv`, `json`, `ndjson` and `sql` (INSERT statements
+  in the source dialect, through the dump's literal renderer and from the values as the driver scanned
+  them); `columns` is a projection. A binary value goes out whole, not as the grid's preview. Two SQL
+  Server types are written as what they are rather than as the driver hands them over
+  (`exportValueOf`): a `uniqueidentifier` as its identifier, not the sixteen stored bytes, and a `time`
+  as a time of day, not that time on the first day of the year one — in either form the column would
+  not take the value back. The row cap is `limit`, clamped to `MaxExportRows`, default
+  `DefaultExportRows`.
+- **An export says how it ended, three ways, because no one way reaches every reader**
+  (`handlers_db_transfer.go`, `exportStream`). A response that ended properly declares two trailers,
+  `X-JD-Export-Status` (`complete` or `truncated`) and `X-JD-Export-Rows`. A JSON or NDJSON file that
+  is not complete ends with an object whose only key is `__export`; a SQL file always ends with a
+  comment. And a caller that names its export (`exportId`) can ask `GET /{id}/export/status` afterwards,
+  which is the only way a browser saving a CSV learns it was cut at the limit: browsers show trailers
+  to nothing, and a CSV has nowhere to say it. The registry is memory, keyed by account, connection and
+  name. A **failure** is never a response that ends: the first 64 KiB are held so that a statement
+  refused before then is an ordinary error response, and past that the response is flushed and the
+  connection aborted (`http.ErrAbortHandler`), which a browser reports as a failed download and every
+  client as a failed transfer. A Mongo server that cannot be reached is `502 connect_failed`, where it
+  was an empty file and a 200. `POST /{id}/export/query` exports one statement's result at
+  `service.control`, taking only what `dbx.Classify` reads as a read and, on Postgres and MySQL,
+  running it in a read-only transaction so the server refuses what the classifier missed.
+- **An import is a stream and one transaction** (`dbx/import*.go`). `POST /{id}/import/upload` is
+  multipart, read as it arrives: an `options` part of JSON, then the `file`, which is never held whole —
+  the cap is `JD_DB_UPLOAD_MAX_MB`, not the JSON body's 4 MiB. The reader is the package's own because
+  an import is asked two things `encoding/csv` cannot answer: which quote character, and whether a field
+  was quoted (an unquoted empty field is NULL, a quoted one the empty string). UTF-16 and Latin-1 are
+  re-encoded as they are read, a byte-order mark deciding over what the caller said. Columns are matched
+  to the table by mapping, by position, or by name; the first thousand rows are profiled and set against
+  each target column's type, and a mismatch is a **warning with the value and its line**, not a refusal.
+  `dryRun` returns that and the first rows as they would be written, and writes nothing. Rows go in as
+  multi-row INSERTs sized under each engine's parameter limit; a refused batch is undone and retried a
+  row at a time, which is what names the line. On Postgres that needs savepoints — a refused statement
+  spoils the transaction, so "skip bad rows" used to import nothing there. `replace` is a `TRUNCATE` only
+  where one can be rolled back (Postgres) and a `DELETE` elsewhere, since MySQL and Oracle commit a
+  TRUNCATE on their own and a failed import left the table empty; it is destructive, checked from the
+  options in the handler like the query runner's SQL. `upsert` is each engine's own form on the primary
+  key or a named unique index. `createTable` infers a type per column and creates the table inside the
+  transaction where DDL is transactional, and drops it by hand on failure where it is not; a column
+  made the key is given a type the engine will index (`nvarchar(450)` on SQL Server, `varchar(255)` on
+  MySQL), since the type inferred for text is not one. Where columns are matched by name, a column the
+  server fills in itself — generated, computed, virtual, a rowversion (`computedColumns`) — is left out
+  and the report says so: an export of the table carries it, and matched to it every row was refused.
+  **SQL Server** (`import_mssql.go`) ends the batch *and the transaction* on a text that does not
+  convert, so "skip bad rows" lost every row before the bad one and failed at the commit. There each
+  value is written through `TRY_CONVERT` to the column's own type, and a row with a value that came
+  back NULL is refused by a `RAISERROR` placed in front of the statement, which ends nothing; the rows
+  of a batch are checked together and written together or not at all. `datetime` and `smalldatetime`
+  are read through `datetime2`, because on their own they read `2026-03-04` as the third of April for
+  a login whose language puts the day first. A binary column is given `CONVERT(varbinary(max), …)`,
+  since a NULL arrives as a text; a file that carries the identity column has `IDENTITY_INSERT`
+  switched on for the transaction. The inline route gets the same check from the column types it now
+  looks up. **Oracle** reads a text as a date by the session's NLS format, so a value in an ISO form is
+  bound as the instant it names (`isoTime`), and `true`/`false` go into a numeric column as 1 and 0 —
+  `NUMBER(1)` is what a column of them is created as there. ClickHouse
+  has no transaction and its driver cannot continue past a refused row, so `atomic` is false there and
+  a refused row ends the import before anything is sent. Mongo's upload inserts in batches; its
+  `replace` stages the documents and swaps them in with `$out`, which keeps the collection's indexes and
+  leaves it untouched if the file breaks its rules. The inline `/import` route runs on the same engine
+  and keeps its request and response; its Mongo `truncate` now reads the data through before removing
+  anything, and empties the collection rather than dropping it.
 - **An unknown row count says so.** `Table.Rows` (`estimatedRows`) is `-1` where the catalogue has no
   estimate — a table PostgreSQL has never analysed, a view, SQLite, which keeps no count at all — and
   `>= 0` only where the engine actually answered. It used to be floored to zero in three dialects and
@@ -269,18 +328,101 @@ holds something is the guard.
   schema back.
 - **A dump for every engine with no external dependency.** Three have a client tool the image can carry;
   the rest returned `ErrUnsupported` at the moment the operator pressed the button — the worst time to
-  learn a backup was never possible. `dump_sql.go` writes DDL then INSERTs over the open connection,
-  ordered so referenced tables come first (alphabetical fails on the first foreign key); `dump_nosql.go`
+  learn a backup was never possible. `dump_sql.go` writes SQL over the open connection; `dump_nosql.go`
   does Mongo and Redis as gzipped JSON Lines, Redis via `DUMP`/`RESTORE` so every type survives. A native
-  tool that *fails* falls through to the built-in rather than to an error. `dumpLiteral` is the second
-  place putting a value into SQL text (unavoidable — a dump is text) and is per-engine, since a backslash
-  escapes on MySQL and ClickHouse and is a plain character on the other four. `Restore` picks its reader
-  from the file's first bytes, not the driver: a Postgres connection may hold a `PGDMP` archive or our SQL.
+  tool that *fails* falls through to the built-in rather than to an error; one that was *stopped* does
+  not. `dumpLiteral` is the second place putting a value into SQL text (unavoidable — a dump is text) and
+  is per-engine, since a backslash escapes on MySQL and ClickHouse and is a plain character on the other
+  four. `Restore` picks its reader from the file's first bytes, not the driver: a Postgres connection may
+  hold a `PGDMP` archive, our SQL, or a plain script somebody uploaded. A mongodump archive is read
+  for the database it came from (`mongoArchiveDatabases`) and confined and redirected with
+  `--nsInclude`/`--nsFrom`/`--nsTo` — it used to be written back over whichever database it named.
+- **A script somebody else wrote is replayed here, never by the engine's client** (`dump_script.go`). A
+  plain pg_dump or a mysqldump used to be piped to `psql` or `mysql`, and a client does more with a
+  script than send it: `\!` and `system` run a shell, both read other files, both reconnect elsewhere.
+  A dump is a file anybody with `service.control` can upload, so restoring one was a second
+  request-defined shell (invariant 6). Reading the script first cannot close that, because where a
+  string ends depends on settings the script changes as it runs (`standard_conforming_strings`,
+  `NO_BACKSLASH_ESCAPES`). So `postgresScript` and `mysqlScript` cut the file into statements by the
+  clients' own rules — dollar quotes, `BEGIN ATOMIC` bodies and `COPY … FROM stdin` blocks (sent with
+  `PgConn.CopyFrom`); `DELIMITER` and conditional comments, which are statement text — and the
+  statements go over the dashboard's connection. A reader that disagrees with the server gets a syntax
+  error and nothing else. The script is read through once before anything runs: a psql meta-command
+  other than `\restrict`/`\unrestrict`, a mysql client command, `\connect`, or a MySQL statement that
+  is a `USE` of another database (wherever on a line, and inside a conditional comment) is refused
+  with the database untouched. Postgres replays as one transaction; a MySQL connection used for a
+  replay has multi-statement queries switched off, so what one statement is stays decided here. The
+  only tools a restore runs are `pg_restore` and `mongorestore`, on archives. This confines the
+  session, not the script: a statement that names another database explicitly still reaches it with
+  the connection's rights, as it would from the query runner.
+- **The built-in dump is a plan, read before a row is** (`dump_sql_plan.go` and the per-engine files).
+  The tables alone restore into a database with no unique constraint, no index and no view, so the plan
+  carries those and the order they replay in: sequences, tables parents-first, rows, then constraints
+  and indexes, foreign keys last, views after everything they read. Postgres is read from `pg_catalog`
+  with the server's own deparsers in a session whose `search_path` is empty, so every name is
+  schema-qualified; the `information_schema` DDL it replaces called an enum `USER-DEFINED` and did not
+  parse. A partition is created `PARTITION OF` its parent and only leaves carry rows; a materialized
+  view is created `WITH NO DATA` and refreshed at the end; an identity column's rows go in
+  `OVERRIDING SYSTEM VALUE` and its sequence is set through `pg_get_serial_sequence`; extension-owned
+  objects are left to `CREATE EXTENSION`. MySQL is scoped to `DATABASE()` — it listed every database the
+  account could see, and the restore began by dropping their tables — written unqualified, with
+  `FOREIGN_KEY_CHECKS` off and the session zone pinned. SQLite replays `sqlite_master`, triggers after
+  the rows. Catalogue text is fenced (`-- jd:statement <word>` … `-- jd:end <word>`) so the reader
+  never lexes a trigger body. The word is made per dump (`newStatementFence`) and only the closing line
+  that carries it closes the fence: what is fenced is somebody else's text — a view's body with its
+  comments kept, a row's long value — and a line of it reading `-- jd:end` used to end the statement
+  there and hand the lines after it to the server as statements of their own. The read is one snapshot
+  where the engine has one, and the replay one transaction where DDL can be rolled back (Postgres,
+  SQLite, SQL Server): a dump that fails on its fortieth statement changes nothing. A restore streams
+  the file; it used to read it whole.
+- **SQL Server and Oracle are dumped from their own catalogues too** (`dump_sql_mssql.go`,
+  `dump_sql_oracle.go`). Both were written from the dialect's column list, which does not say that a
+  column numbers itself, is computed, or is a rowversion: a SQL Server restore gave back tables that no
+  longer handed out an id and failed outright on a rowversion, and an Oracle one failed on the index
+  behind every primary key. SQL Server is read from `sys`, objects the server ships left out: identity,
+  computed and rowversion columns, named defaults, checks, unique constraints, filtered and
+  included-column indexes, schemas other than `dbo`, sequences, and views ordered by
+  `sql_expression_dependencies`. Rows go in under `SET IDENTITY_INSERT` and the counter is reseeded to
+  where it stood, which the rows alone do not say. The engine has no cascading drop, so every foreign
+  key that touches a dumped table — from a table the dump leaves alone as well — is taken off before
+  the drops and put back after the rows. Nothing in the file names the database, which is what lets it
+  load into one made a moment ago. Values are written for the column's type (`mssqlTimeLiteral`: the
+  ISO form with a `T`, the one spelling read the same under every language setting; `datetime` takes
+  three digits of a second and no more). Oracle's definitions are `DBMS_METADATA`'s, with storage
+  clauses left out, asked for on one connection held for the whole dump because how a definition is
+  written is a setting of the session. A table that is `GENERATED ALWAYS AS IDENTITY` refuses a number
+  given to it and has no "this once", so it is altered to `BY DEFAULT` for its rows and back after
+  them, at the counter's position. A row with a value too long for a literal — four thousand bytes;
+  bytes past two thousand could not be written at all — is a PL/SQL block that builds the value in
+  pieces (`oracleLongRow`); the hex goes through a variable because `HEXTORAW` of a long literal is
+  evaluated when the block is compiled and takes seconds a piece. Tables are dropped `PURGE`, or each
+  restore leaves a copy of what it replaced in the recycle bin against the same quota. Oracle has no
+  `DROP … IF EXISTS` before 23, so its drops are unconditional and one that finds nothing is passed
+  over — but only that one (`dumpDropFoundNothing`): a drop refused because a session still holds rows
+  in a temporary table, or because the login may not make it, stops the restore there and says so,
+  where it used to surface a statement later as a name already taken. A dump is of one
+  schema, the session's or the one named; a schema of the server's own (`oracle_maintained`) is refused,
+  which is what an administrator's login is in unless told otherwise. The dialect-driven plan from the
+  standard catalogue views remains only as the fallback for a server that speaks Postgres's protocol
+  without keeping its catalogue. Their live tests do not run where the connection string lands, since
+  a restore replaces every table in the database it is pointed at: SQL Server's make a database of
+  their own (`JD_TEST_MSSQL_DSN` names the server; the string itself lands in master), Oracle's make a
+  user (`JD_TEST_ORACLE_ADMIN_DSN`), and the shared round trips skip in a database that holds tables
+  they did not make.
+- **Every tool is started through `hostexec` with an argv** (`dump_exec.go`), as a process group, so
+  stopping a job stops `pg_restore`'s workers and not only the process that forked them.
+  `TestNothingHereStartsAProcessOfItsOwn` keeps `os/exec` out of the package. One thing is not taken
+  from `hostexec`: a tool that exists only on the host side of a container boundary is not used — it
+  would dial from the host's network and read paths in the host's mount namespace — and the built-in
+  dumper runs instead.
 - **A dump the operator can take away, and a database they can remove.** The dump stays on the server
   (restore reads it) and a copy goes to the browser immediately, because a backup whose only copy is on
   the machine it protects is not one. `/databases/{id}/backup/download` takes a **name**, not a path, and
   contains it with a `files.Service` scoped to that connection's dump directory — [invariant 6](../security/invariants.md#invariants-that-must-not-regress) with the
-  right root, since narrowing `JD_FILE_ROOTS` must not stop us handing back a file we wrote.
+  right root, since narrowing `JD_FILE_ROOTS` must not stop us handing back a file we wrote. Restore
+  resolves through the same scope (`resolveRestoreSource`), by name or by the path the listing reports,
+  and through `files.Resolve` only for a file elsewhere; it used to hold every dump to the roots, so
+  narrowing them stopped the dashboard restoring what it could still download.
   `DELETE /databases/{id}/database` needed `DropDatabaseSQL` and `AdminDatabase` (Postgres and SQL Server
   refuse to drop the database the session is inside) and has no verb at all on two engines — a SQLite
   database is a file to unlink, a Redis keyspace can only be emptied, which `DropResult.Gone` reports
@@ -732,9 +874,38 @@ holds something is the guard.
   out of time sets `truncated` with a reason rather than passing a partial list off as the window. Like
   `/activity` and `/statements`, it returns statement text with its literals at read capability.
 - **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory
-  newest first with each file's size and format; `DELETE /databases/{id}/backups` (destructive,
-  not typed: the database is still there to dump again) removes one, contained against that
-  directory exactly as the download is. The fleet reads the same listing for "last backup".
+  newest first; `DELETE /databases/{id}/backups` (destructive, not typed: the database is still there
+  to dump again) removes one, contained against that directory exactly as the download is. The fleet
+  reads the same listing for "last backup", and `GET /databases/backups/summary` is every connection's
+  newest dump in one read that dials nothing. What a dump holds — the options it was taken with, the
+  tool and version that wrote it, how long it took, a note, who asked — is in a small file beside it
+  (`<dump>.meta.json`, `dbx/dump_meta.go`), written to a temporary name and renamed. Beside it rather
+  than in a table because the directory is what gets copied off the machine. A file with no
+  description is listed with what its first bytes say it is. `POST /databases/{id}/backups/upload`
+  (`service.control`) streams a dump made elsewhere into the directory through the scoped
+  `files.Service`, under a validated name, capped by `JD_DB_UPLOAD_MAX_MB`; it restores nothing.
+  A dump has no name until it is whole: it is written, or uploaded, in a hidden directory inside the
+  one it is bound for (`dbx.NewDumpStaging`, `.dump-*` and `.upload-*`, cleared after a day if a
+  process died over one) and then given its name by `dbx.PlaceDump`, which claims the name with an
+  exclusive create before renaming onto it. So the listing never holds a file that is still being
+  written, and of two uploads of one name — or two dumps in one second — neither lands on the other.
+- **A dump, a restore and a copy are jobs** (`handlers_db_transfer.go`). `POST /{id}/backup` and
+  `/restore` answer `202` with a `jobs.Job`; the page watches `/jobs/{id}` and its stream, where the
+  lines are the tool's own, and stops it with `/jobs/{id}/cancel`. The last line, on stream `result`,
+  is JSON: what was written or restored. One transfer per connection at a time
+  (`StartExclusive` on `database.transfer.<id>.`; a second is `409 transfer_running` with the running
+  job's id in `error.resource`). The request is audited when it is answered and the outcome when the
+  job ends (`database.backup.finish`, `.restore.finish`, `.copy.finish`). A dump takes `schemaOnly`,
+  `dataOnly`, `tables`, `excludeTables`, `compression`, Redis `databases` and a `note`;
+  `dbx.ValidateDumpOptions` refuses what the engine cannot honour before a job exists, and
+  `dbx.DumpCapabilities` is the same table for the form. A Redis dump covers every numbered database
+  that holds a key unless told which. A restore takes `target` (`"this"` or `{"newDatabase": name}`,
+  which also needs `system.admin`, checked in the handler) and `dumpFirst`, which dumps the database
+  as it is before replacing it and names that file in the result. The dashboard's pooled sessions are
+  closed around a restore. A SQLite file is loaded through the engine's online backup into the file
+  that is there: overwriting it by hand gave a program with it open half of each database, and
+  renaming a new file into place left that program writing to one with no name. `POST /{id}/copy`
+  (`system.admin`) is a dump, a new database and a restore as one job, the dump its own and removed.
 - **An account made from the host.** `POST /databases/host/grant` (admin) is for the native
   server whose password nobody knows — the apt-installed Postgres whose `postgres` role has never
   had one. It runs the engine's client on the host through `hostexec`: `psql` as the host's

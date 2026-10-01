@@ -8,8 +8,10 @@ They remain open engineering findings; documenting them does not relax
 
 Invariant 6 requires host commands to use `hostexec` with explicit argv. The normalized deployment and
 proxy paths do, but the repository still contains direct `os/exec` calls in `gitx`, `ghx`, `linuxusers`,
-`selfupdate`, `procs`, `dbx`, and `dockerx`, in addition to the documented stored deployment shell
-exception. Many direct calls intentionally use binaries pinned in the backend image against bind-mounted
+`selfupdate`, `procs`, and `dockerx`, in addition to the documented stored deployment shell
+exception. `dbx` has converged: its dump and restore tools start through `hostexec.Command` and
+`hostexec.RunGroup` (`dbx/dump_exec.go`), and `TestNothingHereStartsAProcessOfItsOwn` fails if the
+package imports `os/exec` again. Many direct calls intentionally use binaries pinned in the backend image against bind-mounted
 host paths or the Docker socket, and Git/GitHub apply `hostexec.AsOwner`, but they do not all pass through
 `hostexec.Command*`. This boundary needs an architecture decision or implementation convergence; do not
 cite the presence of this page as approval for another direct executor.

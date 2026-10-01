@@ -182,12 +182,12 @@ type importRequest struct {
 	NullAs      string   `json:"nullAs"`
 }
 
-// handleDBImport loads pasted or uploaded data into a table.
+// handleDBImport loads pasted data into a table.
 //
-// The body carries the data inline rather than as a multipart upload, which
-// bounds it at DecodeJSON's 4 MB cap. That is a deliberate ceiling: a load
-// larger than that belongs in the engine's own bulk loader, which is faster by
-// orders of magnitude and does not hold an HTTP request open for it.
+// The body carries the data inline, which bounds it at DecodeJSON's 4 MB cap.
+// That suits what is pasted into a form. A file goes to /import/upload, which
+// reads it as a stream and has the options this one does not: a mapping, an
+// upsert, a dry run (handlers_db_transfer.go).
 //
 // Truncate makes this destructive, so it demands the capability by hand — the route cannot know, exactly as the query runner
 // cannot know from its path whether the SQL in it deletes anything.
@@ -261,7 +261,7 @@ func (s *Server) handleDBImport(w http.ResponseWriter, r *http.Request) error {
 // guarantees differ and the difference is worth being explicit about: the SQL
 // import wraps everything in a transaction and either commits or rolls back,
 // while a standalone Mongo server has no transaction to offer. Truncate here
-// means dropping the collection, which is why it demands the same confirmation
+// means removing every document, which is why it demands the same capability
 // the SQL truncate does — that check has already run by the time we arrive.
 func (s *Server) importMongo(w http.ResponseWriter, r *http.Request, conn *dbConnection, dsn string, req *importRequest) error {
 	ctx, cancel := timeoutCtx(r, 15*time.Minute)
@@ -281,7 +281,17 @@ func (s *Server) importMongo(w http.ResponseWriter, r *http.Request, conn *dbCon
 		return httpx.BadRequest("a database is required")
 	}
 	if req.Truncate {
-		if err := dbx.MongoDropCollection(ctx, client, database, req.Table); err != nil {
+		// The data is read through before anything is removed. The collection
+		// used to be dropped first and the data parsed second, so a file with
+		// a mistake in it cost the collection and imported nothing.
+		if err := dbx.ValidateMongoImport(req.Format, req.Data); err != nil {
+			httpx.SetAudit(r, "database.import", conn.Name,
+				map[string]any{"collection": req.Table, "error": err.Error()})
+			return httpx.BadRequest("%v", err)
+		}
+		// Emptied rather than dropped: the collection keeps its indexes and
+		// its validator, which a dropped one comes back without.
+		if err := dbx.MongoEmptyCollection(ctx, client, database, req.Table); err != nil {
 			return httpx.BadRequest("could not empty the collection first: %v", err)
 		}
 	}

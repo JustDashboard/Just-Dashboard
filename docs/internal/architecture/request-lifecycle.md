@@ -122,6 +122,12 @@ per-feature log reads they replaced — `/docker/containers/{id}/logs` and its `
 `/docker/stacks/{name}/logs/stream`, `/systemd/{name}/journal` and its `/stream`, and
 `/pm2/{name}/logs/stream` — are gone, so no second path reaches a log around that check.
 
+The routes that move a database's data decide on their options. `POST /databases/{id}/export/query`
+takes only a statement that classifies as a read. `POST /databases/{id}/import` and `/import/upload`
+require `destructive` and its budget when the options ask for the table's contents to be replaced,
+and `POST /databases/{id}/restore` requires `system.admin` when its target is a database to be
+created.
+
 Compose creation, configuration edits, validation and execution all require `system.admin` until the
 complete resolved Compose model has a shared policy. Stack details evaluate Compose only for
 administrators; other accounts retain static YAML service names without interpolation or includes.

@@ -329,6 +329,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_NGINX_DIR` | `/etc/nginx` | nginx configuration root. |
 | `JD_CADDYFILE` | `/etc/caddy/Caddyfile` | Caddy configuration file. |
 | `JD_BACKUP_DIR` | `/var/backups/just-dashboard` | Local backup destination and staging. |
+| `JD_DB_UPLOAD_MAX_MB` | `2048` | Largest file one database import or uploaded dump may be, in MiB. |
 | `JD_DATA_DIR` | `/var/lib/just-dashboard` | The dashboard's own database. **Back this up.** |
 
 **First run only**

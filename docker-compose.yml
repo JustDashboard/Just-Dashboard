@@ -82,6 +82,7 @@ services:
       JD_NGINX_DIR: ${JD_NGINX_DIR:-/etc/nginx}
       JD_CADDYFILE: ${JD_CADDYFILE:-/etc/caddy/Caddyfile}
       JD_BACKUP_DIR: ${JD_BACKUP_DIR:-/var/backups/just-dashboard}
+      JD_DB_UPLOAD_MAX_MB: ${JD_DB_UPLOAD_MAX_MB:-2048}
       # Metrics history, recorded whether or not a browser is connected.
       JD_METRICS_INTERVAL: ${JD_METRICS_INTERVAL:-15s}
       JD_METRICS_RETENTION: ${JD_METRICS_RETENTION:-7d}
