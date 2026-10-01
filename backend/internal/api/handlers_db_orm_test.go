@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -405,5 +406,103 @@ func TestORMLeavesNonSQLEnginesToTheirOwnSurface(t *testing.T) {
 		if rec.Code != http.StatusBadRequest || res.Error.Message != want {
 			t.Errorf("%s: %d %q, want 400 %q", driver, rec.Code, res.Error.Message, want)
 		}
+	}
+}
+
+// TestLiveORMOverHTTP drives the route against a real PostgreSQL catalogue: an
+// enum, a foreign key and a view in a schema of their own. It is skipped unless
+// JD_TEST_POSTGRES_DSN is set — there is deliberately no default address,
+// because the test creates and drops a schema.
+func TestLiveORMOverHTTP(t *testing.T) {
+	dsn := os.Getenv("JD_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set JD_TEST_POSTGRES_DSN to run this against a real PostgreSQL")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Skipf("postgres unavailable: %v", err)
+	}
+	defer db.Close()
+	if err := db.Ping(); err != nil {
+		t.Skipf("postgres unreachable: %v", err)
+	}
+	drop := func() { _, _ = db.Exec(`DROP SCHEMA IF EXISTS jd_orm_api CASCADE`) }
+	drop()
+	t.Cleanup(drop)
+	for _, stmt := range []string{
+		`CREATE SCHEMA jd_orm_api`,
+		`CREATE TYPE jd_orm_api.plan AS ENUM ('free', 'pro')`,
+		`CREATE TABLE jd_orm_api.accounts (
+			id bigserial PRIMARY KEY, email text NOT NULL UNIQUE, plan jd_orm_api.plan NOT NULL DEFAULT 'free',
+			created_at timestamptz NOT NULL DEFAULT now())`,
+		`CREATE TABLE jd_orm_api.invoices (
+			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+			account_id bigint NOT NULL REFERENCES jd_orm_api.accounts(id) ON DELETE CASCADE,
+			amount numeric(12,2) NOT NULL)`,
+		`CREATE VIEW jd_orm_api.totals AS SELECT account_id, sum(amount) AS total FROM jd_orm_api.invoices GROUP BY 1`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v\n%s", err, stmt)
+		}
+	}
+
+	_, r, id := liveAPIRouter(t, dbx.DriverPostgres, dsn)
+	path := pathf("/databases/%d/orm", id)
+
+	rec, res := ormPost(t, r, path, `{"target":"prisma","schema":"jd_orm_api"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("prisma: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		"model accounts {", "id BigInt @id @default(autoincrement())", "plan plan @default(free)",
+		"created_at DateTime @default(now()) @db.Timestamptz(6)",
+		`id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid`,
+		"amount Decimal @db.Decimal(12, 2)",
+		`account accounts @relation("invoices_account_id", fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)`,
+		`invoices invoices[] @relation("invoices_account_id")`,
+		"enum plan {",
+	} {
+		if !strings.Contains(res.Schema, want) {
+			t.Errorf("prisma schema missing %q:\n%s", want, res.Schema)
+		}
+	}
+	if res.Counts.Tables != 2 || res.Counts.Enums != 1 || res.Counts.Relations != 1 || res.Counts.Views != 0 {
+		t.Errorf("counts = %+v", res.Counts)
+	}
+	// One schema, and not the default one: the result has to say how to reach it.
+	if !strings.Contains(strings.Join(res.Warnings, "\n"), "?schema=jd_orm_api") {
+		t.Errorf("warnings = %v", res.Warnings)
+	}
+
+	rec, res = ormPost(t, r, path, `{"target":"sql","schemas":["jd_orm_api"],"views":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sql: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{
+		`CREATE TYPE "jd_orm_api"."plan" AS ENUM ('free', 'pro');`,
+		`CREATE TABLE "jd_orm_api"."accounts" (`, `"id" bigserial NOT NULL,`,
+		"CREATE UNIQUE INDEX accounts_email_key ON jd_orm_api.accounts USING btree (email);",
+		`ALTER TABLE "jd_orm_api"."invoices" ADD CONSTRAINT "invoices_account_id_fkey" FOREIGN KEY ("account_id") REFERENCES "jd_orm_api"."accounts" ("id") ON DELETE CASCADE;`,
+		`CREATE VIEW "jd_orm_api"."totals" AS`,
+	} {
+		if !strings.Contains(res.Schema, want) {
+			t.Errorf("sql output missing %q:\n%s", want, res.Schema)
+		}
+	}
+	if res.Counts.Views != 1 {
+		t.Errorf("views counted = %d, want 1", res.Counts.Views)
+	}
+
+	rec, res = ormPost(t, r, path, `{"target":"drizzle","schema":"jd_orm_api","tables":["jd_orm_api.accounts"]}`)
+	if rec.Code != http.StatusOK || res.Counts.Tables != 1 || strings.Contains(res.Schema, "invoices") {
+		t.Errorf("selection: %d %+v\n%s", rec.Code, res.Counts, res.Schema)
+	}
+	rec, res = ormPost(t, r, path, `{"target":"prisma","schema":"jd_orm_api","tables":["nope"]}`)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(res.Error.Message, `table "nope" is not in the selected schemas`) {
+		t.Errorf("absent table: %d %s", rec.Code, rec.Body.String())
+	}
+	rec, res = ormPost(t, r, path, `{"target":"prisma","schema":"jd_orm_api_missing"}`)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(res.Error.Message, "there are no tables here to generate from") {
+		t.Errorf("empty schema: %d %s", rec.Code, rec.Body.String())
 	}
 }
