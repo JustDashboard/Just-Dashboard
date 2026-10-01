@@ -205,11 +205,13 @@ func (req roleRequest) spec(create bool) dbx.RoleSpec {
 }
 
 // roleError renders what went wrong with an account operation: a request the
-// engine's accounts cannot express is the caller's to fix, anything else is
-// the server's answer.
+// engine's accounts cannot express, and a drop of an account that still owns
+// or is granted something, are the caller's to fix; anything else is the
+// server's answer.
 func roleError(err error) error {
 	var attr dbx.ErrRoleAttribute
-	if errors.As(err, &attr) {
+	var inUse dbx.ErrRoleInUse
+	if errors.As(err, &attr) || errors.As(err, &inUse) {
 		return httpx.BadRequest("%v", err)
 	}
 	return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
@@ -442,6 +444,12 @@ func (s *Server) handleDBRoleGrant(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
+	if conn.Driver == dbx.DriverRedis {
+		// Nothing was asked of the server and nothing failed there: the
+		// engine has no such operation, which is the request's mistake, as the
+		// privileges route beside this one answers it.
+		return httpx.BadRequest("%v", errRedisGrant)
+	}
 	database := strings.TrimSpace(req.Database)
 	if database == "" {
 		database = conn.Database
@@ -477,6 +485,9 @@ func (s *Server) handleDBRoleGrant(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
+// errRedisGrant is why a database cannot be granted on Redis.
+var errRedisGrant = errors.New("Redis grants are ACL rules; edit the user's rule instead")
+
 // grantRole hands a role a database, connected to that database where the
 // engine grants from inside it, and returns what ran and what it covered. The
 // sibling pool is opened for the request and closed with it rather than
@@ -496,7 +507,7 @@ func (s *Server) grantRole(ctx context.Context, conn *dbConnection, dsn string, 
 		defer client.Disconnect(context.Background())
 		return &dbx.GrantResult{Statements: []string{}}, dbx.MongoGrant(ctx, client, grant.Role, grant.Database, grant.Level)
 	case dbx.DriverRedis:
-		return nil, errors.New("Redis grants are ACL rules; edit the user's rule instead")
+		return nil, errRedisGrant
 	}
 	if admin.GrantNeedsDatabase() && grant.Database != conn.Database {
 		db, err := dbx.OpenDatabase(ctx, conn.Driver, dsn, grant.Database)

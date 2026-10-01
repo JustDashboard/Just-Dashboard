@@ -584,3 +584,19 @@ func TestRedisReadOnlyChecksJudgeWhatTheHandlerDecodes(t *testing.T) {
 		}
 	}
 }
+
+// Redis has no database to grant an account: its permissions are the rules of
+// an ACL user. Asking for the three-level grant is the request's mistake and
+// is answered as one, with or without a preview — not as a read of the server
+// that failed, which it used to be, logged as an error for a request that
+// dialled nothing.
+func TestRedisGrantIsARefusalOfTheRequestNotAFailedRead(t *testing.T) {
+	_, r, id := redisRouter(t, auth.RoleAdmin, nowhere)
+	for _, path := range []string{"/server/roles/app/grant", "/server/roles/app/grant?preview=1"} {
+		rec := do(t, r, http.MethodPost, pathf("/databases/%d", id)+path, `{"level":"read"}`)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "bad_request") ||
+			!strings.Contains(rec.Body.String(), "ACL rules") {
+			t.Errorf("POST %s = %d %s, want 400 bad_request naming the ACL rules", path, rec.Code, rec.Body.String())
+		}
+	}
+}

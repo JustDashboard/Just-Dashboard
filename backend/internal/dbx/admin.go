@@ -3,6 +3,7 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -139,6 +140,15 @@ func (s RoleSpec) asked() []string {
 type ErrRoleAttribute struct{ msg string }
 
 func (e ErrRoleAttribute) Error() string { return e.msg }
+
+// ErrRoleInUse is a drop the engine refused because of what the account still
+// owns or is still granted. It is the state of the request's own account and
+// the operator's to clear, in the engine's words, not a read of the server
+// that failed.
+type ErrRoleInUse struct{ Err error }
+
+func (e ErrRoleInUse) Error() string { return e.Err.Error() }
+func (e ErrRoleInUse) Unwrap() error { return e.Err }
 
 // roleEngineNames is how each engine is named in a refusal.
 var roleEngineNames = map[Driver]string{
@@ -497,13 +507,60 @@ func (d postgresDialect) AlterRole(ctx context.Context, db *sql.DB, spec RoleSpe
 	return err
 }
 
+// DropRole removes a role, taking back first what it was granted in this
+// database.
+//
+// PostgreSQL will not drop a role that still holds a privilege, and the grant
+// this dashboard's own form makes gives it several, default privileges among
+// them: a role made, granted and dropped from here was refused at the last
+// step, with nothing on the page able to take the grants back. DROP OWNED BY
+// revokes them all. It also drops every object the role owns, which nobody
+// asked for by dropping an account, so it is only run for a role that owns
+// nothing here; one that does is left for the engine to refuse. Both
+// statements are one transaction: a role with grants in another database is
+// still refused, and then nothing was revoked in this one either.
 func (d postgresDialect) DropRole(ctx context.Context, db *sql.DB, name, _ string) error {
 	q, err := d.QuoteIdent(name)
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, "DROP ROLE "+q)
-	return err
+	// Not knowing whether it owns anything is not permission to drop it.
+	owns := true
+	if err := db.QueryRowContext(ctx, `
+	  SELECT EXISTS (
+	    SELECT 1 FROM pg_shdepend d JOIN pg_roles r ON r.oid = d.refobjid
+	    WHERE r.rolname = $1 AND d.deptype = 'o'
+	      AND d.dbid IN (0, (SELECT oid FROM pg_database WHERE datname = current_database())))`, name).Scan(&owns); err != nil {
+		owns = true
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if !owns {
+		// A login that may drop the role but not act for it is refused here;
+		// the savepoint keeps that from ending the transaction, and the drop
+		// then answers for itself.
+		if _, err := tx.ExecContext(ctx, "SAVEPOINT jd_drop_owned"); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DROP OWNED BY "+q); err != nil {
+			if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT jd_drop_owned"); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "DROP ROLE "+q); err != nil {
+		var state interface{ SQLState() string }
+		// dependent_objects_still_exist: what the role owns or is granted,
+		// here or in another database, listed in the server's own words.
+		if errors.As(err, &state) && state.SQLState() == "2BP01" {
+			return ErrRoleInUse{err}
+		}
+		return err
+	}
+	return tx.Commit()
 }
 
 func (postgresDialect) GrantNeedsDatabase() bool { return true }
@@ -1419,10 +1476,58 @@ func (d mssqlDialect) AlterRole(ctx context.Context, db *sql.DB, spec RoleSpec) 
 	return nil
 }
 
+// DropRole removes a login, and first the user it has in each database.
+//
+// A login signs in to the server; what it may do in a database belongs to a
+// user there, which the grant forms make for it (CREATE USER … FOR LOGIN).
+// DROP LOGIN leaves those users behind, orphaned and still holding their
+// grants, where a login made later under the same name does not pick them up
+// and nothing on the page shows them. So they go first, found by the login's
+// identifier rather than by its name. A user that cannot be dropped — it owns
+// a schema — stops the drop before the login is touched.
 func (d mssqlDialect) DropRole(ctx context.Context, db *sql.DB, name, _ string) error {
 	q, err := d.QuoteIdent(name)
 	if err != nil {
 		return err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT name FROM sys.databases WHERE state = 0 AND HAS_DBACCESS(name) = 1 ORDER BY database_id`)
+	if err != nil {
+		return err
+	}
+	var databases []string
+	for rows.Next() {
+		var database string
+		if err := rows.Scan(&database); err != nil {
+			rows.Close()
+			return err
+		}
+		databases = append(databases, database)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, database := range databases {
+		within, err := d.QuoteIdent(database)
+		if err != nil {
+			continue
+		}
+		// Past the four principals every database has: a login that owns a
+		// database is its dbo, and that is DROP LOGIN's to refuse.
+		var user string
+		err = db.QueryRowContext(ctx, `SELECT name FROM `+within+`.sys.database_principals
+		  WHERE sid = SUSER_SID(@p1) AND principal_id > 4`, name).Scan(&user)
+		if err != nil {
+			// No user there, or a database this login may not read.
+			continue
+		}
+		quoted, err := d.QuoteIdent(user)
+		if err != nil {
+			return err
+		}
+		statement := "DROP USER " + quoted
+		if _, err := db.ExecContext(ctx, "EXEC "+within+".sys.sp_executesql @p1", statement); err != nil {
+			return ErrRoleInUse{fmt.Errorf("its user in %s could not be removed, so the login was kept: %w", database, err)}
+		}
 	}
 	_, err = db.ExecContext(ctx, "DROP LOGIN "+q)
 	return err
