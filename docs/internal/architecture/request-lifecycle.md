@@ -65,6 +65,30 @@ Referenced network drivers and named-volume drivers/options are inspected too; a
 host bind or plugin mount from this policy. Local filesystem volume backing paths must be absolute and
 pass the configured file-root check, including for administrators.
 
+`POST /databases/{id}/redis/command` is the same position for Redis: one route, any command. The line is
+split into arguments by `dbx.RedisParseCommand` and classified by `dbx.RedisClassify` — a table of the
+commands the dashboard knows, and the server's own `COMMAND INFO` flags for the ones it does not — before
+anything runs. The route asks for `service.control`; a command that removes data, runs a script or changes
+the server is `dangerous` and needs the destructive capability and `destrLim`; one that reads or changes
+the server's configuration or accounts (`CONFIG`, `ACL`, `MODULE`, `DEBUG`, replication, and anything the
+server itself flags `admin`) also needs `system.admin`; one that cannot be a request and a reply
+(`SUBSCRIBE`, `MONITOR`, `MULTI`, a read that waits forever) or would take the server down (`SHUTDOWN`) is
+refused. A command nobody listed is `dangerous` unless the server itself describes it as a plain read, and
+one quoted word that spells a subcommand (`"CONFIG GET"`) is such a command, not that subcommand. The
+classes are drawn so the console is never the cheaper way to do what a form gates: `DELETE /keys` is
+destructive, so `DEL` is; so is a command that stores its result over another key (`SINTERSTORE`,
+`ZRANGESTORE`, `SORT … STORE`, `BITOP`), because an empty result deletes that key; so is an expiry that has
+already passed, whichever command sets it (`EXPIRE k 0`, `SET k v PXAT 1`, `HEXPIRE h 0 …`).
+`PUT /redis/config` is `system.admin`, so `CONFIG SET` is. An expiry still to come is a write however soon
+it falls, as setting one key's expiry from the form has always been, and `SET` over a key is a write
+whatever the key held. `POST /keys/bulk` (`delete` and `expire`, not a dry run), and `overwrite` on
+`/keys/rename` and `/keys/copy`, apply the same capability and budget by hand for the same reason.
+
+Two Redis routes are WebSockets, both `system.admin`: `GET /databases/{id}/redis/monitor` (MONITOR shows
+every client's arguments) and `GET /databases/{id}/redis/subscribe` (a pattern of `*` is every message any
+application publishes). Each records an audit entry at open, runs for a bounded time and a bounded number
+of events, sends an `end` frame saying which bound ended it, and closes.
+
 The log routes decide on the source, not the path. `/logs/stream`, `/search`, `/download`,
 `/retention` and `/source` are `read`, but every one parses its `source` through `logTargetFor`, which
 refuses auth data — `auth.log` and `secure` with their generations and anything resolving to them, a

@@ -306,6 +306,21 @@ docker run -d -p 6379:6379 redis:7
 Then `go test ./internal/dbx/ ./internal/api/ -run Live -v` and watch which
 engines report rather than skip. SQLite needs nothing — it is embedded.
 
+The Redis key and server tests (`TestLiveRedis*`, `TestLiveAPIRedis*`) are the
+exception to the defaults: they run only when `JD_TEST_REDIS_DSN` is set. They
+write, and the port every Redis listens on is as likely to be somebody's real
+data as a fixture. They write only under the `jdb4:` and `jdb4api:` prefixes,
+in the logical database the connection string names. The tests that change a
+server itself have variables of their own, again with no default:
+
+| Variable | What it must be |
+| --- | --- |
+| `JD_TEST_REDIS_ADMIN_DSN` | a Redis the run owns outright: configuration, users, slow log, clients, MONITOR, pub/sub |
+| `JD_TEST_REDIS_FLAVORS` | `valkey=redis://…,keydb=redis://…,dragonfly=redis://…,redis=redis://…` |
+| `JD_TEST_REDIS_CLUSTER_DSN` | a node started with `--cluster-enabled yes` |
+| `JD_TEST_REDIS_SENTINEL_DSN` | a Redis Sentinel |
+| `JD_TEST_REDIS_REPLICA_DSN` | a replica of the admin server |
+
 Oracle has unit coverage for statement guards, SQL rendering and adapter behavior. Live server
 coverage requires an available Oracle instance: set `JD_TEST_ORACLE_DSN` to run the existing Oracle
 fixture alongside the others. If no server was used, identify that validation limit in the pull request;
