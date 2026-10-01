@@ -67,7 +67,7 @@ func (s *Server) handleDBBackupDownload(w http.ResponseWriter, r *http.Request) 
 	base := filepath.Base(st.Name())
 	// A whole database leaving the server is worth a line, and a GET never
 	// reaches the mutation middleware's record, so it is written here.
-	s.recordAudit(r, "database.backup.download", conn.Name, map[string]any{"file": base, "size": st.Size()})
+	s.recordRead(r, "database.backup.download", conn.Name, map[string]any{"file": base, "size": st.Size()}, nil)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition",
 		mime.FormatMediaType("attachment", map[string]string{"filename": base}))
@@ -358,8 +358,8 @@ func (s *Server) handleDBConnURL(w http.ResponseWriter, r *http.Request) error {
 	// Written directly. This is a GET, which the mutation middleware passes
 	// through with nothing to annotate: the SetAudit that used to stand here
 	// recorded nothing, and "deliberate and recorded" was half true.
-	s.recordAudit(r, "database.connection.reveal", conn.Name,
-		map[string]any{"driver": string(conn.Driver), "target": target, "format": format})
+	s.recordRead(r, "database.connection.reveal", conn.Name,
+		map[string]any{"driver": string(conn.Driver), "target": target, "format": format}, nil)
 	reference := ""
 	if target == "container" {
 		reference = fmt.Sprintf("${{database.%d}}", conn.ID)

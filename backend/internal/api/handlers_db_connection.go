@@ -8,13 +8,17 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
@@ -75,11 +79,16 @@ type dbConnState struct {
 	readings sync.Map
 	locks    sync.Map
 	// units is the systemd unit last seen serving each connection, which is
-	// the only thing that says which unit to start once it has stopped.
+	// what says which unit to start once it has stopped. It is kept in memory
+	// only: after the dashboard restarts, a stopped server on a port that is
+	// not its engine's own has no unit until it has been seen running again.
 	units sync.Map
 	// probe reads the machine's sockets and units. Nil is the machine itself;
 	// a test hands in one of its own.
 	probe *dbHostProbe
+	// systemctl starts and stops a unit. Nil is the host's own; a test hands
+	// in one that records what it was asked.
+	systemctl *dbSystemctl
 }
 
 // forget drops everything kept about a connection, for a change after which
@@ -88,6 +97,7 @@ func (st *dbConnState) forget(id int64) {
 	st.identities.Delete(id)
 	st.readings.Delete(id)
 	st.units.Delete(id)
+	st.locks.Delete(id)
 }
 
 // stale drops a connection's last reading and keeps what its server said it
@@ -182,6 +192,117 @@ func (s *Server) dropPoolAfter(id int64, err error) {
 		return
 	}
 	s.modules.dbs.Close(id)
+}
+
+// connectError is what a failed dial said, with the connection's password
+// taken out of it.
+//
+// A driver reports a connection string it could not use by quoting it:
+// net/url prints the whole URL it failed to parse, and a Redis address that
+// is not one comes back inside the dial error, userinfo and all. What it said
+// goes to the read surface, and for a refused request into the audit trail,
+// and neither is a place a password may be written.
+func connectError(dsn string, err error) string {
+	text := err.Error()
+	for _, secret := range dsnSecrets(dsn) {
+		if len(secret) >= 4 {
+			text = strings.ReplaceAll(text, secret, "***")
+			continue
+		}
+		// Too short to blank wherever it occurs — a password of "a" would
+		// leave no sentence — so only where it stands as a password.
+		text = strings.ReplaceAll(text, ":"+secret+"@", ":***@")
+		text = strings.ReplaceAll(text, "="+secret, "=***")
+	}
+	return text
+}
+
+// dsnPasswordParam finds a password given as a parameter, the way SQL Server,
+// ClickHouse and a key=value Postgres string carry one.
+var dsnPasswordParam = regexp.MustCompile(`(?i)\b(?:password|passwd|pwd)\s*=\s*('(?:[^'\\]|\\.)*'|[^&;\s]+)`)
+
+// dsnSecrets are the passwords in a connection string, in every spelling a
+// driver might repeat one in, longest first. It reads the string by its shape
+// rather than through the engine's parser: the string that matters here is
+// the one the parser refused.
+func dsnSecrets(dsn string) []string {
+	found := map[string]bool{}
+	add := func(secret string) {
+		secret = strings.Trim(secret, `'"`)
+		if secret == "" {
+			return
+		}
+		found[secret] = true
+		if plain, err := url.PathUnescape(secret); err == nil {
+			found[plain] = true
+		}
+		if plain, err := url.QueryUnescape(secret); err == nil {
+			found[plain] = true
+		}
+		found[url.QueryEscape(secret)] = true
+		found[url.PathEscape(secret)] = true
+	}
+	rest := dsn
+	if _, after, ok := strings.Cut(dsn, "://"); ok {
+		rest = after
+	}
+	// Everything before the last @ is who is connecting, and what follows the
+	// first colon in it is the password.
+	if at := strings.LastIndex(rest, "@"); at >= 0 {
+		if _, password, ok := strings.Cut(rest[:at], ":"); ok {
+			add(password)
+		}
+	}
+	for _, m := range dsnPasswordParam.FindAllStringSubmatch(dsn, -1) {
+		add(m[1])
+	}
+	out := make([]string, 0, len(found))
+	for secret := range found {
+		if secret != "" {
+			out = append(out, secret)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if len(out[i]) != len(out[j]) {
+			return len(out[i]) > len(out[j])
+		}
+		return out[i] < out[j]
+	})
+	return out
+}
+
+// recordRead puts a read on the audit trail by hand. A GET never reaches the
+// mutation middleware's record, so the few reads that hand something off the
+// server — a password, a table, a dump — write their own, before the read
+// runs, so that one which hangs is still on record.
+//
+// It is written whether or not the client is still there. An entry inserted
+// on the request's own context is lost the moment the browser closes the
+// connection, and a download abandoned at its last byte is exactly the read
+// that must not go unrecorded. A failure is recorded as one: failed is what
+// went wrong after the read had begun, nil when it is beginning or ended well.
+func (s *Server) recordRead(r *http.Request, action, target string, detail map[string]any, failed error) {
+	p := httpx.MustPrincipal(r)
+	entry := audit.Entry{
+		UserID:   p.UserID(),
+		Username: p.Username(),
+		Role:     string(p.Role),
+		IP:       httpx.ClientIP(r),
+		Actor:    p.Kind,
+		Action:   action,
+		Target:   target,
+		Method:   r.Method,
+		Path:     r.URL.Path,
+		Status:   http.StatusOK,
+		Success:  true,
+	}
+	if failed != nil {
+		// What the handler would have answered had the response not already
+		// been under way.
+		entry.Status, entry.Success = http.StatusBadGateway, false
+	}
+	entry.Detail = audit.Detail(detail)
+	s.Audit.Record(context.WithoutCancel(r.Context()), entry)
 }
 
 // --- what the server says it is ---------------------------------------------
@@ -352,24 +473,52 @@ type dbPlacement struct {
 }
 
 // dbHostView is the machine as one request read it. A fleet asks where nine
-// connections run, and each asking wants the listening sockets and the
-// engine's units: they are read once here and shared, as the Docker read
-// snapshot shares its lists.
+// connections run, and each asking wants the listening sockets, the engine's
+// units and what each stopped container publishes: they are read once here
+// and shared, as the Docker read snapshot shares its lists. Without that a
+// fleet of nine connections to servers that are down lists every unit on the
+// machine nine times and inspects every stopped container nine times over.
 type dbHostView struct {
-	s     *Server
-	ctx   context.Context
-	probe dbHostProbe
+	s         *Server
+	ctx       context.Context
+	probe     dbHostProbe
+	systemctl dbSystemctl
 
 	listenersOnce sync.Once
 	listeners     []proxysvc.Listener
+
+	unitsOnce sync.Once
+	units     []procs.Unit
+	unitsErr  error
+
+	// published is what each stopped container's configuration publishes, by
+	// container id.
+	published sync.Map
+}
+
+// dbPublished is one container's published ports, read once.
+type dbPublished struct {
+	once  sync.Once
+	ports []dockerx.PortMapping
 }
 
 func (s *Server) newDBHostView(ctx context.Context) *dbHostView {
-	probe := hostLogProbe
+	view := &dbHostView{s: s, ctx: ctx, probe: hostLogProbe, systemctl: hostSystemctl}
 	if s.dbConns.probe != nil {
-		probe = *s.dbConns.probe
+		view.probe = *s.dbConns.probe
 	}
-	return &dbHostView{s: s, ctx: ctx, probe: probe}
+	if s.dbConns.systemctl != nil {
+		view.systemctl = *s.dbConns.systemctl
+	}
+	// The unit list is asked for through the probe by code that takes one, so
+	// the sharing is put inside the probe this view hands out.
+	if list := view.probe.units; list != nil {
+		view.probe.units = func(context.Context) ([]procs.Unit, error) {
+			view.unitsOnce.Do(func() { view.units, view.unitsErr = list(view.ctx) })
+			return view.units, view.unitsErr
+		}
+	}
+	return view
 }
 
 func (v *dbHostView) sockets() []proxysvc.Listener {
@@ -379,14 +528,28 @@ func (v *dbHostView) sockets() []proxysvc.Listener {
 	return v.listeners
 }
 
+// publishedBy is the ports a container's configuration publishes, which is
+// the only place a stopped container still says them.
+func (v *dbHostView) publishedBy(id string) []dockerx.PortMapping {
+	kept, _ := v.published.LoadOrStore(id, &dbPublished{})
+	read := kept.(*dbPublished)
+	read.once.Do(func() {
+		if spec, err := v.s.modules.docker.SpecOf(v.ctx, id); err == nil {
+			read.ports = spec.Ports
+		}
+	})
+	return read.ports
+}
+
 // place finds where a connection's server runs.
 //
 // In order of how sure each answer is: a running container that publishes or
 // answers at the connection's address; the process listening on its port and
 // the unit that process belongs to; a container that is not running whose
 // configuration publishes the port, or that the connection is named after;
-// and last the engine's own units by name, for a native server that has
-// stopped and left nothing listening to follow.
+// and last, for a native server that has stopped and left nothing listening
+// to follow, the unit it was last seen running under or the engine's only
+// unit on the engine's own port.
 func (v *dbHostView) place(ctx context.Context, conn *dbConnection, dsn string) dbPlacement {
 	out := dbPlacement{Source: "remote", Exposure: exposureRemote}
 	if conn.Driver == dbx.DriverSQLite {
@@ -441,7 +604,7 @@ func (v *dbHostView) place(ctx context.Context, conn *dbConnection, dsn string) 
 		}
 	}
 	if listening == nil {
-		if c, exposure := s.stoppedContainerFor(ctx, conn, loopback, port); c != nil {
+		if c, exposure := v.stoppedContainerFor(ctx, conn, loopback, port); c != nil {
 			out.inContainer(c)
 			out.Exposure = exposure
 			return out
@@ -469,26 +632,39 @@ func (v *dbHostView) place(ctx context.Context, conn *dbConnection, dsn string) 
 		}
 		return out
 	}
-	// Nothing is listening. The engine's units that are not busy serving
-	// another port are the candidates, and the one this connection was last
-	// seen on settles it when there are several.
+	// Nothing is listening. A unit is taken for this connection's server only
+	// on evidence, because what is decided here is what Start starts: the
+	// unit the connection was last seen running under, or the engine's only
+	// unit when the connection is to the engine's own port. A connection to
+	// some other port that nothing answers on is a tunnel that has dropped or
+	// a container that was removed, and the PostgreSQL installed on the
+	// machine has nothing to do with it.
+	remembered, seen := s.dbConns.units.Load(conn.ID)
+	ownPort := port > 0 && port == driverLabels[conn.Driver].port
+	if !seen && !ownPort {
+		return out
+	}
 	units := engineUnits(ctx, conn.Driver, port, v.sockets(), v.probe)
-	remembered, _ := s.dbConns.units.Load(conn.ID)
 	var found *procs.Unit
 	for i := range units {
-		if len(units) == 1 || units[i].Name == remembered {
+		if units[i].Name == remembered {
 			found = &units[i]
 		}
 	}
-	switch {
-	case found != nil:
+	if found == nil && ownPort {
+		switch {
+		case len(units) == 1:
+			found = &units[0]
+		case len(units) > 1:
+			for _, u := range units {
+				out.ambiguous = append(out.ambiguous, u.Name)
+			}
+		}
+	}
+	if found != nil {
 		out.Unit = &dbUnitRef{Name: found.Name, ActiveState: found.ActiveState, SubState: found.SubState}
 		if found.ActiveState != "active" && found.ActiveState != "activating" {
 			out.Down = dbStateStopped
-		}
-	case len(units) > 1:
-		for _, u := range units {
-			out.ambiguous = append(out.ambiguous, u.Name)
 		}
 	}
 	return out
@@ -520,7 +696,8 @@ func (p *dbPlacement) inContainer(c *dockerx.Container) {
 }
 
 // power is which actions the power route would accept for a placement.
-func (p dbPlacement) power(conn *dbConnection) dbPower {
+// systemctl says whether there is one to carry a unit's out.
+func (p dbPlacement) power(conn *dbConnection, systemctl bool) dbPower {
 	switch {
 	case p.Container != nil && p.foreign:
 		// The same caution as for a unit: a proxy or a pooler publishing the
@@ -532,7 +709,7 @@ func (p dbPlacement) power(conn *dbConnection) dbPower {
 		running := p.Down == ""
 		return dbPower{Via: "docker", Start: !running && p.Down != dbStatePaused, Stop: running || p.Down == dbStatePaused, Restart: running}
 	case p.Unit != nil:
-		if !hostexec.Available("systemctl") {
+		if !systemctl {
 			return dbPower{Reason: fmt.Sprintf("%s runs under %s, and systemctl cannot be reached from this dashboard", conn.Name, p.Unit.Name)}
 		}
 		running := p.Down == ""
@@ -550,6 +727,27 @@ func (p dbPlacement) power(conn *dbConnection) dbPower {
 		return dbPower{Reason: fmt.Sprintf("The process listening on port %s could not be identified, so there is nothing here to stop or restart it with.", conn.Port)}
 	}
 	return dbPower{Reason: fmt.Sprintf("No container or systemd unit on this machine was found serving port %s, so there is nothing here to start or stop it with.", conn.Port)}
+}
+
+// notNow is why an action is not one the power route will carry out in the
+// state the server is in, where it could in another.
+func (p dbPlacement) notNow(action string) string {
+	target := ""
+	switch {
+	case p.Container != nil:
+		target = "the container " + p.Container.Name
+	case p.Unit != nil:
+		target = p.Unit.Name
+	}
+	switch {
+	case p.Down == dbStatePaused:
+		return fmt.Sprintf("%s is paused, and a paused container can only be stopped from here. Resume it on the Docker page, or stop it and start it again.", target)
+	case p.Down == "" && action == "start":
+		return fmt.Sprintf("%s is already running.", target)
+	case action == "restart":
+		return fmt.Sprintf("%s is not running, so there is nothing to restart. Start it instead.", target)
+	}
+	return fmt.Sprintf("%s is not running.", target)
 }
 
 func fileRef(path string) *dbFileRef {
@@ -600,7 +798,8 @@ func (s *Server) runningContainerPublishing(ctx context.Context, port int) (*doc
 // container has no address either; there the container the connection is
 // named after is the one, since adopting a container names the connection
 // after it.
-func (s *Server) stoppedContainerFor(ctx context.Context, conn *dbConnection, loopback bool, port int) (*dockerx.Container, dbExposure) {
+func (v *dbHostView) stoppedContainerFor(ctx context.Context, conn *dbConnection, loopback bool, port int) (*dockerx.Container, dbExposure) {
+	s := v.s
 	if s.modules.docker == nil {
 		return nil, ""
 	}
@@ -621,10 +820,8 @@ func (s *Server) stoppedContainerFor(ctx context.Context, conn *dbConnection, lo
 		if loopback && port > 0 {
 			// The engine's own port inside the container, from the table
 			// detection reads.
-			internal, _ := dbx.Detect(c.Name, image, nil, nil, []string{"container"})
-			spec, err := s.modules.docker.SpecOf(ctx, c.ID)
-			if internal != nil && err == nil {
-				for _, p := range spec.Ports {
+			if internal, _ := dbx.Detect(c.Name, image, nil, nil, []string{"container"}); internal != nil {
+				for _, p := range v.publishedBy(c.ID) {
 					if p.HostPort == port && p.ContainerPort == internal.Port {
 						return c, bindingExposure(p.HostIP)
 					}
@@ -749,10 +946,11 @@ func (s *Server) handleDBConnSummary(w http.ResponseWriter, r *http.Request) err
 		return nil
 	}
 
-	place := s.newDBHostView(ctx).place(ctx, conn, dsn)
+	view := s.newDBHostView(ctx)
+	place := view.place(ctx, conn, dsn)
 	out.Source, out.Container, out.Unit, out.File = place.Source, place.Container, place.Unit, place.File
 	out.Exposure, out.Managed = place.Exposure, place.Managed
-	out.Power = place.power(conn)
+	out.Power = place.power(conn, view.systemctl.available())
 
 	identity, _, known := s.lastIdentity(id, dsn)
 	if place.Down != "" {
@@ -764,7 +962,7 @@ func (s *Server) handleDBConnSummary(w http.ResponseWriter, r *http.Request) err
 		cancelDial()
 		out.LatencyMs = time.Since(started).Milliseconds()
 		if err != nil {
-			out.State, out.Error = dbStateUnreachable, err.Error()
+			out.State, out.Error = dbStateUnreachable, connectError(dsn, err)
 		} else {
 			out.State, out.OK = dbStateRunning, true
 			identity, known = answered, true
@@ -788,7 +986,25 @@ func (s *Server) handleDBConnSummary(w http.ResponseWriter, r *http.Request) err
 
 type dbPowerRequest struct {
 	Action string `json:"action"`
+	// TimeoutSeconds is how long a container is given to shut down before it
+	// is killed; zero is dbStopGrace.
+	TimeoutSeconds int `json:"timeoutSeconds"`
 }
+
+// dbStopGrace is how long a database's container is given to shut down when
+// it is stopped or restarted from here, and dbStopGraceLimit the most a
+// request may ask for instead.
+//
+// Docker's own default is ten seconds and then SIGKILL. That is enough for a
+// web server and not for a database: a Redis with a few gigabytes answers
+// SIGTERM by writing its snapshot, a MySQL by flushing its buffer pool, and
+// one killed part-way through loses what it had not written or spends its
+// next start in crash recovery. The Docker page stops a container; this
+// route stops a database, and waits for one.
+const (
+	dbStopGrace      = 90 * time.Second
+	dbStopGraceLimit = 10 * time.Minute
+)
 
 // handleDBPower starts, stops or restarts the server behind a connection.
 //
@@ -801,7 +1017,8 @@ type dbPowerRequest struct {
 //
 // What it will not do is guess. A connection to another machine, a file, or
 // a port nothing on this machine can be tied to is refused with the reason
-// the summary already gave.
+// the summary already gave, and so is an action the summary does not offer
+// for the state the server is in.
 func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -822,6 +1039,13 @@ func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 	default:
 		return httpx.BadRequest("action must be start, stop or restart")
 	}
+	grace := dbStopGrace
+	if req.TimeoutSeconds != 0 {
+		if req.TimeoutSeconds < 0 || req.TimeoutSeconds > int(dbStopGraceLimit.Seconds()) {
+			return httpx.BadRequest("timeoutSeconds must be between 1 and %d", int(dbStopGraceLimit.Seconds()))
+		}
+		grace = time.Duration(req.TimeoutSeconds) * time.Second
+	}
 	if action != dockerx.ActionStart {
 		p := httpx.MustPrincipal(r)
 		if !p.Can(auth.CapDestructive) {
@@ -836,21 +1060,35 @@ func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := timeoutCtx(r, 2*time.Minute)
+	// The grace and then the time the action itself takes.
+	ctx, cancel := timeoutCtx(r, grace+time.Minute)
 	defer cancel()
 
-	place := s.newDBHostView(ctx).place(ctx, conn, dsn)
-	power := place.power(conn)
-	if power.Via == "" {
+	view := s.newDBHostView(ctx)
+	place := view.place(ctx, conn, dsn)
+	power := place.power(conn, view.systemctl.available())
+	unavailable := power.Reason
+	if power.Via != "" {
+		offered := map[string]bool{"start": power.Start, "stop": power.Stop, "restart": power.Restart}
+		if !offered[req.Action] {
+			unavailable = place.notNow(req.Action)
+		}
+	}
+	if unavailable != "" {
 		httpx.SetAudit(r, "database.power."+req.Action, conn.Name, map[string]any{"refused": true})
-		return httpx.Err(http.StatusConflict, "power_unavailable", power.Reason)
+		return httpx.Err(http.StatusConflict, "power_unavailable", unavailable)
 	}
 	detail := map[string]any{"via": power.Via}
 	result := map[string]any{"action": req.Action, "via": power.Via}
 	switch power.Via {
 	case "docker":
 		detail["container"], detail["id"] = place.Container.Name, place.Container.ID
-		if err := s.modules.docker.Lifecycle(ctx, place.Container.ID, action, nil); err != nil {
+		var timeout *int
+		if action != dockerx.ActionStart {
+			seconds := int(grace.Seconds())
+			timeout, detail["timeoutSeconds"] = &seconds, seconds
+		}
+		if err := s.modules.docker.Lifecycle(ctx, place.Container.ID, action, timeout); err != nil {
 			detail["error"] = err.Error()
 			httpx.SetAudit(r, "database.power."+req.Action, conn.Name, detail)
 			return s.dockerErr(err)
@@ -861,14 +1099,22 @@ func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 		}
 	case "systemd":
 		detail["unit"] = place.Unit.Name
-		if output, err := runUnit(ctx, req.Action, place.Unit.Name); err != nil {
+		if err := serviceUnit(place.Unit.Name); err != nil {
 			detail["error"] = err.Error()
+			httpx.SetAudit(r, "database.power."+req.Action, conn.Name, detail)
+			return httpx.Err(http.StatusConflict, "power_unavailable", err.Error())
+		}
+		if output, err := view.systemctl.run(ctx, req.Action, place.Unit.Name); err != nil {
+			detail["error"] = firstLine(output, err)
 			httpx.SetAudit(r, "database.power."+req.Action, conn.Name, detail)
 			return httpx.Err(http.StatusBadGateway, "power_failed",
 				fmt.Sprintf("systemctl %s %s failed: %s", req.Action, place.Unit.Name, firstLine(output, err)))
 		}
 		result["target"] = place.Unit.Name
-		result["state"] = unitActiveState(ctx, place.Unit.Name)
+		// is-active exits non-zero for every state but active and still
+		// prints the state, which is the answer wanted.
+		state, _ := view.systemctl.run(ctx, "is-active", place.Unit.Name)
+		result["state"] = strings.TrimSpace(state)
 	}
 	// What was kept describes a server that has just been stopped or
 	// replaced by a fresh process: the pool's connections are dead, and the
@@ -880,13 +1126,35 @@ func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// dbSystemctl is the host's systemctl as the power route uses it: whether
+// there is one, and one verb carried out on one unit, with what it printed.
+// It is a value rather than two functions called directly so that a test can
+// stand in for the only code in these routes that runs a command on the host.
+type dbSystemctl struct {
+	available func() bool
+	run       func(ctx context.Context, verb, unit string) (string, error)
+}
+
+var hostSystemctl = dbSystemctl{
+	available: func() bool { return hostexec.Available("systemctl") },
+	run:       runUnit,
+}
+
+// serviceUnit refuses anything that is not the name of a service unit.
+func serviceUnit(unit string) error {
+	if err := procs.ValidateName(unit); err != nil || !strings.HasSuffix(unit, ".service") {
+		return fmt.Errorf("%q is not a service unit name", unit)
+	}
+	return nil
+}
+
 // unitCommand is the systemctl invocation for one verb on one unit, on the
-// host: an argument vector, never a shell line. The verb is one of three the
+// host: an argument vector, never a shell line. The verb is one of four the
 // handler chose and the unit is validated here, so nothing a request carried
 // reaches systemctl as anything but a name.
 func unitCommand(ctx context.Context, verb, unit string) (*exec.Cmd, error) {
-	if err := procs.ValidateName(unit); err != nil || !strings.HasSuffix(unit, ".service") {
-		return nil, fmt.Errorf("%q is not a service unit name", unit)
+	if err := serviceUnit(unit); err != nil {
+		return nil, err
 	}
 	cmd := hostexec.CommandOnHost(ctx, "systemctl", verb, unit)
 	// The dashboard shares the host's PID namespace and not its root, which
@@ -902,18 +1170,6 @@ func runUnit(ctx context.Context, verb, unit string) (string, error) {
 	}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
-}
-
-// unitActiveState is systemd's one word for a unit, empty when it cannot say.
-func unitActiveState(ctx context.Context, unit string) string {
-	cmd, err := unitCommand(ctx, "is-active", unit)
-	if err != nil {
-		return ""
-	}
-	// is-active exits non-zero for every state but active and still prints
-	// the state, which is the answer wanted.
-	out, _ := cmd.Output()
-	return strings.TrimSpace(string(out))
 }
 
 // firstLine is what a failed command said, or the error where it said nothing.

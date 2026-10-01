@@ -252,7 +252,7 @@ func (s *Server) dialFleetReading(ctx context.Context, conn *dbConnection, dsn s
 	case dbx.DriverMongo:
 		client, err := dbx.MongoClient(ctx, dsn)
 		if err != nil {
-			e.Error = err.Error()
+			e.Error = connectError(dsn, err)
 			break
 		}
 		defer client.Disconnect(context.Background())
@@ -277,7 +277,7 @@ func (s *Server) dialFleetReading(ctx context.Context, conn *dbConnection, dsn s
 	case dbx.DriverRedis:
 		client, err := dbx.RedisClient(ctx, dsn, 0)
 		if err != nil {
-			e.Error = err.Error()
+			e.Error = connectError(dsn, err)
 			break
 		}
 		defer client.Close()
@@ -305,7 +305,7 @@ func (s *Server) dialFleetReading(ctx context.Context, conn *dbConnection, dsn s
 		}
 		if err != nil {
 			s.dropPoolAfter(conn.ID, err)
-			e.Error = err.Error()
+			e.Error = connectError(dsn, err)
 			break
 		}
 		e.OK = true

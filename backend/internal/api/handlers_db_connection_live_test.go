@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -211,6 +212,13 @@ func TestLiveProvisionAdoptAndPower(t *testing.T) {
 				t.Errorf("fleet after stop = %+v", fleet.Connections)
 			}
 
+			// Stopped, so there is nothing to restart: the route holds the line
+			// the summary drew, and Docker is not asked.
+			if rec := do(t, router, http.MethodPost, pathf("/databases/%d/power", id), `{"action":"restart"}`); rec.Code != http.StatusConflict ||
+				!strings.Contains(rec.Body.String(), "power_unavailable") {
+				t.Errorf("restart of a stopped server = %d %s", rec.Code, rec.Body.String())
+			}
+
 			if rec := do(t, router, http.MethodPost, pathf("/databases/%d/power", id), `{"action":"start"}`); rec.Code != http.StatusOK {
 				t.Fatalf("start = %d %s", rec.Code, rec.Body.String())
 			}
@@ -218,6 +226,14 @@ func TestLiveProvisionAdoptAndPower(t *testing.T) {
 			if got = summary(); got.State != dbStateRunning {
 				t.Errorf("after start: %+v", got)
 			}
+
+			// A restart with a grace of its own: the engine is given the time
+			// to shut down, comes back, and still holds the password it had.
+			rec = do(t, router, http.MethodPost, pathf("/databases/%d/power", id), `{"action":"restart","timeoutSeconds":30}`)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"state":"running"`) {
+				t.Fatalf("restart = %d %s", rec.Code, rec.Body.String())
+			}
+			awaitServer("after restart")
 		})
 	}
 }
@@ -268,4 +284,114 @@ func TestLiveCapabilityFlagsAnswerOnRealServers(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A protected connection against real servers: the statements and the
+// pipeline that got past the check by not looking like a write are refused,
+// and what they would have made is not there afterwards.
+func TestLiveProtectedConnectionIsNotWrittenTo(t *testing.T) {
+	protect := func(t *testing.T, s *Server, id int64) {
+		t.Helper()
+		if _, err := s.Store.DB.Exec(`UPDATE db_connections SET read_only = 1 WHERE id = ?`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refused := func(t *testing.T, router http.Handler, path, body string) {
+		t.Helper()
+		rec := do(t, router, http.MethodPost, path, body)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "connection_read_only") {
+			t.Errorf("POST %s %s = %d %s, want 409 connection_read_only", path, body, rec.Code, rec.Body.String())
+		}
+	}
+
+	t.Run("postgres", func(t *testing.T) {
+		dsn := os.Getenv("JD_TEST_POSTGRES_DSN")
+		if dsn == "" {
+			t.Skip("JD_TEST_POSTGRES_DSN unset")
+		}
+		s, router, id := liveAPIRouter(t, dbx.DriverPostgres, dsn)
+		protect(t, s, id)
+		path := pathf("/databases/%d/query", id)
+		refused(t, router, path, `{"query":"SELECT 1 AS a INTO jd_b1b_protected_into"}`)
+		refused(t, router, path, `{"query":"CREATE TABLE jd_b1b_protected_into (a int)"}`)
+		refused(t, router, path, `{"query":"WITH s AS (SELECT 1 AS a) MERGE INTO jd_b1b_protected_into t USING s ON t.a = s.a WHEN NOT MATCHED THEN INSERT (a) VALUES (s.a)"}`)
+		rec := do(t, router, http.MethodPost, path,
+			`{"query":"SELECT count(*) AS made FROM information_schema.tables WHERE table_name = 'jd_b1b_protected_into'"}`)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"made"`) {
+			t.Fatalf("a read on a protected connection = %d %s", rec.Code, rec.Body.String())
+		}
+		got := readJSON[struct {
+			Result struct {
+				Rows [][]any `json:"rows"`
+			} `json:"result"`
+		}](t, rec)
+		if len(got.Result.Rows) != 1 || len(got.Result.Rows[0]) != 1 || fmt.Sprint(got.Result.Rows[0][0]) != "0" {
+			t.Errorf("a table was made on a protected connection: %v", got.Result.Rows)
+		}
+	})
+
+	t.Run("mysql", func(t *testing.T) {
+		dsn := os.Getenv("JD_TEST_MYSQL_DSN")
+		if dsn == "" {
+			t.Skip("JD_TEST_MYSQL_DSN unset")
+		}
+		s, router, id := liveAPIRouter(t, dbx.DriverMySQL, dsn)
+		protect(t, s, id)
+		path := pathf("/databases/%d/query", id)
+		refused(t, router, path, `{"query":"SELECT 1 INTO OUTFILE '/tmp/jd_b1b_protected.csv'"}`)
+		if rec := do(t, router, http.MethodPost, path, `{"query":"SELECT 1 AS answers"}`); rec.Code != http.StatusOK {
+			t.Errorf("a read on a protected connection = %d %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("mongodb", func(t *testing.T) {
+		dsn := os.Getenv("JD_TEST_MONGO_DSN")
+		if dsn == "" {
+			t.Skip("JD_TEST_MONGO_DSN unset")
+		}
+		s, router, id := liveAPIRouter(t, dbx.DriverMongo, dsn)
+		info, err := dbx.ParseDSN(dbx.DriverMongo, dsn)
+		if err != nil || info.Database == "" {
+			t.Skipf("the fixture DSN names no database: %v", err)
+		}
+		ctx := context.Background()
+		client, err := dbx.MongoClient(ctx, dsn)
+		if err != nil {
+			t.Skip(err)
+		}
+		defer client.Disconnect(ctx)
+		const source, copied = "jd_b1b_protect_src", "jd_b1b_protect_out"
+		drop := func() {
+			_ = dbx.MongoDropCollection(ctx, client, info.Database, source)
+			_ = dbx.MongoDropCollection(ctx, client, info.Database, copied)
+		}
+		drop()
+		defer drop()
+		if rec := do(t, router, http.MethodPost, pathf("/databases/%d/documents", id),
+			`{"collection":"`+source+`","document":"{\"a\":1}"}`); rec.Code != http.StatusOK {
+			t.Fatalf("seeding the source collection = %d %s", rec.Code, rec.Body.String())
+		}
+		protect(t, s, id)
+		path := pathf("/databases/%d/aggregate", id)
+		for _, body := range []string{
+			`{"collection":"` + source + `","pipeline":"[{\"$out\":\"` + copied + `\"}]"}`,
+			`{"collection":"` + source + `","pipeline":"[]","Pipeline":"[{\"$out\":\"` + copied + `\"}]"}`,
+			`{"collection":"` + source + `","PIPELINE":"[{\"$merge\":{\"into\":\"` + copied + `\"}}]"}`,
+		} {
+			refused(t, router, path, body)
+		}
+		rec := do(t, router, http.MethodPost, path, `{"collection":"`+source+`","pipeline":"[{\"$match\":{\"a\":1}}]"}`)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"writes":false`) {
+			t.Errorf("a reading pipeline on a protected connection = %d %s", rec.Code, rec.Body.String())
+		}
+		collections, err := dbx.MongoCollections(ctx, client, info.Database)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range collections {
+			if c.Name == copied {
+				t.Errorf("a pipeline wrote %s on a protected connection", copied)
+			}
+		}
+	})
 }

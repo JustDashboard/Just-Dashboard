@@ -251,7 +251,7 @@ func (s *Server) dbPool(ctx context.Context, id int64) (*sql.DB, *dbConnection, 
 	}
 	pool, err := s.modules.dbs.Pool(ctx, id, conn.Driver, dsn)
 	if err != nil {
-		return nil, conn, httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+		return nil, conn, httpx.Err(http.StatusBadGateway, "connect_failed", connectError(dsn, err))
 	}
 	return pool, conn, nil
 }
@@ -430,7 +430,10 @@ func (s *Server) handleDBConnCreate(w http.ResponseWriter, r *http.Request) erro
 		if err != nil {
 			httpx.SetAudit(r, "database.connection.create", req.Name,
 				map[string]any{"ok": false, "driver": req.Driver})
-			return httpx.BadRequest("%v", err)
+			// The refusal is printed in the form and written to the audit
+			// trail beside the entry above, so it is the engine's words
+			// without the password a driver quotes back in them.
+			return httpx.BadRequest("%s", connectError(dsn, err))
 		}
 	}
 	sealed, err := s.Sealer.Seal(dsn)
@@ -512,14 +515,14 @@ func (s *Server) handleDBPing(w http.ResponseWriter, r *http.Request) error {
 	case dbx.DriverMongo:
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": connectError(dsn, err)})
 			return nil
 		}
 		defer client.Disconnect(context.Background())
 	case dbx.DriverRedis:
 		client, err := dbx.RedisClient(r.Context(), dsn, 0)
 		if err != nil {
-			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": connectError(dsn, err)})
 			return nil
 		}
 		defer client.Close()
@@ -540,7 +543,7 @@ func (s *Server) handleDBPing(w http.ResponseWriter, r *http.Request) error {
 			// the next request dials again instead of failing the same way for
 			// half an hour.
 			s.dropPoolAfter(id, err)
-			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": connectError(dsn, err)})
 			return nil
 		}
 	}
@@ -560,7 +563,7 @@ func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverMongo {
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return httpx.Err(http.StatusBadGateway, "connect_failed", connectError(dsn, err))
 		}
 		defer client.Disconnect(context.Background())
 		status, err := dbx.MongoServerStatus(r.Context(), client)
@@ -573,7 +576,7 @@ func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverRedis {
 		client, err := dbx.RedisClient(r.Context(), dsn, 0)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return httpx.Err(http.StatusBadGateway, "connect_failed", connectError(dsn, err))
 		}
 		defer client.Close()
 		info, err := dbx.RedisInfo(r.Context(), client)
@@ -936,7 +939,7 @@ func (s *Server) handleDBConnTest(w http.ResponseWriter, r *http.Request) error 
 	// button fail for a server the save button then connected to.
 	identity, err := dbx.ProbeIdentity(ctx, req.Driver, dsn)
 	if err != nil {
-		httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": connectError(dsn, err)})
 		return nil
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
@@ -1102,6 +1105,23 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 10*time.Minute)
 	defer cancel()
 
+	// On the trail before the first row leaves, by hand: this is a GET, which
+	// the mutation middleware passes through with nothing to annotate. A
+	// second entry closes it with how much was sent, and that one is written
+	// even when the client has gone — a download dropped at the last byte it
+	// wanted is still a table that left the server.
+	s.recordRead(r, "database.export", conn.Name, map[string]any{
+		"schema": q.Get("schema"), "table": table, "format": string(format),
+		"filtered": q.Get("filters") != "" || q.Get("filter") != "",
+	}, nil)
+	finished := func(rows int, truncated bool, failed error) {
+		detail := map[string]any{"table": table, "rows": rows, "truncated": truncated}
+		if failed != nil {
+			detail["error"] = connectError(dsn, failed)
+		}
+		s.recordRead(r, "database.export.finished", conn.Name, detail, failed)
+	}
+
 	filename := fmt.Sprintf("%s.%s", table, format.Extension())
 	w.Header().Set("Content-Type", format.ContentType())
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
@@ -1116,8 +1136,7 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 		// the filter is a document rather than a WHERE clause.
 		client, cerr := dbx.MongoClient(ctx, dsn)
 		if cerr != nil {
-			s.recordAudit(r, "database.export", conn.Name,
-				map[string]any{"table": table, "error": cerr.Error()})
+			finished(0, false, cerr)
 			return nil
 		}
 		defer client.Disconnect(context.Background())
@@ -1131,6 +1150,7 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 	} else {
 		pool, _, perr := s.dbPool(r.Context(), id)
 		if perr != nil {
+			finished(0, false, perr)
 			return perr
 		}
 		count, truncated, err = dbx.ExportBrowse(ctx, pool, conn.Driver, dbx.BrowseOptions{
@@ -1139,21 +1159,9 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 			Filters: filters,
 		}, format, w, atoiDefault(q.Get("limit"), 0))
 	}
-	if err != nil {
-		// Headers are already sent, so the error cannot become a JSON body; it is
-		// recorded in the audit trail and the connection is dropped by the client
-		// seeing a short file. This is the one export failure mode worth logging.
-		s.recordAudit(r, "database.export", conn.Name,
-			map[string]any{"table": table, "error": err.Error()})
-		return nil
-	}
-	// Written directly rather than through SetAudit: this is a GET, which the
-	// mutation middleware passes through with nothing to annotate, so the
-	// three calls here used to record nothing at all.
-	s.recordAudit(r, "database.export", conn.Name, map[string]any{
-		"table": table, "format": string(format), "rows": count, "truncated": truncated,
-		"filtered": q.Get("filters") != "",
-	})
+	// Headers are already sent, so a failure cannot become a JSON body: the
+	// client sees a short file, and the closing entry says why.
+	finished(count, truncated, err)
 	return nil
 }
 
@@ -1827,7 +1835,7 @@ func (s *Server) handleDBSearch(w http.ResponseWriter, r *http.Request) error {
 	// Written directly, because a GET never reaches the mutation middleware's
 	// record. The needle is left out: it is as likely to be somebody's email
 	// address as a word.
-	s.recordAudit(r, "database.search", conn.Name, map[string]any{"schema": q.Get("schema")})
+	s.recordRead(r, "database.search", conn.Name, map[string]any{"schema": q.Get("schema")}, nil)
 	ctx, cancel := timeoutCtx(r, 120*time.Second)
 	defer cancel()
 	res, err := dbx.Search(ctx, pool, conn.Driver, q.Get("schema"), needle)
