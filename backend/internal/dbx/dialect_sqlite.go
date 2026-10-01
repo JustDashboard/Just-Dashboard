@@ -383,8 +383,8 @@ func (sqliteDialect) enterRead(ctx context.Context, conn *sql.Conn) (func(contex
 	}, nil
 }
 
-func (sqliteDialect) byteLength(_ Column, quoted string) string {
-	return "length(CAST(" + quoted + " AS BLOB))"
+func (sqliteDialect) byteLength(_ Column, quoted string) (string, bool, error) {
+	return "length(CAST(" + quoted + " AS BLOB))", false, nil
 }
 
 // SQLite accepts DEFAULT in neither a VALUES list nor a SET clause.

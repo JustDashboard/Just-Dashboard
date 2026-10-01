@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 	"unicode/utf8"
 )
@@ -43,11 +44,19 @@ var (
 
 // CellTooLargeError is a value past MaxCellBytes. It carries the size so the
 // operator is told what they asked for rather than only that it was refused.
-type CellTooLargeError struct{ Size int64 }
+// AtLeast marks a size the engine could only bound from below.
+type CellTooLargeError struct {
+	Size    int64
+	AtLeast bool
+}
 
 func (e *CellTooLargeError) Error() string {
-	return fmt.Sprintf("this value is %d bytes, past the %d the dashboard reads into one cell",
-		e.Size, int64(MaxCellBytes))
+	size := strconv.FormatInt(e.Size, 10)
+	if e.AtLeast {
+		size = "at least " + size
+	}
+	return fmt.Sprintf("this value is %s bytes, past the %d the dashboard reads into one cell",
+		size, int64(MaxCellBytes))
 }
 
 // ReadCell returns one column of the one row a key names.
@@ -77,38 +86,40 @@ func ReadCell(ctx context.Context, db *sql.DB, driver Driver, schema, table, col
 	args = append(args, tailArgs...)
 	out := &CellValue{Column: column, Type: col.Type, Kind: ValueKind(driver, col.Type)}
 
-	if sizer, ok := d.(cellSizer); ok {
-		// Measured first, on the server. Fetching the value to find out it was
-		// a gigabyte is the thing the bound exists to prevent.
-		rows, err := db.QueryContext(ctx,
-			"SELECT "+sizer.byteLength(col, quoted)+" FROM "+plan.rel+" WHERE "+where+" "+tail, args...)
-		if err != nil {
+	// Measured first, on the server. Fetching the value to find out it was a
+	// gigabyte is the thing the bound exists to prevent, so a value the engine
+	// cannot measure is not fetched either.
+	measure, floor, err := d.byteLength(col, quoted)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT "+measure+" FROM "+plan.rel+" WHERE "+where+" "+tail, args...)
+	if err != nil {
+		return nil, err
+	}
+	sizes := []sql.NullInt64{}
+	for rows.Next() {
+		var n sql.NullInt64
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		sizes := []sql.NullInt64{}
-		for rows.Next() {
-			var n sql.NullInt64
-			if err := rows.Scan(&n); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			sizes = append(sizes, n)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
-		switch {
-		case len(sizes) == 0:
-			return nil, ErrRowNotFound
-		case len(sizes) > 1:
-			return nil, ErrRowAmbiguous
-		case sizes[0].Int64 > MaxCellBytes:
-			return nil, &CellTooLargeError{Size: sizes[0].Int64}
-		}
+		sizes = append(sizes, n)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	switch {
+	case len(sizes) == 0:
+		return nil, ErrRowNotFound
+	case len(sizes) > 1:
+		return nil, ErrRowAmbiguous
+	case sizes[0].Int64 > MaxCellBytes:
+		return nil, &CellTooLargeError{Size: sizes[0].Int64, AtLeast: floor}
 	}
 
-	rows, err := db.QueryContext(ctx, "SELECT "+quoted+" FROM "+plan.rel+" WHERE "+where+" "+tail, args...)
+	rows, err = db.QueryContext(ctx, "SELECT "+quoted+" FROM "+plan.rel+" WHERE "+where+" "+tail, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -346,6 +346,6 @@ func (clickhouseDialect) rowEstimate(ctx context.Context, db *sql.DB, schema, ta
 	return n, err
 }
 
-func (d clickhouseDialect) byteLength(_ Column, quoted string) string {
-	return "length(" + d.CastText(quoted) + ")"
+func (d clickhouseDialect) byteLength(_ Column, quoted string) (string, bool, error) {
+	return "length(" + d.CastText(quoted) + ")", false, nil
 }

@@ -388,6 +388,6 @@ func (mssqlDialect) keyExpr(column Column, quoted string) string {
 	return quoted
 }
 
-func (mssqlDialect) byteLength(_ Column, quoted string) string {
-	return "DATALENGTH(" + quoted + ")"
+func (mssqlDialect) byteLength(_ Column, quoted string) (string, bool, error) {
+	return "DATALENGTH(" + quoted + ")", false, nil
 }

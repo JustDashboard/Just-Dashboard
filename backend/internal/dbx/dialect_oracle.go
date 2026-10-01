@@ -381,6 +381,32 @@ func (oracleDialect) rowEstimate(ctx context.Context, db *sql.DB, schema, table 
 	return n.Int64, err
 }
 
+// byteLength measures a LOB through its locator, which reads nothing of it.
+// Oracle counts a CLOB in characters and has no byte count for one in a
+// multibyte database, so that figure is a floor: the fetch that follows is
+// still held to the bound in bytes, and it can be a few times the bound and no
+// more. A LONG cannot be measured at all — no function takes one — and it is
+// refused rather than read to find out.
+func (oracleDialect) byteLength(column Column, quoted string) (string, bool, error) {
+	kind := strings.ToUpper(strings.TrimSpace(column.Type))
+	switch kind {
+	case "BLOB", "BFILE":
+		return "DBMS_LOB.GETLENGTH(" + quoted + ")", false, nil
+	case "CLOB", "NCLOB":
+		return "DBMS_LOB.GETLENGTH(" + quoted + ")", true, nil
+	case "JSON":
+		return "DBMS_LOB.GETLENGTH(JSON_SERIALIZE(" + quoted + " RETURNING BLOB))", false, nil
+	case "XMLTYPE":
+		return "DBMS_LOB.GETLENGTH(XMLSERIALIZE(CONTENT " + quoted + " AS CLOB))", true, nil
+	case "LONG", "LONG RAW":
+		return "", false, fmt.Errorf(
+			"Oracle cannot say how large a %s value is without reading it, so the dashboard does not read one whole", kind)
+	}
+	// What is left is scalar. A type VSIZE does not take — an object, a
+	// collection — is refused by Oracle, which is the same answer.
+	return "VSIZE(" + quoted + ")", false, nil
+}
+
 // emptyInsert: Oracle has no way to insert a row of nothing but defaults
 // without naming a column.
 func (oracleDialect) emptyInsert() (string, error) {

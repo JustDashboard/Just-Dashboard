@@ -344,8 +344,8 @@ func (d mysqlDialect) keyExpr(column Column, quoted string) string {
 	return quoted
 }
 
-func (mysqlDialect) byteLength(_ Column, quoted string) string {
-	return "OCTET_LENGTH(" + quoted + ")"
+func (mysqlDialect) byteLength(_ Column, quoted string) (string, bool, error) {
+	return "OCTET_LENGTH(" + quoted + ")", false, nil
 }
 
 // emptyInsert: MySQL has no DEFAULT VALUES; an empty column list and an empty

@@ -89,7 +89,10 @@ accounts retain partial results. Full table details and mutation preconditions u
 - **A cell is typed by its column, not its content.** A binary column is hex whatever its bytes spell
   (`\x…`, which an edit may send straight back), a result carries each column's `kinds`, and a value
   cut for the page — a long text, a blob past the preview — is listed in `clipped` with its size and
-  fetched whole by `GET /databases/{id}/cell`.
+  fetched whole by `GET /databases/{id}/cell`. That read is bounded at 8 MiB and the value is measured
+  on the server before it is fetched: `byteLength` is part of `Dialect`, so an engine cannot be added
+  without saying how. Where the engine can only count characters (an Oracle CLOB) the figure is a
+  floor and the refusal says "at least"; a type it cannot measure at all (Oracle's LONG) is not read.
 - `rowsql.go` is the one exception and does not generalise: it renders a row as an INSERT **for the
   clipboard**. Nothing executes what it produces, and no code path may call it and then run the result.
   `TestLiveRowInsertSQLQuoting` feeds `'); DROP TABLE …` to every live engine and checks the table stands.

@@ -357,6 +357,44 @@ func TestReadCell(t *testing.T) {
 	}
 }
 
+// Oracle is the engine with values it can only count in characters, and one it
+// cannot measure at all. Neither may be guessed around: a floor is reported as
+// a floor, and a LONG is not read to find out how large it was.
+func TestOracleMeasuresACellBeforeReadingIt(t *testing.T) {
+	d := oracleDialect{}
+	for _, c := range []struct {
+		columnType, want string
+		floor            bool
+	}{
+		{"BLOB", `DBMS_LOB.GETLENGTH("c")`, false},
+		{"BFILE", `DBMS_LOB.GETLENGTH("c")`, false},
+		{"CLOB", `DBMS_LOB.GETLENGTH("c")`, true},
+		{"nclob", `DBMS_LOB.GETLENGTH("c")`, true},
+		{"JSON", `DBMS_LOB.GETLENGTH(JSON_SERIALIZE("c" RETURNING BLOB))`, false},
+		{"XMLTYPE", `DBMS_LOB.GETLENGTH(XMLSERIALIZE(CONTENT "c" AS CLOB))`, true},
+		{"VARCHAR2(4000)", `VSIZE("c")`, false},
+		{"NUMBER(18,2)", `VSIZE("c")`, false},
+		{"RAW(16)", `VSIZE("c")`, false},
+		{"TIMESTAMP(6) WITH TIME ZONE", `VSIZE("c")`, false},
+	} {
+		got, floor, err := d.byteLength(Column{Name: "c", Type: c.columnType}, `"c"`)
+		if err != nil || got != c.want || floor != c.floor {
+			t.Errorf("%s measured with %q floor %v (%v), want %q floor %v", c.columnType, got, floor, err, c.want, c.floor)
+		}
+	}
+	for _, columnType := range []string{"LONG", "LONG RAW", "long"} {
+		if got, _, err := d.byteLength(Column{Name: "c", Type: columnType}, `"c"`); err == nil {
+			t.Errorf("%s was given the measure %q; nothing can measure one", columnType, got)
+		}
+	}
+
+	exact := (&CellTooLargeError{Size: MaxCellBytes + 1}).Error()
+	floor := (&CellTooLargeError{Size: MaxCellBytes + 1, AtLeast: true}).Error()
+	if !strings.Contains(exact, "is 8388609 bytes") || !strings.Contains(floor, "is at least 8388609 bytes") {
+		t.Errorf("exact: %q\nfloor: %q", exact, floor)
+	}
+}
+
 func browseDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := changeDB(t)

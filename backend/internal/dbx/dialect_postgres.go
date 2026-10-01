@@ -375,11 +375,11 @@ func (d postgresDialect) keyExpr(column Column, quoted string) string {
 	return quoted
 }
 
-func (d postgresDialect) byteLength(column Column, quoted string) string {
+func (d postgresDialect) byteLength(column Column, quoted string) (string, bool, error) {
 	if strings.EqualFold(column.Type, "bytea") {
-		return "octet_length(" + quoted + ")"
+		return "octet_length(" + quoted + ")", false, nil
 	}
-	return "octet_length(" + d.CastText(quoted) + ")"
+	return "octet_length(" + d.CastText(quoted) + ")", false, nil
 }
 
 func (postgresDialect) explainSQL(_, statement string, opts ExplainOptions) (string, error) {

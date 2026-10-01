@@ -48,12 +48,6 @@ type keyComparer interface {
 	keyExpr(column Column, quoted string) string
 }
 
-// cellSizer renders an expression for a value's size in bytes, so one cell can
-// be measured before it is fetched.
-type cellSizer interface {
-	byteLength(column Column, quoted string) string
-}
-
 // planner is implemented by the engines with more than one form of plan: a
 // JSON form a tree can be drawn from, or one that executes the statement and
 // reports what actually happened.
