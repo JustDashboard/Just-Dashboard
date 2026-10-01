@@ -1823,11 +1823,12 @@ func TestLiveOracleCellsAreTypedFromTheCatalogue(t *testing.T) {
 	// One cell, whole: measured by the expression its type needs, then read.
 	key := map[string]any{"ID": json.Number("1")}
 	for column, want := range map[string]CellValue{
-		"JS":   {Kind: KindJSON, Encoding: "text", Value: `{"a":1}`, Size: 7},
-		"X":    {Kind: KindText, Encoding: "text", Value: `<a><b>1</b></a>`, Size: 15},
-		"FLAG": {Kind: KindBoolean, Encoding: "json", Value: false},
+		"JS": {Kind: KindJSON, Encoding: "text", Value: `{"a":1}`, Size: 7},
+		"X":  {Kind: KindText, Encoding: "text", Value: `<a><b>1</b></a>`, Size: 15},
+		// A value that is not text has the size of its written form.
+		"FLAG": {Kind: KindBoolean, Encoding: "json", Value: false, Size: 5},
 		"BL":   {Kind: KindBinary, Encoding: "base64", Value: "Y2FmZQ==", Size: 4},
-		"F":    {Kind: KindFloat, Encoding: "json", Value: 1.5},
+		"F":    {Kind: KindFloat, Encoding: "json", Value: 1.5, Size: 3},
 	} {
 		got, err := ReadCell(ctx, db, e.driver, schema, "JDWB_ODD", column, key)
 		if err != nil {

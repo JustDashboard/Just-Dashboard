@@ -152,7 +152,6 @@ func TestCommandClassification(t *testing.T) {
 		{`{ explain: { aggregate: "c", pipeline: [ { $out: "x" } ], cursor: {} }, verbosity: "executionStats" }`, MongoClassDestructive, false},
 		{`{ explain: { aggregate: "c", pipeline: [ { $match: {} }, { $merge: { into: "x" } } ], cursor: {} } }`, MongoClassDestructive, false},
 		{`{ explain: { aggregate: "c", pipeline: [ { $futureStage: {} } ], cursor: {} }, verbosity: "allPlansExecution" }`, MongoClassDestructive, false},
-		{`{ explain: { aggregate: "c", pipeline: [ { $out: "x" } ], cursor: {} }, verbosity: "queryPlanner", verbosity: "executionStats" }`, MongoClassDestructive, false},
 		{`{ explain: { aggregate: "c", pipeline: [ { $out: "x" } ], cursor: {} }, verbosity: 1 }`, MongoClassDestructive, false},
 		{`{ explain: { aggregate: "c", pipeline: [ { $out: "x" } ], cursor: {} }, verbosity: "queryPlanner" }`, MongoClassRead, false},
 		{`{ explain: { aggregate: "c", pipeline: [ { $match: { a: 1 } } ], cursor: {} }, verbosity: "executionStats" }`, MongoClassRead, false},

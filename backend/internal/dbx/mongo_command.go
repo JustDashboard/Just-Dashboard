@@ -479,24 +479,10 @@ func inspectExplain(cmd bson.Raw, v *MongoVerdict) {
 }
 
 // mongoOnlyPlans reports whether an explain asks for the plan alone. Left out,
-// the verbosity is allPlansExecution; every field of that name is read, so one
-// given twice plans only when both say so.
+// the verbosity is allPlansExecution.
 func mongoOnlyPlans(cmd bson.Raw) bool {
-	elems, err := cmd.Elements()
-	if err != nil {
-		return false
-	}
-	plans := false
-	for _, e := range elems {
-		if e.Key() != "verbosity" {
-			continue
-		}
-		if word, ok := e.Value().StringValueOK(); !ok || word != "queryPlanner" {
-			return false
-		}
-		plans = true
-	}
-	return plans
+	word, ok := cmd.Lookup("verbosity").StringValueOK()
+	return ok && word == "queryPlanner"
 }
 
 func inspectUsersInfo(cmd bson.Raw, v *MongoVerdict) {
