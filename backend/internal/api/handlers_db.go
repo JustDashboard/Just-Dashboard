@@ -469,6 +469,7 @@ func (s *Server) handleDBConnDelete(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
+	origin := s.connectionOrigin(r.Context(), id)
 	// No typed phrase: this forgets a connection string, it does not touch the
 	// server at the other end of it. Re-adding one is a form, not a restore.
 	result, err := s.Store.DB.ExecContext(r.Context(), `DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
@@ -480,7 +481,7 @@ func (s *Server) handleDBConnDelete(w http.ResponseWriter, r *http.Request) erro
 	}
 	s.modules.dbs.Close(id)
 	s.dbConns.forget(id)
-	s.afterConnectionForgotten(r.Context(), conn)
+	s.afterConnectionForgotten(r.Context(), id, origin, httpx.MustPrincipal(r).Username())
 	httpx.SetAudit(r, "database.connection.delete", conn.Name, nil)
 	httpx.NoContent(w)
 	return nil

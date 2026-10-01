@@ -158,10 +158,15 @@ func siblingConnectionName(parent, database string) string {
 	return "database"
 }
 
-// afterConnectionForgotten runs once a connection's row is gone. Discovery
-// points it at its ignore list, so a server the sync connected on its own does
-// not come back the next time the page loads.
-func (s *Server) afterConnectionForgotten(ctx context.Context, conn *dbConnection) {}
+// connectionOrigin and afterConnectionForgotten are the two ends of
+// forgetting a connection that discovery cares about: where the connection
+// came from, read while its row is still there, and the moment the row is
+// gone. Discovery fills them in so that a server the sync connected on its own
+// is put on its ignore list and does not come back the next time the page
+// loads; on their own they do nothing.
+func (s *Server) connectionOrigin(ctx context.Context, id int64) string { return "" }
+
+func (s *Server) afterConnectionForgotten(ctx context.Context, id int64, origin, actor string) {}
 
 // dropPoolAfter lets go of a connection's pool when its server refused a
 // ping, so the next request dials again instead of reusing dead connections
