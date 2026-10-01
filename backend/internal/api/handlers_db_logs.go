@@ -249,10 +249,13 @@ func (s *Server) dbHostLogs(ctx context.Context, conn *dbConnection, port int, l
 	manager, unit := probe.managerOf(l.PID, l.Cmdline)
 	if manager == "container" {
 		// A container on the host's own network: it looks like a native
-		// server from the socket table, and its cgroup says otherwise.
-		if d, err := s.modules.docker.Inspect(ctx, unit); err == nil {
-			out.Sources = append(out.Sources, s.dbContainerLog(ctx, d.Container, lens))
-			return out
+		// server from the socket table, and its cgroup says otherwise. With
+		// no Docker client the cgroup's name is still the log to ask for.
+		if s.modules.docker != nil {
+			if d, err := s.modules.docker.Inspect(ctx, unit); err == nil {
+				out.Sources = append(out.Sources, s.dbContainerLog(ctx, d.Container, lens))
+				return out
+			}
 		}
 		out.Sources = append(out.Sources, dbLogSource{Source: logsx.Source{
 			ID: "docker:" + unit, Label: unit, Kind: logsx.KindDocker, Lens: lens,
@@ -581,6 +584,9 @@ func listenerOn(listeners []proxysvc.Listener, port int) *proxysvc.Listener {
 // whatever its image: a tag that moved leaves the list's image a bare id,
 // which is why detection by image missed it before this was asked.
 func (s *Server) containerPublishing(ctx context.Context, port int) *dockerx.Container {
+	if s.modules.docker == nil {
+		return nil
+	}
 	containers, err := s.modules.docker.ListContainers(ctx, false)
 	if err != nil {
 		return nil
