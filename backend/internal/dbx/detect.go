@@ -57,103 +57,14 @@ type Candidate struct {
 	// connection made this way needs re-detecting after a redeploy, where one
 	// made to a published port does not.
 	ViaContainerNetwork bool `json:"viaContainerNetwork,omitempty"`
+	// SSLMode is the transport a Postgres-wire server insists on, where it is
+	// not the plain connection every stock container on loopback takes: a
+	// CockroachDB cluster that was not started insecure.
+	SSLMode string `json:"-"`
 }
 
 // Connectable reports whether this candidate has everything a DSN needs.
 func (c Candidate) Connectable() bool { return c.Reason == "" && c.Port > 0 }
-
-// engineRule is one image family and how to read its configuration.
-type engineRule struct {
-	driver Driver
-	// images are matched against the repository part of the image reference,
-	// as a suffix, so both "postgres" and "docker.io/library/postgres" hit and
-	// "mycorp/postgres-backup" does not.
-	images []string
-	port   int
-	// read pulls the credentials and initial database out of the container's
-	// environment. Only what the image documents is looked at.
-	read func(env map[string]string) (user, password, database string)
-}
-
-var engineRules = []engineRule{
-	{
-		driver: DriverPostgres,
-		images: []string{"postgres", "postgis/postgis", "pgvector/pgvector", "timescale/timescaledb"},
-		port:   5432,
-		read: func(e map[string]string) (string, string, string) {
-			user := firstNonEmpty(e["POSTGRES_USER"], "postgres")
-			// POSTGRES_DB defaults to the user's own name, not to "postgres".
-			return user, e["POSTGRES_PASSWORD"], firstNonEmpty(e["POSTGRES_DB"], user)
-		},
-	},
-	{
-		driver: DriverMySQL,
-		images: []string{"mysql", "mariadb", "percona"},
-		port:   3306,
-		read: func(e map[string]string) (string, string, string) {
-			db := firstNonEmpty(e["MYSQL_DATABASE"], e["MARIADB_DATABASE"])
-			// The unprivileged account the image creates is preferred over
-			// root: it is the one scoped to the database that was asked for,
-			// and connecting a dashboard as root by default is a choice the
-			// operator should make deliberately rather than inherit.
-			if u := firstNonEmpty(e["MYSQL_USER"], e["MARIADB_USER"]); u != "" {
-				return u, firstNonEmpty(e["MYSQL_PASSWORD"], e["MARIADB_PASSWORD"]), db
-			}
-			return "root", firstNonEmpty(e["MYSQL_ROOT_PASSWORD"], e["MARIADB_ROOT_PASSWORD"]), db
-		},
-	},
-	{
-		driver: DriverMongo,
-		images: []string{"mongo", "mongodb/mongodb-community-server"},
-		port:   27017,
-		read: func(e map[string]string) (string, string, string) {
-			return e["MONGO_INITDB_ROOT_USERNAME"], e["MONGO_INITDB_ROOT_PASSWORD"],
-				firstNonEmpty(e["MONGO_INITDB_DATABASE"], "admin")
-		},
-	},
-	{
-		driver: DriverRedis,
-		images: []string{"redis", "valkey/valkey", "redis/redis-stack-server"},
-		port:   6379,
-		read: func(e map[string]string) (string, string, string) {
-			// Redis has no user in the common configuration, and the password
-			// is only set when the image is told to require one.
-			return "", firstNonEmpty(e["REDIS_PASSWORD"], e["REDIS_ARGS_PASSWORD"]), "0"
-		},
-	},
-	{
-		driver: DriverMSSQL,
-		images: []string{"mcr.microsoft.com/mssql/server", "mssql/server"},
-		port:   1433,
-		read: func(e map[string]string) (string, string, string) {
-			return "sa", firstNonEmpty(e["MSSQL_SA_PASSWORD"], e["SA_PASSWORD"]), "master"
-		},
-	},
-	{
-		driver: DriverClickHouse,
-		images: []string{"clickhouse/clickhouse-server", "clickhouse", "yandex/clickhouse-server"},
-		// The native protocol, not the 8123 HTTP one: that is the port this
-		// package's driver speaks.
-		port: 9000,
-		read: func(e map[string]string) (string, string, string) {
-			return firstNonEmpty(e["CLICKHOUSE_USER"], "default"), e["CLICKHOUSE_PASSWORD"],
-				firstNonEmpty(e["CLICKHOUSE_DB"], "default")
-		},
-	},
-	{
-		driver: DriverOracle,
-		images: []string{"gvenzl/oracle-free", "gvenzl/oracle-xe", "container-registry.oracle.com/database/free"},
-		port:   1521,
-		read: func(e map[string]string) (string, string, string) {
-			// The image creates an application account when asked, which is
-			// the one to prefer over SYSTEM for the same reason as MySQL.
-			if u := e["APP_USER"]; u != "" {
-				return u, e["APP_USER_PASSWORD"], firstNonEmpty(e["ORACLE_DATABASE"], "FREEPDB1")
-			}
-			return "system", e["ORACLE_PASSWORD"], firstNonEmpty(e["ORACLE_DATABASE"], "FREEPDB1")
-		},
-	},
-}
 
 // PublishedPort is one container port and where it is reachable on the host.
 type PublishedPort struct {
@@ -165,29 +76,37 @@ type PublishedPort struct {
 // Detect recognises a database server from what the container states about
 // itself, returning nil when the image is not one it knows.
 //
+// It reads the image name and nothing else to decide what the container is,
+// which is all a caller holding only the container listing can offer; the
+// inventory in discover.go goes further, down to the environment and the
+// command. Both read the same tables, so they cannot disagree about an image.
+// An engine this dashboard has no driver for is not a candidate: a candidate
+// is a connection that could be made.
+//
 // The password is returned separately from the Candidate so a caller can hand
 // the description to a browser and keep the secret. There is no path that puts
 // them in the same value.
 func Detect(container, image string, env map[string]string, ports []PublishedPort, ips []string) (*Candidate, string) {
-	rule, ok := ruleFor(image)
+	rule, ok := imageRuleFor(image)
 	if !ok {
 		return nil, ""
 	}
-	user, password, database := rule.read(env)
+	p := productByID[rule.product]
+	if p.driver == "" {
+		return nil, ""
+	}
+	creds := readCredentials(rule.style, p, env, nil)
 	c := &Candidate{
-		Driver: rule.driver, Container: container, Image: image,
-		User: user, Database: database, Source: SourceDocker,
+		Driver: p.driver, Container: container, Image: image,
+		User: creds.user, Database: creds.database, Source: SourceDocker,
+		AuthSource: creds.authSource, SSLMode: creds.sslMode,
 	}
-	// The official Mongo image creates its initial root user in admin,
-	// even when MONGO_INITDB_DATABASE names another application database.
-	if rule.driver == DriverMongo && env["MONGO_INITDB_ROOT_USERNAME"] != "" {
-		c.AuthSource = "admin"
-	}
-	for _, p := range ports {
-		if p.ContainerPort != rule.port || p.HostPort == 0 {
+	port := enginePort(p, env, nil)
+	for _, published := range ports {
+		if published.ContainerPort != port || published.HostPort == 0 {
 			continue
 		}
-		c.Host, c.Port = hostAddress(p.HostIP), p.HostPort
+		c.Host, c.Port = hostAddress(published.HostIP), published.HostPort
 		break
 	}
 	// Nothing published is not the same as nothing reachable, and treating it
@@ -205,7 +124,7 @@ func Detect(container, image string, env map[string]string, ports []PublishedPor
 	// across a recreate, and a container address is not.
 	if c.Port == 0 {
 		if ip := firstRoutable(ips); ip != "" {
-			c.Host, c.Port, c.ViaContainerNetwork = ip, rule.port, true
+			c.Host, c.Port, c.ViaContainerNetwork = ip, port, true
 		}
 	}
 	if c.Port == 0 {
@@ -215,7 +134,7 @@ func Detect(container, image string, env map[string]string, ports []PublishedPor
 		// operator can see running.
 		c.Reason = "no published port and no container address — nothing here can be dialled"
 	}
-	return c, password
+	return c, creds.password
 }
 
 // firstRoutable picks the container address to dial.
@@ -231,30 +150,6 @@ func firstRoutable(ips []string) string {
 		}
 	}
 	return ""
-}
-
-// ruleFor matches the repository part of an image reference, ignoring the tag
-// and any digest, as a path suffix — so "postgres:16", "library/postgres" and
-// "docker.io/library/postgres@sha256:…" all match and "acme/postgres-backup"
-// does not.
-func ruleFor(image string) (engineRule, bool) {
-	repo := image
-	if i := strings.IndexByte(repo, '@'); i >= 0 {
-		repo = repo[:i]
-	}
-	// A tag separator is a colon after the last slash; a colon before it is a
-	// registry port.
-	if i := strings.LastIndexByte(repo, ':'); i >= 0 && !strings.Contains(repo[i:], "/") {
-		repo = repo[:i]
-	}
-	for _, rule := range engineRules {
-		for _, want := range rule.images {
-			if repo == want || strings.HasSuffix(repo, "/"+want) {
-				return rule, true
-			}
-		}
-	}
-	return engineRule{}, false
 }
 
 // hostAddress turns Docker's binding address into one to dial. A container
@@ -285,7 +180,7 @@ func BuildDSN(c Candidate, password string) string {
 		u.User = userInfo(c.User, password)
 		// sslmode=disable because this is a container on the same host reached
 		// over loopback; requiring TLS there fails against every stock image.
-		u.RawQuery = "sslmode=disable"
+		u.RawQuery = "sslmode=" + firstNonEmpty(c.SSLMode, "disable")
 		return u.String()
 	case DriverMySQL:
 		// The MySQL driver takes its own format rather than a URL.
