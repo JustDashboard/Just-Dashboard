@@ -742,7 +742,23 @@ func TestLiveAPIRedisAdmin(t *testing.T) {
 		if rec.Code != 400 || strings.Contains(rec.Body.String(), secret) {
 			t.Errorf("a password among the command rules: %d %s", rec.Code, rec.Body.String())
 		}
-		wantStatus(t, call(t, h, id, http.MethodPut, "/redis/acl/default", `{"enabled":false}`, nil), 400, "bad_request", "switching off the dashboard's own user")
+		// The account this connection uses, whichever it is, is marked and
+		// cannot be switched off or removed from here.
+		var list struct {
+			Users []dbx.RedisACLUser `json:"users"`
+		}
+		call(t, h, id, http.MethodGet, "/redis/acl", "", &list)
+		self := ""
+		for _, u := range list.Users {
+			if u.Self {
+				self = u.Name
+			}
+		}
+		if self == "" {
+			t.Fatalf("no user is marked as the dashboard's own: %+v", list.Users)
+		}
+		wantStatus(t, call(t, h, id, http.MethodPut, "/redis/acl/"+self, `{"enabled":false}`, nil), 400, "bad_request", "switching off the dashboard's own user")
+		wantStatus(t, call(t, h, id, http.MethodDelete, "/redis/acl/"+self, "", nil), 400, "bad_request", "removing the dashboard's own user")
 		wantStatus(t, call(t, h, id, http.MethodDelete, "/redis/acl/default", "", nil), 400, "bad_request", "removing the default user")
 		wantStatus(t, call(t, h, id, http.MethodDelete, "/redis/acl/jdb4api-app", "", nil), 200, "", "remove the user")
 		wantStatus(t, call(t, h, id, http.MethodDelete, "/redis/acl/jdb4api-app", "", nil), 400, "bad_request", "remove it again")

@@ -556,6 +556,12 @@ func TestLiveRedisStringChunks(t *testing.T) {
 	if out.String() != text {
 		t.Errorf("the windows do not add up to the value: %d bytes of %d", out.Len(), len(text))
 	}
+	// A window smaller than one character still makes progress.
+	client.Set(ctx, string(key), "✓✓✓", 0)
+	tiny, err := RedisReadMembers(ctx, client, nil, RedisMembersOptions{Key: key, Count: 1})
+	if err != nil || tiny.String.Value != "✓" || tiny.Done {
+		t.Errorf("a one-byte window of a three-byte character = %+v done=%v, %v", tiny.String, tiny.Done, err)
+	}
 }
 
 func TestLiveRedisKeyMetadataAndScan(t *testing.T) {
@@ -1741,7 +1747,7 @@ func TestLiveRedisAdminACL(t *testing.T) {
 	}
 	// The server's ACL has no file here, and the reply says the user will
 	// not survive a restart rather than failing the change.
-	if created.Persisted || created.Notice == "" {
+	if created.Persisted || !strings.Contains(created.Notice, "until the server restarts") {
 		t.Errorf("persisted = %v, notice = %q", created.Persisted, created.Notice)
 	}
 	if _, err := RedisACLSetUser(ctx, client, RedisACLSpec{Name: name, Create: true}); err == nil {
@@ -1752,7 +1758,7 @@ func TestLiveRedisAdminACL(t *testing.T) {
 	}
 
 	// The rule works as written: the user reads its own keys and nothing else.
-	opt := *client.Options()
+	opt := client.Options()
 	as := redis.NewClient(&redis.Options{Addr: opt.Addr, Username: name, Password: password, DB: opt.DB})
 	defer as.Close()
 	client.Set(ctx, "app:k", "v", time.Minute)
@@ -1804,18 +1810,25 @@ func TestLiveRedisAdminACL(t *testing.T) {
 	if strings.Contains(raw, password) {
 		t.Error("the password reached the page")
 	}
-	var self, def bool
+	var self string
+	var def bool
 	for _, u := range users {
-		self = self || u.Self
+		if u.Self {
+			self = u.Name
+		}
 		def = def || (u.Name == "default" && u.System)
 	}
-	if !self || !def {
-		t.Errorf("users = %+v; want the default user marked, and the dashboard's own", users)
+	if self == "" || !def {
+		t.Fatalf("users = %+v; want the default user marked, and the dashboard's own", users)
 	}
 
-	// The dashboard's own account is not one to switch off or remove.
-	if _, err := RedisACLSetUser(ctx, client, RedisACLSpec{Name: "default", Enabled: &off}); err == nil {
-		t.Error("switching off the user the dashboard connects as was accepted")
+	// The account this connection uses is not one to switch off or remove,
+	// whichever account that is.
+	if _, err := RedisACLSetUser(ctx, client, RedisACLSpec{Name: self, Enabled: &off}); err == nil {
+		t.Errorf("switching off %q, the user the dashboard connects as, was accepted", self)
+	}
+	if _, err := RedisACLDeleteUser(ctx, client, self); err == nil {
+		t.Errorf("removing %q, the user the dashboard connects as, was accepted", self)
 	}
 	if _, err := RedisACLDeleteUser(ctx, client, "default"); err == nil {
 		t.Error("removing the default user was accepted")

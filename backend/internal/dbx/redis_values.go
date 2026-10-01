@@ -253,6 +253,12 @@ func redisReadString(ctx context.Context, client *redis.Client, page *RedisMembe
 	if size > redisMaxStringBytes {
 		size = redisMaxStringBytes
 	}
+	// Never fewer bytes than the longest character: a window that is nothing
+	// but the first half of one would be cut back to empty and read as the
+	// end of the value.
+	if size < utf8.UTFMax {
+		size = utf8.UTFMax
+	}
 	pipe := client.Pipeline()
 	lenCmd := pipe.StrLen(ctx, key)
 	rangeCmd := pipe.GetRange(ctx, key, offset, offset+size-1)

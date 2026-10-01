@@ -498,7 +498,9 @@ func redisACLPersist(ctx context.Context, client *redis.Client) (bool, string) {
 	if err == nil {
 		return true, ""
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "aclfile") {
+	// "not configured to use an ACL file" from Redis and Valkey, "not running
+	// with aclfile" from Dragonfly.
+	if msg := strings.ToLower(err.Error()); strings.Contains(msg, "aclfile") || strings.Contains(msg, "acl file") {
 		return false, "This server keeps its users in memory rather than in an ACL file, so the change lasts until the server restarts."
 	}
 	return false, "The change is in effect, but the server could not write it to its ACL file: " + err.Error()

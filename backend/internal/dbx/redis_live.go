@@ -85,7 +85,9 @@ func RedisMonitor(ctx context.Context, dsn string, emit func(RedisMonitorEvent))
 		}
 		return nil
 	}
-	if opt.Password != "" {
+	// A named user authenticates even with no password, or the feed would
+	// run as the default user instead of the one the connection is for.
+	if opt.Username != "" || opt.Password != "" {
 		auth := []string{"AUTH", opt.Password}
 		if opt.Username != "" {
 			auth = []string{"AUTH", opt.Username, opt.Password}
