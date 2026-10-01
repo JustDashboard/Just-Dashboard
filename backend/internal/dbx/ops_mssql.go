@@ -208,6 +208,11 @@ func (mssqlDialect) Sessions(ctx context.Context, db *sql.DB) ([]Activity, error
 	  OUTER APPLY sys.dm_exec_sql_text(c.most_recent_sql_handle) ct
 	  WHERE s.is_user_process = 1
 	  ORDER BY ISNULL(r.total_elapsed_time, 0) DESC`)
+	if mssqlRefused(err) {
+		// An application's login: the views that say what each session is
+		// running are not its to read. That is said, not failed.
+		return nil, errSessionsRefused{reason: "This login may not read the session list (it needs VIEW SERVER STATE): " + err.Error()}
+	}
 	if err != nil {
 		return nil, err
 	}

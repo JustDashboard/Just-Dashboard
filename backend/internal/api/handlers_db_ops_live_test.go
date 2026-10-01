@@ -909,6 +909,61 @@ func TestLiveAPIOpsSQLServer(t *testing.T) {
 		mustStatus(t, r, http.MethodDelete, base+"/server/roles/jd_b3_api_login", "", http.StatusOK)
 	})
 
+	// An application's login: a reader in its own database and nothing on the
+	// server. What it may not read is a sentence naming the permission, on a
+	// 200, and it is offered no option to change.
+	t.Run("ordinary_login", func(t *testing.T) {
+		drop := func() {
+			direct.Exec(`IF USER_ID('jd_b3_api_plain') IS NOT NULL DROP USER [jd_b3_api_plain]`)
+			direct.Exec(`IF SUSER_ID('jd_b3_api_plain') IS NOT NULL DROP LOGIN [jd_b3_api_plain]`)
+		}
+		drop()
+		t.Cleanup(drop)
+		for _, stmt := range []string{
+			`CREATE LOGIN [jd_b3_api_plain] WITH PASSWORD = N'Jd-b3-plain#2026', CHECK_POLICY = OFF`,
+			`CREATE USER [jd_b3_api_plain] FOR LOGIN [jd_b3_api_plain]`,
+			`ALTER ROLE db_datareader ADD MEMBER [jd_b3_api_plain]`,
+		} {
+			if _, err := direct.Exec(stmt); err != nil {
+				t.Fatalf("%s: %v", stmt, err)
+			}
+		}
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed.User = url.UserPassword("jd_b3_api_plain", "Jd-b3-plain#2026")
+		plainID := saveOpsConnection(t, s, "live-sqlserver-plain", dbx.DriverMSSQL, parsed.String())
+		plain := pathf("/databases/%d", plainID)
+		// Its pool goes before its login does: a login with a session open
+		// cannot be dropped.
+		t.Cleanup(func() { s.modules.dbs.Close(plainID) })
+		for path, wants := range map[string][]string{
+			"/locks":          {`"supported":false`, "VIEW SERVER STATE"},
+			"/statements":     {`"supported":false`, "VIEW SERVER STATE"},
+			"/tablestats":     {`"supported":false`, "VIEW DATABASE STATE"},
+			"/indexstats":     {`"supported":false`, "VIEW DATABASE STATE"},
+			"/stats":          {`"supported":true`, `"notes":[`},
+			"/activity":       {`"supported":false`, "VIEW SERVER STATE"},
+			"/settings?all=1": {`"supported":true`, `"editable":false`},
+		} {
+			body := mustStatus(t, viewer, http.MethodGet, plain+path, "", http.StatusOK)
+			for _, want := range wants {
+				if !strings.Contains(body, want) {
+					t.Errorf("GET %s lacks %s: %s", path, want, body)
+				}
+			}
+		}
+		if body := mustStatus(t, viewer, http.MethodGet, plain+"/settings?all=1", "", http.StatusOK); strings.Contains(body, `"editable":true`) {
+			t.Error("a login without ALTER SETTINGS is offered an option to change")
+		}
+		if body := mustStatus(t, admin, http.MethodPut, plain+"/settings", `{"name":"cost threshold for parallelism","value":"9"}`, http.StatusBadRequest); !strings.Contains(body, "cannot be changed from here") {
+			t.Errorf("a change without ALTER SETTINGS: %s", body)
+		}
+		// Maintenance it has no right to is the engine's refusal, as a 400.
+		mustStatus(t, admin, http.MethodPost, plain+"/maintenance", `{"action":"rebuild","table":"jd_b3_api_t"}`, http.StatusBadRequest)
+	})
+
 	mustStatus(t, r, http.MethodPost, base+"/activity/cancel", `{"pid":"52"}`, http.StatusBadRequest)
 }
 

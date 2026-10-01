@@ -3009,6 +3009,9 @@ func TestLiveOpsSQLServer(t *testing.T) {
 		parsed.User = url.UserPassword("jd_b3_ops_plain", "Jd-b3-plain#2026")
 		plain := opsOpen(t, DriverMSSQL, parsed.String(), "the ordinary login")
 
+		if _, err := ListActivity(ctx, plain, DriverMSSQL); !errors.Is(err, ErrNoActivityView) || !strings.Contains(err.Error(), "VIEW SERVER STATE") {
+			t.Errorf("sessions: %v", err)
+		}
 		locks, err := ListLocks(ctx, plain, DriverMSSQL)
 		if err != nil || locks.Supported || !strings.Contains(locks.Reason, "VIEW SERVER STATE") || locks.Waits == nil {
 			t.Errorf("locks: %+v %v", locks, err)
