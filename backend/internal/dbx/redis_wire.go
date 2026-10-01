@@ -142,7 +142,7 @@ func (w *redisWire) use(db int) error {
 		return err
 	}
 	if reply.Type == "error" {
-		return redisServerError(redisText(reply.Value))
+		return &RedisDatabaseError{DB: db, Reason: redisText(reply.Value)}
 	}
 	return nil
 }

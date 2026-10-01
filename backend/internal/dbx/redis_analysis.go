@@ -210,12 +210,12 @@ func RedisAnalyze(ctx context.Context, client *redis.Client, profile *RedisProfi
 		if len(batch) > 0 {
 			pipe := client.Pipeline()
 			typeCmds := make([]*redis.StatusCmd, len(batch))
-			ttlCmds := make([]*redis.DurationCmd, len(batch))
+			ttlCmds := make([]*redis.IntCmd, len(batch))
 			memCmds := make([]*redis.IntCmd, len(batch))
 			encCmds := make([]*redis.StringCmd, len(batch))
 			for i, k := range batch {
 				typeCmds[i] = pipe.Type(ctx, k)
-				ttlCmds[i] = pipe.PTTL(ctx, k)
+				ttlCmds[i] = redisTTLCmd(ctx, pipe, "pttl", k)
 				if f.MemoryUsage {
 					memCmds[i] = pipe.MemoryUsage(ctx, k)
 				}
@@ -235,7 +235,7 @@ func RedisAnalyze(ctx context.Context, client *redis.Client, profile *RedisProfi
 				if memCmds[i] != nil {
 					memory = memCmds[i].Val()
 				}
-				pttl := ttlMillis(ttlCmds[i])
+				pttl := redisTTL(ttlCmds[i])
 				encoding := ""
 				if encCmds[i] != nil && encCmds[i].Err() == nil {
 					encoding = encCmds[i].Val()

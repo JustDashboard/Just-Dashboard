@@ -12,9 +12,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// Live tests for the two engines that are not SQL. Same contract as the SQL
-// ones: default to a local instance, skip with a useful message when it is not
-// there.
+// Live tests for the two engines that are not SQL. MongoDB keeps the contract
+// of the SQL ones: default to a local instance, skip with a useful message
+// when it is not there. Redis has no default; liveRedis says why.
 
 func liveMongo(t *testing.T) (*mongo.Client, string) {
 	t.Helper()
@@ -32,15 +32,18 @@ func liveMongo(t *testing.T) (*mongo.Client, string) {
 
 func liveRedis(t *testing.T) *redis.Client {
 	t.Helper()
+	// No default. These tests write, and an address nobody chose — the port
+	// every Redis listens on — is as likely to be somebody's real data as a
+	// fixture.
 	dsn := os.Getenv("JD_TEST_REDIS_DSN")
 	if dsn == "" {
-		dsn = "redis://127.0.0.1:6379/0"
+		t.Skip("set JD_TEST_REDIS_DSN to run this")
 	}
 	// The database the connection string names, not database 0: the fixture
 	// is shared and each run is given a database of its own.
 	client, err := RedisClient(context.Background(), dsn, RedisDSNDatabase)
 	if err != nil {
-		t.Skipf("Redis unreachable — set JD_TEST_REDIS_DSN to run these (%v)", err)
+		t.Skipf("Redis unreachable at JD_TEST_REDIS_DSN (%v)", err)
 	}
 	t.Cleanup(func() { client.Close() })
 	return client

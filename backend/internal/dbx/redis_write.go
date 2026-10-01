@@ -95,6 +95,9 @@ func (w *RedisWrite) normalise() error {
 	if w.Type == "" {
 		w.Type = "string"
 	}
+	if w.TTL != nil && !redisExpiryInRange(*w.TTL, 1000, time.Now()) {
+		return errRedisExpiryTooFar
+	}
 	switch w.Type {
 	case "string", "hash", "set", "json":
 	case "list":
@@ -196,7 +199,10 @@ func RedisWriteValue(ctx context.Context, client *redis.Client, profile *RedisPr
 			if w.Type != "string" && w.TTL != nil {
 				switch {
 				case *w.TTL > 0:
-					pipe.Expire(ctx, key, time.Duration(*w.TTL)*time.Second)
+					// The number as it was given. By way of a time.Duration,
+					// a far-off expiry wraps to a negative one, which Redis
+					// reads as a delete.
+					pipe.Do(ctx, "EXPIRE", key, *w.TTL)
 				case *w.TTL < 0:
 					pipe.Persist(ctx, key)
 				}
@@ -244,26 +250,26 @@ func redisPlanWrite(ctx context.Context, tx *redis.Tx, profile *RedisProfile, w 
 		// Saving a value is not a statement about its expiry. A plain SET
 		// clears the TTL, which is how editing a session by hand used to make
 		// it immortal.
-		var expiry time.Duration
+		set := []any{"SET", key, string(*w.Value)}
 		switch {
 		case w.TTL != nil && *w.TTL > 0:
-			expiry = time.Duration(*w.TTL) * time.Second
+			set = append(set, "EX", *w.TTL)
 		case w.TTL != nil && *w.TTL < 0:
 		case !exists:
 		case profile.Features.KeepTTL:
-			expiry = redis.KeepTTL
+			set = append(set, "KEEPTTL")
 		default:
 			// Before Redis 6 there is no KEEPTTL; the remaining time is read
 			// and written back, under the same WATCH.
-			left, err := tx.PTTL(ctx, key).Result()
+			left, err := tx.Do(ctx, "PTTL", key).Int64()
 			if err != nil {
 				return nil, err
 			}
 			if left > 0 {
-				expiry = left
+				set = append(set, "PX", left)
 			}
 		}
-		return none(func(pipe redis.Pipeliner) { pipe.Set(ctx, key, string(*w.Value), expiry) }), nil
+		return none(func(pipe redis.Pipeliner) { pipe.Do(ctx, set...) }), nil
 
 	case "hash":
 		field := string(*w.Field)
@@ -274,8 +280,9 @@ func redisPlanWrite(ctx context.Context, tx *redis.Tx, profile *RedisProfile, w 
 				return nil, err
 			}
 			if taken {
-				return nil, &RedisConflictError{Reason: fmt.Sprintf(
-					"a field named %q already exists; renaming onto it would replace its value", w.Field.Display())}
+				// The field is not named: a field name is data as often as
+				// it is a label, and this sentence goes on the audit trail.
+				return nil, &RedisConflictError{Reason: "a field of that name already exists; renaming onto it would replace its value"}
 			}
 		}
 		// HSET clears a field's own expiry, the way SET clears a key's.
@@ -300,16 +307,37 @@ func redisPlanWrite(ctx context.Context, tx *redis.Tx, profile *RedisProfile, w 
 		}), nil
 
 	case "set":
+		renaming := w.Replace != nil && *w.Replace != *w.Value
+		if renaming {
+			// Renaming onto a member the set already holds adds nothing and
+			// removes the old one: a removal, asked for as an edit.
+			taken, err := tx.SIsMember(ctx, key, string(*w.Value)).Result()
+			if err != nil {
+				return nil, err
+			}
+			if taken {
+				return nil, &RedisConflictError{Reason: "that member is already in the set; renaming onto it would only remove the old one"}
+			}
+		}
 		return none(func(pipe redis.Pipeliner) {
-			if w.Replace != nil && *w.Replace != *w.Value {
+			if renaming {
 				pipe.SRem(ctx, key, string(*w.Replace))
 			}
 			pipe.SAdd(ctx, key, string(*w.Value))
 		}), nil
 
 	case "zset":
+		renaming := w.Replace != nil && *w.Replace != *w.Value
+		if renaming {
+			switch err := tx.ZScore(ctx, key, string(*w.Value)).Err(); {
+			case err == nil:
+				return nil, &RedisConflictError{Reason: "that member is already in the sorted set; renaming onto it would remove the old one and overwrite this one's score"}
+			case err != redis.Nil:
+				return nil, err
+			}
+		}
 		return none(func(pipe redis.Pipeliner) {
-			if w.Replace != nil && *w.Replace != *w.Value {
+			if renaming {
 				pipe.ZRem(ctx, key, string(*w.Replace))
 			}
 			pipe.Do(ctx, "ZADD", key, formatRedisScore(float64(*w.Score)), string(*w.Value))
@@ -457,7 +485,9 @@ func RedisRemoveMembers(ctx context.Context, client *redis.Client, r RedisRemova
 	case "stream":
 		for _, m := range r.Members {
 			if !redisStreamIDRe.MatchString(string(m)) {
-				return 0, fmt.Errorf("%q is not a stream entry id", m.Display())
+				// What was sent in a member's place is not quoted back: this
+				// sentence goes on the audit trail, and members do not.
+				return 0, fmt.Errorf("a stream entry is removed by its id, such as 1700000000000-0")
 			}
 		}
 		removed, err = client.XDel(ctx, key, redisStrings(r.Members)...).Result()
@@ -602,7 +632,7 @@ func RedisCopyKey(ctx context.Context, client *redis.Client, profile *RedisProfi
 	}
 	pipe := client.Pipeline()
 	dump := pipe.Dump(ctx, from)
-	pttl := pipe.PTTL(ctx, from)
+	pttl := redisTTLCmd(ctx, pipe, "pttl", from)
 	_, _ = pipe.Exec(ctx)
 	payload, err := dump.Result()
 	if err == redis.Nil {
@@ -611,16 +641,12 @@ func RedisCopyKey(ctx context.Context, client *redis.Client, profile *RedisProfi
 	if err != nil {
 		return RedisExplainError(ctx, client, err)
 	}
-	ttl := pttl.Val()
-	if ttl < 0 {
-		ttl = 0
-	}
+	// RESTORE takes the time left in milliseconds, and zero for none.
+	restore := []any{"RESTORE", to, max(redisTTL(pttl), 0), payload}
 	if c.Replace {
-		err = client.RestoreReplace(ctx, to, ttl, payload).Err()
-	} else {
-		err = client.Restore(ctx, to, ttl, payload).Err()
+		restore = append(restore, "REPLACE")
 	}
-	if err != nil {
+	if err = client.Do(ctx, restore...).Err(); err != nil {
 		if strings.HasPrefix(err.Error(), "BUSYKEY") {
 			return &RedisKeyExistsError{Key: c.To}
 		}
@@ -679,6 +705,29 @@ func redisUnlink(ctx context.Context, client *redis.Client, profile *RedisProfil
 	return removed, err
 }
 
+// redisMaxExpiryMs is the latest moment an expiry may name, in milliseconds
+// since the Unix epoch: the largest whole number a page can state exactly,
+// some 285,000 years off.
+//
+// Redis keeps an expiry as a 64-bit count of milliseconds, and the servers
+// from before 6.2 work it out without looking: a number near the top of that
+// range wraps round to a moment long past, and an expiry in the past is a
+// delete. Nothing is sent here that could.
+const redisMaxExpiryMs = 1<<53 - 1
+
+// redisYear10000Ms is the first moment that cannot be written with a
+// four-digit year.
+const redisYear10000Ms = 253402300800000
+
+var errRedisExpiryTooFar = errors.New("that expiry is too far off to set; remove the expiry instead if the key should never expire")
+
+// redisExpiryInRange says whether an expiry of n units from now, each unitMs
+// milliseconds long, lands on a moment an expiry may name. The sum is never
+// made: it is the sum that overflows.
+func redisExpiryInRange(n, unitMs int64, now time.Time) bool {
+	return n <= (redisMaxExpiryMs-now.UnixMilli())/unitMs
+}
+
 // RedisExpiry says when a key should expire, in exactly one of three ways.
 type RedisExpiry struct {
 	// Seconds and Millis are from now; zero or less removes the expiry.
@@ -706,25 +755,44 @@ func RedisSetExpiry(ctx context.Context, client *redis.Client, key RedisBytes, e
 	if given != 1 {
 		return 0, fmt.Errorf("give the expiry one way: ttl in seconds, ttlMs in milliseconds, or at as a moment")
 	}
-	pipe := client.Pipeline()
-	var applied *redis.BoolCmd
+	// The number goes to the server as it was given. By way of a
+	// time.Duration or a time.Time, as the driver's own commands take it, a
+	// far-off expiry — the year 9999, the usual way of writing "never" — wraps
+	// to a negative one, and Redis reads a negative expiry as a delete.
+	now := time.Now()
+	verb, n := "", int64(0)
 	switch {
 	case e.At != nil:
 		// A moment already past deletes the key the instant it is set, which
 		// is a delete under another name and is refused as one.
-		if *e.At <= time.Now().UnixMilli() {
+		if *e.At <= now.UnixMilli() {
 			return 0, fmt.Errorf("that moment has already passed; setting it would delete the key at once")
 		}
-		applied = pipe.PExpireAt(ctx, k, time.UnixMilli(*e.At))
+		if *e.At > redisMaxExpiryMs {
+			return 0, errRedisExpiryTooFar
+		}
+		verb, n = "pexpireat", *e.At
 	case e.Millis != nil && *e.Millis > 0:
-		applied = pipe.PExpire(ctx, k, time.Duration(*e.Millis)*time.Millisecond)
+		if !redisExpiryInRange(*e.Millis, 1, now) {
+			return 0, errRedisExpiryTooFar
+		}
+		verb, n = "pexpire", *e.Millis
 	case e.Seconds != nil && *e.Seconds > 0:
-		applied = pipe.Expire(ctx, k, time.Duration(*e.Seconds)*time.Second)
-	default:
+		if !redisExpiryInRange(*e.Seconds, 1000, now) {
+			return 0, errRedisExpiryTooFar
+		}
+		verb, n = "expire", *e.Seconds
+	}
+	pipe := client.Pipeline()
+	var applied *redis.IntCmd
+	if verb == "" {
 		pipe.Persist(ctx, k)
+	} else {
+		applied = redis.NewIntCmd(ctx, verb, k, n)
+		_ = pipe.Process(ctx, applied)
 	}
 	exists := pipe.Exists(ctx, k)
-	pttl := pipe.PTTL(ctx, k)
+	pttl := redisTTLCmd(ctx, pipe, "pttl", k)
 	if _, err := pipe.Exec(ctx); err != nil && exists.Err() != nil {
 		return 0, RedisExplainError(ctx, client, exists.Err())
 	}
@@ -734,7 +802,7 @@ func RedisSetExpiry(ctx context.Context, client *redis.Client, key RedisBytes, e
 	if exists.Val() == 0 {
 		return 0, ErrRedisKeyNotFound
 	}
-	return ttlMillis(pttl), nil
+	return redisTTL(pttl), nil
 }
 
 // RedisJSONDelete removes what a JSONPath selects from a JSON document and

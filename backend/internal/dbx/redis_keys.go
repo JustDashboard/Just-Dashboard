@@ -383,6 +383,9 @@ func RedisBulk(ctx context.Context, client *redis.Client, profile *RedisProfile,
 	if o.Action == "expire" && o.TTL <= 0 {
 		return nil, fmt.Errorf("an expiry of at least one second is required")
 	}
+	if o.Action == "expire" && !redisExpiryInRange(o.TTL, 1000, started) {
+		return nil, errRedisExpiryTooFar
+	}
 	if o.Limit <= 0 {
 		o.Limit = redisBulkDefaultLimit
 	}
@@ -482,7 +485,9 @@ func redisBulkApply(ctx context.Context, client *redis.Client, profile *RedisPro
 	cmds := make([]*redis.BoolCmd, len(keys))
 	for i, k := range keys {
 		if o.Action == "expire" {
-			cmds[i] = pipe.Expire(ctx, k, time.Duration(o.TTL)*time.Second)
+			// The seconds as they were given; see RedisSetExpiry.
+			cmds[i] = redis.NewBoolCmd(ctx, "expire", k, o.TTL)
+			_ = pipe.Process(ctx, cmds[i])
 		} else {
 			cmds[i] = pipe.Persist(ctx, k)
 		}

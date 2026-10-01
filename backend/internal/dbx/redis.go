@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -145,9 +146,37 @@ func RedisOpen(ctx context.Context, dsn string, o RedisOpenOptions) (*redis.Clie
 	defer cancel()
 	if err := client.Ping(pingCtx).Err(); err != nil {
 		client.Close()
+		if redisRefusedDatabase(err) {
+			return nil, &RedisDatabaseError{DB: opt.DB, Reason: err.Error()}
+		}
 		return nil, err
 	}
 	return client, nil
+}
+
+// RedisDatabaseError is a logical database the server would not select: a
+// number past the ones it has, or any number but zero on a cluster node,
+// which has one. It is told apart from a server that cannot be reached
+// because the fault is in what was asked for, and the server is fine.
+type RedisDatabaseError struct {
+	DB     int
+	Reason string
+}
+
+func (e *RedisDatabaseError) Error() string {
+	return fmt.Sprintf("the server would not select database %d: %s", e.DB, e.Reason)
+}
+
+// redisRefusedDatabase recognises the server's answer to a SELECT it will
+// not perform. A new connection selects its database before anything else,
+// so the refusal arrives as the error of whatever was sent first.
+func redisRefusedDatabase(err error) bool {
+	var replied redis.Error
+	if !errors.As(err, &replied) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "db index") || strings.Contains(msg, "select is not allowed")
 }
 
 // redisOptions reads a connection string. The error is the parser's own
@@ -367,11 +396,11 @@ func redisDescribeKeys(ctx context.Context, client *redis.Client, profile *Redis
 	memory = memory && profile != nil && profile.Features.MemoryUsage
 	pipe := client.Pipeline()
 	types := make([]*redis.StatusCmd, len(names))
-	ttls := make([]*redis.DurationCmd, len(names))
+	ttls := make([]*redis.IntCmd, len(names))
 	usage := make([]*redis.IntCmd, len(names))
 	for i, k := range names {
 		types[i] = pipe.Type(ctx, k)
-		ttls[i] = pipe.TTL(ctx, k)
+		ttls[i] = redisTTLCmd(ctx, pipe, "ttl", k)
 		if memory {
 			usage[i] = pipe.MemoryUsage(ctx, k)
 		}
@@ -394,7 +423,7 @@ func redisDescribeKeys(ctx context.Context, client *redis.Client, profile *Redis
 		if typ == "none" || typ == "" {
 			continue
 		}
-		rk := RedisKey{Key: RedisBytes(k), Type: typ, TTL: ttlSeconds(ttls[i])}
+		rk := RedisKey{Key: RedisBytes(k), Type: typ, TTL: redisTTL(ttls[i])}
 		if sizes[i] != nil {
 			rk.Size = sizes[i].Val()
 		}
@@ -427,42 +456,28 @@ func redisLengthCmd(ctx context.Context, pipe redis.Pipeliner, typ, key string) 
 	return nil
 }
 
-// ttlSeconds renders go-redis's TTL result as whole seconds, keeping Redis's
-// own -1 (no expiry) and -2 (no such key) sentinels rather than inventing a
-// third way to say the same thing.
-func ttlSeconds(cmd *redis.DurationCmd) int64 {
-	d, err := cmd.Result()
-	if err != nil {
-		return -2
-	}
-	switch d {
-	case -1 * time.Nanosecond:
-		return -1
-	case -2 * time.Nanosecond:
-		return -2
-	}
-	if d < 0 {
-		return int64(d)
-	}
-	return int64(d.Seconds())
+// redisTTLCmd queues TTL or PTTL and keeps the number the server answers with.
+//
+// The driver's own TTL and PTTL hand back a time.Duration, which holds 292
+// years. An expiry written for the year 9999 — a common way of saying "never"
+// — does not fit, wraps to a negative number, and a negative TTL reads as a
+// key that is already gone.
+func redisTTLCmd(ctx context.Context, pipe redis.Pipeliner, verb, key string) *redis.IntCmd {
+	cmd := redis.NewIntCmd(ctx, verb, key)
+	_ = pipe.Process(ctx, cmd)
+	return cmd
 }
 
-// ttlMillis is ttlSeconds for a PTTL reply.
-func ttlMillis(cmd *redis.DurationCmd) int64 {
-	d, err := cmd.Result()
+// redisTTL reads a TTL or PTTL reply in the server's own unit, keeping its
+// own -1 (no expiry) and -2 (no such key) rather than inventing a third way
+// to say the same thing. A reply that could not be read is a key that is not
+// there.
+func redisTTL(cmd *redis.IntCmd) int64 {
+	n, err := cmd.Result()
 	if err != nil {
 		return -2
 	}
-	switch d {
-	case -1 * time.Nanosecond:
-		return -1
-	case -2 * time.Nanosecond:
-		return -2
-	}
-	if d < 0 {
-		return int64(d)
-	}
-	return d.Milliseconds()
+	return n
 }
 
 // RedisGet reads the first window of one key's value: redisMaxMembers of a

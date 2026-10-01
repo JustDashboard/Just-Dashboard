@@ -342,7 +342,7 @@ func RedisStreamAck(ctx context.Context, client *redis.Client, key, group RedisB
 	args = append(args, "XACK", string(key), string(group))
 	for _, id := range ids {
 		if !redisStreamIDRe.MatchString(id) {
-			return 0, fmt.Errorf("%q is not a stream entry id", id)
+			return 0, fmt.Errorf("an entry is acknowledged by its id, such as 1700000000000-0")
 		}
 		args = append(args, id)
 	}

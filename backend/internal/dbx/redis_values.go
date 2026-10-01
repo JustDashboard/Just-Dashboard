@@ -156,7 +156,7 @@ func RedisReadMembers(ctx context.Context, client *redis.Client, profile *RedisP
 	key := string(o.Key)
 	pipe := client.Pipeline()
 	typeCmd := pipe.Type(ctx, key)
-	pttlCmd := pipe.PTTL(ctx, key)
+	pttlCmd := redisTTLCmd(ctx, pipe, "pttl", key)
 	if _, err := pipe.Exec(ctx); err != nil && typeCmd.Err() != nil {
 		return nil, RedisExplainError(ctx, client, typeCmd.Err())
 	}
@@ -166,7 +166,7 @@ func RedisReadMembers(ctx context.Context, client *redis.Client, profile *RedisP
 	}
 	page := &RedisMembers{
 		Key: o.Key, DB: client.Options().DB, Type: typ, Rows: []RedisRow{},
-		PTTL: ttlMillis(pttlCmd), Cursor: "0", Done: true,
+		PTTL: redisTTL(pttlCmd), Cursor: "0", Done: true,
 	}
 	page.TTL = redisSecondsFromMillis(page.PTTL)
 
@@ -915,7 +915,7 @@ func RedisKeyMetadata(ctx context.Context, client *redis.Client, profile *RedisP
 	f := profile.Features
 	pipe := client.Pipeline()
 	typeCmd := pipe.Type(ctx, k)
-	pttlCmd := pipe.PTTL(ctx, k)
+	pttlCmd := redisTTLCmd(ctx, pipe, "pttl", k)
 	var (
 		memCmd, freqCmd *redis.IntCmd
 		encCmd          *redis.StringCmd
@@ -943,12 +943,15 @@ func RedisKeyMetadata(ctx context.Context, client *redis.Client, profile *RedisP
 	}
 	meta := &RedisKeyMeta{
 		Key: key, DB: client.Options().DB, Type: typ,
-		PTTL: ttlMillis(pttlCmd), Unavailable: map[string]string{},
+		PTTL: redisTTL(pttlCmd), Unavailable: map[string]string{},
 	}
 	meta.TTL = redisSecondsFromMillis(meta.PTTL)
-	if meta.PTTL > 0 {
-		at := read.Add(time.Duration(meta.PTTL) * time.Millisecond).UTC()
-		meta.ExpiresAt = &at
+	// A moment past the year 9999 cannot be written as RFC 3339, whose years
+	// have four digits, and a page given one could not parse it. Such a key
+	// has its expiry in PTTL and no date.
+	if at := read.UnixMilli() + meta.PTTL; meta.PTTL > 0 && at < redisYear10000Ms {
+		moment := time.UnixMilli(at).UTC()
+		meta.ExpiresAt = &moment
 	}
 
 	server := redisProductName(profile)
