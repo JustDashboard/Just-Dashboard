@@ -59,7 +59,10 @@ the mount site is only the conversion.
 
 Some routes apply additional checks to request **content**, because the path cannot know:
 `POST /databases/{id}/query` uses `dbx.Classify`, fails closed and applies capability + budget in the
-handler. Container creation and recreation use `api.authoriseSpec`: privileged mode, added
+handler. `POST /databases/{id}/export/query` takes only a statement that classifies as a read.
+`POST /databases/{id}/import` and `/import/upload` require `destructive` and its budget when the
+options ask for the table's contents to be replaced, and `POST /databases/{id}/restore` requires
+`system.admin` when its target is a database to be created. Container creation and recreation use `api.authoriseSpec`: privileged mode, added
 capabilities/devices, host/shared network namespaces and bind mounts require `system.admin`.
 Referenced network drivers and named-volume drivers/options are inspected too; a named volume cannot hide a
 host bind or plugin mount from this policy. Local filesystem volume backing paths must be absolute and

@@ -411,29 +411,10 @@ func nativeDumpCommand(ctx context.Context, driver Driver, dsn string, info *Con
 		}
 		path := freeDumpPath(outDir, dumpFilename(database, "postgres", "dump", start))
 		return func() (*DumpResult, error) {
-			args := []string{
-				"--host", info.Host, "--port", info.Port, "--username", info.User,
-				"--format", "custom", "--no-password", "--verbose", "--file", path,
+			run := toolRun{
+				name: tool, args: pgDumpArgs(info, database, path, opts, sel),
+				env: []string{"PGPASSWORD=" + info.Password}, progress: opts.Progress,
 			}
-			if opts.SchemaOnly {
-				args = append(args, "--schema-only")
-			}
-			if opts.DataOnly {
-				args = append(args, "--data-only")
-			}
-			if opts.Compression == CompressionNone {
-				args = append(args, "--compress", "0")
-			}
-			// pg_dump reads these as patterns. Quoting each part makes it the
-			// one name it spells: inside double quotes a star is a star.
-			for _, t := range sel.include {
-				args = append(args, "--table", t.postgresPattern())
-			}
-			for _, t := range sel.exclude {
-				args = append(args, "--exclude-table", t.postgresPattern())
-			}
-			args = append(args, database)
-			run := toolRun{name: tool, args: args, env: []string{"PGPASSWORD=" + info.Password}, progress: opts.Progress}
 			return runDumpCommand(ctx, run, path, driver, database, start)
 		}, filepath.Base(tool)
 	case DriverMySQL:
@@ -452,32 +433,7 @@ func nativeDumpCommand(ctx context.Context, driver Driver, dsn string, info *Con
 				return nil, err
 			}
 			defer cleanup()
-			args := []string{
-				"--defaults-extra-file=" + defaults,
-				"--single-transaction", "--quick", "--verbose",
-				// Tablespace metadata needs the PROCESS privilege, which is
-				// server-wide and which no sensible application login has. Asking
-				// for it put "mysqldump: Error: Access denied" on the end of a
-				// dump that had otherwise worked perfectly.
-				"--no-tablespaces",
-			}
-			switch {
-			case opts.SchemaOnly:
-				args = append(args, "--no-data", "--routines", "--triggers")
-			case opts.DataOnly:
-				// Routines and triggers are structure. Left on, a data-only
-				// dump recreates every trigger over the ones already there.
-				args = append(args, "--no-create-info", "--skip-triggers")
-			default:
-				args = append(args, "--routines", "--triggers")
-			}
-			for _, t := range sel.exclude {
-				args = append(args, "--ignore-table="+database+"."+t.table)
-			}
-			args = append(args, database)
-			for _, t := range sel.include {
-				args = append(args, t.table)
-			}
+			args := mysqldumpArgs(defaults, database, opts, sel)
 			// The dump goes to this process rather than to a file of the
 			// tool's own, which is what lets it be compressed on the way.
 			out, err := newDumpFile(path, opts.Compression == CompressionGzip)
@@ -512,20 +468,11 @@ func nativeDumpCommand(ctx context.Context, driver Driver, dsn string, info *Con
 				return nil, err
 			}
 			defer cleanup()
-			args := []string{"--config", conf, "--db", database, "--archive=" + path}
-			if opts.Compression != CompressionNone {
-				args = append(args, "--gzip")
-			}
 			include, exclude, err := mongoToolSelection(ctx, dsn, database, sel)
 			if err != nil {
 				return nil, err
 			}
-			if include != "" {
-				args = append(args, "--collection", include)
-			}
-			for _, name := range exclude {
-				args = append(args, "--excludeCollection", name)
-			}
+			args := mongodumpArgs(conf, database, path, opts.Compression != CompressionNone, include, exclude)
 			run := toolRun{name: "mongodump", args: args, progress: opts.Progress}
 			return runDumpCommand(ctx, run, path, driver, database, start)
 		}, "mongodump"
@@ -585,6 +532,11 @@ func lastLines(s string, n int) string {
 func validateDumpDatabase(database string) error {
 	if strings.TrimSpace(database) == "" {
 		return fmt.Errorf("no database named in the connection string; specify one explicitly")
+	}
+	if strings.HasPrefix(database, "-") {
+		// Every tool is given its arguments as option=value, so a name cannot
+		// become an option. This is the second lock on the same door.
+		return fmt.Errorf("a database name cannot begin with a dash")
 	}
 	return validateIdent(database)
 }
@@ -678,11 +630,7 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 			defer closeDump()
 			run = toolRun{
 				name: tool, stdin: f, env: []string{"PGPASSWORD=" + info.Password},
-				args: []string{
-					"--host", info.Host, "--port", info.Port, "--username", info.User,
-					"--no-password", "--no-psqlrc", "--quiet", "--set", "ON_ERROR_STOP=1",
-					"--single-transaction", "--dbname", database,
-				},
+				args: psqlArgs(info, database),
 			}
 			break
 		}
@@ -693,10 +641,7 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 		}
 		run = toolRun{
 			name: tool, env: []string{"PGPASSWORD=" + info.Password},
-			args: []string{
-				"--host", info.Host, "--port", info.Port, "--username", info.User,
-				"--no-password", "--verbose", "--clean", "--if-exists", "--dbname", database, dumpPath,
-			},
+			args: pgRestoreArgs(info, database, dumpPath),
 		}
 	case DriverMySQL:
 		tool := firstAvailableTool("mysql", "mariadb")
@@ -713,7 +658,7 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 			return "", err
 		}
 		defer closeDump()
-		run = toolRun{name: tool, args: []string{"--defaults-extra-file=" + defaults, database}, stdin: f}
+		run = toolRun{name: tool, args: mysqlArgs(defaults, database), stdin: f}
 	case DriverMongo:
 		if !toolAvailable("mongorestore") {
 			return "", fmt.Errorf("this is a mongodump archive and mongorestore is not installed; " +
@@ -727,16 +672,10 @@ func runRestore(ctx context.Context, driver Driver, dsn, dumpPath string, opts R
 			return "", err
 		}
 		defer cleanup()
-		args := []string{"--config", conf, "--archive=" + dumpPath, "--drop"}
-		if format == dumpFormatNativeGzip {
-			args = append(args, "--gzip")
+		run = toolRun{
+			name: "mongorestore",
+			args: mongorestoreArgs(conf, dumpPath, format == dumpFormatNativeGzip, opts.SourceDatabase, database),
 		}
-		if opts.SourceDatabase != "" && opts.SourceDatabase != database {
-			// The archive's documents name the database they were dumped from,
-			// and mongorestore puts them back there unless told otherwise.
-			args = append(args, "--nsFrom", opts.SourceDatabase+".*", "--nsTo", database+".*")
-		}
-		run = toolRun{name: "mongorestore", args: args}
 	default:
 		return "", fmt.Errorf("%w: %s", ErrUnsupported, driver)
 	}

@@ -137,6 +137,9 @@ func newDumpSelection(include, exclude []string) (dumpSelection, error) {
 			if err := validateIdent(ref.table); err != nil {
 				return nil, err
 			}
+			if strings.HasPrefix(ref.table, "-") || strings.HasPrefix(ref.schema, "-") {
+				return nil, fmt.Errorf("%q begins with a dash, which a dump tool would read as an option", name)
+			}
 			out = append(out, ref)
 		}
 		return out, nil

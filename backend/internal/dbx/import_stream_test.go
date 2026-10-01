@@ -693,6 +693,7 @@ func TestImportRefusesWhatItCannotRead(t *testing.T) {
 		"an unknown encoding":           {Table: "users", Encoding: "ebcdic"},
 		"a table that is not there":     {Table: "nowhere"},
 		"upsert into a new table":       {Table: "fresh", Mode: ImportModeUpsert, Create: &ImportCreate{}},
+		"a conflict key on an insert":   {Table: "users", ConflictColumns: []string{"id"}},
 	} {
 		if _, err := importInto(t, DriverSQLite, "id,email\n1,x@x.io\n", spec); err == nil {
 			t.Errorf("%s was accepted", name)
@@ -718,5 +719,31 @@ func TestLegacyJSONImportKeepsLargeIntegersExact(t *testing.T) {
 	db.QueryRow(`SELECT CAST(id AS TEXT) FROM big`).Scan(&id)
 	if id != "9007199254740993" {
 		t.Errorf("id stored as %s", id)
+	}
+}
+
+// The inline route's JSON import takes a list of keys, each into the column
+// of its own name — not a list of targets by position.
+func TestLegacyJSONImportTakesTheKeysItIsGiven(t *testing.T) {
+	db, _ := openTestDB(t)
+	res, err := ImportJSON(context.Background(), db, DriverSQLite,
+		strings.NewReader(`[{"name":"Zed","id":70,"email":"z@x.io","extra":"ignored"}]`),
+		ImportOptions{Table: "users", Columns: []string{"id", "email"}})
+	if err != nil || res.Inserted != 1 {
+		t.Fatalf("import: %+v, %v", res, err)
+	}
+	var email string
+	var name *string
+	if err := db.QueryRow(`SELECT email, name FROM users WHERE id = 70`).Scan(&email, &name); err != nil || email != "z@x.io" || name != nil {
+		t.Errorf("row = %q, %v (%v); want the two keys asked for and nothing else", email, name, err)
+	}
+	// And a file with no header needs to be told its columns.
+	if _, err := ImportCSV(context.Background(), db, DriverSQLite, strings.NewReader("1,a@x.io\n"), ImportOptions{Table: "users"}); err == nil {
+		t.Error("a CSV with no header and no columns was imported")
+	}
+	res, err = ImportCSV(context.Background(), db, DriverSQLite, strings.NewReader("71,p@x.io\n72\n"),
+		ImportOptions{Table: "users", Columns: []string{"id", "email"}})
+	if err != nil || res.Inserted != 1 || res.Failed != 1 || !strings.Contains(res.Errors[0], "row 2: row has 1 fields, expected 2") {
+		t.Errorf("positional import: %+v, %v", res, err)
 	}
 }

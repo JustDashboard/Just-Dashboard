@@ -204,3 +204,106 @@ func (s *lineSink) tail() string {
 	defer s.mu.Unlock()
 	return strings.TrimSpace(s.kept.String())
 }
+
+// The argument vectors.
+//
+// Every value that came from a request or a connection string is passed as
+// option=value in one argument, or after a "--" that ends the options. A
+// database called "--result-file=/etc/cron.d/x" is then a database of that
+// name, which does not exist, rather than an instruction to the tool.
+
+func pgConnArgs(info *ConnInfo) []string {
+	return []string{"--host=" + info.Host, "--port=" + info.Port, "--username=" + info.User, "--no-password"}
+}
+
+func pgDumpArgs(info *ConnInfo, database, path string, opts DumpOptions, sel dumpSelection) []string {
+	args := append(pgConnArgs(info), "--format=custom", "--verbose", "--file="+path)
+	if opts.SchemaOnly {
+		args = append(args, "--schema-only")
+	}
+	if opts.DataOnly {
+		args = append(args, "--data-only")
+	}
+	if opts.Compression == CompressionNone {
+		args = append(args, "--compress=0")
+	}
+	// pg_dump reads these as patterns. Quoting each part makes it the one name
+	// it spells: inside double quotes a star is a star.
+	for _, t := range sel.include {
+		args = append(args, "--table="+t.postgresPattern())
+	}
+	for _, t := range sel.exclude {
+		args = append(args, "--exclude-table="+t.postgresPattern())
+	}
+	return append(args, "--dbname="+database)
+}
+
+func pgRestoreArgs(info *ConnInfo, database, dumpPath string) []string {
+	return append(pgConnArgs(info), "--verbose", "--clean", "--if-exists", "--dbname="+database, "--", dumpPath)
+}
+
+func psqlArgs(info *ConnInfo, database string) []string {
+	return append(pgConnArgs(info), "--no-psqlrc", "--quiet", "--set=ON_ERROR_STOP=1",
+		"--single-transaction", "--dbname="+database)
+}
+
+func mysqldumpArgs(defaults, database string, opts DumpOptions, sel dumpSelection) []string {
+	args := []string{
+		"--defaults-extra-file=" + defaults,
+		"--single-transaction", "--quick", "--verbose",
+		// Tablespace metadata needs the PROCESS privilege, which is
+		// server-wide and which no sensible application login has. Asking for
+		// it put "mysqldump: Error: Access denied" on the end of a dump that
+		// had otherwise worked perfectly.
+		"--no-tablespaces",
+	}
+	switch {
+	case opts.SchemaOnly:
+		args = append(args, "--no-data", "--routines", "--triggers")
+	case opts.DataOnly:
+		// Routines and triggers are structure. Left on, a data-only dump
+		// recreates every trigger over the ones already there.
+		args = append(args, "--no-create-info", "--skip-triggers")
+	default:
+		args = append(args, "--routines", "--triggers")
+	}
+	for _, t := range sel.exclude {
+		args = append(args, "--ignore-table="+database+"."+t.table)
+	}
+	args = append(args, "--", database)
+	for _, t := range sel.include {
+		args = append(args, t.table)
+	}
+	return args
+}
+
+func mysqlArgs(defaults, database string) []string {
+	return []string{"--defaults-extra-file=" + defaults, "--database=" + database}
+}
+
+func mongodumpArgs(conf, database, path string, gzip bool, include string, exclude []string) []string {
+	args := []string{"--config=" + conf, "--db=" + database, "--archive=" + path}
+	if gzip {
+		args = append(args, "--gzip")
+	}
+	if include != "" {
+		args = append(args, "--collection="+include)
+	}
+	for _, name := range exclude {
+		args = append(args, "--excludeCollection="+name)
+	}
+	return args
+}
+
+func mongorestoreArgs(conf, dumpPath string, gzip bool, source, database string) []string {
+	args := []string{"--config=" + conf, "--archive=" + dumpPath, "--drop"}
+	if gzip {
+		args = append(args, "--gzip")
+	}
+	if source != "" && source != database {
+		// The archive's documents name the database they were dumped from,
+		// and mongorestore puts them back there unless told otherwise.
+		args = append(args, "--nsFrom="+source+".*", "--nsTo="+database+".*")
+	}
+	return args
+}

@@ -605,3 +605,63 @@ func TestNothingHereStartsAProcessOfItsOwn(t *testing.T) {
 		}
 	}
 }
+
+// A name is a name. Whatever a request or a connection string puts in one, it
+// reaches the tool as the value of an option or after the end of the options,
+// never as an option of its own.
+func TestToolArgumentsCannotBeTurnedIntoOptions(t *testing.T) {
+	hostile := "--result-file=/etc/cron.d/x"
+	info := &ConnInfo{Host: hostile, Port: "5432", User: hostile}
+	sel, err := newDumpSelection([]string{"public.users"}, []string{"logs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := DumpOptions{SchemaOnly: true, Compression: CompressionNone}
+
+	for name, args := range map[string][]string{
+		"pg_dump":      pgDumpArgs(info, hostile, "/dumps/x.dump", opts, sel),
+		"pg_restore":   pgRestoreArgs(info, hostile, "/dumps/x.dump"),
+		"psql":         psqlArgs(info, hostile),
+		"mysql":        mysqlArgs("/tmp/my.cnf", hostile),
+		"mongodump":    mongodumpArgs("/tmp/m.yaml", hostile, "/dumps/x.archive", true, hostile, []string{hostile}),
+		"mongorestore": mongorestoreArgs("/tmp/m.yaml", "/dumps/x.archive", true, hostile, "other"),
+	} {
+		ended := false
+		for _, arg := range args {
+			if arg == "--" {
+				ended = true
+				continue
+			}
+			if !ended && strings.HasPrefix(arg, hostile) {
+				t.Errorf("%s is handed %q as an argument of its own: %q", name, hostile, args)
+			}
+		}
+	}
+	// mysqldump takes its database and tables as bare words, so they follow
+	// the end of the options.
+	args := mysqldumpArgs("/tmp/my.cnf", "shop", opts, sel)
+	end := -1
+	for i, arg := range args {
+		if arg == "--" {
+			end = i
+		}
+	}
+	if end < 0 || strings.Join(args[end:], " ") != "-- shop users" {
+		t.Errorf("mysqldump arguments = %q", args)
+	}
+	if got := strings.Join(pgDumpArgs(&ConnInfo{Host: "h", Port: "5", User: "u"}, "shop", "/d/x.dump", opts, sel), " "); got !=
+		`--host=h --port=5 --username=u --no-password --format=custom --verbose --file=/d/x.dump --schema-only --compress=0 --table="public"."users" --exclude-table="logs" --dbname=shop` {
+		t.Errorf("pg_dump arguments = %s", got)
+	}
+
+	// And such a name is refused before it gets that far.
+	if err := validateDumpDatabase(hostile); err == nil {
+		t.Error("a database name beginning with a dash was accepted")
+	}
+	if _, err := newDumpSelection([]string{"--all-databases"}, nil); err == nil {
+		t.Error("a table name beginning with a dash was accepted")
+	}
+	if err := validateDumpDatabase("my-app"); err != nil {
+		t.Errorf("a dash inside a name was refused: %v", err)
+	}
+}

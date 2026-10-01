@@ -158,6 +158,9 @@ type ImportSpec struct {
 	sampleAll bool
 	// sortKeys orders a JSON file's keys by name rather than as found.
 	sortKeys bool
+	// keys are the only keys of a JSON file to take, each into the column of
+	// its own name, present in the file or not.
+	keys []string
 }
 
 // ImportColumn is one column of the file and where it goes.
@@ -255,6 +258,10 @@ func importLegacy(ctx context.Context, db *sql.DB, driver Driver, r io.Reader, o
 	}
 	if opts.Truncate {
 		spec.Mode = ImportModeReplace
+	}
+	if !format.delimited() {
+		// For an array of objects the list is which keys to take, by name.
+		spec.Columns, spec.keys = nil, opts.Columns
 	}
 	report, err := Import(ctx, db, driver, r, spec)
 	if err != nil {
@@ -418,6 +425,14 @@ func normaliseImportSpec(spec *ImportSpec) error {
 	if spec.Create != nil && spec.Mode != ImportModeInsert {
 		return fmt.Errorf("a table that is being created has nothing to %s", spec.Mode)
 	}
+	if !spec.Format.delimited() && len(spec.Columns) > 0 {
+		return fmt.Errorf("columns names targets by position, which a %s file does not have; use a mapping", spec.Format)
+	}
+	if (spec.ConflictConstraint != "" || len(spec.ConflictColumns) > 0) && spec.Mode != ImportModeUpsert {
+		// Accepted and ignored, it would read as an upsert that then failed on
+		// its first duplicate.
+		return fmt.Errorf("a conflict key is for an upsert; this import's mode is %s", spec.Mode)
+	}
 	return nil
 }
 
@@ -518,6 +533,9 @@ func readImportSample(reader recordReader, spec ImportSpec, report *ImportReport
 	}
 	if src.keyed && spec.sortKeys {
 		sortStrings(src.columns)
+	}
+	if src.keyed && len(spec.keys) > 0 {
+		src.columns = append([]string(nil), spec.keys...)
 	}
 	if !src.keyed && len(src.columns) == 0 {
 		if spec.trusted && len(spec.Columns) == 0 {
