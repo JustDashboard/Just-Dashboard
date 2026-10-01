@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import { mockDatabases } from "./database-fixture"
+import { hold, mockDatabases } from "./database-fixture"
 
 /**
  * The Databases section's shell: the frame every page of a database is drawn
@@ -115,17 +115,20 @@ test("the pages wait for what the server is, and are never mounted on its driver
 }) => {
   // A MariaDB server is dialled with the `mysql` driver; only its summary
   // says what answered, and this one has no dumps.
+  const summary = hold()
   const { asked } = await mockDatabases(page, {
-    summaryDelay: 1_500,
+    summaryHeld: summary.until,
     summaries: { 2: { capabilities: { dump: false, roles: false } } },
   })
   await page.goto("/databases/2/backups")
 
   // Until the summary answers there is no strip and no page of MySQL's.
+  await expect.poll(() => asked).toContain("GET /databases/2")
   await expect(page.locator("[data-slot=page]").first()).toBeVisible()
   await expect(strip(page)).toHaveCount(0)
   await expect(rail(page).getByRole("link", { name: "Backups", exact: true })).toHaveCount(0)
 
+  summary.release()
   await expect(page.getByText("MariaDB has no dumps")).toBeVisible()
   await expect(strip(page)).toContainText("MariaDB 11.8.9")
   expect(await railPages(page)).not.toContain("Backups")
@@ -327,29 +330,38 @@ test("the switcher groups by engine, reads a stopped server as stopped and keeps
 test("a password asked for is not shown once the popover it was asked in has closed", async ({
   page,
 }) => {
-  const { asked } = await mockDatabases(page, { urlDelay: 800 })
+  const read = hold()
+  const { asked } = await mockDatabases(page, { urlHeld: read.until })
   await page.goto("/databases/1/performance")
   const reads = () => asked.filter((request) => request === "GET /databases/1/url").length
   const string = page.locator("[data-slot=connection-string]")
+  const show = page.getByRole("button", { name: "Show the password" })
 
   await page.getByRole("button", { name: "Connect" }).click()
   await expect(string).toContainText("••••••")
   // Drawing the masked string reads nothing audited.
   expect(reads()).toBe(0)
 
-  await page.getByRole("button", { name: "Show the password" }).click()
+  // Asked for, and closed while the answer is still on its way.
+  await show.click()
+  await expect.poll(reads).toBe(1)
   await page.keyboard.press("Escape")
   await expect(string).toHaveCount(0)
-  await expect.poll(reads).toBe(1)
-  await page.waitForTimeout(1_000)
+  const answered = page.waitForResponse((response) => response.url().includes("/databases/1/url"))
+  read.release()
+  await answered
 
   await page.getByRole("button", { name: "Connect" }).click()
+  // The control is held while a read is out, so once it can be pressed again
+  // the late answer has been dealt with — and it is still the one that shows.
+  await expect(show).toBeEnabled()
   await expect(string).toContainText("••••••")
   await expect(string).not.toContainText("s3cret")
   await expect(page.getByRole("button", { name: "Hide the password" })).toHaveCount(0)
+  expect(reads()).toBe(1)
 
   // Asked for and waited for, it is shown — and quoted so a shell reads none of it.
-  await page.getByRole("button", { name: "Show the password" }).click()
+  await show.click()
   await expect(string).toContainText("s3cret")
   await page.getByRole("button", { name: "psql", exact: true }).click()
   await expect(string).toHaveText(

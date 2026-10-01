@@ -164,12 +164,12 @@ export type DatabaseMock = {
    * before the route: it answers 405 and the shell falls back to a ping.
    */
   summaries?: Record<number, Record<string, unknown> | null>
-  /** How long each summary takes, in milliseconds. */
-  summaryDelay?: number
+  /** Every summary answers only once this settles (`hold()`). */
+  summaryHeld?: Promise<unknown>
   /** Fields laid over a connection's fleet entry, by id. */
   fleet?: Record<number, Record<string, unknown>>
-  /** How long the audited connection-string read takes, in milliseconds. */
-  urlDelay?: number
+  /** The audited connection-string read answers only once this settles (`hold()`). */
+  urlHeld?: Promise<unknown>
   /** What `GET /databases/{id}/logs/sources` answers. */
   logSources?: unknown
   /** What `GET /databases/{id}/querylog` answers. */
@@ -180,7 +180,19 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
 
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * A read the spec answers when it chooses: the fixture waits on `until` and
+ * `release` ends the wait. "Before the answer" is then a state the spec is in
+ * for as long as it likes, where a timer made it a race against the machine —
+ * lost whenever the page took longer to load than the answer took to come.
+ */
+export function hold() {
+  let release = () => {}
+  const until = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { until, release }
+}
 
 /**
  * Routes the API for one page. Hands back every path under `/databases` the
@@ -242,7 +254,7 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
       if (over === null) {
         return json(route, { error: { code: "method_not_allowed", message: "" } }, 405)
       }
-      if (options.summaryDelay) await wait(options.summaryDelay)
+      await options.summaryHeld
       return json(route, summaryOf(conn, over))
     }
     if (rest === "/ping") return json(route, { ok: true })
@@ -258,7 +270,7 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
       })
     }
     if (rest === "/url") {
-      if (options.urlDelay) await wait(options.urlDelay)
+      await options.urlHeld
       return json(route, {
         id: conn.id,
         name: conn.name,
