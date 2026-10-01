@@ -1,0 +1,8 @@
+One partition was left out: a partition holds a slice of its parent table's rows, and the parent is the model.
+public.measurements is a partitioned table. It is emitted as an ordinary model; its partitioning is not something this target can describe.
+public.audit_log has no primary key or required unique column, so Prisma Client cannot address its rows; the model is marked @@ignore.
+public.type_samples.span has type interval, which Prisma has no scalar for; it is emitted as Unsupported and Prisma Client will not read or write it.
+public.type_samples.search has type tsvector, which Prisma has no scalar for; it is emitted as Unsupported and Prisma Client will not read or write it.
+public.type_samples.total is a generated column: the database computes it, so do not write to it.
+Index customers_lower_email_idx on public.customers is over an expression and was left out; it still exists in the database.
+Index customers_active_idx on public.customers covers only some rows and was left out; it still exists in the database.

@@ -1,0 +1,7 @@
+One partition was left out: a partition holds a slice of its parent table's rows, and the parent is the model.
+public.measurements is a partitioned table. It is emitted as an ordinary model; its partitioning is not something this target can describe.
+public.audit_log has no primary key. MikroORM needs one to track an entity: mark the columns that identify a row with @PrimaryKey.
+Index products_attributes_gin on public.products uses the gin access method, which this target does not describe; it was left out.
+public.type_samples.search has type tsvector, which MikroORM has no mapped type for; it is handled as a string.
+Index customers_lower_email_idx on public.customers is over an expression and was left out; it still exists in the database.
+Index customers_active_idx on public.customers covers only some rows and was left out; it still exists in the database.

@@ -1,0 +1,1 @@
+dbo.accounts.version has type timestamp, which Prisma has no scalar for; it is emitted as Unsupported and Prisma Client will not read or write it.

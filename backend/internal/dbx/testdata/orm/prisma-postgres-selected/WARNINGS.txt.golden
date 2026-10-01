@@ -1,0 +1,2 @@
+Index customers_lower_email_idx on customers is over an expression and was left out; it still exists in the database.
+Index customers_active_idx on customers covers only some rows and was left out; it still exists in the database.

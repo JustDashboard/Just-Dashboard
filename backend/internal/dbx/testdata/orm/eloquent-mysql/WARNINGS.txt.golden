@@ -1,0 +1,2 @@
+blog.post_tags has a composite primary key, which Eloquent does not support: the model reads rows, but find(), save() on an existing row and delete() will not work.
+Index ft_posts_body on blog.posts is a full-text index and was left out; it still exists in the database.

@@ -396,19 +396,25 @@ func TestLiveSQLEngines(t *testing.T) {
 						details[tb.Name] = d
 					}
 				}
-				prisma, err := GenerateORM(ORMPrisma, f.driver, tables, details)
-				if err != nil {
-					t.Fatalf("GenerateORM prisma: %v", err)
-				}
-				if !strings.Contains(prisma, "model jd_users") {
-					t.Errorf("prisma schema missing jd_users:\n%s", prisma)
-				}
-				drizzle, err := GenerateORM(ORMDrizzle, f.driver, tables, details)
-				if err != nil {
-					t.Fatalf("GenerateORM drizzle: %v", err)
-				}
-				if !strings.Contains(drizzle, "jd_users") {
-					t.Errorf("drizzle schema missing jd_users:\n%s", drizzle)
+				for _, c := range []struct {
+					target ORMTarget
+					want   string
+				}{{ORMPrisma, "model jd_users"}, {ORMDrizzle, "jd_users"}} {
+					out, err := GenerateORM(c.target, f.driver, tables, details)
+					// A target with no connector for the engine refuses with its
+					// reason; it used to answer with a PostgreSQL schema.
+					if reason := ORMUnsupported(c.target, f.driver); reason != "" {
+						if err == nil || err.Error() != reason {
+							t.Errorf("GenerateORM %s = %v, want the refusal %q", c.target, err, reason)
+						}
+						continue
+					}
+					if err != nil {
+						t.Fatalf("GenerateORM %s: %v", c.target, err)
+					}
+					if !strings.Contains(out, c.want) {
+						t.Errorf("%s schema missing jd_users:\n%s", c.target, out)
+					}
 				}
 			})
 
