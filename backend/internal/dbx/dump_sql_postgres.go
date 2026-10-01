@@ -195,6 +195,13 @@ func pgExtensions(ctx context.Context, q dumpQueryer, plan *dumpPlan) error {
 			create += " WITH SCHEMA " + pgIdent(schema)
 		}
 		plan.before = append(plan.before, stmt(create))
+		if name == "timescaledb" {
+			// A hypertable's rows live in chunk tables the extension keeps
+			// track of in its own catalogue. Dumped as the plain tables they
+			// look like from here, they come back as plain tables.
+			plan.notes = append(plan.notes,
+				"TimescaleDB hypertables do not survive this dump as hypertables; take this database's dumps with pg_dump")
+		}
 	}
 	return rows.Err()
 }

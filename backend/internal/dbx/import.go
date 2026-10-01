@@ -371,6 +371,16 @@ func Import(ctx context.Context, db *sql.DB, driver Driver, r io.Reader, spec Im
 	if err := runImport(ctx, db, plan, src, reader, report); err != nil {
 		return nil, err
 	}
+	if len(src.strays) > 0 && !spec.trusted {
+		names := make([]string, 0, len(src.strays))
+		for k := range src.strays {
+			names = append(names, k)
+		}
+		sortStrings(names)
+		report.Warnings = append(report.Warnings, fmt.Sprintf(
+			"rows after the first %d carry keys the earlier ones did not, and those values were not imported: %s",
+			importSampleRows, strings.Join(names, ", ")))
+	}
 	return report, nil
 }
 
@@ -467,6 +477,9 @@ type importSource struct {
 	sample     []importRecord
 	// done is set when the sample is the whole file.
 	done bool
+	// strays are keys met after the sample that the sample did not have. The
+	// columns were settled by then, so their values are not imported.
+	strays map[string]bool
 }
 
 // readImportSample reads the header and the first rows.
@@ -585,10 +598,20 @@ func (src *importSource) fieldsOf(rec importRecord, index map[string]int) ([]imp
 	for i, key := range rec.keys {
 		if at, ok := index[key]; ok {
 			out[at] = rec.values[i]
+			continue
+		}
+		if len(src.strays) < maxStrayKeys {
+			if src.strays == nil {
+				src.strays = map[string]bool{}
+			}
+			src.strays[key] = true
 		}
 	}
 	return out, nil
 }
+
+// maxStrayKeys bounds how many unexpected keys are remembered for the warning.
+const maxStrayKeys = 20
 
 func (src *importSource) index() map[string]int {
 	index := make(map[string]int, len(src.columns))

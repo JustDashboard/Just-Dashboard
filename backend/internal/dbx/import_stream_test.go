@@ -747,3 +747,26 @@ func TestLegacyJSONImportTakesTheKeysItIsGiven(t *testing.T) {
 		t.Errorf("positional import: %+v, %v", res, err)
 	}
 }
+
+// The columns of a JSON file are the keys of its first rows. A key that only
+// turns up later is not imported, and the report says so rather than leaving
+// a column quietly short.
+func TestImportSaysWhenLaterRowsCarryKeysTheFirstDidNot(t *testing.T) {
+	db, _ := openTestDB(t)
+	var body strings.Builder
+	for i := 0; i < importSampleRows+5; i++ {
+		if i < importSampleRows {
+			fmt.Fprintf(&body, `{"id":%d,"email":"k%d@x.io"}`+"\n", 5000+i, i)
+		} else {
+			fmt.Fprintf(&body, `{"id":%d,"email":"k%d@x.io","name":"late","nickname":"x"}`+"\n", 5000+i, i)
+		}
+	}
+	report, err := Import(context.Background(), db, DriverSQLite, strings.NewReader(body.String()),
+		ImportSpec{Table: "users", Format: ImportFormatNDJSON})
+	if err != nil || report.Inserted != importSampleRows+5 {
+		t.Fatalf("report = %+v, %v", report, err)
+	}
+	if len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0], "name, nickname") {
+		t.Errorf("warnings = %v", report.Warnings)
+	}
+}
