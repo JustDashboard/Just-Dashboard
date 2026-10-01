@@ -293,22 +293,36 @@ func ExportTable(ctx context.Context, db *sql.DB, driver Driver, schema, table s
 // ExportQuery streams the result of one statement the operator wrote.
 //
 // The caller has already established that the statement reads: this function
-// does not classify. What it adds is the engine's own word for it where the
-// engine has one — a read-only transaction on Postgres and MySQL — so a
-// statement the classifier read as a SELECT and the server reads as a write
-// is refused by the server rather than run.
+// does not classify. What it adds is the engine's own word for it — the read
+// scope RunStatement gives a read (session.read): a read-only transaction, a
+// session or a setting that refuses writes, or a transaction that is rolled
+// back — so a statement the classifier took for a SELECT and the server takes
+// for a write is refused by the server, or undone, rather than kept. It used
+// to be given that on PostgreSQL and MySQL alone; on the other engines the
+// same statement was rolled back when it was run and committed when it was
+// exported.
 func ExportQuery(ctx context.Context, db *sql.DB, driver Driver, statement string, opts ExportOptions, w io.Writer) (int, bool, error) {
 	opts.Driver = driver
-	if driver != DriverPostgres && driver != DriverMySQL {
-		return streamExport(ctx, db, statement, nil, opts, w)
-	}
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	s, err := openSession(ctx, db, driver)
 	if err != nil {
 		return 0, false, err
 	}
-	// Nothing was written, so there is nothing a commit would keep.
-	defer tx.Rollback()
-	return streamExport(ctx, tx, statement, nil, opts, w)
+	defer s.close()
+	var (
+		count     int
+		truncated bool
+	)
+	err = s.read(ctx, func(ctx context.Context, q queryer) error {
+		var err error
+		count, truncated, err = streamExport(ctx, q, statement, nil, opts, w)
+		if err != nil && ctx.Err() != nil {
+			// Stopped part-way: the connection is left however the driver's
+			// cancel left it, as in session.run.
+			s.dirty = true
+		}
+		return err
+	})
+	return count, truncated, err
 }
 
 // exportValue is normaliseValue for a file rather than for a grid cell.

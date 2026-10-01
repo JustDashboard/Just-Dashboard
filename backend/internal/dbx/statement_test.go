@@ -17,6 +17,12 @@ func TestClassifyForReadsEachEngine(t *testing.T) {
 		{DriverMSSQL, "SELECT 1DELETE FROM t", "critical"},
 		{DriverMSSQL, "SELECT name FROM #tmp WHERE id = @id", "read"},
 		{DriverMSSQL, "SELECT 1 WAITFOR DELAY '00:10:00'", "high"},
+		// Service Broker's verbs follow a SELECT the same way, and RECEIVE
+		// takes off the queue what it returns.
+		{DriverMSSQL, "SELECT 1 RECEIVE TOP (100) * FROM dbo.OrdersQueue", "high"},
+		{DriverMSSQL, "SELECT 1 END CONVERSATION @handle", "high"},
+		{DriverMSSQL, "SELECT CASE WHEN n > 1 THEN 'many' ELSE 'one' END FROM t", "read"},
+		{DriverPostgres, "SELECT send, receive FROM mail", "read"},
 		// A CTE can write on PostgreSQL while the statement leads with WITH.
 		{DriverPostgres, "WITH gone AS (DELETE FROM t WHERE id = 1 RETURNING *) SELECT * FROM gone", "high"},
 		{DriverPostgres, "WITH x AS (SELECT 1) MERGE INTO t USING x ON true WHEN NOT MATCHED THEN INSERT (a) VALUES (1)", "high"},

@@ -219,6 +219,9 @@ var batchWords = []string{
 	"throw", "checkpoint", "deny", "disable", "enable", "revert", "setuser",
 	"writetext", "updatetext", "readtext", "goto", "while", "print", "call",
 	"load", "dump",
+	// Service Broker: RECEIVE takes messages off a queue as it returns them,
+	// and SEND, and END, MOVE or BEGIN CONVERSATION change one.
+	"receive", "send", "conversation",
 }
 
 // serverFunctions are the PostgreSQL functions that act on the server rather
