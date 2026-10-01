@@ -282,6 +282,10 @@ func (clickhouseDialect) AdminDatabase() string { return "" }
 
 func (clickhouseDialect) readScope() readScope { return readScopeSetting }
 
+// refuseChanges: rows here cannot be edited one at a time. See
+// ErrChangesUnsupported for why.
+func (clickhouseDialect) refuseChanges() error { return ErrChangesUnsupported }
+
 // clickhouseReadOnly attaches readonly=2 to a query: reads only, and — unlike
 // readonly=1 — the other settings a connection string carries may still be
 // sent along with it.

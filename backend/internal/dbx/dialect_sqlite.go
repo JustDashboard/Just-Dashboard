@@ -386,3 +386,6 @@ func (sqliteDialect) enterRead(ctx context.Context, conn *sql.Conn) (func(contex
 func (sqliteDialect) byteLength(_ Column, quoted string) string {
 	return "length(CAST(" + quoted + " AS BLOB))"
 }
+
+// SQLite accepts DEFAULT in neither a VALUES list nor a SET clause.
+func (sqliteDialect) updateCannotSetDefault() bool { return true }

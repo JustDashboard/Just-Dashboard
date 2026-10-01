@@ -348,6 +348,14 @@ func (mysqlDialect) byteLength(_ Column, quoted string) string {
 	return "OCTET_LENGTH(" + quoted + ")"
 }
 
+// emptyInsert: MySQL has no DEFAULT VALUES; an empty column list and an empty
+// VALUES list is its spelling of the same thing.
+func (mysqlDialect) emptyInsert() (string, error) { return "() VALUES ()", nil }
+
+// generatedKeyQuery reads the AUTO_INCREMENT value the session's last INSERT
+// produced, which is how MySQL answers what RETURNING answers elsewhere.
+func (mysqlDialect) generatedKeyQuery() string { return "SELECT LAST_INSERT_ID()" }
+
 // countsChangedRows reports that an UPDATE's affected-row count is the number
 // of rows whose values changed, not the number the WHERE matched. An edit that
 // writes back the value already there therefore reports zero, and cannot be

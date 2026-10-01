@@ -131,13 +131,43 @@ var ErrChangesUnsupported = errors.New(
 
 // ChangesSupported reports whether an engine can apply a change set at all.
 func ChangesSupported(driver Driver) bool {
-	return driver.IsSQL() && driver != DriverClickHouse
+	d, err := DialectFor(driver)
+	if err != nil {
+		return false
+	}
+	refuser, refuses := d.(changeRefuser)
+	return !refuses || refuser.refuseChanges() == nil
+}
+
+// What a change set needs to know about an engine, each found by type
+// assertion because each is the exception rather than the rule.
+
+// changeRefuser is implemented by an engine that cannot apply a change set.
+type changeRefuser interface {
+	refuseChanges() error
 }
 
 // changedRowCounter is implemented by the engines that count the rows an
 // UPDATE changed rather than the rows it matched.
 type changedRowCounter interface {
 	countsChangedRows() bool
+}
+
+// emptyInserter is implemented by the engines that do not spell a row of
+// nothing but defaults `DEFAULT VALUES`.
+type emptyInserter interface {
+	emptyInsert() (string, error)
+}
+
+// generatedKeyReader is implemented by the engines that hand a generated key
+// back through a query on the same session rather than from the INSERT.
+type generatedKeyReader interface {
+	generatedKeyQuery() string
+}
+
+// defaultlessUpdater is implemented by an engine with no SET col = DEFAULT.
+type defaultlessUpdater interface {
+	updateCannotSetDefault() bool
 }
 
 // plannedChange is one change rendered and ready to run.
@@ -216,11 +246,14 @@ func loadTable(ctx context.Context, db *sql.DB, driver Driver, schema, table str
 // It touches the catalogue and nothing else, so a dry run and a real run
 // refuse exactly the same requests.
 func planChanges(ctx context.Context, db *sql.DB, driver Driver, set ChangeSet) (*changePlan, error) {
-	if !ChangesSupported(driver) {
-		if driver == DriverClickHouse {
-			return nil, ErrChangesUnsupported
+	d, err := DialectFor(driver)
+	if err != nil {
+		return nil, err
+	}
+	if refuser, ok := d.(changeRefuser); ok {
+		if err := refuser.refuseChanges(); err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("%w: %s", ErrUnsupported, driver)
 	}
 	if len(set.Changes) == 0 {
 		return nil, fmt.Errorf("no changes supplied")
@@ -331,9 +364,12 @@ func (p *changePlan) render(c Change) (*plannedChange, error) {
 			out.args = append(out.args, arg)
 		}
 		if len(names) == 0 {
-			clause, err := defaultValuesClause(d)
-			if err != nil {
-				return nil, err
+			clause := "DEFAULT VALUES"
+			if e, ok := d.(emptyInserter); ok {
+				var err error
+				if clause, err = e.emptyInsert(); err != nil {
+					return nil, err
+				}
 			}
 			out.sql = "INSERT INTO " + p.rel + " " + clause
 			out.rendered = out.sql
@@ -367,8 +403,8 @@ func (p *changePlan) render(c Change) (*plannedChange, error) {
 				return nil, err
 			}
 			if isDefault(c.Values[name]) {
-				if d.Driver() == DriverSQLite {
-					return nil, fmt.Errorf("column %s: SQLite cannot set a column back to its default in an UPDATE", name)
+				if u, ok := d.(defaultlessUpdater); ok && u.updateCannotSetDefault() {
+					return nil, fmt.Errorf("column %s: this engine cannot set a column back to its default in an UPDATE", name)
 				}
 				sets = append(sets, quoted+" = DEFAULT")
 				literals = append(literals, quoted+" = DEFAULT")
@@ -429,17 +465,6 @@ func (p *changePlan) render(c Change) (*plannedChange, error) {
 	}
 	out.rendered += ";"
 	return out, nil
-}
-
-// defaultValuesClause is how an engine spells "a row of nothing but defaults".
-func defaultValuesClause(d Dialect) (string, error) {
-	switch d.Driver() {
-	case DriverMySQL:
-		return "() VALUES ()", nil
-	case DriverOracle:
-		return "", fmt.Errorf("Oracle cannot insert a row with no values; give at least one column")
-	}
-	return "DEFAULT VALUES", nil
 }
 
 // ApplyChanges applies a change set in one transaction, or renders it.
@@ -590,13 +615,14 @@ func (p *changePlan) readBack(ctx context.Context, tx *sql.Tx, c *plannedChange,
 	d := p.dialect
 	key := c.after
 	if c.op == ChangeInsert && key == nil && len(p.key) == 1 {
-		// One generated key column: MySQL hands the value back, and the session
-		// function is read on the same connection the INSERT ran on.
-		if d.Driver() != DriverMySQL {
+		// One generated key column, on an engine that says what it generated
+		// when asked on the connection the INSERT ran on.
+		reader, ok := d.(generatedKeyReader)
+		if !ok {
 			return
 		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, "SELECT LAST_INSERT_ID()").Scan(&id); err != nil || id == 0 {
+		if err := tx.QueryRowContext(ctx, reader.generatedKeyQuery()).Scan(&id); err != nil || id == 0 {
 			return
 		}
 		key = map[string]any{p.key[0]: id}

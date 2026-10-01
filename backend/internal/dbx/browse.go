@@ -264,7 +264,8 @@ func BrowseTablePage(ctx context.Context, db *sql.DB, driver Driver, opts Browse
 	page := &BrowsePage{PrimaryKey: []string{}, Limit: opts.Limit, Offset: opts.Offset}
 	// Not fatal: a login that cannot read the constraint catalogue still gets
 	// its page, in whatever order the engine returns it.
-	if pk, err := d.PrimaryKey(ctx, db, catalogSchema(ctx, db, d, opts.Schema), opts.Table); err == nil && pk != nil {
+	catalog := catalogSchema(ctx, db, d, opts.Schema)
+	if pk, err := d.PrimaryKey(ctx, db, catalog, opts.Table); err == nil && pk != nil {
 		page.PrimaryKey = pk
 	}
 	opts.StableKey = page.PrimaryKey
@@ -275,7 +276,7 @@ func BrowseTablePage(ctx context.Context, db *sql.DB, driver Driver, opts Browse
 		return nil, err
 	}
 	if e, ok := d.(rowEstimator); ok {
-		if n, err := e.rowEstimate(ctx, db, opts.Schema, opts.Table); err == nil && n >= 0 {
+		if n, err := e.rowEstimate(ctx, db, catalog, opts.Table); err == nil && n >= 0 {
 			page.EstimatedRows = &n
 		}
 	}

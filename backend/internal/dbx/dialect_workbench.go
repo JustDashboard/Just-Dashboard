@@ -118,23 +118,31 @@ func keyExprFor(d Dialect, column Column, quoted string) string {
 	return quoted
 }
 
+// currentSchemaQueries ask each engine where it looks up a table named without
+// a schema. It is asked rather than assumed: a ClickHouse connection is in the
+// database its DSN names, not in `default`, and a PostgreSQL role may have a
+// search_path that does not start with `public`.
+var currentSchemaQueries = map[Driver]string{
+	DriverPostgres:   "SELECT current_schema()",
+	DriverMySQL:      "SELECT DATABASE()",
+	DriverMSSQL:      "SELECT SCHEMA_NAME()",
+	DriverClickHouse: "SELECT currentDatabase()",
+}
+
 // catalogSchema is the schema to look a table up in when the request named
 // none. The statement itself can leave the schema out and let the engine
 // resolve the name; a catalogue query cannot, because it filters on the schema
-// as a value.
+// as a value. Oracle's catalogue queries resolve an empty schema themselves and
+// SQLite has none to resolve.
 func catalogSchema(ctx context.Context, db *sql.DB, d Dialect, schema string) string {
 	if schema != "" {
 		return schema
 	}
-	if def := d.DefaultSchema(); def != "" {
-		return def
-	}
-	if d.Driver() == DriverMySQL {
-		// MySQL's schema is the database the connection selected.
+	if query, ok := currentSchemaQueries[d.Driver()]; ok {
 		var current sql.NullString
-		if err := db.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&current); err == nil {
+		if err := db.QueryRowContext(ctx, query).Scan(&current); err == nil && current.String != "" {
 			return current.String
 		}
 	}
-	return ""
+	return d.DefaultSchema()
 }

@@ -1473,7 +1473,11 @@ func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	limit := clampInt(atoiDefault(r.URL.Query().Get("limit"), 50), 1, 200)
+	limit := atoiDefault(r.URL.Query().Get("limit"), 50)
+	if limit <= 0 {
+		limit = 50
+	}
+	limit = min(limit, 200)
 	// ran_at is whole seconds, and a script records several statements in one;
 	// the id breaks the tie in the order they ran.
 	rows, err := s.Store.DB.QueryContext(r.Context(),

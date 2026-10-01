@@ -475,6 +475,18 @@ func TestLiveBrowseOperators(t *testing.T) {
 			if page.EstimatedRows == nil || *page.EstimatedRows != 6 {
 				t.Errorf("estimated rows = %v, want 6", page.EstimatedRows)
 			}
+			// With no schema named, the table is found where the connection is —
+			// which for these fixtures is not the engine's default schema.
+			bare, err := BrowseTablePage(ctx, db, e.driver, BrowseOptions{Table: "jdwb_items", Limit: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !sameStrings(bare.PrimaryKey, []string{"id"}) || bare.EstimatedRows == nil {
+				t.Errorf("with no schema: key = %v estimate = %v", bare.PrimaryKey, bare.EstimatedRows)
+			}
+			if _, err := ReadCell(ctx, db, e.driver, "", "jdwb_items", "label", map[string]any{"id": json.Number("1")}); err != nil {
+				t.Errorf("a cell read with no schema: %v", err)
+			}
 		})
 	}
 }

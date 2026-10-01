@@ -3,6 +3,7 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 )
 
@@ -378,4 +379,10 @@ func (oracleDialect) rowEstimate(ctx context.Context, db *sql.DB, schema, table 
 		return -1, nil
 	}
 	return n.Int64, err
+}
+
+// emptyInsert: Oracle has no way to insert a row of nothing but defaults
+// without naming a column.
+func (oracleDialect) emptyInsert() (string, error) {
+	return "", fmt.Errorf("Oracle cannot insert a row with no values; give at least one column")
 }
