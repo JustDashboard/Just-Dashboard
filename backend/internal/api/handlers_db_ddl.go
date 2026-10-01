@@ -269,7 +269,7 @@ func (s *Server) importMongo(w http.ResponseWriter, r *http.Request, conn *dbCon
 
 	client, err := dbx.MongoClient(ctx, dsn)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+		return connectFailed(dsn, err)
 	}
 	defer client.Disconnect(context.Background())
 

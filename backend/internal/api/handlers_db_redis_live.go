@@ -144,7 +144,7 @@ func (s *Server) handleRedisMonitor(w http.ResponseWriter, r *http.Request) erro
 	client, err := dbx.RedisOpen(probeCtx, dsn, dbx.RedisOpenOptions{DB: dbx.RedisDSNDatabase})
 	if err != nil {
 		cancelProbe()
-		return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+		return connectFailed(dsn, err)
 	}
 	profile, err := dbx.RedisProbe(probeCtx, client)
 	client.Close()
@@ -193,7 +193,7 @@ func (s *Server) handleRedisMonitor(w http.ResponseWriter, r *http.Request) erro
 	cancel()
 	end := redisFeedEnd{Reason: reason, Count: count, Dropped: dropped.Load()}
 	if ferr != nil {
-		end.Error = ferr.Error()
+		end.Error = connectError(dsn, ferr)
 	}
 	if reason != "closed" {
 		ws.Send("end", end)
@@ -241,7 +241,7 @@ func (s *Server) handleRedisSubscribe(w http.ResponseWriter, r *http.Request) er
 	// down is an error the page can show.
 	client, err := dbx.RedisOpen(r.Context(), dsn, dbx.RedisOpenOptions{DB: dbx.RedisDSNDatabase})
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+		return connectFailed(dsn, err)
 	}
 	client.Close()
 
@@ -280,7 +280,7 @@ func (s *Server) handleRedisSubscribe(w http.ResponseWriter, r *http.Request) er
 	cancel()
 	end := redisFeedEnd{Reason: reason, Count: count, Dropped: dropped.Load()}
 	if ferr != nil {
-		end.Error = ferr.Error()
+		end.Error = connectError(dsn, ferr)
 	}
 	if reason != "closed" {
 		ws.Send("end", end)

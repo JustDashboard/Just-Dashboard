@@ -255,7 +255,7 @@ func (s *Server) dbPool(ctx context.Context, id int64) (*sql.DB, *dbConnection, 
 	}
 	pool, err := s.modules.dbs.Pool(ctx, id, conn.Driver, dsn)
 	if err != nil {
-		return nil, conn, httpx.Err(http.StatusBadGateway, "connect_failed", connectError(dsn, err))
+		return nil, conn, connectFailed(dsn, err)
 	}
 	return pool, conn, nil
 }
@@ -525,7 +525,10 @@ func (s *Server) handleDBPing(w http.ResponseWriter, r *http.Request) error {
 		}
 		defer client.Disconnect(context.Background())
 	case dbx.DriverRedis:
-		client, err := dbx.RedisClient(r.Context(), dsn, 0)
+		// In the database the connection string names, which is where every
+		// key route goes: a string naming one the server does not have used
+		// to ping healthy and then fail each of them.
+		client, err := dbx.RedisClient(r.Context(), dsn, dbx.RedisDSNDatabase)
 		if err != nil {
 			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": connectError(dsn, err)})
 			return nil
@@ -568,7 +571,7 @@ func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverMongo {
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", connectError(dsn, err))
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		status, err := dbx.MongoServerStatus(r.Context(), client)
@@ -581,7 +584,7 @@ func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverRedis {
 		client, err := dbx.RedisClient(r.Context(), dsn, 0)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", connectError(dsn, err))
+			return connectFailed(dsn, err)
 		}
 		defer client.Close()
 		info, err := dbx.RedisInfo(r.Context(), client)
@@ -608,7 +611,7 @@ func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverMongo {
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		dbs, err := dbx.MongoDatabases(r.Context(), client)
@@ -621,7 +624,7 @@ func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverRedis {
 		client, err := dbx.RedisClient(r.Context(), dsn, 0)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Close()
 		dbs, err := dbx.RedisDatabases(r.Context(), client)
@@ -656,7 +659,7 @@ func (s *Server) handleDBTables(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverMongo {
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		if schema == "" {
@@ -718,7 +721,7 @@ func (s *Server) handleDBBrowse(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverMongo {
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		res, err := dbx.MongoFind(r.Context(), client, q.Get("schema"), q.Get("table"), q.Get("filter"), limit, offset)

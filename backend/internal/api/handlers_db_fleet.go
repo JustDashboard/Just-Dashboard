@@ -275,7 +275,9 @@ func (s *Server) dialFleetReading(ctx context.Context, conn *dbConnection, dsn s
 			e.Objects = len(cols)
 		}
 	case dbx.DriverRedis:
-		client, err := dbx.RedisClient(ctx, dsn, 0)
+		// The connection string's own database, as the ping and the summary
+		// dial it, so the three agree on whether the connection works.
+		client, err := dbx.RedisClient(ctx, dsn, dbx.RedisDSNDatabase)
 		if err != nil {
 			e.Error = connectError(dsn, err)
 			break

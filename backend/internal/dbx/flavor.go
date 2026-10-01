@@ -413,7 +413,11 @@ func ProbeIdentity(ctx context.Context, driver Driver, dsn string) (Identity, er
 		defer client.Disconnect(context.Background())
 		return IdentifyMongo(ctx, client), nil
 	case DriverRedis:
-		client, err := RedisClient(ctx, dsn, 0)
+		// The identity is the server's whichever database is selected. The
+		// one the string names is selected because this is also the check a
+		// connection string passes before it is saved, and a string naming a
+		// database the server does not have must not pass it.
+		client, err := RedisClient(ctx, dsn, RedisDSNDatabase)
 		if err != nil {
 			return Identity{}, err
 		}

@@ -27,7 +27,7 @@ func (s *Server) handleRedisServer(w http.ResponseWriter, r *http.Request) error
 	}
 	client, err := dbx.RedisOpen(r.Context(), dsn, dbx.RedisOpenOptions{DB: dbx.RedisDSNDatabase})
 	if err != nil {
-		return redisConnectFailed(err, dbx.RedisDSNDatabase)
+		return redisConnectFailed(dsn, err, dbx.RedisDSNDatabase)
 	}
 	defer client.Close()
 	ctx, cancel := timeoutCtx(r, 30*time.Second)

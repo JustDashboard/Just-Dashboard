@@ -854,6 +854,14 @@ func (s *Server) probeConnection(ctx context.Context, driver dbx.Driver, dsn str
 	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
+	// What a driver says of a string it could not use can quote the string,
+	// and every caller prints or records the answer.
+	return withoutSecrets(dsn, probeContained(ctx, driver, contained))
+}
+
+// probeContained is the dial itself, of a connection string already held to
+// the file roots.
+func probeContained(ctx context.Context, driver dbx.Driver, contained string) error {
 	switch driver {
 	case dbx.DriverMongo:
 		client, err := dbx.MongoClient(ctx, contained)
@@ -874,13 +882,16 @@ func (s *Server) probeConnection(ctx context.Context, driver dbx.Driver, dsn str
 		}
 		return nil
 	case dbx.DriverRedis:
-		client, err := dbx.RedisClient(ctx, contained, 0)
+		// In the database the string names: one the server will not select
+		// is a connection every key route would fail on, and this is where
+		// to say so.
+		client, err := dbx.RedisClient(ctx, contained, dbx.RedisDSNDatabase)
 		if err != nil {
 			return err
 		}
 		return client.Close()
 	}
-	_, err = dbx.Probe(ctx, driver, contained)
+	_, err := dbx.Probe(ctx, driver, contained)
 	return err
 }
 

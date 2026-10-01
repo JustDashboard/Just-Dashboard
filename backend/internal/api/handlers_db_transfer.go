@@ -467,8 +467,7 @@ func (s *Server) exportTable(w http.ResponseWriter, r *http.Request) error {
 		// the filter is a document rather than a WHERE clause.
 		client, cerr := dbx.MongoClient(ctx, dsn)
 		if cerr != nil {
-			return s.finishExport(r, run, 0, false,
-				httpx.Err(http.StatusBadGateway, "connect_failed", cerr.Error()))
+			return s.finishExport(r, run, 0, false, connectFailed(dsn, cerr))
 		}
 		defer client.Disconnect(context.Background())
 		database := q.Get("schema")
@@ -782,7 +781,7 @@ func (s *Server) importUploaded(w http.ResponseWriter, r *http.Request, conn *db
 		noun = "collection"
 		client, cerr := dbx.MongoClient(ctx, dsn)
 		if cerr != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", cerr.Error())
+			return connectFailed(dsn, cerr)
 		}
 		defer client.Disconnect(context.Background())
 		database := opts.Schema
@@ -1236,7 +1235,10 @@ func (s *Server) takeDump(ctx context.Context, conn *dbConnection, dsn string, o
 	dir := s.dbDumpDir(conn.Name)
 	res, err := dbx.DumpWith(ctx, conn.Driver, dsn, dir, opts)
 	if err != nil {
-		return nil, err
+		// A job's ending is shown to whoever started it and written to the
+		// audit trail; what a driver or a tool says of a connection string it
+		// could not use may quote it.
+		return nil, withoutSecrets(dsn, err)
 	}
 	meta := dbx.MetaOf(res, opts)
 	meta.Connection, meta.Note, meta.Origin, meta.By = conn.Name, note, origin, by
@@ -1483,14 +1485,14 @@ func (s *Server) runRestore(ctx context.Context, conn *dbConnection, dsn, dumpPa
 	if create {
 		exists, err := dbx.DatabaseExists(ctx, conn.Driver, dsn, target)
 		if err != nil {
-			return "", fmt.Errorf("could not check whether %s exists: %w", target, err)
+			return "", withoutSecrets(dsn, fmt.Errorf("could not check whether %s exists: %w", target, err))
 		}
 		if exists {
 			return "", fmt.Errorf("a database called %s already exists; nothing was restored", target)
 		}
 		out.Status("Creating database %s", target)
 		if err := dbx.CreateDatabase(ctx, conn.Driver, dsn, target); err != nil {
-			return "", fmt.Errorf("could not create %s: %w", target, err)
+			return "", withoutSecrets(dsn, fmt.Errorf("could not create %s: %w", target, err))
 		}
 	}
 	// The dashboard's own connections to the database go first. A SQLite file
@@ -1516,7 +1518,7 @@ func (s *Server) runRestore(ctx context.Context, conn *dbConnection, dsn, dumpPa
 	if !create && conn.Driver.IsSQL() {
 		s.modules.dbs.Close(conn.ID)
 	}
-	return output, err
+	return output, withoutSecrets(dsn, err)
 }
 
 type dbCopyRequest struct {
@@ -1571,7 +1573,7 @@ func (s *Server) handleDBCopy(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) runCopy(ctx context.Context, conn *dbConnection, dsn, name string, opts dbx.DumpOptions, out jobs.Emitter) error {
 	exists, err := dbx.DatabaseExists(ctx, conn.Driver, dsn, name)
 	if err != nil {
-		return fmt.Errorf("could not check whether %s exists: %w", name, err)
+		return withoutSecrets(dsn, fmt.Errorf("could not check whether %s exists: %w", name, err))
 	}
 	if exists {
 		return fmt.Errorf("a database called %s already exists; nothing was copied", name)
@@ -1592,11 +1594,11 @@ func (s *Server) runCopy(ctx context.Context, conn *dbConnection, dsn, name stri
 	opts.Progress = func(line string) { out.Line("stdout", line) }
 	res, err := dbx.DumpWith(ctx, conn.Driver, dsn, dir, opts)
 	if err != nil {
-		return err
+		return withoutSecrets(dsn, err)
 	}
 	out.Status("Creating database %s", name)
 	if err := dbx.CreateDatabase(ctx, conn.Driver, dsn, name); err != nil {
-		return fmt.Errorf("could not create %s: %w", name, err)
+		return withoutSecrets(dsn, fmt.Errorf("could not create %s: %w", name, err))
 	}
 	out.Status("Loading the dump into %s", name)
 	_, err = dbx.RestoreWith(ctx, conn.Driver, dsn, res.Path, dbx.RestoreOptions{
@@ -1607,7 +1609,7 @@ func (s *Server) runCopy(ctx context.Context, conn *dbConnection, dsn, name stri
 		if _, derr := dbx.DropDatabase(context.WithoutCancel(ctx), conn.Driver, dsn, name); derr == nil {
 			out.Status("Removed %s, which the failed copy had created", name)
 		}
-		return err
+		return withoutSecrets(dsn, err)
 	}
 	out.Status("%s is a copy of %s: %s", name, res.Database, res.Summary)
 	emitResult(out, transferResult{Database: name, Summary: res.Summary, Tool: res.Tool})

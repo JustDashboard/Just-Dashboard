@@ -137,9 +137,12 @@ func (s *Server) handleDBDropDatabase(w http.ResponseWriter, r *http.Request) er
 	}
 	res, err := dbx.DropDatabase(ctx, conn.Driver, dsn, dropArgument(conn, req.Database))
 	if err != nil {
+		// The drop dials for itself, and a driver that could not use the
+		// connection string says so by quoting it.
+		refusal := connectError(dsn, err)
 		httpx.SetAudit(r, "database.drop", conn.Name,
-			map[string]any{"database": target, "error": err.Error()})
-		return httpx.Err(http.StatusBadGateway, "drop_failed", err.Error())
+			map[string]any{"database": target, "error": refusal})
+		return httpx.Err(http.StatusBadGateway, "drop_failed", refusal)
 	}
 
 	// A connection whose database no longer exists cannot answer a single

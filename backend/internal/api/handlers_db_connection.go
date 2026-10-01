@@ -260,6 +260,38 @@ func (s *Server) dropPoolAfter(id int64, err error) {
 	s.modules.dbs.Close(id)
 }
 
+// connectFailed is the answer to a server that could not be reached: what its
+// driver said, with the connection's password taken out of it. Every handler
+// that opens a connection answers a failure to through this, so that no file
+// has a way of its own to quote a connection string back.
+func connectFailed(dsn string, err error) error {
+	return httpx.Err(http.StatusBadGateway, "connect_failed", connectError(dsn, err))
+}
+
+// scrubbedError is an error whose text has had a connection's password taken
+// out. What it wraps is kept for errors.Is and errors.As; only what it says is
+// changed.
+type scrubbedError struct {
+	text string
+	err  error
+}
+
+func (e *scrubbedError) Error() string { return e.text }
+func (e *scrubbedError) Unwrap() error { return e.err }
+
+// withoutSecrets is connectError for a place that keeps the error rather than
+// its text: a job's ending, an audit entry written later, a caller that goes
+// on to ask what kind of failure it was.
+func withoutSecrets(dsn string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if text := connectError(dsn, err); text != err.Error() {
+		return &scrubbedError{text: text, err: err}
+	}
+	return err
+}
+
 // connectError is what a failed dial said, with the connection's password
 // taken out of it.
 //
@@ -429,7 +461,10 @@ func (s *Server) dialConnection(ctx context.Context, conn *dbConnection, dsn str
 		defer client.Disconnect(context.Background())
 		return s.identityOf(conn.ID, dsn, func() dbx.Identity { return dbx.IdentifyMongo(ctx, client) }), nil
 	case dbx.DriverRedis:
-		client, err := dbx.RedisClient(ctx, dsn, 0)
+		// The database the connection string names: a server that will not
+		// select it answers every key route with a refusal, and a reading
+		// that called it healthy would be wrong about the one thing it is for.
+		client, err := dbx.RedisClient(ctx, dsn, dbx.RedisDSNDatabase)
 		if err != nil {
 			return dbx.Identity{}, err
 		}

@@ -151,7 +151,7 @@ func (s *Server) redisClient(r *http.Request) (*redis.Client, *dbConnection, err
 	}
 	client, err := dbx.RedisOpen(r.Context(), dsn, dbx.RedisOpenOptions{DB: db})
 	if err != nil {
-		return nil, conn, redisConnectFailed(err, db)
+		return nil, conn, redisConnectFailed(dsn, err, db)
 	}
 	return client, conn, nil
 }
@@ -163,12 +163,12 @@ func (s *Server) redisClient(r *http.Request) (*redis.Client, *dbConnection, err
 // wrong with it; the request has, and is told so. The same refusal for the
 // database the connection string names is the connection that is wrong, and
 // reads as one that does not work.
-func redisConnectFailed(err error, db int) error {
+func redisConnectFailed(dsn string, err error, db int) error {
 	var refused *dbx.RedisDatabaseError
 	if db != dbx.RedisDSNDatabase && errors.As(err, &refused) {
-		return httpx.BadRequest("%v", err)
+		return httpx.BadRequest("%s", connectError(dsn, err))
 	}
-	return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+	return connectFailed(dsn, err)
 }
 
 // redisKeyParam reads a key name from the query string. A key is bytes and a

@@ -95,7 +95,7 @@ func (s *Server) handleDBRoles(w http.ResponseWriter, r *http.Request) error {
 	case dbx.DriverMongo:
 		client, err := dbx.MongoClient(ctx, dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		roles, err = dbx.MongoUsers(ctx, client)
@@ -105,7 +105,7 @@ func (s *Server) handleDBRoles(w http.ResponseWriter, r *http.Request) error {
 	case dbx.DriverRedis:
 		client, err := dbx.RedisClient(ctx, dsn, 0)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Close()
 		roles, err = dbx.RedisUsers(ctx, client)
@@ -483,7 +483,7 @@ func (s *Server) grantRole(ctx context.Context, conn *dbConnection, dsn string, 
 		}
 		client, err := dbx.MongoClient(ctx, dsn)
 		if err != nil {
-			return nil, err
+			return nil, withoutSecrets(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		return &dbx.GrantResult{Statements: []string{}}, dbx.MongoGrant(ctx, client, grant.Role, grant.Database, grant.Level)
@@ -493,14 +493,14 @@ func (s *Server) grantRole(ctx context.Context, conn *dbConnection, dsn string, 
 	if admin.GrantNeedsDatabase() && grant.Database != conn.Database {
 		db, err := dbx.OpenDatabase(ctx, conn.Driver, dsn, grant.Database)
 		if err != nil {
-			return nil, err
+			return nil, withoutSecrets(dsn, err)
 		}
 		defer db.Close()
 		return admin.Grant(ctx, db, grant)
 	}
 	pool, err := s.modules.dbs.Pool(ctx, conn.ID, conn.Driver, dsn)
 	if err != nil {
-		return nil, err
+		return nil, withoutSecrets(dsn, err)
 	}
 	return admin.Grant(ctx, pool, grant)
 }
@@ -513,21 +513,21 @@ func (s *Server) withRoleClient(ctx context.Context, conn *dbConnection, dsn str
 	case dbx.DriverMongo:
 		client, err := dbx.MongoClient(ctx, dsn)
 		if err != nil {
-			return err
+			return withoutSecrets(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		return mongoOp(client)
 	case dbx.DriverRedis:
 		client, err := dbx.RedisClient(ctx, dsn, 0)
 		if err != nil {
-			return err
+			return withoutSecrets(dsn, err)
 		}
 		defer client.Close()
 		return redisOp(client)
 	}
 	pool, err := s.modules.dbs.Pool(ctx, conn.ID, conn.Driver, dsn)
 	if err != nil {
-		return err
+		return withoutSecrets(dsn, err)
 	}
 	return sqlOp(admin, pool)
 }
@@ -560,7 +560,7 @@ func (s *Server) handleDBDatabaseCreate(w http.ResponseWriter, r *http.Request) 
 		// collection is the smallest something.
 		client, err := dbx.MongoClient(ctx, dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		if err := dbx.MongoCreateCollection(ctx, client, name, "_init"); err != nil {
@@ -773,7 +773,7 @@ func (s *Server) handleDBSettings(w http.ResponseWriter, r *http.Request) error 
 	case dbx.DriverMongo:
 		client, err := dbx.MongoClient(ctx, dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		status, err := dbx.MongoServerStatus(ctx, client)
@@ -785,7 +785,7 @@ func (s *Server) handleDBSettings(w http.ResponseWriter, r *http.Request) error 
 	case dbx.DriverRedis:
 		client, err := dbx.RedisClient(ctx, dsn, 0)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Close()
 		info, err := dbx.RedisInfo(ctx, client)

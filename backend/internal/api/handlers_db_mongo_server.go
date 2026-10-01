@@ -434,7 +434,7 @@ func (s *Server) handleMongoCommand(w http.ResponseWriter, r *http.Request) erro
 	}
 	client, err := dbx.MongoClient(r.Context(), dsn)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+		return connectFailed(dsn, err)
 	}
 	defer client.Disconnect(context.Background())
 	ctx, cancel := timeoutCtx(r, mongoCommandTimeout)

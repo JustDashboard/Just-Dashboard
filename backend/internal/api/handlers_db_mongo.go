@@ -133,7 +133,7 @@ func (s *Server) mongoClient(r *http.Request) (*mongo.Client, *dbConnection, err
 	}
 	client, err := dbx.MongoClient(r.Context(), dsn)
 	if err != nil {
-		return nil, conn, httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+		return nil, conn, connectFailed(dsn, err)
 	}
 	return client, conn, nil
 }

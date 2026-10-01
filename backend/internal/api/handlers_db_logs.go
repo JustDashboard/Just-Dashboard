@@ -821,7 +821,7 @@ func (s *Server) dbQueryLog(ctx context.Context, conn *dbConnection, dsn string,
 	case dbx.DriverRedis:
 		client, err := dbx.RedisClient(ctx, dsn, 0)
 		if err != nil {
-			return unreadQueryLog(dbx.QuerySourceSlowlog, err)
+			return unreadQueryLog(dbx.QuerySourceSlowlog, withoutSecrets(dsn, err))
 		}
 		defer client.Close()
 		out, err := dbx.RedisQueryLog(ctx, client, w)
@@ -888,7 +888,7 @@ func (s *Server) mongoQueryLog(ctx context.Context, conn *dbConnection, dsn stri
 	}
 	client, err := dbx.MongoClient(ctx, dsn)
 	if err != nil {
-		return unreadQueryLog(dbx.QuerySourceLog, err)
+		return unreadQueryLog(dbx.QuerySourceLog, withoutSecrets(dsn, err))
 	}
 	defer client.Disconnect(context.Background())
 	lines, err := dbx.MongoGlobalLog(ctx, client)

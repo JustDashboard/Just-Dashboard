@@ -33,7 +33,8 @@ func (d *backupDatabaseDumper) DumpDatabase(ctx context.Context, id int64, direc
 	}
 	result, err := dbx.Dump(ctx, conn.Driver, dsn, "", directory)
 	if err != nil {
-		return backups.DatabaseDumpResult{}, err
+		// A backup run records why a dump failed, and shows it.
+		return backups.DatabaseDumpResult{}, withoutSecrets(dsn, err)
 	}
 	method := result.Tool
 	if method == "" || method == dbx.BuiltInDumpTool {
@@ -63,5 +64,6 @@ func (d *backupDatabaseDumper) RestoreDatabase(ctx context.Context, id int64, da
 		d.server.modules.dbs.Close(id)
 		defer d.server.modules.dbs.Close(id)
 	}
-	return dbx.Restore(ctx, conn.Driver, dsn, database, dumpPath)
+	output, err := dbx.Restore(ctx, conn.Driver, dsn, database, dumpPath)
+	return output, withoutSecrets(dsn, err)
 }

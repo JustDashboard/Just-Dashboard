@@ -354,11 +354,14 @@ func (s *Server) handleDBMaintenance(w http.ResponseWriter, r *http.Request) err
 		Action: action.ID, Schema: req.Schema, Table: req.Table, Index: req.Index, Options: req.Options,
 	})
 	if err != nil {
-		detail["error"] = err.Error()
+		// PostgreSQL's maintenance runs on a connection opened for it, and a
+		// failure to open one is a driver speaking of the connection string.
+		refusal := connectError(dsn, err)
+		detail["error"] = refusal
 		httpx.SetAudit(r, "database.maintenance", conn.Name, detail)
 		// The engine's own refusal — a table that is not there, a lock it
 		// could not take — is about what was asked, as a rejected DDL is.
-		return httpx.BadRequest("%v", err)
+		return httpx.BadRequest("%s", refusal)
 	}
 	detail["statements"], detail["ok"] = result.Statements, result.OK
 	httpx.SetAudit(r, "database.maintenance", conn.Name, detail)
@@ -649,7 +652,7 @@ func (s *Server) documentRoles(ctx context.Context, conn *dbConnection, dsn stri
 	if conn.Driver == dbx.DriverMongo {
 		client, err := dbx.MongoClient(ctx, dsn)
 		if err != nil {
-			return nil, httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return nil, connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		roles, err := dbx.MongoUsers(ctx, client)
@@ -660,7 +663,7 @@ func (s *Server) documentRoles(ctx context.Context, conn *dbConnection, dsn stri
 	}
 	client, err := dbx.RedisClient(ctx, dsn, 0)
 	if err != nil {
-		return nil, httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+		return nil, connectFailed(dsn, err)
 	}
 	defer client.Close()
 	roles, err := dbx.RedisUsers(ctx, client)
@@ -863,7 +866,7 @@ func (s *Server) runPrivilegeChange(ctx context.Context, conn *dbConnection, dsn
 	if privilegeElsewhere(conn, change) {
 		db, err := dbx.OpenDatabase(ctx, conn.Driver, dsn, change.Database)
 		if err != nil {
-			return nil, err
+			return nil, withoutSecrets(dsn, err)
 		}
 		defer db.Close()
 		return dbx.ChangePrivileges(ctx, db, conn.Driver, change, preview)
