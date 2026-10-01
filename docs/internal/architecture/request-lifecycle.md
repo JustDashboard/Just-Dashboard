@@ -63,9 +63,13 @@ connection's engine (`dbx.ClassifyFor`), fail closed and apply capability + budg
 `…/changes` does the same for a set that deletes rows. `POST /databases/{id}/power` starts, stops or
 restarts by its body, so it asks for `destructive` and spends `destrLim` by hand for `stop` and
 `restart`. A connection marked read-only refuses every non-read request under `/databases/{id}` in
-one middleware (`protectReadOnlyConnections`), by an allowlist of routes and, for the statement
-routes, by the same classification applied to the body as the handler's decoder will read it (field
-names folded, a repeated field refused). Container creation and recreation use `api.authoriseSpec`:
+one middleware (`protectReadOnlyConnections`), by an allowlist of routes and, for the routes that
+are a read or a write by what they carry — the statement routes, a result as a file, a change set,
+maintenance, the Redis console and bulk action, MongoDB's pipeline, command and document counts —
+by the handler's own classification applied to the body as the handler's decoder will read it
+(field names folded and a repeated field refused, or the handler's own request type and decoder).
+A schema form asked only for its statement (`?preview=1`) is let through by the same middleware,
+since the flag is in the address and the form runs nothing. Container creation and recreation use `api.authoriseSpec`:
 privileged mode, added capabilities/devices, host/shared network namespaces and bind mounts require
 `system.admin`.
 Referenced network drivers and named-volume drivers/options are inspected too; a named volume cannot hide a
@@ -101,7 +105,8 @@ and needs the destructive capability when a stage writes (`$out`, `$merge`) or i
 read; `POST /databases/{id}/mongo/command` classifies the command by its first key and its arguments
 (`dbx.MongoClassifyCommand`), refuses what is never run, and asks for `system.admin` or the destructive
 capability and budget as the class demands, with anything unlisted treated as destructive and a flag
-taken as set unless it is absent, null, `false` or a zero. The update,
+taken as set unless it is absent, null, `false` or a zero (a profile level the server reads as 0,
+`NaN` among them, is a write). A pipeline field given twice is read at every occurrence. The update,
 rename, index and `collMod` routes are `service.control` and check by hand for the one option each has
 that removes data (`mongoNeedsDestructive`).
 
@@ -139,7 +144,7 @@ check replaces what the header guarded.
 
 `POST /databases/{id}/maintenance` is `service.control` and names its action in the body. An action
 that locks a table against the application while it runs, or can lose rows (`vacuum_full`, `reindex`,
-MySQL `optimize` and `repair`, SQLite `vacuum`), asks for `destructive` and spends `destrLim` in the
+MySQL `optimize` and `repair`, SQLite `vacuum`, SQL Server `rebuild`), asks for `destructive` and spends `destrLim` in the
 handler, before anything is dialled: those are statements the SQL console refuses the same account.
 Which actions those are is a property of the closed action list (`dbx.MaintenanceAction.NeedsDestructive`),
 published to the page as `requires`. The role routes check content too: an alter is refused for an

@@ -15,7 +15,8 @@ A change that weakens any of these has to say so explicitly.
    operations — the deployment run route's `stop`/`restart` alongside `deploy`/`redeploy` — cannot be
    wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
-   request, the handler checks by hand and fails closed: `dbx.Classify` for SQL, `dbx.RedisClassify` for a
+   request, the handler checks by hand and fails closed: `dbx.ClassifyFor` for SQL, read by the rules of
+   the connection's own engine, `dbx.RedisClassify` for a
    Redis console command (and the body of the Redis bulk, rename and copy routes, where
    `action: delete|expire` and `overwrite` are what make the request destructive), `api.runDDL` for a
    schema form that changes a column's type or whose own SQL (a CHECK condition, an index predicate, a
