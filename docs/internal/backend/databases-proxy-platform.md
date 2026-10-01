@@ -219,7 +219,11 @@ accounts retain partial results. Full table details and mutation preconditions u
   schema, the session's or the one named; a schema of the server's own (`oracle_maintained`) is refused,
   which is what an administrator's login is in unless told otherwise. The dialect-driven plan from the
   standard catalogue views remains only as the fallback for a server that speaks Postgres's protocol
-  without keeping its catalogue.
+  without keeping its catalogue. Their live tests do not run where the connection string lands, since
+  a restore replaces every table in the database it is pointed at: SQL Server's make a database of
+  their own (`JD_TEST_MSSQL_DSN` names the server; the string itself lands in master), Oracle's make a
+  user (`JD_TEST_ORACLE_ADMIN_DSN`), and the shared round trips skip in a database that holds tables
+  they did not make.
 - **Every tool is started through `hostexec` with an argv** (`dump_exec.go`), as a process group, so
   stopping a job stops `pg_restore`'s workers and not only the process that forked them.
   `TestNothingHereStartsAProcessOfItsOwn` keeps `os/exec` out of the package. One thing is not taken
@@ -274,11 +278,6 @@ accounts retain partial results. Full table details and mutation preconditions u
   reporting four times the real size, Postgres's `now()` being the *transaction* timestamp and so
   reporting a negative session age. Oracle has an optional live fixture using `JD_TEST_ORACLE_DSN`;
   without a configured server, its unit coverage does not establish live-engine compatibility.
-  A dump's restore replaces every table in the database it is pointed at, so the transfer tests for
-  SQL Server and Oracle do not run where the connection string lands: SQL Server's make a database of
-  their own (`JD_TEST_MSSQL_DSN` names the server; the string itself lands in master) and Oracle's make
-  a user (`JD_TEST_ORACLE_ADMIN_DSN`), and the shared round trips skip in a database that holds tables
-  they did not make.
 
 - **The section opens on every database at once.** `GET /databases/fleet` dials every saved
   connection concurrently (six at a time, twelve seconds each) and hands back the row's facts with
