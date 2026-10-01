@@ -566,6 +566,7 @@ func liveAPIOpsMySQL(t *testing.T, flavour, dsn string) {
 		direct.Exec(`DROP TABLE IF EXISTS jd_b3_api_t`)
 		direct.Exec(`DROP USER IF EXISTS 'jd_b3_api_u'@'%'`)
 		direct.Exec(`DROP USER IF EXISTS 'jd_b3_api_l'@'localhost'`)
+		direct.Exec(`DROP USER IF EXISTS 'jd_b3_api_m'@'%'`)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
@@ -610,6 +611,20 @@ func liveAPIOpsMySQL(t *testing.T, flavour, dsn string) {
 		t.Errorf("a password change unlocked the account: %s", detail)
 	}
 	mustStatus(t, r, http.MethodPut, base+"/server/roles/jd_b3_api_u", `{"host":"%","inherit":false}`, http.StatusBadRequest)
+	// A create carries what this engine's accounts can be given, and is
+	// refused whole for what they cannot: an expiry is PostgreSQL's.
+	mustStatus(t, r, http.MethodPost, base+"/server/roles",
+		`{"name":"jd_b3_api_m","host":"%","password":"made-pw-1A","validUntil":"2032-01-01"}`, http.StatusBadRequest)
+	mustStatus(t, r, http.MethodGet, base+"/server/roles/jd_b3_api_m?host=%25", "", http.StatusNotFound)
+	mustStatus(t, r, http.MethodPost, base+"/server/roles",
+		`{"name":"jd_b3_api_m","host":"%","password":"made-pw-1A","locked":true,"createRole":true,"connectionLimit":4}`, http.StatusCreated)
+	var made dbx.RoleDetail
+	if err := json.Unmarshal([]byte(mustStatus(t, r, http.MethodGet, base+"/server/roles/jd_b3_api_m?host=%25", "", http.StatusOK)), &made); err != nil {
+		t.Fatal(err)
+	}
+	if !made.Locked || made.Login || !made.CreateRole || made.Superuser || made.ConnLimit != 4 {
+		t.Errorf("made as %+v", made.Role)
+	}
 	// An account at one host only, asked about by name alone.
 	if _, err := direct.Exec(`CREATE USER 'jd_b3_api_l'@'localhost' IDENTIFIED BY 'pw-local-1A'`); err != nil {
 		t.Fatal(err)
