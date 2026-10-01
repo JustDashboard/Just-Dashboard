@@ -476,8 +476,10 @@ func oracleXMLText(quoted string) string {
 	return "XMLSERIALIZE(CONTENT " + quoted + " AS CLOB NO INDENT)"
 }
 
-// readExpr serialises an XMLTYPE on the server. The driver cannot read the
-// object form at all, and one such column used to fail the whole page.
+// readExpr serialises an XMLTYPE on the server. The driver reads one laid out
+// afresh, and cannot read a NULL one at all: the statement fails, or — with
+// other columns in the row — waits until its request runs out of time. One
+// empty XML cell used to cost the page of the whole table.
 func (oracleDialect) readExpr(column Column, quoted string) string {
 	if oracleType(column.Type) == "XMLTYPE" {
 		return oracleXMLText(quoted)

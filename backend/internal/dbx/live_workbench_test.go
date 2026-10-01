@@ -1696,9 +1696,11 @@ func TestLiveSQLServerCountsTheStatementNotItsTriggers(t *testing.T) {
 
 // go-ora names a result column by its wire type, which for several of Oracle's
 // types says the wrong thing or nothing: a JSON column is a BLOB locator, a
-// BOOLEAN a NUMBER, a BLOB a long raw, and an XMLTYPE cannot be read at all —
-// one such column failed the page of the whole table. A table's cells are
-// selected and typed from the catalogue instead. Needs Oracle 23ai (BOOLEAN).
+// BOOLEAN a NUMBER, a BLOB a long raw. An XMLTYPE it reads laid out afresh,
+// and a NULL one not at all — the statement fails or, with other columns in the
+// row, waits — so one empty XML cell cost the page of the whole table. A
+// table's cells are selected and typed from the catalogue instead. Needs
+// Oracle 23ai (BOOLEAN).
 func TestLiveOracleCellsAreTypedFromTheCatalogue(t *testing.T) {
 	e := workbenchEngines()[4]
 	db, schema := openWorkbench(t, e)
@@ -1712,7 +1714,7 @@ func TestLiveOracleCellsAreTypedFromTheCatalogue(t *testing.T) {
 
 	page, err := BrowseTablePage(ctx, db, e.driver, BrowseOptions{Schema: schema, Table: "JDWB_ODD"})
 	if err != nil {
-		t.Fatalf("the page of a table with an XMLTYPE column: %v", err)
+		t.Fatalf("the page of a table with a NULL in an XMLTYPE column: %v", err)
 	}
 	cell := func(row int, column string) any { return page.Rows[row][indexOf(page.Columns, column)] }
 	kind := func(column string) string { return page.Kinds[indexOf(page.Columns, column)] }
@@ -1771,8 +1773,8 @@ func TestLiveOracleCellsAreTypedFromTheCatalogue(t *testing.T) {
 	}
 
 	// Looking for a value reads the table's rows the same way. It used to ask
-	// for * and wait for ever on the XMLTYPE; the deadline is what a relapse
-	// would run into.
+	// for * and wait on the row whose XML is NULL; the deadline is what a
+	// relapse would run into.
 	bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	cols, err := ListColumns(ctx, db, e.driver, schema, "JDWB_ODD")

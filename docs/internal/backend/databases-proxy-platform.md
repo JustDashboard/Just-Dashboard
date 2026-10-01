@@ -124,11 +124,12 @@ accounts retain partial results. Full table details and mutation preconditions u
   without saying how. Where the engine can only count characters (an Oracle CLOB) the figure is a
   floor and the refusal says "at least"; a type it cannot measure at all (Oracle's LONG) is not read.
   A driver's name for a result column is not always what the column is. go-ora names its wire types:
-  a JSON column is a BLOB locator, a BOOLEAN a NUMBER, a BLOB a long raw, and an XMLTYPE it cannot
-  read at all — one such column left the page of the whole table waiting for ever. So a dialect may be
-  a `columnReader`: its tables are then selected column by column (`projectionFor`, an XMLTYPE through
-  `XMLSERIALIZE … NO INDENT`) and typed from the catalogue, in the page, the row a change hands back,
-  the cell read and the value search alike. `withCatalog` is the one extra catalogue read that costs,
+  a JSON column is a BLOB locator, a BOOLEAN a NUMBER, a BLOB a long raw. An XMLTYPE it reads laid
+  out afresh, and a NULL one not at all: the statement fails or, with other columns in the row, waits
+  until the request runs out of time — one empty XML cell cost the page of the whole table. So a
+  dialect may be a `columnReader`: its tables are then selected column by column (`projectionFor`, an
+  XMLTYPE through `XMLSERIALIZE … NO INDENT`) and typed from the catalogue, in the page, the row a
+  change hands back, the cell read and the value search alike. `withCatalog` is the one extra catalogue read that costs,
   and only Oracle pays it. A query typed into the editor has no catalogue to ask and is typed by the
   driver's names, which `ValueKind` knows. A SQL Server `uniqueidentifier` is its GUID text in a page
   and in a cell, never the sixteen bytes of the wire form.

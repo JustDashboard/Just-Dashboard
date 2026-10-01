@@ -169,8 +169,8 @@ func searchTable(ctx context.Context, db *sql.DB, d Dialect, t Table, row, cols 
 	tail, tailArgs := d.Paginate(searchMaxPerTable, 0, len(args)+1)
 	args = append(args, tailArgs...)
 	// The row is shown beside the match, so it is selected the way a page of
-	// the table is: on Oracle one XMLTYPE column in a plain SELECT * left the
-	// driver waiting for ever, and the search with it.
+	// the table is: on Oracle a NULL in an XMLTYPE column of a plain SELECT *
+	// left the driver waiting, and the search with it.
 	list, kinds := "*", map[string]string(nil)
 	if project, err := projectionFor(d, row, nil); err != nil {
 		return nil, err
