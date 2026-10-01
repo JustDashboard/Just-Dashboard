@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -286,29 +287,34 @@ func (clickhouseDialect) readScope() readScope { return readScopeSetting }
 // ErrChangesUnsupported for why.
 func (clickhouseDialect) refuseChanges() error { return ErrChangesUnsupported }
 
-// clickhouseReadOnly attaches readonly=2 to a query: reads only, and — unlike
-// readonly=1 — the other settings a connection string carries may still be
-// sent along with it.
-func clickhouseReadOnly(ctx context.Context) context.Context {
-	return clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{"readonly": 2}))
-}
-
-// clickhouseRefusedSetting reports that the server would not let this account
-// set readonly at all. That happens when the account is already restricted to
-// reads, or when its profile pins the setting; either way the request that was
-// refused is the setting, not the statement.
-func clickhouseRefusedSetting(err error) bool {
-	var ex *clickhouse.Exception
-	if !errors.As(err, &ex) {
-		return false
+// clickhouseReadScope returns the context a read runs under: readonly=2 sent
+// with the query. That is reads only, and — unlike readonly=1 — the other
+// settings a connection string carries may still be sent along with it.
+//
+// The setting is tried first, on a statement that cannot matter, because some
+// accounts may not send it. One the server already holds to reads may not
+// change the setting at all, and then the server's own limit is the scope. One
+// whose profile pins the setting at writable may not either, and has no scope:
+// its statement is not run. The two refusals read alike, so which account this
+// is is asked of the server rather than read out of the refusal.
+func clickhouseReadScope(ctx context.Context, conn *sql.Conn) (context.Context, error) {
+	scoped := clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{"readonly": 2}))
+	var one uint8
+	refused := conn.QueryRowContext(scoped, "SELECT 1").Scan(&one)
+	if refused == nil {
+		return scoped, nil
 	}
-	switch ex.Code {
-	case 164: // READONLY
-		return strings.Contains(ex.Message, "readonly") && strings.Contains(ex.Message, "setting")
-	case 452: // SETTING_CONSTRAINT_VIOLATION
-		return strings.Contains(ex.Message, "readonly")
+	var readonly uint64
+	err := conn.QueryRowContext(ctx, "SELECT toUInt64(getSetting('readonly'))").Scan(&readonly)
+	if err == nil && readonly != 0 {
+		return ctx, nil
 	}
-	return false
+	var answer *clickhouse.Exception
+	if !errors.As(refused, &answer) {
+		// The connection failed, not the setting.
+		return nil, refused
+	}
+	return nil, fmt.Errorf("ClickHouse would not hold this statement to reading, so it was not run: %w", refused)
 }
 
 // textMatch uses the position functions instead of LIKE. ClickHouse's LIKE has

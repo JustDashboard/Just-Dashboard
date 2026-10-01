@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -581,6 +582,79 @@ func TestLiveClickHouseReadOnlyAccountStillReads(t *testing.T) {
 	if _, err := RunStatement(ctx, db, DriverClickHouse, misread(`CREATE TABLE jdwb_never (id Int32) ENGINE = Memory`), 10); err == nil {
 		_, _ = db.Exec(`DROP TABLE IF EXISTS jdwb_never`)
 		t.Error("a write ran on a read-only session")
+	}
+}
+
+// The two accounts that may not send the setting the scope uses, as accounts
+// rather than as a session: one the server holds to reads, which reads under
+// the server's own limit, and one whose profile pins readonly at writable,
+// which nothing holds to reads — so a statement called a read is not run on it.
+func TestLiveClickHouseAccountsThatMayNotSetReadonly(t *testing.T) {
+	admin, schema := openWorkbench(t, workbenchEngine{name: "clickhouse", driver: DriverClickHouse, env: "JD_TEST_CLICKHOUSE_DSN"})
+	base, err := url.Parse(os.Getenv("JD_TEST_CLICKHOUSE_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const reader, pinned, password = "jdwb_b2a_reader", "jdwb_b2a_pinned", "jdwb-b2a-Pass1"
+	drop := func() {
+		_, _ = admin.Exec(`DROP USER IF EXISTS ` + reader + `, ` + pinned)
+		_, _ = admin.Exec(`DROP TABLE IF EXISTS jdwb_pinned_proof`)
+		_, _ = admin.Exec(`DROP TABLE IF EXISTS jdwb_pinned_never`)
+	}
+	drop()
+	t.Cleanup(drop)
+	for _, statement := range []string{
+		`CREATE USER ` + reader + ` IDENTIFIED WITH sha256_password BY '` + password + `' SETTINGS readonly = 1`,
+		`CREATE USER ` + pinned + ` IDENTIFIED WITH sha256_password BY '` + password + `' SETTINGS readonly = 0 CONST`,
+		`GRANT SELECT ON ` + schema + `.* TO ` + reader,
+		`GRANT SELECT, INSERT, CREATE TABLE, DROP TABLE ON ` + schema + `.* TO ` + pinned,
+	} {
+		if _, err := admin.Exec(statement); err != nil {
+			t.Skipf("the fixture account may not manage users: %v", err)
+		}
+	}
+	open := func(user string) *sql.DB {
+		dsn := *base
+		dsn.User = url.UserPassword(user, password)
+		db, err := sql.Open("clickhouse", dsn.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.Close() })
+		if err := db.Ping(); err != nil {
+			t.Fatalf("%s cannot connect: %v", user, err)
+		}
+		return db
+	}
+	ctx := context.Background()
+	read := mustStatement(t, DriverClickHouse, `SELECT 1 AS one`)
+	smuggled := misread(`CREATE TABLE jdwb_pinned_never (id Int32) ENGINE = Memory`)
+
+	held := open(reader)
+	res, err := RunStatement(ctx, held, DriverClickHouse, read, 10)
+	if err != nil || res.RowCount != 1 {
+		t.Errorf("a read on an account held to reads = %+v %v", res, err)
+	}
+	if _, err := RunStatement(ctx, held, DriverClickHouse, smuggled, 10); err == nil {
+		t.Error("a write ran on an account held to reads")
+	}
+
+	// The pinned account can write, which is what makes the missing scope matter.
+	loose := open(pinned)
+	mustExec(t, loose, `CREATE TABLE jdwb_pinned_proof (id Int32) ENGINE = Memory`)
+	if _, err := RunStatement(ctx, loose, DriverClickHouse, smuggled, 10); err == nil {
+		t.Error("a write called a read ran on an account nothing holds to reads")
+	}
+	if _, err := admin.Exec(`SELECT 1 FROM jdwb_pinned_never`); err == nil {
+		t.Error("the table a statement called a read created is there")
+	}
+	_, err = RunStatement(ctx, loose, DriverClickHouse, read, 10)
+	if err == nil || !strings.Contains(err.Error(), "would not hold this statement to reading") {
+		t.Errorf("a read with no scope to run in = %v, want it refused and told why", err)
+	}
+	// A script of reads is one scope, and is refused as one.
+	if res, err := RunScript(ctx, loose, DriverClickHouse, []SQLStatement{*read, *read}, ScriptOptions{}); err == nil {
+		t.Errorf("a script of reads with no scope to run in = %+v", res)
 	}
 }
 

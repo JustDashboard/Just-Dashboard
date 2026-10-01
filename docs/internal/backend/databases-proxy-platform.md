@@ -30,6 +30,10 @@ MySQL/MariaDB (`START TRANSACTION READ ONLY` lets DDL through — it commits imp
 Oracle, and on SQL Server — which has none — a transaction that is always rolled back. Anything else
 runs on a connection of its own that is closed afterwards rather than pooled, because a pooled
 connection carries a `SET`, an open transaction or a temporary table into somebody else's request.
+A ClickHouse account may refuse the setting for two opposite reasons, and the refusals read alike, so
+the server is asked which (`clickhouseReadScope`): an account it already holds to reads runs under that
+limit, and one whose profile pins `readonly` at writable has no scope, so a statement called a read is
+not run on it at all.
 
 `POST /databases/{id}/query` takes exactly one statement. `POST …/script` takes several: one
 connection, in order, stop at the first error, optionally one transaction, one result per statement,

@@ -295,13 +295,9 @@ func (s *session) read(ctx context.Context, fn func(ctx context.Context, q query
 		}()
 		return fn(ctx, s.conn)
 	case readScopeSetting:
-		scoped := clickhouseReadOnly(ctx)
-		// Asked of the server first, with a statement that cannot matter: an
-		// account already held to reads may not change the setting at all, and
-		// then the server's own limit is the scope.
-		var one uint8
-		if err := s.conn.QueryRowContext(scoped, "SELECT 1").Scan(&one); clickhouseRefusedSetting(err) {
-			scoped = ctx
+		scoped, err := clickhouseReadScope(ctx, s.conn)
+		if err != nil {
+			return err
 		}
 		return fn(scoped, s.conn)
 	}
