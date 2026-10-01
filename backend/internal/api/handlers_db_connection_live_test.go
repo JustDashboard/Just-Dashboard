@@ -242,15 +242,41 @@ func TestLiveProvisionAdoptAndPower(t *testing.T) {
 // show. Each flag that has a read route of its own is held to it here, on
 // every engine that answers: a flag that is true for an engine whose route
 // then fails is a tab drawn over an error.
+//
+// One flag is one feature and not one address: the sessions of a SQL server,
+// the clients of a Redis and the operations of a MongoDB are the same section
+// of three pages, served by three routes.
 func TestLiveCapabilityFlagsAnswerOnRealServers(t *testing.T) {
-	routes := map[string]string{
-		"roles":      "/server/roles",
-		"extensions": "/server/extensions",
-		"settings":   "/server/settings",
-		"sessions":   "/activity",
-		"statements": "/statements",
-		"queryLog":   "/querylog",
-		"advisor":    "/advisor",
+	everywhere := func(route string) map[string]string {
+		return map[string]string{"sql": route, "redis": route, "mongodb": route}
+	}
+	routes := map[string]map[string]string{
+		"roles":           everywhere("/server/roles"),
+		"extensions":      everywhere("/server/extensions"),
+		"settings":        everywhere("/settings"),
+		"stats":           everywhere("/stats"),
+		"queryLog":        everywhere("/querylog"),
+		"sessions":        {"sql": "/activity", "redis": "/redis/clients", "mongodb": "/mongo/ops"},
+		"replication":     {"sql": "/replication", "redis": "/redis/server", "mongodb": "/mongo/replication"},
+		"statements":      {"sql": "/statements"},
+		"advisor":         {"sql": "/advisor"},
+		"locks":           {"sql": "/locks"},
+		"tableStats":      {"sql": "/tablestats"},
+		"indexStats":      {"sql": "/indexstats"},
+		"maintenance":     {"sql": "/maintenance"},
+		"privileges":      {"sql": "/server/privileges"},
+		"catalog":         {"sql": "/catalog"},
+		"clickhouseViews": {"sql": "/clickhouse/parts"},
+		"keys":            {"redis": "/keys"},
+		"keyTree":         {"redis": "/keys/tree"},
+		"serverInfo":      {"redis": "/redis/server"},
+		"commandStats":    {"redis": "/redis/commandstats"},
+		"latency":         {"redis": "/redis/latency"},
+		"memoryAnalysis":  {"redis": "/redis/analysis"},
+		"aclRules":        {"redis": "/redis/acl"},
+		"pubsub":          {"redis": "/redis/pubsub"},
+		"collections":     {"mongodb": "/mongo/collections"},
+		"profiler":        {"mongodb": "/mongo/profiler"},
 	}
 	for _, c := range []struct {
 		driver dbx.Driver
@@ -261,6 +287,7 @@ func TestLiveCapabilityFlagsAnswerOnRealServers(t *testing.T) {
 		// server's to allow, and an application account is rightly refused.
 		{dbx.DriverMySQL, "JD_TEST_MYSQL_ADMIN_DSN"},
 		{dbx.DriverMySQL, "JD_TEST_MYSQL8_ADMIN_DSN"},
+		{dbx.DriverMSSQL, "JD_TEST_MSSQL_DSN"},
 		{dbx.DriverRedis, "JD_TEST_REDIS_DSN"},
 		{dbx.DriverRedis, "JD_TEST_VALKEY_DSN"},
 		{dbx.DriverRedis, "JD_TEST_KEYDB_DSN"},
@@ -275,9 +302,17 @@ func TestLiveCapabilityFlagsAnswerOnRealServers(t *testing.T) {
 			}
 			_, router, id := liveAPIRouter(t, c.driver, dsn)
 			summary := readJSON[liveSummary](t, do(t, router, http.MethodGet, pathf("/databases/%d", id), ""))
-			for flag, route := range routes {
+			family := string(c.driver)
+			if c.driver.IsSQL() {
+				family = "sql"
+			}
+			for flag, byFamily := range routes {
+				route := byFamily[family]
+				if route == "" || summary.Capabilities[flag] != true {
+					continue
+				}
 				rec := do(t, router, http.MethodGet, pathf("/databases/%d", id)+route, "")
-				if summary.Capabilities[flag] == true && rec.Code != http.StatusOK {
+				if rec.Code != http.StatusOK {
 					t.Errorf("%s (%s) is said to have %q and %s answers %d %s",
 						c.driver, summary.Flavor, flag, route, rec.Code, strings.TrimSpace(rec.Body.String()))
 				}

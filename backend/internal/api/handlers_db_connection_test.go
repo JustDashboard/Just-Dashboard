@@ -1241,13 +1241,45 @@ func TestAFleetReadsTheMachineOnceForAllItsConnections(t *testing.T) {
 
 // --- the catalogue ----------------------------------------------------------------
 
-// The flags the frontend gates on, by name. Written out by hand: a flag that
-// is renamed or dropped is a control that silently stops being drawn.
+// The flags the frontend gates on that are a yes or a no, by name. Written out
+// by hand: a flag that is renamed or dropped is a control that silently stops
+// being drawn.
 var gatedCapabilities = []string{
-	"sql", "ddl", "schemas", "views", "routines", "triggers", "sequences", "enums", "extensions", "roles",
-	"sessions", "cancel", "locks", "statements", "maintenance", "settings", "replication", "explainJSON",
-	"explainAnalyze", "changeSets", "transactions", "queryLog", "advisor", "dump", "orm", "console",
-	"server", "provision",
+	// connections and discovery
+	"server", "provision", "inventoryConnect", "hostAccount", "fileBased", "openByDefault", "dump",
+	// the workbench
+	"sql", "console", "changeSets", "keylessEdits", "updateDefault", "script", "transactions", "queryCancel",
+	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze",
+	// the schema
+	"ddl", "schemas", "catalog", "views", "materializedViews", "routines", "triggers", "sequences", "enums",
+	"comments", "indexes", "extensions",
+	// watching and maintaining a server
+	"stats", "sessions", "kill", "cancel", "locks", "replication", "tableStats", "indexStats", "maintenance",
+	"settings", "settingsWrite", "roles", "privileges", "statements", "statementsReset", "advisor",
+	"engineAdvisor", "queryLog", "clickhouseViews", "sqliteFile",
+	// Redis
+	"keys", "keyTree", "keyTypeFilter", "keyMeta", "valueDownload", "keyEncoding", "bulkKeys", "streams",
+	"logicalDatabases", "consoleClassify", "serverInfo", "commandStats", "latency", "queryLogReset",
+	"persistence", "aofRewrite", "memoryAnalysis", "aclRules", "pubsub", "pubsubLive", "monitor",
+	// MongoDB
+	"documents", "shellSyntax", "collections", "collectionOptions", "aggregation", "schemaAnalysis",
+	"indexUsage", "indexHide", "validation", "profiler",
+	// code generation and moving data
+	"orm", "export", "exportColumns", "exportQuery", "import", "importMapping", "importUpsert",
+	"importReplace", "importCreateTable", "dumpSchemaOnly", "dumpDataOnly", "dumpTables", "dumpCompression",
+	"dumpDatabases", "dumpUpload", "restoreNewDatabase", "copy", "copyStructureOnly",
+}
+
+// The flags that are a list of words: empty for an engine without the
+// feature, and never null.
+var listedCapabilities = []string{
+	"catalogGroups", "ddlOperations", "maintenanceActions", "ormTargets", "exportFormats", "importFormats",
+}
+
+// The flags that are a word where the feature comes in more than one form,
+// and false where the engine has none of them.
+var wordedCapabilities = []string{
+	"rowIdentity", "returnsChangedRow", "readOnlyScope", "importAtomic", "json", "hashFieldTtl", "commandReference",
 }
 
 func TestDriverCatalogueCarriesCapabilitiesAndFlavours(t *testing.T) {
@@ -1264,6 +1296,7 @@ func TestDriverCatalogueCarriesCapabilitiesAndFlavours(t *testing.T) {
 		DDL          bool           `json:"ddl"`
 		DefaultPort  int            `json:"defaultPort"`
 		DSNExample   string         `json:"dsnExample"`
+		FilterOps    []string       `json:"filterOps"`
 		Capabilities map[string]any `json:"capabilities"`
 		Flavors      []struct {
 			ID           string         `json:"id"`
@@ -1292,6 +1325,28 @@ func TestDriverCatalogueCarriesCapabilitiesAndFlavours(t *testing.T) {
 			if _, ok := d.Capabilities[flag].(bool); !ok {
 				t.Errorf("%s: capability %q is %v, want a boolean", d.ID, flag, d.Capabilities[flag])
 			}
+		}
+		for _, flag := range listedCapabilities {
+			if _, ok := d.Capabilities[flag].([]any); !ok {
+				t.Errorf("%s: capability %q is %v, want a list", d.ID, flag, d.Capabilities[flag])
+			}
+		}
+		for _, flag := range wordedCapabilities {
+			switch d.Capabilities[flag].(type) {
+			case bool, string:
+			default:
+				t.Errorf("%s: capability %q is %v, want a word or false", d.ID, flag, d.Capabilities[flag])
+			}
+		}
+		// Every flag served is one of the three kinds above: a flag added to
+		// the table and to none of these lists is one no page was told about.
+		if known := len(gatedCapabilities) + len(listedCapabilities) + len(wordedCapabilities); len(d.Capabilities) != known {
+			t.Errorf("%s: %d capabilities served, %d are listed here", d.ID, len(d.Capabilities), known)
+		}
+		// The operators a filter may use are the engine's own: a regular
+		// expression where it has one.
+		if regex, _ := d.Capabilities["regexFilter"].(bool); regex != slices.Contains(d.FilterOps, "regex") {
+			t.Errorf("%s: regexFilter = %v and the filter operators are %v", d.ID, regex, d.FilterOps)
 		}
 		// The two older fields say what the reading says.
 		if d.SQL != d.Capabilities["sql"] || d.DDL != d.Capabilities["ddl"] {

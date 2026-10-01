@@ -1665,7 +1665,7 @@ func (s *Server) handleDBDrivers(w http.ResponseWriter, r *http.Request) error {
 		if dl, err := dbx.DialectFor(d); err == nil {
 			info.DDL = dl.SupportsDDL()
 			info.ColumnTypes = dl.ColumnTypes()
-			info.FilterOps = dbx.FilterOps()
+			info.FilterOps = dbx.FilterOpsFor(d)
 		}
 		for _, flavor := range dbx.Flavors(d) {
 			info.Flavors = append(info.Flavors, flavorInfo{
