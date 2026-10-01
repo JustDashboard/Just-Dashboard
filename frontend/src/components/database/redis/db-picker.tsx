@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import {
   Select,
@@ -55,7 +56,7 @@ export function DbPicker({
             className="font-mono text-xs"
             hint={
               <span className="numeric font-sans">
-                {keys.has(n) ? `${keys.get(n)!.toLocaleString()} keys` : "empty"}
+                {keys.has(n) ? plural(keys.get(n)!, "key") : "empty"}
                 {n === server.db ? " · connects here" : ""}
               </span>
             }

@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { Trash } from "@/components/icons"
-import { relativeTime, timestamp } from "@/lib/format"
+import { plural, relativeTime, timestamp } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { cn } from "@/lib/utils"
@@ -64,7 +64,7 @@ export function SlowlogView({ redis }: { redis: Redis }) {
       subject: {
         mark: <EngineMark engine={engine} size="sm" />,
         name: conn.name,
-        facts: <FormFact label="Holds">{data.length.toLocaleString()} entries</FormFact>,
+        facts: <FormFact label="Holds">{plural(data.length, "entry", "entries")}</FormFact>,
       },
       description:
         "Every entry the server has kept is discarded. It is the server's own log, so it is emptied for everybody who reads it.",

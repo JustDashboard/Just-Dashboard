@@ -136,6 +136,15 @@ describe("how far a scan has come", () => {
     ).toBe("Scanned all 2,860 keys")
   })
 
+  test("a narrowed walk says how many matched, since the server hands over only those", () => {
+    expect(
+      scanProgress({ found: 400, scanned: 400, total: 2860, complete: true, filtered: true }),
+    ).toBe("400 of 2,860 keys match")
+    expect(
+      scanProgress({ found: 400, scanned: 400, total: 48_000, complete: false, filtered: true }),
+    ).toBe("400 found so far in 48,000 keys")
+  })
+
   test("a listing says what it holds, and 'so far' until the cursor has come round", () => {
     expect(scanProgress({ found: 200, total: 2860, complete: false, filtered: false })).toBe(
       "200 of about 2,860 keys",

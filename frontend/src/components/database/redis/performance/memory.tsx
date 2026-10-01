@@ -268,7 +268,7 @@ export function MemoryView({ redis }: { redis: Redis }) {
                   <span className="numeric font-medium">{figure(group)}</span>
                   <span className="numeric text-muted-foreground">
                     {whole > 0 ? percent((weight(group) / whole) * 100) : "—"} · {about}
-                    {group.estimatedKeys.toLocaleString()} keys
+                    {plural(group.estimatedKeys, "key")}
                   </span>
                 </li>
               )

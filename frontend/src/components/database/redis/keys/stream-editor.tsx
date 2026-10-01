@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Copy, Eye, Minus, Plus, Trash } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { duration, timestamp } from "@/lib/format"
+import { duration, plural, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { usePoll } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
@@ -451,7 +451,7 @@ function TrimDialog({
     setRefused("")
     try {
       const answer = await redisTrim(redis.target, { key: name, maxLen: Number(keep) })
-      notify.success(`${answer.removed.toLocaleString()} entries removed`)
+      notify.success(`${plural(answer.removed, "entry", "entries")} removed`)
       onOpenChange(false)
       onTrimmed()
     } catch (err) {
@@ -469,7 +469,7 @@ function TrimDialog({
       name={name}
       type="stream"
       db={redis.db}
-      command={going > 0 ? `Remove ${going.toLocaleString()} entries` : "Trim"}
+      command={going > 0 ? `Remove ${plural(going, "entry", "entries")}` : "Trim"}
       onSubmit={run}
       busy={busy}
       error={refused}
@@ -524,7 +524,7 @@ function Groups({
     confirm({
       title: "Destroy group",
       subject: subject(bytesLabel(group.name)),
-      description: `The group, its ${group.consumers.length.toLocaleString()} consumers and its record of ${group.pending.toLocaleString()} pending entries are removed. The stream's entries stay.`,
+      description: `The group, its ${plural(group.consumers.length, "consumer")} and its record of ${plural(group.pending, "pending entry", "pending entries")} are removed. The stream's entries stay.`,
       confirmLabel: "Destroy group",
       action: async () => {
         // No `consumer`: that is what makes this the whole group.
@@ -537,7 +537,7 @@ function Groups({
     confirm({
       title: "Remove consumer",
       subject: subject(bytesLabel(consumer) || "(empty name)"),
-      description: `The consumer is removed from ${bytesLabel(group.name)}, with the ${pending.toLocaleString()} entries it was handed and has not acknowledged. The group stays.`,
+      description: `The consumer is removed from ${bytesLabel(group.name)}, with the ${plural(pending, "entry", "entries")} it was handed and has not acknowledged. The group stays.`,
       confirmLabel: "Remove consumer",
       action: async () => {
         // `consumer` is always sent here, even when its name is empty: that

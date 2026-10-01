@@ -3,7 +3,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import { errorMessage } from "@/lib/api"
-import { duration } from "@/lib/format"
+import { duration, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { Segments } from "@/components/deploy/settings/segments"
@@ -136,16 +136,13 @@ export function BulkDialog({
       if (answer.complete) break
       cursor = answer.cursor
     }
-    notify.success(
-      `${affected.toLocaleString()} ${affected === 1 ? "key" : "keys"} ${WORD[action].done}`,
-      { description: `In ${where}, in ${duration(elapsed / 1000)}.` },
-    )
+    notify.success(`${plural(affected, "key")} ${WORD[action].done}`, {
+      description: `In ${where}, in ${duration(elapsed / 1000)}.`,
+    })
     setCount(null)
   }
 
-  const noun = counted
-    ? `${counted.matched.toLocaleString()} ${counted.matched === 1 ? "key" : "keys"}`
-    : ""
+  const noun = counted ? plural(counted.matched, "key") : ""
   const command = counted
     ? `${WORD[action].verb} ${counted.complete ? "" : "at least "}${noun}`
     : ""
@@ -243,10 +240,7 @@ export function BulkDialog({
               <FormFact label="Database">db{db}</FormFact>
               {server.data && (
                 <FormFact label="Holds">
-                  {(
-                    server.data.keyspace.find((space) => space.db === db)?.keys ?? 0
-                  ).toLocaleString()}{" "}
-                  keys
+                  {plural(server.data.keyspace.find((space) => space.db === db)?.keys ?? 0, "key")}
                 </FormFact>
               )}
             </FormFacts>

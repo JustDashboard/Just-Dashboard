@@ -115,7 +115,9 @@ export function leafName(key: RedisKey["key"], prefix: RedisKey["key"]): string 
 /**
  * How far a scan has come, in the words the foot of the list says them.
  * `scanned` is absent for a flat listing, where the server says only whether
- * the cursor has come round.
+ * the cursor has come round. Under a pattern or a type it is not used
+ * either: the server then hands over only the keys that match, so how many
+ * it handed over says how many were found, not how many it looked at.
  */
 export function scanProgress(input: {
   found: number
@@ -126,7 +128,7 @@ export function scanProgress(input: {
 }): string {
   const { found, scanned, total, complete, filtered } = input
   const all = total.toLocaleString()
-  if (scanned !== undefined) {
+  if (scanned !== undefined && !filtered) {
     return complete
       ? `Scanned all ${all} keys`
       : `Scanned ${Math.min(scanned, total).toLocaleString()} of about ${all}`

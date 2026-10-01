@@ -189,9 +189,9 @@ export function RedisPerformance() {
               <TileTrend values={seriesOf(rows, "keys")} label="Keys" color="var(--chart-4)" />
             }
             hint={[
+              now.expires === undefined ? "" : `${now.expires.toLocaleString()} set to expire`,
               // The server counts its keys over every numbered database.
               spaces > 1 ? `in ${spaces} databases` : "",
-              now.expires === undefined ? "" : `${now.expires.toLocaleString()} set to expire`,
             ]
               .filter(Boolean)
               .join(" · ")}
