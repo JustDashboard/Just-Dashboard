@@ -686,3 +686,122 @@ func TestLiveMSSQLExportImportsBack(t *testing.T) {
 		execAll(t, db, `DELETE FROM dbo.people WHERE email LIKE N'probe%'`)
 	}
 }
+
+// TestLiveMSSQLDumpOfTheLessOrdinary dumps the shapes a schema has less often
+// and a dump gets wrong more easily — a primary key that is not the clustered
+// index, a column with a collation of its own, a constraint that is switched
+// off over rows that break it, an alias type, two tables that point at each
+// other, a view the server keeps the rows of, a sequence that has gone round
+// — and the ones it does not carry, which it has to name rather than write
+// as something they are not.
+func TestLiveMSSQLDumpOfTheLessOrdinary(t *testing.T) {
+	db, dsn := liveOwnMSSQL(t, "jd_transfer_live")
+	ctx := context.Background()
+	execAll(t, db,
+		`CREATE TYPE dbo.code_t FROM varchar(10) NOT NULL`,
+		`CREATE TABLE dbo.odd (
+			id int NOT NULL CONSTRAINT odd_pk PRIMARY KEY NONCLUSTERED,
+			code dbo.code_t,
+			exact varchar(10) COLLATE Latin1_General_BIN NULL,
+			n int NULL CONSTRAINT odd_n_ck CHECK (n > 0)
+		)`,
+		`CREATE CLUSTERED INDEX odd_code_cx ON dbo.odd (code)`,
+		`CREATE NONCLUSTERED COLUMNSTORE INDEX odd_cs ON dbo.odd (n)`,
+		`CREATE INDEX odd_off_ix ON dbo.odd (n)`,
+		`ALTER INDEX odd_off_ix ON dbo.odd DISABLE`,
+		`INSERT INTO dbo.odd VALUES (1, 'a', 'Aa', 5), (2, 'b', 'aa', 6)`,
+		// Switched off, and then a row that breaks it.
+		`ALTER TABLE dbo.odd NOCHECK CONSTRAINT odd_n_ck`,
+		`INSERT INTO dbo.odd VALUES (3, 'c', NULL, -5)`,
+		// Each points at the other: neither can be created, or dropped, first.
+		`CREATE TABLE dbo.hen (id int NOT NULL PRIMARY KEY, egg_id int NULL)`,
+		`CREATE TABLE dbo.egg (id int NOT NULL PRIMARY KEY, hen_id int NULL CONSTRAINT egg_hen_fk REFERENCES dbo.hen(id))`,
+		`ALTER TABLE dbo.hen ADD CONSTRAINT hen_egg_fk FOREIGN KEY (egg_id) REFERENCES dbo.egg(id)`,
+		`INSERT INTO dbo.hen VALUES (1, NULL)`, `INSERT INTO dbo.egg VALUES (1, 1)`, `UPDATE dbo.hen SET egg_id = 1`,
+		`CREATE TABLE dbo.versioned (
+			id int NOT NULL PRIMARY KEY, v int,
+			since datetime2 GENERATED ALWAYS AS ROW START NOT NULL,
+			until datetime2 GENERATED ALWAYS AS ROW END NOT NULL,
+			PERIOD FOR SYSTEM_TIME (since, until)
+		) WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.versioned_history))`,
+		`CREATE VIEW dbo.secret WITH ENCRYPTION AS SELECT 1 AS x`,
+		`CREATE VIEW dbo.totals WITH SCHEMABINDING AS SELECT code, COUNT_BIG(*) AS n FROM dbo.odd GROUP BY code`,
+		`CREATE UNIQUE CLUSTERED INDEX totals_cx ON dbo.totals (code)`,
+		`CREATE SEQUENCE dbo.round AS tinyint START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 3 CYCLE NO CACHE`,
+	)
+	// The server will not drop a table it keeps history for while it does.
+	t.Cleanup(func() { db.Exec(`ALTER TABLE dbo.versioned SET (SYSTEM_VERSIONING = OFF)`) })
+	for i := 0; i < 3; i++ {
+		queryString(t, db, `SELECT CAST(NEXT VALUE FOR dbo.round AS varchar(5))`)
+	}
+
+	res, err := DumpWith(ctx, DriverMSSQL, dsn, t.TempDir(), DumpOptions{})
+	if err != nil {
+		t.Fatalf("DumpWith: %v", err)
+	}
+	text := readDump(t, res.Path)
+	// What it does not carry it names, in the file and in the summary.
+	for _, left := range []string{"[dbo].[versioned]", "[dbo].[versioned_history]", "odd_cs", "odd_off_ix", "[dbo].[secret]"} {
+		if !strings.Contains(text, "-- SKIPPED") || !strings.Contains(text, left) {
+			t.Errorf("the dump does not say it left out %s:\n%s", left, text)
+		}
+	}
+	if !strings.Contains(res.Summary, "3 tables, 5 rows") || !strings.Contains(res.Summary, "skipped 5") {
+		t.Errorf("summary = %q", res.Summary)
+	}
+	if strings.Contains(text, "CREATE TABLE [dbo].[versioned") || strings.Contains(text, "code_t") {
+		t.Errorf("the dump writes what it cannot carry:\n%s", text)
+	}
+
+	target := scratchDatabase(t, DriverMSSQL, dsn, "copy")
+	if _, err := RestoreWith(ctx, DriverMSSQL, dsn, res.Path, RestoreOptions{Database: target}); err != nil {
+		t.Fatalf("RestoreWith: %v\n%s", err, text)
+	}
+	restored, err := OpenDatabase(ctx, DriverMSSQL, dsn, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	for query, want := range map[string]string{
+		`SELECT CAST(COUNT(*) AS varchar(5)) FROM dbo.odd`:                                                                                                 "3",
+		`SELECT type_desc FROM sys.indexes WHERE name = 'odd_pk'`:                                                                                          "NONCLUSTERED",
+		`SELECT type_desc FROM sys.indexes WHERE name = 'odd_code_cx'`:                                                                                     "CLUSTERED",
+		`SELECT collation_name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.odd') AND name = 'exact'`:                                                 "Latin1_General_BIN",
+		`SELECT TYPE_NAME(user_type_id) + ':' + CAST(is_nullable AS varchar(1)) FROM sys.columns WHERE object_id = OBJECT_ID('dbo.odd') AND name = 'code'`: "varchar:0",
+		`SELECT CAST(is_disabled AS varchar(1)) FROM sys.check_constraints WHERE name = 'odd_n_ck'`:                                                        "1",
+		`SELECT CAST(n AS varchar(5)) FROM dbo.odd WHERE id = 3`:                                                                                           "-5",
+		`SELECT CAST(COUNT(*) AS varchar(5)) FROM sys.foreign_keys WHERE name IN ('egg_hen_fk', 'hen_egg_fk')`:                                             "2",
+		`SELECT CAST(egg_id AS varchar(5)) FROM dbo.hen WHERE id = 1`:                                                                                      "1",
+		`SELECT CAST(n AS varchar(5)) FROM dbo.totals WITH (NOEXPAND) WHERE code = 'a'`:                                                                    "1",
+		`SELECT name FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.totals')`:                                                                           "totals_cx",
+		// Three were drawn of a round of three: the next is the first again.
+		`SELECT CAST(NEXT VALUE FOR dbo.round AS varchar(5))`:                                                             "1",
+		`SELECT CAST(is_cycling AS varchar(1)) + ':' + TYPE_NAME(system_type_id) FROM sys.sequences WHERE name = 'round'`: "1:tinyint",
+		`SELECT CAST(COUNT(*) AS varchar(5)) FROM sys.tables WHERE name LIKE 'versioned%'`:                                "0",
+	} {
+		if got := queryString(t, restored, query); got != want {
+			t.Errorf("%s\n got %q\nwant %q", strings.Join(strings.Fields(query), " "), got, want)
+		}
+	}
+	if t.Failed() {
+		t.Logf("the dump:\n%s", text)
+	}
+
+	// Over the database it came from: the two tables that point at each other
+	// are dropped and remade, and the tables the dump does not carry are as
+	// they were.
+	execAll(t, db, `INSERT INTO dbo.versioned (id, v) VALUES (1, 1)`, `UPDATE dbo.hen SET egg_id = NULL`)
+	if _, err := RestoreWith(ctx, DriverMSSQL, dsn, res.Path, RestoreOptions{}); err != nil {
+		t.Fatalf("RestoreWith over itself: %v", err)
+	}
+	for query, want := range map[string]string{
+		`SELECT CAST(egg_id AS varchar(5)) FROM dbo.hen WHERE id = 1`:                                 "1",
+		`SELECT CAST(COUNT(*) AS varchar(5)) FROM dbo.versioned`:                                      "1",
+		`SELECT CAST(COUNT(*) AS varchar(5)) FROM dbo.secret`:                                         "1",
+		`SELECT CAST(COUNT(*) AS varchar(5)) FROM sys.indexes WHERE name IN ('odd_cs', 'odd_off_ix')`: "0",
+	} {
+		if got := queryString(t, db, query); got != want {
+			t.Errorf("after restoring over itself, %s = %q, want %q", query, got, want)
+		}
+	}
+}

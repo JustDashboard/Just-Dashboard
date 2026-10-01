@@ -215,7 +215,11 @@ accounts retain partial results. Full table details and mutation preconditions u
   bytes past two thousand could not be written at all — is a PL/SQL block that builds the value in
   pieces (`oracleLongRow`); the hex goes through a variable because `HEXTORAW` of a long literal is
   evaluated when the block is compiled and takes seconds a piece. Tables are dropped `PURGE`, or each
-  restore leaves a copy of what it replaced in the recycle bin against the same quota. A dump is of one
+  restore leaves a copy of what it replaced in the recycle bin against the same quota. Oracle has no
+  `DROP … IF EXISTS` before 23, so its drops are unconditional and one that finds nothing is passed
+  over — but only that one (`dumpDropFoundNothing`): a drop refused because a session still holds rows
+  in a temporary table, or because the login may not make it, stops the restore there and says so,
+  where it used to surface a statement later as a name already taken. A dump is of one
   schema, the session's or the one named; a schema of the server's own (`oracle_maintained`) is refused,
   which is what an administrator's login is in unless told otherwise. The dialect-driven plan from the
   standard catalogue views remains only as the fallback for a server that speaks Postgres's protocol

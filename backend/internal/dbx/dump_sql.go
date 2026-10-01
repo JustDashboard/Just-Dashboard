@@ -658,7 +658,7 @@ func restoreGenericSQL(ctx context.Context, driver Driver, dsn, database, path s
 			// ordinary case for a restore into an empty database. Everything
 			// else stops: half a restore is not a restore, and continuing past
 			// a failed CREATE would fill the *previous* table with these rows.
-			if isDropStatement(statement) && !transactional {
+			if isDropStatement(statement) && !transactional && dumpDropFoundNothing(driver, err) {
 				dropped++
 				continue
 			}
@@ -690,6 +690,25 @@ func restoreGenericSQL(ctx context.Context, driver Driver, dsn, database, path s
 
 func isDropStatement(s string) bool {
 	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(s)), "DROP ")
+}
+
+// dumpDropFoundNothing reports whether a DROP failed because what it names is not
+// there. Oracle has no DROP … IF EXISTS before 23, so its dumps drop
+// unconditionally and that failure is expected; any other — a table another
+// session is using, a drop the login may not make — left the object standing,
+// and passing over it only moved the failure to the CREATE that followed,
+// which then said the name was taken and nothing about why.
+func dumpDropFoundNothing(driver Driver, err error) bool {
+	if driver != DriverOracle {
+		return true
+	}
+	// Table or view, sequence, index, object, materialized view: does not exist.
+	for _, code := range []string{"ORA-00942", "ORA-02289", "ORA-01418", "ORA-04043", "ORA-12003"} {
+		if strings.Contains(err.Error(), code) {
+			return true
+		}
+	}
+	return false
 }
 
 func truncateForMessage(s string) string {

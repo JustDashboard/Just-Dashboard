@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -345,5 +346,27 @@ func TestOracleDumpLongRowBuildsWhatALiteralCannotHold(t *testing.T) {
 		if got := oracleDumpIsBlock(statement); got != want {
 			t.Errorf("oracleDumpIsBlock(%q) = %v, want %v", statement, got, want)
 		}
+	}
+}
+
+// A DROP that failed because there was nothing to drop is passed over; one
+// that failed for any other reason left the object standing, and is where the
+// restore stops.
+func TestOracleDumpDropThatFoundNothing(t *testing.T) {
+	for message, nothing := range map[string]bool{
+		"ORA-00942: table or view does not exist":                                                true,
+		"ORA-02289: sequence does not exist":                                                     true,
+		"ORA-04043: object X does not exist":                                                     true,
+		"ORA-14452: attempt to create, alter or drop an index on temporary table already in use": false,
+		"ORA-01031: insufficient privileges":                                                     false,
+		"ORA-00054: resource busy and acquire with NOWAIT specified or timeout expired":          false,
+	} {
+		if got := dumpDropFoundNothing(DriverOracle, errors.New(message)); got != nothing {
+			t.Errorf("%q: found nothing = %v, want %v", message, got, nothing)
+		}
+	}
+	// The engines whose dumps drop IF EXISTS keep the latitude they had.
+	if !dumpDropFoundNothing(DriverMySQL, errors.New("anything")) || !dumpDropFoundNothing(DriverClickHouse, errors.New("anything")) {
+		t.Error("a failed DROP on an engine that drops IF EXISTS is no longer passed over")
 	}
 }

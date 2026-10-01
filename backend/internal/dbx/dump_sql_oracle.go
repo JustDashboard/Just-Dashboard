@@ -72,9 +72,10 @@ func planOracleDump(ctx context.Context, q dumpQueryer, schema string, sel dumpS
 		return strings.TrimSpace(text), err
 	}
 
-	// What is listed as a table and is not one to dump as one: the copy a
-	// dropped table leaves in the recycle bin, the storage behind a
-	// materialized view or its log, a nested table's, an index's own.
+	// What is listed as a table and is not one to dump as one: the storage
+	// behind a materialized view or its log, a nested table's, an index's own,
+	// and — on the versions that list it — the copy a dropped table leaves in
+	// the recycle bin.
 	rows, err := q.QueryContext(ctx, `
 	  SELECT t.table_name, t.temporary,
 	         CASE WHEN EXISTS (SELECT 1 FROM all_external_tables e
