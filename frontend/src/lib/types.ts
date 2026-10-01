@@ -1748,11 +1748,39 @@ export type DbDriver =
   "postgres" | "mysql" | "sqlite" | "sqlserver" | "clickhouse" | "oracle" | "mongodb" | "redis"
 
 /**
+ * The product behind a driver: MariaDB answers the `mysql` driver, Valkey the
+ * `redis` one. A driver's own product carries the driver's id.
+ */
+export type DbFlavor =
+  | DbDriver
+  | "timescaledb"
+  | "cockroachdb"
+  | "yugabytedb"
+  | "mariadb"
+  | "percona"
+  | "tidb"
+  | "valkey"
+  | "keydb"
+  | "dragonfly"
+  | "ferretdb"
+  | "azure-sql-edge"
+
+/**
+ * What a product can do, one flag per feature the pages gate on (`roles`,
+ * `sessions`, `dump`, …). A flag the server does not send is decided by the
+ * engine registry's own table (`components/database/engine.ts`), and nothing
+ * else reads these directly.
+ */
+export type DbCapabilities = Record<string, boolean | string>
+
+/**
  * What one engine can do, as the server reports it.
  *
- * The frontend deliberately keeps no table of its own: a tab that would 400 on
+ * The server's answer wins wherever it gives one: a page that would 400 on
  * every request should not be offered, and the only thing that actually knows
- * which those are is the dialect registry on the server.
+ * which those are is the dialect registry on the server. The fields a backend
+ * older than the capability table does not send are optional, and the engine
+ * registry answers for them until they arrive.
  */
 export type DbDriverInfo = {
   id: DbDriver
@@ -1763,6 +1791,12 @@ export type DbDriverInfo = {
   ddl: boolean
   columnTypes?: string[]
   filterOps?: string[]
+  defaultPort?: number
+  dsnExample?: string
+  /** The driver's own product. */
+  capabilities?: DbCapabilities
+  /** Every product the driver talks to, its own first. */
+  flavors?: { id: DbFlavor; label: string; capabilities: DbCapabilities }[]
 }
 
 export type DbConnection = {
@@ -1774,6 +1808,20 @@ export type DbConnection = {
   user: string
   database: string
   createdAt: string
+  /** What actually answered, once the server has asked it. */
+  flavor?: DbFlavor
+  /** The server's own description of itself, shortened: "PostgreSQL 16.4". */
+  version?: string
+  /** The operator's label for what the database is for: production, staging, … */
+  environment?: string
+  /** Protected: the dashboard refuses every change to its data or schema. */
+  readOnly?: boolean
+  notes?: string
+  /** Resolved for this driver and the flavour that answered. */
+  capabilities?: DbCapabilities
+  /** The saved row can no longer be opened; only edit and forget work on it. */
+  broken?: boolean
+  brokenReason?: string
 }
 
 /** One table, view or Mongo collection, as the schema browser lists it. */
