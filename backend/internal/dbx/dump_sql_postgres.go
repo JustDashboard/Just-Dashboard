@@ -117,11 +117,11 @@ func pgIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
-func pgLiteral(s string) string {
+func pgDumpLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-func pgRel(schema, name string) string { return pgIdent(schema) + "." + pgIdent(name) }
+func pgDumpRel(schema, name string) string { return pgIdent(schema) + "." + pgIdent(name) }
 
 func sortedSet(set map[string]bool) []string {
 	out := make([]string, 0, len(set))
@@ -165,7 +165,7 @@ func pgRelations(ctx context.Context, q dumpQueryer) ([]pgRelation, error) {
 			&r.bound, &r.partKey, &r.parent, &r.comment); err != nil {
 			return nil, err
 		}
-		r.rel = pgRel(r.schema, r.name)
+		r.rel = pgDumpRel(r.schema, r.name)
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -242,7 +242,7 @@ func pgEnums(ctx context.Context, q dumpQueryer, plan *dumpPlan, schemas map[str
 			enums = append(enums, enum{schema: schema, name: name})
 			last = &enums[len(enums)-1]
 		}
-		last.labels = append(last.labels, pgLiteral(label))
+		last.labels = append(last.labels, pgDumpLiteral(label))
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -256,7 +256,7 @@ func pgEnums(ctx context.Context, q dumpQueryer, plan *dumpPlan, schemas map[str
 		}
 		plan.before = append(plan.before, rawStmt(fmt.Sprintf(
 			"DO $jd$ BEGIN\n  CREATE TYPE %s AS ENUM (%s);\nEXCEPTION WHEN duplicate_object THEN NULL;\nEND $jd$",
-			pgRel(e.schema, e.name), strings.Join(e.labels, ", "))))
+			pgDumpRel(e.schema, e.name), strings.Join(e.labels, ", "))))
 	}
 	return nil
 }
@@ -414,10 +414,10 @@ func pgSequences(ctx context.Context, q dumpQueryer, plan *dumpPlan, wanted map[
 			// Nobody's in particular, and the dump is of particular tables.
 			continue
 		}
-		rel := pgRel(schema, name)
-		position := fmt.Sprintf("SELECT pg_catalog.setval(%s, %s, false)", pgLiteral(rel), start)
+		rel := pgDumpRel(schema, name)
+		position := fmt.Sprintf("SELECT pg_catalog.setval(%s, %s, false)", pgDumpLiteral(rel), start)
 		if last != "" {
-			position = fmt.Sprintf("SELECT pg_catalog.setval(%s, %s, true)", pgLiteral(rel), last)
+			position = fmt.Sprintf("SELECT pg_catalog.setval(%s, %s, true)", pgDumpLiteral(rel), last)
 		}
 		if depType == "i" {
 			// The sequence behind an identity column is made by the column.
@@ -433,7 +433,7 @@ func pgSequences(ctx context.Context, q dumpQueryer, plan *dumpPlan, wanted map[
 			}
 			plan.afterAll = append(plan.afterAll, stmt(fmt.Sprintf(
 				"SELECT pg_catalog.setval(pg_catalog.pg_get_serial_sequence(%s, %s), %s, %s)",
-				pgLiteral(table.rel), pgLiteral(ownerColumn), value, called)))
+				pgDumpLiteral(table.rel), pgDumpLiteral(ownerColumn), value, called)))
 			continue
 		}
 		create := fmt.Sprintf("CREATE SEQUENCE IF NOT EXISTS %s AS %s INCREMENT BY %s MINVALUE %s MAXVALUE %s START WITH %s CACHE %s",
@@ -505,7 +505,7 @@ func pgConstraintsAndIndexes(ctx context.Context, q dumpQueryer, plan *dumpPlan,
 			// back — where the table it belongs to is there to put it on.
 			foreign = append(foreign, rawStmt(fmt.Sprintf(
 				"DO $jd$ BEGIN\n  IF pg_catalog.to_regclass(%s) IS NOT NULL THEN\n    %s;\n  END IF;\nEND $jd$",
-				pgLiteral(r.rel), add)))
+				pgDumpLiteral(r.rel), add)))
 		case wanted[table]:
 			plan.after = append(plan.after, rawStmt(add))
 		}
@@ -648,7 +648,7 @@ func pgComments(ctx context.Context, q dumpQueryer, plan *dumpPlan, relations []
 		if !wanted[r.oid] || r.comment == "" || (r.kind != "r" && r.kind != "p") {
 			continue
 		}
-		plan.after = append(plan.after, stmt(fmt.Sprintf("COMMENT ON TABLE %s IS %s", r.rel, pgLiteral(r.comment))))
+		plan.after = append(plan.after, stmt(fmt.Sprintf("COMMENT ON TABLE %s IS %s", r.rel, pgDumpLiteral(r.comment))))
 	}
 	rows, err := q.QueryContext(ctx, `
 	  SELECT d.objoid::bigint, a.attname, d.description
@@ -673,7 +673,7 @@ func pgComments(ctx context.Context, q dumpQueryer, plan *dumpPlan, relations []
 			continue
 		}
 		plan.after = append(plan.after, stmt(fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s",
-			r.rel, pgIdent(column), pgLiteral(descr))))
+			r.rel, pgIdent(column), pgDumpLiteral(descr))))
 	}
 	return rows.Err()
 }

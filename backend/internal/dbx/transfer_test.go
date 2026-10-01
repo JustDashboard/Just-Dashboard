@@ -501,7 +501,7 @@ func TestDumpKindReadsTheFileNotItsName(t *testing.T) {
 		"pg_dump archive": write("renamed.txt", []byte("PGDMP\x01\x0e\x00")),
 		"SQL":             write("ours.sql", []byte(dumpHeader+"\n-- engine: mysql\n")),
 		"compressed SQL":  write("ours.sql.gz", gz(dumpHeader+"\n")),
-		"SQLite file":     write("data.bin", []byte(sqliteMagic+"rest")),
+		"SQLite file":     write("data.bin", []byte(sqliteFileHeader+"rest")),
 		"JSON Lines":      write("redis-db0.jsonl.gz", gz(`{"format":"jd-redis"}`+"\n")),
 	} {
 		if got := DumpKind(path); got != want {

@@ -140,12 +140,12 @@ func isScriptSpace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'
 }
 
-func isWordStart(c byte) bool {
+func scriptWordStart(c byte) bool {
 	return c == '_' || c >= 0x80 || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-func isWordPart(c byte) bool {
-	return isWordStart(c) || c == '$' || (c >= '0' && c <= '9')
+func scriptWordPart(c byte) bool {
+	return scriptWordStart(c) || c == '$' || (c >= '0' && c <= '9')
 }
 
 // --- Postgres ----------------------------------------------------------------
@@ -290,13 +290,13 @@ func (p *postgresScript) next() (scriptStatement, error) {
 				}
 			}
 			return st, nil
-		case isWordStart(c):
+		case scriptWordStart(c):
 			p.word(c)
 		case c >= '0' && c <= '9':
 			// A number takes its letters with it, so that the e of 1e5 is not
 			// read as the E before a string.
 			p.put(c)
-			for isWordPart(p.src.peek()) || p.src.peek() == '.' {
+			for scriptWordPart(p.src.peek()) || p.src.peek() == '.' {
 				n, _ := p.src.next()
 				p.put(n)
 			}
@@ -328,7 +328,7 @@ func (p *postgresScript) word(first byte) {
 			word[n] = c
 		}
 		n++
-		if !isWordPart(p.src.peek()) {
+		if !scriptWordPart(p.src.peek()) {
 			break
 		}
 		c, _ = p.src.next()
@@ -415,7 +415,7 @@ func (p *postgresScript) dollarQuoted() error {
 			end = i
 			break
 		}
-		if !isWordStart(c) && !(i > 0 && c >= '0' && c <= '9') {
+		if !scriptWordStart(c) && !(i > 0 && c >= '0' && c <= '9') {
 			return nil
 		}
 	}
@@ -951,7 +951,7 @@ func mysqlUse(statement string) (string, bool) {
 		case strings.HasPrefix(s, "*/"):
 			s = s[2:]
 		default:
-			if len(s) < 4 || !strings.EqualFold(s[:3], "use") || isWordPart(s[3]) {
+			if len(s) < 4 || !strings.EqualFold(s[:3], "use") || scriptWordPart(s[3]) {
 				return "", false
 			}
 			name := strings.TrimLeft(s[3:], " \t\r\n\f\v")

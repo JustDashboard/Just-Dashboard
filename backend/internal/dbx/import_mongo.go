@@ -27,8 +27,8 @@ import (
 // target in one step and keeps its indexes: until the whole file has arrived
 // and been accepted, the collection is exactly as it was.
 
-// mongoImportBatch is how many documents one insert carries.
-const mongoImportBatch = 500
+// mongoUploadBatch is how many documents one insert carries.
+const mongoUploadBatch = 500
 
 // ValidateMongoImport reads data as an import would and reports the first
 // thing wrong with it, without touching the server. It is what lets a caller
@@ -301,7 +301,7 @@ func MongoImportStream(ctx context.Context, client *mongo.Client, database, coll
 		}
 		batch = append(batch, doc)
 		origins = append(origins, at)
-		if len(batch) >= mongoImportBatch {
+		if len(batch) >= mongoUploadBatch {
 			if err := flush(); err != nil {
 				return nil, err
 			}

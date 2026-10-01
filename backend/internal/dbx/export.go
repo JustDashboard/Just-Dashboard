@@ -110,8 +110,8 @@ type ExportOptions struct {
 	Table  string
 }
 
-// queryer is the part of *sql.DB and *sql.Tx an export reads through.
-type queryer interface {
+// exportQueryer is the part of *sql.DB and *sql.Tx an export reads through.
+type exportQueryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
@@ -134,7 +134,7 @@ func StreamExport(ctx context.Context, db *sql.DB, query string, args []any, for
 // statement the engine refuses is an error the caller can still answer with,
 // not half a file. Past that point a failure is written into the file where the
 // format has somewhere to put it (see exportEncoder.finish) and returned.
-func streamExport(ctx context.Context, q queryer, query string, args []any, opts ExportOptions, w io.Writer) (int, bool, error) {
+func streamExport(ctx context.Context, q exportQueryer, query string, args []any, opts ExportOptions, w io.Writer) (int, bool, error) {
 	if !opts.Format.Valid() {
 		return 0, false, fmt.Errorf("unsupported export format %q", opts.Format)
 	}

@@ -974,8 +974,8 @@ func dumpSQLite(ctx context.Context, dsn, path, outDir string) (*DumpResult, err
 	}, nil
 }
 
-// sqliteMagic is the sixteen bytes every SQLite database file starts with.
-const sqliteMagic = "SQLite format 3\x00"
+// sqliteFileHeader is the sixteen bytes every SQLite database file starts with.
+const sqliteFileHeader = "SQLite format 3\x00"
 
 // restoreSQLite replaces the contents of the live database with a dump's. The
 // previous contents are kept alongside as <name>.bak-<stamp> rather than
@@ -1032,8 +1032,8 @@ func checkSQLiteFile(path string) error {
 		return err
 	}
 	defer f.Close()
-	head := make([]byte, len(sqliteMagic))
-	if _, err := io.ReadFull(f, head); err != nil || string(head) != sqliteMagic {
+	head := make([]byte, len(sqliteFileHeader))
+	if _, err := io.ReadFull(f, head); err != nil || string(head) != sqliteFileHeader {
 		return fmt.Errorf("%s is not a SQLite database file", filepath.Base(path))
 	}
 	return nil

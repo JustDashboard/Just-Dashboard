@@ -174,12 +174,12 @@ func DumpKind(path string) string {
 		}
 		return "archive"
 	}
-	head := make([]byte, len(sqliteMagic))
+	head := make([]byte, len(sqliteFileHeader))
 	if f, err := os.Open(path); err == nil {
 		n, _ := f.Read(head)
 		f.Close()
 		switch {
-		case string(head[:n]) == sqliteMagic:
+		case string(head[:n]) == sqliteFileHeader:
 			return "SQLite file"
 		case n >= 5 && string(head[:5]) == "PGDMP":
 			return "pg_dump archive"
