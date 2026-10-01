@@ -115,6 +115,7 @@ func (s *Server) handleDBRoles(w http.ResponseWriter, r *http.Request) error {
 			httpx.JSON(w, http.StatusOK, map[string]any{"roles": []dbx.Role{}, "supported": false, "reason": err.Error()})
 			return nil
 		}
+		roles = withoutACLSecrets(roles)
 	default:
 		pool, _, err := s.dbPool(ctx, conn.ID)
 		if err != nil {
@@ -129,32 +130,91 @@ func (s *Server) handleDBRoles(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// withoutACLSecrets drops the password entries from the ACL rule a Redis
+// account is listed with. ACL LIST prints each password's SHA-256 beside the
+// rule ("#5e88…"), and this list is on the read surface: a hash of a password
+// short enough to remember is as good as the password to anyone with a
+// wordlist. The rule's shape — which keys, which commands — is what the page
+// shows, and none of that is in the tokens removed here.
+func withoutACLSecrets(roles []dbx.Role) []dbx.Role {
+	for i := range roles {
+		for j, rule := range roles[i].MemberOf {
+			kept := []string{}
+			for _, token := range strings.Fields(rule) {
+				// "#hash" and ">password" add one, "!hash" and "<password"
+				// take one away; all four carry the secret itself.
+				if strings.HasPrefix(token, "#") || strings.HasPrefix(token, ">") ||
+					strings.HasPrefix(token, "!") || strings.HasPrefix(token, "<") {
+					continue
+				}
+				kept = append(kept, token)
+			}
+			roles[i].MemberOf[j] = strings.Join(kept, " ")
+		}
+	}
+	return roles
+}
+
+// roleRequest is a create or an alter. Every attribute an alter can change is
+// a pointer, because an alter changes exactly what was sent: a request that
+// carries only a password must leave a superuser a superuser. With plain
+// booleans a field that was absent and a field that was false were the same
+// thing, and a password change read as "and clear every attribute".
 type roleRequest struct {
 	Name       string `json:"name"`
 	Host       string `json:"host"`
 	Password   string `json:"password"`
 	Login      *bool  `json:"login"`
-	Superuser  bool   `json:"superuser"`
-	CreateDB   bool   `json:"createDb"`
-	CreateRole bool   `json:"createRole"`
-	ConnLimit  int    `json:"connectionLimit"`
+	Superuser  *bool  `json:"superuser"`
+	CreateDB   *bool  `json:"createDb"`
+	CreateRole *bool  `json:"createRole"`
+	// ConnLimit is -1 for unlimited and 0 for "leave it".
+	ConnLimit   int     `json:"connectionLimit"`
+	Inherit     *bool   `json:"inherit"`
+	Replication *bool   `json:"replication"`
+	BypassRLS   *bool   `json:"bypassRls"`
+	Locked      *bool   `json:"locked"`
+	ValidUntil  *string `json:"validUntil"`
 	// Database and Level, given on create, grant the new role that database
 	// in the same request — the one-step "make an account for this app".
 	Database string `json:"database"`
 	Level    string `json:"level"`
+	// Schema narrows that grant to one schema on PostgreSQL.
+	Schema string `json:"schema"`
 }
 
 func (req roleRequest) spec(create bool) dbx.RoleSpec {
-	login := true
-	if req.Login != nil {
-		login = *req.Login
+	flag := func(v *bool, def bool) bool {
+		if v == nil {
+			return def
+		}
+		return *v
 	}
 	return dbx.RoleSpec{
 		Name: strings.TrimSpace(req.Name), Host: strings.TrimSpace(req.Host),
 		Password: req.Password, SetPassword: req.Password != "" || create,
-		Login: login, Superuser: req.Superuser, CreateDB: req.CreateDB,
-		CreateRole: req.CreateRole, ConnLimit: req.ConnLimit,
+		// A new account signs in unless told otherwise; everything else is
+		// off unless asked for. On an alter the defaults are never read: the
+		// Set* fields say which of these the request carried.
+		Login: flag(req.Login, true), Superuser: flag(req.Superuser, false),
+		CreateDB: flag(req.CreateDB, false), CreateRole: flag(req.CreateRole, false),
+		ConnLimit: req.ConnLimit,
+		SetLogin:  req.Login != nil, SetSuperuser: req.Superuser != nil,
+		SetCreateDB: req.CreateDB != nil, SetCreateRole: req.CreateRole != nil,
+		Inherit: req.Inherit, Replication: req.Replication, BypassRLS: req.BypassRLS,
+		Locked: req.Locked, ValidUntil: req.ValidUntil,
 	}
+}
+
+// roleError renders what went wrong with an account operation: a request the
+// engine's accounts cannot express is the caller's to fix, anything else is
+// the server's answer.
+func roleError(err error) error {
+	var attr dbx.ErrRoleAttribute
+	if errors.As(err, &attr) {
+		return httpx.BadRequest("%v", err)
+	}
+	return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 }
 
 func (s *Server) handleDBRoleCreate(w http.ResponseWriter, r *http.Request) error {
@@ -172,16 +232,25 @@ func (s *Server) handleDBRoleCreate(w http.ResponseWriter, r *http.Request) erro
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	spec := req.spec(true)
+	// Before anything is made: an account created without part of what was
+	// asked for is worse than none, because the answer would still be "done".
+	if err := dbx.CheckRoleRequest(conn.Driver, spec, true); err != nil {
+		return roleError(err)
+	}
 	if err := s.withRoleClient(ctx, conn, dsn, admin,
 		func(a dbx.Admin, pool *sql.DB) error { return a.CreateRole(ctx, pool, spec) },
 		func(c *mongo.Client) error { return dbx.MongoCreateUser(ctx, c, spec) },
 		func(c *redis.Client) error { return dbx.RedisCreateUser(ctx, c, spec) },
 	); err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return roleError(err)
 	}
 	detail := map[string]any{"role": spec.Name, "superuser": spec.Superuser, "driver": conn.Driver}
+	out := map[string]any{"ok": true}
 	if req.Database != "" && req.Level != "" {
-		if err := s.grantRole(ctx, conn, dsn, admin, spec.Name, spec.Host, req.Database, dbx.GrantLevel(req.Level)); err != nil {
+		grant := dbx.DatabaseGrant{Role: spec.Name, Host: spec.Host, Database: req.Database,
+			Schema: strings.TrimSpace(req.Schema), Level: dbx.GrantLevel(req.Level)}
+		granted, err := s.grantRole(ctx, conn, dsn, admin, grant)
+		if err != nil {
 			// The account exists; say what was not done rather than roll
 			// back an act the operator may want to keep.
 			httpx.SetAudit(r, "database.role.create", conn.Name, detail)
@@ -189,10 +258,31 @@ func (s *Server) handleDBRoleCreate(w http.ResponseWriter, r *http.Request) erro
 				fmt.Sprintf("%s was created but could not be granted %s: %v", spec.Name, req.Database, err))
 		}
 		detail["database"], detail["level"] = req.Database, req.Level
+		grantOutcome(granted, detail, out)
 	}
 	httpx.SetAudit(r, "database.role.create", conn.Name, detail)
-	httpx.JSON(w, http.StatusCreated, map[string]any{"ok": true})
+	httpx.JSON(w, http.StatusCreated, out)
 	return nil
+}
+
+// grantOutcome copies what a database grant covered into the audit detail and
+// the response. The schemas it left alone are in both: an operator reading
+// either should not have to infer them from the statements.
+func grantOutcome(granted *dbx.GrantResult, detail, out map[string]any) {
+	detail["statements"], out["statements"] = granted.Statements, granted.Statements
+	if len(granted.Schemas) > 0 {
+		detail["schemas"], out["schemas"] = granted.Schemas, granted.Schemas
+	}
+	if len(granted.SkippedSchemas) > 0 {
+		names := make([]string, len(granted.SkippedSchemas))
+		for i, skipped := range granted.SkippedSchemas {
+			names[i] = skipped.Name
+		}
+		detail["skippedSchemas"], out["skippedSchemas"] = names, granted.SkippedSchemas
+	}
+	if len(granted.Notes) > 0 {
+		out["notes"] = granted.Notes
+	}
 }
 
 func (s *Server) handleDBRoleAlter(w http.ResponseWriter, r *http.Request) error {
@@ -200,7 +290,7 @@ func (s *Server) handleDBRoleAlter(w http.ResponseWriter, r *http.Request) error
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	req.Name = chi.URLParam(r, "name")
+	req.Name = httpx.URLParam(r, "name")
 	if req.Host == "" {
 		req.Host = r.URL.Query().Get("host")
 	}
@@ -211,21 +301,91 @@ func (s *Server) handleDBRoleAlter(w http.ResponseWriter, r *http.Request) error
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	spec := req.spec(false)
+	changes := spec.Changes()
+	// Checked here, for every engine, before the engine is asked: Redis and
+	// MongoDB read two fields of a request and ignore the rest, and an ignored
+	// "locked" answered 200 is an operator believing an account is shut.
+	if err := dbx.CheckRoleRequest(conn.Driver, spec, false); err != nil {
+		return roleError(err)
+	}
+	if err := ownAccountRefusal(conn, spec); err != nil {
+		return err
+	}
 	if err := s.withRoleClient(ctx, conn, dsn, admin,
 		func(a dbx.Admin, pool *sql.DB) error { return a.AlterRole(ctx, pool, spec) },
 		func(c *mongo.Client) error { return dbx.MongoAlterUser(ctx, c, spec) },
 		func(c *redis.Client) error { return dbx.RedisAlterUser(ctx, c, spec) },
 	); err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return roleError(err)
 	}
-	httpx.SetAudit(r, "database.role.alter", conn.Name,
-		map[string]any{"role": spec.Name, "password": spec.SetPassword, "superuser": spec.Superuser, "driver": conn.Driver})
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	// The names of what changed, never the password itself.
+	detail := map[string]any{"role": spec.Name, "password": spec.SetPassword, "superuser": spec.Superuser,
+		"changed": changes, "driver": conn.Driver}
+	out := map[string]any{"ok": true}
+	if spec.SetPassword && strings.EqualFold(spec.Name, conn.User) {
+		// The account this connection signs in with. Its saved password is
+		// now wrong, and every page of this database would fail on the next
+		// dial — so it is replaced, once the new one has been seen to work.
+		updated := s.resealOwnPassword(ctx, conn, dsn, spec.Password)
+		detail["connectionUpdated"], out["connectionUpdated"] = updated, updated
+	}
+	httpx.SetAudit(r, "database.role.alter", conn.Name, detail)
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
+// ownAccountRefusal refuses the changes that would cut the dashboard off from
+// the server it is making them on: the account this connection signs in with
+// may not be barred from signing in, nor demoted. The open pool would carry
+// on for a while and then every page of this database would fail on its next
+// dial, with nothing here able to undo it. Dropping that account is refused
+// for the same reason; the name is compared the same way, without the host,
+// because on MySQL which of a name's accounts the connection matched is the
+// server's to decide and refusing one too many costs a trip to the console.
+func ownAccountRefusal(conn *dbConnection, spec dbx.RoleSpec) error {
+	if conn.User == "" || !strings.EqualFold(spec.Name, conn.User) {
+		return nil
+	}
+	switch {
+	case (spec.SetLogin && !spec.Login) || (spec.Locked != nil && *spec.Locked):
+		return httpx.BadRequest("%s is the account this connection signs in with; it cannot be kept from signing in from here", spec.Name)
+	case spec.SetSuperuser && !spec.Superuser:
+		return httpx.BadRequest("%s is the account this connection signs in with; its administrator rights cannot be taken away from here", spec.Name)
+	}
+	return nil
+}
+
+// resealOwnPassword stores a connection's new password after its own account
+// was changed from here. The new connection string is dialled first: with
+// MySQL's user@host accounts the one that was altered need not be the one the
+// connection matches, and a string that does not open is not saved over one
+// that still might. It reports whether the saved connection was updated.
+func (s *Server) resealOwnPassword(ctx context.Context, conn *dbConnection, dsn, password string) bool {
+	if conn.Driver == dbx.DriverSQLite {
+		return false
+	}
+	next, err := refreshedDatabasePassword(conn.Driver, dsn, password)
+	if err != nil || next == dsn {
+		return false
+	}
+	if err := s.probeConnection(ctx, conn.Driver, next); err != nil {
+		return false
+	}
+	sealed, err := s.Sealer.Seal(next)
+	if err != nil {
+		return false
+	}
+	if _, err := s.Store.DB.ExecContext(ctx, `UPDATE db_connections SET dsn_enc = ? WHERE id = ?`, sealed, conn.ID); err != nil {
+		return false
+	}
+	// The pool was opened with the old password; its idle connections still
+	// work, and the next one it dials would not.
+	s.modules.dbs.Close(conn.ID)
+	return true
+}
+
 func (s *Server) handleDBRoleDrop(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
+	name := httpx.URLParam(r, "name")
 	host := r.URL.Query().Get("host")
 	admin, conn, dsn, err := s.dbAdmin(r)
 	if err != nil {
@@ -241,7 +401,7 @@ func (s *Server) handleDBRoleDrop(w http.ResponseWriter, r *http.Request) error 
 		func(c *mongo.Client) error { return dbx.MongoDropUser(ctx, c, name) },
 		func(c *redis.Client) error { return dbx.RedisDropUser(ctx, c, name) },
 	); err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return roleError(err)
 	}
 	httpx.SetAudit(r, "database.role.drop", conn.Name, map[string]any{"role": name, "host": host, "driver": conn.Driver})
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -252,14 +412,22 @@ type grantRequest struct {
 	Host     string `json:"host"`
 	Database string `json:"database"`
 	Level    string `json:"level"`
+	// Schema narrows the grant to one schema on PostgreSQL; empty covers
+	// every schema of the database that is not the engine's own.
+	Schema string `json:"schema"`
 }
 
+// handleDBRoleGrant hands a role a database at one of three levels.
+//
+// With ?preview=1 nothing runs: the statements come back with the schemas
+// they would reach and the ones they would leave alone, which on PostgreSQL
+// is the only way to know before the fact what "this database" will cover.
 func (s *Server) handleDBRoleGrant(w http.ResponseWriter, r *http.Request) error {
 	var req grantRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	name := chi.URLParam(r, "name")
+	name := httpx.URLParam(r, "name")
 	level := dbx.GrantLevel(req.Level)
 	if !level.Valid() {
 		return httpx.BadRequest("level must be read, write or all")
@@ -277,45 +445,66 @@ func (s *Server) handleDBRoleGrant(w http.ResponseWriter, r *http.Request) error
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	if err := s.grantRole(ctx, conn, dsn, admin, name, req.Host, database, level); err != nil {
+	preview := r.URL.Query().Get("preview") == "1"
+	if preview {
+		// Nothing changes, whether it answers or fails.
+		httpx.SkipAudit(r)
+	}
+	grant := dbx.DatabaseGrant{Role: name, Host: req.Host, Database: database, Schema: strings.TrimSpace(req.Schema),
+		Level: level, Preview: preview}
+	granted, err := s.grantRole(ctx, conn, dsn, admin, grant)
+	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
-	httpx.SetAudit(r, "database.role.grant", conn.Name,
-		map[string]any{"role": name, "database": database, "level": string(level), "driver": conn.Driver})
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	detail := map[string]any{"role": name, "database": database, "schema": grant.Schema, "level": string(level),
+		"driver": conn.Driver}
+	out := map[string]any{}
+	grantOutcome(granted, detail, out)
+	if preview {
+		out["preview"] = true
+		httpx.JSON(w, http.StatusOK, out)
+		return nil
+	}
+	out["ok"] = true
+	httpx.SetAudit(r, "database.role.grant", conn.Name, detail)
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
 // grantRole hands a role a database, connected to that database where the
-// engine grants from inside it. The sibling pool is opened for the request
-// and closed with it rather than cached: it is one statement, and a pool per
-// database an operator ever granted would outlive its use.
-func (s *Server) grantRole(ctx context.Context, conn *dbConnection, dsn string, admin dbx.Admin,
-	role, host, database string, level dbx.GrantLevel) error {
+// engine grants from inside it, and returns what ran and what it covered. The
+// sibling pool is opened for the request and closed with it rather than
+// cached: it is one transaction, and a pool per database an operator ever
+// granted would outlive its use.
+func (s *Server) grantRole(ctx context.Context, conn *dbConnection, dsn string, admin dbx.Admin, grant dbx.DatabaseGrant) (*dbx.GrantResult, error) {
 	switch conn.Driver {
 	case dbx.DriverMongo:
+		// A built-in role on the database: there is no statement to show.
+		if grant.Preview {
+			return &dbx.GrantResult{Statements: []string{}}, nil
+		}
 		client, err := dbx.MongoClient(ctx, dsn)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer client.Disconnect(context.Background())
-		return dbx.MongoGrant(ctx, client, role, database, level)
+		return &dbx.GrantResult{Statements: []string{}}, dbx.MongoGrant(ctx, client, grant.Role, grant.Database, grant.Level)
 	case dbx.DriverRedis:
-		return errors.New("Redis grants are ACL rules; edit the user's rule instead")
+		return nil, errors.New("Redis grants are ACL rules; edit the user's rule instead")
 	}
-	if admin.GrantNeedsDatabase() && database != conn.Database {
-		db, err := dbx.OpenDatabase(ctx, conn.Driver, dsn, database)
+	if admin.GrantNeedsDatabase() && grant.Database != conn.Database {
+		db, err := dbx.OpenDatabase(ctx, conn.Driver, dsn, grant.Database)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer db.Close()
-		return admin.Grant(ctx, db, role, host, database, level)
+		return admin.Grant(ctx, db, grant)
 	}
 	pool, err := s.modules.dbs.Pool(ctx, conn.ID, conn.Driver, dsn)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return admin.Grant(ctx, pool, role, host, database, level)
+	return admin.Grant(ctx, pool, grant)
 }
 
 // withRoleClient runs the SQL, Mongo or Redis form of one account operation,
@@ -546,7 +735,7 @@ func (s *Server) handleDBExtensionCreate(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleDBExtensionDrop(w http.ResponseWriter, r *http.Request) error {
-	name := chi.URLParam(r, "name")
+	name := httpx.URLParam(r, "name")
 	admin, conn, _, err := s.dbAdmin(r)
 	if err != nil {
 		return err
@@ -678,39 +867,122 @@ func (s *Server) handleDBAdvisor(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
-	// The one finding no catalogue can make: where the server is reachable
-	// from. It is read here, beside the engine's own, so the page is one list.
-	if p := httpx.MustPrincipal(r); p.Can(auth.CapSystemAdmin) {
-		_, dsn, err := s.dbConnRow(ctx, id)
-		if err == nil {
-			access := s.describeDBAccess(ctx, conn, dsn)
-			if access.Exposure == exposurePublic && (!access.Firewall.Active || access.Firewall.Open) {
-				report.Findings = append([]dbx.Advice{{
-					ID: "published-everywhere", Level: "warning", Category: "security",
-					Title:  "The server is reachable from the internet",
-					Detail: "Its port is published on every interface and the firewall lets it through, so the only thing between the internet and the data is the password.",
-					Advice: "Keep it if applications elsewhere need it and the passwords are strong; otherwise switch it to this server only under Connection.",
-				}}, report.Findings...)
-			}
+	// The findings no catalogue can make: where the server is reachable
+	// from, whether anything would bring it back, and what its container is
+	// allowed to take. They are read here, beside the engine's own, so the
+	// page is one list.
+	panel, silences := s.panelAdvice(ctx, r, conn)
+	report.Findings = append(panel, report.Findings...)
+	report.Silences = append(report.Silences, silences...)
+	dbx.SortAdvice(report.Findings)
+	// A finding names the page its fix is made on by that page's own name;
+	// which connection it belongs to is only known here.
+	for i := range report.Findings {
+		if link := report.Findings[i].Link; link != "" {
+			report.Findings[i].Link = fmt.Sprintf("/databases/%d/%s", id, link)
 		}
 	}
 	httpx.JSON(w, http.StatusOK, report)
 	return nil
 }
 
+// dbBackupStaleAfter is how old the newest dump may be before the advisor
+// says so. A week: long enough that a weekly schedule never trips it, short
+// enough that a schedule which stopped is noticed before the dump is needed.
+const dbBackupStaleAfter = 7 * 24 * time.Hour
+
+// panelAdvice is what this dashboard knows about a database that the
+// database does not: its dumps, its published port, its container's limits.
+//
+// The dumps are read by anyone who may read the backups list. The port and
+// the container are read through the same calls as the access page, which
+// lists containers and the firewall and is an administrator's; for everyone
+// else those two are named as not assessed rather than left out, so their
+// absence does not read as a clean result.
+func (s *Server) panelAdvice(ctx context.Context, r *http.Request, conn *dbConnection) ([]dbx.Advice, []string) {
+	out := []dbx.Advice{}
+	silences := []string{}
+
+	database := []dbx.AdviceTarget{{Kind: "database", Name: conn.Name}}
+	switch newest := s.newestDump(conn.Name); {
+	case newest == nil:
+		out = append(out, dbx.Advice{
+			ID: "no-backup", Level: "warning", Category: dbx.AdviceReliability,
+			Title:   "No backup of this database has been taken from here",
+			Detail:  "Nothing in this dashboard's backup directory would bring the database back after a bad migration, a dropped table or a lost disk. A backup taken by some other tool is not seen here.",
+			Advice:  "Take one now, and schedule them under Backups.",
+			Targets: database, Link: "backups",
+		})
+	case time.Since(*newest) > dbBackupStaleAfter:
+		days := int(time.Since(*newest).Hours() / 24)
+		out = append(out, dbx.Advice{
+			ID: "stale-backup", Level: "warning", Category: dbx.AdviceReliability,
+			Title:   fmt.Sprintf("The newest backup is %d days old", days),
+			Detail:  "Restoring it would lose everything written since. A schedule that stopped running looks exactly like this.",
+			Advice:  "Take a backup now, and check the schedule under Backups is still running.",
+			Targets: database, Link: "backups",
+		})
+	}
+
+	if p := httpx.MustPrincipal(r); !p.Can(auth.CapSystemAdmin) {
+		silences = append(silences, "Where the server is reachable from, and its container's limits, are assessed for an administrator only.")
+		return out, silences
+	}
+	_, dsn, err := s.dbConnRow(ctx, conn.ID)
+	if err != nil {
+		return out, silences
+	}
+	access := s.describeDBAccess(ctx, conn, dsn)
+	if access.Exposure == exposurePublic && (!access.Firewall.Active || access.Firewall.Open) {
+		out = append(out, dbx.Advice{
+			ID: "published-everywhere", Level: "warning", Category: dbx.AdviceSecurity,
+			Title:   "The server is reachable from the internet",
+			Detail:  "Its port is published on every interface and the firewall lets it through, so the only thing between the internet and the data is the password.",
+			Advice:  "Keep it if applications elsewhere need it and the passwords are strong; otherwise switch it to this server only under Settings.",
+			Targets: []dbx.AdviceTarget{{Kind: "server", Name: fmt.Sprintf("port %d", access.Port)}}, Link: "settings",
+		})
+	}
+	if access.Container != "" && s.modules.docker != nil {
+		// The container's own ceiling. Without one a database's cache grows
+		// until the kernel has to kill something, and what it kills is
+		// whichever process is largest — which may not be the database.
+		if spec, err := s.modules.docker.SpecOf(ctx, access.Container); err != nil {
+			silences = append(silences, "The container's limits could not be read: "+err.Error())
+		} else if spec.Limits.MemoryMB == 0 {
+			out = append(out, dbx.Advice{
+				ID: "container-no-memory-limit", Level: "notice", Category: dbx.AdviceReliability,
+				Title:   "The container has no memory limit",
+				Detail:  "The server may take as much memory as the machine has. When the machine runs out the kernel kills a process to get some back, and it chooses by size, not by which one grew.",
+				Advice:  "Give the container a memory limit a little above what the database is configured to use, so it is the one stopped and restarted rather than its neighbours.",
+				Targets: []dbx.AdviceTarget{{Kind: "container", Name: access.Container}},
+			})
+		}
+	}
+	return out, silences
+}
+
+// handleDBStatements lists the statements that cost the server most. sort
+// and limit choose which and how many; both are closed, because the sort
+// becomes a column name.
 func (s *Server) handleDBStatements(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
 	id, err := parseID(r)
 	if err != nil {
 		return err
 	}
+	q := r.URL.Query()
 	pool, conn, err := s.dbPool(r.Context(), id)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	report, err := dbx.TopStatements(ctx, pool, conn.Driver, atoiDefault(r.URL.Query().Get("limit"), 25))
+	report, err := dbx.TopStatements(ctx, pool, conn.Driver,
+		dbx.StatementsOptions{Sort: strings.TrimSpace(q.Get("sort")), Limit: atoiDefault(q.Get("limit"), 0)})
+	var bad dbx.ErrBadStatementsOption
+	if errors.As(err, &bad) {
+		return httpx.BadRequest("%v", err)
+	}
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}

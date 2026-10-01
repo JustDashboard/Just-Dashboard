@@ -594,11 +594,9 @@ func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) error {
 		httpx.JSON(w, http.StatusOK, map[string]any{"server": info})
 		return nil
 	}
-	if _, _, err := s.dbPool(r.Context(), id); err != nil {
-		return err
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"pool": s.modules.dbs.Stats(id)})
-	return nil
+	// A SQL engine answers with a snapshot of its own counters, and the
+	// pool's beside them where it always was.
+	return s.dbSQLStats(w, r, id)
 }
 
 func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {
