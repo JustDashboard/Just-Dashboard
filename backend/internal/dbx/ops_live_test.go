@@ -3175,9 +3175,25 @@ func TestLiveOpsOracle(t *testing.T) {
 		}
 		if wait == nil || wait.BlockingPID != holderPID || !strings.HasSuffix(wait.Object, ".JD_B3_OPS_T") ||
 			wait.LockType != "row (transaction)" || wait.Mode != "exclusive" || wait.BlockingState != "idle in transaction" ||
-			!strings.Contains(wait.WaitingQuery, "jd_b3_ops_t") || !strings.Contains(wait.BlockingQuery, "jd_b3_ops_t") ||
-			wait.WaitingUser == "" || wait.BlockingUser == "" {
+			!strings.Contains(wait.WaitingQuery, "jd_b3_ops_t") || wait.WaitingUser == "" || wait.BlockingUser == "" {
 			t.Fatalf("wait: %+v in %+v", wait, locks.Waits)
+		}
+		// What the blocker last ran is the shared pool's to keep. A server
+		// short of memory lets a statement go the moment nothing is running
+		// it, and then nobody can say what the blocker did: an empty
+		// statement is the true answer there, and only there.
+		if !strings.Contains(wait.BlockingQuery, "jd_b3_ops_t") {
+			var kept int
+			if err := db.QueryRowContext(ctx, `
+			  SELECT COUNT(*) FROM v$session s JOIN v$sql q
+			    ON q.sql_id = NVL(s.sql_id, s.prev_sql_id) AND q.child_number = NVL(s.sql_child_number, s.prev_child_number)
+			  WHERE TO_CHAR(s.sid) || ',' || TO_CHAR(s.serial#) = :1`, holderPID).Scan(&kept); err != nil {
+				t.Fatal(err)
+			}
+			if wait.BlockingQuery != "" || kept > 0 {
+				t.Fatalf("the blocker's statement reads %q, and the shared pool holds %d of it", wait.BlockingQuery, kept)
+			}
+			t.Log("the server had already let the blocker's statement go; its wait is listed without one")
 		}
 		var held, asked bool
 		for _, l := range locks.Locks {
@@ -3499,23 +3515,26 @@ func TestLiveOpsOracle(t *testing.T) {
 	// shape.
 	t.Run("statements", func(t *testing.T) {
 		const probe = `SELECT COUNT(*) FROM jd_b3_ops_t WHERE v = 424242 AND 'jd-b3-literal' = w`
-		for i := 0; i < 3; i++ {
-			opsMustExec(t, db, probe)
-		}
 		var mine *Statement
 		var report *StatementsReport
-		waitFor(t, "the probe to reach v$sqlstats", func() bool {
+		// The statement is run until three of its runs are counted together.
+		// A server short of memory lets a statement go between two runs of
+		// it and counts from nothing when it comes back, so three runs are
+		// not always a count of three.
+		waitFor(t, "three runs of the probe to be counted in v$sqlstats", func() bool {
+			opsMustExec(t, db, probe)
 			var err error
 			report, err = TopStatements(ctx, db, DriverOracle, StatementsOptions{Sort: StatementsByCalls, Limit: 200})
 			if err != nil {
 				t.Fatal(err)
 			}
+			mine = nil
 			for i := range report.Statements {
 				if strings.Contains(report.Statements[i].Query, "FROM jd_b3_ops_t WHERE v = ? AND ? = w") {
 					mine = &report.Statements[i]
 				}
 			}
-			return mine != nil
+			return mine != nil && mine.Calls >= 3
 		})
 		if !report.Supported || report.Resettable || report.TotalMs <= 0 {
 			t.Fatalf("report: supported %v resettable %v total %v reason %q", report.Supported, report.Resettable, report.TotalMs, report.Reason)
