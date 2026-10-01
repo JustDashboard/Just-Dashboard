@@ -391,14 +391,15 @@ func TestORMRequestOptions(t *testing.T) {
 		req  ORMRequest
 		want string
 	}{
-		"unknown target":        {ORMRequest{Target: "hibernate"}, `unsupported ORM target "hibernate"`},
-		"switch of another":     {ORMRequest{Target: ORMTypeScript, Relations: ormYes()}, `option "relations" does not apply to the TypeScript types target`},
-		"choice of another":     {ORMRequest{Target: ORMSQL, Naming: "camel"}, `option "naming" does not apply to the SQL target`},
-		"choice out of range":   {ORMRequest{Target: ORMGoStructs, Nulls: "maybe"}, "nulls must be one of sql, pointer"},
-		"prisma version":        {ORMRequest{Target: ORMPrisma, PrismaVersion: "5"}, "prismaVersion must be one of 6, 7"},
-		"package with a space":  {ORMRequest{Target: ORMGorm, Package: "my models"}, "package must be a lower-case Go package name"},
-		"package with a quote":  {ORMRequest{Target: ORMGorm, Package: `a"b`}, "package must be a lower-case Go package name"},
-		"package that is upper": {ORMRequest{Target: ORMGorm, Package: "Models"}, "package must be a lower-case Go package name"},
+		"unknown target":         {ORMRequest{Target: "hibernate"}, `unsupported ORM target "hibernate"`},
+		"switch of another":      {ORMRequest{Target: ORMTypeScript, Relations: ormYes()}, `option "relations" does not apply to the TypeScript types target`},
+		"choice of another":      {ORMRequest{Target: ORMSQL, Naming: "camel"}, `option "naming" does not apply to the SQL target`},
+		"choice out of range":    {ORMRequest{Target: ORMGoStructs, Nulls: "maybe"}, "nulls must be one of sql, pointer"},
+		"prisma version":         {ORMRequest{Target: ORMPrisma, PrismaVersion: "5"}, "prismaVersion must be one of 6, 7"},
+		"package with a space":   {ORMRequest{Target: ORMGorm, Package: "my models"}, "package must be a lower-case Go package name"},
+		"package with a quote":   {ORMRequest{Target: ORMGorm, Package: `a"b`}, "package must be a lower-case Go package name"},
+		"package that is upper":  {ORMRequest{Target: ORMGorm, Package: "Models"}, "package must be a lower-case Go package name"},
+		"package that is a word": {ORMRequest{Target: ORMGoStructs, Package: "func"}, "package must be a lower-case Go package name"},
 	} {
 		_, err := c.req.Options()
 		if err == nil || !errors.Is(err, ErrORMRequest) || ORMRequestMessage(err) != c.want {

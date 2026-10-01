@@ -3,6 +3,7 @@ package dbx
 import (
 	"errors"
 	"fmt"
+	"go/token"
 	"regexp"
 	"strings"
 )
@@ -232,7 +233,8 @@ func (r ORMRequest) Options() (ORMOptions, error) {
 			return ORMOptions{}, err
 		}
 	}
-	if o.Package != "" && !ormPackageRe.MatchString(o.Package) {
+	// A keyword fits the pattern and is not a name: `package func` does not parse.
+	if o.Package != "" && (!ormPackageRe.MatchString(o.Package) || token.IsKeyword(o.Package)) {
 		return ORMOptions{}, ormRequestErrorf("package must be a lower-case Go package name")
 	}
 	return o, nil

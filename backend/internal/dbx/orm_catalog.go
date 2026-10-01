@@ -319,10 +319,6 @@ func (l *ormLoader) facts(schemas []string) *ormFacts {
 	return f
 }
 
-func (f *ormFacts) column(table, name string) ormColumnFact {
-	return f.columns[table][name]
-}
-
 func (f *ormFacts) setColumn(table, name string, fact ormColumnFact) {
 	if f.columns[table] == nil {
 		f.columns[table] = map[string]ormColumnFact{}
