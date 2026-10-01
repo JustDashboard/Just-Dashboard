@@ -410,6 +410,12 @@ func (s *Server) handleMongoCommand(w http.ResponseWriter, r *http.Request) erro
 		detail["target"] = verdict.Target
 	}
 	httpx.SetAudit(r, "database.mongo.command", conn.Name, detail)
+	// A protected connection runs reads only. The guard in front of the
+	// routes classified the command; the verdict here has also been through
+	// the check of what the command is aimed at, which can only raise it.
+	if conn.ReadOnly && verdict.Class != dbx.MongoClassRead {
+		return protectedRefusal("this connection is protected, and %s", mongoConsoleSentence(verdict))
+	}
 	// Everything the verdict demands is settled before the server is
 	// dialled, so a refused command never reaches it.
 	p := httpx.MustPrincipal(r)

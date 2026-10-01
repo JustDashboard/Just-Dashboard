@@ -12,39 +12,171 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
-// The routes that stay open on a protected connection, written out by hand a
-// second time. A test that read them from protectedRoutesAllowed would pass
-// just as happily the day somebody added the wrong one to it; this way the
-// list in the handler and the list here have to be changed together, by
-// somebody who then has to say in a review why a route that changes a
-// database belongs on it.
-var protectedStaysOpen = map[string]bool{
-	"PUT ":                  true,
-	"DELETE ":               true,
-	"PUT /access":           true,
-	"POST /power":           true,
-	"POST /backup":          true,
-	"POST /queries":         true,
-	"DELETE /queries/{qid}": true,
-	"PUT /diagram":          true,
-	"DELETE /diagram":       true,
-	"POST /classify":        true,
-	"POST /orm":             true,
-	"POST /rows/sql":        true,
-	"POST /explain":         true,
-	"POST /query":           true,
-	"POST /aggregate":       true,
+// What a protected connection does with a route that is not a read.
+const (
+	// staysOpen: let through whatever it carries. It does not change the
+	// database.
+	staysOpen = "open"
+	// byContent: a read or a write by what the body carries; the check reads
+	// it and lets the read through.
+	byContent = "by content"
+	// previewOnly: refused, and let through with ?preview=1, which shows the
+	// statement and runs nothing.
+	previewOnly = "preview only"
+	// isRefused: changes data, schema, accounts or the server. Refused.
+	isRefused = "refused"
+)
+
+// Every route under /databases/{id} that is not a read, and what a protected
+// connection does with it, written out by hand a second time. A test that
+// read the answers from protectedRoutesAllowed would pass just as happily the
+// day somebody added the wrong route to it; this way the list in the handler
+// and the list here have to be changed together, by somebody who then has to
+// say in a review why a route that changes a database belongs on it. And a
+// route that is on neither fails the test below: it is refused all the same,
+// and somebody still has to decide that it should be.
+var protectedRouteVerdicts = map[string]string{
+	// The connection's own record, its server's reach and its power.
+	"PUT ":          staysOpen,
+	"DELETE ":       staysOpen,
+	"PUT /access":   staysOpen,
+	"POST /power":   staysOpen,
+	"PUT /settings": isRefused,
+	// Dumps are files on this machine: taking one, adding one made elsewhere
+	// and deleting one. Loading one back, importing a file and copying into a
+	// new database write to a server.
+	"POST /backup":         staysOpen,
+	"POST /backups/upload": staysOpen,
+	"DELETE /backups":      staysOpen,
+	"POST /restore":        isRefused,
+	"POST /copy":           isRefused,
+	"POST /import":         isRefused,
+	"POST /import/upload":  isRefused,
+	"DELETE /database":     isRefused,
+	// The dashboard's own state about the connection.
+	"POST /queries":         staysOpen,
+	"PUT /queries/{qid}":    staysOpen,
+	"DELETE /queries/{qid}": staysOpen,
+	"PUT /diagram":          staysOpen,
+	"DELETE /diagram":       staysOpen,
+	// The query runner and what reads through a POST.
+	"POST /classify":     staysOpen,
+	"POST /orm":          staysOpen,
+	"POST /rows/sql":     staysOpen,
+	"POST /query/cancel": staysOpen,
+	"POST /explain":      byContent,
+	"POST /query":        byContent,
+	"POST /script":       byContent,
+	"POST /export/query": byContent,
+	// Rows: a change set can be shown as its statements and not applied.
+	"POST /changes": byContent,
+	"POST /rows":    isRefused,
+	"PATCH /rows":   isRefused,
+	"DELETE /rows":  isRefused,
+	// Structure: every form can show its statement and run none.
+	"POST /ddl/table":         previewOnly,
+	"DELETE /ddl/table":       previewOnly,
+	"POST /ddl/rename":        previewOnly,
+	"POST /ddl/truncate":      previewOnly,
+	"POST /ddl/column":        previewOnly,
+	"PATCH /ddl/column":       previewOnly,
+	"DELETE /ddl/column":      previewOnly,
+	"POST /ddl/index":         previewOnly,
+	"DELETE /ddl/index":       previewOnly,
+	"POST /ddl/foreign-key":   previewOnly,
+	"DELETE /ddl/foreign-key": previewOnly,
+	"POST /ddl/constraint":    previewOnly,
+	"DELETE /ddl/constraint":  previewOnly,
+	"POST /ddl/view":          previewOnly,
+	"DELETE /ddl/view":        previewOnly,
+	"POST /ddl/schema":        previewOnly,
+	"DELETE /ddl/schema":      previewOnly,
+	"POST /ddl/comment":       previewOnly,
+	"POST /ddl/enum":          previewOnly,
+	"POST /ddl/enum/value":    previewOnly,
+	// Watching a server: stopping work in flight stays possible, and a
+	// consistency check; everything that changes the server does not.
+	"POST /activity/cancel":  staysOpen,
+	"POST /activity/kill":    staysOpen,
+	"POST /maintenance":      byContent,
+	"POST /statements/reset": isRefused,
+	// Accounts, databases and extensions on the server.
+	"POST /server/roles":                          isRefused,
+	"PUT /server/roles/{name}":                    isRefused,
+	"DELETE /server/roles/{name}":                 isRefused,
+	"POST /server/roles/{name}/grant":             isRefused,
+	"POST /server/roles/{name}/privileges":        isRefused,
+	"POST /server/roles/{name}/privileges/revoke": isRefused,
+	"POST /server/databases":                      isRefused,
+	"POST /server/databases/connect":              isRefused,
+	"POST /server/extensions":                     isRefused,
+	"DELETE /server/extensions/{name}":            isRefused,
+	// Redis: the console runs a read, the bulk action counts, a client can be
+	// disconnected. Keys, streams, accounts and configuration are writes.
+	"POST /redis/classify":       staysOpen,
+	"POST /redis/command":        byContent,
+	"POST /keys/bulk":            byContent,
+	"POST /redis/clients/kill":   staysOpen,
+	"POST /keys/value":           isRefused,
+	"POST /keys/expire":          isRefused,
+	"POST /keys/persist":         isRefused,
+	"POST /keys/rename":          isRefused,
+	"POST /keys/copy":            isRefused,
+	"DELETE /keys":               isRefused,
+	"POST /keys/stream/groups":   isRefused,
+	"DELETE /keys/stream/groups": isRefused,
+	"POST /keys/stream/ack":      isRefused,
+	"POST /keys/stream/trim":     isRefused,
+	"POST /redis/publish":        isRefused,
+	"POST /redis/save":           isRefused,
+	"POST /redis/slowlog/reset":  isRefused,
+	"PUT /redis/config":          isRefused,
+	"PUT /redis/acl/{name}":      isRefused,
+	"DELETE /redis/acl/{name}":   isRefused,
+	// MongoDB: the reads that are POSTs because a filter is a document, the
+	// console and the pipeline when they read, an update or a delete that
+	// only counts, and stopping an operation.
+	"POST /mongo/find":               staysOpen,
+	"POST /mongo/count":              staysOpen,
+	"POST /mongo/document":           staysOpen,
+	"POST /mongo/explain":            staysOpen,
+	"POST /mongo/aggregate/preview":  staysOpen,
+	"POST /mongo/schema":             staysOpen,
+	"POST /mongo/validation/check":   staysOpen,
+	"POST /mongo/command/classify":   staysOpen,
+	"POST /mongo/killop":             staysOpen,
+	"POST /aggregate":                byContent,
+	"POST /mongo/command":            byContent,
+	"PATCH /mongo/documents":         byContent,
+	"DELETE /mongo/documents":        byContent,
+	"POST /mongo/documents":          isRefused,
+	"PUT /mongo/documents":           isRefused,
+	"POST /mongo/documents/clone":    isRefused,
+	"POST /mongo/collections":        isRefused,
+	"PATCH /mongo/collections":       isRefused,
+	"DELETE /mongo/collections":      isRefused,
+	"POST /mongo/collections/rename": isRefused,
+	"POST /mongo/indexes":            isRefused,
+	"PATCH /mongo/indexes":           isRefused,
+	"DELETE /mongo/indexes":          isRefused,
+	"PUT /mongo/validation":          isRefused,
+	"PUT /mongo/profiler":            isRefused,
+	"POST /mongo/users":              isRefused,
+	"PUT /mongo/users":               isRefused,
+	"DELETE /mongo/users":            isRefused,
+	"POST /mongo/users/grant":        isRefused,
+	"POST /mongo/users/revoke":       isRefused,
+	// The first document browser's writes.
+	"POST /documents":     isRefused,
+	"PATCH /documents":    isRefused,
+	"DELETE /documents":   isRefused,
+	"POST /collections":   isRefused,
+	"DELETE /collections": isRefused,
 }
 
-// protectedNotYetRouted are entries the allowlist carries for routes the
-// workbench adds — editing a saved query, cancelling one's own running
-// query, a script of statements. Each is removed from here when its route
-// arrives, at which point the test above starts holding it to the list.
-var protectedNotYetRouted = map[string]bool{
-	"PUT /queries/{qid}": true,
-	"POST /query/cancel": true,
-	"POST /script":       true,
-}
+// letsThrough reports whether a route can be reached at all on a protected
+// connection without a flag in its address.
+func letsThrough(verdict string) bool { return verdict == staysOpen || verdict == byContent }
 
 const connectionRoutePrefix = "/api/v1/databases/{id}"
 
@@ -105,10 +237,11 @@ func refusal(t *testing.T, s *Server, method, path, body string) string {
 }
 
 // TestProtectionCoversEveryMutatingRoute walks the real router. Every route
-// that is not a read is either on the hand-written list above or refused on a
-// protected connection — including the ones nobody has written yet, which is
-// the property the middleware exists for: a mutating route added to any
-// database file tomorrow is refused until it is put on both lists.
+// that is not a read has an answer in the hand-written list above, and the
+// middleware gives that answer — including for the routes nobody has written
+// yet, which is the property the middleware exists for: a mutating route
+// added to any database file tomorrow is refused, and fails this test until
+// somebody has written down that it should be.
 func TestProtectionCoversEveryMutatingRoute(t *testing.T) {
 	s := testServer(t)
 	protected := protectTestConnection(t, s, "protected", true)
@@ -119,17 +252,34 @@ func TestProtectionCoversEveryMutatingRoute(t *testing.T) {
 		key := rt.method + " " + strings.TrimPrefix(rt.pattern, connectionRoutePrefix)
 		seen[key] = true
 		rest := strings.TrimPrefix(rt.path, "/api/v1/databases/1")
+		verdict, decided := protectedRouteVerdicts[key]
+		if !decided {
+			t.Errorf("%s is a route that changes something and is not in this test's list: decide what a protected connection does with it", key)
+			continue
+		}
 
-		_, allowed := protectedRule(rt.method, rest)
-		if allowed != protectedStaysOpen[key] {
-			t.Errorf("%s: allowed on a protected connection = %v, the list in this test says %v", key, allowed, protectedStaysOpen[key])
+		rule, allowed := protectedRule(rt.method, rest)
+		if allowed != letsThrough(verdict) {
+			t.Errorf("%s: allowed on a protected connection = %v, the list in this test says %q", key, allowed, verdict)
+		}
+		if allowed && (rule.check != nil) != (verdict == byContent) {
+			t.Errorf("%s: has a check of its body = %v, the list in this test says %q", key, rule.check != nil, verdict)
 		}
 		// The same answer from the middleware's own entry point, for a route
 		// with nothing to read in its body.
-		if rule, _ := protectedRule(rt.method, rest); rule.check == nil {
-			refused := refusal(t, s, rt.method, pathf("/api/v1/databases/%d", protected)+rest, `{}`) != ""
+		path := pathf("/api/v1/databases/%d", protected) + rest
+		if rule.check == nil {
+			refused := refusal(t, s, rt.method, path, `{}`) != ""
 			if refused == allowed {
 				t.Errorf("%s: refused = %v on a protected connection", key, refused)
+			}
+		}
+		// Asking to be shown the statement opens a structure form and nothing
+		// else: no other route is let through for a flag in its address.
+		if !allowed {
+			shown := refusal(t, s, rt.method, path+"?preview=1", `{}`) == ""
+			if shown != (verdict == previewOnly) {
+				t.Errorf("%s?preview=1: let through = %v on a protected connection, the list in this test says %q", key, shown, verdict)
 			}
 		}
 		// And protection is the connection's, not the route's.
@@ -142,7 +292,7 @@ func TestProtectionCoversEveryMutatingRoute(t *testing.T) {
 	}
 
 	// Neither list may outlive the routes it names.
-	for key := range protectedStaysOpen {
+	for key := range protectedRouteVerdicts {
 		if !seen[key] {
 			t.Errorf("%q is on the test's list and is not a route", key)
 		}
@@ -151,13 +301,8 @@ func TestProtectionCoversEveryMutatingRoute(t *testing.T) {
 	for _, rule := range protectedRoutesAllowed {
 		key := rule.method + " " + rule.pattern
 		listed = append(listed, key)
-		switch {
-		case protectedStaysOpen[key] && protectedNotYetRouted[key]:
-			t.Errorf("%q is routed now; take it off protectedNotYetRouted", key)
-		case !protectedStaysOpen[key] && !protectedNotYetRouted[key]:
-			t.Errorf("%q is allowed on a protected connection and is on neither list in this test", key)
-		case protectedNotYetRouted[key] && seen[key]:
-			t.Errorf("%q has a route now; move it to protectedStaysOpen", key)
+		if !seen[key] {
+			t.Errorf("%q is allowed on a protected connection and is not a route", key)
 		}
 	}
 	sort.Strings(listed)
@@ -165,6 +310,34 @@ func TestProtectionCoversEveryMutatingRoute(t *testing.T) {
 		if listed[i] == listed[i-1] {
 			t.Errorf("%q is listed twice", listed[i])
 		}
+	}
+}
+
+// A schema form may be shown on a protected connection and may not be run.
+func TestProtectedConnectionShowsASchemaChangeAndRunsNone(t *testing.T) {
+	s := testServer(t)
+	protected := protectTestConnection(t, s, "protected", true)
+	forms := 0
+	for _, rt := range connectionRoutes(t, s) {
+		rest := strings.TrimPrefix(rt.path, "/api/v1/databases/1")
+		if !strings.HasPrefix(rest, "/ddl/") {
+			continue
+		}
+		forms++
+		path := pathf("/api/v1/databases/%d", protected) + rest
+		for _, query := range []string{"?preview=1", "?preview=true"} {
+			if why := refusal(t, s, rt.method, path+query, `{}`); why != "" {
+				t.Errorf("%s %s%s was refused on a protected connection: %s", rt.method, rest, query, why)
+			}
+		}
+		for _, query := range []string{"", "?preview=0", "?preview=yes", "?preview=", "?Preview=1"} {
+			if why := refusal(t, s, rt.method, path+query, `{}`); why == "" {
+				t.Errorf("%s %s%s was let through on a protected connection", rt.method, rest, query)
+			}
+		}
+	}
+	if forms < 15 {
+		t.Fatalf("only %d structure routes found", forms)
 	}
 }
 
@@ -181,7 +354,7 @@ func TestProtectedConnectionRefusesWritesOverHTTP(t *testing.T) {
 	refused := 0
 	for _, rt := range connectionRoutes(t, s) {
 		key := rt.method + " " + strings.TrimPrefix(rt.pattern, connectionRoutePrefix)
-		if protectedStaysOpen[key] {
+		if letsThrough(protectedRouteVerdicts[key]) {
 			continue
 		}
 		path := pathf("/api/v1/databases/%d", id) + strings.TrimPrefix(rt.path, "/api/v1/databases/1")
@@ -321,10 +494,137 @@ func TestProtectedBodiesAreReadAndFailClosed(t *testing.T) {
 		{"a writing pipeline and then a reading one", "/aggregate", `{"collection":"src","pipeline":"[{\"$out\":\"copy\"}]","pipeline":"[]"}`, true},
 		{"a writing stage behind a second key of the same name", "/aggregate", `{"collection":"o","pipeline":"[{\"$lookup\":{\"pipeline\":[{\"$merge\":{\"into\":\"copy\"}}],\"pipeline\":[]}}]"}`, true},
 		{"a pipeline wrapped in a second string", "/aggregate", `{"collection":"o","pipeline":"\"[]\" [{\"$out\":\"copy\"}]"}`, true},
+		{"a pipeline in shell syntax that reads", "/aggregate", `{"collection":"o","pipeline":"[ { $match: { paid: true } }, { $limit: 5 } ]"}`, false},
+		{"a pipeline with a stage nobody knows to be a read", "/aggregate", `{"collection":"o","pipeline":"[{\"$inventedStage\":{}}]"}`, true},
+
+		{"a statement's result as a file", "/export/query", `{"sql":"select * from orders","format":"csv","columns":["id","total"],"filename":"orders","exportId":"export-0001","limit":100,"schema":"main","table":"orders"}`, false},
+		{"a write asked for as a file", "/export/query", `{"sql":"delete from orders returning *","format":"csv"}`, true},
+		{"an export that stores its result", "/export/query", `{"sql":"select * into copied from orders","format":"csv"}`, true},
+		{"an export of two statements, one a write", "/export/query", `{"sql":"select 1; drop table orders","format":"json"}`, true},
+		{"an export's statement under a name in another case", "/export/query", `{"SQL":"drop table orders","format":"csv"}`, true},
+		{"an export's statement given twice", "/export/query", `{"sql":"select 1","Sql":"drop table orders"}`, true},
+		{"an export with no statement", "/export/query", `{"format":"csv"}`, true},
+		{"an export with a field the handler does not have", "/export/query", `{"sql":"select 1","then":"drop table orders"}`, true},
+
+		{"a change set that is only shown", "/changes", `{"schema":"main","table":"orders","changes":[{"op":"update","key":{"id":7},"values":{"paid":true}}],"dryRun":true}`, false},
+		{"a change set that is applied", "/changes", `{"schema":"main","table":"orders","changes":[{"op":"update","key":{"id":7},"values":{"paid":true}}]}`, true},
+		{"a change set with the dry run turned off again under another case", "/changes", `{"table":"orders","changes":[{"op":"delete","key":{"id":7}}],"dryRun":true,"DryRun":false}`, true},
+		{"a change set whose dry run is not a yes or a no", "/changes", `{"table":"orders","changes":[],"dryRun":"yes"}`, true},
+		{"a change set with a field the handler does not have", "/changes", `{"table":"orders","changes":[],"dryRun":true,"apply":true}`, true},
+		{"no change set at all", "/changes", ``, true},
+
+		{"a consistency check", "/maintenance", `{"action":"integrity_check"}`, false},
+		{"a check of one table's foreign keys", "/maintenance", `{"action":"foreign_key_check","table":"orders"}`, false},
+		{"maintenance that rewrites the file", "/maintenance", `{"action":"vacuum"}`, true},
+		{"maintenance that changes statistics", "/maintenance", `{"action":"analyze"}`, true},
+		{"a check and then a rebuild under another case", "/maintenance", `{"action":"integrity_check","Action":"vacuum"}`, true},
+		{"an action the engine does not have", "/maintenance", `{"action":"check"}`, true},
+		{"no action", "/maintenance", `{}`, true},
+
+		{"a console line that reads", "/redis/command", `{"command":"GET session:1"}`, false},
+		{"a console line that writes", "/redis/command", `{"command":"SET session:1 x"}`, true},
+		{"a console line the dashboard does not know", "/redis/command", `{"command":"MODULE.READ k"}`, true},
+		{"a console read and then a write under another case", "/redis/command", `{"command":"GET k","Command":"FLUSHALL"}`, true},
+		{"a bulk action that only counts", "/keys/bulk", `{"pattern":"session:*","action":"delete","dryRun":true}`, false},
+		{"a bulk action that runs", "/keys/bulk", `{"pattern":"session:*","action":"delete"}`, true},
+		{"a bulk dry run turned off again", "/keys/bulk", `{"pattern":"session:*","action":"delete","dryRun":true,"DRYRUN":false}`, true},
+
+		{"a command that reads", "/mongo/command", `{"command":"{\"find\":\"orders\",\"limit\":1}"}`, false},
+		{"a command in shell syntax that reads", "/mongo/command", `{"database":"shop","command":"{ ping: 1 }"}`, false},
+		{"a command that writes", "/mongo/command", `{"command":"{\"drop\":\"orders\"}"}`, true},
+		{"a command nobody listed", "/mongo/command", `{"command":"{\"inventedCommand\":1}"}`, true},
+		{"a command given twice", "/mongo/command", `{"command":"{\"ping\":1}","Command":"{\"dropDatabase\":1}"}`, true},
+		{"no command", "/mongo/command", `{}`, true},
 	} {
 		why := refusal(t, s, http.MethodPost, base+c.path, c.body)
 		if (why != "") != c.refused {
 			t.Errorf("%s (%s %s): refused = %v (%q), want %v", c.name, c.path, c.body, why != "", why, c.refused)
+		}
+	}
+
+	// An update or a delete of documents that only counts what it would reach.
+	for _, method := range []string{http.MethodPatch, http.MethodDelete} {
+		for body, refused := range map[string]bool{
+			`{"collection":"orders","filter":"{}","dryRun":true}`:                false,
+			`{"collection":"orders","filter":"{}"}`:                              true,
+			`{"collection":"orders","filter":"{}","dryRun":false}`:               true,
+			`{"collection":"orders","filter":"{}","dryRun":true,"DryRun":false}`: true,
+			`{"collection":"orders","filter":"{}","dryRun":"true"}`:              true,
+			``: true,
+		} {
+			if why := refusal(t, s, method, base+"/mongo/documents", body); (why != "") != refused {
+				t.Errorf("%s /mongo/documents %s: refused = %v (%q), want %v", method, body, why != "", why, refused)
+			}
+		}
+	}
+}
+
+// The checks added for the other routes that read or write by their body
+// judge the value the handler will decode: its own request type, through its
+// own decoder.
+func TestProtectedChecksDecodeAsTheirHandlersDo(t *testing.T) {
+	decode := func(body string, into any, exact bool) error {
+		return protectedBody([]byte(body), into, exact)
+	}
+	for _, body := range []string{
+		`{"table":"t","changes":[],"dryRun":true}`,
+		`{"table":"t","changes":[],"dryRun":true,"DryRun":false}`,
+		`{"table":"t","changes":[],"DRYRUN":true}`,
+		`{"table":"t","changes":[],"dryRun":false,"dryrun":true}`,
+		`{"table":"t","changes":[]}`,
+	} {
+		var req changesRequest
+		if err := decode(body, &req, true); err != nil {
+			t.Fatalf("%s does not decode: %v", body, err)
+		}
+		if refused := protectedChanges(dbx.DriverSQLite, []byte(body)) != nil; refused == req.DryRun {
+			t.Errorf("%s: refused = %v, and the handler decodes dryRun = %v", body, refused, req.DryRun)
+		}
+	}
+	for _, body := range []string{
+		`{"sql":"select 1","SQL":"drop table orders"}`,
+		`{"Sql":"drop table orders","sql":"select 1"}`,
+		`{"SQL":"select 1"}`,
+		`{"sql":"drop table orders"}`,
+	} {
+		var req exportQueryRequest
+		if err := decode(body, &req, false); err != nil {
+			t.Fatalf("%s does not decode: %v", body, err)
+		}
+		writes := strings.Contains(req.SQL, "drop")
+		if refused := protectedExportQuery(dbx.DriverSQLite, []byte(body)) != nil; refused != writes {
+			t.Errorf("%s: refused = %v, and the handler decodes the statement %q", body, refused, req.SQL)
+		}
+	}
+	for _, body := range []string{
+		`{"action":"integrity_check","Action":"vacuum"}`,
+		`{"ACTION":"vacuum","action":"integrity_check"}`,
+		`{"Action":"quick_check"}`,
+		`{"action":"reindex"}`,
+	} {
+		var req maintenanceRequest
+		if err := decode(body, &req, false); err != nil {
+			t.Fatalf("%s does not decode: %v", body, err)
+		}
+		action, _ := dbx.MaintenanceActionFor(dbx.DriverSQLite, req.Action)
+		if refused := protectedMaintenance(dbx.DriverSQLite, []byte(body)) != nil; refused == action.ReadOnly {
+			t.Errorf("%s: refused = %v, and the handler decodes the action %q (read-only = %v)", body, refused, req.Action, action.ReadOnly)
+		}
+	}
+	// What an engine reads as a string decides what a statement is, so the
+	// check asks the engine the connection is to. A dollar-quoted body is one
+	// value on Postgres, where it can hold anything and is refused, and three
+	// words on the engines that have no such quoting.
+	for driver, refused := range map[dbx.Driver]bool{dbx.DriverPostgres: true, dbx.DriverSQLite: false} {
+		if why := protectedStatementRefusal(driver, "select $$x$$ as body"); (why != "") != refused {
+			t.Errorf("%s: a dollar-quoted body refused = %v (%q), want %v", driver, why != "", why, refused)
+		}
+	}
+	// MySQL opens a comment with -- only before a space; everywhere else the
+	// rest of the line is a comment and the statement a read.
+	for driver, refused := range map[dbx.Driver]bool{dbx.DriverMySQL: true, dbx.DriverPostgres: false} {
+		if why := protectedStatementRefusal(driver, "select 1 --note"); (why != "") != refused {
+			t.Errorf("%s: a comment with no space refused = %v (%q), want %v", driver, why != "", why, refused)
 		}
 	}
 }
@@ -394,12 +694,12 @@ func TestProtectionJudgesWhatTheHandlerDecodes(t *testing.T) {
 		`{"collection":"src","pipeline":"[{\"$match\":{}}]"}`,
 		`{"collection":"src","pIpElInE":"[{\"$match\":{}}]"}`,
 	} {
-		var req mongoDocRequest
+		var req mongoAggregateRequest
 		if err := decode(body, &req); err != nil {
 			t.Fatalf("%s does not decode: %v", body, err)
 		}
 		writes := strings.Contains(req.Pipeline, "$out")
-		refused := protectedPipeline(dbx.DriverMongo, []byte(body)) != nil
+		refused := protectedMongo(mongoReadOnlyPipeline)(dbx.DriverMongo, []byte(body)) != nil
 		if writes && !refused {
 			t.Errorf("%s was let through, and the handler decodes the pipeline %s", body, req.Pipeline)
 		}
@@ -443,6 +743,19 @@ func TestBackupsRestoreIntoAProtectedConnectionIsRefused(t *testing.T) {
 	rec = c.do(http.MethodPost, "/api/v1/backups/runs/1/restore-database", pathf(`{"connectionId":%d}`, open), nil)
 	if strings.Contains(rec.Body.String(), "connection_read_only") {
 		t.Errorf("restore into a connection that is not protected = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Behind that route the Backups module restores through its own adapter. The
+// adapter refuses a protected connection as well, so the answer does not
+// depend on every caller it ever gets remembering to ask first.
+func TestTheBackupsAdapterDoesNotRestoreIntoAProtectedConnection(t *testing.T) {
+	s := testServer(t)
+	protected := protectTestConnection(t, s, "protected", true)
+	dumper := &backupDatabaseDumper{server: s}
+	_, err := dumper.RestoreDatabase(t.Context(), protected, "", "/nowhere/dump.sql")
+	if err == nil || !strings.Contains(err.Error(), "is protected") {
+		t.Errorf("restoring into a protected connection through the adapter = %v, want a refusal that says it is protected", err)
 	}
 }
 

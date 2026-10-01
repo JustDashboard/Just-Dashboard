@@ -535,14 +535,22 @@ func (s *Server) handleDBExportQuery(w http.ResponseWriter, r *http.Request) err
 	if strings.TrimSpace(req.SQL) == "" {
 		return httpx.BadRequest("sql is required")
 	}
-	statement, err := dbx.SingleStatement(req.SQL)
+	// Read by the rules of the engine that will run it, as the query runner
+	// reads it: what one engine takes for a string another takes for the end
+	// of one.
+	conn, err := s.sqlConnection(r, id)
+	if err != nil {
+		return err
+	}
+	parsed, err := dbx.SingleStatementFor(conn.Driver, req.SQL)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	if risk := dbx.Classify(statement); risk.Level != "read" {
+	if parsed.Risk.Level != "read" {
 		return httpx.BadRequest("only a statement that reads can be exported; this one %s",
-			strings.Join(risk.Reasons, ", "))
+			strings.Join(parsed.Risk.Reasons, ", "))
 	}
+	statement := parsed.SQL
 	format, err := exportFormat(req.Format)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
@@ -556,7 +564,7 @@ func (s *Server) handleDBExportQuery(w http.ResponseWriter, r *http.Request) err
 	if format == dbx.ExportSQL && table == "" {
 		table = "query_result"
 	}
-	pool, conn, err := s.dbPool(r.Context(), id)
+	pool, _, err := s.dbPool(r.Context(), id)
 	if err != nil {
 		return err
 	}

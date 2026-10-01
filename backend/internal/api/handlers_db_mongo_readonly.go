@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,12 +27,10 @@ import (
 // from the one the handler runs as soon as a key appears twice in two
 // spellings. And they fail closed: a body that cannot be read is not a read.
 
-// mongoReadOnlyBody decodes a body the way httpx.DecodeJSON will when the
-// handler asks.
+// mongoReadOnlyBody decodes a body with the handler's own decoder
+// (protectedBody), and says in this file's words when it cannot.
 func mongoReadOnlyBody(body []byte, dst any) error {
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
+	if err := protectedBody(body, dst, false); err != nil {
 		return errors.New("the request could not be read to see what it does")
 	}
 	return nil

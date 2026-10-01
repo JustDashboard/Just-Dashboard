@@ -201,6 +201,13 @@ func (s *Server) handleRedisCommand(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 	defer line.close()
+	// A protected connection runs reads only. The guard in front of the
+	// routes judged the line by the dashboard's own table; the server has now
+	// said what the command is on this server, and its word can turn a read
+	// into a write.
+	if line.conn.ReadOnly && line.verdict.Class != dbx.RedisClassRead {
+		return protectedRefusal("this connection is protected, and %s", line.sentence())
+	}
 	detail["class"], detail["db"] = line.verdict.Class, line.db
 	detail["keys"] = dbx.RedisCommandKeys(line.args, line.flags)
 	httpx.SetAudit(r, "database.redis.command", line.conn.Name, detail)

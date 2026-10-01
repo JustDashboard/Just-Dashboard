@@ -966,16 +966,17 @@ type ViewSpec struct {
 
 // viewQuery accepts the statement a view is defined by: exactly one, and a
 // read. The same splitter and classifier that guard the query runner decide
-// it, so a view form is never a way to run something the console would have
-// asked more for.
-func viewQuery(query string) (string, error) {
-	stmt, err := SingleStatement(query)
+// it, by the rules of the engine the view is made on, so a view form is never
+// a way to run something the console would have asked more for.
+func viewQuery(driver Driver, query string) (string, error) {
+	parsed, err := SingleStatementFor(driver, query)
 	if err != nil {
 		return "", fmt.Errorf("a view is defined by one SELECT: %w", err)
 	}
-	if risk := Classify(stmt); risk.Level != "read" {
+	if risk := parsed.Risk; risk.Level != "read" {
 		return "", fmt.Errorf("a view is defined by a SELECT; this statement %s", strings.Join(risk.Reasons, ", "))
 	}
+	stmt := parsed.SQL
 	// The classifier's reads include SHOW, DESCRIBE and EXPLAIN, which answer
 	// a question and define nothing.
 	switch word := leadingKeyword(stmt); word {
@@ -1031,7 +1032,7 @@ func PlanCreateView(driver Driver, spec ViewSpec) (*DDLPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	query, err := viewQuery(spec.Query)
+	query, err := viewQuery(driver, spec.Query)
 	if err != nil {
 		return nil, err
 	}

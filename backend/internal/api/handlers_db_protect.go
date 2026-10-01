@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -70,8 +69,13 @@ var protectedRoutesAllowed = []protectedRoute{
 	{http.MethodDelete, "", nil},
 	{http.MethodPut, "/access", nil},
 	{http.MethodPost, "/power", nil},
-	// A dump reads the database and writes a file on this machine.
+	// A dump reads the database and writes a file on this machine. One made
+	// elsewhere and added to the list, and one deleted from it, are files on
+	// this machine too. Loading any of them back is a restore, which is not
+	// on this list.
 	{http.MethodPost, "/backup", nil},
+	{http.MethodPost, "/backups/upload", nil},
+	{http.MethodDelete, "/backups", nil},
 	// The dashboard's own state about the connection.
 	{http.MethodPost, "/queries", nil},
 	{http.MethodPut, "/queries/{qid}", nil},
@@ -82,12 +86,36 @@ var protectedRoutesAllowed = []protectedRoute{
 	{http.MethodPost, "/classify", nil},
 	{http.MethodPost, "/orm", nil},
 	{http.MethodPost, "/rows/sql", nil},
+	{http.MethodPost, "/redis/classify", nil},
+	{http.MethodPost, "/mongo/find", nil},
+	{http.MethodPost, "/mongo/count", nil},
+	{http.MethodPost, "/mongo/document", nil},
+	{http.MethodPost, "/mongo/explain", nil},
+	{http.MethodPost, "/mongo/aggregate/preview", nil},
+	{http.MethodPost, "/mongo/schema", nil},
+	{http.MethodPost, "/mongo/validation/check", nil},
+	{http.MethodPost, "/mongo/command/classify", nil},
+	// Stopping work in flight. It changes no data and no schema, and the
+	// protected connection is usually the production one, where stopping a
+	// runaway statement is exactly what its operator needs to be able to do.
 	{http.MethodPost, "/query/cancel", nil},
+	{http.MethodPost, "/activity/cancel", nil},
+	{http.MethodPost, "/activity/kill", nil},
+	{http.MethodPost, "/redis/clients/kill", nil},
+	{http.MethodPost, "/mongo/killop", nil},
 	// Read or write by what they carry.
 	{http.MethodPost, "/explain", protectedExplain},
 	{http.MethodPost, "/query", protectedStatements},
 	{http.MethodPost, "/script", protectedStatements},
-	{http.MethodPost, "/aggregate", protectedPipeline},
+	{http.MethodPost, "/export/query", protectedExportQuery},
+	{http.MethodPost, "/changes", protectedChanges},
+	{http.MethodPost, "/maintenance", protectedMaintenance},
+	{http.MethodPost, "/redis/command", protectedRedis(redisCommandWrites)},
+	{http.MethodPost, "/keys/bulk", protectedRedis(redisBulkWrites)},
+	{http.MethodPost, "/aggregate", protectedMongo(mongoReadOnlyPipeline)},
+	{http.MethodPost, "/mongo/command", protectedMongo(mongoReadOnlyCommand)},
+	{http.MethodPatch, "/mongo/documents", protectedMongo(mongoReadOnlyDryRun)},
+	{http.MethodDelete, "/mongo/documents", protectedMongo(mongoReadOnlyDryRun)},
 }
 
 // protectReadOnlyConnections refuses every change to a protected connection's
@@ -126,6 +154,14 @@ func (s *Server) refuseOnProtected(r *http.Request) error {
 		return httpx.Internal(err)
 	}
 	if !readOnly {
+		return nil
+	}
+	// A schema form asked only for its statement runs nothing: runDDL answers
+	// a preview before it executes, and every route under /ddl/ ends in runDDL
+	// (TestEveryStructureRouteCanBeShownWithoutRunning walks the router and
+	// holds a route added there to that). The flag is in the address, which
+	// a check of the body cannot see, so it is asked here.
+	if strings.HasPrefix(rest, "/ddl/") && ddlPreview(r) {
 		return nil
 	}
 	rule, allowed := protectedRule(r.Method, rest)
@@ -269,40 +305,25 @@ var protectedTextOptions = map[string]bool{
 	"queryid": true, "format": true, "schema": true, "database": true, "name": true,
 }
 
-// protectedWriteWords are the words that let a statement which starts as a
-// read change something. SELECT … INTO creates a table on Postgres and SQL
-// Server and writes a file on the database host on MySQL; a WITH leads into a
-// MERGE, or on SQL Server into an INSERT that needs no INTO. The classifier
-// reads the leading verb, finds SELECT or WITH, and calls each of them a read.
-//
-// The words are looked for in the whole text, inside a quoted value or a
-// comment as well. Leaving those out needs a lexer that agrees with the
-// engine's about where a string ends, and the day the two disagree is the day
-// a write is hidden behind a quote. So a SELECT that searches for the word
-// "into" is refused here too, which is the direction this is allowed to be
-// wrong in, and the refusal says which word it was.
-var protectedWriteWords = regexp.MustCompile(`(?i)\b(into|merge|insert)\b`)
-
 // protectedStatementRefusal is why a statement may not run on a protected
-// connection, and empty when it may: it has to classify as a read and carry
-// none of the words above.
+// connection, and empty when it may: it has to classify as a read.
 //
 // The driver is taken because what a statement is depends on the engine that
 // reads it — a backslash ends nothing in Postgres and escapes a quote in
-// MySQL. dbx.Classify reads every dialect by the strictest rules at once and
-// has no use for it; a classifier that reads each engine's own takes it here.
+// MySQL, and a dollar-quoted body is one string there and a refusal anywhere
+// else. Read by its own engine's rules, a statement that starts as a read and
+// writes — SELECT … INTO, a WITH that leads into a MERGE or an INSERT, MySQL's
+// INTO OUTFILE — is not classified as one.
 func protectedStatementRefusal(driver dbx.Driver, statement string) string {
-	if risk := dbx.Classify(statement); risk.Level != "read" {
-		// Never empty: an empty answer is what lets the statement through.
-		if why := strings.Join(risk.Reasons, "; "); why != "" {
-			return why
-		}
-		return "it is classified " + risk.Level
+	risk := dbx.ClassifyFor(driver, statement)
+	if risk.Level == "read" {
+		return ""
 	}
-	if word := protectedWriteWords.FindString(statement); word != "" {
-		return fmt.Sprintf("it contains %s, and a statement that starts as a read can write through it", strings.ToUpper(word))
+	// Never empty: an empty answer is what lets the statement through.
+	if why := strings.Join(risk.Reasons, "; "); why != "" {
+		return why
 	}
-	return ""
+	return "it is classified " + risk.Level
 }
 
 // protectedStatements allows a body whose every statement is a read.
@@ -420,75 +441,96 @@ func protectedExplain(driver dbx.Driver, body []byte) error {
 	return protectedStatements(driver, body)
 }
 
-// protectedPipeline allows an aggregation with no stage that writes.
-//
-// The pipeline is parsed and its keys compared after decoding, at every
-// depth. Looking for the stage names in the request's text would miss one
-// spelled with an escape, which the server decodes and this would not.
-func protectedPipeline(_ dbx.Driver, body []byte) error {
-	fields, err := protectedFields(body)
+// protectedBody reads a request body into the type its handler reads it into,
+// with the handler's own decoder: httpx.DecodeJSON, or DecodeJSONNumbers for a
+// handler that keeps numbers exact. A check that starts from it judges the
+// request the handler will run — the same field for a key spelled in another
+// case, the same one of two that name it, the same refusal of a field it does
+// not have — because there is no second reading for the two to disagree about.
+func protectedBody(body []byte, dst any, exactNumbers bool) error {
+	req, err := http.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	raw := fields["pipeline"]
-	if len(raw) == 0 {
-		return protectedRefusal("this connection is protected, and the request carries no pipeline to check")
+	req.Header.Set("Content-Type", "application/json")
+	if exactNumbers {
+		return httpx.DecodeJSONNumbers(req, dst)
 	}
-	// The pipeline travels as a JSON document inside a string.
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		raw = json.RawMessage(text)
+	return httpx.DecodeJSON(req, dst)
+}
+
+// protectedUnreadable is the refusal of a body no check could read.
+func protectedUnreadable() error {
+	return protectedRefusal("this connection is protected, and the request could not be read to see whether it changes anything")
+}
+
+// protectedExportQuery allows a statement's result as a file when the
+// statement is a read. The handler asks the same of every export; here it is
+// asked before the handler, of the same field, by the same classifier.
+func protectedExportQuery(driver dbx.Driver, body []byte) error {
+	var req exportQueryRequest
+	if err := protectedBody(body, &req, false); err != nil {
+		return protectedUnreadable()
 	}
-	stage, err := writingStage(raw)
-	if err != nil {
-		return protectedRefusal("this connection is protected, and the pipeline could not be read to see whether it writes")
+	if strings.TrimSpace(req.SQL) == "" {
+		return protectedRefusal("this connection is protected, and the request carries no statement to check")
 	}
-	if stage != "" {
-		return protectedRefusal("this connection is protected, and a pipeline with a %s stage writes to a collection", stage)
+	if why := protectedStatementRefusal(driver, req.SQL); why != "" {
+		return protectedRefusal("this connection is protected, and that statement is not a read: %s", why)
 	}
 	return nil
 }
 
-// writingStage is the first key in a pipeline that names a stage which
-// writes. Every key is read as it stands in the text, so one of two that
-// share a name is not lost the way decoding into a map would lose it.
-func writingStage(pipeline []byte) (string, error) {
-	if !json.Valid(pipeline) {
-		return "", errors.New("the pipeline is not JSON")
+// protectedChanges allows a change set that is only rendered: the grid asks
+// for the statements its staged edits would be, to show them, and nothing
+// runs. Applying them is the edit the protection is there to refuse.
+func protectedChanges(_ dbx.Driver, body []byte) error {
+	var req changesRequest
+	if err := protectedBody(body, &req, true); err != nil {
+		return protectedUnreadable()
 	}
-	return writingKey(json.NewDecoder(bytes.NewReader(pipeline)))
+	if !req.DryRun {
+		return protectedRefusal("this connection is protected: its rows cannot be changed from the dashboard until protection is turned off in its settings")
+	}
+	return nil
 }
 
-// writingKey reads one value off the decoder and reports the first $out or
-// $merge among its keys, at any depth.
-func writingKey(dec *json.Decoder) (string, error) {
-	token, err := dec.Token()
-	if err != nil {
-		return "", err
+// protectedMaintenance lets a consistency check through and nothing else: an
+// action the engine's own list marks as one that reads and reports.
+func protectedMaintenance(driver dbx.Driver, body []byte) error {
+	var req maintenanceRequest
+	if err := protectedBody(body, &req, false); err != nil {
+		return protectedUnreadable()
 	}
-	opening, nested := token.(json.Delim)
-	if !nested {
-		return "", nil
+	if action, ok := dbx.MaintenanceActionFor(driver, strings.TrimSpace(req.Action)); ok && action.ReadOnly {
+		return nil
 	}
-	found := ""
-	for dec.More() {
-		if opening == '{' {
-			key, err := dec.Token()
-			if err != nil {
-				return "", err
-			}
-			if name, _ := key.(string); found == "" && (strings.EqualFold(name, "$out") || strings.EqualFold(name, "$merge")) {
-				found = strings.ToLower(name)
-			}
+	return protectedRefusal("this connection is protected: only a check that changes nothing can be run on it")
+}
+
+// protectedRedis makes a route check of one of the Redis body checks
+// (handlers_db_redis_readonly.go), which say why a request writes.
+func protectedRedis(writes func(body []byte) string) func(dbx.Driver, []byte) error {
+	return func(_ dbx.Driver, body []byte) error {
+		if why := writes(body); why != "" {
+			return protectedRefusal("this connection is protected: %s", why)
 		}
-		inner, err := writingKey(dec)
-		if err != nil {
-			return "", err
-		}
-		if found == "" {
-			found = inner
-		}
+		return nil
 	}
-	_, err = dec.Token()
-	return found, err
+}
+
+// protectedMongo makes a route check of one of the MongoDB body checks
+// (handlers_db_mongo_readonly.go). The body is first read as every check here
+// reads one, so a field named twice or from outside ASCII is refused; then the
+// MongoDB check judges it with the handler's own request type and classifier.
+func protectedMongo(check func([]byte) error) func(dbx.Driver, []byte) error {
+	return func(_ dbx.Driver, body []byte) error {
+		if _, err := protectedFields(body); err != nil {
+			return err
+		}
+		if err := check(body); err != nil {
+			return protectedRefusal("this connection is protected, and %v", err)
+		}
+		return nil
+	}
 }

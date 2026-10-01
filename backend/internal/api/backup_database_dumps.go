@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
@@ -48,6 +49,12 @@ func (d *backupDatabaseDumper) RestoreDatabase(ctx context.Context, id int64, da
 	conn, dsn, err := d.server.dbConnRow(ctx, id)
 	if err != nil {
 		return "", errors.New("database connection was not found")
+	}
+	// The route that reaches this refuses a protected connection with its own
+	// answer. This is the same refusal where nothing can come past it: a
+	// restore replaces what is in the database, by whichever road it arrives.
+	if conn.ReadOnly {
+		return "", fmt.Errorf("%s is protected: a dump cannot be restored into it until protection is turned off in its settings", conn.Name)
 	}
 	// The dashboard's own sessions go first, as they do for a restore started
 	// from the Databases page: a pooled one would carry plans for tables that

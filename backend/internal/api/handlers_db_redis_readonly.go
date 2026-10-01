@@ -1,12 +1,9 @@
 package api
 
 import (
-	"bytes"
-	"net/http"
 	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
 // What a Redis request does to a connection that only reads may reach.
@@ -18,19 +15,9 @@ import (
 // would reach. These give it, from the body alone.
 //
 // Each decodes the body with the handler's own decoder into the handler's own
-// request type, so a field spelled in another case, or given twice, is read
-// here exactly as it will be there: there is no second reading of the request
-// for the two to disagree about.
-
-// redisDecodeBody reads a body the way httpx.DecodeJSON reads a request's.
-func redisDecodeBody(body []byte, dst any) error {
-	req, err := http.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	return httpx.DecodeJSON(req, dst)
-}
+// request type (protectedBody), so a field spelled in another case, or given
+// twice, is read here exactly as it will be there: there is no second reading
+// of the request for the two to disagree about.
 
 // redisCommandWrites says why a console request is not a read, or nothing
 // when it is one.
@@ -43,7 +30,7 @@ func redisDecodeBody(body []byte, dst any) error {
 // has one.
 func redisCommandWrites(body []byte) string {
 	var req redisCommandRequest
-	if err := redisDecodeBody(body, &req); err != nil {
+	if err := protectedBody(body, &req, false); err != nil {
 		return "the request could not be read to see whether it changes anything"
 	}
 	args, err := dbx.RedisParseCommand(req.Command)
@@ -70,7 +57,7 @@ func redisCommandWrites(body []byte) string {
 // only counts them.
 func redisBulkWrites(body []byte) string {
 	var req redisBulkRequest
-	if err := redisDecodeBody(body, &req); err != nil {
+	if err := protectedBody(body, &req, false); err != nil {
 		return "the request could not be read to see whether it changes anything"
 	}
 	if !req.DryRun {
