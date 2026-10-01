@@ -1180,3 +1180,45 @@ func TestLiveRedisDumpCoversEveryNumberedDatabase(t *testing.T) {
 		t.Errorf("dump of an empty server: %+v, %v", res, err)
 	}
 }
+
+// TestLiveMySQLRestoreIntoANewDatabase is why the built-in MySQL dump names no
+// database: the same file has to load into the one it came from and into one
+// made a moment ago. It needs an account that may create a database.
+func TestLiveMySQLRestoreIntoANewDatabase(t *testing.T) {
+	admin := os.Getenv("JD_TEST_MYSQL_ADMIN_DSN")
+	own, err := ParseDSN(DriverMySQL, os.Getenv("JD_TEST_MYSQL_DSN"))
+	if admin == "" || err != nil || own.Database == "" {
+		t.Skip("set JD_TEST_MYSQL_ADMIN_DSN and JD_TEST_MYSQL_DSN to run this")
+	}
+	// The administrator's connection, pointed at this run's own database.
+	dsn := dsnForDatabase(DriverMySQL, admin, own.Database)
+	t.Setenv("JD_TEST_MYSQL_ROOT_OWN_DSN", dsn)
+	db := liveSQL(t, DriverMySQL, "JD_TEST_MYSQL_ROOT_OWN_DSN", dsn)
+	ctx := context.Background()
+	seedMySQLRich(t, db)
+
+	res, err := DumpWith(ctx, DriverMySQL, dsn, t.TempDir(), DumpOptions{
+		builtIn: true, Tables: []string{"jd_dx_parent", "jd_dx_child", "jd_dx_view", "jd_dx_summary"},
+	})
+	if err != nil {
+		t.Fatalf("DumpWith: %v", err)
+	}
+	target := scratchDatabase(t, DriverMySQL, dsn, "r1")
+	if exists, err := DatabaseExists(ctx, DriverMySQL, dsn, target); err != nil || !exists {
+		t.Fatalf("DatabaseExists(%s) = %v, %v", target, exists, err)
+	}
+	if _, err := RestoreWith(ctx, DriverMySQL, dsn, res.Path, RestoreOptions{Database: target}); err != nil {
+		t.Fatalf("RestoreWith: %v\n%s", err, readDump(t, res.Path))
+	}
+	restored, err := OpenDatabase(ctx, DriverMySQL, dsn, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	checkMySQLRich(t, restored)
+	// The view in the new database reads the new database's tables.
+	execAll(t, db, `DELETE FROM jd_dx_child`)
+	if got := queryString(t, restored, `SELECT n FROM jd_dx_summary`); got != "2" {
+		t.Errorf("the copy's view reads %s rows after the original was emptied, want its own 2", got)
+	}
+}
