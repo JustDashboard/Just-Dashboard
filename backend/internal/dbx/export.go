@@ -331,7 +331,7 @@ func exportValueOf(v any, typeName string) any {
 	switch x := v.(type) {
 	case []byte:
 		if typeName == "UNIQUEIDENTIFIER" && len(x) == 16 {
-			return mssqlGUID(x)
+			return exportGUID(x)
 		}
 	case time.Time:
 		if typeName == "TIME" {
@@ -341,9 +341,9 @@ func exportValueOf(v any, typeName string) any {
 	return exportValue(v)
 }
 
-// mssqlGUID spells a uniqueidentifier from its stored bytes. The first three
+// exportGUID spells a uniqueidentifier from its stored bytes. The first three
 // groups are kept low byte first; the rest are kept as written.
-func mssqlGUID(b []byte) string {
+func exportGUID(b []byte) string {
 	return fmt.Sprintf("%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
 		b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15])
 }

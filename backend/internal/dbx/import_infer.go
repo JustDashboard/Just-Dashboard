@@ -452,7 +452,7 @@ func bindValue(driver Driver, v importValue, family, typeName string) (any, erro
 			// Oracle reads a text as a date by the session's own format, which
 			// is not ISO's. A value in an ISO form is bound as the instant it
 			// names; anything else is left for the session to read its way.
-			if t, ok := isoTime(v.text); ok {
+			if t, ok := importISOTime(v.text); ok {
 				return t, nil
 			}
 		}
@@ -484,11 +484,11 @@ func bindValue(driver Driver, v importValue, family, typeName string) (any, erro
 	return v.text, nil
 }
 
-// isoTime reads a date or an instant in the ISO forms a file is likely to
+// importISOTime reads a date or an instant in the ISO forms a file is likely to
 // carry: a date alone, or a date and a time joined by T or a space, to the
 // minute or the second or a fraction of one, with or without a zone. One
 // without a zone is the wall-clock time it says.
-func isoTime(text string) (time.Time, bool) {
+func importISOTime(text string) (time.Time, bool) {
 	text = strings.TrimSpace(text)
 	if dateText.MatchString(text) {
 		t, err := time.Parse("2006-01-02", text)
@@ -517,10 +517,10 @@ func isoTime(text string) (time.Time, bool) {
 	return t, err == nil
 }
 
-// keyColumnType is the type a new table's key column is given where the one
+// importKeyColumnType is the type a new table's key column is given where the one
 // inferred for its values cannot be a key: SQL Server and MySQL index a text
 // of bounded length only.
-func keyColumnType(driver Driver, inferred string) string {
+func importKeyColumnType(driver Driver, inferred string) string {
 	switch {
 	case driver == DriverMSSQL && strings.EqualFold(inferred, "nvarchar(max)"):
 		// 900 bytes is the most a key may be, and a character is two.

@@ -121,7 +121,7 @@ func dumpBuiltInSQL(ctx context.Context, driver Driver, dsn, outDir string, opts
 	}
 
 	buffered := bufio.NewWriterSize(file, 256<<10)
-	fence, err := newStatementFence()
+	fence, err := newDumpFence()
 	if err != nil {
 		return nil, err
 	}
@@ -377,8 +377,8 @@ const (
 	rawStatementEnd   = "-- jd:end"
 )
 
-// newStatementFence makes the word one dump's fences carry.
-func newStatementFence() (string, error) {
+// newDumpFence makes the word one dump's fences carry.
+func newDumpFence() (string, error) {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
@@ -503,7 +503,7 @@ func newInsertBatcher(w io.Writer, driver Driver, rel string, quotedCols []strin
 // columns the values came from.
 func (b *insertBatcher) addRow(vals []any, binary []bool, types []string) error {
 	if b.driver == DriverOracle {
-		if block, ok := oracleLongRow(b.rel, b.cols, vals, binary, types); ok {
+		if block, ok := oracleDumpLongRow(b.rel, b.cols, vals, binary, types); ok {
 			// It is a statement of its own, and goes where the row was read.
 			if err := b.flush(); err != nil {
 				return err
@@ -648,7 +648,7 @@ func restoreGenericSQL(ctx context.Context, driver Driver, dsn, database, path s
 				return "", errScriptSwitches(statement, database)
 			}
 		}
-		if driver == DriverOracle && oracleIsBlock(statement) {
+		if driver == DriverOracle && oracleDumpIsBlock(statement) {
 			// The one statement Oracle wants its terminator on: a block ends
 			// with END; and is refused without it.
 			statement += ";"
@@ -884,24 +884,24 @@ func dumpColumnValue(driver Driver, v any, binary bool, typeName string) string 
 	case time.Time:
 		return dumpTimeFor(driver, x, typeName)
 	case float64:
-		if lit, ok := nonFiniteLiteral(driver, x, typeName); ok {
+		if lit, ok := dumpNonFinite(driver, x, typeName); ok {
 			return lit
 		}
 	case float32:
-		if lit, ok := nonFiniteLiteral(driver, float64(x), typeName); ok {
+		if lit, ok := dumpNonFinite(driver, float64(x), typeName); ok {
 			return lit
 		}
 	}
 	switch driver {
 	case DriverMSSQL:
-		if lit, ok := mssqlColumnLiteral(v, typeName); ok {
+		if lit, ok := mssqlDumpLiteral(v, typeName); ok {
 			return lit
 		}
 	case DriverOracle:
 		// The driver hands a NUMBER back as its exact digits. Quoted, they
 		// are a string the server converts by the session's own idea of a
 		// decimal point.
-		if s, ok := v.(string); ok && strings.EqualFold(typeName, "NUMBER") && oracleNumberText.MatchString(s) {
+		if s, ok := v.(string); ok && strings.EqualFold(typeName, "NUMBER") && oracleDumpNumberText.MatchString(s) {
 			return s
 		}
 	}
@@ -915,10 +915,10 @@ func dumpColumnValue(driver Driver, v any, binary bool, typeName string) string 
 	return dumpValue(driver, v, binary)
 }
 
-// nonFiniteLiteral spells the three values most engines here will not take in
+// dumpNonFinite spells the three values most engines here will not take in
 // a VALUES list. Postgres takes them as text and Oracle has names for them, so
 // there they are kept rather than nulled.
-func nonFiniteLiteral(driver Driver, f float64, typeName string) (string, bool) {
+func dumpNonFinite(driver Driver, f float64, typeName string) (string, bool) {
 	var nan, inf string
 	switch driver {
 	case DriverPostgres:
@@ -1165,9 +1165,9 @@ func dumpTimeFor(driver Driver, t time.Time, typeName string) string {
 		// with, which is right for both.
 		return "'" + t.UTC().Format(plain) + "+00'"
 	case DriverOracle:
-		return oracleTimeLiteral(t, typeName)
+		return oracleDumpTime(t, typeName)
 	case DriverMSSQL:
-		return mssqlTimeLiteral(t, typeName)
+		return mssqlDumpTime(t, typeName)
 	case DriverClickHouse:
 		inner := clickhouseInnerType(typeName)
 		switch {
@@ -1365,7 +1365,7 @@ func (s *statementReader) next() (string, error) {
 			}
 			// The comment stood between two tokens, and so must something.
 			s.cur.WriteByte('\n')
-			fence, fenced := statementFenceOf("-" + line)
+			fence, fenced := dumpFenceOf("-" + line)
 			if !fenced {
 				continue
 			}
@@ -1438,10 +1438,10 @@ func (s *statementReader) restOfLine() (string, error) {
 	}
 }
 
-// statementFenceOf reports whether a comment line opens a fenced statement,
+// dumpFenceOf reports whether a comment line opens a fenced statement,
 // and the word its closing line has to carry. A dump written before fences
 // carried one has none, and closes on the bare line.
-func statementFenceOf(line string) (string, bool) {
+func dumpFenceOf(line string) (string, bool) {
 	line = strings.TrimSpace(line)
 	if line == rawStatementBegin {
 		return "", true

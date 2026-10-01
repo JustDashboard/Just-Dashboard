@@ -50,7 +50,7 @@ func TestMSSQLImportValueConvertsToTheColumnsType(t *testing.T) {
 	}
 }
 
-func mssqlPlan(t *testing.T, trusted bool, mode ImportMode, types ...string) *importPlan {
+func mssqlImportPlan(t *testing.T, trusted bool, mode ImportMode, types ...string) *importPlan {
 	t.Helper()
 	d := mustDialect(t, DriverMSSQL)
 	p := &importPlan{d: d, spec: ImportSpec{Mode: mode, trusted: trusted}, key: []string{"id"}, rel: "[dbo].[t]"}
@@ -63,7 +63,7 @@ func mssqlPlan(t *testing.T, trusted bool, mode ImportMode, types ...string) *im
 }
 
 func TestMSSQLImportStatementsCheckBeforeTheyWrite(t *testing.T) {
-	p := mssqlPlan(t, false, ImportModeInsert, "int", "nvarchar(100)", "decimal(10,2)", "varbinary(MAX)")
+	p := mssqlImportPlan(t, false, ImportModeInsert, "int", "nvarchar(100)", "decimal(10,2)", "varbinary(MAX)")
 	const core = "INSERT INTO [dbo].[t] ([id], [name], [total], [raw]) VALUES " +
 		"(TRY_CONVERT(int, @p1), @p2, TRY_CONVERT(decimal(10,2), @p3), CONVERT(varbinary(max), @p4))"
 	const guard = "IF @p1 IS NOT NULL AND TRY_CONVERT(int, @p1) IS NULL RAISERROR(N'jd-import-convert:1', 16, 1) ELSE " +
@@ -87,7 +87,7 @@ func TestMSSQLImportStatementsCheckBeforeTheyWrite(t *testing.T) {
 	}
 
 	// An upsert is checked the same way before its MERGE.
-	up := mssqlPlan(t, false, ImportModeUpsert, "int", "nvarchar(100)")
+	up := mssqlImportPlan(t, false, ImportModeUpsert, "int", "nvarchar(100)")
 	got, err := up.upsertStatement()
 	if err != nil || !strings.HasPrefix(got, "IF @p1 IS NOT NULL AND TRY_CONVERT(int, @p1) IS NULL RAISERROR(N'jd-import-convert:1', 16, 1) ELSE MERGE INTO [dbo].[t] WITH (HOLDLOCK) AS t USING (VALUES (TRY_CONVERT(int, @p1), @p2)) AS s ([id], [name]) ON t.[id] = s.[id]") ||
 		!strings.HasSuffix(got, "OUTPUT $action;") {
@@ -95,11 +95,11 @@ func TestMSSQLImportStatementsCheckBeforeTheyWrite(t *testing.T) {
 	}
 
 	// A table of nothing but text has nothing to check.
-	if got := mssqlPlan(t, false, ImportModeInsert, "nvarchar(10)", "varchar(20)").insertStatement(1); got != "INSERT INTO [dbo].[t] ([id], [name]) VALUES (@p1, @p2)" {
+	if got := mssqlImportPlan(t, false, ImportModeInsert, "nvarchar(10)", "varchar(20)").insertStatement(1); got != "INSERT INTO [dbo].[t] ([id], [name]) VALUES (@p1, @p2)" {
 		t.Errorf("all text = %s", got)
 	}
 	// The inline route checks what converts and leaves a binary column be.
-	legacy := mssqlPlan(t, true, ImportModeInsert, "int", "varbinary(MAX)").insertStatement(1)
+	legacy := mssqlImportPlan(t, true, ImportModeInsert, "int", "varbinary(MAX)").insertStatement(1)
 	if !strings.HasSuffix(legacy, "VALUES (TRY_CONVERT(int, @p1), @p2)") || !strings.HasPrefix(legacy, "IF @p1 IS NOT NULL") {
 		t.Errorf("inline route = %s", legacy)
 	}
@@ -110,8 +110,8 @@ func TestMSSQLImportStatementsCheckBeforeTheyWrite(t *testing.T) {
 	}
 }
 
-func TestMSSQLRowErrorNamesTheColumnAndTheValue(t *testing.T) {
-	p := mssqlPlan(t, false, ImportModeInsert, "int", "nvarchar(100)", "decimal(10,2)")
+func TestMSSQLImportRowErrorNamesTheColumnAndTheValue(t *testing.T) {
+	p := mssqlImportPlan(t, false, ImportModeInsert, "int", "nvarchar(100)", "decimal(10,2)")
 	args := []any{"4", "di", "oops"}
 	got := p.rowError(errors.New("mssql: jd-import-convert:3"), args)
 	if got == nil || got.Error() != `total: "oops" is not a value a decimal(10,2) column takes` {
@@ -129,7 +129,7 @@ func TestMSSQLRowErrorNamesTheColumnAndTheValue(t *testing.T) {
 	}
 }
 
-func TestISOTimeReadsTheFormsAFileCarries(t *testing.T) {
+func TestImportISOTimeReadsTheFormsAFileCarries(t *testing.T) {
 	utc := func(y int, m time.Month, d, h, min, s, ns int) time.Time {
 		return time.Date(y, m, d, h, min, s, ns, time.UTC)
 	}
@@ -143,23 +143,23 @@ func TestISOTimeReadsTheFormsAFileCarries(t *testing.T) {
 		"2026-03-04 05:06:07 +0200":      utc(2026, 3, 4, 3, 6, 7, 0),
 		"2026-03-04 05:06-07":            utc(2026, 3, 4, 12, 6, 0, 0),
 	} {
-		got, ok := isoTime(text)
+		got, ok := importISOTime(text)
 		if !ok || !got.Equal(want) {
-			t.Errorf("isoTime(%q) = %v, %v; want %v", text, got, ok, want)
+			t.Errorf("importISOTime(%q) = %v, %v; want %v", text, got, ok, want)
 		}
 	}
 	// A zone a value names is kept: it is part of what a zoned column holds.
-	if got, _ := isoTime("2026-03-04T05:06:07+02:00"); got.Format("-07:00") != "+02:00" || got.Hour() != 5 {
+	if got, _ := importISOTime("2026-03-04T05:06:07+02:00"); got.Format("-07:00") != "+02:00" || got.Hour() != 5 {
 		t.Errorf("the zone was not kept: %v", got)
 	}
 	for _, text := range []string{"", "04-MAR-26", "2026-13-40", "2026-03-04T25:00:00", "03/04/2026", "yesterday", "2026-03-04T05"} {
-		if got, ok := isoTime(text); ok {
-			t.Errorf("isoTime(%q) = %v, want it left to the engine", text, got)
+		if got, ok := importISOTime(text); ok {
+			t.Errorf("importISOTime(%q) = %v, want it left to the engine", text, got)
 		}
 	}
 }
 
-func TestBindValueForTheEnginesThatParseDifferently(t *testing.T) {
+func TestImportBindValueForTheEnginesThatParseDifferently(t *testing.T) {
 	text := func(s string) importValue { return importValue{text: s} }
 	// Oracle is given an instant for a date in an ISO form, and the text for
 	// one in a form only its session knows.
@@ -197,7 +197,7 @@ func TestBindValueForTheEnginesThatParseDifferently(t *testing.T) {
 	}
 }
 
-func TestKeyColumnTypeIsOneTheEngineWillIndex(t *testing.T) {
+func TestImportKeyColumnTypeIsOneTheEngineWillIndex(t *testing.T) {
 	for _, c := range []struct {
 		driver         Driver
 		inferred, want string
@@ -209,7 +209,7 @@ func TestKeyColumnTypeIsOneTheEngineWillIndex(t *testing.T) {
 		{DriverPostgres, "text", "text"},
 		{DriverOracle, "VARCHAR2(4000)", "VARCHAR2(4000)"},
 	} {
-		if got := keyColumnType(c.driver, c.inferred); got != c.want {
+		if got := importKeyColumnType(c.driver, c.inferred); got != c.want {
 			t.Errorf("%s key of %s = %s, want %s", c.driver, c.inferred, got, c.want)
 		}
 	}
@@ -227,7 +227,7 @@ func TestImportLeavesOutWhatTheServerComputes(t *testing.T) {
 	if _, err := db.Exec(`CREATE TABLE prices (id INTEGER PRIMARY KEY, net REAL NOT NULL, gross REAL GENERATED ALWAYS AS (net * 1.2) STORED)`); err != nil {
 		t.Fatal(err)
 	}
-	if got := sqliteComputedColumns(ctx, db, "prices"); len(got) != 1 || !got["gross"] {
+	if got := importSQLiteComputedColumns(ctx, db, "prices"); len(got) != 1 || !got["gross"] {
 		t.Errorf("computed columns = %v", got)
 	}
 	const file = "id,net,gross\n1,10,12\n2,20,999\n"

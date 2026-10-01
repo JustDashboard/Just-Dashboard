@@ -19,18 +19,18 @@ import (
 // Each test is given a user of its own by the administrator's connection, and
 // drops it.
 
-const oracleAdminEnv = "JD_TEST_ORACLE_ADMIN_DSN"
+const transferOracleAdminEnv = "JD_TEST_ORACLE_ADMIN_DSN"
 
 // liveOwnOracle makes a user for the test, with what an application's account
 // ordinarily may do and no more, and returns a pool as that user, its
 // connection string and its schema's name.
 func liveOwnOracle(t *testing.T, name string) (*sql.DB, string, string) {
 	t.Helper()
-	adminDSN := os.Getenv(oracleAdminEnv)
+	adminDSN := os.Getenv(transferOracleAdminEnv)
 	if adminDSN == "" {
-		t.Skipf("set %s to an Oracle account that may create a user for this test", oracleAdminEnv)
+		t.Skipf("set %s to an Oracle account that may create a user for this test", transferOracleAdminEnv)
 	}
-	admin := liveSQL(t, DriverOracle, oracleAdminEnv, "")
+	admin := liveSQL(t, DriverOracle, transferOracleAdminEnv, "")
 	ctx := context.Background()
 	schema := strings.ToUpper(name)
 	const password = "jdtest"
@@ -259,10 +259,10 @@ func TestLiveBuiltInOracleDumpIsFaithful(t *testing.T) {
 		t.Errorf("result = %+v", res)
 	}
 	if !strings.Contains(text, `CREATE TABLE "`+schema+`"."PEOPLE"`) {
-		t.Errorf("the dump is not of schema %s:\n%s", schema, clipDump(text))
+		t.Errorf("the dump is not of schema %s:\n%s", schema, clipDumpText(text))
 	}
 	if strings.Contains(text, "SKIPPED") {
-		t.Errorf("the dump left something out:\n%s", clipDump(text))
+		t.Errorf("the dump left something out:\n%s", clipDumpText(text))
 	}
 	for _, storage := range []string{"TABLESPACE", "PCTFREE", "STORAGE("} {
 		if strings.Contains(text, storage) {
@@ -277,11 +277,11 @@ func TestLiveBuiltInOracleDumpIsFaithful(t *testing.T) {
 		`DROP VIEW ACTIVE_COUNT`,
 	)
 	if out, err := RestoreWith(ctx, DriverOracle, dsn, res.Path, RestoreOptions{}); err != nil {
-		t.Fatalf("RestoreWith: %v\n%s\n%s", err, out, clipDump(text))
+		t.Fatalf("RestoreWith: %v\n%s\n%s", err, out, clipDumpText(text))
 	}
 	checkOracleRich(t, db)
 	if t.Failed() {
-		t.Logf("the dump:\n%s", clipDump(text))
+		t.Logf("the dump:\n%s", clipDumpText(text))
 	}
 
 	// And into the schema with nothing in it, where every DROP finds nothing.
@@ -299,8 +299,8 @@ func TestLiveBuiltInOracleDumpIsFaithful(t *testing.T) {
 	checkOracleRich(t, db)
 }
 
-// clipDump keeps a dump's long lines short enough to read in a test log.
-func clipDump(text string) string {
+// clipDumpText keeps a dump's long lines short enough to read in a test log.
+func clipDumpText(text string) string {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		if len(line) > 400 {
@@ -375,7 +375,7 @@ func TestLiveBuiltInOracleDumpStaysInItsSchema(t *testing.T) {
 	// The administrator sees every schema on the server. Told which one to
 	// dump, it dumps that one; told nothing, it is in a schema of the
 	// server's own, and that is refused rather than dumped.
-	adminDSN := os.Getenv(oracleAdminEnv)
+	adminDSN := os.Getenv(transferOracleAdminEnv)
 	t.Run("as_the_administrator_told_which", func(t *testing.T) {
 		check(t, adminDSN, DumpOptions{Database: schema})
 	})
@@ -409,16 +409,16 @@ func TestLiveOracleDumpHonoursItsOptions(t *testing.T) {
 		}
 		text := readDump(t, res.Path)
 		if strings.Contains(text, "CREATE ") || strings.Contains(text, "DROP ") {
-			t.Errorf("a dump of the rows carries structure:\n%s", clipDump(text))
+			t.Errorf("a dump of the rows carries structure:\n%s", clipDumpText(text))
 		}
 		if strings.Index(text, `INSERT INTO "JD_TRANSFER_LIVE"."PEOPLE"`) > strings.Index(text, `INSERT INTO "JD_TRANSFER_LIVE"."notes"`) {
-			t.Errorf("a child's rows are written before its parent's:\n%s", clipDump(text))
+			t.Errorf("a child's rows are written before its parent's:\n%s", clipDumpText(text))
 		}
 		// Into the tables as they stand, one of which always numbers its own
 		// rows.
 		execAll(t, db, `DELETE FROM "notes"`, `DELETE FROM PEOPLE`)
 		if _, err := RestoreWith(ctx, DriverOracle, dsn, res.Path, RestoreOptions{}); err != nil {
-			t.Fatalf("RestoreWith: %v\n%s", err, clipDump(text))
+			t.Fatalf("RestoreWith: %v\n%s", err, clipDumpText(text))
 		}
 		for query, want := range map[string]string{
 			`SELECT TO_CHAR(COUNT(*)) FROM PEOPLE`:                                           "2",
@@ -441,11 +441,11 @@ func TestLiveOracleDumpHonoursItsOptions(t *testing.T) {
 		text := readDump(t, res.Path)
 		if strings.Contains(text, `"PEOPLE" `) && strings.Contains(text, `CREATE TABLE "JD_TRANSFER_LIVE"."PEOPLE"`) ||
 			strings.Contains(text, "VIEW") || strings.Contains(text, "TICKET_SEQ") {
-			t.Errorf("a dump of one table carries others:\n%s", clipDump(text))
+			t.Errorf("a dump of one table carries others:\n%s", clipDumpText(text))
 		}
 		execAll(t, db, `DELETE FROM "notes" WHERE "id" = 1`)
 		if _, err := RestoreWith(ctx, DriverOracle, dsn, res.Path, RestoreOptions{}); err != nil {
-			t.Fatalf("RestoreWith: %v\n%s", err, clipDump(text))
+			t.Fatalf("RestoreWith: %v\n%s", err, clipDumpText(text))
 		}
 		// The parent alone. Dropping it takes the child's key with it, and
 		// the key is put back on the child the dump left alone.
@@ -456,7 +456,7 @@ func TestLiveOracleDumpHonoursItsOptions(t *testing.T) {
 		text = readDump(t, res.Path)
 		execAll(t, db, `UPDATE PEOPLE SET NICK = N'changed' WHERE ID = 1`)
 		if _, err := RestoreWith(ctx, DriverOracle, dsn, res.Path, RestoreOptions{}); err != nil {
-			t.Fatalf("RestoreWith: %v\n%s", err, clipDump(text))
+			t.Fatalf("RestoreWith: %v\n%s", err, clipDumpText(text))
 		}
 		for query, want := range map[string]string{
 			`SELECT TO_CHAR(NICK) FROM PEOPLE WHERE ID = 1`:                                      "Zoë",
@@ -481,7 +481,7 @@ func TestLiveOracleDumpHonoursItsOptions(t *testing.T) {
 		text = readDump(t, res.Path)
 		if !strings.Contains(text, `VIEW "JD_TRANSFER_LIVE"."ACTIVE_PEOPLE"`) || strings.Contains(text, "ACTIVE_COUNT") ||
 			!strings.Contains(text, `CREATE SEQUENCE  "JD_TRANSFER_LIVE"."TICKET_SEQ"`) {
-			t.Errorf("a dump of a table, a view and a sequence by name:\n%s", clipDump(text))
+			t.Errorf("a dump of a table, a view and a sequence by name:\n%s", clipDumpText(text))
 		}
 	})
 
@@ -492,10 +492,10 @@ func TestLiveOracleDumpHonoursItsOptions(t *testing.T) {
 		}
 		text := readDump(t, res.Path)
 		if strings.Contains(text, "INSERT INTO") || strings.Contains(text, "MODIFY") || !strings.Contains(res.Summary, "structure only") {
-			t.Errorf("a dump of the structure carries rows (%s):\n%s", res.Summary, clipDump(text))
+			t.Errorf("a dump of the structure carries rows (%s):\n%s", res.Summary, clipDumpText(text))
 		}
 		if _, err := RestoreWith(ctx, DriverOracle, dsn, res.Path, RestoreOptions{}); err != nil {
-			t.Fatalf("RestoreWith: %v\n%s", err, clipDump(text))
+			t.Fatalf("RestoreWith: %v\n%s", err, clipDumpText(text))
 		}
 		// Empty, and still numbering its own rows. Where the numbering starts
 		// is the server's to say: it writes a definition from where the

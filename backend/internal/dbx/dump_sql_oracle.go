@@ -23,24 +23,26 @@ import (
 // "the database" is one schema: Oracle's are users, and the file names the one
 // it was taken of.
 
-func oracleIdent(name string) string {
+func oracleDumpIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
-func oracleRel(schema, name string) string { return oracleIdent(schema) + "." + oracleIdent(name) }
+func oracleDumpRel(schema, name string) string {
+	return oracleDumpIdent(schema) + "." + oracleDumpIdent(name)
+}
 
-func oracleString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+func oracleDumpString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
-// oracleMetadataSession sets how DBMS_METADATA writes a definition for the
+// oracleDumpSession sets how DBMS_METADATA writes a definition for the
 // rest of this session: without where the segment is stored, without the
 // foreign keys (they go on once the rows are in), and without a terminator.
-const oracleMetadataSession = `BEGIN
+const oracleDumpSession = `BEGIN
   DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM, 'SEGMENT_ATTRIBUTES', FALSE);
   DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM, 'REF_CONSTRAINTS', FALSE);
   DBMS_METADATA.SET_TRANSFORM_PARAM(DBMS_METADATA.SESSION_TRANSFORM, 'SQLTERMINATOR', FALSE);
 END;`
 
-type oracleIdentity struct {
+type oracleDumpIdentity struct {
 	column     string
 	generation string // ALWAYS, BY DEFAULT, BY DEFAULT ON NULL
 	last       string
@@ -58,7 +60,7 @@ func planOracleDump(ctx context.Context, q dumpQueryer, schema string, sel dumpS
 	if err := q.QueryRowContext(ctx, `SELECT oracle_maintained FROM all_users WHERE username = :1`, schema).Scan(&maintained); err == nil && maintained == "Y" {
 		return nil, fmt.Errorf("%s is one of Oracle's own schemas, which a dump must not replace; name the schema to dump, or connect as its owner", schema)
 	}
-	if _, err := q.ExecContext(ctx, oracleMetadataSession); err != nil {
+	if _, err := q.ExecContext(ctx, oracleDumpSession); err != nil {
 		return nil, fmt.Errorf("this login cannot read definitions through DBMS_METADATA: %w", err)
 	}
 	plan := &dumpPlan{notes: []string{
@@ -106,11 +108,11 @@ func planOracleDump(ctx context.Context, q dumpQueryer, schema string, sel dumpS
 		return nil, err
 	}
 
-	columns, err := oracleInsertableColumns(ctx, q, schema)
+	columns, err := oracleDumpColumns(ctx, q, schema)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read the columns: %w", err)
 	}
-	identities := oracleIdentities(ctx, q, schema)
+	identities := oracleDumpIdentities(ctx, q, schema)
 
 	wanted := map[string]bool{}
 	var definitions []string
@@ -118,7 +120,7 @@ func planOracleDump(ctx context.Context, q dumpQueryer, schema string, sel dumpS
 		if !sel.wants(schema, e.name) {
 			continue
 		}
-		rel := oracleRel(schema, e.name)
+		rel := oracleDumpRel(schema, e.name)
 		create, err := ddl("TABLE", e.name)
 		if err != nil || create == "" {
 			reason := "it has no definition this login can read"
@@ -141,7 +143,7 @@ func planOracleDump(ctx context.Context, q dumpQueryer, schema string, sel dumpS
 			noData:    e.noRows || len(columns[e.name]) == 0,
 		}
 		if id, ok := identities[e.name]; ok {
-			column := oracleIdent(id.column)
+			column := oracleDumpIdent(id.column)
 			position := "START WITH LIMIT VALUE"
 			if numberText.MatchString(id.last) {
 				position = "START WITH " + id.last
@@ -159,29 +161,29 @@ func planOracleDump(ctx context.Context, q dumpQueryer, schema string, sel dumpS
 		plan.tables = append(plan.tables, table)
 	}
 
-	if err := oracleIndexes(ctx, q, plan, schema, wanted, ddl); err != nil {
+	if err := oracleDumpIndexes(ctx, q, plan, schema, wanted, ddl); err != nil {
 		plan.skipped = append(plan.skipped, "indexes: "+err.Error())
 	}
-	if err := oracleComments(ctx, q, plan, schema, wanted); err != nil {
+	if err := oracleDumpComments(ctx, q, plan, schema, wanted); err != nil {
 		plan.skipped = append(plan.skipped, "comments: "+err.Error())
 	}
-	if err := oracleForeignKeys(ctx, q, plan, schema, wanted, ddl); err != nil {
+	if err := oracleDumpForeignKeys(ctx, q, plan, schema, wanted, ddl); err != nil {
 		plan.skipped = append(plan.skipped, "foreign keys: "+err.Error())
 	}
 	plan.tables = orderByDependency(plan.tables)
-	if err := oracleSequences(ctx, q, plan, schema, sel, definitions, ddl); err != nil {
+	if err := oracleDumpSequences(ctx, q, plan, schema, sel, definitions, ddl); err != nil {
 		plan.skipped = append(plan.skipped, "sequences: "+err.Error())
 	}
-	if err := oracleViews(ctx, q, plan, schema, sel, ddl); err != nil {
+	if err := oracleDumpViews(ctx, q, plan, schema, sel, ddl); err != nil {
 		plan.skipped = append(plan.skipped, "views: "+err.Error())
 	}
 	return plan, nil
 }
 
-// oracleInsertableColumns lists each table's columns that can be given a
+// oracleDumpColumns lists each table's columns that can be given a
 // value: not the virtual ones, which the server computes, and not the ones it
 // keeps for itself behind a function-based index.
-func oracleInsertableColumns(ctx context.Context, q dumpQueryer, schema string) (map[string][]string, error) {
+func oracleDumpColumns(ctx context.Context, q dumpQueryer, schema string) (map[string][]string, error) {
 	rows, err := q.QueryContext(ctx, `
 	  SELECT table_name, column_name
 	  FROM all_tab_cols
@@ -197,16 +199,16 @@ func oracleInsertableColumns(ctx context.Context, q dumpQueryer, schema string) 
 		if err := rows.Scan(&table, &column); err != nil {
 			return nil, err
 		}
-		out[table] = append(out[table], oracleIdent(column))
+		out[table] = append(out[table], oracleDumpIdent(column))
 	}
 	return out, rows.Err()
 }
 
-// oracleIdentities reads which column of which table numbers itself, and
+// oracleDumpIdentities reads which column of which table numbers itself, and
 // where its counter has got to. A server from before identity columns has no
 // such view, and no such columns.
-func oracleIdentities(ctx context.Context, q dumpQueryer, schema string) map[string]oracleIdentity {
-	out := map[string]oracleIdentity{}
+func oracleDumpIdentities(ctx context.Context, q dumpQueryer, schema string) map[string]oracleDumpIdentity {
+	out := map[string]oracleDumpIdentity{}
 	rows, err := q.QueryContext(ctx, `
 	  SELECT i.table_name, i.column_name, i.generation_type, c.default_on_null, TO_CHAR(s.last_number)
 	  FROM all_tab_identity_cols i
@@ -224,7 +226,7 @@ func oracleIdentities(ctx context.Context, q dumpQueryer, schema string) map[str
 		if err := rows.Scan(&table, &column, &generation, nullText{&onNull}, nullText{&last}); err != nil {
 			return out
 		}
-		id := oracleIdentity{column: column, generation: "BY DEFAULT", last: last}
+		id := oracleDumpIdentity{column: column, generation: "BY DEFAULT", last: last}
 		switch {
 		case generation == "ALWAYS":
 			id.generation = "ALWAYS"
@@ -236,10 +238,10 @@ func oracleIdentities(ctx context.Context, q dumpQueryer, schema string) map[str
 	return out
 }
 
-// oracleIndexes writes the indexes that are objects of their own. One that
+// oracleDumpIndexes writes the indexes that are objects of their own. One that
 // stands behind a primary key or a unique constraint is made by the
 // constraint, in the table's own definition; made again it is refused.
-func oracleIndexes(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema string, wanted map[string]bool, ddl func(kind, name string) (string, error)) error {
+func oracleDumpIndexes(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema string, wanted map[string]bool, ddl func(kind, name string) (string, error)) error {
 	rows, err := q.QueryContext(ctx, `
 	  SELECT i.table_name, i.index_name
 	  FROM all_indexes i
@@ -278,7 +280,7 @@ func oracleIndexes(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema st
 	return nil
 }
 
-func oracleComments(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema string, wanted map[string]bool) error {
+func oracleDumpComments(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema string, wanted map[string]bool) error {
 	rows, err := q.QueryContext(ctx, `
 	  SELECT table_name, comments FROM all_tab_comments
 	  WHERE owner = :1 AND table_type = 'TABLE' AND comments IS NOT NULL
@@ -294,7 +296,7 @@ func oracleComments(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema s
 		}
 		if wanted[table] {
 			plan.after = append(plan.after, stmt(fmt.Sprintf("COMMENT ON TABLE %s IS %s",
-				oracleRel(schema, table), oracleString(comment))))
+				oracleDumpRel(schema, table), oracleDumpString(comment))))
 		}
 	}
 	rows.Close()
@@ -316,16 +318,16 @@ func oracleComments(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema s
 		}
 		if wanted[table] {
 			plan.after = append(plan.after, stmt(fmt.Sprintf("COMMENT ON COLUMN %s.%s IS %s",
-				oracleRel(schema, table), oracleIdent(column), oracleString(comment))))
+				oracleDumpRel(schema, table), oracleDumpIdent(column), oracleDumpString(comment))))
 		}
 	}
 	return rows.Err()
 }
 
-// oracleForeignKeys writes the foreign keys last, once every row they cover
+// oracleDumpForeignKeys writes the foreign keys last, once every row they cover
 // is in. A key on a table this dump leaves alone that points at one it holds
 // goes when that one is dropped, so it is put back too.
-func oracleForeignKeys(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema string, wanted map[string]bool, ddl func(kind, name string) (string, error)) error {
+func oracleDumpForeignKeys(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema string, wanted map[string]bool, ddl func(kind, name string) (string, error)) error {
 	rows, err := q.QueryContext(ctx, `
 	  SELECT c.table_name, c.constraint_name, r.owner, r.table_name
 	  FROM all_constraints c
@@ -363,7 +365,7 @@ func oracleForeignKeys(ctx context.Context, q dumpQueryer, plan *dumpPlan, schem
 		if !wanted[k.table] {
 			// -942 is "table or view does not exist": the table the key
 			// belongs to has gone since, and there is nothing to put it on.
-			add = "BEGIN\n  EXECUTE IMMEDIATE " + oracleString(add) +
+			add = "BEGIN\n  EXECUTE IMMEDIATE " + oracleDumpString(add) +
 				";\nEXCEPTION WHEN OTHERS THEN\n  IF SQLCODE <> -942 THEN RAISE; END IF;\nEND;"
 		} else if pointsIn && k.refTable != k.table {
 			parents[k.table] = append(parents[k.table], k.refTable)
@@ -376,9 +378,9 @@ func oracleForeignKeys(ctx context.Context, q dumpQueryer, plan *dumpPlan, schem
 	return nil
 }
 
-// oracleSequences writes the sequences that are objects of their own. The one
+// oracleDumpSequences writes the sequences that are objects of their own. The one
 // behind an identity column is made by the column.
-func oracleSequences(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema string, sel dumpSelection, definitions []string, ddl func(kind, name string) (string, error)) error {
+func oracleDumpSequences(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema string, sel dumpSelection, definitions []string, ddl func(kind, name string) (string, error)) error {
 	rows, err := q.QueryContext(ctx, `
 	  SELECT s.sequence_name
 	  FROM all_sequences s
@@ -429,7 +431,7 @@ func oracleSequences(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema 
 			plan.skipped = append(plan.skipped, fmt.Sprintf("sequence %s: %s", name, err.Error()))
 			continue
 		}
-		rel := oracleRel(schema, name)
+		rel := oracleDumpRel(schema, name)
 		plan.sequences = append(plan.sequences, dumpObject{
 			rel: rel, name: name, schema: schema, drop: stmt("DROP SEQUENCE " + rel), create: rawStmt(create),
 		})
@@ -437,8 +439,8 @@ func oracleSequences(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema 
 	return nil
 }
 
-// oracleViews writes each view after the views it reads.
-func oracleViews(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema string, sel dumpSelection, ddl func(kind, name string) (string, error)) error {
+// oracleDumpViews writes each view after the views it reads.
+func oracleDumpViews(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema string, sel dumpSelection, ddl func(kind, name string) (string, error)) error {
 	rows, err := q.QueryContext(ctx, `SELECT view_name FROM all_views WHERE owner = :1 ORDER BY view_name`, schema)
 	if err != nil {
 		return err
@@ -474,7 +476,7 @@ func oracleViews(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema stri
 		if !sel.wants(schema, name) || (sel.narrowed() && !sel.named(schema, name)) {
 			continue
 		}
-		rel := oracleRel(schema, name)
+		rel := oracleDumpRel(schema, name)
 		create, err := ddl("VIEW", name)
 		if err != nil || create == "" {
 			reason := "its definition is not readable by this login"
@@ -495,16 +497,16 @@ func oracleViews(ctx context.Context, q dumpQueryer, plan *dumpPlan, schema stri
 // --- rows -----------------------------------------------------------------
 
 const (
-	// oracleBinaryLiteralBytes is the most bytes HEXTORAW can be given as a
+	// oracleDumpLiteralBytes is the most bytes HEXTORAW can be given as a
 	// literal in a statement: four thousand characters of hex.
-	oracleBinaryLiteralBytes = 2000
+	oracleDumpLiteralBytes = 2000
 	// Inside a block a literal may be eight times that. These keep each piece
 	// under it whatever the characters are.
-	oracleBlockBinaryBytes = 16000
-	oracleBlockTextRunes   = 8000
+	oracleDumpBlockBytes = 16000
+	oracleDumpBlockRunes = 8000
 )
 
-// oracleLongRow writes a row that holds a value too long for a literal as a
+// oracleDumpLongRow writes a row that holds a value too long for a literal as a
 // block that builds the value in pieces and inserts the row from them.
 //
 // A literal in a statement stops at four thousand bytes. Text past that used
@@ -512,7 +514,7 @@ const (
 // seconds over at a megabyte and does not survive at six; bytes past it could
 // not be written at all, so a table with a picture in it restored up to the
 // picture. It reports false for a row every value of which fits a literal.
-func oracleLongRow(rel string, cols []string, vals []any, binary []bool, types []string) (string, bool) {
+func oracleDumpLongRow(rel string, cols []string, vals []any, binary []bool, types []string) (string, bool) {
 	parts := make([]string, len(vals))
 	var declare, build, free strings.Builder
 	long := 0
@@ -544,19 +546,19 @@ func oracleLongRow(rel string, cols []string, vals []any, binary []bool, types [
 			fmt.Fprintf(&build, "  DBMS_LOB.CREATETEMPORARY(%s, TRUE);\n", name)
 			runes := []rune(text)
 			for len(runes) > 0 {
-				n := min(oracleBlockTextRunes, len(runes))
-				fmt.Fprintf(&build, "  DBMS_LOB.APPEND(%s, TO_CLOB(%s));\n", name, oracleString(string(runes[:n])))
+				n := min(oracleDumpBlockRunes, len(runes))
+				fmt.Fprintf(&build, "  DBMS_LOB.APPEND(%s, TO_CLOB(%s));\n", name, oracleDumpString(string(runes[:n])))
 				runes = runes[n:]
 			}
 			fmt.Fprintf(&free, "  DBMS_LOB.FREETEMPORARY(%s);\n", name)
 			parts[i] = name
-		case !isText && len(raw) > oracleBinaryLiteralBytes:
+		case !isText && len(raw) > oracleDumpLiteralBytes:
 			long++
 			name := fmt.Sprintf("v%d", i+1)
 			fmt.Fprintf(&declare, "  %s BLOB;\n", name)
 			fmt.Fprintf(&build, "  DBMS_LOB.CREATETEMPORARY(%s, TRUE);\n", name)
 			for len(raw) > 0 {
-				n := min(oracleBlockBinaryBytes, len(raw))
+				n := min(oracleDumpBlockBytes, len(raw))
 				// Through a variable: HEXTORAW of a long literal is worked
 				// out when the block is compiled, and takes seconds a piece.
 				fmt.Fprintf(&build, "  s := '%s';\n  DBMS_LOB.WRITEAPPEND(%s, %d, HEXTORAW(s));\n",
@@ -577,27 +579,27 @@ func oracleLongRow(rel string, cols []string, vals []any, binary []bool, types [
 		free.String() + "END;", true
 }
 
-var oracleBlockStart = regexp.MustCompile(`(?i)^(DECLARE|BEGIN)\s`)
+var oracleDumpBlockStart = regexp.MustCompile(`(?i)^(DECLARE|BEGIN)\s`)
 
-// oracleIsBlock reports whether a statement is a PL/SQL block rather than SQL.
-func oracleIsBlock(statement string) bool {
-	return oracleBlockStart.MatchString(strings.TrimSpace(statement) + " ")
+// oracleDumpIsBlock reports whether a statement is a PL/SQL block rather than SQL.
+func oracleDumpIsBlock(statement string) bool {
+	return oracleDumpBlockStart.MatchString(strings.TrimSpace(statement) + " ")
 }
 
 // --- literals -------------------------------------------------------------
 
-// oracleNumberText is a number as Oracle's driver hands one back: exact
+// oracleDumpNumberText is a number as Oracle's driver hands one back: exact
 // digits, with or without anything before the point.
-var oracleNumberText = regexp.MustCompile(`^-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
+var oracleDumpNumberText = regexp.MustCompile(`^-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
 
-// oracleTimeLiteral writes an instant as the column's type reads one.
+// oracleDumpTime writes an instant as the column's type reads one.
 //
 // Oracle will not read a string as a date without being told the format, and
 // its NLS settings are per session — so the format travels with the value
 // rather than being assumed. A column that keeps a zone is written in the
 // value's own, which is part of what it holds; the others are the wall-clock
 // time the driver read.
-func oracleTimeLiteral(t time.Time, typeName string) string {
+func oracleDumpTime(t time.Time, typeName string) string {
 	upper := strings.ToUpper(typeName)
 	switch {
 	case upper == "DATE":

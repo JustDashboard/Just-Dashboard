@@ -25,7 +25,7 @@ import (
 // connection is in, and nothing in the file names that database, so the same
 // file loads into the one it came from and into one made a moment ago.
 
-type mssqlObject struct {
+type mssqlDumpObject struct {
 	id     int64
 	schema string
 	name   string
@@ -33,7 +33,7 @@ type mssqlObject struct {
 	view   bool
 }
 
-type mssqlColumn struct {
+type mssqlDumpColumn struct {
 	name, typeName                 string
 	maxLength, precision, scale    int
 	nullable, identity, computed   bool
@@ -45,13 +45,13 @@ type mssqlColumn struct {
 	seed, increment, last          string
 }
 
-type mssqlIndexColumn struct {
+type mssqlDumpIndexColumn struct {
 	name       string
 	descending bool
 	included   bool
 }
 
-type mssqlIndex struct {
+type mssqlDumpIndex struct {
 	name             string
 	kind             int // 1 clustered, 2 nonclustered; anything else is not written
 	unique           bool
@@ -59,19 +59,21 @@ type mssqlIndex struct {
 	uniqueConstraint bool
 	filter           string
 	disabled         bool
-	columns          []mssqlIndexColumn
+	columns          []mssqlDumpIndexColumn
 }
 
-// mssqlIdent quotes a name with brackets. It is not quoteBracket: that one
+// mssqlDumpIdent quotes a name with brackets. It is not quoteBracket: that one
 // refuses a name with a control character in it, and a dump has to carry
 // whatever the catalogue holds.
-func mssqlIdent(name string) string {
+func mssqlDumpIdent(name string) string {
 	return "[" + strings.ReplaceAll(name, "]", "]]") + "]"
 }
 
-func mssqlRel(schema, name string) string { return mssqlIdent(schema) + "." + mssqlIdent(name) }
+func mssqlDumpRel(schema, name string) string {
+	return mssqlDumpIdent(schema) + "." + mssqlDumpIdent(name)
+}
 
-func mssqlString(s string) string { return "N'" + strings.ReplaceAll(s, "'", "''") + "'" }
+func mssqlDumpString(s string) string { return "N'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
 func planMSSQLDump(ctx context.Context, q dumpQueryer, sel dumpSelection) (*dumpPlan, error) {
 	plan := &dumpPlan{
@@ -89,11 +91,11 @@ func planMSSQLDump(ctx context.Context, q dumpQueryer, sel dumpSelection) (*dump
 		},
 	}
 
-	objects, err := mssqlObjects(ctx, q, plan)
+	objects, err := mssqlDumpObjects(ctx, q, plan)
 	if err != nil {
 		return nil, fmt.Errorf("cannot list tables: %w", err)
 	}
-	wanted := map[int64]*mssqlObject{}
+	wanted := map[int64]*mssqlDumpObject{}
 	schemas := map[string]bool{}
 	for i := range objects {
 		o := &objects[i]
@@ -107,11 +109,11 @@ func planMSSQLDump(ctx context.Context, q dumpQueryer, sel dumpSelection) (*dump
 		}
 	}
 
-	columns, err := mssqlColumns(ctx, q)
+	columns, err := mssqlDumpColumns(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read the columns: %w", err)
 	}
-	indexes, err := mssqlIndexes(ctx, q)
+	indexes, err := mssqlDumpIndexes(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read the indexes: %w", err)
 	}
@@ -126,13 +128,13 @@ func planMSSQLDump(ctx context.Context, q dumpQueryer, sel dumpSelection) (*dump
 		if o.view || wanted[o.id] == nil {
 			continue
 		}
-		table, texts := mssqlTable(o, columns[o.id], indexes[o.id], collation.String)
+		table, texts := mssqlDumpTable(o, columns[o.id], indexes[o.id], collation.String)
 		defaults = append(defaults, texts...)
 		for _, ix := range indexes[o.id] {
 			if ix.primary {
 				continue
 			}
-			if create, reason := mssqlIndexStatement(o.rel, ix); create != "" {
+			if create, reason := mssqlDumpIndexStatement(o.rel, ix); create != "" {
 				plan.after = append(plan.after, rawStmt(create))
 			} else if reason != "" {
 				plan.skipped = append(plan.skipped, fmt.Sprintf("index %s on %s: %s", ix.name, o.rel, reason))
@@ -141,10 +143,10 @@ func planMSSQLDump(ctx context.Context, q dumpQueryer, sel dumpSelection) (*dump
 		plan.tables = append(plan.tables, table)
 	}
 
-	if err := mssqlChecks(ctx, q, plan, wanted); err != nil {
+	if err := mssqlDumpChecks(ctx, q, plan, wanted); err != nil {
 		plan.skipped = append(plan.skipped, "check constraints: "+err.Error())
 	}
-	if err := mssqlForeignKeys(ctx, q, plan, objects, wanted); err != nil {
+	if err := mssqlDumpForeignKeys(ctx, q, plan, objects, wanted); err != nil {
 		plan.skipped = append(plan.skipped, "foreign keys: "+err.Error())
 	}
 	// With the foreign keys read, a table's parents are known: a dump of the
@@ -152,10 +154,10 @@ func planMSSQLDump(ctx context.Context, q dumpQueryer, sel dumpSelection) (*dump
 	// first.
 	plan.tables = orderByDependency(plan.tables)
 
-	if err := mssqlSequences(ctx, q, plan, sel, schemas, defaults); err != nil {
+	if err := mssqlDumpSequences(ctx, q, plan, sel, schemas, defaults); err != nil {
 		plan.skipped = append(plan.skipped, "sequences: "+err.Error())
 	}
-	if err := mssqlViews(ctx, q, plan, objects, wanted, indexes); err != nil {
+	if err := mssqlDumpViews(ctx, q, plan, objects, wanted, indexes); err != nil {
 		plan.skipped = append(plan.skipped, "views: "+err.Error())
 	}
 
@@ -167,17 +169,17 @@ func planMSSQLDump(ctx context.Context, q dumpQueryer, sel dumpSelection) (*dump
 			continue
 		}
 		before = append(before, stmt(fmt.Sprintf("IF SCHEMA_ID(%s) IS NULL EXEC(%s)",
-			mssqlString(schema), mssqlString("CREATE SCHEMA "+mssqlIdent(schema)))))
+			mssqlDumpString(schema), mssqlDumpString("CREATE SCHEMA "+mssqlDumpIdent(schema)))))
 	}
 	plan.before = append(before, plan.before...)
 	return plan, nil
 }
 
-// mssqlObjects lists the tables and views that are somebody's. A table the
+// mssqlDumpObjects lists the tables and views that are somebody's. A table the
 // dump cannot carry as a table — one the server keeps history for, one that
 // lives in memory or outside the database — is named in the file as left out
 // rather than written as something it is not.
-func mssqlObjects(ctx context.Context, q dumpQueryer, plan *dumpPlan) ([]mssqlObject, error) {
+func mssqlDumpObjects(ctx context.Context, q dumpQueryer, plan *dumpPlan) ([]mssqlDumpObject, error) {
 	rows, err := q.QueryContext(ctx, `
 	  SELECT o.object_id, s.name, o.name, CASE WHEN o.type = 'V' THEN 1 ELSE 0 END,
 	         ISNULL(t.temporal_type, 0), ISNULL(t.is_memory_optimized, 0),
@@ -191,17 +193,17 @@ func mssqlObjects(ctx context.Context, q dumpQueryer, plan *dumpPlan) ([]mssqlOb
 		return nil, err
 	}
 	defer rows.Close()
-	out := []mssqlObject{}
+	out := []mssqlDumpObject{}
 	for rows.Next() {
 		var (
-			o                                    mssqlObject
+			o                                    mssqlDumpObject
 			temporal                             int
 			memoryOptimized, external, fileTable bool
 		)
 		if err := rows.Scan(&o.id, &o.schema, &o.name, &o.view, &temporal, &memoryOptimized, &external, &fileTable); err != nil {
 			return nil, err
 		}
-		o.rel = mssqlRel(o.schema, o.name)
+		o.rel = mssqlDumpRel(o.schema, o.name)
 		reason := ""
 		switch {
 		case temporal != 0:
@@ -222,7 +224,7 @@ func mssqlObjects(ctx context.Context, q dumpQueryer, plan *dumpPlan) ([]mssqlOb
 	return out, rows.Err()
 }
 
-func mssqlColumns(ctx context.Context, q dumpQueryer) (map[int64][]mssqlColumn, error) {
+func mssqlDumpColumns(ctx context.Context, q dumpQueryer) (map[int64][]mssqlDumpColumn, error) {
 	// An alias type is written as the type it stands for, so the file does not
 	// depend on a CREATE TYPE it does not carry.
 	rows, err := q.QueryContext(ctx, `
@@ -247,11 +249,11 @@ func mssqlColumns(ctx context.Context, q dumpQueryer) (map[int64][]mssqlColumn, 
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[int64][]mssqlColumn{}
+	out := map[int64][]mssqlDumpColumn{}
 	for rows.Next() {
 		var (
 			table int64
-			c     mssqlColumn
+			c     mssqlDumpColumn
 		)
 		if err := rows.Scan(&table, &c.name, &c.typeName, &c.maxLength, &c.precision, &c.scale,
 			&c.nullable, &c.identity, &c.computed, &c.rowGUID, &c.collation,
@@ -264,9 +266,9 @@ func mssqlColumns(ctx context.Context, q dumpQueryer) (map[int64][]mssqlColumn, 
 	return out, rows.Err()
 }
 
-// mssqlType puts the size back on a type name: the catalogue keeps a length
+// mssqlDumpType puts the size back on a type name: the catalogue keeps a length
 // in bytes, a precision and a scale beside it.
-func mssqlType(c mssqlColumn) string {
+func mssqlDumpType(c mssqlDumpColumn) string {
 	name := strings.ToLower(c.typeName)
 	length := func(unit int) string {
 		if c.maxLength < 0 {
@@ -289,18 +291,18 @@ func mssqlType(c mssqlColumn) string {
 	return c.typeName
 }
 
-// mssqlTable builds one table's CREATE statement, the query that reads its
+// mssqlDumpTable builds one table's CREATE statement, the query that reads its
 // rows, and what has to surround them. It also returns the text of its
 // defaults, which is where a sequence the table draws from is named.
-func mssqlTable(o *mssqlObject, columns []mssqlColumn, indexes []mssqlIndex, databaseCollation string) (dumpTable, []string) {
+func mssqlDumpTable(o *mssqlDumpObject, columns []mssqlDumpColumn, indexes []mssqlDumpIndex, databaseCollation string) (dumpTable, []string) {
 	var (
 		lines, selectCols, defaults []string
-		identity                    *mssqlColumn
+		identity                    *mssqlDumpColumn
 	)
 	for i := range columns {
 		c := &columns[i]
-		name := mssqlIdent(c.name)
-		typ := mssqlType(*c)
+		name := mssqlDumpIdent(c.name)
+		typ := mssqlDumpType(*c)
 		// A rowversion is the server's own stamp, a computed column the
 		// server's own arithmetic: neither can be given a value.
 		writable := !c.computed && !strings.EqualFold(c.typeName, "timestamp")
@@ -327,7 +329,7 @@ func mssqlTable(o *mssqlObject, columns []mssqlColumn, indexes []mssqlIndex, dat
 			line += " ROWGUIDCOL"
 		}
 		if c.defaultDefinition != "" {
-			line += " CONSTRAINT " + mssqlIdent(c.defaultName) + " DEFAULT " + c.defaultDefinition
+			line += " CONSTRAINT " + mssqlDumpIdent(c.defaultName) + " DEFAULT " + c.defaultDefinition
 			defaults = append(defaults, c.defaultDefinition)
 		}
 		if c.nullable {
@@ -347,7 +349,7 @@ func mssqlTable(o *mssqlObject, columns []mssqlColumn, indexes []mssqlIndex, dat
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("  CONSTRAINT %s PRIMARY KEY %s (%s)",
-			mssqlIdent(ix.name), mssqlClustering(ix.kind), mssqlKeyColumns(ix.columns)))
+			mssqlDumpIdent(ix.name), mssqlDumpClustering(ix.kind), mssqlDumpKeyColumns(ix.columns)))
 	}
 
 	table := dumpTable{
@@ -363,47 +365,47 @@ func mssqlTable(o *mssqlObject, columns []mssqlColumn, indexes []mssqlIndex, dat
 		// a time can be told so.
 		table.beforeData = []dumpStatement{stmt("SET IDENTITY_INSERT " + o.rel + " ON")}
 		table.afterData = []dumpStatement{stmt("SET IDENTITY_INSERT " + o.rel + " OFF")}
-		if reseed := mssqlReseed(o.rel, identity.last, identity.increment); reseed != "" {
+		if reseed := mssqlDumpReseed(o.rel, identity.last, identity.increment); reseed != "" {
 			table.afterData = append(table.afterData, stmt(reseed))
 		}
 	}
 	return table, defaults
 }
 
-// mssqlReseed puts an identity counter back where it was. The rows alone do
+// mssqlDumpReseed puts an identity counter back where it was. The rows alone do
 // not say: the id of a row since deleted is not handed out again, so the
 // counter may be ahead of the largest one present.
 //
 // A table that has never held a row takes the value given as its next id; one
 // that has takes it as the last id used. Which this is, is only known where
 // the dump is loaded.
-func mssqlReseed(rel, last, increment string) string {
+func mssqlDumpReseed(rel, last, increment string) string {
 	current, ok := new(big.Int).SetString(last, 10)
 	step, okStep := new(big.Int).SetString(increment, 10)
 	if !ok || !okStep {
 		return ""
 	}
 	next := new(big.Int).Add(current, step)
-	name := mssqlString(rel)
+	name := mssqlDumpString(rel)
 	return fmt.Sprintf(
 		"IF EXISTS (SELECT 1 FROM %s) DBCC CHECKIDENT (%s, RESEED, %s) WITH NO_INFOMSGS ELSE DBCC CHECKIDENT (%s, RESEED, %s) WITH NO_INFOMSGS",
 		rel, name, current.String(), name, next.String())
 }
 
-func mssqlClustering(kind int) string {
+func mssqlDumpClustering(kind int) string {
 	if kind == 1 {
 		return "CLUSTERED"
 	}
 	return "NONCLUSTERED"
 }
 
-func mssqlKeyColumns(columns []mssqlIndexColumn) string {
+func mssqlDumpKeyColumns(columns []mssqlDumpIndexColumn) string {
 	parts := []string{}
 	for _, c := range columns {
 		if c.included {
 			continue
 		}
-		part := mssqlIdent(c.name)
+		part := mssqlDumpIdent(c.name)
 		if c.descending {
 			part += " DESC"
 		}
@@ -412,7 +414,7 @@ func mssqlKeyColumns(columns []mssqlIndexColumn) string {
 	return strings.Join(parts, ", ")
 }
 
-func mssqlIndexes(ctx context.Context, q dumpQueryer) (map[int64][]mssqlIndex, error) {
+func mssqlDumpIndexes(ctx context.Context, q dumpQueryer) (map[int64][]mssqlDumpIndex, error) {
 	// A partitioned index lists its partitioning column as well; that row is
 	// neither a key nor included, and is left out.
 	rows, err := q.QueryContext(ctx, `
@@ -429,7 +431,7 @@ func mssqlIndexes(ctx context.Context, q dumpQueryer) (map[int64][]mssqlIndex, e
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[int64][]mssqlIndex{}
+	out := map[int64][]mssqlDumpIndex{}
 	var (
 		lastTable int64
 		lastIndex = -1
@@ -438,8 +440,8 @@ func mssqlIndexes(ctx context.Context, q dumpQueryer) (map[int64][]mssqlIndex, e
 		var (
 			table   int64
 			indexID int
-			ix      mssqlIndex
-			col     mssqlIndexColumn
+			ix      mssqlDumpIndex
+			col     mssqlDumpIndexColumn
 		)
 		if err := rows.Scan(&table, &indexID, &ix.name, &ix.kind, &ix.unique, &ix.primary, &ix.uniqueConstraint,
 			&ix.filter, &ix.disabled, &col.name, &col.descending, &col.included); err != nil {
@@ -455,9 +457,9 @@ func mssqlIndexes(ctx context.Context, q dumpQueryer) (map[int64][]mssqlIndex, e
 	return out, rows.Err()
 }
 
-// mssqlIndexStatement writes one index or unique constraint, or says why it
+// mssqlDumpIndexStatement writes one index or unique constraint, or says why it
 // is not written.
-func mssqlIndexStatement(rel string, ix mssqlIndex) (statement, skipped string) {
+func mssqlDumpIndexStatement(rel string, ix mssqlDumpIndex) (statement, skipped string) {
 	switch {
 	case ix.kind > 2:
 		return "", "only row-store indexes are dumped"
@@ -466,23 +468,23 @@ func mssqlIndexStatement(rel string, ix mssqlIndex) (statement, skipped string) 
 		// them it could refuse them.
 		return "", "it is disabled"
 	}
-	keys := mssqlKeyColumns(ix.columns)
+	keys := mssqlDumpKeyColumns(ix.columns)
 	if keys == "" {
 		return "", ""
 	}
 	if ix.uniqueConstraint {
 		return fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s UNIQUE %s (%s)",
-			rel, mssqlIdent(ix.name), mssqlClustering(ix.kind), keys), ""
+			rel, mssqlDumpIdent(ix.name), mssqlDumpClustering(ix.kind), keys), ""
 	}
 	unique := ""
 	if ix.unique {
 		unique = "UNIQUE "
 	}
-	create := fmt.Sprintf("CREATE %s%s INDEX %s ON %s (%s)", unique, mssqlClustering(ix.kind), mssqlIdent(ix.name), rel, keys)
+	create := fmt.Sprintf("CREATE %s%s INDEX %s ON %s (%s)", unique, mssqlDumpClustering(ix.kind), mssqlDumpIdent(ix.name), rel, keys)
 	var included []string
 	for _, c := range ix.columns {
 		if c.included {
-			included = append(included, mssqlIdent(c.name))
+			included = append(included, mssqlDumpIdent(c.name))
 		}
 	}
 	if len(included) > 0 {
@@ -494,7 +496,7 @@ func mssqlIndexStatement(rel string, ix mssqlIndex) (statement, skipped string) 
 	return create, ""
 }
 
-func mssqlChecks(ctx context.Context, q dumpQueryer, plan *dumpPlan, wanted map[int64]*mssqlObject) error {
+func mssqlDumpChecks(ctx context.Context, q dumpQueryer, plan *dumpPlan, wanted map[int64]*mssqlDumpObject) error {
 	rows, err := q.QueryContext(ctx, `
 	  SELECT cc.parent_object_id, cc.name, cc.definition, cc.is_disabled
 	  FROM sys.check_constraints cc
@@ -517,34 +519,34 @@ func mssqlChecks(ctx context.Context, q dumpQueryer, plan *dumpPlan, wanted map[
 		if o == nil || o.view {
 			continue
 		}
-		plan.after = append(plan.after, mssqlConstraint(o.rel, name, "CHECK "+definition, disabled)...)
+		plan.after = append(plan.after, mssqlDumpConstraint(o.rel, name, "CHECK "+definition, disabled)...)
 	}
 	return rows.Err()
 }
 
-// mssqlConstraint adds a constraint as it was: checked against the rows where
+// mssqlDumpConstraint adds a constraint as it was: checked against the rows where
 // it was enforced, and switched off again where it was not.
-func mssqlConstraint(rel, name, definition string, disabled bool) []dumpStatement {
+func mssqlDumpConstraint(rel, name, definition string, disabled bool) []dumpStatement {
 	check := "WITH CHECK"
 	if disabled {
 		check = "WITH NOCHECK"
 	}
-	out := []dumpStatement{rawStmt(fmt.Sprintf("ALTER TABLE %s %s ADD CONSTRAINT %s %s", rel, check, mssqlIdent(name), definition))}
+	out := []dumpStatement{rawStmt(fmt.Sprintf("ALTER TABLE %s %s ADD CONSTRAINT %s %s", rel, check, mssqlDumpIdent(name), definition))}
 	if disabled {
-		out = append(out, stmt(fmt.Sprintf("ALTER TABLE %s NOCHECK CONSTRAINT %s", rel, mssqlIdent(name))))
+		out = append(out, stmt(fmt.Sprintf("ALTER TABLE %s NOCHECK CONSTRAINT %s", rel, mssqlDumpIdent(name))))
 	}
 	return out
 }
 
-// mssqlForeignKeys takes every foreign key that touches a dumped table off
+// mssqlDumpForeignKeys takes every foreign key that touches a dumped table off
 // before the tables are dropped, and puts each back once all the rows are in.
 //
 // SQL Server has no cascading drop: a table something points at cannot be
 // dropped, whichever order the tables go in when two point at each other, and
 // not at all when the table pointing at it is one this dump leaves alone. Off
 // first and back on last serves all three.
-func mssqlForeignKeys(ctx context.Context, q dumpQueryer, plan *dumpPlan, objects []mssqlObject, wanted map[int64]*mssqlObject) error {
-	byID := map[int64]*mssqlObject{}
+func mssqlDumpForeignKeys(ctx context.Context, q dumpQueryer, plan *dumpPlan, objects []mssqlDumpObject, wanted map[int64]*mssqlDumpObject) error {
+	byID := map[int64]*mssqlDumpObject{}
 	for i := range objects {
 		byID[objects[i].id] = &objects[i]
 	}
@@ -588,8 +590,8 @@ func mssqlForeignKeys(ctx context.Context, q dumpQueryer, plan *dumpPlan, object
 			last = id
 		}
 		k := &keys[len(keys)-1]
-		k.columns = append(k.columns, mssqlIdent(column))
-		k.refs = append(k.refs, mssqlIdent(ref))
+		k.columns = append(k.columns, mssqlDumpIdent(column))
+		k.refs = append(k.refs, mssqlDumpIdent(ref))
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -605,7 +607,7 @@ func mssqlForeignKeys(ctx context.Context, q dumpQueryer, plan *dumpPlan, object
 		// The key is an object in its table's schema, which is how it is found.
 		plan.beforeDrops = append(plan.beforeDrops, stmt(fmt.Sprintf(
 			"IF OBJECT_ID(%s, 'F') IS NOT NULL ALTER TABLE %s DROP CONSTRAINT %s",
-			mssqlString(mssqlRel(parent.schema, fk.name)), parent.rel, mssqlIdent(fk.name))))
+			mssqlDumpString(mssqlDumpRel(parent.schema, fk.name)), parent.rel, mssqlDumpIdent(fk.name))))
 
 		definition := fmt.Sprintf("FOREIGN KEY (%s) REFERENCES %s (%s)",
 			strings.Join(fk.columns, ", "), referenced.rel, strings.Join(fk.refs, ", "))
@@ -615,13 +617,13 @@ func mssqlForeignKeys(ctx context.Context, q dumpQueryer, plan *dumpPlan, object
 		if action := strings.ReplaceAll(fk.onUpdate, "_", " "); action != "" && action != "NO ACTION" {
 			definition += " ON UPDATE " + action
 		}
-		add := mssqlConstraint(parent.rel, fk.name, definition, fk.disabled)
+		add := mssqlDumpConstraint(parent.rel, fk.name, definition, fk.disabled)
 		if wanted[fk.parent] == nil {
 			// A table this dump leaves alone points at one it holds. Its key
 			// was taken off so that one could be replaced, and goes back where
 			// the table it belongs to is still there.
 			for i := range add {
-				add[i] = rawStmt(fmt.Sprintf("IF OBJECT_ID(%s, 'U') IS NOT NULL %s", mssqlString(parent.rel), add[i].sql))
+				add[i] = rawStmt(fmt.Sprintf("IF OBJECT_ID(%s, 'U') IS NOT NULL %s", mssqlDumpString(parent.rel), add[i].sql))
 			}
 		} else if fk.parent != fk.referenced {
 			parents[fk.parent] = append(parents[fk.parent], referenced.name)
@@ -639,9 +641,9 @@ func mssqlForeignKeys(ctx context.Context, q dumpQueryer, plan *dumpPlan, object
 	return nil
 }
 
-// mssqlSequences writes the sequences that are objects of their own, and
+// mssqlDumpSequences writes the sequences that are objects of their own, and
 // where each had got to.
-func mssqlSequences(ctx context.Context, q dumpQueryer, plan *dumpPlan, sel dumpSelection, schemas map[string]bool, defaults []string) error {
+func mssqlDumpSequences(ctx context.Context, q dumpQueryer, plan *dumpPlan, sel dumpSelection, schemas map[string]bool, defaults []string) error {
 	const columns = `SCHEMA_NAME(s.schema_id), s.name, TYPE_NAME(s.system_type_id), s.precision,
 	         CAST(s.start_value AS varchar(60)), CAST(s.increment AS varchar(60)),
 	         CAST(s.minimum_value AS varchar(60)), CAST(s.maximum_value AS varchar(60)),
@@ -692,7 +694,7 @@ func mssqlSequences(ctx context.Context, q dumpQueryer, plan *dumpPlan, sel dump
 				return fmt.Errorf("sequence %s reports %q where a number belongs", name, n)
 			}
 		}
-		rel := mssqlRel(schema, name)
+		rel := mssqlDumpRel(schema, name)
 		switch strings.ToLower(typ) {
 		case "decimal", "numeric":
 			typ = fmt.Sprintf("%s(%d,0)", typ, precision)
@@ -713,23 +715,23 @@ func mssqlSequences(ctx context.Context, q dumpQueryer, plan *dumpPlan, sel dump
 			// A table this dump leaves alone may draw from it too, and a
 			// sequence something draws from cannot be dropped. It is made
 			// where it is missing and left where it is not.
-			obj.create = stmt(fmt.Sprintf("IF OBJECT_ID(%s, 'SO') IS NULL EXEC(%s)", mssqlString(rel), mssqlString(create)))
+			obj.create = stmt(fmt.Sprintf("IF OBJECT_ID(%s, 'SO') IS NULL EXEC(%s)", mssqlDumpString(rel), mssqlDumpString(create)))
 		} else {
 			obj.drop = stmt("DROP SEQUENCE IF EXISTS " + rel)
 			obj.create = stmt(create)
 		}
 		plan.sequences = append(plan.sequences, obj)
 		schemas[schema] = true
-		if next := mssqlSequenceNext(current, increment, minValue, maxValue, cycling, used); next != "" {
+		if next := mssqlDumpSequenceNext(current, increment, minValue, maxValue, cycling, used); next != "" {
 			plan.afterAll = append(plan.afterAll, stmt("ALTER SEQUENCE "+rel+" RESTART WITH "+next))
 		}
 	}
 	return rows.Err()
 }
 
-// mssqlSequenceNext is the value a sequence hands out next, or nothing when
+// mssqlDumpSequenceNext is the value a sequence hands out next, or nothing when
 // that is still its first.
-func mssqlSequenceNext(current, increment, minValue, maxValue string, cycling, used bool) string {
+func mssqlDumpSequenceNext(current, increment, minValue, maxValue string, cycling, used bool) string {
 	if !used {
 		return ""
 	}
@@ -754,9 +756,9 @@ func mssqlSequenceNext(current, increment, minValue, maxValue string, cycling, u
 	return next.String()
 }
 
-// mssqlViews writes each view after the views it reads, with the indexes that
+// mssqlDumpViews writes each view after the views it reads, with the indexes that
 // make it a stored one.
-func mssqlViews(ctx context.Context, q dumpQueryer, plan *dumpPlan, objects []mssqlObject, wanted map[int64]*mssqlObject, indexes map[int64][]mssqlIndex) error {
+func mssqlDumpViews(ctx context.Context, q dumpQueryer, plan *dumpPlan, objects []mssqlDumpObject, wanted map[int64]*mssqlDumpObject, indexes map[int64][]mssqlDumpIndex) error {
 	definitions := map[int64]string{}
 	rows, err := q.QueryContext(ctx, `
 	  SELECT m.object_id, ISNULL(m.definition, '')
@@ -816,7 +818,7 @@ func mssqlViews(ctx context.Context, q dumpQueryer, plan *dumpPlan, objects []ms
 			drop: stmt("DROP VIEW IF EXISTS " + o.rel), create: rawStmt(definition),
 		}
 		for _, ix := range indexes[o.id] {
-			if create, reason := mssqlIndexStatement(o.rel, ix); create != "" {
+			if create, reason := mssqlDumpIndexStatement(o.rel, ix); create != "" {
 				obj.after = append(obj.after, rawStmt(create))
 			} else if reason != "" {
 				plan.skipped = append(plan.skipped, fmt.Sprintf("index %s on %s: %s", ix.name, o.rel, reason))
@@ -838,11 +840,11 @@ func mssqlViews(ctx context.Context, q dumpQueryer, plan *dumpPlan, objects []ms
 
 // --- literals -------------------------------------------------------------
 
-// mssqlColumnLiteral renders the values SQL Server's driver hands back in a
+// mssqlDumpLiteral renders the values SQL Server's driver hands back in a
 // form that says nothing of what they are: a number as the bytes of its
 // digits, a uniqueidentifier and the other fixed binary types as bytes under
 // a type name with no "binary" in it.
-func mssqlColumnLiteral(v any, typeName string) (string, bool) {
+func mssqlDumpLiteral(v any, typeName string) (string, bool) {
 	b, ok := v.([]byte)
 	if !ok {
 		return "", false
@@ -863,12 +865,12 @@ func mssqlColumnLiteral(v any, typeName string) (string, bool) {
 	return "", false
 }
 
-// mssqlTimeLiteral writes an instant as the column's type reads one.
+// mssqlDumpTime writes an instant as the column's type reads one.
 //
 // The ISO form with a T is the one spelling SQL Server reads the same way
 // under every language and date-format setting. How many digits of a second
 // it will take depends on the type: the old datetime refuses more than three.
-func mssqlTimeLiteral(t time.Time, typeName string) string {
+func mssqlDumpTime(t time.Time, typeName string) string {
 	layout := "2006-01-02T15:04:05.9999999"
 	switch strings.ToUpper(typeName) {
 	case "DATE":

@@ -25,13 +25,13 @@ import (
 // with a value that did not convert is refused before the statement that
 // would have written it runs, by an error that ends nothing but itself.
 
-// mssqlConvertMarker is how the statement says a value did not convert. The
+// mssqlImportMarker is how the statement says a value did not convert. The
 // number after it, where there is one, is the column's position.
-const mssqlConvertMarker = "jd-import-convert"
+const mssqlImportMarker = "jd-import-convert"
 
-// mssqlTypeText is a type as the catalogue spells one. It goes into the
+// mssqlImportTypeText is a type as the catalogue spells one. It goes into the
 // statement, so it is held to that shape whatever the catalogue said.
-var mssqlTypeText = regexp.MustCompile(`^[a-z][a-z0-9]*(\((max|[0-9]+(,[0-9]+)?)\))?$`)
+var mssqlImportTypeText = regexp.MustCompile(`^[a-z][a-z0-9]*(\((max|[0-9]+(,[0-9]+)?)\))?$`)
 
 // mssqlImportValue writes one bound value into a statement for a column of
 // this type. failed is the condition under which the value holds something
@@ -43,7 +43,7 @@ var mssqlTypeText = regexp.MustCompile(`^[a-z][a-z0-9]*(\((max|[0-9]+(,[0-9]+)?)
 // \x form — the text is left for the server to refuse as it always has.
 func mssqlImportValue(typeName, mark string, bytes bool) (value, failed string) {
 	t := strings.ToLower(strings.TrimSpace(typeName))
-	if !mssqlTypeText.MatchString(t) {
+	if !mssqlImportTypeText.MatchString(t) {
 		return mark, ""
 	}
 	base := t
@@ -102,7 +102,7 @@ func (p *importPlan) mssqlGuard(n int) string {
 		var b strings.Builder
 		for _, at := range guarded {
 			_, failed := p.mssqlValue(at, p.d.Placeholder(at+1))
-			fmt.Fprintf(&b, "IF %s RAISERROR(N'%s:%d', 16, 1) ELSE ", failed, mssqlConvertMarker, at+1)
+			fmt.Fprintf(&b, "IF %s RAISERROR(N'%s:%d', 16, 1) ELSE ", failed, mssqlImportMarker, at+1)
 		}
 		return b.String()
 	}
@@ -122,7 +122,7 @@ func (p *importPlan) mssqlGuard(n int) string {
 		conds[i] = "(" + failed + ")"
 	}
 	return fmt.Sprintf("IF EXISTS (SELECT 1 FROM (VALUES %s) AS r (%s) WHERE %s) RAISERROR(N'%s', 16, 1) ELSE ",
-		strings.Join(rows, ", "), strings.Join(names, ", "), strings.Join(conds, " OR "), mssqlConvertMarker)
+		strings.Join(rows, ", "), strings.Join(names, ", "), strings.Join(conds, " OR "), mssqlImportMarker)
 }
 
 // rowError puts a refusal in the file's terms where the engine's own says
@@ -131,7 +131,7 @@ func (p *importPlan) rowError(err error, args []any) error {
 	if err == nil || !p.mssqlConverts() {
 		return err
 	}
-	_, after, found := strings.Cut(err.Error(), mssqlConvertMarker+":")
+	_, after, found := strings.Cut(err.Error(), mssqlImportMarker+":")
 	if !found {
 		return err
 	}

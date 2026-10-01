@@ -16,17 +16,17 @@ import (
 // database lands in master. So nothing here runs in the database the
 // connection string names: each test makes one of its own, and drops it.
 
-const mssqlEnv = "JD_TEST_MSSQL_DSN"
+const transferMSSQLEnv = "JD_TEST_MSSQL_DSN"
 
 // liveOwnMSSQL makes an empty database for the test on the server the
 // environment names, and returns a pool on it and its connection string.
 func liveOwnMSSQL(t *testing.T, name string) (*sql.DB, string) {
 	t.Helper()
-	base := os.Getenv(mssqlEnv)
+	base := os.Getenv(transferMSSQLEnv)
 	if base == "" {
-		t.Skipf("set %s to a SQL Server this test may create a database on", mssqlEnv)
+		t.Skipf("set %s to a SQL Server this test may create a database on", transferMSSQLEnv)
 	}
-	liveSQL(t, DriverMSSQL, mssqlEnv, "")
+	liveSQL(t, DriverMSSQL, transferMSSQLEnv, "")
 	ctx := context.Background()
 	_, _ = DropDatabase(ctx, DriverMSSQL, base, name)
 	if err := CreateDatabase(ctx, DriverMSSQL, base, name); err != nil {

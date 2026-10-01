@@ -65,9 +65,9 @@ func (e transferEngine) elsewhere(table string) string {
 	return e.rel(table)
 }
 
-// openOwnMSSQL makes a database for the test on the server the environment
+// transferOwnMSSQL makes a database for the test on the server the environment
 // names: that connection string lands in master, which is everybody's.
-func openOwnMSSQL(t *testing.T, name string) string {
+func transferOwnMSSQL(t *testing.T, name string) string {
 	t.Helper()
 	base := os.Getenv("JD_TEST_MSSQL_DSN")
 	if base == "" {
@@ -82,9 +82,9 @@ func openOwnMSSQL(t *testing.T, name string) string {
 	return dbx.DSNForDatabase(dbx.DriverMSSQL, base, name)
 }
 
-// openOwnOracle makes a user for the test, with what an application's account
+// transferOwnOracle makes a user for the test, with what an application's account
 // ordinarily may do, and returns its connection string and schema.
-func openOwnOracle(t *testing.T, name string) (string, string) {
+func transferOwnOracle(t *testing.T, name string) (string, string) {
 	t.Helper()
 	adminDSN := os.Getenv("JD_TEST_ORACLE_ADMIN_DSN")
 	if adminDSN == "" {
@@ -136,14 +136,14 @@ func openOwnOracle(t *testing.T, name string) (string, string) {
 	return u.String(), schema
 }
 
-func bracketQuote(name string) string  { return "[" + name + "]" }
-func doubleQuote(name string) string   { return `"` + name + `"` }
-func backtickQuote(name string) string { return "`" + name + "`" }
+func transferQuoteBracket(name string) string  { return "[" + name + "]" }
+func transferQuoteDouble(name string) string   { return `"` + name + `"` }
+func transferQuoteBacktick(name string) string { return "`" + name + "`" }
 
 func TestLiveAPISQLServerTransfer(t *testing.T) {
-	dsn := openOwnMSSQL(t, "jd_transfer_api")
+	dsn := transferOwnMSSQL(t, "jd_transfer_api")
 	runTransferSuite(t, transferEngine{
-		driver: dbx.DriverMSSQL, dsn: dsn, schema: "dbo", quote: bracketQuote,
+		driver: dbx.DriverMSSQL, dsn: dsn, schema: "dbo", quote: transferQuoteBracket,
 		newDatabase: true, database: "jd_transfer_api",
 		seed: []string{
 			`CREATE TABLE dbo.jd_api_orders (
@@ -168,9 +168,9 @@ func TestLiveAPISQLServerTransfer(t *testing.T) {
 }
 
 func TestLiveAPIOracleTransfer(t *testing.T) {
-	dsn, schema := openOwnOracle(t, "jd_transfer_api")
+	dsn, schema := transferOwnOracle(t, "jd_transfer_api")
 	runTransferSuite(t, transferEngine{
-		driver: dbx.DriverOracle, dsn: dsn, schema: schema, quote: doubleQuote,
+		driver: dbx.DriverOracle, dsn: dsn, schema: schema, quote: transferQuoteDouble,
 		seed: []string{
 			// Quoted, in lower case: that is how the dashboard addresses a
 			// name, and how a table made through it is spelled.
@@ -210,7 +210,7 @@ func TestLiveAPIMySQLTransfer(t *testing.T) {
 		t.Skip("set JD_TEST_MYSQL8_DSN (or JD_TEST_MYSQL_DSN) to a MySQL database this test may replace the tables of")
 	}
 	e := transferEngine{
-		driver: dbx.DriverMySQL, dsn: dsn, schema: info.Database, quote: backtickQuote,
+		driver: dbx.DriverMySQL, dsn: dsn, schema: info.Database, quote: transferQuoteBacktick,
 		newDatabase: admin != "", database: info.Database,
 		teardown: []string{`DROP TABLE IF EXISTS jd_api_new`, `DROP TABLE IF EXISTS jd_api_lines`, `DROP TABLE IF EXISTS jd_api_orders`},
 		seed: []string{
@@ -241,9 +241,9 @@ func TestLiveAPIMySQLTransfer(t *testing.T) {
 	runTransferSuite(t, e)
 }
 
-// addLiveConnection saves one more connection on a test server and returns
+// transferAddConnection saves one more connection on a test server and returns
 // its id.
-func addLiveConnection(t *testing.T, s *Server, name string, driver dbx.Driver, dsn string) int64 {
+func transferAddConnection(t *testing.T, s *Server, name string, driver dbx.Driver, dsn string) int64 {
 	t.Helper()
 	sealed, err := s.Sealer.Seal(dsn)
 	if err != nil {
@@ -389,7 +389,7 @@ func runTransferSuite(t *testing.T, e transferEngine) {
 		}
 		exec("DELETE FROM "+lines, "DELETE FROM "+orders)
 		for _, statement := range strings.Split(script, ";\n") {
-			statement = strings.TrimSpace(stripSQLComments(statement))
+			statement = strings.TrimSpace(transferStripComments(statement))
 			if statement != "" {
 				exec(statement)
 			}
@@ -403,7 +403,7 @@ func runTransferSuite(t *testing.T, e transferEngine) {
 		if again != csv {
 			t.Errorf("the table after replaying its SQL export differs:\n%s\nwas\n%s", again, csv)
 		}
-		exec(e.seed[len(e.seed)-countLineInserts(e):]...)
+		exec(e.seed[len(e.seed)-transferLineInserts(e):]...)
 
 		// A projection, in the order asked for; a limit that says it was
 		// reached; a filter the grid would send.
@@ -704,7 +704,7 @@ func runTransferSuite(t *testing.T, e transferEngine) {
 	adminID, adminDSN := id, e.dsn
 	if e.adminDSN != "" {
 		adminDSN = e.adminDSN
-		adminID = addLiveConnection(t, s, "live-admin", e.driver, e.adminDSN)
+		adminID = transferAddConnection(t, s, "live-admin", e.driver, e.adminDSN)
 	}
 	adminPath := func(suffix string) string { return pathf("/databases/%d"+suffix, adminID) }
 	scratch := []string{e.database + "_api_new", e.database + "_api_copy"}
@@ -812,9 +812,9 @@ func runTransferSuite(t *testing.T, e transferEngine) {
 	})
 }
 
-// countLineInserts is how many of an engine's seed statements fill the lines
+// transferLineInserts is how many of an engine's seed statements fill the lines
 // table: the ones to run again once the orders they point at are back.
-func countLineInserts(e transferEngine) int {
+func transferLineInserts(e transferEngine) int {
 	n := 0
 	for _, statement := range e.seed {
 		if strings.Contains(statement, "INSERT INTO") && strings.Contains(statement, "jd_api_lines") {
@@ -824,9 +824,9 @@ func countLineInserts(e transferEngine) int {
 	return n
 }
 
-// stripSQLComments drops the comment lines of an export so what is left of a
+// transferStripComments drops the comment lines of an export so what is left of a
 // piece is a statement or nothing.
-func stripSQLComments(piece string) string {
+func transferStripComments(piece string) string {
 	var kept []string
 	for _, line := range strings.Split(piece, "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(line), "--") {

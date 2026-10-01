@@ -19,7 +19,7 @@ import (
 // a view's body with its comments kept, a row's long value — and a line of it
 // reading "-- jd:end" used to end the statement there, so whatever followed
 // was run as statements of its own by whoever restored the dump.
-func TestAFencedStatementCannotBeClosedByWhatItHolds(t *testing.T) {
+func TestADumpsFencedStatementCannotBeClosedByWhatItHolds(t *testing.T) {
 	hostile := "CREATE VIEW v AS SELECT 1\n" +
 		rawStatementEnd + "\n" +
 		"DROP TABLE everything;\n" +
@@ -50,8 +50,8 @@ func TestAFencedStatementCannotBeClosedByWhatItHolds(t *testing.T) {
 	}
 
 	// Two dumps do not share a word, and a word is one token.
-	a, errA := newStatementFence()
-	b, errB := newStatementFence()
+	a, errA := newDumpFence()
+	b, errB := newDumpFence()
 	if errA != nil || errB != nil || a == b || len(a) != 16 || strings.ContainsAny(a, " \t\n") {
 		t.Errorf("fence words %q, %q (%v, %v)", a, b, errA, errB)
 	}
@@ -63,47 +63,47 @@ func TestAFencedStatementCannotBeClosedByWhatItHolds(t *testing.T) {
 		rawStatementBegin + "x":          false,
 		"-- jd:state":                    false,
 	} {
-		if _, ok := statementFenceOf(line); ok != want {
-			t.Errorf("statementFenceOf(%q) = %v, want %v", line, ok, want)
+		if _, ok := dumpFenceOf(line); ok != want {
+			t.Errorf("dumpFenceOf(%q) = %v, want %v", line, ok, want)
 		}
 	}
 }
 
 // --- SQL Server --------------------------------------------------------------
 
-func TestMSSQLTypePutsTheSizeBack(t *testing.T) {
+func TestMSSQLDumpTypePutsTheSizeBack(t *testing.T) {
 	for _, c := range []struct {
-		col  mssqlColumn
+		col  mssqlDumpColumn
 		want string
 	}{
-		{mssqlColumn{typeName: "nvarchar", maxLength: 510}, "nvarchar(255)"},
-		{mssqlColumn{typeName: "nvarchar", maxLength: -1}, "nvarchar(max)"},
-		{mssqlColumn{typeName: "varchar", maxLength: 40}, "varchar(40)"},
-		{mssqlColumn{typeName: "nchar", maxLength: 6}, "nchar(3)"},
-		{mssqlColumn{typeName: "varbinary", maxLength: -1}, "varbinary(max)"},
-		{mssqlColumn{typeName: "binary", maxLength: 4}, "binary(4)"},
-		{mssqlColumn{typeName: "decimal", precision: 12, scale: 2}, "decimal(12,2)"},
-		{mssqlColumn{typeName: "numeric", precision: 38}, "numeric(38,0)"},
-		{mssqlColumn{typeName: "datetime2", scale: 7}, "datetime2(7)"},
-		{mssqlColumn{typeName: "time", scale: 3}, "time(3)"},
-		{mssqlColumn{typeName: "datetimeoffset", scale: 0}, "datetimeoffset(0)"},
-		{mssqlColumn{typeName: "float", precision: 53}, "float(53)"},
-		{mssqlColumn{typeName: "float", precision: 24}, "float(24)"},
+		{mssqlDumpColumn{typeName: "nvarchar", maxLength: 510}, "nvarchar(255)"},
+		{mssqlDumpColumn{typeName: "nvarchar", maxLength: -1}, "nvarchar(max)"},
+		{mssqlDumpColumn{typeName: "varchar", maxLength: 40}, "varchar(40)"},
+		{mssqlDumpColumn{typeName: "nchar", maxLength: 6}, "nchar(3)"},
+		{mssqlDumpColumn{typeName: "varbinary", maxLength: -1}, "varbinary(max)"},
+		{mssqlDumpColumn{typeName: "binary", maxLength: 4}, "binary(4)"},
+		{mssqlDumpColumn{typeName: "decimal", precision: 12, scale: 2}, "decimal(12,2)"},
+		{mssqlDumpColumn{typeName: "numeric", precision: 38}, "numeric(38,0)"},
+		{mssqlDumpColumn{typeName: "datetime2", scale: 7}, "datetime2(7)"},
+		{mssqlDumpColumn{typeName: "time", scale: 3}, "time(3)"},
+		{mssqlDumpColumn{typeName: "datetimeoffset", scale: 0}, "datetimeoffset(0)"},
+		{mssqlDumpColumn{typeName: "float", precision: 53}, "float(53)"},
+		{mssqlDumpColumn{typeName: "float", precision: 24}, "float(24)"},
 		// A length that means nothing for the type is not written after it.
-		{mssqlColumn{typeName: "int", maxLength: 4, precision: 10}, "int"},
-		{mssqlColumn{typeName: "datetime", maxLength: 8, precision: 23, scale: 3}, "datetime"},
-		{mssqlColumn{typeName: "uniqueidentifier", maxLength: 16}, "uniqueidentifier"},
-		{mssqlColumn{typeName: "xml", maxLength: -1}, "xml"},
+		{mssqlDumpColumn{typeName: "int", maxLength: 4, precision: 10}, "int"},
+		{mssqlDumpColumn{typeName: "datetime", maxLength: 8, precision: 23, scale: 3}, "datetime"},
+		{mssqlDumpColumn{typeName: "uniqueidentifier", maxLength: 16}, "uniqueidentifier"},
+		{mssqlDumpColumn{typeName: "xml", maxLength: -1}, "xml"},
 	} {
-		if got := mssqlType(c.col); got != c.want {
-			t.Errorf("mssqlType(%+v) = %s, want %s", c.col, got, c.want)
+		if got := mssqlDumpType(c.col); got != c.want {
+			t.Errorf("mssqlDumpType(%+v) = %s, want %s", c.col, got, c.want)
 		}
 	}
 }
 
-func TestMSSQLTableKeepsWhatTheColumnsAre(t *testing.T) {
-	o := &mssqlObject{schema: "dbo", name: "t]x", rel: mssqlRel("dbo", "t]x")}
-	columns := []mssqlColumn{
+func TestMSSQLDumpTableKeepsWhatTheColumnsAre(t *testing.T) {
+	o := &mssqlDumpObject{schema: "dbo", name: "t]x", rel: mssqlDumpRel("dbo", "t]x")}
+	columns := []mssqlDumpColumn{
 		{name: "id", typeName: "int", identity: true, seed: "10", increment: "5", last: "25"},
 		{name: "name", typeName: "nvarchar", maxLength: 100, nullable: true, collation: "Latin1_General_CS_AS"},
 		{name: "plain", typeName: "varchar", maxLength: 10, nullable: true, collation: "SQL_Latin1_General_CP1_CI_AS"},
@@ -112,10 +112,10 @@ func TestMSSQLTableKeepsWhatTheColumnsAre(t *testing.T) {
 		{name: "ver", typeName: "timestamp"},
 		{name: "guid", typeName: "uniqueidentifier", rowGUID: true},
 	}
-	indexes := []mssqlIndex{
-		{name: "PK_t", kind: 2, unique: true, primary: true, columns: []mssqlIndexColumn{{name: "id", descending: true}}},
+	indexes := []mssqlDumpIndex{
+		{name: "PK_t", kind: 2, unique: true, primary: true, columns: []mssqlDumpIndexColumn{{name: "id", descending: true}}},
 	}
-	table, defaults := mssqlTable(o, columns, indexes, "SQL_Latin1_General_CP1_CI_AS")
+	table, defaults := mssqlDumpTable(o, columns, indexes, "SQL_Latin1_General_CP1_CI_AS")
 	want := "CREATE TABLE [dbo].[t]]x] (\n" +
 		"  [id] int IDENTITY(10,5) NOT NULL,\n" +
 		"  [name] nvarchar(50) COLLATE Latin1_General_CS_AS NULL,\n" +
@@ -149,45 +149,45 @@ func TestMSSQLTableKeepsWhatTheColumnsAre(t *testing.T) {
 
 	// A table that numbers nothing has nothing switched on around its rows,
 	// and one whose every column the server fills has no rows to write.
-	plain, _ := mssqlTable(o, []mssqlColumn{{name: "a", typeName: "int", nullable: true}}, nil, "")
+	plain, _ := mssqlDumpTable(o, []mssqlDumpColumn{{name: "a", typeName: "int", nullable: true}}, nil, "")
 	if len(plain.beforeData) != 0 || len(plain.afterData) != 0 || plain.noData {
 		t.Errorf("a plain table: %+v", plain)
 	}
-	stamped, _ := mssqlTable(o, []mssqlColumn{{name: "ver", typeName: "timestamp"}}, nil, "")
+	stamped, _ := mssqlDumpTable(o, []mssqlDumpColumn{{name: "ver", typeName: "timestamp"}}, nil, "")
 	if !stamped.noData {
 		t.Error("a table of nothing but a rowversion is read for rows that cannot be written")
 	}
-	if got := mssqlReseed("[t]", "", "1"); got != "" {
+	if got := mssqlDumpReseed("[t]", "", "1"); got != "" {
 		t.Errorf("a counter nobody has drawn from is reseeded: %s", got)
 	}
 }
 
-func TestMSSQLIndexStatement(t *testing.T) {
-	keys := []mssqlIndexColumn{{name: "a"}, {name: "b", descending: true}, {name: "c", included: true}}
+func TestMSSQLDumpIndexStatement(t *testing.T) {
+	keys := []mssqlDumpIndexColumn{{name: "a"}, {name: "b", descending: true}, {name: "c", included: true}}
 	for _, c := range []struct {
-		ix      mssqlIndex
+		ix      mssqlDumpIndex
 		want    string
 		skipped bool
 	}{
-		{mssqlIndex{name: "ix", kind: 2, columns: keys},
+		{mssqlDumpIndex{name: "ix", kind: 2, columns: keys},
 			"CREATE NONCLUSTERED INDEX [ix] ON [dbo].[t] ([a], [b] DESC) INCLUDE ([c])", false},
-		{mssqlIndex{name: "ix", kind: 1, unique: true, columns: keys[:1], filter: "([a] IS NOT NULL)"},
+		{mssqlDumpIndex{name: "ix", kind: 1, unique: true, columns: keys[:1], filter: "([a] IS NOT NULL)"},
 			"CREATE UNIQUE CLUSTERED INDEX [ix] ON [dbo].[t] ([a]) WHERE ([a] IS NOT NULL)", false},
-		{mssqlIndex{name: "uq", kind: 2, unique: true, uniqueConstraint: true, columns: keys[:2]},
+		{mssqlDumpIndex{name: "uq", kind: 2, unique: true, uniqueConstraint: true, columns: keys[:2]},
 			"ALTER TABLE [dbo].[t] ADD CONSTRAINT [uq] UNIQUE NONCLUSTERED ([a], [b] DESC)", false},
 		// A columnstore index is not a list of keys, and a disabled one may be
 		// disabled because the rows break it.
-		{mssqlIndex{name: "cs", kind: 6, columns: keys}, "", true},
-		{mssqlIndex{name: "off", kind: 2, disabled: true, columns: keys}, "", true},
+		{mssqlDumpIndex{name: "cs", kind: 6, columns: keys}, "", true},
+		{mssqlDumpIndex{name: "off", kind: 2, disabled: true, columns: keys}, "", true},
 	} {
-		got, reason := mssqlIndexStatement("[dbo].[t]", c.ix)
+		got, reason := mssqlDumpIndexStatement("[dbo].[t]", c.ix)
 		if got != c.want || (reason != "") != c.skipped {
 			t.Errorf("%+v:\n got %q (%q)\nwant %q", c.ix, got, reason, c.want)
 		}
 	}
 }
 
-func TestMSSQLSequenceNext(t *testing.T) {
+func TestMSSQLDumpSequenceNext(t *testing.T) {
 	for _, c := range []struct {
 		current, increment, low, high string
 		cycling, used                 bool
@@ -204,13 +204,13 @@ func TestMSSQLSequenceNext(t *testing.T) {
 		{"1000", "5", "1", "1000", false, true, "1000"},
 		{"9223372036854775807", "1", "-9223372036854775808", "99999999999999999999", false, true, "9223372036854775808"},
 	} {
-		if got := mssqlSequenceNext(c.current, c.increment, c.low, c.high, c.cycling, c.used); got != c.want {
+		if got := mssqlDumpSequenceNext(c.current, c.increment, c.low, c.high, c.cycling, c.used); got != c.want {
 			t.Errorf("%+v: next = %q, want %q", c, got, c.want)
 		}
 	}
 }
 
-func TestMSSQLLiteralsAreWrittenForTheirColumn(t *testing.T) {
+func TestMSSQLDumpLiteralsAreWrittenForTheirColumn(t *testing.T) {
 	at := time.Date(2026, 3, 4, 5, 6, 7, 123456700, time.UTC)
 	offset := time.Date(2026, 3, 4, 5, 6, 7, 123456700, time.FixedZone("", -8*3600))
 	for _, c := range []struct {
@@ -246,7 +246,7 @@ func TestMSSQLLiteralsAreWrittenForTheirColumn(t *testing.T) {
 
 // --- Oracle ------------------------------------------------------------------
 
-func TestOracleLiteralsAreWrittenForTheirColumn(t *testing.T) {
+func TestOracleDumpLiteralsAreWrittenForTheirColumn(t *testing.T) {
 	at := time.Date(2026, 3, 4, 5, 6, 7, 123456789, time.UTC)
 	offset := time.Date(2026, 3, 4, 5, 6, 7, 123456000, time.FixedZone("", 2*3600))
 	for _, c := range []struct {
@@ -278,13 +278,13 @@ func TestOracleLiteralsAreWrittenForTheirColumn(t *testing.T) {
 	}
 }
 
-func TestOracleLongRowBuildsWhatALiteralCannotHold(t *testing.T) {
+func TestOracleDumpLongRowBuildsWhatALiteralCannotHold(t *testing.T) {
 	cols := []string{`"ID"`, `"BIO"`, `"AVATAR"`, `"NOTE"`}
 	binary := []bool{false, false, true, false}
 	types := []string{"NUMBER", "LongVarChar", "LongRaw", "NCHAR"}
 
 	// A row whose every value fits a literal is an ordinary INSERT.
-	if block, ok := oracleLongRow(`"S"."T"`, cols, []any{"1", strings.Repeat("é", oracleLiteralChars), make([]byte, oracleBinaryLiteralBytes), nil}, binary, types); ok {
+	if block, ok := oracleDumpLongRow(`"S"."T"`, cols, []any{"1", strings.Repeat("é", oracleLiteralChars), make([]byte, oracleDumpLiteralBytes), nil}, binary, types); ok {
 		t.Fatalf("a row of short values was written as a block:\n%.200s", block)
 	}
 
@@ -293,11 +293,11 @@ func TestOracleLongRowBuildsWhatALiteralCannotHold(t *testing.T) {
 	for i := range raw {
 		raw[i] = byte(i)
 	}
-	block, ok := oracleLongRow(`"S"."T"`, cols, []any{"7", text, raw, "o'k"}, binary, types)
+	block, ok := oracleDumpLongRow(`"S"."T"`, cols, []any{"7", text, raw, "o'k"}, binary, types)
 	if !ok {
 		t.Fatal("a row with a long value was not written as a block")
 	}
-	if !oracleIsBlock(block) || !strings.HasSuffix(block, "END;") {
+	if !oracleDumpIsBlock(block) || !strings.HasSuffix(block, "END;") {
 		t.Errorf("not a block the restore will recognise:\n%.200s", block)
 	}
 	for _, want := range []string{
@@ -329,7 +329,7 @@ func TestOracleLongRowBuildsWhatALiteralCannotHold(t *testing.T) {
 	}
 
 	// Bytes that are not text any literal can carry go as bytes, long or not.
-	block, ok = oracleLongRow(`"S"."T"`, cols, []any{"8", strings.Repeat("a\x00b", 2000), nil, nil}, binary, types)
+	block, ok = oracleDumpLongRow(`"S"."T"`, cols, []any{"8", strings.Repeat("a\x00b", 2000), nil, nil}, binary, types)
 	if !ok || !strings.Contains(block, "v2 BLOB;") {
 		t.Errorf("text with a NUL in it was not written as bytes:\n%.200s", block)
 	}
@@ -342,8 +342,8 @@ func TestOracleLongRowBuildsWhatALiteralCannotHold(t *testing.T) {
 		"INSERT INTO t VALUES ('BEGIN ')":             false,
 		"CREATE TABLE begin_log (id NUMBER)":          false,
 	} {
-		if got := oracleIsBlock(statement); got != want {
-			t.Errorf("oracleIsBlock(%q) = %v, want %v", statement, got, want)
+		if got := oracleDumpIsBlock(statement); got != want {
+			t.Errorf("oracleDumpIsBlock(%q) = %v, want %v", statement, got, want)
 		}
 	}
 }

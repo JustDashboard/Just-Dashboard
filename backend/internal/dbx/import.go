@@ -732,7 +732,7 @@ func importTargets(ctx context.Context, db *sql.DB, d Dialect, schema string, sr
 			}
 			col.NotNull, col.PrimaryKey, col.Default = o.NotNull, o.PrimaryKey, o.Default
 			if o.PrimaryKey && strings.TrimSpace(o.Type) == "" {
-				col.Type = keyColumnType(d.Driver(), col.Type)
+				col.Type = importKeyColumnType(d.Driver(), col.Type)
 			}
 			delete(overrides, name)
 		}
@@ -752,11 +752,11 @@ func importTargets(ctx context.Context, db *sql.DB, d Dialect, schema string, sr
 	return targets, created, nil
 }
 
-// computedColumns names the columns of a table that the server fills in and
+// importComputedColumns names the columns of a table that the server fills in and
 // refuses to be given: a generated or computed column, a rowversion. A
 // catalogue that cannot be read gives none, and the engine's own refusal is
 // what the caller then sees.
-func computedColumns(ctx context.Context, db *sql.DB, d Dialect, schema, table string) map[string]bool {
+func importComputedColumns(ctx context.Context, db *sql.DB, d Dialect, schema, table string) map[string]bool {
 	var (
 		query string
 		args  []any
@@ -789,7 +789,7 @@ func computedColumns(ctx context.Context, db *sql.DB, d Dialect, schema, table s
 		         WHERE database = ? AND table = ? AND default_kind IN ('MATERIALIZED', 'ALIAS')`
 		args = []any{schema, table}
 	case DriverSQLite:
-		return sqliteComputedColumns(ctx, db, table)
+		return importSQLiteComputedColumns(ctx, db, table)
 	default:
 		return map[string]bool{}
 	}
@@ -808,9 +808,9 @@ func computedColumns(ctx context.Context, db *sql.DB, d Dialect, schema, table s
 	return out
 }
 
-// sqliteComputedColumns reads which columns are generated from the one place
+// importSQLiteComputedColumns reads which columns are generated from the one place
 // SQLite says: the extended table listing, where they are marked hidden.
-func sqliteComputedColumns(ctx context.Context, db *sql.DB, table string) map[string]bool {
+func importSQLiteComputedColumns(ctx context.Context, db *sql.DB, table string) map[string]bool {
 	out := map[string]bool{}
 	quoted, err := quoteDouble(table)
 	if err != nil {
@@ -877,7 +877,7 @@ func planImport(ctx context.Context, db *sql.DB, d Dialect, schema string, src *
 	// it would be refused.
 	computed := map[string]bool{}
 	if !spec.trusted && spec.Create == nil && spec.Mapping == nil && len(spec.Columns) == 0 && !src.positional {
-		computed = computedColumns(ctx, db, d, schema, spec.Table)
+		computed = importComputedColumns(ctx, db, d, schema, spec.Table)
 	}
 	used := map[string]bool{}
 	for i, source := range src.columns {
