@@ -748,10 +748,24 @@ func (s *Server) handleDBBrowse(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	page, err := dbx.BrowseTablePage(ctx, pool, conn.Driver, opts)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return tableReadError(err)
 	}
 	httpx.JSON(w, http.StatusOK, page)
 	return nil
+}
+
+// tableReadError answers a read of a table that the engine, or the dashboard
+// on its behalf, would not make. The connection was open by then, so what went
+// wrong is the request's: a filter the engine has no operator for, a column
+// that is not there, a value that is not of the column's type — in the
+// engine's own words. The page, the count, the cell and the export answer
+// through it, so the grid that asks two of them about the same rows is not
+// told by one that its filter is wrong and by the other that the server is.
+func tableReadError(err error) error {
+	if errors.Is(err, dbx.ErrCredentialsWithheld) {
+		return httpx.Err(http.StatusForbidden, "credentials_withheld", err.Error())
+	}
+	return httpx.BadRequest("%v", err)
 }
 
 const (
@@ -1701,7 +1715,7 @@ func (s *Server) handleDBCount(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	n, err := dbx.Count(ctx, pool, conn.Driver, opts)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return tableReadError(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"count": n})
 	return nil

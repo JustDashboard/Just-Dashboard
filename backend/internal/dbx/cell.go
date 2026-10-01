@@ -65,6 +65,9 @@ func ReadCell(ctx context.Context, db *sql.DB, driver Driver, schema, table, col
 	if err != nil {
 		return nil, err
 	}
+	if err := guardCredentials(ctx, db, d, schema, table); err != nil {
+		return nil, err
+	}
 	// The same resolution an edit goes through: the columns exist, the key
 	// names every primary key column, values are bound.
 	plan, err := loadTable(ctx, db, driver, schema, table)

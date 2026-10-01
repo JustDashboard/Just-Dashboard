@@ -213,7 +213,7 @@ func (s *Server) handleDBCell(w http.ResponseWriter, r *http.Request) error {
 		case errors.As(err, &tooLarge):
 			return httpx.Err(http.StatusRequestEntityTooLarge, "cell_too_large", err.Error())
 		}
-		return httpx.BadRequest("%v", err)
+		return tableReadError(err)
 	}
 	// A cell can be megabytes of somebody's data; nothing between here and the
 	// browser has a reason to keep a copy.

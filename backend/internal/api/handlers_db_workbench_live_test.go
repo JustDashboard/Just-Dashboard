@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 )
 
@@ -350,5 +351,71 @@ func TestLiveAPIWorkbenchSQLServerAndOracle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The read surface is every role's, and the connection it reads through is
+// usually an administrator's. The relations that hold what accounts sign in
+// with are refused to all of them, on every route that reads a table by name:
+// a read-only session used to be handed pg_shadow's verifiers by the grid, and
+// the same rows as a file by the export.
+func TestLiveAPIReadSurfaceWithholdsCredentialCatalogues(t *testing.T) {
+	for _, e := range []struct {
+		driver             dbx.Driver
+		env, schema, table string
+	}{
+		{dbx.DriverPostgres, "JD_TEST_POSTGRES_DSN", "pg_catalog", "pg_shadow"},
+		{dbx.DriverPostgres, "JD_TEST_POSTGRES_DSN", "", "pg_authid"},
+		{dbx.DriverMySQL, "JD_TEST_MYSQL_ADMIN_DSN", "mysql", "user"},
+		{dbx.DriverMSSQL, "JD_TEST_MSSQL_DSN", "sys", "sql_logins"},
+		{dbx.DriverOracle, "JD_TEST_ORACLE_ADMIN_DSN", "SYS", "USER$"},
+	} {
+		t.Run(string(e.driver)+" "+e.schema+"."+e.table, func(t *testing.T) {
+			dsn := os.Getenv(e.env)
+			if dsn == "" {
+				t.Skipf("set %s to run this", e.env)
+			}
+			s, _, id := liveAPIRouter(t, e.driver, dsn)
+			query := "?schema=" + url.QueryEscape(e.schema) + "&table=" + url.QueryEscape(e.table)
+			for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleAdmin} {
+				r := asRole(s, role)
+				for _, path := range []string{
+					"/browse" + query,
+					"/count" + query,
+					"/export" + query + "&format=csv",
+					"/cell" + query + "&column=name&key=" + url.QueryEscape(`{"name":"x"}`),
+				} {
+					rec := do(t, r, http.MethodGet, pathf("/databases/%d", id)+path, "")
+					if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "credentials_withheld") {
+						t.Errorf("%s GET %s = %d %.200s, want 403 credentials_withheld", role, path, rec.Code, rec.Body.String())
+					}
+				}
+			}
+		})
+	}
+}
+
+// The count is asked about the same rows as the page, with the same
+// parameters, and answers the operator's own mistake the way the page does. It
+// used to answer 502, which told a grid that asked both that the server had
+// failed on the count of a filter the page had just called wrong.
+func TestLiveAPICountRefusesWhatThePageRefuses(t *testing.T) {
+	r, id := liveWorkbenchRouter(t, dbx.DriverPostgres, "JD_TEST_POSTGRES_DSN")
+	for name, filters := range map[string]string{
+		"an operator nobody has":     `[{"column":"relname","op":"bogus","value":"x"}]`,
+		"a column that is not there": `[{"column":"no_such_column","op":"eq","value":"x"}]`,
+		"text for a number":          `[{"column":"relpages","op":"eq","value":"abc"}]`,
+	} {
+		query := "?schema=pg_catalog&table=pg_class&filters=" + url.QueryEscape(filters)
+		for _, route := range []string{"/browse", "/count"} {
+			rec := do(t, r, http.MethodGet, pathf("/databases/%d", id)+route+query, "")
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "bad_request") {
+				t.Errorf("%s with %s = %d %.200s, want 400 bad_request", route, name, rec.Code, rec.Body.String())
+			}
+		}
+	}
+	rec := do(t, r, http.MethodGet, pathf("/databases/%d/count", id)+"?schema=pg_catalog&table=pg_class", "")
+	if rec.Code != http.StatusOK {
+		t.Errorf("a count with nothing wrong = %d %s", rec.Code, rec.Body.String())
 	}
 }

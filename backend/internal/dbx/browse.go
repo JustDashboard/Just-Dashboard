@@ -235,6 +235,9 @@ func Browse(ctx context.Context, db *sql.DB, driver Driver, opts BrowseOptions) 
 	if err != nil {
 		return nil, err
 	}
+	if err := guardCredentials(ctx, db, d, opts.Schema, opts.Table); err != nil {
+		return nil, err
+	}
 	opts.Limit = clampRows(opts.Limit, defaultBrowseRows, MaxBrowseRows)
 	if opts.Offset < 0 {
 		opts.Offset = 0
@@ -443,6 +446,9 @@ func Count(ctx context.Context, db *sql.DB, driver Driver, opts BrowseOptions) (
 	}
 	rel, err := qualify(d, opts.Schema, opts.Table)
 	if err != nil {
+		return 0, err
+	}
+	if err := guardCredentials(ctx, db, d, opts.Schema, opts.Table); err != nil {
 		return 0, err
 	}
 	opts = withCatalog(ctx, db, d, opts)

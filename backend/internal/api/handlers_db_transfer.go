@@ -317,7 +317,7 @@ func exportError(err error) error {
 	if errors.As(err, &apiErr) {
 		return apiErr
 	}
-	return httpx.BadRequest("%v", err)
+	return tableReadError(err)
 }
 
 // exportBrowseOptions reads which rows an export is of, with the reader the

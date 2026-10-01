@@ -77,6 +77,11 @@ func Search(ctx context.Context, db *sql.DB, driver Driver, schema, needle strin
 		if strings.EqualFold(t.Type, "view") {
 			continue
 		}
+		// What accounts sign in with is not searched, and is not reported as
+		// a table that failed: it was never going to be read.
+		if guardCredentials(ctx, db, d, t.Schema, t.Name) != nil {
+			continue
+		}
 		cols, err := d.Columns(ctx, db, t.Schema, t.Name)
 		if err != nil || len(cols) == 0 {
 			out.Skipped = append(out.Skipped, t.Name)

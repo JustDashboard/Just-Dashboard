@@ -269,6 +269,9 @@ func ExportSelection(ctx context.Context, db *sql.DB, driver Driver, browse Brow
 	if err != nil {
 		return 0, false, err
 	}
+	if err := guardCredentials(ctx, db, d, browse.Schema, browse.Table); err != nil {
+		return 0, false, err
+	}
 	// What the grid's page read asks of the catalogue, the export asks too:
 	// Oracle has to be told how to read a date a filter compares with, and
 	// its driver cannot read every column as SELECT * returns it. Nothing is
