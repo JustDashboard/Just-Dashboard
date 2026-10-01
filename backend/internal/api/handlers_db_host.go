@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -85,6 +87,9 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 	if err := validateRoleName(account); err != nil {
 		return httpx.BadRequest("%v", err)
 	}
+	if err := validConnectionNames("", req.Database); err != nil {
+		return err
+	}
 	password := req.Password
 	if password == "" {
 		generated, err := generatePassword()
@@ -115,7 +120,7 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 		out, err = hostPostgresAccount(ctx, req.Port, account, password, superuser)
 	case dbx.DriverMySQL:
 		cand.Database = strings.TrimSpace(req.Database)
-		out, err = hostMySQLAccount(ctx, req.Port, account, password, superuser)
+		out, err = hostMySQLAccount(ctx, s.hostSocket(ctx, req.Driver, req.Port), account, password, superuser)
 	case dbx.DriverMongo:
 		cand.Database = firstNonEmpty(strings.TrimSpace(req.Database), "admin")
 		out, err = hostMongoAccount(ctx, req.Port, account, password, superuser)
@@ -152,44 +157,25 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 	if dsn == "" {
 		return httpx.BadRequest("no connection string could be built for %s", req.Driver)
 	}
-	if err := s.probeConnection(ctx, req.Driver, dsn); err != nil {
+	if err := s.dialDatabase(ctx, req.Driver, dsn); err != nil {
 		audit["ok"], audit["error"] = false, err.Error()
 		httpx.SetAudit(r, "database.connection.host.grant", host, audit)
 		return httpx.Err(http.StatusBadGateway, "connect_failed",
 			fmt.Sprintf("the account was set up but a connection over TCP was refused: %v", err))
 	}
 
-	existing, err := s.existingDSNs(ctx)
+	// A connection as this account to this database already exists — with a
+	// password that no longer works, since the account was just reset. Re-seal
+	// that one. A connection to the same server as somebody else is another
+	// connection, and is left exactly as it is: matching on the address alone
+	// used to overwrite whichever one happened to be there.
+	conn, _, names, err := s.adoptedDatabaseConnection(ctx, req.Driver, dsn)
 	if err != nil {
 		return err
 	}
-	if have, ok := existing[addressKey(cand.Host, cand.Port)]; ok {
-		// A connection to this server already exists — with a password that
-		// may no longer work. Re-seal it with the one that does.
-		conn, _, err := s.connectionByName(ctx, have)
-		if err != nil {
-			return err
-		}
-		contained, err := s.containDSN(req.Driver, dsn)
-		if err != nil {
-			return err
-		}
-		sealed, err := s.Sealer.Seal(contained)
-		if err != nil {
-			return httpx.Internal(err)
-		}
-		if _, err := s.Store.DB.ExecContext(ctx, `UPDATE db_connections SET dsn_enc = ? WHERE id = ?`, sealed, conn.ID); err != nil {
-			return httpx.Internal(err)
-		}
-		s.modules.dbs.Close(conn.ID)
-		conn, _, err = s.dbConnRow(ctx, conn.ID)
-		if err != nil {
-			return err
-		}
-		audit["ok"], audit["connection"] = true, conn.Name
-		httpx.SetAudit(r, "database.connection.host.grant", host, audit)
-		httpx.JSON(w, http.StatusOK, conn)
-		return nil
+	audit["ok"] = true
+	if conn != nil {
+		return s.resealConnection(ctx, w, r, conn, req.Driver, dsn, "database.connection.host.grant", audit)
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -198,9 +184,36 @@ func (s *Server) handleDBHostGrant(w http.ResponseWriter, r *http.Request) error
 	if !connNameRe.MatchString(name) {
 		return httpx.BadRequest("name may contain letters, digits, spaces, dots, dashes and underscores")
 	}
-	name = uniqueConnectionName(name, existing)
-	audit["ok"] = true
-	return s.saveConnection(w, r, name, req.Driver, dsn, "database.connection.host.grant", audit)
+	name = uniqueConnectionName(name, names)
+	return s.saveConnectionFrom(w, r, s.hostOrigin(ctx, cand), name, req.Driver, dsn, "database.connection.host.grant", audit)
+}
+
+// hostSocket is the unix socket of the server of that engine listening on a
+// TCP port of this machine, read off the kernel's own tables, or "" when it
+// has none this dashboard can see. Two servers of one engine keep two sockets,
+// and the client's default names only one of them.
+func (s *Server) hostSocket(ctx context.Context, driver dbx.Driver, port int) string {
+	facts := dbx.Facts{}
+	facts.Listeners, _ = s.collectListeners(ctx)
+	facts.Sockets, _ = s.collectSockets(ctx)
+	for _, inst := range dbx.Discover(facts).Instances {
+		if inst.Source != dbx.SourceHost || inst.Driver != driver {
+			continue
+		}
+		listens, socket := false, ""
+		for _, e := range inst.Endpoints {
+			switch {
+			case e.Kind == "tcp" && e.Port == port:
+				listens = true
+			case e.Kind == "unix" && socket == "":
+				socket = e.Path
+			}
+		}
+		if listens {
+			return socket
+		}
+	}
+	return ""
 }
 
 // validateRoleName is the identifier rule every engine here accepts for an
@@ -285,16 +298,10 @@ func hostPostgresAccount(ctx context.Context, port int, account, password string
 	if superuser {
 		privileges += " SUPERUSER CREATEDB CREATEROLE"
 	}
-	// A DO block so one round trip creates or resets. The role name is an
-	// identifier (format %I) and the password a literal (%L), quoted by the
-	// server itself rather than by string concatenation here.
-	stmt := fmt.Sprintf(`DO $jd$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %[1]s) THEN
-    EXECUTE format('ALTER ROLE %%I WITH %[3]s PASSWORD %%L', %[1]s, %[2]s);
-  ELSE
-    EXECUTE format('CREATE ROLE %%I WITH %[3]s PASSWORD %%L', %[1]s, %[2]s);
-  END IF;
-END $jd$;`, sqlLiteral(account), sqlLiteral(password), privileges)
+	stmt, err := postgresAccountStatement(account, password, privileges)
+	if err != nil {
+		return "", err
+	}
 	args := []string{"-X", "-q", "-v", "ON_ERROR_STOP=1", "-p", strconv.Itoa(port), "-d", "postgres", "-c", stmt}
 	cmd, err := hostexec.CommandOnHostAsUser(ctx, pg, []string{"PGCONNECT_TIMEOUT=10"}, "psql", args...)
 	if err != nil {
@@ -303,10 +310,47 @@ END $jd$;`, sqlLiteral(account), sqlLiteral(password), privileges)
 	return runHostCmd(ctx, cmd)
 }
 
+// postgresAccountStatement is the one statement that creates or resets a role.
+//
+// A DO block so one round trip does either. The role name is an identifier
+// (format %I) and the password a literal (%L), quoted by the server itself
+// rather than by string concatenation here.
+//
+// The block's body is dollar-quoted, and a dollar quote ends wherever its tag
+// next appears — inside the password included. The tag was a constant, so a
+// password containing it closed the block early and ran what followed as SQL,
+// as the postgres superuser. The tag is now drawn at random and checked
+// against everything that goes inside it.
+func postgresAccountStatement(account, password, privileges string) (string, error) {
+	body := fmt.Sprintf(`BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %[1]s) THEN
+    EXECUTE format('ALTER ROLE %%I WITH %[3]s PASSWORD %%L', %[1]s, %[2]s);
+  ELSE
+    EXECUTE format('CREATE ROLE %%I WITH %[3]s PASSWORD %%L', %[1]s, %[2]s);
+  END IF;
+END`, sqlLiteral(account), sqlLiteral(password), privileges)
+	for range 8 {
+		raw := make([]byte, 8)
+		if _, err := rand.Read(raw); err != nil {
+			return "", err
+		}
+		tag := "$jd" + hex.EncodeToString(raw) + "$"
+		if !strings.Contains(body, tag) {
+			return "DO " + tag + " " + body + " " + tag + ";", nil
+		}
+	}
+	return "", fmt.Errorf("the password cannot be quoted safely; choose another")
+}
+
 // hostMySQLAccount runs as root over the socket, which auth_socket admits.
 // The account is made for both spellings of the local host, because a TCP
 // client from 127.0.0.1 matches 'localhost' only when name resolution is on.
-func hostMySQLAccount(ctx context.Context, port int, account, password string, superuser bool) (string, error) {
+//
+// socket is the server's own unix socket where the kernel's table names one.
+// A machine running two servers has two, and the client's default is only one
+// of them: without it, an account asked for on the second server was made on
+// the first.
+func hostMySQLAccount(ctx context.Context, socket, account, password string, superuser bool) (string, error) {
 	client := "mysql"
 	if !hostexec.Available(client) {
 		client = "mariadb"
@@ -325,8 +369,11 @@ func hostMySQLAccount(ctx context.Context, port int, account, password string, s
 		}
 	}
 	stmts = append(stmts, "FLUSH PRIVILEGES;")
-	args := []string{"--protocol=socket", "--user=root", "--batch", "--execute", strings.Join(stmts, " ")}
-	_ = port
+	args := []string{"--protocol=socket", "--user=root", "--batch"}
+	if socket != "" {
+		args = append(args, "--socket="+socket)
+	}
+	args = append(args, "--execute", strings.Join(stmts, " "))
 	cmd := hostexec.CommandOnHost(ctx, client, args...)
 	return runHostCmd(ctx, cmd)
 }
@@ -352,10 +399,14 @@ func hostMongoAccount(ctx context.Context, port int, account, password string, s
 	if superuser {
 		roles = `[{role: "root", db: "admin"}]`
 	}
+	// An account that exists keeps the roles it has: updateUser with a role
+	// list replaces the list, which took every role away from an account that
+	// was reset without the superuser box ticked. Only the password changes,
+	// and root is added to what is there when it was asked for.
 	script := fmt.Sprintf(`const a = db.getSiblingDB("admin");
-const u = %s; const p = %s;
-if (a.getUser(u)) { a.updateUser(u, {pwd: p, roles: %s}); } else { a.createUser({user: u, pwd: p, roles: %s}); }`,
-		jsLiteral(account), jsLiteral(password), roles, roles)
+const u = %s; const p = %s; const r = %s;
+if (a.getUser(u)) { a.updateUser(u, {pwd: p}); if (r.length) { a.grantRolesToUser(u, r); } } else { a.createUser({user: u, pwd: p, roles: r}); }`,
+		jsLiteral(account), jsLiteral(password), roles)
 	args := []string{"--quiet", "--port", strconv.Itoa(port), "--eval", script}
 	cmd := hostexec.CommandOnHost(ctx, shell, args...)
 	return runHostCmd(ctx, cmd)
@@ -372,16 +423,19 @@ func hostClickHouseAccount(ctx context.Context, port int, account, password stri
 	if !hostexec.Available("clickhouse-client") {
 		return "", fmt.Errorf("clickhouse-client is not installed on this server")
 	}
+	// ClickHouse reads a backslash in a string literal as an escape, as MySQL
+	// does, so the literal has to double it as well as the quote.
 	stmts := []string{
-		"CREATE USER IF NOT EXISTS " + quoteBacktickPlain(account) + " IDENTIFIED WITH sha256_password BY " + sqlLiteral(password),
-		"ALTER USER " + quoteBacktickPlain(account) + " IDENTIFIED WITH sha256_password BY " + sqlLiteral(password),
+		"CREATE USER IF NOT EXISTS " + quoteBacktickPlain(account) + " IDENTIFIED WITH sha256_password BY " + mysqlLiteral(password),
+		"ALTER USER " + quoteBacktickPlain(account) + " IDENTIFIED WITH sha256_password BY " + mysqlLiteral(password),
 	}
 	if superuser {
 		stmts = append(stmts, "GRANT ALL ON *.* TO "+quoteBacktickPlain(account)+" WITH GRANT OPTION")
 	}
-	_ = port
 	for _, stmt := range stmts {
-		cmd := hostexec.CommandOnHost(ctx, "clickhouse-client", "--query", stmt)
+		// The port is the server's native one, which is the one the saved
+		// connection dials: a second server on this machine is another port.
+		cmd := hostexec.CommandOnHost(ctx, "clickhouse-client", "--port", strconv.Itoa(port), "--query", stmt)
 		if _, err := runHostCmd(ctx, cmd); err != nil {
 			return "", err
 		}

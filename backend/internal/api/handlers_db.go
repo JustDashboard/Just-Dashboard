@@ -397,6 +397,11 @@ func (s *Server) containDSN(driver dbx.Driver, dsn string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The dashboard's own store is never a connection, by any spelling of its
+	// path: see refuseOwnStore.
+	if err := s.refuseOwnStore(driver, resolved); err != nil {
+		return "", err
+	}
 	return dbx.SQLiteDSNWithPath(dsn, resolved), nil
 }
 
