@@ -273,7 +273,12 @@ accounts retain partial results. Full table details and mutation preconditions u
   **canonical Extended JSON** with a relaxed copy for display (`dbx.MongoDoc`), is addressed by its
   `_id` as Extended JSON whatever type that is, and is decoded into `bson.Raw`, so a document read and
   saved back unchanged is byte-identical (`TestCanonicalRoundTripIsByteIdentical`, and live in
-  `TestLiveMongoDocuments`). The display copy leaves a 64-bit integer too large for a double in its
+  `TestLiveMongoDocuments`). It also carries a `digest` (SHA-256 of its BSON), which a replace sends
+  back as `expectedDigest` so an edit never overwrites a change made since the read: the stored
+  document is re-read and compared, and the server repeats the comparison in the operation that
+  writes whenever both documents fit one operation (15 MiB together). The two routes that carry
+  whole documents read a body of up to 64 MiB (`decodeMongoDocuments`), because a 16 MiB document
+  is several times that as canonical text. The display copy leaves a 64-bit integer too large for a double in its
   `$numberLong` form, because a browser would show a different number. Every text field — filter, sort,
   document, pipeline, command — is Extended JSON or the shell's spelling (`ObjectId("…")`,
   `ISODate("…")`, unquoted keys, single quotes): `mongo_shell.go` rewrites the shell form into Extended
@@ -300,11 +305,24 @@ accounts retain partial results. Full table details and mutation preconditions u
     `mongoCommands`: read, write, destructive or blocked, plus an `admin` flag for what the forms keep
     to `system.admin` (accounts, the profiler, server parameters). Arguments can raise the class
     (`aggregate` with `$out`, `update` with an empty filter and `multi`, `findAndModify` with `remove`,
-    `createIndexes` with a TTL). A command not in the table is destructive; `shutdown`, the `replSet*`
+    `createIndexes` with a TTL, `profile` with anything beside a negative level). A flag counts as
+    set unless it is absent, null, `false` or a numeric zero (`mongoFlagSet`): servers differ in what
+    they read as true, and 7.0 takes a Decimal128 for `showCredentials` and a string for `repair`. A
+    command that sets a field twice is refused, since which one a server reads depends on the server.
+    A command not in the table is destructive; `shutdown`, the `replSet*`
     reconfiguration commands, `eval`/`mapReduce`, `applyOps`, sessions and transactions, and
     `usersInfo` with `showCredentials` are never run. The audit entry is the command's name and the
     collection it names, never its body, and is set before the gate so a refusal is recorded under
     the command's own name.
+  - *Credentials are never documents.* `admin.system.users`, `admin.system.keys` and `local.oplog.rs`
+    (whose entries for an account being made carry its verifier) are refused by every route that
+    reads or writes documents, the first browser's included (`mongoNamespace`), by a pipeline stage
+    that names them, across databases too (`mongoGuardPipeline`), and by the console
+    (`MongoGuardCommand`, which also refuses a collection named by UUID in those databases and a
+    view made over them). In `admin` and `local` a read first lists the database's views and follows
+    the one it was asked for to what it reads (`mongoGuardRead`), so a view somebody made over
+    `system.users` with a shell is refused as well. Not followed: a view in any *other* database
+    whose pipeline joins the replication log, when it was made outside the dashboard.
   - The first Mongo browser's routes (`/documents`, `/collections`, `/collections/indexes`,
     `/aggregate`) still answer in their old shapes. `/stats` returns the keys it had plus the counters
     a chart is drawn from and the server's own clock (`timestamp`), so rates are a difference of two
@@ -313,7 +331,8 @@ accounts retain partial results. Full table details and mutation preconditions u
     `database.validation.set`, `database.aggregate`, `database.mongo.command/killop/profiler`,
     `database.role.create/alter/grant/revoke/drop`, and `database.export` for the Mongo export, which
     connects and opens its cursor before the first header so a failure is an error response rather
-    than an empty file.
+    than an empty file. That entry is written before the first byte, and an export that breaks off
+    afterwards gets a second one marked as a failure.
 
 ### Database provisioning for deployments
 

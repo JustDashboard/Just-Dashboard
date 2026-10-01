@@ -69,7 +69,8 @@ The MongoDB routes read the request the same way. `POST /databases/{id}/aggregat
 and needs the destructive capability when a stage writes (`$out`, `$merge`) or is not known to be a
 read; `POST /databases/{id}/mongo/command` classifies the command by its first key and its arguments
 (`dbx.MongoClassifyCommand`), refuses what is never run, and asks for `system.admin` or the destructive
-capability and budget as the class demands, with anything unlisted treated as destructive. The update,
+capability and budget as the class demands, with anything unlisted treated as destructive and a flag
+taken as set unless it is absent, null, `false` or a zero. The update,
 rename, index and `collMod` routes are `service.control` and check by hand for the one option each has
 that removes data (`mongoNeedsDestructive`).
 
