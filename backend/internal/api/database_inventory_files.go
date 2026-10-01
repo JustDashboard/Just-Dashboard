@@ -248,13 +248,22 @@ func (s *Server) scanDatabaseFiles(ctx context.Context) dbFileScanResult {
 	// path. A file root is walked as itself unless a broad root lies inside
 	// it: that one resolves and is walked, and walking down from a root as
 	// wide as / is the scan of the whole machine this list of roots replaces.
+	fileRoots := s.modules.files.Roots()
+	withinRoots := func(path string) bool {
+		for _, fileRoot := range fileRoots {
+			if pathInside(path, fileRoot) {
+				return true
+			}
+		}
+		return false
+	}
 	narrowed, replaced := []scanRoot{}, map[string]bool{}
-	for _, fileRoot := range s.modules.files.Roots() {
+	for _, fileRoot := range fileRoots {
 		wide := false
 		for _, root := range broad {
 			visible := hostVisible(host.hostRoot, root.path)
 			wide = wide || pathInside(visible, fileRoot)
-			if visible != fileRoot && pathInside(fileRoot, visible) {
+			if !withinRoots(visible) && pathInside(fileRoot, visible) {
 				// Scanned as far as the roots allow, so not reported as left out.
 				replaced[root.path] = true
 			}
