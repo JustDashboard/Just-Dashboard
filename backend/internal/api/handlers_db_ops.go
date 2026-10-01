@@ -487,6 +487,14 @@ func (s *Server) handleDBSettingsList(w http.ResponseWriter, r *http.Request) er
 			"writable": false, "reason": fmt.Sprintf("%s parameters are not read from here", conn.Driver)})
 		return nil
 	}
+	// An account the engine will not show its parameters to: said where the
+	// list would be, with the grant it lacks, rather than failed.
+	var refused dbx.ErrSettingsRefused
+	if errors.As(err, &refused) {
+		httpx.JSON(w, http.StatusOK, map[string]any{"settings": []dbx.Setting{}, "supported": false, "all": all,
+			"writable": false, "reason": refused.Error()})
+		return nil
+	}
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}

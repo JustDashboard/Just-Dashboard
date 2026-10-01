@@ -3068,7 +3068,7 @@ func TestLiveOpsSQLServer(t *testing.T) {
 // is an ordinary application schema, which may not, and has to be told so
 // rather than fail.
 func TestLiveOpsOracle(t *testing.T) {
-	db, _ := opsLiveAny(t, DriverOracle, "JD_TEST_B3_ORACLE_ADMIN_DSN", "JD_TEST_ORACLE_ADMIN_DSN")
+	db, dsn := opsLiveAny(t, DriverOracle, "JD_TEST_B3_ORACLE_ADMIN_DSN", "JD_TEST_ORACLE_ADMIN_DSN")
 	ctx := t.Context()
 	db.Exec(`DROP TABLE jd_b3_ops_t PURGE`)
 	opsMustExec(t, db, `CREATE TABLE jd_b3_ops_t (id NUMBER PRIMARY KEY, v NUMBER, w VARCHAR2(20))`,
@@ -3630,6 +3630,53 @@ func TestLiveOpsOracle(t *testing.T) {
 		}
 		if levels := PrivilegeLevelsFor(DriverOracle); len(levels) != 0 {
 			t.Errorf("privileges: %+v", levels)
+		}
+	})
+
+	// An account that can sign in and nothing more — what an application
+	// schema is on every release before the developer role of 23. Every read
+	// answers it: with what it may see, or with the grant it lacks.
+	t.Run("bare_account", func(t *testing.T) {
+		db.Exec(`DROP USER jd_b3_bare CASCADE`)
+		opsMustExec(t, db, `CREATE USER jd_b3_bare IDENTIFIED BY "Jd_b3_pw_2026"`, `GRANT CREATE SESSION TO jd_b3_bare`)
+		t.Cleanup(func() { db.Exec(`DROP USER jd_b3_bare CASCADE`) })
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed.User = url.UserPassword("jd_b3_bare", "Jd_b3_pw_2026")
+		bare := opsOpen(t, DriverOracle, parsed.String(), "the bare account")
+
+		_, err = ListSettings(ctx, bare, DriverOracle, true)
+		if _, refused := err.(ErrSettingsRefused); !refused || !strings.Contains(err.Error(), "v$parameter") {
+			t.Errorf("settings: %v", err)
+		}
+		if _, err := ChangeSetting(ctx, bare, DriverOracle, "undo_retention", "901", false); err == nil {
+			t.Error("an account that may not read the parameters changed one")
+		}
+		if _, err := ListActivity(ctx, bare, DriverOracle); !errors.Is(err, ErrNoActivityView) || !strings.Contains(err.Error(), "v$session") {
+			t.Errorf("sessions: %v", err)
+		}
+		if locks, err := ListLocks(ctx, bare, DriverOracle); err != nil || locks.Supported || locks.Reason == "" {
+			t.Errorf("locks: %+v %v", locks, err)
+		}
+		if statements, err := TopStatements(ctx, bare, DriverOracle, StatementsOptions{}); err != nil || statements.Supported || statements.Reason == "" {
+			t.Errorf("statements: %+v %v", statements, err)
+		}
+		stats, err := ReadServerStats(ctx, bare, DriverOracle)
+		if err != nil || stats.Version == "" || len(stats.Notes) < 3 {
+			t.Errorf("stats: %+v %v", stats, err)
+		}
+		// The catalogue's ALL_ views answer anyone, with what they may see:
+		// an account that owns nothing has nothing to list, and is not refused.
+		if tables, err := ReadTableStats(ctx, bare, DriverOracle, StatsOptions{}); err != nil || !tables.Supported || len(tables.Tables) != 0 {
+			t.Errorf("tablestats: %+v %v", tables, err)
+		}
+		if indexes, err := ReadIndexStats(ctx, bare, DriverOracle, StatsOptions{}); err != nil || !indexes.Supported || len(indexes.Indexes) != 0 {
+			t.Errorf("indexstats: %+v %v", indexes, err)
+		}
+		if report, err := Advise(ctx, bare, DriverOracle, ""); err != nil || len(report.Silences) < 2 {
+			t.Errorf("advisor: %+v %v", report, err)
 		}
 	})
 

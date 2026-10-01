@@ -1054,6 +1054,44 @@ func TestLiveAPIOpsOracle(t *testing.T) {
 		}
 	})
 
+	// An account that can sign in and nothing more: even its parameters are
+	// not its to read, and the page is told so on a 200.
+	t.Run("bare_account", func(t *testing.T) {
+		direct.Exec(`DROP USER jd_b3_api_bare CASCADE`)
+		for _, stmt := range []string{`CREATE USER jd_b3_api_bare IDENTIFIED BY "Jd_b3_pw_2026"`, `GRANT CREATE SESSION TO jd_b3_api_bare`} {
+			if _, err := direct.Exec(stmt); err != nil {
+				t.Fatalf("%s: %v", stmt, err)
+			}
+		}
+		t.Cleanup(func() { direct.Exec(`DROP USER jd_b3_api_bare CASCADE`) })
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed.User = url.UserPassword("jd_b3_api_bare", "Jd_b3_pw_2026")
+		bareID := saveOpsConnection(t, s, "live-oracle-bare", dbx.DriverOracle, parsed.String())
+		bare := pathf("/databases/%d", bareID)
+		t.Cleanup(func() { s.modules.dbs.Close(bareID) })
+		for path, wants := range map[string][]string{
+			"/settings":       {`"supported":false`, `"writable":false`, "v$parameter"},
+			"/settings?all=1": {`"supported":false`, `"settings":[]`},
+			"/activity":       {`"supported":false`, "v$session"},
+			"/locks":          {`"supported":false`},
+			"/statements":     {`"supported":false`},
+			"/stats":          {`"supported":true`, `"notes":[`},
+			"/tablestats":     {`"supported":true`, `"tables":[]`},
+			"/maintenance":    {`"id":"gather_stats"`},
+		} {
+			body := mustStatus(t, viewer, http.MethodGet, bare+path, "", http.StatusOK)
+			for _, want := range wants {
+				if !strings.Contains(body, want) {
+					t.Errorf("GET %s lacks %s: %s", path, want, body)
+				}
+			}
+		}
+		mustStatus(t, admin, http.MethodPut, bare+"/settings", `{"name":"undo_retention","value":"903"}`, http.StatusBadRequest)
+	})
+
 	// An application schema: what it may not read is a sentence, on a 200.
 	t.Run("ordinary_account", func(t *testing.T) {
 		plainDSN := os.Getenv("JD_TEST_B3_ORACLE_DSN")

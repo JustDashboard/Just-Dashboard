@@ -62,6 +62,13 @@ func settingRefused(format string, args ...any) error {
 	return ErrSettingRequest{msg: fmt.Sprintf(format, args...)}
 }
 
+// ErrSettingsRefused is an engine that has parameters and will not show them
+// to this account. It is not a failed read: the page says which grant is
+// missing where the list would be.
+type ErrSettingsRefused struct{ msg string }
+
+func (e ErrSettingsRefused) Error() string { return e.msg }
+
 // ListSettings returns every parameter the engine has, or — when all is
 // false — the short list an operator asks about, in the same shape.
 func ListSettings(ctx context.Context, db *sql.DB, driver Driver, all bool) ([]Setting, error) {
@@ -1051,7 +1058,8 @@ func (d oracleDialect) Settings(ctx context.Context, db *sql.DB) ([]Setting, err
 }
 
 // AllSettings reads v$parameter, which needs a grant an application schema
-// often lacks; the refusal is the engine's own and is passed on.
+// often lacks; that refusal is returned as ErrSettingsRefused, with the
+// engine's own words in it.
 //
 // A parameter is editable from here when three things hold: the instance can
 // change it while it runs (IMMEDIATE, or DEFERRED for the sessions that connect
@@ -1076,6 +1084,9 @@ func (oracleDialect) AllSettings(ctx context.Context, db *sql.DB) ([]Setting, er
 		  SELECT name, display_value, type, isdefault, issys_modifiable, description, 'TRUE', ismodified
 		  FROM v$parameter
 		  ORDER BY name`)
+		if oracleRefused(err) {
+			return nil, ErrSettingsRefused{msg: "This account may not read the instance's parameters (it needs SELECT on v$parameter): " + err.Error()}
+		}
 		if err != nil {
 			return nil, err
 		}
