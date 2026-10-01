@@ -20,6 +20,12 @@ var updateORMGolden = flag.Bool("update-orm", false, "rewrite testdata/orm from 
 func ormYes() *bool { v := true; return &v }
 func ormNo() *bool  { v := false; return &v }
 
+// ormGoldenSuffix is added to every stored file's name. Without it the tree
+// would hold files called models.go and schema.ts that are not part of this
+// repository's source: the Go ones import modules go.mod does not have, and
+// any tool pointed at their directory would say so.
+const ormGoldenSuffix = ".golden"
+
 // ormCase is one target over one engine's fixture with one set of options. Its
 // name is the directory its output is kept in.
 type ormCase struct {
@@ -180,7 +186,7 @@ func TestORMGolden(t *testing.T) {
 					t.Fatal(err)
 				}
 				for name, content := range got {
-					if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+					if err := os.WriteFile(filepath.Join(dir, name+ormGoldenSuffix), []byte(content), 0o644); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -195,11 +201,12 @@ func TestORMGolden(t *testing.T) {
 				names = append(names, e.Name())
 			}
 			sort.Strings(names)
-			for _, name := range names {
-				want, err := os.ReadFile(filepath.Join(dir, name))
+			for _, stored := range names {
+				want, err := os.ReadFile(filepath.Join(dir, stored))
 				if err != nil {
 					t.Fatal(err)
 				}
+				name := strings.TrimSuffix(stored, ormGoldenSuffix)
 				content, ok := got[name]
 				if !ok {
 					t.Errorf("%s is in the golden output and was not generated", name)
