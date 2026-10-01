@@ -491,6 +491,26 @@ func (s *sqlGen) mssql() {
 
 var sqlCreateTableRe = regexp.MustCompile(`(?i)^(\s*CREATE\s+(?:TEMPORARY\s+)?TABLE\s+)(IF\s+NOT\s+EXISTS\s+)?`)
 
+// The opening of a view's statement as SQLite and ClickHouse keep it, and as
+// it is put together for MySQL.
+var (
+	sqlCreateViewRe   = regexp.MustCompile(`(?i)^(\s*CREATE\s+(?:(?:TEMP|TEMPORARY|MATERIALIZED|LIVE|WINDOW)\s+)?VIEW\s+)(IF\s+NOT\s+EXISTS\s+)?`)
+	mysqlCreateViewRe = regexp.MustCompile(`(?i)^\s*CREATE\s+VIEW\s+`)
+)
+
+// guardedView is a view's statement in the form that can be run over a view
+// that is already there. MySQL has no IF NOT EXISTS for a view, so there it is
+// OR REPLACE, as it is for PostgreSQL; Oracle's own text already says so.
+func (s *sqlGen) guardedView(text string) string {
+	switch s.driver {
+	case DriverMySQL:
+		return mysqlCreateViewRe.ReplaceAllString(text, "CREATE OR REPLACE VIEW ")
+	case DriverOracle:
+		return text
+	}
+	return sqlCreateViewRe.ReplaceAllString(text, "${1}IF NOT EXISTS ")
+}
+
 // verbatim writes the engine's own CREATE statement for each table, and
 // assembles one from the catalogue only where the engine handed none back.
 func (s *sqlGen) verbatim() {
@@ -563,6 +583,9 @@ func (s *sqlGen) verbatim() {
 		}
 		if text := s.viewText(m); text != "" {
 			enter(m)
+			if s.opts.IfNotExists {
+				text = s.guardedView(text)
+			}
 			s.statement(text)
 		}
 	}

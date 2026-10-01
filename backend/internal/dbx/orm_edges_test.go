@@ -493,6 +493,29 @@ func TestORMSQLWritesViewsAfterTheTablesTheyRead(t *testing.T) {
 	if res.Counts.Views != 1 {
 		t.Errorf("counts = %+v", res.Counts)
 	}
+
+	// Guarded, a view is written so it can be run over itself: MySQL's word
+	// for that is OR REPLACE, the others take IF NOT EXISTS, and Oracle's own
+	// text needs nothing added.
+	guarded := ormGenerate(t, schema, ORMRequest{Target: ORMSQL, Views: ormYes(), IfNotExists: ormYes()})
+	ormMustContain(t, "schema.sql", guarded.Schema, "\nCREATE OR REPLACE VIEW `published_posts` AS select")
+	for _, c := range []struct {
+		driver     Driver
+		kept, want string
+	}{
+		{DriverSQLite, "CREATE VIEW note_titles AS SELECT 1", "CREATE VIEW IF NOT EXISTS note_titles AS SELECT 1"},
+		{DriverSQLite, "create temp view v as select 1", "create temp view IF NOT EXISTS v as select 1"},
+		{DriverSQLite, "CREATE VIEW IF NOT EXISTS v AS SELECT 1", "CREATE VIEW IF NOT EXISTS v AS SELECT 1"},
+		{DriverClickHouse, "CREATE MATERIALIZED VIEW db.mv TO db.t AS SELECT 1", "CREATE MATERIALIZED VIEW IF NOT EXISTS db.mv TO db.t AS SELECT 1"},
+		{DriverClickHouse, "CREATE VIEW db.v\n(\n    `id` Int32\n)\nAS SELECT 1", "CREATE VIEW IF NOT EXISTS db.v\n(\n    `id` Int32\n)\nAS SELECT 1"},
+		{DriverMySQL, "CREATE VIEW `v` AS select 1", "CREATE OR REPLACE VIEW `v` AS select 1"},
+		{DriverOracle, `CREATE OR REPLACE FORCE EDITIONABLE VIEW "A"."V" ("ID") AS SELECT 1 FROM dual`, `CREATE OR REPLACE FORCE EDITIONABLE VIEW "A"."V" ("ID") AS SELECT 1 FROM dual`},
+	} {
+		g := &sqlGen{ormGen: &ormGen{driver: c.driver}}
+		if got := g.guardedView(c.kept); got != c.want {
+			t.Errorf("%s: guarded %q = %q, want %q", c.driver, c.kept, got, c.want)
+		}
+	}
 }
 
 // The counts are what the page says the file holds, so a model a target could

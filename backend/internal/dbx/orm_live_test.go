@@ -814,9 +814,18 @@ func TestLiveORMViewsInTheSQLScript(t *testing.T) {
 			ormExec(t, db, stmt)
 		}
 		ormExec(t, db, `INSERT INTO jd_orm_people (id, name) VALUES (1, 'kept'), (2, 'it''s')`)
+		// The guarded script is for running over what is already there, the
+		// view included, and more than once.
+		req.IfNotExists = ormYes()
+		guarded := ormGenerate(t, schema, req)
+		for range 2 {
+			for _, stmt := range splitSQLStatements(driver, guarded.Schema) {
+				ormExec(t, db, stmt)
+			}
+		}
 		var named int
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jd_orm_named`).Scan(&named); err != nil || named != 1 {
-			t.Errorf("the rebuilt view answers %d rows (%v), want 1\n%s", named, err, script.Schema)
+			t.Errorf("the rebuilt view answers %d rows (%v), want 1\n%s", named, err, guarded.Schema)
 		}
 	}
 	view := `CREATE VIEW jd_orm_named AS SELECT id, name FROM jd_orm_people WHERE name <> 'it''s'`
