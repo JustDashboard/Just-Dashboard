@@ -149,6 +149,17 @@ CREATE TABLE IF NOT EXISTS db_diagram_layouts (
   PRIMARY KEY (connection_id, schema_name)
 );
 
+-- Databases found on this machine that the operator said to leave alone. The
+-- key is the inventory's own (docker:<container>, compose:<project>/<service>,
+-- host:<unit>, file:<path>), not a connection id: the point of the row is to
+-- outlive the connection that was forgotten, so the next reconcile does not
+-- quietly bring it back.
+CREATE TABLE IF NOT EXISTS db_inventory_ignored (
+  origin     TEXT PRIMARY KEY,
+  ignored_at INTEGER NOT NULL,
+  ignored_by TEXT NOT NULL DEFAULT ''
+);
+
 -- Boards live with the dashboard's other durable state, including embedded
 -- Excalidraw image data. Revision guards prevent a stale tab overwriting a
 -- newer save. A new table is additive for existing installations.
@@ -1090,6 +1101,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_git_watches", "reason", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "baseline_revision", "TEXT NOT NULL DEFAULT ''"},
+	// A connection remembers which discovered database it was made from, by
+	// the inventory's key. Where it dials can change — a container is given a
+	// new address when it is recreated — and the key does not.
+	{"db_connections", "origin", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_database_networks", "network_id", "TEXT NOT NULL DEFAULT ''"},
 	// Reconciliation knew why a binding could not be repaired and threw the
 	// reason away, so the settings page could only say "check that the

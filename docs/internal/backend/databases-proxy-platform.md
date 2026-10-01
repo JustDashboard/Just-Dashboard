@@ -141,6 +141,43 @@ accounts retain partial results. Full table details and mutation preconditions u
   reporting a negative session age. Oracle has an optional live fixture using `JD_TEST_ORACLE_DSN`;
   without a configured server, its unit coverage does not establish live-engine compatibility.
 
+- **Everything on the machine that holds a database is listed, connected or not.**
+  `GET /databases/inventory` answers `{instances, scans, ignored, detail, checkedAt}`. An instance
+  (`dbx.Instance`) is a server, a file, a data directory or a file embedded in a container, with a
+  stable `key` (`docker:<container>`, `compose:<project>/<service>`, `host:<unit>`,
+  `host:<engine>:<port or socket>`, `file:<path>`, `data:<path>`, `embedded:<container>:<path>`), its
+  engine, driver (empty for an engine nothing here opens — Memcached, Elasticsearch and the rest are
+  listed all the same), flavour, state, endpoints, how its credentials are known, why it was taken for
+  what it is, and where it cannot be connected, the reason. Classification is `dbx.Discover`, a pure
+  function of facts; the collectors that read the machine are in `api/database_inventory_*.go`, and
+  each reports its own outcome in `scans`, so a missing Docker daemon is a stated silence and never a
+  failed request. Containers are read with `all=true` and recognised by a ladder — image name, then the
+  variables the stock image sets, then the command, and last a distinctive port, labelled a guess and
+  never connected unasked. Host servers are one instance per process with several endpoints (both
+  loopback families collapse; MySQL's X port and ClickHouse's HTTP port are side doors), matched on the
+  exact process name, joined to their unix sockets (`proxysvc.ListUnixListeners`) and their systemd
+  unit; an installed server that is stopped is listed from its unit, and a Debian PostgreSQL cluster's
+  port is read from its `postgresql.conf`. Files are confirmed by their first sixteen bytes and never
+  opened with a driver to be listed; the walk is server-chosen roots through `files.Resolve`, bounded by
+  depth, visits and time, on a ten-minute cadence or `POST /databases/inventory/scan`. A database kept
+  in a container's own writable layer is found through the Engine's diff and archive reads and listed
+  as `embedded`, never connectable. The route is on the read surface: for `system.admin` every
+  container is inspected; for every other role nothing is, and the list is a separate reading built
+  from what those roles already see elsewhere (`detail: "reduced"`). No reading carries a credential.
+- **Connecting is one explicit act about one instance.** `POST /databases/inventory/connect`
+  (`system.admin`) takes a key and, optionally, a name, user, password and database. The server looks
+  the instance up again, reads what its container states (a `*_FILE` secret is read from the container
+  at that moment), signs in, and saves only then, recording the key in `db_connections.origin`. It
+  never tries a server that needs a password without one: `409 credentials_required` names the
+  account, `409 sign_in_failed` carries the engine's own words when what the container states is
+  refused, `400 sign_in_failed` when what the operator typed is. The dashboard's own store is marked
+  `self`, refused with `409 self_database`, and refused again in `containDSN` whatever route offers it.
+  `POST /databases/inventory/ignore` records a key in `db_inventory_ignored`. `POST /databases/sync`
+  keeps its contract and now signs in before saving, records the origin, skips what is ignored and
+  reports it, and runs its host half with Docker absent; forgetting the last connection to a found
+  server marks it ignored (`ignoreOriginOnForget`), so it stays forgotten. `/adopt`, `/host` and
+  `/host/grant` sign in the same way and match an existing connection by driver, address identity
+  (`dbx.AddressIdentity`: every loopback spelling is one place), database and user.
 - **The section opens on every database at once.** `GET /databases/fleet` dials every saved
   connection concurrently (six at a time, twelve seconds each) and hands back the row's facts with
   what the server answered: reachable, version, latency, the database's size where the engine
@@ -291,9 +328,11 @@ preselects one when detection read that extension from the schema. `mongodb` is 
 on a CPU without AVX (x86-64) or ARMv8.2 atomics (arm64), where MongoDB 5 and later die with an illegal
 instruction. The URL read also takes `format` and `database`; see
 [deployment database networks](../deployments/database-networks.md).
-`/adopt` is idempotent by driver, address, database and login user: a matching connection gets that row
-back, and when the container's password differs the row is re-sealed in place while preserving its
-transport and query options (audited as `database.connection.refresh`, pool dropped). Different databases,
+`/adopt` signs in before it saves, so the caller's retry loop is what waits for the engine. It is
+idempotent by driver, address, database and login user: a matching connection gets that row
+back, and when the container's password differs the row is re-sealed in place — once the new password
+has been seen to work — while preserving its transport and query options (audited as
+`database.connection.refresh`, pool dropped). Different databases,
 users and engines on one address are never overwritten; ambiguous duplicate matches require an explicit
 saved-connection choice. This keeps replacement credentials current — a database
 removed and created again under the same name takes the same loopback port back with a new password,

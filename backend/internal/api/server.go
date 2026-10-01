@@ -59,6 +59,10 @@ type Server struct {
 	// The GitHub accounts' own pictures, read once an hour per account.
 	avatars avatarCache
 
+	// What the database inventory last found on this machine, kept for the
+	// few seconds between two polls (handlers_db_inventory.go).
+	dbInventory dbInventoryState
+
 	// The reference a bare image id was created from, by image id, for
 	// choosing a container's log lens. The container list reports a moved
 	// tag's image as sha256:…, and a Postgres container read as an app is
