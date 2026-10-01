@@ -106,12 +106,16 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/overview", s.handle(s.handleDBOverview))
 		r.Method(http.MethodGet, "/orm/targets", s.handle(s.handleDBTargets))
 		r.Method(http.MethodPost, "/{id}/rows/sql", s.handle(s.handleDBRowSQL))
-		// Redis and Mongo reads. They are separate paths rather than a
-		// pretence that a key or a document is a row: the vocabulary is part of
-		// what makes each engine legible.
-		r.Method(http.MethodGet, "/{id}/keys", s.handle(s.handleRedisScan))
-		r.Method(http.MethodGet, "/{id}/keys/value", s.handle(s.handleRedisGet))
-		r.Method(http.MethodGet, "/{id}/collections/indexes", s.handle(s.handleMongoIndexes))
+		// Redis and Mongo have their own paths rather than a pretence that a
+		// key or a document is a row: the vocabulary is part of what makes each
+		// engine legible. Each engine and each working surface mounts its own
+		// routes from its own file.
+		s.mountDatabaseRedisRoutes(r)
+		s.mountDatabaseMongoRoutes(r)
+		s.mountDatabaseInventoryRoutes(r)
+		s.mountDatabaseWorkbenchRoutes(r)
+		s.mountDatabaseOpsRoutes(r)
+		s.mountDatabaseTransferRoutes(r)
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{id}/query", s.handle(s.handleDBQuery))
@@ -137,13 +141,6 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/ddl/column", s.handle(s.handleDDLAddColumn))
 			r.Method(http.MethodPost, "/{id}/ddl/index", s.handle(s.handleDDLCreateIndex))
 			r.Method(http.MethodPost, "/{id}/ddl/rename", s.handle(s.handleDDLRename))
-			r.Method(http.MethodPost, "/{id}/keys/value", s.handle(s.handleRedisSet))
-			r.Method(http.MethodPost, "/{id}/keys/expire", s.handle(s.handleRedisExpire))
-			r.Method(http.MethodPost, "/{id}/keys/rename", s.handle(s.handleRedisRename))
-			r.Method(http.MethodPost, "/{id}/documents", s.handle(s.handleMongoInsert))
-			r.Method(http.MethodPatch, "/{id}/documents", s.handle(s.handleMongoReplace))
-			r.Method(http.MethodPost, "/{id}/aggregate", s.handle(s.handleMongoAggregate))
-			r.Method(http.MethodPost, "/{id}/collections", s.handle(s.handleMongoCreateCollection))
 		})
 		// Everything here uses the destructive capability, tighter budget, and audit.
 		s.destructive(r, func(r chi.Router) {
@@ -158,9 +155,6 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodDelete, "/{id}/ddl/column", s.handle(s.handleDDLDropColumn))
 			r.Method(http.MethodDelete, "/{id}/ddl/index", s.handle(s.handleDDLDropIndex))
 			r.Method(http.MethodPost, "/{id}/ddl/truncate", s.handle(s.handleDDLTruncate))
-			r.Method(http.MethodDelete, "/{id}/keys", s.handle(s.handleRedisDelete))
-			r.Method(http.MethodDelete, "/{id}/documents", s.handle(s.handleMongoDelete))
-			r.Method(http.MethodDelete, "/{id}/collections", s.handle(s.handleMongoDropCollection))
 			// Removing the database itself, which is the one thing on this
 			// page that cannot be undone by anything except a dump taken
 			// first. system.admin on top of the destructive group: creating a
