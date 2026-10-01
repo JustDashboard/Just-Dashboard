@@ -1,13 +1,15 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { CheckCircle, CloudUpload, Globe, Logout, Plus, RefreshClockwise } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type {
   Capability,
+  DbConnection,
+  DbDriverInfo,
   DeploymentFleet,
   ProxyReloadResult,
   ProxyValidation,
@@ -19,6 +21,9 @@ import { NAV, PERSONAL_NAV, type NavEntry, type NavItem } from "@/components/nav
 import { PaletteModal } from "@/components/modal"
 import type { ProxyStatus } from "@/components/proxy/proxy-context"
 import { warningCount } from "@/components/proxy/config-test"
+import { engineFor, sectionHref } from "@/components/database/engine"
+import { EngineGlyph } from "@/components/database/kit/engine-mark"
+import { databaseIdFrom } from "@/components/database/shell/routes"
 import {
   Command,
   CommandEmpty,
@@ -34,12 +39,14 @@ type PaletteValue = { open: () => void; close: () => void; toggle: () => void }
 const PaletteContext = createContext<PaletteValue | null>(null)
 
 /**
- * One keystroke to any of the forty-five destinations in the nav.
+ * One keystroke to any destination in the nav.
  *
  * A server dashboard is navigated by someone who already knows where they are
  * going — they are here because something is wrong at 3am, not to browse. The
  * palette is the shortest path, and it reads the same `NAV` the sidebar does,
- * so a new page appears in both or in neither.
+ * so a new page appears in both or in neither. The destinations the nav
+ * cannot list ahead of time — a project, a proxy site, a database and the
+ * pages of the one being looked at — are read when it opens.
  */
 export function CommandPaletteProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false)
@@ -128,6 +135,26 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
     enabled: open && proxyVisible,
   })
   const sites = vhosts.error ? [] : (vhosts.data ?? [])
+  // Every saved database is a destination, and the one being looked at has
+  // pages of its own that depend on its engine — the catalogue is read only
+  // for that one, since it is what says which pages those are.
+  const pathname = usePathname()
+  const inside = databaseIdFrom(pathname)
+  const connections = usePoll(
+    (signal) => get<DbConnection[]>("/databases/", undefined, signal),
+    0,
+    [],
+    { enabled: open },
+  )
+  const drivers = usePoll(
+    (signal) => get<DbDriverInfo[]>("/databases/drivers", undefined, signal),
+    0,
+    [],
+    { enabled: open && inside !== null },
+  )
+  const databases = connections.data ?? []
+  const current = databases.find((conn) => conn.id === inside)
+  const currentPages = current && !drivers.loading ? engineFor(current, drivers.data).sections : []
 
   const run = useCallback(
     (action: () => void) => {
@@ -197,6 +224,41 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
                   New project
                 </CommandItem>
               )}
+            </CommandGroup>
+          )}
+
+          {current && currentPages.length > 0 && (
+            // The heading is set in small caps, which a name somebody typed
+            // must not be (§8): the name is on each row instead.
+            <CommandGroup heading="This database">
+              {currentPages.map((page) => (
+                <CommandItem
+                  key={page.id}
+                  value={`database ${current.name} ${page.title}`}
+                  onSelect={() => run(() => router.push(sectionHref(current.id, page.id)))}
+                >
+                  <page.icon className="size-4" />
+                  <span className="text-muted-foreground">{current.name}</span>
+                  {page.title}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+
+          {databases.length > 0 && (
+            <CommandGroup heading="Databases">
+              {databases.map((conn) => (
+                <CommandItem
+                  key={conn.id}
+                  // The id keeps two connections of one name apart.
+                  value={`database open ${conn.name} ${conn.driver} ${conn.id}`}
+                  onSelect={() => run(() => router.push(sectionHref(conn.id)))}
+                >
+                  <EngineGlyph engine={engineFor(conn, drivers.data)} className="size-4" />
+                  <span className="text-muted-foreground">Open</span>
+                  {conn.name}
+                </CommandItem>
+              ))}
             </CommandGroup>
           )}
 

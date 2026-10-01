@@ -53,15 +53,23 @@ share no prefix. `sectionsFor` returns the chain of groups and sections a path s
 draws one panel per link of it; the breadcrumb names every link (`navLocation().parents`).
 
 `components/nav-scope.tsx` is for the two panels the route cannot describe. A section calls
-`useNavScope(...)` and the rail draws what it publishes: the databases layout, because which pages exist
-depends on whether the connection is SQL and because every one of them carries `?conn=` (`replaces: true`
-— it stands in place of the static Databases panel); and `deploy/project-shell.tsx`, because a project's
-name and its mark (its favicon or product), its game-only pages and which of its settings pages hold a
-saved change that is not live yet (`PENDING_KIND_PAGE`) are not in the URL (a level *below* Deployments).
-The rail draws a project's rows from the route alone until that registration lands, so the panel does not
-reflow — only the name fills in. The alternative was the rail polling the driver catalogue and a project
-on every page in the product to draw a list the page beneath it already holds. A project's run page
-keeps the project's panel, with Deployments marked as where you are, because a run is opened from there.
+`useNavScope(...)` and the rail draws what it publishes: one database's layout
+(`app/(dashboard)/databases/[id]/layout.tsx`, through `database/shell/nav-scope.tsx`), because the
+connection's name and which pages it has depend on its engine — the engine registry
+(`database/engine.ts`) says Redis has Keys and a Console where a SQL server has Data, Query, Schema and
+a Diagram — and its rows carry the reader's place (`?schema=&table=`) from page to page; and
+`deploy/project-shell.tsx`, because a project's name and its mark (its favicon or product), its
+game-only pages and which of its settings pages hold a saved change that is not live yet
+(`PENDING_KIND_PAGE`) are not in the URL. Both sit a level *below* their section (`/databases/<id>`
+under Databases, `/deploy/<id>` under Deployments), so the back control leads to the section. The rail
+draws a project's rows from the route alone until that registration lands, so the panel does not reflow —
+only the name fills in. It draws a database's from the route and its memory of the last connection list
+(`useViewState("databases.known")`: name and engine by id), so a database this browser has opened before
+is its own panel at once; an id the list never held gets none until its layout registers one, since a
+rail of pages for a database that does not exist is worse than the section's panel standing a moment
+longer. The alternative was the rail polling the driver catalogue and a project on every page in the
+product to draw a list the page beneath it already holds. A project's run page keeps the project's
+panel, with Deployments marked as where you are, because a run is opened from there.
 
 A scope's head is not a section's. A section's name is one of this product's words and is drawn as an
 eyebrow, the rail's label voice; a project or a connection is a name somebody typed, and small caps
