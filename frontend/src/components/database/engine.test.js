@@ -81,20 +81,25 @@ describe("what an engine is", () => {
   })
 
   test("a flavour is drawn as itself where it has artwork, and never as another product", () => {
-    expect(engineFor({ driver: "mysql", flavor: "mariadb" }).logo).toBe("mariadb")
-    expect(engineFor({ driver: "redis", flavor: "valkey" }).logo).toBe("valkey")
+    for (const [driver, flavor] of [
+      ["mysql", "mariadb"],
+      ["mysql", "tidb"],
+      ["redis", "valkey"],
+      ["postgres", "cockroachdb"],
+      ["postgres", "timescaledb"],
+      ["postgres", "yugabytedb"],
+      ["mongodb", "ferretdb"],
+      // Drawn as the SQL Server engine it is; the id is still its own.
+      ["sqlserver", "azure-sql-edge"],
+    ]) {
+      expect(engineFor({ driver, flavor }).logo).toBe(flavor)
+    }
     // No artwork of its own is the kind's glyph, not the driver's product
     // with this one's name beside it.
     for (const [driver, flavor] of [
       ["redis", "keydb"],
       ["redis", "dragonfly"],
-      ["postgres", "cockroachdb"],
-      ["postgres", "timescaledb"],
-      ["postgres", "yugabytedb"],
       ["mysql", "percona"],
-      ["mysql", "tidb"],
-      ["mongodb", "ferretdb"],
-      ["sqlserver", "azure-sql-edge"],
     ]) {
       expect(engineFor({ driver, flavor }).logo).toBeUndefined()
     }
@@ -155,8 +160,8 @@ describe("what an engine is", () => {
     expect(memcached.sections).toEqual([])
     expect(engineOf("neo4j").kindWord).toBe("graph")
     expect(engineOf("qdrant").logo).toBe("qdrant")
+    expect(engineOf("memcached").logo).toBe("memcached")
     // Nothing bundled is never a guess.
-    expect(engineOf("memcached").logo).toBeUndefined()
     expect(engineOf("something-new")).toMatchObject({ driver: "", label: "something-new" })
     expect(engineOf("something-new").logo).toBeUndefined()
   })

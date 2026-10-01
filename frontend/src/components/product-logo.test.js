@@ -421,6 +421,162 @@ test("programProduct reads a cron command", () => {
   expect(programProduct("cd / && run-parts --report /etc/cron.hourly")).toBeUndefined()
 })
 
+// A database is drawn as the product that answered. The ids are the backend's
+// (`products` in `internal/dbx/discover_engines.go`): a flavour's for a server
+// a driver opens, the engine's own for one the inventory only sees.
+describe("the database engines", () => {
+  const src = (id) => ProductGlyph({ id })?.props.src
+
+  test("every flavour and engine a licensed collection draws has its own file", () => {
+    for (const id of [
+      "timescaledb",
+      "cockroachdb",
+      "yugabytedb",
+      "tidb",
+      "ferretdb",
+      "memcached",
+      "elasticsearch",
+      "opensearch",
+      "etcd",
+      "cassandra",
+      "scylladb",
+      "neo4j",
+      "couchdb",
+      "duckdb",
+      "nats",
+      "kafka",
+      "influxdb",
+      "rabbitmq",
+      "qdrant",
+      "meilisearch",
+      "typesense",
+    ]) {
+      expect({ id, drawn: hasProductLogo(id) }).toEqual({ id, drawn: true })
+      expect(src(seen(id))).toBe(`/logos/${id}.svg`)
+    }
+  })
+
+  test("a flavour is never its driver's product under another name", () => {
+    const own = {
+      timescaledb: "postgres",
+      cockroachdb: "postgres",
+      yugabytedb: "postgres",
+      mariadb: "mysql",
+      tidb: "mysql",
+      valkey: "redis",
+      ferretdb: "mongodb",
+    }
+    for (const [flavor, driver] of Object.entries(own)) {
+      expect(src(flavor)).not.toBe(src(driver))
+    }
+  })
+
+  test("SQL Edge, which no collection draws, is the SQL Server engine it is", () => {
+    expect(src(seen("azure-sql-edge"))).toBe(src("sqlserver"))
+  })
+
+  test("a product in no licensed collection has no mark rather than a guessed one", () => {
+    for (const id of ["percona", "keydb", "dragonfly"]) {
+      expect({ id, drawn: hasProductLogo(id) }).toEqual({ id, drawn: false })
+      expect(ProductGlyph({ id })).toBeNull()
+    }
+  })
+
+  test("the images the inventory recognises are the same product on the Docker page", () => {
+    const images = {
+      "timescale/timescaledb:latest-pg16": "timescaledb",
+      "timescale/timescaledb-ha:pg16": "timescaledb",
+      "cockroachdb/cockroach:v24.1.0": "cockroachdb",
+      "yugabytedb/yugabyte:2.21": "yugabytedb",
+      "pingcap/tidb:v8.1.0": "tidb",
+      "ghcr.io/ferretdb/ferretdb:1.24": "ferretdb",
+      "mcr.microsoft.com/azure-sql-edge:latest": "azure-sql-edge",
+      "memcached:1.6-alpine": "memcached",
+      "docker.elastic.co/elasticsearch/elasticsearch:8.14.0": "elasticsearch",
+      "opensearchproject/opensearch:2": "opensearch",
+      "quay.io/coreos/etcd:v3.5.14": "etcd",
+      "bitnami/cassandra:5": "cassandra",
+      "scylladb/scylla:6.0": "scylladb",
+      "neo4j:5-community": "neo4j",
+      "apache/couchdb:3": "couchdb",
+      "nats:2.10-alpine": "nats",
+      "apache/kafka:3.7.0": "kafka",
+      "confluentinc/cp-kafka:7.6.1": "kafka",
+    }
+    for (const [image, id] of Object.entries(images)) {
+      expect(seen(imageProduct(image))).toBe(id)
+    }
+    // A sidecar or another product that only carries the name is not the server.
+    expect(imageProduct("prom/memcached-exporter:v0.14.3")).toBe("docker")
+    expect(imageProduct("provectuslabs/kafka-ui:latest")).toBe("docker")
+    expect(imageProduct("redpandadata/redpanda:v24.1.1")).toBe("docker")
+    expect(imageProduct("percona/percona-server:8.0")).toBe("docker")
+    expect(imageProduct("eqalpha/keydb:latest")).toBe("docker")
+    expect(imageProduct("docker.dragonflydb.io/dragonflydb/dragonfly")).toBe("docker")
+  })
+
+  test("a server process and its unit are the product they run", () => {
+    const processes = {
+      memcached: "memcached",
+      etcd: "etcd",
+      cockroach: "cockroachdb",
+      "tidb-server": "tidb",
+      scylla: "scylladb",
+      "nats-server": "nats",
+      ferretdb: "ferretdb",
+      yugabyted: "yugabytedb",
+      "yb-tserver": "yugabytedb",
+      "yb-master": "yugabytedb",
+    }
+    for (const [name, id] of Object.entries(processes)) {
+      expect(seen(processProduct(name))).toBe(id)
+    }
+    const units = {
+      "memcached.service": "memcached",
+      "elasticsearch.service": "elasticsearch",
+      "opensearch.service": "opensearch",
+      "etcd.service": "etcd",
+      "cassandra.service": "cassandra",
+      "scylla-server.service": "scylladb",
+      "neo4j.service": "neo4j",
+      "couchdb.service": "couchdb",
+      "nats-server.service": "nats",
+      "kafka.service": "kafka",
+      "cockroach.service": "cockroachdb",
+      "tidb.service": "tidb",
+      "yb-tserver.service": "yugabytedb",
+      "rabbitmq-server.service": "rabbitmq",
+    }
+    for (const [unit, id] of Object.entries(units)) {
+      expect(seen(unitProduct(unit))).toBe(id)
+    }
+    // No mark of their own, and not Redis's: the unit keeps its glyph.
+    expect(unitProduct("keydb-server.service")).toBeUndefined()
+    expect(unitProduct("dragonfly.service")).toBeUndefined()
+  })
+
+  test("the ports the attention list names and the shells a terminal runs", () => {
+    expect(seen(portProduct(11211))).toBe("memcached")
+    expect(seen(portProduct(9200))).toBe("elasticsearch")
+    // The finding says "Memcached" and "Elasticsearch" of those two by number.
+    // It names neither of these, and each is two products' default: 9042 is
+    // Cassandra's and ScyllaDB's, 9092 Kafka's and Redpanda's.
+    expect(portProduct(9042)).toBeUndefined()
+    expect(portProduct(9092)).toBeUndefined()
+    const programs = {
+      "cockroach sql --insecure": "cockroachdb",
+      "duckdb analytics.duckdb": "duckdb",
+      "etcdctl get / --prefix": "etcd",
+      "cqlsh 127.0.0.1": "cassandra",
+      "cypher-shell -u neo4j": "neo4j",
+      "nats sub orders.>": "nats",
+    }
+    for (const [command, id] of Object.entries(programs)) {
+      expect(seen(programProduct(command))).toBe(id)
+    }
+  })
+})
+
 test("hasProductLogo", () => {
   expect(hasProductLogo("rust")).toBe(true)
   expect(hasProductLogo("vite")).toBe(true)

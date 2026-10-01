@@ -129,6 +129,37 @@ charcoal #4c4c4c lifted to #a4a4a4, the same grey at the L 0.72 rung, for the
 tile a package manager is drawn on; pnpm.svg stays as it was for the file
 manager's paper page.
 
+The database engines the Databases pages draw — the products a driver talks
+to under another name, and the servers found on a machine that the dashboard
+cannot open — come from the same three collections.
+
+From homarr-labs/dashboard-icons, under the Apache License 2.0:
+elasticsearch.svg, etcd.svg, neo4j.svg and couchdb.svg keep their names and are
+unchanged. cassandra.svg is its apache-cassandra.svg with the charcoal #373535
+of the eye's lids and lashes lifted to #a6a4a4; opensearch.svg had the darker
+of its two blues, #003b5c, lifted to #77abd2; and ferretdb.svg had its navy
+#092032 lifted to #8ea8c0, and the drawing program's ids, class and style
+element folded into one fill attribute — each the same hue at the L 0.72 rung,
+so the mark reads on a dark ground. kafka.svg is its kafka-dark.svg, the white
+mark it draws for a dark theme, without the XML declaration, title, role and
+fixed size that file carries.
+
+From devicon v2.17.0, under the MIT License above: memcached.svg, nats.svg and
+yugabytedb.svg are its memcached-original.svg, nats-original.svg and
+yugabytedb-original.svg, unchanged.
+
+From Simple Icons 16.33.0 (https://simpleicons.org), CC0 1.0, without the title
+and role its files carry and filled because Simple Icons ships the path alone:
+timescaledb.svg (its timescale.svg), tidb.svg, scylladb.svg and duckdb.svg in
+their brand colour (#FDB515, #DC150B, #6CD5E7, #FFF000), and cockroachdb.svg
+(its cockroachlabs.svg) in its #6933FF lifted to #9b95ff, the same hue at the
+L 0.72 rung.
+
+Azure SQL Edge has no file: none of the three collections draws it a mark of
+its own, and it is drawn with sqlserver.svg, the engine it is. Percona Server,
+KeyDB and Dragonfly are in none of the three either and have no logo here; the
+pages draw them with a plain database glyph rather than another product's mark.
+
 mono/ holds the single-colour marks pressed into a folder's face. Every file
 there is from Simple Icons (https://simpleicons.org), CC0 1.0, unchanged, renamed
 after the product key the folders use: nodedotjs.svg is nodejs.svg,
