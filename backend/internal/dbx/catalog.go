@@ -71,6 +71,38 @@ const (
 	TableTypePartition   = "partition"
 )
 
+// CatalogGroups names the groups an engine's catalogue answers with, in the
+// order a tree draws them. It is the static form of what ReadCatalog returns,
+// for the driver catalogue to advertise before any connection exists: a page
+// can know that Postgres has sequences and MySQL does not without asking a
+// server. flavor is the product behind the driver where one driver serves
+// several ("mariadb" behind mysql); an empty flavor is the driver's own.
+func CatalogGroups(driver Driver, flavor string) []string {
+	switch driver {
+	case DriverPostgres:
+		return []string{GroupTables, GroupViews, GroupMaterializedViews, GroupFunctions, GroupProcedures,
+			GroupTriggers, GroupSequences, GroupTypes}
+	case DriverMySQL:
+		groups := []string{GroupTables, GroupViews, GroupFunctions, GroupProcedures, GroupTriggers, GroupEvents}
+		if strings.EqualFold(flavor, "mariadb") {
+			groups = append(groups, GroupSequences)
+		}
+		return groups
+	case DriverSQLite:
+		return []string{GroupTables, GroupViews, GroupTriggers}
+	case DriverMSSQL:
+		return []string{GroupTables, GroupViews, GroupFunctions, GroupProcedures, GroupTriggers,
+			GroupSequences, GroupTypes, GroupSynonyms}
+	case DriverOracle:
+		return []string{GroupTables, GroupViews, GroupMaterializedViews, GroupFunctions, GroupProcedures,
+			GroupPackages, GroupTriggers, GroupSequences, GroupTypes, GroupSynonyms}
+	case DriverClickHouse:
+		return []string{GroupTables, GroupViews, GroupMaterializedViews, GroupDictionaries, GroupFunctions}
+	default:
+		return []string{}
+	}
+}
+
 // DefaultCatalogLimit bounds each group. A schema with forty thousand
 // functions (PostGIS plus a few extensions gets there) is listed up to the
 // bound and says it stopped, rather than building a reply nobody can scroll.

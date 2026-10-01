@@ -657,12 +657,7 @@ func TestClickHouseGetsItsOwnStatementsOrARefusal(t *testing.T) {
 
 func TestDDLOperationsDescribeEachEngine(t *testing.T) {
 	has := func(driver Driver, op string) bool {
-		for _, o := range DDLOperations(driver) {
-			if o == op {
-				return true
-			}
-		}
-		return false
+		return contains(DDLOperations(driver, ""), op)
 	}
 	for _, c := range []struct {
 		driver Driver
@@ -683,6 +678,11 @@ func TestDDLOperationsDescribeEachEngine(t *testing.T) {
 		if got := has(c.driver, c.op); got != c.want || got != SupportsOperation(c.driver, c.op) {
 			t.Errorf("%s %s: listed=%v supported=%v, want %v", c.driver, c.op, got, SupportsOperation(c.driver, c.op), c.want)
 		}
+	}
+	// CREATE INDEX IF NOT EXISTS is MariaDB's, and the planner asks the server
+	// which product it is; the catalogue has to say the same without one.
+	if contains(DDLOperations(DriverMySQL, "mysql"), OpIndexIfMissing) || !contains(DDLOperations(DriverMySQL, "mariadb"), OpIndexIfMissing) {
+		t.Error("index IF NOT EXISTS is advertised for the wrong MySQL product")
 	}
 	// A refusal is worded for the operator: it names the engine.
 	for driver, refusals := range ddlRefusals {

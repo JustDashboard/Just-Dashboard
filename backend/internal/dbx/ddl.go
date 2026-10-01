@@ -187,17 +187,24 @@ var ddlEverything = append(append([]string{}, ddlAll...),
 
 // DDLOperations lists the schema operations an engine supports, sorted. It is
 // what the driver catalogue advertises, so a form is never drawn for a change
-// the route would refuse.
-func DDLOperations(driver Driver) []string {
+// the route would refuse. flavor is the product behind the driver where one
+// driver serves several; an empty flavor is the driver's own.
+func DDLOperations(driver Driver, flavor string) []string {
 	refusals, ok := ddlRefusals[driver]
 	if !ok {
 		return []string{}
 	}
 	out := []string{}
 	for _, op := range ddlEverything {
-		if _, refused := refusals[op]; !refused {
-			out = append(out, op)
+		if _, refused := refusals[op]; refused {
+			continue
 		}
+		// The one operation the two products behind the MySQL driver disagree
+		// on: CREATE INDEX IF NOT EXISTS is MariaDB's.
+		if op == OpIndexIfMissing && driver == DriverMySQL && !strings.EqualFold(flavor, "mariadb") {
+			continue
+		}
+		out = append(out, op)
 	}
 	sort.Strings(out)
 	return out

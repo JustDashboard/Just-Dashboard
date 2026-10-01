@@ -827,6 +827,15 @@ func TestLivePostgresGeneratedDDLReplays(t *testing.T) {
 		`CREATE UNIQUE INDEX jd_replay_big_idx ON public.jd_replay (email) WHERE qty > 10`,
 		`INSERT INTO public.jd_replay(email, tags, qty) VALUES ('a@x.io', '{one,two}', 3), ('b@x.io', '{}', 40)`,
 	)
+	// Asked for with no schema, the table is found where an unqualified name
+	// resolves, and every fact about it is read from there — not only the ones
+	// whose query happens to default the schema.
+	unqualified, err := DescribeTable(ctx, db, DriverPostgres, "", "jd_replay")
+	if err != nil || unqualified.Schema != "public" || !reflect.DeepEqual(unqualified.PrimaryKey, []string{"id"}) ||
+		len(unqualified.Constraints) != 2 || len(unqualified.Indexes) != 4 ||
+		!strings.HasPrefix(unqualified.CreateSQL, `CREATE TABLE "public"."jd_replay"`) {
+		t.Errorf("without a schema = %+v, %v", unqualified, err)
+	}
 	detail, err := Detail(ctx, db, DriverPostgres, "public", "jd_replay")
 	if err != nil {
 		t.Fatal(err)
@@ -978,6 +987,13 @@ func TestLiveMySQLCatalogAndStructureChanges(t *testing.T) {
 				if catalog.Schema != schema || catalog.DefaultSchema != schema {
 					t.Errorf("schema = %q, default = %q, want %q", catalog.Schema, catalog.DefaultSchema, schema)
 				}
+				groups := []string{}
+				for group := range catalog.Objects {
+					groups = append(groups, group)
+				}
+				if advertised := CatalogGroups(d, flavour.name); len(advertised) != len(groups) {
+					t.Errorf("%s advertises %v and read %v", flavour.name, advertised, groups)
+				}
 				// MySQL has no sequences and no free-standing types, and the
 				// tree must not draw an empty branch for either.
 				if _, ok := catalog.Objects[GroupTypes]; ok {
@@ -1068,6 +1084,13 @@ func TestLiveMySQLCatalogAndStructureChanges(t *testing.T) {
 				}
 				if ix := catIndex(describe("jd_cat_posts"), "jd_cat_posts_title"); ix == nil || ix.Method != "BTREE" || ix.Unique {
 					t.Errorf("index = %+v", ix)
+				}
+				// With no database named, the connection's own is read — keys
+				// and all.
+				unqualified, err := DescribeTable(ctx, db, d, "", "jd_cat_posts")
+				if err != nil || unqualified.Schema != schema || !reflect.DeepEqual(unqualified.PrimaryKey, []string{"id"}) ||
+					len(unqualified.ForeignKeys) != 1 || unqualified.ForeignKeys[0].RefSchema != schema {
+					t.Errorf("without a schema = %+v, %v", unqualified, err)
 				}
 				// SHOW CREATE TABLE answers a view with four columns, and the
 				// definition used to be lost to a two-column scan.
@@ -1356,6 +1379,10 @@ func TestLiveClickHouseCatalogAndStructureChanges(t *testing.T) {
 		}
 		if ix := catIndex(events, "sorting key"); ix == nil || !ix.Primary || !reflect.DeepEqual(ix.Columns, []string{"kind", "id"}) {
 			t.Errorf("sorting key = %+v", ix)
+		}
+		unqualified, err := DescribeTable(ctx, db, d, "", "jd_cat_events")
+		if err != nil || unqualified.Schema != schema || len(unqualified.PrimaryKey) != 2 {
+			t.Errorf("without a schema = %+v, %v", unqualified, err)
 		}
 		tables, err := ListTables(ctx, db, d, schema)
 		if err != nil {

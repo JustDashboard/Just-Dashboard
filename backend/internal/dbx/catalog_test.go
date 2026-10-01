@@ -86,6 +86,35 @@ func TestEverySQLDialectHasACatalogue(t *testing.T) {
 	}
 }
 
+// What the driver catalogue advertises and what a read returns are written in
+// two places, and a page draws its tree from the first before it has the
+// second.
+func TestAdvertisedGroupsAreTheGroupsRead(t *testing.T) {
+	for _, driver := range []Driver{DriverPostgres, DriverSQLite, DriverMSSQL, DriverOracle, DriverClickHouse} {
+		_, cd, err := catalogFor(driver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		read := []string{}
+		// None of these dialects consults the connection to list its groups.
+		for _, g := range cd.catalogGroups(context.Background(), nil) {
+			read = append(read, g.name)
+		}
+		if advertised := CatalogGroups(driver, ""); !reflect.DeepEqual(advertised, read) {
+			t.Errorf("%s advertises %v and reads %v", driver, advertised, read)
+		}
+	}
+	if groups := CatalogGroups(DriverMySQL, "mariadb"); !contains(groups, GroupSequences) {
+		t.Errorf("mariadb groups = %v", groups)
+	}
+	if groups := CatalogGroups(DriverMySQL, "mysql"); contains(groups, GroupSequences) || !contains(groups, GroupEvents) {
+		t.Errorf("mysql groups = %v", groups)
+	}
+	if groups := CatalogGroups(DriverRedis, ""); groups == nil || len(groups) != 0 {
+		t.Errorf("redis groups = %#v", groups)
+	}
+}
+
 func TestSQLiteCatalogListsWhatTheFileHolds(t *testing.T) {
 	db := catalogSQLite(t)
 	ctx := context.Background()

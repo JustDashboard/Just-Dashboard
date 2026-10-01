@@ -160,6 +160,20 @@ func describeTable(ctx context.Context, db *sql.DB, driver Driver, schema, table
 		Constraints: []Constraint{}, ReferencedBy: []IncomingForeignKey{},
 		Facts: []ObjectFact{}, Rows: -1,
 	}
+	cd, _ := d.(catalogDialect)
+	if cd != nil {
+		// First, because it names the schema the table was actually found in.
+		// A request that names none is answered from the connection's own, and
+		// the dialect's reads below take a schema literally: asked for "" they
+		// find nothing, which is how a table came back with columns and no key.
+		_ = cd.tableFacts(ctx, db, schema, table, detail)
+		if detail.Facts == nil {
+			detail.Facts = []ObjectFact{}
+		}
+	}
+	if schema == "" {
+		schema = detail.Schema
+	}
 	// reader stands in for the dialect's own reads on an engine where those
 	// cannot address the schema that was asked for.
 	reader, _ := d.(schemaTableReader)
@@ -189,23 +203,17 @@ func describeTable(ctx context.Context, db *sql.DB, driver Driver, schema, table
 		foreignKeys = reader.tableForeignKeys
 	}
 	if fks, err := foreignKeys(ctx, db, schema, table); err == nil && fks != nil {
-		detail.ForeignKeys = fks
+		// A reference with no schema of its own points into the table's.
+		detail.ForeignKeys = qualifyReferences(fks, detail.Schema)
 	}
-	if cd, ok := d.(catalogDialect); ok {
+	if cd != nil {
 		if cs, err := cd.tableConstraints(ctx, db, schema, table); err == nil && cs != nil {
 			detail.Constraints = cs
 		}
 		if in, err := cd.tableReferencedBy(ctx, db, schema, table); err == nil && in != nil {
 			detail.ReferencedBy = in
 		}
-		_ = cd.tableFacts(ctx, db, schema, table, detail)
 	}
-	if detail.Facts == nil {
-		detail.Facts = []ObjectFact{}
-	}
-	// tableFacts names the schema the table was actually found in, which is
-	// what a reference with no schema of its own points into.
-	detail.ForeignKeys = qualifyReferences(detail.ForeignKeys, detail.Schema)
 	inPK := map[string]bool{}
 	for _, c := range detail.PrimaryKey {
 		inPK[c] = true
@@ -234,7 +242,7 @@ func describeTable(ctx context.Context, db *sql.DB, driver Driver, schema, table
 		return detail, nil
 	}
 	isView := strings.EqualFold(detail.Type, TableTypeView) || strings.EqualFold(detail.Type, TableTypeMaterializedView)
-	if cd, ok := d.(catalogDialect); ok && (isView && generated || strings.TrimSpace(detail.CreateSQL) == "") {
+	if cd != nil && (isView && generated || strings.TrimSpace(detail.CreateSQL) == "") {
 		// A view has no CREATE TABLE. Where the engine's table read could not
 		// produce its text (or produced a table-shaped guess), ask for the
 		// view's own definition.
