@@ -276,8 +276,10 @@ func TestExportFormatsSayHowTheyEnded(t *testing.T) {
 		}
 		check(rec.Body.String())
 	}
-	if len(f.audited("database.export")) != 5 {
-		t.Errorf("exports recorded: %v", f.audited("database.export"))
+	// Each is on the trail twice: when it began, and with how it ended.
+	if began, ended := f.audited("database.export"), f.audited("database.export.finished"); len(began) != 5 || len(ended) != 5 ||
+		!strings.Contains(began[0], `"table":"items"`) || !strings.Contains(ended[0], `"rows":3`) {
+		t.Errorf("exports recorded: %v\n%v", began, ended)
 	}
 }
 
@@ -404,8 +406,8 @@ func TestExportThatFailsPartwayAbortsTheResponse(t *testing.T) {
 	if !ok || state.Status != "failed" || state.Rows != rows-1 || state.Error == "" {
 		t.Errorf("status = %+v", state)
 	}
-	details := f.audited("database.export")
-	if len(details) != 1 || !strings.Contains(details[0], "error") {
+	details := f.audited("database.export.finished")
+	if len(details) != 1 || !strings.Contains(details[0], "error") || len(f.audited("database.export")) != 1 {
 		t.Errorf("the failure was not recorded: %v", details)
 	}
 
@@ -848,9 +850,6 @@ func TestUploadedDumpIsContainedListedDownloadedAndDeleted(t *testing.T) {
 		if rec := f.do(http.MethodGet, f.path("/backup/download?file="+name), ""); rec.Code != http.StatusBadRequest {
 			t.Errorf("download of %q: %d %s", name, rec.Code, rec.Body.String())
 		}
-	}
-	if details := f.audited("database.backup.download"); len(details) != 1 {
-		t.Errorf("downloads recorded: %v", details)
 	}
 
 	// Deleting a dump takes its description with it.

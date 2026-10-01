@@ -267,30 +267,35 @@ func (s *Server) finishExport(r *http.Request, run exportRun, rows int, truncate
 		}
 		s.dbExports.finish(run.key, status, rows, reason)
 	}
+	// A GET is recorded by hand, because the mutation middleware passes one
+	// through with nothing to annotate: an entry when it began (exportTable)
+	// and this one, with how much was sent. It is not written on the request's
+	// own context. A client that hangs up at the last byte it wanted has
+	// still taken the table, and its going would take the entry with it.
+	get := r.Method == http.MethodGet
+	if get {
+		s.recordTransfer(auditBaseOf(r), run.action+".finished", run.conn.Name, detail, err)
+	}
 	if err != nil && !run.stream.started {
-		// Nothing has been sent, so this is an ordinary refusal. A GET is
-		// recorded here because nothing else records one; a POST's refusal is
-		// recorded by the mutation middleware like any other.
-		if r.Method == http.MethodGet {
-			s.recordTransfer(auditBaseOf(r), run.action, run.conn.Name, detail, err)
-		} else {
+		// Nothing has been sent, so this is an ordinary refusal, and a POST's
+		// is recorded by the mutation middleware like any other.
+		if !get {
 			httpx.SetAudit(r, run.action, run.conn.Name, detail)
 		}
 		return exportError(err)
 	}
 	if err != nil {
-		s.recordTransfer(auditBaseOf(r), run.action, run.conn.Name, detail, err)
+		if !get {
+			// Its request never completes, so the middleware never writes it.
+			s.recordTransfer(auditBaseOf(r), run.action, run.conn.Name, detail, err)
+		}
 		// What was written goes out first, the format's own closing remark
 		// with it: a client that keeps what it received holds a file that
 		// says it is not whole.
 		_ = http.NewResponseController(run.stream.w).Flush()
 		panic(http.ErrAbortHandler)
 	}
-	if r.Method == http.MethodGet {
-		// Written directly: the mutation middleware passes a GET through with
-		// nothing to annotate, and a table leaving the server is worth a line.
-		s.recordAudit(r, run.action, run.conn.Name, detail)
-	} else {
+	if !get {
 		httpx.SetAudit(r, run.action, run.conn.Name, detail)
 	}
 	if err := run.stream.start(); err != nil {
@@ -442,9 +447,16 @@ func (s *Server) exportTable(w http.ResponseWriter, r *http.Request) error {
 	limit := atoiDefault(q.Get("limit"), 0)
 	run := exportRun{
 		conn: conn, action: "database.export", key: key,
-		detail: map[string]any{"table": table, "format": string(format), "filtered": q.Get("filters") != "" || q.Get("filter") != ""},
+		detail: map[string]any{
+			"schema": browse.Schema, "table": table, "format": string(format),
+			"filtered": q.Get("filters") != "" || q.Get("filter") != "",
+		},
 		stream: &exportStream{w: w, format: format, filename: exportFilename(table, format)},
 	}
+	// On the trail before the first row leaves, so that an export which hangs,
+	// or takes the process down with it, is still on record. finishExport
+	// writes the entry that closes it.
+	s.recordTransfer(auditBaseOf(r), run.action, conn.Name, run.detail, nil)
 	var (
 		count     int
 		truncated bool

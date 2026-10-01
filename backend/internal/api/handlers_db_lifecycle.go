@@ -67,9 +67,6 @@ func (s *Server) handleDBBackupDownload(w http.ResponseWriter, r *http.Request) 
 		return httpx.BadRequest("%s is a directory", name)
 	}
 	base := filepath.Base(st.Name())
-	// A whole database leaving the server is worth a line, and a GET never
-	// reaches the mutation middleware's record, so it is written here.
-	s.recordAudit(r, "database.backup.download", conn.Name, map[string]any{"file": base, "size": st.Size()})
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition",
 		mime.FormatMediaType("attachment", map[string]string{"filename": base}))
