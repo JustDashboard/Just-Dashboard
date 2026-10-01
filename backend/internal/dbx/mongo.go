@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,19 +53,18 @@ func MongoDatabases(ctx context.Context, client *mongo.Client) ([]Database, erro
 // one browser for every engine instead of a separate Mongo-specific view.
 func MongoCollections(ctx context.Context, client *mongo.Client, dbName string) ([]Table, error) {
 	db := client.Database(dbName)
-	names, err := db.ListCollectionNames(ctx, bson.D{})
+	entries, err := mongoCollectionEntries(ctx, db, bson.D{})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Table, 0, len(names))
-	for _, name := range names {
-		t := Table{Schema: dbName, Name: name, Type: "collection"}
-		var stats struct {
-			Count int64 `bson:"count"`
-			Size  int64 `bson:"size"`
-		}
-		if err := db.RunCommand(ctx, bson.D{{Key: "collStats", Value: name}}).Decode(&stats); err == nil {
-			t.Rows, t.Size = stats.Count, stats.Size
+	out := make([]Table, 0, len(entries))
+	for _, e := range entries {
+		t := Table{Schema: dbName, Name: e.Name, Type: e.Type}
+		// A view stores nothing, so it has no figures to ask for.
+		if e.Type != "view" {
+			if stats, err := mongoCollStats(ctx, db, e.Name); err == nil {
+				t.Rows, t.Size = mongoLookupInt(stats, "count"), mongoLookupInt(stats, "size")
+			}
 		}
 		out = append(out, t)
 	}
@@ -89,26 +91,32 @@ type MongoFindOptions struct {
 }
 
 func MongoQuery(ctx context.Context, client *mongo.Client, dbName, collection string, opts MongoFindOptions) (*QueryResult, error) {
-	if opts.Limit <= 0 || opts.Limit > 1000 {
+	if err := mongoGuardCredentials(dbName, collection); err != nil {
+		return nil, err
+	}
+	if opts.Limit <= 0 {
 		opts.Limit = 100
+	}
+	if opts.Limit > 1000 {
+		opts.Limit = 1000
 	}
 	filter, err := mongoParseFilter(opts.Filter)
 	if err != nil {
 		return nil, err
 	}
 	find := options.Find().SetLimit(int64(opts.Limit)).SetSkip(int64(opts.Skip))
-	if strings.TrimSpace(opts.Sort) != "" && strings.TrimSpace(opts.Sort) != "{}" {
-		sortDoc := bson.D{}
-		if err := bson.UnmarshalExtJSON([]byte(opts.Sort), false, &sortDoc); err != nil {
-			return nil, fmt.Errorf("sort is not valid JSON: %w", err)
-		}
+	sortDoc, err := mongoParseOptionalDocument("sort", opts.Sort)
+	if err != nil {
+		return nil, err
+	}
+	if !mongoIsEmpty(sortDoc) {
 		find.SetSort(sortDoc)
 	}
-	if strings.TrimSpace(opts.Projection) != "" && strings.TrimSpace(opts.Projection) != "{}" {
-		projDoc := bson.D{}
-		if err := bson.UnmarshalExtJSON([]byte(opts.Projection), false, &projDoc); err != nil {
-			return nil, fmt.Errorf("projection is not valid JSON: %w", err)
-		}
+	projDoc, err := mongoParseOptionalDocument("projection", opts.Projection)
+	if err != nil {
+		return nil, err
+	}
+	if !mongoIsEmpty(projDoc) {
 		find.SetProjection(projDoc)
 	}
 	start := time.Now()
@@ -118,8 +126,11 @@ func MongoQuery(ctx context.Context, client *mongo.Client, dbName, collection st
 	}
 	defer cur.Close(ctx)
 
-	res := docsToResult(ctx, cur, opts.Limit,
+	res, err := docsToResult(ctx, cur, opts.Limit,
 		fmt.Sprintf("db.%s.find(%s)", collection, defaultFilter(opts.Filter)))
+	if err != nil {
+		return nil, err
+	}
 	res.Duration = time.Since(start).Round(time.Microsecond).String()
 	return res, nil
 }
@@ -131,52 +142,22 @@ func MongoQuery(ctx context.Context, client *mongo.Client, dbName, collection st
 // document's keys: a collection where later documents carry fields the first
 // one lacks would otherwise render those fields nowhere, which is the normal
 // state of an evolving schema rather than an edge case.
-func docsToResult(ctx context.Context, cur *mongo.Cursor, limit int, statement string) *QueryResult {
-	docs := []map[string]any{}
-	columns := []string{}
-	seen := map[string]bool{}
+func docsToResult(ctx context.Context, cur *mongo.Cursor, limit int, statement string) (*QueryResult, error) {
+	docs := []bson.Raw{}
 	for cur.Next(ctx) {
 		if len(docs) >= limit {
 			break
 		}
-		var doc bson.M
-		if err := cur.Decode(&doc); err != nil {
-			continue
-		}
-		flat := map[string]any{}
-		for k, v := range doc {
-			flat[k] = normaliseBSON(v)
-			if !seen[k] {
-				seen[k] = true
-				columns = append(columns, k)
-			}
-		}
-		docs = append(docs, flat)
+		docs = append(docs, append(bson.Raw(nil), cur.Current...))
 	}
-	sort.Slice(columns, func(i, j int) bool {
-		// _id first, then alphabetical: the identifier is what an operator
-		// scans for, and it is also what an edit is keyed on.
-		if columns[i] == "_id" {
-			return true
-		}
-		if columns[j] == "_id" {
-			return false
-		}
-		return columns[i] < columns[j]
-	})
-	res := &QueryResult{
-		Columns: columns, Types: []string{}, Rows: [][]any{}, Statement: statement,
+	// A cursor that failed part-way is a failed read. Returning what arrived
+	// before it would show a short page as if it were the whole answer.
+	if err := cur.Err(); err != nil {
+		return nil, err
 	}
-	for _, doc := range docs {
-		row := make([]any, len(columns))
-		for i, c := range columns {
-			row[i] = doc[c]
-		}
-		res.Rows = append(res.Rows, row)
-	}
-	res.RowCount = len(res.Rows)
-	res.Truncated = res.RowCount >= limit
-	return res
+	res := mongoGrid(docs, len(docs) >= limit)
+	res.Statement = statement
+	return res, nil
 }
 
 func defaultFilter(f string) string {
@@ -206,33 +187,31 @@ func normaliseBSON(v any) any {
 		// Bare hex, not ObjectID("…"): this value is what the grid shows and
 		// what an edit sends back as the filter, so it has to round-trip.
 		return t.Hex()
+	case primitive.DateTime:
+		return t.Time().UTC().Format(time.RFC3339Nano)
 	case primitiveStringer:
 		return t.String()
 	case time.Time:
 		return t.UTC().Format(time.RFC3339Nano)
+	case float64:
+		// JSON has no NaN and no infinity; encoding one fails the whole
+		// response after its status line has gone out.
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return strconv.FormatFloat(t, 'g', -1, 64)
+		}
+		return t
+	case int64:
+		// Past 2^53 a browser reads a different number than was stored.
+		if t > mongoSafeInteger || t < -mongoSafeInteger {
+			return strconv.FormatInt(t, 10)
+		}
+		return t
 	default:
 		return v
 	}
 }
 
 type primitiveStringer interface{ String() string }
-
-func MongoServerStatus(ctx context.Context, client *mongo.Client) (map[string]any, error) {
-	var raw bson.M
-	err := client.Database("admin").RunCommand(ctx, bson.D{{Key: "serverStatus", Value: 1}}).Decode(&raw)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]any{}
-	// Only the fields an operator watches are surfaced; serverStatus is
-	// hundreds of keys deep and mostly irrelevant here.
-	for _, key := range []string{"host", "version", "uptime", "connections", "network", "opcounters", "mem"} {
-		if v, ok := raw[key]; ok {
-			out[key] = normaliseBSON(v)
-		}
-	}
-	return out, nil
-}
 
 // --- Mongo write and analysis surface ------------------------------------
 //
@@ -253,10 +232,14 @@ func MongoServerStatus(ctx context.Context, client *mongo.Client) (map[string]an
 // is left as the string it is, because plenty of collections use string ids.
 func mongoParseFilter(filterJSON string) (bson.D, error) {
 	filter := bson.D{}
-	if strings.TrimSpace(filterJSON) == "" || strings.TrimSpace(filterJSON) == "{}" {
+	if strings.TrimSpace(filterJSON) == "" {
 		return filter, nil
 	}
-	if err := bson.UnmarshalExtJSON([]byte(filterJSON), false, &filter); err != nil {
+	raw, err := mongoParseDocument("filter", filterJSON)
+	if err != nil {
+		return nil, err
+	}
+	if err := bson.Unmarshal(raw, &filter); err != nil {
 		return nil, fmt.Errorf("filter is not valid JSON: %w", err)
 	}
 	for i, e := range filter {
@@ -273,11 +256,12 @@ func mongoParseFilter(filterJSON string) (bson.D, error) {
 }
 
 func mongoParseDoc(docJSON string) (bson.D, error) {
-	doc := bson.D{}
-	if strings.TrimSpace(docJSON) == "" {
-		return nil, fmt.Errorf("a document is required")
+	raw, err := mongoParseDocument("document", docJSON)
+	if err != nil {
+		return nil, err
 	}
-	if err := bson.UnmarshalExtJSON([]byte(docJSON), false, &doc); err != nil {
+	doc := bson.D{}
+	if err := bson.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("document is not valid JSON: %w", err)
 	}
 	return doc, nil
@@ -334,6 +318,11 @@ func MongoReplace(ctx context.Context, client *mongo.Client, dbName, collection,
 	res, err := client.Database(dbName).Collection(collection).ReplaceOne(ctx, filter, clean)
 	if err != nil {
 		return 0, err
+	}
+	// Matching nothing is not "saved with no changes". The page that calls
+	// this reported success on a zero, for a document that was never found.
+	if res.MatchedCount == 0 {
+		return 0, fmt.Errorf("no document matches the filter, so nothing was saved")
 	}
 	return res.ModifiedCount, nil
 }
@@ -411,32 +400,15 @@ func MongoIndexes(ctx context.Context, client *mongo.Client, dbName, collection 
 // construction — but not entirely, so the handler classifies the pipeline for
 // the writing stages before letting it run.
 func MongoAggregate(ctx context.Context, client *mongo.Client, dbName, collection, pipelineJSON string, limit int) (*QueryResult, error) {
-	if limit <= 0 || limit > 1000 {
+	if limit <= 0 {
 		limit = 100
 	}
-	pipeline := []bson.D{}
-	if err := bson.UnmarshalExtJSON([]byte("{\"p\":"+pipelineJSON+"}"), false, &struct {
-		P *[]bson.D `bson:"p"`
-	}{P: &pipeline}); err != nil {
-		return nil, fmt.Errorf("pipeline is not a valid JSON array of stages: %w", err)
-	}
-	start := time.Now()
-	cur, err := client.Database(dbName).Collection(collection).Aggregate(ctx, pipeline)
+	res, err := MongoRunPipeline(ctx, client, dbName, collection,
+		MongoAggregateSpec{Pipeline: pipelineJSON, Limit: int64(limit), MaxTimeMS: (2 * time.Minute).Milliseconds()})
 	if err != nil {
 		return nil, err
 	}
-	defer cur.Close(ctx)
-	res := docsToResult(ctx, cur, limit, fmt.Sprintf("db.%s.aggregate(%s)", collection, pipelineJSON))
-	res.Duration = time.Since(start).Round(time.Microsecond).String()
-	return res, nil
-}
-
-// MongoWritesInPipeline reports whether an aggregation ends in a stage that
-// writes. $out and $merge replace or update a whole collection, so a pipeline
-// carrying either is treated as destructive rather than as a read.
-func MongoWritesInPipeline(pipelineJSON string) bool {
-	lower := strings.ToLower(pipelineJSON)
-	return strings.Contains(lower, `"$out"`) || strings.Contains(lower, `"$merge"`)
+	return res.Grid, nil
 }
 
 // MongoCreateCollection makes an empty collection, which Mongo otherwise only
@@ -489,16 +461,19 @@ func MongoExport(
 	if maxRows <= 0 || maxRows > 1_000_000 {
 		maxRows = 100_000
 	}
+	if err := mongoGuardCredentials(dbName, collection); err != nil {
+		return 0, false, err
+	}
 	filter, err := mongoParseFilter(opts.Filter)
 	if err != nil {
 		return 0, false, err
 	}
 	find := options.Find().SetLimit(int64(maxRows))
-	if strings.TrimSpace(opts.Sort) != "" && strings.TrimSpace(opts.Sort) != "{}" {
-		sortDoc := bson.D{}
-		if err := bson.UnmarshalExtJSON([]byte(opts.Sort), false, &sortDoc); err != nil {
-			return 0, false, fmt.Errorf("sort is not valid JSON: %w", err)
-		}
+	sortDoc, err := mongoParseOptionalDocument("sort", opts.Sort)
+	if err != nil {
+		return 0, false, err
+	}
+	if !mongoIsEmpty(sortDoc) {
 		find.SetSort(sortDoc)
 	}
 
@@ -539,12 +514,12 @@ func mongoColumnUnion(ctx context.Context, coll *mongo.Collection, filter any, f
 	columns := []string{}
 	n := 0
 	for cur.Next(ctx) && n < maxRows {
-		var doc bson.M
-		if err := cur.Decode(&doc); err != nil {
-			continue
+		elems, err := cur.Current.Elements()
+		if err != nil {
+			return nil, err
 		}
-		for k := range doc {
-			if !seen[k] {
+		for _, e := range elems {
+			if k := e.Key(); !seen[k] {
 				seen[k] = true
 				columns = append(columns, k)
 			}
@@ -583,7 +558,7 @@ func mongoStreamCSV(ctx context.Context, cur *mongo.Cursor, columns []string, w 
 		}
 		var doc bson.M
 		if err := cur.Decode(&doc); err != nil {
-			continue
+			return count, truncated, err
 		}
 		for i, c := range columns {
 			v, ok := doc[c]
@@ -618,7 +593,7 @@ func mongoStreamJSON(ctx context.Context, cur *mongo.Cursor, w io.Writer, maxRow
 		}
 		var doc bson.M
 		if err := cur.Decode(&doc); err != nil {
-			continue
+			return count, truncated, err
 		}
 		flat := map[string]any{}
 		for k, v := range doc {
@@ -659,23 +634,40 @@ func MongoImport(
 	}
 	coll := client.Database(dbName).Collection(collection)
 	res := &ImportResult{Errors: []string{}, Statement: fmt.Sprintf("db.%s.insertMany(…)", collection)}
-	for i, doc := range docs {
-		if _, err := coll.InsertOne(ctx, doc); err != nil {
+	// Batches rather than one round trip per document. An unordered batch
+	// tries every document and reports each refusal with its position, which
+	// is what "keep going" means; an ordered one stops at the first.
+	for offset := 0; offset < len(docs); offset += mongoImportBatch {
+		batch := docs[offset:min(offset+mongoImportBatch, len(docs))]
+		ins, err := coll.InsertMany(ctx, batch, options.InsertMany().SetOrdered(stopOnError))
+		if ins != nil {
+			res.Inserted += len(ins.InsertedIDs)
+		}
+		if err == nil {
+			continue
+		}
+		var bulk mongo.BulkWriteException
+		if !errors.As(err, &bulk) || len(bulk.WriteErrors) == 0 {
+			return res, err
+		}
+		for _, we := range bulk.WriteErrors {
 			res.Failed++
 			if len(res.Errors) < maxImportErrors {
-				res.Errors = append(res.Errors, fmt.Sprintf("document %d: %v", i+1, err))
+				res.Errors = append(res.Errors, fmt.Sprintf("document %d: %s", offset+we.Index+1, we.Message))
 			} else {
 				res.Truncated = true
 			}
-			if stopOnError {
-				return res, fmt.Errorf("document %d: %w", i+1, err)
-			}
-			continue
 		}
-		res.Inserted++
+		if stopOnError {
+			first := bulk.WriteErrors[0]
+			return res, fmt.Errorf("document %d: %s", offset+first.Index+1, first.Message)
+		}
 	}
 	return res, nil
 }
+
+// mongoImportBatch is how many documents one insertMany carries.
+const mongoImportBatch = 500
 
 // parseImportDocuments turns either format into a list of BSON documents. CSV
 // values arrive as strings and are left that way: guessing that "007" is the
@@ -695,8 +687,11 @@ func parseImportDocuments(format, data string) ([]any, error) {
 		out := []any{}
 		for {
 			rec, err := cr.Read()
-			if err != nil {
+			if err == io.EOF {
 				break
+			}
+			if err != nil {
+				return nil, fmt.Errorf("could not read the CSV: %w", err)
 			}
 			doc := bson.D{}
 			for i, field := range rec {
