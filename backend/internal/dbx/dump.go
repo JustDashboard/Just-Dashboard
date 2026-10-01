@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -314,19 +315,103 @@ func DumpWith(ctx context.Context, driver Driver, dsn, outDir string, opts DumpO
 	if err := ValidateDumpOptions(driver, opts); err != nil {
 		return nil, err
 	}
-	res, err := runDump(ctx, driver, dsn, outDir, opts)
-	if res != nil {
-		res.File = filepath.Base(res.Path)
-		if res.Tool == "" {
-			res.Tool = BuiltInDumpTool
-		}
+	staging, discard, err := NewDumpStaging(outDir, "dump")
+	if err != nil {
+		return nil, err
 	}
+	defer discard()
+	res, err := runDump(ctx, driver, dsn, staging, opts)
 	if err != nil && ctx.Err() != nil {
 		// The tool's last words when it is killed are "terminated by signal",
 		// which is true and says nothing about why.
 		return nil, fmt.Errorf("dump stopped: %w", context.Cause(ctx))
 	}
-	return res, err
+	if err != nil {
+		return nil, err
+	}
+	// Two dumps taken in the same second are after the same name — one taken
+	// to keep the current state follows the dump it is about to be replaced
+	// from by less than that — and the later one takes the name with a number.
+	name := filepath.Base(res.Path)
+	for n := 1; ; n++ {
+		path, err := PlaceDump(res.Path, outDir, numberedDumpName(name, n))
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		res.Path, res.File = path, filepath.Base(path)
+		break
+	}
+	if res.Tool == "" {
+		res.Tool = BuiltInDumpTool
+	}
+	return res, nil
+}
+
+// Where a dump is while it is not yet whole.
+//
+// A dump used to be written straight under its name, so for as long as it took
+// the directory held a file that looked like a backup and was not one, and the
+// listing had to guess which that was from its age and from a job happening to
+// be running. It is written in a directory of its own instead, inside the one
+// it is bound for — the same volume, so the move at the end is a rename — under
+// a name the listing does not read, and given its own name once it is whole.
+// An upload arrives the same way.
+
+// dumpStagingStale is the age at which a staging directory can only be what a
+// process that died left behind: twice the longest a transfer is allowed.
+const dumpStagingStale = 24 * time.Hour
+
+// NewDumpStaging makes the directory a dump is written in before it has its
+// name, inside dir, and returns it with what removes it. kind says what is
+// arriving: "dump" or "upload".
+func NewDumpStaging(dir, kind string) (string, func(), error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", nil, err
+	}
+	// Nobody can delete from the page what the page does not list, so what an
+	// earlier process left is cleared here.
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || (!strings.HasPrefix(e.Name(), ".dump-") && !strings.HasPrefix(e.Name(), ".upload-")) {
+				continue
+			}
+			if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > dumpStagingStale {
+				os.RemoveAll(filepath.Join(dir, e.Name()))
+			}
+		}
+	}
+	staging, err := os.MkdirTemp(dir, "."+kind+"-")
+	if err != nil {
+		return "", nil, err
+	}
+	return staging, func() { os.RemoveAll(staging) }, nil
+}
+
+// PlaceDump gives a dump that is whole its name in dir.
+//
+// The name is claimed by creating it, which only one writer can do, and the
+// dump is then moved onto the claim. Checking that the name is free and
+// renaming onto it are two steps, and between them a second upload of the
+// same name — or a dump finishing in the same second — used to land on the
+// first. The loser now gets fs.ErrExist.
+func PlaceDump(staged, dir, name string) (string, error) {
+	path := filepath.Join(dir, name)
+	claim, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return "", fmt.Errorf("%w: %s", fs.ErrExist, name)
+	}
+	if err != nil {
+		return "", err
+	}
+	claim.Close()
+	if err := os.Rename(staged, path); err != nil {
+		os.Remove(path)
+		return "", err
+	}
+	return path, nil
 }
 
 // runDump is Dump without the bookkeeping, so the several places that build a

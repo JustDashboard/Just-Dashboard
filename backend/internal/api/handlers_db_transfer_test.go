@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -662,7 +664,7 @@ func TestBackupRunsAsAJobAndIsListedWithWhatItHolds(t *testing.T) {
 	got := listing.Files[0]
 	if got.File != res.File || got.Note != "before the migration" || got.Origin != dbx.DumpOriginDump ||
 		got.By != "tester" || got.Tool != dbx.BuiltInDumpTool || got.ToolVersion == "" ||
-		got.DurationMs == nil || got.Format != "SQLite file" || got.Contents == nil || got.Partial {
+		got.DurationMs == nil || got.Format != "SQLite file" || got.Contents == nil {
 		t.Errorf("listed dump = %+v", got)
 	}
 	// The description is beside the dump and is not itself listed as one.
@@ -802,8 +804,40 @@ func TestUploadedDumpIsContainedListedDownloadedAndDeleted(t *testing.T) {
 		t.Errorf("a path in the filename: %d %s", rec.Code, rec.Body.String())
 	}
 	// A name that is taken is not overwritten.
-	if rec := f.upload(f.path("/backups/upload"), nil, "old-server.sqlite", dump); rec.Code != http.StatusConflict {
+	if rec := f.upload(f.path("/backups/upload"), nil, "old-server.sqlite", dump); rec.Code != http.StatusConflict ||
+		strings.Contains(rec.Body.String(), dir) {
 		t.Errorf("a second upload under the same name: %d %s", rec.Code, rec.Body.String())
+	}
+	// Nor when the uploads arrive together: one of them has the name and the
+	// rest are told it is taken, and the file is the one that was accepted.
+	const together = 8
+	var wg sync.WaitGroup
+	codes := make([]int, together)
+	for i := range codes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes[i] = f.upload(f.path("/backups/upload"), nil, "raced.sql", []byte(fmt.Sprintf("-- upload %d\n", i))).Code
+		}()
+	}
+	wg.Wait()
+	accepted := -1
+	for i, code := range codes {
+		switch {
+		case code == http.StatusCreated && accepted >= 0:
+			t.Fatalf("uploads %d and %d were both accepted under one name", accepted, i)
+		case code == http.StatusCreated:
+			accepted = i
+		case code != http.StatusConflict:
+			t.Errorf("upload %d: %d", i, code)
+		}
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "raced.sql")); accepted < 0 || string(got) != fmt.Sprintf("-- upload %d\n", accepted) {
+		t.Errorf("accepted upload %d, and the file holds %q", accepted, got)
+	}
+	// Nothing an upload was staged in is left, and none of it was ever listed.
+	if entries, _ := os.ReadDir(dir); len(entries) != 8 {
+		t.Errorf("the dump directory holds %d entries, want four dumps and their descriptions", len(entries))
 	}
 
 	// Download by name; the description is not a dump and is not handed out.

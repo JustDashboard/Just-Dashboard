@@ -736,8 +736,6 @@ type dbBackupFile struct {
 	Note        string            `json:"note,omitempty"`
 	Origin      string            `json:"origin,omitempty"`
 	By          string            `json:"by,omitempty"`
-	// Partial marks a file a running job is still writing.
-	Partial bool `json:"partial,omitempty"`
 }
 
 func (s *Server) handleDBBackupList(w http.ResponseWriter, r *http.Request) error {
@@ -758,13 +756,6 @@ func (s *Server) handleDBBackupList(w http.ResponseWriter, r *http.Request) erro
 	answer := map[string]any{"dir": dir, "files": out, "options": dbx.DumpCapabilities(conn.Driver)}
 	if job, running := s.runningTransfer(conn.ID); running {
 		answer["job"] = job
-		// A file with no description that appeared after the job began is
-		// the one it is writing.
-		for i := range out {
-			if out[i].Origin == "" && !out[i].TakenAt.Before(job.StartedAt.Add(-time.Second)) {
-				out[i].Partial = true
-			}
-		}
 	}
 	httpx.JSON(w, http.StatusOK, answer)
 	return nil

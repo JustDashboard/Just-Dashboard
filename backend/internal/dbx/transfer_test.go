@@ -5,12 +5,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -300,6 +303,128 @@ func TestFreeDumpPathNeverNamesAFileThatIsThere(t *testing.T) {
 	os.WriteFile(second, nil, 0o600)
 	if third := freeDumpPath(dir, "shop-20260102-030405.sql.gz"); filepath.Base(third) != "shop-20260102-030405-3.sql.gz" {
 		t.Errorf("third = %s", third)
+	}
+}
+
+// Of several dumps after one name, one gets it and none is written over.
+func TestPlaceDumpGivesANameToOneDumpOnly(t *testing.T) {
+	dir := t.TempDir()
+	const writers = 16
+	var wg sync.WaitGroup
+	placed := make([]error, writers)
+	for i := range placed {
+		staging, discard, err := NewDumpStaging(dir, "upload")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer discard()
+		staged := filepath.Join(staging, "shop.sql")
+		if err := os.WriteFile(staged, []byte(fmt.Sprintf("-- dump %d\n", i)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, placed[i] = PlaceDump(staged, dir, "shop.sql")
+		}()
+	}
+	wg.Wait()
+	winner := -1
+	for i, err := range placed {
+		switch {
+		case err == nil && winner >= 0:
+			t.Fatalf("writers %d and %d were both given the name", winner, i)
+		case err == nil:
+			winner = i
+		case !errors.Is(err, fs.ErrExist):
+			t.Errorf("writer %d: %v, want the name reported as taken", i, err)
+		case strings.Contains(err.Error(), dir):
+			t.Errorf("the refusal names the directory: %v", err)
+		}
+	}
+	if winner < 0 {
+		t.Fatal("nobody was given the name")
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "shop.sql")); string(got) != fmt.Sprintf("-- dump %d\n", winner) {
+		t.Errorf("the file holds %q, which is not what writer %d put there", got, winner)
+	}
+}
+
+// A dump has no name until it is whole: while it is written the directory
+// holds nothing a listing would take for one, and what a dead process left is
+// cleared by the next.
+func TestADumpIsWrittenOutOfSightAndNamedWhenWhole(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "dumps")
+	staging, discard, err := NewDumpStaging(dir, "dump")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(staging) != dir || !strings.HasPrefix(filepath.Base(staging), ".dump-") {
+		t.Fatalf("staging = %s, want a hidden directory inside %s", staging, dir)
+	}
+	// Left by a process that died yesterday, and by one still running.
+	stale, running, other := filepath.Join(dir, ".dump-dead"), filepath.Join(dir, ".upload-live"), filepath.Join(dir, ".kept")
+	for _, d := range []string{stale, running, other} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(d, "half.sql"), []byte("-- half"), 0o600)
+	}
+	old := time.Now().Add(-dumpStagingStale - time.Hour)
+	os.Chtimes(stale, old, old)
+	os.Chtimes(other, old, old)
+	discard()
+	if _, err := os.Stat(staging); err == nil {
+		t.Error("the staging directory outlived its dump")
+	}
+	if _, _, err := NewDumpStaging(dir, "dump"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); err == nil {
+		t.Error("what a dead process left is still there")
+	}
+	for _, kept := range []string{running, other} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s was removed: it is not stale staging", filepath.Base(kept))
+		}
+	}
+
+	// A real dump, twice in the same second: two files, each whole, each
+	// under a name of its own, and nothing else left in the directory.
+	source := filepath.Join(t.TempDir(), "shop.db")
+	db, err := sql.Open("sqlite", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t (id integer primary key); INSERT INTO t VALUES (1)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	out := filepath.Join(t.TempDir(), "out")
+	names := map[string]bool{}
+	for range 3 {
+		res, err := DumpWith(context.Background(), DriverSQLite, source, out, DumpOptions{})
+		if err != nil {
+			t.Fatalf("DumpWith: %v", err)
+		}
+		if filepath.Dir(res.Path) != out || res.File != filepath.Base(res.Path) || names[res.File] {
+			t.Fatalf("dump placed at %s (file %s), after %v", res.Path, res.File, names)
+		}
+		names[res.File] = true
+		if err := checkSQLiteFile(res.Path); err != nil {
+			t.Errorf("%s is not a whole database: %v", res.File, err)
+		}
+	}
+	entries, _ := os.ReadDir(out)
+	if len(entries) != 3 {
+		t.Errorf("the directory holds %d entries after three dumps", len(entries))
+	}
+	// One that fails leaves nothing at all.
+	if _, err := DumpWith(context.Background(), DriverSQLite, filepath.Join(t.TempDir(), "missing", "x.db"), out, DumpOptions{}); err == nil {
+		t.Fatal("a dump of a file that is not there succeeded")
+	}
+	if entries, _ := os.ReadDir(out); len(entries) != 3 {
+		t.Errorf("a failed dump left something behind: %d entries", len(entries))
 	}
 }
 

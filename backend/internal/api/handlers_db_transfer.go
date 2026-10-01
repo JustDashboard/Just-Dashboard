@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"mime"
 	"net/http"
 	"net/url"
@@ -997,9 +998,11 @@ const maxDumpNoteBytes = 500
 // handleDBBackupUpload puts a dump made elsewhere among a connection's own.
 //
 // The file is streamed into the connection's dump directory through the same
-// contained writer the file manager uploads with — into a temporary name and
-// renamed, so a transfer that stops halfway leaves nothing that looks like a
-// dump. Nothing is restored: that is the restore route's, and its capability.
+// contained writer the file manager uploads with, out of sight, and given its
+// name once all of it has arrived — so a transfer that stops halfway leaves
+// nothing that looks like a dump, and of two uploads of one name the second
+// is refused rather than written over the first. Nothing is restored: that is
+// the restore route's, and its capability.
 func (s *Server) handleDBBackupUpload(w http.ResponseWriter, r *http.Request) error {
 	limit := s.dbUploadLimit()
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
@@ -1045,11 +1048,18 @@ func (s *Server) handleDBBackupUpload(w http.ResponseWriter, r *http.Request) er
 			return httpx.BadRequest("%v", err)
 		}
 		dir := s.dbDumpDir(conn.Name)
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		// Said now, before the file is sent, where it can be; decided when
+		// the name is claimed, where it has to be.
+		if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+			return mapFileError(fmt.Errorf("%w: %s", fs.ErrExist, name))
+		}
+		staging, discard, err := dbx.NewDumpStaging(dir, "upload")
+		if err != nil {
 			return httpx.Internal(err)
 		}
-		path := filepath.Join(dir, name)
-		size, err := files.New([]string{dir}).Upload(path, part, false)
+		defer discard()
+		staged := filepath.Join(staging, name)
+		size, err := files.New([]string{dir}).Upload(staged, part, false)
 		if err != nil {
 			if uerr := tooLarge(err, limit); uerr != nil {
 				return uerr
@@ -1058,8 +1068,12 @@ func (s *Server) handleDBBackupUpload(w http.ResponseWriter, r *http.Request) er
 		}
 		// A dump is a database's contents. It is kept as private as the ones
 		// the dashboard writes itself.
-		if err := os.Chmod(path, 0o600); err != nil {
+		if err := os.Chmod(staged, 0o600); err != nil {
 			return httpx.Internal(err)
+		}
+		path, err := dbx.PlaceDump(staged, dir, name)
+		if err != nil {
+			return mapFileError(err)
 		}
 		meta := dbx.DumpMeta{
 			File: name, Connection: conn.Name, Driver: conn.Driver, StartedAt: time.Now().UTC(),

@@ -725,15 +725,23 @@ func dumpFilename(database, driver, ext string, at time.Time) string {
 	return fmt.Sprintf("%s-%s.%s", base, at.UTC().Format("20060102-150405"), ext)
 }
 
-// freeDumpPath is where a dump of this name goes: under the name itself, or,
-// when a dump taken in the same second already has it, under the name with a
-// number. The stamp in a name is to the second, and a dump taken to keep the
-// current state follows the dump it is about to be replaced from by less than
-// that — one of them would have overwritten the other.
+// freeDumpPath is where a dump of this name is written: under the name
+// itself, or with a number when a file already has it.
 func freeDumpPath(dir, name string) string {
-	path := filepath.Join(dir, name)
-	if _, err := os.Lstat(path); err != nil {
-		return path
+	for n := 1; ; n++ {
+		path := filepath.Join(dir, numberedDumpName(name, n))
+		if _, err := os.Lstat(path); err != nil {
+			return path
+		}
+	}
+}
+
+// numberedDumpName is the nth name a dump may take: its own, then its own
+// with a number before the extension. The stamp in a name is to the second,
+// which two dumps can share.
+func numberedDumpName(name string, n int) string {
+	if n < 2 {
+		return name
 	}
 	stem, ext := name, ""
 	// The extension is everything from the first dot after the stamp, so
@@ -741,12 +749,7 @@ func freeDumpPath(dir, name string) string {
 	if dot := strings.IndexByte(name, '.'); dot > 0 {
 		stem, ext = name[:dot], name[dot:]
 	}
-	for n := 2; ; n++ {
-		path = filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, n, ext))
-		if _, err := os.Lstat(path); err != nil {
-			return path
-		}
-	}
+	return fmt.Sprintf("%s-%d%s", stem, n, ext)
 }
 
 // --- literals -------------------------------------------------------------

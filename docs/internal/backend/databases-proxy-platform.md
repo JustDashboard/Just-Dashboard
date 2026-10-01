@@ -328,6 +328,11 @@ accounts retain partial results. Full table details and mutation preconditions u
   description is listed with what its first bytes say it is. `POST /databases/{id}/backups/upload`
   (`service.control`) streams a dump made elsewhere into the directory through the scoped
   `files.Service`, under a validated name, capped by `JD_DB_UPLOAD_MAX_MB`; it restores nothing.
+  A dump has no name until it is whole: it is written, or uploaded, in a hidden directory inside the
+  one it is bound for (`dbx.NewDumpStaging`, `.dump-*` and `.upload-*`, cleared after a day if a
+  process died over one) and then given its name by `dbx.PlaceDump`, which claims the name with an
+  exclusive create before renaming onto it. So the listing never holds a file that is still being
+  written, and of two uploads of one name — or two dumps in one second — neither lands on the other.
 - **A dump, a restore and a copy are jobs** (`handlers_db_transfer.go`). `POST /{id}/backup` and
   `/restore` answer `202` with a `jobs.Job`; the page watches `/jobs/{id}` and its stream, where the
   lines are the tool's own, and stops it with `/jobs/{id}/cancel`. The last line, on stream `result`,
