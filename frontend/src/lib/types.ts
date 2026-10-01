@@ -5485,16 +5485,27 @@ export type DbFleetEntry = DbConnection & {
   ok: boolean
   error?: string
   version?: string
+  /** The bare number: "16.4". The fork's own, not the one it imitates. */
+  versionNumber?: string
+  /**
+   * What the server is doing. A stopped or paused one is not dialled, so it
+   * is `ok: false` with no error and this is what says it did not fail. A
+   * backend from before it sends `ok` alone.
+   */
+  state?: "running" | "stopped" | "paused" | "unreachable" | "broken"
   latencyMs: number
   bytes: number
   sizesKnown: boolean
   objects: number
   objectWord: "tables" | "collections" | "keys"
   sessions: number
-  source: "docker" | "host" | "remote" | "file"
+  /** `unknown` only on a row that cannot be opened. */
+  source: "docker" | "host" | "remote" | "file" | "unknown"
   container?: string
   composeProject?: string
-  exposure: DbAccess["exposure"]
+  /** The systemd unit of a server installed on the machine. */
+  unit?: string
+  exposure: DbAccess["exposure"] | "unknown"
   consumers: number
   lastBackup?: string
 }

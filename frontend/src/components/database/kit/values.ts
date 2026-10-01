@@ -14,14 +14,31 @@ export type ValueKind =
 /** The server's preview of bytes that are not text: hex, then how many there were if it cut them. */
 const BINARY = /^\\x((?:[0-9a-f]{2})*)(?:… \((\d+) bytes\))?$/i
 const NUMERIC = /^[+-]?(?:\d+\.?\d*(?:e[+-]?\d+)?|\.\d+|nan|[+-]?inf(?:inity)?)$/i
-const INSTANT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?/
+/** A whole RFC 3339 moment and nothing after it. */
+const INSTANT =
+  /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?: ?(?:Z|[+-]\d{2}(?::?\d{2})?))?$/i
+const BOOLEAN = /^(?:true|false|t|f)$/i
+
+const JSON_TYPE = /json/
+// Oracle's BINARY_DOUBLE and BINARY_FLOAT are numbers that say how they are stored.
+const BINARY_TYPE = /binary(?!_(?:double|float))|bytea|blob|\braw\b|image|bytes/
+const BOOLEAN_TYPE = /^bool/
 const NUMBER_TYPE = /int|serial|numeric|decimal|number|real|double|float|money/
-const TIME_TYPE = /date|time/
+const NOT_A_NUMBER_TYPE = /interval|point/
+const TIME_TYPE = /date|time|year/
 
 /**
- * The kind of a value. `type` is the column's own type name where there is
- * one, and decides what a string is: a number that kept its digits, a moment,
- * a JSON text.
+ * The kind of a value. `type` is what the column holds — the engine's own
+ * type name (`bigint`, `character varying(255)`, `BLOB`) or the server's word
+ * for it (`integer`, `text`, `binary`, `datetime`) — and where it is given it
+ * decides what a string is: digits in a `bigint` column are a number and the
+ * same digits in a `text` column are text; `\x41` is a byte in a `bytea`
+ * column and four characters in a `varchar` one.
+ *
+ * With no type there is only the value to go on, so only what cannot be
+ * mistaken is claimed: the server's byte preview, and a string that is a
+ * moment from its first character to its last. A note that begins with a
+ * date is a note.
  */
 export function valueKind(value: unknown, type = ""): ValueKind {
   if (value === null || value === undefined) return "null"
@@ -30,15 +47,18 @@ export function valueKind(value: unknown, type = ""): ValueKind {
   if (typeof value === "object") return "json"
   const text = String(value)
   if (text === "") return "empty"
-  if (BINARY.test(text)) return "binary"
   const column = type.toLowerCase()
-  if (/json/.test(column)) return "json"
-  if (NUMBER_TYPE.test(column) && !/interval|point/.test(column) && NUMERIC.test(text)) {
-    return "number"
+  if (!column) {
+    if (BINARY.test(text)) return "binary"
+    return INSTANT.test(text) ? "date" : "string"
   }
-  if (TIME_TYPE.test(column) ? INSTANT.test(text) || /^\d/.test(text) : INSTANT.test(text)) {
-    return "date"
+  if (JSON_TYPE.test(column)) return "json"
+  if (BINARY_TYPE.test(column)) return BINARY.test(text) ? "binary" : "string"
+  if (BOOLEAN_TYPE.test(column)) return BOOLEAN.test(text) ? "boolean" : "string"
+  if (NUMBER_TYPE.test(column) && !NOT_A_NUMBER_TYPE.test(column)) {
+    return NUMERIC.test(text) ? "number" : "string"
   }
+  if (TIME_TYPE.test(column)) return /^\d/.test(text) ? "date" : "string"
   return "string"
 }
 

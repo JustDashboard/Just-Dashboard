@@ -28,16 +28,23 @@ export function newDatabaseHref(options?: { mode?: AddMode; key?: string }): str
   return text ? `${NEW_DATABASE_HREF}?${text}` : NEW_DATABASE_HREF
 }
 
+/**
+ * A connection's id as an address spells it: digits with no leading zero.
+ * The layout, the rail and the palette all read it with this, so `/databases/007`
+ * is not database 7 to one of them and an unknown address to another.
+ */
+export const DATABASE_ID = /^[1-9]\d*$/
+
 /** The database a path is inside, or `null` — whatever page of it that is. */
 export function databaseIdFrom(pathname: string): number | null {
-  const match = /^\/databases\/(\d+)(?:\/.*)?$/.exec(pathname)
-  return match ? Number(match[1]) : null
+  const match = /^\/databases\/([^/]+)(?:\/.*)?$/.exec(pathname)
+  return match && DATABASE_ID.test(match[1]) ? Number(match[1]) : null
 }
 
 /** The database and the page of it a path names, or `null` when it names neither. */
 export function databasePlace(pathname: string): { id: number; section: SectionId } | null {
-  const match = /^\/databases\/(\d+)(?:\/([a-z]+))?\/?$/.exec(pathname)
-  if (!match) return null
+  const match = /^\/databases\/([^/]+)(?:\/([a-z]+))?\/?$/.exec(pathname)
+  if (!match || !DATABASE_ID.test(match[1])) return null
   const section = (match[2] ?? "home") as SectionId
   // `home` is the bare path; spelled out it is no page.
   if (match[2] === "home" || !SECTION_IDS.includes(section)) return null
@@ -85,10 +92,11 @@ export function legacyDatabasesHref(
   const match = /^\/databases\/([a-z]+)\/?$/.exec(pathname)
   if (!match) return null
   if (match[1] === "topology") return DATABASES_MAP_HREF
+  // Its own entry only: `/databases/constructor` is not an old page.
+  if (!Object.hasOwn(LEGACY_PAGES, match[1])) return null
   const section = LEGACY_PAGES[match[1]]
-  if (!section) return null
   const conn = searchParams.get("conn") ?? ""
-  if (!/^[1-9]\d*$/.test(conn)) return DATABASES_HREF
+  if (!DATABASE_ID.test(conn)) return DATABASES_HREF
   return sectionHref(
     conn,
     section,

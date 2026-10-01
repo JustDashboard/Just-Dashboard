@@ -63,6 +63,9 @@ describe("addresses from before the connection moved into the path", () => {
     expect(legacy("/databases/map")).toBeNull()
     expect(legacy("/databases/nonsense?conn=3")).toBeNull()
     expect(legacy("/databases/browse/extra?conn=3")).toBeNull()
+    // A name every object answers to is not one of the old pages.
+    expect(legacy("/databases/constructor?conn=3")).toBeNull()
+    expect(legacy("/databases/toString?conn=3")).toBeNull()
   })
 })
 
@@ -75,6 +78,16 @@ describe("reading an address", () => {
     expect(databaseIdFrom("/databases/new")).toBeNull()
     expect(databaseIdFrom("/databases/browse")).toBeNull()
     expect(databaseIdFrom("/deploy/12")).toBeNull()
+  })
+
+  test("an id is spelled one way", () => {
+    // The layout says "Database not found" for these; the rail must not
+    // draw database 7's pages beside it.
+    expect(databaseIdFrom("/databases/007/data")).toBeNull()
+    expect(databaseIdFrom("/databases/0")).toBeNull()
+    expect(databaseIdFrom("/databases/7x/data")).toBeNull()
+    expect(databasePlace("/databases/007/data")).toBeNull()
+    expect(databasePlace("/databases/0")).toBeNull()
   })
 
   test("the page of it", () => {

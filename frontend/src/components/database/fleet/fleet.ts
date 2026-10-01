@@ -18,7 +18,11 @@ export function fleetConcern(
   entry: DbFleetEntry,
   now = Date.now(),
 ): { level: "critical" | "warning"; reason: string } | null {
-  if (!entry.ok) return { level: "critical", reason: entry.error || "cannot be reached" }
+  // A server somebody stopped did not answer because it was not asked: it is
+  // not a failure, and what else is true of it — published, never backed up —
+  // still is.
+  const down = entry.state === "stopped" || entry.state === "paused"
+  if (!entry.ok && !down) return { level: "critical", reason: entry.error || "cannot be reached" }
   if (entry.exposure === "public")
     return { level: "warning", reason: "reachable from the internet" }
   if (entry.source !== "file" && !entry.lastBackup)

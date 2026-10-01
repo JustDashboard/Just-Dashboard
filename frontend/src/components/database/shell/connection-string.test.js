@@ -115,8 +115,12 @@ describe("the string, with the password hidden", () => {
 
   test("MySQL's is the URL applications expect", () => {
     const c = conn({ driver: "mysql", port: "3306", database: "blog" })
-    expect(maskedParts(c, engineFor(c), targets(c)[0]).url).toBe(
-      `mysql://app:${MASK}@127.0.0.1:3306/blog`,
+    const engine = engineFor(c)
+    const parts = maskedParts(c, engine, targets(c)[0])
+    expect(parts.url).toBe(`mysql://app:${MASK}@127.0.0.1:3306/blog`)
+    // The driver's own string holds the password as typed; the URL encodes it.
+    expect(revealedParts(parts, engine, "app:p@ss:w@tcp(127.0.0.1:3306)/blog").url).toBe(
+      "mysql://app:p%40ss%3Aw@127.0.0.1:3306/blog",
     )
   })
 })
@@ -141,10 +145,24 @@ describe("the shapes it is offered in", () => {
 
   test("each shape is written around the same string", () => {
     expect(connectSnippet(engine, parts, "url")).toBe(parts.url)
-    expect(connectSnippet(engine, parts, "env")).toBe(`DATABASE_URL=${parts.url}`)
-    expect(connectSnippet(engine, parts, "cli")).toBe(`psql "${parts.url}"`)
+    expect(connectSnippet(engine, parts, "env")).toBe(`DATABASE_URL='${parts.url}'`)
+    expect(connectSnippet(engine, parts, "cli")).toBe(`psql '${parts.url}'`)
     expect(connectSnippet(engine, parts, "node")).toContain(`connectionString: "${parts.url}"`)
     expect(connectSnippet(engine, parts, "no-such-shape")).toBe(parts.url)
+  })
+
+  test("an .env line reads the same in a shell, in Compose and in a dotenv library", () => {
+    const env = (url) => connectSnippet(engine, { ...parts, url }, "env")
+    // Nothing a reader could take another way: bare.
+    expect(env("redis://127.0.0.1:6379/0")).toBe("DATABASE_URL=redis://127.0.0.1:6379/0")
+    // A space, a `#`, an `&` or a `$` would each be read by one of them.
+    expect(env("postgres://u:pa ss#x$y@h:5432/d?a=1&b=2")).toBe(
+      "DATABASE_URL='postgres://u:pa ss#x$y@h:5432/d?a=1&b=2'",
+    )
+    // A single quote cannot sit between single quotes; in a URL it is %27.
+    expect(env("postgres://u:it's@h/d")).toBe("DATABASE_URL='postgres://u:it%27s@h/d'")
+    // A path is not a URL and keeps its quote, escaped.
+    expect(env("/data/it's $HOME.db")).toBe('DATABASE_URL="/data/it\'s \\$HOME.db"')
   })
 
   test("the revealed string replaces the masked one in every shape", () => {
@@ -154,7 +172,7 @@ describe("the shapes it is offered in", () => {
       "postgres://app:s3cret@127.0.0.1:55432/shop_main?sslmode=disable",
     )
     expect(connectSnippet(engine, real, "env")).toBe(
-      "DATABASE_URL=postgres://app:s3cret@127.0.0.1:55432/shop_main?sslmode=disable",
+      "DATABASE_URL='postgres://app:s3cret@127.0.0.1:55432/shop_main?sslmode=disable'",
     )
     expect(holdsSecret(connectSnippet(engine, real, "env"))).toBe(false)
   })

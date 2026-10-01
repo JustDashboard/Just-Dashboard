@@ -59,6 +59,16 @@ describe("what needs attention", () => {
       reason: "refused",
     })
   })
+  test("a server somebody stopped has not failed", () => {
+    expect(fleetConcern(entry({ ok: false, state: "stopped" }), NOW)).toBeNull()
+    expect(fleetConcern(entry({ ok: false, state: "paused" }), NOW)).toBeNull()
+    // What else is true of it still is.
+    expect(
+      fleetConcern(entry({ ok: false, state: "stopped", lastBackup: undefined }), NOW)?.reason,
+    ).toBe("never backed up")
+    // One that was dialled and did not answer has.
+    expect(fleetConcern(entry({ ok: false, state: "unreachable" }), NOW)?.level).toBe("critical")
+  })
   test("a public port, a missing backup and a stale backup are warnings in that order", () => {
     expect(fleetConcern(entry({ exposure: "public" }), NOW)?.reason).toBe(
       "reachable from the internet",

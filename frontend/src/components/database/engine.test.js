@@ -65,11 +65,24 @@ describe("what an engine is", () => {
     expect(engineFor({ driver: "redis", flavor: "valkey" }).label).toBe("Valkey")
   })
 
-  test("a flavour is drawn as itself where it has artwork and as its driver where it has none", () => {
+  test("a flavour is drawn as itself where it has artwork, and never as another product", () => {
     expect(engineFor({ driver: "mysql", flavor: "mariadb" }).logo).toBe("mariadb")
     expect(engineFor({ driver: "redis", flavor: "valkey" }).logo).toBe("valkey")
-    expect(engineFor({ driver: "redis", flavor: "keydb" }).logo).toBe("redis")
-    expect(engineFor({ driver: "postgres", flavor: "cockroachdb" }).logo).toBe("postgres")
+    // No artwork of its own is the kind's glyph, not the driver's product
+    // with this one's name beside it.
+    for (const [driver, flavor] of [
+      ["redis", "keydb"],
+      ["redis", "dragonfly"],
+      ["postgres", "cockroachdb"],
+      ["postgres", "timescaledb"],
+      ["postgres", "yugabytedb"],
+      ["mysql", "percona"],
+      ["mysql", "tidb"],
+      ["mongodb", "ferretdb"],
+      ["sqlserver", "azure-sql-edge"],
+    ]) {
+      expect(engineFor({ driver, flavor }).logo).toBeUndefined()
+    }
   })
 
   test("the command-line client follows the flavour", () => {
@@ -82,6 +95,19 @@ describe("what an engine is", () => {
     const engine = engineFor({ driver: "postgres", flavor: "mariadb" })
     expect(engine.id).toBe("postgres")
     expect(engine.label).toBe("PostgreSQL")
+  })
+
+  test("a name every object inherits is not an engine", () => {
+    for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      expect(engineFor({ driver: "mysql", flavor: name })).toMatchObject({
+        id: "mysql",
+        label: "MySQL",
+        cli: "mysql",
+      })
+      expect(engineOf(name)).toMatchObject({ id: name.toLowerCase(), driver: "", label: name })
+      expect(engineOf(name).sections).toEqual([])
+      expect(engineOf("postgres").can(name)).toBe(false)
+    }
   })
 
   test("the kinds and the words each kind uses", () => {
@@ -283,7 +309,16 @@ describe("how a program connects", () => {
 
   test("the Go driver's own string becomes the URL applications expect", () => {
     expect(engineOf("mysql").url("app:pw@tcp(10.0.0.5:3306)/shop")).toBe(parts.url)
+    expect(engineOf("mysql").url("app@tcp(10.0.0.5:3306)/shop")).toBe(
+      "mysql://app@10.0.0.5:3306/shop",
+    )
     expect(engineOf("postgres").url("postgres://a@b/c")).toBe("postgres://a@b/c")
+  })
+
+  test("a password the Go driver takes as typed is encoded for the URL", () => {
+    expect(engineOf("mysql").url("ap p:p@ss:w/1#@tcp(10.0.0.5:3306)/shop?parseTime=true")).toBe(
+      "mysql://ap%20p:p%40ss%3Aw%2F1%23@10.0.0.5:3306/shop?parseTime=true",
+    )
   })
 
   test("a shell that takes fields asks for the password itself", () => {
@@ -294,14 +329,38 @@ describe("how a program connects", () => {
       "mariadb --host=10.0.0.5 --port=3306 --user=app --password shop",
     )
     expect(engineOf("redis").command({ ...parts, url: "redis://h/0" })).toBe(
-      'redis-cli -u "redis://h/0"',
+      "redis-cli -u redis://h/0",
     )
     expect(engineOf("valkey").command({ ...parts, url: "redis://h/0" })).toBe(
-      'valkey-cli -u "redis://h/0"',
+      "valkey-cli -u redis://h/0",
     )
     expect(engineOf("sqlite").command({ ...parts, database: "/data/app.db" })).toBe(
-      'sqlite3 "/data/app.db"',
+      "sqlite3 /data/app.db",
     )
+  })
+
+  test("nothing in a pasted command is read by the shell", () => {
+    // Between double quotes `$(…)` and backticks would run.
+    const url = "postgres://u:pa$(id)ss`x`'q@h:5432/d?sslmode=disable"
+    expect(engineOf("postgres").command({ ...parts, url })).toBe(
+      "psql 'postgres://u:pa$(id)ss`x`'\\''q@h:5432/d?sslmode=disable'",
+    )
+    expect(engineOf("sqlite").command({ ...parts, database: "/data/my app; rm.db" })).toBe(
+      "sqlite3 '/data/my app; rm.db'",
+    )
+    expect(engineOf("mysql").command({ ...parts, user: "a b", database: "$(id)" })).toBe(
+      "mysql --host=10.0.0.5 --port=3306 --user='a b' --password '$(id)'",
+    )
+  })
+
+  test("a quote in a password cannot end a snippet's string early", () => {
+    const url = 'mysql://u:pa"s\\s@h:3306/d'
+    const node = engineOf("mysql").clients.find((client) => client.id === "node")
+    expect(node.code({ ...parts, url })).toContain(
+      'createConnection("mysql://u:pa\\"s\\\\s@h:3306/d")',
+    )
+    const lite = engineOf("sqlite").clients.find((client) => client.id === "python")
+    expect(lite.code({ ...parts, database: '/data/a"b.db' })).toContain('connect("/data/a\\"b.db")')
   })
 
   test("every engine has at least one client snippet that names the address", () => {

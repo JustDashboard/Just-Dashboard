@@ -136,9 +136,10 @@ export type Engine = {
   driver: DbDriver | ""
   label: string
   /**
-   * The `ProductLogo` id. A flavour with no artwork of its own is drawn as its
-   * driver's product; an engine with none at all is `undefined` and keeps the
-   * kind's glyph on the tile — never a guessed logo.
+   * The `ProductLogo` id, where this product's own artwork is bundled. One
+   * with none is `undefined` and keeps the kind's glyph on the tile: a
+   * Dragonfly server drawn with the Redis mark, or CockroachDB with the
+   * PostgreSQL elephant, is a guessed logo with another product's name on it.
    */
   logo: string | undefined
   /**
@@ -285,6 +286,25 @@ type DriverSpec = {
   flavors: Record<string, Flavor>
 }
 
+/**
+ * A value as one word of a POSIX shell command. A string between double
+ * quotes is still read by the shell — `$(…)` and backticks in a password
+ * would run when the line is pasted — so anything past the plain characters
+ * goes between single quotes, where nothing is.
+ */
+function shellWord(value: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`
+}
+
+/**
+ * A value as a string literal of the snippet's language. JSON's escapes are
+ * read the same way by JavaScript, Python and Go, so a quote or a backslash
+ * in a password cannot end the string early.
+ */
+function literal(value: string): string {
+  return JSON.stringify(value)
+}
+
 /** What every SQL engine but ClickHouse, which runs no generated DDL, starts from. */
 const SQL_FLAGS = [
   "sql",
@@ -318,18 +338,18 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
       "server",
       "provision",
     ),
-    command: (cli, { url }) => `${cli} "${url}"`,
+    command: (cli, { url }) => `${cli} ${shellWord(url)}`,
     clients: [
       {
         id: "node",
         label: "Node.js",
         code: ({ url }) =>
-          `import pg from "pg"\n\nconst client = new pg.Client({ connectionString: "${url}" })\nawait client.connect()`,
+          `import pg from "pg"\n\nconst client = new pg.Client({ connectionString: ${literal(url)} })\nawait client.connect()`,
       },
       {
         id: "python",
         label: "Python",
-        code: ({ url }) => `import psycopg\n\nconn = psycopg.connect("${url}")`,
+        code: ({ url }) => `import psycopg\n\nconn = psycopg.connect(${literal(url)})`,
       },
     ],
     flavors: {
@@ -364,29 +384,32 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
       "provision",
     ),
     // The Go driver's own `user:pass@tcp(host)/db` is not a URL; every
-    // application expects one.
+    // application expects one. The driver takes the name and the password as
+    // typed, and a URL does not: an `@` or a `:` in either would move where
+    // the address starts, so both are percent-encoded on the way.
     url: (dsn) => {
-      const m = /^(.*?):(.*)@tcp\((.*)\)\/(.*)$/.exec(dsn)
+      const m = /^(.*?)(?::(.*))?@tcp\((.*)\)\/(.*)$/.exec(dsn)
       if (!m) return dsn
       const [, user, password, at, db] = m
-      return `mysql://${user}${password ? `:${password}` : ""}@${at}/${db}`
+      const secret = password ? `:${encodeURIComponent(password)}` : ""
+      return `mysql://${encodeURIComponent(user)}${secret}@${at}/${db}`
     },
     // A shell that takes fields asks for the password itself, so none lands
     // in a shell history.
     command: (cli, { host, port, user, database }) =>
-      `${cli} --host=${host} --port=${port} --user=${user || "root"} --password ${database}`.trim(),
+      `${cli} --host=${shellWord(host)} --port=${port} --user=${shellWord(user || "root")} --password ${database && shellWord(database)}`.trim(),
     clients: [
       {
         id: "node",
         label: "Node.js",
         code: ({ url }) =>
-          `import mysql from "mysql2/promise"\n\nconst conn = await mysql.createConnection("${url}")`,
+          `import mysql from "mysql2/promise"\n\nconst conn = await mysql.createConnection(${literal(url)})`,
       },
       {
         id: "python",
         label: "Python",
         code: ({ url }) =>
-          `from sqlalchemy import create_engine\n\nengine = create_engine("${url.replace(/^mysql:/, "mysql+pymysql:")}")`,
+          `from sqlalchemy import create_engine\n\nengine = create_engine(${literal(url.replace(/^mysql:/, "mysql+pymysql:"))})`,
       },
     ],
     flavors: {
@@ -410,18 +433,18 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
       access:
         "A SQLite database is a file. Whoever can read the file reads everything in it, so there are no roles to manage.",
     },
-    command: (cli, { database }) => `${cli} "${database}"`,
+    command: (cli, { database }) => `${cli} ${shellWord(database)}`,
     clients: [
       {
         id: "node",
         label: "Node.js",
         code: ({ database }) =>
-          `import Database from "better-sqlite3"\n\nconst db = new Database("${database}")`,
+          `import Database from "better-sqlite3"\n\nconst db = new Database(${literal(database)})`,
       },
       {
         id: "python",
         label: "Python",
-        code: ({ database }) => `import sqlite3\n\nconn = sqlite3.connect("${database}")`,
+        code: ({ database }) => `import sqlite3\n\nconn = sqlite3.connect(${literal(database)})`,
       },
     ],
     flavors: { sqlite: { label: "SQLite" } },
@@ -437,13 +460,13 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     editor: "sql",
     capabilities: flags(...SQL_FLAGS, "schemas", "roles", "sessions", "settings", "server"),
     command: (cli, { host, port, user, database }) =>
-      `${cli} -S ${host},${port} -U ${user || "sa"}${database ? ` -d ${database}` : ""}`,
+      `${cli} -S ${shellWord(`${host},${port}`)} -U ${shellWord(user || "sa")}${database ? ` -d ${shellWord(database)}` : ""}`,
     clients: [
       {
         id: "go",
         label: "Go",
         code: ({ url }) =>
-          `import (\n\t"database/sql"\n\n\t_ "github.com/microsoft/go-mssqldb"\n)\n\ndb, err := sql.Open("sqlserver", "${url}")`,
+          `import (\n\t"database/sql"\n\n\t_ "github.com/microsoft/go-mssqldb"\n)\n\ndb, err := sql.Open("sqlserver", ${literal(url)})`,
       },
     ],
     flavors: {
@@ -476,19 +499,19 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
       "provision",
     ),
     command: (cli, { host, port, user, database }) =>
-      `${cli} --host ${host} --port ${port} --user ${user || "default"} --database ${database || "default"} --ask-password`,
+      `${cli} --host ${shellWord(host)} --port ${port} --user ${shellWord(user || "default")} --database ${shellWord(database || "default")} --ask-password`,
     clients: [
       {
         id: "go",
         label: "Go",
         code: ({ url }) =>
-          `import (\n\t"database/sql"\n\n\t_ "github.com/ClickHouse/clickhouse-go/v2"\n)\n\ndb, err := sql.Open("clickhouse", "${url}")`,
+          `import (\n\t"database/sql"\n\n\t_ "github.com/ClickHouse/clickhouse-go/v2"\n)\n\ndb, err := sql.Open("clickhouse", ${literal(url)})`,
       },
       {
         id: "python",
         label: "Python",
         code: ({ url }) =>
-          `from clickhouse_driver import Client\n\nclient = Client.from_url("${url}")`,
+          `from clickhouse_driver import Client\n\nclient = Client.from_url(${literal(url)})`,
       },
     ],
     flavors: { clickhouse: { label: "ClickHouse" } },
@@ -505,13 +528,13 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     capabilities: flags(...SQL_FLAGS, "schemas", "sessions", "server"),
     absent: { access: "This dashboard does not manage Oracle's roles." },
     command: (cli, { host, port, user, database }) =>
-      `${cli} ${user || "system"}@//${host}:${port}/${database}`,
+      `${cli} ${shellWord(`${user || "system"}@//${host}:${port}/${database}`)}`,
     clients: [
       {
         id: "go",
         label: "Go",
         code: ({ url }) =>
-          `import (\n\t"database/sql"\n\n\t_ "github.com/sijms/go-ora/v2"\n)\n\ndb, err := sql.Open("oracle", "${url}")`,
+          `import (\n\t"database/sql"\n\n\t_ "github.com/sijms/go-ora/v2"\n)\n\ndb, err := sql.Open("oracle", ${literal(url)})`,
       },
     ],
     flavors: { oracle: { label: "Oracle" } },
@@ -536,18 +559,19 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     editor: "json",
     capabilities: flags("roles", "settings", "queryLog", "dump", "server", "provision"),
     absent: { advisor: "The advisor's checks are written for SQL engines." },
-    command: (cli, { url }) => `${cli} "${url}"`,
+    command: (cli, { url }) => `${cli} ${shellWord(url)}`,
     clients: [
       {
         id: "node",
         label: "Node.js",
         code: ({ url }) =>
-          `import { MongoClient } from "mongodb"\n\nconst client = new MongoClient("${url}")\nawait client.connect()`,
+          `import { MongoClient } from "mongodb"\n\nconst client = new MongoClient(${literal(url)})\nawait client.connect()`,
       },
       {
         id: "python",
         label: "Python",
-        code: ({ url }) => `from pymongo import MongoClient\n\nclient = MongoClient("${url}")`,
+        code: ({ url }) =>
+          `from pymongo import MongoClient\n\nclient = MongoClient(${literal(url)})`,
       },
     ],
     flavors: {
@@ -575,18 +599,18 @@ const DRIVERS: Record<DbDriver, DriverSpec> = {
     editor: "redis",
     capabilities: flags("roles", "settings", "queryLog", "dump", "server", "provision"),
     absent: { advisor: "The advisor's checks are written for SQL engines." },
-    command: (cli, { url }) => `${cli} -u "${url}"`,
+    command: (cli, { url }) => `${cli} -u ${shellWord(url)}`,
     clients: [
       {
         id: "node",
         label: "Node.js",
         code: ({ url }) =>
-          `import { createClient } from "redis"\n\nconst client = createClient({ url: "${url}" })\nawait client.connect()`,
+          `import { createClient } from "redis"\n\nconst client = createClient({ url: ${literal(url)} })\nawait client.connect()`,
       },
       {
         id: "python",
         label: "Python",
-        code: ({ url }) => `import redis\n\nclient = redis.from_url("${url}")`,
+        code: ({ url }) => `import redis\n\nclient = redis.from_url(${literal(url)})`,
       },
     ],
     flavors: {
@@ -866,15 +890,24 @@ function build(
   }
 }
 
+/**
+ * A table's own entry for a name that came from outside — a flavour the
+ * server reported, a segment of an address. A plain index would also answer
+ * for `constructor` and `toString`, with whatever every object inherits.
+ */
+function own<T>(table: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined
+}
+
 /** The engine for a driver, flavour or engine id, with what the server said about it. */
 export function engineOf(id: string, drivers?: DbDriverInfo[], given?: DbCapabilities): Engine {
-  const key = ALIASES[id.toLowerCase()] ?? id.toLowerCase()
+  const key = own(ALIASES, id.toLowerCase()) ?? id.toLowerCase()
   const driver = (Object.keys(DRIVERS) as DbDriver[]).find(
-    (d) => d === key || key in DRIVERS[d].flavors,
+    (d) => d === key || Object.hasOwn(DRIVERS[d].flavors, key),
   )
 
   if (!driver) {
-    const other = UNOPENED[key]
+    const other = own(UNOPENED, key)
     const kind = other?.kind ?? "sql"
     return build({
       id: key,
@@ -899,8 +932,8 @@ export function engineOf(id: string, drivers?: DbDriverInfo[], given?: DbCapabil
   }
 
   const spec = DRIVERS[driver]
-  const flavor = spec.flavors[key] ?? spec.flavors[driver]
-  const flavorId = key in spec.flavors ? key : driver
+  const flavor = own(spec.flavors, key) ?? spec.flavors[driver]
+  const flavorId = Object.hasOwn(spec.flavors, key) ? key : driver
   const info = drivers?.find((d) => d.id === driver)
   // Later wins: the registry's floor, the product's own differences, what
   // the driver catalogue says of the driver, of this flavour, and last what
@@ -921,7 +954,8 @@ export function engineOf(id: string, drivers?: DbDriverInfo[], given?: DbCapabil
       // The catalogue's own label for a driver covers every product it talks
       // to ("MySQL / MariaDB"); a connection is one of them.
       label: info?.flavors?.find((f) => f.id === flavorId)?.label ?? flavor.label,
-      logo: hasProductLogo(flavorId) ? flavorId : hasProductLogo(driver) ? driver : undefined,
+      // The driver's logo is its own product's alone; see `Engine.logo`.
+      logo: hasProductLogo(flavorId) ? flavorId : undefined,
       kind: spec.kind,
       kindWord: KIND_WORD[spec.kind],
       kindPhrase: KIND_PHRASE[spec.kind],
@@ -950,8 +984,9 @@ export function engineFor(
   drivers?: DbDriverInfo[],
 ): Engine {
   // A flavour that is not one of this driver's is not believed over the driver.
-  const known = (DRIVERS[conn.driver] as DriverSpec | undefined)?.flavors
-  const flavor = conn.flavor && known && conn.flavor in known ? conn.flavor : conn.driver
+  const known = own<DriverSpec>(DRIVERS, conn.driver)?.flavors
+  const flavor =
+    conn.flavor && known && Object.hasOwn(known, conn.flavor) ? conn.flavor : conn.driver
   return engineOf(flavor, drivers, conn.capabilities)
 }
 

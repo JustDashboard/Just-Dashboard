@@ -141,8 +141,11 @@ export function maskedParts(
     password: MASK,
     database: conn.database,
     option: "",
-  }).replace(encodeURIComponent(MASK), MASK)
-  return { url: engine.url(dsn), host, port, user: conn.user, database: conn.database }
+  })
+  // The mask is put back after the URL is written: whichever of the two
+  // encoded it, it is a mark for the reader and not part of the address.
+  const url = engine.url(dsn).replace(encodeURIComponent(MASK), MASK)
+  return { url, host, port, user: conn.user, database: conn.database }
 }
 
 /** The same parts around the real string, once the server has handed it over. */
@@ -162,9 +165,24 @@ export function connectFormats(engine: Engine): ConnectFormat[] {
   ]
 }
 
+/**
+ * A value as an `.env` file holds it. Bare where every reader of such a file
+ * agrees on what it says; otherwise between single quotes, which a shell,
+ * Compose and the dotenv libraries all take literally — a `#` after a space
+ * starts a comment, `&` backgrounds a sourced line and `$` is expanded
+ * between double quotes. A single quote cannot be written inside them, so in
+ * a URL it travels percent-encoded, which names the same address.
+ */
+function envValue(value: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]*$/.test(value)) return value
+  if (!value.includes("'")) return `'${value}'`
+  if (value.includes("://")) return `'${value.replace(/'/g, "%27")}'`
+  return `"${value.replace(/[\\"$`]/g, "\\$&")}"`
+}
+
 /** The string in the shape asked for. An unknown shape is the URL. */
 export function connectSnippet(engine: Engine, parts: ConnectParts, format: string): string {
-  if (format === "env") return `${engine.env}=${parts.url}`
+  if (format === "env") return `${engine.env}=${envValue(parts.url)}`
   if (format === "cli") return engine.command(parts)
   return engine.clients.find((client) => client.id === format)?.code(parts) ?? parts.url
 }

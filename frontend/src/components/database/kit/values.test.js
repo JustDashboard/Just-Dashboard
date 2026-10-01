@@ -32,6 +32,39 @@ describe("what kind of thing a value is", () => {
     expect(valueKind("\\x" + "ab".repeat(256) + "… (4096 bytes)")).toBe("binary")
     expect(valueKind("\\xnot hex")).toBe("string")
   })
+
+  test("the column's type decides what a string is", () => {
+    // Four characters in a text column, a byte in a bytes column.
+    expect(valueKind("\\x41", "text")).toBe("string")
+    expect(valueKind("\\x41", "character varying(255)")).toBe("string")
+    expect(valueKind("\\x41", "bytea")).toBe("binary")
+    expect(valueKind("\\x41", "BLOB")).toBe("binary")
+    expect(valueKind("\\x41", "binary")).toBe("binary")
+    expect(valueKind("\\x41", "RAW(16)")).toBe("binary")
+    expect(valueKind("NaN", "BINARY_DOUBLE")).toBe("number")
+    // A note that opens with a date is a note.
+    expect(valueKind("2024-01-01 10:00 call the bank", "text")).toBe("string")
+    expect(valueKind("2024-01-01 10:00:00+00", "timestamptz")).toBe("date")
+    expect(valueKind("2024", "year")).toBe("date")
+    // A boolean some drivers hand over as its word.
+    expect(valueKind("true", "boolean")).toBe("boolean")
+    expect(valueKind("f", "bool")).toBe("boolean")
+    expect(valueKind("true", "text")).toBe("string")
+    // The server's own words for a column work the same as the engine's.
+    expect(valueKind("42", "integer")).toBe("number")
+    expect(valueKind("42", "uuid")).toBe("string")
+    expect(valueKind("2026-10-01T08:20:06Z", "datetime")).toBe("date")
+    expect(valueKind("{1,2}", "integer[]")).toBe("string")
+  })
+
+  test("with no type, only what cannot be mistaken is claimed", () => {
+    expect(valueKind("2024-01-01 10:00 call the bank")).toBe("string")
+    expect(valueKind("2024-01-01 10:00")).toBe("date")
+    expect(valueKind("2026-10-01T08:20:06+02:00")).toBe("date")
+    expect(valueKind("2026-10-01")).toBe("string")
+    expect(valueKind("0123")).toBe("string")
+    expect(valueKind("true")).toBe("string")
+  })
 })
 
 describe("how a value reads on one line", () => {
