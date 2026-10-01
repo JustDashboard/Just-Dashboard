@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { mockDatabases } from "./database-fixture"
 
 const signedIn = {
   authenticated: true,
@@ -7,18 +8,6 @@ const signedIn = {
   capabilities: ["read", "service.control", "file.write", "destructive"],
   user: { id: 1, username: "operator", role: "operator" },
 }
-const columns = [
-  { name: "id", type: "bigint", nullable: false },
-  { name: "name", type: "text", nullable: false },
-]
-const result = (rows: unknown[][]) => ({
-  columns: ["id", "name"],
-  types: ["bigint", "text"],
-  rows,
-  rowCount: rows.length,
-  rowsAffected: 0,
-  duration: "1ms",
-})
 const fulfill = (route: Route, body: unknown) =>
   route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 
@@ -94,109 +83,183 @@ for (const admin of [false, true]) {
   })
 }
 
+/**
+ * The SQL table editor (`/databases/<id>/data`) over a two-row table, with a
+ * second table whose rows the spec answers when it chooses. Hands back every
+ * change set the page sent to be applied (dry runs left out) and the held
+ * reads of the second table.
+ */
 async function databaseFixture(page: Page) {
   const mutations: unknown[] = [],
     held: Route[] = []
-  await page.route("**/api/v1/**", async (route) => {
+  await mockDatabases(page)
+  await page.route("**/api/v1/databases/1/**", async (route) => {
     const request = route.request(),
       url = new URL(request.url()),
-      path = url.pathname.slice(7)
-    let body: unknown = []
-    if (path === "/auth/session") body = signedIn
-    if (path === "/dashboard/update") body = { current: "0.6.7", latest: "0.6.7", releases: [] }
-    if (path === "/databases/")
-      body = [
-        {
-          id: 1,
-          name: "Test database",
-          driver: "postgres",
-          host: "localhost",
-          port: 5432,
-          database: "test",
-          username: "test",
-          createdAt: new Date().toISOString(),
-        },
-      ]
-    if (path === "/databases/drivers")
-      body = [{ id: "postgres", name: "Postgres", sql: true, ddl: true, filterOps: ["eq"] }]
-    if (path === "/databases/1/tables")
-      body = ["items", "other"].map((name) => ({
+      rest = url.pathname.replace(/^\/api\/v1\/databases\/1/, ""),
+      table = url.searchParams.get("table") ?? ""
+    if (rest === "/catalog")
+      return fulfill(route, {
         schema: "public",
-        name,
+        defaultSchema: "public",
+        schemas: [{ name: "public", default: true, tables: 2 }],
+        objects: {
+          tables: ["items", "other"].map((name) => ({
+            kind: "table",
+            schema: "public",
+            name,
+            estimatedRows: 2,
+          })),
+        },
+        truncated: [],
+        limit: 5000,
+      })
+    if (rest === "/table")
+      return fulfill(route, {
+        schema: "public",
+        name: table,
         type: "table",
+        columns: [
+          { name: "id", type: "bigint", nullable: false, position: 1 },
+          { name: "name", type: "text", nullable: false, position: 2 },
+        ],
+        primaryKey: ["id"],
+        foreignKeys: [],
+        indexes: [],
+        constraints: [],
+        referencedBy: [],
+        facts: [],
         estimatedRows: 2,
-      }))
-    if (path === "/databases/1/table")
-      body = { columns, primaryKey: ["id"], foreignKeys: [], indexes: [] }
-    if (path === "/databases/1/browse") {
-      if (url.searchParams.get("table") === "other") {
+      })
+    if (rest === "/browse") {
+      if (table === "other") {
         held.push(route)
         return
       }
-      body = result(
-        url.searchParams.has("orderBy")
-          ? [
-              ["2", "B"],
-              ["1", "A"],
-            ]
-          : [
-              ["1", "A"],
-              ["2", "B"],
-            ],
-      )
+      const sort = JSON.parse(url.searchParams.get("sort") ?? "[]") as { desc: boolean }[]
+      const rows = sort[0]?.desc
+        ? [
+            ["2", "B"],
+            ["1", "A"],
+          ]
+        : [
+            ["1", "A"],
+            ["2", "B"],
+          ]
+      return fulfill(route, {
+        columns: ["id", "name"],
+        types: ["INT8", "TEXT"],
+        kinds: ["integer", "text"],
+        rows,
+        rowCount: rows.length,
+        rowsAffected: 0,
+        duration: "1ms",
+        truncated: false,
+        statement: "",
+        primaryKey: ["id"],
+        estimatedRows: 2,
+        sort: [{ column: "id", desc: Boolean(sort[0]?.desc) }],
+        limit: 100,
+        offset: 0,
+      })
     }
-    if (path === "/databases/1/rows") {
-      mutations.push(request.postDataJSON())
-      body = {}
+    if (rest === "/changes") {
+      const body = request.postDataJSON() as { dryRun?: boolean; changes: { op: string }[] }
+      if (!body.dryRun) mutations.push(body)
+      return fulfill(route, {
+        applied: !body.dryRun,
+        dryRun: Boolean(body.dryRun),
+        keyColumns: ["id"],
+        statements: body.changes.map(() => "…;"),
+        results: body.changes.map((change, index) => ({ index, op: change.op, rowsAffected: 1 })),
+        attempts: 1,
+        duration: "1ms",
+      })
     }
-    await fulfill(route, body)
+    return route.fallback()
   })
-  await page.goto("/databases/browse?conn=1&schema=public&table=items")
-  await expect(page.getByRole("checkbox", { name: "Select row 1", exact: true })).toBeVisible()
+  await page.goto("/databases/1/data?schema=public&table=items")
+  await expect(page.locator('[data-row="0"] [data-col="1"]')).toHaveText("A")
   return { mutations, held }
 }
 
 /*
-  The three database regressions below drive the table editor and the Redis
-  key browser that were removed when the Databases section moved to
-  `/databases/<id>/…`; the pages that replace them are being rebuilt. They are
-  held as `fixme` rather than deleted, because each is a defect that shipped
-  once and the rebuilt page has to be held to it:
+  The two regressions below are held against the SQL table editor
+  (`components/database/data`, at `/databases/<id>/data`), which replaced the
+  editor they were first written for. Each is a defect that shipped once:
 
-    selection and exact BIGINT digits — the SQL data workbench
-    (`components/database/data`, at `/databases/<id>/data`);
-    unsigned 64-bit scan cursors — the Redis key browser
-    (`components/database/redis`, at `/databases/<id>/data` on a Redis server).
+    a row ticked under one order was the row deleted under another, and the
+    ticks of one table stood over the next while its rows were still coming;
+    a 64-bit key typed into the row editor was sent as a rounded number.
 
-  Whoever lands those pages restores the test against them and removes the
-  `fixme`. `databaseFixture` still opens the old address, which now redirects.
+  The Redis one further down is still `fixme`: it belongs to the key browser
+  (`components/database/redis`).
 */
-test.fixme("database selections cannot follow a different sort or a loading table", async ({
-  page,
-}) => {
+test("database selections cannot follow a different sort or a loading table", async ({ page }) => {
   const { mutations, held } = await databaseFixture(page)
-  await page.getByRole("checkbox", { name: "Select row 1", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Delete 1", exact: true })).toBeVisible()
-  await page.getByTitle("Sort by id", { exact: true }).click()
-  await expect(page.getByRole("checkbox", { name: "Select row 1", exact: true })).not.toBeChecked()
-  await expect(page.getByRole("button", { name: "Delete 1", exact: true })).toHaveCount(0)
-  await page.getByRole("checkbox", { name: "Select row 1", exact: true }).click()
-  await page.getByRole("button", { name: /^other\b/ }).click()
+  const row = (index: number) => page.locator(`[data-row="${index}"]`)
+  const bar = page.locator("[data-slot=change-bar]")
+
+  // Tick the first row: id 1, "A".
+  await row(0).locator('[data-col="1"]').click()
+  await page.keyboard.press("Shift+Space")
+  await expect(row(0)).toHaveAttribute("aria-selected", "true")
+
+  // Under the other order the first row is id 2, and the tick is not on it:
+  // it stayed with the row it was put on.
+  await page.getByRole("button", { name: "Sort", exact: true }).click()
+  await page.getByRole("menuitem", { name: /^id/ }).click()
+  await page.getByRole("button", { name: "Sort id descending instead" }).click()
+  await expect(row(0).locator('[data-col="1"]')).toHaveText("B")
+  await expect(row(0)).not.toHaveAttribute("aria-selected", "true")
+  await expect(row(1)).toHaveAttribute("aria-selected", "true")
+
+  // Deleting the ticked row deletes id 1, wherever the cursor is.
+  await row(0).locator('[data-col="1"]').click()
+  await page.keyboard.press("Delete")
+  await expect(bar).toContainText("1 change — 1 deleted")
+  await bar.getByRole("button", { name: "Apply", exact: true }).click()
+  await expect(bar).toHaveCount(0)
+  expect(mutations).toEqual([
+    { schema: "public", table: "items", changes: [{ op: "delete", key: { id: "1" } }] },
+  ])
+
+  // Another table, whose rows have not come: nothing of the first is drawn
+  // under its name, nothing is ticked, and Delete has nothing to act on.
+  await row(0).locator('[data-col="1"]').click()
+  await page.keyboard.press("Shift+Space")
+  await page.getByRole("link", { name: /^other\b/ }).click()
   await expect(page).toHaveURL(/table=other/)
   await expect.poll(() => held.length).toBeGreaterThan(0)
-  await expect(page.getByRole("checkbox", { name: "Select row 1", exact: true })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Delete 1", exact: true })).toHaveCount(0)
-  expect(mutations).toEqual([])
+  await expect(page.locator("[data-row]")).toHaveCount(0)
+  await expect(page.locator("[data-row][aria-selected=true]")).toHaveCount(0)
+  await page.keyboard.press("Delete")
+  await expect(bar).toHaveCount(0)
+  expect(mutations).toHaveLength(1)
 })
 
-test.fixme("the row editor submits exact BIGINT digits", async ({ page }) => {
+test("the row editor submits exact BIGINT digits", async ({ page }) => {
   const { mutations } = await databaseFixture(page)
-  await page.getByRole("button", { name: "Insert", exact: true }).click()
-  await page.locator('[id="f-id"]').fill("9007199254740993")
-  await page.locator('[id="f-name"]').fill("precision")
-  await page.getByRole("dialog").getByRole("button", { name: "Insert", exact: true }).click()
-  await expect(page.getByRole("dialog")).toHaveCount(0)
-  expect(mutations).toMatchObject([{ values: { id: "9007199254740993", name: "precision" } }])
+  const field = (name: string) =>
+    page.locator("[data-slot=row-field]").filter({ has: page.locator(`label:text-is("${name}")`) })
+  await page.getByRole("button", { name: "Insert row" }).click()
+  await page.getByRole("button", { name: "Show the row" }).click()
+  await field("id").getByRole("textbox").fill("9007199254740993")
+  await page.keyboard.press("Enter")
+  await field("name").getByRole("textbox").fill("precision")
+  await page.keyboard.press("Enter")
+  await page
+    .locator("[data-slot=change-bar]")
+    .getByRole("button", { name: "Apply", exact: true })
+    .click()
+  await expect(page.locator("[data-slot=change-bar]")).toHaveCount(0)
+  expect(mutations).toEqual([
+    {
+      schema: "public",
+      table: "items",
+      changes: [{ op: "insert", values: { id: "9007199254740993", name: "precision" } }],
+    },
+  ])
 })
 
 test("slow polling has only one request in flight", async ({ page }) => {
