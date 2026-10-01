@@ -191,6 +191,9 @@ func discoverHost(listeners []HostListener, sockets []UnixSocket, units []HostUn
 	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
 
 	byPID := map[int32]int{}
+	// supervised are the servers read under a unit that is somebody else's:
+	// their process is known, and so is that no database unit is running it.
+	supervised := map[int]bool{}
 	for _, pid := range order {
 		g := groups[pid]
 		endpoints := groupEndpoints(g.product, g.listeners)
@@ -203,6 +206,10 @@ func discoverHost(listeners []HostListener, sockets []UnixSocket, units []HostUn
 		inst.Endpoints = endpoints
 		inst.Confidence = ConfidenceProcess
 		inst.Evidence = []string{"a " + g.first.Process + " process is listening"}
+		if unit := supervisingUnit(g.product, g.first.Manager, g.first.ManagerName); unit != "" {
+			inst.Evidence = append(inst.Evidence, "it runs under "+unit+", which is not a unit of its own")
+			supervised[len(inv.Instances)] = true
+		}
 		if primary := primaryEndpoint(&inst); primary != nil {
 			if inst.Key == "" {
 				inst.Key = "host:" + g.product.engine + ":" + strconv.Itoa(primary.Port)
@@ -248,6 +255,10 @@ func discoverHost(listeners []HostListener, sockets []UnixSocket, units []HostUn
 		inst.Endpoints = []Endpoint{endpoint}
 		inst.Confidence = ConfidenceSocket
 		inst.Evidence = []string{"a unix socket named for " + p.label + " is listening at " + s.Path}
+		if unit := supervisingUnit(p, s.Manager, s.ManagerName); unit != "" {
+			inst.Evidence = append(inst.Evidence, "it runs under "+unit+", which is not a unit of its own")
+			supervised[len(inv.Instances)] = true
+		}
 		inst.Reason = "it listens on a unix socket only (" + s.Path + ") — nothing here can dial it over TCP"
 		if inst.Key == "" {
 			inst.Key = "host:" + p.engine + ":" + s.Path
@@ -289,7 +300,7 @@ func discoverHost(listeners []HostListener, sockets []UnixSocket, units []HostUn
 			// A unit that ran once and finished is not a server.
 			continue
 		}
-		if i, ok := unitlessInstance(inv, p, u, units); ok {
+		if i, ok := unitlessInstance(inv, p, u, units, supervised); ok {
 			// The server was found by a socket whose owner could not be read,
 			// so nothing said which unit it belongs to. Its port does.
 			inst := &inv.Instances[i]
@@ -333,12 +344,25 @@ func discoverHost(listeners []HostListener, sockets []UnixSocket, units []HostUn
 	// would otherwise share a key, and a key names exactly one instance. Only
 	// the host's own servers can collide here — a container's key was settled
 	// when it was listed — and how they are signed in to is recorded below,
-	// under the key each ends up with.
-	taken := map[string]int{}
+	// under the key each ends up with. Which of them keeps the bare key is
+	// decided by where each listens and not by which was found first: the order
+	// they are found in is the order of their process ids, and that changes
+	// every time the machine restarts.
+	sharing := map[string][]int{}
 	for i := range inv.Instances {
-		key := inv.Instances[i].Key
-		if taken[key]++; taken[key] > 1 && inv.Instances[i].Source == SourceHost {
-			inv.Instances[i].Key = key + "#" + strconv.Itoa(taken[key])
+		if inv.Instances[i].Source == SourceHost {
+			sharing[inv.Instances[i].Key] = append(sharing[inv.Instances[i].Key], i)
+		}
+	}
+	for key, shared := range sharing {
+		if len(shared) < 2 {
+			continue
+		}
+		sort.SliceStable(shared, func(a, b int) bool {
+			return listensBefore(&inv.Instances[shared[a]], &inv.Instances[shared[b]])
+		})
+		for n, i := range shared[1:] {
+			inv.Instances[i].Key = key + "#" + strconv.Itoa(n+2)
 		}
 	}
 	for i := range inv.Instances {
@@ -355,6 +379,28 @@ func discoverHost(listeners []HostListener, sockets []UnixSocket, units []HostUn
 			}}
 		}
 	}
+}
+
+// listensBefore orders two servers by the address each is reached at: its port,
+// then its host, then its socket's path.
+func listensBefore(a, b *Instance) bool {
+	at := func(inst *Instance) Endpoint {
+		if primary := primaryEndpoint(inst); primary != nil {
+			return *primary
+		}
+		if len(inst.Endpoints) > 0 {
+			return inst.Endpoints[0]
+		}
+		return Endpoint{}
+	}
+	x, y := at(a), at(b)
+	if x.Port != y.Port {
+		return x.Port < y.Port
+	}
+	if x.Host != y.Host {
+		return x.Host < y.Host
+	}
+	return x.Path < y.Path
 }
 
 // claimConfiguredPort gives an active unit the socket on the port its own
@@ -386,15 +432,16 @@ func claimConfiguredPort(inst *Instance, p *product, u HostUnit, ownerless map[i
 // unitlessInstance finds a running server of the unit's engine that no unit
 // has claimed: the one listening on the port the unit is configured for, or —
 // where the unit states no port — the only one there is, when this is the only
-// active unit that could be running it.
-func unitlessInstance(inv *Inventory, p *product, u HostUnit, units []HostUnit) (int, bool) {
+// active unit that could be running it. A server read under somebody else's
+// unit is not a candidate: which unit runs it is known, and it is not this one.
+func unitlessInstance(inv *Inventory, p *product, u HostUnit, units []HostUnit, supervised map[int]bool) (int, bool) {
 	if u.ActiveState != "active" {
 		return 0, false
 	}
 	candidates := []int{}
 	for i := range inv.Instances {
 		inst := &inv.Instances[i]
-		if inst.Source != SourceHost || inst.Host == nil || inst.Host.Unit != "" || inst.Engine != p.engine {
+		if inst.Source != SourceHost || inst.Host == nil || inst.Host.Unit != "" || inst.Engine != p.engine || supervised[i] {
 			continue
 		}
 		if u.Port > 0 {
@@ -420,10 +467,38 @@ func unitlessInstance(inv *Inventory, p *product, u HostUnit, units []HostUnit) 
 	return candidates[0], active == 1
 }
 
+// ownUnit reports a systemd unit that is the server's own: one named for the
+// engine the process is.
+//
+// The unit a process is read under is whichever service its control group
+// names, and that is not always the database's. A Redis and a MongoDB that
+// supervisord starts are both under supervisor.service, as everything pm2
+// starts is under pm2-<user>.service and everything a login starts under
+// user@<uid>.service. Taking that unit for the server's identity gave two
+// servers one key, told apart by the order of their process ids — so the keys
+// swapped when the machine restarted, and with them the connection and the
+// ignore mark recorded against each.
+func ownUnit(p *product, manager, managerName string) bool {
+	if manager != "systemd" || !strings.HasSuffix(managerName, ".service") {
+		return false
+	}
+	named := productForUnit(managerName)
+	return named != nil && named.engine == p.engine
+}
+
+// supervisingUnit is the unit a server runs under where that unit is not its
+// own, and empty otherwise.
+func supervisingUnit(p *product, manager, managerName string) string {
+	if manager != "systemd" || !strings.HasSuffix(managerName, ".service") || ownUnit(p, manager, managerName) {
+		return ""
+	}
+	return managerName
+}
+
 // hostInstance starts the description of a server on the machine itself. The
-// key is the unit where systemd manages it — a unit is the same server before
-// and after it changes port — and is left for the caller to derive from the
-// address otherwise.
+// key is the unit where the server runs under one of its own — a unit is the
+// same server before and after it changes port — and is left for the caller to
+// derive from the address otherwise.
 func hostInstance(p *product, process, cmdline, user string, pid int32, manager, managerName string) Instance {
 	inst := Instance{
 		Kind: KindServer, Source: SourceHost, State: StateRunning,
@@ -431,7 +506,7 @@ func hostInstance(p *product, process, cmdline, user string, pid int32, manager,
 		Host: &HostRef{PID: pid, Process: process, User: user},
 	}
 	describe(&inst, p)
-	if manager == "systemd" && strings.HasSuffix(managerName, ".service") {
+	if ownUnit(p, manager, managerName) {
 		inst.Host.Unit = managerName
 		inst.Key = "host:" + managerName
 		inst.Name = strings.TrimSuffix(managerName, ".service")

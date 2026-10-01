@@ -947,8 +947,12 @@ func TestAForgottenServerStaysForgotten(t *testing.T) {
 	if _, err := s.Store.DB.Exec(`DELETE FROM db_connections WHERE id = ?`, id); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ignoreOriginOnForget(t.Context(), origin, "tester"); err != nil {
-		t.Fatal(err)
+	if marked, err := s.ignoreOriginOnForget(t.Context(), origin, "tester"); err != nil || !marked {
+		t.Fatalf("forgetting the last connection marked the server ignored = %v, %v", marked, err)
+	}
+	// Forgetting is not counted twice: the mark was already there.
+	if marked, err := s.ignoreOriginOnForget(t.Context(), origin, "tester"); err != nil || marked {
+		t.Fatalf("a second forget reported a new mark = %v, %v", marked, err)
 	}
 
 	rec := do(t, r, http.MethodPost, "/databases/sync", "{}")
@@ -986,15 +990,15 @@ func TestAForgottenServerStaysForgotten(t *testing.T) {
 	if _, err := s.Store.DB.Exec(`UPDATE db_connections SET origin = 'docker:fixture' WHERE id = ?`, legacy); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ignoreOriginOnForget(t.Context(), "docker:fixture", "tester"); err != nil {
-		t.Fatal(err)
+	if marked, err := s.ignoreOriginOnForget(t.Context(), "docker:fixture", "tester"); err != nil || marked {
+		t.Fatalf("ignoreOriginOnForget = %v, %v", marked, err)
 	}
 	if ignored, _ := s.ignoredOrigins(t.Context()); ignored["docker:fixture"] {
 		t.Error("a server that is still connected was marked ignored")
 	}
 	// And a file is never marked: nothing connects one unasked.
-	if err := s.ignoreOriginOnForget(t.Context(), "file:/srv/x.db", "tester"); err != nil {
-		t.Fatal(err)
+	if marked, err := s.ignoreOriginOnForget(t.Context(), "file:/srv/x.db", "tester"); err != nil || marked {
+		t.Fatalf("ignoreOriginOnForget = %v, %v", marked, err)
 	}
 	if ignored, _ := s.ignoredOrigins(t.Context()); ignored["file:/srv/x.db"] {
 		t.Error("a file was marked ignored on forget")
@@ -1902,6 +1906,61 @@ func TestInstalledAndDisabledServersAreListed(t *testing.T) {
 		if inventoryHas(inv, key) {
 			t.Errorf("%s was listed as a server", key)
 		}
+	}
+}
+
+// Two servers one supervisor starts are both read under the supervisor's unit.
+// Each is keyed by where it listens, so the connection and the ignore mark
+// recorded against one are still that one's after the machine restarts and
+// their process ids come back the other way round.
+func TestServersUnderOneSupervisorKeepTheirOwnKeys(t *testing.T) {
+	supervised := func(redisPID, mongoPID int32) []proxysvc.Listener {
+		return []proxysvc.Listener{
+			{Protocol: "tcp", Address: "127.0.0.1", Port: 6379, PID: redisPID, Process: "redis-server", Manager: "systemd", ManagerName: "supervisor.service"},
+			{Protocol: "tcp", Address: "127.0.0.1", Port: 27017, PID: mongoPID, Process: "mongod", Manager: "systemd", ManagerName: "supervisor.service"},
+		}
+	}
+	m := &fakeMachine{
+		listeners: supervised(100, 200),
+		units:     []procs.Unit{{Name: "supervisor.service", LoadState: "loaded", ActiveState: "active", SubState: "running"}},
+	}
+	s, r := inventoryRouter(t, auth.RoleAdmin, m)
+
+	if rec := do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"host:redis:6379","name":"queue"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("connect = %d %s", rec.Code, rec.Body.String())
+	}
+	if dials := m.dials(); len(dials) != 1 || !strings.Contains(dials[0], "127.0.0.1:6379") {
+		t.Fatalf("connecting the Redis signed in to %v", dials)
+	}
+	if rec := do(t, r, http.MethodPost, "/databases/inventory/ignore", `{"key":"host:mongodb:27017","ignored":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("ignore = %d %s", rec.Code, rec.Body.String())
+	}
+	if rows := connectionRows(t, s); rows["queue"] != "host:redis:6379" {
+		t.Fatalf("connections = %v", rows)
+	}
+
+	// The machine restarts.
+	m.listeners = supervised(200, 100)
+	s.dropInventory()
+	inv := decodeInventory(t, do(t, r, http.MethodGet, "/databases/inventory", ""))
+	redis := inventoryInstance(t, inv, "host:redis:6379")
+	if redis.Engine != "redis" || len(redis.Connections) != 1 || redis.Ignored || redis.Host.Unit != "" {
+		t.Errorf("the Redis after a restart = %+v host %+v", redis, redis.Host)
+	}
+	mongo := inventoryInstance(t, inv, "host:mongodb:27017")
+	if mongo.Engine != "mongodb" || len(mongo.Connections) != 0 || !mongo.Ignored {
+		t.Errorf("the MongoDB after a restart = %+v", mongo)
+	}
+	if inventoryHas(inv, "host:supervisor.service") || inventoryHas(inv, "host:supervisor.service#2") {
+		t.Error("a server was keyed by the supervisor's unit")
+	}
+
+	// The reconcile leaves both alone: one is connected, one is ignored.
+	before := len(m.dials())
+	rec := do(t, r, http.MethodPost, "/databases/sync", "{}")
+	if len(m.dials()) != before || !strings.Contains(rec.Body.String(), `"ignored":["host:mongodb:27017"]`) ||
+		!strings.Contains(rec.Body.String(), `"already":["queue"]`) {
+		t.Errorf("sync after a restart dialled %d more and answered %s", len(m.dials())-before, rec.Body.String())
 	}
 }
 

@@ -400,21 +400,24 @@ func (s *Server) originOfConnection(ctx context.Context, id int64) string {
 //
 // Only a server is marked. A file is never connected unasked, so there is
 // nothing to keep from coming back.
-func (s *Server) ignoreOriginOnForget(ctx context.Context, origin, by string) error {
+//
+// It reports whether it marked anything, so the route that forgot the
+// connection can say so in its own audit entry: the mark is a second thing
+// that request changed, and it decides what the next reconcile does.
+func (s *Server) ignoreOriginOnForget(ctx context.Context, origin, by string) (bool, error) {
 	if !strings.HasPrefix(origin, "docker:") && !strings.HasPrefix(origin, "compose:") && !strings.HasPrefix(origin, "host:") {
-		return nil
+		return false, nil
 	}
 	var others int
 	if err := s.Store.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM db_connections WHERE origin = ?`, origin).Scan(&others); err != nil {
-		return httpx.Internal(err)
+		return false, httpx.Internal(err)
 	}
 	if others > 0 {
 		// Still connected under another login; nothing would come back.
-		return nil
+		return false, nil
 	}
-	_, err := s.setIgnored(ctx, origin, by, true)
-	return err
+	return s.setIgnored(ctx, origin, by, true)
 }
 
 // dashboardStorePath is the dashboard's own database file.

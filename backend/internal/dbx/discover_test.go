@@ -791,6 +791,100 @@ func TestHostKeysAreNeverShared(t *testing.T) {
 			t.Errorf("%s: access %+v does not dial its own endpoint %+v", inst.Key, access.Candidate, inst.Endpoints[0])
 		}
 	}
+	// Which of the two holds which key is decided by where it listens. The
+	// process ids are the other way round after a restart, and the keys are not.
+	restarted := Discover(Facts{Listeners: []HostListener{
+		{Protocol: "tcp", Address: "10.0.0.1", Port: 5432, Process: "postgres", PID: 12},
+		{Protocol: "tcp", Address: "10.0.0.2", Port: 5432, Process: "postgres", PID: 11},
+	}})
+	for key, host := range map[string]string{"host:postgres:5432": "10.0.0.1", "host:postgres:5432#2": "10.0.0.2"} {
+		for _, reading := range []Inventory{inv, restarted} {
+			if got := find(t, reading, key); got.Endpoints[0].Host != host {
+				t.Errorf("%s listens at %s, want %s", key, got.Endpoints[0].Host, host)
+			}
+		}
+	}
+}
+
+// The unit a process is read under is whichever service its control group
+// names, and a supervisor's is not the database's. Two servers started by one
+// supervisord shared its unit as their key and were told apart by process id,
+// so the keys — and the connection and the ignore mark kept against each —
+// changed hands when the machine restarted.
+func TestAServerUnderSomebodyElsesUnitIsKeyedByItsAddress(t *testing.T) {
+	under := func(unit string, redisPID, mongoPID int32) Inventory {
+		return Discover(Facts{Listeners: []HostListener{
+			{Protocol: "tcp", Address: "127.0.0.1", Port: 6379, Process: "redis-server", PID: redisPID, Manager: "systemd", ManagerName: unit},
+			{Protocol: "tcp", Address: "127.0.0.1", Port: 27017, Process: "mongod", PID: mongoPID, Manager: "systemd", ManagerName: unit},
+		}})
+	}
+	for _, unit := range []string{"supervisor.service", "pm2-ubuntu.service", "user@1000.service"} {
+		// Whichever of the two was started first.
+		for _, inv := range []Inventory{under(unit, 100, 200), under(unit, 200, 100)} {
+			if len(inv.Instances) != 2 {
+				t.Fatalf("%s: %d instances, want the two servers", unit, len(inv.Instances))
+			}
+			redis := find(t, inv, "host:redis:6379")
+			if redis.Engine != "redis" || redis.Name != "Redis on port 6379" || redis.Host.Unit != "" || !redis.Connectable {
+				t.Errorf("%s: redis = %+v host %+v", unit, redis, redis.Host)
+			}
+			if !strings.Contains(strings.Join(redis.Evidence, " "), "it runs under "+unit) {
+				t.Errorf("%s: evidence %v does not say what runs it", unit, redis.Evidence)
+			}
+			mongo := find(t, inv, "host:mongodb:27017")
+			if mongo.Engine != "mongodb" || mongo.Host.Unit != "" {
+				t.Errorf("%s: mongodb = %+v host %+v", unit, mongo, mongo.Host)
+			}
+			for _, inst := range []*Instance{redis, mongo} {
+				access, ok := inv.Access(inst.Key)
+				if !ok || access.Candidate.Port != inst.Endpoints[0].Port || string(access.Candidate.Driver) != inst.Engine {
+					t.Errorf("%s: %s is signed in to as %+v", unit, inst.Key, access.Candidate)
+				}
+			}
+		}
+	}
+
+	// A unit named for the engine is the server's own, whichever product of
+	// that engine the process turns out to be.
+	inv := Discover(Facts{
+		Listeners: []HostListener{
+			{Protocol: "tcp", Address: "127.0.0.1", Port: 6379, Process: "valkey-server", PID: 10, Manager: "systemd", ManagerName: "redis-server.service"},
+			{Protocol: "tcp", Address: "127.0.0.1", Port: 3306, Process: "mariadbd", PID: 11, Manager: "systemd", ManagerName: "mysql.service"},
+			{Protocol: "tcp", Address: "127.0.0.1", Port: 5432, Process: "postgres", PID: 12, Manager: "systemd", ManagerName: "postgresql-16.service"},
+		},
+	})
+	for key, flavor := range map[string]string{"host:redis-server.service": "valkey", "host:mysql.service": "mariadb", "host:postgresql-16.service": "postgres"} {
+		if got := find(t, inv, key); got.Flavor != flavor || got.Host.Unit != strings.TrimPrefix(key, "host:") {
+			t.Errorf("%s: flavor %q unit %q", key, got.Flavor, got.Host.Unit)
+		}
+	}
+
+	// A server on a unix socket only, under a unit that is not its own.
+	inv = Discover(Facts{Sockets: []UnixSocket{
+		{Path: "/run/mysqld/mysqld.sock", PID: 60, Process: "mysqld", Manager: "systemd", ManagerName: "supervisor.service"},
+	}})
+	if got := find(t, inv, "host:mysql:/run/mysqld/mysqld.sock"); got.Host.Unit != "" || got.Name != "MySQL at /run/mysqld/mysqld.sock" {
+		t.Errorf("socket-only server = %+v host %+v", got, got.Host)
+	}
+
+	// The packaged unit is running too, and its process could not be read. The
+	// supervisor's Redis is known not to be it: which unit runs it was read.
+	inv = Discover(Facts{
+		Listeners: []HostListener{
+			{Protocol: "tcp", Address: "127.0.0.1", Port: 6380, Process: "redis-server", PID: 100, Manager: "systemd", ManagerName: "supervisor.service"},
+			{Protocol: "tcp", Address: "127.0.0.1", Port: 6379},
+		},
+		Units: []HostUnit{{Name: "redis-server.service", LoadState: "loaded", ActiveState: "active", SubState: "running", Enabled: true}},
+	})
+	if len(inv.Instances) != 2 {
+		t.Fatalf("%d instances, want the supervisor's server and the unit's", len(inv.Instances))
+	}
+	if own := find(t, inv, "host:redis:6380"); own.Host.Unit != "" || own.Host.PID != 100 {
+		t.Errorf("the supervisor's server was given the packaged unit: %+v", own.Host)
+	}
+	if unit := find(t, inv, "host:redis-server.service"); unit.Host.PID != 0 || unit.Host.UnitState != "active" {
+		t.Errorf("the packaged unit took somebody else's process: %+v", unit.Host)
+	}
 }
 
 // The process name is matched exactly. A prefix match offered every exporter
@@ -1130,9 +1224,25 @@ func TestDataDirMarkers(t *testing.T) {
 			t.Errorf("%v read as %q %v", tc.names, engine, ok)
 		}
 	}
-	// A stray PG_VERSION is not a cluster.
-	if engine, _, ok := DataDirMarker(names("PG_VERSION", "README")); ok {
-		t.Errorf("read as %s", engine)
+	// What the two server images' own data directories hold.
+	for _, mysql := range []map[string]bool{
+		names("#innodb_redo", "auto.cnf", "ib_buffer_pool", "ibdata1", "mysql", "mysql.ibd", "performance_schema", "sys", "undo_001"),
+		names("aria_log_control", "ib_buffer_pool", "ib_logfile0", "ibdata1", "mysql", "performance_schema", "sys"),
+	} {
+		if engine, _, ok := DataDirMarker(mysql); !ok || engine != "mysql" {
+			t.Errorf("%v read as %q %v", mysql, engine, ok)
+		}
+	}
+	// One name is not a data directory: a stray PG_VERSION is not a cluster, and
+	// a tablespace file copied into a project is not a MySQL.
+	for _, stray := range []map[string]bool{
+		names("PG_VERSION", "README"),
+		names("ibdata1", "app.db", "docker-compose.yml"),
+		names("mysql", "postgres", "README.md"),
+	} {
+		if engine, _, ok := DataDirMarker(stray); ok {
+			t.Errorf("%v read as %s data", stray, engine)
+		}
 	}
 	// Redis's whole footprint is a file any directory can end up holding. A
 	// directory is its data only when nothing in it is anybody else's.

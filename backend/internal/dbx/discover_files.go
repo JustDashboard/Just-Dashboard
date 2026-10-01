@@ -84,17 +84,20 @@ func FileCandidate(name string) bool {
 // returning the product and the file that carries its version, if one does.
 //
 // A directory recognised here is recorded and not walked into, so being wrong
-// costs more than a mislabel: every database file below it goes unlisted. The
-// first three engines keep files nothing else is called. Redis does not — its
-// whole footprint is a dump.rdb, and a dump.rdb is also what a redis-server
-// once run from an application's directory leaves there. So a directory is
-// Redis's only when everything in it is: one stray dump beside an
+// costs more than a mislabel: every database file below it goes unlisted. No
+// engine is therefore taken on one name alone where a second can be asked for:
+// PostgreSQL's version file beside its base directory, InnoDB's system
+// tablespace beside the mysql schema every initialised MySQL and MariaDB has.
+// WiredTiger's files are called what nothing else is. Redis has no second name
+// to ask for — its whole footprint is a dump.rdb, and a dump.rdb is also what
+// a redis-server once run from an application's directory leaves there. So a
+// directory is Redis's only when everything in it is: one stray dump beside an
 // application's own files does not make the application a Redis.
 func DataDirMarker(names map[string]bool) (engine, versionFile string, ok bool) {
 	switch {
 	case names["PG_VERSION"] && (names["base"] || names["global"]):
 		return "postgres", "PG_VERSION", true
-	case names["ibdata1"] || (names["mysql"] && names["ib_buffer_pool"]):
+	case names["mysql"] && (names["ibdata1"] || names["ib_buffer_pool"]):
 		return "mysql", "", true
 	case names["WiredTiger"] || names["WiredTiger.wt"]:
 		return "mongodb", "", true
