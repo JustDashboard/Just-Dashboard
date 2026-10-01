@@ -32,6 +32,14 @@ import (
 // takes, in the order they run.
 type DDLPlan struct {
 	Statements []string `json:"statements"`
+	// Unvouched names the functions the request's own SQL calls that are not
+	// on the short list of ones known to compute a value and do nothing else.
+	// The engine evaluates a CHECK condition against every existing row and a
+	// default for every new one, so a call in either is a call that runs — and
+	// what an arbitrary function does when it runs cannot be read off its
+	// name. A plan with any is one the caller has to be allowed to run as the
+	// arbitrary SQL it is.
+	Unvouched []string `json:"-"`
 	// before is what a dialect needs done ahead of the statements. It runs
 	// only when the plan is executed, so planning a change to show it never
 	// touches the database.
@@ -39,6 +47,15 @@ type DDLPlan struct {
 }
 
 func planOf(statements ...string) *DDLPlan { return &DDLPlan{Statements: statements} }
+
+// vouching returns the plan with the calls found in the request's free SQL
+// recorded on it.
+func (p *DDLPlan) vouching(calls ...[]string) *DDLPlan {
+	for _, list := range calls {
+		p.Unvouched = append(p.Unvouched, list...)
+	}
+	return p
+}
 
 // String is the plan as one text, for showing and for the audit entry.
 func (p *DDLPlan) String() string {
@@ -353,6 +370,133 @@ func validateDefault(v string) error {
 	return nil
 }
 
+// pureFunctions are the calls a form vouches for: they compute a value from
+// their arguments and touch nothing. The list is short on purpose. It is not
+// an attempt to enumerate every harmless function in six engines — it is the
+// ones a check condition or a partial index actually uses, and anything else
+// is not refused but handed to the rule for arbitrary SQL. Type names are here
+// because `CAST(x AS varchar(10))` spells one like a call.
+var pureFunctions = stringSet(
+	"abs", "array_length", "bit_length", "btrim", "cardinality", "cast", "ceil", "ceiling", "char_length",
+	"character_length", "charindex", "coalesce", "concat", "concat_ws", "convert", "datalength", "date",
+	"date_part", "date_trunc", "dateadd", "datediff", "datepart", "day", "empty", "exp", "extract", "floor",
+	"greatest", "hour", "if", "ifnull", "initcap", "instr", "isdate", "isnull", "isnumeric", "json_array_length",
+	"json_typeof", "json_valid", "jsonb_array_length", "jsonb_typeof", "least", "left", "len", "length",
+	"lengthutf8", "ln", "locate", "log", "log10", "lower", "lpad", "ltrim", "minute", "mod", "month",
+	"notempty", "nullif", "num_nonnulls", "num_nulls", "nvl", "nvl2", "octet_length", "patindex", "position",
+	"pow", "power", "regexp_like", "replace", "reverse", "right", "round", "rpad", "rtrim", "second", "sign",
+	"sqrt", "starts_with", "strpos", "substr", "substring", "time", "to_char", "to_date", "to_number",
+	"to_timestamp", "todate", "todatetime", "tostring", "toyear", "toyyyymm", "trim", "trunc", "truncate",
+	"try_cast", "try_convert", "upper", "year",
+	// types, as they appear inside a cast
+	"binary", "bit", "char", "character", "datetime2", "decimal", "float", "interval", "nchar", "number",
+	"numeric", "nvarchar", "timestamp", "varbinary", "varchar", "varchar2", "varying",
+)
+
+// fragmentKeywords are the words that are followed by a parenthesis without
+// being a call: `x IN (…)`, `NOT (…)`, `CASE WHEN (…)`.
+var fragmentKeywords = stringSet(
+	"all", "and", "any", "as", "between", "case", "else", "exists", "filter", "from", "ilike", "in", "is",
+	"like", "not", "on", "or", "over", "select", "similar", "some", "then", "to", "using", "values", "when",
+	"where",
+)
+
+// safeDefaults are the functions with no arguments that a column default may
+// call on a form's say-so: the clock, the session's user, and a fresh
+// identifier. Any other is still a valid default — and is a function the
+// engine will run for every row, so it is planned as unvouched.
+var safeDefaults = stringSet(
+	"clock_timestamp", "curdate", "current_date", "current_time", "current_timestamp", "current_user",
+	"curtime", "gen_random_uuid", "generateuuidv4", "getdate", "getutcdate", "localtime", "localtimestamp",
+	"newid", "newsequentialid", "now", "rand", "random", "session_user", "statement_timestamp", "sys_guid",
+	"sysdate", "sysdatetime", "sysdatetimeoffset", "systimestamp", "sysutcdatetime", "today",
+	"transaction_timestamp", "unix_timestamp", "utc_timestamp", "uuid", "uuid_generate_v4", "uuidv4", "uuidv7",
+	"yesterday",
+)
+
+func stringSet(values ...string) map[string]bool {
+	out := make(map[string]bool, len(values))
+	for _, v := range values {
+		out[v] = true
+	}
+	return out
+}
+
+// unvouchedCalls lists the functions a validated fragment calls that are not
+// in pureFunctions. A name counts as a call when a parenthesis follows it,
+// whether it is written bare, qualified or quoted: `"lo_unlink"(1)` and
+// `pg_catalog.lo_unlink(1)` are the same call as `lo_unlink(1)`, and a
+// qualified name is never vouched for — `public.lower` is not `lower`.
+func unvouchedCalls(driver Driver, text string) []string {
+	quotes := fragmentQuotes(driver)
+	var out []string
+	seen := map[string]bool{}
+	note := func(name string, vouched bool) {
+		if !vouched && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	followedByCall := func(i int) bool {
+		for i < len(text) && (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' || text[i] == '\r') {
+			i++
+		}
+		return i < len(text) && text[i] == '('
+	}
+	for i := 0; i < len(text); {
+		c := text[i]
+		if closer, ok := quotes[c]; ok {
+			start := i
+			for i++; i < len(text); i++ {
+				if text[i] == closer {
+					if i+1 < len(text) && text[i+1] == closer {
+						i++
+						continue
+					}
+					break
+				}
+			}
+			i++
+			// A quoted name in front of a parenthesis is a call by a name
+			// this list was never going to contain.
+			if c != '\'' && followedByCall(i) {
+				note(text[start:min(i, len(text))], false)
+			}
+			continue
+		}
+		// A byte past ASCII is part of a name too: every engine here allows
+		// letters outside it, and a function named with them is still a call.
+		if !isASCIILetter(c) && c != '_' && c < 0x80 {
+			i++
+			continue
+		}
+		start := i
+		for i < len(text) && (isASCIILetter(text[i]) || isASCIIDigit(text[i]) || text[i] == '_' ||
+			text[i] == '.' || text[i] == '$' || text[i] >= 0x80) {
+			i++
+		}
+		name := strings.ToLower(text[start:i])
+		if followedByCall(i) && !fragmentKeywords[name] {
+			note(name, pureFunctions[name])
+		}
+	}
+	return out
+}
+
+// unvouchedDefault reports a function default that is not one of the known
+// harmless ones.
+func unvouchedDefault(def string) []string {
+	def = strings.TrimSpace(def)
+	if !functionDefaultRe.MatchString(def) {
+		return nil
+	}
+	name := strings.ToLower(strings.TrimSuffix(def, "()"))
+	if safeDefaults[name] {
+		return nil
+	}
+	return []string{name}
+}
+
 var functionDefaultRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\(\)$`)
 
 // renderDefault writes a validated default the way the engine wants it. MySQL
@@ -639,7 +783,11 @@ func PlanCreateTable(driver Driver, schema, table string, cols []NewColumn) (*DD
 	if err != nil {
 		return nil, err
 	}
-	return planOf(stmt), nil
+	plan := planOf(stmt)
+	for _, c := range cols {
+		plan.vouching(unvouchedDefault(c.Default))
+	}
+	return plan, nil
 }
 
 // CreateTable renders and executes.
@@ -717,7 +865,8 @@ func PlanAddColumn(driver Driver, schema, table string, col NewColumn) (*DDLPlan
 	if err != nil {
 		return nil, err
 	}
-	return planOf(fmt.Sprintf("ALTER TABLE %s %s %s", rel, d.AddColumnKeyword(), def)), nil
+	return planOf(fmt.Sprintf("ALTER TABLE %s %s %s", rel, d.AddColumnKeyword(), def)).
+		vouching(unvouchedDefault(col.Default)), nil
 }
 
 func AddColumn(ctx context.Context, db *sql.DB, driver Driver, schema, table string, col NewColumn) (string, error) {
@@ -978,13 +1127,16 @@ func PlanCreateIndex(ctx context.Context, db *sql.DB, driver Driver, spec IndexS
 		}
 	}
 	where := ""
+	var calls []string
 	if strings.TrimSpace(spec.Where) != "" {
 		predicate, err := validateFragment(driver, "the index predicate", spec.Where)
 		if err != nil {
 			return nil, err
 		}
-		where = " WHERE (" + predicate + ")"
+		where, calls = " WHERE ("+predicate+")", unvouchedCalls(driver, predicate)
 	}
+	// The predicate is the one part of an index the operator writes as SQL.
+	done := func(statement string) (*DDLPlan, error) { return planOf(statement).vouching(calls), nil }
 	keyword := ""
 	if method != "" && driver != DriverPostgres {
 		spelled, ok := indexMethods[driver][method]
@@ -1015,8 +1167,8 @@ func PlanCreateIndex(ctx context.Context, db *sql.DB, driver Driver, spec IndexS
 		if spec.Concurrently {
 			concurrently = "CONCURRENTLY "
 		}
-		return planOf("CREATE " + unique + "INDEX " + concurrently + ifNotExists + name +
-			" ON " + rel + using + " (" + cols + ")" + where), nil
+		return done("CREATE " + unique + "INDEX " + concurrently + ifNotExists + name +
+			" ON " + rel + using + " (" + cols + ")" + where)
 	case DriverMySQL:
 		if spec.IfNotExists && !isMariaDB(ctx, db) {
 			return nil, fmt.Errorf("MySQL has no CREATE INDEX IF NOT EXISTS; MariaDB does")
@@ -1026,11 +1178,11 @@ func PlanCreateIndex(ctx context.Context, db *sql.DB, driver Driver, spec IndexS
 			if spec.Unique {
 				return nil, fmt.Errorf("a %s index cannot be unique", strings.ToLower(keyword))
 			}
-			return planOf("CREATE " + keyword + " INDEX " + ifNotExists + name + " ON " + rel + " (" + cols + ")"), nil
+			return done("CREATE " + keyword + " INDEX " + ifNotExists + name + " ON " + rel + " (" + cols + ")")
 		case "":
-			return planOf("CREATE " + unique + "INDEX " + ifNotExists + name + " ON " + rel + " (" + cols + ")"), nil
+			return done("CREATE " + unique + "INDEX " + ifNotExists + name + " ON " + rel + " (" + cols + ")")
 		default:
-			return planOf("CREATE " + unique + "INDEX " + ifNotExists + name + " ON " + rel + " (" + cols + ") USING " + keyword), nil
+			return done("CREATE " + unique + "INDEX " + ifNotExists + name + " ON " + rel + " (" + cols + ") USING " + keyword)
 		}
 	case DriverMSSQL:
 		if keyword != "" {
@@ -1040,7 +1192,7 @@ func PlanCreateIndex(ctx context.Context, db *sql.DB, driver Driver, spec IndexS
 		if spec.Concurrently {
 			online = " WITH (ONLINE = ON)"
 		}
-		return planOf("CREATE " + unique + keyword + "INDEX " + name + " ON " + rel + " (" + cols + ")" + where + online), nil
+		return done("CREATE " + unique + keyword + "INDEX " + name + " ON " + rel + " (" + cols + ")" + where + online)
 	case DriverOracle:
 		if keyword == "BITMAP" {
 			if spec.Unique {
@@ -1058,9 +1210,9 @@ func PlanCreateIndex(ctx context.Context, db *sql.DB, driver Driver, spec IndexS
 		if spec.Concurrently {
 			online = " ONLINE"
 		}
-		return planOf("CREATE " + unique + "INDEX " + qualified + " ON " + rel + " (" + cols + ")" + online), nil
+		return done("CREATE " + unique + "INDEX " + qualified + " ON " + rel + " (" + cols + ")" + online)
 	default:
-		return planOf("CREATE " + unique + "INDEX " + ifNotExists + name + " ON " + rel + " (" + cols + ")" + where), nil
+		return done("CREATE " + unique + "INDEX " + ifNotExists + name + " ON " + rel + " (" + cols + ")" + where)
 	}
 }
 

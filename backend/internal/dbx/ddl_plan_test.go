@@ -149,6 +149,105 @@ func TestFragmentQuotingIsTheEnginesOwn(t *testing.T) {
 	}
 }
 
+// A condition or a default is SQL the engine runs against rows, so a call in
+// one is a call that happens. The form vouches for a short list of functions
+// that only compute; a plan that calls anything else says so, and the route
+// treats it as the arbitrary SQL it is.
+func TestPlansNameTheCallsTheyCannotVouchFor(t *testing.T) {
+	for _, c := range []struct {
+		driver Driver
+		text   string
+		want   []string
+	}{
+		{DriverPostgres, "price >= 0 AND length(name) < 100", nil},
+		{DriverPostgres, "status IN ('a', 'b') AND NOT (qty < 0)", nil},
+		{DriverPostgres, "CAST(code AS varchar(10)) <> '' AND coalesce(lower(trim(name)), '') <> ''", nil},
+		{DriverPostgres, "CASE WHEN (a > 0) THEN b ELSE c END > 0", nil},
+		{DriverPostgres, "x = 'lo_unlink(1)'", nil},
+		{DriverPostgres, "lo_unlink(oid_col) = 1", []string{"lo_unlink"}},
+		{DriverPostgres, "pg_terminate_backend ( pid )", []string{"pg_terminate_backend"}},
+		{DriverPostgres, `"lo_unlink"(1) = 1`, []string{`"lo_unlink"`}},
+		// A qualified name is never the function the list means.
+		{DriverPostgres, "public.lower(name) = 'x'", []string{"public.lower"}},
+		{DriverPostgres, "pg_catalog.length(name) > 0", []string{"pg_catalog.length"}},
+		{DriverPostgres, "f(g(x)) AND f(y)", []string{"f", "g"}},
+		{DriverPostgres, "étiquette(x) AND é(y)", []string{"étiquette", "é"}},
+		{DriverPostgres, "EXISTS (SELECT dblink_exec('c', 'q'))", []string{"dblink_exec"}},
+		{DriverMSSQL, "[dbo].[audit](id) = 1", []string{"[audit]"}},
+		{DriverMSSQL, "len([name]) > 0", nil},
+		{DriverMySQL, "`audit`(id) = 1", []string{"`audit`"}},
+		{DriverClickHouse, "notEmpty(toString(id))", nil},
+	} {
+		got := unvouchedCalls(c.driver, c.text)
+		if len(got) != len(c.want) {
+			t.Errorf("%s %q calls %q, want %q", c.driver, c.text, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s %q calls %q, want %q", c.driver, c.text, got, c.want)
+			}
+		}
+	}
+
+	ctx := context.Background()
+	for name, c := range map[string]struct {
+		plan *DDLPlan
+		err  error
+		want int
+	}{
+		"a plain check": plannedAs(PlanAddConstraint(DriverPostgres, ConstraintSpec{
+			Table: "t", Type: "check", Expression: "qty >= 0 AND char_length(sku) = 8"}))(0),
+		"a check that calls out": plannedAs(PlanAddConstraint(DriverPostgres, ConstraintSpec{
+			Table: "t", Type: "check", Expression: "audit(qty)"}))(1),
+		"a plain predicate": plannedAs(PlanCreateIndex(ctx, nil, DriverPostgres, IndexSpec{
+			Table: "t", Columns: []string{"a"}, Where: "deleted_at IS NULL"}))(0),
+		"a predicate that calls out": plannedAs(PlanCreateIndex(ctx, nil, DriverPostgres, IndexSpec{
+			Table: "t", Columns: []string{"a"}, Where: "is_live(a)"}))(1),
+		"the clock as a default": plannedAs(PlanAddColumn(DriverPostgres, "", "t",
+			NewColumn{Name: "at", Type: "timestamptz", Default: "now()"}))(0),
+		"a fresh identifier as a default": plannedAs(PlanCreateTable(DriverPostgres, "", "t",
+			[]NewColumn{{Name: "id", Type: "uuid", Default: "GEN_RANDOM_UUID()"}}))(0),
+		"a literal default": plannedAs(PlanAlterColumn(ctx, nil, DriverPostgres,
+			ColumnChange{Table: "t", Column: "c", Default: ddlString("'x'")}))(0),
+		"any other function as a default": plannedAs(PlanAddColumn(DriverPostgres, "", "t",
+			NewColumn{Name: "n", Type: "integer", Default: "pg_reload_conf()"}))(1),
+		"any other function as a new default": plannedAs(PlanAlterColumn(ctx, nil, DriverPostgres,
+			ColumnChange{Table: "t", Column: "c", Default: ddlString("next_ticket()")}))(1),
+		"a conversion that calls out": plannedAs(PlanAlterColumn(ctx, nil, DriverPostgres,
+			ColumnChange{Table: "t", Column: "c", Type: "integer", Using: "parse_qty(c)"}))(1),
+		"a change with no SQL of the operator's": plannedAs(PlanDropTable(DriverPostgres, "", "t"))(0),
+	} {
+		if c.err != nil {
+			t.Errorf("%s: %v", name, c.err)
+			continue
+		}
+		if len(c.plan.Unvouched) != c.want {
+			t.Errorf("%s: unvouched calls = %q, want %d", name, c.plan.Unvouched, c.want)
+		}
+	}
+}
+
+// plannedAs pairs a planner's two results with the number of unvouched calls
+// expected of it.
+func plannedAs(plan *DDLPlan, err error) func(int) struct {
+	plan *DDLPlan
+	err  error
+	want int
+} {
+	return func(want int) struct {
+		plan *DDLPlan
+		err  error
+		want int
+	} {
+		return struct {
+			plan *DDLPlan
+			err  error
+			want int
+		}{plan, err, want}
+	}
+}
+
 func TestLiteralsCannotCloseThemselves(t *testing.T) {
 	cases := []struct {
 		driver Driver

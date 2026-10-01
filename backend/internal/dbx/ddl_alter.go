@@ -70,6 +70,20 @@ func (c ColumnChange) validate() (typ, def string, setDefault bool, err error) {
 
 // PlanAlterColumn plans a change to one column.
 func PlanAlterColumn(ctx context.Context, db *sql.DB, driver Driver, c ColumnChange) (*DDLPlan, error) {
+	plan, err := planAlterColumn(ctx, db, driver, c)
+	if err != nil {
+		return nil, err
+	}
+	if c.Default != nil {
+		plan.vouching(unvouchedDefault(*c.Default))
+	}
+	if using := strings.TrimSpace(c.Using); using != "" {
+		plan.vouching(unvouchedCalls(driver, using))
+	}
+	return plan, nil
+}
+
+func planAlterColumn(ctx context.Context, db *sql.DB, driver Driver, c ColumnChange) (*DDLPlan, error) {
 	d, err := ddlDialect(driver, OpAlterColumn)
 	if err != nil {
 		return nil, err
@@ -529,7 +543,8 @@ func PlanAddConstraint(driver Driver, spec ConstraintSpec) (*DDLPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	return planOf("ALTER TABLE " + rel + " ADD CONSTRAINT " + name + " CHECK (" + expression + ")"), nil
+	return planOf("ALTER TABLE " + rel + " ADD CONSTRAINT " + name + " CHECK (" + expression + ")").
+		vouching(unvouchedCalls(driver, expression)), nil
 }
 
 // PlanDropConstraint plans removing a unique or check constraint. MySQL drops

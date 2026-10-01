@@ -14,9 +14,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// mountDatabaseSchemaRoutes registers the routes that read and change the objects a schema holds: the catalogue, definitions and structure changes. It is called inside the /databases
-// route, so paths are relative to it and each group states the capability it
-// needs.
+// mountDatabaseSchemaRoutes registers the routes that read and change the
+// objects a schema holds: the catalogue, definitions and structure changes. It
+// is called inside the /databases route, so paths are relative to it and each
+// group states the capability it needs.
 func (s *Server) mountDatabaseSchemaRoutes(r chi.Router) {
 	// Read surface. The catalogue and an object's definition are the schema
 	// read a level deeper than the table list — what a view selects, what a
@@ -167,8 +168,21 @@ type ddlPlanner func(ctx context.Context, pool *sql.DB) (*dbx.DDLPlan, error)
 // A preview changes nothing, so it is not on the audit trail. A change is,
 // whether or not the engine accepted it: the statement that was refused is as
 // much a part of the record as the one that ran.
+//
+// destructive is the reason the request's own content makes it destructive,
+// or empty when the route's group has already decided. The path cannot know —
+// the same route sets a default and rewrites a column — so it is checked here
+// by hand, and it is checked a second time once the plan exists: SQL the
+// operator wrote into a condition or a default is run by the engine against
+// every row, and a call in it that the form cannot vouch for is arbitrary SQL
+// by another route. Both fail closed, for a preview as much as for a run; only
+// a run spends the budget.
 func (s *Server) runDDL(w http.ResponseWriter, r *http.Request, conn *dbConnection, timeout time.Duration,
-	action string, detail map[string]any, plan ddlPlanner) error {
+	action string, detail map[string]any, destructive string, plan ddlPlanner) error {
+	principal := httpx.MustPrincipal(r)
+	if destructive != "" && !principal.Can(auth.CapDestructive) {
+		return httpx.Err(http.StatusForbidden, "forbidden", destructive+"; your role does not permit it")
+	}
 	pool, _, err := s.dbPool(r.Context(), conn.ID)
 	if err != nil {
 		return err
@@ -179,23 +193,42 @@ func (s *Server) runDDL(w http.ResponseWriter, r *http.Request, conn *dbConnecti
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	statement := p.String()
-	if ddlPreview(r) {
-		httpx.SkipAudit(r)
-		httpx.JSON(w, http.StatusOK, map[string]any{
-			"statement": statement, "statements": p.Statements, "preview": true,
-		})
-		return nil
-	}
 	if detail == nil {
 		detail = map[string]any{}
+	}
+	if len(p.Unvouched) > 0 {
+		detail["calls"] = p.Unvouched
+		if destructive == "" {
+			destructive = "this change calls " + strings.Join(p.Unvouched, ", ") +
+				", which the engine runs for every row it checks or fills and which this form cannot vouch for"
+			if !principal.Can(auth.CapDestructive) {
+				return httpx.Err(http.StatusForbidden, "forbidden", destructive+"; your role does not permit it")
+			}
+		}
+	}
+	statement := p.String()
+	reply := map[string]any{"statement": statement, "statements": p.Statements}
+	if len(p.Unvouched) > 0 {
+		// Named in the reply so a dialog can say what the statement will run
+		// beyond the change itself.
+		reply["calls"] = p.Unvouched
+	}
+	if ddlPreview(r) {
+		httpx.SkipAudit(r)
+		reply["preview"] = true
+		httpx.JSON(w, http.StatusOK, reply)
+		return nil
+	}
+	if destructive != "" && !s.destrLim.Allow(principal.Username()+"|dbddl") {
+		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
+			"too many destructive schema changes, slow down")
 	}
 	detail["statement"] = statement
 	httpx.SetAudit(r, action, conn.Name, detail)
 	if err := p.Exec(ctx, pool); err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"statement": statement, "statements": p.Statements})
+	httpx.JSON(w, http.StatusOK, reply)
 	return nil
 }
 
@@ -231,9 +264,9 @@ type alterColumnRequest struct {
 //
 // Whether it is destructive depends on the body, which the route cannot see: a
 // new default loses nothing, and a new type rewrites every value in the
-// column and discards whatever does not fit. So a change of type demands the
-// destructive capability and spends its budget by hand, exactly as the query
-// runner does for the ALTER it would classify the same way.
+// column and discards whatever does not fit. So a change of type is handed to
+// runDDL as destructive, exactly as the query runner treats the ALTER it
+// would classify the same way.
 func (s *Server) handleDDLAlterColumn(w http.ResponseWriter, r *http.Request) error {
 	var req alterColumnRequest
 	conn, err := s.ddlDecode(r, &req)
@@ -248,21 +281,12 @@ func (s *Server) handleDDLAlterColumn(w http.ResponseWriter, r *http.Request) er
 		Type: req.Type, Using: req.Using, Nullable: req.Nullable,
 		Default: req.Default, DropDefault: req.DropDefault,
 	}
+	destructive := ""
 	if change.ChangesType() {
-		p := httpx.MustPrincipal(r)
-		if !p.Can(auth.CapDestructive) {
-			return httpx.Err(http.StatusForbidden, "forbidden",
-				"changing a column's type rewrites its values and can lose them; your role does not permit it")
-		}
-		// A preview runs nothing, so it does not draw on the budget that
-		// exists to slow down what does.
-		if !ddlPreview(r) && !s.destrLim.Allow(p.Username()+"|dbddl") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many destructive schema changes, slow down")
-		}
+		destructive = "changing a column's type rewrites its values and can lose them"
 	}
 	return s.runDDL(w, r, conn, 30*time.Minute, "database.ddl.alter_column",
-		map[string]any{"table": req.Table, "column": req.Name, "typeChanged": change.ChangesType()},
+		map[string]any{"table": req.Table, "column": req.Name, "typeChanged": change.ChangesType()}, destructive,
 		func(ctx context.Context, pool *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanAlterColumn(ctx, pool, conn.Driver, change)
 		})
@@ -292,7 +316,7 @@ func (s *Server) handleDDLAddForeignKey(w http.ResponseWriter, r *http.Request) 
 	// Adding a key validates every existing row against the referenced table,
 	// which on a large one is as long as building an index.
 	return s.runDDL(w, r, conn, 30*time.Minute, "database.ddl.add_foreign_key",
-		map[string]any{"table": req.Table, "references": req.RefTable},
+		map[string]any{"table": req.Table, "references": req.RefTable}, "",
 		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanAddForeignKey(conn.Driver, dbx.ForeignKeySpec{
 				Schema: req.Schema, Table: req.Table, Name: req.Name, Columns: req.Columns,
@@ -312,7 +336,7 @@ func (s *Server) handleDDLDropForeignKey(w http.ResponseWriter, r *http.Request)
 		return httpx.BadRequest("table and the foreign key's name are required")
 	}
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_foreign_key",
-		map[string]any{"table": req.Table, "constraint": req.Name},
+		map[string]any{"table": req.Table, "constraint": req.Name}, "",
 		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanDropForeignKey(conn.Driver, req.Schema, req.Table, req.Name)
 		})
@@ -337,7 +361,7 @@ func (s *Server) handleDDLAddConstraint(w http.ResponseWriter, r *http.Request) 
 		return httpx.BadRequest("table is required")
 	}
 	return s.runDDL(w, r, conn, 30*time.Minute, "database.ddl.add_constraint",
-		map[string]any{"table": req.Table, "type": req.Type},
+		map[string]any{"table": req.Table, "type": req.Type}, "",
 		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanAddConstraint(conn.Driver, dbx.ConstraintSpec{
 				Schema: req.Schema, Table: req.Table, Name: req.Name, Type: req.Type,
@@ -356,7 +380,7 @@ func (s *Server) handleDDLDropConstraint(w http.ResponseWriter, r *http.Request)
 		return httpx.BadRequest("table and the constraint's name are required")
 	}
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_constraint",
-		map[string]any{"table": req.Table, "constraint": req.Name},
+		map[string]any{"table": req.Table, "constraint": req.Name}, "",
 		func(ctx context.Context, pool *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanDropConstraint(ctx, pool, conn.Driver, req.Schema, req.Table, req.Name, req.Type)
 		})
@@ -384,7 +408,7 @@ func (s *Server) handleDDLCreateView(w http.ResponseWriter, r *http.Request) err
 	}
 	// A materialized view runs its query to completion as it is created.
 	return s.runDDL(w, r, conn, 30*time.Minute, "database.ddl.create_view",
-		map[string]any{"view": req.Name, "replace": req.Replace, "materialized": req.Materialized},
+		map[string]any{"view": req.Name, "replace": req.Replace, "materialized": req.Materialized}, "",
 		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanCreateView(conn.Driver, dbx.ViewSpec{
 				Schema: req.Schema, Name: req.Name, Query: req.Query,
@@ -403,7 +427,7 @@ func (s *Server) handleDDLDropView(w http.ResponseWriter, r *http.Request) error
 		return httpx.BadRequest("the view's name is required")
 	}
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_view",
-		map[string]any{"view": req.Name, "materialized": req.Materialized},
+		map[string]any{"view": req.Name, "materialized": req.Materialized}, "",
 		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanDropView(conn.Driver, req.Schema, req.Name, req.Materialized)
 		})
@@ -423,7 +447,7 @@ func (s *Server) handleDDLCreateSchema(w http.ResponseWriter, r *http.Request) e
 		return httpx.BadRequest("the schema's name is required")
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.create_schema",
-		map[string]any{"schema": req.Name},
+		map[string]any{"schema": req.Name}, "",
 		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanCreateSchema(conn.Driver, req.Name)
 		})
@@ -444,7 +468,7 @@ func (s *Server) handleDDLDropSchema(w http.ResponseWriter, r *http.Request) err
 		return httpx.BadRequest("the schema's name is required")
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.drop_schema",
-		map[string]any{"schema": req.Name},
+		map[string]any{"schema": req.Name}, "",
 		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanDropSchema(conn.Driver, req.Name)
 		})
@@ -467,7 +491,7 @@ func (s *Server) handleDDLComment(w http.ResponseWriter, r *http.Request) error 
 		return httpx.BadRequest("table is required")
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.comment",
-		map[string]any{"table": req.Table, "column": req.Column},
+		map[string]any{"table": req.Table, "column": req.Column}, "",
 		func(ctx context.Context, pool *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanComment(ctx, pool, conn.Driver, dbx.CommentSpec{
 				Schema: req.Schema, Table: req.Table, Column: req.Column, Comment: req.Comment,
@@ -495,7 +519,7 @@ func (s *Server) handleDDLCreateEnum(w http.ResponseWriter, r *http.Request) err
 		return httpx.BadRequest("the type's name is required")
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.create_enum",
-		map[string]any{"type": req.Name, "labels": len(req.Values)},
+		map[string]any{"type": req.Name, "labels": len(req.Values)}, "",
 		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanCreateEnum(conn.Driver, req.Schema, req.Name, req.Values)
 		})
@@ -511,7 +535,7 @@ func (s *Server) handleDDLAddEnumValue(w http.ResponseWriter, r *http.Request) e
 		return httpx.BadRequest("the type's name is required")
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.add_enum_value",
-		map[string]any{"type": req.Name, "label": req.Value},
+		map[string]any{"type": req.Name, "label": req.Value}, "",
 		func(context.Context, *sql.DB) (*dbx.DDLPlan, error) {
 			return dbx.PlanAddEnumValue(conn.Driver, dbx.EnumValueSpec{
 				Schema: req.Schema, Name: req.Name, Value: req.Value,

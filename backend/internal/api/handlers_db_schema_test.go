@@ -267,6 +267,62 @@ func TestStructureChangesAskForTheCapabilityTheirEffectNeeds(t *testing.T) {
 	}
 }
 
+// SQL the operator writes into a condition or a default is run by the engine
+// against rows. A call in it that the form cannot vouch for is arbitrary SQL
+// arriving by a cheaper route than the console, so it needs what the console
+// would ask for — decided from the body, and decided closed.
+func TestSQLInAFormIsHeldToTheConsolesRule(t *testing.T) {
+	for _, c := range []struct {
+		role   auth.Role
+		method string
+		path   string
+		body   string
+		status int
+	}{
+		// What only computes is an ordinary additive change.
+		{auth.RoleLimited, http.MethodPost, "/databases/1/ddl/index?preview=1",
+			`{"table":"orders","fields":["customer_id"],"where":"total > abs(0) AND length(total) > 0"}`, http.StatusOK},
+		{auth.RoleLimited, http.MethodPost, "/databases/1/ddl/column?preview=1",
+			`{"table":"customers","column":{"name":"seen","type":"TEXT","default":"CURRENT_TIMESTAMP"}}`, http.StatusOK},
+		// What calls anything else is not, shown or run.
+		{auth.RoleLimited, http.MethodPost, "/databases/1/ddl/index?preview=1",
+			`{"table":"orders","fields":["customer_id"],"where":"load_extension(total) IS NULL"}`, http.StatusForbidden},
+		{auth.RoleLimited, http.MethodPost, "/databases/1/ddl/index",
+			`{"table":"orders","fields":["customer_id"],"where":"load_extension(total) IS NULL"}`, http.StatusForbidden},
+		{auth.RoleLimited, http.MethodPost, "/databases/1/ddl/column?preview=1",
+			`{"table":"customers","column":{"name":"n","type":"TEXT","default":"anything()"}}`, http.StatusForbidden},
+		{auth.RoleLimited, http.MethodPost, "/databases/1/ddl/table?preview=1",
+			`{"table":"t","columns":[{"name":"n","type":"TEXT","default":"anything()"}]}`, http.StatusForbidden},
+		// An account that may run arbitrary SQL may run this too.
+		{auth.RoleAdmin, http.MethodPost, "/databases/1/ddl/index?preview=1",
+			`{"table":"orders","fields":["customer_id"],"where":"load_extension(total) IS NULL"}`, http.StatusOK},
+		{auth.RoleAdmin, http.MethodPost, "/databases/1/ddl/column?preview=1",
+			`{"table":"customers","column":{"name":"n","type":"TEXT","default":"anything()"}}`, http.StatusOK},
+	} {
+		_, router, db := schemaRouter(t, c.role)
+		before := schemaText(t, db)
+		rec, body := schemaSend(t, router, c.method, c.path, c.body)
+		if rec.Code != c.status {
+			t.Errorf("%s %s %s %s = %d %s, want %d", c.role, c.method, c.path, c.body, rec.Code,
+				strings.TrimSpace(rec.Body.String()), c.status)
+		}
+		if c.status == http.StatusForbidden && (schemaErrCode(body) != "forbidden" ||
+			!strings.Contains(schemaErrMessage(body), "cannot vouch for")) {
+			t.Errorf("the refusal does not say why: %s", strings.TrimSpace(rec.Body.String()))
+		}
+		if after := schemaText(t, db); after != before {
+			t.Errorf("%s %s changed the database", c.method, c.path)
+		}
+		// An account allowed to run it is told what it calls, so the dialog
+		// can say so.
+		calls, _ := body["calls"].([]any)
+		wantCalls := c.role == auth.RoleAdmin
+		if c.status == http.StatusOK && (len(calls) == 1) != wantCalls {
+			t.Errorf("%s %s %s: calls = %v", c.role, c.method, c.path, body["calls"])
+		}
+	}
+}
+
 // With ?preview=1 every schema route answers with the statement it would run
 // and runs nothing. That is what lets a confirmation dialog show the server's
 // SQL rather than the page's guess at it.

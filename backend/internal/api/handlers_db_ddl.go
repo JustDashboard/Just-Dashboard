@@ -65,7 +65,7 @@ func (s *Server) handleDDLCreateTable(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.create_table",
-		map[string]any{"table": req.Table},
+		map[string]any{"table": req.Table}, "",
 		planned(dbx.PlanCreateTable(conn.Driver, req.Schema, req.Table, req.Columns)))
 }
 
@@ -75,7 +75,7 @@ func (s *Server) handleDDLAddColumn(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.add_column",
-		map[string]any{"table": req.Table, "column": req.Column.Name},
+		map[string]any{"table": req.Table, "column": req.Column.Name}, "",
 		planned(dbx.PlanAddColumn(conn.Driver, req.Schema, req.Table, req.Column)))
 }
 
@@ -88,7 +88,7 @@ func (s *Server) handleDDLCreateIndex(w http.ResponseWriter, r *http.Request) er
 	// this gets the long timeout the dumps get rather than the short one the
 	// other DDL uses.
 	return s.runDDL(w, r, conn, 30*time.Minute, "database.ddl.create_index",
-		map[string]any{"table": req.Table, "index": req.Name},
+		map[string]any{"table": req.Table, "index": req.Name}, "",
 		planCreateIndex(conn.Driver, dbx.IndexSpec{
 			Schema: req.Schema, Table: req.Table, Name: req.Name, Columns: req.Fields,
 			Unique: req.Unique, Method: req.Method, Where: req.Where,
@@ -114,7 +114,7 @@ func (s *Server) handleDDLRename(w http.ResponseWriter, r *http.Request) error {
 		plan = planned(dbx.PlanRenameColumn(conn.Driver, req.Schema, req.Table, req.Name, req.To))
 	}
 	return s.runDDL(w, r, conn, 60*time.Second, "database.ddl.rename",
-		map[string]any{"kind": req.Kind, "table": req.Table, "to": req.To}, plan)
+		map[string]any{"kind": req.Kind, "table": req.Table, "to": req.To}, "", plan)
 }
 
 // --- destructive schema changes -------------------------------------------
@@ -125,7 +125,7 @@ func (s *Server) handleDDLDropTable(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_table",
-		map[string]any{"table": req.Table},
+		map[string]any{"table": req.Table}, "",
 		planned(dbx.PlanDropTable(conn.Driver, req.Schema, req.Table)))
 }
 
@@ -138,7 +138,7 @@ func (s *Server) handleDDLDropColumn(w http.ResponseWriter, r *http.Request) err
 		return httpx.BadRequest("the column to drop is required")
 	}
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_column",
-		map[string]any{"table": req.Table, "column": req.Name},
+		map[string]any{"table": req.Table, "column": req.Name}, "",
 		planDropColumn(conn.Driver, req.Schema, req.Table, req.Name))
 }
 
@@ -154,7 +154,7 @@ func (s *Server) handleDDLDropIndex(w http.ResponseWriter, r *http.Request) erro
 	// shows the definition that recreates it. Dropping one costs a rebuild, not
 	// a restore from backup.
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.drop_index",
-		map[string]any{"table": req.Table, "index": req.Name},
+		map[string]any{"table": req.Table, "index": req.Name}, "",
 		planned(dbx.PlanDropIndex(conn.Driver, req.Schema, req.Table, req.Name)))
 }
 
@@ -164,7 +164,7 @@ func (s *Server) handleDDLTruncate(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	return s.runDDL(w, r, conn, 5*time.Minute, "database.ddl.truncate",
-		map[string]any{"table": req.Table},
+		map[string]any{"table": req.Table}, "",
 		planned(dbx.PlanTruncate(conn.Driver, req.Schema, req.Table)))
 }
 
