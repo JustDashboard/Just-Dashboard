@@ -413,6 +413,11 @@ func (s *Server) handleBackupRestoreDatabase(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return err
 	}
+	// The second way into a database's restore, and the one the middleware in
+	// front of /databases/{id} does not stand in front of.
+	if conn.ReadOnly {
+		return protectedRefusal("%s is protected: a dump cannot be restored into it until protection is turned off in its settings", conn.Name)
+	}
 	target := strings.TrimSpace(req.Database)
 	if target == "" {
 		target = conn.Database

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
@@ -225,6 +226,11 @@ func TestProtectedConnectionRunsOnlyReads(t *testing.T) {
 		"pragma journal_mode = wal",
 		"select 1; delete from t",
 		"with gone as (delete from t returning *) select * from gone",
+		// Statements that start as a read and write all the same.
+		"select 1 as id into copied",
+		"select * into outfile '/tmp/orders.csv' from t",
+		"with s as (select 1 as id) merge into t using s on t.id = s.id when not matched then insert (id) values (s.id)",
+		"with s as (select 1 as id) insert t select id from s",
 	} {
 		rec := do(t, router, http.MethodPost, "/databases/1/query", `{"query":"`+statement+`"}`)
 		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "connection_read_only") {
@@ -255,6 +261,22 @@ func TestProtectedBodiesAreReadAndFailClosed(t *testing.T) {
 		{"a read with the options the runner takes", "/query", `{"query":"select 1","maxRows":10,"queryId":"q-1"}`, false},
 		{"a write", "/query", `{"query":"update orders set paid = true where id = 7"}`, true},
 		{"a write hidden behind a comment", "/query", `{"query":"select 1 /* */ ; drop table orders"}`, true},
+		{"a SELECT that creates a table", "/query", `{"query":"SELECT * INTO backup_users FROM users"}`, true},
+		{"a SELECT that writes a file on the database host", "/query", `{"query":"SELECT 1 INTO OUTFILE '/tmp/x'"}`, true},
+		{"a WITH that leads into a MERGE", "/query", `{"query":"WITH s AS (SELECT 1 AS id) MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id)"}`, true},
+		{"a WITH that leads into a MERGE without INTO", "/query", `{"query":"WITH s AS (SELECT 1 AS id) MERGE t USING s ON t.id = s.id WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id);"}`, true},
+		{"a WITH that leads into an INSERT without INTO", "/query", `{"query":"WITH s AS (SELECT 1 AS id) INSERT t SELECT id FROM s"}`, true},
+		{"a plan that runs a SELECT INTO", "/query", `{"query":"EXPLAIN ANALYZE SELECT * INTO x FROM t"}`, true},
+		{"a read that only mentions one of those words is refused too", "/query", `{"query":"select * from notes where body like '%into%'"}`, true},
+		{"a column that merely starts with one is not", "/query", `{"query":"select inserted_at, merged, intolerance from audit"}`, false},
+		{"the statement under a name in another case", "/query", `{"QUERY":"select 1"}`, false},
+		{"a write under a name in another case", "/query", `{"Query":"drop table orders"}`, true},
+		{"the same field twice, in two cases", "/query", `{"query":"select 1","Query":"drop table orders"}`, true},
+		{"the same field twice", "/query", `{"query":"drop table orders","query":"select 1"}`, true},
+		{"a name the decoder folds to a field's from outside ASCII", "/query", `{"query":"select 1","\u017fql":"drop table orders"}`, true},
+		{"an option under a name outside ASCII", "/query", `{"query":"select 1","max\u212aows":5}`, true},
+		{"two JSON values", "/query", `{"query":"select 1"} {"query":"drop table orders"}`, true},
+		{"a list where an object belongs", "/query", `["select 1"]`, true},
 		{"no statement at all", "/query", `{"maxRows":10}`, true},
 		{"a statement that is not text", "/query", `{"query":["select 1"],"sql":7}`, true},
 		{"text under a name the check does not know", "/query", `{"query":"select 1","then":"drop table orders"}`, true},
@@ -269,12 +291,20 @@ func TestProtectedBodiesAreReadAndFailClosed(t *testing.T) {
 		{"a script with one write in it", "/script", `{"statements":["select 1","delete from orders where id = 1"]}`, true},
 		{"a script as one text with a write", "/script", `{"sql":"select 1; truncate orders"}`, true},
 		{"a script entry that names no statement", "/script", `{"statements":[{"text":"select 1"}]}`, true},
+		{"a script entry with text beside its statement", "/script", `{"statements":[{"sql":"select 1","then":"drop table orders"}]}`, true},
+		{"a script entry that names its statement twice", "/script", `{"statements":[{"sql":"select 1","SQL":"drop table orders"}]}`, true},
+		{"a script entry that writes through INTO", "/script", `{"statements":["select 1",{"sql":"select 1 into t"}]}`, true},
 
 		{"a plan that is only planned", "/explain", `{"query":"delete from orders"}`, false},
 		{"a plan with analyze off", "/explain", `{"query":"delete from orders","analyze":false,"format":"json"}`, false},
 		{"a plan that runs a read", "/explain", `{"query":"select * from orders","analyze":true}`, false},
 		{"a plan that runs a write", "/explain", `{"query":"delete from orders","analyze":true}`, true},
 		{"analyze spelled as anything but false", "/explain", `{"query":"delete from orders","analyze":"yes"}`, true},
+		{"analyze under a name in another case", "/explain", `{"query":"delete from orders","Analyze":true}`, true},
+		{"analyze off and then on under another case", "/explain", `{"query":"delete from orders","analyze":false,"ANALYZE":true}`, true},
+		{"analyze off twice", "/explain", `{"query":"delete from orders","analyze":false,"analyze":false}`, true},
+		{"a plan with an option nobody has decided about", "/explain", `{"query":"delete from orders","execute":true}`, true},
+		{"a plan with the options the route takes", "/explain", `{"query":"select 1","maxRows":10,"analyze":false,"format":"text"}`, false},
 
 		{"a pipeline that reads", "/aggregate", `{"collection":"orders","pipeline":"[{\"$match\":{\"paid\":true}},{\"$group\":{\"_id\":\"$city\",\"n\":{\"$sum\":1}}}]"}`, false},
 		{"$mergeObjects is an expression, not a stage that writes", "/aggregate", `{"collection":"o","pipeline":"[{\"$replaceRoot\":{\"newRoot\":{\"$mergeObjects\":[\"$a\",\"$b\"]}}}]"}`, false},
@@ -285,6 +315,12 @@ func TestProtectedBodiesAreReadAndFailClosed(t *testing.T) {
 		{"a pipeline given as a value rather than as text", "/aggregate", `{"collection":"o","pipeline":[{"$out":"copy"}]}`, true},
 		{"a pipeline that is not JSON", "/aggregate", `{"collection":"o","pipeline":"[{$out: 'copy'}]"}`, true},
 		{"no pipeline", "/aggregate", `{"collection":"orders"}`, true},
+		{"a reading pipeline and then a writing one under another case", "/aggregate", `{"collection":"src","pipeline":"[]","Pipeline":"[{\"$out\":\"copy\"}]"}`, true},
+		{"a writing pipeline under a name in capitals", "/aggregate", `{"collection":"src","PIPELINE":"[{\"$merge\":{\"into\":\"copy\"}}]"}`, true},
+		{"a reading pipeline under a name in another case", "/aggregate", `{"collection":"src","Pipeline":"[{\"$match\":{}}]"}`, false},
+		{"a writing pipeline and then a reading one", "/aggregate", `{"collection":"src","pipeline":"[{\"$out\":\"copy\"}]","pipeline":"[]"}`, true},
+		{"a writing stage behind a second key of the same name", "/aggregate", `{"collection":"o","pipeline":"[{\"$lookup\":{\"pipeline\":[{\"$merge\":{\"into\":\"copy\"}}],\"pipeline\":[]}}]"}`, true},
+		{"a pipeline wrapped in a second string", "/aggregate", `{"collection":"o","pipeline":"\"[]\" [{\"$out\":\"copy\"}]"}`, true},
 	} {
 		why := refusal(t, s, http.MethodPost, base+c.path, c.body)
 		if (why != "") != c.refused {
@@ -338,6 +374,75 @@ func TestConnectionRouteReadsAPathAsTheRouterDoes(t *testing.T) {
 		if got := routeMatches(c.pattern, c.path); got != c.match {
 			t.Errorf("routeMatches(%q, %q) = %v, want %v", c.pattern, c.path, got, c.match)
 		}
+	}
+}
+
+// What the handler decodes is what the check judged. encoding/json fills a
+// field from a key in any case and from the last of two that name it, so
+// every body the check lets through has to decode, in the handler's own
+// struct and with the handler's own decoder, to the value that was judged.
+func TestProtectionJudgesWhatTheHandlerDecodes(t *testing.T) {
+	decode := func(body string, into any) error {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		return httpx.DecodeJSON(req, into)
+	}
+	for _, body := range []string{
+		`{"collection":"src","pipeline":"[]","Pipeline":"[{\"$out\":\"copy\"}]"}`,
+		`{"collection":"src","pipeline":"[]","PIPELINE":"[{\"$out\":\"copy\"}]"}`,
+		`{"collection":"src","Pipeline":"[{\"$out\":\"copy\"}]","pipeline":"[]"}`,
+		`{"collection":"src","pipeline":"[{\"$match\":{}}]"}`,
+		`{"collection":"src","pIpElInE":"[{\"$match\":{}}]"}`,
+	} {
+		var req mongoDocRequest
+		if err := decode(body, &req); err != nil {
+			t.Fatalf("%s does not decode: %v", body, err)
+		}
+		writes := strings.Contains(req.Pipeline, "$out")
+		refused := protectedPipeline(dbx.DriverMongo, []byte(body)) != nil
+		if writes && !refused {
+			t.Errorf("%s was let through, and the handler decodes the pipeline %s", body, req.Pipeline)
+		}
+		// A body that names the pipeline once and reads is not refused for
+		// the case it is spelled in.
+		if !writes && refused && strings.Count(strings.ToLower(body), `"pipeline"`) == 1 {
+			t.Errorf("%s was refused, and the handler decodes the reading pipeline %s", body, req.Pipeline)
+		}
+	}
+	for _, body := range []string{
+		`{"query":"select 1","Query":"drop table orders"}`,
+		`{"Query":"drop table orders","query":"select 1"}`,
+		`{"QUERY":"drop table orders"}`,
+		`{"query":"select 1"}`,
+	} {
+		var req queryRequest
+		if err := decode(body, &req); err != nil {
+			t.Fatalf("%s does not decode: %v", body, err)
+		}
+		writes := strings.Contains(req.Query, "drop")
+		refused := protectedStatements(dbx.DriverSQLite, []byte(body)) != nil
+		if writes && !refused {
+			t.Errorf("%s was let through, and the handler decodes the statement %q", body, req.Query)
+		}
+	}
+}
+
+// The Backups page has its own route for loading a dump into a connection.
+// It is outside /databases, where the middleware stands, and is held to the
+// same answer.
+func TestBackupsRestoreIntoAProtectedConnectionIsRefused(t *testing.T) {
+	s := testServer(t)
+	protected := protectTestConnection(t, s, "protected", true)
+	open := protectTestConnection(t, s, "open", false)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	rec := c.do(http.MethodPost, "/api/v1/backups/runs/1/restore-database", pathf(`{"connectionId":%d}`, protected), nil)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "connection_read_only") {
+		t.Errorf("restore into a protected connection = %d %s, want 409 connection_read_only", rec.Code, rec.Body.String())
+	}
+	rec = c.do(http.MethodPost, "/api/v1/backups/runs/1/restore-database", pathf(`{"connectionId":%d}`, open), nil)
+	if strings.Contains(rec.Body.String(), "connection_read_only") {
+		t.Errorf("restore into a connection that is not protected = %d %s", rec.Code, rec.Body.String())
 	}
 }
 

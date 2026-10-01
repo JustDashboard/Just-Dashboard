@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -55,8 +57,9 @@ type protectedRoute struct {
 	pattern string
 	// check reads the body when what the route does depends on it, and
 	// returns why the request is refused. A nil check allows the route
-	// whatever it carries.
-	check func(body []byte) error
+	// whatever it carries. The driver is the connection's: what a statement
+	// is depends on the engine that will read it.
+	check func(driver dbx.Driver, body []byte) error
 }
 
 var protectedRoutesAllowed = []protectedRoute{
@@ -108,9 +111,12 @@ func (s *Server) refuseOnProtected(r *http.Request) error {
 	if !ok {
 		return nil
 	}
-	var readOnly bool
+	var (
+		driver   string
+		readOnly bool
+	)
 	err := s.Store.DB.QueryRowContext(r.Context(),
-		`SELECT read_only FROM db_connections WHERE id = ?`, id).Scan(&readOnly)
+		`SELECT driver, read_only FROM db_connections WHERE id = ?`, id).Scan(&driver, &readOnly)
 	if err == sql.ErrNoRows {
 		// No such connection, so nothing to protect; the handler says so.
 		return nil
@@ -136,7 +142,7 @@ func (s *Server) refuseOnProtected(r *http.Request) error {
 		return protectedRefusal("this connection is protected, and the request could not be read to see whether it changes anything")
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
-	return rule.check(body)
+	return rule.check(dbx.Driver(driver), body)
 }
 
 func protectedRefusal(format string, args ...any) error {
@@ -206,59 +212,156 @@ func routeMatches(pattern, path string) bool {
 	return true
 }
 
+// protectedFields reads the top level of a request body the way the handler's
+// decoder is about to.
+//
+// encoding/json fills a struct field from a key spelled in any case, and from
+// the last of two keys that name it. A check that looked a field up by its
+// exact name judged "pipeline" and let the handler run "Pipeline". So the
+// names are folded here as the decoder folds them, and a body that names one
+// field twice, in any spelling, is refused rather than second-guessed: nothing
+// this dashboard sends does. A name outside ASCII is refused for the same
+// reason — the decoder's folding reaches a few letters there, the long s for
+// an s among them, and no field is named with one.
+func protectedFields(body []byte) (map[string]json.RawMessage, error) {
+	unreadable := protectedRefusal("this connection is protected, and the request could not be read to see whether it changes anything")
+	if !json.Valid(body) {
+		return nil, unreadable
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if opening, err := dec.Token(); err != nil || opening != json.Delim('{') {
+		return nil, unreadable
+	}
+	fields := map[string]json.RawMessage{}
+	for dec.More() {
+		token, err := dec.Token()
+		name, isName := token.(string)
+		if err != nil || !isName {
+			return nil, unreadable
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, unreadable
+		}
+		for i := 0; i < len(name); i++ {
+			if name[i] >= 0x80 {
+				return nil, protectedRefusal("this connection is protected, and %q is not a field this check can read to see whether it changes anything", name)
+			}
+		}
+		folded := strings.ToLower(name)
+		if _, twice := fields[folded]; twice {
+			return nil, protectedRefusal("this connection is protected, and the request names %q more than once, so what it asks for cannot be told", folded)
+		}
+		fields[folded] = value
+	}
+	return fields, nil
+}
+
 // protectedStatementFields are the body fields that carry SQL, in every shape
-// the statement routes take it: one statement, or a list of them.
+// the statement routes take it: one statement, or a list of them. The names
+// here and below are folded, as protectedFields hands them over.
 var protectedStatementFields = map[string]bool{
 	"query": true, "sql": true, "script": true, "statements": true, "queries": true,
 }
 
 // protectedTextOptions are body fields that are text and are not SQL.
 var protectedTextOptions = map[string]bool{
-	"queryId": true, "format": true, "schema": true, "database": true, "name": true,
+	"queryid": true, "format": true, "schema": true, "database": true, "name": true,
 }
 
-// protectedStatements allows a body whose every statement classifies as a
-// read.
+// protectedWriteWords are the words that let a statement which starts as a
+// read change something. SELECT … INTO creates a table on Postgres and SQL
+// Server and writes a file on the database host on MySQL; a WITH leads into a
+// MERGE, or on SQL Server into an INSERT that needs no INTO. The classifier
+// reads the leading verb, finds SELECT or WITH, and calls each of them a read.
+//
+// The words are looked for in the whole text, inside a quoted value or a
+// comment as well. Leaving those out needs a lexer that agrees with the
+// engine's about where a string ends, and the day the two disagree is the day
+// a write is hidden behind a quote. So a SELECT that searches for the word
+// "into" is refused here too, which is the direction this is allowed to be
+// wrong in, and the refusal says which word it was.
+var protectedWriteWords = regexp.MustCompile(`(?i)\b(into|merge|insert)\b`)
+
+// protectedStatementRefusal is why a statement may not run on a protected
+// connection, and empty when it may: it has to classify as a read and carry
+// none of the words above.
+//
+// The driver is taken because what a statement is depends on the engine that
+// reads it — a backslash ends nothing in Postgres and escapes a quote in
+// MySQL. dbx.Classify reads every dialect by the strictest rules at once and
+// has no use for it; a classifier that reads each engine's own takes it here.
+func protectedStatementRefusal(driver dbx.Driver, statement string) string {
+	if risk := dbx.Classify(statement); risk.Level != "read" {
+		// Never empty: an empty answer is what lets the statement through.
+		if why := strings.Join(risk.Reasons, "; "); why != "" {
+			return why
+		}
+		return "it is classified " + risk.Level
+	}
+	if word := protectedWriteWords.FindString(statement); word != "" {
+		return fmt.Sprintf("it contains %s, and a statement that starts as a read can write through it", strings.ToUpper(word))
+	}
+	return ""
+}
+
+// protectedStatements allows a body whose every statement is a read.
 //
 // It fails closed on what it does not recognise. A field it has never heard
 // of that holds text, a list or an object could be a statement under a name
 // added after this was written, and letting it through unread would be the
 // hole this file exists not to have; only numbers and booleans pass as
 // options without being named above.
-func protectedStatements(body []byte) error {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &fields); err != nil {
-		return protectedRefusal("this connection is protected, and the request could not be read to see whether it changes anything")
+func protectedStatements(driver dbx.Driver, body []byte) error {
+	fields, err := protectedFields(body)
+	if err != nil {
+		return err
 	}
+	statements, err := statementsIn(fields)
+	if err != nil {
+		return err
+	}
+	if len(statements) == 0 {
+		return protectedRefusal("this connection is protected, and the request carries no statement to check")
+	}
+	for _, statement := range statements {
+		if why := protectedStatementRefusal(driver, statement); why != "" {
+			return protectedRefusal("this connection is protected, and that statement is not a read: %s", why)
+		}
+	}
+	return nil
+}
+
+// statementsIn collects the SQL in a decoded object, and refuses one that
+// holds anything which could be SQL under a name not listed above.
+func statementsIn(fields map[string]json.RawMessage) ([]string, error) {
 	var statements []string
 	for name, raw := range fields {
 		switch {
 		case protectedStatementFields[name]:
 			found, err := statementTexts(raw)
 			if err != nil {
-				return protectedRefusal("this connection is protected, and %q could not be read as SQL to see whether it changes anything", name)
+				var refusal *httpx.APIError
+				if errors.As(err, &refusal) {
+					return nil, err
+				}
+				return nil, protectedRefusal("this connection is protected, and %q could not be read as SQL to see whether it changes anything", name)
 			}
 			statements = append(statements, found...)
 		case protectedTextOptions[name]:
 		default:
 			if first := bytes.TrimSpace(raw); len(first) > 0 && (first[0] == '"' || first[0] == '[' || first[0] == '{') {
-				return protectedRefusal("this connection is protected, and %q is not a field this check can read to see whether it changes anything", name)
+				return nil, protectedRefusal("this connection is protected, and %q is not a field this check can read to see whether it changes anything", name)
 			}
 		}
 	}
-	if len(statements) == 0 {
-		return protectedRefusal("this connection is protected, and the request carries no statement to check")
-	}
-	for _, statement := range statements {
-		if risk := dbx.Classify(statement); risk.Level != "read" {
-			return protectedRefusal("this connection is protected, and that statement is not a read: %s", strings.Join(risk.Reasons, "; "))
-		}
-	}
-	return nil
+	return statements, nil
 }
 
 // statementTexts reads SQL out of a field: a string, or a list whose entries
-// are strings or objects naming their statement "sql" or "query".
+// are strings or objects naming their statement "sql" or "query". An entry
+// that is an object is held to the rule the body is: it names a statement,
+// and nothing else in it could be one.
 func statementTexts(raw json.RawMessage) ([]string, error) {
 	var one string
 	if err := json.Unmarshal(raw, &one); err == nil {
@@ -275,39 +378,46 @@ func statementTexts(raw json.RawMessage) ([]string, error) {
 			out = append(out, text)
 			continue
 		}
-		var named map[string]json.RawMessage
-		if err := json.Unmarshal(entry, &named); err != nil {
+		named, err := protectedFields(entry)
+		if err != nil {
 			return nil, err
 		}
-		found := false
-		for _, key := range []string{"sql", "query"} {
-			if value, ok := named[key]; ok {
-				if err := json.Unmarshal(value, &text); err != nil {
-					return nil, err
-				}
-				out, found = append(out, text), true
-			}
+		found, err := statementsIn(named)
+		if err != nil {
+			return nil, err
 		}
-		if !found {
+		if len(found) == 0 {
 			return nil, fmt.Errorf("an entry names no statement")
 		}
+		out = append(out, found...)
 	}
 	return out, nil
 }
 
+// protectedExplainFields are what a request for a plan may carry beside its
+// statement and the text options. A plan route that grew a second way of
+// running its statement would grow it as a field, and one not named here is
+// refused until somebody has decided what it does.
+var protectedExplainFields = map[string]bool{"analyze": true, "maxrows": true}
+
 // protectedExplain allows a plan that is only planned. Asking for the plan
 // with the statement actually run is running the statement, and is held to
 // what running it would be.
-func protectedExplain(body []byte) error {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &fields); err != nil {
-		return protectedRefusal("this connection is protected, and the request could not be read to see whether it changes anything")
+func protectedExplain(driver dbx.Driver, body []byte) error {
+	fields, err := protectedFields(body)
+	if err != nil {
+		return err
+	}
+	for name := range fields {
+		if !protectedStatementFields[name] && !protectedTextOptions[name] && !protectedExplainFields[name] {
+			return protectedRefusal("this connection is protected, and %q is not a field this check can read to see whether it changes anything", name)
+		}
 	}
 	switch strings.TrimSpace(string(fields["analyze"])) {
 	case "", "false", "null":
 		return nil
 	}
-	return protectedStatements(body)
+	return protectedStatements(driver, body)
 }
 
 // protectedPipeline allows an aggregation with no stage that writes.
@@ -315,45 +425,70 @@ func protectedExplain(body []byte) error {
 // The pipeline is parsed and its keys compared after decoding, at every
 // depth. Looking for the stage names in the request's text would miss one
 // spelled with an escape, which the server decodes and this would not.
-func protectedPipeline(body []byte) error {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(body, &fields); err != nil || len(fields["pipeline"]) == 0 {
-		return protectedRefusal("this connection is protected, and the request carries no pipeline to check")
+func protectedPipeline(_ dbx.Driver, body []byte) error {
+	fields, err := protectedFields(body)
+	if err != nil {
+		return err
 	}
 	raw := fields["pipeline"]
+	if len(raw) == 0 {
+		return protectedRefusal("this connection is protected, and the request carries no pipeline to check")
+	}
 	// The pipeline travels as a JSON document inside a string.
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
 		raw = json.RawMessage(text)
 	}
-	var pipeline any
-	if err := json.Unmarshal(raw, &pipeline); err != nil {
+	stage, err := writingStage(raw)
+	if err != nil {
 		return protectedRefusal("this connection is protected, and the pipeline could not be read to see whether it writes")
 	}
-	if stage := writingStage(pipeline); stage != "" {
+	if stage != "" {
 		return protectedRefusal("this connection is protected, and a pipeline with a %s stage writes to a collection", stage)
 	}
 	return nil
 }
 
-// writingStage is the first stage name in a decoded pipeline that writes.
-func writingStage(v any) string {
-	switch x := v.(type) {
-	case map[string]any:
-		for key, value := range x {
-			if strings.EqualFold(key, "$out") || strings.EqualFold(key, "$merge") {
-				return strings.ToLower(key)
+// writingStage is the first key in a pipeline that names a stage which
+// writes. Every key is read as it stands in the text, so one of two that
+// share a name is not lost the way decoding into a map would lose it.
+func writingStage(pipeline []byte) (string, error) {
+	if !json.Valid(pipeline) {
+		return "", errors.New("the pipeline is not JSON")
+	}
+	return writingKey(json.NewDecoder(bytes.NewReader(pipeline)))
+}
+
+// writingKey reads one value off the decoder and reports the first $out or
+// $merge among its keys, at any depth.
+func writingKey(dec *json.Decoder) (string, error) {
+	token, err := dec.Token()
+	if err != nil {
+		return "", err
+	}
+	opening, nested := token.(json.Delim)
+	if !nested {
+		return "", nil
+	}
+	found := ""
+	for dec.More() {
+		if opening == '{' {
+			key, err := dec.Token()
+			if err != nil {
+				return "", err
 			}
-			if stage := writingStage(value); stage != "" {
-				return stage
+			if name, _ := key.(string); found == "" && (strings.EqualFold(name, "$out") || strings.EqualFold(name, "$merge")) {
+				found = strings.ToLower(name)
 			}
 		}
-	case []any:
-		for _, value := range x {
-			if stage := writingStage(value); stage != "" {
-				return stage
-			}
+		inner, err := writingKey(dec)
+		if err != nil {
+			return "", err
+		}
+		if found == "" {
+			found = inner
 		}
 	}
-	return ""
+	_, err = dec.Token()
+	return found, err
 }
