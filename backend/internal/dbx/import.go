@@ -991,7 +991,11 @@ func (p *importPlan) rowStatement(n int) (string, error) {
 
 // upsertStatement renders the engine's own form of "insert this row, or
 // overwrite the one with its key".
-func (p *importPlan) upsertStatement() (string, error) {
+func (p *importPlan) upsertStatement() (string, error) { return p.upsertStatementFor(1) }
+
+// upsertStatementFor is upsertStatement for n rows at once, on the engines
+// whose form takes several.
+func (p *importPlan) upsertStatementFor(n int) (string, error) {
 	isKey := map[string]bool{}
 	keyQuoted := make([]string, len(p.key))
 	for i, k := range p.key {
@@ -1008,7 +1012,7 @@ func (p *importPlan) upsertStatement() (string, error) {
 			rest = append(rest, c)
 		}
 	}
-	insert := p.insertStatement(1)
+	insert := p.insertStatement(n)
 	switch p.d.Driver() {
 	case DriverPostgres, DriverSQLite:
 		target := " ON CONFLICT (" + strings.Join(keyQuoted, ", ") + ")"
@@ -1172,9 +1176,14 @@ func parameterLimit(driver Driver) int {
 func (p *importPlan) strategy() importStrategy {
 	driver := p.d.Driver()
 	s := importStrategy{rowsPerStatement: 1, savepoints: driver == DriverPostgres}
-	if p.spec.Mode == ImportModeUpsert || driver == DriverOracle || driver == DriverClickHouse {
-		// An upsert is counted row by row; Oracle has no multi-row VALUES;
-		// ClickHouse's driver gathers a prepared statement's rows itself.
+	if driver == DriverOracle || driver == DriverClickHouse {
+		// Oracle has no multi-row VALUES; ClickHouse's driver gathers a
+		// prepared statement's rows itself.
+		return s
+	}
+	if p.spec.Mode == ImportModeUpsert && driver != DriverPostgres {
+		// An upsert has to say, row by row, whether it added or overwrote.
+		// Only Postgres says that for several rows in one statement.
 		return s
 	}
 	s.rowsPerStatement = min(p.spec.BatchSize, max(1, parameterLimit(driver)/len(p.cols)))
@@ -1201,8 +1210,9 @@ type importRun struct {
 	pending  []pendingRow
 	single   *sql.Stmt
 	exists   *sql.Stmt
-	// statements caches the multi-row INSERT text by row count: every full
-	// batch shares one, and the last, shorter one is another.
+	// statements caches the multi-row statement text by row count: every full
+	// batch shares one, and the last, shorter one is another. An upsert's are
+	// kept under the negative of theirs.
 	statements map[int]string
 }
 
@@ -1481,13 +1491,59 @@ func (r *importRun) together(rows []pendingRow) (inserted, updated int, err erro
 	}
 	for len(rows) > 0 {
 		n := min(len(rows), r.strategy.rowsPerStatement)
-		if err := r.insertMany(rows[:n]); err != nil {
-			return 0, 0, err
+		if r.plan.spec.Mode == ImportModeUpsert {
+			added, err := r.upsertMany(rows[:n])
+			if err != nil {
+				return 0, 0, err
+			}
+			inserted += added
+			updated += n - added
+		} else {
+			if err := r.insertMany(rows[:n]); err != nil {
+				return 0, 0, err
+			}
+			inserted += n
 		}
-		inserted += n
 		rows = rows[n:]
 	}
-	return inserted, 0, nil
+	return inserted, updated, nil
+}
+
+// upsertMany writes rows with one Postgres upsert and returns how many of
+// them were new. A file that names one key twice is refused by the server as
+// a single statement — it will not overwrite a row twice in one go — and the
+// caller then writes those rows one at a time, where the second simply
+// overwrites the first.
+func (r *importRun) upsertMany(rows []pendingRow) (int, error) {
+	key := -len(rows)
+	statement, ok := r.statements[key]
+	if !ok {
+		var err error
+		if statement, err = r.plan.upsertStatementFor(len(rows)); err != nil {
+			return 0, err
+		}
+		r.statements[key] = statement
+	}
+	args := make([]any, 0, len(rows)*len(r.plan.cols))
+	for _, row := range rows {
+		args = append(args, row.args...)
+	}
+	result, err := r.tx.QueryContext(r.ctx, statement, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer result.Close()
+	added := 0
+	for result.Next() {
+		var inserted bool
+		if err := result.Scan(&inserted); err != nil {
+			return 0, err
+		}
+		if inserted {
+			added++
+		}
+	}
+	return added, result.Err()
 }
 
 // insertMany writes rows with one INSERT.

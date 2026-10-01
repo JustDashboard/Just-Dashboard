@@ -648,6 +648,18 @@ func TestLivePostgresImport(t *testing.T) {
 		t.Errorf("the matched row is %s, want 31:2", got)
 	}
 
+	// A file that names one key twice: the server will not overwrite a row
+	// twice in one statement, so those rows go in one at a time and the later
+	// one wins.
+	report, err = Import(ctx, db, DriverPostgres, strings.NewReader("id,email,qty\n40,twice@x.io,1\n41,once@x.io,1\n40,twice@x.io,2\n"),
+		ImportSpec{Table: "jd_imp", Mode: ImportModeUpsert})
+	if err != nil || report.Inserted != 2 || report.Updated != 1 {
+		t.Fatalf("upsert with a repeated key: %+v, %v", report, err)
+	}
+	if got := queryString(t, db, `SELECT qty::text FROM jd_imp WHERE id = 40`); got != "2" {
+		t.Errorf("the repeated key holds qty %s, want the later row's 2", got)
+	}
+
 	// Replace that fails puts the rows back: TRUNCATE is undone with the rest.
 	before := queryString(t, db, `SELECT count(*)::text FROM jd_imp`)
 	if _, err := Import(ctx, db, DriverPostgres, strings.NewReader("id,email\n1,x@x.io\n1,y@x.io\n"),
