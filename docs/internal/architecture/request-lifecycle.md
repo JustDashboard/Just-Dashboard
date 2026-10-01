@@ -65,12 +65,6 @@ Referenced network drivers and named-volume drivers/options are inspected too; a
 host bind or plugin mount from this policy. Local filesystem volume backing paths must be absolute and
 pass the configured file-root check, including for administrators.
 
-The routes that move a database's data decide on their options. `POST /databases/{id}/export/query`
-takes only a statement that classifies as a read. `POST /databases/{id}/import` and `/import/upload`
-require `destructive` and its budget when the options ask for the table's contents to be replaced,
-and `POST /databases/{id}/restore` requires `system.admin` when its target is a database to be
-created.
-
 The log routes decide on the source, not the path. `/logs/stream`, `/search`, `/download`,
 `/retention` and `/source` are `read`, but every one parses its `source` through `logTargetFor`, which
 refuses auth data — `auth.log` and `secure` with their generations and anything resolving to them, a
@@ -87,6 +81,12 @@ with `/stream` and `/export`, `agent=` and `referer=` on a deployment's request 
 per-feature log reads they replaced — `/docker/containers/{id}/logs` and its `/stream`,
 `/docker/stacks/{name}/logs/stream`, `/systemd/{name}/journal` and its `/stream`, and
 `/pm2/{name}/logs/stream` — are gone, so no second path reaches a log around that check.
+
+The routes that move a database's data decide on their options. `POST /databases/{id}/export/query`
+takes only a statement that classifies as a read. `POST /databases/{id}/import` and `/import/upload`
+require `destructive` and its budget when the options ask for the table's contents to be replaced,
+and `POST /databases/{id}/restore` requires `system.admin` when its target is a database to be
+created.
 
 Compose creation, configuration edits, validation and execution all require `system.admin` until the
 complete resolved Compose model has a shared policy. Stack details evaluate Compose only for
