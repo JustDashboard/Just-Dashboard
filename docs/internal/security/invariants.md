@@ -31,7 +31,9 @@ A change that weakens any of these has to say so explicitly.
    clone can only create a directory that does not exist. Terminal startup also uses
    a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. `dockerx` invokes the `docker` binary in three places
    (compose, the streaming runner, `Build`) because the Engine API has no equivalent; all three build argv
-   explicitly.
+   explicitly. A database dump that is a SQL script is replayed by `dbx` over the dashboard's own
+   connection (`dump_script.go`) and never piped to `psql` or `mysql`: each of those runs a shell for a
+   line of what it is fed (`\!`, `system`), which would make an uploaded dump that second shell.
 7. Nothing but Caddy binds a routable address. The one exception is not the dashboard's own listener:
    a pull request preview is reachable at `https://<node>.<tailnet>.ts.net:<port>` because **tailscaled**
    listens on the host's tailnet address for ports **21000–21999** on the dashboard's behalf
