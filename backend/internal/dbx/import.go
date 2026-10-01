@@ -11,6 +11,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -360,7 +361,7 @@ func Import(ctx context.Context, db *sql.DB, driver Driver, r io.Reader, spec Im
 	}
 	report.Create = create
 	report.Key = plan.key
-	if report.Statement, err = plan.rowStatement(1); err != nil {
+	if report.Statement, err = plan.shownStatement(); err != nil {
 		return nil, err
 	}
 	if spec.DryRun {
@@ -730,6 +731,9 @@ func importTargets(ctx context.Context, db *sql.DB, d Dialect, schema string, sr
 				col.Type = strings.TrimSpace(o.Type)
 			}
 			col.NotNull, col.PrimaryKey, col.Default = o.NotNull, o.PrimaryKey, o.Default
+			if o.PrimaryKey && strings.TrimSpace(o.Type) == "" {
+				col.Type = keyColumnType(d.Driver(), col.Type)
+			}
 			delete(overrides, name)
 		}
 		created.Columns = append(created.Columns, col)
@@ -748,6 +752,88 @@ func importTargets(ctx context.Context, db *sql.DB, d Dialect, schema string, sr
 	return targets, created, nil
 }
 
+// computedColumns names the columns of a table that the server fills in and
+// refuses to be given: a generated or computed column, a rowversion. A
+// catalogue that cannot be read gives none, and the engine's own refusal is
+// what the caller then sees.
+func computedColumns(ctx context.Context, db *sql.DB, d Dialect, schema, table string) map[string]bool {
+	var (
+		query string
+		args  []any
+	)
+	switch d.Driver() {
+	case DriverPostgres:
+		query = `SELECT a.attname FROM pg_catalog.pg_attribute a
+		         JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+		         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		         WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped AND a.attgenerated <> ''`
+		args = []any{schema, table}
+	case DriverMySQL:
+		query = `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+		         WHERE TABLE_SCHEMA = COALESCE(NULLIF(?, ''), DATABASE()) AND TABLE_NAME = ? AND GENERATION_EXPRESSION <> ''`
+		args = []any{schema, table}
+	case DriverMSSQL:
+		// 189 is the rowversion, which the catalogue calls timestamp.
+		query = `SELECT c.name FROM sys.columns c
+		         JOIN sys.objects o ON o.object_id = c.object_id
+		         JOIN sys.schemas s ON s.schema_id = o.schema_id
+		         WHERE s.name = @p1 AND o.name = @p2 AND (c.is_computed = 1 OR c.system_type_id = 189)`
+		args = []any{schema, table}
+	case DriverOracle:
+		query = `SELECT column_name FROM all_tab_cols
+		         WHERE owner = NVL(:1, SYS_CONTEXT('USERENV','CURRENT_SCHEMA')) AND table_name = :2
+		           AND virtual_column = 'YES' AND hidden_column = 'NO'`
+		args = []any{oracleSchemaArg(schema), table}
+	case DriverClickHouse:
+		query = `SELECT name FROM system.columns
+		         WHERE database = ? AND table = ? AND default_kind IN ('MATERIALIZED', 'ALIAS')`
+		args = []any{schema, table}
+	case DriverSQLite:
+		return sqliteComputedColumns(ctx, db, table)
+	default:
+		return map[string]bool{}
+	}
+	out := map[string]bool{}
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if rows.Scan(&name) == nil {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// sqliteComputedColumns reads which columns are generated from the one place
+// SQLite says: the extended table listing, where they are marked hidden.
+func sqliteComputedColumns(ctx context.Context, db *sql.DB, table string) map[string]bool {
+	out := map[string]bool{}
+	quoted, err := quoteDouble(table)
+	if err != nil {
+		return out
+	}
+	rows, err := db.QueryContext(ctx, "PRAGMA table_xinfo("+quoted+")")
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid, notnull, pk, hidden int
+			name, ctype              string
+			dflt                     sql.NullString
+		)
+		if rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk, &hidden) == nil && (hidden == 2 || hidden == 3) {
+			out[name] = true
+		}
+	}
+	return out
+}
+
 // planImport settles which source column goes to which table column and, for
 // an upsert, which key it matches on.
 func planImport(ctx context.Context, db *sql.DB, d Dialect, schema string, src *importSource, profiles []*columnProfile, targets []Column, spec ImportSpec, report *ImportReport) (*importPlan, error) {
@@ -761,6 +847,21 @@ func planImport(ctx context.Context, db *sql.DB, d Dialect, schema string, src *
 	for _, t := range targets {
 		byName[t.Name] = t
 	}
+	// The inline route names its own columns and asks the catalogue nothing.
+	// On SQL Server the types are read all the same: a value the column cannot
+	// take has to be caught by the statement, which needs to know the type.
+	trustedTypes := map[string]string{}
+	if spec.trusted && d.Driver() == DriverMSSQL {
+		lookup := schema
+		if lookup == "" {
+			lookup = currentSchema(ctx, db, d)
+		}
+		if cols, err := d.Columns(ctx, db, lookup, spec.Table); err == nil {
+			for _, c := range cols {
+				trustedTypes[c.Name] = c.Type
+			}
+		}
+	}
 	if spec.Mapping != nil {
 		have := src.index()
 		for source := range spec.Mapping {
@@ -769,6 +870,14 @@ func planImport(ctx context.Context, db *sql.DB, d Dialect, schema string, src *
 					fmt.Sprintf("the mapping names %q, which the file has no column called", source))
 			}
 		}
+	}
+	// What the server works out for itself, where the file's columns are being
+	// matched to the table's by name. A file exported from a table carries
+	// its computed columns like any other, and matched to them every row of
+	// it would be refused.
+	computed := map[string]bool{}
+	if !spec.trusted && spec.Create == nil && spec.Mapping == nil && len(spec.Columns) == 0 && !src.positional {
+		computed = computedColumns(ctx, db, d, schema, spec.Table)
 	}
 	used := map[string]bool{}
 	for i, source := range src.columns {
@@ -781,7 +890,7 @@ func planImport(ctx context.Context, db *sql.DB, d Dialect, schema string, src *
 		switch {
 		case !wanted:
 		case spec.trusted:
-			target = Column{Name: name}
+			target = Column{Name: name, Type: trustedTypes[name]}
 		case spec.Mapping != nil || len(spec.Columns) > 0 || spec.Create != nil:
 			// Somebody said where it goes, so it goes there or the import is
 			// wrong — not quietly somewhere similar.
@@ -799,9 +908,15 @@ func planImport(ctx context.Context, db *sql.DB, d Dialect, schema string, src *
 				wanted = false
 			}
 		default:
-			if t, ok := matchColumn(source, targets); ok {
+			t, ok := matchColumn(source, targets)
+			switch {
+			case ok && computed[t.Name]:
+				report.Warnings = append(report.Warnings,
+					fmt.Sprintf("%s is filled in by the server and takes no value, so the file's column was left out", t.Name))
+				wanted = false
+			case ok:
 				target = t
-			} else {
+			default:
 				wanted = false
 			}
 		}
@@ -833,7 +948,7 @@ func planImport(ctx context.Context, db *sql.DB, d Dialect, schema string, src *
 		for _, t := range targets {
 			// A key column with no default is the usual shape of a column the
 			// table numbers itself, so only the others are worth a warning.
-			if !used[t.Name] && !t.Nullable && t.Default == "" && t.Key == "" {
+			if !used[t.Name] && !computed[t.Name] && !t.Nullable && t.Default == "" && t.Key == "" {
 				report.Warnings = append(report.Warnings,
 					fmt.Sprintf("%s requires a value and has no default, and the file has nothing for it", t.Name))
 			}
@@ -929,11 +1044,24 @@ func (p *importPlan) args(fields []importValue) ([]any, error) {
 		}
 		if p.spec.trusted {
 			out[i] = trustedValue(v)
+			if b, ok := out[i].(bool); ok && p.d.Driver() == DriverMSSQL {
+				// As text, like every other value SQL Server is sent: a
+				// conversion written around a text is one the server has.
+				out[i] = "0"
+				if b {
+					out[i] = "1"
+				}
+			}
 			continue
 		}
 		bound, err := bindValue(p.d.Driver(), v, c.family, c.typeName)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", c.name, err)
+		}
+		if n, ok := bound.(int64); ok && p.d.Driver() == DriverMSSQL {
+			// Every value reaches SQL Server as text or as bytes, so the
+			// conversion written around it is always one the server has.
+			bound = strconv.FormatInt(n, 10)
 		}
 		out[i] = bound
 	}
@@ -959,6 +1087,9 @@ func (p *importPlan) placeholders(from int) string {
 	marks := make([]string, len(p.cols))
 	for i := range marks {
 		marks[i] = p.d.Placeholder(from + i)
+		if p.mssqlConverts() {
+			marks[i], _ = p.mssqlValue(i, marks[i])
+		}
 	}
 	return "(" + strings.Join(marks, ", ") + ")"
 }
@@ -977,7 +1108,14 @@ func (p *importPlan) insertStatement(n int) string {
 	for i := range tuples {
 		tuples[i] = p.placeholders(i*len(p.cols) + 1)
 	}
-	return "INSERT INTO " + p.rel + " (" + p.columnList() + ") VALUES " + strings.Join(tuples, ", ")
+	return p.mssqlGuard(n) + "INSERT INTO " + p.rel + " (" + p.columnList() + ") VALUES " + strings.Join(tuples, ", ")
+}
+
+// shownStatement is the statement one row is written with as a report shows
+// it: what writes the row, without what is checked before it.
+func (p *importPlan) shownStatement() (string, error) {
+	statement, err := p.rowStatement(1)
+	return strings.TrimPrefix(statement, p.mssqlGuard(1)), err
 }
 
 // rowStatement is the statement one row is written with — the first n rows,
@@ -1043,7 +1181,7 @@ func (p *importPlan) upsertStatementFor(n int) (string, error) {
 		}
 		return insert + " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", "), nil
 	case DriverMSSQL, DriverOracle:
-		return p.mergeStatement(keyQuoted, rest), nil
+		return p.mssqlGuard(1) + p.mergeStatement(keyQuoted, rest), nil
 	}
 	return "", fmt.Errorf("%s has no upsert", p.d.Driver())
 }
@@ -1147,6 +1285,8 @@ func previewText(v any) string {
 		return clipText(`\x`+hex.EncodeToString(t), 200)
 	case bool:
 		return strconv.FormatBool(t)
+	case time.Time:
+		return t.Format(time.RFC3339Nano)
 	}
 	return fmt.Sprint(v)
 }
@@ -1278,6 +1418,20 @@ func runImport(ctx context.Context, db *sql.DB, plan *importPlan, src *importSou
 		}
 	}
 
+	// SQL Server refuses a number given to a column it numbers itself unless
+	// the session says, for that one table, that it will be given them. A file
+	// that carries the column — an export of the table is one — says so.
+	identityOff := func() error { return nil }
+	if driver == DriverMSSQL && report.Create == nil && plan.writesIdentity(ctx, db) {
+		if _, err := tx.ExecContext(ctx, "SET IDENTITY_INSERT "+plan.rel+" ON"); err != nil {
+			return fmt.Errorf("the file carries the column %s numbers itself, and that could not be allowed: %w", spec.Table, err)
+		}
+		identityOff = func() error {
+			_, err := tx.ExecContext(ctx, "SET IDENTITY_INSERT "+plan.rel+" OFF")
+			return err
+		}
+	}
+
 	run := &importRun{
 		ctx: ctx, tx: tx, plan: plan, strategy: plan.strategy(), report: report,
 		statements: map[int]string{},
@@ -1339,6 +1493,11 @@ func runImport(ctx context.Context, db *sql.DB, plan *importPlan, src *importSou
 		if _, err := db.ExecContext(ctx, "TRUNCATE TABLE "+plan.rel); err != nil {
 			return fmt.Errorf("could not empty the table first: %w", err)
 		}
+	}
+	// It is the session's setting, not the transaction's, and the session goes
+	// back to the pool.
+	if err := identityOff(); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("the import could not be committed, and nothing was imported: %w", err)
@@ -1571,6 +1730,7 @@ func (r *importRun) oneByOne(rows []pendingRow) error {
 			}
 		}
 		wasInsert, err := r.write(row)
+		err = r.plan.rowError(err, row.args)
 		if r.strategy.savepoints {
 			undo := "RELEASE SAVEPOINT jd_import_row"
 			if err != nil {

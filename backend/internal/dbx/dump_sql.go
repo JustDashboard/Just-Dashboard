@@ -3,6 +3,7 @@ package dbx
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"io"
@@ -120,7 +121,11 @@ func dumpBuiltInSQL(ctx context.Context, driver Driver, dsn, outDir string, opts
 	}
 
 	buffered := bufio.NewWriterSize(file, 256<<10)
-	w := &countingWriter{w: buffered}
+	fence, err := newStatementFence()
+	if err != nil {
+		return nil, err
+	}
+	w := &countingWriter{w: buffered, fence: fence}
 	summary, err := writeDumpPlan(ctx, w, q, d, database, plan, opts, start)
 	if err != nil {
 		return nil, err
@@ -163,8 +168,17 @@ type dumpQueryer interface {
 // Server only does with a database option most do not have set, Oracle's
 // driver has no read-only transaction to ask for, and ClickHouse has no
 // transactions; those read as they always did, table by table.
+//
+// Oracle is still given one connection of its own for the whole dump: how
+// DBMS_METADATA writes a definition is a setting of the session that asks.
 func dumpSnapshot(ctx context.Context, db *sql.DB, driver Driver) (dumpQueryer, func(), error) {
 	switch driver {
+	case DriverOracle:
+		conn, err := db.Conn(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		return conn, func() { conn.Close() }, nil
 	case DriverPostgres, DriverMySQL:
 		tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 		if err != nil {
@@ -233,6 +247,9 @@ func writeDumpPlan(ctx context.Context, w *countingWriter, q dumpQueryer, d Dial
 	}
 
 	if structure {
+		for _, stmt := range plan.beforeDrops {
+			writeStatement(w, stmt)
+		}
 		// Every DROP first, dependants before what they depend on, so nothing
 		// is dropped while something else still points at it.
 		for i := len(plan.views) - 1; i >= 0; i-- {
@@ -267,6 +284,9 @@ func writeDumpPlan(ctx context.Context, w *countingWriter, q dumpQueryer, d Dial
 			dumped++
 			continue
 		}
+		for _, stmt := range pt.beforeData {
+			writeStatement(w, stmt)
+		}
 		n, err := dumpTableRows(ctx, w, q, d, pt)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -276,6 +296,13 @@ func writeDumpPlan(ctx context.Context, w *countingWriter, q dumpQueryer, d Dial
 			// The failure is recorded in the file and in the result, so a dump
 			// that is missing something says which something.
 			fmt.Fprintf(w, "\n-- SKIPPED %s: %s\n\n", sqlComment(pt.rel), sqlComment(err.Error()))
+			if len(pt.beforeData) > 0 {
+				// What was switched on for this table's rows is switched off
+				// again, or the next table's cannot be switched on.
+				for _, stmt := range pt.afterData {
+					writeStatement(w, stmt)
+				}
+			}
 			skipped = append(skipped, pt.table.Name)
 			opts.progress("%s: skipped (%v)", pt.rel, err)
 			continue
@@ -338,10 +365,26 @@ func writeDumpPlan(ctx context.Context, w *countingWriter, q dumpQueryer, d Dial
 // package writes itself. Fencing such a statement means it is never lexed at
 // all: a trigger body's semicolons and a function's dollar quotes pass through
 // untouched. To any other client the fences are two comments.
+//
+// What is fenced is text somebody else wrote: a view's body with its comments
+// kept, a row's long value. A line of it reading "-- jd:end" would close the
+// fence early and hand whatever followed to the server as statements of its
+// own. So each dump fences with a word of its own, made when the dump is, and
+// only the closing line that carries that word closes it: nothing that was in
+// the database before the dump began can spell it.
 const (
 	rawStatementBegin = "-- jd:statement"
 	rawStatementEnd   = "-- jd:end"
 )
+
+// newStatementFence makes the word one dump's fences carry.
+func newStatementFence() (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return bytesToHex(b[:]), nil
+}
 
 // dumpStatement is one statement of a dump. raw marks text that came from the
 // catalogue rather than from this package.
@@ -362,7 +405,11 @@ func writeStatement(w io.Writer, s dumpStatement) {
 		return
 	}
 	if s.raw {
-		fmt.Fprintf(w, "%s\n%s;\n%s\n", rawStatementBegin, text, rawStatementEnd)
+		begin, end := rawStatementBegin, rawStatementEnd
+		if f, ok := w.(interface{ statementFence() string }); ok && f.statementFence() != "" {
+			begin, end = begin+" "+f.statementFence(), end+" "+f.statementFence()
+		}
+		fmt.Fprintf(w, "%s\n%s;\n%s\n", begin, text, end)
 		return
 	}
 	fmt.Fprintf(w, "%s;\n", text)
@@ -417,11 +464,7 @@ func dumpTableRows(ctx context.Context, w *countingWriter, q dumpQueryer, d Dial
 		if err != nil {
 			return count, err
 		}
-		parts := make([]string, len(vals))
-		for i, v := range vals {
-			parts[i] = dumpColumnValue(d.Driver(), v, binaryCol[i], typeName[i])
-		}
-		if err := batch.add("(" + strings.Join(parts, ", ") + ")"); err != nil {
+		if err := batch.addRow(vals, binaryCol, typeName); err != nil {
 			return count, err
 		}
 		count++
@@ -440,6 +483,8 @@ type insertBatcher struct {
 	driver Driver
 	prefix string
 	limit  int
+	rel    string
+	cols   []string
 	// overriding is Postgres's permission to write a column the table would
 	// otherwise generate itself.
 	overriding bool
@@ -449,9 +494,29 @@ type insertBatcher struct {
 
 func newInsertBatcher(w io.Writer, driver Driver, rel string, quotedCols []string, rowsPerStatement int) *insertBatcher {
 	return &insertBatcher{
-		w: w, driver: driver, limit: rowsPerStatement,
+		w: w, driver: driver, limit: rowsPerStatement, rel: rel, cols: quotedCols,
 		prefix: "INSERT INTO " + rel + " (" + strings.Join(quotedCols, ", ") + ") ",
 	}
+}
+
+// addRow renders one scanned row and adds it. binary and types describe the
+// columns the values came from.
+func (b *insertBatcher) addRow(vals []any, binary []bool, types []string) error {
+	if b.driver == DriverOracle {
+		if block, ok := oracleLongRow(b.rel, b.cols, vals, binary, types); ok {
+			// It is a statement of its own, and goes where the row was read.
+			if err := b.flush(); err != nil {
+				return err
+			}
+			writeStatement(b.w, rawStmt(block))
+			return nil
+		}
+	}
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		parts[i] = dumpColumnValue(b.driver, v, binary[i], types[i])
+	}
+	return b.add("(" + strings.Join(parts, ", ") + ")")
 }
 
 func (b *insertBatcher) add(tuple string) error {
@@ -489,22 +554,14 @@ func (b *insertBatcher) flush() error {
 }
 
 // dropTableStatement removes a table along with whatever still points at it,
-// in whichever spelling this engine has for that.
-//
-// SQL Server and ClickHouse have no cascading form, which is the other half of
-// why the dump is ordered: there, dropping in reverse dependency order is the
-// only way a table with a child ever goes.
+// where the engine has a spelling for that. Where it has none, dropping in
+// reverse dependency order is the only way a table with a child ever goes,
+// which is the other half of why the dump is ordered.
 func dropTableStatement(driver Driver, rel string) string {
-	switch driver {
-	case DriverPostgres:
+	if driver == DriverPostgres {
 		return "DROP TABLE IF EXISTS " + rel + " CASCADE"
-	case DriverOracle:
-		// Oracle before 23c has no IF EXISTS; the restore treats a failing DROP
-		// as the table not being there.
-		return "DROP TABLE " + rel + " CASCADE CONSTRAINTS"
-	default:
-		return "DROP TABLE IF EXISTS " + rel
 	}
+	return "DROP TABLE IF EXISTS " + rel
 }
 
 // restoreGenericSQL replays a dump this package wrote.
@@ -541,9 +598,13 @@ func restoreGenericSQL(ctx context.Context, driver Driver, dsn, database, path s
 	// transaction: a dump that fails on its fortieth statement leaves the
 	// database as it was, rather than with its tables dropped and a third of
 	// them back. MySQL, Oracle and ClickHouse commit at every DDL statement
-	// whatever they are told, and SQL Server is left as it was for want of a
-	// server to prove the change against.
-	transactional := driver == DriverPostgres || driver == DriverSQLite
+	// whatever they are told.
+	transactional := driver == DriverPostgres || driver == DriverSQLite || driver == DriverMSSQL
+	begin := "BEGIN"
+	if driver == DriverMSSQL {
+		// A bare BEGIN opens a block there, not a transaction.
+		begin = "BEGIN TRANSACTION"
+	}
 	if driver == DriverSQLite {
 		// Foreign keys are switched off for the session, and it has to happen
 		// before the transaction: inside one the pragma is silently ignored.
@@ -554,7 +615,7 @@ func restoreGenericSQL(ctx context.Context, driver Driver, dsn, database, path s
 		}
 	}
 	if transactional {
-		if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
+		if _, err := conn.ExecContext(ctx, begin); err != nil {
 			return "", err
 		}
 	}
@@ -586,6 +647,11 @@ func restoreGenericSQL(ctx context.Context, driver Driver, dsn, database, path s
 				rollback()
 				return "", errScriptSwitches(statement, database)
 			}
+		}
+		if driver == DriverOracle && oracleIsBlock(statement) {
+			// The one statement Oracle wants its terminator on: a block ends
+			// with END; and is refused without it.
+			statement += ";"
 		}
 		if _, err := conn.ExecContext(ctx, statement); err != nil {
 			// A DROP that fails is the table not being there yet, which is the
@@ -690,7 +756,11 @@ type countingWriter struct {
 	w   interface{ Write([]byte) (int, error) }
 	n   int64
 	err error
+	// fence is the word this dump's fenced statements carry.
+	fence string
 }
+
+func (c *countingWriter) statementFence() string { return c.fence }
 
 func (c *countingWriter) Write(p []byte) (int, error) {
 	if c.err != nil {
@@ -814,12 +884,25 @@ func dumpColumnValue(driver Driver, v any, binary bool, typeName string) string 
 	case time.Time:
 		return dumpTimeFor(driver, x, typeName)
 	case float64:
-		if lit, ok := postgresNonFinite(driver, x); ok {
+		if lit, ok := nonFiniteLiteral(driver, x, typeName); ok {
 			return lit
 		}
 	case float32:
-		if lit, ok := postgresNonFinite(driver, float64(x)); ok {
+		if lit, ok := nonFiniteLiteral(driver, float64(x), typeName); ok {
 			return lit
+		}
+	}
+	switch driver {
+	case DriverMSSQL:
+		if lit, ok := mssqlColumnLiteral(v, typeName); ok {
+			return lit
+		}
+	case DriverOracle:
+		// The driver hands a NUMBER back as its exact digits. Quoted, they
+		// are a string the server converts by the session's own idea of a
+		// decimal point.
+		if s, ok := v.(string); ok && strings.EqualFold(typeName, "NUMBER") && oracleNumberText.MatchString(s) {
+			return s
 		}
 	}
 	if driver == DriverClickHouse && clickhouseNumeric(typeName) {
@@ -832,19 +915,33 @@ func dumpColumnValue(driver Driver, v any, binary bool, typeName string) string 
 	return dumpValue(driver, v, binary)
 }
 
-// postgresNonFinite spells the three values no other engine here will take in
-// a VALUES list, and Postgres will, so there they are kept rather than nulled.
-func postgresNonFinite(driver Driver, f float64) (string, bool) {
-	if driver != DriverPostgres {
+// nonFiniteLiteral spells the three values most engines here will not take in
+// a VALUES list. Postgres takes them as text and Oracle has names for them, so
+// there they are kept rather than nulled.
+func nonFiniteLiteral(driver Driver, f float64, typeName string) (string, bool) {
+	var nan, inf string
+	switch driver {
+	case DriverPostgres:
+		nan, inf = "'NaN'", "'Infinity'"
+		if math.IsInf(f, -1) {
+			return "'-Infinity'", true
+		}
+	case DriverOracle:
+		nan, inf = "BINARY_DOUBLE_NAN", "BINARY_DOUBLE_INFINITY"
+		if strings.EqualFold(typeName, "IBFloat") {
+			nan, inf = "BINARY_FLOAT_NAN", "BINARY_FLOAT_INFINITY"
+		}
+		if math.IsInf(f, -1) {
+			return "-" + inf, true
+		}
+	default:
 		return "", false
 	}
 	switch {
 	case math.IsNaN(f):
-		return "'NaN'", true
+		return nan, true
 	case math.IsInf(f, 1):
-		return "'Infinity'", true
-	case math.IsInf(f, -1):
-		return "'-Infinity'", true
+		return inf, true
 	}
 	return "", false
 }
@@ -1068,10 +1165,9 @@ func dumpTimeFor(driver Driver, t time.Time, typeName string) string {
 		// with, which is right for both.
 		return "'" + t.UTC().Format(plain) + "+00'"
 	case DriverOracle:
-		// Oracle will not read an ISO string as a date without being told the
-		// format, and its NLS settings are per session — so the format travels
-		// with the value rather than being assumed.
-		return "TO_TIMESTAMP('" + t.UTC().Format(plain) + "', 'YYYY-MM-DD HH24:MI:SS.FF')"
+		return oracleTimeLiteral(t, typeName)
+	case DriverMSSQL:
+		return mssqlTimeLiteral(t, typeName)
 	case DriverClickHouse:
 		inner := clickhouseInnerType(typeName)
 		switch {
@@ -1269,10 +1365,11 @@ func (s *statementReader) next() (string, error) {
 			}
 			// The comment stood between two tokens, and so must something.
 			s.cur.WriteByte('\n')
-			if strings.TrimSpace("-"+line) != rawStatementBegin {
+			fence, fenced := statementFenceOf("-" + line)
+			if !fenced {
 				continue
 			}
-			raw, err := s.rawStatement()
+			raw, err := s.rawStatement(fence)
 			if err != nil {
 				return "", err
 			}
@@ -1341,12 +1438,30 @@ func (s *statementReader) restOfLine() (string, error) {
 	}
 }
 
+// statementFenceOf reports whether a comment line opens a fenced statement,
+// and the word its closing line has to carry. A dump written before fences
+// carried one has none, and closes on the bare line.
+func statementFenceOf(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if line == rawStatementBegin {
+		return "", true
+	}
+	if word, ok := strings.CutPrefix(line, rawStatementBegin+" "); ok && word != "" && !strings.ContainsAny(word, " \t") {
+		return word, true
+	}
+	return "", false
+}
+
 // rawStatement reads the lines up to the closing fence as one statement.
-func (s *statementReader) rawStatement() (string, error) {
+func (s *statementReader) rawStatement(fence string) (string, error) {
+	closing := rawStatementEnd
+	if fence != "" {
+		closing += " " + fence
+	}
 	var body strings.Builder
 	for {
 		line, err := s.r.ReadString('\n')
-		if strings.TrimSpace(line) == rawStatementEnd {
+		if strings.TrimSpace(line) == closing {
 			break
 		}
 		body.WriteString(line)

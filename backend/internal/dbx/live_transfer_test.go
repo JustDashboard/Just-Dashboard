@@ -236,6 +236,19 @@ func TestLiveBuiltInPostgresDumpIsFaithful(t *testing.T) {
 	if got := queryString(t, restored, `SELECT count(*)::text FROM jd_rich.notes`); got != "3" {
 		t.Errorf("notes after a second restore = %s, want 3", got)
 	}
+
+	// A view is there to be asked for by name beside a table. It used to be
+	// reported as a table that does not exist: views are kept under a key of
+	// their own, and the name asked for was compared with the key.
+	named, err := DumpWith(ctx, DriverPostgres, dsn, t.TempDir(), DumpOptions{
+		builtIn: true, Tables: []string{"jd_rich.people", "jd_rich.calm_people"},
+	})
+	if err != nil {
+		t.Fatalf("a dump that names a view: %v", err)
+	}
+	if text := readDump(t, named.Path); !strings.Contains(text, `CREATE VIEW "jd_rich"."calm_people"`) || strings.Contains(text, "calm_count") {
+		t.Errorf("a dump of a table and a view by name:\n%s", text)
+	}
 }
 
 // TestLivePostgresNativeDumpHonoursItsOptions drives pg_dump itself: the
@@ -645,6 +658,100 @@ func TestLiveBuiltInMySQLDumpStaysInItsDatabase(t *testing.T) {
 		t.Fatalf("RestoreWith: %v\n%s", err, text)
 	}
 	checkMySQLRich(t, db)
+}
+
+// TestLiveBuiltInMySQLDumpLeavesTheDatabaseNextDoorAlone is the same
+// regression from the side of the database that was being damaged. The login
+// is the administrator's, which sees every database on the server — the case
+// in which the old dump wrote all of them into one file — and a database next
+// to the one being dumped holds a table of the same name. Nothing of it may be
+// in the file, and nothing of it may have changed once the file is loaded.
+//
+// It runs against each server an administrator's connection is given for.
+func TestLiveBuiltInMySQLDumpLeavesTheDatabaseNextDoorAlone(t *testing.T) {
+	for _, env := range [][2]string{
+		{"JD_TEST_MYSQL_ADMIN_DSN", "JD_TEST_MYSQL_DSN"},
+		{"JD_TEST_MYSQL8_ADMIN_DSN", "JD_TEST_MYSQL8_DSN"},
+	} {
+		t.Run(env[1], func(t *testing.T) {
+			admin := os.Getenv(env[0])
+			own, err := ParseDSN(DriverMySQL, os.Getenv(env[1]))
+			if admin == "" || err != nil || own.Database == "" {
+				t.Skipf("set %s and %s to run this", env[0], env[1])
+			}
+			// The administrator's connection, pointed at this run's own database.
+			dsn := dsnForDatabase(DriverMySQL, admin, own.Database)
+			const pointed = "JD_TEST_MYSQL_ROOT_OWN_DSN"
+			t.Setenv(pointed, dsn)
+			db := liveSQL(t, DriverMySQL, pointed, dsn)
+			ctx := context.Background()
+			seedMySQLRich(t, db)
+
+			next := scratchDatabase(t, DriverMySQL, dsn, "nextdoor")
+			nextDB, err := OpenDatabase(ctx, DriverMySQL, dsn, next)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer nextDB.Close()
+			execAll(t, nextDB,
+				`CREATE TABLE jd_dx_parent (id INT PRIMARY KEY, name VARCHAR(50))`,
+				`INSERT INTO jd_dx_parent VALUES (7, 'not yours')`,
+				`CREATE TABLE jd_dx_nextdoor_only (id INT PRIMARY KEY)`,
+			)
+			var visible int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT TABLE_SCHEMA) FROM information_schema.TABLES
+				WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys') AND TABLE_SCHEMA <> DATABASE()`).Scan(&visible); err != nil {
+				t.Fatal(err)
+			}
+			if visible == 0 {
+				t.Fatal("this login sees no database but its own, so the test proves nothing")
+			}
+
+			res, err := DumpWith(ctx, DriverMySQL, dsn, t.TempDir(), DumpOptions{builtIn: true})
+			if err != nil {
+				t.Fatalf("DumpWith: %v", err)
+			}
+			text := readDump(t, res.Path)
+			for _, foreign := range []string{next, "jd_dx_nextdoor_only", "not yours"} {
+				if strings.Contains(text, foreign) {
+					t.Errorf("the dump of %s holds %q", own.Database, foreign)
+				}
+			}
+			// No statement in it names a database at all, so each can only
+			// land in the one the session is in.
+			rows, err := db.QueryContext(ctx, `SELECT SCHEMA_NAME FROM information_schema.SCHEMATA`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var schema string
+				if err := rows.Scan(&schema); err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(text, "`"+schema+"`.") {
+					t.Errorf("the dump names database %s in a statement", schema)
+				}
+			}
+			rows.Close()
+			t.Logf("%d other databases are visible to this login and absent from the dump of %s", visible, own.Database)
+
+			execAll(t, db, `DELETE FROM jd_dx_child`, `DELETE FROM jd_dx_parent`)
+			if _, err := RestoreWith(ctx, DriverMySQL, dsn, res.Path, RestoreOptions{}); err != nil {
+				t.Fatalf("RestoreWith: %v", err)
+			}
+			checkMySQLRich(t, db)
+			for query, want := range map[string]string{
+				`SELECT name FROM jd_dx_parent WHERE id = 7`:                                     "not yours",
+				`SELECT COUNT(*) FROM jd_dx_parent`:                                              "1",
+				`SELECT COUNT(*) FROM jd_dx_nextdoor_only`:                                       "0",
+				`SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`: "2",
+			} {
+				if got := queryString(t, nextDB, query); got != want {
+					t.Errorf("in the database next door, %s = %q, want %q", query, got, want)
+				}
+			}
+		})
+	}
 }
 
 // TestLiveMySQLNativeDump drives mysqldump, where it is installed: a narrowed,
@@ -1508,4 +1615,48 @@ func TestLiveMySQLRestoreIntoANewDatabase(t *testing.T) {
 	}
 	defer copied.Close()
 	checkMySQLRich(t, copied)
+}
+
+// TestLiveImportLeavesOutWhatTheServerComputes imports a file that carries a
+// generated column — an export of the table does — into each engine that
+// lists such a column among a table's own. The column is left out and the
+// report says so; matched to it, every row would have been refused.
+func TestLiveImportLeavesOutWhatTheServerComputes(t *testing.T) {
+	for _, c := range []struct {
+		driver        Driver
+		env, fallback string
+		create        string
+	}{
+		{DriverPostgres, "JD_TEST_POSTGRES_DSN", "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable",
+			`CREATE TABLE jd_gen (id integer PRIMARY KEY, net numeric NOT NULL, gross numeric GENERATED ALWAYS AS (net * 2) STORED)`},
+		{DriverMySQL, "JD_TEST_MYSQL_DSN", "jdtest:jdtest@tcp(127.0.0.1:3306)/jdtest",
+			`CREATE TABLE jd_gen (id INT PRIMARY KEY, net DECIMAL(10,2) NOT NULL, gross DECIMAL(12,2) AS (net * 2) STORED)`},
+		{DriverMySQL, "JD_TEST_MYSQL8_DSN", "",
+			`CREATE TABLE jd_gen (id INT PRIMARY KEY, net DECIMAL(10,2) NOT NULL, gross DECIMAL(12,2) AS (net * 2) STORED)`},
+		{DriverClickHouse, "JD_TEST_CLICKHOUSE_DSN", "clickhouse://default@127.0.0.1:9000/default",
+			`CREATE TABLE jd_gen (id Int32, net Float64, gross Float64 MATERIALIZED net * 2) ENGINE = MergeTree ORDER BY id`},
+	} {
+		t.Run(c.env, func(t *testing.T) {
+			if c.fallback == "" && os.Getenv(c.env) == "" {
+				t.Skipf("set %s to run this", c.env)
+			}
+			db := liveSQL(t, c.driver, c.env, c.fallback)
+			ctx := context.Background()
+			db.Exec(`DROP TABLE IF EXISTS jd_gen`)
+			execAll(t, db, c.create)
+			t.Cleanup(func() { db.Exec(`DROP TABLE IF EXISTS jd_gen`) })
+
+			report, err := Import(ctx, db, c.driver, strings.NewReader("id,net,gross\n1,10,999\n2,20,999\n"), ImportSpec{Table: "jd_gen"})
+			if err != nil || report.Inserted != 2 {
+				t.Fatalf("Import: %+v, %v", report, err)
+			}
+			if len(report.Warnings) != 1 || !strings.Contains(report.Warnings[0], "gross is filled in by the server") {
+				t.Errorf("warnings = %q", report.Warnings)
+			}
+			var gross float64
+			if err := db.QueryRowContext(ctx, `SELECT gross FROM jd_gen WHERE id = 2`).Scan(&gross); err != nil || gross != 40 {
+				t.Errorf("gross = %v (%v), want what the table computes", gross, err)
+			}
+		})
+	}
 }

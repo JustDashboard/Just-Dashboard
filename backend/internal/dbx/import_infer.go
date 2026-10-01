@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -422,10 +423,37 @@ func bindValue(driver Driver, v importValue, family, typeName string) (any, erro
 		if b, ok := booleanValue(v.text); ok {
 			return boolForDriver(driver, b, family), nil
 		}
+	case kindInteger, kindDecimal:
+		// A column of true and false is a column of numbers on the engines
+		// with no boolean type: Oracle's is NUMBER(1), and that is what a
+		// table made from such a file is given there.
+		if driver != DriverClickHouse {
+			switch strings.ToLower(strings.TrimSpace(v.text)) {
+			case "true":
+				return int64(1), nil
+			case "false":
+				return int64(0), nil
+			}
+		}
 	case "binary":
 		if hexBytesText.MatchString(v.text) {
 			if b, err := hex.DecodeString(v.text[2:]); err == nil {
 				return b, nil
+			}
+		}
+		if driver == DriverMSSQL {
+			// The others take a text into a binary column as its bytes. SQL
+			// Server would take it as the bytes of its UTF-16 form, which is
+			// nobody's intention.
+			return nil, fmt.Errorf("%q is not bytes; a binary column takes \\x followed by hex digits", clipText(v.text, 40))
+		}
+	case kindDate, kindDatetime:
+		if driver == DriverOracle {
+			// Oracle reads a text as a date by the session's own format, which
+			// is not ISO's. A value in an ISO form is bound as the instant it
+			// names; anything else is left for the session to read its way.
+			if t, ok := isoTime(v.text); ok {
+				return t, nil
 			}
 		}
 	}
@@ -454,6 +482,53 @@ func bindValue(driver Driver, v importValue, family, typeName string) (any, erro
 		}
 	}
 	return v.text, nil
+}
+
+// isoTime reads a date or an instant in the ISO forms a file is likely to
+// carry: a date alone, or a date and a time joined by T or a space, to the
+// minute or the second or a fraction of one, with or without a zone. One
+// without a zone is the wall-clock time it says.
+func isoTime(text string) (time.Time, bool) {
+	text = strings.TrimSpace(text)
+	if dateText.MatchString(text) {
+		t, err := time.Parse("2006-01-02", text)
+		return t, err == nil
+	}
+	if !datetimeText.MatchString(text) {
+		return time.Time{}, false
+	}
+	// One spelling of what the pattern admits several of.
+	text = strings.Replace(text, " ", "T", 1)
+	text = strings.ReplaceAll(text, " ", "")
+	zone := zonedText.FindString(text)
+	clock := strings.TrimSuffix(text, zone)
+	if strings.Count(clock, ":") == 1 {
+		clock += ":00"
+	}
+	switch {
+	case zone == "" || zone == "Z":
+		zone = "Z"
+	case len(zone) == 3:
+		zone += ":00"
+	case len(zone) == 5:
+		zone = zone[:3] + ":" + zone[3:]
+	}
+	t, err := time.Parse(time.RFC3339Nano, clock+zone)
+	return t, err == nil
+}
+
+// keyColumnType is the type a new table's key column is given where the one
+// inferred for its values cannot be a key: SQL Server and MySQL index a text
+// of bounded length only.
+func keyColumnType(driver Driver, inferred string) string {
+	switch {
+	case driver == DriverMSSQL && strings.EqualFold(inferred, "nvarchar(max)"):
+		// 900 bytes is the most a key may be, and a character is two.
+		return "nvarchar(450)"
+	case driver == DriverMySQL && strings.EqualFold(inferred, "text"):
+		return "varchar(255)"
+	}
+	return inferred
 }
 
 // boolForDriver is true and false as the engine's column takes them: the

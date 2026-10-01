@@ -68,8 +68,12 @@ accounts retain partial results. Full table details and mutation preconditions u
   started, a rejected filter can only arrive as JSON inside a file named `.csv`. `ExportTable` remains
   as the unfiltered form. The formats are `csv`, `tsv`, `json`, `ndjson` and `sql` (INSERT statements
   in the source dialect, through the dump's literal renderer and from the values as the driver scanned
-  them); `columns` is a projection. A binary value goes out whole, not as the grid's preview. The row
-  cap is `limit`, clamped to `MaxExportRows`, default `DefaultExportRows`.
+  them); `columns` is a projection. A binary value goes out whole, not as the grid's preview. Two SQL
+  Server types are written as what they are rather than as the driver hands them over
+  (`exportValueOf`): a `uniqueidentifier` as its identifier, not the sixteen stored bytes, and a `time`
+  as a time of day, not that time on the first day of the year one — in either form the column would
+  not take the value back. The row cap is `limit`, clamped to `MaxExportRows`, default
+  `DefaultExportRows`.
 - **An export says how it ended, three ways, because no one way reaches every reader**
   (`handlers_db_transfer.go`, `exportStream`). A response that ended properly declares two trailers,
   `X-JD-Export-Status` (`complete` or `truncated`) and `X-JD-Export-Rows`. A JSON or NDJSON file that
@@ -100,7 +104,23 @@ accounts retain partial results. Full table details and mutation preconditions u
   TRUNCATE on their own and a failed import left the table empty; it is destructive, checked from the
   options in the handler like the query runner's SQL. `upsert` is each engine's own form on the primary
   key or a named unique index. `createTable` infers a type per column and creates the table inside the
-  transaction where DDL is transactional, and drops it by hand on failure where it is not. ClickHouse
+  transaction where DDL is transactional, and drops it by hand on failure where it is not; a column
+  made the key is given a type the engine will index (`nvarchar(450)` on SQL Server, `varchar(255)` on
+  MySQL), since the type inferred for text is not one. Where columns are matched by name, a column the
+  server fills in itself — generated, computed, virtual, a rowversion (`computedColumns`) — is left out
+  and the report says so: an export of the table carries it, and matched to it every row was refused.
+  **SQL Server** (`import_mssql.go`) ends the batch *and the transaction* on a text that does not
+  convert, so "skip bad rows" lost every row before the bad one and failed at the commit. There each
+  value is written through `TRY_CONVERT` to the column's own type, and a row with a value that came
+  back NULL is refused by a `RAISERROR` placed in front of the statement, which ends nothing; the rows
+  of a batch are checked together and written together or not at all. `datetime` and `smalldatetime`
+  are read through `datetime2`, because on their own they read `2026-03-04` as the third of April for
+  a login whose language puts the day first. A binary column is given `CONVERT(varbinary(max), …)`,
+  since a NULL arrives as a text; a file that carries the identity column has `IDENTITY_INSERT`
+  switched on for the transaction. The inline route gets the same check from the column types it now
+  looks up. **Oracle** reads a text as a date by the session's NLS format, so a value in an ISO form is
+  bound as the instant it names (`isoTime`), and `true`/`false` go into a numeric column as 1 and 0 —
+  `NUMBER(1)` is what a column of them is created as there. ClickHouse
   has no transaction and its driver cannot continue past a refused row, so `atomic` is false there and
   a refused row ends the import before anything is sent. Mongo's upload inserts in batches; its
   `replace` stages the documents and swaps them in with `$out`, which keeps the collection's indexes and
@@ -166,11 +186,40 @@ accounts retain partial results. Full table details and mutation preconditions u
   objects are left to `CREATE EXTENSION`. MySQL is scoped to `DATABASE()` — it listed every database the
   account could see, and the restore began by dropping their tables — written unqualified, with
   `FOREIGN_KEY_CHECKS` off and the session zone pinned. SQLite replays `sqlite_master`, triggers after
-  the rows. Catalogue text is fenced (`-- jd:statement` … `-- jd:end`) so the reader never lexes a
-  trigger body. The read is one snapshot where the engine has one, and the replay one transaction where
-  DDL can be rolled back (Postgres, SQLite): a dump that fails on its fortieth statement changes nothing.
-  A restore streams the file; it used to read it whole. SQL Server and Oracle keep the dialect-driven
-  plan with indexes added, and views and sequences where the login can read them.
+  the rows. Catalogue text is fenced (`-- jd:statement <word>` … `-- jd:end <word>`) so the reader
+  never lexes a trigger body. The word is made per dump (`newStatementFence`) and only the closing line
+  that carries it closes the fence: what is fenced is somebody else's text — a view's body with its
+  comments kept, a row's long value — and a line of it reading `-- jd:end` used to end the statement
+  there and hand the lines after it to the server as statements of their own. The read is one snapshot
+  where the engine has one, and the replay one transaction where DDL can be rolled back (Postgres,
+  SQLite, SQL Server): a dump that fails on its fortieth statement changes nothing. A restore streams
+  the file; it used to read it whole.
+- **SQL Server and Oracle are dumped from their own catalogues too** (`dump_sql_mssql.go`,
+  `dump_sql_oracle.go`). Both were written from the dialect's column list, which does not say that a
+  column numbers itself, is computed, or is a rowversion: a SQL Server restore gave back tables that no
+  longer handed out an id and failed outright on a rowversion, and an Oracle one failed on the index
+  behind every primary key. SQL Server is read from `sys`, objects the server ships left out: identity,
+  computed and rowversion columns, named defaults, checks, unique constraints, filtered and
+  included-column indexes, schemas other than `dbo`, sequences, and views ordered by
+  `sql_expression_dependencies`. Rows go in under `SET IDENTITY_INSERT` and the counter is reseeded to
+  where it stood, which the rows alone do not say. The engine has no cascading drop, so every foreign
+  key that touches a dumped table — from a table the dump leaves alone as well — is taken off before
+  the drops and put back after the rows. Nothing in the file names the database, which is what lets it
+  load into one made a moment ago. Values are written for the column's type (`mssqlTimeLiteral`: the
+  ISO form with a `T`, the one spelling read the same under every language setting; `datetime` takes
+  three digits of a second and no more). Oracle's definitions are `DBMS_METADATA`'s, with storage
+  clauses left out, asked for on one connection held for the whole dump because how a definition is
+  written is a setting of the session. A table that is `GENERATED ALWAYS AS IDENTITY` refuses a number
+  given to it and has no "this once", so it is altered to `BY DEFAULT` for its rows and back after
+  them, at the counter's position. A row with a value too long for a literal — four thousand bytes;
+  bytes past two thousand could not be written at all — is a PL/SQL block that builds the value in
+  pieces (`oracleLongRow`); the hex goes through a variable because `HEXTORAW` of a long literal is
+  evaluated when the block is compiled and takes seconds a piece. Tables are dropped `PURGE`, or each
+  restore leaves a copy of what it replaced in the recycle bin against the same quota. A dump is of one
+  schema, the session's or the one named; a schema of the server's own (`oracle_maintained`) is refused,
+  which is what an administrator's login is in unless told otherwise. The dialect-driven plan from the
+  standard catalogue views remains only as the fallback for a server that speaks Postgres's protocol
+  without keeping its catalogue.
 - **Every tool is started through `hostexec` with an argv** (`dump_exec.go`), as a process group, so
   stopping a job stops `pg_restore`'s workers and not only the process that forked them.
   `TestNothingHereStartsAProcessOfItsOwn` keeps `os/exec` out of the package. One thing is not taken
@@ -225,6 +274,11 @@ accounts retain partial results. Full table details and mutation preconditions u
   reporting four times the real size, Postgres's `now()` being the *transaction* timestamp and so
   reporting a negative session age. Oracle has an optional live fixture using `JD_TEST_ORACLE_DSN`;
   without a configured server, its unit coverage does not establish live-engine compatibility.
+  A dump's restore replaces every table in the database it is pointed at, so the transfer tests for
+  SQL Server and Oracle do not run where the connection string lands: SQL Server's make a database of
+  their own (`JD_TEST_MSSQL_DSN` names the server; the string itself lands in master) and Oracle's make
+  a user (`JD_TEST_ORACLE_ADMIN_DSN`), and the shared round trips skip in a database that holds tables
+  they did not make.
 
 - **The section opens on every database at once.** `GET /databases/fleet` dials every saved
   connection concurrently (six at a time, twelve seconds each) and hands back the row's facts with

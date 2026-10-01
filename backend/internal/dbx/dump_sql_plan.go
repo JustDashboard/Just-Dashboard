@@ -28,6 +28,9 @@ type dumpPlan struct {
 	// to be set for the rest to mean what it meant here.
 	session    []dumpStatement
 	sessionEnd []dumpStatement
+	// beforeDrops is what has to go before anything can be dropped: on an
+	// engine with no cascading drop, the foreign keys that point at the tables.
+	beforeDrops []dumpStatement
 	// before is structure the tables need to exist first: schemas, extensions,
 	// types.
 	before    []dumpStatement
@@ -57,6 +60,11 @@ type dumpObject struct {
 	// refs are the names this one's definition mentions, for ordering.
 	refs []string
 	name string
+	// schema and label are what the object is called, where name is a key
+	// made for ordering — two views in different schemas may share a name —
+	// rather than the name somebody would ask for it by.
+	schema string
+	label  string
 }
 
 // dumpTable is one table with everything the dump needs about it read once.
@@ -74,8 +82,11 @@ type dumpTable struct {
 	// overriding is set when the table generates a column the dump has to
 	// write.
 	overriding bool
-	// afterData follows this table's rows.
-	afterData []dumpStatement
+	// beforeData goes in front of this table's rows and afterData follows
+	// them: what lets a column the table numbers itself be written, and what
+	// puts its counter back where it was.
+	beforeData []dumpStatement
+	afterData  []dumpStatement
 	// parents are the tables this one has to be created after, beyond the
 	// ones its foreign keys already name.
 	parents []string
@@ -217,6 +228,10 @@ func planDump(ctx context.Context, q dumpQueryer, db *sql.DB, d Dialect, databas
 		plan, err = planSQLiteDump(ctx, q, sel)
 	case DriverClickHouse:
 		plan, err = planClickHouseDump(ctx, q, database, sel)
+	case DriverMSSQL:
+		plan, err = planMSSQLDump(ctx, q, sel)
+	case DriverOracle:
+		plan, err = planOracleDump(ctx, q, resolveDumpSchema(ctx, db, DriverOracle, database), sel)
 	default:
 		plan, err = planGenericDump(ctx, db, d, database, sel)
 	}
@@ -231,7 +246,11 @@ func planDump(ctx context.Context, q dumpQueryer, db *sql.DB, d Dialect, databas
 		}
 		for _, objects := range [][]dumpObject{plan.views, plan.sequences} {
 			for _, o := range objects {
-				if o.name == ref.table {
+				name := o.name
+				if o.label != "" {
+					name = o.label
+				}
+				if name == ref.table && (ref.schema == "" || o.schema == "" || ref.schema == o.schema) {
 					return true
 				}
 			}
@@ -247,12 +266,12 @@ func planDump(ctx context.Context, q dumpQueryer, db *sql.DB, d Dialect, databas
 	return plan, nil
 }
 
-// planGenericDump is the plan for the engines whose catalogue this package
-// reads only through the dialect: SQL Server and Oracle. Tables come with the
-// keys their generated DDL carries; indexes are added once the rows are in;
-// views and sequences are read where the engine exposes their text, and a
-// catalogue the login may not read costs the dump those objects and not the
-// tables.
+// planGenericDump is the plan read through the dialect alone, from the
+// standard catalogue views. It is what a server that speaks an engine's
+// protocol without keeping that engine's catalogue is dumped with: tables with
+// the keys their generated DDL carries, and the indexes added once the rows
+// are in. A view's definition is not something those views give back whole, so
+// views are named in the file as left out.
 func planGenericDump(ctx context.Context, db *sql.DB, d Dialect, database string, sel dumpSelection) (*dumpPlan, error) {
 	driver := d.Driver()
 	schema := resolveDumpSchema(ctx, db, driver, database)
@@ -273,14 +292,12 @@ func planGenericDump(ctx context.Context, db *sql.DB, d Dialect, database string
 	// `jd_users`, which is exactly the case, and the restore failed on the
 	// second statement with a constraint error that described the symptom and
 	// not the cause.
-	viewsWanted := []Table{}
 	for _, t := range tables {
 		if isViewType(t.Type) {
 			// A view has no rows of its own and INSERTing into one fails on
-			// most engines. Its definition is written after the tables it
-			// reads.
+			// most engines.
 			if sel.wants(t.Schema, t.Name) && (!sel.narrowed() || sel.named(t.Schema, t.Name)) {
-				viewsWanted = append(viewsWanted, t)
+				plan.skipped = append(plan.skipped, fmt.Sprintf("view %s: its definition is not in the standard catalogue views", t.Name))
 			}
 			continue
 		}
@@ -305,9 +322,7 @@ func planGenericDump(ctx context.Context, db *sql.DB, d Dialect, database string
 			table: t, detail: detail, rel: rel,
 			create: rawStmt(ddl), drop: stmt(dropTableStatement(driver, rel)),
 		})
-		// Oracle's own DDL text already carries the table's indexes only when
-		// they back a constraint; the rest, on both engines, are separate
-		// objects the table's definition never mentions.
+		// An index is a separate object the table's definition never mentions.
 		for _, ix := range detail.Indexes {
 			if ix.Primary || len(ix.Columns) == 0 {
 				continue
@@ -318,9 +333,6 @@ func planGenericDump(ctx context.Context, db *sql.DB, d Dialect, database string
 		}
 	}
 	plan.tables = orderByDependency(plan.tables)
-
-	plan.sequences = genericSequences(ctx, db, d, schema, plan)
-	plan.views = orderObjects(genericViews(ctx, db, d, viewsWanted, plan))
 	return plan, nil
 }
 
@@ -350,121 +362,13 @@ func createIndexStatement(d Dialect, rel string, ix Index) (string, error) {
 	return fmt.Sprintf("CREATE %sINDEX %s ON %s (%s)", unique, name, rel, strings.Join(cols, ", ")), nil
 }
 
-// genericViews reads each view's definition where the engine keeps its text.
-func genericViews(ctx context.Context, db *sql.DB, d Dialect, views []Table, plan *dumpPlan) []dumpObject {
-	out := []dumpObject{}
-	for _, v := range views {
-		rel, err := qualify(d, v.Schema, v.Name)
-		if err != nil {
-			plan.skipped = append(plan.skipped, fmt.Sprintf("view %s: %s", v.Name, err.Error()))
-			continue
-		}
-		var (
-			create string
-			drop   string
-		)
-		switch d.Driver() {
-		case DriverMSSQL:
-			// The stored text is the whole CREATE VIEW statement as written.
-			var text sql.NullString
-			err = db.QueryRowContext(ctx,
-				`SELECT OBJECT_DEFINITION(OBJECT_ID(@p1))`, v.Schema+"."+v.Name).Scan(&text)
-			create, drop = text.String, "DROP VIEW IF EXISTS "+rel
-		case DriverOracle:
-			// Oracle keeps only the query, so the statement is put back
-			// around it.
-			var text sql.NullString
-			err = db.QueryRowContext(ctx,
-				`SELECT text FROM all_views WHERE owner = NVL(:1, SYS_CONTEXT('USERENV','CURRENT_SCHEMA')) AND view_name = :2`,
-				oracleSchemaArg(v.Schema), v.Name).Scan(&text)
-			if text.String != "" {
-				create = "CREATE OR REPLACE VIEW " + rel + " AS " + text.String
-			}
-			drop = "DROP VIEW " + rel
-		default:
-			err = fmt.Errorf("this engine does not expose a view's definition")
-		}
-		if err != nil || strings.TrimSpace(create) == "" {
-			reason := "its definition is not readable by this login"
-			if err != nil {
-				reason = err.Error()
-			}
-			plan.skipped = append(plan.skipped, fmt.Sprintf("view %s: %s", v.Name, reason))
-			continue
-		}
-		out = append(out, dumpObject{
-			rel: rel, name: v.Name, drop: stmt(drop), create: rawStmt(create),
-		})
-	}
-	nameObjectRefs(out)
-	return out
-}
-
-// genericSequences reads the sequences SQL Server and Oracle keep as objects
-// of their own. A catalogue the login cannot read is reported and skipped.
-func genericSequences(ctx context.Context, db *sql.DB, d Dialect, schema string, plan *dumpPlan) []dumpObject {
-	var query string
-	args := []any{}
-	switch d.Driver() {
-	case DriverMSSQL:
-		query = `SELECT SCHEMA_NAME(schema_id), name,
-		                CAST(start_value AS varchar(40)), CAST(increment AS varchar(40)),
-		                CAST(current_value AS varchar(40))
-		         FROM sys.sequences ORDER BY 1, 2`
-	case DriverOracle:
-		query = `SELECT sequence_owner, sequence_name, TO_CHAR(min_value), TO_CHAR(increment_by), TO_CHAR(last_number)
-		         FROM all_sequences
-		         WHERE sequence_owner = NVL(:1, SYS_CONTEXT('USERENV','CURRENT_SCHEMA'))
-		         ORDER BY 1, 2`
-		args = append(args, oracleSchemaArg(schema))
-	default:
-		return nil
-	}
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		plan.skipped = append(plan.skipped, "sequences: "+err.Error())
-		return nil
-	}
-	defer rows.Close()
-	out := []dumpObject{}
-	for rows.Next() {
-		var owner, name, start, increment, current string
-		if err := rows.Scan(&owner, &name, &start, &increment, &current); err != nil {
-			plan.skipped = append(plan.skipped, "sequences: "+err.Error())
-			return out
-		}
-		if !numberText.MatchString(start) || !numberText.MatchString(increment) || !numberText.MatchString(current) {
-			continue
-		}
-		rel, err := qualify(d, owner, name)
-		if err != nil {
-			continue
-		}
-		obj := dumpObject{rel: rel, name: name}
-		if d.Driver() == DriverMSSQL {
-			obj.drop = stmt("DROP SEQUENCE IF EXISTS " + rel)
-			// Created at where it had got to, so the next value drawn is one
-			// the old database had not yet handed out.
-			obj.create = stmt(fmt.Sprintf("CREATE SEQUENCE %s START WITH %s INCREMENT BY %s", rel, current, increment))
-		} else {
-			obj.drop = stmt("DROP SEQUENCE " + rel)
-			obj.create = stmt(fmt.Sprintf("CREATE SEQUENCE %s START WITH %s INCREMENT BY %s", rel, current, increment))
-		}
-		out = append(out, obj)
-	}
-	if err := rows.Err(); err != nil {
-		plan.skipped = append(plan.skipped, "sequences: "+err.Error())
-	}
-	return out
-}
-
 // resolveDumpSchema decides what to pass as the catalogue's "schema" for a dump
 // of a whole database.
 //
 // The two words mean different things per engine and the difference is not
-// cosmetic. On SQL Server the database is chosen by the connection string and
-// an empty schema means every schema in it — which is what a database dump
-// should contain.
+// cosmetic. Where the database is chosen by the connection string an empty
+// schema means every schema in it — which is what a database dump should
+// contain.
 //
 // Oracle is the one that cannot be decided statically, and getting it wrong is
 // silent. Its schemas are users, but the name in a connection string is the

@@ -607,7 +607,7 @@ func pgViews(ctx context.Context, q dumpQueryer, plan *dumpPlan, relations []pgR
 		// one, and the ordering must not confuse them.
 		key := fmt.Sprintf("%d", r.oid)
 		names[r.oid] = key
-		obj := dumpObject{rel: r.rel, name: key}
+		obj := dumpObject{rel: r.rel, name: key, schema: r.schema, label: r.name}
 		if r.kind == "m" {
 			obj.drop = stmt("DROP MATERIALIZED VIEW IF EXISTS " + r.rel + " CASCADE")
 			obj.create = rawStmt("CREATE MATERIALIZED VIEW " + r.rel + " AS\n" + def + "\nWITH NO DATA")

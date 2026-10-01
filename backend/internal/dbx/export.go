@@ -320,6 +320,34 @@ func exportValue(v any) any {
 	return normaliseValue(v)
 }
 
+// exportValueOf is exportValue for a value whose column type is known, for
+// the two SQL Server types its driver hands back as something they are not.
+//
+// A uniqueidentifier arrives as sixteen bytes in the order the server stores
+// them, which written as bytes is neither the identifier anybody knows it by
+// nor anything the column takes back. A time of day arrives as that time on
+// the first of January of the year one.
+func exportValueOf(v any, typeName string) any {
+	switch x := v.(type) {
+	case []byte:
+		if typeName == "UNIQUEIDENTIFIER" && len(x) == 16 {
+			return mssqlGUID(x)
+		}
+	case time.Time:
+		if typeName == "TIME" {
+			return x.Format("15:04:05.999999999")
+		}
+	}
+	return exportValue(v)
+}
+
+// mssqlGUID spells a uniqueidentifier from its stored bytes. The first three
+// groups are kept low byte first; the rest are kept as written.
+func mssqlGUID(b []byte) string {
+	return fmt.Sprintf("%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+		b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15])
+}
+
 // exportEncoder writes one format. begin writes whatever precedes the first
 // row, row one row of raw scanned values, and finish whatever follows the last
 // — including, where the format can carry one, the line that says the file is
@@ -337,7 +365,7 @@ func newExportEncoder(opts ExportOptions, w io.Writer, cols []string, binary []b
 		if opts.Format == ExportTSV {
 			cw.Comma = '\t'
 		}
-		return &delimitedEncoder{w: cw, cols: cols, rec: make([]string, len(cols))}, nil
+		return &delimitedEncoder{w: cw, cols: cols, types: types, rec: make([]string, len(cols))}, nil
 	case ExportJSON, ExportNDJSON:
 		keys := make([][]byte, len(cols))
 		for i, c := range cols {
@@ -347,7 +375,7 @@ func newExportEncoder(opts ExportOptions, w io.Writer, cols []string, binary []b
 			}
 			keys[i] = k
 		}
-		return &jsonEncoder{w: w, keys: keys, lines: opts.Format == ExportNDJSON}, nil
+		return &jsonEncoder{w: w, keys: keys, types: types, lines: opts.Format == ExportNDJSON}, nil
 	case ExportSQL:
 		return newSQLEncoder(opts, w, cols, binary, types)
 	}
@@ -358,16 +386,17 @@ func newExportEncoder(opts ExportOptions, w io.Writer, cols []string, binary []b
 // reader would not take for a row, so how the export ended travels beside the
 // file rather than in it.
 type delimitedEncoder struct {
-	w    *csv.Writer
-	cols []string
-	rec  []string
+	w     *csv.Writer
+	cols  []string
+	types []string
+	rec   []string
 }
 
 func (e *delimitedEncoder) begin() error { return e.w.Write(e.cols) }
 
 func (e *delimitedEncoder) row(vals []any) error {
 	for i, v := range vals {
-		e.rec[i] = csvCell(exportValue(v))
+		e.rec[i] = csvCell(exportValueOf(v, e.types[i]))
 	}
 	return e.w.Write(e.rec)
 }
@@ -412,6 +441,7 @@ func csvCell(v any) string {
 type jsonEncoder struct {
 	w     io.Writer
 	keys  [][]byte
+	types []string
 	lines bool
 	buf   bytes.Buffer
 	wrote bool
@@ -434,7 +464,7 @@ func (e *jsonEncoder) row(vals []any) error {
 		}
 		e.buf.Write(e.keys[i])
 		e.buf.WriteByte(':')
-		b, err := json.Marshal(exportValue(v))
+		b, err := json.Marshal(exportValueOf(v, e.types[i]))
 		if err != nil {
 			return err
 		}
@@ -539,11 +569,7 @@ func (e *sqlEncoder) begin() error {
 }
 
 func (e *sqlEncoder) row(vals []any) error {
-	parts := make([]string, len(vals))
-	for i, v := range vals {
-		parts[i] = dumpColumnValue(e.driver, v, e.binary[i], e.types[i])
-	}
-	return e.batch.add("(" + strings.Join(parts, ", ") + ")")
+	return e.batch.addRow(vals, e.binary, e.types)
 }
 
 func (e *sqlEncoder) finish(status ExportStatus, rows int, reason string) error {
