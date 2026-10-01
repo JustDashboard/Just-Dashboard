@@ -91,6 +91,15 @@ set the POST routes use. That socket is the one place a phrase may arrive as a q
 (`RequireTypedConfirmationWS`) — a browser cannot set a header on a WS handshake, and `wsx`'s origin
 check replaces what the header guarded.
 
+`POST /databases/{id}/maintenance` is `service.control` and names its action in the body. An action
+that locks a table against the application while it runs, or can lose rows (`vacuum_full`, `reindex`,
+MySQL `optimize` and `repair`, SQLite `vacuum`), asks for `destructive` and spends `destrLim` in the
+handler, before anything is dialled: those are statements the SQL console refuses the same account.
+Which actions those are is a property of the closed action list (`dbx.MaintenanceAction.NeedsDestructive`),
+published to the page as `requires`. The role routes check content too: an alter is refused for an
+attribute the engine cannot change (`dbx.CheckRoleRequest`), and for locking out or demoting the
+account the connection itself signs in with.
+
 Two deployment reads open to every account answer more for an administrator. A webhook trigger list
 (`GET /deploy/{id}/environments/{env}/triggers`) carries each trigger's delivery summary
 (`lastDelivery`, `recent`) only for a session holding `system.admin`, because the delivery log it

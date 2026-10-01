@@ -165,39 +165,144 @@ accounts retain partial results. Full table details and mutation preconditions u
   implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
   Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)
   and Redis (`ACL LIST`/`SETUSER`/`DELUSER`, saved where an aclfile exists) mapped onto the same
-  `Role` shape. Routes under `/databases/{id}/server/`: `roles` (list on the read surface; create,
-  alter and `/{name}/grant` under `system.admin`; drop under `s.destructive`, refused for the
-  account the connection signs in with), `databases` (create, and `/connect` to save a sibling
-  connection to another database on the same server under the same credentials, probed before it
-  is stored), `extensions` (list; create and drop for Postgres, listed only for MySQL's plugins)
-  and `settings` (a curated read of `pg_settings`, `global_variables`, `system.server_settings`,
-  `sys.configurations`; Mongo's `serverStatus` and Redis's `INFO` flattened to the same rows).
-  Identifiers go through the dialect's `QuoteIdent`; a grant runs inside the target database on
-  the engines that grant from there (`GrantNeedsDatabase`) through a pool opened for that one
-  statement; a password is the one value no engine binds in `CREATE ROLE`/`CREATE USER`, so it is
-  refused if it carries a control character and quoted by the same per-engine rule `dumpString`
-  applies (`passwordLiteral`). Audited as `database.role.create/alter/drop/grant`,
-  `database.create`, `database.connection.sibling`, `database.extension.create/drop`.
+  `Role` shape. Routes under `/databases/{id}/server/`: `roles` (list and `/{name}` detail on the
+  read surface; create, alter and `/{name}/grant` under `system.admin`; drop under
+  `s.destructive`, refused for the account the connection signs in with), `databases` (create,
+  and `/connect` to save a sibling connection to another database on the same server under the
+  same credentials, probed before it is stored), `extensions` (list; create and drop for
+  Postgres, listed only for MySQL's plugins) and `settings` (the short list an operator asks
+  about; the full one is `/databases/{id}/settings`, below). Identifiers go through the dialect's
+  `QuoteIdent`; a grant runs inside the target database on the engines that grant from there
+  (`GrantNeedsDatabase`) through a pool opened for that one request; a password is the one value
+  no engine binds in `CREATE ROLE`/`CREATE USER`, so it is refused if it carries a control
+  character and quoted by the same per-engine rule `dumpString` applies (`passwordLiteral`).
+  Audited as `database.role.create/alter/drop/grant/revoke`, `database.create`,
+  `database.connection.sibling`, `database.extension.create/drop`.
+  - *An alter changes what was sent and nothing else.* `roleRequest`'s attributes are pointers and
+    `RoleSpec` carries a `Set*` beside each shared flag, so a body with only a password renders
+    `ALTER ROLE … WITH PASSWORD …` and leaves `SUPERUSER`/`CREATEDB`/`CREATEROLE` as they were (the
+    old renderer wrote all four from booleans that were false when absent, and a password change
+    demoted a superuser). A request is honoured whole or refused: `dbx.CheckRoleRequest` runs in the
+    handler before any engine is dialled and answers `400` naming the attribute for anything outside
+    `EditableRoleAttributes(driver)`, and for `superuser:false` on the engines that can only grant
+    (ClickHouse, MongoDB, Redis) — Redis and MongoDB read a password and one flag and used to answer
+    `200` to a request to lock an account they had not locked. A create is checked the same way on
+    what it *asks for* (a form may send every field at its default); MySQL and SQL Server creates
+    now carry the lock and the create-account right, and drop the half-made account when a later
+    statement fails. `ownAccountRefusal` refuses `login:false`, `locked:true` and `superuser:false`
+    on the account the connection signs in with, as the drop route does: the pool would carry on
+    and every later dial would fail with nothing here able to undo it. A password change on that
+    account re-seals the saved connection string once the new one has been seen to open
+    (`resealOwnPassword`, reported as `connectionUpdated`).
+  - *The three-level grant* (`POST …/roles/{name}/grant`, `read|write|all`) runs in one transaction
+    on PostgreSQL and covers every schema of the database that is not the engine's own, **an
+    extension's** (membership in `pg_depend`: pg_cron's `cron`, TimescaleDB's catalogues) **or a
+    platform's** (`hdb_catalog`; Supabase's `auth`, `storage`, `vault`… recognised by name only on a
+    server that has the `supabase_admin` role) — `pgGrantSchemas`. The reply and the audit detail
+    list `schemas` and `skippedSchemas` with the reason; `schema` in the body names one schema and
+    grants on it regardless. Default privileges are written for the connection's account and, with
+    `FOR ROLE`, for every other role that owns the schema or a table or sequence in it and that the
+    account is a member of (`pgFutureOwners`); owners it cannot speak for come back in `notes`.
+    `?preview=1` returns the same body with `preview:true` and executes nothing. MySQL escapes `_`
+    and `%` in the database name, which is a pattern at that position.
+  - *Fine-grained privileges.* `GET …/server/privileges` publishes the closed set per engine and
+    level (`PrivilegeLevels`: database, schema, table, sequence, role membership on PostgreSQL;
+    database and table on MySQL/ClickHouse; database, schema, table on SQL Server); a request names
+    privileges from that set and the keyword that reaches the statement is the set's.
+    `POST …/roles/{name}/privileges` and `…/privileges/revoke` (`system.admin`, `?preview=1`) render
+    through `PrivilegeStatements` and run through `ChangePrivileges`, in one transaction where the
+    engine has transactional grants, connected to the database that holds the object. `future:true`
+    resolves the same owners as the preset and returns them as `futureOwners`; that is the one
+    preview that dials. `GET …/server/grants` lists grants by role or by object (`aclexplode` over
+    databases, schemas, relations and `pg_default_acl`; `SHOW GRANTS` parsed on MySQL, for every
+    host a name has when none is given, the line's password hash never returned;
+    `system.grants`; `sys.database_permissions`), bounded at 1000.
+  - *What a non-administrator is not shown.* The role list and detail are on the read surface, so
+    two things are withheld there: the password entries of a Redis ACL rule (`withoutACLSecrets`),
+    and the values of a PostgreSQL role's own settings (`rolconfig`) whose name is one the settings
+    redaction matches or carries a dot — a parameter PostgreSQL does not define, which is where
+    PostgREST's `pgrst.jwt_secret` and applications' tokens live. The names come back in
+    `configRedacted` (`redactRoleConfig`).
+- **Watching and maintaining a SQL server** (`handlers_db_ops.go`, `mountDatabaseOpsRoutes`;
+  per-engine SQL in `dbx/ops_<engine>.go` behind optional interfaces, so a dialect that has no
+  answer reports `supported:false` with a sentence rather than an error).
+  - Reads, on the read surface: `GET /{id}/stats` for a SQL engine is one snapshot of raw counters
+    and gauges stamped with this server's clock (`ServerStats`; the page derives rates between two
+    polls — nothing is kept between requests) with the dashboard's own pool under its old key;
+    `/activity` rows gain `status`, wait type and event, application, transaction and query start,
+    `blockedByPids`, and `seconds` is now the running statement's age and `0` for a session that
+    is not running one (an idle pooled connection used to read as the longest query); `/locks`
+    (waiter–blocker pairs and the lock table, bounded at 500: PostgreSQL, MySQL 8
+    `performance_schema`, MariaDB `INNODB_LOCK_WAITS`, SQL Server); `/replication` (PostgreSQL
+    replicas, slots, publications, subscriptions, receiver; MySQL/MariaDB replica and source
+    status); `/tablestats` and `/indexstats` (sizes, row and dead-row estimates, scans, last
+    vacuum/analyze, a planner-statistics bloat estimate, unused/duplicate/covered indexes; default
+    200, clamped to 1000, largest first — MySQL and SQLite read up to 20 000 index names and rank
+    them here because their sizes arrive from a second read); `/maintenance` (the action list);
+    `/settings[?all=1]`; `/clickhouse/{parts,merges,mutations,queries}`; `/sqlite/file`. The stats
+    poll asks the catalogue which checkpoint view exists (`to_regclass`) instead of trying
+    `pg_stat_checkpointer` and catching the error, which PostgreSQL before 17 wrote to its log on
+    every poll; `pg_stat_statements_info` is asked for the same way.
+  - `POST /{id}/activity/cancel` stops a statement and keeps the session (`pg_cancel_backend`,
+    `KILL QUERY`, Oracle `ALTER SYSTEM CANCEL SQL`); it sits in `s.destructive` beside kill. Audit
+    `database.session.cancel`.
+  - `POST /{id}/maintenance {action, schema?, table?, index?, options?}` runs one of a closed set
+    per engine and returns the engine's own lines, kept to 500 as they arrive. The route is
+    `service.control`. **An action that locks a table against the application for as long as it
+    runs, or can lose rows — `vacuum_full`, `reindex`, MySQL `optimize` and `repair`, SQLite
+    `vacuum` — also needs the destructive capability and spends `destrLim`**, checked in the
+    handler before anything is dialled (`MaintenanceAction.NeedsDestructive`, published per action
+    as `requires`): the SQL console refuses those statements to the same account, and a form is
+    never the cheaper way. The actions left on `service.control` — vacuum, analyze, check,
+    integrity checks, checkpoint, ClickHouse optimize — read, or work alongside the application;
+    the console's stricter answer to them comes from not knowing what a typed statement does, which
+    a closed list does. The request is held for up to thirty minutes; ending it stops the command
+    on the server — pgx sends a cancel request when a cancelled context closes its connection, and
+    for MySQL/MariaDB the statement runs on one session whose id is killed (`KILL QUERY`) from a
+    second connection, because the driver only closes the socket and the server does not notice
+    that inside a table rebuild. Audit `database.maintenance`.
+  - `PUT /{id}/settings {name, value | reset}` (`system.admin`) persists one parameter where the
+    engine can: `ALTER SYSTEM` + `pg_reload_conf()`, `SET PERSIST` (MariaDB: `SET GLOBAL`, said to
+    be unpersisted), the four SQLite pragmas stored in the file. The name must be in the engine's
+    own list and its spelling there is what reaches the statement; the value is checked against
+    the type, enum and range the engine publishes. The list withholds, from a viewer without
+    `system.admin`, values whose name matches `conninfo|password|passphrase|secret|token|_command$|
+    private_key` (marked `redacted`); the same names keep their value out of the audit detail.
+    Audit `database.setting.set` / `database.setting.reset`.
+  - `POST /{id}/statements/reset` (`service.control`) zeroes `pg_stat_statements` or the
+    performance_schema digest table for the whole server. Audit `database.statements.reset`.
 - **The advisor and statement statistics.** `GET /databases/{id}/advisor?schema=` runs
   `dbx.Advise`: generic checks over the introspected structure on every SQL engine (tables with no
-  primary key, foreign keys no index begins with, capped at 300 tables), plus an engine's own
-  `Adviser` where it keeps statistics — Postgres (unused indexes over 1 MiB, identical indexes,
-  never-analysed tables, dead rows past a fifth, sequences past 80 % of their ceiling, connections
-  past 80 % of `max_connections`, a cache hit ratio under 90 %, sessions idle in a transaction
-  for five minutes, `password_encryption = md5`, login superusers besides `postgres`, no
-  `pg_stat_statements`) and MySQL (non-InnoDB tables, the slow log and `performance_schema` off,
-  superusers at host `%`, a buffer pool under 128 MiB). The handler prepends one finding no
-  catalogue can make, for an administrator: the server published on every interface with the
-  firewall off or open. Each finding carries the objects it names and, where one statement fixes
-  it, that statement; nothing is executed. `GET /databases/{id}/statements` reads
-  `pg_stat_statements` (13+ and older column names both) or
-  `performance_schema.events_statements_summary_by_digest`, top N by total time, and reports
-  `supported: false` with the reason where neither is there.
-  Advisor reports include server `checkedAt`, `tablesOmitted` and `silences`. Structure scans beyond
-  300 tables report the omitted count. Unread engine statistics retain completed structure findings
-  and name the failed source with `engineChecks=false`. The frontend displays partial/stale reports,
-  disables stale SQL preparation and opens the SQL console for reviewed statements or the owning
-  Structure/Server controls for cases needing a choice; execution still uses existing SQL authorization.
+  primary key, foreign keys no index begins with; the first 300 tables, with `truncated` and
+  `tablesOmitted` saying so past that; a partitioned table is checked like any other), plus an
+  engine's own `Adviser` — Postgres (unused, duplicate and invalid indexes, never-analysed tables,
+  dead rows, sequence exhaustion, connections near the limit, cache hit ratio, sessions idle in a
+  transaction, transaction-id wraparound, inactive replication slots, `fsync`/`full_page_writes`/
+  `autovacuum` off, `md5` passwords, a writable `public` schema, superusers besides the
+  connection's own role, no `pg_stat_statements`), MySQL/MariaDB (non-InnoDB tables, free space,
+  connections, the slow log and `performance_schema` off, superusers at any host, anonymous
+  accounts, a small buffer pool), SQLite (journal mode, free pages, a large WAL, never analysed),
+  ClickHouse (too many parts, stuck mutations, accounts without a password, read-only replicas,
+  disk, detached parts), SQL Server (auto-shrink, auto-close, page verify, `sa` enabled, logins
+  without a password policy) and Oracle (invalid objects, never analysed, default passwords,
+  tablespaces). Every finding carries a `category` — `security`, `performance`, `reliability` or
+  `maintenance` (the old `schema` is `reliability`) — the `targets` it is about, each with its own
+  fix statement where one exists, and a `link` to the page that acts on it. The handler adds what
+  only a server panel can know (`panelAdvice`): no dump or a stale one, read from the same dump
+  directory the fleet reads; a release past its end of life (`dbx.VersionEndOfLife`, a compiled-in
+  table of vendor dates); and, for an administrator, a port published to every address and a
+  container with no memory limit — a viewer is told in `silences` that those were not assessed.
+  Nothing is executed. With no `schema`, MySQL and ClickHouse check the connection's own database.
+  `GET /databases/{id}/statements?sort=&limit=` reads `pg_stat_statements` (13+ and older column
+  names both), `performance_schema.events_statements_summary_by_digest`, or ClickHouse's
+  `system.query_log` over the last day; `sort` is one of a closed set, `limit` clamps at 200, each
+  row carries its `share` of everything tracked, and `supported: false` comes with what would
+  enable it (`enable`: the extension to create, or the configuration to change first).
+  Advisor reports include server `checkedAt`, `tablesOmitted` and `silences`. Unread engine
+  statistics retain completed structure findings and name the failed source with
+  `engineChecks=false`. The frontend displays partial/stale reports, disables stale SQL preparation
+  and opens the SQL console for reviewed statements or the owning Structure/Server controls for
+  cases needing a choice; execution still uses existing SQL authorization.
 
 - **The server's own log, found from its connection.** `GET /databases/{id}/logs/sources`
   (`handlers_db_logs.go`, on the read surface — reading what the server printed is what `/activity`
