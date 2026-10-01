@@ -65,6 +65,23 @@ func ExplainForms(driver Driver) (jsonPlan, analyze bool) {
 	return jsonErr == nil, analyzeErr == nil
 }
 
+// planPreparer is implemented by a dialect whose server has to be told
+// something on the session before it will produce an executing plan.
+type planPreparer interface {
+	// preparePlan readies conn for the plan opts asks for, and reports
+	// whether it left the session changed.
+	preparePlan(ctx context.Context, conn *sql.Conn, version string, opts ExplainOptions) bool
+}
+
+// preparePlanSession lets the dialect ready the session a plan is about to run
+// on. A session it changed is not handed to the next request, whose plans
+// would come back in the shape this one asked for.
+func preparePlanSession(ctx context.Context, s *session, version string, opts ExplainOptions) {
+	if p, ok := s.dialect.(planPreparer); ok && p.preparePlan(ctx, s.conn, version, opts) {
+		s.dirty = true
+	}
+}
+
 // Explain returns the plan for a statement ExplainTarget accepted.
 //
 // Without Analyze nothing is executed, on any engine. With it the statement
@@ -113,6 +130,7 @@ func Explain(ctx context.Context, db *sql.DB, driver Driver, st *SQLStatement, o
 			return nil, err
 		}
 		defer s.close()
+		preparePlanSession(ctx, s, version, opts)
 		err = s.read(ctx, func(ctx context.Context, q queryer) error {
 			var err error
 			out.Result, err = s.run(ctx, q, plan, MaxResultRows)
@@ -125,6 +143,7 @@ func Explain(ctx context.Context, db *sql.DB, driver Driver, st *SQLStatement, o
 		}
 		s.dirty = true
 		defer s.close()
+		preparePlanSession(ctx, s, version, opts)
 		var tx *sql.Tx
 		if tx, err = s.conn.BeginTx(ctx, nil); err != nil {
 			return nil, err

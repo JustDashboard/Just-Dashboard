@@ -383,6 +383,22 @@ func (mysqlDialect) explainSQL(version, statement string, opts ExplainOptions) (
 	return "EXPLAIN ANALYZE " + statement, nil
 }
 
+// preparePlan asks MySQL for the second version of its JSON plan before a
+// measured one is requested as JSON. From 8.3 the server produces EXPLAIN
+// ANALYZE FORMAT=JSON only in that version, and a session left on the first —
+// the default — is refused with "This version of MySQL doesn't yet support
+// 'EXPLAIN ANALYZE with JSON format'", on a server that supports exactly that.
+// An older MySQL has no such variable and refuses the SET; its refusal of the
+// plan itself is then the answer, in its own words. MariaDB spells the
+// statement differently and needs nothing.
+func (mysqlDialect) preparePlan(ctx context.Context, conn *sql.Conn, version string, opts ExplainOptions) bool {
+	if !opts.Analyze || opts.Format != ExplainJSON || strings.Contains(strings.ToLower(version), "mariadb") {
+		return false
+	}
+	_, err := conn.ExecContext(ctx, "SET SESSION explain_json_format_version = 2")
+	return err == nil
+}
+
 // cancelFunc kills the statement by the server's id for this connection.
 //
 // The driver answers a cancelled context by closing the socket, and the server

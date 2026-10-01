@@ -1138,6 +1138,28 @@ func TestLiveExplain(t *testing.T) {
 				t.Errorf("analysed select = %+v", analysed)
 			}
 			if e.name == "mysql8" {
+				// A measured plan as a document. From 8.3 the server gives one
+				// only in the second version of its JSON plan, which the
+				// session has to ask for; left on the first it is refused as
+				// "not yet supported" by a server that supports it.
+				measured, err := Explain(ctx, db, e.driver, sel, ExplainOptions{Analyze: true, Format: ExplainJSON})
+				if err != nil {
+					t.Fatalf("analysed json plan of a SELECT: %v", err)
+				}
+				if _, tree := measured.Plan.(map[string]any); !measured.Analyzed || !tree {
+					t.Errorf("analysed json plan = %+v", measured)
+				}
+				// The session that asked for it is not the next request's: a
+				// plain JSON plan afterwards is still the first version's.
+				for range 6 {
+					next, err := Explain(ctx, db, e.driver, sel, ExplainOptions{Format: ExplainJSON})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if doc, _ := next.Plan.(map[string]any); doc["query_block"] == nil {
+						t.Fatalf("a plan asked for after a measured one came back in its shape: %v", next.Plan)
+					}
+				}
 				return
 			}
 			measured, err := Explain(ctx, db, e.driver, del, ExplainOptions{Analyze: true, Format: ExplainJSON})
@@ -1299,6 +1321,11 @@ func TestLiveReadCell(t *testing.T) {
 			}
 			if _, err := ReadCell(ctx, db, e.driver, schema, cells, raw, e.row(map[string]any{"id": json.Number("2")})); !errors.Is(err, ErrRowNotFound) {
 				t.Errorf("a missing row = %v", err)
+			}
+			// A number is not text and not bytes, and still has a size.
+			cell, err = ReadCell(ctx, db, e.driver, schema, cells, e.ident("id"), key)
+			if err != nil || cell.Size != 1 || fmt.Sprint(cell.Value) != "1" {
+				t.Errorf("a number cell: %v %+v, want the value 1 and a size of 1", err, cell)
 			}
 			// A NULL is said to be one, not passed off as an empty value.
 			mustExec(t, db, `INSERT INTO jdwb_cells (id) VALUES (3)`)

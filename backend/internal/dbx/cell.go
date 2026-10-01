@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -31,7 +32,8 @@ type CellValue struct {
 	// for bytes, "json" for anything else in its JSON form, "null" for NULL.
 	Encoding string `json:"encoding"`
 	Value    any    `json:"value"`
-	// Size is the value's length in bytes as stored.
+	// Size is the value's length in bytes: of the text or the bytes
+	// themselves, and for a number or a boolean of its written form.
 	Size int64 `json:"size"`
 }
 
@@ -156,6 +158,7 @@ func ReadCell(ctx context.Context, db *sql.DB, driver Driver, schema, table, col
 func (c *CellValue) fill(driver Driver, v any) error {
 	if flag, ok := oracleBoolean(driver, c.Kind, v); ok {
 		c.Encoding, c.Value = "json", flag
+		c.Size = writtenSize(flag)
 		return nil
 	}
 	switch t := v.(type) {
@@ -193,6 +196,23 @@ func (c *CellValue) fill(driver Driver, v any) error {
 		c.Size = int64(len(c.Value.(string)))
 	default:
 		c.Encoding, c.Value = "json", normaliseValue(v)
+		c.Size = writtenSize(c.Value)
 	}
 	return nil
+}
+
+// writtenSize is the length of a value that is not text or bytes — a number,
+// a boolean — as it is written out. What such a value occupies on disk is the
+// engine's business and differs by engine for the same number; its written
+// form is what the reader is shown, and a size of nothing beside a cell that
+// holds 15 read as an empty cell.
+func writtenSize(v any) int64 {
+	if text, ok := v.(string); ok {
+		return int64(len(text))
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return 0
+	}
+	return int64(len(out))
 }

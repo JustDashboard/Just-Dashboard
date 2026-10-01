@@ -119,7 +119,7 @@ func TestCellsTheDriverDoesNotSpell(t *testing.T) {
 		t.Errorf("a MySQL integer is shown as %#v", got)
 	}
 	flag := &CellValue{Kind: KindBoolean}
-	if err := flag.fill(DriverOracle, "0"); err != nil || flag.Encoding != "json" || flag.Value != false {
+	if err := flag.fill(DriverOracle, "0"); err != nil || flag.Encoding != "json" || flag.Value != false || flag.Size != 5 {
 		t.Errorf("an Oracle boolean cell = %+v %v", flag, err)
 	}
 
@@ -136,6 +136,27 @@ func TestCellsTheDriverDoesNotSpell(t *testing.T) {
 	raw := &CellValue{Kind: KindBinary, Type: "varbinary(16)"}
 	if err := raw.fill(DriverMSSQL, wire); err != nil || raw.Encoding != "base64" {
 		t.Errorf("sixteen bytes of a binary column = %+v %v", raw, err)
+	}
+}
+
+// A value that travels as JSON — a number, a boolean — has the size of its
+// written form. It used to have none, so the cell that holds 15 said it held
+// nothing; a NULL is the one value that does.
+func TestACellThatIsNotTextStillHasASize(t *testing.T) {
+	for _, c := range []struct {
+		value any
+		size  int64
+	}{
+		{int64(15), 2}, {int64(-1234567), 8}, {float64(2.5), 3}, {true, 4}, {false, 5}, {int32(7), 1},
+	} {
+		cell := &CellValue{Kind: KindInteger, Type: "integer"}
+		if err := cell.fill(DriverPostgres, c.value); err != nil || cell.Encoding != "json" || cell.Size != c.size {
+			t.Errorf("a cell holding %#v = %+v %v, want json of size %d", c.value, cell, err, c.size)
+		}
+	}
+	null := &CellValue{Kind: KindInteger, Type: "integer"}
+	if err := null.fill(DriverPostgres, nil); err != nil || null.Encoding != "null" || null.Size != 0 {
+		t.Errorf("a NULL cell = %+v %v", null, err)
 	}
 }
 
