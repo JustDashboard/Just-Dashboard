@@ -153,7 +153,14 @@ accounts retain partial results. Full table details and mutation preconditions u
   through `PUT /databases/{id}` field by field (a field left out keeps its value). `GET /databases/`
   and the fleet list a row whose DSN no longer unseals or whose SQLite file left the file roots as
   `broken` with the reason, instead of dropping it; `PUT` with a new DSN repairs one and `DELETE`
-  forgets one. `GET /databases/{id}` (read surface) is one connection's reading without dialling any
+  forgets one. A row is removed in one place, `forgetConnection`, whichever route asked for it —
+  forgetting the connection, dropping the database it pointed at, removing the container that served
+  it: the row goes unless a deployment is bound to it, the pool is closed, what was kept under the id
+  is dropped, and discovery is told where the connection came from so the next sync does not connect
+  the same server again. Deployment resource removal still runs its own `DELETE`
+  (`deployment_resource_remover.go`) and is to call the same function. The connection's JSON carries
+  `origin`, the key of the found server it was made from; the column is discovery's, and the field
+  is empty until `dbConnColumns` and `scanDBConn` read it. `GET /databases/{id}` (read surface) is one connection's reading without dialling any
   other: what the server says it is, whether it answers, where it runs, which power actions apply, its
   exposure, bound deployments and the capability flags for its driver and flavour. It answers 200 for a
   stopped, unreachable or broken connection; those are states, not errors. Where a server runs is read
@@ -210,7 +217,8 @@ accounts retain partial results. Full table details and mutation preconditions u
   string, MySQL's `version_comment`, a Postgres database's extensions, the text of Redis `INFO`, the
   keys of Mongo's `buildInfo` — and the probes that read those are `IdentifySQL`, `IdentifyRedis`,
   `IdentifyMongo` and `ProbeIdentity`. The answer is kept per connection for ten minutes and outlives
-  a stop, so a stopped Valkey is still drawn as Valkey. `dbx.Capabilities(driver, flavor)` is one
+  a stop, so a stopped Valkey is still drawn as Valkey, and one that has stopped answering is too, in
+  the fleet as in its own summary. `dbx.Capabilities(driver, flavor)` is one
   table of feature flags (`dbx/capabilities.go`); `GET /databases/drivers` serves it per driver and
   per flavour, with the default port and a DSN example, so the page gates on what the server enforces.
   A flag is one row; a file that owns a feature may register its rows with `RegisterCapabilities`.

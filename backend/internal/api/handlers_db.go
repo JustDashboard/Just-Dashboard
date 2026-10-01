@@ -37,6 +37,12 @@ type dbConnection struct {
 	Environment string `json:"environment"`
 	ReadOnly    bool   `json:"readOnly"`
 	Notes       string `json:"notes"`
+	// Origin is the key of the server or file on this machine the connection
+	// was made from, as discovery lists it, and empty for one typed in by
+	// hand. The column is discovery's and is not in this store until that
+	// work is merged: the field stays empty until dbConnColumns names the
+	// column and scanDBConn reads it.
+	Origin string `json:"origin"`
 	// Broken marks a row this process cannot use, with the reason: its sealed
 	// DSN no longer opens, or its file is outside the file roots. The address
 	// fields above are empty on such a row.
@@ -472,19 +478,15 @@ func (s *Server) handleDBConnDelete(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return err
 	}
-	origin := s.connectionOrigin(r.Context(), id)
 	// No typed phrase: this forgets a connection string, it does not touch the
 	// server at the other end of it. Re-adding one is a form, not a restore.
-	result, err := s.Store.DB.ExecContext(r.Context(), `DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
+	removed, err := s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 	if err != nil {
-		return httpx.Internal(err)
+		return err
 	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
+	if !removed {
 		return httpx.Err(http.StatusConflict, "database_linked", "remove the deployment's managed database network before forgetting this linked connection")
 	}
-	s.modules.dbs.Close(id)
-	s.dbConns.forget(id)
-	s.afterConnectionForgotten(r.Context(), id, origin, httpx.MustPrincipal(r).Username())
 	httpx.SetAudit(r, "database.connection.delete", conn.Name, nil)
 	httpx.NoContent(w)
 	return nil

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,11 +12,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
@@ -133,6 +136,16 @@ func (f *fakeDockerEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"HostConfig":      map[string]any{"NetworkMode": "bridge", "PortBindings": binding(c)},
 			"NetworkSettings": map[string]any{"Ports": binding(c)},
 		})
+	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/containers/"):
+		c := f.find(strings.TrimPrefix(path, "/containers/"))
+		if c == nil {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"No such container"}`))
+			return
+		}
+		f.calls = append(f.calls, "remove "+c.name)
+		f.containers = slices.DeleteFunc(f.containers, func(have *fakeDBContainer) bool { return have == c })
+		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/containers/"):
 		ref, verb, _ := strings.Cut(strings.TrimPrefix(path, "/containers/"), "/")
 		c := f.find(ref)
@@ -165,8 +178,10 @@ type connHarness struct {
 	engine    *fakeDockerEngine
 	listeners []proxysvc.Listener
 	units     []procs.Unit
-	// unitLists counts how often the machine's units were asked for.
-	unitLists atomic.Int64
+	// unitLists counts how often the machine's units were asked for, and
+	// managerReads how often a listening process was asked what runs it.
+	unitLists    atomic.Int64
+	managerReads atomic.Int64
 
 	// The host's systemctl: whether there is one, what it was asked, and what
 	// it answers. A verb in systemctlFails fails with that output.
@@ -214,8 +229,11 @@ func newConnHarness(t *testing.T) *connHarness {
 	h.s.Cfg.BackupLocalDir = t.TempDir()
 	h.s.dbConns.probe = &dbHostProbe{
 		listeners: func(context.Context) ([]proxysvc.Listener, error) { return h.listeners, nil },
-		managerOf: func(int32, string) (string, string) { return "unmanaged", "" },
-		systemd:   func() bool { return true },
+		managerOf: func(int32, string) (string, string) {
+			h.managerReads.Add(1)
+			return "unmanaged", ""
+		},
+		systemd: func() bool { return true },
 		units: func(context.Context) ([]procs.Unit, error) {
 			h.unitLists.Add(1)
 			return h.units, nil
@@ -262,6 +280,22 @@ func (h *connHarness) add(name string, driver dbx.Driver, dsn string) int64 {
 	return id
 }
 
+// discoveryStore reports whether this build's store has what discovery adds
+// to it: the column a connection's origin is kept in, and the list of found
+// servers that are to be left alone. The tests that depend on it say what they
+// expect of the connection routes once both are there.
+func (h *connHarness) discoveryStore() bool {
+	h.t.Helper()
+	var column, table int
+	if err := h.s.Store.DB.QueryRow(
+		`SELECT (SELECT COUNT(*) FROM pragma_table_info('db_connections') WHERE name = 'origin'),
+		        (SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'db_inventory_ignored')`,
+	).Scan(&column, &table); err != nil {
+		h.t.Fatal(err)
+	}
+	return column == 1 && table == 1
+}
+
 // deafPort is a port that accepts a connection and says nothing, counting
 // how many it was offered: the difference between "was dialled" and "was not"
 // that the fleet's promises are about.
@@ -303,7 +337,9 @@ type summaryView struct {
 	Notes       string `json:"notes"`
 	Broken      bool   `json:"broken"`
 	Reason      string `json:"brokenReason"`
+	Origin      string `json:"origin"`
 	Flavor      string `json:"flavor"`
+	Number      string `json:"versionNumber"`
 	State       string `json:"state"`
 	OK          bool   `json:"ok"`
 	Error       string `json:"error"`
@@ -1073,6 +1109,7 @@ type dbFleetView struct {
 		OK          bool   `json:"ok"`
 		Error       string `json:"error"`
 		Flavor      string `json:"flavor"`
+		Number      string `json:"versionNumber"`
 		Environment string `json:"environment"`
 		ReadOnly    bool   `json:"readOnly"`
 		Broken      bool   `json:"broken"`
@@ -1133,11 +1170,52 @@ func TestFleetKeepsADialForAFewSecondsAndFlagsBrokenRows(t *testing.T) {
 	}
 }
 
+// A server that has stopped answering is still the product it was. The fleet
+// fell back to the driver's own flavour on a failed dial, so a Valkey tile
+// turned into a Redis one with no version at the moment its server went away,
+// while the connection's own page went on saying Valkey.
+func TestAnUnreachableServerKeepsItsFlavourInTheFleet(t *testing.T) {
+	h := newConnHarness(t)
+	router := h.as(auth.RoleReadOnly)
+	port, _ := deafPort(t)
+	dsn := fmt.Sprintf("redis://127.0.0.1:%d/0", port)
+	id := h.add("cache", dbx.DriverRedis, dsn)
+	// What it said the last time it answered, an hour ago.
+	h.s.dbConns.identities.Store(id, dbIdentityKept{
+		dsn: sha256.Sum256([]byte(dsn)), at: time.Now().Add(-time.Hour),
+		identity: dbx.Identity{Flavor: dbx.FlavorValkey, Version: "8.1.10", Number: "8.1.10"},
+	})
+
+	fleet := readJSON[dbFleetView](t, do(t, router, http.MethodGet, "/databases/fleet", ""))
+	if len(fleet.Connections) != 1 {
+		t.Fatalf("fleet = %+v", fleet.Connections)
+	}
+	if c := fleet.Connections[0]; c.State != dbStateUnreachable || c.Error == "" || c.Flavor != dbx.FlavorValkey || c.Number != "8.1.10" {
+		t.Errorf("fleet entry of a server that stopped answering = %+v, want it still a Valkey 8.1.10", c)
+	}
+	summary := readJSON[summaryView](t, do(t, router, http.MethodGet, pathf("/databases/%d", id), ""))
+	if summary.State != dbStateUnreachable || summary.Flavor != dbx.FlavorValkey || summary.Number != "8.1.10" {
+		t.Errorf("summary of the same server = %+v; the two must agree", summary)
+	}
+
+	// What is kept is about the server the connection pointed at. One that
+	// has never answered where it points now is the driver's own, in both.
+	other, _ := deafPort(t)
+	never := h.add("never", dbx.DriverRedis, fmt.Sprintf("redis://127.0.0.1:%d/0", other))
+	fleet = readJSON[dbFleetView](t, do(t, router, http.MethodGet, "/databases/fleet", ""))
+	for _, c := range fleet.Connections {
+		if c.ID == never && (c.Flavor != dbx.FlavorRedis || c.Number != "") {
+			t.Errorf("a server that never answered = %+v, want the driver's own flavour and no version", c)
+		}
+	}
+}
+
 // A fleet asks where each of its connections runs, and for a server that is
-// down that means the machine's units and what every stopped container of the
-// engine publishes. Both are read once for the request and shared: six
-// connections used to list the units six times and inspect the same stopped
-// container six times over.
+// down that means the machine's units, which unit each listening process
+// belongs to and what every stopped container of the engine publishes. Each is
+// read once for the request and shared: six connections used to list the
+// units six times, read every listener's cgroup six times and inspect the
+// same stopped container six times over.
 func TestAFleetReadsTheMachineOnceForAllItsConnections(t *testing.T) {
 	h := newConnHarness(t)
 	h.engine.containers = []*fakeDBContainer{{
@@ -1147,6 +1225,12 @@ func TestAFleetReadsTheMachineOnceForAllItsConnections(t *testing.T) {
 	// The engine's only unit, stopped: every connection to the engine's own
 	// port is its, and none of them is dialled.
 	h.units = []procs.Unit{{Name: "redis-server.service", LoadState: "loaded", ActiveState: "inactive", SubState: "dead"}}
+	// Two processes listening on other ports: each is asked what runs it, to
+	// leave out a unit that is busy serving another port.
+	h.listeners = []proxysvc.Listener{
+		{Protocol: "tcp", Address: "127.0.0.1", Port: 5432, PID: 41, Process: "postgres"},
+		{Protocol: "tcp", Address: "0.0.0.0", Port: 22, PID: 42, Process: "sshd"},
+	}
 	for i := range 6 {
 		h.add(fmt.Sprintf("cache-%d", i), dbx.DriverRedis, fmt.Sprintf("redis://127.0.0.1:6379/%d", i))
 	}
@@ -1161,6 +1245,9 @@ func TestAFleetReadsTheMachineOnceForAllItsConnections(t *testing.T) {
 	}
 	if n := h.unitLists.Load(); n != 1 {
 		t.Errorf("the machine's units were listed %d times for one fleet", n)
+	}
+	if n := h.managerReads.Load(); n != 2 {
+		t.Errorf("two listening processes were asked what runs them %d times for one fleet", n)
 	}
 	if n := h.engine.inspected("old-cache"); n != 1 {
 		t.Errorf("a stopped container was inspected %d times for one fleet", n)
@@ -1488,20 +1575,113 @@ func TestTopologyLinksADatabaseToItsOwnPage(t *testing.T) {
 	}
 }
 
-// Nothing about a connection outlives it: an id is never reused by SQLite's
-// AUTOINCREMENT, but a reading kept under one is still a reading of nothing.
-func TestForgettingAConnectionClearsWhatWasKeptAboutIt(t *testing.T) {
+// A connection's row goes away by three roads: forgetting it, dropping the
+// database it pointed at, and removing the container that served it. Each ran
+// its own DELETE, and only the first went on to drop what is kept under the id
+// and to tell discovery. The other two left a reading of nothing behind, and a
+// server the next sync would have connected again.
+func TestEveryRoadThatRemovesAConnectionForgetsIt(t *testing.T) {
 	h := newConnHarness(t)
 	router := h.as(auth.RoleAdmin)
-	id := h.add("gone", dbx.DriverSQLite, filepath.Join(h.s.Cfg.FileRoots[0], "gone.db"))
-	do(t, router, http.MethodGet, pathf("/databases/%d", id), "")
-	if _, ok := h.s.dbConns.identities.Load(id); !ok {
-		t.Fatal("a server that answered was not remembered")
+	root := h.s.Cfg.FileRoots[0]
+	port, _ := deafPort(t)
+	h.engine.containers = []*fakeDBContainer{{
+		id: "c0ffee", name: "jd-redis", image: "redis:7-alpine", state: "running",
+		hostIP: "127.0.0.1", hostPort: port, port: 6379,
+	}}
+	discovery := h.discoveryStore()
+
+	for _, road := range []struct {
+		name   string
+		driver dbx.Driver
+		dsn    string
+		// path is under the connection, and confirm the phrase the route asks
+		// to be typed.
+		path, body, confirm string
+		want                int
+	}{
+		{"forgotten", dbx.DriverSQLite, filepath.Join(root, "forgotten.db"), "", "", "", http.StatusNoContent},
+		{"dropped", dbx.DriverSQLite, filepath.Join(root, "dropped.db"), "/database", `{}`, "dropped.db", http.StatusOK},
+		{"removed", dbx.DriverRedis, fmt.Sprintf("redis://127.0.0.1:%d/0", port), "/database", `{"removeContainer":true}`, "db0", http.StatusOK},
+	} {
+		id := h.add(road.name, road.driver, road.dsn)
+		origin := "docker:" + road.name
+		if discovery {
+			if _, err := h.s.Store.DB.Exec(`UPDATE db_connections SET origin = ? WHERE id = ?`, origin, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Everything the routes keep about a connection between requests.
+		if road.driver.IsSQL() {
+			if _, _, err := h.s.dbPool(context.Background(), id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		h.s.dbConns.identities.Store(id, dbIdentityKept{})
+		h.s.dbConns.readings.Store(id, fleetReadingKept{})
+		h.s.dbConns.units.Store(id, "redis-server.service")
+
+		req := httptest.NewRequest(http.MethodDelete, pathf("/databases/%d", id)+road.path, strings.NewReader(road.body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(httpx.ConfirmHeader, road.confirm)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != road.want {
+			t.Errorf("%s: %d %s", road.name, rec.Code, rec.Body.String())
+			continue
+		}
+		var rows int
+		if err := h.s.Store.DB.QueryRow(`SELECT COUNT(*) FROM db_connections WHERE id = ?`, id).Scan(&rows); err != nil || rows != 0 {
+			t.Errorf("%s: the connection's row is still there (%d, %v)", road.name, rows, err)
+		}
+		if h.s.modules.dbs.Stats(id) != nil {
+			t.Errorf("%s: the connection's pool is still open", road.name)
+		}
+		for what, kept := range map[string]*sync.Map{
+			"what its server said it is": &h.s.dbConns.identities,
+			"its last fleet reading":     &h.s.dbConns.readings,
+			"the unit it ran under":      &h.s.dbConns.units,
+		} {
+			if _, ok := kept.Load(id); ok {
+				t.Errorf("%s: %s is still kept under its id", road.name, what)
+			}
+		}
+		if !discovery {
+			continue
+		}
+		// With discovery's store here, the two hooks forgetConnection calls
+		// have to be discovery's: the server the connection was made from is
+		// put on the list the sync leaves alone, by whoever removed it.
+		var by string
+		err := h.s.Store.DB.QueryRow(`SELECT ignored_by FROM db_inventory_ignored WHERE origin = ?`, origin).Scan(&by)
+		if err != nil || by != "tester" {
+			t.Errorf("%s: its server %s is not on discovery's ignore list (by %q, %v): connectionOrigin and afterConnectionForgotten in handlers_db_connection.go are still the no-ops they were before discovery was merged",
+				road.name, origin, by, err)
+		}
 	}
-	if rec := do(t, router, http.MethodDelete, pathf("/databases/%d", id), ""); rec.Code != http.StatusNoContent {
-		t.Fatalf("forget = %d %s", rec.Code, rec.Body.String())
+	if did := h.engine.did(); len(did) != 1 || did[0] != "remove jd-redis" {
+		t.Errorf("Docker was asked %v, want only the removal of the one container", did)
 	}
-	if _, ok := h.s.dbConns.identities.Load(id); ok {
-		t.Error("what a forgotten connection's server said is still kept under its id")
+}
+
+// A connection says which found server it was made from, in its own summary
+// and in the list. The column is discovery's: until it is in this store the
+// field is there and empty, and once it is, the value has to come through.
+func TestAConnectionCarriesItsOrigin(t *testing.T) {
+	h := newConnHarness(t)
+	router := h.as(auth.RoleReadOnly)
+	id := h.add("found", dbx.DriverSQLite, filepath.Join(h.s.Cfg.FileRoots[0], "found.db"))
+	want, hint := "", "the field is missing"
+	if h.discoveryStore() {
+		want, hint = "docker:found", "dbConnColumns and scanDBConn in handlers_db.go do not read db_connections.origin yet"
+		if _, err := h.s.Store.DB.Exec(`UPDATE db_connections SET origin = ? WHERE id = ?`, want, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{pathf("/databases/%d", id), "/databases/", "/databases/fleet"} {
+		rec := do(t, router, http.MethodGet, path, "")
+		if !strings.Contains(rec.Body.String(), `"origin":"`+want+`"`) {
+			t.Errorf("GET %s does not carry origin %q (%s): %s", path, want, hint, rec.Body.String())
+		}
 	}
 }

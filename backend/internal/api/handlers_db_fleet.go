@@ -313,6 +313,15 @@ func (s *Server) dialFleetReading(ctx context.Context, conn *dbConnection, dsn s
 		identify(s.identityOf(conn.ID, dsn, func() dbx.Identity { return dbx.IdentifySQL(ctx, pool, conn.Driver) }))
 		s.fillSQLReadings(ctx, pool, conn, &e)
 	}
+	if !e.OK {
+		// A server that has stopped answering is still the product it was.
+		// Falling back to the driver's own here turned a MariaDB tile into a
+		// MySQL one at the moment its server went away, while the connection's
+		// own page went on saying MariaDB.
+		if identity, _, known := s.lastIdentity(conn.ID, dsn); known {
+			identify(identity)
+		}
+	}
 	return e
 }
 

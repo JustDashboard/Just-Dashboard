@@ -173,10 +173,37 @@ func siblingConnectionName(parent, database string) string {
 // came from, read while its row is still there, and the moment the row is
 // gone. Discovery fills them in so that a server the sync connected on its own
 // is put on its ignore list and does not come back the next time the page
-// loads; on their own they do nothing.
+// loads; on their own they do nothing. forgetConnection is their one caller.
 func (s *Server) connectionOrigin(ctx context.Context, id int64) string { return "" }
 
 func (s *Server) afterConnectionForgotten(ctx context.Context, id int64, origin, actor string) {}
+
+// forgetConnection removes a saved connection's row and everything kept about
+// it, and reports whether there was a row to remove. It leaves a connection a
+// deployment is bound to exactly as it was and reports false.
+//
+// A row goes away by more than one road: the operator forgets the connection,
+// drops the database it pointed at, or removes the container that served it.
+// Each used to run its own DELETE, and only the first went on to close the
+// pool, drop what was remembered under the id and tell discovery — so a server
+// whose database was dropped was connected again by the next sync, which
+// forgetting it by hand would have prevented. Every one of them comes through
+// here now, and a road added later has one thing to call.
+func (s *Server) forgetConnection(ctx context.Context, id int64, actor string) (bool, error) {
+	origin := s.connectionOrigin(ctx, id)
+	result, err := s.Store.DB.ExecContext(ctx,
+		`DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
+	if err != nil {
+		return false, httpx.Internal(err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return false, nil
+	}
+	s.modules.dbs.Close(id)
+	s.dbConns.forget(id)
+	s.afterConnectionForgotten(ctx, id, origin, actor)
+	return true, nil
+}
 
 // dropPoolAfter lets go of a connection's pool when its server refused a
 // ping, so the next request dials again instead of reusing dead connections
@@ -474,10 +501,12 @@ type dbPlacement struct {
 
 // dbHostView is the machine as one request read it. A fleet asks where nine
 // connections run, and each asking wants the listening sockets, the engine's
-// units and what each stopped container publishes: they are read once here
-// and shared, as the Docker read snapshot shares its lists. Without that a
-// fleet of nine connections to servers that are down lists every unit on the
-// machine nine times and inspects every stopped container nine times over.
+// units, which unit each listening process belongs to and what each stopped
+// container publishes: they are read once here and shared, as the Docker read
+// snapshot shares its lists. Without that a fleet of nine connections to
+// servers that are down lists every unit on the machine nine times, reads
+// every listening process's cgroup nine times and inspects every stopped
+// container nine times over.
 type dbHostView struct {
 	s         *Server
 	ctx       context.Context
@@ -491,9 +520,16 @@ type dbHostView struct {
 	units     []procs.Unit
 	unitsErr  error
 
-	// published is what each stopped container's configuration publishes, by
-	// container id.
+	// managers is what runs each listening process, by pid, and published
+	// what each stopped container's configuration publishes, by container id.
+	managers  sync.Map
 	published sync.Map
+}
+
+// dbManaged is what runs one process, read once.
+type dbManaged struct {
+	once          sync.Once
+	manager, name string
 }
 
 // dbPublished is one container's published ports, read once.
@@ -510,12 +546,21 @@ func (s *Server) newDBHostView(ctx context.Context) *dbHostView {
 	if s.dbConns.systemctl != nil {
 		view.systemctl = *s.dbConns.systemctl
 	}
-	// The unit list is asked for through the probe by code that takes one, so
-	// the sharing is put inside the probe this view hands out.
+	// The unit list and each process's manager are asked for through the probe
+	// by code that takes one, so the sharing is put inside the probe this view
+	// hands out.
 	if list := view.probe.units; list != nil {
 		view.probe.units = func(context.Context) ([]procs.Unit, error) {
 			view.unitsOnce.Do(func() { view.units, view.unitsErr = list(view.ctx) })
 			return view.units, view.unitsErr
+		}
+	}
+	if ask := view.probe.managerOf; ask != nil {
+		view.probe.managerOf = func(pid int32, cmdline string) (string, string) {
+			kept, _ := view.managers.LoadOrStore(pid, &dbManaged{})
+			read := kept.(*dbManaged)
+			read.once.Do(func() { read.manager, read.name = ask(pid, cmdline) })
+			return read.manager, read.name
 		}
 	}
 	return view
