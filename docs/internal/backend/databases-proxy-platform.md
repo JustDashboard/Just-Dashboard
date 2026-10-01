@@ -55,6 +55,10 @@ cancel on the wire). Every dialect validates explain input as exactly one suppor
 adding its fixed plan syntax; user-supplied EXPLAIN/ANALYZE options never reach the connection.
 `analyze: true` on `POST …/explain` executes the statement, so the handler asks of it what the query
 route would, and a data-changing statement is measured inside a transaction that is rolled back.
+MySQL from 8.3 gives a measured plan as JSON only in the second version of its JSON plan, so the
+session is set to it first (`mysqlDialect.preparePlan`, `explain_json_format_version = 2`) and is
+not returned to the pool, where it would change the shape of the next request's plain plan; an
+older MySQL has no such variable and its own refusal of the combination is the answer.
 
 SQL Server resets SHOWPLAN using a bounded cancellation-independent context, including after query
 failure. An uncertain enable/reset outcome discards the connection instead of returning its mode to
@@ -87,7 +91,10 @@ left out rather than drawing a third of a schema as if it were all of it. Every 
 a table by `dbx.TableKey(schema, name)`: keyed by the bare name, a table called `users` in two schemas was
 one entry, and one of them silently took the other's place. Partitions are listed as `partition` and are
 not drawn; views and materialized views are not asked for foreign keys. Each dialect keeps its type
-spelling, key order and referential actions. A refused bulk read falls back to per-table reads so
+spelling, key order and referential actions; SQL Server's bulk columns are therefore read from
+`sys.columns` and spelled by `mssqlColumnType`, as a table's own detail is, because
+information_schema names an alias type by the type under it (`sysname` came back as `nvarchar(128)`)
+and leaves a `datetime2`'s precision out. A refused bulk read falls back to per-table reads so
 restricted accounts retain partial results. Full table details use fresh reads.
 
 **The catalogue is per engine, and optional per group.** `GET /databases/{id}/catalog` lists the schemas
@@ -184,6 +191,21 @@ holds something is the guard.
   `01-FEB-24`. `TestLiveARowGoesBackAsTheGridShowedIt` writes every type back as displayed and deletes
   the row by it, on every engine. The statements a change set shows for review take the same wrappers
   around their literals, and `TestLiveReviewedStatementsAreTheEnginesOwnSQL` runs them as written.
+- **The engines' credential catalogues are not read by name.** The page, the count, the cell, the
+  export and the value search are on the read surface and take any schema and table, and the
+  connection behind them is usually an administrator's. `guardCredentials` (`dbx/credentials.go`)
+  refuses the relations that hold what accounts sign in with — PostgreSQL's `pg_authid`,
+  `pg_shadow`, `pg_user_mapping(s)`, `pg_subscription` and the two information_schema views over
+  user mappings; MySQL's and MariaDB's `mysql.user`, `global_priv`, `password_history`, `servers`,
+  `slave_master_info`; SQL Server's `sys.sql_logins` and `syslogins`; Oracle's `SYS.USER$`,
+  `USER_HISTORY$`, `LINK$`, `DBA_USERS`, `KU$_USER_VIEW` — with `403 credentials_withheld`, for
+  every role, as MongoDB's `system.users` is. A request that names no schema is resolved as the
+  engine would resolve it (pg_catalog and SQL Server's `sys` are searched implicitly, Oracle falls
+  back to a public synonym, MySQL is asked which database the session is on, so an application's
+  own `user` table is not caught). The search skips them. It is a list of names in front of the
+  forms that read a table by name; a statement in the console is the operator's own and needs a
+  capability a read-only role does not have. `/count` answers a refused filter, an unknown column
+  and a value of the wrong type with `400`, as `/browse` does (`tableReadError`) — it answered `502`.
 - **A cell is typed by its column, not its content.** A binary column is hex whatever its bytes spell
   (`\x…`, which an edit may send straight back), a result carries each column's `kinds`, and a value
   cut for the page — a long text, a blob past the preview — is listed in `clipped` with its size and
@@ -191,6 +213,8 @@ holds something is the guard.
   on the server before it is fetched: `byteLength` is part of `Dialect`, so an engine cannot be added
   without saying how. Where the engine can only count characters (an Oracle CLOB) the figure is a
   floor and the refusal says "at least"; a type it cannot measure at all (Oracle's LONG) is not read.
+  A cell's `size` is the bytes of its text or its bytes, and for a number or a boolean — which
+  travel as `json` — the length of its written form; only a NULL has none.
   A driver's name for a result column is not always what the column is. go-ora names its wire types:
   a JSON column is a BLOB locator, a BOOLEAN a NUMBER, a BLOB a long raw. An XMLTYPE it reads laid
   out afresh, and a NULL one not at all: the statement fails or, with other columns in the row, waits
@@ -241,8 +265,12 @@ holds something is the guard.
   connection aborted (`http.ErrAbortHandler`), which a browser reports as a failed download and every
   client as a failed transfer. A Mongo server that cannot be reached is `502 connect_failed`, where it
   was an empty file and a 200. `POST /{id}/export/query` exports one statement's result at
-  `service.control`, taking only what `dbx.Classify` reads as a read and, on Postgres and MySQL,
-  running it in a read-only transaction so the server refuses what the classifier missed.
+  `service.control`, taking only what `dbx.ClassifyFor` reads as a read and running it inside the
+  same engine read scope a run of it gets (`session.read`, on every engine: a read-only transaction,
+  a session or setting that refuses writes, or a transaction that is rolled back), so what the
+  classifier missed is refused by the server or undone. It used to be scoped on Postgres and MySQL
+  only, which made the same statement rolled back by `/query` and kept by `/export/query` on SQL
+  Server, Oracle, ClickHouse and SQLite.
 - **An import is a stream and one transaction** (`dbx/import*.go`). `POST /{id}/import/upload` is
   multipart, read as it arrives: an `options` part of JSON, then the `file`, which is never held whole —
   the cap is `JD_DB_UPLOAD_MAX_MB`, not the JSON body's 4 MiB. The reader is the package's own because
@@ -563,13 +591,40 @@ holds something is the guard.
     extensions, keys, streams, ACL users, documents, collections, indexes, validation rules, the
     profiler, a statistics reset.
   It guards the dashboard's own controls and is as strong as the classification — a `SELECT` that
-  calls a function which writes passes; it is not a sandbox around the server. Two things outside
-  `/databases/{id}` are held to the same answer. Restoring a backup run into a connection goes
-  through `/backups`: `handleBackupRestoreDatabase` refuses a protected connection with the same
-  `409`, and the adapter behind it (`backupDatabaseDumper.RestoreDatabase`) refuses again whoever
-  calls it. And `POST /databases/host/grant`, which resets an account's password on a host server,
-  refuses the account a protected connection signs in with before it runs anything
-  (`refuseGrantOnProtected`).
+  calls a function which writes passes; it is not a sandbox around the server. Restoring a backup
+  run into a connection goes through `/backups`, outside `/databases/{id}`, and is held to the same
+  answer: `handleBackupRestoreDatabase` refuses a protected connection with the same `409`, and the
+  adapter behind it (`backupDatabaseDumper.RestoreDatabase`) refuses again whoever calls it.
+  - *Protection follows the server* where a request reaches past the connection it was addressed
+    to. The mark is on one saved connection, but an account is the server's and a restore or a drop
+    can name another database, so the handlers that do either ask
+    `protectedNeighbour` (`handlers_db_protect.go`) first — every protected saved connection to the
+    same engine at the same address, compared as an identity (`localhost` is `127.0.0.1`):
+    - *Its account* is not changed through anything else. `POST /databases/host/grant` refuses to
+      reset the account a protected connection signs in with **whichever database the request
+      names** (`refuseGrantOnProtected`; it used to match the database too, so a request naming
+      another one, or none, reset the account and made it a superuser). `PUT` and `DELETE
+      …/server/roles/{name}`, MongoDB's `PUT /mongo/users`, `POST /mongo/users/revoke` and `DELETE
+      /mongo/users`, and Redis's `PUT`/`DELETE /redis/acl/{name}` refuse the same account through a
+      neighbouring connection (`refuseNeighbourAccount`), before anything is dialled. A Redis
+      connection that names no user signs in as `default`.
+    - *Its database* is not replaced or removed through a neighbour. `POST /{id}/restore` with
+      `database`, `DELETE /{id}/database` with `database`, and `POST
+      /backups/runs/{runID}/restore-database` with `database` are refused with `409
+      connection_read_only` when a protected connection is on that database
+      (`refuseDatabaseOfProtected`); `removeContainer` is refused while a protected connection is on
+      any database of that server (`refuseServerOfProtected`). A Redis archive restored with no
+      database named writes into the numbered databases its header lists, not into the
+      connection's own, so those are the ones asked about (`restoreDestinations`,
+      `dbx.RedisArchiveDatabases`) — and the ones the job reports as `database` (`"8"`, `"0,3"`).
+    - *Not followed*: a row whose connection string no longer opens has no address to compare, and
+      a SQLite file has no neighbours. Two saved connections to the **same** database, one
+      protected and one not, are two decisions by the operator: the unprotected one's own routes
+      work on it. Granting, creating a database and settings through a neighbour are not held
+      back; they take nothing from the protected connection.
+    `TestAProtectedDatabaseIsNotReplacedOrDroppedThroughANeighbour`,
+    `TestARedisRestoreIsHeldToTheDatabasesItsArchiveNames` and
+    `TestAProtectedConnectionsAccountIsNotChangedThroughANeighbour` hold each route to it.
 - **Drivers, flavours and capabilities.** A driver is a wire protocol; a flavour is the product behind
   it (`dbx/flavor.go`: MariaDB, Percona and TiDB behind `mysql`; Valkey, KeyDB and Dragonfly behind
   `redis`; TimescaleDB, CockroachDB and YugabyteDB behind `postgres`; FerretDB; Azure SQL Edge).
@@ -655,7 +710,11 @@ holds something is the guard.
   a stopped Debian PostgreSQL cluster, found by its `/etc/postgresql/<version>/<name>` directory — and a
   cluster's port is read from its `postgresql.conf`. Files are confirmed by their first sixteen bytes and never
   opened with a driver to be listed; the walk is server-chosen roots through `files.Resolve`, bounded by
-  depth, visits and time, on a ten-minute cadence or `POST /databases/inventory/scan`. A database kept
+  depth, visits and time, on a ten-minute cadence or `POST /databases/inventory/scan`. Where
+  `JD_FILE_ROOTS` is narrower than those roots — beneath `/home`, or beside all of them — the file
+  roots themselves are walked: a broad root above a file root is outside the roots as a whole, and
+  the scan used to walk nothing and list no file that `inventory/connect` would still take by its
+  path. A file root with a broad root inside it (`/`) is not walked from its top. A database kept
   in a container's own writable layer is found through the Engine's diff and archive reads and listed
   as `embedded`, never connectable. The route is on the read surface: for `system.admin` every
   container is inspected; for every other role nothing is, and the list is a separate reading built
@@ -743,6 +802,17 @@ holds something is the guard.
     and every later dial would fail with nothing here able to undo it. A password change on that
     account re-seals the saved connection string once the new one has been seen to open
     (`resealOwnPassword`, reported as `connectionUpdated`).
+  - *A drop closes what the forms opened.* PostgreSQL refuses to drop a role that still holds a
+    privilege, and the three-level grant below gives it several: `postgresDialect.DropRole` runs
+    `DROP OWNED BY` and `DROP ROLE` in one transaction — but only for a role that owns nothing in
+    this database (`pg_shdepend`), because `DROP OWNED` also drops what a role owns, and dropping an
+    account must not drop its tables. A role that owns something, or holds grants in another
+    database, is refused in the engine's words and nothing was revoked. SQL Server's `DropRole`
+    first drops the user the login has in each database it can reach (found by `SUSER_SID`, the
+    one the grant forms made with `CREATE USER … FOR LOGIN`), which `DROP LOGIN` leaves orphaned
+    with its grants; a user that owns a schema stops the drop before the login is touched. Both
+    refusals are `dbx.ErrRoleInUse` and answer `400`, not `502`. Redis has no database to grant:
+    `POST …/roles/{name}/grant` answers `400` there, with or without `?preview=1`.
   - *The three-level grant* (`POST …/roles/{name}/grant`, `read|write|all`) runs in one transaction
     on PostgreSQL and covers every schema of the database that is not the engine's own, **an
     extension's** (membership in `pg_depend`: pg_cron's `cron`, TimescaleDB's catalogues) **or a
@@ -790,7 +860,11 @@ holds something is the guard.
     (`v$session` names each waiter's blocker, `v$lock` what it asked for; needs grants an
     application schema lacks). `/replication`: PostgreSQL replicas, slots, publications,
     subscriptions, receiver; MySQL/MariaDB replica and source status; the other engines say
-    `supported:false`. `/tablestats` and `/indexstats`: sizes, row and dead-row estimates, scans,
+    `supported:false`. One question is put to MySQL and MariaDB in each one's spelling, and when
+    neither answers the refusal reported is the one that denies access and names the privilege
+    (`mysqlRefusals`), not the older spelling's syntax error; a note about missing
+    performance_schema counts says whether it is off, unreadable to this account, or empty
+    (`mysqlPerformanceSchemaGap`). `/tablestats` and `/indexstats`: sizes, row and dead-row estimates, scans,
     last vacuum/analyze, a planner-statistics bloat estimate, unused/duplicate/covered indexes;
     default 200, clamped to 1000, largest first. MySQL, SQLite and Oracle read up to 20 000 names
     and rank them here because their sizes arrive from a second read; Oracle's catalogue views are
@@ -804,7 +878,10 @@ holds something is the guard.
     every poll; `pg_stat_statements_info` is asked for the same way.
   - `POST /{id}/activity/cancel` stops a statement and keeps the session (`pg_cancel_backend`,
     `KILL QUERY`, Oracle `ALTER SYSTEM CANCEL SQL`); it sits in `s.destructive` beside kill. Audit
-    `database.session.cancel`.
+    `database.session.cancel`. Oracle answers the kill of a session that is in the middle of a
+    statement with `ORA-00031: session marked for kill`: the session is ended once it has rolled
+    back, so `oracleKillOutcome` reads that as the kill having worked, where the route answered
+    `400` for a session that was gone a second later.
   - `POST /{id}/maintenance {action, schema?, table?, index?, options?}` runs one of a closed set
     per engine and returns the engine's own lines, kept to 500 as they arrive: PostgreSQL (vacuum,
     vacuum_analyze, analyze, vacuum_full, reindex), MySQL/MariaDB (analyze, check, optimize,
@@ -1072,7 +1149,10 @@ holds something is the guard.
     `mongoCommands`: read, write, destructive or blocked, plus an `admin` flag for what the forms keep
     to `system.admin` (accounts, the profiler, server parameters). Arguments can raise the class
     (`aggregate` with `$out`, `update` with an empty filter and `multi`, `findAndModify` with `remove`,
-    `createIndexes` with a TTL, `profile` with anything beside a negative level). A flag counts as
+    `createIndexes` with a TTL, `profile` with anything beside a negative level, and an `explain` of
+    an `aggregate` whose pipeline writes or holds an unknown stage unless its `verbosity` is
+    `queryPlanner` — with execution the pipeline runs, and the console does not leave refusing that
+    to the server). A flag counts as
     set unless it is absent, null, `false` or a numeric zero (`mongoFlagSet`): servers differ in what
     they read as true, and 7.0 takes a Decimal128 for `showCredentials` and a string for `repair`. A
     command that sets a field twice is refused, since which one a server reads depends on the server.
