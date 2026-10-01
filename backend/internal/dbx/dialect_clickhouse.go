@@ -3,7 +3,11 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 type clickhouseDialect struct{}
@@ -115,8 +119,9 @@ func (clickhouseDialect) Columns(ctx context.Context, db *sql.DB, schema, table 
 
 // PrimaryKey reports the sorting key columns. ClickHouse has no primary-key
 // constraint in the relational sense — the key orders parts and is not unique —
-// so a row edit keyed on it could match more than one row. That is why the
-// mutation path checks uniqueness separately rather than trusting this.
+// so it identifies a place in the table, not a row. Nothing may edit by it:
+// ApplyChanges refuses this engine outright, and the key is reported only so
+// the Structure tab can show what the table is ordered by.
 func (clickhouseDialect) PrimaryKey(ctx context.Context, db *sql.DB, schema, table string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `
 	  SELECT name FROM system.columns
@@ -200,12 +205,12 @@ func (clickhouseDialect) BeforeDropColumn(context.Context, *sql.DB, string, stri
 	return nil
 }
 
-func (clickhouseDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
-	checked, checkErr := ExplainStatement(query)
+func (d clickhouseDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := explainStatement(d.Driver(), query)
 	if checkErr != nil {
 		return nil, checkErr
 	}
-	query = checked
+	query = checked.SQL
 	return RunQuery(ctx, db, "EXPLAIN "+query, 500)
 }
 
@@ -273,3 +278,80 @@ func (d clickhouseDialect) DropDatabaseSQL(name string) ([]DropStatement, error)
 // ClickHouse's connection database is only a default for unqualified names, so
 // there is nothing to move away from.
 func (clickhouseDialect) AdminDatabase() string { return "" }
+
+// --- the workbench ---------------------------------------------------------
+
+func (clickhouseDialect) readScope() readScope { return readScopeSetting }
+
+// refuseChanges: rows here cannot be edited one at a time. See
+// ErrChangesUnsupported for why.
+func (clickhouseDialect) refuseChanges() error { return ErrChangesUnsupported }
+
+// clickhouseReadScope returns the context a read runs under: readonly=2 sent
+// with the query. That is reads only, and — unlike readonly=1 — the other
+// settings a connection string carries may still be sent along with it.
+//
+// The setting is tried first, on a statement that cannot matter, because some
+// accounts may not send it. One the server already holds to reads may not
+// change the setting at all, and then the server's own limit is the scope. One
+// whose profile pins the setting at writable may not either, and has no scope:
+// its statement is not run. The two refusals read alike, so which account this
+// is is asked of the server rather than read out of the refusal.
+func clickhouseReadScope(ctx context.Context, conn *sql.Conn) (context.Context, error) {
+	scoped := clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{"readonly": 2}))
+	var one uint8
+	refused := conn.QueryRowContext(scoped, "SELECT 1").Scan(&one)
+	if refused == nil {
+		return scoped, nil
+	}
+	var readonly uint64
+	err := conn.QueryRowContext(ctx, "SELECT toUInt64(getSetting('readonly'))").Scan(&readonly)
+	if err == nil && readonly != 0 {
+		return ctx, nil
+	}
+	var answer *clickhouse.Exception
+	if !errors.As(refused, &answer) {
+		// The connection failed, not the setting.
+		return nil, refused
+	}
+	return nil, fmt.Errorf("ClickHouse would not hold this statement to reading, so it was not run: %w", refused)
+}
+
+// textMatch uses the position functions instead of LIKE. ClickHouse's LIKE has
+// no ESCAPE clause, and these take the operator's text as text.
+func (d clickhouseDialect) textMatch(expr string, kind matchKind, fold bool, ph string) (string, func(string) string) {
+	text, verbatim := d.CastText(expr), func(value string) string { return value }
+	if fold {
+		text, ph = "lowerUTF8("+text+")", "lowerUTF8("+ph+")"
+	}
+	switch kind {
+	case matchPrefix:
+		return "startsWith(" + text + ", " + ph + ")", verbatim
+	case matchSuffix:
+		return "endsWith(" + text + ", " + ph + ")", verbatim
+	}
+	return "position(" + text + ", " + ph + ") > 0", verbatim
+}
+
+func (d clickhouseDialect) regexMatch(expr, ph string) string {
+	return "match(" + d.CastText(expr) + ", " + ph + ")"
+}
+
+// rowEstimate reads total_rows, which the MergeTree family keeps exactly.
+func (clickhouseDialect) rowEstimate(ctx context.Context, db *sql.DB, schema, table string) (int64, error) {
+	if schema == "" {
+		schema = "default"
+	}
+	var n int64
+	err := db.QueryRowContext(ctx,
+		`SELECT ifNull(toInt64(total_rows), -1) FROM system.tables WHERE database = ? AND name = ?`,
+		schema, table).Scan(&n)
+	if err == sql.ErrNoRows {
+		return -1, nil
+	}
+	return n, err
+}
+
+func (d clickhouseDialect) byteLength(_ Column, quoted string) (string, bool, error) {
+	return "length(" + d.CastText(quoted) + ")", false, nil
+}

@@ -16,7 +16,7 @@ func TestBuildWhereOperators(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ` WHERE "age" >= $1 AND CAST("name" AS TEXT) LIKE $2 AND "deleted_at" IS NULL`
+	want := ` WHERE "age" >= $1 AND CAST("name" AS TEXT) LIKE $2 ESCAPE '!' AND "deleted_at" IS NULL`
 	if clause != want {
 		t.Errorf("clause = %q, want %q", clause, want)
 	}

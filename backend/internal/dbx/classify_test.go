@@ -56,23 +56,6 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-func TestNormaliseSQL(t *testing.T) {
-	cases := map[string]string{
-		"DELETE/**/FROM users":         "DELETE FROM users",
-		"SELECT 1 -- trailing\nFROM t": "SELECT 1 FROM t",
-		"SELECT 1 # mysql\nFROM t":     "SELECT 1 FROM t",
-		"SELECT   *\n\tFROM  t":        "SELECT * FROM t",
-		"SELECT '-- not a comment'":    "SELECT '-- not a comment'",
-		"SELECT '/* nor this */'":      "SELECT '/* nor this */'",
-		"SELECT 1 /* unterminated":     "SELECT 1",
-	}
-	for in, want := range cases {
-		if got := normaliseSQL(in); got != want {
-			t.Errorf("normaliseSQL(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestReturnsRows(t *testing.T) {
 	cases := map[string]bool{
 		"SELECT 1":                  true,
@@ -82,10 +65,46 @@ func TestReturnsRows(t *testing.T) {
 		"INSERT INTO t(a) VALUES(1) RETURNING a":           true,
 		"UPDATE t SET a = 1":                               false,
 		"SHOW TABLES":                                      true,
+		// A parenthesised query leads with SELECT all the same; the prefix test
+		// saw "(" and ran it through Exec, which threw the rows away.
+		"(SELECT 1) UNION (SELECT 2)": true,
+		// The word in a string is data. Matching " returning " in the text sent
+		// this UPDATE through Query.
+		"UPDATE t SET note = ' returning ' WHERE id = 1": false,
+		// A CTE that only writes has no rows to hand back.
+		"WITH old AS (SELECT 1) DELETE FROM t WHERE id IN (SELECT * FROM old)": false,
+		"WITH gone AS (DELETE FROM t RETURNING id) SELECT * FROM gone":         true,
 	}
 	for query, want := range cases {
 		if got := returnsRows(query); got != want {
 			t.Errorf("returnsRows(%q) = %v, want %v", query, got, want)
+		}
+	}
+}
+
+// The same word answers in rows on one engine and in nothing on another.
+func TestRowReturningStatementsPerEngine(t *testing.T) {
+	for _, c := range []struct {
+		driver Driver
+		query  string
+		want   bool
+	}{
+		{DriverMySQL, "CALL report()", true},
+		{DriverMySQL, "CHECK TABLE t", true},
+		{DriverOracle, "CALL report()", false},
+		{DriverPostgres, "CALL report()", false},
+		{DriverMSSQL, "EXEC sp_who", true},
+		{DriverMSSQL, "UPDATE t SET a = 1 OUTPUT inserted.a WHERE id = 1", true},
+		{DriverPostgres, "UPDATE t SET output = 1 WHERE id = 1", false},
+		{DriverClickHouse, "EXISTS TABLE t", true},
+		{DriverMySQL, "DELETE FROM t WHERE id = 1 RETURNING id", true},
+	} {
+		st, err := SingleStatementFor(c.driver, c.query)
+		if err != nil {
+			t.Fatalf("%s %q: %v", c.driver, c.query, err)
+		}
+		if st.returnsRows != c.want {
+			t.Errorf("%s %q returns rows = %v, want %v", c.driver, c.query, st.returnsRows, c.want)
 		}
 	}
 }

@@ -120,7 +120,8 @@ CREATE TABLE IF NOT EXISTS db_saved_queries (
   connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
   sql           TEXT NOT NULL,
-  created_at    INTEGER NOT NULL
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_db_saved_conn ON db_saved_queries(connection_id, name);
 
@@ -136,7 +137,9 @@ CREATE TABLE IF NOT EXISTS db_query_history (
   success       INTEGER NOT NULL DEFAULT 1,
   duration_ms   INTEGER NOT NULL DEFAULT 0,
   row_count     INTEGER NOT NULL DEFAULT 0,
-  ran_at        INTEGER NOT NULL
+  ran_at        INTEGER NOT NULL,
+  rows_affected INTEGER NOT NULL DEFAULT 0,
+  error         TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_db_history_conn ON db_query_history(connection_id, ran_at DESC);
 
@@ -1165,6 +1168,12 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_runs", "slot_class", "TEXT NOT NULL DEFAULT 'light'"},
 	{"deploy_runs", "metadata_json", "TEXT NOT NULL DEFAULT '{}'"},
 	{"deploy_releases", "expected_downtime", "INTEGER NOT NULL DEFAULT 1"},
+
+	// The query history learned why a statement failed and how many rows a
+	// write changed, and a saved query learned when it was last edited.
+	{"db_query_history", "error", "TEXT NOT NULL DEFAULT ''"},
+	{"db_query_history", "rows_affected", "INTEGER NOT NULL DEFAULT 0"},
+	{"db_saved_queries", "updated_at", "INTEGER NOT NULL DEFAULT 0"},
 
 	// The CPU mode breakdown, added because one "busy" percentage cannot tell
 	// apart a server doing work, a server waiting on a disk, and a hypervisor

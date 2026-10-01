@@ -69,7 +69,7 @@ type engineFixture struct {
 }
 
 func sqlFixtures() []engineFixture {
-	return []engineFixture{
+	fixtures := []engineFixture{
 		{
 			driver: DriverPostgres, env: "JD_TEST_POSTGRES_DSN",
 			dsn:    "postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable",
@@ -209,6 +209,19 @@ func sqlFixtures() []engineFixture {
 			},
 		},
 	}
+	// On MySQL and ClickHouse the schema is the database, so a DSN that names a
+	// different one — a fixture server shared between several runs gives each
+	// its own — moves the fixture with it. The unqualified seed statements
+	// already land there; only the name the assertions qualify by has to follow.
+	for i, f := range fixtures {
+		if f.driver != DriverMySQL && f.driver != DriverClickHouse {
+			continue
+		}
+		if info, err := ParseDSN(f.driver, os.Getenv(f.env)); err == nil && info.Database != "" {
+			fixtures[i].schema = info.Database
+		}
+	}
+	return fixtures
 }
 
 func setupFixture(t *testing.T, db *sql.DB, f engineFixture) {

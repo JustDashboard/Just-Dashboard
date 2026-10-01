@@ -1,7 +1,6 @@
 package dbx
 
 import (
-	"errors"
 	"strings"
 	"testing"
 )
@@ -46,59 +45,11 @@ func TestBuildInsert(t *testing.T) {
 	}
 }
 
-func TestBuildUpdate(t *testing.T) {
-	got, err := buildUpdate(mustDialect(t, DriverPostgres), "public", "users",
-		[]string{"name", "role"}, []string{"id"}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `UPDATE "public"."users" SET "name" = $1, "role" = $2 WHERE "id" = $3 RETURNING *`
-	if got != want {
-		t.Errorf("buildUpdate = %q, want %q", got, want)
-	}
-
-	// Placeholders must run continuously across SET and WHERE for MySQL too.
-	gotMy, err := buildUpdate(mustDialect(t, DriverMySQL), "app", "users",
-		[]string{"name"}, []string{"id", "tenant"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantMy := "UPDATE `app`.`users` SET `name` = ? WHERE `id` = ? AND `tenant` = ?"
-	if gotMy != wantMy {
-		t.Errorf("buildUpdate(mysql) = %q, want %q", gotMy, wantMy)
-	}
-}
-
-func TestBuildUpdateRefusesNoKey(t *testing.T) {
-	// An UPDATE with no WHERE columns would touch every row; it must be refused
-	// before a statement is ever built.
-	if _, err := buildUpdate(mustDialect(t, DriverPostgres), "public", "users", []string{"name"}, nil, false); !errors.Is(err, ErrNoPrimaryKey) {
-		t.Errorf("buildUpdate with no key = %v, want ErrNoPrimaryKey", err)
-	}
-	if _, err := buildDelete(mustDialect(t, DriverPostgres), "public", "users", nil); !errors.Is(err, ErrNoPrimaryKey) {
-		t.Errorf("buildDelete with no key = %v, want ErrNoPrimaryKey", err)
-	}
-}
-
-func TestBuildDelete(t *testing.T) {
-	got, err := buildDelete(mustDialect(t, DriverSQLite), "", "sessions", []string{"id"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `DELETE FROM "sessions" WHERE "id" = ?`
-	if got != want {
-		t.Errorf("buildDelete = %q, want %q", got, want)
-	}
-}
-
 func TestBuildersRejectBadIdentifiers(t *testing.T) {
 	// A column name that is not a plain identifier must be rejected rather than
 	// interpolated — this is the injection guard for the form-driven edit path.
 	if _, err := buildInsert(mustDialect(t, DriverPostgres), "public", "users", []string{"name\x00drop"}, false); err == nil {
 		t.Error("buildInsert accepted a non-identifier column name")
-	}
-	if _, err := buildUpdate(mustDialect(t, DriverPostgres), "public", "users", []string{"ok"}, []string{"id\x00"}, false); err == nil {
-		t.Error("buildUpdate accepted a non-identifier key column")
 	}
 }
 
@@ -117,7 +68,7 @@ func TestQuotingEscapesAndAllowsRealNames(t *testing.T) {
 	// A hyphenated or spaced table name is legal in every engine here and used
 	// to be refused outright, which made such a table visible in the list and
 	// impossible to open.
-	got, err := buildDelete(mustDialect(t, DriverPostgres), "", "user-profiles", []string{"id"})
+	got, err := buildInsert(mustDialect(t, DriverPostgres), "", "user-profiles", []string{"id"}, false)
 	if err != nil {
 		t.Fatalf("hyphenated table name rejected: %v", err)
 	}

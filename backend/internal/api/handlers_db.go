@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -732,27 +733,135 @@ func (s *Server) handleDBBrowse(w http.ResponseWriter, r *http.Request) error {
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
 	}
+	opts, err := browseOptions(q)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
 	pool, conn, err := s.dbPool(r.Context(), id)
 	if err != nil {
 		return err
 	}
-	filters, err := parseFilters(q.Get("filters"))
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
+	opts.Limit, opts.Offset = limit, offset
+	// How much of a long text cell a page carries. The rest of a cell that was
+	// cut is one GET /cell away, and a page of a thousand rows cannot afford a
+	// megabyte in each.
+	opts.ClipText = clampInt(atoiDefault(q.Get("cellLimit"), defaultCellLimit), minCellLimit, maxCellLimit)
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	res, err := dbx.Browse(ctx, pool, conn.Driver, dbx.BrowseOptions{
-		Schema: q.Get("schema"), Table: q.Get("table"),
-		Limit: limit, Offset: offset,
-		OrderBy: q.Get("orderBy"), Desc: q.Get("dir") == "desc",
-		Filters: filters,
-	})
+	page, err := dbx.BrowseTablePage(ctx, pool, conn.Driver, opts)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.JSON(w, http.StatusOK, res)
+	httpx.JSON(w, http.StatusOK, page)
 	return nil
+}
+
+const (
+	defaultCellLimit = 4 << 10
+	minCellLimit     = 256
+	maxCellLimit     = 64 << 10
+)
+
+func clampInt(n, low, high int) int {
+	switch {
+	case n < low:
+		return low
+	case n > high:
+		return high
+	}
+	return n
+}
+
+// browseOptions reads what a grid request says about which rows it wants: the
+// table, the conditions and how they combine, the order, and the columns.
+//
+// One function for the page, the count and the export, because those three
+// answering different questions about "the rows I am looking at" is the bug
+// the shared selection in dbx exists to prevent, and it would come straight
+// back if each handler read the query string its own way.
+func browseOptions(q url.Values) (dbx.BrowseOptions, error) {
+	opts := dbx.BrowseOptions{Schema: q.Get("schema"), Table: q.Get("table")}
+	var err error
+	if opts.Filters, err = parseFilters(q.Get("filters")); err != nil {
+		return opts, err
+	}
+	switch q.Get("match") {
+	case "", "all":
+	case "any":
+		opts.MatchAny = true
+	default:
+		return opts, fmt.Errorf("match must be all or any")
+	}
+	if opts.Sort, err = parseSort(q.Get("sort"), q.Get("orderBy"), q.Get("dir")); err != nil {
+		return opts, err
+	}
+	if opts.Columns, err = parseColumns(q.Get("columns")); err != nil {
+		return opts, err
+	}
+	return opts, nil
+}
+
+// parseSort reads the order. Three spellings, most exact first: `sort` is a
+// JSON array of {column, desc}, which can name any column; `orderBy=a:asc,b:desc`
+// is the compact form; and `orderBy=a&dir=desc` is the single column the grid
+// has always sent, which is also what any value without a direction on every
+// part is read as — a column may legitimately contain a comma or a colon, and
+// guessing otherwise would sort by a column that does not exist.
+func parseSort(raw, orderBy, dir string) ([]dbx.SortKey, error) {
+	if strings.TrimSpace(raw) != "" {
+		var keys []dbx.SortKey
+		if err := json.Unmarshal([]byte(raw), &keys); err != nil {
+			return nil, fmt.Errorf("sort must be a JSON array of {column, desc}: %v", err)
+		}
+		if len(keys) > dbx.MaxBrowseColumns {
+			return nil, fmt.Errorf("too many sort columns")
+		}
+		return keys, nil
+	}
+	if orderBy == "" {
+		return nil, nil
+	}
+	parts := strings.Split(orderBy, ",")
+	keys := make([]dbx.SortKey, 0, len(parts))
+	for _, part := range parts {
+		i := strings.LastIndexByte(part, ':')
+		if i <= 0 {
+			keys = nil
+			break
+		}
+		switch strings.ToLower(part[i+1:]) {
+		case "asc":
+			keys = append(keys, dbx.SortKey{Column: part[:i]})
+		case "desc":
+			keys = append(keys, dbx.SortKey{Column: part[:i], Desc: true})
+		default:
+			keys = nil
+		}
+		if keys == nil {
+			break
+		}
+	}
+	if keys != nil {
+		return keys, nil
+	}
+	return []dbx.SortKey{{Column: orderBy, Desc: dir == "desc"}}, nil
+}
+
+// parseColumns reads a projection: a JSON array of names, or a comma-separated
+// list for names that hold no comma.
+func parseColumns(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if strings.HasPrefix(raw, "[") {
+		var cols []string
+		if err := json.Unmarshal([]byte(raw), &cols); err != nil {
+			return nil, fmt.Errorf("columns must be a JSON array of names: %v", err)
+		}
+		return cols, nil
+	}
+	return strings.Split(raw, ","), nil
 }
 
 // parseFilters decodes the grid's filter list, which travels as a JSON array in
@@ -777,18 +886,84 @@ func parseFilters(raw string) ([]dbx.Filter, error) {
 type queryRequest struct {
 	Query   string `json:"query"`
 	MaxRows int    `json:"maxRows"`
+	// QueryID is a name the client chose for this run, so it can ask for the
+	// run to be stopped while the request is still open.
+	QueryID string `json:"queryId"`
+}
+
+// classifyResponse is the verdict on everything in the editor, and on each
+// statement of it, so a script can be marked up line by line.
+type classifyResponse struct {
+	dbx.Risk
+	Statements []dbx.SQLStatement `json:"statements"`
 }
 
 // handleDBClassify lets the editor warn before anything is sent. It is a pure
-// analysis of the text and touches no database.
+// analysis of the text for the connection's engine and touches no database.
 func (s *Server) handleDBClassify(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
 	var req queryRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
 	httpx.SkipAudit(r)
-	httpx.JSON(w, http.StatusOK, dbx.Classify(req.Query))
+	// The engine decides how the text is read — a backtick is a quote on one
+	// and an operator on another — so the connection is looked up, not dialled.
+	conn, err := s.sqlConnection(r, id)
+	if err != nil {
+		return err
+	}
+	statements, err := dbx.ParseScript(conn.Driver, req.Query)
+	if err != nil {
+		// Unreadable is destructive, here as in the runner: the editor must
+		// show the same verdict the run would be held to.
+		httpx.JSON(w, http.StatusOK, classifyResponse{
+			Risk:       dbx.ClassifyFor(conn.Driver, req.Query),
+			Statements: []dbx.SQLStatement{},
+		})
+		return nil
+	}
+	if statements == nil {
+		statements = []dbx.SQLStatement{}
+	}
+	httpx.JSON(w, http.StatusOK, classifyResponse{Risk: dbx.WorstRisk(statements), Statements: statements})
 	return nil
+}
+
+// authoriseSQL turns a verdict on operator-written SQL into a permission. It
+// is the one place that does: the query route, the script route and an
+// executing plan all come through here, so they cannot disagree about what a
+// destructive statement costs.
+func (s *Server) authoriseSQL(r *http.Request, risk dbx.Risk) error {
+	if !risk.Destructive {
+		return nil
+	}
+	p := httpx.MustPrincipal(r)
+	if !p.Can(auth.CapDestructive) {
+		return httpx.Err(http.StatusForbidden, "forbidden",
+			"this statement is destructive and your role does not permit it")
+	}
+	if !s.destrLim.Allow(p.Username() + "|dbquery") {
+		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
+			"too many destructive statements, slow down")
+	}
+	return nil
+}
+
+// sqlConnection returns a connection's record for a route that reads its SQL
+// before dialling, refusing the engines that have none.
+func (s *Server) sqlConnection(r *http.Request, id int64) (*dbConnection, error) {
+	conn, _, err := s.dbConnRow(r.Context(), id)
+	if err != nil {
+		return nil, err
+	}
+	if !conn.Driver.IsSQL() {
+		return nil, httpx.BadRequest("this endpoint is for SQL engines; %s uses its own surface", conn.Driver)
+	}
+	return conn, nil
 }
 
 // handleDBQuery runs arbitrary SQL. A destructive statement additionally
@@ -805,22 +980,17 @@ func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 	if req.Query == "" {
 		return httpx.BadRequest("query is required")
 	}
-	statement, err := dbx.SingleStatement(req.Query)
+	conn, err := s.sqlConnection(r, id)
+	if err != nil {
+		return err
+	}
+	statement, err := dbx.SingleStatementFor(conn.Driver, req.Query)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	req.Query = statement
-	risk := dbx.Classify(req.Query)
-	p := httpx.MustPrincipal(r)
-	if risk.Destructive {
-		if !p.Can(auth.CapDestructive) {
-			return httpx.Err(http.StatusForbidden, "forbidden",
-				"this statement is destructive and your role does not permit it")
-		}
-		if !s.destrLim.Allow(p.Username() + "|dbquery") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many destructive statements, slow down")
-		}
+	risk := statement.Risk
+	if err := s.authoriseSQL(r, risk); err != nil {
+		return err
 	}
 	pool, _, err := s.dbPool(r.Context(), id)
 	if err != nil {
@@ -828,19 +998,30 @@ func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx, cancel := timeoutCtx(r, 120*time.Second)
 	defer cancel()
+	ctx, run, err := s.trackRun(ctx, r, id, req.QueryID)
+	if err != nil {
+		return err
+	}
+	defer run.release()
 	start := time.Now()
-	res, err := dbx.RunQuery(ctx, pool, req.Query, req.MaxRows)
+	res, err := dbx.RunStatement(ctx, pool, conn.Driver, statement, req.MaxRows)
 	elapsed := time.Since(start).Milliseconds()
 	if err != nil {
-		s.recordDBHistory(r.Context(), id, req.Query, risk.Level, false, elapsed, 0)
+		err = run.explain(err)
+		s.recordDBHistory(r.Context(), id, dbHistoryEntry{
+			SQL: statement.SQL, Risk: risk.Level, DurationMs: elapsed, Error: err.Error(),
+		})
 		httpx.SetAudit(r, "database.query", strconv.FormatInt(id, 10),
-			map[string]any{"risk": risk.Level, "error": err.Error()})
-		return httpx.BadRequest("%v", err)
+			map[string]any{"risk": risk.Level, "error": err.Error(), "statement": statement.SQL})
+		return err
 	}
-	s.recordDBHistory(r.Context(), id, req.Query, risk.Level, true, elapsed, res.RowCount)
+	s.recordDBHistory(r.Context(), id, dbHistoryEntry{
+		SQL: statement.SQL, Risk: risk.Level, Success: true, DurationMs: elapsed,
+		RowCount: res.RowCount, RowsAffected: res.Affected,
+	})
 	httpx.SetAudit(r, "database.query", strconv.FormatInt(id, 10), map[string]any{
 		"risk": risk.Level, "destructive": risk.Destructive,
-		"rowsAffected": res.Affected, "rowCount": res.RowCount, "statement": req.Query,
+		"rowsAffected": res.Affected, "rowCount": res.RowCount, "statement": statement.SQL,
 	})
 	httpx.JSON(w, http.StatusOK, map[string]any{"result": res, "risk": risk})
 	return nil
@@ -1251,7 +1432,7 @@ func (s *Server) handleDBRowInsert(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	res, err := dbx.InsertRow(ctx, pool, conn.Driver, req.Schema, req.Table, req.Values)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return changeError(err)
 	}
 	httpx.SetAudit(r, "database.row.insert", conn.Name,
 		map[string]any{"table": req.Table, "columns": len(req.Values)})
@@ -1282,10 +1463,12 @@ func (s *Server) handleDBRowUpdate(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	res, err := dbx.UpdateRow(ctx, pool, conn.Driver, req.Schema, req.Table, req.Values, req.Key)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return changeError(err)
 	}
+	// The key's columns, not its values: a key is row data like any other, and
+	// row data does not belong in the audit log.
 	httpx.SetAudit(r, "database.row.update", conn.Name,
-		map[string]any{"table": req.Table, "key": req.Key})
+		map[string]any{"table": req.Table, "key": keyColumns(req.Key)})
 	httpx.JSON(w, http.StatusOK, map[string]any{"result": res})
 	return nil
 }
@@ -1323,10 +1506,10 @@ func (s *Server) handleDBRowDelete(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	res, err := dbx.DeleteRow(ctx, pool, conn.Driver, req.Schema, req.Table, req.Key)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return changeError(err)
 	}
 	httpx.SetAudit(r, "database.row.delete", conn.Name,
-		map[string]any{"table": req.Table, "key": req.Key})
+		map[string]any{"table": req.Table, "key": keyColumns(req.Key)})
 	httpx.JSON(w, http.StatusOK, map[string]any{"result": res})
 	return nil
 }
@@ -1338,6 +1521,9 @@ type savedQuery struct {
 	Name      string    `json:"name"`
 	SQL       string    `json:"sql"`
 	CreatedAt time.Time `json:"createdAt"`
+	// UpdatedAt is when the query was last renamed or edited; the creation
+	// time until then.
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func (s *Server) handleDBSavedList(w http.ResponseWriter, r *http.Request) error {
@@ -1346,7 +1532,7 @@ func (s *Server) handleDBSavedList(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	rows, err := s.Store.DB.QueryContext(r.Context(),
-		`SELECT id, name, sql, created_at FROM db_saved_queries WHERE connection_id = ? ORDER BY name`, id)
+		`SELECT id, name, sql, created_at, updated_at FROM db_saved_queries WHERE connection_id = ? ORDER BY name`, id)
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -1354,20 +1540,44 @@ func (s *Server) handleDBSavedList(w http.ResponseWriter, r *http.Request) error
 	out := []savedQuery{}
 	for rows.Next() {
 		var q savedQuery
-		var created int64
-		if err := rows.Scan(&q.ID, &q.Name, &q.SQL, &created); err != nil {
+		var created, updated int64
+		if err := rows.Scan(&q.ID, &q.Name, &q.SQL, &created, &updated); err != nil {
 			return httpx.Internal(err)
 		}
-		q.CreatedAt = time.Unix(created, 0).UTC()
+		q.setTimes(created, updated)
 		out = append(out, q)
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
+func (q *savedQuery) setTimes(created, updated int64) {
+	q.CreatedAt = time.Unix(created, 0).UTC()
+	q.UpdatedAt = q.CreatedAt
+	// 0 is a query saved before edits were recorded, or never edited.
+	if updated > 0 {
+		q.UpdatedAt = time.Unix(updated, 0).UTC()
+	}
+}
+
 type savedQueryRequest struct {
 	Name string `json:"name"`
 	SQL  string `json:"sql"`
+}
+
+// maxSavedQueryName keeps a saved query's name a name. The statement itself is
+// bounded by the request body.
+const maxSavedQueryName = 200
+
+func (req *savedQueryRequest) validate() error {
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" || strings.TrimSpace(req.SQL) == "" {
+		return httpx.BadRequest("name and sql are required")
+	}
+	if len(req.Name) > maxSavedQueryName {
+		return httpx.BadRequest("a saved query's name may be at most %d characters", maxSavedQueryName)
+	}
+	return nil
 }
 
 func (s *Server) handleDBSavedCreate(w http.ResponseWriter, r *http.Request) error {
@@ -1379,23 +1589,24 @@ func (s *Server) handleDBSavedCreate(w http.ResponseWriter, r *http.Request) err
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if req.Name == "" || req.SQL == "" {
-		return httpx.BadRequest("name and sql are required")
+	if err := req.validate(); err != nil {
+		return err
 	}
 	if _, _, err := s.dbConnRow(r.Context(), id); err != nil {
 		return err
 	}
+	now := time.Now()
 	res, err := s.Store.DB.ExecContext(r.Context(),
-		`INSERT INTO db_saved_queries(connection_id, name, sql, created_at) VALUES(?,?,?,?)`,
-		id, req.Name, req.SQL, time.Now().Unix())
+		`INSERT INTO db_saved_queries(connection_id, name, sql, created_at, updated_at) VALUES(?,?,?,?,?)`,
+		id, req.Name, req.SQL, now.Unix(), now.Unix())
 	if err != nil {
 		return httpx.BadRequest("could not save query: %v", err)
 	}
 	newID, _ := res.LastInsertId()
 	httpx.SetAudit(r, "database.query.save", req.Name, nil)
-	httpx.JSON(w, http.StatusCreated, savedQuery{
-		ID: newID, Name: req.Name, SQL: req.SQL, CreatedAt: time.Now().UTC(),
-	})
+	saved := savedQuery{ID: newID, Name: req.Name, SQL: req.SQL}
+	saved.setTimes(now.Unix(), now.Unix())
+	httpx.JSON(w, http.StatusCreated, saved)
 	return nil
 }
 
@@ -1418,13 +1629,15 @@ func (s *Server) handleDBSavedDelete(w http.ResponseWriter, r *http.Request) err
 }
 
 type historyEntry struct {
-	ID       int64     `json:"id"`
-	SQL      string    `json:"sql"`
-	Risk     string    `json:"risk"`
-	Success  bool      `json:"success"`
-	Duration int64     `json:"durationMs"`
-	RowCount int       `json:"rowCount"`
-	RanAt    time.Time `json:"ranAt"`
+	ID           int64     `json:"id"`
+	SQL          string    `json:"sql"`
+	Risk         string    `json:"risk"`
+	Success      bool      `json:"success"`
+	Duration     int64     `json:"durationMs"`
+	RowCount     int       `json:"rowCount"`
+	RowsAffected int64     `json:"rowsAffected"`
+	Error        string    `json:"error,omitempty"`
+	RanAt        time.Time `json:"ranAt"`
 }
 
 func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {
@@ -1433,12 +1646,15 @@ func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	limit := atoiDefault(r.URL.Query().Get("limit"), 50)
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 {
 		limit = 50
 	}
+	limit = min(limit, 200)
+	// ran_at is whole seconds, and a script records several statements in one;
+	// the id breaks the tie in the order they ran.
 	rows, err := s.Store.DB.QueryContext(r.Context(),
-		`SELECT id, sql, risk, success, duration_ms, row_count, ran_at
-		 FROM db_query_history WHERE connection_id = ? ORDER BY ran_at DESC LIMIT ?`, id, limit)
+		`SELECT id, sql, risk, success, duration_ms, row_count, rows_affected, error, ran_at
+		 FROM db_query_history WHERE connection_id = ? ORDER BY ran_at DESC, id DESC LIMIT ?`, id, limit)
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -1447,7 +1663,8 @@ func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {
 	for rows.Next() {
 		var e historyEntry
 		var success, ranAt int64
-		if err := rows.Scan(&e.ID, &e.SQL, &e.Risk, &success, &e.Duration, &e.RowCount, &ranAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.SQL, &e.Risk, &success, &e.Duration, &e.RowCount,
+			&e.RowsAffected, &e.Error, &ranAt); err != nil {
 			return httpx.Internal(err)
 		}
 		e.Success = success != 0
@@ -1458,19 +1675,41 @@ func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// dbHistoryEntry is one statement as the history remembers it.
+type dbHistoryEntry struct {
+	SQL          string
+	Risk         string
+	Success      bool
+	DurationMs   int64
+	RowCount     int
+	RowsAffected int64
+	Error        string
+}
+
+// maxHistoryError bounds the engine's message as it is kept. An error is one
+// line of explanation in a list, and some engines answer with the statement
+// repeated inside it.
+const maxHistoryError = 1000
+
 // recordDBHistory appends a statement to the per-connection history and prunes
 // it to the most recent entries. It never fails the request it records: a
 // history write that errors is logged and swallowed, because losing an audit
 // convenience must not turn a successful query into a failed one.
-func (s *Server) recordDBHistory(ctx context.Context, connID int64, query, risk string, success bool, durationMs int64, rowCount int) {
+func (s *Server) recordDBHistory(ctx context.Context, connID int64, e dbHistoryEntry) {
+	// The request's context may be the very thing that ended the statement —
+	// a cancelled query is exactly the one worth finding in the history.
+	ctx = context.WithoutCancel(ctx)
 	succ := 0
-	if success {
+	if e.Success {
 		succ = 1
 	}
+	if len(e.Error) > maxHistoryError {
+		e.Error = strings.ToValidUTF8(e.Error[:maxHistoryError], "") + "…"
+	}
 	if _, err := s.Store.DB.ExecContext(ctx,
-		`INSERT INTO db_query_history(connection_id, sql, risk, success, duration_ms, row_count, ran_at)
-		 VALUES(?,?,?,?,?,?,?)`,
-		connID, query, risk, succ, durationMs, rowCount, time.Now().Unix()); err != nil {
+		`INSERT INTO db_query_history(connection_id, sql, risk, success, duration_ms, row_count, rows_affected, error, ran_at)
+		 VALUES(?,?,?,?,?,?,?,?,?)`,
+		connID, e.SQL, e.Risk, succ, e.DurationMs, e.RowCount, e.RowsAffected, e.Error, time.Now().Unix()); err != nil {
 		s.Log.Warn("db history write failed", "err", err)
 		return
 	}
@@ -1478,7 +1717,7 @@ func (s *Server) recordDBHistory(ctx context.Context, connID int64, query, risk 
 	// no separate reaper and no unbounded growth.
 	_, _ = s.Store.DB.ExecContext(ctx,
 		`DELETE FROM db_query_history WHERE connection_id = ? AND id NOT IN (
-		    SELECT id FROM db_query_history WHERE connection_id = ? ORDER BY ran_at DESC LIMIT 100
+		    SELECT id FROM db_query_history WHERE connection_id = ? ORDER BY ran_at DESC, id DESC LIMIT 100
 		 )`, connID, connID)
 }
 
@@ -1577,16 +1816,13 @@ func (s *Server) handleDBCount(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	q := r.URL.Query()
-	filters, err := parseFilters(q.Get("filters"))
+	opts, err := browseOptions(r.URL.Query())
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
 	ctx, cancel := timeoutCtx(r, 120*time.Second)
 	defer cancel()
-	n, err := dbx.Count(ctx, pool, conn.Driver, dbx.BrowseOptions{
-		Schema: q.Get("schema"), Table: q.Get("table"), Filters: filters,
-	})
+	n, err := dbx.Count(ctx, pool, conn.Driver, opts)
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
@@ -1635,6 +1871,17 @@ func (s *Server) handleDBRelations(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
+type explainRequest struct {
+	Query string `json:"query"`
+	// MaxRows is accepted because the editor sends one request shape to run
+	// and to explain; a plan is never cut to it.
+	MaxRows int `json:"maxRows"`
+	// Analyze runs the statement and reports what happened.
+	Analyze bool `json:"analyze"`
+	// Format is "text" or "json".
+	Format string `json:"format"`
+}
+
 // handleDBExplain returns the engine's plan for a statement.
 //
 // It is on the read side of the route map, with no capability beyond browsing,
@@ -1643,34 +1890,67 @@ func (s *Server) handleDBRelations(w http.ResponseWriter, r *http.Request) error
 // on — a "show me the plan" button that quietly executed a DELETE would be the
 // worst control in the product — so it is asserted in the dialect contract and
 // tested against every live engine rather than assumed here.
+//
+// analyze is the exception, and it is not on the read side at all: it executes
+// the statement, so the handler asks of it exactly what running the statement
+// through the query route would be asked — the capability to run SQL, and for
+// a destructive statement the destructive capability and its budget. The plan
+// of a data-changing statement is taken inside a transaction that is rolled
+// back, which changes what is left behind and nothing about who may ask.
 func (s *Server) handleDBExplain(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
 		return err
 	}
-	var req queryRequest
+	var req explainRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
 	if strings.TrimSpace(req.Query) == "" {
 		return httpx.BadRequest("query is required")
 	}
-	pool, conn, err := s.dbPool(r.Context(), id)
+	conn, err := s.sqlConnection(r, id)
 	if err != nil {
 		return err
 	}
-	d, err := dbx.DialectFor(conn.Driver)
+	statement, err := dbx.ExplainTarget(conn.Driver, req.Query)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
+	}
+	if req.Analyze {
+		if !httpx.MustPrincipal(r).Can(auth.CapServiceControl) {
+			return httpx.Err(http.StatusForbidden, "forbidden",
+				"an analysed plan runs the statement, and your role does not permit running SQL")
+		}
+		if err := s.authoriseSQL(r, statement.Risk); err != nil {
+			return err
+		}
+	}
+	pool, _, err := s.dbPool(r.Context(), id)
+	if err != nil {
+		return err
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	res, err := d.ExplainPlan(ctx, pool, req.Query)
+	plan, err := dbx.Explain(ctx, pool, conn.Driver, statement, dbx.ExplainOptions{
+		Analyze: req.Analyze, Format: req.Format,
+	})
 	if err != nil {
+		if req.Analyze {
+			httpx.SetAudit(r, "database.explain", conn.Name, map[string]any{
+				"statement": statement.SQL, "analyze": true, "risk": statement.Risk.Level, "error": err.Error(),
+			})
+		}
+		if errors.Is(err, dbx.ErrExplainUnsupported) {
+			return httpx.Err(http.StatusBadRequest, "unsupported", err.Error())
+		}
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.SetAudit(r, "database.explain", conn.Name, map[string]any{"statement": req.Query})
-	httpx.JSON(w, http.StatusOK, map[string]any{"result": res})
+	httpx.SetAudit(r, "database.explain", conn.Name, map[string]any{
+		"statement": statement.SQL, "analyze": req.Analyze, "format": plan.Format,
+		"risk": statement.Risk.Level, "rolledBack": plan.RolledBack,
+	})
+	httpx.JSON(w, http.StatusOK, plan)
 	return nil
 }
 
