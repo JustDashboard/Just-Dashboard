@@ -247,6 +247,12 @@ type ormGen struct {
 	// refusal is set by a generator that finds, once it sees the schema, that
 	// its target cannot represent it at all.
 	refusal string
+	// left are the models a generator could not write and said so. They are in
+	// models, because other tables' keys still point at them, and not in the
+	// counts, which say what is in the output. leftEnums counts the enum types
+	// that met the same end.
+	left      map[*ormTable]bool
+	leftEnums int
 	// multiSchema is true when the models live in more than one schema, which
 	// is when a name alone stops identifying a table.
 	multiSchema   bool
@@ -278,10 +284,16 @@ func (g *ormGen) refuse(format string, args ...any) {
 	g.refusal = fmt.Sprintf(format, args...)
 }
 
+// leaveOut records that a model is not in the output. The warning that says
+// why is the caller's: only it knows the reason.
+func (g *ormGen) leaveOut(m *ormTable) {
+	g.left[m] = true
+}
+
 func newORMGen(s *ORMSchema, o ORMOptions) *ormGen {
 	g := &ormGen{
 		schema: s, driver: s.Driver, flavor: s.Flavor, opts: o,
-		warned: map[string]bool{},
+		warned: map[string]bool{}, left: map[*ormTable]bool{},
 	}
 	if d, err := DialectFor(s.Driver); err == nil {
 		g.dialect = d
@@ -810,15 +822,24 @@ func (g *ormGen) nothingToGenerate() string {
 	return "there are no tables here to generate from"
 }
 
+// counts is what the output holds. A model or an enum type a generator left
+// out is not in it, and neither is a relation with such a model at either end.
 func (g *ormGen) counts() ORMCounts {
-	c := ORMCounts{Enums: len(g.enums)}
+	c := ORMCounts{Enums: len(g.enums) - g.leftEnums}
 	for _, m := range g.models {
+		if g.left[m] {
+			continue
+		}
 		if m.view {
 			c.Views++
 		} else {
 			c.Tables++
 		}
-		c.Relations += len(m.rels)
+		for _, r := range m.rels {
+			if !g.left[r.to] {
+				c.Relations++
+			}
+		}
 	}
 	return c
 }

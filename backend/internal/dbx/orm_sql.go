@@ -76,6 +76,7 @@ func (s *sqlGen) rel(schema, name string) string {
 func (s *sqlGen) writable(m *ormTable) bool {
 	if s.quote(m.Name) == "" || (m.Schema != "" && s.quote(m.Schema) == "") {
 		s.warn("%s has a name that cannot be quoted safely and was left out.", ormOneLine(s.label(m)))
+		s.leaveOut(m)
 		return false
 	}
 	// A column's type is copied as the catalogue printed it wherever the
@@ -84,11 +85,13 @@ func (s *sqlGen) writable(m *ormTable) bool {
 	for _, c := range m.cols {
 		if s.quote(c.Name) == "" {
 			s.warn("%s has a column whose name cannot be quoted safely and was left out.", ormOneLine(s.label(m)))
+			s.leaveOut(m)
 			return false
 		}
 		if assembled && !sqlFragment(c.Type) {
 			s.warn("%s.%s has a type that cannot be copied into a statement as the catalogue printed it; the table was left out.",
 				ormOneLine(s.label(m)), ormOneLine(c.Name))
+			s.leaveOut(m)
 			return false
 		}
 	}
@@ -120,6 +123,18 @@ func sqlFragment(text string) bool {
 		}
 	}
 	return quote == 0
+}
+
+// viewText is a view's definition as it was read, or "" with the view left
+// out and a sentence saying so. Nothing is written in its place: a view with
+// no body is not a statement, and one guessed from its columns is a table.
+func (s *sqlGen) viewText(m *ormTable) string {
+	text := strings.TrimSpace(m.CreateSQL)
+	if text == "" {
+		s.warn("The definition of %s %s could not be read; it was left out.", m.Kind, s.label(m))
+		s.leaveOut(m)
+	}
+	return text
 }
 
 func (s *sqlGen) statement(text string) {
@@ -226,6 +241,7 @@ func (s *sqlGen) postgres() {
 	for _, e := range s.enums {
 		if s.quote(e.Name) == "" || (e.Schema != "" && s.quote(e.Schema) == "") {
 			s.warn("Enum type %s has a name that cannot be quoted safely and was left out.", ormOneLine(e.Name))
+			s.leftEnums++
 			continue
 		}
 		values := make([]string, len(e.Values))
@@ -320,11 +336,10 @@ func (s *sqlGen) postgres() {
 		if !m.view || !s.writable(m) {
 			continue
 		}
-		if strings.TrimSpace(m.CreateSQL) == "" {
-			s.warn("The definition of %s %s could not be read; it was left out.", m.Kind, s.label(m))
+		body := strings.TrimRight(s.viewText(m), ";")
+		if body == "" {
 			continue
 		}
-		body := strings.TrimRight(strings.TrimSpace(m.CreateSQL), ";")
 		switch {
 		case m.Kind == ORMKindMatView:
 			s.statement(fmt.Sprintf("CREATE MATERIALIZED VIEW %s%s AS\n %s", exists, s.rel(m.Schema, m.Name), body))
@@ -385,11 +400,7 @@ func (s *sqlGen) mssql() {
 		}
 	}
 	for _, m := range s.models {
-		if m.view {
-			s.warn("The definition of %s %s is not read for SQL Server; it was left out.", m.Kind, s.label(m))
-			continue
-		}
-		if !s.writable(m) {
+		if m.view || !s.writable(m) {
 			continue
 		}
 		var lines []string
@@ -446,12 +457,34 @@ func (s *sqlGen) mssql() {
 			s.statement(stmt)
 		}
 	}
-	s.foreignKeys(func(_ *ormTable, name, stmt string) string {
+	s.foreignKeys(func(m *ormTable, name, stmt string) string {
 		if !s.opts.IfNotExists || name == "" {
 			return stmt
 		}
-		return fmt.Sprintf("IF OBJECT_ID(N%s, N'F') IS NULL\n", ormSQLString(s.quote(name))) + stmt
+		// A constraint lives in its table's schema. Asked for by its bare name
+		// it is looked for in the login's default one and not found there, and
+		// the second run of the script then fails adding what the first made.
+		return fmt.Sprintf("IF OBJECT_ID(N%s, N'F') IS NULL\n", ormSQLString(s.rel(m.Schema, name))) + stmt
 	})
+
+	for _, m := range s.models {
+		if !m.view || !s.writable(m) {
+			continue
+		}
+		text := s.viewText(m)
+		if text == "" {
+			continue
+		}
+		// SQL Server keeps the statement that made the view, and that is what is
+		// written. CREATE VIEW has to be the first statement of its batch, like
+		// CREATE SCHEMA, so it is handed to EXEC as a string: the script then
+		// runs as one batch or statement by statement alike.
+		stmt := "EXEC(N" + ormSQLString(strings.TrimRight(text, " \t\r\n;")) + ")"
+		if s.opts.IfNotExists {
+			stmt = fmt.Sprintf("IF OBJECT_ID(N%s, N'V') IS NULL\n", ormSQLString(s.rel(m.Schema, m.Name))) + stmt
+		}
+		s.statement(stmt)
+	}
 }
 
 // --- engines that keep the statement ---------------------------------------
@@ -480,15 +513,13 @@ func (s *sqlGen) verbatim() {
 			s.statement("CREATE DATABASE IF NOT EXISTS " + s.quote(m.Schema))
 			s.statement("USE " + s.quote(m.Schema))
 		}
-		ddl := strings.TrimSpace(m.CreateSQL)
 		if m.view {
-			if ddl == "" {
-				s.warn("The definition of %s %s could not be read; it was left out.", m.Kind, s.label(m))
-				continue
+			if text := s.viewText(m); text != "" {
+				s.statement(text)
 			}
-			s.statement(ddl)
 			continue
 		}
+		ddl := strings.TrimSpace(m.CreateSQL)
 		if ddl == "" {
 			s.warn("%s: the engine returned no CREATE statement, so one was assembled from the catalogue; storage options and the like are missing from it.", s.label(m))
 			s.statement(s.assembled(m))
@@ -536,11 +567,13 @@ func (s *sqlGen) assembled(m *ormTable) string {
 	var lines []string
 	for _, c := range m.cols {
 		line := "  " + s.quote(c.Name) + " " + strings.TrimSpace(c.Type)
-		if !c.Nullable && s.driver != DriverClickHouse {
-			line += " NOT NULL"
-		}
+		// The default first: Oracle takes the two in no other order (ORA-03076),
+		// and the engines that take either take this one.
 		if strings.TrimSpace(c.Default) != "" && c.def.Kind != ormDefAuto {
 			line += " DEFAULT " + c.def.sql(s.driver)
+		}
+		if !c.Nullable && s.driver != DriverClickHouse {
+			line += " NOT NULL"
 		}
 		if c.def.Kind == ormDefAuto && s.driver == DriverMySQL {
 			line += " AUTO_INCREMENT"

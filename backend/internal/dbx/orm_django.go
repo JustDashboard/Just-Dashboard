@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Django.
@@ -156,8 +158,9 @@ func (d *djangoGen) choices(e *ormEnum) string {
 	}
 	for _, m := range djangoChoiceNames(e.Values) {
 		label := strings.TrimSpace(strings.NewReplacer("_", " ", "-", " ").Replace(m[1]))
-		if label != "" {
-			label = strings.ToUpper(label[:1]) + label[1:]
+		// By rune: the first byte of "în lucru" is half a letter.
+		if first, size := utf8.DecodeRuneInString(label); first != utf8.RuneError {
+			label = string(unicode.ToUpper(first)) + label[size:]
 		}
 		fmt.Fprintf(&b, "    %s = %s, %s\n", m[0], jsString(m[1]), jsString(label))
 	}

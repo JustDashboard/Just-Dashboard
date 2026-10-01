@@ -781,12 +781,18 @@ func TestLiveORMClickHouse(t *testing.T) {
 	}
 }
 
+// ormLiveSQLServerView is kept by the server exactly as it is sent, which is
+// what lets the test ask for it back word for word.
+const ormLiveSQLServerView = `CREATE VIEW jd_orm.open_accounts AS
+SELECT id, name FROM jd_orm.accounts WHERE active = 1 AND name <> 'it''s closed'`
+
 // SQL Server keeps identity, computed columns, filtered indexes and INCLUDE
 // columns in sys.* views the shared introspection does not read.
 func TestLiveORMSQLServer(t *testing.T) {
 	db := ormLiveDB(t, DriverMSSQL, "JD_TEST_ORM_MSSQL_DSN")
 	ctx := context.Background()
 	drop := []string{
+		`IF OBJECT_ID('jd_orm.open_accounts', 'V') IS NOT NULL DROP VIEW jd_orm.open_accounts`,
 		`IF OBJECT_ID('jd_orm.transfers', 'U') IS NOT NULL DROP TABLE jd_orm.transfers`,
 		`IF OBJECT_ID('jd_orm.accounts', 'U') IS NOT NULL DROP TABLE jd_orm.accounts`,
 	}
@@ -823,6 +829,7 @@ func TestLiveORMSQLServer(t *testing.T) {
 			amount DECIMAL(18,2) NOT NULL,
 			memo VARCHAR(255) NOT NULL DEFAULT ''
 		)`,
+		ormLiveSQLServerView,
 	)
 	scope := ORMScope{Schemas: []string{"jd_orm"}}
 	schema, err := LoadORMSchema(ctx, db, DriverMSSQL, scope)
@@ -874,6 +881,68 @@ func TestLiveORMSQLServer(t *testing.T) {
 	)
 	ormMustNotContain(t, "schema.prisma", before, "IX_jd_orm_accounts_level")
 
+	// A view is in the script as the statement SQL Server kept for it, not as
+	// a table with the view's columns. The guarded script is run from nothing
+	// as one batch — which CREATE VIEW only survives inside EXEC — and then
+	// again over what the first run made, statement by statement.
+	t.Run("views_come_back_as_views", func(t *testing.T) {
+		req := ORMRequest{Target: ORMSQL, Schema: "jd_orm", Views: ormYes(), IfNotExists: ormYes()}
+		asked, err := req.Scope(DriverMSSQL, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		read := func() *ORMSchema {
+			t.Helper()
+			s, err := LoadORMSchema(ctx, db, DriverMSSQL, asked)
+			if err != nil {
+				t.Fatalf("LoadORMSchema: %v", err)
+			}
+			for _, w := range s.Warnings {
+				t.Errorf("loading reported: %s", w)
+			}
+			return s
+		}
+		withViews := read()
+		view := ormTableNamed(withViews, "jd_orm", "open_accounts")
+		if view == nil || view.Kind != ORMKindView || strings.TrimSpace(view.CreateSQL) != ormLiveSQLServerView {
+			t.Fatalf("view = %+v, want the statement that made it", view)
+		}
+		prismaOf := func(s *ORMSchema) string {
+			return ormGenerate(t, s, ORMRequest{Target: ORMPrisma, Views: ormYes()}).Schema
+		}
+		before := prismaOf(withViews)
+		ormMustContain(t, "schema.prisma", before, "view open_accounts {")
+
+		script := ormGenerate(t, withViews, req)
+		ormMustContain(t, "schema.sql", script.Schema,
+			"IF OBJECT_ID(N'[jd_orm].[open_accounts]', N'V') IS NULL\nEXEC(N'"+strings.ReplaceAll(ormLiveSQLServerView, "'", "''")+"');")
+		ormMustNotContain(t, "schema.sql", script.Schema, "CREATE TABLE [jd_orm].[open_accounts]")
+		if script.Counts.Views != 1 || script.Counts.Tables != 2 {
+			t.Errorf("counts = %+v", script.Counts)
+		}
+		for _, w := range script.Warnings {
+			if strings.Contains(w, "open_accounts") {
+				t.Errorf("the view was not written: %s", w)
+			}
+		}
+
+		ormExec(t, db, drop...)
+		if _, err := db.ExecContext(ctx, script.Schema); err != nil {
+			t.Fatalf("the script does not run as one batch: %v\n%s", err, script.Schema)
+		}
+		ormRunScript(t, db, script.Schema)
+		if _, err := db.ExecContext(ctx, `INSERT INTO jd_orm.accounts (name, active) VALUES (N'kept', 1), (N'it''s closed', 1), (N'gone', 0)`); err != nil {
+			t.Fatal(err)
+		}
+		var open int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jd_orm.open_accounts`).Scan(&open); err != nil || open != 1 {
+			t.Errorf("the rebuilt view answers %d rows (%v), want 1", open, err)
+		}
+		if after := prismaOf(read()); after != before {
+			t.Errorf("the rebuilt database generates a different Prisma schema.\n--- before\n%s\n--- after\n%s", before, after)
+		}
+	})
+
 	// Drop the tables, run the generated script, and the same Prisma schema
 	// has to come back out.
 	script := ormGenerate(t, schema, ORMRequest{Target: ORMSQL})
@@ -903,7 +972,9 @@ func TestLiveORMOracle(t *testing.T) {
 	db := ormLiveDB(t, DriverOracle, "JD_TEST_ORM_ORACLE_DSN")
 	ctx := context.Background()
 	drop := func() {
-		for _, s := range []string{`DROP TABLE JD_ORM_ORDERS PURGE`, `DROP TABLE JD_ORM_CUSTOMERS PURGE`} {
+		for _, s := range []string{
+			`DROP VIEW JD_ORM_ACTIVE_CUSTOMERS`, `DROP TABLE JD_ORM_ORDERS PURGE`, `DROP TABLE JD_ORM_CUSTOMERS PURGE`,
+		} {
 			_, _ = db.ExecContext(context.Background(), s)
 		}
 	}
@@ -930,6 +1001,7 @@ func TestLiveORMOracle(t *testing.T) {
 			TOTAL NUMBER(12,2) NOT NULL,
 			PLACED TIMESTAMP(6) DEFAULT SYSTIMESTAMP NOT NULL
 		)`,
+		`CREATE VIEW JD_ORM_ACTIVE_CUSTOMERS AS SELECT ID, EMAIL FROM JD_ORM_CUSTOMERS WHERE STATE = 'A'`,
 	)
 	var owner string
 	if err := db.QueryRowContext(ctx, `SELECT SYS_CONTEXT('USERENV','CURRENT_SCHEMA') FROM dual`).Scan(&owner); err != nil {
@@ -979,6 +1051,41 @@ func TestLiveORMOracle(t *testing.T) {
 	sqlOut := ormGenerate(t, schema, ORMRequest{Target: ORMSQL, Tables: tables})
 	ormMustContain(t, "schema.sql", sqlOut.Schema, "JD_ORM_CUSTOMERS", "JD_ORM_ORDERS", "VARCHAR2(255)")
 
+	// A view's statement is asked of DBMS_METADATA as a view. Asked as a table
+	// it is not found, and what used to stand in was a CREATE TABLE with the
+	// view's columns.
+	t.Run("views_come_back_as_views", func(t *testing.T) {
+		req := ORMRequest{Target: ORMSQL, Schema: owner, Tables: []string{"JD_ORM_ACTIVE_CUSTOMERS"}, Views: ormYes()}
+		asked, err := req.Scope(DriverOracle, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		views, err := LoadORMSchema(ctx, db, DriverOracle, asked)
+		if err != nil {
+			t.Fatalf("LoadORMSchema: %v", err)
+		}
+		view := ormTableNamed(views, owner, "JD_ORM_ACTIVE_CUSTOMERS")
+		if view == nil || view.Kind != ORMKindView || !strings.Contains(view.CreateSQL, "VIEW") {
+			t.Fatalf("view = %+v, want its own statement", view)
+		}
+		script := ormGenerate(t, views, req)
+		ormMustContain(t, "schema.sql", script.Schema,
+			`VIEW "`+owner+`"."JD_ORM_ACTIVE_CUSTOMERS"`, "SELECT ID, EMAIL FROM JD_ORM_CUSTOMERS WHERE STATE = 'A'")
+		ormMustNotContain(t, "schema.sql", script.Schema, "CREATE TABLE")
+		if script.Counts.Views != 1 || script.Counts.Tables != 0 || len(script.Warnings) != 0 {
+			t.Errorf("counts = %+v, warnings = %q", script.Counts, script.Warnings)
+		}
+		ormExec(t, db, `DROP VIEW JD_ORM_ACTIVE_CUSTOMERS`, `INSERT INTO JD_ORM_CUSTOMERS (EMAIL) VALUES ('a@example.test')`)
+		// Oracle takes one statement at a time and no terminator with it.
+		for _, stmt := range splitSQLStatements(DriverOracle, script.Schema) {
+			ormExec(t, db, stmt)
+		}
+		var active int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM JD_ORM_ACTIVE_CUSTOMERS`).Scan(&active); err != nil || active != 1 {
+			t.Errorf("the rebuilt view answers %d rows (%v), want 1", active, err)
+		}
+	})
+
 	opts, _ := ORMRequest{Target: ORMPrisma}.Options()
 	if _, err := GenerateORMFiles(schema, opts); err == nil || !strings.Contains(err.Error(), "Prisma has no connector for Oracle") {
 		t.Errorf("Prisma for Oracle was not refused with its reason: %v", err)
@@ -991,6 +1098,55 @@ func TestLiveORMOracle(t *testing.T) {
 			t.Errorf("%s produced nothing", target)
 		}
 	}
+
+	// The script made of DBMS_METADATA's own statements rebuilds the tables:
+	// identity column, constraints and the foreign key included.
+	t.Run("the_sql_target_rebuilds_the_tables", func(t *testing.T) {
+		entitiesOf := func(s *ORMSchema) string {
+			return ormGenerate(t, s, ORMRequest{Target: ORMTypeORM, Tables: tables}).Schema
+		}
+		before := entitiesOf(schema)
+		drop()
+		for _, stmt := range splitSQLStatements(DriverOracle, sqlOut.Schema) {
+			ormExec(t, db, stmt)
+		}
+		rebuilt, err := LoadORMSchema(ctx, db, DriverOracle, ORMScope{Schemas: []string{owner}, Tables: tables, Statements: true})
+		if err != nil {
+			t.Fatalf("LoadORMSchema after rebuild: %v", err)
+		}
+		if after := entitiesOf(rebuilt); after != before {
+			t.Errorf("the rebuilt tables generate different entities.\n--- before\n%s\n--- after\n%s", before, after)
+		}
+	})
+
+	// Where DBMS_METADATA hands no statement over, one is assembled from the
+	// catalogue, and Oracle has to take that one too: it is particular about
+	// the order of DEFAULT and NOT NULL. Last, because it replaces the tables.
+	t.Run("the_assembled_script_runs", func(t *testing.T) {
+		read := func() *ORMSchema {
+			t.Helper()
+			s, err := LoadORMSchema(ctx, db, DriverOracle, ORMScope{Schemas: []string{owner}, Tables: tables})
+			if err != nil {
+				t.Fatalf("LoadORMSchema: %v", err)
+			}
+			return s
+		}
+		typesOf := func(s *ORMSchema) string {
+			return ormGenerate(t, s, ORMRequest{Target: ORMTypeScript, Tables: tables}).Schema
+		}
+		bare := read()
+		before := typesOf(bare)
+		script := ormGenerate(t, bare, ORMRequest{Target: ORMSQL, Tables: tables})
+		ormMustContain(t, "warnings", strings.Join(script.Warnings, "\n"), "the engine returned no CREATE statement")
+		ormMustContain(t, "schema.sql", script.Schema, `"BALANCE" NUMBER(18,2) DEFAULT 0 NOT NULL`, `"CREATED" DATE DEFAULT SYSDATE NOT NULL`)
+		drop()
+		for _, stmt := range splitSQLStatements(DriverOracle, script.Schema) {
+			ormExec(t, db, stmt)
+		}
+		if after := typesOf(read()); after != before {
+			t.Errorf("the rebuilt tables read differently.\n--- before\n%s\n--- after\n%s", before, after)
+		}
+	})
 }
 
 // CockroachDB answers on PostgreSQL's driver and is not PostgreSQL: it has its

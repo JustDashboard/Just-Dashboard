@@ -855,6 +855,17 @@ func TestORMSQL(t *testing.T) {
 			},
 		},
 		{
+			// Each guard asks about the object where it will be made: the
+			// constraint in its table's schema, like the table and the index.
+			name: "sqlserver guarded", engine: "sqlserver", req: ORMRequest{Target: ORMSQL, IfNotExists: ormYes()},
+			must: []string{
+				"IF OBJECT_ID(N'[dbo].[accounts]', N'U') IS NULL\nCREATE TABLE [dbo].[accounts] (",
+				"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UQ_accounts_guid' AND object_id = OBJECT_ID(N'[dbo].[accounts]'))\nCREATE UNIQUE INDEX [UQ_accounts_guid]",
+				"IF OBJECT_ID(N'[dbo].[FK_transfers_from]', N'F') IS NULL\nALTER TABLE [dbo].[transfers] ADD CONSTRAINT [FK_transfers_from]",
+			},
+			mustNot: []string{"OBJECT_ID(N'[FK_transfers_from]'"},
+		},
+		{
 			name: "clickhouse", engine: "clickhouse", req: ORMRequest{Target: ORMSQL},
 			must: []string{"CREATE TABLE analytics.page_views\n(", "ENGINE = MergeTree", "ORDER BY (ts, user_id)", "SETTINGS index_granularity = 8192;"},
 		},

@@ -695,6 +695,11 @@ func TestORMSQLLeavesOutWhatItCannotQuote(t *testing.T) {
 	}
 	ormMustNotContain(t, "schema.sql", res.Schema, "INJECTED_BAD", "INJECTED_COL", "INJECTED_IX", "INJECTED_FK", "INJECTED_KIND", "INJECTED_SCH")
 	ormMustContain(t, "warnings", strings.Join(res.Warnings, "\n"), "cannot be quoted safely and was left out")
+	// And what was left out is not counted as written: every table here has a
+	// name, a column or a type that could not be, and so has the enum.
+	if res.Counts != (ORMCounts{}) || strings.Contains(res.Schema, "CREATE T") {
+		t.Errorf("counts = %+v for a script that creates nothing:\n%s", res.Counts, res.Schema)
+	}
 }
 
 func TestSQLFragment(t *testing.T) {

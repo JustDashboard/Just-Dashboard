@@ -73,6 +73,7 @@ func generateDiesel(g *ormGen) []ORMFile {
 	for _, m := range g.models {
 		if len(m.PrimaryKey) == 0 {
 			g.warn("%s has no primary key. Diesel cannot describe a table without one, so it was left out.", g.label(m))
+			g.leaveOut(m)
 			continue
 		}
 		mod := d.moduleFor(m.Schema, g.qualified(m))
@@ -90,6 +91,7 @@ func generateDiesel(g *ormGen) []ORMFile {
 		switch n := len(m.cols); {
 		case n > 128:
 			g.warn("%s has %d columns, more than Diesel's table! macro supports (128); it was left out.", g.label(m), n)
+			g.leaveOut(m)
 			continue
 		case n > 64:
 			d.features["128-column-tables"] = true

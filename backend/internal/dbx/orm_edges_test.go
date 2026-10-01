@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // The schemas nobody designs on purpose.
@@ -331,4 +332,187 @@ func TestSQLAlchemyTextKeepsItsColons(t *testing.T) {
 	}}}
 	ormMustContain(t, "models.py", ormGenerate(t, schema, ORMRequest{Target: ORMSQLAlchemy}).Schema,
 		`server_default=text("'{\"a\"\\:1}'::jsonb")`, `Computed("('k:' || ' \\:v')", persisted=True)`)
+}
+
+// ormNonASCIIFixture is a school in Romanian, French and Russian: tables,
+// columns, comments, a default and enum labels that begin with a letter of
+// more than one byte.
+func ormNonASCIIFixture(driver Driver) *ORMSchema {
+	s := &ORMSchema{Driver: driver, Detailed: true}
+	schema := "public"
+	stare := ormColumn("stare", "public.stare", ormEnumOf("public", "stare"))
+	if driver == DriverMySQL {
+		schema = "blog"
+		stare = ormColumn("stare", "enum('éclair','în lucru','новый','Ștefan','plain_one')")
+	} else {
+		s.Enums = []ORMEnum{{Schema: "public", Name: "stare", Values: []string{"éclair", "în lucru", "новый", "Ștefan", "plain_one"}}}
+	}
+	s.Tables = []ORMTable{
+		{
+			Schema: schema, Name: "școli", Kind: ORMKindTable, Comment: "Școlile din țară",
+			Columns:    []ORMColumn{ormColumn("id", "integer", ormAuto), ormColumn("țară", "text", ormNull, ormNote("țara")), stare},
+			PrimaryKey: []string{"id"}, Indexes: []ORMIndex{ormPK("scoli_pkey", "id")},
+		},
+		{
+			Schema: schema, Name: "Élèves", Kind: ORMKindTable,
+			Columns: []ORMColumn{
+				ormColumn("id", "integer", ormAuto), ormColumn("școală_id", "integer"),
+				ormColumn("Éa_id", "integer", ormNull), ormColumn("ёж", "text", ormNull, ormDef("'ёж'")),
+			},
+			PrimaryKey: []string{"id"}, Indexes: []ORMIndex{ormPK("eleves_pkey", "id")},
+			ForeignKeys: []ForeignKey{
+				ormFK("elevi_scoala_fkey", []string{"școală_id"}, schema, "școli", []string{"id"}, "CASCADE"),
+				ormFK("elevi_a_fkey", []string{"Éa_id"}, schema, "școli", []string{"id"}, "SET NULL"),
+			},
+		},
+		{
+			Schema: schema, Name: "заказы", Kind: ORMKindTable,
+			Columns:    []ORMColumn{ormColumn("id", "integer", ormAuto), ormColumn("ученик", "integer", ormNull)},
+			PrimaryKey: []string{"id"}, Indexes: []ORMIndex{ormPK("zakazy_pkey", "id")},
+			ForeignKeys: []ForeignKey{
+				ormFK("zakazy_uchenik_fkey", []string{"ученик"}, schema, "Élèves", []string{"id"}, "NO ACTION"),
+			},
+		},
+	}
+	return s
+}
+
+// Names and labels are in the language of the people who made the schema. A
+// casing rule that takes a string's first byte for its first letter cuts a
+// Romanian or Russian one in half, and what is left is not text any more.
+func TestORMNamesOutsideASCIIStayWhole(t *testing.T) {
+	django := ormGenerate(t, ormNonASCIIFixture(DriverPostgres), ORMRequest{Target: ORMDjango}).Schema
+	ormMustContain(t, "models.py", django,
+		`    CLAIR = "éclair", "Éclair"`,
+		`    N_LUCRU = "în lucru", "În lucru"`,
+		`"новый", "Новый"`,
+		`    TEFAN = "Ștefan", "Ștefan"`,
+		`    PLAIN_ONE = "plain_one", "Plain one"`)
+
+	// Whole means whole everywhere: no file may hold half a letter, or the
+	// replacement character an encoder writes where it found one.
+	broken := func(text string) bool {
+		return !utf8.ValidString(text) || strings.ContainsRune(text, utf8.RuneError) ||
+			strings.Contains(strings.ToLower(text), `\ufffd`)
+	}
+	for _, driver := range []Driver{DriverPostgres, DriverMySQL} {
+		for _, target := range ORMTargets() {
+			if ORMUnsupported(target, driver) != "" {
+				continue
+			}
+			requests := []ORMRequest{{Target: target}}
+			if ormTargetHasOption(target, "naming") {
+				requests = append(requests, ORMRequest{Target: target, Naming: ORMNamingCamel})
+			}
+			for _, req := range requests {
+				res := ormGenerate(t, ormNonASCIIFixture(driver), req)
+				for _, f := range res.Files {
+					for _, line := range strings.Split(f.Content, "\n") {
+						if broken(line) {
+							t.Errorf("%s %s (naming %q) %s: %q", driver, target, req.Naming, f.Filename, line)
+						}
+					}
+				}
+				for _, w := range res.Warnings {
+					if broken(w) {
+						t.Errorf("%s %s warning: %q", driver, target, w)
+					}
+				}
+			}
+		}
+	}
+}
+
+// SQL Server keeps the statement that made a view, and a script is no place
+// for a view with a table written where it was. CREATE VIEW also has to open
+// its batch, so the statement travels inside EXEC, after everything it reads.
+func TestORMSQLServerViewsAreWrittenAsTheirOwnStatement(t *testing.T) {
+	definition := "CREATE VIEW [sales].[open accounts] AS\nSELECT id, region FROM sales.accounts WHERE region <> 'it''s; DROP TABLE x --'"
+	schema := ormMSSQLFixture()
+	schema.Tables = append(schema.Tables,
+		ORMTable{
+			Schema: "sales", Name: "open accounts", Kind: ORMKindView, CreateSQL: definition + ";\n",
+			Columns: []ORMColumn{ormColumn("id", "int"), ormColumn("region", "nchar(2)")},
+		},
+		// Created WITH ENCRYPTION: the server has the view and will not say what it is.
+		ORMTable{
+			Schema: "sales", Name: "sealed", Kind: ORMKindView,
+			Columns: []ORMColumn{ormColumn("id", "int")},
+		})
+
+	quoted := "EXEC(N'" + strings.ReplaceAll(definition, "'", "''") + "');"
+	plain := ormGenerate(t, schema, ORMRequest{Target: ORMSQL, Views: ormYes()})
+	ormMustContain(t, "schema.sql", plain.Schema, "\n"+quoted+"\n")
+	ormMustNotContain(t, "schema.sql", plain.Schema, "CREATE TABLE [sales].[open accounts]", "sealed")
+	if view, key := strings.Index(plain.Schema, "CREATE VIEW"), strings.LastIndex(plain.Schema, "ALTER TABLE"); view < key {
+		t.Errorf("the view is written before the tables it reads are complete:\n%s", plain.Schema)
+	}
+	ormMustContain(t, "warnings", strings.Join(plain.Warnings, "\n"), "The definition of view sales.sealed could not be read; it was left out.")
+	if plain.Counts.Views != 1 || plain.Counts.Tables != 3 {
+		t.Errorf("counts = %+v, want the one view that was written and three tables", plain.Counts)
+	}
+
+	guarded := ormGenerate(t, schema, ORMRequest{Target: ORMSQL, Views: ormYes(), IfNotExists: ormYes()})
+	ormMustContain(t, "schema.sql", guarded.Schema, "IF OBJECT_ID(N'[sales].[open accounts]', N'V') IS NULL\n"+quoted)
+
+	// The definition is text from the catalogue: whatever it holds, it is one
+	// string inside one statement.
+	without := ormGenerate(t, schema, ORMRequest{Target: ORMSQL})
+	if with, base := len(splitSQLStatements(DriverMSSQL, plain.Schema)), len(splitSQLStatements(DriverMSSQL, without.Schema)); with != base+1 {
+		t.Errorf("the view added %d statements to the script, want 1\n%s", with-base, plain.Schema)
+	}
+	if without.Counts.Views != 0 || strings.Contains(without.Schema, "VIEW") {
+		t.Errorf("views are in a script that did not ask for them: %+v\n%s", without.Counts, without.Schema)
+	}
+}
+
+// The counts are what the page says the file holds, so a model a target could
+// not write is not in them, and neither is a relation that would have led to it.
+func TestORMCountsWhatIsInTheOutput(t *testing.T) {
+	schema := &ORMSchema{Driver: DriverPostgres, Detailed: true, Tables: []ORMTable{
+		{
+			Schema: "public", Name: "accounts", Kind: ORMKindTable,
+			Columns:    []ORMColumn{ormColumn("id", "integer"), ormColumn("log_at", "timestamp with time zone", ormNull)},
+			PrimaryKey: []string{"id"}, Indexes: []ORMIndex{ormPK("accounts_pkey", "id")},
+		},
+		{
+			Schema: "public", Name: "entries", Kind: ORMKindTable,
+			Columns:    []ORMColumn{ormColumn("id", "integer"), ormColumn("account_id", "integer")},
+			PrimaryKey: []string{"id"}, Indexes: []ORMIndex{ormPK("entries_pkey", "id")},
+			ForeignKeys: []ForeignKey{
+				ormFK("entries_account_id_fkey", []string{"account_id"}, "public", "accounts", []string{"id"}, "CASCADE"),
+			},
+		},
+		// No key: Diesel leaves it out.
+		{
+			Schema: "public", Name: "audit_log", Kind: ORMKindTable,
+			Columns: []ORMColumn{ormColumn("at", "timestamp with time zone"), ormColumn("account_id", "integer", ormNull)},
+			ForeignKeys: []ForeignKey{
+				ormFK("audit_log_account_id_fkey", []string{"account_id"}, "public", "accounts", []string{"id"}, "SET NULL"),
+			},
+		},
+		// No definition: the SQL target leaves it out.
+		{
+			Schema: "public", Name: "balances", Kind: ORMKindView,
+			Columns: []ORMColumn{ormColumn("account_id", "integer", ormNull)},
+		},
+	}}
+	for _, c := range []struct {
+		req    ORMRequest
+		want   ORMCounts
+		warned string
+	}{
+		{ORMRequest{Target: ORMPrisma}, ORMCounts{Tables: 3, Relations: 2}, ""},
+		{ORMRequest{Target: ORMDiesel}, ORMCounts{Tables: 2, Relations: 1}, "audit_log has no primary key"},
+		{ORMRequest{Target: ORMSQL, Views: ormYes()}, ORMCounts{Tables: 3, Relations: 2}, "The definition of view balances could not be read"},
+		{ORMRequest{Target: ORMTypeScript}, ORMCounts{Tables: 3, Views: 1}, ""},
+	} {
+		res := ormGenerate(t, schema, c.req)
+		if res.Counts != c.want {
+			t.Errorf("%s: counts = %+v, want %+v", c.req.Target, res.Counts, c.want)
+		}
+		if c.warned != "" {
+			ormMustContain(t, string(c.req.Target)+" warnings", strings.Join(res.Warnings, "\n"), c.warned)
+		}
+	}
 }

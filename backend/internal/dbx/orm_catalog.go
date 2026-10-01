@@ -271,9 +271,48 @@ func (l *ormLoader) detail(d Dialect, t Table, statements bool) (*TableDetail, e
 		l.warn("The foreign keys of %s could not be read (%v); its relations are missing.", t.Name, err)
 	}
 	if statements || l.driver == DriverSQLite {
-		detail.CreateSQL, _ = d.CreateSQL(l.ctx, l.db, t.Schema, t.Name, detail)
+		detail.CreateSQL = l.statement(d, t, detail)
 	}
 	return detail, nil
+}
+
+// statement is a relation's own CREATE text, or "" where it could not be had.
+// For a table that is the dialect's answer. For a view it is the dialect's only
+// on the engines that keep a view's statement where they keep a table's (MySQL,
+// SQLite, ClickHouse). PostgreSQL, SQL Server and Oracle answer a view with a
+// CREATE TABLE put together from its columns, and that, printed into a script,
+// makes a table where the view was — so there the view's text is asked for by
+// name, and nothing stands in for it when it cannot be read.
+func (l *ormLoader) statement(d Dialect, t Table, detail *TableDetail) string {
+	var ddl string
+	kind, _ := ormKindOf(t.Type)
+	if kind != ORMKindView && kind != ORMKindMatView {
+		ddl, _ = d.CreateSQL(l.ctx, l.db, t.Schema, t.Name, detail)
+		return ddl
+	}
+	switch l.driver {
+	case DriverPostgres:
+		// pg_get_viewdef, read with the relation facts for every view at once.
+	case DriverMSSQL:
+		// The module text is the whole statement as it was last run. It is NULL
+		// for a view created WITH ENCRYPTION, and for a login without VIEW
+		// DEFINITION on it.
+		var text sql.NullString
+		_ = l.db.QueryRowContext(l.ctx, `
+		  SELECT m.definition
+		  FROM sys.views v
+		  JOIN sys.schemas s ON s.schema_id = v.schema_id
+		  JOIN sys.sql_modules m ON m.object_id = v.object_id
+		  WHERE s.name = @p1 AND v.name = @p2`, t.Schema, t.Name).Scan(&text)
+		ddl = text.String
+	case DriverOracle:
+		_ = l.db.QueryRowContext(l.ctx,
+			`SELECT DBMS_METADATA.GET_DDL('VIEW', :1, NVL(:2, SYS_CONTEXT('USERENV','CURRENT_SCHEMA'))) FROM dual`,
+			t.Name, oracleSchemaArg(t.Schema)).Scan(&ddl)
+	default:
+		ddl, _ = d.CreateSQL(l.ctx, l.db, t.Schema, t.Name, detail)
+	}
+	return ddl
 }
 
 // --- per-engine facts -----------------------------------------------------
