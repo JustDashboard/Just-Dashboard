@@ -11,7 +11,8 @@ import type {
 } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ErrorState, Notice, Spinner } from "@/components/state"
-import { ChoiceGrid, EngineCard, driverKind } from "@/components/choice-card"
+import { ChoiceGrid, EngineCard } from "@/components/choice-card"
+import { engineOf, sectionHref } from "@/components/database/engine"
 import { Field, FieldRow, FormFact, FormFacts, FormNote } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { RunPhases, phaseStates } from "@/components/run-phases"
@@ -266,7 +267,7 @@ export function DatabaseQuickDeploy({
         </PanelBody>
         <Foot className="justify-between">
           <Button variant="outline" asChild>
-            <Link href={`/databases/overview?conn=${connection.id}`}>Open in Databases</Link>
+            <Link href={sectionHref(connection.id)}>Open in Databases</Link>
           </Button>
           {onConnect ? (
             <Button
@@ -334,7 +335,7 @@ export function DatabaseQuickDeploy({
               key={option.engine}
               engine={option.engine}
               label={option.label}
-              kind={driverKind(option.driver)}
+              kind={engineOf(option.driver).kind}
               detail={option.image}
               disabled={(Boolean(startedContainer) || inFlight) && engine !== option.engine}
               selected={engine === option.engine}

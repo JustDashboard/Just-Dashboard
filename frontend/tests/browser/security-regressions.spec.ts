@@ -156,7 +156,24 @@ async function databaseFixture(page: Page) {
   return { mutations, held }
 }
 
-test("database selections cannot follow a different sort or a loading table", async ({ page }) => {
+/*
+  The three database regressions below drive the table editor and the Redis
+  key browser that were removed when the Databases section moved to
+  `/databases/<id>/…`; the pages that replace them are being rebuilt. They are
+  held as `fixme` rather than deleted, because each is a defect that shipped
+  once and the rebuilt page has to be held to it:
+
+    selection and exact BIGINT digits — the SQL data workbench
+    (`components/database/data`, at `/databases/<id>/data`);
+    unsigned 64-bit scan cursors — the Redis key browser
+    (`components/database/redis`, at `/databases/<id>/data` on a Redis server).
+
+  Whoever lands those pages restores the test against them and removes the
+  `fixme`. `databaseFixture` still opens the old address, which now redirects.
+*/
+test.fixme("database selections cannot follow a different sort or a loading table", async ({
+  page,
+}) => {
   const { mutations, held } = await databaseFixture(page)
   await page.getByRole("checkbox", { name: "Select row 1", exact: true }).click()
   await expect(page.getByRole("button", { name: "Delete 1", exact: true })).toBeVisible()
@@ -172,7 +189,7 @@ test("database selections cannot follow a different sort or a loading table", as
   expect(mutations).toEqual([])
 })
 
-test("the row editor submits exact BIGINT digits", async ({ page }) => {
+test.fixme("the row editor submits exact BIGINT digits", async ({ page }) => {
   const { mutations } = await databaseFixture(page)
   await page.getByRole("button", { name: "Insert", exact: true }).click()
   await page.locator('[id="f-id"]').fill("9007199254740993")
@@ -376,7 +393,8 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
   )
 })
 
-test("Redis scan cursors retain all unsigned 64-bit digits in requests", async ({ page }) => {
+// Held with the two database regressions above: the Redis key browser is being rebuilt.
+test.fixme("Redis scan cursors retain all unsigned 64-bit digits in requests", async ({ page }) => {
   const cursors: string[] = []
   const cursor = "18446744073709551615"
   await page.route("**/api/v1/**", async (route) => {

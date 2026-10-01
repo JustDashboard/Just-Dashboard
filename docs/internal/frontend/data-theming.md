@@ -43,8 +43,12 @@
   forgotten (`forgetSessionState`/`forgetMemoryState` by prefix) when it is closed by hand, never by
   navigation; and `forgetWorkingState` empties both working stores on sign-out. `useQuerySelection`
   keeps a sheet's selection in the address bar and, per page and key, in the session store, so
-  arriving on the rail's bare link puts the last selection back with `replaceState`; the databases
-  layout does the same for `?conn=`, `?schema=` and `?table=`. Every route area was reviewed for this:
+  arriving on the rail's bare link puts the last selection back with `replaceState`. A database's
+  layout does the same for the reader's place inside it — `?schema=&table=`, `?db=&collection=` — per
+  database (`databases.<id>.place`, `database/shell/place.ts`): a page's address holds only what that
+  page can use, so the place the last address stated is kept, every link the shell builds
+  (`useDatabase().href`) carries the part its target can hold, and a bare address is completed from it.
+  Which database is the path (`/databases/<id>`), never remembered. Every route area was reviewed for this:
   filters, chips, facets, pagination, chosen sub-tabs, open detail rows, in-progress forms and the
   whole new-project flow are remembered; a search box is no longer the exception it used to be. A
   service's logs keep their reading — source, view, filter, lens, range, window — under the embedding

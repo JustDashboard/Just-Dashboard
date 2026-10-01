@@ -5,7 +5,6 @@ import {
   ChartActivity,
   Clock,
   CloudUpload,
-  CodeBracket,
   Cpu,
   Database,
   DesktopDevice,
@@ -20,13 +19,10 @@ import {
   Inspect,
   Key,
   Layers,
-  Layout,
   LineChart,
-  Linked,
   ListOrdered,
   LockClosed,
   Logs,
-  MagnifyingGlass,
   Monitoring,
   NetworkDevice,
   Notes,
@@ -42,14 +38,13 @@ import {
   Shield,
   ShieldOff,
   SignIn,
-  Sparkles,
-  Table,
   Terminal,
   UserSettings,
   Users,
   Warning,
   Wrench,
   ArrowLeftRight,
+  Plus,
 } from "@/components/icons"
 import type { Capability } from "@/lib/types"
 
@@ -170,22 +165,19 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         title: "Databases",
         href: "/databases",
         icon: Database,
+        // The pages about every database at once. One database's own pages
+        // are not here: which of them it has depends on its engine, so its
+        // layout hands the rail that panel, a level below this one
+        // (`components/database/shell/nav-scope.tsx`).
         children: [
-          { title: "All databases", href: "/databases", icon: Layers },
-          { title: "Overview", href: "/databases/overview", icon: Home },
-          { title: "Browse", href: "/databases/browse", icon: GridSquare },
-          { title: "Structure", href: "/databases/structure", icon: Table },
-          { title: "Diagram", href: "/databases/diagram", icon: Layout },
-          { title: "Query", href: "/databases/query", icon: CodeBracket },
-          { title: "Find", href: "/databases/find", icon: MagnifyingGlass },
-          { title: "Monitor", href: "/databases/monitor", icon: ChartActivity },
-          { title: "Advisor", href: "/databases/advisor", icon: Shield },
-          { title: "Topology", href: "/databases/topology", icon: Route },
-          { title: "Server", href: "/databases/server", icon: Servers },
-          { title: "Backups", href: "/databases/backups", icon: Archive },
-          { title: "Logs", href: "/databases/logs", icon: Logs },
-          { title: "Generate", href: "/databases/generate", icon: Sparkles },
-          { title: "Connection", href: "/databases/connection", icon: Linked },
+          { title: "Control center", href: "/databases", icon: Layers },
+          { title: "Map", href: "/databases/map", icon: Route },
+          {
+            title: "Add a database",
+            href: "/databases/new",
+            icon: Plus,
+            capability: "system.admin",
+          },
         ],
       },
       {

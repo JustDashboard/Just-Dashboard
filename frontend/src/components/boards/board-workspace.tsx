@@ -34,6 +34,7 @@ import { ErrorState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Modal } from "@/components/modal"
+import { sectionHref } from "@/components/database/engine"
 import { ApiError, del, get, put } from "@/lib/api"
 import type { Board, BoardScene, BoardSummary } from "@/lib/boards"
 import type { DbFleet, DeployProject } from "@/lib/types"
@@ -527,7 +528,7 @@ function LoadedBoard({ board }: { board: Board }) {
                         "database",
                         database.name,
                         `${database.driver.toUpperCase()} · ${database.ok ? "REACHABLE" : "UNREACHABLE"}`,
-                        `/databases/overview?conn=${database.id}`,
+                        sectionHref(database.id),
                         database.id,
                       )
                     }

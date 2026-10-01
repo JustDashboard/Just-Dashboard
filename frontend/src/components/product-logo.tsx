@@ -261,7 +261,9 @@ const LOGOS: Record<string, string> = {
  * either, rather than finding out from an empty tile.
  */
 export function hasProductLogo(id: string | undefined): id is string {
-  return id !== undefined && id in LOGOS
+  // Its own entry: the id is often a name from outside — an image, an engine
+  // a server reported — and `constructor` is in every object.
+  return id !== undefined && Object.hasOwn(LOGOS, id)
 }
 
 /**
