@@ -159,12 +159,24 @@ accounts retain partial results. Full table details and mutation preconditions u
   stopped, unreachable or broken connection; those are states, not errors. Where a server runs is read
   off the machine each time (`dbHostView.place`), never stored: the container that publishes or answers
   at the address, then the process listening on the port and its unit, then a stopped container whose
-  configuration publishes that port, then the engine's own units by name. A container or unit known to
-  be down is not dialled.
+  configuration publishes that port, then — for a native server that has stopped — a unit on evidence
+  only: the one the connection was last seen running under (kept in memory), or the engine's only unit
+  when the connection is to the engine's own port. A connection to another port that nothing answers on
+  is a dropped tunnel or a removed container; it is dialled, reads `unreachable`, and is given no unit,
+  because what is decided there is what Start starts. A container or unit known to be down is not
+  dialled. One request reads the listening sockets, the unit list and each stopped container's
+  published ports once and shares them across its connections (`dbHostView`). What a failed dial said
+  goes out through `connectError`, which takes the connection's password out of it: a driver reports a
+  connection string it could not use by quoting it.
 - **Power.** `POST /databases/{id}/power` `{action: start|stop|restart}` acts on that container
   (`dockerx.Lifecycle`) or unit (`systemctl` on the host through `hostexec`, the unit name validated,
   an argument vector). The route is in the `service.control` group; `stop` and `restart` additionally
   need `destructive` and spend `destrLim`, checked by hand because they share the path with `start`.
+  A container is given `dbStopGrace` (90 s) to shut down before Docker kills it, not Docker's own ten —
+  a database answers SIGTERM by writing what it holds — and a request may ask for up to ten minutes
+  with `timeoutSeconds`. An action the summary does not offer for the state the server is in (restart
+  of a stopped one, start of a running one) is refused with `409 power_unavailable` before Docker or
+  systemctl is asked. systemctl is reached through `dbSystemctl`, which a test replaces.
   Audited as `database.power.<action>`. It never guesses: a unit is taken for the server only when it
   is named for the engine (what listens on a database's port may be an ssh tunnel, whose unit is
   sshd's, or `docker-proxy`, whose unit is Docker's), a container found only by its port only when its
@@ -180,10 +192,17 @@ accounts retain partial results. Full table details and mutation preconditions u
   `TestProtectionCoversEveryMutatingRoute` walks the real router against a second hand-written list.
   `/query`, `/script`, `/explain` with `analyze`, and `/aggregate` are read or write by content: the
   middleware reads the body, lets through only statements `dbx.Classify` calls `read` and pipelines
-  with no `$out`/`$merge` at any depth, and refuses any field it does not recognise that could hold
-  one. It guards the dashboard's own controls and is as strong as the classification; it is not a
-  sandbox around the server. Restoring a backup run into a connection goes through `/backups`, not
-  through these routes, and is not covered.
+  with no `$out`/`$merge` key at any depth, and refuses any field it does not recognise that could
+  hold one. The body is read as the handler's decoder will read it (`protectedFields`): encoding/json
+  fills a field from a key in any case and from the last of two that name it, so names are folded, and
+  a body that names a field twice or with a letter outside ASCII is refused. A statement that
+  classifies as a read is refused all the same when it contains `INTO`, `MERGE` or `INSERT` anywhere in
+  its text (`protectedWriteWords`): `SELECT … INTO` makes a table or writes a file, and a `WITH` leads
+  into a `MERGE` or an `INSERT`, and each starts with a verb the classifier calls a read. It guards
+  the dashboard's own controls and is as strong as the classification — a `SELECT` that calls a
+  function which writes passes; it is not a sandbox around the server. Restoring a backup run into a
+  connection goes through `/backups`, outside that middleware, and `handleBackupRestoreDatabase`
+  refuses a protected connection with the same `409`.
 - **Drivers, flavours and capabilities.** A driver is a wire protocol; a flavour is the product behind
   it (`dbx/flavor.go`: MariaDB, Percona and TiDB behind `mysql`; Valkey, KeyDB and Dragonfly behind
   `redis`; TimescaleDB, CockroachDB and YugabyteDB behind `postgres`; FerretDB; Azure SQL Edge).
@@ -198,9 +217,12 @@ accounts retain partial results. Full table details and mutation preconditions u
   `POST /databases/test` uses the same probe for every engine (Redis used to be reported unreachable
   for having no SQL dialect), and `POST /databases/` takes `probe: true` to dial before saving.
 - **Reads that leave the server leave a trail.** `GET /databases/{id}/url`, `/export`, `/search` and
-  `/backup/download` are written to the audit log with `recordAudit`, as
-  `database.connection.reveal`, `database.export`, `database.search` and `database.backup.download`.
-  They used to call `SetAudit`, which does nothing on a GET.
+  `/backup/download` are written to the audit log with `recordRead`, as
+  `database.connection.reveal`, `database.export`, `database.search` and `database.backup.download`,
+  before the read runs. They used to call `SetAudit`, which does nothing on a GET. `recordRead` writes
+  on a context that outlives the request, so a client that drops the connection does not take the
+  entry with it. An export is closed by a second entry, `database.export.finished`, with the rows sent
+  and whether it was cut short, recorded as a failure (`502`, with the error) when the stream broke.
 - **Live tests skip rather than fail**, or a suite failing for want of a database teaches people to ignore
   it. Every bug this feature shipped was a catalogue query a unit test string-matched identically and only
   the engine rejected — SQL Server refusing `ADD COLUMN`, a size query summing every index_id and
