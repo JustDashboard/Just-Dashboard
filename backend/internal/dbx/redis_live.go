@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -164,49 +163,75 @@ type RedisPubSubMessage struct {
 const redisPubSubMaxPayload = 64 << 10
 
 // RedisSubscribe listens on channels and patterns and calls emit for every
-// message until ctx ends.
-func RedisSubscribe(ctx context.Context, client *redis.Client, channels, patterns []string, emit func(RedisPubSubMessage)) error {
+// message until ctx ends, which is the only way it returns without an error.
+//
+// Like MONITOR it runs on a connection of its own and reads the protocol
+// itself. A published message is as large as its publisher made it, and this
+// way one is kept only as far as redisPubSubMaxPayload and the rest of it
+// read past, where the client library would have read it whole to hand over
+// something to cut.
+func RedisSubscribe(ctx context.Context, dsn string, channels, patterns []string, emit func(RedisPubSubMessage)) error {
 	if len(channels) == 0 && len(patterns) == 0 {
 		return fmt.Errorf("name at least one channel or pattern to listen on")
 	}
-	sub := client.Subscribe(ctx)
-	defer sub.Close()
+	wire, err := redisDial(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer wire.close()
+	if err := wire.authenticate(); err != nil {
+		return redisLiveError(ctx, err)
+	}
+	// Each name subscribed to is acknowledged in the same stream the messages
+	// arrive in, so the two commands are simply sent and everything after is
+	// read in one loop.
 	if len(channels) > 0 {
-		if err := sub.Subscribe(ctx, channels...); err != nil {
-			return err
+		if err := wire.send(8*time.Second, append([]string{"SUBSCRIBE"}, channels...)...); err != nil {
+			return redisLiveError(ctx, err)
 		}
 	}
 	if len(patterns) > 0 {
-		if err := sub.PSubscribe(ctx, patterns...); err != nil {
-			return err
-		}
-	}
-	for {
-		if ctx.Err() != nil {
-			return nil
-		}
-		// A short wait rather than a blocking read, so a quiet channel still
-		// notices the context end within a second.
-		received, err := sub.ReceiveTimeout(ctx, time.Second)
-		if err != nil {
-			var timeout net.Error
-			if errors.As(err, &timeout) && timeout.Timeout() {
-				continue
-			}
+		if err := wire.send(8*time.Second, append([]string{"PSUBSCRIBE"}, patterns...)...); err != nil {
 			return redisLiveError(ctx, err)
 		}
-		msg, ok := received.(*redis.Message)
-		if !ok {
+	}
+	wire.conn.SetDeadline(time.Time{})
+	for {
+		reader := &redisReplyReader{
+			rd: wire.rd, nodes: 64, bytes: redisPubSubMaxPayload + (8 << 10),
+			maxString: redisPubSubMaxPayload, drain: true,
+		}
+		reply, err := reader.read(0)
+		if err != nil {
+			return redisLiveError(ctx, err)
+		}
+		if reply.Type == "error" {
+			return redisServerError(redisText(reply.Value))
+		}
+		if len(reply.Items) < 3 {
 			continue
 		}
-		out := RedisPubSubMessage{
-			Channel: RedisBytes(msg.Channel), Pattern: msg.Pattern,
-			Payload: RedisBytes(msg.Payload), Bytes: len(msg.Payload),
+		var out RedisPubSubMessage
+		var payload RedisReply
+		switch redisText(reply.Items[0].generic()) {
+		case "message":
+			out.Channel, _, _ = redisMember(reply.Items[1])
+			payload = reply.Items[2]
+		case "pmessage":
+			if len(reply.Items) < 4 {
+				continue
+			}
+			pattern, _, _ := redisMember(reply.Items[1])
+			out.Pattern = string(pattern)
+			out.Channel, _, _ = redisMember(reply.Items[2])
+			payload = reply.Items[3]
+		default:
+			// An acknowledgement of a subscription.
+			continue
 		}
-		if len(msg.Payload) > redisPubSubMaxPayload {
-			out.Payload = RedisBytes(redisTrimPartialRune(msg.Payload[:redisPubSubMaxPayload]))
-			out.Truncated = true
-		}
+		var size int64
+		out.Payload, out.Truncated, size = redisMember(payload)
+		out.Bytes = int(size)
 		emit(out)
 	}
 }

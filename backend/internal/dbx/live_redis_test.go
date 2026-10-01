@@ -1768,7 +1768,7 @@ func TestLiveRedisAdminClientsAndPubSub(t *testing.T) {
 	got := make(chan RedisPubSubMessage, 16)
 	done := make(chan error, 1)
 	go func() {
-		done <- RedisSubscribe(subCtx, client, []string{"jdb4.exact"}, []string{"jdb4.pat.*"}, func(m RedisPubSubMessage) { got <- m })
+		done <- RedisSubscribe(subCtx, dsn, []string{"jdb4.exact"}, []string{"jdb4.pat.*"}, func(m RedisPubSubMessage) { got <- m })
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -1786,14 +1786,24 @@ func TestLiveRedisAdminClientsAndPubSub(t *testing.T) {
 	}
 	RedisPublish(ctx, client, "jdb4.pat.one", RedisBytes("\xff\x00"))
 	RedisPublish(ctx, client, "jdb4.exact", RedisBytes(strings.Repeat("x", redisPubSubMaxPayload+10)))
+	// One far past anything worth reading to its end, and the feed goes on
+	// after it.
+	RedisPublish(ctx, client, "jdb4.exact", RedisBytes(strings.Repeat("y", 6<<20)))
+	RedisPublish(ctx, client, "jdb4.exact", "after")
 	var msgs []RedisPubSubMessage
-	for len(msgs) < 3 {
+	for len(msgs) < 5 {
 		select {
 		case m := <-got:
 			msgs = append(msgs, m)
 		case <-time.After(5 * time.Second):
-			t.Fatalf("only %d of 3 messages arrived", len(msgs))
+			t.Fatalf("only %d of 5 messages arrived", len(msgs))
 		}
+	}
+	if !msgs[3].Truncated || msgs[3].Bytes != 6<<20 || len(msgs[3].Payload) != redisPubSubMaxPayload {
+		t.Errorf("huge message: truncated=%v bytes=%d kept=%d", msgs[3].Truncated, msgs[3].Bytes, len(msgs[3].Payload))
+	}
+	if msgs[4].Payload != "after" || msgs[4].Truncated {
+		t.Errorf("the message after the huge one = %+v", msgs[4])
 	}
 	if msgs[0].Channel != "jdb4.exact" || msgs[0].Payload != "plain" || msgs[0].Pattern != "" {
 		t.Errorf("first message = %+v", msgs[0])
@@ -1813,8 +1823,20 @@ func TestLiveRedisAdminClientsAndPubSub(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the subscription did not stop with its context")
 	}
-	if err := RedisSubscribe(ctx, client, nil, nil, func(RedisPubSubMessage) {}); err == nil {
+	if err := RedisSubscribe(ctx, dsn, nil, nil, func(RedisPubSubMessage) {}); err == nil {
 		t.Error("a subscription to nothing was accepted")
+	}
+	// Nothing is left subscribed on the server once it has stopped.
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		state, err := RedisPubSubChannels(ctx, client, "jdb4.*")
+		if err == nil && len(state.Channels) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("a subscription is still attached: %+v, %v", state, err)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

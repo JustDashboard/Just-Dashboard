@@ -237,11 +237,13 @@ func (s *Server) handleRedisSubscribe(w http.ResponseWriter, r *http.Request) er
 	}
 	duration, limit := redisFeedBounds(r, redisSubscribeDefaultSeconds, redisSubscribeMaxSeconds,
 		redisSubscribeDefaultEvents, redisSubscribeMaxEvents)
+	// Asked before the upgrade, for the reason MONITOR is: a server that is
+	// down is an error the page can show.
 	client, err := dbx.RedisOpen(r.Context(), dsn, dbx.RedisOpenOptions{DB: dbx.RedisDSNDatabase})
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
 	}
-	defer client.Close()
+	client.Close()
 
 	s.recordAudit(r, "database.redis.subscribe.open", conn.Name, map[string]any{
 		"channels": channels, "patterns": patterns, "seconds": int(duration.Seconds()), "max": limit,
@@ -262,7 +264,7 @@ func (s *Server) handleRedisSubscribe(w http.ResponseWriter, r *http.Request) er
 	failed := make(chan error, 1)
 	var dropped atomic.Int64
 	go func() {
-		failed <- dbx.RedisSubscribe(box, client, channels, patterns, func(m dbx.RedisPubSubMessage) {
+		failed <- dbx.RedisSubscribe(box, dsn, channels, patterns, func(m dbx.RedisPubSubMessage) {
 			select {
 			case messages <- m:
 			default:

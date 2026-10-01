@@ -960,7 +960,7 @@ func TestLiveAPIRedisSubscribeIsBoundedAndClosesCleanly(t *testing.T) {
 	if !websocket.IsCloseError(closed, websocket.CloseNormalClosure) {
 		t.Errorf("the socket ended with %v, want a normal close", closed)
 	}
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	if n := direct.PubSubNumSub(ctx, "jdb4api.exact").Val()["jdb4api.exact"]; n != 0 {
 		t.Errorf("%d subscribers are still attached after the feed closed", n)
 	}
