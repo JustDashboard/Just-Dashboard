@@ -25,19 +25,23 @@ import (
 //   - Reading any of it is on the read surface. A lock table, a replication
 //     position and a table's scan count carry nothing the activity list and
 //     the storage overview do not already hand any role.
-//   - Running a maintenance command and zeroing the statement statistics are
-//     service.control: they change how the server performs and no data. The
-//     maintenance actions that lock a table against the application while
-//     they run, or can lose rows — VACUUM FULL, REINDEX, OPTIMIZE TABLE,
-//     REPAIR, SQLite's VACUUM — demand the destructive capability and its
-//     budget by hand, because the route cannot know from its path which
-//     action the body names. A form is never a cheaper way to run what the
+//   - Running a maintenance command is service.control: it changes how the
+//     server performs and no data. The maintenance actions that lock a table
+//     against the application while they run, or can lose rows — VACUUM FULL,
+//     REINDEX, OPTIMIZE TABLE, REPAIR, SQLite's VACUUM — demand the
+//     destructive capability and its budget by hand, because the route cannot
+//     know from its path which action the body names. A form is never a cheaper way to run what the
 //     SQL console would refuse the same role; the actions left on
 //     service.control are the ones that read, or work alongside the
 //     application, and the console's stricter answer to those is its not
 //     knowing what a typed statement does, which a closed list does.
 //   - Stopping a statement sits with ending a session, in the destructive
 //     group: work in flight is thrown away either way.
+//   - Zeroing the statement statistics is in the destructive group too. No
+//     row of anybody's data goes, but the server's whole record of what cost
+//     it the most does, for everyone, and cannot be had back; on MySQL the
+//     statement is a TRUNCATE the console holds to that capability, and the
+//     Redis slow log is cleared from the same group.
 //   - Changing a server parameter and granting or revoking a privilege are
 //     system.admin, beside creating an account.
 //
@@ -67,7 +71,6 @@ func (s *Server) mountDatabaseOpsRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapServiceControl))
 		r.Method(http.MethodPost, "/{id}/maintenance", s.handle(s.handleDBMaintenance))
-		r.Method(http.MethodPost, "/{id}/statements/reset", s.handle(s.handleDBStatementsReset))
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
@@ -80,6 +83,7 @@ func (s *Server) mountDatabaseOpsRoutes(r chi.Router) {
 		// the group beside this one, ends the session. Both discard work in
 		// flight, which is what puts them here.
 		r.Method(http.MethodPost, "/{id}/activity/cancel", s.handle(s.handleDBCancel))
+		r.Method(http.MethodPost, "/{id}/statements/reset", s.handle(s.handleDBStatementsReset))
 	})
 }
 

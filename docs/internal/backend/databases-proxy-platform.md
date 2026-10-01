@@ -851,8 +851,10 @@ holds something is the guard.
     is a list and not a pattern on purpose: a pattern on "password" hid `password_encryption`,
     which the advisor reports to the same viewer. The same rule keeps the value and the statement
     out of the audit detail. Audit `database.setting.set` / `database.setting.reset`.
-  - `POST /{id}/statements/reset` (`service.control`) zeroes `pg_stat_statements` or the
-    performance_schema digest table for the whole server. Audit `database.statements.reset`.
+  - `POST /{id}/statements/reset` (the destructive group) zeroes `pg_stat_statements` or the
+    performance_schema digest table for the whole server. No data goes, but the record does, for
+    everyone, and on MySQL the statement is a `TRUNCATE` the console holds to the same capability;
+    the Redis slow-log reset sits in that group too. Audit `database.statements.reset`.
 - **Redis.** Routes under `/databases/{id}/keys` are about what is stored and under
   `/databases/{id}/redis` about the server (`handlers_db_redis*.go`; `dbx/redis*.go`). They serve
   Redis, Valkey, KeyDB and Dragonfly. No `?db=` means the logical database the connection string

@@ -466,6 +466,37 @@ func inspectExplain(cmd bson.Raw, v *MongoVerdict) {
 	if target, ok := inner.Index(0).Value().StringValueOK(); ok {
 		v.Target = target
 	}
+	// Explaining a pipeline with execution runs it. Current servers refuse to
+	// execute one that writes; an older or a compatible one need not, and the
+	// console does not leave that line to the server: only the plan of such a
+	// pipeline is a read, as on the explain page (mongo_explain.go).
+	if strings.EqualFold(mongoFirstKey(inner), "aggregate") && !mongoOnlyPlans(cmd) {
+		var pipeline MongoVerdict
+		if inspectAggregate(inner, &pipeline); pipeline.Class != "" {
+			v.raise(MongoClassDestructive, "it explains a pipeline by running it, and "+pipeline.Reason)
+		}
+	}
+}
+
+// mongoOnlyPlans reports whether an explain asks for the plan alone. Left out,
+// the verbosity is allPlansExecution; every field of that name is read, so one
+// given twice plans only when both say so.
+func mongoOnlyPlans(cmd bson.Raw) bool {
+	elems, err := cmd.Elements()
+	if err != nil {
+		return false
+	}
+	plans := false
+	for _, e := range elems {
+		if e.Key() != "verbosity" {
+			continue
+		}
+		if word, ok := e.Value().StringValueOK(); !ok || word != "queryPlanner" {
+			return false
+		}
+		plans = true
+	}
+	return plans
 }
 
 func inspectUsersInfo(cmd bson.Raw, v *MongoVerdict) {

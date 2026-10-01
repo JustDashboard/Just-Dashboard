@@ -193,8 +193,9 @@ func TestOpsReadRoutesAnswerAViewer(t *testing.T) {
 }
 
 // The capability is on the route. A viewer is refused every write here; a
-// limited account may run maintenance and reset statistics and nothing else;
-// stopping a statement and changing the server are an administrator's.
+// limited account may run maintenance and nothing else; stopping a statement,
+// discarding the statement statistics and changing the server are an
+// administrator's.
 func TestOpsWritesNeedTheirCapability(t *testing.T) {
 	h := newOpsHarness(t)
 	for _, c := range []struct {
@@ -202,7 +203,7 @@ func TestOpsWritesNeedTheirCapability(t *testing.T) {
 		limited            bool
 	}{
 		{http.MethodPost, "/maintenance", `{"action":"quick_check"}`, true},
-		{http.MethodPost, "/statements/reset", `{}`, true},
+		{http.MethodPost, "/statements/reset", `{}`, false},
 		{http.MethodPut, "/settings", `{"name":"user_version","value":"3"}`, false},
 		{http.MethodPost, "/server/roles/app/privileges", `{"level":"table","schema":"s","table":"t","privileges":["SELECT"]}`, false},
 		{http.MethodPost, "/server/roles/app/privileges/revoke", `{"level":"table","schema":"s","table":"t","privileges":["SELECT"]}`, false},

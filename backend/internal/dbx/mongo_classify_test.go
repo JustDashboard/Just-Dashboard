@@ -146,6 +146,17 @@ func TestCommandClassification(t *testing.T) {
 		{`{ fsync: 1, lock: true }`, MongoClassDestructive, false},
 		{`{ validate: "c", repair: true }`, MongoClassDestructive, false},
 		{`{ explain: { insert: "c", documents: [] } }`, MongoClassDestructive, false},
+		// Explaining a pipeline with execution runs it, so one that writes, or
+		// holds a stage nobody here knows, is a read only when it is planned
+		// and nothing more. The verbosity left out is allPlansExecution.
+		{`{ explain: { aggregate: "c", pipeline: [ { $out: "x" } ], cursor: {} }, verbosity: "executionStats" }`, MongoClassDestructive, false},
+		{`{ explain: { aggregate: "c", pipeline: [ { $match: {} }, { $merge: { into: "x" } } ], cursor: {} } }`, MongoClassDestructive, false},
+		{`{ explain: { aggregate: "c", pipeline: [ { $futureStage: {} } ], cursor: {} }, verbosity: "allPlansExecution" }`, MongoClassDestructive, false},
+		{`{ explain: { aggregate: "c", pipeline: [ { $out: "x" } ], cursor: {} }, verbosity: "queryPlanner", verbosity: "executionStats" }`, MongoClassDestructive, false},
+		{`{ explain: { aggregate: "c", pipeline: [ { $out: "x" } ], cursor: {} }, verbosity: 1 }`, MongoClassDestructive, false},
+		{`{ explain: { aggregate: "c", pipeline: [ { $out: "x" } ], cursor: {} }, verbosity: "queryPlanner" }`, MongoClassRead, false},
+		{`{ explain: { aggregate: "c", pipeline: [ { $match: { a: 1 } } ], cursor: {} }, verbosity: "executionStats" }`, MongoClassRead, false},
+		{`{ explain: { aggregate: "c", pipeline: [ { $group: { _id: "$a" } } ], cursor: {} } }`, MongoClassRead, false},
 		{`{ explain: "c" }`, MongoClassDestructive, false},
 		// What the forms keep to administrators.
 		{`{ createUser: "u", pwd: "p", roles: [] }`, MongoClassWrite, true},
