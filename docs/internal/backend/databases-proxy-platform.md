@@ -86,6 +86,29 @@ accounts retain partial results. Full table details and mutation preconditions u
   `database.diagram.reset`. The server checks only that the document is a JSON object under 512 KiB:
   every field is a decision about a picture, and the diagram (`diagram/memory.ts`) is the only thing
   that decodes it, with the browser's storage as a mirror for roles that cannot save.
+- **Code generation is one model and seventeen writers.** `POST /databases/{id}/orm` and
+  `GET /databases/orm/targets` stay on the read surface. `orm_catalog.go` reads the schema into an
+  `ORMSchema` — the same `Tables`/`Columns`/`Indexes`/`ForeignKeys` calls `Detail` makes, then per-engine
+  catalogue facts those do not carry: PostgreSQL's real type names (`format_type`, with a domain resolved
+  to its base), which type is an enum and its labels, identity and generated columns, which index is
+  partial, over an expression, on another access method or descending (with `pg_get_indexdef` kept for
+  the SQL target), which relation is a partition; MySQL's `EXTRA` (auto-increment, expression default,
+  `ON UPDATE`); SQL Server's identity, computed columns, filtered indexes and `INCLUDE` columns; Oracle's
+  character lengths. Those queries are best effort: one that fails costs a detail and adds a warning.
+  Tables are keyed by schema and name throughout, so the same table name in two schemas is two models.
+  Types and defaults are parsed per engine (`orm_types.go`, `orm_defaults.go`); a name one engine's
+  reader does not know stays unknown and is reported, never treated as PostgreSQL would treat it. Each
+  target (`orm_<target>.go`) is a pure function of that model, listed in `orm_targets.go` with its
+  language, group, the engines it exists for and its switches — which is what the picker is drawn from,
+  and why a target with no connector for an engine (Prisma for ClickHouse or Oracle, Drizzle for SQL
+  Server) is refused with the reason before the connection is opened, where it used to come out as a
+  PostgreSQL schema. What a target cannot express — a partial index, a composite foreign key in
+  Sequelize, a table with no key in Prisma — comes back in `warnings`, and `schema`/`filename` repeat
+  `files[0]` for callers that only know those two. The CREATE statement an engine keeps is read only for
+  the SQL target (`ORMScope.Statements`): on Oracle `DBMS_METADATA` can take seconds a table. The tests
+  are golden files per target, engine and option (`testdata/orm`, rewritten with `-update-orm`),
+  line-level expectations beside them, and live tests that skip unless a DSN is set; the PostgreSQL and
+  SQL Server ones drop their schema, run the generated SQL and require the same Prisma schema back.
 - **A dump for every engine with no external dependency.** Three have a client tool the image can carry;
   the rest returned `ErrUnsupported` at the moment the operator pressed the button — the worst time to
   learn a backup was never possible. `dump_sql.go` writes DDL then INSERTs over the open connection,

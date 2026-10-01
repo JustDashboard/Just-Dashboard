@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"net/http"
 	"net/http/httptest"
@@ -179,11 +180,25 @@ func TestORMTargetCatalogueCoversEveryGenerator(t *testing.T) {
 		t.Fatalf("GET /databases/orm/targets = %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
+	var res struct {
+		Targets []struct {
+			ID       string `json:"id"`
+			Filename string `json:"filename"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode: %v: %s", err, body)
+	}
+	filenames := map[string]string{}
+	for _, tg := range res.Targets {
+		filenames[tg.ID] = tg.Filename
+	}
 	for _, tg := range dbx.ORMTargets() {
-		if !strings.Contains(body, `"id":"`+string(tg)+`"`) {
+		f, listed := filenames[string(tg)]
+		if !listed {
 			t.Errorf("target %q missing from the catalogue: %s", tg, body)
 		}
-		if f := ormFilename(tg); f == "schema.txt" {
+		if f == "" || f == "schema.txt" {
 			t.Errorf("target %q has no filename of its own", tg)
 		}
 	}

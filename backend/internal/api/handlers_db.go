@@ -1000,20 +1000,20 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-type ormRequest struct {
-	Target dbx.ORMTarget `json:"target"`
-	Schema string        `json:"schema"`
-}
-
-// handleDBGenerateORM introspects the connection and returns a generated ORM
-// schema file (Prisma or Drizzle). It is a read of the schema catalogue, so it
-// needs no write capability.
+// handleDBGenerateORM introspects the connection and returns generated code
+// for one target: an ORM schema, a set of types, or the schema as SQL. It is
+// a read of the schema catalogue, so it needs no write capability.
+//
+// The target and its options are checked before the connection is opened, and
+// whether the target exists for this engine at all before anything is read
+// from it: a Prisma schema for a ClickHouse server is refused with the reason
+// rather than answered with something PostgreSQL-shaped.
 func (s *Server) handleDBGenerateORM(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
 		return err
 	}
-	var req ormRequest
+	var req dbx.ORMRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
@@ -1024,31 +1024,47 @@ func (s *Server) handleDBGenerateORM(w http.ResponseWriter, r *http.Request) err
 		}
 		return httpx.BadRequest("target must be one of %s", strings.Join(names, ", "))
 	}
+	opts, err := req.Options()
+	if err != nil {
+		return httpx.BadRequest("%s", dbx.ORMRequestMessage(err))
+	}
+	row, _, err := s.dbConnRow(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	// An engine with no SQL at all is left to dbPool below, which names the
+	// surface it does have.
+	if row.Driver.IsSQL() {
+		if reason := dbx.ORMUnsupported(req.Target, row.Driver); reason != "" {
+			return httpx.BadRequest("%s", reason)
+		}
+	}
 	pool, conn, err := s.dbPool(r.Context(), id)
 	if err != nil {
 		return err
 	}
+	scope, err := req.Scope(conn.Driver, conn.Database)
+	if err != nil {
+		return httpx.BadRequest("%s", dbx.ORMRequestMessage(err))
+	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	tables, err := dbx.ListTables(ctx, pool, conn.Driver, req.Schema)
+	schema, err := dbx.LoadORMSchema(ctx, pool, conn.Driver, scope)
+	if errors.Is(err, dbx.ErrORMRequest) {
+		return httpx.BadRequest("%s", dbx.ORMRequestMessage(err))
+	}
 	if err != nil {
 		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 	}
-	details := map[string]*dbx.TableDetail{}
-	for _, t := range tables {
-		d, err := dbx.Detail(ctx, pool, conn.Driver, t.Schema, t.Name)
-		if err != nil {
-			continue
-		}
-		details[t.Name] = d
-	}
-	schema, err := dbx.GenerateORM(req.Target, conn.Driver, tables, details)
+	res, err := dbx.GenerateORMFiles(schema, opts)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.BadRequest("%s", dbx.ORMRequestMessage(err))
 	}
-	filename := ormFilename(req.Target)
-	httpx.SetAudit(r, "database.orm.generate", conn.Name, map[string]any{"target": string(req.Target)})
-	httpx.JSON(w, http.StatusOK, map[string]any{"schema": schema, "filename": filename})
+	httpx.SetAudit(r, "database.orm.generate", conn.Name, map[string]any{
+		"target": string(req.Target), "schemas": scope.Schemas,
+		"tables": res.Counts.Tables, "views": res.Counts.Views, "warnings": len(res.Warnings),
+	})
+	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
 
@@ -1474,67 +1490,14 @@ func (s *Server) handleDBExplain(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// ormFilename is the name the generated file should be saved under. It lives
-// here rather than in dbx because it is a download-header concern, not a
-// property of the schema — but it stays in one place so a new generator cannot
-// be added without deciding what its file is called.
-func ormFilename(t dbx.ORMTarget) string {
-	switch t {
-	case dbx.ORMPrisma:
-		return "schema.prisma"
-	case dbx.ORMDrizzle:
-		return "schema.ts"
-	case dbx.ORMTypeScript:
-		return "types.ts"
-	case dbx.ORMZod:
-		return "schemas.ts"
-	default:
-		return "schema.txt"
-	}
-}
-
 // handleDBTargets lists the code generators this build offers, so the ORM tab
 // is populated from the server rather than from a second list in TypeScript
-// that drifts the first time a generator is added.
+// that drifts the first time a generator is added. Each one comes with the
+// engines it can be pointed at and the switches it takes, for the same reason.
 func (s *Server) handleDBTargets(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
-	out := make([]map[string]string, 0, len(dbx.ORMTargets()))
-	for _, t := range dbx.ORMTargets() {
-		out = append(out, map[string]string{
-			"id": string(t), "label": ormTargetLabel(t), "filename": ormFilename(t),
-			"description": ormTargetBlurb(t),
-		})
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"targets": out})
+	httpx.JSON(w, http.StatusOK, map[string]any{"targets": dbx.ORMTargetCatalogue()})
 	return nil
-}
-
-func ormTargetLabel(t dbx.ORMTarget) string {
-	switch t {
-	case dbx.ORMPrisma:
-		return "Prisma"
-	case dbx.ORMDrizzle:
-		return "Drizzle"
-	case dbx.ORMTypeScript:
-		return "TypeScript types"
-	case dbx.ORMZod:
-		return "Zod schemas"
-	}
-	return string(t)
-}
-
-func ormTargetBlurb(t dbx.ORMTarget) string {
-	switch t {
-	case dbx.ORMPrisma:
-		return "A schema.prisma to drop into an existing Prisma project."
-	case dbx.ORMDrizzle:
-		return "Drizzle ORM table definitions."
-	case dbx.ORMTypeScript:
-		return "Plain interfaces — no runtime dependency, useful with any client."
-	case dbx.ORMZod:
-		return "Runtime validators, plus an insert variant with defaults optional."
-	}
-	return ""
 }
 
 // --- activity -------------------------------------------------------------
