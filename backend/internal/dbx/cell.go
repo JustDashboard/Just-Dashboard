@@ -46,7 +46,7 @@ var (
 type CellTooLargeError struct{ Size int64 }
 
 func (e *CellTooLargeError) Error() string {
-	return fmt.Sprintf("this value is %d bytes, past the %d the dashboard reads into one cell; export the table to get it",
+	return fmt.Sprintf("this value is %d bytes, past the %d the dashboard reads into one cell",
 		e.Size, int64(MaxCellBytes))
 }
 
