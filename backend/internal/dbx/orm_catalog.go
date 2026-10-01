@@ -31,6 +31,9 @@ type ORMScope struct {
 	// keeps one. Only the SQL target prints it, and on Oracle fetching it
 	// (DBMS_METADATA) can take seconds a table, so nothing else pays for it.
 	Statements bool
+	// SkipViews leaves the views listed but unread, for a generation that will
+	// not emit them: a view costs the same catalogue queries a table does.
+	SkipViews bool
 }
 
 // Scope turns a request's schema and table selection into what the loader
@@ -80,12 +83,18 @@ func (r ORMRequest) Scope(driver Driver, database string) (ORMScope, error) {
 		scope.Schemas = []string{database}
 	}
 	scope.Statements = r.Target == ORMSQL
+	// Whether views are written is the target's default unless the request
+	// says; a request the target refuses is refused where its options are read.
+	if opts, err := r.Options(); err == nil {
+		scope.SkipViews = !opts.Views
+	}
 	return scope, nil
 }
 
 // ormMaxTables bounds one generation. Each table costs several catalogue
 // queries; past this many the honest answer is "pick some", not a request that
-// runs into its deadline and returns half a schema.
+// runs into its deadline and returns half a schema. It counts what is read:
+// a partition is not, and neither is a view the target will not emit.
 const ormMaxTables = 1000
 
 type ormLoader struct {
@@ -93,6 +102,8 @@ type ormLoader struct {
 	db     *sql.DB
 	driver Driver
 	schema *ORMSchema
+	// pgVersion is PostgreSQL's server_version_num, 0 where it was not read.
+	pgVersion int
 	// failed is set when the facts a generator leans on (which columns the
 	// engine numbers itself) could not be read.
 	failed bool
@@ -161,9 +172,6 @@ func LoadORMSchema(ctx context.Context, db *sql.DB, driver Driver, scope ORMScop
 	if err != nil {
 		return nil, err
 	}
-	if len(tables) > ormMaxTables {
-		return nil, ormRequestErrorf("%d tables is more than one generation reads (%d); narrow it by schema or by table", len(tables), ormMaxTables)
-	}
 
 	// The schemas the tables are actually in, which is what the per-engine
 	// catalogue queries are asked about.
@@ -175,22 +183,24 @@ func LoadORMSchema(ctx context.Context, db *sql.DB, driver Driver, scope ORMScop
 			present = append(present, t.Schema)
 		}
 	}
-	facts := l.facts(present)
+	// Which relations are partitions has to be known before the listing is
+	// measured: a table partitioned by day lists a thousand relations within
+	// three years and is still one model, and its partitions share its schema,
+	// so "narrow it by schema" would be no way out.
+	facts := newORMFacts()
+	l.relationFacts(facts, present)
+	read, unread := ormReadPlan(tables, facts.partition, scope.SkipViews)
+	l.schema.Tables = append(l.schema.Tables, unread...)
+	if len(read) > ormMaxTables {
+		return nil, ormRequestErrorf("%d tables is more than one generation reads (%d); narrow it by schema or by table", len(read), ormMaxTables)
+	}
+	l.columnFacts(facts, present)
 
-	for _, t := range tables {
-		key := ormTableKey(t.Schema, t.Name)
-		if facts.partition[key] {
-			// Counted and reported by the generator; its columns are its
-			// parent's and are not read.
-			l.schema.Tables = append(l.schema.Tables, ORMTable{Schema: t.Schema, Name: t.Name, Kind: ORMKindPartition})
-			continue
-		}
-		if _, model := ormKindOf(t.Type); !model {
-			continue
-		}
+	done := 0
+	for _, t := range read {
 		detail, err := l.detail(d, t, scope.Statements)
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("introspection ran out of time after %d of %d tables; choose fewer tables or one schema", len(l.schema.Tables), len(tables))
+			return nil, fmt.Errorf("introspection ran out of time after %d of %d tables; choose fewer tables or one schema", done, len(read))
 		}
 		if err != nil {
 			l.warn("%s could not be read (%v) and was left out.", t.Name, err)
@@ -201,11 +211,33 @@ func LoadORMSchema(ctx context.Context, db *sql.DB, driver Driver, scope ORMScop
 		if len(l.schema.Tables) > before {
 			facts.apply(&l.schema.Tables[len(l.schema.Tables)-1])
 		}
+		done++
 	}
 	l.schema.Enums = facts.enums
 	l.schema.Flavor = facts.flavor
 	l.schema.Detailed = !l.failed
 	return l.schema, nil
+}
+
+// ormReadPlan splits a listing into the relations whose columns will be read
+// and the ones that are only counted: a partition, whose columns are its
+// parent's, and — when the generation will not emit them — a view. The second
+// kind is kept as a name and a kind, so the generator can still report the
+// partitions it left out and answer "nothing but views here".
+func ormReadPlan(tables []Table, partition map[string]bool, skipViews bool) (read []Table, unread []ORMTable) {
+	for _, t := range tables {
+		kind, model := ormKindOf(t.Type)
+		switch {
+		case partition[ormTableKey(t.Schema, t.Name)]:
+			unread = append(unread, ORMTable{Schema: t.Schema, Name: t.Name, Kind: ORMKindPartition})
+		case !model:
+		case skipViews && (kind == ORMKindView || kind == ORMKindMatView):
+			unread = append(unread, ORMTable{Schema: t.Schema, Name: t.Name, Kind: kind})
+		default:
+			read = append(read, t)
+		}
+	}
+	return read, unread
 }
 
 // detail reads one table the way Detail does — the same dialect calls, with the
@@ -295,8 +327,8 @@ type ormFacts struct {
 	checks     map[string][]ORMCheck
 }
 
-func (l *ormLoader) facts(schemas []string) *ormFacts {
-	f := &ormFacts{
+func newORMFacts() *ormFacts {
+	return &ormFacts{
 		partition: map[string]bool{}, kind: map[string]ORMTableKind{}, viewSQL: map[string]string{},
 		comment: map[string]*string{},
 		partKey: map[string]string{}, columns: map[string]map[string]ormColumnFact{},
@@ -304,6 +336,20 @@ func (l *ormLoader) facts(schemas []string) *ormFacts {
 		indexes:     map[string]map[string]ormIndexFact{}, indexOrder: map[string][]string{},
 		checks: map[string][]ORMCheck{},
 	}
+}
+
+// relationFacts reads what is true of a relation as a whole, one row each:
+// cheap enough to ask of a listing of any size, and needed before anything else
+// because it says which relations are not read at all.
+func (l *ormLoader) relationFacts(f *ormFacts, schemas []string) {
+	if l.driver == DriverPostgres {
+		l.postgresRelations(f, schemas)
+	}
+}
+
+// columnFacts reads the per-column and per-index detail, once the listing is
+// known to be of a size worth reading.
+func (l *ormLoader) columnFacts(f *ormFacts, schemas []string) {
 	switch l.driver {
 	case DriverPostgres:
 		l.postgresFacts(f, schemas)
@@ -316,7 +362,6 @@ func (l *ormLoader) facts(schemas []string) *ormFacts {
 	case DriverOracle:
 		l.oracleFacts(f, schemas)
 	}
-	return f
 }
 
 func (f *ormFacts) setColumn(table, name string, fact ormColumnFact) {
@@ -435,36 +480,54 @@ func (f *ormFacts) apply(t *ORMTable) {
 
 // --- PostgreSQL -----------------------------------------------------------
 
-func (l *ormLoader) postgresFacts(f *ormFacts, schemas []string) {
+// postgresCatalog is the handful of catalogue columns younger than a
+// PostgreSQL that is still met on old servers, each with what stands in for it
+// where it does not exist yet. One missing column fails its whole query, and
+// with it every enum, array, domain and identity column in the schema, so the
+// query is written for the server that will run it.
+type postgresCatalog struct {
+	partition  string // pg_class.relispartition, 10
+	partKey    string // pg_get_partkeydef, 10
+	identity   string // pg_attribute.attidentity, 10
+	generated  string // pg_attribute.attgenerated, 12
+	keyColumns string // pg_index.indnkeyatts, 11: before INCLUDE every column is a key column
+}
+
+// postgresCatalogFor takes server_version_num; 0 means it could not be read
+// and is taken for a current server.
+func postgresCatalogFor(version int) postgresCatalog {
+	c := postgresCatalog{
+		partition: "c.relispartition", partKey: "pg_get_partkeydef(c.oid)",
+		identity: "a.attidentity::text", generated: "a.attgenerated::text",
+		keyColumns: "ix.indnkeyatts",
+	}
+	if version == 0 {
+		return c
+	}
+	if version < 120000 {
+		c.generated = "''::text"
+	}
+	if version < 110000 {
+		c.keyColumns = "ix.indnatts"
+	}
+	if version < 100000 {
+		c.partition, c.partKey, c.identity = "false", "''::text", "''::text"
+	}
+	return c
+}
+
+func (l *ormLoader) postgresRelations(f *ormFacts, schemas []string) {
 	var version string
 	if err := l.db.QueryRowContext(l.ctx, `SELECT version()`).Scan(&version); err == nil &&
 		strings.Contains(version, "CockroachDB") {
 		f.flavor = "cockroachdb"
 	}
-
-	// Enum types, whichever schema they live in: a column may use one from
-	// outside the schemas being read.
-	byName := map[string]int{}
-	l.each("enum types", `
-	  SELECT n.nspname, t.typname, e.enumlabel
-	  FROM pg_type t
-	  JOIN pg_namespace n ON n.oid = t.typnamespace
-	  JOIN pg_enum e ON e.enumtypid = t.oid
-	  ORDER BY n.nspname, t.typname, e.enumsortorder`, nil, func(rows *sql.Rows) error {
-		var schema, name, label string
-		if err := rows.Scan(&schema, &name, &label); err != nil {
-			return err
-		}
-		key := ormTableKey(schema, name)
-		i, ok := byName[key]
-		if !ok {
-			i = len(f.enums)
-			byName[key] = i
-			f.enums = append(f.enums, ORMEnum{Schema: schema, Name: name})
-		}
-		f.enums[i].Values = append(f.enums[i].Values, label)
-		return nil
-	})
+	// Scanned as text: an integer everywhere, but not worth failing over.
+	var num string
+	if err := l.db.QueryRowContext(l.ctx, `SHOW server_version_num`).Scan(&num); err == nil {
+		l.pgVersion, _ = strconv.Atoi(strings.TrimSpace(num))
+	}
+	cat := postgresCatalogFor(l.pgVersion)
 
 	for _, schema := range schemas {
 		// Partitions, the definitions PostgreSQL will print for a view or a
@@ -473,8 +536,8 @@ func (l *ormLoader) postgresFacts(f *ormFacts, schemas []string) {
 		// with another object's comment that happens to share the OID, which
 		// on CockroachDB it does for every table that has none of its own.
 		l.each("partitions, view definitions and comments in "+schema, `
-		  SELECT c.relname, c.relkind::text, COALESCE(c.relispartition, false),
-		         CASE WHEN c.relkind = 'p' THEN COALESCE(pg_get_partkeydef(c.oid), '') ELSE '' END,
+		  SELECT c.relname, c.relkind::text, COALESCE(`+cat.partition+`, false),
+		         CASE WHEN c.relkind = 'p' THEN COALESCE(`+cat.partKey+`, '') ELSE '' END,
 		         CASE WHEN c.relkind IN ('v','m') THEN COALESCE(pg_get_viewdef(c.oid), '') ELSE '' END,
 		         COALESCE(obj_description(c.oid, 'pg_class'), '')
 		  FROM pg_class c
@@ -501,7 +564,37 @@ func (l *ormLoader) postgresFacts(f *ormFacts, schemas []string) {
 			}
 			return nil
 		})
+	}
+}
 
+func (l *ormLoader) postgresFacts(f *ormFacts, schemas []string) {
+	cat := postgresCatalogFor(l.pgVersion)
+
+	// Enum types, whichever schema they live in: a column may use one from
+	// outside the schemas being read.
+	byName := map[string]int{}
+	l.each("enum types", `
+	  SELECT n.nspname, t.typname, e.enumlabel
+	  FROM pg_type t
+	  JOIN pg_namespace n ON n.oid = t.typnamespace
+	  JOIN pg_enum e ON e.enumtypid = t.oid
+	  ORDER BY n.nspname, t.typname, e.enumsortorder`, nil, func(rows *sql.Rows) error {
+		var schema, name, label string
+		if err := rows.Scan(&schema, &name, &label); err != nil {
+			return err
+		}
+		key := ormTableKey(schema, name)
+		i, ok := byName[key]
+		if !ok {
+			i = len(f.enums)
+			byName[key] = i
+			f.enums = append(f.enums, ORMEnum{Schema: schema, Name: name})
+		}
+		f.enums[i].Values = append(f.enums[i].Values, label)
+		return nil
+	})
+
+	for _, schema := range schemas {
 		// A column's type as PostgreSQL writes it, with a domain resolved to
 		// what it is a domain over, and the enum named when it is one.
 		// information_schema says only "USER-DEFINED" and "ARRAY" for these.
@@ -512,7 +605,7 @@ func (l *ormLoader) postgresFacts(f *ormFacts, schemas []string) {
 		                   CASE WHEN t.typcategory = 'A' THEN '[]' ELSE '' END
 		              ELSE format_type(a.atttypid, a.atttypmod) END,
 		         b.typtype = 'e', bn.nspname, b.typname,
-		         a.attidentity::text, a.attgenerated::text,
+		         `+cat.identity+`, `+cat.generated+`,
 		         COALESCE(pg_get_expr(d.adbin, d.adrelid), ''),
 		         COALESCE(col_description(c.oid, a.attnum), ''),
 		         NOT a.attnotnull
@@ -556,7 +649,7 @@ func (l *ormLoader) postgresFacts(f *ormFacts, schemas []string) {
 		l.each("indexes in "+schema, `
 		  SELECT t.relname, i.relname, ix.indisunique, ix.indisprimary,
 		         ix.indpred IS NOT NULL, ix.indexprs IS NOT NULL, am.amname,
-		         ix.indnkeyatts, ix.indoption::text, pg_get_indexdef(ix.indexrelid)
+		         `+cat.keyColumns+`, ix.indoption::text, pg_get_indexdef(ix.indexrelid)
 		  FROM pg_index ix
 		  JOIN pg_class i ON i.oid = ix.indexrelid
 		  JOIN pg_class t ON t.oid = ix.indrelid
