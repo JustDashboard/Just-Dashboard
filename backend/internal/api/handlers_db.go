@@ -31,10 +31,22 @@ type dbConnection struct {
 	User      string     `json:"user"`
 	Database  string     `json:"database"`
 	CreatedAt time.Time  `json:"createdAt"`
+	// What the operator says about the connection rather than what its DSN
+	// does: the environment it serves, whether the dashboard may change what
+	// is in it, and anything worth remembering.
+	Environment string `json:"environment"`
+	ReadOnly    bool   `json:"readOnly"`
+	Notes       string `json:"notes"`
+	// Broken marks a row this process cannot use, with the reason: its sealed
+	// DSN no longer opens, or its file is outside the file roots. The address
+	// fields above are empty on such a row.
+	Broken       bool   `json:"broken,omitempty"`
+	BrokenReason string `json:"brokenReason,omitempty"`
 }
 
 func (s *Server) mountDatabaseRoutes(r chi.Router) {
 	r.Route("/databases", func(r chi.Router) {
+		r.Use(s.protectReadOnlyConnections)
 		r.Method(http.MethodGet, "/", s.handle(s.handleDBConnList))
 		r.Method(http.MethodGet, "/drivers", s.handle(s.handleDBDrivers))
 		r.Group(func(r chi.Router) {
@@ -167,28 +179,40 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 	})
 }
 
-func (s *Server) dbConnRow(ctx context.Context, id int64) (*dbConnection, string, error) {
+// dbConnColumns is a row of db_connections in the order scanDBConn reads it.
+const dbConnColumns = `id, name, driver, dsn_enc, created_at, environment, read_only, notes`
+
+// dbConnRecord is a connection as stored: everything but the address, which
+// is inside the sealed DSN.
+type dbConnRecord struct {
+	conn   dbConnection
+	dsnEnc string
+}
+
+func scanDBConn(scan func(...any) error) (*dbConnRecord, error) {
 	var (
-		name, driver, dsnEnc string
-		created              int64
+		rec      dbConnRecord
+		driver   string
+		created  int64
+		readOnly int
 	)
-	err := s.Store.DB.QueryRowContext(ctx,
-		`SELECT name, driver, dsn_enc, created_at FROM db_connections WHERE id = ?`, id).
-		Scan(&name, &driver, &dsnEnc, &created)
-	if err == sql.ErrNoRows {
-		return nil, "", httpx.ErrNotFound
+	if err := scan(&rec.conn.ID, &rec.conn.Name, &driver, &rec.dsnEnc, &created,
+		&rec.conn.Environment, &readOnly, &rec.conn.Notes); err != nil {
+		return nil, err
 	}
+	rec.conn.Driver = dbx.Driver(driver)
+	rec.conn.CreatedAt = time.Unix(created, 0).UTC()
+	rec.conn.ReadOnly = readOnly != 0
+	return &rec, nil
+}
+
+// openDBConn unseals a stored connection and reads its address out of the DSN.
+func (s *Server) openDBConn(rec *dbConnRecord) (*dbConnection, string, error) {
+	dsn, err := s.Sealer.Open(rec.dsnEnc)
 	if err != nil {
 		return nil, "", httpx.Internal(err)
 	}
-	dsn, err := s.Sealer.Open(dsnEnc)
-	if err != nil {
-		return nil, "", httpx.Internal(err)
-	}
-	conn := &dbConnection{
-		ID: id, Name: name, Driver: dbx.Driver(driver),
-		CreatedAt: time.Unix(created, 0).UTC(),
-	}
+	conn := rec.conn
 	// Contained again here rather than trusted from the store: the roots may
 	// have been narrowed since this row was written, and every caller that
 	// opens a pool comes through this function.
@@ -199,7 +223,19 @@ func (s *Server) dbConnRow(ctx context.Context, id int64) (*dbConnection, string
 	if info, err := dbx.ParseDSN(conn.Driver, dsn); err == nil {
 		conn.Host, conn.Port, conn.User, conn.Database = info.Host, info.Port, info.User, info.Database
 	}
-	return conn, dsn, nil
+	return &conn, dsn, nil
+}
+
+func (s *Server) dbConnRow(ctx context.Context, id int64) (*dbConnection, string, error) {
+	rec, err := scanDBConn(s.Store.DB.QueryRowContext(ctx,
+		`SELECT `+dbConnColumns+` FROM db_connections WHERE id = ?`, id).Scan)
+	if err == sql.ErrNoRows {
+		return nil, "", httpx.ErrNotFound
+	}
+	if err != nil {
+		return nil, "", httpx.Internal(err)
+	}
+	return s.openDBConn(rec)
 }
 
 func (s *Server) dbPool(ctx context.Context, id int64) (*sql.DB, *dbConnection, error) {
@@ -221,30 +257,60 @@ func (s *Server) dbPool(ctx context.Context, id int64) (*sql.DB, *dbConnection, 
 }
 
 func (s *Server) handleDBConnList(w http.ResponseWriter, r *http.Request) error {
-	rows, err := s.Store.DB.QueryContext(r.Context(),
-		`SELECT id FROM db_connections ORDER BY name`)
+	out, err := s.allConnections(r.Context())
 	if err != nil {
-		return httpx.Internal(err)
-	}
-	defer rows.Close()
-	ids := []int64{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return httpx.Internal(err)
-		}
-		ids = append(ids, id)
-	}
-	out := []*dbConnection{}
-	for _, id := range ids {
-		conn, _, err := s.dbConnRow(r.Context(), id)
-		if err != nil {
-			continue
-		}
-		out = append(out, conn)
+		return err
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
+}
+
+// allConnections is every saved connection by name, the unusable ones
+// included.
+//
+// A row whose DSN would not open used to be left out, so the connection an
+// operator came to repair was the one connection the page did not show: it
+// vanished from the picker the day the master key or the file roots changed,
+// and stayed in the table where nothing could reach it to forget it. It is
+// listed now, flagged with why, and its id still answers the routes that fix
+// or remove it.
+func (s *Server) allConnections(ctx context.Context) ([]*dbConnection, error) {
+	rows, err := s.Store.DB.QueryContext(ctx,
+		`SELECT `+dbConnColumns+` FROM db_connections ORDER BY name`)
+	if err != nil {
+		return nil, httpx.Internal(err)
+	}
+	defer rows.Close()
+	out := []*dbConnection{}
+	for rows.Next() {
+		rec, err := scanDBConn(rows.Scan)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		conn, _, err := s.openDBConn(rec)
+		if err != nil {
+			broken := rec.conn
+			broken.Broken, broken.BrokenReason = true, brokenReason(err)
+			conn = &broken
+		}
+		out = append(out, conn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, httpx.Internal(err)
+	}
+	return out, nil
+}
+
+// brokenReason says why a stored connection cannot be used, in a sentence the
+// page prints. A containment refusal already reads that way. A DSN that will
+// not unseal comes back as an internal error whose text is deliberately
+// hidden, and the one cause worth naming is the key it was sealed under.
+func brokenReason(err error) string {
+	var apiErr *httpx.APIError
+	if errors.As(err, &apiErr) && apiErr.Status < http.StatusInternalServerError {
+		return apiErr.Message
+	}
+	return "its stored connection string could not be decrypted; JD_MASTER_KEY is not the key it was saved under"
 }
 
 // connNameRe deliberately excludes "/" and ".." so a connection name cannot
@@ -255,6 +321,36 @@ type createDBConnRequest struct {
 	Name   string     `json:"name"`
 	Driver dbx.Driver `json:"driver"`
 	DSN    string     `json:"dsn"`
+	// Probe dials the server before the connection is saved, and refuses to
+	// save one that does not answer.
+	Probe       bool   `json:"probe"`
+	Environment string `json:"environment"`
+	ReadOnly    bool   `json:"readOnly"`
+	Notes       string `json:"notes"`
+}
+
+// connEnvironmentRe bounds the environment tag the way a name is bounded: it
+// is drawn as a chip beside the connection, and compared across connections.
+var connEnvironmentRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$`)
+
+// maxConnNotes is the most an operator may write about one connection, in
+// bytes.
+const maxConnNotes = 4000
+
+// connLabels validates what the operator says about a connection: an
+// environment that is empty or a short tag, and notes that are text.
+func connLabels(environment, notes string) (string, string, error) {
+	environment = strings.TrimSpace(environment)
+	if environment != "" && !connEnvironmentRe.MatchString(environment) {
+		return "", "", httpx.BadRequest("environment is a short tag of letters, digits, spaces, dots, dashes and underscores")
+	}
+	if len(notes) > maxConnNotes {
+		return "", "", httpx.BadRequest("notes may be at most %d bytes", maxConnNotes)
+	}
+	if strings.ContainsRune(notes, 0) {
+		return "", "", httpx.BadRequest("notes must be text")
+	}
+	return environment, notes, nil
 }
 
 // containDSN puts a SQLite connection's path through the same check every
@@ -315,17 +411,36 @@ func (s *Server) handleDBConnCreate(w http.ResponseWriter, r *http.Request) erro
 	if !connNameRe.MatchString(req.Name) {
 		return httpx.BadRequest("name may contain letters, digits, spaces, dots, dashes and underscores")
 	}
+	environment, notes, err := connLabels(req.Environment, req.Notes)
+	if err != nil {
+		return err
+	}
 	dsn, err := s.containDSN(req.Driver, req.DSN)
 	if err != nil {
 		return err
+	}
+	if req.Probe {
+		// Dialled before it is stored, for the reason the host route gives: a
+		// connection that cannot answer is a row that looks connected and
+		// fails every request made of it afterwards, and the engine's own
+		// refusal belongs in the form the operator is still looking at.
+		ctx, cancel := timeoutCtx(r, 15*time.Second)
+		_, err := dbx.ProbeIdentity(ctx, req.Driver, dsn)
+		cancel()
+		if err != nil {
+			httpx.SetAudit(r, "database.connection.create", req.Name,
+				map[string]any{"ok": false, "driver": req.Driver})
+			return httpx.BadRequest("%v", err)
+		}
 	}
 	sealed, err := s.Sealer.Seal(dsn)
 	if err != nil {
 		return httpx.Internal(err)
 	}
 	res, err := s.Store.DB.ExecContext(r.Context(),
-		`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES(?,?,?,?)`,
-		req.Name, string(req.Driver), sealed, time.Now().Unix())
+		`INSERT INTO db_connections(name, driver, dsn_enc, created_at, environment, read_only, notes)
+		 VALUES(?,?,?,?,?,?,?)`,
+		req.Name, string(req.Driver), sealed, time.Now().Unix(), environment, req.ReadOnly, notes)
 	if err != nil {
 		return httpx.BadRequest("could not save connection: %v", err)
 	}
@@ -336,8 +451,9 @@ func (s *Server) handleDBConnCreate(w http.ResponseWriter, r *http.Request) erro
 	}
 	// The DSN itself never reaches the audit trail; the parsed host and user
 	// identify the connection without leaking the password.
-	httpx.SetAudit(r, "database.connection.create", req.Name,
-		map[string]any{"driver": req.Driver, "host": conn.Host, "user": conn.User})
+	httpx.SetAudit(r, "database.connection.create", req.Name, map[string]any{
+		"driver": req.Driver, "host": conn.Host, "user": conn.User, "probed": req.Probe,
+	})
 	httpx.JSON(w, http.StatusCreated, conn)
 	return nil
 }
@@ -347,7 +463,9 @@ func (s *Server) handleDBConnDelete(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return httpx.BadRequest("invalid id")
 	}
-	conn, _, err := s.dbConnRow(r.Context(), id)
+	// Read as stored rather than opened: a connection whose DSN no longer
+	// unseals is exactly the one somebody needs to be able to forget.
+	conn, err := s.storedConnection(r.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -361,6 +479,8 @@ func (s *Server) handleDBConnDelete(w http.ResponseWriter, r *http.Request) erro
 		return httpx.Err(http.StatusConflict, "database_linked", "remove the deployment's managed database network before forgetting this linked connection")
 	}
 	s.modules.dbs.Close(id)
+	s.dbConns.forget(id)
+	s.afterConnectionForgotten(r.Context(), conn)
 	httpx.SetAudit(r, "database.connection.delete", conn.Name, nil)
 	httpx.NoContent(w)
 	return nil
@@ -418,7 +538,7 @@ func (s *Server) handleDBPing(w http.ResponseWriter, r *http.Request) error {
 			// Dropped rather than left to expire with the pool's lifetime, so
 			// the next request dials again instead of failing the same way for
 			// half an hour.
-			s.modules.dbs.Close(id)
+			s.dropPoolAfter(id, err)
 			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 			return nil
 		}
@@ -789,9 +909,9 @@ func (s *Server) handleDBRestore(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// handleDBConnTest verifies a DSN before it is saved. It reports the server
-// version on success so the operator can see they reached the engine they
-// meant to, and never persists anything.
+// handleDBConnTest verifies a DSN before it is saved. It reports what answered
+// on success — the product and its version — so the operator can see they
+// reached the engine they meant to, and never persists anything.
 func (s *Server) handleDBConnTest(w http.ResponseWriter, r *http.Request) error {
 	var req createDBConnRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -803,51 +923,54 @@ func (s *Server) handleDBConnTest(w http.ResponseWriter, r *http.Request) error 
 	if req.DSN == "" {
 		return httpx.BadRequest("dsn is required")
 	}
-	if _, err := s.containDSN(req.Driver, req.DSN); err != nil {
+	dsn, err := s.containDSN(req.Driver, req.DSN)
+	if err != nil {
 		return err
 	}
 	httpx.SkipAudit(r)
 	ctx, cancel := timeoutCtx(r, 15*time.Second)
 	defer cancel()
-	if req.Driver == dbx.DriverMongo {
-		client, err := dbx.MongoClient(ctx, req.DSN)
-		if err != nil {
-			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-			return nil
-		}
-		defer client.Disconnect(context.Background())
-		httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
-		return nil
-	}
-	probeDSN, err := s.containDSN(req.Driver, req.DSN)
-	if err != nil {
-		return err
-	}
-	version, err := dbx.Probe(ctx, req.Driver, probeDSN)
+	// One probe for every engine. Redis used to fall through to the SQL path
+	// and be reported unreachable for having no dialect, which made the test
+	// button fail for a server the save button then connected to.
+	identity, err := dbx.ProbeIdentity(ctx, req.Driver, dsn)
 	if err != nil {
 		httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return nil
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "version": version})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"ok": true, "version": identity.Version, "versionNumber": identity.Number,
+		"flavor": identity.Flavor, "flavorLabel": dbx.FlavorLabel(identity.Flavor),
+	})
 	return nil
 }
 
+// updateDBConnRequest changes what is named in it and nothing else: a field
+// left out keeps its stored value, which is why the three labels are pointers
+// — an absent "notes" is not a request to erase them.
 type updateDBConnRequest struct {
-	Name string `json:"name"`
-	DSN  string `json:"dsn"`
+	Name        string  `json:"name"`
+	DSN         string  `json:"dsn"`
+	Environment *string `json:"environment"`
+	ReadOnly    *bool   `json:"readOnly"`
+	Notes       *string `json:"notes"`
 }
 
-// handleDBConnUpdate edits a connection's name and, optionally, its DSN. The
-// driver is fixed at creation — changing it would mean the stored secret no
-// longer parses — so it is not editable here. An empty DSN leaves the existing
-// one untouched, so an operator can rename without re-typing a password they
-// cannot read back.
+// handleDBConnUpdate edits a connection's name, its labels and, optionally,
+// its DSN. The driver is fixed at creation — changing it would mean the stored
+// secret no longer parses — so it is not editable here. An empty DSN leaves
+// the existing one untouched, so an operator can rename without re-typing a
+// password they cannot read back.
+//
+// It reads the row as stored rather than opening it, because this is the one
+// route that repairs a broken connection: a DSN that no longer unseals is
+// replaced here, and a handler that had to open it first could never run.
 func (s *Server) handleDBConnUpdate(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
 		return err
 	}
-	conn, _, err := s.dbConnRow(r.Context(), id)
+	conn, err := s.storedConnection(r.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -859,9 +982,29 @@ func (s *Server) handleDBConnUpdate(w http.ResponseWriter, r *http.Request) erro
 	if name == "" {
 		name = conn.Name
 	}
-	if !connNameRe.MatchString(name) {
+	// Only a name that is being changed is held to the rule. A connection
+	// saved under an older rule keeps its name through an edit that does not
+	// touch it, rather than refusing every change until it is renamed.
+	if name != conn.Name && !connNameRe.MatchString(name) {
 		return httpx.BadRequest("name may contain letters, digits, spaces, dots, dashes and underscores")
 	}
+	environment, notes := conn.Environment, conn.Notes
+	if req.Environment != nil {
+		environment = *req.Environment
+	}
+	if req.Notes != nil {
+		notes = *req.Notes
+	}
+	environment, notes, err = connLabels(environment, notes)
+	if err != nil {
+		return err
+	}
+	readOnly := conn.ReadOnly
+	if req.ReadOnly != nil {
+		readOnly = *req.ReadOnly
+	}
+	set := []string{"name = ?", "environment = ?", "read_only = ?", "notes = ?"}
+	args := []any{name, environment, readOnly, notes}
 	if req.DSN != "" {
 		dsn, err := s.containDSN(conn.Driver, req.DSN)
 		if err != nil {
@@ -871,25 +1014,35 @@ func (s *Server) handleDBConnUpdate(w http.ResponseWriter, r *http.Request) erro
 		if err != nil {
 			return httpx.Internal(err)
 		}
-		if _, err := s.Store.DB.ExecContext(r.Context(),
-			`UPDATE db_connections SET name = ?, dsn_enc = ? WHERE id = ?`, name, sealed, id); err != nil {
-			return httpx.BadRequest("could not update connection: %v", err)
-		}
-		// The pool was opened against the old DSN; drop it so the next request
-		// dials the new one.
-		s.modules.dbs.Close(id)
-	} else {
-		if _, err := s.Store.DB.ExecContext(r.Context(),
-			`UPDATE db_connections SET name = ? WHERE id = ?`, name, id); err != nil {
-			return httpx.BadRequest("could not update connection: %v", err)
-		}
+		set, args = append(set, "dsn_enc = ?"), append(args, sealed)
 	}
-	updated, _, err := s.dbConnRow(r.Context(), id)
+	if _, err := s.Store.DB.ExecContext(r.Context(),
+		`UPDATE db_connections SET `+strings.Join(set, ", ")+` WHERE id = ?`, append(args, id)...); err != nil {
+		return httpx.BadRequest("could not update connection: %v", err)
+	}
+	if req.DSN != "" {
+		// The pool was opened against the old DSN; drop it so the next request
+		// dials the new one, and with it what the old server said it was.
+		s.modules.dbs.Close(id)
+		s.dbConns.forget(id)
+	}
+	updated, err := s.storedConnection(r.Context(), id)
 	if err != nil {
 		return err
 	}
-	httpx.SetAudit(r, "database.connection.update", name,
-		map[string]any{"dsnChanged": req.DSN != ""})
+	detail := map[string]any{"dsnChanged": req.DSN != ""}
+	// Protection is the one label whose change is worth reading back out of
+	// the trail: it is what stood between this connection and a write.
+	if readOnly != conn.ReadOnly {
+		detail["readOnly"] = readOnly
+	}
+	if environment != conn.Environment {
+		detail["environment"] = environment
+	}
+	if notes != conn.Notes {
+		detail["notesChanged"] = true
+	}
+	httpx.SetAudit(r, "database.connection.update", name, detail)
 	httpx.JSON(w, http.StatusOK, updated)
 	return nil
 }
@@ -962,7 +1115,7 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 		// the filter is a document rather than a WHERE clause.
 		client, cerr := dbx.MongoClient(ctx, dsn)
 		if cerr != nil {
-			httpx.SetAudit(r, "database.export", conn.Name,
+			s.recordAudit(r, "database.export", conn.Name,
 				map[string]any{"table": table, "error": cerr.Error()})
 			return nil
 		}
@@ -989,11 +1142,14 @@ func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
 		// Headers are already sent, so the error cannot become a JSON body; it is
 		// recorded in the audit trail and the connection is dropped by the client
 		// seeing a short file. This is the one export failure mode worth logging.
-		httpx.SetAudit(r, "database.export", conn.Name,
+		s.recordAudit(r, "database.export", conn.Name,
 			map[string]any{"table": table, "error": err.Error()})
 		return nil
 	}
-	httpx.SetAudit(r, "database.export", conn.Name, map[string]any{
+	// Written directly rather than through SetAudit: this is a GET, which the
+	// mutation middleware passes through with nothing to annotate, so the
+	// three calls here used to record nothing at all.
+	s.recordAudit(r, "database.export", conn.Name, map[string]any{
 		"table": table, "format": string(format), "rows": count, "truncated": truncated,
 		"filtered": q.Get("filters") != "",
 	})
@@ -1324,6 +1480,23 @@ type driverInfo struct {
 	DDL         bool       `json:"ddl"`
 	ColumnTypes []string   `json:"columnTypes,omitempty"`
 	FilterOps   []string   `json:"filterOps,omitempty"`
+	// DefaultPort is what the engine listens on when nothing says otherwise;
+	// 0 for an engine that is a file. DSNExample is a connection string in
+	// the form this engine's driver takes.
+	DefaultPort int    `json:"defaultPort"`
+	DSNExample  string `json:"dsnExample"`
+	// Capabilities is every feature flag for the driver's own product, and
+	// Flavors the same reading for each product that speaks its protocol,
+	// the driver's own first.
+	Capabilities map[string]any `json:"capabilities"`
+	Flavors      []flavorInfo   `json:"flavors"`
+}
+
+// flavorInfo is one product a driver can turn out to be connected to.
+type flavorInfo struct {
+	ID           string         `json:"id"`
+	Label        string         `json:"label"`
+	Capabilities map[string]any `json:"capabilities"`
 }
 
 // containerNameRe and dbNameRe bound the two names a provision request can
@@ -1334,15 +1507,18 @@ var (
 	dbNameRe        = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
 )
 
-var driverLabels = map[dbx.Driver]struct{ label, kind, placeholder string }{
-	dbx.DriverPostgres:   {"PostgreSQL", "sql", "postgres://user:password@127.0.0.1:5432/dbname?sslmode=disable"},
-	dbx.DriverMySQL:      {"MySQL / MariaDB", "sql", "user:password@tcp(127.0.0.1:3306)/dbname"},
-	dbx.DriverSQLite:     {"SQLite", "sql", "/var/lib/myapp/data.db"},
-	dbx.DriverMSSQL:      {"SQL Server", "sql", "sqlserver://user:password@127.0.0.1:1433?database=dbname"},
-	dbx.DriverClickHouse: {"ClickHouse", "sql", "clickhouse://user:password@127.0.0.1:9000/default"},
-	dbx.DriverOracle:     {"Oracle", "sql", "oracle://user:password@127.0.0.1:1521/ORCLPDB1"},
-	dbx.DriverMongo:      {"MongoDB", "document", "mongodb://user:password@127.0.0.1:27017/dbname"},
-	dbx.DriverRedis:      {"Redis", "keyvalue", "redis://:password@127.0.0.1:6379/0"},
+var driverLabels = map[dbx.Driver]struct {
+	label, kind, placeholder string
+	port                     int
+}{
+	dbx.DriverPostgres:   {"PostgreSQL", "sql", "postgres://user:password@127.0.0.1:5432/dbname?sslmode=disable", 5432},
+	dbx.DriverMySQL:      {"MySQL / MariaDB", "sql", "user:password@tcp(127.0.0.1:3306)/dbname", 3306},
+	dbx.DriverSQLite:     {"SQLite", "sql", "/var/lib/myapp/data.db", 0},
+	dbx.DriverMSSQL:      {"SQL Server", "sql", "sqlserver://user:password@127.0.0.1:1433?database=dbname", 1433},
+	dbx.DriverClickHouse: {"ClickHouse", "sql", "clickhouse://user:password@127.0.0.1:9000/default", 9000},
+	dbx.DriverOracle:     {"Oracle", "sql", "oracle://user:password@127.0.0.1:1521/ORCLPDB1", 1521},
+	dbx.DriverMongo:      {"MongoDB", "document", "mongodb://user:password@127.0.0.1:27017/dbname", 27017},
+	dbx.DriverRedis:      {"Redis", "keyvalue", "redis://:password@127.0.0.1:6379/0", 6379},
 }
 
 func (s *Server) handleDBDrivers(w http.ResponseWriter, r *http.Request) error {
@@ -1353,11 +1529,19 @@ func (s *Server) handleDBDrivers(w http.ResponseWriter, r *http.Request) error {
 		info := driverInfo{
 			ID: d, Label: meta.label, Kind: meta.kind,
 			Placeholder: meta.placeholder, SQL: d.IsSQL(),
+			DefaultPort: meta.port, DSNExample: meta.placeholder,
+			Capabilities: dbx.Capabilities(d, ""),
+			Flavors:      []flavorInfo{},
 		}
 		if dl, err := dbx.DialectFor(d); err == nil {
 			info.DDL = dl.SupportsDDL()
 			info.ColumnTypes = dl.ColumnTypes()
 			info.FilterOps = dbx.FilterOps()
+		}
+		for _, flavor := range dbx.Flavors(d) {
+			info.Flavors = append(info.Flavors, flavorInfo{
+				ID: flavor, Label: dbx.FlavorLabel(flavor), Capabilities: dbx.Capabilities(d, flavor),
+			})
 		}
 		out = append(out, info)
 	}
@@ -1639,7 +1823,10 @@ func (s *Server) handleDBSearch(w http.ResponseWriter, r *http.Request) error {
 	}
 	// A search reads the whole schema, so it is worth an audit entry even
 	// though it changes nothing: it is the one read that touches every table.
-	httpx.SetAudit(r, "database.search", conn.Name, map[string]any{"schema": q.Get("schema")})
+	// Written directly, because a GET never reaches the mutation middleware's
+	// record. The needle is left out: it is as likely to be somebody's email
+	// address as a word.
+	s.recordAudit(r, "database.search", conn.Name, map[string]any{"schema": q.Get("schema")})
 	ctx, cancel := timeoutCtx(r, 120*time.Second)
 	defer cancel()
 	res, err := dbx.Search(ctx, pool, conn.Driver, q.Get("schema"), needle)

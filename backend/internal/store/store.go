@@ -102,7 +102,13 @@ CREATE TABLE IF NOT EXISTS db_connections (
   name       TEXT NOT NULL UNIQUE,
   driver     TEXT NOT NULL,
   dsn_enc    TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  -- What the operator says about the connection, as opposed to what its DSN
+  -- says: which environment it serves, whether the dashboard may change what
+  -- is in it, and anything worth remembering about it.
+  environment TEXT NOT NULL DEFAULT '',
+  read_only   INTEGER NOT NULL DEFAULT 0,
+  notes       TEXT NOT NULL DEFAULT ''
 );
 
 -- Named SQL snippets an operator keeps against a connection. The SQL is stored
@@ -1091,6 +1097,13 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "baseline_revision", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_database_networks", "network_id", "TEXT NOT NULL DEFAULT ''"},
+	// A saved connection gained what the operator says about it: the
+	// environment it serves, a protection that refuses every write made
+	// through the dashboard, and free notes. Existing connections are
+	// unlabelled, unprotected and have none.
+	{"db_connections", "environment", "TEXT NOT NULL DEFAULT ''"},
+	{"db_connections", "read_only", "INTEGER NOT NULL DEFAULT 0"},
+	{"db_connections", "notes", "TEXT NOT NULL DEFAULT ''"},
 	// Reconciliation knew why a binding could not be repaired and threw the
 	// reason away, so the settings page could only say "check that the
 	// container is running". The reason is kept on the binding it belongs to.

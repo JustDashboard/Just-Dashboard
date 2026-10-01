@@ -448,7 +448,7 @@ func (s *Server) saveSiblingConnection(w http.ResponseWriter, r *http.Request, c
 	for _, have := range existing {
 		names[have.Name] = have.Name
 	}
-	name := uniqueConnectionName(conn.Name+" · "+database, names)
+	name := uniqueConnectionName(siblingConnectionName(conn.Name, database), names)
 	return s.saveConnection(w, r, name, conn.Driver, sibling, "database.connection.sibling",
 		map[string]any{"from": conn.Name, "database": database})
 }
