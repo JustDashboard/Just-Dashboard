@@ -366,14 +366,6 @@ export function dropIndexRequest(schema: string, table: string, name: string): D
 
 /* ------------------------------------------------------ keys, constraints */
 
-export const REFERENCE_ACTIONS = [
-  "NO ACTION",
-  "RESTRICT",
-  "CASCADE",
-  "SET NULL",
-  "SET DEFAULT",
-] as const
-
 export type ForeignKeyDraft = {
   name: string
   /** This table's columns, paired in order with `refColumns`. */

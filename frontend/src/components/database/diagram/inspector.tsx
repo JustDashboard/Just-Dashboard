@@ -1,10 +1,12 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import {
   ArrowRight,
   Code,
   Cross,
+  External,
   Eye,
   Fingerprint,
   GridSquare,
@@ -52,6 +54,7 @@ export function Inspector({
   onOpenTable,
   onOpenStructure,
   onQuery,
+  hrefOutside,
   onClose,
 }: {
   graph: DbSchemaGraph
@@ -70,14 +73,20 @@ export function Inspector({
   onOpenTable: (table: DbGraphTable) => void
   onOpenStructure: (table: DbGraphTable) => void
   onQuery: (table: DbGraphTable) => void
+  /** Where a table that is not in the picture can be read: its page in Schema. */
+  hrefOutside: (schema: string, table: string) => string
   onClose: () => void
 }) {
   const [filter, setFilter] = useState("")
   const byId = useMemo(() => new Map(graph.tables.map((t) => [t.id, t])), [graph.tables])
-  const label = (id: string, fallback: string) => {
+  // A table is said with its schema where the picture holds several — and
+  // always when it is in another schema than the table being read, which is
+  // the case of a key that leaves a one-schema picture.
+  const label = (id: string, schema: string | undefined, name: string) => {
     const table = byId.get(id)
-    if (!table) return fallback
-    return qualified && table.schema ? `${table.schema}.${table.name}` : table.name
+    const of = table?.schema ?? schema ?? ""
+    const outside = focused !== undefined && of !== "" && of !== focused.schema
+    return (qualified || outside) && of ? `${of}.${table?.name ?? name}` : (table?.name ?? name)
   }
   const columns = graph.tables.reduce((n, t) => n + t.columns.length, 0)
   const outgoing = focused ? graph.edges.filter((e) => e.from === focused.id) : []
@@ -214,7 +223,10 @@ export function Inspector({
               edges={outgoing}
               other={(e) => e.to}
               known={(e) => byId.has(e.to)}
-              describe={(e) => `${e.fromColumn} → ${label(e.to, e.toTable)}.${e.toColumn}`}
+              describe={(e) =>
+                `${e.fromColumn} → ${label(e.to, e.toSchema, e.toTable)}.${e.toColumn}`
+              }
+              outside={(e) => hrefOutside(e.toSchema ?? focused.schema, e.toTable)}
               onFocus={onFocus}
             />
             <RelationList
@@ -223,7 +235,10 @@ export function Inspector({
               edges={incoming}
               other={(e) => e.from}
               known={(e) => byId.has(e.from)}
-              describe={(e) => `${label(e.from, e.fromTable)}.${e.fromColumn} → ${e.toColumn}`}
+              describe={(e) =>
+                `${label(e.from, e.fromSchema, e.fromTable)}.${e.fromColumn} → ${e.toColumn}`
+              }
+              outside={(e) => hrefOutside(e.fromSchema ?? focused.schema, e.fromTable)}
               onFocus={onFocus}
             />
 
@@ -262,12 +277,13 @@ export function Inspector({
               </Detail>
               <Detail label="From">
                 <span className="font-mono">
-                  {label(relation.from, relation.fromTable)}.{relation.fromColumn}
+                  {label(relation.from, relation.fromSchema, relation.fromTable)}.
+                  {relation.fromColumn}
                 </span>
               </Detail>
               <Detail label="To">
                 <span className="font-mono">
-                  {label(relation.to, relation.toTable)}.{relation.toColumn}
+                  {label(relation.to, relation.toSchema, relation.toTable)}.{relation.toColumn}
                 </span>
               </Detail>
               <Detail label="Cardinality">
@@ -382,6 +398,7 @@ function RelationList({
   other,
   known,
   describe,
+  outside,
   onFocus,
 }: {
   title: string
@@ -391,8 +408,12 @@ function RelationList({
   /** The other end is in the picture: a key may point at a table outside it. */
   known: (e: DbGraphEdge) => boolean
   describe: (e: DbGraphEdge) => string
+  /** Where the other end is read when it is not in the picture. */
+  outside: (e: DbGraphEdge) => string
   onFocus: (id: string) => void
 }) {
+  const row =
+    "flex w-full items-center gap-2 rounded-md py-1 text-left text-hint focus-ring-inset transition-colors hover:bg-row-hover"
   return (
     <div className="space-y-1.5">
       <p className="eyebrow">
@@ -405,20 +426,25 @@ function RelationList({
         <ul className="divide-y divide-hairline">
           {edges.map((e, i) => (
             <li key={`${e.name}-${i}`}>
-              <button
-                type="button"
-                disabled={!known(e)}
-                onClick={() => onFocus(other(e))}
-                className="flex w-full items-center gap-2 rounded-md py-1 text-left text-hint focus-ring-inset transition-colors enabled:hover:bg-row-hover"
-              >
-                <span className="min-w-0 flex-1 truncate font-mono">{describe(e)}</span>
-                {e.cardinality === "one-to-one" && <Tag>1:1</Tag>}
-                {known(e) ? (
+              {known(e) ? (
+                <button type="button" onClick={() => onFocus(other(e))} className={row}>
+                  <span className="min-w-0 flex-1 truncate font-mono">{describe(e)}</span>
+                  {e.cardinality === "one-to-one" && <Tag>1:1</Tag>}
                   <ArrowRight aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-                ) : (
-                  <Tag>not shown</Tag>
-                )}
-              </button>
+                </button>
+              ) : (
+                // Not in this picture: the row leads to the table itself.
+                <Link
+                  href={outside(e)}
+                  className={row}
+                  title="Not in this picture: open it in Schema"
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono">{describe(e)}</span>
+                  {e.cardinality === "one-to-one" && <Tag>1:1</Tag>}
+                  <Tag>not drawn</Tag>
+                  <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+                </Link>
+              )}
             </li>
           ))}
         </ul>

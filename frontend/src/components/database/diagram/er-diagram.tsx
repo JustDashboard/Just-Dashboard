@@ -44,10 +44,12 @@ import {
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { plural } from "@/lib/format"
+import { hueFor, LANES } from "@/lib/hue"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Segments } from "@/components/deploy/settings/segments"
@@ -75,6 +77,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useCatalog } from "@/components/database/data/use-table"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { EngineMark } from "@/components/database/kit"
+import { tableParams } from "@/components/database/schema/address"
+import { useFocusReturn } from "@/components/database/schema/focus"
 import { selectStatement } from "@/components/database/schema/select"
 import { useSettledAddress } from "@/components/database/schema/use-settled-address"
 import { useDatabase } from "@/components/database/shell/database-context"
@@ -82,6 +86,7 @@ import {
   DiagramSchemaPicker,
   FIT,
   Legend,
+  fitPadding,
   NoteDialog,
   Saved,
   ZoomControls,
@@ -128,8 +133,13 @@ const MOST = 1000
 /** What "show more" asks for first: enough for most schemas, still a readable picture. */
 const MORE = 400
 
-/** Below this the names on the canvas stop being read. */
-const READABLE = 0.45
+/**
+ * Below this the names on the canvas stop being read: a table's name is set
+ * at 12px and its columns at 11, so seven tenths is eight pixels of type.
+ */
+const READABLE = 0.7
+/** The picture never opens larger than this, however few tables it holds. */
+const ARRIVE_AT_MOST = 1.15
 const ZOOM = { min: 0.08, max: 2.5 }
 
 /** How many tables the address asks for; 0 is the server's own default. */
@@ -158,10 +168,16 @@ function readLimit(raw: string): number {
  * out says how many, and offers the rest.
  */
 export function ErDiagram() {
-  const { id, engine, selection, param, select, href, readOnly } = useDatabase()
+  const { id, engine, selection, param, href, readOnly } = useDatabase()
   const { can } = useAuth()
   useSettledAddress()
-  const schema = selection.schema
+  // Which picture: one schema's, or every schema's. "Every" is said in the
+  // address in so many words (`every=1`), beside the schema the reader's
+  // place is in — an address with no schema in it is completed from where
+  // they last were, so leaving the schema out could not mean it. An address
+  // with nothing to complete it from is the picture of everything too.
+  const every = param("every") === "1" || selection.schema === ""
+  const schema = every ? "" : selection.schema
   const limit = readLimit(param("limit"))
   const root = useRef<HTMLDivElement>(null)
 
@@ -287,12 +303,10 @@ export function ErDiagram() {
                         </Button>
                       )}
                       {schema !== "" && engine.can("schemas") && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => select({ schema: null, limit: null })}
-                        >
-                          Show every {engine.nouns.container}
+                        <Button size="sm" variant="outline" asChild>
+                          <Link href={href("diagram", { every: "1", limit: null })}>
+                            Show every {engine.nouns.container}
+                          </Link>
                         </Button>
                       )}
                     </div>
@@ -367,9 +381,10 @@ function Canvas({
   onFullscreen: () => void
   onLeaveImmersive: () => void
 }) {
-  const { id, conn, engine, select, goto } = useDatabase()
+  const { conn, engine, select, href, goto } = useDatabase()
   const flow = useReactFlow()
   const { confirm, dialog } = useConfirm()
+  useFocusReturn((dialog.props as { request: unknown }).request !== null)
   const searchRef = useRef<HTMLInputElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
   const [pickedEdge, setPickedEdge] = useState<string | null>(null)
@@ -378,7 +393,15 @@ function Canvas({
   const [menu, setMenu] = useState<Menu | null>(null)
   const menuFor = useRef("")
   const [noteFor, setNoteFor] = useState<DbGraphTable | null>(null)
-  const [inspector, setInspector] = useViewState("databases.diagram.inspector", true)
+  // The inspector is what a table or a relation says about itself, so it
+  // opens when one is chosen and gives the canvas back when nothing is. A
+  // reader who wants it beside the canvas all the time pins it. On a narrow
+  // window it would take the lower half of a canvas that has none to spare:
+  // there it opens only when asked for, and is closed on every arrival.
+  const wide = useMediaQuery("(min-width: 1024px)")
+  const [pinned, setPinned] = useViewState("databases.diagram.inspector", false)
+  const [askedFor, setAskedFor] = useState(false)
+  const [closedOn, setClosedOn] = useState<string | null>(null)
   const [selectedCount, setSelectedCount] = useState(0)
   // Bumped by Tidy and Reset, which change nothing the layout is keyed on but
   // still mean "lay it out again".
@@ -388,6 +411,10 @@ function Canvas({
   // More than one schema in the picture: a name is said with its schema.
   const qualified = useMemo(
     () => new Set(graph.tables.map((t) => t.schema)).size > 1,
+    [graph.tables],
+  )
+  const schemas = useMemo(
+    () => [...new Set(graph.tables.map((t) => t.schema))].filter(Boolean).sort(),
     [graph.tables],
   )
   const nameOf = useCallback(
@@ -420,42 +447,56 @@ function Canvas({
   const restored = useRef(false)
 
   /**
-   * The picture fitted to the canvas — all of it, while that leaves the names
-   * readable. A schema with one very long table (a statistics view of forty
-   * columns under six tables of eight) used to open as a column of specks:
-   * past that point the tables that have relations are what is fitted, and
-   * the rest is a pan away, on the minimap.
+   * The picture fitted to the canvas — as much of it as can be read. A schema
+   * of ten tables used to open with its names five pixels tall, every table
+   * on screen and none of them legible: a picture is for reading, so what is
+   * fitted is the widest part of it that leaves the type readable.
    */
   const canvas = useRef<HTMLDivElement>(null)
+  const minimap = doc.minimap
   const fitPicture = useCallback(
-    (duration: number) => {
-      const all = flow.getNodes()
+    (duration: number, all = false) => {
+      const nodes = flow.getNodes()
       const box = canvas.current?.getBoundingClientRect()
-      if (all.length === 0 || !box || box.width === 0) return
-      const whole = getViewportForBounds(
-        flow.getNodesBounds(all),
-        box.width,
-        box.height,
-        ZOOM.min,
-        ZOOM.max,
-        FIT.padding,
-      )
-      const related = new Set<string>()
+      if (nodes.length === 0 || !box || box.width === 0) return
+      // "Fit to view" is the reader asking for everything, however small.
+      const padding = fitPadding(minimap && box.width >= 640)
+      if (all) return void flow.fitView({ padding, duration })
+      const zoomFor = (part: Node[]) =>
+        getViewportForBounds(
+          flow.getNodesBounds(part),
+          box.width,
+          box.height,
+          ZOOM.min,
+          ZOOM.max,
+          padding,
+        ).zoom
+      // What is fitted on arrival, widest first: everything; the tables that
+      // have relations; the best-connected table with what it touches. The
+      // first that can be read is the one drawn, and the last is drawn at the
+      // floor even if it overflows — the rest is a pan away, on the minimap.
+      const degree = new Map<string, number>()
       for (const e of graph.edges) {
-        if (e.from !== e.to) {
-          related.add(e.from)
-          related.add(e.to)
-        }
+        if (e.from === e.to) continue
+        degree.set(e.from, (degree.get(e.from) ?? 0) + 1)
+        degree.set(e.to, (degree.get(e.to) ?? 0) + 1)
       }
-      const part = all.filter((n) => related.has(n.id))
+      const related = nodes.filter((n) => degree.has(n.id))
+      const hub = [...related].sort((a, b) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0))[0]
+      const around = hub ? neighbourhood(graph, hub.id) : null
+      const tiers = [nodes, related, around ? nodes.filter((n) => around.has(n.id)) : []].filter(
+        (tier) => tier.length > 0,
+      )
+      const target = tiers.find((tier) => zoomFor(tier) >= READABLE) ?? tiers[tiers.length - 1]
       void flow.fitView({
-        nodes:
-          whole.zoom < READABLE && part.length > 0 ? part.map((n) => ({ id: n.id })) : undefined,
-        padding: FIT.padding,
+        nodes: target.length === nodes.length ? undefined : target.map((n) => ({ id: n.id })),
+        padding,
         duration,
+        minZoom: READABLE,
+        maxZoom: ARRIVE_AT_MOST,
       })
     },
-    [flow, graph.edges],
+    [flow, graph, minimap],
   )
 
   // Re-laying out is a deliberate act — changing the direction or the detail,
@@ -525,6 +566,10 @@ function Canvas({
     setPickedEdge(null)
   }, [])
 
+  /** A table's own menu button on the canvas: where the keyboard goes back to. */
+  const menuButton = (table: string) =>
+    root.current?.querySelector<HTMLElement>(`[${NODE_MENU}="${CSS.escape(table)}"]`) ?? null
+
   const openMenu = useCallback((table: DbGraphTable, at: { x: number; y: number }) => {
     menuFor.current = table.id
     setMenu({ table, ...at })
@@ -552,11 +597,11 @@ function Canvas({
       update((d) => ({ ...d, hidden: [...new Set([...d.hidden, ...ids])] }))
       setFocus((f) => (f && ids.includes(f) ? null : f))
       const one = ids.length === 1 ? byId.get(ids[0]) : undefined
-      notify.success(one ? `Hidden ${one.name}` : `Hidden ${plural(ids.length, "table")}`, {
+      notify.success(one ? `Hidden ${nameOf(one)}` : `Hidden ${plural(ids.length, "table")}`, {
         description: "Bring it back from the hidden list in the toolbar.",
       })
     },
-    [update, byId],
+    [update, byId, nameOf],
   )
   const show = (ids: string[]) =>
     update((d) => ({ ...d, hidden: d.hidden.filter((h) => !ids.includes(h)) }))
@@ -641,12 +686,17 @@ function Canvas({
       },
     })
 
-  const openQuery = async (table: DbGraphTable) => {
-    try {
-      goto("query", { sql: await selectStatement(id, table.schema, table.name) })
-    } catch (err) {
-      notify.error(`Could not write a query for ${table.name}`, err)
-    }
+  const openQuery = (table: DbGraphTable) =>
+    goto("query", { sql: selectStatement(engine, table.schema, table.name) })
+
+  // What the inspector would be about, and whether it is on screen.
+  const subject = focus ?? pickedEdge
+  const inspector = wide ? pinned || (subject !== null && closedOn !== subject) : askedFor
+  const toggleInspector = () => {
+    if (!wide) return setAskedFor(!inspector)
+    setPinned(!inspector)
+    // Closed over something chosen: it stays closed for that thing.
+    setClosedOn(inspector ? subject : null)
   }
 
   // The handful of keys a diagram wants — fit, find, the inspector, hide what
@@ -666,11 +716,11 @@ function Canvas({
       return
     }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return
-    if (e.key === "f") fitPicture(FIT.duration)
+    if (e.key === "f") fitPicture(FIT.duration, true)
     else if (e.key === "/") {
       e.preventDefault()
       searchRef.current?.focus()
-    } else if (e.key === "i") setInspector((v) => !v)
+    } else if (e.key === "i") toggleInspector()
     else if (e.key === "h" && focus) hide([focus])
   }
 
@@ -986,7 +1036,7 @@ function Canvas({
           label={inspector ? "Hide the inspector (I)" : "Show the inspector (I)"}
           aria-pressed={inspector}
           className="size-7"
-          onClick={() => setInspector(!inspector)}
+          onClick={toggleInspector}
         >
           {inspector ? <SidebarRightClose /> : <SidebarRightOpen />}
         </IconAction>
@@ -1097,20 +1147,26 @@ function Canvas({
                 ariaLabel="Minimap"
                 className="!right-3 !bottom-3 !h-24 !w-40 overflow-hidden !rounded-md !border !bg-card max-sm:!hidden"
                 maskColor="color-mix(in oklab, var(--color-background) 70%, transparent)"
-                nodeColor="color-mix(in oklab, var(--color-chart-1) 55%, var(--color-muted))"
+                // Several schemas in one picture: each table is its schema's hue.
+                nodeColor={(n) => {
+                  const of = byId.get(n.id)?.schema
+                  return qualified && of
+                    ? `color-mix(in oklab, ${hueFor(of.toLowerCase(), LANES)} 70%, var(--color-muted))`
+                    : "color-mix(in oklab, var(--color-chart-1) 55%, var(--color-muted))"
+                }}
                 nodeStrokeWidth={0}
               />
             )}
           </ReactFlow>
 
           <ZoomControls
-            onFit={() => fitPicture(FIT.duration)}
+            onFit={() => fitPicture(FIT.duration, true)}
             focus={focused ? nameOf(focused) : null}
             locked={doc.locked}
             onClear={() => focusTable(null)}
             onUnlock={() => update({ locked: false })}
           />
-          <Legend />
+          <Legend schemas={qualified ? schemas : undefined} />
         </div>
 
         {inspector && (
@@ -1133,8 +1189,9 @@ function Canvas({
             onNote={setNoteFor}
             onOpenTable={(t) => goto("data", { schema: t.schema || null, table: t.name })}
             onOpenStructure={(t) => goto("schema", { schema: t.schema || null, table: t.name })}
-            onQuery={(t) => void openQuery(t)}
-            onClose={() => setInspector(false)}
+            onQuery={openQuery}
+            hrefOutside={(tableSchema, table) => href("schema", tableParams(tableSchema, table))}
+            onClose={toggleInspector}
           />
         )}
       </div>
@@ -1157,9 +1214,7 @@ function Canvas({
             className="w-60"
             onCloseAutoFocus={(event) => {
               event.preventDefault()
-              root.current
-                ?.querySelector<HTMLElement>(`[${NODE_MENU}="${CSS.escape(menuFor.current)}"]`)
-                ?.focus()
+              menuButton(menuFor.current)?.focus()
             }}
           >
             <DropdownMenuLabel className="truncate font-mono text-xs">
@@ -1182,7 +1237,7 @@ function Canvas({
               Open in Schema
             </DropdownMenuItem>
             {engine.has("query") && (
-              <DropdownMenuItem onSelect={() => void openQuery(menu.table)}>
+              <DropdownMenuItem onSelect={() => openQuery(menu.table)}>
                 <Code />
                 Open a SELECT in Query
               </DropdownMenuItem>
@@ -1257,7 +1312,8 @@ function Canvas({
 
       {noteFor && (
         <NoteDialog
-          table={noteFor}
+          name={nameOf(noteFor)}
+          returnTo={() => menuButton(noteFor.id)}
           initial={doc.notes[noteFor.id] ?? ""}
           onClose={() => setNoteFor(null)}
           onSave={(text) => {

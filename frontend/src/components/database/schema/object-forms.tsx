@@ -127,8 +127,16 @@ export function ViewDialog({
       }}
       title={existing ? "Replace view" : "New view"}
       subject={{
-        name: existing ? qualified(existing.schema, existing.name) : draft.schema || engine.label,
-        facts: existing ? undefined : <FormFact label="Lands in">{draft.schema || word}</FormFact>,
+        // A new view is named as it will be: where it lands, then what it is
+        // called — the schema is said once, here, and chosen in its field.
+        name: existing ? (
+          qualified(existing.schema, existing.name)
+        ) : (
+          <>
+            {draft.schema ? `${draft.schema}.` : ""}
+            {draft.name.trim() || <span className="text-muted-foreground">new_view</span>}
+          </>
+        ),
       }}
       request={request}
       waiting={existing ? "Change the query." : "Name the view and write the query it shows."}
@@ -272,7 +280,12 @@ export function EnumDialog({
       }}
       title="New enum type"
       subject={{
-        name: draft.schema,
+        name: (
+          <>
+            {draft.schema ? `${draft.schema}.` : ""}
+            {draft.name.trim() || <span className="text-muted-foreground">new_type</span>}
+          </>
+        ),
         facts: labels.length > 0 ? <FormFact label="Labels">{labels.length}</FormFact> : undefined,
       }}
       request={createEnumRequest(draft.schema, draft.name, draft.labels)}

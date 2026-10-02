@@ -1,15 +1,17 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { Warning } from "@/components/icons"
 import { ApiError } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { useConfirm } from "@/components/confirm-dialog"
 import { FormFacts, FormNote, Statement } from "@/components/form"
 import { Modal } from "@/components/modal"
+import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
-import type { DdlRequest } from "@/components/database/schema/changes"
+import { requestKey, type DdlRequest } from "@/components/database/schema/changes"
+import { useFocusReturn } from "@/components/database/schema/focus"
 import type { DdlAnswer } from "@/components/database/schema/types"
 import { runChange, usePreview, type Preview } from "@/components/database/schema/use-ddl"
 
@@ -18,6 +20,16 @@ export type Subject = {
   name: React.ReactNode
   /** What tells it from its neighbours, as `FormFact`s. */
   facts?: React.ReactNode
+}
+
+/** A change the engine may refuse half-way, or that rewrites every row. */
+export type Risk = {
+  /** What it does to the rows that are there, in a few words: the notice's title. */
+  title: string
+  /** Why it may be refused, as sentences. */
+  description: React.ReactNode
+  /** What the footer asks before it runs: "Rewrite total in every row?" */
+  question: string
 }
 
 /** The words a statement's refusal is said in, where the form is. */
@@ -89,19 +101,27 @@ export function PlannedStatement({
   )
 }
 
+/** What the footer is asking, when it is asking: whether to lose typed work, or whether to run a risky change. */
+type Asking = { about: "discard" } | { about: "risk"; key: string } | null
+
 /**
  * One structure change as a dialog: the thing it acts on, the form, the
  * statement the server will run for it, and the one command.
  *
  * The command stays off until the server has planned exactly what the form
  * says, so what is read is what runs. A change that can lose or refuse rows
- * (`confirm`) is asked about once more by name before it does.
+ * (`confirm`) says so under its statement as soon as the form states it, and
+ * its command asks once more before it runs — in the dialog's own footer, over
+ * the subject and the statement the question is about, rather than in a second
+ * dialog that repeats both.
  *
  * Typed work is not lost to a slip. Escape and a press outside the dialog ask
  * before they discard anything that was typed, and neither closes it while
  * the statement is running; Cancel is the reader saying so and closes at once.
- * A statement the engine refuses leaves the form as it was, with the engine's
- * words under it.
+ * A statement the engine refuses — confirmed or not — leaves the form as it
+ * was, with the engine's words under it.
+ *
+ * When it closes, the keyboard goes back to the control that opened it.
  */
 export function ChangeDialog({
   onClose,
@@ -129,8 +149,7 @@ export function ChangeDialog({
   done: string
   /** Something was typed that closing would lose. */
   dirty: boolean
-  /** Set for a change the engine may refuse half-way or that rewrites every row. */
-  confirm?: { title: string; description: React.ReactNode } | null
+  confirm?: Risk | null
   size?: "md" | "lg"
   onDone: (answer: DdlAnswer) => void
   children: React.ReactNode
@@ -140,14 +159,28 @@ export function ChangeDialog({
   const preview = usePreview(id, request, attempt)
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<{ key: string; error: Error }>()
-  const [asking, setAsking] = useState(false)
-  const { confirm, dialog } = useConfirm()
-  // The confirmation is up: `useConfirm` says so only through what it renders.
-  const confirming = (dialog.props as { request: unknown }).request !== null
+  const [asking, setAsking] = useState<Asking>(null)
+  useFocusReturn(true)
 
   const planned = preview.answer
-  const key = JSON.stringify(request)
+  const key = requestKey(request)
   const failed = failure?.key === key ? failure.error : undefined
+  // The question is about one statement: a form changed under it is asked again.
+  const question: Asking = asking?.about === "risk" && asking.key !== key ? null : asking
+
+  // The footer's question takes the keyboard, and gives it back to the field
+  // it was taken from when the answer is to go on editing.
+  const keep = useRef<HTMLButtonElement>(null)
+  const typing = useRef<HTMLElement | null>(null)
+  const about = question?.about
+  useEffect(() => {
+    if (!about) return
+    typing.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    keep.current?.focus()
+    return () => {
+      if (typing.current?.isConnected) typing.current.focus()
+    }
+  }, [about])
 
   const run = async () => {
     if (!request || !planned || busy) return
@@ -160,6 +193,7 @@ export function ChangeDialog({
       onClose()
     } catch (err) {
       setFailure({ key, error: err instanceof Error ? err : new Error(String(err)) })
+      setAsking(null)
     } finally {
       setBusy(false)
     }
@@ -167,97 +201,95 @@ export function ChangeDialog({
 
   const press = () => {
     if (!request || !planned) return
-    if (!risk) return void run()
-    confirm({
-      title: risk.title,
-      confirmLabel: command,
-      subject: { mark: <EngineMark engine={engine} size="sm" />, ...subject },
-      description: (
-        <>
-          {risk.description}
-          <Statement sql={planned.statement} placeholder="" />
-        </>
-      ),
-      action: async () => {
-        const answer = await runChange(id, request)
-        notify.success(done, { description: answer.statement })
-        onDone(answer)
-        onClose()
-        return "reported"
-      },
-    })
+    if (risk && question?.about !== "risk") setAsking({ about: "risk", key })
+    else void run()
   }
 
   // Escape and a press outside: never while the statement runs, and not past
-  // typed work without asking. The confirmation over this dialog is outside
-  // it too, and a press there is not a wish to close this one.
+  // typed work without asking. While the footer is asking, either means "no":
+  // the form stays, as it was.
   const dismiss = (open: boolean) => {
-    if (open || busy || confirming) return
-    if (dirty) setAsking(true)
+    if (open || busy) return
+    if (question) setAsking(null)
+    else if (dirty) setAsking({ about: "discard" })
     else onClose()
   }
 
   return (
-    <>
-      <Modal
-        open
-        onOpenChange={dismiss}
-        size={size}
-        title={title}
-        description={`${title}: the statement is shown before it runs`}
-        footer={
-          asking ? (
-            <>
-              <p role="alert" className="mr-auto min-w-0 text-body">
-                Close and lose what you typed?
-              </p>
-              <Button variant="outline" autoFocus onClick={() => setAsking(false)}>
-                Keep editing
-              </Button>
-              <Button variant="destructive" onClick={onClose}>
-                Discard
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button variant="outline" onClick={onClose} disabled={busy}>
-                Cancel
-              </Button>
-              <Button
-                variant={risk ? "destructive" : "default"}
-                onClick={press}
-                disabled={!planned}
-                pending={busy}
-              >
-                {risk ? `${command}…` : command}
-              </Button>
-            </>
-          )
-        }
-      >
-        <div className="space-y-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <EngineMark engine={engine} size="sm" />
-            <div className="min-w-0 space-y-0.5">
-              <p className="truncate font-mono text-body font-medium">{subject.name}</p>
-              {subject.facts && <FormFacts>{subject.facts}</FormFacts>}
-            </div>
+    <Modal
+      open
+      onOpenChange={dismiss}
+      size={size}
+      title={title}
+      description={`${title}: the statement is shown before it runs`}
+      footer={
+        question?.about === "discard" ? (
+          <>
+            <p role="alert" className="mr-auto min-w-0 text-body">
+              Close and lose what you typed?
+            </p>
+            <Button ref={keep} variant="outline" onClick={() => setAsking(null)}>
+              Keep editing
+            </Button>
+            <Button variant="destructive" onClick={onClose}>
+              Discard
+            </Button>
+          </>
+        ) : question?.about === "risk" && risk ? (
+          <>
+            <p role="alert" className="mr-auto min-w-0 text-body">
+              {risk.question}
+            </p>
+            <Button ref={keep} variant="outline" onClick={() => setAsking(null)} disabled={busy}>
+              Keep editing
+            </Button>
+            <Button variant="destructive" onClick={() => void run()} pending={busy}>
+              {command}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="outline" onClick={onClose} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              variant={risk ? "destructive" : "default"}
+              onClick={press}
+              disabled={!planned}
+              pending={busy}
+            >
+              {risk ? `${command}…` : command}
+            </Button>
+          </>
+        )
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <EngineMark engine={engine} size="sm" />
+          <div className="min-w-0 space-y-0.5">
+            <p className="truncate font-mono text-body font-medium">{subject.name}</p>
+            {subject.facts && <FormFacts>{subject.facts}</FormFacts>}
           </div>
-          {children}
-          <PlannedStatement
-            request={request}
-            preview={preview}
-            waiting={waiting}
-            onRetry={() => setAttempt((n) => n + 1)}
-          />
-          {failed && (
-            <FormNote role="alert" tone="danger" className="break-words">
-              Nothing was changed. {refusal(failed)}
-            </FormNote>
-          )}
         </div>
-      </Modal>
-      {dialog}
-    </>
+        {children}
+        <PlannedStatement
+          request={request}
+          preview={preview}
+          waiting={waiting}
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+        {risk && request && (
+          <Notice tone="warning" icon={Warning} title={risk.title}>
+            {risk.description}
+          </Notice>
+        )}
+        {failed && (
+          <FormNote role="alert" tone="danger" className="break-words">
+            Nothing was changed. {refusal(failed)}
+          </FormNote>
+        )}
+      </div>
+    </Modal>
   )
 }

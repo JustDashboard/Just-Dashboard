@@ -1,18 +1,25 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ApiError, api, get } from "@/lib/api"
+import { ChevronDown } from "@/components/icons"
+import { ApiError, get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
-import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { FormFact, Statement } from "@/components/form"
 import { Metric } from "@/components/page"
 import { Well } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -29,10 +36,24 @@ import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { qualified } from "@/components/database/schema/changes"
 import { Facts } from "@/components/database/schema/facts"
+import { useFocusReturn } from "@/components/database/schema/focus"
+import {
+  maintenanceKey,
+  startMaintenance,
+  stopMaintenance,
+  useMaintenance,
+  useMaintenanceReader,
+} from "@/components/database/schema/maintenance-runs"
+import {
+  elapsed,
+  maintenanceVariants,
+  type MaintenanceVariant,
+} from "@/components/database/schema/maintenance-variants"
+import { quietNotes } from "@/components/database/schema/stat-notes"
 import type {
+  DbIndexStat,
   DbIndexStats,
   DbMaintenanceAction,
-  DbMaintenanceResult,
   DbTableDetail,
   DbTableStat,
   DbTableStats,
@@ -40,6 +61,8 @@ import type {
 
 /** How many tables are asked for: the server's ceiling, so the one wanted is among them. */
 const MOST = 1000
+/** Below this the index figures are read down, an index to a block, instead of across. */
+const NARROW = 560
 
 /** A count the engine keeps; -1 is "does not say". */
 const kept = (value: number | undefined): value is number => value !== undefined && value >= 0
@@ -105,9 +128,23 @@ export function TableStatistics({
     answered.current = asked
     refresh()
   }, [asked, refresh])
+  // What the engine could not say, once, under everything it could.
+  const notes = quietNotes(stats.data?.notes, indexes.data?.notes)
+  // A size the engine did not give is 0 on the wire: an index is never no
+  // bytes, so where none has a size the column says nothing at all.
+  const listed = indexes.data?.indexes ?? []
+  const sized = listed.some((index) => index.bytes > 0)
+  // The same of the counters: where the engine counts for none of them, a
+  // column of "not counted" says once what the line under the table says.
+  const counted = listed.some((index) => kept(index.scans))
+  const followed = listed.some((index) => kept(index.rowsRead))
+
+  // Across while there is room for the figures, down when there is not.
+  const [box, width] = useColumnWidth<HTMLDivElement>()
+  const narrow = width > 0 && width < NARROW
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div ref={box} className="min-h-0 flex-1 overflow-y-auto">
       <div className="space-y-6 p-4">
         {engine.can("tableStats") &&
           (stats.error && !stats.data ? (
@@ -119,7 +156,7 @@ export function TableStatistics({
               {stats.data.reason ?? `${engine.label} keeps no statistics for a table.`}
             </EmptyNote>
           ) : stat ? (
-            <Figures stat={stat} notes={stats.data.notes} />
+            <Figures stat={stat} />
           ) : (
             <EmptyNote className="py-2 text-left">
               {stats.data.truncated
@@ -144,70 +181,133 @@ export function TableStatistics({
             ) : (indexes.data.indexes ?? []).length === 0 ? (
               <EmptyNote className="py-3 text-left">This table has no index.</EmptyNote>
             ) : (
-              <div className="-mx-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="h-8">Index</TableHead>
-                      <TableHead className="h-8 text-right">Size</TableHead>
-                      <TableHead className="h-8 text-right">Scans</TableHead>
-                      <TableHead className="h-8 text-right max-md:hidden">Rows read</TableHead>
-                      <TableHead className="h-8">Reading</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {indexes.data.indexes.map((index) => (
-                      <TableRow key={index.name} className="hover:bg-transparent">
-                        <TableCell className="py-1.5">
-                          <span className="font-mono font-medium">{index.name}</span>
-                          <p className="truncate font-mono text-hint text-muted-foreground">
-                            {index.columns.join(", ")}
-                          </p>
-                        </TableCell>
-                        <TableCell className="numeric py-1.5 text-right">
-                          {bytes(index.bytes)}
-                        </TableCell>
-                        <TableCell className="numeric py-1.5 text-right">
-                          {kept(index.scans) ? grouped(index.scans) : "not counted"}
-                        </TableCell>
-                        <TableCell className="numeric py-1.5 text-right max-md:hidden">
-                          {kept(index.rowsRead) ? grouped(index.rowsRead) : ""}
-                        </TableCell>
-                        <TableCell className="py-1.5">
-                          <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                            {index.primary ? (
-                              <Tag>primary</Tag>
-                            ) : index.unique ? (
-                              <Tag>unique</Tag>
-                            ) : null}
-                            {!index.valid && <Tag tone="warning">not usable</Tag>}
-                            {index.unused && <Tag tone="warning">never used</Tag>}
-                            {index.duplicateOf && (
-                              <Tag tone="warning" title={`Identical to ${index.duplicateOf}`}>
-                                copy of {index.duplicateOf}
-                              </Tag>
-                            )}
-                            {index.coveredBy && (
-                              <Tag title={`${index.coveredBy} starts with the same columns`}>
-                                covered by {index.coveredBy}
-                              </Tag>
-                            )}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              <IndexUse
+                indexes={indexes.data.indexes}
+                sized={sized}
+                counted={counted}
+                followed={followed}
+                narrow={narrow}
+                keyWord={engine.capabilities.rowIdentity === "none" ? "sorting key" : "primary"}
+              />
             )}
-            {indexes.data?.notes?.map((note) => (
-              <p key={note} className="pt-2 text-hint text-muted-foreground">
-                {note}
-              </p>
-            ))}
           </section>
         )}
+
+        {notes.length > 0 && (
+          <p className="max-w-3xl text-hint leading-relaxed text-muted-foreground">
+            {notes.join(" ")}
+          </p>
+        )}
       </div>
+    </div>
+  )
+}
+
+/** What each index costs and earns: one row to an index, read across or — on a narrow pane — down. */
+function IndexUse({
+  indexes,
+  sized,
+  counted,
+  followed,
+  narrow,
+  keyWord,
+}: {
+  indexes: DbIndexStat[]
+  /** The engine gave sizes, scan counts, rows read: a figure it gave for none has no column. */
+  sized: boolean
+  counted: boolean
+  followed: boolean
+  narrow: boolean
+  /** What this engine calls its key. */
+  keyWord: string
+}) {
+  const reading = (index: DbIndexStat) => (
+    <>
+      {index.primary ? <Tag>{keyWord}</Tag> : index.unique ? <Tag>unique</Tag> : null}
+      {!index.valid && <Tag tone="warning">not usable</Tag>}
+      {index.unused && <Tag tone="warning">never used</Tag>}
+      {index.duplicateOf && (
+        <Tag tone="warning" title={`Identical to ${index.duplicateOf}`}>
+          copy of {index.duplicateOf}
+        </Tag>
+      )}
+      {index.coveredBy && (
+        <Tag title={`${index.coveredBy} starts with the same columns`}>
+          covered by {index.coveredBy}
+        </Tag>
+      )}
+    </>
+  )
+  if (narrow) {
+    return (
+      <ul aria-label="Indexes" className="divide-y divide-hairline">
+        {indexes.map((index) => {
+          const figures = [
+            sized && index.bytes > 0 && bytes(index.bytes),
+            counted && (kept(index.scans) ? `${grouped(index.scans)} scans` : "scans not counted"),
+            followed && kept(index.rowsRead) && `${grouped(index.rowsRead)} rows read`,
+          ].filter(Boolean)
+          return (
+            <li key={index.name} className="space-y-1 py-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+                <span className="font-mono text-xs font-medium break-all">{index.name}</span>
+                {reading(index)}
+              </div>
+              <p className="font-mono text-hint break-words text-muted-foreground">
+                {index.columns.join(", ")}
+              </p>
+              {figures.length > 0 && <p className="numeric text-xs">{figures.join(" · ")}</p>}
+            </li>
+          )
+        })}
+      </ul>
+    )
+  }
+  return (
+    <div className="-mx-4">
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="h-8">Index</TableHead>
+            {sized && <TableHead className="h-8 text-right">Size</TableHead>}
+            {counted && <TableHead className="h-8 text-right">Scans</TableHead>}
+            {followed && <TableHead className="h-8 text-right">Rows read</TableHead>}
+            <TableHead className="h-8">Reading</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {indexes.map((index) => (
+            <TableRow key={index.name} className="hover:bg-transparent">
+              <TableCell className="py-1.5">
+                <span className="font-mono font-medium">{index.name}</span>
+                <p className="truncate font-mono text-hint text-muted-foreground">
+                  {index.columns.join(", ")}
+                </p>
+              </TableCell>
+              {sized && (
+                <TableCell className="numeric py-1.5 text-right">
+                  {index.bytes > 0 ? bytes(index.bytes) : ""}
+                </TableCell>
+              )}
+              {counted && (
+                <TableCell className="numeric py-1.5 text-right">
+                  {kept(index.scans) ? grouped(index.scans) : "not counted"}
+                </TableCell>
+              )}
+              {followed && (
+                <TableCell className="numeric py-1.5 text-right">
+                  {kept(index.rowsRead) ? grouped(index.rowsRead) : ""}
+                </TableCell>
+              )}
+              <TableCell className="py-1.5">
+                <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                  {reading(index)}
+                </span>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   )
 }
@@ -229,7 +329,7 @@ function FiguresSkeleton() {
 }
 
 /** One bar divided by what it is made of, with what each part is under it. */
-function Composition({
+export function Composition({
   label,
   total,
   parts,
@@ -279,7 +379,7 @@ function Composition({
   )
 }
 
-function Figures({ stat, notes }: { stat: DbTableStat; notes?: string[] }) {
+function Figures({ stat }: { stat: DbTableStat }) {
   const tended = [
     { label: "Vacuumed", at: latest(stat.lastVacuum, stat.lastAutovacuum) },
     { label: "Analyzed", at: latest(stat.lastAnalyze, stat.lastAutoanalyze) },
@@ -365,11 +465,6 @@ function Figures({ stat, notes }: { stat: DbTableStat; notes?: string[] }) {
           />
         ))}
       </Facts>
-      {notes?.map((note) => (
-        <p key={note} className="text-hint text-muted-foreground">
-          {note}
-        </p>
-      ))}
     </div>
   )
 }
@@ -381,62 +476,61 @@ function latest(a: string | undefined, b: string | undefined): string | undefine
   return new Date(a).getTime() >= new Date(b).getTime() ? a : b
 }
 
-type Run = { action: DbMaintenanceAction; result?: DbMaintenanceResult; error?: Error }
-
 /**
  * The engine's maintenance for this one table. The list is the server's own
  * closed one, cut to the actions that take a table and to what the role may
- * run. One runs at a time, on a request held open until the engine is done;
- * what the engine printed is shown under the buttons, with the statement.
+ * run; an action that can be asked for in more than one way (a reindex that
+ * blocks writes or one that does not) opens a short menu of them.
+ *
+ * One runs at a time, on a request held open until the engine is done. The
+ * run is the table's, not this panel's (`maintenance-runs.ts`): it goes on
+ * when the reader looks at another reading, and what the engine printed is
+ * here, with the statement, when they come back.
  */
 function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => void }) {
   const { id, engine } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
+  useFocusReturn((dialog.props as { request: unknown }).request !== null)
   const list = usePoll(
     (signal) =>
       get<{ actions?: DbMaintenanceAction[] }>(`/databases/${id}/maintenance`, undefined, signal),
     0,
     [id],
   )
-  const [running, setRunning] = useState<DbMaintenanceAction | null>(null)
-  const [last, setLast] = useState<Run>()
-  const flight = useRef<AbortController | null>(null)
-  useEffect(() => () => flight.current?.abort(), [])
+  const key = maintenanceKey(id, detail.schema, detail.name)
+  const { run, outcome } = useMaintenance(key)
+  useMaintenanceReader(key)
+
+  // A run that landed changed the figures above: they are read again, once.
+  const landed = outcome?.result ? outcome.at : 0
+  const seen = useRef(landed)
+  useEffect(() => {
+    if (seen.current === landed) return
+    seen.current = landed
+    if (landed) onRan()
+  }, [landed, onRan])
 
   const actions = (list.data?.actions ?? []).filter(
     (action) => action.scope !== "database" && can(action.requires),
   )
   if (list.data && actions.length === 0) return null
 
-  const run = async (action: DbMaintenanceAction) => {
-    const controller = new AbortController()
-    flight.current = controller
-    setRunning(action)
-    try {
-      const result = await api<DbMaintenanceResult>(`/databases/${id}/maintenance`, {
-        method: "POST",
-        body: { action: action.id, schema: detail.schema || undefined, table: detail.name },
-        signal: controller.signal,
-      })
-      setLast({ action, result })
-      onRan()
-    } catch (err) {
-      if (controller.signal.aborted) {
-        notify.info(`${action.label} was stopped`)
-        return
-      }
-      setLast({ action, error: err instanceof Error ? err : new Error(String(err)) })
-    } finally {
-      if (flight.current === controller) setRunning(null)
-    }
-  }
+  const start = (action: DbMaintenanceAction, variant: MaintenanceVariant) =>
+    startMaintenance({
+      id,
+      schema: detail.schema,
+      table: detail.name,
+      action,
+      label: variant.label,
+      options: variant.options,
+    })
 
-  const press = (action: DbMaintenanceAction) => {
-    if (!action.blocking && !action.destructive) return void run(action)
+  const press = (action: DbMaintenanceAction, variant: MaintenanceVariant) => {
+    if (!action.blocking && !action.destructive) return start(action, variant)
     confirm({
-      title: action.label,
-      confirmLabel: action.label,
+      title: variant.label,
+      confirmLabel: variant.label,
       subject: {
         mark: <EngineMark engine={engine} size="sm" />,
         name: <span className="font-mono">{qualified(detail.schema, detail.name)}</span>,
@@ -449,10 +543,15 @@ function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => vo
           </>
         ),
       },
-      description: <p>{action.description}</p>,
+      description: (
+        <>
+          <p>{action.description}</p>
+          {variant.note && <p>{variant.note}</p>}
+        </>
+      ),
       action: async () => {
-        // The dialog closes on the press; the run reports under the buttons.
-        void run(action)
+        // The dialog closes on the press; the run reports in the table's head.
+        start(action, variant)
         return "reported"
       },
     })
@@ -467,50 +566,78 @@ function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => vo
         <Skeleton className="h-7 w-72 max-w-full" />
       ) : (
         <div className="flex flex-wrap items-center gap-1.5">
-          {actions.map((action) => (
-            <Button
-              key={action.id}
-              size="xs"
-              variant="outline"
-              className="max-sm:h-8"
-              title={action.description}
-              disabled={running !== null}
-              onClick={() => press(action)}
-            >
-              {action.label}
-              {(action.blocking || action.destructive) && "…"}
-            </Button>
-          ))}
+          {actions.map((action) => {
+            const variants = maintenanceVariants(action)
+            const asks = action.blocking || action.destructive
+            const going = run?.action.id === action.id
+            if (variants.length === 1) {
+              return (
+                <Button
+                  key={action.id}
+                  size="xs"
+                  variant="outline"
+                  className="max-sm:h-8"
+                  title={action.description}
+                  disabled={run !== undefined}
+                  pending={going}
+                  onClick={() => press(action, variants[0])}
+                >
+                  {action.label}
+                  {asks && "…"}
+                </Button>
+              )
+            }
+            return (
+              <DropdownMenu key={action.id}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    className="max-sm:h-8"
+                    title={action.description}
+                    disabled={run !== undefined}
+                  >
+                    {action.label}
+                    <ChevronDown className="text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-48">
+                  {variants.map((variant) => (
+                    <DropdownMenuItem
+                      key={variant.key}
+                      title={variant.note}
+                      onSelect={() => press(action, variant)}
+                    >
+                      {variant.label}
+                      {asks && "…"}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )
+          })}
         </div>
       )}
       <div aria-live="polite" className="space-y-3">
-        {running && (
-          <div className="flex flex-wrap items-center gap-3">
-            <TextShimmer className="text-body">{`Running ${running.label.toLowerCase()} on ${detail.name}…`}</TextShimmer>
-            <Button size="xs" variant="ghost" onClick={() => flight.current?.abort()}>
-              Stop
-            </Button>
-          </div>
-        )}
-        {!running && last?.error && (
+        {!run && outcome?.error && (
           <p role="alert" className="text-body break-words text-destructive">
-            {last.action.label} did not run.{" "}
-            {last.error instanceof ApiError ? last.error.message : String(last.error)}
+            {outcome.label} did not run.{" "}
+            {outcome.error instanceof ApiError ? outcome.error.message : String(outcome.error)}
           </p>
         )}
-        {!running && last?.result && (
+        {!run && outcome?.result && (
           <div className="animate-rise space-y-3">
             <p className="text-body">
-              {last.action.label} {last.result.ok ? "finished" : "ran and reported a problem"}
+              {outcome.label} {outcome.result.ok ? "finished" : "ran and reported a problem"}
               <span className="text-muted-foreground">
                 {" "}
-                in {readableDuration(last.result.duration)}
+                in {readableDuration(outcome.result.duration)}
               </span>
             </p>
-            <Statement sql={last.result.statements.join(";\n")} placeholder="" />
-            {last.result.output.length > 0 && (
+            <Statement sql={outcome.result.statements.join(";\n")} placeholder="" />
+            {outcome.result.output.length > 0 && (
               <Well className="max-h-64 overflow-auto text-hint leading-relaxed whitespace-pre-wrap">
-                {last.result.output.join("\n")}
+                {outcome.result.output.join("\n")}
               </Well>
             )}
           </div>
@@ -518,5 +645,57 @@ function Maintenance({ detail, onRan }: { detail: DbTableDetail; onRan: () => vo
       </div>
       {dialog}
     </section>
+  )
+}
+
+/** The time now, ticking each second while something is being timed. */
+function useNow(ticking: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!ticking) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [ticking])
+  return now
+}
+
+/**
+ * A table's maintenance command in flight, said in the table's head whichever
+ * reading is open: what is running, for how long, and the one way to end it.
+ */
+export function MaintenanceBand({ schema, table }: { schema: string; table: string }) {
+  const { id } = useDatabase()
+  const key = maintenanceKey(id, schema, table)
+  const { run } = useMaintenance(key)
+  const now = useNow(run !== undefined)
+  if (!run) return null
+  return (
+    <div
+      role="status"
+      data-slot="maintenance-band"
+      className="relative flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-4 py-1.5"
+    >
+      <TextShimmer className="text-body">{`${run.label} is running on ${table}`}</TextShimmer>
+      <span className="numeric text-hint text-muted-foreground">
+        {elapsed(Math.max(now, run.startedAt) - run.startedAt)}
+      </span>
+      <span className="min-w-0 truncate text-hint text-muted-foreground max-md:hidden">
+        {run.action.blocking
+          ? "The table is locked until it is done."
+          : "It goes on while you read elsewhere."}
+      </span>
+      <Button
+        size="xs"
+        variant="outline"
+        className="ml-auto max-sm:h-8"
+        onClick={() => stopMaintenance(key)}
+      >
+        Stop
+      </Button>
+      {/* Working, and it cannot say how far. */}
+      <span aria-hidden className="absolute inset-x-0 bottom-0 h-px overflow-hidden">
+        <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep bg-brand" />
+      </span>
+    </div>
   )
 }

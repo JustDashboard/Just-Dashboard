@@ -1,35 +1,51 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import Link from "next/link"
 import { SidebarLeftOpen } from "@/components/icons"
-import { bytes } from "@/lib/format"
-import type { DbCatalogGroup } from "@/lib/types"
+import { get } from "@/lib/api"
+import { bytes, percent, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { usePoll } from "@/hooks/use-poll"
 import { BarList } from "@/components/bar-list"
 import { IconAction } from "@/components/icon-action"
+import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { NumberTicker } from "@/components/ui/number-ticker"
+import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { schemaSummary } from "@/components/database/data/summary"
 import { compactCount, grouped } from "@/components/database/data/view"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { objectParams, tableParams } from "@/components/database/schema/address"
 import { GroupGlyph, groupSpec } from "@/components/database/schema/kinds"
-import type { DbCatalog, SchemaObject } from "@/components/database/schema/types"
+import { schemaFigures } from "@/components/database/schema/landing-figures"
+import { SchemaMark } from "@/components/database/schema/rail"
+import { Composition } from "@/components/database/schema/statistics"
+import type { DbCatalog, DbTableStats, SchemaObject } from "@/components/database/schema/types"
 
 /** How many labels of an enum are printed before the rest are counted. */
-const LABELS = 6
+const LABELS = 8
+/** How many tables are listed by name where nothing ranks them. */
+const LISTED = 12
+/** How many tables are asked about: the server's ceiling. */
+const MOST = 1000
 
 /**
- * What stands where an object would, before one is chosen: the schema itself.
+ * What stands where an object would, before one is chosen: the schema itself,
+ * in the figures only this page has.
  *
- * How many of each kind it holds, in the tree's own glyphs and hues; its
- * largest tables, a press from open; and its enum types with their labels,
- * which are the part of a schema most often looked up and least often
- * remembered. The commands that make something new are here too, beside the
- * schema they act on, and the one that drops it.
+ * The tree beside it already says what the schema holds, kind by kind, so
+ * this does not say it again. It says what the tree cannot: how many rows
+ * there are in all, how much of the disk they take and how much of that is
+ * indexes — read from the engine's own table statistics where it keeps them —
+ * then the tables that weigh the most, a press from open, and beside them the
+ * two things most often looked up and least often remembered: an enum type's
+ * labels, and what the views are called.
+ *
+ * The commands that make something new are in its head, beside the schema
+ * they act on, with the one that drops it.
  */
 export function SchemaLanding({
   catalog,
@@ -38,6 +54,7 @@ export function SchemaLanding({
   creations,
   verbs,
   note,
+  asked,
 }: {
   catalog: DbCatalog
   railShown: boolean
@@ -48,18 +65,63 @@ export function SchemaLanding({
   verbs: Verb[]
   /** What cannot be made here, and where it is made instead. */
   note?: string
+  /** Counts the times the reader asked for the schema to be read again. */
+  asked: number
 }) {
-  const { engine, href, goto } = useDatabase()
-  const summary = useMemo(() => schemaSummary(catalog), [catalog])
+  const { id, engine, href, goto } = useDatabase()
+  const measures = engine.can("tableStats")
+  const stats = usePoll(
+    (signal) =>
+      get<DbTableStats>(
+        `/databases/${id}/tablestats`,
+        { schema: catalog.schema || undefined, limit: MOST },
+        signal,
+      ),
+    0,
+    [id, catalog.schema],
+    { enabled: measures },
+  )
+  const reread = stats.refresh
+  const answered = useRef(asked)
+  useEffect(() => {
+    if (answered.current === asked) return
+    answered.current = asked
+    reread()
+  }, [asked, reread])
+
+  const measured = stats.data?.supported ? stats.data.tables : undefined
+  const figures = useMemo(() => schemaFigures(catalog, measured), [catalog, measured])
+  // The engine is still being asked: a figure the catalogue lacks is on its way, not absent.
+  const measuring = measures && !stats.data && !stats.error
+
   const info = catalog.schemas.find((schema) => schema.name === catalog.schema)
   const name = catalog.schema || engine.label
-  const order = engine.capabilities.catalogGroups.filter((group) => catalog.objects[group])
-  const total = order.reduce((sum, group) => sum + (catalog.objects[group]?.length ?? 0), 0)
+  const total = Object.values(catalog.objects).reduce((sum, held) => sum + (held?.length ?? 0), 0)
+  const tables = (catalog.objects.tables ?? []) as SchemaObject[]
   const enums = ((catalog.objects.types ?? []) as SchemaObject[]).filter(
     (type) => type.kind === "enum" && type.values && type.values.length > 0,
   )
-  const groupOf = (group: DbCatalogGroup) => groupSpec(group)
+  const views = [
+    ...((catalog.objects.views ?? []) as SchemaObject[]).map((object) => ({
+      object,
+      group: "views" as const,
+    })),
+    ...((catalog.objects.materializedViews ?? []) as SchemaObject[]).map((object) => ({
+      object,
+      group: "materializedViews" as const,
+    })),
+  ]
   const [first, ...rest] = creations
+  const facts = [
+    info?.comment,
+    info?.owner && `Owned by ${info.owner}`,
+    info?.detail,
+    info?.default && "names resolve here by default",
+  ].filter(Boolean)
+  const beside = enums.length > 0 || views.length > 0 || figures.reads !== null
+  const indexShare =
+    figures.indexBytes !== null && figures.bytes ? (figures.indexBytes / figures.bytes) * 100 : null
+  const pending = <Skeleton className="my-1 h-6 w-16" />
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -74,30 +136,28 @@ export function SchemaLanding({
           </IconAction>
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="@container min-h-0 flex-1 overflow-y-auto">
         <div
           className={cn(
-            "mx-auto flex w-full max-w-2xl animate-rise flex-col gap-6 px-6 py-10",
-            total === 0 && "min-h-full justify-center",
+            "flex animate-rise flex-col gap-6 px-5 py-5",
+            // An empty schema is a name and a command: they stand in the
+            // middle of the pane, not at the top of an empty one.
+            total === 0 && "mx-auto min-h-full max-w-xl justify-center",
           )}
         >
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <EngineMark engine={engine} />
             <div className="min-w-0 flex-1">
-              <h2 className="truncate font-mono text-title font-medium">{name}</h2>
+              <h2 className="flex min-w-0 items-center gap-2 font-mono text-title font-medium">
+                {catalog.schema && <SchemaMark name={catalog.schema} />}
+                <span className="truncate">{name}</span>
+              </h2>
               <p className="truncate text-body text-muted-foreground">
                 {total === 0
                   ? `Nothing in this ${engine.nouns.container} yet.`
-                  : (info?.comment ??
-                      [
-                        info?.owner && `Owned by ${info.owner}`,
-                        info?.detail,
-                        info?.default && "names resolve here by default",
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")) ||
-                    `${grouped(total)} objects`}
-                {summary.size !== null && total > 0 && ` · ${bytes(summary.size)} on disk`}
+                  : facts.length > 0
+                    ? facts.join(" · ")
+                    : `A ${engine.nouns.container} of ${engine.label}`}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
@@ -116,93 +176,282 @@ export function SchemaLanding({
           {note && <p className="text-hint leading-relaxed text-muted-foreground">{note}</p>}
 
           {total > 0 && (
-            // How many of each kind, in the tree's own legend. A run of words
-            // with their figures rather than ruled cells: eight kinds wrap, and
-            // a rule that opens a wrapped line divides nothing.
-            <ul aria-label="What it holds" className="flex flex-wrap gap-x-5 gap-y-2">
-              {order.map((group) => (
-                <li key={group} className="flex items-center gap-1.5 text-xs">
-                  <GroupGlyph group={group} />
-                  <span className="text-muted-foreground">{groupOf(group).plural}</span>
-                  <span className="numeric font-medium">
-                    {grouped(catalog.objects[group]?.length ?? 0)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {summary.largest.length > 0 && (
-            <section aria-label={`Largest in ${name}`} className="min-w-0">
-              <h3 className="eyebrow pb-1">Largest in {name}</h3>
-              <BarList
-                className="-mx-2"
-                items={summary.largest.map(({ object, group, share }) => {
-                  const rows = object.estimatedRows
-                  const counted = rows !== undefined && rows >= 0
-                  return {
-                    key: `${group}:${object.name}`,
-                    label: object.name,
-                    mark: <GroupGlyph group={group} />,
-                    hint:
-                      summary.rankedBy === "size" && counted
-                        ? `~${compactCount(rows)} rows`
-                        : undefined,
-                    value:
-                      summary.rankedBy === "size"
-                        ? bytes(object.size ?? 0)
-                        : `~${compactCount(rows ?? 0)}`,
-                    share,
-                    title: `Open ${object.name}`,
-                    onClick: () => goto("schema", tableParams(object.schema, object.name)),
-                  }
-                })}
+            // Bled to the pane's edges: the tiles keep their own inset, which
+            // is the page's, so the figures start on the line the name does.
+            <StatGrid
+              dense
+              // While the engine is being asked the fourth figure keeps its
+              // place, so the run does not re-divide when the answer lands.
+              columns={indexShare !== null || measuring ? 4 : 3}
+              className="-mx-5 border-y border-hairline"
+            >
+              <StatTile
+                label={groupSpec("tables").plural}
+                value={<NumberTicker value={figures.tables} />}
+                hint={
+                  figures.others.length > 0
+                    ? `and ${figures.others
+                        .map(({ group, count }) =>
+                          plural(count, groupSpec(group).label.toLowerCase()),
+                        )
+                        .join(", ")}`
+                    : undefined
+                }
               />
-            </section>
+              <StatTile
+                label="Rows"
+                value={
+                  figures.rows !== null ? (
+                    <span key="rows" className="animate-rise" title={grouped(figures.rows)}>
+                      ~{compactCount(figures.rows)}
+                    </span>
+                  ) : measuring ? (
+                    pending
+                  ) : (
+                    "not counted"
+                  )
+                }
+                hint={
+                  figures.rows !== null
+                    ? "the engine's estimate"
+                    : measuring
+                      ? undefined
+                      : `${engine.label} keeps no estimate`
+                }
+              />
+              <StatTile
+                label="On disk"
+                value={
+                  figures.bytes !== null ? (
+                    <span key="bytes" className="animate-rise">
+                      {bytes(figures.bytes)}
+                    </span>
+                  ) : measuring ? (
+                    pending
+                  ) : (
+                    "not measured"
+                  )
+                }
+                hint={
+                  figures.bytes === null
+                    ? undefined
+                    : figures.reclaimable && figures.reclaimable * 20 > figures.bytes
+                      ? `about ${bytes(figures.reclaimable)} reclaimable, estimated`
+                      : `${plural(figures.measured, "table")} with their indexes`
+                }
+              />
+              {indexShare !== null ? (
+                <StatTile
+                  label="In indexes"
+                  value={
+                    <span key="indexes" className="animate-rise">
+                      {indexShare > 0 && indexShare < 0.1 ? "under 0.1%" : percent(indexShare)}
+                    </span>
+                  }
+                  meter={indexShare}
+                  hint={`${bytes(figures.indexBytes)} of what is on disk`}
+                />
+              ) : (
+                measuring && <StatTile label="In indexes" value={pending} />
+              )}
+            </StatGrid>
           )}
 
-          {enums.length > 0 && (
-            <section aria-label="Enum types" className="min-w-0">
-              <h3 className="eyebrow pb-1">Enum types</h3>
-              <ul className="divide-y divide-hairline">
-                {enums.map((type) => (
-                  <li key={type.name}>
-                    <Link
-                      href={href("schema", objectParams(type))}
-                      className="-mx-2 flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-1.5 focus-ring-inset transition-colors hover:bg-row-hover"
-                    >
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <GroupGlyph group="types" />
-                        <span className="truncate font-mono text-xs font-medium">{type.name}</span>
-                      </span>
-                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        {type.values!.slice(0, LABELS).map((label) => (
-                          <Tag key={label} mono>
-                            {label}
-                          </Tag>
+          {total > 0 && (
+            <div
+              className={cn(
+                "grid items-start gap-x-10 gap-y-6",
+                beside && "@4xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]",
+              )}
+            >
+              {figures.largest.length > 0 ? (
+                <section aria-label={`Largest in ${name}`} className="min-w-0">
+                  <h3 className="border-b border-hairline pb-2 text-title font-medium">
+                    Largest in {name}
+                  </h3>
+                  <BarList
+                    className="-mx-2 pt-1.5"
+                    items={figures.largest.map(({ object, group, share, rows, bytes: size }) => ({
+                      key: `${group}:${object.name}`,
+                      label: object.name,
+                      mark: <GroupGlyph group={group} />,
+                      // What tells it from its neighbours besides its weight:
+                      // how many rows, and the storage engine where one is named.
+                      hint:
+                        [
+                          figures.rankedBy === "size" && rows !== null
+                            ? `~${compactCount(rows)} rows`
+                            : null,
+                          object.detail,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || undefined,
+                      value:
+                        figures.rankedBy === "size" ? bytes(size) : `~${compactCount(rows ?? 0)}`,
+                      share,
+                      title: `Open ${object.name}`,
+                      onClick: () => goto("schema", tableParams(object.schema, object.name)),
+                    }))}
+                  />
+                </section>
+              ) : tables.length > 0 && !measuring ? (
+                // Nothing ranks them: the tables by name, as the engine lists them.
+                <section aria-label={`Tables of ${name}`} className="min-w-0">
+                  <h3 className="border-b border-hairline pb-2 text-title font-medium">
+                    {groupSpec("tables").plural}
+                  </h3>
+                  <ul className="divide-y divide-hairline">
+                    {tables.slice(0, LISTED).map((table) => (
+                      <ObjectRow
+                        key={table.name}
+                        href={href("schema", tableParams(table.schema, table.name))}
+                        group="tables"
+                        name={table.name}
+                        detail={table.comment ?? table.detail}
+                      />
+                    ))}
+                  </ul>
+                  {tables.length > LISTED && (
+                    <p className="pt-2 text-hint text-muted-foreground">
+                      and {grouped(tables.length - LISTED)} more, in the tree.
+                    </p>
+                  )}
+                </section>
+              ) : measuring ? (
+                <div aria-hidden className="space-y-4 pt-1">
+                  {["w-40", "w-28", "w-32", "w-24"].map((width) => (
+                    <div key={width} className="space-y-1.5">
+                      <Skeleton className={cn("h-3", width)} />
+                      <Skeleton className="h-1 w-full" />
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {beside && (
+                <div className="min-w-0 space-y-6">
+                  {figures.reads && (
+                    <section aria-label="How it is read" className="min-w-0">
+                      <h3 className="border-b border-hairline pb-2 text-title font-medium">
+                        How it is read
+                      </h3>
+                      <div className="pt-3">
+                        <Composition
+                          label={`${grouped(figures.reads.byIndex + figures.reads.byScan)} reads`}
+                          total="since the counters were last reset"
+                          parts={[
+                            {
+                              key: "index",
+                              label: "By an index",
+                              value: figures.reads.byIndex,
+                              figure: grouped(figures.reads.byIndex),
+                              color: "var(--chart-5)",
+                            },
+                            {
+                              key: "scan",
+                              label: "By scanning a table whole",
+                              value: figures.reads.byScan,
+                              figure: grouped(figures.reads.byScan),
+                              color: "var(--chart-3)",
+                            },
+                          ]}
+                        />
+                      </div>
+                    </section>
+                  )}
+                  {enums.length > 0 && (
+                    <section aria-label="Enum types" className="min-w-0">
+                      <h3 className="border-b border-hairline pb-2 text-title font-medium">
+                        Enum types
+                      </h3>
+                      <ul className="divide-y divide-hairline">
+                        {enums.map((type) => (
+                          <li key={type.name}>
+                            <Link
+                              href={href("schema", objectParams(type))}
+                              className="-mx-2 flex flex-col gap-1.5 rounded-md px-2 py-2 focus-ring-inset transition-colors hover:bg-row-hover"
+                            >
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                <GroupGlyph group="types" />
+                                <span className="truncate font-mono text-xs font-medium">
+                                  {type.name}
+                                </span>
+                              </span>
+                              <span className="flex min-w-0 flex-wrap items-center gap-1.5 pl-5">
+                                {type.values!.slice(0, LABELS).map((label) => (
+                                  <Tag key={label} mono>
+                                    {label}
+                                  </Tag>
+                                ))}
+                                {type.values!.length > LABELS && (
+                                  <span className="numeric text-hint text-muted-foreground">
+                                    +{type.values!.length - LABELS}
+                                  </span>
+                                )}
+                              </span>
+                            </Link>
+                          </li>
                         ))}
-                        {type.values!.length > LABELS && (
-                          <span className="numeric text-hint text-muted-foreground">
-                            +{type.values!.length - LABELS}
-                          </span>
-                        )}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {!railShown && total > 0 && (
-            <div>
-              <Button size="sm" variant="outline" onClick={onShowRail}>
-                Show the objects
-              </Button>
+                      </ul>
+                    </section>
+                  )}
+                  {views.length > 0 && (
+                    <section aria-label="Views" className="min-w-0">
+                      <h3 className="border-b border-hairline pb-2 text-title font-medium">
+                        {groupSpec("views").plural}
+                      </h3>
+                      <ul className="divide-y divide-hairline">
+                        {views.slice(0, LISTED).map(({ object, group }) => (
+                          <ObjectRow
+                            key={`${group}:${object.name}`}
+                            href={href("schema", tableParams(object.schema, object.name))}
+                            group={group}
+                            name={object.name}
+                            detail={object.comment ?? object.detail}
+                          />
+                        ))}
+                      </ul>
+                      {views.length > LISTED && (
+                        <p className="pt-2 text-hint text-muted-foreground">
+                          and {grouped(views.length - LISTED)} more, in the tree.
+                        </p>
+                      )}
+                    </section>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
     </div>
+  )
+}
+
+/** One object as a row that opens it: its kind's glyph, its name, and a word about it. */
+function ObjectRow({
+  href,
+  group,
+  name,
+  detail,
+}: {
+  href: string
+  group: Parameters<typeof GroupGlyph>[0]["group"]
+  name: string
+  detail?: string
+}) {
+  return (
+    <li>
+      <Link
+        href={href}
+        className="-mx-2 flex min-h-8 min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 focus-ring-inset transition-colors hover:bg-row-hover"
+      >
+        <GroupGlyph group={group} />
+        <span className="max-w-full shrink-0 truncate font-mono text-xs font-medium">{name}</span>
+        {detail && (
+          <span className="min-w-0 truncate pl-1 text-hint text-muted-foreground">{detail}</span>
+        )}
+      </Link>
+    </li>
   )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import Link from "next/link"
 import { useReactFlow } from "@xyflow/react"
 import {
@@ -29,13 +29,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
+import { useFocusReturn } from "@/components/database/schema/focus"
 import { SchemaMark } from "@/components/database/schema/rail"
 import type { DbCatalogSchema } from "@/components/database/schema/types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import type { MemoryStatus } from "@/components/database/diagram/memory"
-import type { DbGraphTable } from "@/components/database/diagram/types"
 
-export const FIT = { padding: 0.15, duration: 300 }
+export const FIT = { duration: 300 }
+
+/**
+ * The room a fitted picture leaves around itself, by side: the zoom controls
+ * stand over the top of the canvas, the legend over the bottom, and the
+ * minimap — when it is drawn — over the bottom right. What is fitted is
+ * fitted clear of them, not under them.
+ */
+export function fitPadding(minimap: boolean) {
+  return { top: "56px", right: "24px", bottom: minimap ? "132px" : "56px", left: "24px" } as const
+}
 
 /**
  * Which schema the picture is of, said in the toolbar and changed there.
@@ -43,7 +53,9 @@ export const FIT = { padding: 0.15, duration: 300 }
  * The diagram used to draw whichever schema the last table selection had left
  * in the address, with nothing on the page saying which or offering another.
  * "Every schema" is a picture of its own — the one that shows a key crossing
- * from one schema into the next — and has its own arrangement.
+ * from one schema into the next — and has its own arrangement. Each choice is
+ * a link: a picture is a place, Back returns to the one before it, and a
+ * pasted address opens the picture it names.
  */
 export function DiagramSchemaPicker({
   schemas,
@@ -53,7 +65,7 @@ export function DiagramSchemaPicker({
   schemas: readonly DbCatalogSchema[] | undefined
   current: string
 }) {
-  const { engine, href, select } = useDatabase()
+  const { engine, href } = useDatabase()
   const own = (schemas ?? []).filter((schema) => !schema.system)
   const system = (schemas ?? []).filter((schema) => schema.system)
   const every = `Every ${engine.nouns.container}`
@@ -63,7 +75,7 @@ export function DiagramSchemaPicker({
       asChild
       className={cn(schema.name === current && "bg-accent")}
     >
-      <Link href={href("diagram", { schema: schema.name, limit: null })}>
+      <Link href={href("diagram", { schema: schema.name, limit: null, every: null })}>
         <SchemaMark name={schema.name} />
         <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
         {schema.tables >= 0 && (
@@ -89,13 +101,10 @@ export function DiagramSchemaPicker({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-80 w-64 overflow-y-auto">
-        {/* Not a link: an address with the schema left out is completed from
-            where the reader last was, so "every schema" is said by clearing it. */}
-        <DropdownMenuItem
-          className={cn(current === "" && "bg-accent")}
-          onSelect={() => select({ schema: null, limit: null })}
-        >
-          {every}
+        {/* Said in so many words: an address with the schema left out would be
+            completed from where the reader last was. */}
+        <DropdownMenuItem asChild className={cn(current === "" && "bg-accent")}>
+          <Link href={href("diagram", { every: "1", limit: null })}>{every}</Link>
         </DropdownMenuItem>
         {own.length > 0 && <DropdownMenuSeparator />}
         {own.map(item)}
@@ -209,10 +218,16 @@ export function ZoomControls({
   )
 }
 
-/** What the three marks beside a column mean. */
-export function Legend() {
+/** How many schemas the legend names before it counts the rest. */
+const SCHEMAS_NAMED = 4
+
+/**
+ * What the three marks beside a column mean — and, in a picture of several
+ * schemas, which hue is which schema's.
+ */
+export function Legend({ schemas }: { schemas?: readonly string[] }) {
   return (
-    <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-3 rounded-md border bg-card px-2.5 py-1.5 text-micro text-muted-foreground max-sm:hidden">
+    <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[calc(100%-13rem)] flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-card px-2.5 py-1.5 text-micro text-muted-foreground max-sm:hidden">
       <span className="flex items-center gap-1">
         <Key className="size-3 text-chart-2" /> primary key
       </span>
@@ -222,22 +237,42 @@ export function Legend() {
       <span className="flex items-center gap-1">
         <Fingerprint className="size-3 text-muted-foreground/60" /> unique
       </span>
+      {schemas && schemas.length > 1 && (
+        <>
+          <span aria-hidden className="h-3 w-px bg-border" />
+          {schemas.slice(0, SCHEMAS_NAMED).map((schema) => (
+            <span key={schema} className="flex min-w-0 items-center gap-1 font-mono">
+              <SchemaMark name={schema} />
+              <span className="max-w-28 truncate">{schema}</span>
+            </span>
+          ))}
+          {schemas.length > SCHEMAS_NAMED && (
+            <span className="numeric">+{schemas.length - SCHEMAS_NAMED}</span>
+          )}
+        </>
+      )}
     </div>
   )
 }
 
 /**
  * A note on a table. What was typed is not lost to a slip: Escape and a press
- * outside ask before they discard a changed note; Cancel closes at once.
+ * outside ask before they discard a changed note, and while they are asking
+ * either means "keep editing"; Cancel closes at once. The table is named as
+ * the picture names it — with its schema where the picture holds several.
  */
 export function NoteDialog({
-  table,
+  name,
   initial,
+  returnTo,
   onClose,
   onSave,
 }: {
-  table: DbGraphTable
+  /** The table, as the canvas says it. */
+  name: string
   initial: string
+  /** The control the keyboard goes back to: the table's own button on the canvas. */
+  returnTo: () => HTMLElement | null
   onClose: () => void
   onSave: (text: string) => void
 }) {
@@ -245,24 +280,35 @@ export function NoteDialog({
   const [text, setText] = useState(initial)
   const [asking, setAsking] = useState(false)
   const dirty = text.trim() !== initial.trim()
+  useFocusReturn(true, returnTo)
+  // The question takes the keyboard, and hands it back to the note.
+  const keep = useRef<HTMLButtonElement>(null)
+  const note = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!asking) return
+    keep.current?.focus()
+    const field = note.current
+    return () => field?.focus()
+  }, [asking])
   return (
     <Modal
       open
       onOpenChange={(open) => {
         if (open) return
-        if (dirty) setAsking(true)
+        if (asking) setAsking(false)
+        else if (dirty) setAsking(true)
         else onClose()
       }}
       size="sm"
       title={initial ? "Edit note" : "Add a note"}
-      description={`A short note about ${table.name}, shown on the diagram and kept with it.`}
+      description={`A short note about ${name}, shown on the diagram and kept with it.`}
       footer={
         asking ? (
           <>
             <p role="alert" className="mr-auto min-w-0 text-body">
               Close and lose what you typed?
             </p>
-            <Button variant="outline" autoFocus onClick={() => setAsking(false)}>
+            <Button ref={keep} variant="outline" onClick={() => setAsking(false)}>
               Keep editing
             </Button>
             <Button variant="destructive" onClick={onClose}>
@@ -290,13 +336,14 @@ export function NoteDialog({
       <Field
         label={
           <>
-            Note on <span className="font-mono">{table.name}</span>
+            Note on <span className="font-mono">{name}</span>
           </>
         }
         htmlFor={`${id}-note`}
         hint="One line shows on the table; the whole note is in the inspector."
       >
         <Textarea
+          ref={note}
           id={`${id}-note`}
           value={text}
           onChange={(e) => setText(e.target.value)}

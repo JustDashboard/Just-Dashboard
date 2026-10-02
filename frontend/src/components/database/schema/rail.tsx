@@ -2,7 +2,13 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { ChevronDown, ChevronRight, Plus, RefreshClockwise } from "@/components/icons"
+import {
+  ChevronDown,
+  ChevronRight,
+  MoreHorizontal,
+  Plus,
+  RefreshClockwise,
+} from "@/components/icons"
 import type { DbCatalogGroup } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { hueFor, LANES } from "@/lib/hue"
@@ -11,6 +17,7 @@ import type { PollState } from "@/hooks/use-poll"
 import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
 import { EmptyNote, EmptyState } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -81,6 +88,7 @@ export function SchemaRail({
   catalog,
   selected,
   creations,
+  verbs,
   onRefresh,
   saidBeside = false,
   className,
@@ -89,6 +97,8 @@ export function SchemaRail({
   selected: Selected
   /** What can be made here, for the head's "New" menu; empty where the role or the engine cannot. */
   creations: Verb[]
+  /** What can be done to the schema itself: it is said here too, where the tree is all a phone shows. */
+  verbs: Verb[]
   /** Reads the tree again, and with it whatever is open beside it. */
   onRefresh: () => void
   /** The page says beside the rail what is wrong, with the way on: the rail does not say it twice. */
@@ -170,7 +180,40 @@ export function SchemaRail({
         >
           <RefreshClockwise />
         </IconAction>
+        {verbs.length > 0 && known && (
+          <VerbMenu
+            verbs={verbs}
+            trigger={
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`More for ${schema || engine.label}`}
+                className="size-7 max-sm:size-8"
+              >
+                <MoreHorizontal className="size-3.5" />
+              </Button>
+            }
+          />
+        )}
       </div>
+      {data && catalog.error && (
+        // The tree is what was read before: the read that was just asked for failed.
+        <div
+          role="status"
+          className="flex shrink-0 items-center gap-2 border-b border-hairline py-1 pr-1.5 pl-3"
+        >
+          <Status tone="warning" label="Not read again" className="shrink-0" />
+          <span
+            className="min-w-0 flex-1 truncate text-hint text-muted-foreground"
+            title={catalog.error.message}
+          >
+            last reading
+          </span>
+          <Button size="xs" variant="ghost" className="shrink-0" onClick={onRefresh}>
+            Try again
+          </Button>
+        </div>
+      )}
       <div className="shrink-0 border-b border-hairline p-1.5">
         <SearchInput
           dense

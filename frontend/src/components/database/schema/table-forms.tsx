@@ -21,7 +21,6 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { ChangeDialog } from "@/components/database/schema/change-dialog"
 import {
   BLANK_INDEX,
-  REFERENCE_ACTIONS,
   addColumnRequest,
   alterColumnRequest,
   columnChanges,
@@ -37,6 +36,7 @@ import {
   type ForeignKeyDraft,
   type IndexDraft,
 } from "@/components/database/schema/changes"
+import { notesFor, type ReferenceAction } from "@/components/database/schema/engine-notes"
 import { ColumnChips, DEFAULT_HINT, TypeField } from "@/components/database/schema/fields"
 import type { DbColumn, DbTableDetail, DdlAnswer } from "@/components/database/schema/types"
 import { useSupport } from "@/components/database/schema/use-ddl"
@@ -214,20 +214,28 @@ export function EditColumnDialog({
       confirm={
         risky
           ? {
-              title: "Change column",
+              title: changes.type
+                ? `This rewrites ${column.name} in every row`
+                : `This fails if a row holds NULL in ${column.name}`,
               description: (
                 <>
                   {changes.type && (
                     <p>
-                      Changing the type rewrites this column in every row. The engine refuses the
-                      whole change if a stored value cannot be converted.
+                      The engine converts every stored value to the new type and refuses the whole
+                      change if one cannot be converted. The table is locked while it does.
                     </p>
                   )}
                   {changes.nullable && !edit.nullable && (
-                    <p>Refusing NULL fails if any row holds NULL in this column today.</p>
+                    <p>
+                      Refusing NULL checks every row: one that holds NULL in this column today stops
+                      the change.
+                    </p>
                   )}
                 </>
               ),
+              question: changes.type
+                ? `Rewrite ${column.name} in every row of ${detail.name}?`
+                : `Refuse NULL in ${column.name} from now on?`,
             }
           : null
       }
@@ -402,12 +410,10 @@ export function AddIndexDialog({ detail, onClose, onDone }: TableFormProps) {
   const request = indexRequest(detail.schema, detail.name, draft)
   const columns = useMemo(() => detail.columns.map((column) => column.name), [detail.columns])
   const set = (patch: Partial<IndexDraft>) => setDraft({ ...draft, ...patch })
-  // The methods this table's indexes already use: the nearest thing to the
-  // engine's own list that the catalogue says.
-  const methods = useMemo(
-    () => [...new Set(detail.indexes.flatMap((index) => (index.method ? [index.method] : [])))],
-    [detail.indexes],
-  )
+  const notes = notesFor(engine)
+  // The method is being typed rather than chosen: an access method an
+  // extension installed, where the engine takes any it knows.
+  const [other, setOther] = useState(false)
   return (
     <ChangeDialog
       onClose={onClose}
@@ -457,27 +463,27 @@ export function AddIndexDialog({ detail, onClose, onDone }: TableFormProps) {
             onChange={(event) => set({ name: event.target.value })}
           />
         </Field>
-        {operations.includes("indexMethod") && (
+        {operations.includes("indexMethod") && notes.indexMethods.length > 0 && (
           <Field
             label="Method"
             htmlFor={`${ids}-method`}
-            hint="Empty: the engine's default."
-            info="The access method, in the engine's own word. PostgreSQL: btree, hash, gin, gist, spgist, brin. MySQL and MariaDB: btree, hash, fulltext, spatial. SQL Server: clustered, nonclustered. Oracle: bitmap."
+            hint={
+              notes.otherIndexMethods && other
+                ? "The access method's name, as the engine knows it."
+                : undefined
+            }
           >
-            <Input
+            <MethodField
               id={`${ids}-method`}
-              list={`${ids}-methods`}
-              autoComplete="off"
-              spellCheck={false}
-              className="font-mono text-xs"
+              methods={notes.indexMethods}
+              open={notes.otherIndexMethods}
               value={draft.method}
-              onChange={(event) => set({ method: event.target.value })}
+              other={other}
+              onChange={(method, typed) => {
+                setOther(typed)
+                set({ method })
+              }}
             />
-            <datalist id={`${ids}-methods`}>
-              {methods.map((method) => (
-                <option key={method} value={method.toLowerCase()} />
-              ))}
-            </datalist>
           </Field>
         )}
       </FieldRow>
@@ -545,6 +551,8 @@ export function AddForeignKeyDialog({ detail, onClose, onDone }: TableFormProps)
   const refColumns = referenced.data?.columns.map((column) => column.name) ?? NO_COLUMNS
   const own = detail.columns.map((column) => column.name)
   const request = foreignKeyRequest(detail.schema, detail.name, draft)
+  const notes = notesFor(engine)
+  const limits = actionLimits(engine.label, notes.onDelete, notes.onUpdate)
 
   const pair = (index: number, side: "columns" | "refColumns", value: string) =>
     set({ [side]: draft[side].map((held, at) => (at === index ? value : held)) })
@@ -628,7 +636,7 @@ export function AddForeignKeyDialog({ detail, onClose, onDone }: TableFormProps)
                   aria-label={`Column ${index + 1} of ${detail.name}`}
                   className="min-w-0 flex-1 font-mono text-xs"
                 >
-                  <SelectValue placeholder="This table's column" />
+                  <SelectValue placeholder="Column" />
                 </SelectTrigger>
                 <SelectContent>
                   {own.map((name) => (
@@ -689,21 +697,27 @@ export function AddForeignKeyDialog({ detail, onClose, onDone }: TableFormProps)
         </div>
       </Field>
 
-      <FieldRow columns={3}>
-        <Field label="When the row it points at is deleted" htmlFor={`${ids}-delete`}>
-          <ActionSelect
-            id={`${ids}-delete`}
-            value={draft.onDelete}
-            onChange={(onDelete) => set({ onDelete })}
-          />
-        </Field>
-        <Field label="When its key is changed" htmlFor={`${ids}-update`}>
-          <ActionSelect
-            id={`${ids}-update`}
-            value={draft.onUpdate}
-            onChange={(onUpdate) => set({ onUpdate })}
-          />
-        </Field>
+      <FieldRow columns={notes.onDelete.length > 1 && notes.onUpdate.length > 1 ? 3 : 2}>
+        {notes.onDelete.length > 1 && (
+          <Field label="When the row it points at is deleted" htmlFor={`${ids}-delete`}>
+            <ActionSelect
+              id={`${ids}-delete`}
+              actions={notes.onDelete}
+              value={draft.onDelete}
+              onChange={(onDelete) => set({ onDelete })}
+            />
+          </Field>
+        )}
+        {notes.onUpdate.length > 1 && (
+          <Field label="When its key is changed" htmlFor={`${ids}-update`}>
+            <ActionSelect
+              id={`${ids}-update`}
+              actions={notes.onUpdate}
+              value={draft.onUpdate}
+              onChange={(onUpdate) => set({ onUpdate })}
+            />
+          </Field>
+        )}
         <Field label="Name" htmlFor={`${ids}-name`} hint="Empty: the server names it.">
           <Input
             id={`${ids}-name`}
@@ -715,6 +729,9 @@ export function AddForeignKeyDialog({ detail, onClose, onDone }: TableFormProps)
           />
         </Field>
       </FieldRow>
+      {limits.map((line) => (
+        <FormNote key={line}>{line}</FormNote>
+      ))}
       <FormNote>
         Adding it checks every row the table holds: a row that points at nothing stops the change.
       </FormNote>
@@ -722,12 +739,39 @@ export function AddForeignKeyDialog({ detail, onClose, onDone }: TableFormProps)
   )
 }
 
+/** What the engine's foreign keys cannot do, said under the choices that are left. */
+function actionLimits(
+  engine: string,
+  onDelete: readonly ReferenceAction[],
+  onUpdate: readonly ReferenceAction[],
+): string[] {
+  const lines: string[] = []
+  if (onUpdate.length <= 1) {
+    lines.push(
+      `${engine} has no ON UPDATE for a foreign key: a key that is pointed at cannot be made to carry a change to the rows that point at it.`,
+    )
+  }
+  const gone = (["RESTRICT", "SET DEFAULT"] as const).filter(
+    (action) => onDelete.length > 1 && !onDelete.includes(action),
+  )
+  if (gone.includes("RESTRICT")) {
+    lines.push(`${engine} has no RESTRICT: no action is its equivalent.`)
+  }
+  if (gone.includes("SET DEFAULT")) {
+    lines.push(`${engine} does not set a default through a foreign key.`)
+  }
+  return lines
+}
+
 function ActionSelect({
   id,
+  actions,
   value,
   onChange,
 }: {
   id: string
+  /** What this engine's foreign keys may do, its default first. */
+  actions: readonly ReferenceAction[]
   value: string
   onChange: (value: string) => void
 }) {
@@ -737,13 +781,97 @@ function ActionSelect({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {REFERENCE_ACTIONS.map((action) => (
+        {actions.map((action) => (
           <SelectItem key={action} value={action} className="text-xs">
             {action.toLowerCase()}
           </SelectItem>
         ))}
       </SelectContent>
     </Select>
+  )
+}
+
+const DEFAULT_METHOD = "default"
+const OTHER_METHOD = "other"
+
+/**
+ * An index's access method, chosen from the engine's own: a segmented control
+ * for the two or three an engine has, a list for more. "Default" sends none
+ * and leaves the choice to the engine. Where the engine takes any method it
+ * has installed, "another" opens a field for its name.
+ */
+function MethodField({
+  id,
+  methods,
+  open,
+  value,
+  other,
+  onChange,
+}: {
+  id: string
+  methods: readonly string[]
+  /** Any other method the engine knows is taken too. */
+  open: boolean
+  value: string
+  /** The method is being typed. */
+  other: boolean
+  onChange: (method: string, typed: boolean) => void
+}) {
+  const chosen = other ? OTHER_METHOD : value === "" ? DEFAULT_METHOD : value
+  const pick = (next: string) =>
+    next === OTHER_METHOD
+      ? onChange("", true)
+      : onChange(next === DEFAULT_METHOD ? "" : next, false)
+  if (methods.length <= 2 && !open) {
+    return (
+      <Segments
+        id={id}
+        label="Index method"
+        fill
+        value={chosen}
+        options={[
+          { value: DEFAULT_METHOD, label: "Default" },
+          ...methods.map((method) => ({ value: method, label: method, mono: true })),
+        ]}
+        onChange={pick}
+      />
+    )
+  }
+  return (
+    <div className="space-y-2">
+      <Select value={chosen} onValueChange={pick}>
+        <SelectTrigger id={id} className="w-full text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={DEFAULT_METHOD} className="text-xs">
+            The engine&rsquo;s default
+          </SelectItem>
+          {methods.map((method) => (
+            <SelectItem key={method} value={method} className="font-mono text-xs">
+              {method}
+            </SelectItem>
+          ))}
+          {open && (
+            <SelectItem value={OTHER_METHOD} className="text-xs">
+              Another, by name…
+            </SelectItem>
+          )}
+        </SelectContent>
+      </Select>
+      {other && (
+        <Input
+          aria-label="Name of the access method"
+          autoFocus
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="hnsw"
+          className="font-mono text-xs"
+          value={value}
+          onChange={(event) => onChange(event.target.value, true)}
+        />
+      )}
+    </div>
   )
 }
 

@@ -1,35 +1,31 @@
-import { get } from "@/lib/api"
-import { inlineStatement } from "@/components/database/data/statement"
+import type { Engine } from "@/components/database/engine"
+import { notesFor, quotedRelation } from "@/components/database/schema/engine-notes"
 
 /** How many rows the statement handed to Query asks for. */
 const FIRST = 100
 
 /**
- * A SELECT of one table, as the server writes it for this engine.
+ * A SELECT of one table or view, in the engine's own words: what "Query"
+ * hands to the editor from the schema browser and from the diagram.
  *
- * "The first hundred rows of a table" is spelled three ways across the
- * engines, and a name is quoted four. The page used to branch on the driver
- * and join the schema and the name with a dot, unquoted — wrong for a mixed-
- * case name, and one more copy of what each dialect is. The server already
- * knows: `GET /browse` answers with the statement it ran, in the engine's own
- * words with every name quoted, and a marker where the page size and the
- * offset went. One row is asked for, so the read costs nothing, and the
- * markers are filled with the size wanted.
+ * "The first hundred rows" is spelled three ways across the engines and a
+ * name is quoted three. The diagram used to branch on the driver and join the
+ * schema and the name with a dot, unquoted — wrong for a mixed-case name. Its
+ * successor asked the server, by reading a row of the relation and taking the
+ * statement that read reported: right in every dialect, but it ran the
+ * relation to learn a string, and a view that takes a minute to produce its
+ * first row made the press wait a minute.
+ *
+ * So the statement is written here, at once and without a request, from what
+ * the engine's notes say of its dialect. Both parts of the name are always
+ * quoted, so a name is never folded to another case or read as a word of the
+ * language.
  */
-export async function selectStatement(
-  id: number,
+export function selectStatement(
+  engine: Pick<Engine, "driver">,
   schema: string,
   table: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  const page = await get<{ statement?: string }>(
-    `/databases/${id}/browse`,
-    { schema: schema || undefined, table, limit: 1 },
-    signal,
-  )
-  const sql = page.statement
-    ? inlineStatement(page.statement, [], { limit: FIRST, offset: 0 })
-    : null
-  if (!sql) throw new Error("The server did not say how it reads this table.")
-  return sql
+): string {
+  const notes = notesFor(engine)
+  return notes.firstRows(quotedRelation(schema, table, notes), FIRST)
 }

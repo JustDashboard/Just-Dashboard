@@ -4,6 +4,8 @@ import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { Eye, Fingerprint, Key, Linked, MoreHorizontal, Notes } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { KindGlyph, rowObjectKind } from "@/components/database/data/kinds"
+import { SchemaMark } from "@/components/database/schema/rail"
 import type { DiagramColor } from "@/components/database/diagram/document"
 import {
   HEADER_HEIGHT,
@@ -82,6 +84,8 @@ function TableNodeComponent({ data, selected }: NodeProps & { data: TableNodeDat
       >
         {/* The header carries the handles a names-only diagram lands on. */}
         <NodeHandles table={table.id} column="" />
+        {/* The tree's own legend: a view is the same violet eye here. */}
+        <KindGlyph kind={rowObjectKind(table.type)} className="size-3" />
         {/* Not `nodrag`: the name is where a hand reaches to move a table. A
             press that does not move is still the button's own. */}
         <button
@@ -90,8 +94,14 @@ function TableNodeComponent({ data, selected }: NodeProps & { data: TableNodeDat
           className="min-w-0 flex-1 cursor-[inherit] truncate rounded-sm text-left font-mono text-xs font-semibold focus-ring-inset"
           title={full}
         >
+          {/* Two schemas in one picture are told apart at a glance by their
+              hue — the one the picker and the legend give each — and to the
+              letter by the name. */}
           {qualified && table.schema && (
-            <span className="font-normal text-muted-foreground">{table.schema}.</span>
+            <>
+              <SchemaMark name={table.schema} className="mr-1.5 inline-block align-baseline" />
+              <span className="font-normal text-muted-foreground">{table.schema}.</span>
+            </>
           )}
           {table.name}
         </button>

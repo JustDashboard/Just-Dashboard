@@ -1,9 +1,10 @@
 "use client"
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { Eye, FolderPlus, Puzzle, SidebarLeftOpen, Table, Trash } from "@/components/icons"
 import { usePanelSize } from "@/lib/panel-size"
+import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
@@ -37,6 +38,7 @@ import { useDestroy } from "@/components/database/schema/use-destroy"
 import { useSettledAddress } from "@/components/database/schema/use-settled-address"
 
 const RAIL = { min: 200, max: 480, fallback: 272 }
+const NO_VERBS: Verb[] = []
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 /**
@@ -92,6 +94,8 @@ export function SqlSchema() {
   const listed = data?.schema ?? selection.schema
   const info = data?.schemas.find((schema) => schema.name === listed)
   const unknown = data !== undefined && data.schemas.length > 0 && !info
+  // There is a schema to show beside the tree: it has been read, and it exists.
+  const known = data !== undefined && !unknown
   const operations = engine.capabilities.ddlOperations
   // Changes are made in a schema of the reader's own: not in the engine's
   // namespaces, and — on an engine with one schema to choose from — only in
@@ -141,6 +145,15 @@ export function SqlSchema() {
     refreshDetail()
     setAsked((n) => n + 1)
   }, [refreshCatalog, refreshDetail])
+
+  // A read that fails over what is already on screen leaves it there — and
+  // says so. Both reads are made only when asked for (the tree's refresh, a
+  // change that has just run), so a failure here is the answer to a press:
+  // without a word, what was read before would pass for what is true now.
+  const stale = (data !== undefined && catalog.error) || (detail.data && detail.error) || undefined
+  useEffect(() => {
+    if (stale) notify.error("The schema could not be read again", stale)
+  }, [stale])
 
   // A form that made something goes to what it made, and that address no
   // longer asks for the form. Closing it must not then write the old address
@@ -219,6 +232,9 @@ export function SqlSchema() {
               catalog={catalog}
               selected={selected}
               creations={creations}
+              // Beside the schema its own head carries them; over it, the
+              // tree is all there is to press.
+              verbs={beside ? NO_VERBS : schemaVerbs}
               onRefresh={refreshAll}
               saidBeside={beside && selected === null}
             />
@@ -234,7 +250,9 @@ export function SqlSchema() {
                 className="absolute inset-y-0 -right-1 z-20"
               />
             ) : (
-              selected && (
+              // Over the object, the rail needs a way off it whatever is
+              // open: back to the object chosen, or on to the schema itself.
+              known && (
                 <div className="shrink-0 border-t border-hairline bg-surface-header p-2">
                   <Button
                     size="sm"
@@ -242,7 +260,11 @@ export function SqlSchema() {
                     className="w-full"
                     onClick={() => setRailOver(false)}
                   >
-                    <span className="min-w-0 truncate">Back to {selected.name}</span>
+                    <span className="min-w-0 truncate">
+                      {selected
+                        ? `Back to ${selected.name}`
+                        : `Show ${listed || `this ${engine.nouns.container}`}`}
+                    </span>
                   </Button>
                 </div>
               )
@@ -250,109 +272,122 @@ export function SqlSchema() {
           </div>
         )}
 
-        {table ? (
-          <TableView
-            key={`${table.schema}\u0000${table.name}`}
-            schema={table.schema}
-            name={table.name}
-            view={address.view}
-            onView={(view: TableViewId) => select({ view: view === "columns" ? null : view })}
-            detail={detail}
-            catalog={data}
-            asked={asked}
-            railOpen={railShown}
-            onToggleRail={toggleRail}
-            onChanged={() => {
-              refreshDetail()
-              refreshCatalog()
-            }}
-            onRenamed={(to) => {
-              refreshCatalog()
-              select({ table: to })
-            }}
-            onDropped={() => {
-              refreshCatalog()
-              select({ table: null, view: null })
-            }}
-          />
-        ) : selected?.type === "object" ? (
-          <ObjectView
-            key={`${selected.kind}:${selected.schema}:${selected.name}:${selected.signature}:${selected.table}`}
-            selected={selected}
-            asked={asked}
-            railOpen={railShown}
-            onToggleRail={toggleRail}
-            onChanged={refreshCatalog}
-          />
-        ) : data && !unknown ? (
-          <SchemaLanding
-            catalog={data}
-            railShown={railShown}
-            onShowRail={toggleRail}
-            creations={creations}
-            verbs={schemaVerbs}
-            note={limit}
-          />
-        ) : (
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {!railShown && toggle}
-            <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-              {catalog.error && !data ? (
-                <ReadFailed
-                  error={catalog.error}
-                  onRetry={refreshCatalog}
-                  className="w-full max-w-md"
-                />
-              ) : !data ? (
-                // The catalogue is on its way: the shape of what it will say.
-                <div
-                  role="status"
-                  aria-label="Reading the schema"
-                  className="w-full max-w-2xl space-y-6"
-                >
-                  <div className="flex items-center gap-3">
-                    <Skeleton className="size-10 rounded-lg" />
-                    <div className="space-y-2">
-                      <Skeleton className="h-3.5 w-28" />
-                      <Skeleton className="h-3 w-56 max-w-full" />
+        {/* Under the tree, where the tree lies over it, the object is not
+            there to the keyboard or to a screen reader either. */}
+        <div className="flex min-h-0 min-w-0 flex-1" inert={!beside && railShown}>
+          {table ? (
+            <TableView
+              key={`${table.schema}\u0000${table.name}`}
+              schema={table.schema}
+              name={table.name}
+              view={address.view}
+              onView={(view: TableViewId) => select({ view: view === "columns" ? null : view })}
+              detail={detail}
+              catalog={data}
+              asked={asked}
+              railOpen={railShown}
+              onToggleRail={toggleRail}
+              onChanged={() => {
+                refreshDetail()
+                refreshCatalog()
+              }}
+              onRenamed={(to) => {
+                refreshCatalog()
+                select({ table: to })
+              }}
+              onDropped={() => {
+                refreshCatalog()
+                select({ table: null, view: null })
+              }}
+            />
+          ) : selected?.type === "object" ? (
+            <ObjectView
+              key={`${selected.kind}:${selected.schema}:${selected.name}:${selected.signature}:${selected.table}`}
+              selected={selected}
+              asked={asked}
+              railOpen={railShown}
+              onToggleRail={toggleRail}
+              onChanged={refreshCatalog}
+            />
+          ) : data && !unknown ? (
+            <SchemaLanding
+              catalog={data}
+              railShown={railShown}
+              onShowRail={toggleRail}
+              creations={creations}
+              verbs={schemaVerbs}
+              note={limit}
+              asked={asked}
+            />
+          ) : (
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {!railShown && toggle}
+              <div
+                className={cn(
+                  "flex min-h-0 flex-1 justify-center p-5",
+                  // The coming silhouette lies where the schema will; a failure
+                  // and a schema that is not there stand in the middle.
+                  catalog.error || data ? "items-center" : "items-start",
+                )}
+              >
+                {catalog.error && !data ? (
+                  <ReadFailed
+                    error={catalog.error}
+                    onRetry={refreshCatalog}
+                    className="w-full max-w-md"
+                  />
+                ) : !data ? (
+                  // The catalogue is on its way: the shape of what it will say.
+                  <div
+                    role="status"
+                    aria-label="Reading the schema"
+                    className="w-full space-y-6 self-start"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="size-10 rounded-lg" />
+                      <div className="space-y-2">
+                        <Skeleton className="h-3.5 w-28" />
+                        <Skeleton className="h-3 w-56 max-w-full" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-10 gap-y-5 xl:grid-cols-4">
+                      {["w-10", "w-16", "w-20", "w-14"].map((width, index) => (
+                        <div key={index} className="space-y-2.5">
+                          <Skeleton className="h-2.5 w-14" />
+                          <Skeleton className={cn("h-6", width)} />
+                          <Skeleton className="h-2.5 w-24" />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-4">
+                      {["w-40", "w-28", "w-32", "w-24"].map((width) => (
+                        <div key={width} className="space-y-1.5">
+                          <Skeleton className={cn("h-3", width)} />
+                          <Skeleton className="h-1 w-full" />
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  <div className="flex gap-6">
-                    {["w-8", "w-6", "w-8", "w-6", "w-8"].map((width, index) => (
-                      <div key={index} className="space-y-2">
-                        <Skeleton className="h-2.5 w-12" />
-                        <Skeleton className={cn("h-3.5", width)} />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="space-y-4">
-                    {["w-40", "w-28", "w-32", "w-24"].map((width) => (
-                      <div key={width} className="space-y-1.5">
-                        <Skeleton className={cn("h-3", width)} />
-                        <Skeleton className="h-1 w-full" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                // A schema that is not there is not an empty one: nothing can
-                // be made in it, and the way on is the one that exists.
-                <EmptyState
-                  className="border-0"
-                  title={`No ${engine.nouns.container} called ${listed}`}
-                  description={`This connection has no such ${engine.nouns.container}. It may have been dropped since the link was made.`}
-                  action={
-                    <Button size="sm" variant="outline" asChild>
-                      <Link href={href("schema", schemaParams(data.defaultSchema))}>
-                        Open {data.defaultSchema || `the default ${engine.nouns.container}`}
-                      </Link>
-                    </Button>
-                  }
-                />
-              )}
+                ) : (
+                  // A schema that is not there is not an empty one: nothing can
+                  // be made in it, and the way on is the one that exists.
+                  <EmptyState
+                    className="border-0"
+                    title={`No ${engine.nouns.container} called ${listed}`}
+                    description={`This connection has no such ${engine.nouns.container}. It may have been dropped since the link was made.`}
+                    action={
+                      <Button size="sm" variant="outline" asChild>
+                        <Link href={href("schema", schemaParams(data.defaultSchema))}>
+                          Open {data.defaultSchema || `the default ${engine.nouns.container}`}
+                        </Link>
+                      </Button>
+                    }
+                  />
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {may("table") && (
@@ -363,6 +398,11 @@ export function SqlSchema() {
           onClose={closeForm}
           onCreated={(schema, name) => {
             refreshCatalog()
+            // The entry that asked for the form stops asking, so Back from
+            // the new table is the schema and not an empty form again.
+            const here = new URL(window.location.href)
+            here.searchParams.delete("new")
+            window.history.replaceState(window.history.state, "", here)
             goto("schema", tableParams(schema, name))
           }}
         />

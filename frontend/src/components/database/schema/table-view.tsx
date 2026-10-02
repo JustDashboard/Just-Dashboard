@@ -22,7 +22,6 @@ import {
 import { ApiError } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { bytes } from "@/lib/format"
-import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
@@ -31,6 +30,7 @@ import { FormFact } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Metric } from "@/components/page"
 import { EmptyNote, EmptyState } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { ChipCount, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -71,7 +71,7 @@ import { Facts } from "@/components/database/schema/facts"
 import { GroupGlyph, groupSpec } from "@/components/database/schema/kinds"
 import { ViewDialog, useViewReplace } from "@/components/database/schema/object-forms"
 import { selectStatement } from "@/components/database/schema/select"
-import { TableStatistics } from "@/components/database/schema/statistics"
+import { MaintenanceBand, TableStatistics } from "@/components/database/schema/statistics"
 import {
   AddColumnDialog,
   AddConstraintDialog,
@@ -147,7 +147,7 @@ export function TableView({
   onRenamed: (to: string) => void
   onDropped: () => void
 }) {
-  const { id, engine, href, goto, readOnly } = useDatabase()
+  const { engine, href, goto, readOnly } = useDatabase()
   const { can } = useAuth()
   const tabsId = useId()
   const tabs = useRef<HTMLDivElement>(null)
@@ -253,13 +253,8 @@ export function TableView({
     ),
   }
 
-  const openQuery = async () => {
-    try {
-      goto("query", { sql: await selectStatement(id, data?.schema ?? schema, name) })
-    } catch (err) {
-      notify.error(`Could not write a query for ${name}`, err)
-    }
-  }
+  const openQuery = () =>
+    goto("query", { sql: selectStatement(engine, data?.schema ?? schema, name) })
 
   const tableVerbs: Verb[] = [
     { key: "copy", label: "Copy name", icon: Copy, run: () => void copyText(full, "Name copied") },
@@ -359,11 +354,14 @@ export function TableView({
           title={full}
           className="flex min-w-0 items-baseline font-mono text-body font-medium"
         >
+          {/* The schema is half of the name at every width: it gives way to
+              the name by truncating, never by leaving. */}
           {(data?.schema ?? schema) && (
-            <span className="shrink-0 text-muted-foreground max-sm:hidden">
-              {data?.schema ?? schema}.
+            <span className="min-w-[3ch] shrink-[2] truncate text-muted-foreground">
+              {data?.schema ?? schema}
             </span>
           )}
+          {(data?.schema ?? schema) && <span className="text-muted-foreground">.</span>}
           <span className="min-w-[4ch] truncate">{name}</span>
         </h2>
         {data?.type && data.type !== "table" && <Tag className="shrink-0">{data.type}</Tag>}
@@ -380,12 +378,7 @@ export function TableView({
               </Button>
             )}
             {engine.has("query") && (
-              <Button
-                size="xs"
-                variant="outline"
-                className={TOUCH}
-                onClick={() => void openQuery()}
-              >
+              <Button size="xs" variant="outline" className={TOUCH} onClick={openQuery}>
                 <Code />
                 <span className="max-sm:sr-only">Query</span>
               </Button>
@@ -416,6 +409,25 @@ export function TableView({
         </div>
       ) : (
         <>
+          <MaintenanceBand schema={data?.schema ?? schema} table={name} />
+          {data && detail.error && (
+            // What is below is the last reading: the one just asked for failed.
+            <div
+              role="status"
+              className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-4 py-1.5"
+            >
+              <Status tone="warning" label="Not read again" />
+              <span
+                className="min-w-0 flex-1 truncate text-hint text-muted-foreground"
+                title={detail.error.message}
+              >
+                What is shown is the last reading of {name}.
+              </span>
+              <Button size="xs" variant="outline" className={TOUCH} onClick={detail.refresh}>
+                Try again
+              </Button>
+            </div>
+          )}
           {/* What the table amounts to, before any of its parts. */}
           <div className="shrink-0 space-y-3 border-b border-hairline px-4 py-3">
             {data ? (
@@ -435,6 +447,7 @@ export function TableView({
                     <Metric
                       label="Data · indexes"
                       value={`${bytes(data.dataSize)} · ${bytes(data.indexSize)}`}
+                      hint={<Split data={data.dataSize} indexes={data.indexSize} />}
                     />
                   )}
                   {data.owner && <Metric label="Owner" value={data.owner} />}
@@ -748,6 +761,29 @@ export function TableView({
   )
 }
 
+/**
+ * How a table's bytes divide between its rows and its indexes, as one thin
+ * bar under the two figures: the proportion is read at a glance, in the
+ * colours the Statistics reading gives the same two parts.
+ */
+function Split({ data, indexes }: { data: number; indexes: number }) {
+  const total = data + indexes
+  if (total <= 0) return null
+  return (
+    <span
+      role="img"
+      aria-label={`${Math.round((indexes / total) * 100)}% of it is indexes`}
+      className="mt-1 flex h-1 w-full min-w-24 overflow-hidden rounded-full bg-meter-track"
+    >
+      <span
+        className="h-full"
+        style={{ width: `${(data / total) * 100}%`, backgroundColor: "var(--chart-1)" }}
+      />
+      <span className="h-full flex-1" style={{ backgroundColor: "var(--chart-2)" }} />
+    </span>
+  )
+}
+
 function TableSkeleton() {
   // The coming silhouette: a header line and rows of a name, a type and a mark.
   return (
@@ -806,7 +842,7 @@ function Columns({
   const operations = engine.capabilities.ddlOperations
   // Where the engine's key does not tell rows apart it is the order they are
   // kept in, and is called that.
-  const keyWord = engine.capabilities.rowIdentity === "none" ? "sort key" : "primary"
+  const keyWord = engine.capabilities.rowIdentity === "none" ? "sorting key" : "primary"
   const foreign = new Map(
     detail.foreignKeys.flatMap((key) =>
       key.columns.map((column, index) => [column, { key, index }] as const),
@@ -820,7 +856,10 @@ function Columns({
       .map((index) => index.columns[0]),
   )
   const verbsFor = (column: DbColumn): Verb[] => [
-    ...(editable && operations.includes("alterColumn")
+    // A computed column's type and value are its expression's: no engine takes
+    // a default for one and most refuse to alter it at all, so it is renamed,
+    // commented on and dropped here, and rewritten in Query.
+    ...(editable && operations.includes("alterColumn") && !column.generated
       ? [
           {
             key: "edit",
@@ -878,7 +917,11 @@ function Columns({
           </span>
         )}
         {column.identity && <Tag title={column.identity}>numbered</Tag>}
-        {column.generated && <Tag>computed</Tag>}
+        {column.generated && (
+          <Tag title="Its value is its expression: it is changed by rewriting that, in Query">
+            computed
+          </Tag>
+        )}
         {reference && (
           <Link
             href={href(
@@ -888,6 +931,11 @@ function Columns({
             className="flex items-center gap-1 rounded-sm font-mono text-xs text-muted-foreground focus-ring transition-colors hover:text-foreground"
           >
             <Linked aria-hidden className="size-3 text-chart-1" />
+            {/* A key into another schema says which: the name alone would be
+                read as this schema's table of that name. */}
+            {reference.key.refSchema && reference.key.refSchema !== detail.schema
+              ? `${reference.key.refSchema}.`
+              : ""}
             {reference.key.refTable}.{reference.key.refColumns[reference.index]}
           </Link>
         )}
@@ -985,7 +1033,10 @@ function Columns({
                     {column.nullable ? "yes" : "no"}
                   </TableCell>
                   <TableCell
-                    className={cn(CELL, "max-w-40 truncate font-mono text-muted-foreground")}
+                    className={cn(
+                      CELL,
+                      "max-w-64 truncate font-mono text-muted-foreground @min-[56rem]:max-w-[26rem]",
+                    )}
                     title={said(column)}
                   >
                     {said(column)}
@@ -1037,13 +1088,82 @@ function Indexes({
   limits: string[]
   onDrop: (index: DbTableDetail["indexes"][number]) => void
 }) {
+  const { engine } = useDatabase()
+  const keyWord = engine.capabilities.rowIdentity === "none" ? "sorting key" : "primary"
+  // A key or a constraint is dropped under Keys only where that reading can drop one.
+  const dropsKeys = engine.capabilities.ddlOperations.includes("uniqueConstraints")
+  // Across while there is room for the columns, down when there is not: one
+  // shape, chosen by the width the reading is given, with every verb in reach.
+  const [box, width] = useColumnWidth<HTMLDivElement>()
+  const narrow = width > 0 && width < NARROW
+
+  type Index = DbTableDetail["indexes"][number]
+  const over = (index: Index) => (
+    <>
+      {index.columns.join(", ")}
+      {index.include && index.include.length > 0 && (
+        <span className="text-muted-foreground"> include {index.include.join(", ")}</span>
+      )}
+      {index.predicate && <span className="text-muted-foreground"> where {index.predicate}</span>}
+    </>
+  )
+  const kind = (index: Index) => (
+    <>
+      {index.primary ? <Tag>{keyWord}</Tag> : index.unique ? <Tag>unique</Tag> : null}
+      {index.invalid && <Tag tone="warning">not usable</Tag>}
+    </>
+  )
+  // An index that enforces a constraint goes with it, under Keys &
+  // constraints; it cannot be dropped as an index.
+  const drop = (index: Index) =>
+    droppable &&
+    !index.constraint && (
+      <VerbActions
+        dim={!narrow}
+        className={ROW_ACTIONS}
+        verbs={[
+          {
+            key: "drop",
+            label: `Drop ${index.name}`,
+            icon: Trash,
+            inline: true,
+            run: () => onDrop(index),
+          },
+        ]}
+      />
+    )
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div ref={box} className="min-h-0 flex-1 overflow-y-auto">
       {detail.indexes.length === 0 ? (
         <EmptyNote className="px-4 py-10">
           No index. Every read of this {rowObjectKind(detail.type) === "table" ? "table" : "view"}{" "}
           scans it.
         </EmptyNote>
+      ) : narrow ? (
+        <ul aria-label="Indexes" className="divide-y divide-hairline border-b border-hairline">
+          {detail.indexes.map((index) => (
+            <li key={index.name} className="group flex items-start gap-2 py-2 pr-2 pl-4">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-mono text-xs font-medium break-all">{index.name}</span>
+                  {kind(index)}
+                </div>
+                <p className="font-mono text-xs break-words" title={index.definition}>
+                  {over(index)}
+                </p>
+                {(index.method || index.size !== undefined) && (
+                  <p className="text-hint text-muted-foreground">
+                    {[index.method?.toLowerCase(), index.size !== undefined && bytes(index.size)]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                )}
+              </div>
+              {drop(index)}
+            </li>
+          ))}
+        </ul>
       ) : (
         <Table>
           <TableHeader>
@@ -1051,8 +1171,8 @@ function Indexes({
               <TableHead className={HEAD}>Name</TableHead>
               <TableHead className={HEAD}>Columns</TableHead>
               <TableHead className={HEAD}>Kind</TableHead>
-              <TableHead className={cn(HEAD, "max-md:hidden")}>Method</TableHead>
-              <TableHead className={cn(HEAD, "text-right max-md:hidden")}>Size</TableHead>
+              <TableHead className={HEAD}>Method</TableHead>
+              <TableHead className={cn(HEAD, "text-right")}>Size</TableHead>
               {droppable && (
                 <TableHead className={cn(HEAD, "w-px")}>
                   <span className="sr-only">Actions</span>
@@ -1066,59 +1186,25 @@ function Indexes({
                 <TableCell className={cn(CELL, "font-mono font-medium")}>{index.name}</TableCell>
                 <TableCell className={cn(CELL, "max-w-96 font-mono")}>
                   <span className="block truncate" title={index.definition}>
-                    {index.columns.join(", ")}
-                    {index.include && index.include.length > 0 && (
-                      <span className="text-muted-foreground">
-                        {" "}
-                        include {index.include.join(", ")}
-                      </span>
-                    )}
-                    {index.predicate && (
-                      <span className="text-muted-foreground"> where {index.predicate}</span>
-                    )}
+                    {over(index)}
                   </span>
                 </TableCell>
                 <TableCell className={CELL}>
-                  <span className="flex items-center gap-2">
-                    {index.primary ? <Tag>primary</Tag> : index.unique ? <Tag>unique</Tag> : null}
-                    {index.invalid && <Tag tone="warning">not usable</Tag>}
-                  </span>
+                  <span className="flex items-center gap-2">{kind(index)}</span>
                 </TableCell>
-                <TableCell className={cn(CELL, "text-muted-foreground max-md:hidden")}>
+                <TableCell className={cn(CELL, "text-muted-foreground")}>
                   {index.method?.toLowerCase()}
                 </TableCell>
-                <TableCell
-                  className={cn(CELL, "numeric text-right text-muted-foreground max-md:hidden")}
-                >
+                <TableCell className={cn(CELL, "numeric text-right text-muted-foreground")}>
                   {index.size !== undefined ? bytes(index.size) : ""}
                 </TableCell>
-                {droppable && (
-                  <TableCell className={cn(CELL, "pl-0")}>
-                    {/* An index that enforces a constraint goes with it, under
-                        Keys & constraints; it cannot be dropped as an index. */}
-                    {!index.constraint && (
-                      <VerbActions
-                        dim
-                        className={ROW_ACTIONS}
-                        verbs={[
-                          {
-                            key: "drop",
-                            label: `Drop ${index.name}`,
-                            icon: Trash,
-                            inline: true,
-                            run: () => onDrop(index),
-                          },
-                        ]}
-                      />
-                    )}
-                  </TableCell>
-                )}
+                {droppable && <TableCell className={cn(CELL, "pl-0")}>{drop(index)}</TableCell>}
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
-      {droppable && detail.indexes.some((index) => index.constraint) && (
+      {droppable && dropsKeys && detail.indexes.some((index) => index.constraint) && (
         <p className="px-4 pt-3 text-hint text-muted-foreground">
           An index that enforces a key or a constraint is dropped with it, under Keys &amp;
           constraints.
@@ -1156,15 +1242,13 @@ function Keys({
     exclusion: mayDrop && operations.includes("uniqueConstraints"),
   }
   const acts = Object.values(drops).some(Boolean)
-  const empty =
-    detail.primaryKey.length === 0 &&
-    detail.foreignKeys.length === 0 &&
-    detail.constraints.length === 0
+  const [box, width] = useColumnWidth<HTMLDivElement>()
+  const narrow = width > 0 && width < NARROW
   const drop = (kind: KeyKind, name: string) =>
     drops[kind] &&
     name !== "" && (
       <VerbActions
-        dim
+        dim={!narrow}
         className={ROW_ACTIONS}
         verbs={[
           {
@@ -1178,13 +1262,106 @@ function Keys({
       />
     )
 
+  // Every key and constraint as one row of the reading, whichever shape draws it.
+  const entries: {
+    id: string
+    name: React.ReactNode
+    kind: React.ReactNode
+    definition: React.ReactNode
+    title?: string
+    drop: React.ReactNode
+  }[] = [
+    ...(detail.primaryKey.length > 0
+      ? [
+          {
+            id: "pk",
+            name: primaryConstraint ?? <span className="text-muted-foreground">unnamed</span>,
+            kind: (
+              <span className="flex items-center gap-1">
+                <Key aria-hidden className="size-3 text-chart-2" />
+                <Tag>
+                  {engine.capabilities.rowIdentity === "none" ? "sorting key" : "primary key"}
+                </Tag>
+              </span>
+            ),
+            definition: `(${detail.primaryKey.join(", ")})`,
+            drop: drop("primary key", primaryConstraint ?? ""),
+          },
+        ]
+      : []),
+    ...detail.foreignKeys.map((key) => ({
+      id: `fk:${key.name}`,
+      name: key.name,
+      kind: (
+        <span className="flex items-center gap-1">
+          <Linked aria-hidden className="size-3 text-chart-1" />
+          <Tag>foreign key</Tag>
+        </span>
+      ),
+      definition: (
+        <span className="flex flex-wrap items-center gap-x-1.5">
+          ({key.columns.join(", ")})
+          <ArrowRight aria-hidden className="size-3 text-muted-foreground" />
+          <Link
+            href={href("schema", tableParams(key.refSchema ?? detail.schema, key.refTable))}
+            className="rounded-sm underline-offset-2 focus-ring hover:underline"
+          >
+            {key.refSchema && key.refSchema !== detail.schema
+              ? `${key.refSchema}.${key.refTable}`
+              : key.refTable}
+          </Link>
+          ({key.refColumns.join(", ")})
+          {key.onDelete && key.onDelete !== "NO ACTION" && (
+            <span className="font-sans text-muted-foreground">
+              on delete {key.onDelete.toLowerCase()}
+            </span>
+          )}
+          {key.onUpdate && key.onUpdate !== "NO ACTION" && (
+            <span className="font-sans text-muted-foreground">
+              on update {key.onUpdate.toLowerCase()}
+            </span>
+          )}
+        </span>
+      ),
+      drop: drop("foreign key", key.name),
+    })),
+    ...detail.constraints.map((constraint, index) => ({
+      id: `c:${index}:${constraint.name}`,
+      name: constraint.name || <span className="text-muted-foreground">unnamed</span>,
+      kind: <Tag>{constraint.type}</Tag>,
+      definition: constraint.definition ?? `(${constraint.columns.join(", ")})`,
+      title: constraint.definition,
+      drop: drop(constraint.type, constraint.name),
+    })),
+  ]
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      {empty ? (
+    <div ref={box} className="min-h-0 flex-1 overflow-y-auto">
+      {entries.length === 0 ? (
         <EmptyNote className="px-4 py-10">
           No key and no constraint: nothing tells this table&rsquo;s rows apart, and nothing checks
           them.
         </EmptyNote>
+      ) : narrow ? (
+        <ul
+          aria-label="Keys and constraints"
+          className="divide-y divide-hairline border-b border-hairline"
+        >
+          {entries.map((entry) => (
+            <li key={entry.id} className="group flex items-start gap-2 py-2 pr-2 pl-4">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-mono text-xs font-medium break-all">{entry.name}</span>
+                  {entry.kind}
+                </div>
+                <div className="font-mono text-xs break-words" title={entry.title}>
+                  {entry.definition}
+                </div>
+              </div>
+              {entry.drop}
+            </li>
+          ))}
+        </ul>
       ) : (
         <Table>
           <TableHeader>
@@ -1200,91 +1377,20 @@ function Keys({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {detail.primaryKey.length > 0 && (
-              <TableRow className="group">
-                <TableCell className={cn(CELL, "font-mono font-medium")}>
-                  {primaryConstraint ?? <span className="text-muted-foreground">unnamed</span>}
-                </TableCell>
-                <TableCell className={CELL}>
-                  <span className="flex items-center gap-1">
-                    <Key aria-hidden className="size-3 text-chart-2" />
-                    <Tag>
-                      {engine.capabilities.rowIdentity === "none" ? "sorting key" : "primary key"}
-                    </Tag>
-                  </span>
-                </TableCell>
-                <TableCell className={cn(CELL, "font-mono")}>
-                  ({detail.primaryKey.join(", ")})
-                </TableCell>
-                {acts && (
-                  <TableCell className={cn(CELL, "pl-0")}>
-                    {drop("primary key", primaryConstraint ?? "")}
-                  </TableCell>
-                )}
-              </TableRow>
-            )}
-            {detail.foreignKeys.map((key) => (
-              <TableRow key={`fk:${key.name}`} className="group">
-                <TableCell className={cn(CELL, "font-mono font-medium")}>{key.name}</TableCell>
-                <TableCell className={CELL}>
-                  <span className="flex items-center gap-1">
-                    <Linked aria-hidden className="size-3 text-chart-1" />
-                    <Tag>foreign key</Tag>
-                  </span>
-                </TableCell>
-                <TableCell className={cn(CELL, "font-mono")}>
-                  <span className="flex flex-wrap items-center gap-x-1.5">
-                    ({key.columns.join(", ")})
-                    <ArrowRight aria-hidden className="size-3 text-muted-foreground" />
-                    <Link
-                      href={href(
-                        "schema",
-                        tableParams(key.refSchema ?? detail.schema, key.refTable),
-                      )}
-                      className="rounded-sm underline-offset-2 focus-ring hover:underline"
-                    >
-                      {key.refSchema && key.refSchema !== detail.schema
-                        ? `${key.refSchema}.${key.refTable}`
-                        : key.refTable}
-                    </Link>
-                    ({key.refColumns.join(", ")})
-                    {key.onDelete && key.onDelete !== "NO ACTION" && (
-                      <span className="font-sans text-muted-foreground">
-                        on delete {key.onDelete.toLowerCase()}
-                      </span>
-                    )}
-                    {key.onUpdate && key.onUpdate !== "NO ACTION" && (
-                      <span className="font-sans text-muted-foreground">
-                        on update {key.onUpdate.toLowerCase()}
-                      </span>
-                    )}
-                  </span>
-                </TableCell>
-                {acts && (
-                  <TableCell className={cn(CELL, "pl-0")}>
-                    {drop("foreign key", key.name)}
-                  </TableCell>
-                )}
-              </TableRow>
-            ))}
-            {detail.constraints.map((constraint, index) => (
-              <TableRow key={`c:${index}:${constraint.name}`} className="group">
-                <TableCell className={cn(CELL, "font-mono font-medium")}>
-                  {constraint.name || <span className="text-muted-foreground">unnamed</span>}
-                </TableCell>
-                <TableCell className={CELL}>
-                  <Tag>{constraint.type}</Tag>
-                </TableCell>
+            {entries.map((entry) => (
+              <TableRow key={entry.id} className="group">
+                <TableCell className={cn(CELL, "font-mono font-medium")}>{entry.name}</TableCell>
+                <TableCell className={CELL}>{entry.kind}</TableCell>
                 <TableCell className={cn(CELL, "max-w-[40rem] font-mono")}>
-                  <span className="block truncate" title={constraint.definition}>
-                    {constraint.definition ?? `(${constraint.columns.join(", ")})`}
-                  </span>
+                  {typeof entry.definition === "string" ? (
+                    <span className="block truncate" title={entry.title}>
+                      {entry.definition}
+                    </span>
+                  ) : (
+                    entry.definition
+                  )}
                 </TableCell>
-                {acts && (
-                  <TableCell className={cn(CELL, "pl-0")}>
-                    {drop(constraint.type, constraint.name)}
-                  </TableCell>
-                )}
+                {acts && <TableCell className={cn(CELL, "pl-0")}>{entry.drop}</TableCell>}
               </TableRow>
             ))}
           </TableBody>

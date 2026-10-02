@@ -24,6 +24,7 @@ import {
   type TableDraft,
 } from "@/components/database/schema/changes"
 import { TypeField, useColumnTypes } from "@/components/database/schema/fields"
+import { useFocusReturn } from "@/components/database/schema/focus"
 import { SchemaSelect } from "@/components/database/schema/object-forms"
 import type { DbCatalogSchema, DdlAnswer } from "@/components/database/schema/types"
 import { runChange, usePreview } from "@/components/database/schema/use-ddl"
@@ -49,7 +50,8 @@ function worked(draft: TableDraft): boolean {
  *
  * The draft is kept for the tab. Closing the panel — a slip of Escape, a
  * press outside it, a look at another table — loses nothing: opening it again
- * finds the rows as they were left, with "Start over" to clear them.
+ * finds the rows as they were left, with "Start over" to clear them. When
+ * it closes, the keyboard goes back to the control that opened it.
  */
 export function NewTablePanel({
   open,
@@ -67,6 +69,7 @@ export function NewTablePanel({
 }) {
   const ids = useId()
   const { id, engine } = useDatabase()
+  useFocusReturn(open)
   const [kept, setKept] = useSessionState<TableDraft>(`databases.${id}.schema.newTable`, START)
   // A draft with no rows yet is the form's first sight: one empty row to type in.
   const draft: TableDraft = kept.columns.length > 0 ? kept : { ...kept, columns: [FIRST_ROW] }

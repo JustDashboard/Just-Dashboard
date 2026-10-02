@@ -220,6 +220,14 @@ type SchemaMock = DatabaseMock & {
   runRefused?: { status: number; message: string }
   /** `GET /catalog` fails until this is cleared by the spec. */
   catalogDown?: { down: boolean }
+  /** `GET /table` fails while this is set. */
+  tableDown?: { down: boolean }
+  /** A preview of a destructive change answers only once this settles. */
+  previewHeld?: Promise<unknown>
+  /** A maintenance command answers only once this settles. */
+  maintenanceHeld?: Promise<unknown>
+  /** The engine gave no index sizes or counts, and said why in its own error's words. */
+  indexesUnread?: boolean
   /** The graph `GET /graph` answers, by schema asked for ("" = every schema). */
   graphs?: Record<string, unknown>
   /** What `GET /diagram` holds as the saved layout. */
@@ -277,6 +285,13 @@ async function mockSchema(page: Page, options: SchemaMock = {}, connection = 1) 
     if (rest === "/table") {
       sent.tables.push(url)
       const table = url.searchParams.get("table") ?? ""
+      if (options.tableDown?.down) {
+        return json(
+          route,
+          { error: { code: "connect_failed", message: "the server did not answer" } },
+          502,
+        )
+      }
       if (table === "gone") {
         return json(
           route,
@@ -388,7 +403,10 @@ async function mockSchema(page: Page, options: SchemaMock = {}, connection = 1) 
         )
       }
       const statement = statementOf(entry)
-      if (preview) return json(route, { preview: true, statement, statements: [statement] })
+      if (preview) {
+        if (method === "DELETE") await options.previewHeld
+        return json(route, { preview: true, statement, statements: [statement] })
+      }
       await options.runHeld
       if (options.runRefused) {
         return json(
@@ -426,6 +444,32 @@ async function mockSchema(page: Page, options: SchemaMock = {}, connection = 1) 
             modsSinceAnalyze: 0,
             lastAutovacuum: "2026-10-01T08:00:00Z",
             lastAnalyze: "2026-10-01T08:00:00Z",
+          },
+        ],
+      })
+    }
+    if (rest === "/indexstats" && options.indexesUnread) {
+      return json(route, {
+        supported: true,
+        schema,
+        truncated: false,
+        notes: [
+          "Index sizes need read access to mysql.innodb_index_stats.",
+          "Use counts are unavailable: this account may not read performance_schema (Error 1142 (42000): SELECT command denied to user 'app'@'10.0.0.1'), so no index can be called unused.",
+        ],
+        indexes: [
+          {
+            schema,
+            table: "orders",
+            name: "orders_status_idx",
+            columns: ["status"],
+            unique: false,
+            primary: false,
+            valid: true,
+            bytes: 0,
+            scans: -1,
+            rowsRead: -1,
+            unused: false,
           },
         ],
       })
@@ -489,6 +533,15 @@ async function mockSchema(page: Page, options: SchemaMock = {}, connection = 1) 
               requires: "destructive",
             },
             {
+              id: "reindex",
+              label: "Reindex",
+              description: "Builds every index of the table again. Blocks writes while it does.",
+              scope: "either",
+              blocking: true,
+              requires: "destructive",
+              options: ["concurrently"],
+            },
+            {
               id: "checkpoint",
               label: "Checkpoint",
               description: "The whole database.",
@@ -500,6 +553,7 @@ async function mockSchema(page: Page, options: SchemaMock = {}, connection = 1) 
       }
       const body = request.postDataJSON() as Record<string, unknown>
       sent.maintenance.push(body)
+      await options.maintenanceHeld
       return json(route, {
         action: body.action,
         statements: [`ANALYZE VERBOSE "public"."orders"`],
@@ -608,6 +662,55 @@ test("the tree lists a schema by kind, with what an extension installed folded a
   )
 })
 
+test("with nothing chosen the page is the schema: its figures, and its largest tables", async ({
+  page,
+}) => {
+  await mockSchema(page)
+  await page.goto("/databases/1/schema?schema=public")
+  // Figures the tree cannot give: read from the engine's own statistics where it keeps them.
+  const tile = (label: string) =>
+    page.locator("[data-slot=stat-tile]").filter({ has: page.getByText(label, { exact: true }) })
+  await expect(tile("Tables")).toContainText("3")
+  await expect(tile("Tables")).toContainText("and 1 view")
+  await expect(tile("Rows")).toContainText("~28.2k")
+  await expect(tile("On disk")).toContainText("5.5 MB")
+  await expect(tile("In indexes")).toContainText("%")
+  // The large ones are a press from open.
+  const largest = page.getByRole("region", { name: "Largest in public" })
+  await expect(largest.getByRole("button")).toHaveCount(3)
+  await largest.getByRole("button", { name: "Open orders" }).click()
+  await expect(page).toHaveURL(/schema=public&table=orders$/)
+  await page.goBack()
+  // An enum's labels are read without opening it.
+  await expect(page.getByRole("region", { name: "Enum types" })).toContainText("sadokhappy")
+})
+
+test("on a phone the tree lies over the schema, and has a way off it with nothing chosen", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockSchema(page)
+  await page.goto("/databases/1/schema?schema=sales")
+  const rail = page.getByRole("navigation", { name: "Objects of this schema" })
+  await expect(rail).toBeVisible()
+  // What the tree covers is not there to the keyboard.
+  await expect(page.locator("[data-slot=schema-browser] > [inert]")).toHaveCount(1)
+  // The schema's own verbs are in the tree's head: it is all a phone shows.
+  await rail.getByRole("button", { name: "More for sales" }).click()
+  await expect(page.getByRole("menuitem", { name: "Drop schema…" })).toBeVisible()
+  await page.keyboard.press("Escape")
+
+  await page.getByRole("button", { name: "Show sales" }).click()
+  await expect(rail).toBeHidden()
+  await expect(page.getByRole("region", { name: "Largest in sales" })).toBeVisible()
+  await page.getByRole("button", { name: "Show the objects" }).click()
+  await expect(rail).toBeVisible()
+
+  // With a table open the same foot leads back to it, and the head keeps its schema.
+  await rail.getByRole("link", { name: /^orders/ }).click()
+  await expect(page.getByRole("heading", { name: "sales.orders" })).toContainText("sales")
+})
+
 test("a table is its schema and its name: two schemas' orders are two tables", async ({ page }) => {
   const { sent } = await mockSchema(page)
   await page.goto("/databases/1/schema?schema=public")
@@ -700,12 +803,38 @@ test("a catalogue that cannot be read offers Retry, and a later failure keeps wh
     rail.getByRole("region", { name: "Tables" }).getByRole("link", { name: /^orders/ }),
   ).toBeVisible()
 
-  // The next read fails: the tree that was read stays.
+  // The next read fails: the tree that was read stays — and says it is the
+  // last reading, not the one just asked for.
   down.down = true
   await rail.getByRole("button", { name: "Read the schema again" }).click()
+  await expect(rail.getByText("Not read again")).toBeVisible()
+  await expect(page.getByText("The schema could not be read again")).toBeVisible()
   await expect(
     rail.getByRole("region", { name: "Tables" }).getByRole("link", { name: /^orders/ }),
   ).toBeVisible()
+  down.down = false
+  await rail.getByRole("button", { name: "Try again" }).click()
+  await expect(rail.getByText("Not read again")).toBeHidden()
+})
+
+test("a table that cannot be read again says so over what it read before", async ({ page }) => {
+  const down = { down: false }
+  await mockSchema(page, { tableDown: down })
+  await page.goto(TABLE)
+  await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
+  down.down = true
+  // The read that follows a change is the same read: a failure there used to
+  // leave the old structure on screen without a word.
+  await page.getByRole("button", { name: "Read the schema again" }).click()
+  await expect(page.getByText("What is shown is the last reading of orders.")).toBeVisible()
+  await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
+  down.down = false
+  await page
+    .getByRole("status")
+    .filter({ hasText: "last reading of orders" })
+    .getByRole("button", { name: "Try again" })
+    .click()
+  await expect(page.getByText("What is shown is the last reading of orders.")).toBeHidden()
 })
 
 test("reading the schema again reads the open table again with it", async ({ page }) => {
@@ -752,6 +881,12 @@ test("?new=table opens the panel; a half-filled column stops it and the statemen
     panel.getByText('CREATE TABLE "sales"."invoices" ("id" bigserial, "total" bigint)'),
   ).toBeVisible()
   await panel.getByRole("button", { name: "Create table" }).click()
+  await expect(page).toHaveURL(/schema=sales&table=invoices$/)
+  // The entry that asked for the form no longer asks: Back is the schema.
+  await page.goBack()
+  await expect(page).toHaveURL(/schema\?schema=public$/)
+  await expect(panel).toBeHidden()
+  await page.goForward()
   await expect(page).toHaveURL(/schema=sales&table=invoices$/)
 
   // What was shown is what ran: the same body, once with preview and once without.
@@ -862,7 +997,11 @@ test("Escape does not lose typed work, and a running statement cannot be dismiss
   await dialog.getByLabel("Type", { exact: true }).fill("integer")
   await page.keyboard.press("Escape")
   await expect(dialog.getByText("Close and lose what you typed?")).toBeVisible()
-  await dialog.getByRole("button", { name: "Keep editing" }).click()
+  // The question has the keyboard, and Escape again means "keep editing".
+  await expect(dialog.getByRole("button", { name: "Keep editing" })).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(dialog.getByText("Close and lose what you typed?")).toBeHidden()
+  await expect(dialog.getByLabel("Type", { exact: true })).toBeFocused()
   await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue("priority")
 
   // While the statement runs, neither Escape nor the corner closes the dialog.
@@ -873,6 +1012,31 @@ test("Escape does not lose typed work, and a running statement cannot be dismiss
   await expect(dialog.getByText("Close and lose what you typed?")).toBeHidden()
   run.release()
   await expect(dialog).toBeHidden()
+  // The keyboard goes back to the control the form was opened from.
+  await expect(page.getByRole("button", { name: "Add column" })).toBeFocused()
+})
+
+test("a form opened from a row's menu hands the keyboard back to that menu's button", async ({
+  page,
+}) => {
+  await mockSchema(page)
+  await page.goto(TABLE)
+  const menu = page.getByRole("button", { name: "Actions for note", exact: true })
+  await menu.click()
+  await page.getByRole("menuitem", { name: "Rename" }).click()
+  await expect(page.getByRole("dialog", { name: "Rename column" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(menu).toBeFocused()
+
+  // A confirmation that is cancelled does the same.
+  await menu.click()
+  await page.getByRole("menuitem", { name: "Drop…" }).click()
+  await page
+    .getByRole("dialog", { name: "Drop column" })
+    .getByRole("button", { name: "Cancel" })
+    .click()
+  await expect(menu).toBeFocused()
 })
 
 test("a statement the engine refuses leaves the form as it was, with the engine's words", async ({
@@ -891,7 +1055,9 @@ test("a statement the engine refuses leaves the form as it was, with the engine'
   await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue("priority")
 })
 
-test("a type change is confirmed by name; a default alone is not", async ({ page }) => {
+test("a type change is asked about in the form's own footer; a default alone is not", async ({
+  page,
+}) => {
   const { sent } = await mockSchema(page)
   await page.goto(TABLE)
   await page.getByRole("button", { name: "Edit status" }).click()
@@ -906,14 +1072,22 @@ test("a type change is confirmed by name; a default alone is not", async ({ page
   await expect(dialog.getByText('ALTER COLUMN "status" TYPE varchar(40)')).toBeVisible()
   // This engine answered the page's question about a conversion: the field is offered.
   await expect(dialog.getByLabel("Convert the stored values with")).toBeVisible()
+  // What the change does to the rows is said as soon as the form states it.
+  await expect(dialog.getByText("This rewrites status in every row")).toBeVisible()
   await dialog.getByRole("button", { name: "Change column…" }).click()
 
-  const confirm = page.getByRole("dialog", { name: "Change column" })
-  await expect(confirm.getByText("public.orders.status")).toBeVisible()
-  await expect(confirm.getByText(/rewrites this column in every row/)).toBeVisible()
-  await expect(confirm.getByText('ALTER COLUMN "status" TYPE varchar(40)')).toBeVisible()
+  // One dialog: the question is asked over the subject and the statement it is about.
+  await expect(page.getByRole("dialog")).toHaveCount(1)
+  await expect(dialog.getByText("Rewrite status in every row of orders?")).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Keep editing" })).toBeFocused()
   expect(runs(sent)).toEqual([])
-  await confirm.getByRole("button", { name: "Change column" }).click()
+  // Escape answers "no" and leaves the form as it was.
+  await page.keyboard.press("Escape")
+  await expect(dialog.getByText("Rewrite status in every row of orders?")).toBeHidden()
+  await expect(dialog.getByLabel("Type", { exact: true })).toHaveValue("varchar(40)")
+
+  await dialog.getByRole("button", { name: "Change column…" }).click()
+  await dialog.getByRole("button", { name: "Change column", exact: true }).click()
   await expect(dialog).toBeHidden()
   expect(runs(sent)[0].body).toEqual({
     schema: "public",
@@ -935,14 +1109,79 @@ test("a type change is confirmed by name; a default alone is not", async ({ page
   })
 })
 
+test("a confirmed change the engine refuses says so in the form, not only in a toast", async ({
+  page,
+}) => {
+  await mockSchema(page, {
+    runRefused: {
+      status: 400,
+      message: 'ERROR: column "status" cannot be cast automatically to type integer',
+    },
+  })
+  await page.goto(TABLE)
+  await page.getByRole("button", { name: "Edit status" }).click()
+  const dialog = page.getByRole("dialog", { name: "Edit column" })
+  await dialog.getByLabel("Type", { exact: true }).fill("integer")
+  await dialog.getByRole("button", { name: "Change column…" }).click()
+  await dialog.getByRole("button", { name: "Change column", exact: true }).click()
+  await expect(
+    dialog.getByText(/Nothing was changed\..*cannot be cast automatically/),
+  ).toBeVisible()
+  // The form is as it was, the question is withdrawn, and nothing is stacked over it.
+  await expect(page.getByRole("dialog")).toHaveCount(1)
+  await expect(dialog.getByLabel("Type", { exact: true })).toHaveValue("integer")
+  await expect(dialog.getByRole("button", { name: "Change column…" })).toBeVisible()
+})
+
+test("a computed column is not offered for editing, and a key into another schema says which", async ({
+  page,
+}) => {
+  await mockSchema(page, {
+    details: {
+      "public.orders": {
+        columns: [
+          ...ORDERS_COLUMNS,
+          { name: "total", type: "numeric", nullable: true, position: 5, generated: "qty * price" },
+        ],
+        foreignKeys: [
+          {
+            name: "orders_customer_id_fkey",
+            columns: ["customer_id"],
+            refSchema: "sales",
+            refTable: "customers",
+            refColumns: ["id"],
+          },
+        ],
+      },
+    },
+  })
+  await page.goto(TABLE)
+  await expect(page.getByRole("cell", { name: "total", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Edit status" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Edit total" })).toHaveCount(0)
+  // It can still be renamed and dropped.
+  await page.getByRole("button", { name: "Actions for total", exact: true }).click()
+  await expect(page.getByRole("menuitem")).toHaveText(["Rename", "Add comment", "Drop…"])
+  await page.keyboard.press("Escape")
+
+  const key = page.getByRole("link", { name: "sales.customers.id" })
+  await expect(key).toHaveAttribute("href", /schema=sales&table=customers/)
+})
+
 test("a drop is previewed once, confirmed by name, and sent to the destructive route", async ({
   page,
 }) => {
-  const { sent } = await mockSchema(page)
+  const read = hold()
+  const { sent } = await mockSchema(page, { previewHeld: read.until })
   await page.goto(TABLE)
   // Each row's menu is named for its column.
   await page.getByRole("button", { name: "Actions for note", exact: true }).click()
   await page.getByRole("menuitem", { name: "Drop…" }).click()
+  // The statement is slow to come: the wait is said, and a second press is not a second ask.
+  await expect(page.getByText("Drop column: reading the statement…")).toBeVisible()
+  await page.getByRole("button", { name: "Actions for note", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Drop…" }).click()
+  read.release()
   const confirm = page.getByRole("dialog", { name: "Drop column" })
   await expect(confirm.getByText("public.orders.note")).toBeVisible()
   await expect(confirm.getByText('ALTER TABLE "public"."orders" DROP COLUMN "note"')).toBeVisible()
@@ -996,6 +1235,28 @@ test("keys and constraints: what points where, what is dropped with what", async
   await expect(page.getByRole("tab", { name: /Indexes/ })).toHaveAttribute("aria-selected", "true")
 })
 
+test("on a phone a table's indexes and keys are read down, with every verb in reach", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockSchema(page)
+  await page.goto(`${TABLE}&view=indexes`)
+  // Across, the table ran off the pane and took its drop control with it.
+  await expect(page.getByRole("list", { name: "Indexes" }).getByRole("listitem")).toHaveCount(2)
+  await expect(page.getByRole("button", { name: "Drop orders_status_idx" })).toBeInViewport({
+    ratio: 1,
+  })
+  await page.getByRole("tab", { name: /Keys/ }).click()
+  await expect(
+    page.getByRole("list", { name: "Keys and constraints" }).getByRole("listitem"),
+  ).toHaveCount(3)
+  await expect(page.getByRole("button", { name: "Drop orders_customer_id_fkey" })).toBeInViewport({
+    ratio: 1,
+  })
+  // The head names the table whole at this width too.
+  await expect(page.getByRole("heading", { name: "public.orders" })).toContainText("public")
+})
+
 test("a foreign key is built against the other table's own columns", async ({ page }) => {
   const { sent } = await mockSchema(page)
   await page.goto(`${TABLE}&view=keys`)
@@ -1016,6 +1277,76 @@ test("a foreign key is built against the other table's own columns", async ({ pa
     refTable: "customers",
     refColumns: ["id"],
   })
+})
+
+test("a foreign key's actions and an index's methods are the engine's own choices", async ({
+  page,
+}) => {
+  // PostgreSQL: every action, its methods, and room for an extension's.
+  await mockSchema(page)
+  await page.goto(`${TABLE}&view=keys`)
+  await page.getByRole("button", { name: "Add foreign key" }).click()
+  const key = page.getByRole("dialog", { name: "Add foreign key" })
+  await key.getByRole("combobox", { name: "When the row it points at is deleted" }).click()
+  await expect(page.getByRole("option")).toHaveText([
+    "no action",
+    "restrict",
+    "cascade",
+    "set null",
+    "set default",
+  ])
+  await page.keyboard.press("Escape")
+  await key.getByRole("button", { name: "Cancel" }).click()
+
+  await page.getByRole("tab", { name: /Indexes/ }).click()
+  await page.getByRole("button", { name: "Add index" }).click()
+  const index = page.getByRole("dialog", { name: "Add index" })
+  await index.getByRole("combobox", { name: "Method" }).click()
+  await expect(page.getByRole("option")).toHaveText([
+    "The engine’s default",
+    "btree",
+    "hash",
+    "gin",
+    "gist",
+    "spgist",
+    "brin",
+    "Another, by name…",
+  ])
+  await page.getByRole("option", { name: "gin", exact: true }).click()
+  await index.getByRole("button", { name: "status", exact: true }).click()
+  await expect(index.getByText(/"method":"gin"/)).toBeVisible()
+})
+
+test("an engine's limits on those choices are left out and said, not found by refusal", async ({
+  page,
+}) => {
+  // MariaDB behind the mysql driver: no SET DEFAULT, a closed list of methods.
+  await mockSchema(page, {}, 2)
+  await page.goto("/databases/2/schema?schema=public&table=orders&view=keys")
+  await page.getByRole("button", { name: "Add foreign key" }).click()
+  const key = page.getByRole("dialog", { name: "Add foreign key" })
+  await key.getByRole("combobox", { name: "When its key is changed" }).click()
+  await expect(page.getByRole("option")).toHaveText([
+    "no action",
+    "restrict",
+    "cascade",
+    "set null",
+  ])
+  await page.keyboard.press("Escape")
+  await expect(key.getByText(/does not set a default through a foreign key/)).toBeVisible()
+  await key.getByRole("button", { name: "Cancel" }).click()
+
+  await page.getByRole("tab", { name: /Indexes/ }).click()
+  await page.getByRole("button", { name: "Add index" }).click()
+  const index = page.getByRole("dialog", { name: "Add index" })
+  await index.getByRole("combobox", { name: "Method" }).click()
+  await expect(page.getByRole("option")).toHaveText([
+    "The engine’s default",
+    "btree",
+    "hash",
+    "fulltext",
+    "spatial",
+  ])
 })
 
 /* ----------------------------------------------------- roles and limits */
@@ -1088,6 +1419,20 @@ test("SQLite's limits are stated where the controls would be, not found by an er
   ).toBeVisible()
   await expect(page.getByRole("button", { name: "Replace the query" })).toBeDisabled()
   expect(runs(sent)).toEqual([])
+})
+
+test("Query hands over a SELECT in the engine's dialect, without reading the table to learn it", async ({
+  page,
+}) => {
+  const { sent } = await mockSchema(page)
+  await page.goto(TABLE)
+  await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Query", exact: true }).click()
+  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
+  expect(new URL(page.url()).searchParams.get("sql")).toBe(
+    'SELECT * FROM "public"."orders" LIMIT 100',
+  )
+  expect(sent.browse).toEqual([])
 })
 
 /* ------------------------------------------------- views, objects, types */
@@ -1184,6 +1529,100 @@ test("statistics: what the engine measured, and the maintenance a role may run",
   await expect(confirm.getByText(/Takes an exclusive lock/)).toBeVisible()
   expect(sent.maintenance).toHaveLength(1)
   await confirm.getByRole("button", { name: "Cancel" }).click()
+
+  // An action that can be asked for two ways offers both, and sends the one chosen.
+  await maintenance.getByRole("button", { name: "Reindex" }).click()
+  await expect(page.getByRole("menuitem")).toHaveText(["Reindex…", "Reindex concurrently…"])
+  await page.getByRole("menuitem", { name: "Reindex concurrently…" }).click()
+  const ask = page.getByRole("dialog", { name: "Reindex concurrently" })
+  await expect(ask.getByText(/beside the old one/)).toBeVisible()
+  await ask.getByRole("button", { name: "Reindex concurrently" }).click()
+  await expect(maintenance.getByText(/Reindex concurrently finished/)).toBeVisible()
+  expect(sent.maintenance[1]).toEqual({
+    action: "reindex",
+    schema: "public",
+    table: "orders",
+    options: { concurrently: true },
+  })
+})
+
+test("a maintenance command goes on while the reader looks at another reading", async ({
+  page,
+}) => {
+  const command = hold()
+  const { sent } = await mockSchema(page, { maintenanceHeld: command.until })
+  const dropped: string[] = []
+  page.on("requestfailed", (request) => {
+    if (request.url().includes("/maintenance")) dropped.push(request.url())
+  })
+  await page.goto(`${TABLE}&view=statistics`)
+  await page
+    .getByRole("region", { name: "Maintenance" })
+    .getByRole("button", { name: "Analyze" })
+    .click()
+  const running = page.getByRole("status").filter({ hasText: "Analyze is running on orders" })
+  await expect(running).toBeVisible()
+
+  // Another reading of the table, and another table: the request is not dropped.
+  await page.getByRole("tab", { name: /Columns/ }).click()
+  await expect(running).toBeVisible()
+  const tables = page
+    .getByRole("navigation", { name: "Objects of this schema" })
+    .getByRole("region", { name: "Tables" })
+  await tables.getByRole("link", { name: /^customers/ }).click()
+  await expect(page.getByRole("heading", { name: "public.customers" })).toBeVisible()
+  await expect(running).toBeHidden()
+  await page.goBack()
+  await expect(running).toBeVisible()
+  expect(dropped).toEqual([])
+  expect(sent.maintenance).toHaveLength(1)
+
+  // It lands while nobody is looking at Statistics: a toast says how it went,
+  // and the outcome is there on the way back.
+  command.release()
+  await expect(page.getByText("Analyze on orders finished")).toBeVisible()
+  await expect(running).toBeHidden()
+  await page.getByRole("tab", { name: "Statistics" }).click()
+  await expect(
+    page.getByRole("region", { name: "Maintenance" }).getByText(/Analyze finished/),
+  ).toBeVisible()
+})
+
+test("only Stop ends a maintenance command", async ({ page }) => {
+  const command = hold()
+  await mockSchema(page, { maintenanceHeld: command.until })
+  const dropped: string[] = []
+  page.on("requestfailed", (request) => {
+    if (request.url().includes("/maintenance")) dropped.push(request.url())
+  })
+  await page.goto(`${TABLE}&view=statistics`)
+  await page
+    .getByRole("region", { name: "Maintenance" })
+    .getByRole("button", { name: "Analyze" })
+    .click()
+  const running = page.getByRole("status").filter({ hasText: "Analyze is running on orders" })
+  await running.getByRole("button", { name: "Stop" }).click()
+  await expect(page.getByText("Analyze on orders was stopped")).toBeVisible()
+  await expect(running).toBeHidden()
+  expect(dropped).toHaveLength(1)
+  command.release()
+})
+
+test("a figure the engine could not read is not drawn as zero, nor its error printed", async ({
+  page,
+}) => {
+  await mockSchema(page, { indexesUnread: true })
+  await page.goto(`${TABLE}&view=statistics`)
+  const use = page.getByRole("region", { name: "Index use" })
+  await expect(use.getByRole("row", { name: /orders_status_idx/ })).toBeVisible()
+  await expect(use).not.toContainText("0 B")
+  await expect(use.getByRole("columnheader", { name: "Size" })).toHaveCount(0)
+  await expect(use.getByRole("columnheader", { name: "Scans" })).toHaveCount(0)
+  const panel = page.getByRole("tabpanel")
+  await expect(
+    panel.getByText(/this account may not read performance_schema, so no index/),
+  ).toBeVisible()
+  await expect(panel).not.toContainText("Error 1142")
 })
 
 /* -------------------------------------------------------------- diagram */
@@ -1248,8 +1687,12 @@ test("two schemas' tables of one name are two tables on the diagram", async ({ p
   // With more than one schema in the picture, a name is said with its schema.
   await expect(tableNode(page, "sales.orders")).toContainText("sales.orders")
 
+  // Each schema's tables carry its mark, and the legend says whose it is.
+  await expect(page.getByText("primary key").locator("..").locator("..")).toContainText("sales")
+
   // Hiding one of them hides that one, and the layout that is saved says which.
   const inspector = page.getByRole("complementary", { name: "Diagram inspector" })
+  await page.getByRole("button", { name: "Show the inspector (I)" }).click()
   await inspector.getByRole("checkbox", { name: "Show sales.orders on the diagram" }).click()
   await expect(tableNode(page, "sales.orders")).toHaveCount(0)
   await expect(tableNode(page, "public.orders")).toBeVisible()
@@ -1271,8 +1714,14 @@ test("the diagram says which schema it draws, and another is a press away", asyn
   await page.getByRole("button", { name: "schema: public" }).click()
   await page.getByRole("menuitem", { name: "Every schema" }).click()
   await expect(page.locator(".react-flow__node")).toHaveCount(3)
-  await expect(page).not.toHaveURL(/schema=/)
+  // "Every schema" is said in the address, so it can be pasted and gone back from.
+  await expect(page).toHaveURL(/every=1/)
   await expect(page.getByRole("button", { name: "schema: Every schema" })).toBeVisible()
+  await page.goBack()
+  await expect(page).toHaveURL(/diagram\?schema=public$/)
+  await expect(page.locator(".react-flow__node")).toHaveCount(2)
+  await page.goForward()
+  await expect(page.locator(".react-flow__node")).toHaveCount(3)
 })
 
 test("one schema can be chosen again after every schema was", async ({ page }) => {
@@ -1359,7 +1808,7 @@ test("forgetting a layout asks first", async ({ page }) => {
   expect(sent.layouts.some((l) => l.method === "DELETE")).toBe(true)
 })
 
-test("a table's menu leads to its data, its schema and a SELECT the server wrote", async ({
+test("a table's menu leads to its data, its schema and a SELECT in the engine's dialect", async ({
   page,
 }) => {
   const { sent } = await mockSchema(page, { graphs: GRAPHS })
@@ -1374,11 +1823,12 @@ test("a table's menu leads to its data, its schema and a SELECT the server wrote
   await button.click()
   await page.getByRole("menuitem", { name: "Open a SELECT in Query" }).click()
   await expect(page).toHaveURL(/\/databases\/1\/query\?/)
-  // The statement is the server's, quoted its way; the page only filled in the size.
+  // Both parts of the name quoted the engine's way — and written at once:
+  // the table is not read to learn how it is read.
   expect(new URL(page.url()).searchParams.get("sql")).toBe(
-    'SELECT * FROM "sales"."orders" ORDER BY "id" ASC LIMIT 100 OFFSET 0',
+    'SELECT * FROM "sales"."orders" LIMIT 100',
   )
-  expect(sent.browse.at(-1)?.searchParams.get("schema")).toBe("sales")
+  expect(sent.browse).toEqual([])
 
   await page.goBack()
   await page.getByRole("button", { name: "Actions for sales.orders" }).click()
@@ -1386,22 +1836,90 @@ test("a table's menu leads to its data, its schema and a SELECT the server wrote
   await expect(page).toHaveURL(/\/databases\/1\/schema\?schema=sales&table=orders/)
 })
 
+test("the inspector opens on what is chosen, and gives the canvas back when nothing is", async ({
+  page,
+}) => {
+  await mockSchema(page, {
+    graphs: {
+      ...GRAPHS,
+      // A key that leaves the picture: public.orders points into sales.
+      public: {
+        ...PUBLIC,
+        edges: [
+          ...PUBLIC.edges,
+          {
+            name: "orders_region_fkey",
+            from: "public.orders",
+            to: "sales.regions",
+            fromSchema: "public",
+            fromTable: "orders",
+            fromColumn: "id",
+            toSchema: "sales",
+            toTable: "regions",
+            toColumn: "id",
+            cardinality: "many-to-one",
+          },
+        ],
+      },
+    },
+  })
+  await page.goto("/databases/1/diagram?schema=public")
+  const inspector = page.getByRole("complementary", { name: "Diagram inspector" })
+  await expect(tableNode(page, "public.orders")).toBeVisible()
+  // Nobody asked for it yet: the canvas has the whole pane.
+  await expect(inspector).toBeHidden()
+
+  await tableNode(page, "public.orders")
+    .getByRole("button", { name: "orders", exact: true })
+    .click()
+  await expect(inspector).toBeVisible()
+  await expect(inspector.getByText("Referenced by")).toBeVisible()
+  // A key into a table that is not drawn says which schema it goes to, and leads there.
+  const outside = inspector.getByRole("link", { name: /sales\.regions\.id/ })
+  await expect(outside).toContainText("not drawn")
+  await expect(outside).toHaveAttribute("href", /schema\?schema=sales&table=regions/)
+
+  // Closed over the table chosen, it stays closed for that table.
+  await inspector.getByRole("button", { name: "Close the inspector" }).click()
+  await expect(inspector).toBeHidden()
+  await tableNode(page, "public.customers")
+    .getByRole("button", { name: "customers", exact: true })
+    .click()
+  await expect(inspector).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(inspector).toBeHidden()
+})
+
 test("the diagram's single keys are heard in the diagram only", async ({ page }) => {
   await mockSchema(page, { graphs: GRAPHS })
   await page.goto("/databases/1/diagram?schema=public")
   const inspector = page.getByRole("complementary", { name: "Diagram inspector" })
-  await expect(inspector).toBeVisible()
+  await expect(tableNode(page, "public.orders")).toBeVisible()
+  await expect(inspector).toBeHidden()
 
   // Focus elsewhere on the page: "i" is a letter, not a command.
   await page.getByRole("button", { name: /^Database: shop/ }).focus()
   await page.keyboard.press("i")
-  await expect(inspector).toBeVisible()
+  await expect(inspector).toBeHidden()
 
-  // Focus on a table of the diagram: it closes the inspector, and opens it again.
+  // Focus on a table of the diagram: it opens the inspector, and closes it again.
   await page.getByRole("button", { name: "Actions for public.orders" }).focus()
   await page.keyboard.press("i")
-  await expect(inspector).toBeHidden()
+  await expect(inspector).toBeVisible()
   await page.keyboard.press("i")
+  await expect(inspector).toBeHidden()
+})
+
+test("on a phone the inspector takes none of the canvas until it is asked for", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockSchema(page, { graphs: GRAPHS })
+  await page.goto("/databases/1/diagram?schema=public")
+  const inspector = page.getByRole("complementary", { name: "Diagram inspector" })
+  await expect(tableNode(page, "public.orders")).toBeVisible()
+  await expect(inspector).toBeHidden()
+  await page.getByRole("button", { name: "Show the inspector (I)" }).click()
   await expect(inspector).toBeVisible()
 })
 
@@ -1413,11 +1931,17 @@ test("a note is kept with the table it is on, and typed work is not lost to Esca
   await page.getByRole("button", { name: "Actions for sales.orders" }).click()
   await page.getByRole("menuitem", { name: "Add a note…" }).click()
   const dialog = page.getByRole("dialog", { name: "Add a note" })
+  // Two tables are called orders here: the note says which it is on.
+  await expect(dialog.getByText("Note on sales.orders")).toBeVisible()
   await dialog.getByRole("textbox").fill("Wholesale only")
   await page.keyboard.press("Escape")
   await expect(dialog.getByText("Close and lose what you typed?")).toBeVisible()
-  await dialog.getByRole("button", { name: "Keep editing" }).click()
+  await expect(dialog.getByRole("button", { name: "Keep editing" })).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(dialog.getByRole("textbox")).toBeFocused()
   await dialog.getByRole("button", { name: "Save note" }).click()
+  // The keyboard goes back to the table the note is on.
+  await expect(page.getByRole("button", { name: "Actions for sales.orders" })).toBeFocused()
   await expect(tableNode(page, "sales.orders")).toContainText("Wholesale only")
   await expect(tableNode(page, "public.orders")).not.toContainText("Wholesale only")
   await expect
@@ -1435,7 +1959,7 @@ test("an empty schema says so on the diagram, and the picker is still there", as
     "href",
     /schema\?schema=sales&new=table/,
   )
-  await page.getByRole("button", { name: "Show every schema" }).click()
+  await page.getByRole("link", { name: "Show every schema" }).click()
   await expect(page.locator(".react-flow__node")).toHaveCount(3)
 })
 
