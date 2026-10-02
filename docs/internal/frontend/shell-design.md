@@ -1,6 +1,6 @@
 # Frontend shell and design system
 
-The App Router currently has 85 `page.tsx` entry points, including nested database, Docker, proxy,
+The App Router currently has 89 `page.tsx` entry points, including nested database, Docker, proxy,
 security, and deployment workflows plus `/login`. Most page modules are client components; the three
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
@@ -154,9 +154,13 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   Do not reintroduce a route-level strip for them (see the `SectionNav` note below), and do not give
   one a `useNavScope`: the rail drills into a *section* with many pages, not into a leaf.
 
-  One thing a sheet gives free that a page does not: `onOpenChange` is a single funnel every exit
-  passes through, which is where `files/file-editor.tsx` guards unsaved work. The App Router cannot
-  block a soft navigation, so a detail that guards a dirty buffer on close stays a sheet.
+  A sheet's `onOpenChange` is the funnel for guarding unsaved work. Files keeps that quick-edit
+  sheet and also offers `/files/editor`, a destination with a collapsible file tree.
+  `files/editor-surface.tsx` keeps the text editor's controls identical in both surfaces.
+  Opening the destination transfers text/image drafts in memory; file contents never become a browser
+  storage preference. The destination guards file switches and links with ordinary confirmation,
+  browser unload with `beforeunload`, and cancelable history traversals with the Navigation API.
+  Older browsers without cancelable traversal retain the link and unload guards.
   `Modal` and `SidePanel` share one anatomy: title, tinted strip, a body that is the only
   part that scrolls, a footer strip. Both take `actions` in the title strip; `Modal`'s
   `size="full"` is the whole viewport with that anatomy intact, for the one task that is looking
@@ -274,6 +278,12 @@ Docker socket and a root shell, and a permanent spinner for an operator whose wo
 which is the workstation this is meant to be reached from. `scripts/sync-monaco.mjs` copies
 `monaco-editor/min/vs` into `public/monaco/vs` from the Bun `dev`/`build` scripts and explicitly in the
 Dockerfile. The copy is gitignored and excluded from eslint.
+
+Files exposes Monaco's Find, Replace, Undo, Redo, Format and Commands actions, indentation, word wrap,
+minimap and font size. Models use the file path, search results reveal their matching line, and
+`bun.lock` is recognised as JSON. The image editor bundles ISC-licensed `react-image-crop` 11.1.2
+for resizable, keyboard-accessible crop handles and aspect presets; rotate, flip, resize, adjustments,
+undo/redo, zoom and export remain local canvas operations. No editor loads a runtime from a CDN.
 
 ### Bundled sanitizer advisory review (2026-09-15)
 

@@ -248,6 +248,14 @@ two-gigabyte log.
   boundary beats mid-word and a shallow path beats a deep one; terms ANDed; positions as **UTF-16
   offsets**. Bounded three ways (time, visits, matches) and it *says* when it stopped early — a fuzzy
   search that quietly answers from a third of the disk is worse than one that admits it.
+- **`search.go`** pins the search directory inside an allowed `os.Root`, walks without following
+  symlinks, and opens only regular files with a nonblocking flag and an opened-file stat. Content
+  scans are limited to 4 MiB per file, 100,000 visits, twelve directory levels and the requested hit
+  limit; binary files and generated/system directories are skipped. The palette requests
+  `detailed=true`, which returns every matching line plus `hits`, `truncated`, `visited`, `unreadable`
+  and `elapsedMs`, under a three-second deadline. Snippets centre on the first match and carry UTF-16
+  ranges for literal and regex highlighting. `hidden=false` skips dotfiles; invalid regex is a 400.
+  Callers without `detailed=true` retain the hit array and first matching line per file.
 - **`places.go`**: `Home` prefers `$HOME`, then `/root`, then a single account under `/home`, then the
   first configured root — every candidate checked through `Resolve`, because a shortcut landing outside
   the roots is worse than no shortcut. `Complete` treats a trailing separator as "inside this directory"
@@ -315,17 +323,28 @@ asks once per operation (replace, keep both, skip) before an upload, move or pas
 is taken; "keep both" is `photo (2).jpg` for a transfer and `photo copy.jpg` for a duplicate.
 `media-viewer.tsx` is the full-screen look (a `Modal` at `size="full"`): pictures fit or 1:1, video,
 audio, PDF through a blob, and the same head or archive listing the inspector shows for anything else;
-Space in the listing opens it, the arrows walk the folder's files. The editor gains a full-screen toggle
-and a diff review of the draft against the disk (`diff.ts`, a prefix/suffix-trimmed LCS capped at a few
-million cells) drawn by the git page's `DiffView`. The listing polls every twenty seconds and refetches
+Space in the listing opens it, the arrows walk the folder's files. Text and image editors open beside
+that listing. **Open full editor** transfers the current draft in memory to `/files/editor`, which
+shares the same editor controls beside a collapsible `FileTree`, which unfolds the current file's
+ancestors; on a phone the tree opens over the editor. Contents are never put in browser storage. Monaco exposes Find, Replace, commands, undo/redo,
+formatting, language, indentation, wrap, minimap and font size, with a cursor/UTF-8 size status and a
+diff review (`diff.ts`, a prefix/suffix-trimmed LCS capped at a few million cells) drawn by `DiffView`.
+Content-search results reveal their matching line. `quick-open.tsx` shares one keyboard palette for
+names (Ctrl/Cmd+P) and contents (Ctrl/Cmd+Shift+F), with immediate current-listing name matches,
+cancelled stale requests, hidden/case/regex controls, a wider scope and explicit partial/error states.
+The palette sizes to its results; a failed disk request leaves current-listing matches available. The listing polls every twenty seconds and refetches
 hidden-file flips in place; the parent row is offered only where the parent is inside the roots; a bulk
 delete that includes a folder uses ordinary confirmation like a single one. Two layout rules are easy to undo: **the
 listing body does not scroll** (a sticky table header sticks to its nearest scrolling ancestor), and
 **the sidebar's tree waits for `/files/places`** before mounting, since it caches and would keep showing
 the refusal from listing a root it cannot. The image editor commits each operation to a **new canvas**
-rather than a live parameter pipeline — that is what makes undo a stack of bitmaps and why "rotate, crop,
-rotate again" behaves the way it looks; saving goes through the ordinary upload route with
-`overwrite=true`, so owner and mode survive.
+rather than a live parameter pipeline, with bounded undo/redo, original comparison, zoom, resizing,
+rotation, flips and live brightness/contrast/saturation. `react-image-crop` supplies touch and keyboard
+crop handles and aspect-ratio constraints; native canvas operations stay local to the browser. Save
+bakes live adjustments into PNG/JPEG/WebP, preserving `.jpeg` when applicable. The ordinary upload
+route gets `overwrite=true` only for the source path, preserving owner and mode; a copy refuses an
+occupied name. Both editors guard closing a dirty sheet. The full workspace guards file changes,
+links, unload and cancelable browser-history traversal (see `frontend/shell-design.md`).
 
 Large listings keep every filename and metadata cell mounted: native find, sorting, filtering, range
 selection and select-all still address the complete directory. One shared intersection observer defers

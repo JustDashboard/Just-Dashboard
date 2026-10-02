@@ -54,11 +54,11 @@ export function GridView({
   onDropFiles?: (transfer: DataTransfer, dir: string) => void
   actions: (entry: FileEntry) => FileActions
 }) {
-  const min = size === "sm" ? "7rem" : size === "lg" ? "13rem" : "10rem"
+  const width = size === "sm" ? "6rem" : size === "lg" ? "10rem" : "8rem"
   return (
     <div
-      className="grid gap-2 p-3"
-      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${min}, 1fr))` }}
+      className="grid content-start justify-start gap-x-2 gap-y-3 p-3"
+      style={{ gridTemplateColumns: `repeat(auto-fill, minmax(0, ${width}))` }}
     >
       {entries.map((entry) => (
         <Tile
@@ -133,7 +133,7 @@ function Tile({
       onClick={onSelect}
       onDoubleClick={onOpen}
       className={cn(
-        "group relative flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-transparent p-2 text-center transition-colors select-none",
+        "group relative flex cursor-pointer flex-col items-center gap-1 rounded-md border border-transparent px-1.5 py-2 text-center transition-colors select-none",
         "hover:bg-row-hover",
         (active || selected) && "bg-accent",
         active && "border-rule-brand",
@@ -176,7 +176,7 @@ function Tile({
           aria-hidden
           className={cn(
             "w-full shrink-0",
-            size === "sm" ? "h-16" : size === "lg" ? "h-32" : "h-24",
+            size === "sm" ? "h-12" : size === "lg" ? "h-24" : "h-16",
           )}
         />
       )}

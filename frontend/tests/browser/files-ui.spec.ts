@@ -86,12 +86,31 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
 
+async function mockPicture(page: Page, width = 80, height = 40) {
+  const picture = await page.evaluate(
+    ({ width, height }) => {
+      const canvas = document.createElement("canvas")
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext("2d")!
+      ctx.fillStyle = "red"
+      ctx.fillRect(0, 0, width, height)
+      return canvas.toDataURL().split(",")[1]
+    },
+    { width, height },
+  )
+  await page.route("**/api/v1/files/raw**", (route) =>
+    route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from(picture, "base64") }),
+  )
+}
+
 /** The labels the mocked server holds, which a test can change as the real one would. */
 async function mockFiles(
   page: Page,
   colours: Record<string, string> = { [`${home}/photos`]: "red" },
   palette: { defaultColour?: string } = {},
 ) {
+  await page.routeWebSocket("**/api/v1/system/stream**", (socket) => socket.close())
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api\/v1/, "")
@@ -178,6 +197,32 @@ async function mockFiles(
     if (path === "/files/upload") {
       return json(route, { uploaded: ["x"], path: url.searchParams.get("path") }, 201)
     }
+    if (path === "/files/read")
+      return json(route, {
+        path: url.searchParams.get("path"),
+        content: "# Notes\nhello\n",
+        size: 14,
+        language: "markdown",
+        binary: false,
+        modeOctal: "0644",
+      })
+    if (path === "/files/write") return json(route, { ok: true })
+    if (path === "/files/find")
+      return json(route, {
+        root: home,
+        hits: [],
+        truncated: false,
+        visited: 5,
+        elapsedMs: 2,
+      })
+    if (path === "/files/search")
+      return json(route, {
+        hits: [],
+        truncated: false,
+        visited: 5,
+        unreadable: 0,
+        elapsedMs: 2,
+      })
     if (path === "/files/colours/default") {
       palette.defaultColour = route.request().postDataJSON().colour
       for (const target of Object.keys(colours)) delete colours[target]
@@ -270,6 +315,310 @@ test("the commands sit in the workbench's strip, not in a page header", async ({
   const frame = await strip.boundingBox()
   const pageBox = await page.locator("[data-slot='page']").boundingBox()
   expect(frame!.y - pageBox!.y).toBeLessThan(20)
+})
+
+test("tiles stay compact and toolbar controls share a height", async ({ page }) => {
+  await mockFiles(page)
+  await openFiles(page)
+  await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+  const tile = page.locator('[data-entry-path="' + home + '/photos"]').first()
+  const box = await tile.boundingBox()
+  expect(box!.width).toBeLessThanOrEqual(132)
+  expect(box!.height).toBeLessThan(130)
+  const strip = page.locator("[data-slot='pane-header']").first()
+  const heights = await Promise.all(
+    ["Find", "New", "Upload", "Refresh", "Arrange"].map(async (name) => {
+      const button = strip.getByRole("button", { name, exact: true })
+      return (await button.boundingBox())!.height
+    }),
+  )
+  expect(new Set(heights).size).toBe(1)
+  expect(
+    await page
+      .getByRole("navigation", { name: "Places" })
+      .locator('[aria-current="location"] .rounded-full')
+      .count(),
+  ).toBe(0)
+})
+
+test("find responds from the current listing before a disk search and opens from the keyboard", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/find**", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await json(route, { root: home, hits: [], truncated: false, visited: 5, elapsedMs: 500 })
+  })
+  await openFiles(page)
+  await page.getByRole("button", { name: "Find", exact: true }).click()
+  const input = page.getByRole("combobox", { name: "Find by name" })
+  await input.fill("ntsmd")
+  await expect(page.getByRole("option")).toContainText("notes.md")
+  await input.press("Enter")
+  await expect(page.getByRole("dialog")).toContainText("notes.md")
+  await expect(page.getByRole("button", { name: "Open full editor" })).toBeVisible()
+})
+
+test("content search highlights matches, opens at the line and rejects stale results", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/search**", async (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q")
+    if (query === "old") await new Promise((resolve) => setTimeout(resolve, 700))
+    await json(route, {
+      hits: [
+        {
+          path: home + "/notes.md",
+          name: "notes.md",
+          isDir: false,
+          line: 2,
+          snippet: query + " hello",
+          ranges: [[0, query!.length]],
+        },
+      ],
+      truncated: false,
+      unreadable: 0,
+      visited: 4,
+      elapsedMs: 4,
+    })
+  })
+  await openFiles(page)
+  await page.getByRole("button", { name: "Search inside files", exact: true }).click()
+  const input = page.getByRole("combobox", { name: "Search file contents" })
+  await input.fill("old")
+  await page.waitForRequest(
+    (request) => request.url().includes("/files/search") && request.url().includes("q=old"),
+  )
+  await input.fill("new")
+  await expect(page.getByRole("option")).toContainText("new hello")
+  await expect(page.getByRole("option").locator("mark")).toHaveText("new")
+  await page.waitForTimeout(750)
+  await expect(page.getByRole("option")).not.toContainText("old hello")
+  await input.press("Enter")
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole("dialog")).toContainText("Ln 2")
+})
+
+test("the full editor preserves the sheet draft, saves it and navigates through a collapsible tree", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  let written: { content?: string } = {}
+  await page.route("**/api/v1/files/write", async (route) => {
+    written = route.request().postDataJSON()
+    await json(route, { ok: true })
+  })
+  await openFiles(page)
+  await page.locator('tr[data-entry-path="' + home + '/notes.md"]').dblclick()
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await page.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("unsaved draft")
+  await expect(page.getByRole("dialog")).toContainText("Unsaved changes")
+  await page.getByRole("button", { name: "Open full editor" }).click()
+  await expect(page).toHaveURL(/\/files\/editor\?/)
+  await expect(page.getByRole("complementary", { name: "File explorer" })).toBeVisible()
+  await expect(page.locator(".monaco-editor")).toContainText("unsaved draft")
+  await page.getByRole("button", { name: "Hide file tree" }).click()
+  await expect(page.getByRole("complementary", { name: "File explorer" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Show file tree" }).click()
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => written.content).toContain("unsaved draft")
+  await page
+    .getByRole("complementary", { name: "File explorer" })
+    .getByRole("button", { name: /logo.png/ })
+    .click()
+  await expect(page.getByRole("button", { name: "Crop", exact: true })).toBeVisible()
+})
+
+test("unsaved full-page edits are guarded when changing files or leaving", async ({ page }) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/find**", (route) =>
+    json(route, { hits: [entry("notes.md")], truncated: false }),
+  )
+  await openFiles(page)
+  await page.locator('tr[data-entry-path="' + home + '/notes.md"]').dblclick()
+  await page.getByRole("button", { name: "Open full editor" }).click()
+  await expect(page).toHaveURL(/\/files\/editor\?/)
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await page.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("dirty")
+  await expect(page.getByRole("region", { name: "File editor" })).toContainText("Unsaved changes")
+  await page.keyboard.press("Control+p")
+  const finder = page.getByRole("combobox", { name: "Find by name" })
+  await finder.fill("notes")
+  await expect(page.getByRole("option")).toContainText("notes.md")
+  await finder.press("Enter")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(page.locator(".monaco-editor")).toContainText("dirty")
+  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.locator(".monaco-editor")).toContainText("dirty")
+  await page.evaluate(() => history.back())
+  await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
+  await expect(page).toHaveURL(/\/files\/editor\?/)
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await page.getByRole("button", { name: "Discard and leave", exact: true }).click()
+  await expect(page).toHaveURL(/\/files\?path=/)
+})
+
+test("local name results remain usable when the disk search fails", async ({ page }) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/find**", (route) =>
+    json(
+      route,
+      { error: { code: "internal", message: "Disk search unavailable", retryable: true } },
+      500,
+    ),
+  )
+  await openFiles(page)
+  await page.getByRole("button", { name: "Find", exact: true }).click()
+  const input = page.getByRole("combobox", { name: "Find by name" })
+  await input.fill("ntsmd")
+  await expect(page.getByText("Disk search unavailable")).toBeVisible()
+  await expect(page.getByRole("option")).toContainText("notes.md")
+  await input.press("Enter")
+  await expect(page.getByRole("button", { name: "Open full editor" })).toBeVisible()
+})
+
+test("a deep-linked file unfolds its ancestor folders in the full editor", async ({ page }) => {
+  await mockFiles(page)
+  const path = home + "/site/src/app.ts"
+  await page.route("**/api/v1/files/list**", (route) => {
+    const dir = new URL(route.request().url()).searchParams.get("path")
+    const listing =
+      dir === home
+        ? [entry("site", { isDir: true })]
+        : dir === home + "/site"
+          ? [entry("src", { path: home + "/site/src", isDir: true })]
+          : [entry("app.ts", { path })]
+    return json(route, { path: dir, entries: listing })
+  })
+  await page.goto(`/files/editor?path=${encodeURIComponent(path)}&root=${encodeURIComponent(home)}`)
+  await expect(
+    page
+      .getByRole("complementary", { name: "File explorer" })
+      .getByRole("button", { name: /app.ts/ }),
+  ).toBeVisible()
+})
+
+test("image edits have crop handles, redo and a full editor that keeps the edit", async ({
+  page,
+}) => {
+  await mockFiles(page)
+  await mockPicture(page)
+  await openFiles(page)
+  await page.locator('tr[data-entry-path="' + home + '/logo.png"]').click()
+  await page.getByRole("button", { name: "Crop, rotate, resize" }).click()
+  await page.getByRole("button", { name: "Right", exact: true }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await page.getByRole("button", { name: "Undo", exact: true }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "80")
+  await page.getByRole("button", { name: "Redo", exact: true }).click()
+  await page.getByRole("button", { name: "Open full editor" }).click()
+  await expect(page).toHaveURL(/\/files\/editor\?/)
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "40")
+  await page.getByRole("button", { name: "Crop", exact: true }).click()
+  await expect(page.locator(".ReactCrop__drag-handle").first()).toBeVisible()
+  await expect(page.getByRole("combobox", { name: "Crop aspect ratio" })).toBeVisible()
+  await page.getByRole("button", { name: /^Apply \d/ }).click()
+  await expect(page.getByLabel("Image editing canvas")).toHaveAttribute("width", "32")
+})
+
+test("full editors and the search palette fit desktop and phone widths", async ({ page }) => {
+  await mockFiles(page)
+  await mockPicture(page, 320, 180)
+  await openFiles(page)
+  for (const width of [1280, 1720]) {
+    await page.setViewportSize({ width, height: 960 })
+    await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    await page.screenshot({ path: `test-results/files-tiles-${width}.png` })
+  }
+  await page.getByRole("button", { name: "Find", exact: true }).click()
+  await page.getByRole("combobox", { name: "Find by name" }).fill("ntsmd")
+  await expect(page.getByRole("option")).toContainText("notes.md")
+  const resultBounds = await page.getByRole("listbox", { name: "Search results" }).boundingBox()
+  expect(resultBounds!.height).toBeLessThan(120)
+  await page.screenshot({ path: "test-results/files-find-1720.png" })
+  await page.keyboard.press("Enter")
+  await page.getByRole("button", { name: "Open full editor" }).click()
+  await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  for (const width of [1280, 1720]) {
+    await page.setViewportSize({ width, height: 960 })
+    await page.screenshot({ path: `test-results/files-editor-${width}.png` })
+  }
+  await page.setViewportSize({ width: 375, height: 812 })
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(375)
+  await page.screenshot({ path: "test-results/files-editor-phone.png" })
+  await expect(page.getByRole("complementary", { name: "File explorer" })).toBeHidden()
+  await page.getByRole("button", { name: "Show file tree", exact: true }).click()
+  const tree = page.getByRole("complementary", { name: "File explorer" })
+  await expect(tree).toBeVisible()
+  await tree.getByRole("button", { name: /logo.png/ }).click()
+  await expect(tree).toBeHidden()
+  await expect(page.getByRole("button", { name: "Crop", exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(375)
+  await page.screenshot({ path: "test-results/files-image-editor-phone.png" })
+  await page.setViewportSize({ width: 640, height: 375 })
+  await expect(
+    page.getByRole("button", { name: "Save over original", exact: true }),
+  ).toBeInViewport()
+  await page.getByRole("slider", { name: "saturate", exact: true }).scrollIntoViewIfNeeded()
+  await expect(page.getByRole("slider", { name: "saturate", exact: true })).toBeInViewport()
+  await page.setViewportSize({ width: 1720, height: 960 })
+  await page.screenshot({ path: "test-results/files-image-editor-1720.png" })
+})
+
+test("image export saves live adjustments and a copy keeps the source dirty", async ({ page }) => {
+  await mockFiles(page)
+  await mockPicture(page)
+  let upload: { url: string; body: Buffer } | undefined
+  await page.route("**/api/v1/files/upload**", async (route) => {
+    upload = { url: route.request().url(), body: route.request().postDataBuffer()! }
+    await json(route, { ok: true })
+  })
+  await page.goto(
+    `/files/editor?path=${encodeURIComponent(home + "/logo.png")}&root=${encodeURIComponent(home)}`,
+  )
+  await expect(page.getByLabel("Image editing canvas")).toBeVisible()
+  const brightness = page.getByRole("slider", { name: "brightness", exact: true })
+  await brightness.focus()
+  await brightness.press("ArrowLeft")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+  await page.getByRole("textbox", { name: "Save image as" }).fill("copy.png")
+  await page.getByRole("button", { name: "Save as", exact: true }).click()
+  await expect.poll(() => upload?.url).toContain("overwrite=false")
+  expect(upload!.body.toString("latin1")).toContain('filename="copy.png"')
+  const start = upload!.body.indexOf(Buffer.from("89504e470d0a1a0a", "hex"))
+  const end = upload!.body.indexOf(Buffer.from("0000000049454e44", "hex"), start) + 12
+  expect(start).toBeGreaterThan(0)
+  const encoded = upload!.body.subarray(start, end).toString("base64")
+  const red = await page.evaluate(async (encoded) => {
+    const data = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0))
+    const blob = new Blob([data], { type: "image/png" })
+    const bitmap = await createImageBitmap(blob)
+    const canvas = document.createElement("canvas")
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext("2d")!
+    ctx.drawImage(bitmap, 0, 0)
+    const value = ctx.getImageData(0, 0, 1, 1).data[0]
+    bitmap.close()
+    return value
+  }, encoded)
+  expect(red).toBeGreaterThan(0)
+  expect(red).toBeLessThan(255)
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.getByRole("button", { name: "Save over original", exact: true }).click()
+  await expect.poll(() => upload?.url).toContain("overwrite=true")
+  await expect(page.getByText("Unsaved edits", { exact: true })).toBeHidden()
 })
 
 test("a folder's colour is drawn everywhere it is and saved on the server", async ({ page }) => {

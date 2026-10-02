@@ -38,6 +38,12 @@ const MonacoEditor = dynamic(
   },
 )
 
+export type EditorCommands = {
+  run: (action: string) => void
+  undo: () => void
+  redo: () => void
+}
+
 /**
  * Monaco, wired to the dashboard's palette.
  *
@@ -64,6 +70,9 @@ export function CodeEditor({
   onFormat,
   revealLine,
   revealAgain,
+  onReady,
+  filePath,
+  tabSize = 2,
 }: {
   value: string
   onChange?: (value: string) => void
@@ -100,6 +109,9 @@ export function CodeEditor({
    * reader scrolled away and asked for the line a second time.
    */
   revealAgain?: number
+  onReady?: (commands: EditorCommands | undefined) => void
+  filePath?: string
+  tabSize?: number
 }) {
   // The save handler is read through a ref for the same reason the completion
   // schema is: the command is registered once on mount and would otherwise
@@ -137,17 +149,39 @@ export function CodeEditor({
     mounted.editor.focus()
   }, [revealAgain])
 
+  useEffect(
+    () => () => {
+      mountedRef.current = null
+      onReady?.(undefined)
+    },
+    [onReady],
+  )
+
   return (
     <div className={cn("monaco-host min-h-0", className)} style={{ minHeight }}>
       <MonacoEditor
         height="100%"
+        path={filePath}
         theme="vs-dark"
         language={language}
         value={value}
         onChange={(v) => onChange?.(v ?? "")}
         onMount={(editor, monaco) => {
           mountedRef.current = { editor, monaco }
-          if (editor.getValue()) markLine(mountedRef.current, revealRef.current)
+          onReady?.({
+            run: (action) => {
+              editor.focus()
+              void editor.getAction(action)?.run()
+            },
+            undo: () => {
+              editor.focus()
+              editor.trigger("toolbar", "undo", null)
+            },
+            redo: () => {
+              editor.focus()
+              editor.trigger("toolbar", "redo", null)
+            },
+          })
           editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveRef.current?.())
           editor.onDidChangeCursorSelection(() => {
             const position = editor.getPosition()
@@ -163,6 +197,7 @@ export function CodeEditor({
                   : 0,
             })
           })
+          if (editor.getValue()) markLine(mountedRef.current, revealRef.current)
           onFormat?.(() => {
             void editor.getAction("editor.action.formatDocument")?.run()
           })
@@ -180,7 +215,7 @@ export function CodeEditor({
           rulers: [],
           scrollBeyondLastLine: false,
           automaticLayout: true,
-          tabSize: 2,
+          tabSize,
           renderLineHighlight: "none",
           renderWhitespace: "selection",
           padding: { top: 12, bottom: 12 },

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import {
   ArrowLeftRight,
   CodeWrap,
@@ -12,6 +13,9 @@ import {
   RotateCounterClockwise,
   ShieldOff,
   Sparkles,
+  External,
+  CornerUpLeft,
+  CornerUpRight,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post, put } from "@/lib/api"
@@ -20,11 +24,14 @@ import { cn } from "@/lib/utils"
 import type { FileContent } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
-import { CodeEditor } from "@/components/code-editor"
+import { CodeEditor, type EditorCommands } from "@/components/code-editor"
 import { DiffView } from "@/components/files/diff-view"
 import { unifiedDiff } from "@/components/files/diff"
 import { isImage, rawUrl } from "@/components/files/media"
-import { SidePanel } from "@/components/side-panel"
+import { EditorSurface } from "./editor-surface"
+import { FileIcon } from "./file-icon"
+import { handoffDraft, takeDraft } from "./editor-handoff"
+import { editorHref } from "./search"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -79,10 +86,18 @@ export function FileEditorSheet({
   path,
   onOpenChange,
   onSaved,
+  root,
+  revealLine,
+  destination,
+  onDirtyChange,
 }: {
   path: string | null
   onOpenChange: (open: boolean) => void
   onSaved?: (path: string) => void
+  root?: string
+  revealLine?: number
+  destination?: boolean
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   return (
     <FileEditorPanel
@@ -92,6 +107,10 @@ export function FileEditorSheet({
       path={path}
       onOpenChange={onOpenChange}
       onSaved={onSaved}
+      root={root}
+      revealLine={revealLine}
+      destination={destination}
+      onDirtyChange={onDirtyChange}
     />
   )
 }
@@ -100,12 +119,24 @@ function FileEditorPanel({
   path,
   onOpenChange,
   onSaved,
+  root,
+  revealLine,
+  destination,
+  onDirtyChange,
 }: {
   path: string | null
   onOpenChange: (open: boolean) => void
   onSaved?: (path: string) => void
+  root?: string
+  revealLine?: number
+  destination?: boolean
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   const { can } = useAuth()
+  const router = useRouter()
+  const [handoff] = useState(() => (path && destination ? takeDraft(path) : undefined))
+  const [commands, setCommands] = useState<EditorCommands>()
+  const [indent, setIndent] = useViewState("files.editor.indent", "2")
   const { confirm, dialog } = useConfirm()
   const [file, setFile] = useState<FileContent>()
   const [draft, setDraft] = useState("")
@@ -132,14 +163,15 @@ function FileEditorPanel({
       if (!path) return
       get<FileContent>("/files/read", { path }, signal)
         .then((f) => {
+          if (signal?.aborted) return
           setFile(f)
-          setDraft(f.content)
+          setDraft(handoff?.content ?? f.content)
           setMode(f.modeOctal)
-          setLanguage(f.language)
+          setLanguage(handoff?.language ?? (nameLanguage(path) || f.language))
         })
         .catch((err) => !signal?.aborted && setError(err))
     },
-    [path],
+    [handoff, path],
   )
 
   useEffect(() => {
@@ -149,13 +181,16 @@ function FileEditorPanel({
   }, [load])
 
   const dirty = file !== undefined && draft !== file.content
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
   const canEdit = can("file.write")
   const name = path?.split("/").pop() ?? "file"
   const review = reviewing && file ? unifiedDiff(file.content, draft, name) : undefined
 
   const save = useCallback(
     async (target?: string) => {
-      if (!path) return
+      if (!path || saving || !file || file.binary || !canEdit) return
       const destination = target ?? path
       setSaving(true)
       try {
@@ -169,7 +204,7 @@ function FileEditorPanel({
         setSaving(false)
       }
     },
-    [draft, onSaved, path],
+    [canEdit, draft, file, onSaved, path, saving],
   )
 
   const applyMode = async () => {
@@ -190,8 +225,16 @@ function FileEditorPanel({
       description: <p>The editor goes back to what is on disk. Nothing is written.</p>,
       confirmLabel: "Discard",
       action: async () => {
+        setError(undefined)
         setFile(undefined)
-        load()
+        if (path)
+          get<FileContent>("/files/read", { path })
+            .then((f) => {
+              setFile(f)
+              setDraft(f.content)
+              setMode(f.modeOctal)
+            })
+            .catch(setError)
       },
     })
 
@@ -216,7 +259,8 @@ function FileEditorPanel({
   }
 
   return (
-    <SidePanel
+    <EditorSurface
+      destination={destination}
       open={path !== null}
       onOpenChange={requestClose}
       width="xl"
@@ -226,6 +270,12 @@ function FileEditorPanel({
       className={cn(fullscreen && "sm:max-w-none")}
       title={
         <>
+          {path && (
+            <FileIcon
+              entry={{ name, path, isDir: false, isSymlink: false }}
+              className="size-5 shrink-0"
+            />
+          )}
           {path?.split("/").pop() ?? "File"}
           {dirty && <Tag tone="warning">unsaved</Tag>}
         </>
@@ -235,9 +285,9 @@ function FileEditorPanel({
       actions={
         file &&
         !file.binary && (
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             <Select value={language} onValueChange={setLanguage}>
-              <SelectTrigger size="sm" className="h-7 w-36 text-xs">
+              <SelectTrigger size="sm" aria-label="File language" className="h-8 w-32 text-body">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="max-h-72">
@@ -248,6 +298,31 @@ function FileEditorPanel({
                 ))}
               </SelectContent>
             </Select>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!commands}
+              onClick={() => commands?.run("actions.find")}
+            >
+              <MagnifyingGlass className="size-3.5" />
+              Find
+            </Button>
+            {canEdit && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!commands}
+                onClick={() => commands?.run("editor.action.startFindReplaceAction")}
+              >
+                Replace
+              </Button>
+            )}
+            <Toggle label="Undo" disabled={!commands || !canEdit} onClick={() => commands?.undo()}>
+              <CornerUpLeft className="size-3.5" />
+            </Toggle>
+            <Toggle label="Redo" disabled={!commands || !canEdit} onClick={() => commands?.redo()}>
+              <CornerUpRight className="size-3.5" />
+            </Toggle>
             <Toggle label="Wrap long lines" active={wrap} onClick={() => setWrap((v) => !v)}>
               <CodeWrap className="size-3.5" />
             </Toggle>
@@ -263,7 +338,7 @@ function FileEditorPanel({
               <span className="text-body leading-none font-semibold">A+</span>
             </Toggle>
             {canEdit && (
-              <Toggle label="Format this document" onClick={() => format?.()}>
+              <Toggle label="Format this document" disabled={!commands} onClick={() => format?.()}>
                 <Sparkles className="size-3.5" />
               </Toggle>
             )}
@@ -281,26 +356,59 @@ function FileEditorPanel({
                 <ArrowLeftRight className="size-3.5" />
               </Toggle>
             )}
-            <Toggle
-              label={fullscreen ? "Leave full screen" : "Full screen"}
-              active={fullscreen}
-              onClick={() => setFullscreen((v) => !v)}
+            {!destination && (
+              <Toggle
+                label={fullscreen ? "Leave full screen" : "Full screen"}
+                active={fullscreen}
+                onClick={() => setFullscreen((v) => !v)}
+              >
+                {fullscreen ? (
+                  <FullscreenClose className="size-3.5" />
+                ) : (
+                  <Fullscreen className="size-3.5" />
+                )}
+              </Toggle>
+            )}
+            <Select value={indent} onValueChange={setIndent}>
+              <SelectTrigger size="sm" aria-label="Indentation" className="h-8 w-24 text-body">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["2", "4", "8"].map((size) => (
+                  <SelectItem key={size} value={size}>
+                    {size} spaces
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!commands}
+              onClick={() => commands?.run("editor.action.quickCommand")}
             >
-              {fullscreen ? (
-                <FullscreenClose className="size-3.5" />
-              ) : (
-                <Fullscreen className="size-3.5" />
-              )}
-            </Toggle>
-            <span className="flex items-center gap-1 pl-1 text-hint text-muted-foreground">
-              <MagnifyingGlass className="size-3" />
-              Ctrl+S save · Ctrl+F find · Ctrl+H replace · Ctrl+G go to line
-            </span>
+              Commands
+            </Button>
+            {!destination && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto"
+                onClick={() => {
+                  if (!path) return
+                  handoffDraft(path, draft, language)
+                  router.push(editorHref(path, root, revealLine))
+                }}
+              >
+                <External className="size-3.5" />
+                Open full editor
+              </Button>
+            )}
           </div>
         )
       }
       footer={
-        file && (canEdit || can("system.admin")) ? (
+        file ? (
           <>
             {/* chmod is a system.admin route, so the mode control only appears
                 for an admin — showing it to a file.write user guaranteed a 403. */}
@@ -329,7 +437,8 @@ function FileEditorPanel({
             {!file.binary && (
               <span className="numeric text-xs text-muted-foreground">
                 Ln {cursor.line}, Col {cursor.column}
-                {cursor.selected > 0 && ` · ${cursor.selected} selected`} · {bytes(draft.length)}
+                {cursor.selected > 0 && ` · ${cursor.selected} selected`} ·{" "}
+                {bytes(new TextEncoder().encode(draft).length)}
               </span>
             )}
             {canEdit && !file.binary && (
@@ -354,6 +463,14 @@ function FileEditorPanel({
         ) : undefined
       }
     >
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline px-3 py-1.5 text-hint text-muted-foreground">
+        <span className="truncate font-mono" title={path ?? undefined}>
+          {path}
+        </span>
+        <span className="shrink-0">
+          {dirty ? "Unsaved changes" : canEdit ? "Saved to disk" : "Read only"}
+        </span>
+      </div>
       {error && <ErrorState error={error} className="m-4" />}
       {!file && !error && <LoadingRows className="p-4" />}
 
@@ -397,6 +514,10 @@ function FileEditorPanel({
 
       {file && !file.binary && !reviewing && (
         <CodeEditor
+          filePath={path ?? undefined}
+          tabSize={Number(indent)}
+          revealLine={revealLine}
+          onReady={setCommands}
           className="flex-1"
           value={draft}
           onChange={setDraft}
@@ -411,18 +532,31 @@ function FileEditorPanel({
         />
       )}
       {dialog}
-    </SidePanel>
+    </EditorSurface>
   )
+}
+
+function nameLanguage(path: string) {
+  const name = path.split("/").pop()?.toLowerCase() ?? ""
+  if (name === "bun.lock" || name === "composer.lock") return "json"
+  if (name === "dockerfile" || name.startsWith("dockerfile.")) return "dockerfile"
+  if (name === ".env" || name.startsWith(".env.")) return "ini"
+  const extension = name.split(".").pop() ?? ""
+  return (
+    { tsx: "typescript", jsx: "javascript", mdx: "markdown", yml: "yaml" } as Record<string, string>
+  )[extension]
 }
 
 function Toggle({
   label,
   active,
+  disabled,
   onClick,
   children,
 }: {
   label: string
   active?: boolean
+  disabled?: boolean
   onClick: () => void
   children: React.ReactNode
 }) {
@@ -430,12 +564,13 @@ function Toggle({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
-          size="icon-xs"
+          size="icon-sm"
           variant={active ? "secondary" : "ghost"}
           aria-label={label}
           aria-pressed={active}
           className={cn(!active && "text-muted-foreground")}
           onClick={onClick}
+          disabled={disabled}
         >
           {children}
         </Button>

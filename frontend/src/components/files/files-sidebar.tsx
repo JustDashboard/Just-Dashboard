@@ -210,7 +210,6 @@ function PlaceRow({
             <span className="block truncate font-mono text-hint text-muted-foreground">{hint}</span>
           )}
         </span>
-        {active && <span className="size-1.5 shrink-0 rounded-full bg-brand" aria-hidden />}
       </button>
       {trailing}
     </div>
