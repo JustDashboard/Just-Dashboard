@@ -1,13 +1,14 @@
 "use client"
 
 import { Fragment, useState } from "react"
-import { ChevronDown, ChevronRight } from "@/components/icons"
+import { ChevronDown, ChevronRight, RefreshClockwise } from "@/components/icons"
 import { relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { Segments } from "@/components/deploy/settings/segments"
 import { Field, FieldRow } from "@/components/form"
+import { IconAction } from "@/components/icon-action"
 import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { EmptyState, LoadingPanel } from "@/components/state"
@@ -53,6 +54,10 @@ const LEVEL_HINT: Record<MongoProfilerLevel, string> = {
   2: "Every operation is recorded, which costs the server throughput. For a short look only.",
 }
 
+/** How often the list is read while the profiler is recording, and while it is off. */
+const RECORDING_MS = 4000
+const IDLE_MS = 20_000
+
 const grouped = (n: number) => n.toLocaleString("en-US")
 
 function took(millis: number): string {
@@ -69,6 +74,10 @@ function took(millis: number): string {
  * The slow threshold is not — it is one for the whole server, and it also
  * decides what the server writes to its log as slow — so changing it here
  * changes it for every database. Both are an administrator's to set.
+ *
+ * While the profiler is recording, the list is read every few seconds, so an
+ * operation appears soon after it ran; while it is off there is nothing new
+ * to read and the page asks rarely.
  */
 export function ProfilerView({
   mongo,
@@ -78,7 +87,14 @@ export function ProfilerView({
   databases: PollState<MongoDatabase[]>
 }) {
   const { id, engine, admin, readOnly, select, database } = mongo
-  const profiler = usePoll((signal) => mongoProfiler(id, database, signal), 15_000, [id, database])
+  // The level the last answer stated: a profiler that is recording is read often.
+  const [recording, setRecording] = useState(false)
+  const profiler = usePoll(
+    (signal) => mongoProfiler(id, database, signal),
+    recording ? RECORDING_MS : IDLE_MS,
+    [id, database],
+  )
+  if (profiler.data && profiler.data.level > 0 !== recording) setRecording(profiler.data.level > 0)
   const [threshold, setThreshold] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
@@ -87,7 +103,7 @@ export function ProfilerView({
 
   const names = databases.data?.map((entry) => entry.name) ?? []
   const listed = database && !names.includes(database) ? [database, ...names] : names
-  const picker = (
+  const chooser = (
     <Select value={database} onValueChange={(db) => select({ db })}>
       <SelectTrigger
         size="sm"
@@ -105,6 +121,14 @@ export function ProfilerView({
         ))}
       </SelectContent>
     </Select>
+  )
+  const picker = (
+    <div className="flex items-center gap-1">
+      <IconAction label="Read the recorded operations again" onClick={profiler.refresh}>
+        <RefreshClockwise />
+      </IconAction>
+      {chooser}
+    </div>
   )
 
   if (profiler.error && !data) {
@@ -215,12 +239,16 @@ export function ProfilerView({
             title={
               data.level === 0
                 ? `The profiler of ${data.database} is off`
-                : `Nothing slow has been recorded in ${data.database}`
+                : data.level === 2
+                  ? `Nothing has been recorded in ${data.database} yet`
+                  : `Nothing slow has been recorded in ${data.database}`
             }
             description={
               data.level === 0
                 ? `No operation has been recorded. Turned on, it keeps every operation slower than ${grouped(data.slowMs)} ms.`
-                : `No operation has taken longer than ${grouped(data.slowMs)} ms since the profiler was turned on.`
+                : data.level === 2
+                  ? "Every operation is recorded from now on, whatever it takes. Each one is listed here within a few seconds of running."
+                  : `No operation has taken longer than ${grouped(data.slowMs)} ms since the profiler was turned on.`
             }
             action={
               data.level === 0 &&

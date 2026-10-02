@@ -14,17 +14,19 @@ import {
   Plus,
   PlusSquareSmall,
   RefreshClockwise,
+  SettingsSliders,
+  StopCircle,
   Trash,
 } from "@/components/icons"
+import { ApiError } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import { useSessionState, useViewState } from "@/lib/view-state"
+import { useMemoryState, useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { FormFact, FormFacts } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { Modal } from "@/components/modal"
 import { PaneFooter } from "@/components/panel"
 import { EmptyState } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
@@ -38,7 +40,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { useUnloadGuard } from "@/components/database/data/guard"
 import { grouped } from "@/components/database/data/view"
 import { useGridLayout } from "@/components/database/grid"
 import { EngineMark } from "@/components/database/kit"
@@ -49,7 +50,15 @@ import {
   findDocuments,
 } from "@/components/database/mongo/api"
 import { idLabel, parseDocument, printShell } from "@/components/database/mongo/bson"
-import type { Edits } from "@/components/database/mongo/changes"
+import {
+  NO_STAGED,
+  idsFilter,
+  stagedKey,
+  withStaged,
+  withoutStaged,
+  type Edits,
+  type StagedEdits,
+} from "@/components/database/mongo/changes"
 import { BulkDialog, type BulkMode } from "@/components/database/mongo/documents/bulk"
 import {
   EditDocumentDialog,
@@ -57,6 +66,7 @@ import {
   editorText,
 } from "@/components/database/mongo/documents/document-editor"
 import { QueryBar } from "@/components/database/mongo/documents/query-bar"
+import { sortOf, sortText } from "@/components/database/mongo/documents/table"
 import {
   JsonView,
   ListView,
@@ -64,6 +74,7 @@ import {
   useListed,
 } from "@/components/database/mongo/documents/views"
 import { ExplainDialog, type ExplainSubject } from "@/components/database/mongo/explain"
+import { Stopped, useElapsed, useStoppable } from "@/components/database/mongo/in-flight"
 import {
   CollectionKindTag,
   CollectionMark,
@@ -128,10 +139,16 @@ const VIEWS: { id: View; label: string }[] = [
  *
  * The database, the collection, the query and the page are in the address, so
  * a pasted link opens on the same documents; opening a collection is a step
- * of history, so Back returns to the one before. A document is edited as the canonical Extended JSON it is stored
- * as — nothing here passes it through a JavaScript number or a plain object,
- * which is how the old editor rewrote a document's types by saving it — or a
- * field at a time, as the update that change is.
+ * of history, so Back returns to the one before. A document is edited as the
+ * Extended JSON it is stored as — nothing here passes it through a JavaScript
+ * number or a plain object, which is how the old editor rewrote a document's
+ * types by saving it — or a field at a time, as the update that change is.
+ *
+ * Edits made a field at a time are staged on their documents and stay there
+ * until they are sent or let go: turning the page, asking another query,
+ * opening another collection or another page of the database takes nothing
+ * away. The strip over the documents says how many hold unsent edits and
+ * brings the ones that are not on screen back.
  */
 export function MongoDocuments() {
   return (
@@ -155,6 +172,7 @@ function Documents({
   confirm,
   exportCollection,
   exporting,
+  collectionOptions,
 }: Workbench) {
   const { id, target, database, collection, param, select, engine, canWrite, canDestroy } = mongo
   const view_ = info?.type === "view"
@@ -212,7 +230,15 @@ function Documents({
     [applied, window_.skip, window_.limit],
   )
   const identity = JSON.stringify([database, collection, spec, epoch])
-  const poll = usePoll((signal) => findDocuments(target, spec, false, signal), 0, [id, identity])
+  // A find the reader can stop: after a second the bar says how long it has
+  // run, and Stop drops the request — and with it the server's work on it.
+  const flight = useStoppable()
+  const poll = usePoll(
+    (signal) => flight.run((own) => findDocuments(target, spec, false, own), signal),
+    0,
+    [id, identity],
+  )
+  const seconds = useElapsed(poll.loading)
   // The page on screen is kept under the one being read, so turning a page
   // sweeps over the old documents instead of collapsing to a skeleton.
   const [kept, setKept] = useState<MongoFindResult>()
@@ -252,15 +278,18 @@ function Documents({
 
   /* ------------------------------------------------------- staged edits */
 
-  const [edits, setEdits] = useState<Readonly<Record<string, Edits>>>({})
-  const stagedOn = Object.values(edits).filter((held) => Object.keys(held).length > 0).length
-  useUnloadGuard(stagedOn > 0)
-  const [leaving, setLeaving] = useState<(() => void) | null>(null)
-  /** Runs a step that replaces the documents on screen, after asking when edits are staged on them. */
-  const guarded = (step: () => void) => {
-    if (stagedOn > 0) setLeaving(() => step)
-    else step()
-  }
+  // Held for the tab, by collection and by document, and never written down:
+  // they are values of the documents. What is here is exactly what has not
+  // been sent, wherever the reader has been in between.
+  const [allStaged, setAllStaged] = useMemoryState<StagedEdits>(stagedKey(id), {})
+  const scope = collectionKey(database, collection)
+  const edits = allStaged[scope] ?? NO_STAGED
+  const stagedIds = Object.keys(edits)
+  const setEdits = (document: string, next: Edits) =>
+    setAllStaged((held) => withStaged(held, scope, document, next))
+  // Staged on documents the page on screen does not hold: said, and brought back on request.
+  const onPage = new Set(poll.data?.documents.map((doc) => doc.id))
+  const elsewhere = poll.data ? stagedIds.filter((staged) => !onPage.has(staged)) : []
 
   /* ------------------------------------------------------------- dialogs */
 
@@ -279,7 +308,6 @@ function Documents({
 
   const apply = (next: QueryDraft) => {
     setHistory((held) => withHistory(held, { database, collection, draft: next, at: Date.now() }))
-    setEdits({})
     // Like a filter or a sort on the SQL pages, a query replaces the address
     // rather than adding to history: Back is the collection before, not every
     // query typed on the way. It is taken at once — the page does not wait
@@ -290,21 +318,41 @@ function Documents({
   }
   const find = (next: QueryDraft = draft) => {
     if (Object.keys(draftProblems(next)).length > 0) return
-    guarded(() => apply(next))
+    apply(next)
   }
-  const reset = () => {
-    setDraft(EMPTY_QUERY)
-    guarded(() => apply(EMPTY_QUERY))
-  }
-  const turn = (to: number) =>
-    guarded(() => {
-      setEdits({})
-      select({ page: to <= 0 ? null : String(to + 1) })
-    })
-  const narrow = (clause: string) => {
-    const next = { ...applied, filter: mergeFilter(applied.filter, clause) }
+  const ask = (next: QueryDraft) => {
     setDraft(next)
-    guarded(() => apply(next))
+    apply(next)
+  }
+  const reset = () => ask(EMPTY_QUERY)
+  const turn = (to: number) => select({ page: to <= 0 ? null : String(to + 1) })
+  const narrow = (clause: string) =>
+    ask({ ...applied, filter: mergeFilter(applied.filter, clause) })
+  /** The documents with unsent edits, found by their ids. */
+  const showStaged = () => ask({ ...EMPTY_QUERY, filter: idsFilter(stagedIds) })
+  const discardStaged = () => {
+    const before = edits
+    setAllStaged((held) => withoutStaged(held, scope))
+    notify.info(
+      stagedIds.length === 1
+        ? "The unsent edits of one document were let go"
+        : `The unsent edits of ${stagedIds.length} documents were let go`,
+      {
+        action: {
+          label: "Undo",
+          onClick: () => setAllStaged((held) => ({ ...held, [scope]: before })),
+        },
+      },
+    )
+  }
+  /** The order a head of the table asks for, written into the bar's Sort and asked of the server. */
+  const sortBy = (sort: Parameters<typeof sortText>[0]) => {
+    const text = sortText(sort)
+    if (text === null) {
+      notify.info("A field with a dot or a leading $ in its name cannot be sorted by")
+      return
+    }
+    ask({ ...applied, sort: text })
   }
   const setView = (next: View) => {
     setPreferred(next)
@@ -397,7 +445,11 @@ function Documents({
                     notify.success("Document deleted")
                     return "reported"
                   },
-                  onDone: reread,
+                  onDone: () => {
+                    // Edits staged on a document that is gone are edits of nothing.
+                    setEdits(doc.id, {})
+                    reread()
+                  },
                 }),
             },
           ]
@@ -416,6 +468,22 @@ function Documents({
           },
         ]
       : []),
+    {
+      key: "copy-query",
+      label: "Copy the query",
+      icon: Copy,
+      run: () => void copyText(findStatement(collection, applied), "Query copied"),
+    },
+    ...(collectionOptions
+      ? [
+          {
+            key: "options",
+            label: "Collection options…",
+            icon: SettingsSliders,
+            run: collectionOptions,
+          },
+        ]
+      : []),
     ...(canDestroy && !view_
       ? [
           {
@@ -427,12 +495,6 @@ function Documents({
           },
         ]
       : []),
-    {
-      key: "copy-query",
-      label: "Copy the query",
-      icon: Copy,
-      run: () => void copyText(findStatement(collection, applied), "Query copied"),
-    },
   ]
 
   /* ------------------------------------------------------------ problems */
@@ -441,8 +503,18 @@ function Documents({
   // The server's refusal belongs to the query it was given: once the bar is
   // edited away from that, the sentence is about something else.
   const untouched = QUERY_FIELDS.every((field) => draft[field] === applied[field])
-  const refusal = poll.error && untouched ? refusedField(poll.error.message, applied) : null
-  const problems = refusal ? { ...typed, [refusal.field]: refusal.message } : typed
+  // A refusal is the server's answer to this query (a 400, or a read that ran
+  // past its time limit); anything else is a read that failed for a reason
+  // the query has no part in.
+  const failure = poll.error
+  const stopped = failure instanceof Stopped
+  const refused =
+    failure instanceof ApiError && (failure.status === 400 || failure.code === "query_timeout")
+  const refusal =
+    failure && refused && untouched
+      ? refusedField(failure.message, applied, failure instanceof ApiError ? failure.code : "")
+      : null
+  const problems = refusal?.field ? { ...typed, [refusal.field]: refusal.message } : typed
 
   /* --------------------------------------------------------------- foot */
 
@@ -450,9 +522,11 @@ function Documents({
   const count = counted.data ?? null
   // Where the reader's own Skip puts page one; a page's place is counted from there.
   const base = window_.skip - window_.page * pageSize
-  const words = result
+  const range = result
     ? rangeWords(result.skip - base, result.returned, count, filtered, window_.cap)
     : ""
+  // A page that could not be read leaves the one before on screen: its range is said as that.
+  const words = failure && result ? `${range} · from before` : range
   const hasNext = Boolean(result?.hasMore) && !window_.last
   const pager = (
     <>
@@ -477,13 +551,10 @@ function Documents({
       </span>
       <Select
         value={String(pageSize)}
-        onValueChange={(next) =>
-          guarded(() => {
-            setEdits({})
-            setSize(Number(next))
-            select({ page: null })
-          })
-        }
+        onValueChange={(next) => {
+          setSize(Number(next))
+          select({ page: null })
+        }}
       >
         <SelectTrigger
           size="sm"
@@ -568,16 +639,7 @@ function Documents({
               Export
             </Button>
           )}
-          <IconAction
-            label="Read the documents again"
-            className="size-7"
-            onClick={() =>
-              guarded(() => {
-                setEdits({})
-                reread()
-              })
-            }
-          >
+          <IconAction label="Read the documents again" className="size-7" onClick={reread}>
             <RefreshClockwise />
           </IconAction>
           <VerbMenu verbs={pageVerbs} label={`More actions for ${collection}`} />
@@ -588,9 +650,12 @@ function Documents({
         draft={draft}
         onChange={setDraft}
         problems={problems}
+        refusal={refusal && !refusal.field ? refusal.message : undefined}
         optionsOpen={optionsOpen}
         onOptionsOpen={setOptionsOpen}
         running={poll.loading}
+        seconds={seconds}
+        onStop={flight.stop}
         onFind={() => find()}
         onReset={reset}
         onExplain={
@@ -610,10 +675,7 @@ function Documents({
         history={history.filter(
           (entry) => entry.database === database && entry.collection === collection,
         )}
-        onPick={(picked) => {
-          setDraft(picked)
-          find(picked)
-        }}
+        onPick={ask}
         onClearHistory={() =>
           setHistory((held) =>
             held.filter(
@@ -623,8 +685,8 @@ function Documents({
         }
       />
 
-      <div className="flex h-9 shrink-0 items-center gap-3 border-b border-hairline px-3">
-        <div role="group" aria-label="Document views" className="flex h-full gap-1">
+      <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-x-3 border-b border-hairline px-3">
+        <div role="group" aria-label="Document views" className="flex h-9 gap-1">
           {VIEWS.map((entry) => (
             <button
               key={entry.id}
@@ -649,18 +711,57 @@ function Documents({
             Expand all
           </Button>
         )}
-        <span className="min-w-0 flex-1" />
-        {stagedOn > 0 && (
-          <span className="text-hint whitespace-nowrap text-(--git-modified)">
-            Edits staged on {stagedOn === 1 ? "one document" : `${stagedOn} documents`}
-          </span>
-        )}
-        {poll.error && result && (
-          <span role="status" className="min-w-0 truncate text-hint text-warning">
-            The last read failed; these are the documents from before.
-          </span>
+        {stagedIds.length > 0 && (
+          <div
+            data-slot="mongo-unsent"
+            className="ml-auto flex min-h-9 min-w-0 flex-wrap items-center gap-x-1.5"
+          >
+            <p className="text-hint text-(--git-modified)">
+              Unsent edits on{" "}
+              {stagedIds.length === 1 ? "one document" : `${stagedIds.length} documents`}
+              {elsewhere.length > 0 &&
+                (elsewhere.length === stagedIds.length
+                  ? ", not on this page"
+                  : `, ${elsewhere.length} of them not on this page`)}
+            </p>
+            {elsewhere.length > 0 && (
+              <Button size="xs" variant="ghost" onClick={showStaged}>
+                Show {stagedIds.length === 1 ? "it" : "them"}
+              </Button>
+            )}
+            <Button size="xs" variant="ghost" onClick={discardStaged}>
+              Let them go
+            </Button>
+          </div>
         )}
       </div>
+
+      {/* A read that failed over documents already on screen: they stay, and
+          the line says whose they are, why the read failed, and asks again. */}
+      {failure && result && (
+        <div
+          role="status"
+          data-slot="mongo-read-failed"
+          className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-3 py-1.5"
+        >
+          <p className="min-w-0 flex-1 basis-64 text-hint leading-relaxed break-words text-muted-foreground">
+            <span className="font-medium text-warning">
+              {stopped
+                ? "Stopped."
+                : refused
+                  ? "The server refused this query."
+                  : window_.page > 0
+                    ? `Page ${window_.page + 1} could not be read.`
+                    : "The documents could not be read again."}
+            </span>{" "}
+            {!stopped && <span className="font-mono">{failure.message}</span>} These are the
+            documents from before.
+          </p>
+          <Button size="xs" variant="outline" onClick={poll.refresh}>
+            {stopped ? "Find again" : "Try again"}
+          </Button>
+        </div>
+      )}
 
       {/* The sweep over a page that is being replaced: the old documents stay under it. */}
       <div className="relative min-h-0 flex-1">
@@ -681,14 +782,29 @@ function Documents({
               onLayoutChange={setGridLayout}
               offset={result.skip}
               loading={poll.loading && !current}
+              sort={sortOf(applied.sort)}
+              onSort={sortBy}
               onOpen={setEditing}
               onFilter={narrow}
               footer={pager}
             />
           </div>
         ) : (
-          <div className="absolute inset-0 overflow-auto">
-            {poll.error && !result ? (
+          <div className="absolute inset-0 overflow-x-hidden overflow-y-auto">
+            {stopped && !result ? (
+              // Stopping is the reader's own doing, not a failure: it is said plainly.
+              <EmptyState
+                icon={StopCircle}
+                className="m-4 border-0"
+                title="Stopped"
+                description="The find was stopped before the server answered."
+                action={
+                  <Button size="sm" variant="outline" onClick={poll.refresh}>
+                    Find again
+                  </Button>
+                }
+              />
+            ) : poll.error && !result ? (
               <ReadError error={poll.error} onRetry={poll.refresh} className="m-4" />
             ) : !result ? (
               <DocumentsSkeleton />
@@ -749,7 +865,7 @@ function Documents({
                 expanded={expanded}
                 editable={canWrite && !view_}
                 edits={edits}
-                onEdits={(docId, next) => setEdits((held) => ({ ...held, [docId]: next }))}
+                onEdits={setEdits}
                 verbsFor={verbsFor}
                 onUpdated={reread}
               />
@@ -806,36 +922,6 @@ function Documents({
         subject={explaining}
         onOpenChange={(open) => !open && setExplaining(null)}
       />
-      <Modal
-        open={leaving !== null}
-        onOpenChange={(open) => !open && setLeaving(null)}
-        size="sm"
-        title="Unsent edits"
-        description="Fields were edited on this page and the update has not been sent"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setLeaving(null)}>
-              Keep editing
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                const step = leaving
-                setLeaving(null)
-                setEdits({})
-                step?.()
-              }}
-            >
-              Discard and go on
-            </Button>
-          </>
-        }
-      >
-        <p className="text-body leading-relaxed">
-          {stagedOn === 1 ? "One document has" : `${stagedOn} documents have`} edits that were not
-          sent. Reading other documents leaves them behind; nothing has been written.
-        </p>
-      </Modal>
     </div>
   )
 }

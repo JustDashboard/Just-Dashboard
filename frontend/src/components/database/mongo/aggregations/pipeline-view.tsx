@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { Fragment, useMemo, useRef, useState } from "react"
 import {
   ChevronDown,
   Copy,
@@ -35,7 +35,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
 import type { Verb } from "@/components/verbs"
 import { useGridLayout } from "@/components/database/grid"
 import { EngineMark, downloadText } from "@/components/database/kit"
@@ -57,7 +56,12 @@ import {
   type SavedPipeline,
   type Stage,
 } from "@/components/database/mongo/aggregations/pipeline"
-import { StageCard } from "@/components/database/mongo/aggregations/stage-card"
+import {
+  PipelineInput,
+  StageCard,
+  StageOperator,
+  type PreviewOutcome,
+} from "@/components/database/mongo/aggregations/stage-card"
 import { runPipeline } from "@/components/database/mongo/api"
 import { CodeField } from "@/components/database/mongo/code-field"
 import { editorText } from "@/components/database/mongo/documents/document-editor"
@@ -68,6 +72,13 @@ import {
   useListed,
 } from "@/components/database/mongo/documents/views"
 import { ExplainDialog, type ExplainSubject } from "@/components/database/mongo/explain"
+import {
+  StopButton,
+  Stopped,
+  useElapsed,
+  useStoppable,
+  worthShowing,
+} from "@/components/database/mongo/in-flight"
 import { CollectionMark, collectionKind } from "@/components/database/mongo/kinds"
 import type { MongoAggregateResult, MongoDoc } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
@@ -95,6 +106,10 @@ export const savedKey = (id: number) => `databases.${id}.mongo.pipelines`
  * said to be of an earlier pipeline once the stages have moved on. Whether a
  * pipeline writes is read off its stage operators, the way the server reads
  * it, and a run that writes is confirmed and asked only of a role that may.
+ *
+ * A stage the server refuses says so once, on that stage. The stages after
+ * it wait for it instead of each repeating its refusal: their previews would
+ * run the same refused stage again.
  */
 export function PipelineView({
   mongo,
@@ -118,10 +133,15 @@ export function PipelineView({
   const loaded = saved.find((entry) => entry.name === loadedName)
   const [auto, setAuto] = useViewState(`databases.${id}.mongo.autoPreview`, true)
   const [nonce, setNonce] = useState(0)
+  // How each stage's own preview last came out, by stage: the first refused
+  // one holds back the previews of every stage after it.
+  const [outcomes, setOutcomes] = useState<Readonly<Record<string, PreviewOutcome>>>({})
+  const flight = useStoppable()
 
   const [limit, setLimit] = useViewState<Limit>(`databases.${id}.mongo.aggregate.limit`, "100")
   const [ran, setRan] = useState<Ran | null>(null)
   const [running, setRunning] = useState(false)
+  const seconds = useElapsed(running)
   const [resultView, setResultView] = useViewState<ResultView>(
     `databases.${id}.mongo.aggregate.view`,
     "list",
@@ -162,10 +182,12 @@ export function PipelineView({
     setRunning(true)
     const asked = { pipeline: text, limit: Number(limit) }
     try {
-      const result = await runPipeline(target, text, Number(limit))
+      const result = await flight.run((signal) => runPipeline(target, text, Number(limit), signal))
       setRan({ ...asked, result })
       if (result.writes) notify.success("The pipeline ran, and wrote its result")
     } catch (err) {
+      // Stopped by the reader: the result of the run before, if any, stays as it was.
+      if (err instanceof Stopped) return
       setRan({ ...asked, error: errorMessage(err) })
     } finally {
       setRunning(false)
@@ -238,6 +260,11 @@ export function PipelineView({
     setSavedAll((held) => ({ ...held, [scope]: withoutSaved(held[scope] ?? [], name) }))
     if (name === loadedName) setLoadedName("")
   }
+
+  // The first enabled stage whose own preview the server refused, as its number in the list.
+  const refusedIndex = stages.findIndex(
+    (stage) => stage.enabled && outcomes[stage.id] === "refused",
+  )
 
   const unsaved = stages.length > 0 && !sameAsSaved(stages, loaded)
   const stale = ran !== null && (ran.pipeline !== text || ran.limit !== Number(limit))
@@ -345,14 +372,16 @@ export function PipelineView({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-          <label className="flex h-7 cursor-pointer items-center gap-1.5 px-1.5 text-xs font-medium">
-            <Switch
-              checked={auto}
-              onCheckedChange={setAuto}
-              aria-label="Preview each stage as it is typed"
-            />
+          <Button
+            size="xs"
+            variant="ghost"
+            aria-pressed={auto}
+            title="Preview each stage as it is typed"
+            className={cn(auto && "bg-accent")}
+            onClick={() => setAuto(!auto)}
+          >
             Auto-preview
-          </label>
+          </Button>
           {!auto && (
             <Button
               size="xs"
@@ -380,25 +409,40 @@ export function PipelineView({
               Explain
             </Button>
           )}
-          {canRun && (
-            <Button
-              size="xs"
-              pending={running}
-              disabled={!sendable || enabled.length === 0 || !mayRun}
-              onClick={pressRun}
-            >
-              <Play />
-              Run
-            </Button>
-          )}
+          {canRun &&
+            (running && worthShowing(seconds) ? (
+              <StopButton size="xs" seconds={seconds} onStop={flight.stop} />
+            ) : (
+              <Button
+                size="xs"
+                pending={running}
+                disabled={!sendable || enabled.length === 0 || !mayRun}
+                onClick={pressRun}
+              >
+                <Play />
+                Run
+              </Button>
+            ))}
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
         {stages.length === 0 ? (
-          <Start saved={saved} onLoad={load} onAdd={add} onText={() => setTexting(true)} />
+          <div className="space-y-2 p-3">
+            <PipelineInput
+              target={target}
+              collection={collection}
+              count={info?.statsKnown ? info.count : undefined}
+            />
+            <Start saved={saved} onLoad={load} onAdd={add} onText={() => setTexting(true)} />
+          </div>
         ) : (
           <div className="space-y-3 p-3">
+            <PipelineInput
+              target={target}
+              collection={collection}
+              count={info?.statsKnown ? info.count : undefined}
+            />
             {writes && (
               <FormNote tone={mayRun ? "default" : "warning"}>
                 {kind.writes
@@ -425,6 +469,12 @@ export function PipelineView({
                   auto={auto}
                   nonce={nonce}
                   operators={foreign}
+                  refusedAt={refusedIndex >= 0 && index > refusedIndex ? refusedIndex + 1 : null}
+                  onPreview={(outcome) =>
+                    setOutcomes((held) =>
+                      held[stage.id] === outcome ? held : { ...held, [stage.id]: outcome },
+                    )
+                  }
                   onChange={(next) =>
                     change(stages.map((held) => (held.id === stage.id ? next : held)))
                   }
@@ -527,18 +577,18 @@ function Start({
   onText: () => void
 }) {
   return (
-    <div className="animate-rise space-y-6 p-4">
+    <div className="animate-rise space-y-6">
       <EmptyState
-        className="border-0 py-6"
+        className="border-0 py-8"
         icon={Play}
         title="No stages yet"
-        description="A pipeline passes the collection's documents through stages, one after another. Each stage shows a sample of what it leaves."
+        description="A pipeline passes these documents through stages, one after another. Each stage shows a sample of what it leaves."
         action={
           <div className="flex flex-wrap justify-center gap-2">
             {["$match", "$group", "$sort", "$project", "$lookup"].map((op) => (
               <Button key={op} size="sm" variant="outline" onClick={() => onAdd(op)}>
                 <Plus />
-                <span className="font-mono">{op}</span>
+                <StageOperator op={op} />
               </Button>
             ))}
             <Button size="sm" variant="ghost" onClick={onText}>
@@ -560,9 +610,18 @@ function Start({
                 title={entry.name}
                 verb={`Open the pipeline ${entry.name}`}
                 description={
-                  <span className="font-mono">
-                    {entry.stages.map((stage) => stage.op).join(" → ") || "no stages"}
-                  </span>
+                  entry.stages.length === 0 ? (
+                    "no stages"
+                  ) : (
+                    <span className="font-mono">
+                      {entry.stages.map((stage, at) => (
+                        <Fragment key={at}>
+                          {at > 0 && " → "}
+                          <StageOperator op={stage.op} />
+                        </Fragment>
+                      ))}
+                    </span>
+                  )
                 }
                 trailing={
                   <span className="text-hint whitespace-nowrap text-muted-foreground">

@@ -11,6 +11,7 @@ import { LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
+import { NumberTicker } from "@/components/ui/number-ticker"
 import { CodeView } from "@/components/database/kit"
 import { explain, type MongoTarget } from "@/components/database/mongo/api"
 import { parseJson, printJson } from "@/components/database/mongo/bson"
@@ -29,6 +30,9 @@ export type ExplainSubject =
   | { kind: "pipeline"; pipeline: string; statement: string }
 
 const grouped = (n: number | null) => (n === null ? "—" : n.toLocaleString("en-US"))
+
+/** A figure of a run, counted up to as it arrives; a dash where the server gave none. */
+const figure = (n: number | null) => (n === null ? "—" : <NumberTicker value={n} />)
 
 /** Every node of a plan with how deep it sits, the last thing done first. */
 function flatten(node: MongoPlanNode, depth = 0): { node: MongoPlanNode; depth: number }[] {
@@ -146,10 +150,10 @@ function Explain({
           {data.note && <FormNote tone="warning">{data.note}</FormNote>}
           {summary?.executed ? (
             <StatGrid columns={4} dense framed>
-              <StatTile label="Returned" value={grouped(summary.returned)} hint="documents" />
+              <StatTile label="Returned" value={figure(summary.returned)} hint="documents" />
               <StatTile
                 label="Documents examined"
-                value={grouped(summary.docsExamined)}
+                value={figure(summary.docsExamined)}
                 tone={ratio !== null && ratio > 10 ? "warning" : "default"}
                 hint={
                   ratio === null
@@ -163,12 +167,13 @@ function Explain({
               />
               <StatTile
                 label="Index keys examined"
-                value={grouped(summary.keysExamined)}
+                value={figure(summary.keysExamined)}
                 hint={summary.indexesUsed.length === 0 ? "no index used" : undefined}
               />
               <StatTile
                 label="Time"
-                value={summary.timeMs === null ? "—" : `${grouped(summary.timeMs)} ms`}
+                value={figure(summary.timeMs)}
+                trailing={summary.timeMs === null ? undefined : "ms"}
                 hint="the server's own estimate"
               />
             </StatGrid>

@@ -17,8 +17,27 @@ export type Stage = {
   enabled: boolean
 }
 
+/**
+ * What a stage does to the documents passing through it, in the few kinds a
+ * reader tells apart at a glance: it keeps some, reshapes each, folds many
+ * into one, brings in another collection's, starts from somewhere else, or
+ * writes what arrives.
+ */
+export type StageKind = "filter" | "shape" | "group" | "join" | "source" | "write"
+
+/** The kinds in the order a picker lists them, each with its word. */
+export const STAGE_KINDS: readonly { kind: StageKind; label: string }[] = [
+  { kind: "filter", label: "Filter" },
+  { kind: "shape", label: "Shape" },
+  { kind: "group", label: "Group" },
+  { kind: "join", label: "Join" },
+  { kind: "source", label: "Source" },
+  { kind: "write", label: "Write" },
+]
+
 export type StageSpec = {
   op: string
+  kind: StageKind
   /** What the stage does, in one line. */
   hint: string
   /** What a new stage of this kind starts as. */
@@ -27,89 +46,157 @@ export type StageSpec = {
 
 /** The stages the builder offers, in the order a pipeline usually uses them. */
 export const STAGES: readonly StageSpec[] = [
-  { op: "$match", hint: "Keep the documents a filter matches", snippet: "{\n  \n}" },
+  {
+    op: "$match",
+    kind: "filter",
+    hint: "Keep the documents a filter matches",
+    snippet: "{\n  \n}",
+  },
   {
     op: "$group",
+    kind: "group",
     hint: "Group by a key and compute over each group",
     snippet: '{\n  _id: "$field",\n  count: { $sum: 1 }\n}',
   },
-  { op: "$project", hint: "Choose and reshape fields", snippet: "{\n  field: 1\n}" },
-  { op: "$sort", hint: "Order the documents", snippet: "{\n  field: -1\n}" },
-  { op: "$limit", hint: "Keep the first n documents", snippet: "10" },
-  { op: "$skip", hint: "Leave out the first n documents", snippet: "0" },
-  { op: "$addFields", hint: "Add computed fields", snippet: '{\n  field: "$other"\n}' },
-  { op: "$set", hint: "Add or overwrite fields", snippet: '{\n  field: "$other"\n}' },
-  { op: "$unset", hint: "Remove fields", snippet: '"field"' },
-  { op: "$unwind", hint: "One document per element of a list", snippet: '{\n  path: "$field"\n}' },
+  { op: "$project", kind: "shape", hint: "Choose and reshape fields", snippet: "{\n  field: 1\n}" },
+  { op: "$sort", kind: "shape", hint: "Order the documents", snippet: "{\n  field: -1\n}" },
+  { op: "$limit", kind: "filter", hint: "Keep the first n documents", snippet: "10" },
+  { op: "$skip", kind: "filter", hint: "Leave out the first n documents", snippet: "0" },
+  {
+    op: "$addFields",
+    kind: "shape",
+    hint: "Add computed fields",
+    snippet: '{\n  field: "$other"\n}',
+  },
+  {
+    op: "$set",
+    kind: "shape",
+    hint: "Add or overwrite fields",
+    snippet: '{\n  field: "$other"\n}',
+  },
+  { op: "$unset", kind: "shape", hint: "Remove fields", snippet: '"field"' },
+  {
+    op: "$unwind",
+    kind: "shape",
+    hint: "One document per element of a list",
+    snippet: '{\n  path: "$field"\n}',
+  },
   {
     op: "$lookup",
+    kind: "join",
     hint: "Join documents of another collection",
     snippet:
       '{\n  from: "collection",\n  localField: "field",\n  foreignField: "_id",\n  as: "joined"\n}',
   },
-  { op: "$count", hint: "Count the documents into one field", snippet: '"total"' },
-  { op: "$sortByCount", hint: "Group by a value and count, largest first", snippet: '"$field"' },
-  { op: "$sample", hint: "A random sample of n documents", snippet: "{\n  size: 10\n}" },
-  { op: "$facet", hint: "Several pipelines over the same input", snippet: "{\n  name: [ ]\n}" },
+  { op: "$count", kind: "group", hint: "Count the documents into one field", snippet: '"total"' },
+  {
+    op: "$sortByCount",
+    kind: "group",
+    hint: "Group by a value and count, largest first",
+    snippet: '"$field"',
+  },
+  {
+    op: "$sample",
+    kind: "filter",
+    hint: "A random sample of n documents",
+    snippet: "{\n  size: 10\n}",
+  },
+  {
+    op: "$facet",
+    kind: "group",
+    hint: "Several pipelines over the same input",
+    snippet: "{\n  name: [ ]\n}",
+  },
   {
     op: "$bucket",
+    kind: "group",
     hint: "Group into ranges you set",
     snippet: '{\n  groupBy: "$field",\n  boundaries: [0, 10, 100],\n  default: "other"\n}',
   },
   {
     op: "$bucketAuto",
+    kind: "group",
     hint: "Group into n even ranges",
     snippet: '{\n  groupBy: "$field",\n  buckets: 5\n}',
   },
   {
     op: "$replaceRoot",
+    kind: "shape",
     hint: "Make a nested document the document",
     snippet: '{\n  newRoot: "$field"\n}',
   },
-  { op: "$replaceWith", hint: "Replace each document with a value", snippet: '"$field"' },
+  {
+    op: "$replaceWith",
+    kind: "shape",
+    hint: "Replace each document with a value",
+    snippet: '"$field"',
+  },
   {
     op: "$unionWith",
+    kind: "join",
     hint: "Add the documents of another collection",
     snippet: '{\n  coll: "collection",\n  pipeline: [ ]\n}',
   },
   {
     op: "$graphLookup",
+    kind: "join",
     hint: "Follow references through a collection",
     snippet:
       '{\n  from: "collection",\n  startWith: "$field",\n  connectFromField: "field",\n  connectToField: "_id",\n  as: "path"\n}',
   },
   {
     op: "$setWindowFields",
+    kind: "shape",
     hint: "Compute over a window of neighbouring documents",
     snippet:
       '{\n  partitionBy: "$field",\n  sortBy: { at: 1 },\n  output: { running: { $sum: "$value", window: { documents: ["unbounded", "current"] } } }\n}',
   },
   {
     op: "$densify",
+    kind: "shape",
     hint: "Fill gaps in a sequence",
     snippet: '{\n  field: "at",\n  range: { step: 1, unit: "hour", bounds: "full" }\n}',
   },
   {
     op: "$fill",
+    kind: "shape",
     hint: "Fill missing values",
     snippet: '{\n  output: { field: { method: "locf" } }\n}',
   },
   {
     op: "$redact",
+    kind: "filter",
     hint: "Keep or prune parts of each document",
     snippet: '{\n  $cond: { if: { $eq: ["$level", 1] }, then: "$$DESCEND", else: "$$PRUNE" }\n}',
   },
   {
     op: "$geoNear",
+    kind: "filter",
     hint: "Documents by distance from a point",
     snippet: '{\n  near: { type: "Point", coordinates: [0, 0] },\n  distanceField: "distance"\n}',
   },
-  { op: "$documents", hint: "Start from documents written here", snippet: "[\n  { x: 1 }\n]" },
-  { op: "$collStats", hint: "Statistics of the collection", snippet: "{\n  storageStats: {}\n}" },
-  { op: "$indexStats", hint: "How much each index is used", snippet: "{}" },
-  { op: "$out", hint: "Write the result as a collection, replacing it", snippet: '"collection"' },
+  {
+    op: "$documents",
+    kind: "source",
+    hint: "Start from documents written here",
+    snippet: "[\n  { x: 1 }\n]",
+  },
+  {
+    op: "$collStats",
+    kind: "source",
+    hint: "Statistics of the collection",
+    snippet: "{\n  storageStats: {}\n}",
+  },
+  { op: "$indexStats", kind: "source", hint: "How much each index is used", snippet: "{}" },
+  {
+    op: "$out",
+    kind: "write",
+    hint: "Write the result as a collection, replacing it",
+    snippet: '"collection"',
+  },
   {
     op: "$merge",
+    kind: "write",
     hint: "Write the result into a collection",
     snippet: '{\n  into: "collection",\n  whenMatched: "merge",\n  whenNotMatched: "insert"\n}',
   },
@@ -119,6 +206,11 @@ const SPEC = new Map(STAGES.map((spec) => [spec.op, spec]))
 
 export function stageSpec(op: string): StageSpec | undefined {
   return SPEC.get(op)
+}
+
+/** The kind of a stage by its operator; `undefined` for one the builder does not know. */
+export function stageKind(op: string): StageKind | undefined {
+  return SPEC.get(op)?.kind
 }
 
 /** The stages the server knows to be reads. Any other is treated as writing, by it and so here. */

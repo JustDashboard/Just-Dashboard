@@ -2,6 +2,7 @@
 
 import { bytes, duration, relativeTime } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { Meter } from "@/components/meter"
 import { Metric, MetricStrip } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -35,6 +36,12 @@ function MemberState({ member }: { member: MongoMember }) {
   return <Status tone="warning" label={word} />
 }
 
+/** How far a member is behind the primary, in words: for a row drawn down rather than across. */
+function lagWords(member: MongoMember): string {
+  if (member.lagSeconds === null) return "lag not known"
+  return member.lagSeconds < 1 ? "in step" : `${duration(member.lagSeconds)} behind`
+}
+
 /**
  * The members of the replica set, as this member sees them, and how far back
  * the replication log reaches.
@@ -42,22 +49,42 @@ function MemberState({ member }: { member: MongoMember }) {
  * A secondary's lag is how far its last applied write is behind the
  * primary's; the log's window is how long a member can be away and still
  * catch up from it rather than starting over.
+ *
+ * The members are a table where the page is wide enough for its six columns.
+ * Under that — a phone — each member is drawn down instead of across, and
+ * nothing is dropped.
  */
 export function ReplicationView({ mongo }: { mongo: Mongo }) {
   const { id } = mongo
   const replication = usePoll((signal) => mongoReplication(id, signal), 10_000, [id])
   const data = replication.data
+  const [frame, width] = useColumnWidth()
+  const wide = width === 0 || width >= 640
 
+  // The measured frame is drawn from the first render on, whatever is in it:
+  // its width is read once it is on the page, and that is before the members are.
   if (replication.error && !data) {
-    return <ReadError error={replication.error} onRetry={replication.refresh} />
+    return (
+      <div ref={frame}>
+        <ReadError error={replication.error} onRetry={replication.refresh} />
+      </div>
+    )
   }
-  if (!data) return <LoadingPanel plain rows={4} />
+  if (!data) {
+    return (
+      <div ref={frame}>
+        <LoadingPanel plain rows={4} />
+      </div>
+    )
+  }
   if (!data.replicaSet) {
     return (
-      <EmptyNote className="py-10">
-        This server is not a member of a replica set
-        {data.reason ? `: ${data.reason}.` : "."}
-      </EmptyNote>
+      <div ref={frame}>
+        <EmptyNote className="py-10">
+          This server is not a member of a replica set
+          {data.reason ? `: ${data.reason}.` : "."}
+        </EmptyNote>
+      </div>
     )
   }
 
@@ -65,7 +92,7 @@ export function ReplicationView({ mongo }: { mongo: Mongo }) {
   const used = oplog && oplog.sizeBytes > 0 ? (oplog.usedBytes / oplog.sizeBytes) * 100 : undefined
 
   return (
-    <div className="space-y-8">
+    <div ref={frame} className="space-y-8">
       {replication.error && (
         <p role="status" className="text-hint text-warning">
           The replica set could not be read again just now: {replication.error.message}
@@ -83,65 +110,100 @@ export function ReplicationView({ mongo }: { mongo: Mongo }) {
           }
         />
         <PanelBody flush className="group-data-[plain]/panel:-mx-4">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Member</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead className="text-right">Behind the primary</TableHead>
-                <TableHead className="text-right">Ping</TableHead>
-                <TableHead className="text-right">Up for</TableHead>
-                <TableHead className="max-lg:hidden">Copies from</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          {!wide ? (
+            <ul className="divide-y divide-hairline">
               {data.members.map((member) => (
-                <TableRow key={member.id} data-slot="mongo-member">
-                  <TableCell>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-mono font-medium">{member.name}</span>
-                      {member.self && <Tag>this server</Tag>}
+                <li key={member.id} data-slot="mongo-member" className="space-y-1 px-4 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 truncate font-mono text-xs font-medium">
+                      {member.name}
                     </span>
-                    {member.message && (
-                      <p className="truncate text-hint text-muted-foreground">{member.message}</p>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <span className="flex">
+                    {member.self && <Tag>this server</Tag>}
+                    <span className="ml-auto flex shrink-0">
                       <MemberState member={member} />
                     </span>
-                  </TableCell>
-                  <TableCell
-                    className={
-                      member.lagSeconds !== null && member.lagSeconds >= LAG_SECONDS
-                        ? "numeric text-right text-warning"
-                        : "numeric text-right"
-                    }
-                    title={
-                      member.optimeDate
-                        ? `Last write applied ${relativeTime(member.optimeDate)}`
-                        : undefined
-                    }
-                  >
-                    {member.lagSeconds === null
-                      ? "—"
-                      : member.lagSeconds < 1
-                        ? "in step"
-                        : duration(member.lagSeconds)}
-                  </TableCell>
-                  <TableCell className="numeric text-right text-muted-foreground">
-                    {member.self ? "—" : `${member.pingMs.toLocaleString("en-US")} ms`}
-                  </TableCell>
-                  <TableCell className="numeric text-right text-muted-foreground">
-                    {uptimeWords(member.uptime)}
-                  </TableCell>
-                  <TableCell className="font-mono text-muted-foreground max-lg:hidden">
-                    {member.syncSource || "—"}
-                  </TableCell>
-                </TableRow>
+                  </div>
+                  {member.message && (
+                    <p className="truncate text-hint text-muted-foreground">{member.message}</p>
+                  )}
+                  <p className="numeric text-hint text-muted-foreground">
+                    <span
+                      className={
+                        member.lagSeconds !== null && member.lagSeconds >= LAG_SECONDS
+                          ? "text-warning"
+                          : undefined
+                      }
+                    >
+                      {lagWords(member)}
+                    </span>
+                    {member.self ? "" : ` · ping ${member.pingMs.toLocaleString("en-US")} ms`}
+                    {` · up ${uptimeWords(member.uptime)}`}
+                    {member.syncSource ? ` · copies from ${member.syncSource}` : ""}
+                  </p>
+                </li>
               ))}
-            </TableBody>
-          </Table>
+            </ul>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Member</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead className="text-right">Behind the primary</TableHead>
+                  <TableHead className="text-right">Ping</TableHead>
+                  <TableHead className="text-right">Up for</TableHead>
+                  <TableHead className="max-lg:hidden">Copies from</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.members.map((member) => (
+                  <TableRow key={member.id} data-slot="mongo-member">
+                    <TableCell>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-mono font-medium">{member.name}</span>
+                        {member.self && <Tag>this server</Tag>}
+                      </span>
+                      {member.message && (
+                        <p className="truncate text-hint text-muted-foreground">{member.message}</p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span className="flex">
+                        <MemberState member={member} />
+                      </span>
+                    </TableCell>
+                    <TableCell
+                      className={
+                        member.lagSeconds !== null && member.lagSeconds >= LAG_SECONDS
+                          ? "numeric text-right text-warning"
+                          : "numeric text-right"
+                      }
+                      title={
+                        member.optimeDate
+                          ? `Last write applied ${relativeTime(member.optimeDate)}`
+                          : undefined
+                      }
+                    >
+                      {member.lagSeconds === null
+                        ? "—"
+                        : member.lagSeconds < 1
+                          ? "in step"
+                          : duration(member.lagSeconds)}
+                    </TableCell>
+                    <TableCell className="numeric text-right text-muted-foreground">
+                      {member.self ? "—" : `${member.pingMs.toLocaleString("en-US")} ms`}
+                    </TableCell>
+                    <TableCell className="numeric text-right text-muted-foreground">
+                      {uptimeWords(member.uptime)}
+                    </TableCell>
+                    <TableCell className="font-mono text-muted-foreground max-lg:hidden">
+                      {member.syncSource || "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </PanelBody>
       </Panel>
 

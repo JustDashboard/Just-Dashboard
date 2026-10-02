@@ -223,6 +223,11 @@ export type BsonNode =
 
 export type BsonScalar = Extract<BsonNode, { text: string }>
 
+const wrap = (key: string, text: string): Json => ({
+  k: "object",
+  entries: [[key, { k: "string", value: text }]],
+})
+
 const single = (json: Json, key: string): Json | undefined =>
   json.k === "object" && json.entries.length === 1 && json.entries[0][0] === key
     ? json.entries[0][1]
@@ -404,6 +409,38 @@ export function printCanonical(node: BsonNode, indent = false): string {
   return printJson(toJson(node), indent)
 }
 
+/** The last millisecond relaxed Extended JSON spells as ISO text: the end of the year 9999. */
+const ISO_MAX_MS = 253402300799999
+
+/**
+ * The tree as JSON a person reads and edits: canonical in every type but
+ * one. A date between 1970 and 9999 is `{"$date":"2026-10-02T03:24:02.889Z"}`
+ * rather than a count of milliseconds. It is the same value and the same type
+ * to the server, which reads both spellings, and the only one of the two a
+ * reader can check or change by hand. Every other value keeps its canonical
+ * wrapper, so a number's type still survives the round trip.
+ */
+export function toReadableJson(node: BsonNode): Json {
+  if (node.type === "object") {
+    return {
+      k: "object",
+      entries: node.fields.map((entry) => [entry.name, toReadableJson(entry.value)]),
+    }
+  }
+  if (node.type === "array") return { k: "array", items: node.items.map(toReadableJson) }
+  if (node.type !== "date") return node.json
+  const millis = stringOf(single(single(node.json, "$date") ?? { k: "null" }, "$numberLong"))
+  if (millis === undefined || !/^\d+$/.test(millis)) return node.json
+  const ms = Number(millis)
+  if (ms > ISO_MAX_MS) return node.json
+  return wrap("$date", new Date(ms).toISOString())
+}
+
+/** The text an editor opens on and a reader copies: `toReadableJson`, printed. */
+export function printReadable(node: BsonNode, indent = false): string {
+  return printJson(toReadableJson(node), indent)
+}
+
 /* ---------------------------------------------------------- shell spelling */
 
 const PLAIN_KEY = /^[A-Za-z_$][\w$]*$/
@@ -547,11 +584,6 @@ export type TypedInput = (typeof TYPED_INPUTS)[number]
 export type InputType = TypedInput | "ejson"
 
 export type Typed = { ok: true; node: BsonNode } | { ok: false; message: string }
-
-const wrap = (key: string, text: string): Json => ({
-  k: "object",
-  entries: [[key, { k: "string", value: text }]],
-})
 
 const DECIMAL = /^[+-]?(?:(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?|Infinity|NaN)$/
 const SPECIAL_DOUBLES = new Set(["NaN", "Infinity", "-Infinity"])

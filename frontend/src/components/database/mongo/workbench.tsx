@@ -1,27 +1,31 @@
 "use client"
 
 import { useState } from "react"
-import { Copy, Download, Pencil, SidebarLeftOpen, Trash } from "@/components/icons"
+import { Copy, Download, Pencil, SettingsSliders, SidebarLeftOpen, Trash } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePanelSize } from "@/lib/panel-size"
-import { useViewState } from "@/lib/view-state"
+import { useMemoryState, useViewState } from "@/lib/view-state"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { IconAction } from "@/components/icon-action"
 import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import type { Verb } from "@/components/verbs"
+import { useUnloadGuard } from "@/components/database/data/guard"
 import type { SectionId } from "@/components/database/engine"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
+import { stagedKey, withoutStaged, type StagedEdits } from "@/components/database/mongo/changes"
 import {
+  CollectionOptionsDialog,
   NewCollectionDialog,
   RenameCollectionDialog,
   dropRequest,
+  mayModify,
   type ViewPreset,
 } from "@/components/database/mongo/collection-dialogs"
 import { DatabasePane } from "@/components/database/mongo/database-pane"
-import type { QueryDraft } from "@/components/database/mongo/query"
+import { collectionKey, type QueryDraft } from "@/components/database/mongo/query"
 import { CollectionRail } from "@/components/database/mongo/rail"
 import { ExportDialog, useMongoExport } from "@/components/database/mongo/transfer"
 import type { MongoCollection } from "@/components/database/mongo/types"
@@ -55,6 +59,12 @@ export type Workbench = {
    * Absent where the role, the engine or the connection cannot.
    */
   newCollection: ((view?: ViewPreset) => void) | undefined
+  /**
+   * Opens the options of the open collection — a cap, an expiry, a view's
+   * definition. Absent where it has none that can be changed, or the reader
+   * may not change them.
+   */
+  collectionOptions: (() => void) | undefined
 }
 
 /**
@@ -64,9 +74,9 @@ export type Workbench = {
  * One frame, two columns with a hairline between them. Which database and
  * which collection are in the address, so a pasted link opens on the same
  * collection, and the rail's rows open theirs in whichever of Documents,
- * Aggregations and Schema the reader is on. Creating, renaming, dropping and
- * exporting a collection live here, because the rail that offers them is
- * here.
+ * Aggregations and Schema the reader is on. Creating, renaming, changing the
+ * options of, dropping and exporting a collection live here, because the rail
+ * that offers them is here.
  *
  * The readings a report page would carry as tiles are where the reader is
  * already looking: a count and a size on every row of the rail, their sums
@@ -108,6 +118,16 @@ export function MongoWorkbench({
   // A view the dialog was opened on belongs to that opening alone.
   if (!creating && preset) setPreset(undefined)
   const [renaming, setRenaming] = useState<MongoCollection | null>(null)
+  const [modifying, setModifying] = useState<MongoCollection | null>(null)
+  // Field edits staged on documents and not yet sent, in any collection here.
+  // They are kept while the reader moves about the database, and a reload or
+  // a closed tab would lose them: the browser asks first.
+  const [staged, setStaged] = useMemoryState<StagedEdits>(stagedKey(id), {})
+  useUnloadGuard(Object.keys(staged).length > 0)
+  const unsent = (name: string) => Object.keys(staged[collectionKey(database, name)] ?? {}).length
+  /** A collection that is gone, or goes by another name, takes the edits staged on its documents with it. */
+  const forget = (name: string) =>
+    setStaged((held) => withoutStaged(held, collectionKey(database, name)))
   const [exporting, setExporting] = useState<{ collection: string; draft?: QueryDraft } | null>(
     null,
   )
@@ -171,6 +191,16 @@ export function MongoWorkbench({
       ...(canWrite && !entry.system && entry.type !== "view"
         ? [{ key: "rename", label: "Rename…", icon: Pencil, run: () => setRenaming(entry) }]
         : []),
+      ...(mayModify(mongo, entry)
+        ? [
+            {
+              key: "options",
+              label: "Options…",
+              icon: SettingsSliders,
+              run: () => setModifying(entry),
+            },
+          ]
+        : []),
       ...(canDestroy && !entry.system
         ? [
             {
@@ -181,6 +211,7 @@ export function MongoWorkbench({
               run: () =>
                 confirm(
                   dropRequest(mongo, entry, () => {
+                    forget(entry.name)
                     catalog.refresh()
                     // The one on screen is gone: the pane says what the database holds.
                     if (entry.name === collection) select({ collection: null })
@@ -216,6 +247,8 @@ export function MongoWorkbench({
     exportCollection: (draft) => setExporting({ collection, draft }),
     exporting: exporter.running !== null,
     newCollection: openNew,
+    collectionOptions:
+      current && mayModify(mongo, current) ? () => setModifying(current) : undefined,
   }
 
   return (
@@ -234,6 +267,7 @@ export function MongoWorkbench({
               catalog={catalog}
               section={section}
               verbsFor={verbsFor}
+              unsent={unsent}
               onNew={openNew && (() => openNew())}
               onHide={() => (wide ? setRailShown(false) : setRailOver(false))}
             />
@@ -306,9 +340,20 @@ export function MongoWorkbench({
           confirm={confirm}
           onOpenChange={(open) => !open && setRenaming(null)}
           onRenamed={(from, to) => {
+            forget(from)
             catalog.refresh()
             if (from === collection) select({ collection: to })
           }}
+        />
+      )}
+      {canWrite && (
+        <CollectionOptionsDialog
+          mongo={mongo}
+          collection={modifying}
+          collections={listed}
+          confirm={confirm}
+          onOpenChange={(open) => !open && setModifying(null)}
+          onChanged={catalog.refresh}
         />
       )}
       <ExportDialog

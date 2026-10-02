@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { clientWork, isHeartbeat, leftOutWords, operationTitle } from "./ops"
+import { clientWork, isHeartbeat, leftOutWords, operationTitle, stoppable } from "./ops"
 
 const operation = (over) => ({
   opId: "1",
@@ -56,6 +56,24 @@ describe("a driver's heartbeat", () => {
     expect(leftOutWords(1, 0)).toBe("the heartbeat of one connected client")
     expect(leftOutWords(0, 3)).toBe("3 tasks of the server's own")
     expect(leftOutWords(0, 0)).toBe("")
+  })
+})
+
+describe("what can be stopped from here", () => {
+  test("a client's operation in progress can", () => {
+    expect(stoppable(operation({ op: "query", command: '{"find":"orders"}' }))).toBe(true)
+  })
+
+  test("a heartbeat cannot, though it is active and has a client", () => {
+    const heartbeat = operation({ command: '{"hello":1,"helloOk":true}' })
+    expect(heartbeat.active && Boolean(heartbeat.client)).toBe(true)
+    expect(stoppable(heartbeat)).toBe(false)
+  })
+
+  test("nor the server's own work, an idle connection, or an operation with no id", () => {
+    expect(stoppable(operation({ op: "query", client: "" }))).toBe(false)
+    expect(stoppable(operation({ op: "query", active: false }))).toBe(false)
+    expect(stoppable(operation({ op: "query", opId: "" }))).toBe(false)
   })
 })
 

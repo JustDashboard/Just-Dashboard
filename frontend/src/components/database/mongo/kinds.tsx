@@ -147,6 +147,39 @@ export function operationColor(op: string): string | undefined {
   return Object.hasOwn(OPERATION_EFFECT, op) ? effectColor(OPERATION_EFFECT[op]) : undefined
 }
 
+/* ----------------------------------------------------------- stage kinds */
+
+/** The kinds of pipeline stage, as `aggregations/pipeline` names them. */
+type StageKindName = "filter" | "shape" | "group" | "join" | "source" | "write"
+
+/**
+ * The hue of a stage by what it does to the documents passing through. A
+ * stage that keeps some is a read, and takes the read's hue; one that writes
+ * takes the removal's, since a pipeline that writes is asked the permission
+ * to remove. The rest are the hues no reading of state uses, so a column of
+ * stages reads as its shape — filter, group, shape — before a word of it is
+ * read.
+ */
+export function stageColor(kind: StageKindName | undefined): string {
+  switch (kind) {
+    case "filter":
+      return effectColor("read") ?? "var(--tag-blue)"
+    case "shape":
+      return "var(--tag-cyan)"
+    case "group":
+      return "var(--tag-violet)"
+    case "join":
+      return "var(--tag-green)"
+    case "write":
+      return effectColor("remove") ?? "var(--tag-pink)"
+    case "source":
+      return "var(--tag-slate)"
+    default:
+      // A stage the builder does not know: no kind is claimed for it.
+      return "var(--muted-foreground)"
+  }
+}
+
 /* -------------------------------------------------------- collection kinds */
 
 export type CollectionKind = "collection" | "view" | "timeseries" | "capped" | "system"

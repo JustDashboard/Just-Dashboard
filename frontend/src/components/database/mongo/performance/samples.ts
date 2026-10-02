@@ -164,6 +164,22 @@ export function latest(rows: readonly StatRow[], key: Exclude<Numeric, "ts">): n
  * Documents examined for each one returned since the server started: the
  * figure the tile opens on before the page has two samples of its own.
  */
+/**
+ * Whether a server's status carries none of the counters this page is made
+ * of. A server that only speaks the protocol answers `serverStatus` with its
+ * name, its version and how long it has been up, and nothing to count: no
+ * operation counters, no connections, no traffic. Tiles and charts drawn from
+ * that would be a page of zeros that read as "idle".
+ */
+export function reportsNothing(server: MongoServer): boolean {
+  return (
+    Object.keys(server.opcounters).length === 0 &&
+    server.connections.current + server.connections.available === 0 &&
+    server.network.numRequests === 0 &&
+    server.cache === null
+  )
+}
+
 export function lifetimeTargeting(server: MongoServer): number | null {
   return server.documents.returned > 0 ? server.scanned.documents / server.documents.returned : null
 }

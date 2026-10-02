@@ -11,6 +11,7 @@ import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, LoadingPanel } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import {
   Table,
   TableBody,
@@ -24,8 +25,10 @@ import { EngineMark } from "@/components/database/kit"
 import { killOperation, mongoOperations } from "@/components/database/mongo/api"
 import {
   clientWork,
+  isHeartbeat,
   leftOutWords,
   operationTitle as title,
+  stoppable,
 } from "@/components/database/mongo/performance/ops"
 import { runningWords } from "@/components/database/mongo/performance/samples"
 import type { MongoOperation } from "@/components/database/mongo/types"
@@ -44,7 +47,9 @@ const LONG_SECONDS = 10
  * may remove things, on a protected connection too, since it changes no data.
  * The dashboard's own request for this list is left out by the server; the
  * heartbeat each connected driver keeps open and the server's own tasks are
- * left out here, until the reader asks for them.
+ * left out here, until the reader asks for them — and when they are listed
+ * they are named as what they are and cannot be stopped from here: a
+ * heartbeat is not work, and stopping one only makes its driver reconnect.
  */
 export function OperationsView({
   mongo,
@@ -202,12 +207,15 @@ export function OperationsView({
                       </span>
                     </TableCell>
                     <TableCell className="py-1 text-right">
-                      {/* The server's own background work is not a client's to stop. */}
-                      {canKill &&
+                      {isHeartbeat(operation) ? (
+                        // Where Stop would stand, the reason there is none.
+                        <span className="flex justify-end">
+                          <Tag>heartbeat</Tag>
+                        </span>
+                      ) : (
+                        canKill &&
                         engine.can("cancel") &&
-                        operation.opId &&
-                        operation.active &&
-                        operation.client && (
+                        stoppable(operation) && (
                           <IconAction
                             label={`Stop ${title(operation)}`}
                             disabled={operation.killPending}
@@ -215,7 +223,8 @@ export function OperationsView({
                           >
                             <StopCircle />
                           </IconAction>
-                        )}
+                        )
+                      )}
                     </TableCell>
                   </TableRow>
                 )

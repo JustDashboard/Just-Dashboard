@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   STAGES,
+  STAGE_KINDS,
   enabledStages,
   exportText,
   listText,
@@ -13,6 +14,7 @@ import {
   sameAsSaved,
   shellCollection,
   stageProblem,
+  stageKind,
   stageSpec,
   withOperator,
   withSaved,
@@ -78,6 +80,32 @@ describe("whether a run would write", () => {
       expect(kind.unknown).toEqual([])
       expect(kind.writes).toBe(spec.op === "$out" || spec.op === "$merge" ? spec.op : null)
     }
+  })
+})
+
+describe("what a stage does", () => {
+  test("every stage the builder offers has a kind the picker lists", () => {
+    const listed = new Set(STAGE_KINDS.map((entry) => entry.kind))
+    for (const spec of STAGES) expect(listed.has(spec.kind)).toBe(true)
+    // And every kind has a stage: the picker draws no empty group.
+    for (const { kind } of STAGE_KINDS) {
+      expect(STAGES.some((spec) => spec.kind === kind)).toBe(true)
+    }
+  })
+
+  test("the stages that write are the only ones of the writing kind", () => {
+    expect(STAGES.filter((spec) => spec.kind === "write").map((spec) => spec.op)).toEqual([
+      "$out",
+      "$merge",
+    ])
+  })
+
+  test("a stage by its operator; one the builder does not know has no kind", () => {
+    expect(stageKind("$match")).toBe("filter")
+    expect(stageKind("$group")).toBe("group")
+    expect(stageKind("$lookup")).toBe("join")
+    expect(stageKind("$project")).toBe("shape")
+    expect(stageKind("$changeStream")).toBeUndefined()
   })
 })
 

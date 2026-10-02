@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 import { mockDatabases, type DatabaseMock } from "./database-fixture"
 
 /**
@@ -60,8 +60,11 @@ const ORDERS = [
 type FakeCollection = {
   type?: "collection" | "view" | "timeseries"
   capped?: boolean
+  cappedSize?: number
+  cappedMax?: number
   system?: boolean
   viewOn?: string
+  pipeline?: string
   docs: Doc[]
   indexes?: Record<string, unknown>[]
   validator?: string
@@ -72,6 +75,18 @@ type Call = { method: string; path: string; query: URLSearchParams; body: Record
 type MongoMock = DatabaseMock & {
   /** `service.control` without `destructive`: a role that may write and not remove. */
   limited?: boolean
+  /** `read` alone: a role that may run nothing. */
+  reader?: boolean
+  /** What the server says to a find it refuses (a 400), by the request's body. */
+  refusal?: (body: Record<string, unknown>) => string | undefined
+  /** Finds the server cannot be reached for (a 502), by the request's body. */
+  unreachable?: (body: Record<string, unknown>) => boolean
+  /** Holds every find until it settles: a find that is still running. */
+  findHeld?: Promise<void>
+  /** Holds every classification until it settles. */
+  classifyHeld?: Promise<void>
+  /** A server that answers its status with no counters at all (one that only speaks the protocol). */
+  silent?: boolean
   collections?: Record<string, FakeCollection>
   /** Paths that answer 502 until `heal()` is called. */
   failing?: RegExp
@@ -216,14 +231,14 @@ async function mockMongo(page: Page, options: MongoMock = {}) {
   }
 
   await mockDatabases(page, options)
-  if (options.limited) {
+  if (options.limited || options.reader) {
     await page.route("**/api/v1/auth/session", (route) =>
       json(route, {
         authenticated: true,
         needsTotp: false,
         needsEnrollment: false,
         require2fa: false,
-        capabilities: ["read", "service.control"],
+        capabilities: options.reader ? ["read"] : ["read", "service.control"],
         user: {
           id: 2,
           username: "limited",
@@ -255,8 +270,11 @@ async function mockMongo(page: Page, options: MongoMock = {}) {
         indexCount: entry.indexes?.length ?? 1,
         indexSize: 20480,
         capped: Boolean(entry.capped),
+        cappedSize: entry.capped ? (entry.cappedSize ?? 1 << 20) : undefined,
+        cappedMax: entry.cappedMax,
         clustered: false,
         viewOn: entry.viewOn,
+        pipeline: entry.pipeline,
         validator: entry.validator,
       }))
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -314,12 +332,27 @@ async function mockMongo(page: Page, options: MongoMock = {}) {
             },
           ],
         })
-      case "GET /mongo/collections":
+      case "GET /mongo/collections": {
+        const database = query.get("database") ?? DB
         return json(route, {
-          database: query.get("database") ?? DB,
-          collections: query.get("database") === "reporting" ? [] : listed(),
+          database,
+          collections:
+            database === DB
+              ? listed()
+              : database === "admin"
+                ? listed()
+                    .slice(0, 1)
+                    .map((entry) => ({ ...entry, name: "system.version", system: true }))
+                : [],
           statsTruncated: false,
         })
+      }
+      case "PATCH /mongo/collections":
+        if (typeof body.cappedSize === "number") held.cappedSize = body.cappedSize
+        if (typeof body.cappedMax === "number") held.cappedMax = body.cappedMax
+        if (typeof body.viewOn === "string") held.viewOn = body.viewOn
+        if (typeof body.pipeline === "string") held.pipeline = body.pipeline
+        return json(route, { ok: true })
       case "POST /mongo/collections":
         collections[named] = { docs: [], capped: Boolean(body.capped) }
         return json(route, { ok: true })
@@ -332,8 +365,12 @@ async function mockMongo(page: Page, options: MongoMock = {}) {
         return json(route, { ok: true })
 
       case "POST /mongo/find": {
-        const refusal = options.refused?.[String(body.filter ?? "")]
+        await options.findHeld
+        const refusal = options.refused?.[String(body.filter ?? "")] ?? options.refusal?.(body)
         if (refusal) return refuse(route, 400, "bad_request", refusal)
+        if (options.unreachable?.(body)) {
+          return refuse(route, 502, "connect_failed", "the server could not be reached")
+        }
         const found = matching(held?.docs ?? [], body.filter)
         const skip = Number(body.skip ?? 0)
         const limit = Number(body.limit ?? 50)
@@ -420,7 +457,13 @@ async function mockMongo(page: Page, options: MongoMock = {}) {
         return json(route, { name: "made_1" })
       case "PATCH /mongo/indexes":
         held.indexes = held.indexes?.map((index) =>
-          index.name === body.name ? { ...index, hidden: body.hidden } : index,
+          index.name === body.name
+            ? {
+                ...index,
+                hidden: body.hidden ?? index.hidden,
+                expireAfterSeconds: body.expireAfterSeconds ?? index.expireAfterSeconds,
+              }
+            : index,
         )
         return json(route, { ok: true })
       case "DELETE /mongo/indexes":
@@ -455,6 +498,25 @@ async function mockMongo(page: Page, options: MongoMock = {}) {
       case "POST /mongo/aggregate/preview": {
         const text = String(body.pipeline)
         const out = text.includes('"$out"')
+        if (text.includes("$collStats")) {
+          // What the server has counted on a collection since it started.
+          const reads = named === "users" ? 620 : 40
+          return json(route, {
+            documents: options.silent
+              ? []
+              : [
+                  doc(
+                    `{"ns":"${DB}.${named}","localTime":{"$date":{"$numberLong":"1790900000000"}},"latencyStats":{"reads":{"latency":{"$numberLong":"9000"},"ops":{"$numberLong":"${reads}"}},"writes":{"latency":{"$numberLong":"500"},"ops":{"$numberLong":"10"}},"commands":{"latency":{"$numberLong":"1"},"ops":{"$numberLong":"1"}}}}`,
+                  ),
+                ],
+            returned: options.silent ? 0 : 1,
+            stage: 0,
+            stages: 1,
+            inputLimited: false,
+            inputLimit: 0,
+            durationMs: 1,
+          })
+        }
         if (text.includes("$nope")) {
           return refuse(route, 400, "bad_request", "pipeline: $nope is not one a preview can run")
         }
@@ -613,8 +675,23 @@ async function mockMongo(page: Page, options: MongoMock = {}) {
           body: `${held.docs.map((entry) => entry.canonical).join("\n")}\n`,
         })
 
-      case "GET /mongo/server":
-        return json(route, SERVER(state.samples++, options.topology ?? "standalone"))
+      case "GET /mongo/server": {
+        const server = SERVER(state.samples++, options.topology ?? "standalone")
+        return json(
+          route,
+          options.silent
+            ? {
+                ...server,
+                process: "ferretdb",
+                storageEngine: "",
+                opcounters: {},
+                connections: { current: 0, available: 0, active: 0, totalCreated: 0 },
+                network: { bytesIn: 0, bytesOut: 0, numRequests: 0 },
+                cache: null,
+              }
+            : server,
+        )
+      }
       case "GET /mongo/ops":
         return json(route, { operations: options.operations ?? [] })
       case "POST /mongo/killop":
@@ -688,6 +765,7 @@ async function mockMongo(page: Page, options: MongoMock = {}) {
           ],
         })
       case "POST /mongo/command/classify": {
+        await options.classifyHeld
         const first = /^\s*\{\s*"?(\w+)/.exec(String(body.command))?.[1] ?? ""
         const verdict = {
           command: first,
@@ -736,6 +814,24 @@ async function mockMongo(page: Page, options: MongoMock = {}) {
       state.replace = undefined
     },
   }
+}
+
+/** Something a test lets go of when it chooses: a response that has not come yet. */
+function hold() {
+  let release = () => {}
+  const until = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { until, release }
+}
+
+/**
+ * Presses one of a field's own controls. They are drawn on the row the
+ * pointer is over (or the keyboard is on), and on no other.
+ */
+async function fieldAction(scope: Locator, field: string, action: string) {
+  await scope.getByRole("treeitem", { name: new RegExp(`^${field}:`) }).hover()
+  await scope.getByRole("button", { name: `${action} ${field}` }).click()
 }
 
 const rail = (page: Page) => page.locator("[data-slot=collection-rail]")
@@ -909,12 +1005,12 @@ test.describe("documents", () => {
     )
     await expect(first.locator("[data-type=double]")).toHaveText("5.0")
 
-    await first.getByRole("button", { name: "Edit loginCount" }).click()
+    await fieldAction(first, "loginCount", "Edit")
     // The editor opens on the value's own type: an Int64 stays one.
     await expect(first.getByRole("combobox", { name: "Type of loginCount" })).toHaveText("Int64")
     await first.getByLabel("Value of loginCount").fill("4")
     await page.keyboard.press("Enter")
-    await first.getByRole("button", { name: "Remove verified" }).click()
+    await fieldAction(first, "verified", "Remove")
     const pending = first.locator("[data-slot=mongo-pending]")
     await expect(pending).toContainText("1 changed, 1 removed")
     await expect(pending).toContainText('$set: { loginCount: Long("4") }')
@@ -938,7 +1034,7 @@ test.describe("documents", () => {
     await mockMongo(page, { matched: 0 })
     await page.goto(collection("users"))
     const first = documents(page).first()
-    await first.getByRole("button", { name: "Edit age" }).click()
+    await fieldAction(first, "age", "Edit")
     await first.getByLabel("Value of age").fill("21")
     await page.keyboard.press("Enter")
     await first.getByRole("button", { name: "Update" }).click()
@@ -951,7 +1047,7 @@ test.describe("documents", () => {
     await mockMongo(page)
     await page.goto(collection("users"))
     const first = documents(page).first()
-    await first.getByRole("button", { name: "Edit age" }).click()
+    await fieldAction(first, "age", "Edit")
     await first.getByLabel("Value of age").fill("2147483648")
     await page.keyboard.press("Enter")
     await expect(first.getByRole("alert")).toContainText("Outside what an Int32 holds")
@@ -1281,6 +1377,349 @@ test.describe("documents", () => {
     await expect(documents(page)).toHaveCount(2)
   })
 
+  // The review's first finding: a refusal that was not about the filter was
+  // shown nowhere, or was pinned on the filter.
+  test("a refusal lands on the field it is about, or under the bar, and is said beside the documents it left", async ({
+    page,
+  }) => {
+    await mockMongo(page, {
+      refusal: (body) =>
+        body.sort === "{ age: 5 }"
+          ? "(Location15975) $sort key ordering must be 1 (for ascending) or -1 (for descending)"
+          : body.sort === "{ $x: 1 }"
+            ? "(Location16410) FieldPath field names may not start with '$'."
+            : undefined,
+    })
+    await page.goto(collection("users"))
+    await expect(documents(page)).toHaveCount(2)
+    await page.getByRole("button", { name: "Options" }).click()
+    const sort = page.getByLabel("Sort", { exact: true })
+    await page.getByLabel("Filter", { exact: true }).fill("{ age: { $gt: 1 } }")
+    await sort.fill("{ age: 5 }")
+    await sort.press("Enter")
+    // On the sort, in the server's words — and not on the filter, though one is typed.
+    await expect(page.locator("#mongo-query-sort-problem")).toContainText("$sort key ordering")
+    await expect(page.locator("#mongo-query-filter-problem")).toHaveCount(0)
+    // The documents from before stay, and the line over them says why and asks again.
+    const held = page.locator("[data-slot=mongo-read-failed]")
+    await expect(held).toContainText("The server refused this query")
+    await expect(held).toContainText("$sort key ordering")
+    await expect(held.getByRole("button", { name: "Try again" })).toBeVisible()
+    await expect(documents(page)).toHaveCount(2)
+
+    // A refusal that names no field of the bar is the query's own.
+    await sort.fill("{ $x: 1 }")
+    await sort.press("Enter")
+    await expect(page.locator("[data-slot=mongo-query-refusal]")).toContainText(
+      "FieldPath field names may not start with",
+    )
+    await expect(page.locator("#mongo-query-sort-problem")).toHaveCount(0)
+  })
+
+  test("a page that could not be read says which, why, and whose documents are on screen", async ({
+    page,
+  }) => {
+    const users = Array.from({ length: 60 }, (_, n) =>
+      doc(`{"_id":{"$numberInt":"${n}"},"n":{"$numberInt":"${n}"}}`),
+    )
+    const mongo = await mockMongo(page, {
+      collections: { many: { docs: users } },
+      unreachable: (body) => body.skip === 50,
+    })
+    await page.goto(collection("many"))
+    await expect(documents(page)).toHaveCount(50)
+    await page.getByRole("button", { name: "Next page" }).click()
+    const held = page.locator("[data-slot=mongo-read-failed]")
+    await expect(held).toContainText("Page 2 could not be read")
+    await expect(held).toContainText("the server could not be reached")
+    // The page before is still there, and its range is said as that.
+    await expect(documents(page)).toHaveCount(50)
+    await expect(page.locator("[data-slot=mongo-documents]")).toContainText(
+      "1–50 of 60 · from before",
+    )
+    const before = mongo.asked("POST /mongo/find").length
+    await held.getByRole("button", { name: "Try again" }).click()
+    await expect.poll(() => mongo.asked("POST /mongo/find").length).toBeGreaterThan(before)
+  })
+
+  test("a find that runs long says how long, and stopping it is not a failure", async ({
+    page,
+  }) => {
+    const find = hold()
+    await mockMongo(page, { findHeld: find.until })
+    await page.goto(collection("users"))
+    // After a second the command's place holds the clock and the way to stop.
+    const stop = page.getByRole("button", { name: /^Stop/ })
+    await expect(stop).toBeVisible({ timeout: 10_000 })
+    await expect(stop).toContainText(/\d+ s/)
+    await stop.click()
+    await expect(page.getByText("The find was stopped before the server answered.")).toBeVisible()
+    await expect(page.locator("[data-slot=mongo-documents]").getByRole("alert")).toHaveCount(0)
+    find.release()
+    await page.getByRole("button", { name: "Find again" }).click()
+    await expect(documents(page)).toHaveCount(2)
+  })
+
+  // The review: staged edits were dropped without a word by a press on
+  // another collection, or on the sidebar.
+  test("edits staged on a document stay with it through another collection, another page and a re-read", async ({
+    page,
+  }) => {
+    const mongo = await mockMongo(page)
+    await page.goto(collection("users"))
+    const first = documents(page).first()
+    await fieldAction(first, "age", "Edit")
+    await first.getByLabel("Value of age").fill("21")
+    await page.keyboard.press("Enter")
+    await expect(first.locator("[data-slot=mongo-pending]")).toContainText("1 changed")
+    const unsent = page.locator("[data-slot=mongo-unsent]")
+    await expect(unsent).toContainText("Unsent edits on one document")
+
+    // Another collection opens at once; the one left behind is marked in the rail.
+    await rail(page)
+      .getByRole("link", { name: /orders/ })
+      .click()
+    await expect(documents(page)).toHaveCount(3)
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    await expect(
+      rail(page)
+        .getByRole("link", { name: /users/ })
+        .first()
+        .locator("[data-slot=mongo-unsent-mark]"),
+    ).toBeVisible()
+    // Another page of the database, by the sidebar, and back.
+    await page
+      .getByRole("navigation", { name: "Sidebar" })
+      .getByRole("link", { name: "Schema" })
+      .click()
+    await expect(page.locator("[data-slot=mongo-schema]")).toBeVisible()
+    await rail(page).getByRole("link", { name: /users/ }).first().click()
+    await page
+      .getByRole("navigation", { name: "Sidebar" })
+      .getByRole("link", { name: "Documents" })
+      .click()
+    await expect(documents(page).first().locator("[data-slot=mongo-pending]")).toContainText(
+      "1 changed",
+    )
+
+    // A query that leaves the document out says so, and brings it back.
+    await page.getByLabel("Filter", { exact: true }).fill('{ "email": "user2@example.com" }')
+    await page.getByLabel("Filter", { exact: true }).press("Enter")
+    await expect(documents(page)).toHaveCount(1)
+    await expect(unsent).toContainText("not on this page")
+    await unsent.getByRole("button", { name: "Show it" }).click()
+    await expect(page.getByLabel("Filter", { exact: true })).toHaveValue(
+      '{ "_id": {"$oid":"6abe79972945ac11a3124bfc"} }',
+    )
+
+    // The update is still held to the value the field had when the edit was made.
+    mongo.collections.users.docs[0] = doc(
+      USERS[0].canonical.replace('"age":{"$numberInt":"19"}', '"age":{"$numberInt":"40"}'),
+    )
+    await page.getByRole("button", { name: "Read the documents again" }).click()
+    const pending = documents(page).first().locator("[data-slot=mongo-pending]")
+    await expect(pending).toContainText("has been written to since this edit was made")
+    await pending.getByRole("button", { name: "Update" }).click()
+    await expect
+      .poll(() => mongo.asked("PATCH /mongo/documents").at(-1)?.body.filter)
+      .toBe('{"_id":{"$oid":"6abe79972945ac11a3124bfc"},"age":{"$numberInt":"19"}}')
+
+    // Letting them go is the reader's own word, and can be taken back.
+    await page.goto(collection("users"))
+    await fieldAction(documents(page).first(), "email", "Remove")
+    await page
+      .locator("[data-slot=mongo-unsent]")
+      .getByRole("button", { name: "Let them go" })
+      .click()
+    await expect(page.locator("[data-slot=mongo-pending]")).toHaveCount(0)
+    await page.getByRole("button", { name: "Undo" }).click()
+    await expect(documents(page).first().locator("[data-slot=mongo-pending]")).toContainText(
+      "1 removed",
+    )
+  })
+
+  // The review: fifty documents were 2,300 stops for Tab, and an edit in
+  // place left the keyboard on the page's body.
+  test("the list is one stop for Tab, the arrows walk its rows, and an edit gives the keyboard back", async ({
+    page,
+  }) => {
+    await mockMongo(page)
+    await page.goto(collection("users"))
+    await expect(documents(page)).toHaveCount(2)
+    const list = page.getByRole("list", { name: "Documents" })
+    const focused = () =>
+      page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? "")
+
+    await page.getByRole("button", { name: "Expand all" }).focus()
+    await page.keyboard.press("Tab")
+    expect(await focused()).toBe('_id: ObjectId("6abe79972945ac11a3124bfc")')
+    // The rows of every document are walked with the arrows; none of them is a stop of its own.
+    expect(await list.locator('[data-tree-row][tabindex="0"]').count()).toBe(1)
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.press("ArrowDown")
+    expect(await focused()).toBe("age: 19")
+    await page.keyboard.press("PageDown")
+    expect(await focused()).toBe('_id: ObjectId("6abe79972945ac11a3124bfd")')
+    await page.keyboard.press("PageUp")
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.press("ArrowDown")
+
+    // Enter edits the value; Enter again stages it, and the row has the keyboard.
+    await page.keyboard.press("Enter")
+    await expect(documents(page).first().getByLabel("Value of age")).toBeFocused()
+    await page.keyboard.type("23")
+    await page.keyboard.press("Enter")
+    expect(await focused()).toBe("age: 23, changed")
+    // Escape out of the form does the same.
+    await page.keyboard.press("Enter")
+    await page.keyboard.press("Escape")
+    expect(await focused()).toBe("age: 23, changed")
+
+    // From the row, Tab reaches its own controls, then the document's, then leaves the list.
+    await page.keyboard.press("Tab")
+    expect(await focused()).toBe("Undo the change to age")
+    let stops = 1
+    while (
+      stops < 20 &&
+      (await page.evaluate(
+        () => document.activeElement?.closest('[aria-label="Documents"]') !== null,
+      ))
+    ) {
+      await page.keyboard.press("Tab")
+      stops++
+    }
+    expect(stops).toBeLessThan(14)
+    await expect(page.getByRole("combobox", { name: "Documents a page" })).toBeFocused()
+  })
+
+  test("a date is the moment it is wherever a document is read as text", async ({ page }) => {
+    const mongo = await mockMongo(page)
+    await page.goto(collection("users", "&view=json"))
+    await expect(documents(page).first()).toContainText(
+      '"createdAt": {"$date":"2026-10-01T14:17:43.204Z"}',
+    )
+    await documents(page).first().getByRole("button", { name: "Edit", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "Edit document" })
+    const text = await opened(page)
+    expect(text).toContain('"createdAt": {"$date":"2026-10-01T14:17:43.204Z"}')
+    // Unchanged, it is not something to save: the two spellings are one value.
+    await expect(dialog.getByRole("button", { name: "Save document" })).toBeDisabled()
+    await type(page, text.replace("2026-10-01T14:17:43.204Z", "2027-01-01T00:00:00.000Z"))
+    await dialog.getByRole("button", { name: "Save document" }).click()
+    await expect(dialog).toBeHidden()
+    expect(String(mongo.asked("PUT /mongo/documents").at(-1)?.body.document)).toContain(
+      '{"$date":"2027-01-01T00:00:00.000Z"}',
+    )
+  })
+
+  test("a head of the table asks the server for the order, and says which fields are not in every document", async ({
+    page,
+  }) => {
+    const mongo = await mockMongo(page)
+    await page.goto(collection("users", "&view=table"))
+    const grid = page.getByRole("grid", { name: "users documents" })
+    await expect(grid).toBeVisible()
+    // (The first column of the grid is its row numbers.)
+    const head = (at: number) => grid.locator(`[role=columnheader][aria-colindex="${at + 2}"]`)
+    // `zeta` is in one of the two documents: its head says so, and the rule is stated once.
+    await expect(head(1)).toContainText("zeta")
+    await expect(head(1)).toContainText("1 of 2")
+    await expect(head(3)).toContainText("Int32")
+    await expect(page.getByText("may be a field the document does not have")).toBeVisible()
+
+    await head(3).getByText("age", { exact: true }).click()
+    await expect.poll(() => mongo.asked("POST /mongo/find").at(-1)?.body.sort).toBe('{ "age": 1 }')
+    await expect.poll(() => where(page)).toContain('sort={ "age": 1 }')
+    // The bar holds the same sort the head asked for.
+    await page.getByRole("button", { name: /^Options/ }).click()
+    await expect(page.getByLabel("Sort", { exact: true })).toHaveValue('{ "age": 1 }')
+  })
+
+  test("a database with nothing of the reader's says which kind of nothing it is", async ({
+    page,
+  }) => {
+    await mockMongo(page)
+    await page.goto(`${DATA}?db=admin`)
+    const pane = page.locator("[data-slot=mongo-database]")
+    await expect(pane).toContainText("admin holds only the server's own collections")
+    await expect(pane.getByRole("button", { name: "New collection" })).toHaveCount(0)
+    // The list beside it shows them without being asked.
+    await expect(rail(page).getByText("system.version")).toBeVisible()
+
+    await page.goto(`${DATA}?db=gone_since`)
+    await expect(pane).toContainText("The server has no database called gone_since")
+    await pane.getByRole("link", { name: `Open ${DB}` }).click()
+    await expect(pane).toContainText("By the data they hold")
+
+    // The one the connection names is simply empty until it holds something.
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockMongo(page, { collections: {} })
+    await page.goto(`${DATA}?db=${DB}`)
+    await expect(pane).toContainText(`${DB} holds no collections`)
+    await expect(pane.getByRole("button", { name: "New collection" }).first()).toBeVisible()
+  })
+
+  test("a collection's options are changed in place, and what removes documents is asked for by name", async ({
+    page,
+  }) => {
+    const mongo = await mockMongo(page, {
+      collections: {
+        ...DEFAULT_COLLECTIONS,
+        sessions: { capped: true, cappedSize: 2 << 20, cappedMax: 500, docs: [] },
+        active_users: {
+          type: "view",
+          viewOn: "users",
+          pipeline: '[{"$match":{"verified":true}}]',
+          docs: [],
+        },
+      },
+    })
+    await page.goto(`${DATA}?db=${DB}`)
+    // An ordinary collection has nothing of the kind to change.
+    await rail(page).getByRole("button", { name: "Actions for orders" }).click()
+    await expect(page.getByRole("menuitem", { name: "Options…" })).toHaveCount(0)
+    await page.keyboard.press("Escape")
+
+    await rail(page).getByRole("button", { name: "Actions for sessions" }).click()
+    await page.getByRole("menuitem", { name: "Options…" }).click()
+    const options = page.getByRole("dialog", { name: "Options of sessions" })
+    await expect(options.getByLabel("Size")).toHaveValue("2")
+    await options.getByLabel("Size").fill("1")
+    await options.getByRole("button", { name: "Save options…" }).click()
+    const confirm = page.getByRole("dialog", { name: "Resize sessions" })
+    await expect(confirm).toContainText("removed at once, oldest first")
+    expect(mongo.asked("PATCH /mongo/collections")).toHaveLength(0)
+    await confirm.getByRole("button", { name: "Resize collection" }).click()
+    // Only the field that changed is sent.
+    await expect
+      .poll(() => mongo.asked("PATCH /mongo/collections").at(-1)?.body)
+      .toEqual({ database: DB, collection: "sessions", cappedSize: 1 << 20 })
+
+    // A view is redefined without ceremony: nothing it reads is touched.
+    await rail(page).getByRole("button", { name: "Actions for active_users" }).click()
+    await page.getByRole("menuitem", { name: "Options…" }).click()
+    const view = page.getByRole("dialog", { name: "Options of active_users" })
+    await view.getByLabel("Pipeline").fill("[ { $match: { verified: false } } ]")
+    await view.getByRole("button", { name: "Save options", exact: true }).click()
+    await expect(view).toBeHidden()
+    expect(mongo.asked("PATCH /mongo/collections").at(-1)?.body).toEqual({
+      database: DB,
+      collection: "active_users",
+      viewOn: "users",
+      pipeline: "[ { $match: { verified: false } } ]",
+    })
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+
+    // A role that may not remove is not offered a cap to change.
+    await mockMongo(page, { limited: true })
+    await page.goto(`${DATA}?db=${DB}`)
+    await rail(page).getByRole("button", { name: "Actions for sessions" }).click()
+    await expect(page.getByRole("menuitem", { name: "Rename…" })).toBeVisible()
+    await expect(page.getByRole("menuitem", { name: "Options…" })).toHaveCount(0)
+  })
+
   test("the explain is a tree of steps, and running it fills in what each step examined", async ({
     page,
   }) => {
@@ -1338,8 +1777,8 @@ test.describe("aggregations", () => {
 
     // A stage that is switched off is skipped by what follows it.
     const sent = mongo.asked("POST /mongo/aggregate/preview").length
-    await stages.nth(0).getByRole("switch").click()
-    await expect(stages.nth(0)).toContainText("Switched off")
+    await stages.nth(0).getByRole("button", { name: "Skip stage 1" }).click()
+    await expect(stages.nth(0)).toContainText("Skipped")
     await expect
       .poll(() => mongo.asked("POST /mongo/aggregate/preview").slice(sent).at(-1)?.body)
       .toMatchObject({ stage: 0, pipeline: '[{ "$group": { _id: "$status", n: { $sum: 1 } } }]' })
@@ -1525,6 +1964,65 @@ test.describe("aggregations", () => {
     expect(mongo.asked("POST /mongo/command")).toHaveLength(1)
   })
 
+  test("a stage the server refuses says so once, and the stages after it wait for it", async ({
+    page,
+  }) => {
+    await mockMongo(page)
+    await page.goto(`${QUERY}?db=${DB}&collection=orders`)
+    // What enters the pipeline is on screen before any stage is.
+    await expect(page.locator("[data-slot=mongo-pipeline-input]")).toContainText(
+      "of its 3 documents",
+    )
+    await build(
+      page,
+      '[ { $match: { status: "paid" } }, { $nope: {} }, { $sort: { total: -1 } }, { $limit: 5 } ]',
+    )
+    const previews = page.locator("[data-slot=mongo-stage-preview]")
+    await expect(previews.nth(1).getByRole("alert")).toContainText("$nope is not one a preview can")
+    await expect(previews.nth(2)).toContainText("Shown once stage 2 can be run")
+    await expect(previews.nth(3)).toContainText("Shown once stage 2 can be run")
+    // The refusal is printed on the stage it is about, and nowhere else.
+    await expect(page.getByText("$nope is not one a preview can run")).toHaveCount(1)
+
+    // With that stage skipped, the ones after it are read again.
+    await page.getByRole("button", { name: "Skip stage 2" }).click()
+    await expect(previews.nth(2)).toContainText("sample documents after $sort")
+    await expect(previews.nth(3)).toContainText("sample documents after $limit")
+  })
+
+  // The review: Enter pressed before the classification answered did nothing.
+  test("Enter pressed before a command is classed is kept, and runs it when the answer comes", async ({
+    page,
+  }) => {
+    const classify = hold()
+    const mongo = await mockMongo(page, { classifyHeld: classify.until })
+    await page.goto(`${QUERY}?db=${DB}&view=command`)
+    const prompt = page.getByLabel("Command", { exact: true })
+    await prompt.fill("{ ping: 1 }")
+    await prompt.press("Enter")
+    // Nothing is run before the server has said what the command is.
+    await page.waitForTimeout(500)
+    expect(mongo.asked("POST /mongo/command")).toHaveLength(0)
+    await expect(page.getByRole("button", { name: "Run", exact: true })).toBeDisabled()
+    classify.release()
+    await expect(page.getByRole("log")).toContainText("ok")
+    expect(mongo.asked("POST /mongo/command")).toHaveLength(1)
+    await expect(prompt).toHaveValue("")
+  })
+
+  test("a role that cannot run commands is given the reference, and no prompt", async ({
+    page,
+  }) => {
+    await mockMongo(page, { reader: true })
+    await page.goto(`${QUERY}?db=${DB}&view=command`)
+    await expect(page.getByText("Your role cannot run commands")).toBeVisible()
+    await expect(page.getByLabel("Command", { exact: true })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Run", exact: true })).toHaveCount(0)
+    await expect(
+      page.getByRole("complementary", { name: "Commands the console knows" }),
+    ).toContainText("collStats")
+  })
+
   test("a protected connection runs a command that reads and no other", async ({ page }) => {
     await mockMongo(page, {
       rows: { 5: { readOnly: true } },
@@ -1613,6 +2111,63 @@ test.describe("schema", () => {
     expect(mongo.asked("DELETE /mongo/indexes")).toHaveLength(0)
     await confirm.getByRole("button", { name: "Drop index" }).click()
     await expect(rows).toHaveCount(2)
+  })
+
+  test("a view is shown whose indexes its reads use, and the server is not asked for its own", async ({
+    page,
+  }) => {
+    const mongo = await mockMongo(page)
+    await page.goto(`${SCHEMA}?db=${DB}&collection=active_users&view=indexes`)
+    await expect(page.getByText("A view has no indexes of its own")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Create index" })).toHaveCount(0)
+    expect(mongo.asked("GET /mongo/indexes")).toHaveLength(0)
+    await page.getByRole("link", { name: "Open the indexes of users" }).click()
+    await expect(page.locator("[data-slot=mongo-index]")).toHaveCount(2)
+  })
+
+  test("a TTL index's limit is changed in place, after the deletion it causes is named", async ({
+    page,
+  }) => {
+    const mongo = await mockMongo(page, {
+      collections: {
+        users: {
+          docs: USERS,
+          indexes: [
+            INDEXES[0],
+            {
+              ...INDEXES[1],
+              name: "createdAt_1",
+              keys: [{ field: "createdAt", type: "asc" }],
+              unique: false,
+              expireAfterSeconds: 86_400,
+            },
+          ],
+        },
+      },
+    })
+    await page.goto(`${SCHEMA}?db=${DB}&collection=users&view=indexes`)
+    const row = page.locator("[data-slot=mongo-index]").nth(1)
+    await expect(row).toContainText("expires after 1d")
+    await row.getByRole("button", { name: "More actions for createdAt_1" }).click()
+    await page.getByRole("menuitem", { name: "Change expiry…" }).click()
+    const dialog = page.getByRole("dialog", { name: "Change expiry" })
+    await dialog.getByLabel("Delete a document after").fill("3600")
+    await dialog.getByRole("button", { name: "Change expiry…" }).click()
+    const confirm = page.getByRole("dialog", { name: "Change when users expires" })
+    await expect(confirm).toContainText("more than 1h old is deleted")
+    expect(mongo.asked("PATCH /mongo/indexes")).toHaveLength(0)
+    await confirm.getByRole("button", { name: "Change expiry", exact: true }).click()
+    await expect
+      .poll(() => mongo.asked("PATCH /mongo/indexes").at(-1)?.body)
+      .toEqual({ database: DB, collection: "users", name: "createdAt_1", expireAfterSeconds: 3600 })
+    await expect(row).toContainText("expires after 1h")
+
+    // Dropping it by the keyboard leaves the keyboard on the list, not on the page's body.
+    await row.getByRole("button", { name: "Drop", exact: true }).focus()
+    await page.keyboard.press("Enter")
+    await page.getByRole("dialog").getByRole("button", { name: "Drop index" }).click()
+    await expect(page.locator("[data-slot=mongo-index]")).toHaveCount(1)
+    await expect(page.getByLabel("Indexes of users")).toBeFocused()
   })
 
   test("a rule is checked against what is stored before it is saved", async ({ page }) => {
@@ -1796,6 +2351,91 @@ test.describe("performance", () => {
       })
   })
 
+  // The engineer's own incident: Stop was offered on another client's heartbeat.
+  test("a heartbeat that is listed on request is named as one, and cannot be stopped", async ({
+    page,
+  }) => {
+    const base = {
+      ns: "admin.$cmd",
+      commandTruncated: false,
+      secondsRunning: 2,
+      client: "10.0.0.9:5000",
+      appName: "",
+      user: "",
+      desc: "conn1",
+      active: true,
+      waitingForLock: false,
+      planSummary: "",
+      message: "",
+      killPending: false,
+      connectionId: 1,
+      numYields: 0,
+    }
+    await mockMongo(page, {
+      operations: [
+        { ...base, opId: "1", op: "command", command: '{"hello":1,"maxAwaitTimeMS":10000}' },
+        { ...base, opId: "2", op: "query", ns: `${DB}.orders`, command: '{"find":"orders"}' },
+      ],
+    })
+    await page.goto(`${PERFORMANCE}?view=operations`)
+    const rows = page.locator("[data-slot=mongo-operation]")
+    await expect(rows).toHaveCount(1)
+    await page.getByRole("switch").click()
+    await expect(rows).toHaveCount(2)
+    const heartbeat = rows.filter({ hasText: '"hello"' })
+    await expect(heartbeat).toContainText("heartbeat")
+    await expect(heartbeat.getByRole("button")).toHaveCount(0)
+    await expect(rows.getByRole("button", { name: /^Stop / })).toHaveCount(1)
+  })
+
+  test("a profiler that records everything does not speak of a threshold while it is empty", async ({
+    page,
+  }) => {
+    await mockMongo(page, { profiler: { level: 2, entries: [] } })
+    await page.goto(`${PERFORMANCE}?view=slow`)
+    await expect(page.getByText(`Nothing has been recorded in ${DB} yet`)).toBeVisible()
+    await expect(page.getByText(/No operation has taken longer/)).toHaveCount(0)
+    await expect(
+      page.getByRole("button", { name: "Read the recorded operations again" }),
+    ).toBeVisible()
+  })
+
+  test("the collections the work is on are listed by what the server has counted on each", async ({
+    page,
+  }) => {
+    const mongo = await mockMongo(page)
+    await page.goto(PERFORMANCE)
+    const busiest = page.locator("[data-slot=mongo-busiest]")
+    // Before a second reading there is no rate: the bars are what each has been asked in all.
+    await expect(busiest).toContainText("since the server started")
+    // Busiest first: 620 reads and 10 writes on users, 40 and 10 on each of the others.
+    await expect(busiest.getByRole("listitem").first()).toContainText("users")
+    await expect(busiest.getByRole("listitem").first()).toContainText("630")
+    // Views and the server's own collections are not watched.
+    const watched = mongo
+      .asked("POST /mongo/aggregate/preview")
+      .map((call) => String(call.body.collection))
+    expect(new Set(watched)).toEqual(new Set(["users", "orders", "sessions", "products"]))
+    await busiest.getByRole("button", { name: /users/ }).click()
+    await expect.poll(() => where(page)).toContain("collection=users")
+  })
+
+  test("a server that reports no counters is said to have none, and is not drawn as one at rest", async ({
+    page,
+  }) => {
+    await mockMongo(page, {
+      silent: true,
+      summaries: { 5: { flavor: "ferretdb", flavorLabel: "FerretDB" } },
+    })
+    await page.goto(PERFORMANCE)
+    await expect(page.getByText("FerretDB has no performance counters")).toBeVisible()
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+    await expect(page.locator("[data-slot=mongo-busiest]")).toHaveCount(0)
+    // What such a server does report is still there.
+    await expect(page.getByText("Databases on this server")).toBeVisible()
+    await expect(page.getByRole("group", { name: "Performance views" })).toBeHidden()
+  })
+
   test("the replica set is a view only where the server is a member of one", async ({ page }) => {
     await mockMongo(page)
     await page.goto(PERFORMANCE)
@@ -1957,7 +2597,7 @@ for (const [label, viewport] of [
     // A staged edit, the editor, and a confirmation over the documents.
     await page.goto(collection("users"))
     const first = documents(page).first()
-    await first.getByRole("button", { name: "Edit age" }).click()
+    await fieldAction(first, "age", "Edit")
     await expectTheRules(page, "a field being edited")
     await first.getByLabel("Value of age").fill("21")
     await page.keyboard.press("Enter")

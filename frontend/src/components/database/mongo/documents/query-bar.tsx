@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { CodeField } from "@/components/database/mongo/code-field"
+import { StopButton, worthShowing } from "@/components/database/mongo/in-flight"
 import {
   draftLabel,
   optionCount,
@@ -50,17 +51,22 @@ const OPTIONS: FieldSpec[] = [
  * set. Each takes Extended JSON or the shell's spelling — unquoted keys,
  * `ObjectId("…")`, `ISODate("…")`, a `/pattern/` — and is checked as it is
  * typed for what can be told here (a bracket left open); the server's own
- * refusal, which knows the operators, lands under the field it is about.
+ * refusal, which knows the operators, lands under the field it is about, and
+ * one that is about no field in particular is said under the bar.
  *
- * Enter runs the query from any field; Shift+Enter breaks the line.
+ * Enter runs the query from any field; Shift+Enter breaks the line. A find
+ * that has run for a second says how long, and can be stopped.
  */
 export function QueryBar({
   draft,
   onChange,
   problems,
+  refusal,
   optionsOpen,
   onOptionsOpen,
   running,
+  seconds,
+  onStop,
   onFind,
   onReset,
   onExplain,
@@ -72,9 +78,14 @@ export function QueryBar({
   onChange: (draft: QueryDraft) => void
   /** What is wrong with a field: found here as it is typed, or said by the server. */
   problems: Partial<Record<QueryField, string>>
+  /** The server's refusal of the query as a whole, where it names no field. */
+  refusal?: string
   optionsOpen: boolean
   onOptionsOpen: (open: boolean) => void
   running: boolean
+  /** Whole seconds the find in flight has run. */
+  seconds: number
+  onStop: () => void
   onFind: () => void
   onReset: () => void
   /** Absent where the engine has no plan to show. */
@@ -201,9 +212,13 @@ export function QueryBar({
           <Button type="button" size="sm" variant="ghost" className="h-8" onClick={onReset}>
             Reset
           </Button>
-          <Button type="submit" size="sm" className="h-8" pending={running} disabled={invalid}>
-            Find
-          </Button>
+          {running && worthShowing(seconds) ? (
+            <StopButton seconds={seconds} onStop={onStop} className="h-8" />
+          ) : (
+            <Button type="submit" size="sm" className="h-8" pending={running} disabled={invalid}>
+              Find
+            </Button>
+          )}
         </div>
       </div>
 
@@ -256,6 +271,16 @@ export function QueryBar({
             )
           })}
         </div>
+      )}
+
+      {refusal && (
+        <p
+          role="alert"
+          data-slot="mongo-query-refusal"
+          className="text-hint leading-relaxed break-words text-destructive"
+        >
+          {refusal}
+        </p>
       )}
     </form>
   )

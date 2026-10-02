@@ -21,17 +21,21 @@ import {
   JsonSyntaxError,
   parseDocument,
   parseJson,
-  printCanonical,
+  printReadable,
 } from "@/components/database/mongo/bson"
 import { scan } from "@/components/database/mongo/shell"
 import type { MongoDoc, MongoWriteError } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
 import { ReadError } from "@/components/database/redis/read-error"
 
-/** A document laid out for editing: its canonical text, indented, every type and the field order kept. */
+/**
+ * A document laid out for editing: its Extended JSON, indented, every type
+ * and the field order kept. A date is its ISO moment — still a date to the
+ * server, and one a reader can change without counting milliseconds.
+ */
 export function editorText(canonical: string): string {
   try {
-    return printCanonical(parseDocument(canonical), true)
+    return printReadable(parseDocument(canonical), true)
   } catch {
     return canonical
   }
@@ -141,7 +145,7 @@ function DiscardFooter({ onStay, onLeave }: { onStay: () => void; onLeave: () =>
 }
 
 /**
- * One document in an editor: its canonical Extended JSON, as stored.
+ * One document in an editor: its Extended JSON, as stored.
  *
  * The text is the document's own — every type spelled out, the fields in
  * their stored order — so saving it unchanged changes nothing. It is read
@@ -256,6 +260,8 @@ function EditDocument({
       bodyClassName="flex min-h-0 flex-col gap-3 p-4"
       className="h-[min(48rem,calc(100svh-4rem))]"
       actions={
+        // Format rewrites the text: there is nothing to rewrite in a document that is only read.
+        canWrite &&
         read &&
         reading.state === "json" && (
           <Button size="xs" variant="ghost" onClick={() => formatRef.current?.()}>

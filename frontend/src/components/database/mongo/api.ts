@@ -96,6 +96,26 @@ export function renameCollection(target: MongoTarget, to: string, dropTarget = f
   })
 }
 
+/**
+ * What `collMod` can change about a collection that exists. Only the fields
+ * present are sent. A new cap and an expiry of zero or more remove documents
+ * the moment they land, and the server asks the permission to remove data for
+ * them; a wider granularity, turning expiry off (a negative number) and a
+ * view's new definition do not.
+ */
+export type MongoModifyCollection = {
+  viewOn?: string
+  pipeline?: string
+  cappedSize?: number
+  cappedMax?: number
+  expireAfterSeconds?: number
+  granularity?: "seconds" | "minutes" | "hours"
+}
+
+export function modifyCollection(target: MongoTarget, change: MongoModifyCollection) {
+  return patch<{ ok: true }>(`${at(target.id)}/mongo/collections`, { ...of(target), ...change })
+}
+
 export function dropCollection(target: MongoTarget) {
   return del<{ ok: true }>(`${at(target.id)}/mongo/collections`, { body: of(target) })
 }
@@ -205,6 +225,15 @@ export function createIndex(id: number, request: MongoCreateIndex) {
 
 export function hideIndex(target: MongoTarget, name: string, hidden: boolean) {
   return patch<{ ok: true }>(`${at(target.id)}/mongo/indexes`, { ...of(target), name, hidden })
+}
+
+/** A TTL index's limit, changed in place. The server deletes what is already older at once. */
+export function setIndexExpiry(target: MongoTarget, name: string, expireAfterSeconds: number) {
+  return patch<{ ok: true }>(`${at(target.id)}/mongo/indexes`, {
+    ...of(target),
+    name,
+    expireAfterSeconds,
+  })
 }
 
 export function dropIndex(target: MongoTarget, name: string) {

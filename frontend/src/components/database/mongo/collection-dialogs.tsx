@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { errorMessage } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, duration } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
@@ -32,7 +32,9 @@ import { EngineMark } from "@/components/database/kit"
 import {
   createCollection,
   dropCollection,
+  modifyCollection,
   renameCollection,
+  type MongoModifyCollection,
   type MongoTarget,
 } from "@/components/database/mongo/api"
 import { CodeField } from "@/components/database/mongo/code-field"
@@ -42,7 +44,7 @@ import {
   collectionKind,
   type CollectionKind,
 } from "@/components/database/mongo/kinds"
-import { shapeProblem } from "@/components/database/mongo/shell"
+import { scan, shapeProblem, textOf } from "@/components/database/mongo/shell"
 import type {
   MongoCollection,
   MongoCreateCollection,
@@ -655,6 +657,424 @@ export function RenameCollectionDialog({
           Applications that read <span className="font-mono">{collection.name}</span> by name stop
           finding it the moment it is renamed.
         </FormNote>
+      </div>
+    </Modal>
+  )
+}
+
+/* ----------------------------------------------------------------- options */
+
+const MIB = 1024 * 1024
+const GRANULARITIES = ["seconds", "minutes", "hours"] as const
+
+/** A number of megabytes as a field holds it: whole where it is whole. */
+const megabytes = (size: number) => String(Math.round((size / MIB) * 100) / 100)
+
+/** Whether a collection has options that can be changed after it is made. */
+export function hasOptions(collection: MongoCollection): boolean {
+  return (
+    !collection.system &&
+    (collection.type === "view" ||
+      collection.type === "timeseries" ||
+      collection.capped ||
+      collection.clustered)
+  )
+}
+
+/**
+ * Whether the reader may change them. A view's definition and a time
+ * series' granularity are a write; a capped collection's size and an expiry
+ * remove documents, and take the permission to remove data.
+ */
+export function mayModify(mongo: Mongo, collection: MongoCollection): boolean {
+  if (!hasOptions(collection) || !mongo.canWrite) return false
+  if (collection.type === "view") return mongo.engine.can("views")
+  if (!mongo.engine.can("collectionOptions")) return false
+  // Without that permission a time series can still be made coarser, and an expiry turned off.
+  return collection.capped ? mongo.canDestroy : true
+}
+
+type OptionsDraft = {
+  sizeMb: string
+  max: string
+  granularity: (typeof GRANULARITIES)[number]
+  expire: string
+  viewOn: string
+  pipeline: string
+}
+
+/** A view's stored pipeline laid out for editing, a stage to a line. */
+function laidOut(pipeline: string | undefined): string {
+  const text = pipeline?.trim() || "[]"
+  const read = scan(text)
+  if (!read.ok || read.value.kind !== "array" || read.value.items.length === 0) return text
+  return `[\n${read.value.items.map((item) => `  ${textOf(text, item)}`).join(",\n")}\n]`
+}
+
+const optionsOf = (collection: MongoCollection): OptionsDraft => ({
+  sizeMb: collection.cappedSize ? megabytes(collection.cappedSize) : "",
+  max: collection.cappedMax ? String(collection.cappedMax) : "",
+  granularity: collection.timeseries?.granularity ?? "seconds",
+  expire: collection.expireAfterSeconds !== undefined ? String(collection.expireAfterSeconds) : "",
+  viewOn: collection.viewOn ?? "",
+  pipeline: laidOut(collection.pipeline),
+})
+
+/**
+ * The options of a collection that exists: a capped collection's size, a time
+ * series' granularity and expiry, a clustered collection's expiry, what a
+ * view reads and through which stages.
+ *
+ * These are the few things the server lets a collection change about itself
+ * without being made again. Two of them remove documents the moment they are
+ * set — a smaller cap drops the oldest, an expiry deletes what is already
+ * older — so those are confirmed with the collection named, and are offered
+ * only to a role that may remove data. The rest are saved as they stand.
+ */
+export function CollectionOptionsDialog({
+  mongo,
+  collection,
+  collections,
+  confirm,
+  onOpenChange,
+  onChanged,
+}: {
+  mongo: Mongo
+  /** The collection whose options are open; `null` closes the dialog. */
+  collection: MongoCollection | null
+  collections: MongoCollection[]
+  confirm: (request: ConfirmRequest) => void
+  onOpenChange: (open: boolean) => void
+  onChanged: () => void
+}) {
+  const { id, database, engine, canDestroy } = mongo
+  const [draft, setDraft] = useState<OptionsDraft | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [refused, setRefused] = useState("")
+  const [held, setHeld] = useState(collection)
+  if (collection !== held) {
+    setHeld(collection)
+    setDraft(collection ? optionsOf(collection) : null)
+    setRefused("")
+  }
+  if (!collection || !draft) return null
+
+  const set = (patch: Partial<OptionsDraft>) => {
+    setDraft({ ...draft, ...patch })
+    setRefused("")
+  }
+  const saved = optionsOf(collection)
+  const kind = collectionKind(collection)
+  const view = collection.type === "view"
+  const series = collection.type === "timeseries"
+  const expires = series || collection.clustered
+  const target: MongoTarget = { id, database, collection: collection.name }
+
+  const sizeBad = collection.capped && !(Number(draft.sizeMb) > 0)
+  const maxText = draft.max.trim()
+  const maxBad =
+    collection.capped &&
+    (maxText === "" ? Boolean(collection.cappedMax) : !WHOLE.test(maxText) || Number(maxText) < 1)
+  const expireText = draft.expire.trim()
+  const expireBad = expires && expireText !== "" && !WHOLE.test(expireText)
+  const pipelineBad = view ? shapeProblem(draft.pipeline, "list") : null
+
+  // Only what was changed is sent: the server takes each field as a change of its own.
+  const change: MongoModifyCollection = {}
+  if (collection.capped) {
+    if (draft.sizeMb.trim() !== saved.sizeMb)
+      change.cappedSize = Math.round(Number(draft.sizeMb) * MIB)
+    if (maxText !== saved.max && maxText !== "") change.cappedMax = Number(maxText)
+  }
+  if (series && draft.granularity !== saved.granularity) change.granularity = draft.granularity
+  if (expires && expireText !== saved.expire) {
+    // A blank field is "keep everything": a negative number turns expiry off.
+    change.expireAfterSeconds = expireText === "" ? -1 : Number(expireText)
+  }
+  if (view && (draft.viewOn !== saved.viewOn || draft.pipeline.trim() !== saved.pipeline.trim())) {
+    change.viewOn = draft.viewOn
+    change.pipeline = draft.pipeline.trim() || "[]"
+  }
+  const removes =
+    change.cappedSize !== undefined ||
+    change.cappedMax !== undefined ||
+    (change.expireAfterSeconds !== undefined && change.expireAfterSeconds >= 0)
+  const changed = Object.keys(change).length > 0
+  const incomplete =
+    !changed || sizeBad || maxBad || expireBad || Boolean(pipelineBad) || (view && !draft.viewOn)
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      await modifyCollection(target, change)
+      notify.success(
+        view
+          ? `The view ${collection.name} was redefined`
+          : `Saved the options of ${collection.name}`,
+      )
+      onOpenChange(false)
+      onChanged()
+    } catch (err) {
+      setRefused(errorMessage(err))
+      throw err
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const submit = () => {
+    if (!removes) {
+      void save().catch(() => {})
+      return
+    }
+    const resized = change.cappedSize !== undefined || change.cappedMax !== undefined
+    const expiry = change.expireAfterSeconds
+    // One dialog at a time: the confirmation takes this one's place.
+    onOpenChange(false)
+    confirm({
+      title: resized ? `Resize ${collection.name}` : `Change when ${collection.name} expires`,
+      description: resized ? (
+        <>
+          Documents past the new limit are removed at once, oldest first, and cannot be brought
+          back.
+        </>
+      ) : (
+        <>
+          Everything older than {duration(expiry)} is deleted — what is already that old at once,
+          the rest as it ages. This cannot be undone.
+        </>
+      ),
+      subject: {
+        mark: <EngineMark engine={engine} size="sm" />,
+        name: (
+          <span className="flex min-w-0 items-center gap-1.5 font-mono">
+            <CollectionMark kind={kind} />
+            <span className="truncate">{collection.name}</span>
+          </span>
+        ),
+        facts: (
+          <FormFacts>
+            <FormFact label="Database" mono>
+              {database}
+            </FormFact>
+            {collection.statsKnown && (
+              <FormFact label="Holds">
+                {grouped(collection.count)} documents · {bytes(collection.size)}
+              </FormFact>
+            )}
+            {change.cappedSize !== undefined && (
+              <FormFact label="New size">{bytes(change.cappedSize)}</FormFact>
+            )}
+            {change.cappedMax !== undefined && (
+              <FormFact label="At most">{grouped(change.cappedMax)} documents</FormFact>
+            )}
+            {expiry !== undefined && expiry >= 0 && (
+              <FormFact label="Delete after">
+                {grouped(expiry)} s ({duration(expiry)})
+              </FormFact>
+            )}
+          </FormFacts>
+        ),
+      },
+      confirmLabel: resized ? "Resize collection" : "Set expiry",
+      action: async () => {
+        await save()
+        return "reported"
+      },
+    })
+  }
+
+  const expireField = expires && (
+    <Field
+      label="Delete after"
+      htmlFor="mongo-options-expire"
+      hint={
+        expireText && !expireBad
+          ? `Seconds: ${duration(Number(expireText))}. What is already older is deleted when this is saved.`
+          : "Seconds. Blank keeps everything."
+      }
+      error={expireBad ? "A whole number of seconds." : undefined}
+    >
+      <Input
+        id="mongo-options-expire"
+        inputMode="numeric"
+        value={draft.expire}
+        // A new limit deletes; taking the limit away does not.
+        readOnly={!canDestroy && expireText === ""}
+        className="numeric"
+        onChange={(event) => {
+          const next = event.target.value
+          if (canDestroy || next.trim() === "") set({ expire: next })
+        }}
+      />
+    </Field>
+  )
+
+  return (
+    <Modal
+      open
+      onOpenChange={(next) => !busy && onOpenChange(next)}
+      size={view ? "lg" : "md"}
+      title={`Options of ${collection.name}`}
+      description={`Change what the server lets ${collection.name} change without being made again`}
+      footer={
+        <>
+          <p className="mr-auto min-w-0 text-hint text-muted-foreground">
+            {refused ? (
+              <span role="alert" className="text-destructive">
+                {refused}
+              </span>
+            ) : removes ? (
+              "Removes documents: asked for once more before it runs."
+            ) : view ? (
+              "The view is redefined in place. Nothing it reads is touched."
+            ) : (
+              "Only what you changed is sent."
+            )}
+          </p>
+          <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button pending={busy} disabled={incomplete} onClick={submit}>
+            {removes ? "Save options…" : "Save options"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <EngineMark engine={engine} size="sm" />
+          <div className="min-w-0 space-y-0.5">
+            <p className="flex min-w-0 items-center gap-1.5 font-mono text-body font-medium">
+              <CollectionMark kind={kind} />
+              <span className="truncate">{collection.name}</span>
+            </p>
+            <FormFacts>
+              <FormFact label="Database" mono>
+                {database}
+              </FormFact>
+              <FormFact label="Kind">{COLLECTION_KINDS[kind].label}</FormFact>
+              {collection.statsKnown && (
+                <FormFact label="Holds">
+                  {grouped(collection.count)} documents · {bytes(collection.size)}
+                </FormFact>
+              )}
+              {series && collection.timeseries && (
+                <FormFact label="Time field" mono>
+                  {collection.timeseries.timeField}
+                </FormFact>
+              )}
+            </FormFacts>
+          </div>
+        </div>
+
+        {collection.capped && (
+          <FieldRow>
+            <Field
+              label="Size"
+              htmlFor="mongo-options-size"
+              hint="Megabytes of data it holds before the oldest go."
+              error={sizeBad ? "A size above zero." : undefined}
+            >
+              <Input
+                id="mongo-options-size"
+                inputMode="decimal"
+                value={draft.sizeMb}
+                className="numeric"
+                onChange={(event) => set({ sizeMb: event.target.value })}
+              />
+            </Field>
+            <Field
+              label="At most"
+              htmlFor="mongo-options-max"
+              hint={
+                collection.cappedMax
+                  ? "Documents. The limit can be moved, not taken away."
+                  : "Documents. Blank leaves only the size as the limit."
+              }
+              error={maxBad ? "A whole number, 1 or more." : undefined}
+            >
+              <Input
+                id="mongo-options-max"
+                inputMode="numeric"
+                value={draft.max}
+                className="numeric"
+                onChange={(event) => set({ max: event.target.value })}
+              />
+            </Field>
+          </FieldRow>
+        )}
+
+        {series && (
+          <FieldRow>
+            <Field
+              label="Measurements arrive every few"
+              htmlFor="mongo-options-granularity"
+              hint="It can only be made coarser, a step at a time: seconds to minutes, minutes to hours."
+            >
+              <Segments
+                id="mongo-options-granularity"
+                label="Granularity"
+                value={draft.granularity}
+                options={GRANULARITIES.filter(
+                  // The stored one, and the one step up from it the server allows.
+                  (_, at) =>
+                    at >= GRANULARITIES.indexOf(saved.granularity) &&
+                    at <= GRANULARITIES.indexOf(saved.granularity) + 1,
+                ).map((value) => ({
+                  value,
+                  label: value.charAt(0).toUpperCase() + value.slice(1),
+                }))}
+                onChange={(granularity) => set({ granularity })}
+              />
+            </Field>
+            {expireField}
+          </FieldRow>
+        )}
+
+        {!series && expireField}
+
+        {view && (
+          <>
+            <Field label="View on" htmlFor="mongo-options-source">
+              <Select value={draft.viewOn} onValueChange={(viewOn) => set({ viewOn })}>
+                <SelectTrigger id="mongo-options-source" className="w-full font-mono">
+                  <SelectValue placeholder="Choose a collection" />
+                </SelectTrigger>
+                <SelectContent>
+                  {collections
+                    .filter((entry) => !entry.system && entry.name !== collection.name)
+                    .map((entry) => (
+                      <SelectItem key={entry.name} value={entry.name} className="font-mono">
+                        {entry.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field
+              label="Pipeline"
+              htmlFor="mongo-options-pipeline"
+              hint="The stages every read of the view runs. It may not write ($out, $merge)."
+              error={pipelineBad ?? undefined}
+            >
+              <CodeField
+                id="mongo-options-pipeline"
+                value={draft.pipeline}
+                invalid={Boolean(pipelineBad)}
+                className="min-h-32"
+                onChange={(pipeline) => set({ pipeline })}
+              />
+            </Field>
+          </>
+        )}
+
+        {!canDestroy && expires && (
+          <FormNote>
+            Setting an expiry deletes documents, which your role may not do. It can be turned off
+            from here by clearing the field.
+          </FormNote>
+        )}
       </div>
     </Modal>
   )

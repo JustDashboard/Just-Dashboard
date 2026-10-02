@@ -6,6 +6,7 @@ import {
   lifetimeTargeting,
   rate,
   ratio,
+  reportsNothing,
   runningWords,
   seriesOf,
   statRows,
@@ -169,5 +170,24 @@ describe("words", () => {
     expect(uptimeWords(3 * 3600 + 120)).toBe("3h 2m")
     expect(uptimeWords(3 * 86400 + 4 * 3600)).toBe("3d 4h")
     expect(uptimeWords(5)).toBe("5s")
+  })
+})
+
+describe("a server that reports no counters", () => {
+  test("is one whose status has no operations, no connections, no traffic and no cache", () => {
+    const silent = sample(0, {
+      process: "ferretdb",
+      storageEngine: "",
+      opcounters: {},
+      connections: { current: 0, available: 0, active: 0, totalCreated: 0 },
+      cache: null,
+    })
+    expect(reportsNothing(silent)).toBe(true)
+  })
+
+  test("an idle server that does report them is not one", () => {
+    expect(reportsNothing(sample(0))).toBe(false)
+    // A storage engine with no cache still counts its operations.
+    expect(reportsNothing(sample(0, { cache: null }))).toBe(false)
   })
 })

@@ -57,7 +57,9 @@ const GROUPS: { kind: CollectionKind; plural: string }[] = [
  * data size at the right. A row is a link: it opens in a new tab, and
  * choosing one is a step of history, so Back returns to the collection the
  * reader came from. The server's own collections (`system.*`) fold away
- * under the rest.
+ * under the rest. A collection whose documents hold edits that were staged
+ * and not sent carries a mark in the hue of a change, so they are not
+ * forgotten behind another collection.
  *
  * The same rail stands beside Documents, Aggregations and Schema, and a row
  * opens its collection in whichever of the three the reader is on.
@@ -67,6 +69,7 @@ export function CollectionRail({
   catalog,
   section,
   verbsFor,
+  unsent,
   onNew,
   onHide,
 }: {
@@ -74,6 +77,8 @@ export function CollectionRail({
   catalog: Catalog
   section: SectionId
   verbsFor: (collection: MongoCollection) => Verb[]
+  /** How many documents of a collection hold field edits that were not sent. */
+  unsent: (collection: string) => number
   /** Opens "New collection"; absent where the role, the engine or the connection cannot. */
   onNew?: () => void
   onHide: () => void
@@ -108,7 +113,11 @@ export function CollectionRail({
   const documents = measured.reduce((sum, entry) => sum + entry.count, 0)
   const size = measured.reduce((sum, entry) => sum + entry.size, 0)
   // A search, or the open collection being one of them, shows the server's own.
-  const showSystem = systemOpen || Boolean(needle) || system.some((entry) => entry.name === current)
+  const showSystem =
+    systemOpen ||
+    Boolean(needle) ||
+    own.length === 0 ||
+    system.some((entry) => entry.name === current)
 
   return (
     <nav
@@ -191,6 +200,7 @@ export function CollectionRail({
                       current={entry.name === current}
                       href={href(section, { db: database, collection: entry.name })}
                       verbs={verbsFor(entry)}
+                      unsent={unsent(entry.name)}
                     />
                   ))}
                 </ul>
@@ -223,6 +233,7 @@ export function CollectionRail({
                         current={entry.name === current}
                         href={href(section, { db: database, collection: entry.name })}
                         verbs={verbsFor(entry)}
+                        unsent={unsent(entry.name)}
                       />
                     ))}
                   </ul>
@@ -252,11 +263,13 @@ function RailRow({
   current,
   href,
   verbs,
+  unsent,
 }: {
   entry: MongoCollection
   current: boolean
   href: string
   verbs: Verb[]
+  unsent: number
 }) {
   const kind = collectionKind(entry)
   return (
@@ -281,6 +294,16 @@ function RailRow({
       >
         <CollectionMark kind={kind} />
         <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.name}</span>
+        {unsent > 0 && (
+          <span
+            data-slot="mongo-unsent-mark"
+            title={`Unsent edits on ${unsent === 1 ? "one document" : `${unsent} documents`}`}
+            className="flex shrink-0 items-center"
+          >
+            <span aria-hidden className="size-1.5 rounded-full bg-(--git-modified)" />
+            <span className="sr-only">, unsent edits</span>
+          </span>
+        )}
         {entry.statsKnown ? (
           <>
             <span className="numeric shrink-0 text-hint text-muted-foreground">

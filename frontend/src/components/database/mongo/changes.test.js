@@ -7,8 +7,13 @@ import {
   countEdits,
   editAt,
   editSummary,
+  idsFilter,
+  overtaken,
+  staged,
   withEdit,
+  withStaged,
   withoutEdit,
+  withoutStaged,
 } from "./changes"
 
 const ID = '{"$oid":"6abe79972945ac11a3124bfc"}'
@@ -126,5 +131,67 @@ describe("the update the edits are", () => {
     expect(buildUpdate(ID, ROOT, dotted)).toBeNull()
     const edits = withEdit(NO_EDITS, { op: "unset", path: ["verified"] })
     expect(buildUpdate("", ROOT, edits)).toBeNull()
+  })
+})
+
+describe("an edit remembers what the document held when it was made", () => {
+  const CHANGED = parseDocument(
+    `{"_id":${ID},"name":"Renamed by somebody","loginCount":{"$numberLong":"3"},` +
+      '"address":{"city":"Bucharest","zip":"10001"},"roles":["member"],"verified":true,"nick":"x"}',
+  )
+
+  test("the guard is the value read when the edit was staged, not the one read since", () => {
+    const edits = staged(NO_EDITS, ROOT, {
+      op: "set",
+      path: ["name"],
+      value: value("string", "Mine"),
+    })
+    // The document was re-read, and somebody else has changed the field.
+    const update = buildUpdate(ID, CHANGED, edits)
+    expect(update.filter).toBe(`{"_id":${ID},"name":"User 1"}`)
+    expect(overtaken(edits, CHANGED).map((edit) => edit.path)).toEqual([["name"]])
+    expect(overtaken(edits, ROOT)).toEqual([])
+  })
+
+  test("a field staged as new is guarded by its absence even once somebody has added it", () => {
+    const edits = staged(NO_EDITS, ROOT, {
+      op: "set",
+      path: ["nick"],
+      value: value("string", "u1"),
+    })
+    expect(buildUpdate(ID, CHANGED, edits).filter).toBe(`{"_id":${ID},"nick":{"$exists":false}}`)
+    expect(countEdits(edits, CHANGED)).toEqual({ changed: 0, added: 1, removed: 0 })
+    expect(overtaken(edits, CHANGED)).toHaveLength(1)
+  })
+
+  test("editing the same field again keeps what it held before the first edit", () => {
+    let edits = staged(NO_EDITS, ROOT, { op: "set", path: ["name"], value: value("string", "A") })
+    edits = staged(edits, CHANGED, { op: "set", path: ["name"], value: value("string", "B") })
+    expect(editAt(edits, ["name"]).own.had).toBe('"User 1"')
+  })
+})
+
+describe("the edits of a connection's collections", () => {
+  const one = withEdit(NO_EDITS, { op: "unset", path: ["name"] })
+
+  test("are kept by collection and by document", () => {
+    let all = withStaged({}, "app\u0000users", ID, one)
+    all = withStaged(all, "app\u0000orders", '"o1"', one)
+    expect(Object.keys(all)).toEqual(["app\u0000users", "app\u0000orders"])
+    expect(all["app\u0000users"][ID]).toBe(one)
+  })
+
+  test("a document with nothing staged leaves, and so does a collection with no document", () => {
+    let all = withStaged({}, "app\u0000users", ID, one)
+    all = withStaged(all, "app\u0000users", '"second"', one)
+    all = withStaged(all, "app\u0000users", ID, NO_EDITS)
+    expect(Object.keys(all["app\u0000users"])).toEqual(['"second"'])
+    expect(withStaged(all, "app\u0000users", '"second"', NO_EDITS)).toEqual({})
+    expect(withoutStaged(all, "app\u0000users")).toEqual({})
+  })
+
+  test("the documents they are on are found by their ids", () => {
+    expect(idsFilter([ID])).toBe(`{ "_id": ${ID} }`)
+    expect(idsFilter([ID, '"second"'])).toBe(`{ "_id": { "$in": [${ID}, "second"] } }`)
   })
 })

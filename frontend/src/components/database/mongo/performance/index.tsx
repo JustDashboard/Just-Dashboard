@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { bytes, percent } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { utilisationTone } from "@/components/meter"
@@ -9,7 +10,7 @@ import { TileTrend } from "@/components/metrics/sparkline"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { tabClasses } from "@/components/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
-import { SectionError, SectionFrame } from "@/components/database/kit"
+import { BlockedState, SectionError, SectionFrame } from "@/components/database/kit"
 import { mongoDatabases, mongoServer } from "@/components/database/mongo/api"
 import { OperationsView } from "@/components/database/mongo/performance/operations"
 import { OverviewView } from "@/components/database/mongo/performance/overview"
@@ -21,6 +22,7 @@ import {
   latest,
   lifetimeTargeting,
   ratio,
+  reportsNothing,
   seriesOf,
   statRows,
 } from "@/components/database/mongo/performance/samples"
@@ -53,6 +55,11 @@ type View = "overview" | "operations" | "slow" | "replication"
  * Under them the page reads four ways: the same samples as charts; the
  * operations in progress, each of which can be stopped; the slow operations
  * the profiler kept; and, on a replica set, its members.
+ *
+ * A server that only speaks the protocol may answer with no counters at all.
+ * It is then said to have none — five tiles of zeros would read as a server
+ * at rest — and the page keeps what such a server does report: what it is,
+ * and what its databases hold.
  */
 export function MongoPerformance() {
   const mongo = useMongo()
@@ -101,6 +108,7 @@ export function MongoPerformance() {
   }
 
   const now = newest
+  const silent = now !== undefined && reportsNothing(now)
   const ops = latest(rows, "ops")
   const total = now ? OPERATIONS.reduce((sum, kind) => sum + (now.opcounters[kind] ?? 0), 0) : 0
   const limit = now ? now.connections.current + now.connections.available : 0
@@ -115,7 +123,12 @@ export function MongoPerformance() {
   return (
     <SectionFrame section="performance">
       {dialog}
-      {!now ? (
+      {silent ? (
+        <BlockedState engine={engine} thing="performance counters" className="animate-rise">
+          It answers the server&rsquo;s status with no counts of operations, connections or traffic,
+          so there is no rate to draw. What it is and what it holds are below.
+        </BlockedState>
+      ) : !now ? (
         <StatGrid columns={5} dense aria-hidden>
           {Array.from({ length: 5 }, (_, i) => (
             <div key={i} className="space-y-2.5 px-5 py-4">
@@ -207,7 +220,11 @@ export function MongoPerformance() {
             ref={strip}
             role="group"
             aria-label="Performance views"
-            className="flex gap-1 overflow-x-auto border-b border-hairline"
+            // One view is no choice: the strip is drawn where there is another to go to.
+            className={cn(
+              "flex gap-1 overflow-x-auto border-b border-hairline",
+              views.length < 2 && "hidden",
+            )}
           >
             {views.map((entry) => (
               <button
@@ -243,6 +260,7 @@ export function MongoPerformance() {
             server={now}
             databases={databases}
             everyMs={EVERY_MS}
+            silent={silent}
           />
         )}
       </div>

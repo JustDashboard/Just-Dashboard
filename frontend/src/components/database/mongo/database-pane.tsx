@@ -1,10 +1,12 @@
 "use client"
 
+import Link from "next/link"
 import { bytes } from "@/lib/format"
 import { BarList, type BarListItem } from "@/components/bar-list"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { NumberTicker } from "@/components/ui/number-ticker"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tag } from "@/components/tag"
 import { Plus } from "@/components/icons"
@@ -19,6 +21,9 @@ import { ReadError } from "@/components/database/redis/read-error"
 /** How many collections the ranked list draws; the rail has all of them. */
 const RANKED = 12
 
+/** The databases the server keeps for itself: nothing of the reader's belongs in them. */
+const RESERVED = new Set(["admin", "local", "config"])
+
 /**
  * The pane while no collection is open: what the database is made of.
  *
@@ -26,6 +31,11 @@ const RANKED = 12
  * collections by the data they hold and the server's other databases, each a
  * way in. It is drawn from the lists the rail already read, so it costs
  * nothing, and the page is never a list beside an empty half.
+ *
+ * A database with nothing of the reader's in it says which of three things
+ * that is: one the server does not have at all (a link that outlived it),
+ * one that holds only the server's own collections, or one that is simply
+ * empty — and only the last leads with making a collection.
  */
 export function DatabasePane({
   mongo,
@@ -41,7 +51,7 @@ export function DatabasePane({
   leading?: React.ReactNode
   onNew?: () => void
 }) {
-  const { engine, database, conn, goto } = mongo
+  const { engine, database, conn, goto, href } = mongo
   const { collections, databases } = catalog
   const data = collections.data
   const place = engine.section(section)?.title ?? "Documents"
@@ -55,7 +65,7 @@ export function DatabasePane({
       </h2>
       {database && database === conn.database && <Tag>connects here</Tag>}
       <span className="min-w-0 flex-1" />
-      {onNew && database && (
+      {onNew && database && !RESERVED.has(database) && (
         <Button size="xs" variant="outline" onClick={onNew}>
           <Plus />
           New {engine.nouns.object}
@@ -124,28 +134,68 @@ export function DatabasePane({
 
   const own = (data?.collections ?? []).filter((entry) => !entry.system)
   if (data && own.length === 0) {
+    const system = data.collections.length
+    // An empty database does not exist for the server until it holds a
+    // collection, so the one the connection names is not "missing" for being
+    // absent from the list; any other name that is absent is.
+    const missing =
+      system === 0 &&
+      databases.data !== undefined &&
+      database !== conn.database &&
+      !databases.data.some((entry) => entry.name === database)
     return (
       <div data-slot="mongo-database" className="flex min-h-0 min-w-0 flex-1 flex-col">
         {head}
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="animate-rise space-y-6 px-5 py-5">
-            <EmptyState
-              mark={<EngineMark engine={engine} />}
-              title={`${database} holds no ${engine.nouns.objects}`}
-              description={
-                onNew
-                  ? `Create one, and ${place.toLowerCase()} for it open here.`
-                  : `Nothing in this ${engine.nouns.container} holds ${engine.nouns.rows} yet.`
-              }
-              action={
-                onNew && (
-                  <Button size="sm" onClick={onNew}>
-                    <Plus />
-                    New {engine.nouns.object}
-                  </Button>
-                )
-              }
-            />
+            {missing ? (
+              <EmptyState
+                mark={<EngineMark engine={engine} />}
+                title={`The server has no database called ${database}`}
+                description="A database exists once it holds a collection. This one may have been dropped since the link was made, or never made."
+                action={
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {conn.database && (
+                      <Button size="sm" variant="outline" asChild>
+                        <Link href={href(section, { db: conn.database, collection: null })}>
+                          Open {conn.database}
+                        </Link>
+                      </Button>
+                    )}
+                    {onNew && (
+                      <Button size="sm" variant="ghost" onClick={onNew}>
+                        <Plus />
+                        Make it, with a first {engine.nouns.object}
+                      </Button>
+                    )}
+                  </div>
+                }
+              />
+            ) : system > 0 ? (
+              <EmptyState
+                mark={<EngineMark engine={engine} />}
+                title={`${database} holds only the server's own ${engine.nouns.objects}`}
+                description={`${grouped(system)} of them, listed under “The server's own” beside this. Nothing in it is a ${engine.nouns.object} of yours.`}
+              />
+            ) : (
+              <EmptyState
+                mark={<EngineMark engine={engine} />}
+                title={`${database} holds no ${engine.nouns.objects}`}
+                description={
+                  onNew
+                    ? `Create one, and ${place.toLowerCase()} for it open here.`
+                    : `Nothing in this ${engine.nouns.container} holds ${engine.nouns.rows} yet.`
+                }
+                action={
+                  onNew && (
+                    <Button size="sm" onClick={onNew}>
+                      <Plus />
+                      New {engine.nouns.object}
+                    </Button>
+                  )
+                }
+              />
+            )}
             <div className="max-w-2xl">{elsewhereBlock}</div>
           </div>
         </div>
@@ -188,7 +238,7 @@ export function DatabasePane({
           <StatGrid columns={4} dense className="-mx-5 border-b border-hairline">
             <StatTile
               label="Collections"
-              value={data ? grouped(own.length - views) : "—"}
+              value={data ? <NumberTicker value={own.length - views} /> : "—"}
               hint={
                 !data
                   ? undefined
@@ -199,7 +249,7 @@ export function DatabasePane({
             />
             <StatTile
               label="Documents"
-              value={data ? grouped(documents) : "—"}
+              value={data ? <NumberTicker value={documents} /> : "—"}
               hint={data?.statsTruncated ? "of the collections measured" : "in every collection"}
             />
             <StatTile
@@ -209,7 +259,7 @@ export function DatabasePane({
             />
             <StatTile
               label="Indexes"
-              value={data ? grouped(indexes) : "—"}
+              value={data ? <NumberTicker value={indexes} /> : "—"}
               hint={data ? `${bytes(indexSize)} on disk` : undefined}
             />
           </StatGrid>

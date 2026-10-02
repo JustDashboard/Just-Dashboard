@@ -128,24 +128,59 @@ const SERVER_FIELD: Record<string, QueryField> = {
   maxTimeMS: "maxTime",
 }
 
+/** What a refusal from the server is about: one field of the bar, or the query as a whole. */
+export type Refusal = { field: QueryField | null; message: string }
+
+/**
+ * The server's own words for a field, where its refusal names none. Each is
+ * tried in turn and only blames a field that holds something: a sort that is
+ * empty cannot be the sort that was refused.
+ */
+const SAID_OF: readonly [RegExp, QueryField][] = [
+  [/\$sort\b|\bsort (?:key|order|pattern|specification)\b/i, "sort"],
+  [
+    /\bcollation\b|\blocale\b|'(?:strength|caseLevel|caseFirst|numericOrdering|alternate)'/i,
+    "collation",
+  ],
+  [/\bhint\b/i, "hint"],
+  [/\$project\b|\bprojection\b|\b(?:inclusion|exclusion)\b/i, "project"],
+  [/time limit|MaxTimeMS/i, "maxTime"],
+  [
+    /unknown (?:top level )?operator|\bbad query\b|\$(?:and|or|nor)\b.*\bneed|\$in needs|\$regex\b/i,
+    "filter",
+  ],
+]
+
+/** The fields that hold a document, where an operator can be written. */
+const DOCUMENT_FIELDS: readonly QueryField[] = ["filter", "project", "sort", "collation", "hint"]
+
 /**
  * The field a refusal from the server is about, and the sentence without the
- * field's name in front of it. A refusal that names none — an operator the
- * server does not know — belongs to the filter when there is one, since that
- * is where operators are written.
+ * field's name in front of it.
+ *
+ * A refusal that begins with a field's name (`sort: line 1, …`) is that
+ * field's. One that does not is read for what it names — `$sort`, a locale,
+ * a hint — and, failing that, for an operator that only one field of the bar
+ * contains. What is left belongs to no field: it is the query's, and is said
+ * under the bar rather than pinned on the filter, which is where a refusal of
+ * a sort used to land.
  */
-export function refusedField(
-  message: string,
-  draft: QueryDraft,
-): { field: QueryField; message: string } | null {
+export function refusedField(message: string, draft: QueryDraft, code?: string): Refusal {
   const match = /^([A-Za-z]+): ([\s\S]+)$/.exec(message)
   if (match && Object.hasOwn(SERVER_FIELD, match[1])) {
     return { field: SERVER_FIELD[match[1]], message: capitalised(match[2]) }
   }
-  if (/unknown (?:top level )?operator|\$[a-zA-Z]+/.test(message) && draft.filter.trim()) {
-    return { field: "filter", message }
+  if (code === "query_timeout") {
+    return { field: draft.maxTime.trim() ? "maxTime" : null, message }
   }
-  return null
+  for (const [said, field] of SAID_OF) {
+    if (said.test(message) && draft[field].trim()) return { field, message }
+  }
+  const operators = message.match(/\$[A-Za-z]\w*/g) ?? []
+  const holders = DOCUMENT_FIELDS.filter((field) =>
+    operators.some((operator) => new RegExp(`\\${operator}\\b`).test(draft[field])),
+  )
+  return { field: holders.length === 1 ? holders[0] : null, message }
 }
 
 const capitalised = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)

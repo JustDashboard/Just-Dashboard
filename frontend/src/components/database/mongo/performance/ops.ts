@@ -25,6 +25,18 @@ export function isInternal(operation: MongoOperation): boolean {
 }
 
 /**
+ * Whether an operation is one a reader may stop from here: a client's own
+ * work, in progress. A heartbeat is neither work nor worth stopping — the
+ * driver it belongs to drops its connection and opens another — and the
+ * server's own tasks are not a client's to interrupt.
+ */
+export function stoppable(operation: MongoOperation): boolean {
+  return (
+    Boolean(operation.opId) && operation.active && !isInternal(operation) && !isHeartbeat(operation)
+  )
+}
+
+/**
  * The operations a reader came to see — the work clients asked for — with
  * how many heartbeats and how many of the server's own tasks were left out.
  */

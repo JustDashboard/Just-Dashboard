@@ -12,6 +12,7 @@ import {
   parseJson,
   printCanonical,
   printJson,
+  printReadable,
   printShell,
   sameValue,
   shellScalar,
@@ -136,6 +137,40 @@ describe("JSON text", () => {
   test("strings are their own value, escapes and all", () => {
     const json = parseJson('{"a":"line\\nbreak \\u00e9 \\"q\\""}')
     expect(json.entries[0][1].value).toBe('line\nbreak é "q"')
+  })
+})
+
+describe("the text a person reads and edits", () => {
+  test("a date is its ISO moment, and every other type keeps its canonical wrapper", () => {
+    const doc = parseDocument(
+      '{"at":{"$date":{"$numberLong":"1790911442889"}},"n":{"$numberInt":"19"},' +
+        '"big":{"$numberLong":"9007199254740993"},"list":[{"$date":{"$numberLong":"0"}}]}',
+    )
+    expect(printReadable(doc)).toBe(
+      '{"at":{"$date":"2026-10-02T03:24:02.889Z"},"n":{"$numberInt":"19"},' +
+        '"big":{"$numberLong":"9007199254740993"},"list":[{"$date":"1970-01-01T00:00:00.000Z"}]}',
+    )
+  })
+
+  test("it reads back as the same document", () => {
+    const canonical = '{"at":{"$date":{"$numberLong":"1790911442889"}},"n":{"$numberDouble":"5.0"}}'
+    const again = parseDocument(printReadable(parseDocument(canonical)))
+    expect(again.fields[0].value).toMatchObject({ type: "date", text: "2026-10-02T03:24:02.889Z" })
+    expect(again.fields[1].value).toMatchObject({ type: "double", text: "5.0" })
+  })
+
+  test("a date ISO text cannot spell stays the milliseconds it is", () => {
+    const before = '{"$date":{"$numberLong":"-62135596800000"}}'
+    const after = '{"$date":{"$numberLong":"253402300800000"}}'
+    expect(printReadable(parseDocument(`{"a":${before},"b":${after}}`))).toBe(
+      `{"a":${before},"b":${after}}`,
+    )
+  })
+
+  test("a date is laid out on one line, like every other typed value", () => {
+    expect(printReadable(parseDocument('{"at":{"$date":{"$numberLong":"0"}}}'), true)).toBe(
+      '{\n  "at": {"$date":"1970-01-01T00:00:00.000Z"}\n}',
+    )
   })
 })
 

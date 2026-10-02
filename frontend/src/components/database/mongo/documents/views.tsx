@@ -1,31 +1,35 @@
 "use client"
 
 import { memo, useMemo, useState } from "react"
-import { Plus } from "@/components/icons"
+import { MoreHorizontal, Plus } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
+import { DimActions, IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
-import { VerbActions, type Verb } from "@/components/verbs"
-import { DataGrid, type GridLayout } from "@/components/database/grid"
+import { VerbMenu, type Verb } from "@/components/verbs"
+import { DataGrid, type GridLayout, type GridSort } from "@/components/database/grid"
 import { updateDocuments, type MongoTarget } from "@/components/database/mongo/api"
 import {
+  dotted,
   fromJson,
   idLabel,
   parseDocument,
   printJson,
-  toJson,
+  toReadableJson,
   type Json,
 } from "@/components/database/mongo/bson"
-import { BsonTree } from "@/components/database/mongo/bson-tree"
+import { BsonTree, FIRST_FIELDS, useTreeRun } from "@/components/database/mongo/bson-tree"
 import {
   NO_EDITS,
   buildUpdate,
   countEdits,
   editSummary,
-  withEdit,
+  overtaken,
+  staged,
   withoutEdit,
   type Edits,
+  type StagedDocuments,
 } from "@/components/database/mongo/changes"
 import { cellFilter, tableModel, type Listed } from "@/components/database/mongo/documents/table"
 import { valueClass } from "@/components/database/mongo/kinds"
@@ -50,6 +54,63 @@ export function useListed(documents: readonly MongoDoc[]): Listed[] {
 const hasEdits = (edits: Edits | undefined): edits is Edits =>
   edits !== undefined && Object.keys(edits).length > 0
 
+/** What a document is keyed by in a list: its `_id`, or its place where a projection left that out. */
+const keyOf = (entry: Listed, index: number) => entry.doc.id || `at:${index}`
+
+/**
+ * A document's verbs: the daily ones as icons, the rest behind one menu. They
+ * are stops for Tab only on the document the keyboard is in, so a page of
+ * fifty documents is not two hundred stops between the query and the pager.
+ */
+function DocumentVerbs({
+  verbs,
+  subject,
+  reach,
+  className,
+}: {
+  verbs: Verb[]
+  /** The document, as its `_id` reads. */
+  subject: string
+  reach: boolean
+  className?: string
+}) {
+  const inline = verbs.filter((verb) => verb.inline)
+  const rest = verbs.filter((verb) => !verb.inline)
+  const tabIndex = reach ? 0 : -1
+  return (
+    <DimActions className={className}>
+      {inline.map((verb) => (
+        <IconAction
+          key={verb.key}
+          label={verb.label}
+          tabIndex={tabIndex}
+          disabled={verb.disabled}
+          className={cn(verb.danger && "text-destructive")}
+          onClick={() => verb.run()}
+        >
+          <verb.icon />
+        </IconAction>
+      ))}
+      {rest.length > 0 && (
+        <VerbMenu
+          verbs={rest}
+          trigger={
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              tabIndex={tabIndex}
+              aria-label={`More actions for ${subject}`}
+              className="[&_svg:not([class*='size-'])]:size-3.5"
+            >
+              <MoreHorizontal />
+            </Button>
+          }
+        />
+      )}
+    </DimActions>
+  )
+}
+
 /* -------------------------------------------------------------------- list */
 
 /**
@@ -57,6 +118,12 @@ const hasEdits = (edits: Edits | undefined): edits is Edits =>
  * verbs beside it. Where the role and the collection allow, a value is
  * changed where it stands, and the document then carries its staged edits —
  * and the update they are — until it is sent or let go.
+ *
+ * A pane wide enough for two documents side by side draws them so, and three
+ * on a very wide one: a document is a narrow column of short lines, and one
+ * to a row left most of a wide pane empty with its verbs at the far edge.
+ * Read across, then down. The list is one stop for Tab; the arrows walk its
+ * rows, and Page Up and Page Down go a document at a time.
  */
 export function ListView({
   target,
@@ -75,29 +142,53 @@ export function ListView({
   /** Fields can be edited in place: the role may write, and this is not a view. */
   editable: boolean
   /** Staged edits by document `_id` (canonical text). */
-  edits: Readonly<Record<string, Edits>>
+  edits: StagedDocuments
   onEdits: (id: string, edits: Edits) => void
   verbsFor: (doc: MongoDoc) => Verb[]
   onUpdated: () => void
 }) {
+  const keys = useMemo(() => listed.map(keyOf), [listed])
+  const run = useTreeRun(keys)
   return (
-    <ol aria-label="Documents" className="divide-y divide-hairline">
-      {listed.map((entry, index) => (
-        <DocumentBlock
-          // The fold is a tree's own state: a change of "expand all" starts the trees again.
-          key={`${entry.doc.id || `at:${index}`}:${expanded}`}
-          target={target}
-          entry={entry}
-          expanded={expanded}
-          // A document whose _id the projection left out cannot be named in an update.
-          editable={editable && entry.doc.id !== ""}
-          edits={edits[entry.doc.id] ?? NO_EDITS}
-          onEdits={onEdits}
-          verbs={verbsFor(entry.doc)}
-          onUpdated={onUpdated}
-        />
-      ))}
-    </ol>
+    <div className="@container">
+      <ol
+        aria-label="Documents"
+        // The cells' own right and bottom edges are the rules between them;
+        // the last column's falls just outside the list.
+        className="-mr-px grid @5xl:grid-cols-2 @min-[96rem]:grid-cols-3"
+        onKeyDown={(event) => {
+          run.onKeyDown(event)
+          if (event.defaultPrevented) return
+          if (event.key !== "PageDown" && event.key !== "PageUp") return
+          // A document at a time: the first row of the next one, or of the one before.
+          const from = event.target instanceof Element ? event.target.closest("li") : null
+          const to =
+            event.key === "PageDown" ? from?.nextElementSibling : from?.previousElementSibling
+          const row = to?.querySelector<HTMLElement>("[data-tree-row]")
+          if (!row) return
+          event.preventDefault()
+          row.focus()
+        }}
+      >
+        {listed.map((entry, index) => (
+          <DocumentBlock
+            // The fold is a tree's own state: a change of "expand all" starts the trees again.
+            key={`${keys[index]}:${expanded}`}
+            target={target}
+            entry={entry}
+            expanded={expanded}
+            // A document whose _id the projection left out cannot be named in an update.
+            editable={editable && entry.doc.id !== ""}
+            edits={edits[entry.doc.id] ?? NO_EDITS}
+            onEdits={onEdits}
+            verbs={verbsFor(entry.doc)}
+            onUpdated={onUpdated}
+            active={run.active === keys[index]}
+            onEnter={run.enter(keys[index])}
+          />
+        ))}
+      </ol>
+    </div>
   )
 }
 
@@ -110,6 +201,8 @@ const DocumentBlock = memo(function DocumentBlock({
   onEdits,
   verbs,
   onUpdated,
+  active,
+  onEnter,
 }: {
   target: MongoTarget
   entry: Listed
@@ -119,13 +212,19 @@ const DocumentBlock = memo(function DocumentBlock({
   onEdits: (id: string, edits: Edits) => void
   verbs: Verb[]
   onUpdated: () => void
+  /** This document holds the list's tab stop. */
+  active: boolean
+  onEnter: () => void
 }) {
   const { doc, root } = entry
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
   const [refused, setRefused] = useState("")
-  const staged = hasEdits(edits)
-  const update = root && staged ? buildUpdate(doc.id, root, edits) : null
+  const pending = hasEdits(edits)
+  const update = root && pending ? buildUpdate(doc.id, root, edits) : null
+  // Fields somebody else has written to since their edit was staged: the update would match nothing.
+  const moved = root && pending ? overtaken(edits, root) : []
+  const subject = idLabel(doc.id)
 
   const send = async () => {
     if (!update) return
@@ -160,25 +259,33 @@ const DocumentBlock = memo(function DocumentBlock({
     <li
       data-slot="mongo-document"
       data-id={doc.id}
-      className="group @container min-w-0 px-3 py-2 [contain-intrinsic-size:auto_12rem] [content-visibility:auto]"
+      className="group @container min-w-0 border-r border-b border-hairline px-3 py-2 [contain-intrinsic-size:auto_12rem] [content-visibility:auto]"
+      onFocusCapture={active ? undefined : onEnter}
     >
       {/* Beside the fields where there is room; over them on a narrow pane,
-          where a column of controls would leave the values a few characters. */}
-      <div className="flex min-w-0 flex-col-reverse gap-1 @lg:flex-row @lg:items-start @lg:gap-2">
+          where a column of controls would leave the values a few characters.
+          The measure is capped, so on a wide pane that draws one document to
+          a row the verbs still stand at the end of its lines, not a pane away. */}
+      <div className="relative flex max-w-3xl min-w-0 flex-col-reverse gap-1">
         {root ? (
           <BsonTree
             root={root}
+            label={`Fields of ${subject}`}
             expand={expanded ? 8 : 0}
+            first={expanded ? undefined : FIRST_FIELDS}
             adding={adding}
             onAdding={setAdding}
-            className="min-w-0 @lg:flex-1"
+            tabbable={active}
+            // The verbs stand at the end of the first line: it alone gives them room.
+            leadClassName="@lg:pr-32"
+            className="min-w-0"
             editing={
               editable
                 ? {
                     edits,
                     onEdit: (edit) => {
                       setRefused("")
-                      onEdits(doc.id, withEdit(edits, edit))
+                      onEdits(doc.id, staged(edits, root, edit))
                     },
                     onRevert: (path) => {
                       setRefused("")
@@ -189,12 +296,14 @@ const DocumentBlock = memo(function DocumentBlock({
             }
           />
         ) : (
-          <pre className="min-w-0 font-mono text-xs break-all whitespace-pre-wrap @lg:flex-1">
+          <pre className="min-w-0 font-mono text-xs break-all whitespace-pre-wrap @lg:pr-32">
             {doc.canonical}
           </pre>
         )}
-        <VerbActions
-          className="@max-lg:self-end"
+        <DocumentVerbs
+          className="@max-lg:self-end @lg:absolute @lg:-top-0.5 @lg:right-0"
+          subject={subject}
+          reach={active}
           verbs={
             editable && root?.type === "object"
               ? withBeforeDanger(verbs, {
@@ -205,14 +314,12 @@ const DocumentBlock = memo(function DocumentBlock({
                 })
               : verbs
           }
-          dim
-          menuLabel={`More actions for ${idLabel(doc.id)}`}
         />
       </div>
-      {staged && root && (
+      {pending && root && (
         <div
           data-slot="mongo-pending"
-          className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md bg-surface-sunken px-2.5 py-1.5"
+          className="mt-2 flex max-w-3xl min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md bg-surface-sunken px-2.5 py-1.5"
         >
           <span className="shrink-0 text-xs font-medium">
             {editSummary(countEdits(edits, root))}
@@ -239,6 +346,14 @@ const DocumentBlock = memo(function DocumentBlock({
               Update
             </Button>
           </div>
+          {moved.length > 0 && !refused && (
+            <p role="status" className="basis-full text-hint leading-relaxed text-warning">
+              {moved.map((edit) => dotted(edit.path) ?? "a field").join(", ")}{" "}
+              {moved.length === 1 ? "has" : "have"} been written to since{" "}
+              {moved.length === 1 ? "this edit was" : "these edits were"} made, so the update would
+              match nothing. Undo the edit and make it again on the value as it is now.
+            </p>
+          )}
           {refused && (
             <p role="alert" className="basis-full text-hint leading-relaxed text-destructive">
               {refused}
@@ -259,8 +374,9 @@ function withBeforeDanger(verbs: Verb[], extra: Verb): Verb[] {
 /* -------------------------------------------------------------------- JSON */
 
 /**
- * The documents as canonical Extended JSON: the text an export writes and the
- * editor loads, every type spelled out. Typed values take their kind's hue.
+ * The documents as Extended JSON: the text the editor loads, every type
+ * spelled out and a date as its ISO moment. Typed values take their kind's
+ * hue.
  */
 export function JsonView({
   listed,
@@ -270,27 +386,29 @@ export function JsonView({
   verbsFor: (doc: MongoDoc) => Verb[]
 }) {
   return (
-    <ol aria-label="Documents" className="divide-y divide-hairline">
-      {listed.map(({ doc, root }, index) => (
-        <li
-          key={doc.id || `at:${index}`}
-          data-slot="mongo-document"
-          className="group @container min-w-0 px-3 py-2 [contain-intrinsic-size:auto_14rem] [content-visibility:auto]"
-        >
-          <div className="flex min-w-0 flex-col-reverse gap-1 @lg:flex-row @lg:items-start @lg:gap-2">
-            <pre className="min-w-0 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap @lg:flex-1">
-              {root ? <JsonText json={toJson(root)} depth={0} /> : doc.canonical}
-            </pre>
-            <VerbActions
-              className="@max-lg:self-end"
-              verbs={verbsFor(doc)}
-              dim
-              menuLabel={`More actions for ${idLabel(doc.id)}`}
-            />
-          </div>
-        </li>
-      ))}
-    </ol>
+    <div className="@container">
+      <ol aria-label="Documents" className="-mr-px grid @5xl:grid-cols-2 @min-[96rem]:grid-cols-3">
+        {listed.map(({ doc, root }, index) => (
+          <li
+            key={doc.id || `at:${index}`}
+            data-slot="mongo-document"
+            className="group @container min-w-0 border-r border-b border-hairline px-3 py-2 [contain-intrinsic-size:auto_14rem] [content-visibility:auto]"
+          >
+            <div className="flex max-w-3xl min-w-0 flex-col-reverse gap-1 @lg:flex-row @lg:items-start @lg:gap-2">
+              <pre className="min-w-0 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap @lg:flex-1">
+                {root ? <JsonText json={toReadableJson(root)} depth={0} /> : doc.canonical}
+              </pre>
+              <DocumentVerbs
+                className="@max-lg:self-end"
+                subject={idLabel(doc.id)}
+                reach
+                verbs={verbsFor(doc)}
+              />
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
   )
 }
 
@@ -358,6 +476,12 @@ function JsonText({ json, depth }: { json: Json; depth: number }): React.ReactNo
  * The documents as a table: the read-only grid over the union of their
  * top-level fields. A nested document or a list is its JSON on one line; the
  * row opens the whole document.
+ *
+ * A head pressed where the owner takes the order (`onSort`) asks the server
+ * for it — the whole match in that order, the same Sort the query bar holds —
+ * rather than shuffling the fifty rows that happen to be on screen. Without
+ * an owner (a pipeline's result, which is all here) the rows are ordered in
+ * place.
  */
 export function TableView({
   label,
@@ -366,6 +490,8 @@ export function TableView({
   onLayoutChange,
   offset,
   loading,
+  sort,
+  onSort,
   onOpen,
   onFilter,
   footer,
@@ -378,6 +504,10 @@ export function TableView({
   /** Where the page starts, so its first row is numbered as the query numbers it. */
   offset: number
   loading: boolean
+  /** The order the query asks for, as the heads show it. */
+  sort?: GridSort
+  /** Takes the order a head asks for to the server. */
+  onSort?: (sort: GridSort) => void
   onOpen?: (doc: MongoDoc) => void
   /** Hands over the clause for "filter by this value". */
   onFilter?: (clause: string) => void
@@ -391,7 +521,17 @@ export function TableView({
       label={label}
       columns={model.columns}
       rows={model.rows}
-      sortMode="client"
+      sort={onSort ? sort : undefined}
+      onSortChange={onSort}
+      sortMode={onSort ? "server" : "client"}
+      banner={
+        model.absent > 0 ? (
+          <p className="border-b border-hairline px-3 py-1 font-sans text-hint text-muted-foreground">
+            A NULL in a column headed &ldquo;n of m&rdquo; may be a field the document does not
+            have: only that many of these documents have it.
+          </p>
+        ) : undefined
+      }
       findable
       selectable={false}
       layout={layout}

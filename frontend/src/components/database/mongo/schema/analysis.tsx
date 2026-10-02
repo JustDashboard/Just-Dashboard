@@ -13,6 +13,13 @@ import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
 import { analyseSchema } from "@/components/database/mongo/api"
 import { CodeField } from "@/components/database/mongo/code-field"
+import {
+  StopButton,
+  Stopped,
+  useElapsed,
+  useStoppable,
+  worthShowing,
+} from "@/components/database/mongo/in-flight"
 import { TypeTag, typeInfo } from "@/components/database/mongo/kinds"
 import {
   EMPTY_QUERY,
@@ -77,19 +84,26 @@ export function AnalysisView({ mongo, collection: info }: Pick<Workbench, "mongo
   const [busy, setBusy] = useState(false)
   const [refused, setRefused] = useState("")
   const [query, setQuery] = useState("")
+  // A sample of ten thousand documents can take a while: it says how long, and can be stopped.
+  const flight = useStoppable()
+  const seconds = useElapsed(busy)
 
   const filterBad = shapeProblem(filter, "document")
   const analyse = async () => {
     setBusy(true)
     setRefused("")
     try {
-      const answer = await analyseSchema(target, {
-        sample: Number(sample),
-        filter: filter.trim() ? filter : undefined,
-      })
+      const answer = await flight.run((signal) =>
+        analyseSchema(
+          target,
+          { sample: Number(sample), filter: filter.trim() ? filter : undefined },
+          signal,
+        ),
+      )
       setHeld((all) => ({ ...all, [scope]: answer }))
     } catch (err) {
-      setRefused(errorMessage(err))
+      // Stopped by the reader: what was on screen stays, and nothing is said to have failed.
+      if (!(err instanceof Stopped)) setRefused(errorMessage(err))
     } finally {
       setBusy(false)
     }
@@ -137,16 +151,20 @@ export function AnalysisView({ mongo, collection: info }: Pick<Workbench, "mongo
           </p>
         )}
       </div>
-      <Button
-        size="sm"
-        className="h-8"
-        variant={schema ? "outline" : "default"}
-        pending={busy}
-        disabled={Boolean(filterBad)}
-        onClick={() => void analyse()}
-      >
-        {schema ? "Analyze again" : "Analyze"}
-      </Button>
+      {busy && worthShowing(seconds) ? (
+        <StopButton seconds={seconds} onStop={flight.stop} className="h-8" />
+      ) : (
+        <Button
+          size="sm"
+          className="h-8"
+          variant={schema ? "outline" : "default"}
+          pending={busy}
+          disabled={Boolean(filterBad)}
+          onClick={() => void analyse()}
+        >
+          {schema ? "Analyze again" : "Analyze"}
+        </Button>
+      )}
     </div>
   )
 

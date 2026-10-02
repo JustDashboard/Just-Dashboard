@@ -92,6 +92,8 @@ function Schema(workbench: Workbench) {
       {view === "indexes" ? (
         <IndexesView
           mongo={mongo}
+          catalog={workbench.catalog}
+          collection={info}
           confirm={workbench.confirm}
           onChanged={workbench.catalog.refresh}
         />

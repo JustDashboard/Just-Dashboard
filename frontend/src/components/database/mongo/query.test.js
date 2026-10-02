@@ -105,9 +105,76 @@ describe("the server's refusal lands on the field it is about", () => {
     ).toEqual({ field: "filter", message: "(BadValue) unknown operator: $gtx" })
   })
 
-  test("a refusal about nothing in the bar is not pinned on a field", () => {
-    expect(refusedField("the server could not be reached", draft({ filter: "{a:1}" }))).toBeNull()
-    expect(refusedField("unknown operator: $x", draft())).toBeNull()
+  test("a refusal about nothing in the bar is the query's, not a field's", () => {
+    expect(refusedField("the server could not be reached", draft({ filter: "{a:1}" }))).toEqual({
+      field: null,
+      message: "the server could not be reached",
+    })
+    expect(refusedField("unknown operator: $x", draft()).field).toBeNull()
+  })
+
+  test("the server's words for a sort, a collation, a hint and a projection land on those fields", () => {
+    const typed = draft({
+      filter: "{ age: { $gt: 70 } }",
+      sort: "{ age: 5 }",
+      collation: '{ locale: "xx" }',
+      hint: "nope_1",
+      project: "{ a: 1, b: 0 }",
+    })
+    expect(
+      refusedField(
+        "(Location15975) $sort key ordering must be 1 (for ascending) or -1 (for descending)",
+        typed,
+      ).field,
+    ).toBe("sort")
+    expect(
+      refusedField("(BadValue) Field 'locale' is invalid in: { locale: \"xx\" }", typed).field,
+    ).toBe("collation")
+    expect(
+      refusedField(
+        "(BadValue) error processing query: ns=app.users limit=51Tree: $and\nSort: {}\nProj: {}\n planner returned error :: caused by :: hint provided does not correspond to an existing index",
+        typed,
+      ).field,
+    ).toBe("hint")
+    expect(
+      refusedField("(Location31254) Cannot do exclusion on field b in inclusion projection", typed)
+        .field,
+    ).toBe("project")
+  })
+
+  test("a refusal of the sort is never pinned on the filter", () => {
+    const typed = draft({ filter: "{ age: { $gt: 70 } }", sort: "{ age: 5 }" })
+    expect(refusedField("(Location15975) $sort key ordering must be 1 or -1", typed).field).toBe(
+      "sort",
+    )
+    // A field that holds nothing is never blamed.
+    expect(
+      refusedField("(Location15975) $sort key ordering must be 1 or -1", draft({ filter: "{}" }))
+        .field,
+    ).toBeNull()
+  })
+
+  test("an operator only one field contains belongs to that field", () => {
+    expect(
+      refusedField(
+        "(Location40324) Unrecognized expression '$bogus'",
+        draft({ filter: "{ a: 1 }", project: "{ b: { $bogus: 1 } }" }),
+      ).field,
+    ).toBe("project")
+    // Named by none of them, or by two: the query's.
+    expect(
+      refusedField(
+        "(Location16410) FieldPath field names may not start with '$'. Consider using $getField or $setField.",
+        draft({ filter: "{ a: 1 }", sort: "{ $x: 1 }" }),
+      ).field,
+    ).toBeNull()
+  })
+
+  test("a read that ran out of time is the time limit's, when one was typed", () => {
+    expect(
+      refusedField("operation exceeded time limit", draft({ maxTime: "5" }), "query_timeout").field,
+    ).toBe("maxTime")
+    expect(refusedField("the request timed out", draft(), "query_timeout").field).toBeNull()
   })
 })
 
