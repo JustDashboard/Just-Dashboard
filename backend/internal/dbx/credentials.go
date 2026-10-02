@@ -42,6 +42,13 @@ var credentialRelations = map[Driver]map[string][]string{
 		"pg_subscription":      {"pg_catalog"},
 		"_pg_user_mappings":    {"information_schema"},
 		"user_mapping_options": {"information_schema"},
+		// Settings as the server holds them. A value can be a secret — a
+		// replica's primary_conninfo, a module's own key — and the Settings
+		// page blanks those for every role but an administrator; read as a
+		// table they would come back whole.
+		"pg_settings":        {"pg_catalog"},
+		"pg_file_settings":   {"pg_catalog"},
+		"pg_db_role_setting": {"pg_catalog"},
 	},
 	DriverMySQL: {
 		// authentication_string, and where MariaDB keeps it.
@@ -52,6 +59,10 @@ var credentialRelations = map[Driver]map[string][]string{
 		"password_history":  {"mysql"},
 		"servers":           {"mysql"},
 		"slave_master_info": {"mysql"},
+		// The server's variables, for the reason pg_settings is here.
+		"global_variables":    {"performance_schema"},
+		"session_variables":   {"performance_schema"},
+		"persisted_variables": {"performance_schema"},
 	},
 	DriverMSSQL: {
 		"sql_logins": {"sys"},

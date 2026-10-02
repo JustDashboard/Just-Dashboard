@@ -299,7 +299,10 @@ func buildRedisRules() (map[string]redisRule, map[string]bool) {
 		"HEXPIRE", "HPEXPIRE", "HEXPIREAT", "HPEXPIREAT", "HPERSIST")
 	danger("hash", removesMembers, "HDEL", "HGETDEL")
 	check(redisCheckExpiry, "HEXPIRE", "HPEXPIRE", "HEXPIREAT", "HPEXPIREAT")
-	check(redisCheckExpiryOptions(2, "FIELDS"), "HSETEX", "HGETEX")
+	// These two take their expiry before FIELDS or after the field list, and
+	// an expiry in the past removes the fields either way.
+	check(redisCheckHashFieldExpiry(2), "HSETEX")
+	check(redisCheckHashFieldExpiry(1), "HGETEX")
 
 	// --- lists ---
 	read("list", "LRANGE", "LINDEX", "LLEN", "LPOS")
@@ -600,8 +603,10 @@ func redisClassRank(class string) int {
 func redisExpiryVerdict(text string, absolute bool, unitMs int64) (string, string) {
 	n, err := strconv.ParseInt(text, 10, 64)
 	if err != nil {
-		// Not a number, or past what one holds: the server refuses it.
-		return "", ""
+		// Not a number as Go reads one. Most servers refuse it; one that
+		// trims the text first (Dragonfly takes " 0") deletes the key, so an
+		// expiry this cannot read is not assumed harmless.
+		return RedisClassDangerous, "sets an expiry that cannot be read as a number, which a server may take as already past"
 	}
 	now := time.Now()
 	past, far := n <= 0, !redisExpiryInRange(n, unitMs, now)
@@ -776,6 +781,33 @@ func redisCheckXRead(args []string) (string, string) {
 	return class, reason
 }
 
+// redisCheckHashFieldExpiry judges the expiry options of HSETEX and HGETEX
+// wherever they stand. The field list (FIELDS n, then n fields of perField
+// words each) is stepped over first, so a field that happens to be called EX
+// is not read as an option and an option written after the list is not
+// missed.
+func redisCheckHashFieldExpiry(perField int) func(args []string) (string, string) {
+	options := redisCheckExpiryOptions(2, "")
+	return func(args []string) (string, string) {
+		kept := make([]string, 0, len(args))
+		for i := 0; i < len(args); i++ {
+			if i >= 2 && strings.EqualFold(args[i], "FIELDS") {
+				n := -1
+				if i+1 < len(args) {
+					n, _ = strconv.Atoi(args[i+1])
+				}
+				if n < 1 {
+					return RedisClassDangerous, "names its fields in a way that cannot be read, so what it expires cannot be judged"
+				}
+				i += 1 + n*perField
+				continue
+			}
+			kept = append(kept, args[i])
+		}
+		return options(kept)
+	}
+}
+
 // redisCheckXAdd finds the trimming options, which sit between the key and
 // the entry id and make an append remove entries as well.
 func redisCheckXAdd(args []string) (string, string) {
@@ -783,12 +815,33 @@ func redisCheckXAdd(args []string) (string, string) {
 		switch strings.ToUpper(args[i]) {
 		case "NOMKSTREAM", "KEEPREF", "DELREF", "ACKED":
 			continue
+		case "LIMIT", "IDMPAUTO":
+			i++
+			continue
+		case "IDMP":
+			i += 2
+			continue
 		case "MAXLEN", "MINID":
 			return RedisClassDangerous, "trims the stream as it adds, which removes entries"
 		}
-		return "", ""
+		// The entry id ends the options. Anything else in their place is an
+		// option this does not know, and a trim may follow it.
+		if id := args[i]; id == "*" || redisStreamID(id) {
+			return "", ""
+		}
+		return RedisClassDangerous, "carries an option before the entry id that is not known here, and a trim may follow it"
 	}
 	return "", ""
+}
+
+// redisStreamID reports an explicit stream entry id: <ms>, <ms>-<seq> or
+// <ms>-*.
+func redisStreamID(text string) bool {
+	ms, seq, dashed := strings.Cut(text, "-")
+	if ms == "" || strings.Trim(ms, "0123456789") != "" {
+		return false
+	}
+	return !dashed || seq == "*" || (seq != "" && strings.Trim(seq, "0123456789") == "")
 }
 
 // RedisCommandKeys picks the key names out of a command by the positions the

@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -240,6 +241,52 @@ var serverFunctions = []string{
 	"pg_file_rename", "dblink", "dblink_exec", "dblink_connect", "set_config",
 }
 
+// unicodeIdentRe finds PostgreSQL's U&"…" identifier form, quoted text and
+// comments included: over-reporting costs a confirmation, as with the verbs.
+var unicodeIdentRe = regexp.MustCompile(`(?i)u&\s*"`)
+
+// plainObjects are what a CREATE may make and stay a "medium" statement: the
+// objects the schema forms themselves make at service.control. Everything
+// else CREATE can name — a database, an extension, a language, a server, a
+// function, a directory, a credential — reaches outside the schema.
+var plainObjects = map[string]bool{
+	"table": true, "index": true, "view": true, "schema": true, "sequence": true, "type": true,
+}
+
+// createModifiers are the words that may stand between CREATE and the kind.
+var createModifiers = map[string]bool{
+	"temporary": true, "temp": true, "unlogged": true, "global": true, "local": true,
+	"unique": true, "materialized": true, "or": true, "replace": true, "if": true,
+	"not": true, "exists": true, "clustered": true, "nonclustered": true, "fulltext": true,
+	"spatial": true, "columnstore": true, "bitmap": true, "virtual": true,
+}
+
+// plainWrite reports a statement whose leading verb is a write the row and
+// schema forms offer at the same capability: an INSERT, or a CREATE of one of
+// plainObjects. ClickHouse's INSERT INTO FUNCTION writes through a table
+// function — a file, a URL, another server — and is not one.
+func plainWrite(driver Driver, leader string, code []string) bool {
+	switch leader {
+	case "insert":
+		if driver == DriverClickHouse {
+			for _, word := range code {
+				if word == "function" {
+					return false
+				}
+			}
+		}
+		return true
+	case "create":
+		for _, word := range code[1:] {
+			if createModifiers[word] {
+				continue
+			}
+			return plainObjects[word]
+		}
+	}
+	return false
+}
+
 // read fills in everything the runner asks of a statement.
 //
 // Two different readings are used on purpose. The *tokens* — the lexer's view
@@ -396,8 +443,21 @@ func (st *SQLStatement) read(driver Driver, tokens []sqlToken) {
 	// query runner derives its capability check from this verdict. Costing the
 	// operator a confirmation for a statement nobody enumerated is the right
 	// side to be wrong on.
-	if risk.Level == "read" && !readOnlyLeaders[st.leader] {
+	//
+	// The same holds one level up. INSERT, INTO and CREATE each say "medium",
+	// and a statement that merely contains one of those words is not thereby
+	// an insert or a plain CREATE: VACUUM INTO writes a file, LOAD DATA …
+	// INTO TABLE reads one, CREATE EXTENSION and CREATE DATABASE are an
+	// administrator's. Only a statement whose leading verb is fully known
+	// stays below high.
+	if rank(risk.Level) < rank("high") && !readOnlyLeaders[st.leader] && !plainWrite(driver, st.leader, code) {
 		add("high", "statement is not a recognised read")
+	}
+	// A Unicode-escaped identifier (U&"pg\005fterminate_backend") names a
+	// function without spelling it, which is the one way past a reading that
+	// looks for names in the text.
+	if driver == DriverPostgres && unicodeIdentRe.MatchString(st.SQL) {
+		add("high", "names something in Unicode escapes, which hides what it names")
 	}
 	risk.Destructive = risk.Level == "critical" || risk.Level == "high"
 	st.Risk = risk

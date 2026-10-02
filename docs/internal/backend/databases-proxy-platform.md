@@ -472,6 +472,18 @@ line comment, a NUL, `--x` on MySQL, Oracle's `q'[…]'`, a `$` or a typographic
 refusal classifies as destructive. A statement is sent from its first token to its last, so the
 comments around it never reach the engine.
 
+Below "high" a statement must be one whose leading verb is fully known: a read, an `INSERT`, or a
+`CREATE` of a table, index, view, schema, sequence or type — what the row and schema forms offer at
+the same capability. Merely containing `INTO`, `CREATE` or `INSERT` buys nothing: `VACUUM INTO`,
+`LOAD DATA … INTO TABLE`, `CREATE DATABASE`, `CREATE EXTENSION` and ClickHouse's `INSERT INTO
+FUNCTION` are high. On PostgreSQL a `U&"…"` identifier is high as well, since it can name a server
+function without spelling it. The Redis console applies the same rule to options: `XADD` is judged up
+to its entry id whatever options precede it, `HSETEX`/`HGETEX` wherever their expiry stands, and an
+expiry that cannot be read as a number is dangerous. A dump's database name may not contain `=` or
+begin with `postgres://`, which `pg_dump` would read as a connection string of its own; a connection
+string written as pairs (`host=… password=…`, `server=…;password=…`) is parsed as pairs, never
+passed through as a name.
+
 Classification is per statement and keeps the strongest verdict. The shape (leading word, `WHERE`,
 `RETURNING`) comes from the tokens; the *verbs* are looked for in the statement's raw text, quoted
 text and comments included, so no disagreement about where a quote ends can put one out of sight —

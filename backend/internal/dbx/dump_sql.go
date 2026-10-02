@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 // A dump that does not depend on a client binary.
@@ -1311,6 +1313,13 @@ func urlDSNWithQuery(dsn, key, value string) string {
 // — which is why the search starts after the closing bracket.
 func mysqlDSNWithDatabase(dsn, database string) string {
 	if !strings.Contains(dsn, "://") {
+		// Through the driver's own writer where it can read the string: a
+		// name spliced in by hand could carry "?" or "/" and with them
+		// parameters of its own.
+		if cfg, err := mysql.ParseDSN(dsn); err == nil {
+			cfg.DBName = database
+			return cfg.FormatDSN()
+		}
 		start := 0
 		if close := strings.LastIndex(dsn, ")"); close >= 0 {
 			start = close + 1

@@ -1123,14 +1123,10 @@ func (v *dbHostView) stoppedContainerFor(ctx context.Context, conn *dbConnection
 // containerOrigin reports a container that is the server a connection's
 // origin names: docker:<name>, or compose:<project>/<service>.
 func containerOrigin(origin string, c *dockerx.Container) bool {
-	if name, ok := strings.CutPrefix(origin, "docker:"); ok {
-		return name != "" && name == c.Name
-	}
-	if ref, ok := strings.CutPrefix(origin, "compose:"); ok {
-		project, service := c.Labels["com.docker.compose.project"], c.Labels["com.docker.compose.service"]
-		return project != "" && service != "" && ref == project+"/"+service
-	}
-	return false
+	// The key discovery itself gives this container: a one-off `compose run`
+	// container and a second replica each have a key of their own, and are
+	// not the service's server.
+	return origin != "" && dbx.ContainerKey(c.Name, c.Labels) == origin
 }
 
 // stoppedExposure is how far a stopped container's binding of a host port

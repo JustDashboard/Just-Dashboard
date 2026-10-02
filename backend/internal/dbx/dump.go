@@ -50,6 +50,13 @@ func ParseDSN(driver Driver, dsn string) (*ConnInfo, error) {
 	if driver == DriverMySQL && !strings.Contains(dsn, "://") {
 		return parseMySQLDSN(dsn)
 	}
+	if !strings.Contains(dsn, "://") {
+		// A keyword string (host=… password=…) or an ADO one
+		// (server=…;password=…). Read as a URL it has no scheme and is all
+		// path, and the whole of it — password included — would come back
+		// as the database's name.
+		return parseKeywordDSN(dsn), nil
+	}
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse connection string: %w", err)
@@ -605,6 +612,74 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
+// parseKeywordDSN reads the parts of a connection string written as pairs:
+// libpq's "host=h port=5432 user=u password=p dbname=d", values optionally in
+// single quotes, or ADO's "server=h,1433;user id=u;password=p;database=d". A
+// part it does not find is left empty; nothing of the string is passed
+// through unread.
+func parseKeywordDSN(dsn string) *ConnInfo {
+	info := &ConnInfo{}
+	set := func(key, value string) {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "host", "hostaddr":
+			info.Host = value
+		case "server", "data source", "addr", "address":
+			host := strings.TrimPrefix(value, "tcp:")
+			if h, port, ok := strings.Cut(host, ","); ok {
+				host, info.Port = h, strings.TrimSpace(port)
+			}
+			if h, _, ok := strings.Cut(host, "\\"); ok {
+				host = h
+			}
+			info.Host = strings.TrimSpace(host)
+		case "port":
+			info.Port = value
+		case "user", "user id", "uid":
+			info.User = value
+		case "password", "pwd":
+			info.Password = value
+		case "dbname", "database", "initial catalog":
+			info.Database = value
+		}
+	}
+	if strings.Contains(dsn, ";") {
+		for _, pair := range strings.Split(dsn, ";") {
+			if key, value, ok := strings.Cut(pair, "="); ok {
+				set(key, strings.TrimSpace(value))
+			}
+		}
+		return info
+	}
+	rest := dsn
+	for {
+		rest = strings.TrimLeft(rest, " \t\r\n")
+		key, after, ok := strings.Cut(rest, "=")
+		if !ok {
+			return info
+		}
+		after = strings.TrimLeft(after, " \t")
+		var value string
+		if strings.HasPrefix(after, "'") {
+			var b strings.Builder
+			i := 1
+			for ; i < len(after) && after[i] != '\''; i++ {
+				if after[i] == '\\' && i+1 < len(after) {
+					i++
+				}
+				b.WriteByte(after[i])
+			}
+			value, rest = b.String(), after[min(i+1, len(after)):]
+		} else {
+			end := strings.IndexAny(after, " \t\r\n")
+			if end < 0 {
+				end = len(after)
+			}
+			value, rest = after[:end], after[end:]
+		}
+		set(key, value)
+	}
+}
+
 // validateDumpDatabase refuses only what cannot be handled safely rather than a
 // conservative character class.
 //
@@ -622,6 +697,14 @@ func validateDumpDatabase(database string) error {
 		// Every tool is given its arguments as option=value, so a name cannot
 		// become an option. This is the second lock on the same door.
 		return fmt.Errorf("a database name cannot begin with a dash")
+	}
+	// pg_dump and pg_restore read a --dbname that contains "=" or begins
+	// with a URI scheme as a whole connection string, whose host and port
+	// then override the ones given beside it: the stored password would be
+	// sent to a server the caller chose. No engine here needs such a name.
+	lower := strings.ToLower(database)
+	if strings.Contains(database, "=") || strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {
+		return fmt.Errorf("a database name cannot contain \"=\" or begin with postgres://: the dump tools would read it as a connection string")
 	}
 	return validateIdent(database)
 }

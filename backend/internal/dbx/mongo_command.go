@@ -102,7 +102,7 @@ func init() {
 	add(mongoCommandRule{class: MongoClassRead, inspect: inspectProfile}, "profile")
 	add(mongoCommandRule{class: MongoClassRead, inspect: inspectFeatures}, "features")
 
-	add(write, "insert", "create", "killCursors", "planCacheClear", "planCacheSetFilter",
+	add(write, "insert", "create", "planCacheClear", "planCacheSetFilter",
 		"planCacheClearFilters", "fsyncUnlock", "setIndexCommitQuorum",
 		"createSearchIndexes", "updateSearchIndex")
 	add(mongoCommandRule{class: MongoClassWrite, inspect: inspectUpdate}, "update")
@@ -123,7 +123,7 @@ func init() {
 	add(mongoCommandRule{class: MongoClassDestructive, reason: "it removes indexes"},
 		"dropIndexes", "deleteIndexes", "dropSearchIndex")
 	add(mongoCommandRule{class: MongoClassDestructive, reason: "it stops work in flight"},
-		"killOp", "killSessions", "killAllSessions", "killAllSessionsByPattern")
+		"killOp", "killSessions", "killAllSessions", "killAllSessionsByPattern", "killCursors")
 	add(mongoCommandRule{class: MongoClassDestructive, reason: "it rewrites the collection's data on disk and blocks it while it does"},
 		"compact", "reIndex")
 	add(mongoCommandRule{class: MongoClassDestructive, reason: "it replaces the collection with a capped copy, dropping what does not fit"},
