@@ -244,15 +244,16 @@ func TestTableRowsInsertSQLReadsTheCatalogue(t *testing.T) {
 		t.Errorf("the statement does not run on the engine it was written for: %v", err)
 	}
 
-	plain, err := RowsInsertSQL(DriverSQLite, "", "people", rows)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Each case has its own expectation: a map is walked in no fixed order,
+	// and one case's statement must not be what the other is held to.
 	for name, db := range map[string]*sql.DB{"no pool": nil, "a table that is not there": db} {
 		table := "people"
 		if db != nil {
 			table = "nonesuch"
-			plain, _ = RowsInsertSQL(DriverSQLite, "", table, rows)
+		}
+		plain, err := RowsInsertSQL(DriverSQLite, "", table, rows)
+		if err != nil {
+			t.Fatal(err)
 		}
 		if got, err := TableRowsInsertSQL(ctx, db, DriverSQLite, "", table, rows); err != nil || got != plain {
 			t.Errorf("%s: %q (%v), want %q", name, got, err, plain)
