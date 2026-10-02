@@ -115,6 +115,64 @@ export function printJsonDoc(node: JsonNode, indent = 0, depth = 0): string {
   }
 }
 
+/**
+ * The same document with other spacing: laid out a level per line with
+ * `indent`, or compact without. Only the space between tokens is touched —
+ * every string, number and name is copied as it was written, so `1.10` stays
+ * `1.10`, `1e3` stays `1e3`, a twenty-digit integer keeps its digits and an
+ * escape stays the escape it was. `null` when the text is not one JSON value.
+ */
+export function respaceJson(text: string, indent = 0): string | null {
+  try {
+    JSON.parse(text)
+  } catch {
+    return null
+  }
+  let out = ""
+  let depth = 0
+  let at = 0
+  const line = () => (indent ? `\n${" ".repeat(indent * depth)}` : "")
+  while (at < text.length) {
+    const ch = text[at]
+    if (WHITESPACE.includes(ch)) {
+      at++
+    } else if (ch === '"') {
+      const start = at
+      at++
+      while (text[at] !== '"') at += text[at] === "\\" ? 2 : 1
+      at++
+      out += text.slice(start, at)
+    } else if (ch === "{" || ch === "[") {
+      let next = at + 1
+      while (WHITESPACE.includes(text[next])) next++
+      if (text[next] === "}" || text[next] === "]") {
+        // An empty container stays on its line, as `JSON.stringify` writes it.
+        out += ch + text[next]
+        at = next + 1
+      } else {
+        depth++
+        out += ch + line()
+        at++
+      }
+    } else if (ch === "}" || ch === "]") {
+      depth--
+      out += line() + ch
+      at++
+    } else if (ch === ",") {
+      out += `,${line()}`
+      at++
+    } else if (ch === ":") {
+      out += indent ? ": " : ":"
+      at++
+    } else {
+      const start = at
+      while (at < text.length && !WHITESPACE.includes(text[at]) && !",]}".includes(text[at])) at++
+      out += text.slice(start, at)
+    }
+  }
+  return out
+}
+
 /** The node under a run of keys and positions, or `undefined` where the path leads nowhere. */
 export function nodeAt(node: JsonNode, path: readonly (string | number)[]): JsonNode | undefined {
   let at: JsonNode | undefined = node

@@ -1,12 +1,13 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Play, StopCircle } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { clock, plural } from "@/lib/format"
 import { LANES, hueFor } from "@/lib/hue"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
+import { useMemoryState } from "@/lib/view-state"
 import { Field, FormNote } from "@/components/form"
 import { EmptyNote, LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -189,17 +190,39 @@ export function PubSubView({ redis }: { redis: Redis }) {
   )
 }
 
-/** The messages published while the feed is open, on the channels it was pointed at. */
+/**
+ * The messages published while the feed is open, on the channels it was
+ * pointed at.
+ *
+ * What was heard, and what was being listened to, are kept for the tab like
+ * the console's transcript: looking at the monitor and coming back finds the
+ * messages where they were. The feed itself is not kept open behind another
+ * view — it closes when this one is left, and says so, with the press that
+ * opens it again. Payloads are held in memory only, never written down.
+ */
 function LiveFeed({ id }: { id: number }) {
-  const [targets, setTargets] = useState("*")
+  const [targets, setTargets] = useMemoryState(`databases.${id}.redis.pubsub.targets`, "*")
+  const [heard, setHeard] = useMemoryState<Heard[]>(`databases.${id}.redis.pubsub.heard`, [])
+  /** The feed was open when this view was last left. */
+  const [left, setLeft] = useMemoryState(`databases.${id}.redis.pubsub.left`, false)
   const [running, setRunning] = useState(false)
-  const [heard, setHeard] = useState<Heard[]>([])
   const [ended, setEnded] = useState<RedisFeedEnd | null>(null)
   const [opened, setOpened] = useState(false)
   const answered = useRef(false)
   const [failed, setFailed] = useState("")
   const listen = listenTargets(targets)
   const valid = listen.channel.length + listen.pattern.length > 0
+
+  const live = useRef(false)
+  useEffect(() => {
+    live.current = running
+  }, [running])
+  useEffect(
+    () => () => {
+      if (live.current) setLeft(true)
+    },
+    [setLeft],
+  )
 
   useSocket(`/databases/${id}/redis/subscribe`, {
     enabled: running,
@@ -229,6 +252,7 @@ function LiveFeed({ id }: { id: number }) {
     setOpened(false)
     answered.current = false
     setFailed("")
+    setLeft(false)
     setRunning(true)
   }
 
@@ -255,7 +279,10 @@ function LiveFeed({ id }: { id: number }) {
             }
           />
         ) : (
-          <Status tone="stopped" label="Not listening" />
+          <Status
+            tone="stopped"
+            label={left ? "Stopped when you left this view" : "Not listening"}
+          />
         )}
         <span className="numeric text-hint text-muted-foreground">
           {plural(heard.length, "message")}
@@ -285,7 +312,7 @@ function LiveFeed({ id }: { id: number }) {
         ) : (
           <Button type="submit" size="sm" disabled={!valid}>
             <Play />
-            Listen
+            {left || ended ? "Listen again" : "Listen"}
           </Button>
         )}
       </form>

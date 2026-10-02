@@ -1,6 +1,8 @@
 import { del, downloadUrl, get, getText, post, type Query } from "@/lib/api"
 import { keyQuery, prefixQuery } from "@/components/database/redis/bytes"
+import { commandLine } from "@/components/database/redis/command-line"
 import { nodeAt, parseJsonDoc, type JsonNode } from "@/components/database/redis/keys/json-doc"
+import { noteRead } from "@/components/database/redis/own-reads"
 import type {
   RedisAnalysis,
   RedisBulkRequest,
@@ -17,6 +19,7 @@ import type {
   RedisMembers,
   RedisPage,
   RedisPubSub,
+  RedisReply,
   RedisServer,
   RedisSlowlog,
   RedisStats,
@@ -75,7 +78,12 @@ export function redisKeys(
       db: target.db,
     },
     signal,
-  ).then((answer) => shaped<RedisPage>(answer, "keys", "the keys"))
+  ).then((answer) => {
+    const page = shaped<RedisPage>(answer, "keys", "the keys")
+    // Listing a key reads its size, which the server counts as a use of it.
+    for (const entry of page.keys) noteRead(target.id, page.db, entry.key)
+    return page
+  })
 }
 
 export function redisTree(
@@ -94,7 +102,11 @@ export function redisTree(
       db: target.db,
     },
     signal,
-  ).then((answer) => shaped<RedisTree>(answer, "folders", "the namespaces"))
+  ).then((answer) => {
+    const tree = shaped<RedisTree>(answer, "folders", "the namespaces")
+    for (const entry of tree.keys) noteRead(target.id, tree.db, entry.key)
+    return tree
+  })
 }
 
 export function redisMeta(target: RedisTarget, key: RedisBytes, signal?: AbortSignal) {
@@ -127,9 +139,11 @@ export function redisMembers(
   for (const [name, value] of Object.entries(query)) {
     if (value !== undefined && value !== "") sent[name] = value
   }
-  return get<unknown>(`${at(target.id)}/keys/members`, sent, signal).then((answer) =>
-    shaped<RedisMembers>(answer, "rows", "the key's value"),
-  )
+  return get<unknown>(`${at(target.id)}/keys/members`, sent, signal).then((answer) => {
+    const members = shaped<RedisMembers>(answer, "rows", "the key's value")
+    noteRead(target.id, members.db, key)
+    return members
+  })
 }
 
 /**
@@ -272,7 +286,11 @@ export function redisAck(
   })
 }
 
-export function redisTrim(target: RedisTarget, body: { key: RedisBytes; maxLen: number }) {
+export function redisTrim(
+  target: RedisTarget,
+  // Exactly one of the two: keep the newest so many, or drop what is older than an id.
+  body: { key: RedisBytes; maxLen: number } | { key: RedisBytes; minId: string },
+) {
   return post<{ removed: number }>(`${at(target.id)}/keys/stream/trim`, body, {
     query: db(target),
   })
@@ -287,6 +305,28 @@ export function redisClassify(target: RedisTarget, command: string) {
 
 export function redisCommand(target: RedisTarget, command: string) {
   return post<RedisCommandResult>(`${at(target.id)}/redis/command`, { command, db: target.db })
+}
+
+/**
+ * A command that has no route of its own — a hash field's expiry, a claim on
+ * a pending entry — run through the console's, where the server classifies
+ * and audits it like a line typed there. Its arguments are quoted, so a name
+ * is one argument whatever it holds. An error reply is thrown as one.
+ */
+export async function redisRun(
+  target: RedisTarget,
+  command: string,
+  args: readonly (RedisBytes | number)[],
+): Promise<RedisReply> {
+  const result = await redisCommand(target, commandLine(command, args))
+  if (result.reply.type === "error") throw new Error(String(result.reply.value))
+  return result.reply
+}
+
+/** The whole numbers of a reply that is a list of them: what `HEXPIRE` and its kin answer, one per field. */
+export function replyCodes(reply: RedisReply): number[] {
+  if (reply.type !== "array") return []
+  return reply.items.flatMap((item) => (item.type === "integer" ? [Number(item.value)] : []))
 }
 
 export function redisCommands(id: number, signal?: AbortSignal) {

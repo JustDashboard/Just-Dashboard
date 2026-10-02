@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { bytes, percent } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
 import { utilisationTone } from "@/components/meter"
@@ -26,6 +26,7 @@ import {
   type StatSample,
 } from "@/components/database/redis/performance/samples"
 import { SlowlogView } from "@/components/database/redis/performance/slowlog"
+import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 
 /** How often the counters are read: one INFO each time. */
@@ -51,6 +52,7 @@ type View = "overview" | "memory" | "slowlog" | "clients" | "commands" | "persis
 export function RedisPerformance() {
   const redis = useRedis()
   const { id, server, engine, param, select } = redis
+  useFocusReturn()
   const stats = usePoll((signal) => redisStats(id, signal), EVERY_MS, [id])
   const [samples, setSamples] = useState<StatSample[]>([])
   const newest = samples[samples.length - 1]
@@ -71,6 +73,16 @@ export function RedisPerformance() {
   ]
   const asked = param("view")
   const view: View = views.some((entry) => entry.id === asked) ? (asked as View) : "overview"
+
+  // On a phone the strip is wider than the page and scrolls sideways: the
+  // view on screen is kept in sight in it, so the strip says where the
+  // reader is and not only where they could go.
+  const strip = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    strip.current
+      ?.querySelector('[aria-pressed="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" })
+  }, [view])
 
   if (stats.error && samples.length === 0) {
     return (
@@ -98,11 +110,6 @@ export function RedisPerformance() {
   return (
     <SectionFrame section="performance">
       {server.data?.notice && <Notice title="About this server">{server.data.notice}</Notice>}
-      {stats.error && (
-        <p role="status" className="text-hint text-warning">
-          The last reading failed, so the figures are a few seconds old: {stats.error.message}
-        </p>
-      )}
       {!now ? (
         <StatGrid columns={5} dense aria-hidden>
           {Array.from({ length: 5 }, (_, i) => (
@@ -188,10 +195,11 @@ export function RedisPerformance() {
             trend={
               <TileTrend values={seriesOf(rows, "keys")} label="Keys" color="var(--chart-4)" />
             }
+            // The server counts its keys over every numbered database, and
+            // says so first: it is the clause a truncated hint must not lose.
             hint={[
+              spaces > 1 ? `in all ${spaces} databases` : "",
               now.expires === undefined ? "" : `${now.expires.toLocaleString()} set to expire`,
-              // The server counts its keys over every numbered database.
-              spaces > 1 ? `in ${spaces} databases` : "",
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -200,25 +208,41 @@ export function RedisPerformance() {
       )}
 
       <div className="min-w-0 space-y-6">
-        <nav
-          aria-label="Performance views"
-          className="flex gap-1 overflow-x-auto border-b border-hairline"
-        >
-          {views.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              aria-pressed={view === entry.id}
-              onClick={() => select({ view: entry.id === "overview" ? null : entry.id })}
-              className={tabClasses(view === entry.id, "h-10")}
+        {/* A strip of pressed buttons, not a landmark: these are six readings
+            of one page, and the rail is where the product navigates. The
+            line under it is where a failed reading is said, so the page
+            does not move when one fails. */}
+        <div className="relative">
+          <div
+            ref={strip}
+            role="group"
+            aria-label="Performance views"
+            className="flex gap-1 overflow-x-auto border-b border-hairline"
+          >
+            {views.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                aria-pressed={view === entry.id}
+                onClick={() => select({ view: entry.id === "overview" ? null : entry.id })}
+                className={tabClasses(view === entry.id, "h-10")}
+              >
+                {entry.label}
+                {entry.id === "clients" && clients !== undefined && (
+                  <ChipCount>{clients.toLocaleString()}</ChipCount>
+                )}
+              </button>
+            ))}
+          </div>
+          {stats.error && (
+            <p
+              role="status"
+              className="absolute inset-x-0 top-full truncate pt-1 text-hint text-warning"
             >
-              {entry.label}
-              {entry.id === "clients" && clients !== undefined && (
-                <ChipCount>{clients.toLocaleString()}</ChipCount>
-              )}
-            </button>
-          ))}
-        </nav>
+              The last reading failed, so the figures are a few seconds old: {stats.error.message}
+            </p>
+          )}
+        </div>
         {view === "overview" ? (
           <OverviewView redis={redis} rows={rows} everyMs={EVERY_MS} />
         ) : view === "memory" ? (

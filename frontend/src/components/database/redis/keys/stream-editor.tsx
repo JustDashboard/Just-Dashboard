@@ -32,6 +32,7 @@ import {
   redisDelete,
   redisGroupRemove,
   redisGroupSet,
+  redisRun,
   redisStream,
   redisStreamPending,
   redisTrim,
@@ -44,7 +45,7 @@ import { MemberDialog } from "@/components/database/redis/keys/member-dialog"
 import { MemberTable, type MemberColumn } from "@/components/database/redis/keys/member-table"
 import { useMembers } from "@/components/database/redis/keys/members"
 import { ReadError } from "@/components/database/redis/read-error"
-import { entryMoment } from "@/components/database/redis/ttl"
+import { entryMoment, localMoment } from "@/components/database/redis/ttl"
 import type { RedisBytes, RedisRow, RedisStreamGroup } from "@/components/database/redis/types"
 
 type View = "entries" | "groups"
@@ -183,6 +184,7 @@ function Entries({
       id: "at",
       label: "Added",
       width: "10rem",
+      lead: true,
       cell: (row) => {
         const at = entryMoment(row.id ?? "")
         return (
@@ -222,26 +224,28 @@ function Entries({
             Oldest first
           </FilterChip>
         </div>
-        <span className="min-w-0 flex-1" />
-        {canDestroy && (
-          <Button size="xs" variant="ghost" onClick={() => setTrimming(true)}>
-            Trim…
-          </Button>
-        )}
-        {canWrite && (
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => {
-              setDraft(draft ?? NEW_ENTRY)
-              setRefused("")
-              setOpen(true)
-            }}
-          >
-            <Plus />
-            Add entry
-          </Button>
-        )}
+        {/* One group, so the commands wrap together and stay on the right edge. */}
+        <div className="ml-auto flex items-center gap-2 py-1.5">
+          {canDestroy && (
+            <Button size="xs" variant="ghost" onClick={() => setTrimming(true)}>
+              Trim…
+            </Button>
+          )}
+          {canWrite && (
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => {
+                setDraft(draft ?? NEW_ENTRY)
+                setRefused("")
+                setOpen(true)
+              }}
+            >
+              <Plus />
+              Add entry
+            </Button>
+          )}
+        </div>
       </EditorStrip>
       <MemberTable
         label={`Entries of ${bytesLabel(name)}`}
@@ -254,6 +258,8 @@ function Entries({
         nouns="entries"
         empty={<EmptyNote>The stream holds no entries.</EmptyNote>}
         actionsWidth="5rem"
+        // An id, a time and the pairs: three columns need more room than two.
+        fits={640}
         actions={(row) => (
           <RowActions>
             <IconAction
@@ -427,7 +433,13 @@ function entryJson(row: RedisRow): string {
   )
 }
 
-/** Keep the newest so many entries and drop the rest. */
+type TrimBy = "count" | "id" | "time"
+
+/**
+ * Drop the old end of a stream: keep the newest so many entries, or remove
+ * everything before an entry — named by its id, or by the moment an id of
+ * that time would have been given.
+ */
 function TrimDialog({
   redis,
   name,
@@ -441,16 +453,30 @@ function TrimDialog({
   onOpenChange: (open: boolean) => void
   onTrimmed: () => void
 }) {
+  const [by, setBy] = useState<TrimBy>("count")
   const [keep, setKeep] = useState("")
+  const [before, setBefore] = useState("")
+  const [moment, setMoment] = useState("")
   const [busy, setBusy] = useState(false)
   const [refused, setRefused] = useState("")
-  const valid = /^\d+$/.test(keep.trim())
-  const going = valid ? Math.max(length - Number(keep), 0) : 0
+  const counted = /^\d+$/.test(keep.trim())
+  const going = counted ? Math.max(length - Number(keep), 0) : 0
+  // An entry id is a time in milliseconds, then a sequence number within it.
+  const id = before.trim()
+  const named = /^\d+(-\d+)?$/.test(id)
+  const at = moment ? new Date(moment).getTime() : Number.NaN
+  const valid =
+    by === "count" ? counted && going > 0 : by === "id" ? named : Number.isFinite(at) && at > 0
   const run = async () => {
     setBusy(true)
     setRefused("")
     try {
-      const answer = await redisTrim(redis.target, { key: name, maxLen: Number(keep) })
+      const answer = await redisTrim(
+        redis.target,
+        by === "count"
+          ? { key: name, maxLen: Number(keep) }
+          : { key: name, minId: by === "id" ? id : String(at) },
+      )
       notify.success(`${plural(answer.removed, "entry", "entries")} removed`)
       onOpenChange(false)
       onTrimmed()
@@ -469,25 +495,80 @@ function TrimDialog({
       name={name}
       type="stream"
       db={redis.db}
-      command={going > 0 ? `Remove ${plural(going, "entry", "entries")}` : "Trim"}
+      command={
+        by === "count" && going > 0
+          ? `Remove ${plural(going, "entry", "entries")}`
+          : "Remove the older entries"
+      }
       onSubmit={run}
       busy={busy}
       error={refused}
-      disabled={!valid || going === 0}
+      disabled={!valid}
     >
-      <Field
-        label="Entries to keep"
-        htmlFor="redis-stream-keep"
-        hint={`The stream holds ${length.toLocaleString()}. The newest are kept and the oldest removed, for good.`}
-      >
-        <Input
-          id="redis-stream-keep"
-          inputMode="numeric"
-          value={keep}
-          className="font-mono"
-          onChange={(event) => setKeep(event.target.value)}
+      <Field label="What is removed">
+        <Segments
+          label="How the stream is trimmed"
+          fill
+          value={by}
+          onChange={(next) => {
+            setBy(next)
+            setRefused("")
+          }}
+          options={[
+            { value: "count", label: "All but the newest" },
+            { value: "id", label: "Before an entry" },
+            { value: "time", label: "Before a time" },
+          ]}
         />
       </Field>
+      {by === "count" ? (
+        <Field
+          label="Entries to keep"
+          htmlFor="redis-stream-keep"
+          hint={`The stream holds ${length.toLocaleString()}. The newest are kept and the oldest removed, for good.`}
+        >
+          <Input
+            id="redis-stream-keep"
+            inputMode="numeric"
+            value={keep}
+            className="font-mono"
+            onChange={(event) => setKeep(event.target.value)}
+          />
+        </Field>
+      ) : by === "id" ? (
+        <Field
+          label="Entry id"
+          htmlFor="redis-stream-before"
+          hint="Every entry with a lower id is removed, for good. This one and the ones after it stay."
+          error={
+            id && !named ? "An entry id is a number, or two with a dash: 1727800000000-0." : ""
+          }
+        >
+          <Input
+            id="redis-stream-before"
+            value={before}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder="1727800000000-0"
+            className="font-mono"
+            onChange={(event) => setBefore(event.target.value)}
+          />
+        </Field>
+      ) : (
+        <Field
+          label="Date and time"
+          htmlFor="redis-stream-before-time"
+          hint="Every entry added before this moment is removed, for good. An entry whose id was chosen by hand is judged by that id."
+        >
+          <Input
+            id="redis-stream-before-time"
+            type="datetime-local"
+            value={moment}
+            max={localMoment(new Date())}
+            onChange={(event) => setMoment(event.target.value)}
+          />
+        </Field>
+      )}
     </MemberDialog>
   )
 }
@@ -691,6 +772,7 @@ function Groups({
                           redis={redis}
                           name={name}
                           group={group.name}
+                          consumers={group.consumers.map((consumer) => consumer.name)}
                           onAcked={info.refresh}
                         />
                       </Disclosure>
@@ -723,18 +805,26 @@ function Groups({
   )
 }
 
-/** What a group was handed and has not acknowledged, with the press that acknowledges it. */
+/**
+ * What a group was handed and has not acknowledged. An entry leaves the list
+ * two ways: acknowledged, which says its work is done, or claimed, which
+ * hands it to another consumer because the one holding it will not finish.
+ */
 function Pending({
   redis,
   name,
   group,
+  consumers,
   onAcked,
 }: {
   redis: KeyEditorProps["redis"]
   name: RedisBytes
   group: string
+  /** The group's consumers, as the ones an entry can be handed to. */
+  consumers: RedisBytes[]
   onAcked: () => void
 }) {
+  const [claiming, setClaiming] = useState<{ id: string; holder: RedisBytes } | null>(null)
   const pending = usePoll(
     (signal) => redisStreamPending(redis.target, name, { group, count: 200 }, signal),
     0,
@@ -790,17 +880,27 @@ function Pending({
               >
                 {entry.deliveries.toLocaleString()}
               </TableCell>
-              <TableCell className="px-2 py-1 text-right">
+              <TableCell className="px-2 py-1">
                 {redis.canWrite && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    pending={busy === entry.id}
-                    disabled={busy !== ""}
-                    onClick={() => void ack([entry.id])}
-                  >
-                    Acknowledge
-                  </Button>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      disabled={busy !== ""}
+                      onClick={() => setClaiming({ id: entry.id, holder: entry.consumer })}
+                    >
+                      Claim…
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      pending={busy === entry.id}
+                      disabled={busy !== ""}
+                      onClick={() => void ack([entry.id])}
+                    >
+                      Acknowledge
+                    </Button>
+                  </div>
                 )}
               </TableCell>
             </TableRow>
@@ -810,7 +910,126 @@ function Pending({
       {!pending.data.done && (
         <FormNote>The first {entries.length.toLocaleString()} are listed.</FormNote>
       )}
+      {claiming && (
+        <ClaimDialog
+          redis={redis}
+          name={name}
+          group={group}
+          entry={claiming.id}
+          holder={claiming.holder}
+          consumers={consumers}
+          onOpenChange={() => setClaiming(null)}
+          onClaimed={() => {
+            pending.refresh()
+            onAcked()
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/**
+ * Hand a pending entry to another consumer of its group.
+ *
+ * The server has the command and the dashboard no route for it, so it goes
+ * through the console's: `XCLAIM`, classified and audited as a line typed
+ * there. Only the entry's owner changes — nothing is read, so the entry's
+ * fields never pass through here.
+ */
+function ClaimDialog({
+  redis,
+  name,
+  group,
+  entry,
+  holder,
+  consumers,
+  onOpenChange,
+  onClaimed,
+}: {
+  redis: KeyEditorProps["redis"]
+  name: RedisBytes
+  group: string
+  entry: string
+  holder: RedisBytes
+  consumers: RedisBytes[]
+  onOpenChange: (open: boolean) => void
+  onClaimed: () => void
+}) {
+  const [to, setTo] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [refused, setRefused] = useState("")
+  const others = consumers.filter(
+    (consumer): consumer is string =>
+      typeof consumer === "string" && consumer !== "" && bytesId(consumer) !== bytesId(holder),
+  )
+  const claim = async () => {
+    setBusy(true)
+    setRefused("")
+    try {
+      const reply = await redisRun(redis.target, "XCLAIM", [name, group, to, 0, entry, "JUSTID"])
+      if (reply.type === "array" && reply.items.length === 0) {
+        setRefused("The entry is not pending any more: it was acknowledged, or removed.")
+        return
+      }
+      notify.success(`Entry ${entry} handed to ${to}`)
+      onOpenChange(false)
+      onClaimed()
+    } catch (err) {
+      setRefused(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <MemberDialog
+      open
+      onOpenChange={onOpenChange}
+      onCancel={() => onOpenChange(false)}
+      title="Claim a pending entry"
+      name={name}
+      type="stream"
+      db={redis.db}
+      command="Claim entry"
+      onSubmit={claim}
+      busy={busy}
+      error={refused}
+      disabled={to === ""}
+    >
+      <DetailList className="font-mono">
+        <Detail label="Entry">{entry}</Detail>
+        <Detail label="Group">{group}</Detail>
+        <Detail label="Held by">{bytesLabel(holder) || "(empty name)"}</Detail>
+      </DetailList>
+      <Field
+        label="Hand it to"
+        htmlFor="redis-claim-consumer"
+        hint="A consumer of this group. A name the group has not seen becomes a consumer of it."
+      >
+        <Input
+          id="redis-claim-consumer"
+          value={to}
+          spellCheck={false}
+          autoComplete="off"
+          className="font-mono"
+          onChange={(event) => setTo(event.target.value)}
+        />
+      </Field>
+      {others.length > 0 && (
+        <div role="group" aria-label="The group's other consumers" className="flex flex-wrap gap-1">
+          {others.slice(0, 12).map((consumer) => (
+            <FilterChip
+              key={consumer}
+              selected={to === consumer}
+              className="font-mono"
+              onClick={() => setTo(consumer)}
+            >
+              {consumer}
+            </FilterChip>
+          ))}
+        </div>
+      )}
+    </MemberDialog>
   )
 }
 

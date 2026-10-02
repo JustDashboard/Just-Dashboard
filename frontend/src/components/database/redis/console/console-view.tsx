@@ -42,6 +42,26 @@ export type ConsoleEntry = {
   truncated?: boolean
   /** Why it was not run, or why the run failed: a sentence, in place of a reply. */
   refused?: string
+  /** The view of this page that does what the line asked for, where there is one. */
+  elsewhere?: ConsoleElsewhere
+}
+
+/** The two things a console line cannot do, and the view each has. */
+export type ConsoleElsewhere = "pubsub" | "monitor"
+
+/**
+ * Commands the console refuses because a view of this page is built for
+ * them. The server's sentence for MONITOR names a page this product does not
+ * have ("the Profiler"), so that one is said here, with the view it means.
+ */
+const ELSEWHERE: Record<string, { view: ConsoleElsewhere; why?: string }> = {
+  MONITOR: {
+    view: "monitor",
+    why: "streams every command the server runs, which one console line cannot hold",
+  },
+  SUBSCRIBE: { view: "pubsub" },
+  PSUBSCRIBE: { view: "pubsub" },
+  SSUBSCRIBE: { view: "pubsub" },
 }
 
 const KEEP = 60
@@ -87,8 +107,13 @@ export function ConsoleView({
   line,
   onLine,
   confirm,
+  views,
+  onView,
 }: {
   redis: Redis
+  /** The views this page offers this reader beside the console. */
+  views: readonly ConsoleElsewhere[]
+  onView: (view: ConsoleElsewhere) => void
   /** The server's command reference, once it has arrived. */
   commands: readonly RedisCommandRef[]
   /** The prompt's text, held by the page so the reference pane can write into it. */
@@ -145,8 +170,13 @@ export function ConsoleView({
   }
 
   const refusal = (verdict: RedisClassifyResponse): string | null => {
-    const why = verdict.reasons.join("; ")
-    if (verdict.class === "blocked") return `Not run: ${verdict.name} ${why}.`
+    const there = Object.hasOwn(ELSEWHERE, verdict.name) ? ELSEWHERE[verdict.name] : undefined
+    const why = there?.why ?? verdict.reasons.join("; ")
+    if (verdict.class === "blocked") {
+      return there?.why && views.includes(there.view)
+        ? `Not run: ${verdict.name} ${why}. The Monitor view is built for it.`
+        : `Not run: ${verdict.name} ${why}.`
+    }
     if (!verdict.allowed) {
       const wants = verdict.requires.map((need) => CAPABILITY[need] ?? need)
       return `Not run: ${verdict.name} ${why ? `${why}, and ` : ""}needs ${wants.join(" and ")}, which your role does not have.`
@@ -169,7 +199,16 @@ export function ConsoleView({
       const verdict = await redisClassify(target, command)
       const refused = refusal(verdict)
       if (refused) {
-        add({ command, class: verdict.class, refused })
+        const there =
+          verdict.class === "blocked" && Object.hasOwn(ELSEWHERE, verdict.name)
+            ? ELSEWHERE[verdict.name]
+            : undefined
+        add({
+          command,
+          class: verdict.class,
+          refused,
+          ...(there && views.includes(there.view) ? { elsewhere: there.view } : {}),
+        })
       } else if (verdict.class === "dangerous" || verdict.slow) {
         confirm({
           title:
@@ -291,7 +330,7 @@ export function ConsoleView({
             </div>
           </div>
         ) : (
-          entries.map((entry) => <Entry key={entry.id} entry={entry} />)
+          entries.map((entry) => <Entry key={entry.id} entry={entry} onView={onView} />)
         )}
         {busy && (
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -403,7 +442,13 @@ export function ConsoleView({
   )
 }
 
-function Entry({ entry }: { entry: ConsoleEntry }) {
+function Entry({
+  entry,
+  onView,
+}: {
+  entry: ConsoleEntry
+  onView: (view: ConsoleElsewhere) => void
+}) {
   return (
     <div data-slot="redis-console-entry" className="min-w-0 animate-rise">
       <div className="flex min-w-0 items-baseline gap-2">
@@ -422,7 +467,18 @@ function Entry({ entry }: { entry: ConsoleEntry }) {
       </div>
       <div className="mt-0.5 min-w-0">
         {entry.refused ? (
-          <span className="font-sans text-warning">{entry.refused}</span>
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans">
+            <span className="text-warning">{entry.refused}</span>
+            {entry.elsewhere && (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => onView(entry.elsewhere as ConsoleElsewhere)}
+              >
+                {entry.elsewhere === "monitor" ? "Open Monitor" : "Open Pub/Sub"}
+              </Button>
+            )}
+          </span>
         ) : (
           entry.reply && <Reply reply={entry.reply} />
         )}

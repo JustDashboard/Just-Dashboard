@@ -130,7 +130,11 @@ export function ZsetEditor({ redis, name, meta, epoch, onChanged, confirm }: Key
       title: "Remove member",
       subject: {
         mark: <EngineMark engine={engine} size="sm" />,
-        name: <span className="font-mono">{bytesLabel(row.value ?? "").slice(0, 120)}</span>,
+        name: (
+          <span className="font-mono">
+            {bytesLabel(row.value ?? "").slice(0, 120) || "the empty member"}
+          </span>
+        ),
         facts: (
           <>
             <FormFact label="Score">{scoreText(row.score)}</FormFact>
@@ -168,12 +172,13 @@ export function ZsetEditor({ redis, name, meta, epoch, onChanged, confirm }: Key
       label: "Score",
       width: "9rem",
       align: "right",
+      word: "Score",
       cell: (row) =>
         canWrite ? (
           <InlineEdit
             value={scoreText(row.score)}
             align="right"
-            label={`the score of ${bytesLabel(row.value ?? "").slice(0, 60)}`}
+            label={`the score of ${bytesLabel(row.value ?? "").slice(0, 60) || "the empty member"}`}
             onSave={(next) => saveScore(row, next)}
           />
         ) : (
@@ -267,7 +272,7 @@ export function ZsetEditor({ redis, name, meta, epoch, onChanged, confirm }: Key
         }
         actionsWidth="5rem"
         actions={(row) => {
-          const label = bytesLabel(row.value ?? "").slice(0, 60)
+          const label = bytesLabel(row.value ?? "").slice(0, 60) || "the empty member"
           return (
             <RowActions>
               <IconAction

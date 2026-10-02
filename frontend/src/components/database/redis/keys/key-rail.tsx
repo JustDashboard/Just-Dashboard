@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ChevronDown,
   ChevronRight,
-  Clock,
   Cross,
   Filter,
   Key,
@@ -14,7 +13,8 @@ import {
   SidebarLeftClose,
 } from "@/components/icons"
 import { bytes } from "@/lib/format"
-import { useSessionState, useViewState } from "@/lib/view-state"
+import { LANES, hueFor } from "@/lib/hue"
+import { useSessionState } from "@/lib/view-state"
 import { cn } from "@/lib/utils"
 import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
@@ -35,6 +35,7 @@ import {
 import { DbPicker } from "@/components/database/redis/db-picker"
 import { KIND_ORDER, KindMark, REDIS_KINDS, kindOf } from "@/components/database/redis/kinds"
 import {
+  ancestors,
   leafName,
   mergeKeys,
   mergeLevel,
@@ -43,7 +44,7 @@ import {
   type TreeLevel,
 } from "@/components/database/redis/keys/scan"
 import { ReadError } from "@/components/database/redis/read-error"
-import { ttlWord } from "@/components/database/redis/ttl"
+import { ttlShort, ttlWord } from "@/components/database/redis/ttl"
 import type { RedisBytes, RedisKey, RedisTreeFolder } from "@/components/database/redis/types"
 import { usePaged, type Paged } from "@/components/database/redis/use-paged"
 import type { Redis } from "@/components/database/redis/use-redis"
@@ -54,7 +55,28 @@ const ROW_HEIGHT = 28
 /** How many namespaces of one level are drawn before the rest are asked for. */
 const FOLDER_PAGE = 200
 
-type RailView = "tree" | "list"
+export type RailView = "tree" | "list"
+
+/**
+ * The walk of the keyspace's top level: its namespaces, its mix of types and
+ * how far it got. The rail draws it as the tree; the pane beside it reads the
+ * same walk as what the database is made of, so the keyspace is scanned once
+ * for both.
+ */
+export function useKeyWalk(redis: Redis, epoch: number, enabled: boolean): Paged<TreeLevel> {
+  const { id, target, scope, param } = redis
+  const pattern = param("pattern")
+  const type = param("type")
+  return usePaged(
+    {
+      fetch: (cursor, signal) => redisTree(target, { prefix: "", pattern, type, cursor }, signal),
+      merge: mergeLevel,
+      next: (page) => (page.complete ? null : page.cursor),
+    },
+    `tree:${JSON.stringify([id, scope, pattern, type])}`,
+    { epoch, enabled: enabled && scope !== undefined },
+  )
+}
 
 /** What every row of the rail needs to know about the page around it. */
 type RailContext = {
@@ -65,6 +87,8 @@ type RailContext = {
   selected: RedisBytes | undefined
   open: ReadonlySet<string>
   toggle: (prefix: RedisBytes) => void
+  /** Open a namespace that is not open yet; one that is stays as it is. */
+  unfold: (prefix: RedisBytes) => void
   onOpen: (key: RedisBytes) => void
   /** Narrow the rail to one namespace, as a flat list. */
   onNarrow: (pattern: string) => void
@@ -85,6 +109,9 @@ export function KeyRail({
   redis,
   selected,
   epoch,
+  view,
+  onView: setView,
+  root,
   onOpen,
   onRefresh,
   onNew,
@@ -95,6 +122,11 @@ export function KeyRail({
   selected: RedisBytes | undefined
   /** Raised to read the keys again: Refresh, and after a key is made, renamed or removed. */
   epoch: number
+  /** How the keys are arranged; a tree only where the engine walks namespaces. */
+  view: RailView
+  onView: (view: RailView) => void
+  /** The walk of the top level, which the page holds: the pane reads it too. */
+  root: Paged<TreeLevel>
   onOpen: (key: RedisBytes) => void
   onRefresh: () => void
   onNew: () => void
@@ -105,12 +137,9 @@ export function KeyRail({
   const { id, target, db, server, select, param, canWrite } = redis
   const pattern = param("pattern")
   const type = param("type")
-  const [arranged, setView] = useViewState<RailView>(`databases.${id}.redis.view`, "tree")
-  // An engine with no namespace walk has only the list.
   const tree = redis.engine.can("keyTree")
-  const view: RailView = tree ? arranged : "list"
   const [opened, setOpened] = useSessionState<string[]>(
-    `databases.${id}.redis.open.${db ?? "default"}`,
+    `databases.${id}.redis.open.${redis.scope ?? "own"}`,
     [],
   )
   const open = useMemo(() => new Set(opened), [opened])
@@ -118,17 +147,29 @@ export function KeyRail({
     const key = bytesId(prefix)
     setOpened((held) => (held.includes(key) ? held.filter((p) => p !== key) : [...held, key]))
   }
+  const unfold = (prefix: RedisBytes) => {
+    const key = bytesId(prefix)
+    setOpened((held) => (held.includes(key) ? held : [...held, key]))
+  }
 
-  const scope = JSON.stringify([id, target.db ?? null, pattern, type])
-  const root = usePaged(
-    {
-      fetch: (cursor, signal) => redisTree(target, { prefix: "", pattern, type, cursor }, signal),
-      merge: mergeLevel,
-      next: (page) => (page.complete ? null : page.cursor),
-    },
-    `tree:${scope}`,
-    { epoch, enabled: view === "tree" },
-  )
+  // The tree follows the key that is open: a pasted link, a key reached from
+  // the memory analysis, Back — each opens the namespaces the key sits under,
+  // so the rail shows where it lives. Only when the key changes: a namespace
+  // the reader folds afterwards stays folded.
+  const followed = typeof selected === "string" ? selected : undefined
+  useEffect(() => {
+    if (followed === undefined) return
+    const path = ancestors(followed).map((prefix) => bytesId(prefix))
+    if (path.length === 0) return
+    setOpened((held) => {
+      const missing = path.filter((key) => !held.includes(key))
+      return missing.length > 0 ? [...held, ...missing] : held
+    })
+    // By database too: the open namespaces are kept per database, and which
+    // one a link without `db` means is learned a moment after it opens.
+  }, [followed, redis.scope, setOpened])
+
+  const scope = JSON.stringify([id, redis.scope, pattern, type])
   const list = usePaged(
     {
       // The cursor goes back as it came. It is the server's own unsigned
@@ -140,14 +181,14 @@ export function KeyRail({
       next: (page) => (page.done ? null : page.cursor),
     },
     `list:${scope}`,
-    { epoch, enabled: view === "list" },
+    { epoch, enabled: view === "list" && redis.scope !== undefined },
   )
 
   // The mix of types in the database, as the last unfiltered walk counted it:
   // a chip keeps its count while another one is pressed.
   const [mix, setMix] = useState<{ scope: string; types: Record<string, number> }>()
-  const mixScope = JSON.stringify([id, target.db ?? null, pattern])
-  if (view === "tree" && !type && root.state && mix?.types !== root.state.types) {
+  const mixScope = JSON.stringify([id, redis.scope, pattern])
+  if (!type && root.state && mix?.types !== root.state.types) {
     setMix({ scope: mixScope, types: root.state.types })
   }
   const counts = mix?.scope === mixScope ? mix.types : undefined
@@ -166,6 +207,7 @@ export function KeyRail({
     selected,
     open,
     toggle,
+    unfold,
     onOpen,
     onNarrow: (next) => {
       select({ pattern: next })
@@ -203,7 +245,14 @@ export function KeyRail({
         </IconAction>
         <VerbMenu verbs={verbs} label="More key actions" />
         {canWrite && (
-          <Button size="xs" className="h-7" onClick={onNew}>
+          // The page's one command while nothing is open. Beside an open key
+          // the command is that key's own — Save — and this one steps back.
+          <Button
+            size="xs"
+            variant={selected === undefined ? "default" : "outline"}
+            className="h-7"
+            onClick={onNew}
+          >
             <Plus />
             New key
           </Button>
@@ -363,7 +412,7 @@ function NoKeys({
         description="Create the first one here, or pick another database above."
         action={
           onNew && (
-            <Button size="sm" onClick={onNew}>
+            <Button size="sm" variant="outline" onClick={onNew}>
               <Plus />
               New key
             </Button>
@@ -456,12 +505,31 @@ function LevelRows({
   /** For a level below the top: its own walk stopped short, and this continues it. */
   more?: { run: () => void; busy: boolean }
 }) {
-  const [shown, setShown] = useState(FOLDER_PAGE)
+  const [paged, setShown] = useState(FOLDER_PAGE)
+  // The namespace the open key sits under is drawn however far down the
+  // level it is: the tree is following that key.
+  const selected = typeof context.selected === "string" ? context.selected : undefined
+  const onPath =
+    selected === undefined
+      ? -1
+      : level.folders.findIndex(
+          (folder) => typeof folder.prefix === "string" && selected.startsWith(folder.prefix),
+        )
+  const shown = Math.max(paged, onPath + 1)
   const hidden = level.keyCount - level.keys.length
+  // Under a pattern, a level that is one namespace and nothing else has one
+  // thing to show, and showing it folded is showing nothing.
+  const sole = Boolean(context.pattern) && level.folders.length === 1 && level.keys.length === 0
   return (
     <>
       {level.folders.slice(0, shown).map((folder) => (
-        <FolderRow key={bytesId(folder.prefix)} context={context} folder={folder} depth={depth} />
+        <FolderRow
+          key={bytesId(folder.prefix)}
+          context={context}
+          folder={folder}
+          depth={depth}
+          sole={sole}
+        />
       ))}
       {level.folders.length > shown && (
         <NoteRow depth={depth} onClick={() => setShown(shown + FOLDER_PAGE)}>
@@ -508,14 +576,27 @@ function FolderRow({
   context,
   folder,
   depth,
+  sole,
 }: {
   context: RailContext
   folder: RedisTreeFolder
   depth: number
+  /** The only thing at its level, under a pattern: it opens by itself. */
+  sole: boolean
 }) {
-  const { redis, pattern, type, epoch, open, toggle, onNarrow } = context
+  const { redis, pattern, type, epoch, open, toggle, unfold, onNarrow } = context
   const id = bytesId(folder.prefix)
   const isOpen = open.has(id)
+  // Once per pattern: the reader may fold it again and it stays folded.
+  const unfoldSole = useRef(unfold)
+  useEffect(() => {
+    unfoldSole.current = unfold
+  })
+  useEffect(() => {
+    if (sole) unfoldSole.current(folder.prefix)
+    // `id` is the prefix, by its bytes: the object naming it is new with every read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sole, pattern, id])
   const level = usePaged(
     {
       fetch: (cursor, signal) =>
@@ -523,11 +604,12 @@ function FolderRow({
       merge: mergeLevel,
       next: (page) => (page.complete ? null : page.cursor),
     },
-    `tree:${JSON.stringify([redis.id, redis.target.db ?? null, pattern, type, id])}`,
+    `tree:${JSON.stringify([redis.id, redis.scope, pattern, type, id])}`,
     { epoch, enabled: isOpen },
   )
   const name = bytesLabel(folder.name)
   const Chevron = isOpen ? ChevronDown : ChevronRight
+  const listable = typeof folder.pattern === "string" ? folder.pattern : undefined
   return (
     <>
       <div className="group flex min-w-0 items-center">
@@ -536,23 +618,46 @@ function FolderRow({
           data-roving
           tabIndex={-1}
           aria-expanded={isOpen}
-          title={bytesLabel(folder.prefix)}
+          aria-keyshortcuts={listable ? "Shift+Enter" : undefined}
+          title={
+            listable
+              ? `${bytesLabel(folder.prefix)} — Shift+Enter lists its keys`
+              : bytesLabel(folder.prefix)
+          }
           onClick={() => toggle(folder.prefix)}
+          // The row's second verb, from the keyboard: its button beside the
+          // row is out of the tab order, so the tree stays one stop.
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || !event.shiftKey || !listable) return
+            event.preventDefault()
+            onNarrow(listable)
+          }}
           style={indent(depth)}
           className={cn(ROW, "flex-1")}
         >
           <Chevron aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+          {depth === 0 && (
+            // A namespace's own hue, at the top level only: the same name is
+            // the same colour in the memory analysis and beside this tree.
+            <span
+              aria-hidden
+              className="size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: hueFor(name.toLowerCase(), LANES) }}
+            />
+          )}
           <span className="min-w-0 truncate font-mono">{name || "(empty)"}</span>
           <span className="numeric ml-auto shrink-0 pl-2 text-hint text-muted-foreground">
             {folder.count.toLocaleString()}
           </span>
         </button>
-        {typeof folder.pattern === "string" ? (
+        {listable ? (
           <IconAction
             reveal
+            // A pointer's shortcut: from the keyboard the row itself does it.
+            tabIndex={-1}
             label={`List the keys of ${name}`}
             className="mr-1 size-6"
-            onClick={() => onNarrow(folder.pattern as string)}
+            onClick={() => onNarrow(listable)}
           >
             <Filter />
           </IconAction>
@@ -602,8 +707,15 @@ function KeyRow({
 }) {
   const label = bytesLabel(entry.key)
   const size = entry.type === "string" ? bytes(entry.size, 0) : entry.size.toLocaleString()
+  // The open key's row is brought into sight when it arrives and when it
+  // becomes the open one: the tree opened itself to show where the key is.
+  const row = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (current) row.current?.scrollIntoView({ block: "nearest" })
+  }, [current])
   return (
     <button
+      ref={row}
       type="button"
       data-roving
       tabIndex={-1}
@@ -618,9 +730,10 @@ function KeyRow({
       {depth > 0 && <span className="w-3 shrink-0" />}
       <KindMark type={entry.type} />
       <span className="min-w-0 truncate font-mono">{name || "(empty name)"}</span>
-      <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-hint text-muted-foreground">
-        {entry.ttl >= 0 && <Clock aria-hidden className="size-3 opacity-70" />}
-        {kindOf(entry.type).member && <span className="numeric">{size}</span>}
+      <span className="numeric ml-auto flex shrink-0 items-baseline gap-1.5 pl-2 text-hint text-muted-foreground">
+        {/* How long it has left, in words: a glyph this small read as a dot. */}
+        {entry.ttl >= 0 && <span className="text-muted-foreground/60">{ttlShort(entry.ttl)}</span>}
+        {kindOf(entry.type).member && <span>{size}</span>}
       </span>
     </button>
   )

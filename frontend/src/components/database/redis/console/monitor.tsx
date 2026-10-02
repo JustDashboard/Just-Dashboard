@@ -1,9 +1,10 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Play, StopCircle, Warning } from "@/components/icons"
 import { duration, plural } from "@/lib/format"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
+import { useMemoryState } from "@/lib/view-state"
 import { BarList } from "@/components/bar-list"
 import { Segments } from "@/components/deploy/settings/segments"
 import { SearchInput } from "@/components/page"
@@ -43,12 +44,21 @@ function at(seconds: number): string {
  * arguments and all, and costs the server throughput for as long as it is
  * attached. So a run is asked for, lasts a stated time, and ends on its own;
  * nothing here starts one by itself or starts it again.
+ *
+ * What a run recorded is kept for the tab, in memory only: looking at the
+ * console and coming back finds it. A run left behind does not go on behind
+ * another view — it stops, and the view says so.
  */
 export function MonitorView({ redis }: { redis: Redis }) {
   const { id } = redis
   const [seconds, setSeconds] = useState("30")
   const [running, setRunning] = useState(false)
-  const [events, setEvents] = useState<RedisMonitorEvent[]>([])
+  const [events, setEvents] = useMemoryState<RedisMonitorEvent[]>(
+    `databases.${id}.redis.monitor.events`,
+    [],
+  )
+  /** A run was recording when this view was last left. */
+  const [left, setLeft] = useMemoryState(`databases.${id}.redis.monitor.left`, false)
   const [ended, setEnded] = useState<RedisFeedEnd | null>(null)
   const [opened, setOpened] = useState(false)
   // Read by the close handler, which can run before the render that follows
@@ -83,8 +93,20 @@ export function MonitorView({ redis }: { redis: Redis }) {
     },
   })
 
+  const live = useRef(false)
+  useEffect(() => {
+    live.current = running
+  }, [running])
+  useEffect(
+    () => () => {
+      if (live.current) setLeft(true)
+    },
+    [setLeft],
+  )
+
   const start = () => {
     setEvents([])
+    setLeft(false)
     setEnded(null)
     setOpened(false)
     answered.current = false
@@ -132,7 +154,10 @@ export function MonitorView({ redis }: { redis: Redis }) {
             label={ENDED[ended.reason]}
           />
         ) : (
-          <Status tone="stopped" label="Not recording" />
+          <Status
+            tone="stopped"
+            label={left ? "Stopped when you left this view" : "Not recording"}
+          />
         )}
         <span className="numeric text-hint text-muted-foreground">
           {plural(events.length, "command")}

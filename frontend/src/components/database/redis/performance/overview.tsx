@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import Link from "next/link"
 import { bytes, duration, rate, relativeTime } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
@@ -17,7 +18,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { redisLatency } from "@/components/database/redis/api"
-import { perSecond, type StatRow } from "@/components/database/redis/performance/samples"
+import {
+  countScale,
+  perSecond,
+  type StatRow,
+} from "@/components/database/redis/performance/samples"
 import { ReadError } from "@/components/database/redis/read-error"
 import type { Redis } from "@/components/database/redis/use-redis"
 
@@ -51,6 +56,7 @@ const bytesAxis = (value: number) => bytes(value, 0)
 const rateLabel = (value: number) => rate(value)
 const countLabel = (value: number) =>
   Number.isInteger(value) ? value.toLocaleString() : value.toFixed(2)
+const wholeLabel = (value: number) => Math.round(value).toLocaleString()
 
 /**
  * The page's own samples as charts, and the two readings that sit beside
@@ -76,6 +82,10 @@ export function OverviewView({
   })
   const waiting = `A rate is the difference between two readings: the first appears ${Math.round((everyMs * 2) / 1000)} seconds after the page opens.`
   const keyspace = server.data?.keyspace
+  // Clients come whole: the axis is whole numbers up to the most seen. Held
+  // by that figure, so the chart's props stay the same from sample to sample.
+  const most = rows.reduce((top, row) => Math.max(top, row.clients ?? 0, row.blocked ?? 0), 0)
+  const clientScale = useMemo(() => countScale(most), [most])
 
   return (
     <div className="space-y-8">
@@ -105,7 +115,16 @@ export function OverviewView({
           format={perSecondLabel}
           note={waiting}
         />
-        <ChartPanel plain title="Clients" rows={rows} series={CLIENTS} format={countLabel} />
+        <ChartPanel
+          plain
+          title="Clients"
+          rows={rows}
+          series={CLIENTS}
+          format={countLabel}
+          axisFormat={wholeLabel}
+          domain={clientScale.domain}
+          yTicks={clientScale.ticks}
+        />
         <ChartPanel
           plain
           title="Network"

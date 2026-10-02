@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { bytes, percent, plural, relativeTime } from "@/lib/format"
+import { bytes, plural, relativeTime } from "@/lib/format"
 import { LANES, hueFor } from "@/lib/hue"
 import { useMemoryState } from "@/lib/view-state"
 import { BarList, type BarListItem } from "@/components/bar-list"
@@ -14,8 +14,9 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { EngineMark } from "@/components/database/kit"
 import { redisAnalysis } from "@/components/database/redis/api"
 import { bytesId, bytesLabel, globEscape } from "@/components/database/redis/bytes"
+import { TypeComposition } from "@/components/database/redis/composition"
 import { DbPicker } from "@/components/database/redis/db-picker"
-import { KindMark, kindLabel, kindOf, sizeOf } from "@/components/database/redis/kinds"
+import { KindMark, kindLabel, sizeOf } from "@/components/database/redis/kinds"
 import { ReadError } from "@/components/database/redis/read-error"
 import { ttlWord } from "@/components/database/redis/ttl"
 import type { RedisAnalysis, RedisAnalysisGroup } from "@/components/database/redis/types"
@@ -120,7 +121,6 @@ export function MemoryView({ redis }: { redis: Redis }) {
     noMemory ? group.estimatedKeys : group.estimatedMemory
   const figure = (group: RedisAnalysisGroup) =>
     noMemory ? group.estimatedKeys.toLocaleString() : bytes(group.estimatedMemory)
-  const whole = result.types.reduce((sum, group) => sum + weight(group), 0)
   const about = result.complete ? "" : "about "
 
   const ranked = (groups: RedisAnalysisGroup[]) => Math.max(...groups.map(weight), 1)
@@ -237,43 +237,15 @@ export function MemoryView({ redis }: { redis: Redis }) {
 
       <Panel plain>
         <PanelHeader title="By type" />
-        <PanelBody className="space-y-2.5">
-          {/* One track, a width per type, each in its type's hue: the same
-              legend the key browser draws a key's mark in. */}
-          <div
-            role="img"
-            aria-label={result.types
-              .map((group) => `${kindLabel(bytesLabel(group.name))} ${figure(group)}`)
-              .join(", ")}
-            className="flex h-2 w-full overflow-hidden rounded-full bg-meter-track"
-          >
-            {result.types.map((group) => (
-              <span
-                key={bytesId(group.name)}
-                className="h-full transition-[width] first:rounded-l-full last:rounded-r-full"
-                style={{
-                  width: `${whole > 0 ? (weight(group) / whole) * 100 : 0}%`,
-                  backgroundColor: kindOf(bytesLabel(group.name)).color,
-                }}
-              />
-            ))}
-          </div>
-          <ul className="flex flex-wrap gap-x-5 gap-y-1.5">
-            {result.types.map((group) => {
-              const type = bytesLabel(group.name)
-              return (
-                <li key={type} className="flex min-w-0 items-center gap-1.5 text-hint">
-                  <KindMark type={type} className="size-3" />
-                  <span className="text-muted-foreground">{kindLabel(type)}</span>
-                  <span className="numeric font-medium">{figure(group)}</span>
-                  <span className="numeric text-muted-foreground">
-                    {whole > 0 ? percent((weight(group) / whole) * 100) : "—"} · {about}
-                    {plural(group.estimatedKeys, "key")}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
+        <PanelBody>
+          <TypeComposition
+            shares={result.types.map((group) => ({
+              type: bytesLabel(group.name),
+              weight: weight(group),
+              figure: figure(group),
+              detail: `${about}${plural(group.estimatedKeys, "key")}`,
+            }))}
+          />
         </PanelBody>
       </Panel>
 

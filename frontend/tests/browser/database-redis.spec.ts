@@ -30,8 +30,12 @@ type FakeKey = {
   /** A string's value. */
   value?: Bytes
   /** Hash fields, list elements, set members. */
-  rows?: { field?: Bytes; value?: Bytes; score?: number | string; index?: number }[]
+  rows?: { field?: Bytes; value?: Bytes; score?: number | string; index?: number; ttl?: number }[]
   entries?: { id: string; fields: [string, string][] }[]
+  /** A stream's consumer groups, as `GET /keys/stream` lists them. */
+  groups?: unknown[]
+  /** What those groups were handed and have not acknowledged. */
+  pending?: unknown[]
   /** A JSON document, as text. */
   json?: string
   /** How many it really holds, where that is more than the rows given. */
@@ -59,6 +63,12 @@ type RedisMock = DatabaseMock & {
   slowlog?: unknown[]
   clients?: unknown[]
   documented?: boolean
+  /**
+   * Keep an idle clock per key as the server does: a listing, a read of the
+   * members and a read of the facts each reset it, and the facts say how long
+   * it had run. A key nothing has read has been idle for 2,283 seconds.
+   */
+  idleClock?: boolean
 }
 
 const DEFAULT_KEYS: Record<string, FakeKey> = {
@@ -125,6 +135,7 @@ async function mockRedis(page: Page, options: RedisMock = {}) {
   const keys: Record<string, FakeKey> = structuredClone(options.keys ?? DEFAULT_KEYS)
   const calls: Call[] = []
   const state = { failing: options.failing as RegExp | undefined, polls: 0 }
+  const touched = new Map<string, number>()
   const db = options.db ?? 0
 
   await mockDatabases(page, options)
@@ -150,6 +161,13 @@ async function mockRedis(page: Page, options: RedisMock = {}) {
         },
       }),
     )
+  }
+
+  /** How long the key's clock had run, read before the read that resets it. */
+  const idleOf = (name: string) => {
+    const at = touched.get(name)
+    touched.set(name, Date.now())
+    return at === undefined ? 2283 : Math.floor((Date.now() - at) / 1000)
   }
 
   const listed = (pattern: string, type: string | null) =>
@@ -282,6 +300,7 @@ async function mockRedis(page: Page, options: RedisMock = {}) {
       }
       const from = cursor === "0" ? 0 : size
       const page = cursor === "0" ? all.slice(0, size) : all.slice(from)
+      for (const entry of page) touched.set(entry.key, Date.now())
       const more = cursor === "0" && all.length > size
       return json(route, {
         keys: page,
@@ -336,7 +355,8 @@ async function mockRedis(page: Page, options: RedisMock = {}) {
           folders: folder.count - folder.keyCount,
           types: folder.types,
         })),
-        keys: direct,
+        // Listing a key reads its size, which the server counts as a use of it.
+        keys: direct.map((entry) => (touched.set(entry.key, Date.now()), entry)),
         keyCount: direct.length,
         count: part.length,
         types,
@@ -363,13 +383,14 @@ async function mockRedis(page: Page, options: RedisMock = {}) {
         ...(options.features?.objectEncoding === false
           ? { unavailable: { encoding: "Dragonfly 2.0.0 has no OBJECT ENCODING." } }
           : { encoding: "listpack" }),
-        idleSeconds: 4,
+        idleSeconds: options.idleClock ? idleOf(named()) : 4,
       })
     }
 
     if (method === "GET" && path === "/keys/members") {
       const key = keys[named()]
       if (!key) return refuse(route, 404, "key_not_found", "that key does not exist")
+      touched.set(named(), Date.now())
       const ttl = key.ttl ?? -1
       const base = {
         key: named(),
@@ -399,8 +420,23 @@ async function mockRedis(page: Page, options: RedisMock = {}) {
       const match = query.get("match")
       const rows = (key.rows ?? [])
         .map((row, index) => (key.type === "list" ? { ...row, index } : row))
+        // A server with per-field expiry says each field's, -1 for none.
+        .map((row) =>
+          key.type === "hash" && options.features?.hashFieldTtl
+            ? { ...row, ttl: row.ttl ?? -1 }
+            : row,
+        )
         .filter((row) => !match || glob(match).test(String(row.field ?? row.value)))
-      return json(route, { ...base, rows })
+      // In pages, as the server hands a large key over: the cursor is where the next starts.
+      const size = Number(query.get("count") ?? 100)
+      const from = Number(query.get("cursor") ?? 0)
+      const more = rows.length > from + size
+      return json(route, {
+        ...base,
+        rows: rows.slice(from, from + size),
+        cursor: more ? String(from + size) : "0",
+        done: !more,
+      })
     }
 
     if (method === "POST" && path === "/keys/value") {
@@ -473,6 +509,8 @@ async function mockRedis(page: Page, options: RedisMock = {}) {
       const bulk = body as { pattern: string; type?: string; action: string; dryRun?: boolean }
       const hit = listed(bulk.pattern, bulk.type ?? null)
       if (!bulk.dryRun && bulk.action === "delete") for (const entry of hit) delete keys[entry.key]
+      if (!bulk.dryRun && bulk.action === "persist")
+        for (const entry of hit) keys[entry.key].ttl = -1
       return json(route, {
         action: bulk.action,
         dryRun: Boolean(bulk.dryRun),
@@ -488,8 +526,12 @@ async function mockRedis(page: Page, options: RedisMock = {}) {
       })
     }
     if (method === "GET" && path === "/keys/stream") {
-      return json(route, { key: named(), db, length: 2, groups: [] })
+      return json(route, { key: named(), db, length: 2, groups: keys[named()]?.groups ?? [] })
     }
+    if (method === "GET" && path === "/keys/stream/pending") {
+      return json(route, { entries: keys[named()]?.pending ?? [], cursor: "0", done: true })
+    }
+    if (method === "POST" && path === "/keys/stream/trim") return json(route, { removed: 1 })
 
     if (method === "POST" && path === "/redis/classify") {
       const command = String((body as { command: string }).command)
@@ -511,13 +553,18 @@ async function mockRedis(page: Page, options: RedisMock = {}) {
       const command = String((body as { command: string }).command)
       const [word, name] = command.trim().split(/\s+/)
       const reply =
-        word.toUpperCase() === "GET"
-          ? keys[name]
-            ? { type: "string", value: keys[name].value }
-            : { type: "nil" }
-          : word.toUpperCase() === "DEL"
-            ? { type: "integer", value: 1 }
-            : { type: "status", value: "OK" }
+        // One code per field asked about: 1 is "done".
+        ["HEXPIRE", "HPEXPIREAT", "HPERSIST"].includes(word.toUpperCase())
+          ? { type: "array", items: [{ type: "integer", value: 1 }] }
+          : word.toUpperCase() === "XCLAIM"
+            ? { type: "array", items: [{ type: "string", value: "1-0" }] }
+            : word.toUpperCase() === "GET"
+              ? keys[name]
+                ? { type: "string", value: keys[name].value }
+                : { type: "nil" }
+              : word.toUpperCase() === "DEL"
+                ? { type: "integer", value: 1 }
+                : { type: "status", value: "OK" }
       if (word.toUpperCase() === "DEL") delete keys[name]
       return json(route, {
         name: word.toUpperCase(),
@@ -706,7 +753,8 @@ const SLOW = [
     at: "2026-10-01T08:59:00Z",
     durationUs: 25_000,
     command: "KEYS",
-    args: ["*"],
+    // The whole line as the server kept it: the command's own word comes first.
+    args: ["KEYS", "*"],
     client: "10.0.0.5:51000",
     clientName: "worker",
   },
@@ -960,10 +1008,9 @@ test.describe("keys", () => {
     // Bulk delete and expire ask for it too; removing expiries does not.
     await rail(page).getByRole("button", { name: "More key actions" }).click()
     await page.getByRole("menuitem", { name: "Bulk actions…" }).click()
-    await expect(
-      page.getByRole("dialog").getByRole("radio", { name: "Remove expiries" }),
-    ).toBeVisible()
-    await expect(page.getByRole("dialog").getByRole("radio", { name: "Delete" })).toHaveCount(0)
+    // One thing this role can do is a fact, not a choice of one.
+    await expect(page.getByRole("dialog")).toContainText("Their expiries are removed")
+    await expect(page.getByRole("dialog").getByRole("radio")).toHaveCount(0)
   })
 
   for (const [what, options] of [
@@ -1134,7 +1181,7 @@ test.describe("keys", () => {
     await page.goto(`${KEYS}?key=expired%3Akey`)
     await expect(page.getByText("This key is gone")).toBeVisible()
     await page.getByRole("button", { name: "Back to the keys" }).click()
-    await expect(page.getByText("No key is open")).toBeVisible()
+    await expect(page.locator("[data-slot=redis-keyspace]")).toBeVisible()
     // The page says so at once; the address follows it.
     await expect.poll(() => where(page)).not.toContain("key=")
   })
@@ -1277,6 +1324,405 @@ test.describe("keys", () => {
     await expect(pane(page).getByRole("heading", { name: "queue" })).toBeVisible()
     await pane(page).getByRole("button", { name: "Why encoding is not known" }).hover()
     await expect(page.getByRole("tooltip")).toContainText("Dragonfly 2.0.0 has no OBJECT ENCODING.")
+  })
+
+  test("formatting a JSON string changes its spacing and none of its digits", async ({ page }) => {
+    // A 64-bit id, a decimal with a trailing zero and an exponent: `JSON.parse`
+    // and `JSON.stringify` would write back 12345678901234567000, 1.1 and 1000.
+    const stored = '{"id":12345678901234567890,"price":1.10,"n":1e3}'
+    const redis = await mockRedis(page, { keys: { big: { type: "string", value: stored } } })
+    await page.goto(`${KEYS}?key=big`)
+
+    await pane(page).getByRole("button", { name: "Format" }).click()
+    await expect(pane(page).getByText("Unsaved changes")).toBeVisible()
+    await pane(page).getByRole("button", { name: "Save", exact: true }).click()
+    await expect
+      .poll(() => (redis.asked("/keys/value").at(-1)?.body as { value?: string })?.value)
+      .toBe('{\n  "id": 12345678901234567890,\n  "price": 1.10,\n  "n": 1e3\n}')
+
+    // And back: minified, it is the value it was, byte for byte.
+    await pane(page).getByRole("button", { name: "Minify" }).click()
+    await pane(page).getByRole("button", { name: "Save", exact: true }).click()
+    await expect
+      .poll(() => (redis.asked("/keys/value").at(-1)?.body as { value?: string })?.value)
+      .toBe(stored)
+  })
+
+  test("removing expiries in bulk is asked about once more, like the other two", async ({
+    page,
+  }) => {
+    const redis = await mockRedis(page)
+    await page.goto(KEYS)
+    await rail(page).getByRole("button", { name: "More key actions" }).click()
+    await page.getByRole("menuitem", { name: "Bulk actions…" }).click()
+    const dialog = page.getByRole("dialog", { name: "Bulk actions" })
+    await dialog.getByLabel("Pattern").fill("session:*")
+    await dialog.getByRole("radio", { name: "Remove expiries" }).click()
+    await dialog.getByRole("button", { name: "Count the keys" }).click()
+    await expect(
+      dialog.getByText("The next step names the count and asks once more."),
+    ).toBeVisible()
+
+    // The command says what it does, and pressing it changes nothing yet.
+    await dialog.getByRole("button", { name: "Remove the expiry of 2 keys…" }).click()
+    const confirm = page.getByRole("dialog", { name: "Remove the expiry of 2 keys" })
+    await expect(confirm).toContainText("this cannot be undone")
+    expect(
+      redis.asked("/keys/bulk").every((call) => (call.body as { dryRun?: boolean }).dryRun),
+    ).toBe(true)
+    expect(redis.keys["session:1"].ttl).toBe(3600)
+
+    await confirm.getByRole("button", { name: "Cancel" }).click()
+    await expect(confirm).toHaveCount(0)
+    expect(redis.keys["session:1"].ttl).toBe(3600)
+
+    // Opened again, the dialog counts again: a count is true for its moment.
+    await rail(page).getByRole("button", { name: "More key actions" }).click()
+    await page.getByRole("menuitem", { name: "Bulk actions…" }).click()
+    await dialog.getByLabel("Pattern").fill("session:*")
+    await dialog.getByRole("radio", { name: "Remove expiries" }).click()
+    await dialog.getByRole("button", { name: "Count the keys" }).click()
+    await dialog.getByRole("button", { name: "Remove the expiry of 2 keys…" }).click()
+    await confirm.getByRole("button", { name: "Remove the expiry of 2 keys" }).click()
+    await expect(page.getByText("2 keys no longer set to expire")).toBeVisible()
+    expect(redis.asked("/keys/bulk").at(-1)?.body).toEqual({
+      pattern: "session:*",
+      action: "persist",
+    })
+    expect(redis.keys["session:1"].ttl).toBe(-1)
+  })
+
+  test("an edit on a later page of a large key leaves the reader where they were", async ({
+    page,
+  }) => {
+    const redis = await mockRedis(page, {
+      keys: {
+        big: {
+          type: "hash",
+          rows: Array.from({ length: 450 }, (_, i) => ({ field: `f${i}`, value: `v${i}` })),
+        },
+      },
+    })
+    await page.goto(`${KEYS}?key=big`)
+    const count = pane(page).locator("[data-slot=redis-member-count]")
+    await expect(count).toHaveText("200 of 450 fields")
+    await pane(page).getByRole("button", { name: "Load more" }).click()
+    await expect(count).toHaveText("400 of 450 fields")
+
+    // A row of the second page, edited where it stands.
+    const scroller = pane(page).getByRole("table").locator("xpath=..")
+    await scroller.evaluate((el) => {
+      el.scrollTop = el.scrollHeight
+    })
+    await pane(page).getByRole("button", { name: "Edit the value of f399" }).click()
+    const value = pane(page).getByRole("textbox", { name: "the value of f399" })
+    await value.fill("changed")
+    await value.press("Enter")
+    await expect(pane(page).getByRole("button", { name: "Edit the value of f399" })).toHaveText(
+      "changed",
+    )
+    // The key's facts are read again; its rows are not thrown back to the first page.
+    await expect.poll(() => redis.asked("/keys/meta").length).toBeGreaterThan(1)
+    await expect(count).toHaveText("400 of 450 fields")
+    expect(redis.asked("/keys/members").length).toBe(2)
+    expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(1000)
+    // The keyboard is on the value that was edited, not on nothing.
+    await expect(pane(page).getByRole("button", { name: "Edit the value of f399" })).toBeFocused()
+
+    // Refresh is the reader asking for the rows again, and gets them.
+    await pane(page).getByRole("button", { name: "Refresh", exact: true }).click()
+    await expect(count).toHaveText("200 of 450 fields")
+  })
+
+  test("the tree opens to the key in the address, and a pattern that is one namespace opens it", async ({
+    page,
+  }) => {
+    await mockRedis(page)
+    await page.goto(`${KEYS}?key=user%3A1%3Aprofile`)
+    // A pasted link: the rail shows where the key lives, marked as the open one.
+    const row = rail(page).getByRole("button", { name: "Open user:1:profile" })
+    await expect(row).toBeVisible()
+    await expect(row).toHaveAttribute("aria-current", "true")
+    await expect(rail(page).getByRole("button", { name: /^user/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    )
+
+    // Arriving on one namespace's keys — from the memory analysis, from a
+    // namespace of the pane — the tree is not one folded row.
+    await page.goto(`${KEYS}?pattern=session%3A*`)
+    await expect(rail(page).getByRole("button", { name: "Open session:1" })).toBeVisible()
+    // The reader may fold it again, and it stays folded.
+    await rail(page)
+      .getByRole("button", { name: /^session/ })
+      .click()
+    await expect(rail(page).getByRole("button", { name: "Open session:1" })).toHaveCount(0)
+  })
+
+  test("the tree is one tab stop, and a namespace's keys are listed from the keyboard", async ({
+    page,
+  }) => {
+    await mockRedis(page)
+    await page.goto(KEYS)
+    const user = rail(page).getByRole("button", { name: /^user/ })
+    await expect(user).toBeVisible()
+
+    // From the last type chip, Tab enters the tree once and leaves it once:
+    // the control beside each namespace is the pointer's, not a stop of its own.
+    await rail(page)
+      .getByRole("button", { name: /^Stream/ })
+      .focus()
+    await page.keyboard.press("Tab")
+    const inTree = () =>
+      page.evaluate(() =>
+        Boolean(document.activeElement?.closest("[aria-label='Keys by namespace']")),
+      )
+    expect(await inTree()).toBe(true)
+    await page.keyboard.press("Tab")
+    expect(await inTree()).toBe(false)
+
+    // The row itself has the verb: Shift+Enter lists the namespace's keys.
+    await user.focus()
+    await page.keyboard.press("Shift+Enter")
+    await expect(page).toHaveURL(/pattern=user%3A\*/)
+    await expect(rail(page).getByRole("button", { name: "Open user:2:profile" })).toBeVisible()
+  })
+
+  test("the keyboard goes back to what opened a dialog when the dialog closes", async ({
+    page,
+  }) => {
+    await mockRedis(page)
+    await page.goto(`${KEYS}?key=queue`)
+
+    const rename = pane(page).getByRole("button", { name: "Rename", exact: true })
+    await rename.focus()
+    await page.keyboard.press("Enter")
+    await expect(page.getByRole("dialog")).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    await expect(rename).toBeFocused()
+
+    const remove = pane(page).getByRole("button", { name: "Delete key" })
+    await remove.focus()
+    await page.keyboard.press("Enter")
+    await expect(page.getByRole("dialog")).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    await expect(remove).toBeFocused()
+
+    // An inline edit put away with Escape leaves the keyboard on its value.
+    await pane(page).getByRole("button", { name: "Edit element 1" }).first().click()
+    await pane(page).getByRole("textbox", { name: "element 1" }).press("Escape")
+    await expect(pane(page).getByRole("button", { name: "Edit element 1" }).first()).toBeFocused()
+  })
+
+  test("adding a member a set already has says so, and the empty member is named", async ({
+    page,
+  }) => {
+    const redis = await mockRedis(page, {
+      keys: { tags: { type: "set", rows: [{ value: "a" }, { value: "b" }, { value: "" }] } },
+    })
+    await page.goto(`${KEYS}?key=tags`)
+    await pane(page).getByRole("button", { name: "Add member" }).click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByLabel("Member").fill("a")
+    await dialog.getByRole("button", { name: "Add member" }).click()
+    // It used to close as if it had been added.
+    await expect(dialog.getByRole("alert")).toHaveText("a is already in the set.")
+    expect(redis.asked("/keys/value")).toEqual([])
+    await dialog.getByRole("button", { name: "Cancel" }).click()
+
+    await expect(pane(page).getByRole("button", { name: "Remove the empty member" })).toHaveCount(1)
+    await expect(pane(page).getByRole("button", { name: "Remove", exact: true })).toHaveCount(0)
+  })
+
+  test("with no key open the pane says what the database is made of, and each part is a way in", async ({
+    page,
+  }) => {
+    const redis = await mockRedis(page)
+    await page.goto(KEYS)
+    const made = page.locator("[data-slot=redis-keyspace]")
+    await expect(made.getByRole("heading", { name: "db0" })).toBeVisible()
+    await expect(made.locator("[data-slot=stat-tile]").first()).toContainText("9")
+    // The mix of types, in the legend's hues, from the walk the tree already made.
+    await expect(made.getByRole("img", { name: /String 3, Hash 2/ })).toBeVisible()
+    expect(redis.asked("/keys/tree").filter((call) => !call.query.has("prefix")).length).toBe(1)
+
+    // A type narrows the rail to that type; pressed again, it clears.
+    await made.getByRole("button", { name: /^Show only hash keys/ }).click()
+    await expect(page).toHaveURL(/type=hash/)
+    await expect(rail(page).getByRole("button", { name: /^Hash/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await made.getByRole("button", { name: /^Show only hash keys/ }).click()
+    await expect.poll(() => where(page)).not.toContain("type=")
+
+    // A namespace lists its keys.
+    await made.getByRole("button", { name: "List the keys of user" }).click()
+    await expect(page).toHaveURL(/pattern=user%3A\*/)
+    await expect(rail(page).getByRole("button", { name: /^user/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    )
+
+    // Another database of the server is one press away.
+    await made.getByRole("button", { name: "Open db7" }).click()
+    await expect(page).toHaveURL(/[?&]db=7(&|$)/)
+  })
+
+  test("a field's own expiry is set with the server's command, every name quoted", async ({
+    page,
+  }) => {
+    const redis = await mockRedis(page, {
+      features: { hashFieldTtl: true },
+      verdicts: { HEXPIRE: { class: "write" }, HPERSIST: { class: "write" } },
+      keys: {
+        "user:1": {
+          type: "hash",
+          rows: [
+            { field: "two words", value: "v" },
+            { field: "token", value: "t", ttl: 120 },
+          ],
+        },
+      },
+    })
+    await page.goto(`${KEYS}?key=user%3A1`)
+    await expect(pane(page).getByRole("button", { name: /^Expiry of token: 2m/ })).toBeVisible()
+
+    await pane(page).getByRole("button", { name: "Expiry of two words: —. Change it" }).click()
+    const editor = page.locator("[data-slot=popover-content]")
+    await editor.getByLabel("Time to live").fill("10m")
+    await editor.getByRole("button", { name: "Set expiry" }).click()
+    // No route sets a field's expiry: it is the server's command, through the
+    // console's route, with the key and the field as one argument each.
+    await expect
+      .poll(() => redis.asked("/redis/command").at(-1)?.body)
+      .toEqual({ command: 'HEXPIRE "user:1" 600 "FIELDS" 1 "two words"' })
+    await expect(
+      pane(page).getByRole("button", { name: /^Expiry of two words: 10m/ }),
+    ).toBeVisible()
+
+    await pane(page)
+      .getByRole("button", { name: /^Expiry of token: / })
+      .click()
+    await editor.getByRole("button", { name: "Remove expiry" }).click()
+    await expect
+      .poll(() => redis.asked("/redis/command").at(-1)?.body)
+      .toEqual({ command: 'HPERSIST "user:1" "FIELDS" 1 "token"' })
+    await expect(
+      pane(page).getByRole("button", { name: "Expiry of token: —. Change it" }),
+    ).toBeVisible()
+  })
+
+  test("a stream is trimmed before an entry, and a pending entry is handed to another consumer", async ({
+    page,
+  }) => {
+    const redis = await mockRedis(page, {
+      verdicts: { XCLAIM: { class: "write" } },
+      keys: {
+        "stream:orders": {
+          ...DEFAULT_KEYS["stream:orders"],
+          groups: [
+            {
+              name: "workers",
+              lastDeliveredId: "1790882554510-1",
+              pending: 1,
+              consumers: [
+                { name: "alice", pending: 1, idleMs: 60_000 },
+                { name: "bob", pending: 0, idleMs: 1000 },
+              ],
+            },
+          ],
+          pending: [{ id: "1790882554510-0", consumer: "alice", idleMs: 60_000, deliveries: 3 }],
+        },
+      },
+    })
+    await page.goto(`${KEYS}?key=stream%3Aorders`)
+
+    await pane(page).getByRole("button", { name: "Trim…" }).click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("radio", { name: "Before an entry" }).click()
+    await dialog.getByLabel("Entry id").fill("not an id")
+    await expect(dialog.getByRole("button", { name: "Remove the older entries" })).toBeDisabled()
+    await dialog.getByLabel("Entry id").fill("1790882554510-1")
+    await dialog.getByRole("button", { name: "Remove the older entries" }).click()
+    await expect
+      .poll(() => redis.asked("/keys/stream/trim").at(-1)?.body)
+      .toEqual({ key: "stream:orders", minId: "1790882554510-1" })
+
+    await pane(page)
+      .getByRole("button", { name: /^Consumer groups/ })
+      .click()
+    await pane(page).getByText("Pending entries").click()
+    await pane(page).getByRole("button", { name: "Claim…" }).click()
+    await expect(dialog).toContainText("Held by")
+    // The holder is not offered as the one to hand it to.
+    await expect(dialog.getByRole("button", { name: "alice" })).toHaveCount(0)
+    await dialog.getByRole("button", { name: "bob" }).click()
+    await dialog.getByRole("button", { name: "Claim entry" }).click()
+    await expect
+      .poll(() => redis.asked("/redis/command").at(-1)?.body)
+      .toEqual({
+        command: 'XCLAIM "stream:orders" "workers" "bob" 0 "1790882554510-0" "JUSTID"',
+      })
+  })
+
+  test("how long a key had been idle is read once, and never from the page's own reads", async ({
+    page,
+  }) => {
+    // The server's clock is reset by the read that opens the key: the second
+    // answer, and every one after it, is the time since this page looked.
+    await mockRedis(page, { idleClock: true })
+    // A pasted link to a key nothing has read for 38 minutes.
+    await page.goto(`${KEYS}?key=user%3A2%3Aprofile`)
+    const idle = pane(page)
+      .locator("div")
+      .filter({ hasText: /^Idle when opened/ })
+      .last()
+    await expect(idle).toContainText("38m")
+    await pane(page).getByRole("button", { name: "Refresh", exact: true }).click()
+    await expect(pane(page).getByRole("heading", { name: "user:2:profile" })).toBeVisible()
+    await expect(idle).toContainText("38m")
+
+    // A key the list has just drawn was read by the list: its idle time is
+    // that moment, and is said to be the page's own instead of being printed.
+    await rail(page).getByRole("button", { name: "Open leaderboard" }).click()
+    await expect(pane(page).getByRole("heading", { name: "leaderboard" })).toBeVisible()
+    await pane(page).getByRole("button", { name: "Why idle when opened is not known" }).hover()
+    await expect(page.getByRole("tooltip")).toContainText("a read resets the server's idle clock")
+  })
+
+  test("on a phone a key's rows are drawn down instead of across, with their controls on screen", async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      hasTouch: true,
+    })
+    const page = await context.newPage()
+    await mockRedis(page)
+    for (const key of ["user:1:profile", "queue", "leaderboard", "stream:orders"]) {
+      await page.goto(`${KEYS}?key=${encodeURIComponent(key)}`)
+      const table = pane(page).getByRole("table")
+      await expect(table).toHaveAttribute("data-shape", "stacked")
+      // Nothing to drag sideways for: the table is as wide as its pane.
+      const fits = await table
+        .locator("xpath=..")
+        .evaluate((el) => el.scrollWidth <= el.clientWidth + 1)
+      expect(fits, `${key} scrolls sideways`).toBe(true)
+      // Every control of the first row is inside the window.
+      const edges = await table
+        .getByRole("row")
+        .first()
+        .getByRole("button")
+        .evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().right))
+      expect(edges.length, `${key} has row controls`).toBeGreaterThan(0)
+      for (const edge of edges) expect(edge).toBeLessThanOrEqual(390)
+    }
+    // A stream's entry shows what it holds, which a sideways table hid.
+    await expect(pane(page).getByRole("row").first()).toContainText("order=1")
+    await context.close()
   })
 })
 
@@ -1454,6 +1900,54 @@ test.describe("console", () => {
     await page.waitForTimeout(2500)
     expect(opened).toBe(1)
   })
+
+  test("MONITOR typed at the prompt is refused with the view that does it", async ({ page }) => {
+    await mockRedis(page, {
+      verdicts: {
+        MONITOR: {
+          class: "blocked",
+          allowed: false,
+          // The server's sentence names a page this product does not have.
+          reasons: [
+            "streams every command the server runs; use the Profiler, which is built for it",
+          ],
+        },
+      },
+    })
+    await page.goto(CONSOLE)
+    await prompt(page).fill("MONITOR")
+    await prompt(page).press("Enter")
+    await expect(log(page)).toContainText("The Monitor view is built for it.")
+    await expect(log(page)).not.toContainText("Profiler")
+    await log(page).getByRole("button", { name: "Open Monitor" }).click()
+    await expect(page).toHaveURL(/view=monitor/)
+    await expect(page.getByRole("button", { name: "Start recording" })).toBeVisible()
+  })
+
+  test("what was heard on Pub/Sub is still there after looking at another view", async ({
+    page,
+  }) => {
+    await mockRedis(page)
+    await page.routeWebSocket("**/api/v1/databases/4/redis/subscribe**", (socket) => {
+      const send = (type: string, data: unknown) =>
+        socket.send(JSON.stringify({ type, data, ts: Date.now() }))
+      send("meta", { seconds: 300, max: 5000, channels: [], patterns: ["*"] })
+      send("messages", [{ channel: "orders.created", pattern: "*", payload: "order 41", bytes: 8 }])
+    })
+    await page.goto(`${CONSOLE}?view=pubsub`)
+    await page.getByRole("button", { name: "Listen", exact: true }).click()
+    await expect(page.getByRole("log", { name: "Published messages" })).toContainText("order 41")
+
+    await page.getByRole("button", { name: "Console", exact: true }).click()
+    await expect(prompt(page)).toBeVisible()
+    await expect.poll(() => where(page)).not.toContain("view=")
+    await page.getByRole("button", { name: "Pub/Sub", exact: true }).click()
+    // The messages are where they were; the feed is not kept open behind
+    // another view, and says so.
+    await expect(page.getByRole("log", { name: "Published messages" })).toContainText("order 41")
+    await expect(page.getByText("Stopped when you left this view")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Listen again" })).toBeVisible()
+  })
 })
 
 test.describe("performance", () => {
@@ -1504,6 +1998,10 @@ test.describe("performance", () => {
     const redis = await mockRedis(page)
     await page.goto(`${PERFORMANCE}?view=slowlog`)
     await expect(page.getByRole("row").filter({ hasText: "KEYS" })).toContainText("25 ms")
+    // The server keeps the whole line, the command first: it is printed once.
+    await expect(page.getByRole("row").filter({ hasText: "KEYS" }).locator("td").nth(2)).toHaveText(
+      "KEYS *",
+    )
     await page.getByRole("button", { name: "Empty the log" }).click()
     await expect(page.getByRole("dialog")).toContainText("cache")
     expect(redis.asked("/redis/slowlog/reset")).toEqual([])
@@ -1673,6 +2171,12 @@ async function expectTheRules(page: Page, where: string) {
       .some((el) => el.scrollWidth > el.clientWidth + 1),
   )
   expect(sideways, `${where} scrolls sideways`).toBe(false)
+  // A page's view strip is a group of pressed buttons. A navigation landmark
+  // named for views would be the route-level strip the product does without.
+  expect(
+    await page.getByRole("navigation", { name: /views$/ }).count(),
+    `${where} has a view strip that is a landmark`,
+  ).toBe(0)
 }
 
 for (const [label, viewport] of [

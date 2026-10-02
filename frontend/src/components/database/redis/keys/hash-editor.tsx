@@ -11,7 +11,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { EngineMark } from "@/components/database/kit"
-import { redisDelete, redisMembers, redisRawUrl, redisWrite } from "@/components/database/redis/api"
+import {
+  redisDelete,
+  redisMembers,
+  redisRawUrl,
+  redisRun,
+  redisWrite,
+  replyCodes,
+} from "@/components/database/redis/api"
 import {
   boxSafe,
   bytesId,
@@ -36,6 +43,7 @@ import {
   type MemberColumn,
 } from "@/components/database/redis/keys/member-table"
 import { useMembers } from "@/components/database/redis/keys/members"
+import { TtlControl, type TtlWhen } from "@/components/database/redis/keys/ttl-editor"
 import { ttlWord } from "@/components/database/redis/ttl"
 import type { RedisBytes, RedisRow } from "@/components/database/redis/types"
 
@@ -55,13 +63,22 @@ type Draft = {
  * text, or that the server sent cut, is shown for what it is and is not
  * offered to a text box: writing a cut value back would replace the whole
  * with its own beginning.
+ *
+ * Where the server gives a field an expiry of its own, each row states its
+ * field's and is where it is changed. There is no route for it, so the change
+ * is the server's own command, sent through the console's route: classified,
+ * capability-checked and audited as a line typed there would be.
  */
 export function HashEditor({ redis, name, meta, epoch, onChanged, confirm }: KeyEditorProps) {
   const { target, db, engine, canWrite, canDestroy } = redis
   const [filter, setFilter] = useState("")
   const members = useMembers(target, name, { match: matchOf(filter) }, epoch)
   const rows = members.state?.rows ?? []
-  const fieldTtl = rows.some((row) => row.ttl !== undefined && row.ttl >= 0)
+  // The server says a field's expiry on every row where it has such a thing.
+  // The column is drawn where there is one to read, or one could be set.
+  const fieldTtl =
+    rows.some((row) => row.ttl !== undefined && row.ttl >= 0) ||
+    (canWrite && rows.some((row) => row.ttl !== undefined))
 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [open, setOpen] = useState(false)
@@ -133,6 +150,37 @@ export function HashEditor({ redis, name, meta, epoch, onChanged, confirm }: Key
     onChanged()
   }
 
+  const setTtl = (row: RedisRow, ttl: number) =>
+    members.patch((held) => ({
+      ...held,
+      rows: held.rows.map((other) =>
+        sameBytes(other.field, row.field) ? { ...other, ttl } : other,
+      ),
+    }))
+
+  /** One field's expiry, set: the server answers a code for the field it was asked about. */
+  const expireField = async (row: RedisRow, when: TtlWhen) => {
+    const field = row.field ?? ""
+    const [code] = replyCodes(
+      "seconds" in when
+        ? await redisRun(target, "HEXPIRE", [name, when.seconds, "FIELDS", 1, field])
+        : await redisRun(target, "HPEXPIREAT", [name, when.at, "FIELDS", 1, field]),
+    )
+    if (code === -2) throw new Error("The field is not in the hash any more.")
+    if (code !== 1) throw new Error("The server did not set the expiry.")
+    const pttl = "seconds" in when ? when.seconds * 1000 : when.at - Date.now()
+    setTtl(row, Math.ceil(pttl / 1000))
+    return pttl
+  }
+
+  const persistField = async (row: RedisRow) => {
+    const [code] = replyCodes(
+      await redisRun(target, "HPERSIST", [name, "FIELDS", 1, row.field ?? ""]),
+    )
+    if (code === -2) throw new Error("The field is not in the hash any more.")
+    setTtl(row, -1)
+  }
+
   const remove = (row: RedisRow) =>
     confirm({
       title: "Remove field",
@@ -194,11 +242,31 @@ export function HashEditor({ redis, name, meta, epoch, onChanged, confirm }: Key
             label: "Expires in",
             width: "5.5rem",
             align: "right" as const,
-            cell: (row: RedisRow) => (
-              <span className="numeric text-muted-foreground">
-                {row.ttl !== undefined && row.ttl >= 0 ? ttlWord(row.ttl) : "—"}
-              </span>
-            ),
+            // Said only for a field that does expire: on a hash where none
+            // does, a column of the words would be the loudest thing in it.
+            word: (row: RedisRow) =>
+              row.ttl !== undefined && row.ttl >= 0 ? "Expires in" : undefined,
+            cell: (row: RedisRow) => {
+              const expires = row.ttl !== undefined && row.ttl >= 0
+              const reading = expires ? ttlWord(row.ttl ?? 0) : "—"
+              if (!canWrite || row.ttl === undefined) {
+                return <span className="numeric text-muted-foreground">{reading}</span>
+              }
+              return (
+                <TtlControl
+                  quiet
+                  reading={reading}
+                  label={`Expiry of ${bytesLabel(row.field ?? "") || "the empty field"}`}
+                  subject="field"
+                  expires={expires}
+                  onChanged={onChanged}
+                  write={{
+                    set: (when) => expireField(row, when),
+                    remove: () => persistField(row),
+                  }}
+                />
+              )
+            },
           },
         ]
       : []),

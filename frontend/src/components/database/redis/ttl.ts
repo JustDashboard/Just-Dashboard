@@ -64,6 +64,16 @@ export function ttlWord(seconds: number): string {
   return duration(seconds)
 }
 
+/** How long is left in one unit, for a row with no room for two: "12h". */
+export function ttlShort(seconds: number): string {
+  if (seconds < 0) return ""
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h`
+  if (seconds < 86_400 * 730) return `${Math.floor(seconds / 86_400).toLocaleString()}d`
+  return `${Math.floor(seconds / (86_400 * 365)).toLocaleString()}y`
+}
+
 /** What is left of an expiry read `readAt` ago, in milliseconds. `-1` stays "none". */
 export function remainingMs(pttl: number, readAt: number, now = Date.now()): number {
   if (pttl < 0) return -1

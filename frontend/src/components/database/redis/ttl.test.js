@@ -6,6 +6,7 @@ import {
   parseMoment,
   parseTtl,
   remainingMs,
+  ttlShort,
   ttlWord,
 } from "./ttl"
 
@@ -87,5 +88,19 @@ describe("a stream entry's id as a moment", () => {
     expect(entryMoment("1-0")).toBeNull()
     expect(entryMoment("0-1")).toBeNull()
     expect(entryMoment("abc")).toBeNull()
+  })
+})
+
+describe("how long is left, in one unit", () => {
+  test("the largest whole unit, rounded down", () => {
+    expect(ttlShort(45)).toBe("45s")
+    expect(ttlShort(119)).toBe("1m")
+    expect(ttlShort(3600 * 11 + 3540)).toBe("11h")
+    expect(ttlShort(86_400 * 3 + 5)).toBe("3d")
+    expect(ttlShort(86_400 * 365 * 8000)).toBe("8,000y")
+  })
+
+  test("no expiry has no word", () => {
+    expect(ttlShort(-1)).toBe("")
   })
 })

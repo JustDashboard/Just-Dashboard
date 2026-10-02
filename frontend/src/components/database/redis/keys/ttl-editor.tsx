@@ -4,6 +4,7 @@ import { useEffect, useId, useState } from "react"
 import { Pencil } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import { Segments } from "@/components/deploy/settings/segments"
 import { FormNote } from "@/components/form"
 import { FilterChip } from "@/components/tabs"
@@ -46,6 +47,82 @@ export function ttlReading(remaining: number): string {
   return ttlWord(Math.ceil(remaining / 1000))
 }
 
+/** When something should expire: so long from now, or at a moment. */
+export type TtlWhen = { seconds: number } | { at: number }
+
+/** What an expiry editor writes with: the two changes an expiry has. */
+export type TtlWrite = {
+  /** Set the expiry; answers how long is left afterwards, in milliseconds. */
+  set: (when: TtlWhen) => Promise<number>
+  remove: () => Promise<void>
+}
+
+/**
+ * An expiry as a fact you can press: the reading, and behind it the one
+ * place an expiry is changed. A key's and a hash field's are the same fact
+ * and the same form; only what the form writes with differs.
+ */
+export function TtlControl({
+  reading,
+  label,
+  subject,
+  expires,
+  write,
+  onChanged,
+  quiet,
+}: {
+  /** How long is left, as it is drawn. */
+  reading: string
+  /** What the control changes, for its name: "Expiry", "Expiry of the field name". */
+  label: string
+  /** What is removed when the time is up, for the form's sentence. */
+  subject: "key" | "field"
+  expires: boolean
+  write: TtlWrite
+  onChanged: () => void
+  /** A cell of a table: no pencil beside the reading, and the reading is muted when there is no expiry. */
+  quiet?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`${label}: ${reading}. Change it`}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-sm whitespace-nowrap focus-ring-inset transition-colors hover:bg-row-hover",
+            quiet && "-mx-1 px-1 py-0.5 hover:bg-control",
+            quiet && !expires && "text-muted-foreground",
+          )}
+        >
+          <span>{reading}</span>
+          {!quiet && <Pencil aria-hidden className="size-3 shrink-0 text-muted-foreground" />}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align={quiet ? "end" : "start"}
+        className="w-80 p-3 font-sans"
+        // The field, not the switch above it: the reader opened this to type a span.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          ;(event.currentTarget as HTMLElement).querySelector("input")?.focus()
+        }}
+      >
+        <TtlForm
+          subject={subject}
+          expires={expires}
+          write={write}
+          onDone={() => {
+            setOpen(false)
+            onChanged()
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 /**
  * A key's expiry as a fact you can press.
  *
@@ -73,54 +150,37 @@ export function TtlFact({
   onChanged: () => void
 }) {
   const remaining = useRemaining(pttl, readAt)
-  const [open, setOpen] = useState(false)
   const reading = ttlReading(remaining)
 
   if (!editable) return <span>{reading}</span>
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={`Expiry: ${reading}. Change it`}
-          className="inline-flex items-center gap-1.5 rounded-sm whitespace-nowrap focus-ring-inset transition-colors hover:bg-row-hover"
-        >
-          <span>{reading}</span>
-          <Pencil aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="w-80 p-3"
-        // The field, not the switch above it: the reader opened this to type a span.
-        onOpenAutoFocus={(event) => {
-          event.preventDefault()
-          ;(event.currentTarget as HTMLElement).querySelector("input")?.focus()
-        }}
-      >
-        <TtlForm
-          target={target}
-          name={name}
-          expires={pttl >= 0}
-          onDone={() => {
-            setOpen(false)
-            onChanged()
-          }}
-        />
-      </PopoverContent>
-    </Popover>
+    <TtlControl
+      reading={reading}
+      label="Expiry"
+      subject="key"
+      expires={pttl >= 0}
+      onChanged={onChanged}
+      write={{
+        set: (when) =>
+          redisExpire(
+            target,
+            "seconds" in when ? { key: name, ttl: when.seconds } : { key: name, at: when.at },
+          ).then((answer) => answer.pttl),
+        remove: () => redisPersist(target, name).then(() => undefined),
+      }}
+    />
   )
 }
 
 function TtlForm({
-  target,
-  name,
+  subject,
   expires,
+  write,
   onDone,
 }: {
-  target: RedisTarget
-  name: RedisBytes
+  subject: "key" | "field"
   expires: boolean
+  write: TtlWrite
   onDone: () => void
 }) {
   const field = useId()
@@ -141,11 +201,10 @@ function TtlForm({
     setBusy("set")
     setRefused("")
     try {
-      const answer = await redisExpire(
-        target,
-        "seconds" in parsed ? { key: name, ttl: parsed.seconds } : { key: name, at: parsed.at },
+      const pttl = await write.set(
+        "seconds" in parsed ? { seconds: parsed.seconds } : { at: parsed.at },
       )
-      notify.success(`Expires in ${ttlWord(Math.ceil(answer.pttl / 1000))}`)
+      notify.success(`Expires in ${ttlWord(Math.ceil(pttl / 1000))}`)
       onDone()
     } catch (err) {
       setRefused(errorMessage(err))
@@ -158,7 +217,7 @@ function TtlForm({
     setBusy("remove")
     setRefused("")
     try {
-      await redisPersist(target, name)
+      await write.remove()
       notify.success("Expiry removed")
       onDone()
     } catch (err) {
@@ -247,7 +306,9 @@ function TtlForm({
           ) : (
             parsed.ok &&
             "seconds" in parsed && (
-              <FormNote>The key is removed {ttlWord(parsed.seconds)} from now.</FormNote>
+              <FormNote>
+                The {subject} is removed {ttlWord(parsed.seconds)} from now.
+              </FormNote>
             )
           )}
         </div>

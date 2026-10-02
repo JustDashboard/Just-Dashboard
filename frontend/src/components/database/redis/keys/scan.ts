@@ -113,6 +113,20 @@ export function leafName(key: RedisKey["key"], prefix: RedisKey["key"]): string 
 }
 
 /**
+ * The namespaces a key sits under, outermost first, each as the prefix the
+ * tree names it by: `user:7:profile` is under `user:` and `user:7:`.
+ */
+export function ancestors(name: string, delimiter = ":"): string[] {
+  const out: string[] = []
+  let at = name.indexOf(delimiter)
+  while (at !== -1 && at + delimiter.length < name.length) {
+    out.push(name.slice(0, at + delimiter.length))
+    at = name.indexOf(delimiter, at + delimiter.length)
+  }
+  return out
+}
+
+/**
  * How far a scan has come, in the words the foot of the list says them.
  * `scanned` is absent for a flat listing, where the server says only whether
  * the cursor has come round. Under a pattern or a type it is not used

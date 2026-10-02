@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { Trash } from "@/components/icons"
 import { plural, relativeTime, timestamp } from "@/lib/format"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { cn } from "@/lib/utils"
@@ -24,6 +25,7 @@ import { EngineMark } from "@/components/database/kit"
 import { redisSlowlog, redisSlowlogReset } from "@/components/database/redis/api"
 import { bytesLabel } from "@/components/database/redis/bytes"
 import { micros } from "@/components/database/redis/performance/samples"
+import { argsAfterCommand } from "@/components/database/redis/performance/slowlog-line"
 import { ReadError } from "@/components/database/redis/read-error"
 import type { Redis } from "@/components/database/redis/use-redis"
 
@@ -40,6 +42,9 @@ export function SlowlogView({ redis }: { redis: Redis }) {
   const { confirm, dialog } = useConfirm()
   const log = usePoll((signal) => redisSlowlog(id, signal), 10_000, [id])
   const arrived = useArrivals(log.data?.entries.map((entry) => String(entry.id)) ?? [])
+  // On a phone the client's address gives its column to the command, which
+  // is what the row is about; the address stays on the command's tooltip.
+  const roomy = useMediaQuery("(min-width: 640px)")
 
   if (log.error && !log.data) return <ReadError error={log.error} onRetry={log.refresh} />
   if (!log.data) return <LoadingPanel plain rows={6} />
@@ -129,34 +134,42 @@ export function SlowlogView({ redis }: { redis: Redis }) {
                   <TableHead>When</TableHead>
                   <TableHead className="text-right">Took</TableHead>
                   <TableHead className="w-full">Command</TableHead>
-                  <TableHead>Client</TableHead>
+                  {roomy && <TableHead>Client</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.entries.map((entry) => (
-                  <TableRow
-                    key={entry.id}
-                    className={cn(arrived.has(String(entry.id)) && "animate-rise")}
-                  >
-                    <TableCell className="text-muted-foreground" title={timestamp(entry.at)}>
-                      {relativeTime(entry.at)}
-                    </TableCell>
-                    <TableCell className="numeric text-right font-medium">
-                      {micros(entry.durationUs)}
-                    </TableCell>
-                    <TableCell className="max-w-0 font-mono">
-                      <span className="block truncate" title={entry.args.map(bytesLabel).join(" ")}>
-                        <span className="font-medium">{entry.command}</span>{" "}
-                        <span className="text-muted-foreground">
-                          {entry.args.map(bytesLabel).join(" ")}
+                {data.entries.map((entry) => {
+                  const args = argsAfterCommand(entry.command, entry.args.map(bytesLabel)).join(" ")
+                  const client = entry.clientName || entry.client
+                  const line = `${entry.command} ${args}`.trim()
+                  return (
+                    <TableRow
+                      key={entry.id}
+                      className={cn(arrived.has(String(entry.id)) && "animate-rise")}
+                    >
+                      <TableCell className="text-muted-foreground" title={timestamp(entry.at)}>
+                        {relativeTime(entry.at)}
+                      </TableCell>
+                      <TableCell className="numeric text-right font-medium">
+                        {micros(entry.durationUs)}
+                      </TableCell>
+                      <TableCell className="max-w-0 font-mono">
+                        <span
+                          className="block truncate"
+                          title={!roomy && client ? `${line} — from ${client}` : line}
+                        >
+                          <span className="font-medium">{entry.command}</span>{" "}
+                          <span className="text-muted-foreground">{args}</span>
                         </span>
-                      </span>
-                    </TableCell>
-                    <TableCell className="font-mono text-muted-foreground">
-                      {entry.clientName || entry.client || "—"}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      {roomy && (
+                        <TableCell className="font-mono text-muted-foreground">
+                          {client || "—"}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           )}

@@ -27,6 +27,7 @@ import { StreamEditor } from "@/components/database/redis/keys/stream-editor"
 import { StringEditor } from "@/components/database/redis/keys/string-editor"
 import { TtlFact } from "@/components/database/redis/keys/ttl-editor"
 import { ZsetEditor } from "@/components/database/redis/keys/zset-editor"
+import { lastRead, noteRead, ownEcho } from "@/components/database/redis/own-reads"
 import { ReadError } from "@/components/database/redis/read-error"
 import type { RedisBytes, RedisKeyMeta, RedisMetaFact } from "@/components/database/redis/types"
 import type { Redis } from "@/components/database/redis/use-redis"
@@ -36,14 +37,22 @@ export type KeyEditorProps = {
   redis: Redis
   name: RedisBytes
   meta: RedisKeyMeta
-  /** Raised when the value should be read again. */
+  /** Raised when the value should be read again from its start: the Refresh verb. */
   epoch: number
-  /** A write landed: read the value and the key's facts again. */
+  /**
+   * A write landed: read the key's facts again — its size, its memory. The
+   * rows are the editor's own to keep: it lays the write over the ones it
+   * holds, or reads them again where the write moved them.
+   */
   onChanged: () => void
   confirm: (request: ConfirmRequest) => void
 }
 
-type ReadMeta = RedisKeyMeta & { readAt: number }
+type ReadMeta = RedisKeyMeta & {
+  readAt: number
+  /** When this page had last read the key before this reading, if it had. */
+  seenAt: number | undefined
+}
 
 /**
  * One key: what it is, and the editor its type calls for.
@@ -79,15 +88,47 @@ export function KeyPane({
   const { target, db, engine, conn, canWrite, canDestroy } = redis
   const label = bytesLabel(name)
   const meta = usePoll<ReadMeta>(
-    (signal) => redisMeta(target, name, signal).then((read) => ({ ...read, readAt: Date.now() })),
+    (signal) => {
+      // A request counts as a read from the moment it is sent: the server
+      // reads the key whether or not the answer is kept, and a request that
+      // was dropped for a newer one has still reset the key's idle clock.
+      const sent = Date.now()
+      const earlier = db === undefined ? undefined : lastRead(target.id, db, name)
+      if (db !== undefined) noteRead(target.id, db, name, sent)
+      return redisMeta(target, name, signal).then((read) => {
+        // What this page had read of the key before this answer, judged when
+        // the answer lands, so a listing made while it was on its way counts.
+        // Then this read is noted itself: the idle time in the answer was
+        // taken first, and the size read after it is what resets the clock
+        // for the next.
+        const readAt = Date.now()
+        const latest = lastRead(target.id, read.db, name)
+        const seenAt = latest !== undefined && latest !== sent ? latest : earlier
+        noteRead(target.id, read.db, name, readAt)
+        return { ...read, readAt, seenAt }
+      })
+    },
     15_000,
     [target.id, target.db, bytesId(name)],
   )
   const [epoch, setEpoch] = useState(0)
   const [renaming, setRenaming] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
+  // What the server said the first time this page asked. How long a key has
+  // gone unread is true only then: reading its size counts as a read, so
+  // every later answer is the time since this page last looked. And not
+  // always then either — a key the list drew a moment ago was read by the
+  // list, and its idle time is that moment.
+  const [opened, setOpened] = useState<ReadMeta>()
+  if (!opened && meta.data) setOpened(meta.data)
+  const echoed =
+    opened?.idleSeconds !== undefined && ownEcho(opened.idleSeconds, opened.seenAt, opened.readAt)
 
-  const changed = () => {
+  // The whole key again, rows and all. A write does not come through here:
+  // its editor has already laid it over the rows on screen, and reading them
+  // again from the start would throw a reader three pages into a hash back
+  // to its first.
+  const reread = () => {
     setEpoch((n) => n + 1)
     meta.refresh()
   }
@@ -127,7 +168,7 @@ export function KeyPane({
       label: "Refresh",
       icon: RefreshClockwise,
       inline: true,
-      run: changed,
+      run: reread,
     },
     ...(canWrite
       ? [
@@ -208,7 +249,7 @@ export function KeyPane({
     name,
     meta: read,
     epoch,
-    onChanged: changed,
+    onChanged: meta.refresh,
     confirm,
   }
   const kind = read ? kindOf(read.type).id : undefined
@@ -263,10 +304,26 @@ export function KeyPane({
               <Metric label="Access frequency" value={read.frequency.toLocaleString()} />
             ) : (
               <Fact
-                label="Idle"
+                label="Idle when opened"
                 fact="idleSeconds"
-                meta={read}
-                value={read.idleSeconds === undefined ? undefined : duration(read.idleSeconds)}
+                meta={
+                  echoed
+                    ? {
+                        ...read,
+                        idleSeconds: undefined,
+                        unavailable: {
+                          idleSeconds:
+                            "This page had read the key itself just before opening it — the key list reads each key it shows — and a read resets the server's idle clock.",
+                        },
+                      }
+                    : (opened ?? read)
+                }
+                value={
+                  echoed || opened?.idleSeconds === undefined
+                    ? undefined
+                    : duration(opened.idleSeconds)
+                }
+                tip="How long nothing had read or written the key when this page opened it."
               />
             )}
           </MetricStrip>
@@ -370,12 +427,15 @@ function Fact({
   meta,
   value,
   mono,
+  tip,
 }: {
   label: string
   fact: RedisMetaFact
   meta: RedisKeyMeta
   value: string | undefined
   mono?: boolean
+  /** What the figure is a reading of, where its name does not say it all. */
+  tip?: string
 }) {
   const why = meta.unavailable?.[fact]
   if (value === undefined && !why) return null
@@ -384,7 +444,14 @@ function Fact({
       label={label}
       value={
         value !== undefined ? (
-          <span className={mono ? "font-mono text-xs" : undefined}>{value}</span>
+          tip ? (
+            <span className="flex items-center gap-1">
+              {value}
+              <InfoTip label={`About ${label.toLowerCase()}`}>{tip}</InfoTip>
+            </span>
+          ) : (
+            <span className={mono ? "font-mono text-xs" : undefined}>{value}</span>
+          )
         ) : (
           <span className="flex items-center gap-1 text-muted-foreground">
             —<InfoTip label={`Why ${label.toLowerCase()} is not known`}>{why}</InfoTip>

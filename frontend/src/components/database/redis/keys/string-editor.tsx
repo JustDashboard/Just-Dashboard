@@ -26,6 +26,7 @@ import {
   toHex,
 } from "@/components/database/redis/bytes"
 import { EditorStrip, saveFrom } from "@/components/database/redis/keys/editor-parts"
+import { respaceJson } from "@/components/database/redis/keys/json-doc"
 import type { KeyEditorProps } from "@/components/database/redis/keys/key-pane"
 import { ReadError } from "@/components/database/redis/read-error"
 import type { RedisBytes, RedisMembers } from "@/components/database/redis/types"
@@ -165,11 +166,15 @@ export function StringEditor({ redis, name, meta, epoch, onChanged }: KeyEditorP
     }
   }
 
+  // Only the spacing changes: a value formatted and saved is the value it
+  // was, digit for digit. `JSON.parse` would have read a 64-bit id as a float
+  // and written back another number.
   const format = (indent: number) => {
-    try {
-      setDraft({ as: "text", text: JSON.stringify(JSON.parse(shownText), null, indent) })
-    } catch {
+    const spaced = respaceJson(shownText, indent)
+    if (spaced === null) {
       notify.error("Not formatted", undefined, { description: "The value is not valid JSON." })
+    } else if (spaced !== shownText) {
+      setDraft({ as: "text", text: spaced })
     }
   }
 

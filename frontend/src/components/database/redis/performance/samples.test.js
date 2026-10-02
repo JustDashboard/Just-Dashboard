@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   addSample,
+  countScale,
   lifetimeHitRate,
   micros,
   perSecond,
@@ -156,5 +157,24 @@ describe("readings in words", () => {
       "after 5m if 100 keys changed",
     ])
     expect(scheduleWords("something else")).toEqual(["something else"])
+  })
+})
+
+describe("an axis for a count of things", () => {
+  test("one client is drawn against 0 and 1, not quarters of a client", () => {
+    expect(countScale(1)).toEqual({ domain: [0, 1], ticks: [0, 1] })
+    expect(countScale(0)).toEqual({ domain: [0, 1], ticks: [0, 1] })
+  })
+
+  test("small counts step by one", () => {
+    expect(countScale(3).ticks).toEqual([0, 1, 2, 3])
+    expect(countScale(4).ticks).toEqual([0, 1, 2, 3, 4])
+  })
+
+  test("larger counts step by a round figure and end on one", () => {
+    expect(countScale(7)).toEqual({ domain: [0, 8], ticks: [0, 2, 4, 6, 8] })
+    expect(countScale(37)).toEqual({ domain: [0, 40], ticks: [0, 10, 20, 30, 40] })
+    expect(countScale(950)).toEqual({ domain: [0, 1000], ticks: [0, 500, 1000] })
+    for (const tick of countScale(2311).ticks) expect(Number.isInteger(tick)).toBe(true)
   })
 })

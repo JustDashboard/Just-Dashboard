@@ -112,6 +112,25 @@ export function lifetimeHitRate(counters: StatSample["counters"]): number | null
   return (hits / (hits + misses)) * 100
 }
 
+/**
+ * An axis for a count of things — clients, connections — that cannot be had
+ * in halves: whole-number ticks from zero to a round figure at or above the
+ * most seen. A fitted axis drew "0.25, 0.5, 0.75" under one client.
+ */
+export function countScale(most: number): { domain: [number, number]; ticks: number[] } {
+  const top = Math.max(Math.ceil(most), 1)
+  let step = 1
+  if (top > 4) {
+    const rough = top / 4
+    const magnitude = 10 ** Math.floor(Math.log10(rough))
+    step = [1, 2, 5, 10].map((factor) => factor * magnitude).find((size) => size >= rough) ?? 1
+  }
+  const ceiling = Math.ceil(top / step) * step
+  const ticks: number[] = []
+  for (let tick = 0; tick <= ceiling; tick += step) ticks.push(tick)
+  return { domain: [0, ceiling], ticks }
+}
+
 /** A count a second, in the fewest digits that say it: "2,146", "12.4", "0.3". */
 export function perSecond(value: number): string {
   if (value >= 100) return Math.round(value).toLocaleString()

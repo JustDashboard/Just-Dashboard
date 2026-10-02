@@ -21,6 +21,7 @@ import { CommandHelper } from "@/components/database/redis/console/helper"
 import { MonitorView } from "@/components/database/redis/console/monitor"
 import { PubSubView } from "@/components/database/redis/console/pubsub"
 import { DbPicker } from "@/components/database/redis/db-picker"
+import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 
 const HELPER = { base: 320, min: 260, max: 520 }
@@ -43,6 +44,7 @@ export function RedisConsole() {
   const redis = useRedis()
   const { id, db, server, engine, param, select, canRun, admin } = redis
   const { confirm, dialog } = useConfirm()
+  useFocusReturn()
   const features = server.data?.features
 
   const views: { id: View; label: string }[] = [
@@ -82,7 +84,8 @@ export function RedisConsole() {
       >
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <PaneHeader className="gap-1 py-0 pl-0">
-            <nav aria-label="Console views" className="flex min-w-0 self-stretch">
+            {/* Pressed buttons, not a landmark: three readings of one page. */}
+            <div role="group" aria-label="Console views" className="flex min-w-0 self-stretch">
               {views.map((entry) => (
                 <button
                   key={entry.id}
@@ -94,7 +97,7 @@ export function RedisConsole() {
                   {entry.label}
                 </button>
               ))}
-            </nav>
+            </div>
             <span className="min-w-0 flex-1" />
             {view === "console" && (
               <>
@@ -134,6 +137,8 @@ export function RedisConsole() {
               line={line}
               onLine={setLine}
               confirm={confirm}
+              views={views.flatMap((entry) => (entry.id === "console" ? [] : [entry.id]))}
+              onView={(next) => select({ view: next })}
             />
           ) : (
             <EmptyState

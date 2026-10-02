@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { definitePath, nodeAt, nodeSize, parseJsonDoc, printJsonDoc } from "./json-doc"
+import { definitePath, nodeAt, nodeSize, parseJsonDoc, printJsonDoc, respaceJson } from "./json-doc"
 
 describe("a document read as text", () => {
   test("a 64-bit number keeps every digit", () => {
@@ -103,5 +103,48 @@ describe("a path that names exactly one place", () => {
     for (const path of ["$.items[*]", "$..sku", "$.a[?(@.x>1)]", "$.a[0:2]", "a.b", ""]) {
       expect(definitePath(path)).toBe(false)
     }
+  })
+})
+
+describe("a document spaced again", () => {
+  const text =
+    '{"id":12345678901234567890,"price":1.10,"n":1e3,"s":"a \\u00e9 \\"q\\" {,}:","e":{},"l":[ ],"t":[true,null]}'
+
+  test("formatting changes the spacing and no digit", () => {
+    const spaced = respaceJson(text, 2)
+    expect(spaced).toBe(
+      [
+        "{",
+        '  "id": 12345678901234567890,',
+        '  "price": 1.10,',
+        '  "n": 1e3,',
+        '  "s": "a \\u00e9 \\"q\\" {,}:",',
+        '  "e": {},',
+        '  "l": [],',
+        '  "t": [',
+        "    true,",
+        "    null",
+        "  ]",
+        "}",
+      ].join("\n"),
+    )
+    // What the old formatter wrote for the same value.
+    expect(JSON.stringify(JSON.parse(text), null, 2)).not.toContain("12345678901234567890")
+  })
+
+  test("minifying a formatted document gives back the compact one", () => {
+    expect(respaceJson(respaceJson(text, 2), 0)).toBe(text.replace("[ ]", "[]"))
+  })
+
+  test("an ordinary document is laid out as JSON.stringify lays it out", () => {
+    const value = { a: [1, 2, { b: "x" }], c: {}, d: [], e: "s p a c e", f: -0.5 }
+    const compact = JSON.stringify(value)
+    expect(respaceJson(compact, 2)).toBe(JSON.stringify(value, null, 2))
+    expect(respaceJson(JSON.stringify(value, null, 4), 0)).toBe(compact)
+  })
+
+  test("a scalar, and text that is not JSON", () => {
+    expect(respaceJson(" 12345678901234567890 ", 2)).toBe("12345678901234567890")
+    expect(respaceJson("{oops", 2)).toBeNull()
   })
 })

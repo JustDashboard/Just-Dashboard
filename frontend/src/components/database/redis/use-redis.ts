@@ -35,6 +35,15 @@ export function useRedis() {
   const named = DATABASE.test(selection.db) ? Number(selection.db) : undefined
   const target = useMemo<RedisTarget>(() => ({ id, db: named }), [id, named])
   const db = named ?? server.data?.db
+  // Which database a listing held on the page is a listing *of*. The address
+  // may not name one — then it is the connection's own, which the server
+  // says a moment later — and the first key opened from a list puts the
+  // number in the address. Both are the same database, and a list keyed by
+  // what the address says would be thrown away and scanned again for it. So
+  // lists are keyed by the database itself, and wait the moment it takes to
+  // learn which that is; a server that will not say is asked for its keys
+  // anyway, so the failure is the list's to show.
+  const scope = db !== undefined ? String(db) : server.error ? "own" : undefined
 
   const setDb = useCallback(
     // Another database holds other keys: the one that was open is not in it.
@@ -49,6 +58,8 @@ export function useRedis() {
     target,
     /** The database on screen: the named one, else the connection string's. */
     db,
+    /** What a held listing is keyed by; `undefined` until the database is known. */
+    scope,
     setDb,
     /**
      * The console's own route: any command needs `service.control`, and a

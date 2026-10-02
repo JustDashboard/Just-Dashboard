@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { leafName, mergeKeys, mergeLevel, scanProgress } from "./scan"
+import { ancestors, leafName, mergeKeys, mergeLevel, scanProgress } from "./scan"
 
 const key = (name, type = "string") => ({ key: name, type, ttl: -1, size: 1 })
 const folder = (name, count, over = {}) => ({
@@ -156,5 +156,21 @@ describe("how far a scan has come", () => {
       "37 of 2,860 keys match",
     )
     expect(scanProgress({ found: 9, total: 9, complete: true, filtered: false })).toBe("All 9 keys")
+  })
+})
+
+describe("the namespaces a key sits under", () => {
+  test("outermost first, each with its delimiter", () => {
+    expect(ancestors("user:7:profile")).toEqual(["user:", "user:7:"])
+  })
+
+  test("a key with no delimiter sits under none", () => {
+    expect(ancestors("counter")).toEqual([])
+    expect(ancestors("")).toEqual([])
+  })
+
+  test("an empty segment is a namespace like any other, and a trailing delimiter names no deeper one", () => {
+    expect(ancestors("a::b")).toEqual(["a:", "a::"])
+    expect(ancestors("a:b:")).toEqual(["a:"])
   })
 })

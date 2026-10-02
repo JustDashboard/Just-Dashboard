@@ -35,10 +35,17 @@ type Count = {
   total: number
 }
 
-const WORD: Record<RedisBulkAction, { segment: string; verb: string; done: string }> = {
-  delete: { segment: "Delete", verb: "Delete", done: "deleted" },
-  expire: { segment: "Set an expiry", verb: "Expire", done: "set to expire" },
-  persist: { segment: "Remove expiries", verb: "Keep", done: "kept for good" },
+const WORD: Record<
+  RedisBulkAction,
+  { segment: string; command: (keys: string) => string; done: string }
+> = {
+  delete: { segment: "Delete", command: (keys) => `Delete ${keys}`, done: "deleted" },
+  expire: { segment: "Set an expiry", command: (keys) => `Expire ${keys}`, done: "set to expire" },
+  persist: {
+    segment: "Remove expiries",
+    command: (keys) => `Remove the expiry of ${keys}`,
+    done: "no longer set to expire",
+  },
 }
 
 /**
@@ -46,9 +53,11 @@ const WORD: Record<RedisBulkAction, { segment: string; verb: string; done: strin
  *
  * Nothing is changed until the keys have been counted: the count is a dry run
  * on the server, with the first names it found, and the command that follows
- * is named for that count. A pattern that is every key in the database is not
- * a bulk action — emptying a database asks for its name, in Settings — so it
- * can be counted here and not removed.
+ * is named for that count and asked about once more — all three of them.
+ * Removing expiries destroys nothing, and cannot be taken back either: the
+ * time each key had left is kept nowhere. A pattern that is every key in the
+ * database is not a bulk delete — emptying a database asks for its name, in
+ * Settings — so it can be counted here and not removed.
  */
 export function BulkDialog({
   redis,
@@ -79,6 +88,10 @@ export function BulkDialog({
   const [count, setCount] = useState<Count | null>(null)
   const [busy, setBusy] = useState(false)
   const [refused, setRefused] = useState("")
+  // A count is true for the moment it was taken. Closed and opened again,
+  // the dialog counts again rather than offer a command named for keys that
+  // may have come and gone since.
+  if (!open && count) setCount(null)
 
   const glob = pattern.trim()
   const inputs = JSON.stringify([db, glob, type])
@@ -144,7 +157,7 @@ export function BulkDialog({
 
   const noun = counted ? plural(counted.matched, "key") : ""
   const command = counted
-    ? `${WORD[action].verb} ${counted.complete ? "" : "at least "}${noun}`
+    ? WORD[action].command(`${counted.complete ? "" : "at least "}${noun}`)
     : ""
   const ready =
     counted !== null && counted.matched > 0 && !everything && (action !== "expire" || ttl?.ok)
@@ -160,12 +173,6 @@ export function BulkDialog({
         {type && <FormFact label="Of type">{kindOf(type).label}</FormFact>}
       </>
     )
-    if (action === "persist") {
-      void apply()
-        .then(onDone)
-        .catch((err: unknown) => notify.error("Could not remove the expiries", err))
-      return
-    }
     confirm({
       title: command,
       subject: { mark: <EngineMark engine={engine} size="sm" />, name: where, facts },
@@ -174,7 +181,9 @@ export function BulkDialog({
           <p>
             {action === "delete"
               ? "Every key the pattern matches is removed, with what it holds. This cannot be undone."
-              : `Every key the pattern matches is set to expire in ${ttl?.ok ? ttlWord(ttl.seconds) : ""}, and is removed then.`}
+              : action === "expire"
+                ? `Every key the pattern matches is set to expire in ${ttl?.ok ? ttlWord(ttl.seconds) : ""}, and is removed then.`
+                : "Every key the pattern matches is kept until something removes it. The time each had left is recorded nowhere, so this cannot be undone."}
           </p>
           {counted.complete && counted.matched === counted.total && (
             <p className="font-medium text-warning">
@@ -289,15 +298,22 @@ export function BulkDialog({
           </ChipStrip>
         </Field>
 
-        <Field label="What happens to them">
-          <Segments
-            label="What happens to the keys"
-            fill
-            value={action}
-            onChange={setAction}
-            options={actions.map((value) => ({ value, label: WORD[value].segment }))}
-          />
-        </Field>
+        {actions.length > 1 ? (
+          <Field label="What happens to them">
+            <Segments
+              label="What happens to the keys"
+              fill
+              value={action}
+              onChange={setAction}
+              options={actions.map((value) => ({ value, label: WORD[value].segment }))}
+            />
+          </Field>
+        ) : (
+          // One thing this role can do to them: a fact, not a choice of one.
+          <FormFacts>
+            <FormFact label="What happens to them">Their expiries are removed</FormFact>
+          </FormFacts>
+        )}
 
         {action === "expire" && (
           <Field

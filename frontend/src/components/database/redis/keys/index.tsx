@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, SidebarLeftOpen } from "@/components/icons"
+import { SidebarLeftOpen } from "@/components/icons"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePanelSize } from "@/lib/panel-size"
 import { useViewState } from "@/lib/view-state"
@@ -9,14 +9,15 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { IconAction } from "@/components/icon-action"
 import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState, Notice } from "@/components/state"
-import { Button } from "@/components/ui/button"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { keyFromAddress, keyToAddress } from "@/components/database/redis/bytes"
 import { BulkDialog } from "@/components/database/redis/keys/bulk"
 import { KeyPane } from "@/components/database/redis/keys/key-pane"
-import { KeyRail } from "@/components/database/redis/keys/key-rail"
+import { KeyRail, useKeyWalk, type RailView } from "@/components/database/redis/keys/key-rail"
+import { Keyspace } from "@/components/database/redis/keys/keyspace"
 import { NewKeyDialog } from "@/components/database/redis/keys/new-key"
 import type { RedisBytes } from "@/components/database/redis/types"
+import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 
 const RAIL = { base: 320, min: 240, max: 560 }
@@ -34,12 +35,16 @@ const RAIL = { base: 320, min: 240, max: 560 }
  * The readings a report page would carry as tiles are where the reader is
  * already looking: key counts per database in the picker, per type on the
  * chips, per namespace in the tree, and how far the scan has come at the
- * rail's foot. A workbench has no row of tiles above it.
+ * rail's foot. A workbench has no row of tiles above it. While no key is
+ * open, the pane where one would be says what the database is made of — the
+ * same walk the tree drew, read as figures, a composition by type and the
+ * largest namespaces — so the page is never a list beside an empty half.
  */
 export function RedisKeys() {
   const redis = useRedis()
   const { id, db, server, selection, param, goto, select, engine, canWrite } = redis
   const { confirm, dialog } = useConfirm()
+  useFocusReturn()
 
   const selected = keyFromAddress(selection.key, param("keyB64"))
   const [epoch, setEpoch] = useState(0)
@@ -53,9 +58,22 @@ export function RedisKeys() {
   const wide = useMediaQuery("(min-width: 1024px)")
   const [railShown, setRailShown] = useViewState(`databases.${id}.redis.rail`, true)
   const [railOver, setRailOver] = useState(false)
-  const railVisible = wide ? railShown : railOver || !selected
+  const railVisible = wide ? railShown : railOver || selected === undefined
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize("databases.redis.rail", RAIL.base)
   const railPx = Math.min(Math.max(railWidth, RAIL.min), RAIL.max)
+
+  // How the rail is arranged, and the walk its tree is drawn from. Both are
+  // held here because the pane reads the walk too: with no key open it says
+  // what the database is made of, from the scan the tree already paid for.
+  const [arranged, setView] = useViewState<RailView>(`databases.${id}.redis.view`, "tree")
+  // An engine with no namespace walk has only the list.
+  const tree = engine.can("keyTree")
+  const view: RailView = tree ? arranged : "list"
+  const walk = useKeyWalk(
+    redis,
+    epoch,
+    tree && (view === "tree" || (wide && selected === undefined)),
+  )
 
   const open = (key: RedisBytes | undefined) => {
     setRailOver(false)
@@ -112,6 +130,9 @@ export function RedisKeys() {
                 redis={redis}
                 selected={selected}
                 epoch={epoch}
+                view={view}
+                onView={setView}
+                root={walk}
                 onOpen={open}
                 onRefresh={refresh}
                 onNew={() => setCreating(true)}
@@ -133,7 +154,12 @@ export function RedisKeys() {
           {selected !== undefined ? (
             <KeyPane
               // A key is one editor's worth of state: another key starts clean.
-              key={`${db ?? "default"}:${JSON.stringify(selected)}`}
+              // By the database the address names, not the one on screen: that
+              // one is learned from the server a moment after the key opens,
+              // and a pane that started again then would read the key twice —
+              // the second time after its own first read had reset the key's
+              // idle clock.
+              key={`${redis.target.db ?? "own"}:${JSON.stringify(selected)}`}
               redis={redis}
               name={selected}
               leading={railToggle}
@@ -146,25 +172,16 @@ export function RedisKeys() {
               }}
             />
           ) : (
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {railToggle && (
-                <div className="flex h-9 shrink-0 items-center px-2">{railToggle}</div>
-              )}
-              <EmptyState
-                mark={<EngineMark engine={engine} />}
-                className="min-h-0 flex-1 border-0"
-                title="No key is open"
-                description={`Pick a key on the left to read and edit its value${canWrite ? ", or make a new one" : ""}.`}
-                action={
-                  canWrite && (
-                    <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-                      <Plus />
-                      New key
-                    </Button>
-                  )
-                }
-              />
-            </div>
+            <Keyspace
+              redis={redis}
+              walk={walk}
+              leading={railToggle}
+              onNamespace={(pattern) => {
+                select({ pattern })
+                if (!wide) setRailOver(true)
+                else setRailShown(true)
+              }}
+            />
           )}
         </div>
       )}
