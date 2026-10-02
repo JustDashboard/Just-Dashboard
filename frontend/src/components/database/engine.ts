@@ -317,6 +317,8 @@ const NO_CAPABILITIES: DbCapabilities = {
   dumpDatabases: false,
   dumpUpload: false,
   restoreNewDatabase: false,
+  serverDatabaseCreate: false,
+  serverDatabaseConnect: false,
   copy: false,
   copyStructureOnly: false,
   catalogGroups: [],

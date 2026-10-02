@@ -1879,6 +1879,8 @@ export type DbCapabilityFlag =
   | "dumpDatabases" // Redis's choice of numbered databases
   | "dumpUpload"
   | "restoreNewDatabase"
+  | "serverDatabaseCreate" // POST /{id}/server/databases makes a database on this server
+  | "serverDatabaseConnect" // POST /{id}/server/databases/connect opens another one as a connection
   | "copy"
   | "copyStructureOnly"
 
