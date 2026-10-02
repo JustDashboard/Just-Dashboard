@@ -16,7 +16,7 @@ func TestBuildWhereOperators(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ` WHERE "age" >= $1 AND CAST("name" AS TEXT) LIKE $2 AND "deleted_at" IS NULL`
+	want := ` WHERE "age" >= $1 AND CAST("name" AS TEXT) LIKE $2 ESCAPE '!' AND "deleted_at" IS NULL`
 	if clause != want {
 		t.Errorf("clause = %q, want %q", clause, want)
 	}
@@ -159,7 +159,7 @@ func TestOutlineListsTablesAndColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cols, ok := outline.Tables["users"]
+	cols, ok := outline.Tables[TableKey("main", "users")]
 	if !ok {
 		t.Fatalf("outline missing users: %v", outline.Tables)
 	}
@@ -174,7 +174,7 @@ func TestRelationsBuildsTheGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fks, ok := rels["posts"]
+	fks, ok := rels[TableKey("main", "posts")]
 	if !ok || len(fks) == 0 {
 		t.Fatalf("expected posts to have a foreign key, got %v", rels)
 	}

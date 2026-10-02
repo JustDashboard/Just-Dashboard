@@ -49,7 +49,10 @@ func (s *Server) adoptedDatabaseConnection(ctx context.Context, driver dbx.Drive
 		if err != nil {
 			continue
 		}
-		if connection.Driver != driver || connection.Host != wanted.Host || connection.Port != wanted.Port ||
+		// The address is compared as an identity: a connection typed to
+		// localhost is the same server as one found at 127.0.0.1.
+		if connection.Driver != driver ||
+			addressKey(connection.Host, atoiDefault(connection.Port, 0)) != addressKey(wanted.Host, atoiDefault(wanted.Port, 0)) ||
 			connection.Database != wanted.Database || connection.User != wanted.User {
 			continue
 		}

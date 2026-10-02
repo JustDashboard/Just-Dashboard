@@ -92,7 +92,9 @@ test("standalone database setup resumes its container after switching sources", 
   await page.route("**/api/v1/databases/**", (route) => {
     const path = new URL(route.request().url()).pathname
     if (path.endsWith("/provision/options"))
-      return json(route, [{ engine: "postgres", label: "PostgreSQL", image: "postgres:17" }])
+      return json(route, [
+        { engine: "postgres", label: "PostgreSQL", image: "postgres:17", driver: "postgres" },
+      ])
     if (path.endsWith("/provision")) {
       provisions++
       return json(route, { container: "standalone-db" })
@@ -134,7 +136,9 @@ test("database engine loading can be retried after an API failure", async ({ pag
   let recovered = false
   await page.route("**/api/v1/databases/provision/options", (route) =>
     recovered
-      ? json(route, [{ engine: "postgres", label: "PostgreSQL", image: "postgres:17" }])
+      ? json(route, [
+          { engine: "postgres", label: "PostgreSQL", image: "postgres:17", driver: "postgres" },
+        ])
       : route.fulfill({
           status: 503,
           contentType: "application/json",

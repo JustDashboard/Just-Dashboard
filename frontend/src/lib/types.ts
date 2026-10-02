@@ -1748,23 +1748,252 @@ export type DbDriver =
   "postgres" | "mysql" | "sqlite" | "sqlserver" | "clickhouse" | "oracle" | "mongodb" | "redis"
 
 /**
- * What one engine can do, as the server reports it.
- *
- * The frontend deliberately keeps no table of its own: a tab that would 400 on
- * every request should not be offered, and the only thing that actually knows
- * which those are is the dialect registry on the server.
+ * The product behind a driver: MariaDB answers the `mysql` driver, Valkey the
+ * `redis` one. A driver's own product carries the driver's id.
  */
+export type DbFlavor =
+  | DbDriver
+  | "timescaledb"
+  | "cockroachdb"
+  | "yugabytedb"
+  | "mariadb"
+  | "percona"
+  | "tidb"
+  | "valkey"
+  | "keydb"
+  | "dragonfly"
+  | "ferretdb"
+  | "azure-sql-edge"
+
+/**
+ * The capability flags that are a yes or a no, as `GET /databases/drivers`
+ * serves them for every driver and every flavour (`dbx.Capabilities`; the
+ * server's tests pin who has which). A flag says the feature exists for the
+ * product; a route may still answer `supported: false` for one server.
+ */
+export type DbCapabilityFlag =
+  // Connections and discovery.
+  | "server" // a process that listens, logs and can be started; false = a file
+  | "provision" // the dashboard can start one from its own images
+  | "inventoryConnect" // can be connected from the inventory by its key
+  | "hostAccount" // POST /host/grant can make or reset an account on a host server
+  | "fileBased" // no host, port or account to ask for
+  | "openByDefault" // a host server of this kind is tried without a password by the sync
+  | "dump"
+  // The workbench.
+  | "sql"
+  | "console" // SQL editor, Redis console, MongoDB command runner
+  | "changeSets" // POST /changes: staged edits in one transaction
+  | "keylessEdits" // a table without a primary key is edited by its whole row
+  | "updateDefault" // an existing row's column can be set back to its default
+  | "script" // POST /script
+  | "transactions" // a script can run in one transaction
+  | "queryCancel" // POST /query/cancel stops a run the editor started
+  | "dollarQuoting"
+  | "regexFilter" // the `regex` filter operator
+  | "rowEstimate" // browse answers an estimated row count
+  | "cellRead" // GET /cell: one whole value the grid clipped
+  | "explainJSON" // a plan as a tree
+  | "explainAnalyze" // a plan measured by running the statement
+  // The schema.
+  | "ddl" // the create-table form; gate the other forms on `ddlOperations`
+  | "schemas" // more than one namespace to choose from
+  | "catalog" // GET /catalog and /object
+  | "views"
+  | "materializedViews"
+  | "routines"
+  | "triggers"
+  | "sequences"
+  | "enums"
+  | "comments"
+  | "indexes"
+  | "extensions"
+  // Watching and maintaining a server.
+  | "stats" // GET /stats: one snapshot of counters and gauges
+  | "sessions" // sessions, Redis clients, MongoDB operations
+  | "kill" // end a session or disconnect a client
+  | "cancel" // stop what a session is running and keep the session
+  | "locks"
+  | "replication"
+  | "tableStats"
+  | "indexStats"
+  | "maintenance" // the actions are `maintenanceActions`
+  | "settings" // the server's parameters can be read
+  | "settingsWrite" // and one can be changed
+  | "roles"
+  | "privileges" // role detail, grants, grant and revoke
+  | "statements"
+  | "statementsReset"
+  | "advisor"
+  | "engineAdvisor" // the engine's own checks, beyond the structure ones
+  | "queryLog"
+  | "clickhouseViews" // parts, merges, mutations, running queries
+  | "sqliteFile"
+  // Redis.
+  | "keys"
+  | "keyTree"
+  | "keyTypeFilter"
+  | "keyMeta"
+  | "valueDownload"
+  | "keyEncoding"
+  | "bulkKeys"
+  | "streams"
+  | "logicalDatabases"
+  | "consoleClassify"
+  | "serverInfo"
+  | "commandStats"
+  | "latency"
+  | "queryLogReset"
+  | "persistence"
+  | "aofRewrite"
+  | "memoryAnalysis"
+  | "aclRules"
+  | "pubsub"
+  | "pubsubLive"
+  | "monitor"
+  // MongoDB.
+  | "documents"
+  | "shellSyntax"
+  | "collections"
+  | "collectionOptions"
+  | "aggregation"
+  | "schemaAnalysis"
+  | "indexUsage"
+  | "indexHide"
+  | "validation"
+  | "profiler"
+  // Code generation and moving data.
+  | "orm" // the targets are `ormTargets`
+  | "export" // the formats are `exportFormats`
+  | "exportColumns"
+  | "exportQuery"
+  | "import" // the formats are `importFormats`
+  | "importMapping"
+  | "importUpsert"
+  | "importReplace"
+  | "importCreateTable"
+  | "dumpSchemaOnly"
+  | "dumpDataOnly"
+  | "dumpTables"
+  | "dumpCompression"
+  | "dumpDatabases" // Redis's choice of numbered databases
+  | "dumpUpload"
+  | "restoreNewDatabase"
+  | "serverDatabaseCreate" // POST /{id}/server/databases makes a database on this server
+  | "serverDatabaseConnect" // POST /{id}/server/databases/connect opens another one as a connection
+  | "copy"
+  | "copyStructureOnly"
+
+/** A branch of the schema catalogue (`GET /catalog`). */
+export type DbCatalogGroup =
+  | "tables"
+  | "views"
+  | "materializedViews"
+  | "functions"
+  | "procedures"
+  | "triggers"
+  | "sequences"
+  | "types"
+  | "events"
+  | "packages"
+  | "synonyms"
+  | "dictionaries"
+
+/** A structure change the engine's forms can make (`/ddl/*`). */
+export type DbDdlOperation =
+  | "createTable"
+  | "dropTable"
+  | "truncate"
+  | "addColumn"
+  | "dropColumn"
+  | "renameColumn"
+  | "renameTable"
+  | "alterColumn"
+  | "createIndex"
+  | "dropIndex"
+  | "foreignKeys"
+  | "uniqueConstraints"
+  | "checkConstraints"
+  | "views"
+  | "materializedViews"
+  | "schemas"
+  | "tableComments"
+  | "columnComments"
+  | "enumTypes"
+  | "indexMethod"
+  | "indexPartial"
+  | "indexIfNotExists"
+  | "indexConcurrently"
+
+export type DbExportFormat = "csv" | "tsv" | "json" | "ndjson" | "sql"
+export type DbImportFormat = "csv" | "tsv" | "json" | "ndjson"
+
+/**
+ * What a product can do, as the server states it: the `capabilities` object
+ * of a driver, of each of its flavours (`GET /databases/drivers`) and of one
+ * connection (`GET /databases/{id}`, resolved for the flavour that answered).
+ * Every key is always present. Nothing reads these directly: a page asks the
+ * engine registry (`components/database/engine.ts`, `engine.can(…)`).
+ *
+ * Besides the yes-or-no flags there are lists, empty for an engine without the
+ * feature, and flags that are a word where the feature comes in more than one
+ * form and `false` where the engine has none of them.
+ */
+export type DbCapabilities = Record<DbCapabilityFlag, boolean> & {
+  catalogGroups: DbCatalogGroup[]
+  ddlOperations: DbDdlOperation[]
+  /** The ids `POST /maintenance` takes; `GET /maintenance` describes them. */
+  maintenanceActions: string[]
+  /** The ids `POST /orm` takes; `GET /databases/orm/targets` describes them. */
+  ormTargets: string[]
+  /** What `GET /export` writes. */
+  exportFormats: DbExportFormat[]
+  /** What `POST /import/upload` reads. */
+  importFormats: DbImportFormat[]
+  /** What identifies a row: `none` where the engine's key does not (ClickHouse). */
+  rowIdentity: "primaryKey" | "none" | false
+  /** Whether an applied change hands the row back: always, or only by its key. */
+  returnsChangedRow: "always" | "byKey" | false
+  /** How a read is kept from writing: the engine refuses, or the write is rolled back. */
+  readOnlyScope: "enforced" | "rollback" | false
+  /** A failed import leaves nothing behind; MongoDB's only when it replaces. */
+  importAtomic: boolean | "replace"
+  /** Redis JSON values: a module the server may have, or built in. */
+  json: boolean | "module"
+  /** An expiry on one field of a hash, as the release that brought it ("7.4+"). */
+  hashFieldTtl: string | false
+  /** What `GET /redis/commands` holds: the server's documentation, or names only. */
+  commandReference: "docs" | "names" | false
+}
+
+/** Any key of the capabilities object: what `engine.can(…)` takes. */
+export type DbCapabilityName = keyof DbCapabilities
+
+/** One engine, as `GET /databases/drivers` describes it. */
 export type DbDriverInfo = {
   id: DbDriver
+  /** The driver's label covers every product it talks to ("MySQL / MariaDB"). */
   label: string
   kind: "sql" | "document" | "keyvalue"
   placeholder: string
+  /** `capabilities.sql` and `capabilities.ddl`, kept for older readers. */
   sql: boolean
   ddl: boolean
+  /** SQL engines only. */
   columnTypes?: string[]
+  /** The operators a browse filter may use on this engine. SQL engines only. */
   filterOps?: string[]
+  /** 0 for an engine that is a file. */
+  defaultPort: number
+  /** A connection string in the form this engine's driver takes. */
+  dsnExample: string
+  /** The driver's own product. */
+  capabilities: DbCapabilities
+  /** Every product the driver talks to, its own first (`flavors[0].id === id`). */
+  flavors: { id: DbFlavor; label: string; capabilities: DbCapabilities }[]
 }
 
+/** A saved connection, as `GET /databases/` lists it. The DSN is never sent. */
 export type DbConnection = {
   id: number
   name: string
@@ -1774,6 +2003,28 @@ export type DbConnection = {
   user: string
   database: string
   createdAt: string
+  /** The operator's label for what the database is for: production, staging, … */
+  environment: string
+  /** Protected: the dashboard refuses every change to its data or schema. */
+  readOnly: boolean
+  notes: string
+  /**
+   * The inventory key of the server or file on this machine it was made from
+   * (`docker:shop-db`, `host:postgres:5432`), `""` for one typed in by hand.
+   */
+  origin: string
+  /** The saved row can no longer be opened; only edit and forget work on it. */
+  broken?: boolean
+  brokenReason?: string
+  /**
+   * What only the server behind it can say, laid in from the connection's
+   * summary once that has answered: what actually answered, its own
+   * description of itself ("PostgreSQL 16.4"), and what that product can do.
+   * The list itself does not carry them.
+   */
+  flavor?: DbFlavor
+  version?: string
+  capabilities?: DbCapabilities
 }
 
 /** One table, view or Mongo collection, as the schema browser lists it. */
@@ -5437,16 +5688,31 @@ export type DbFleetEntry = DbConnection & {
   ok: boolean
   error?: string
   version?: string
+  /** The bare number: "16.4". The fork's own, not the one it imitates. */
+  versionNumber?: string
+  /**
+   * The product that answered: its driver's own until the server has answered
+   * once, and what it last said it was while it is stopped or unreachable.
+   */
+  flavor: DbFlavor
+  /**
+   * What the server is doing. A stopped or paused one is not dialled, so it
+   * is `ok: false` with no error and this is what says it did not fail.
+   */
+  state: "running" | "stopped" | "paused" | "unreachable" | "broken"
   latencyMs: number
   bytes: number
   sizesKnown: boolean
   objects: number
   objectWord: "tables" | "collections" | "keys"
   sessions: number
-  source: "docker" | "host" | "remote" | "file"
+  /** `unknown` only on a row that cannot be opened. */
+  source: "docker" | "host" | "remote" | "file" | "unknown"
   container?: string
   composeProject?: string
-  exposure: DbAccess["exposure"]
+  /** The systemd unit of a server installed on the machine. */
+  unit?: string
+  exposure: DbAccess["exposure"] | "unknown"
   consumers: number
   lastBackup?: string
 }

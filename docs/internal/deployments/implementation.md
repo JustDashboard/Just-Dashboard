@@ -1152,11 +1152,12 @@ only renderer/executor/validation authority for their feature.
   `valid` with `certificateRenewedBy: "caddy"` and no days left or certificate link: Caddy renews the
   certificate it serves and never the copy, so the copy's expiry is not the domain's and raises no
   finding. A dependency's `deepLink` is the page that owns it: a backup
-  job's own page (`/backups/<id>`) and Databases with the connection selected
-  (`/databases/connection?conn=<id>`), each only once the resource is known to exist and the list page
-  until then. The connection link used to be `/databases/<id>`, which is not a route, because the
-  Databases pages select a connection by query rather than by path, and the job link was always the
-  list. `deploy.Diagnose` is a pure function over those
+  job's own page (`/backups/<id>`) and the linked database's Settings page
+  (`/databases/<id>/settings`), each only once the resource is known to exist and the list page
+  (`/backups`, `/databases`) until then. A database is a path now — `/databases/<id>` is its home and
+  each of its pages a segment under it — so the link no longer selects a connection by query; the
+  older `/databases/connection?conn=<id>` a previous release emitted still resolves, through the
+  section's redirect for such addresses. `deploy.Diagnose` is a pure function over those
   observations returning findings and explicit *silences*: an owner that could not be read is never a
   claim and never a clean result. Release comparison (`.../releases/{release}/comparison`) names source,
   image, command, ports, runtime plan, storage, dependencies, checks and domains, compares variables by

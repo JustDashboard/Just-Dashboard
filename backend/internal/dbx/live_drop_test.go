@@ -139,12 +139,11 @@ func TestLiveDropMongoDatabase(t *testing.T) {
 // not anything is in them. The result has to say so rather than report a
 // removal that did not happen.
 func TestLiveDropRedisEmptiesRatherThanRemoves(t *testing.T) {
+	// liveRedis skips when the variable is unset: there is no default address,
+	// least of all for a test that empties what it is pointed at.
 	client := liveRedis(t)
 	ctx := context.Background()
 	dsn := os.Getenv("JD_TEST_REDIS_DSN")
-	if dsn == "" {
-		dsn = "redis://127.0.0.1:6379/0"
-	}
 	// db9, not the one the other tests use: this empties whatever it points at.
 	if err := client.Do(ctx, "SELECT", 9).Err(); err != nil {
 		t.Fatalf("select: %v", err)

@@ -26,6 +26,9 @@ node_modules/
 .DS_Store
 backend/just-dashboard-server
 data/
+# The dashboard's own state lives in a directory called data; so does the
+# Databases section's Data page, which is source.
+!frontend/src/**/data/
 *.db
 *.db-wal
 *.db-shm

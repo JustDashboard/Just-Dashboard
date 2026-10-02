@@ -3,6 +3,10 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
 )
 
 type mysqlDialect struct{}
@@ -154,13 +158,34 @@ func (d mysqlDialect) CreateSQL(ctx context.Context, db *sql.DB, schema, table s
 	if err != nil {
 		return "", err
 	}
-	// SHOW CREATE TABLE returns two columns, and a view names its second column
-	// differently, so they are scanned positionally.
-	var name, ddl string
-	if err := db.QueryRowContext(ctx, "SHOW CREATE TABLE "+rel).Scan(&name, &ddl); err != nil {
+	// SHOW CREATE TABLE answers in two columns for a table and four for a view
+	// (the statement, then the character set and collation it was created
+	// under), so the row is scanned by however many columns it has. Scanning
+	// two failed on every view and left it with no definition at all.
+	rows, err := db.QueryContext(ctx, "SHOW CREATE TABLE "+rel)
+	if err != nil {
 		return "", err
 	}
-	return ddl, nil
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return "", err
+	}
+	if len(cols) < 2 || !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return "", err
+		}
+		return "", sql.ErrNoRows
+	}
+	cells := make([]sql.NullString, len(cols))
+	ptrs := make([]any, len(cols))
+	for i := range cells {
+		ptrs[i] = &cells[i]
+	}
+	if err := rows.Scan(ptrs...); err != nil {
+		return "", err
+	}
+	return cells[1].String, rows.Err()
 }
 
 func (mysqlDialect) CastText(e string) string { return "CAST(" + e + " AS CHAR)" }
@@ -171,12 +196,12 @@ func (mysqlDialect) BeforeDropColumn(context.Context, *sql.DB, string, string, s
 	return nil
 }
 
-func (mysqlDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
-	checked, checkErr := ExplainStatement(query)
+func (d mysqlDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := explainStatement(d.Driver(), query)
 	if checkErr != nil {
 		return nil, checkErr
 	}
-	query = checked
+	query = checked.SQL
 	return RunQuery(ctx, db, "EXPLAIN "+query, 500)
 }
 
@@ -247,3 +272,148 @@ func (d mysqlDialect) DropDatabaseSQL(name string) ([]DropStatement, error) {
 
 // MySQL is happy to drop the database the session has selected.
 func (mysqlDialect) AdminDatabase() string { return "" }
+
+// --- the workbench ---------------------------------------------------------
+
+func (mysqlDialect) readScope() readScope { return readScopeSession }
+
+// enterRead makes the session's transactions read-only.
+//
+// Not START TRANSACTION READ ONLY, which is what the driver offers: a
+// statement that commits implicitly — every piece of DDL — ends that
+// transaction first and then runs, so a CREATE or a DROP went straight through
+// it. With the session itself read-only the server refuses both, on MySQL and
+// MariaDB alike.
+//
+// The session is put back to whatever it was, which is read from whichever of
+// the two names the server has for the variable. A server that will not take
+// the setting at all (some that only speak the protocol) is left as it is: the
+// classifier's verdict still stands in front of the statement, and refusing to
+// read from such a server would help nobody.
+func (mysqlDialect) enterRead(ctx context.Context, conn *sql.Conn) (func(context.Context) error, error) {
+	unchanged := func(context.Context) error { return nil }
+	var was int
+	if err := conn.QueryRowContext(ctx, "SELECT @@session.transaction_read_only").Scan(&was); err != nil {
+		if err := conn.QueryRowContext(ctx, "SELECT @@session.tx_read_only").Scan(&was); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return unchanged, nil
+		}
+	}
+	if was == 1 {
+		return unchanged, nil
+	}
+	if _, err := conn.ExecContext(ctx, "SET SESSION TRANSACTION READ ONLY"); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return unchanged, nil
+	}
+	return func(ctx context.Context) error {
+		_, err := conn.ExecContext(ctx, "SET SESSION TRANSACTION READ WRITE")
+		return err
+	}, nil
+}
+
+// regexMatch uses REGEXP, which MySQL and MariaDB both spell the same way even
+// though the engines behind it (ICU, PCRE) do not accept quite the same
+// patterns.
+func (d mysqlDialect) regexMatch(expr, ph string) string {
+	return d.CastText(expr) + " REGEXP " + ph
+}
+
+func (mysqlDialect) rowEstimate(ctx context.Context, db *sql.DB, schema, table string) (int64, error) {
+	var n sql.NullInt64
+	err := db.QueryRowContext(ctx, `SELECT TABLE_ROWS FROM information_schema.TABLES
+	         WHERE TABLE_SCHEMA = COALESCE(NULLIF(?, ''), DATABASE()) AND TABLE_NAME = ?
+	           AND TABLE_TYPE = 'BASE TABLE'`, schema, table).Scan(&n)
+	if err == sql.ErrNoRows || err == nil && !n.Valid {
+		return -1, nil
+	}
+	return n.Int64, err
+}
+
+// keyExpr compares a JSON column through its text. MySQL compares a JSON value
+// with a string as two different types, which is never equal, so a keyless row
+// holding a document could not be found by the document it was read with.
+func (d mysqlDialect) keyExpr(column Column, quoted string) string {
+	if strings.EqualFold(column.Type, "json") {
+		return d.CastText(quoted)
+	}
+	return quoted
+}
+
+func (mysqlDialect) byteLength(_ Column, quoted string) (string, bool, error) {
+	return "OCTET_LENGTH(" + quoted + ")", false, nil
+}
+
+// emptyInsert: MySQL has no DEFAULT VALUES; an empty column list and an empty
+// VALUES list is its spelling of the same thing.
+func (mysqlDialect) emptyInsert() (string, error) { return "() VALUES ()", nil }
+
+// generatedKeyQuery reads the AUTO_INCREMENT value the session's last INSERT
+// produced, which is how MySQL answers what RETURNING answers elsewhere.
+func (mysqlDialect) generatedKeyQuery() string { return "SELECT LAST_INSERT_ID()" }
+
+// countsChangedRows reports that an UPDATE's affected-row count is the number
+// of rows whose values changed, not the number the WHERE matched. An edit that
+// writes back the value already there therefore reports zero, and cannot be
+// told apart from an edit that matched nothing by the count alone.
+func (mysqlDialect) countsChangedRows() bool { return true }
+
+// explainSQL covers the two servers behind this driver, which agree on the
+// estimated plan and disagree on the measured one: MySQL 8.0.18 added EXPLAIN
+// ANALYZE, MariaDB has had ANALYZE as a statement of its own since 10.1.
+func (mysqlDialect) explainSQL(version, statement string, opts ExplainOptions) (string, error) {
+	json := opts.Format == ExplainJSON
+	maria := strings.Contains(strings.ToLower(version), "mariadb")
+	switch {
+	case !opts.Analyze && json:
+		return "EXPLAIN FORMAT=JSON " + statement, nil
+	case !opts.Analyze:
+		return "EXPLAIN " + statement, nil
+	case maria && json:
+		return "ANALYZE FORMAT=JSON " + statement, nil
+	case maria:
+		return "ANALYZE " + statement, nil
+	case json:
+		return "EXPLAIN ANALYZE FORMAT=JSON " + statement, nil
+	}
+	return "EXPLAIN ANALYZE " + statement, nil
+}
+
+// preparePlan asks MySQL for the second version of its JSON plan before a
+// measured one is requested as JSON. From 8.3 the server produces EXPLAIN
+// ANALYZE FORMAT=JSON only in that version, and a session left on the first —
+// the default — is refused with "This version of MySQL doesn't yet support
+// 'EXPLAIN ANALYZE with JSON format'", on a server that supports exactly that.
+// An older MySQL has no such variable and refuses the SET; its refusal of the
+// plan itself is then the answer, in its own words. MariaDB spells the
+// statement differently and needs nothing.
+func (mysqlDialect) preparePlan(ctx context.Context, conn *sql.Conn, version string, opts ExplainOptions) bool {
+	if !opts.Analyze || opts.Format != ExplainJSON || strings.Contains(strings.ToLower(version), "mariadb") {
+		return false
+	}
+	_, err := conn.ExecContext(ctx, "SET SESSION explain_json_format_version = 2")
+	return err == nil
+}
+
+// cancelFunc kills the statement by the server's id for this connection.
+//
+// The driver answers a cancelled context by closing the socket, and the server
+// goes on executing until it has rows to send. KILL QUERY from a second
+// connection is the only thing that stops it. The id is read before the
+// statement starts, on the connection that will run it.
+func (mysqlDialect) cancelFunc(ctx context.Context, db *sql.DB, conn *sql.Conn) (func(), error) {
+	var id uint64
+	if err := conn.QueryRowContext(ctx, "SELECT CONNECTION_ID()").Scan(&id); err != nil {
+		return nil, fmt.Errorf("read the connection id: %w", err)
+	}
+	return func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		// KILL takes no bind marker; the id is a number the server gave us.
+		_, _ = db.ExecContext(ctx, "KILL QUERY "+strconv.FormatUint(id, 10))
+	}, nil
+}

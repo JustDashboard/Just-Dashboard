@@ -87,6 +87,7 @@ import { useMediaQuery } from "@/hooks/use-mobile"
 import { useProject } from "@/components/deploy/project-context"
 import { ProjectDatabase } from "@/components/deploy/project-database"
 import { withPreviousConnectionShape } from "@/components/deploy/deployment-defaults"
+import { sectionHref } from "@/components/database/engine"
 
 /**
  * Databases & backups — what the release reaches and what protects it.
@@ -652,7 +653,7 @@ function DatabasesBody({
                   return (
                     <DatabaseRowGroup key={`${id}-${index}`}>
                       <ChoiceRow
-                        href={`/databases/overview?conn=${id}`}
+                        href={sectionHref(id)}
                         verb={name}
                         busy={busy === `ping-${id}`}
                         leading={<ProductLogo size="sm" id={link?.driver} fallback={Database} />}

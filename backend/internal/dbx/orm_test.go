@@ -44,7 +44,10 @@ func ormFixture() ([]Table, map[string]*TableDetail) {
 
 func TestGeneratePrismaSchema(t *testing.T) {
 	tables, details := ormFixture()
-	out := GeneratePrismaSchema(DriverPostgres, tables, details)
+	out, err := GenerateORM(ORMPrisma, DriverPostgres, tables, details)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	must := []string{
 		`provider = "postgresql"`,
@@ -70,17 +73,25 @@ func TestGeneratePrismaSchema(t *testing.T) {
 
 func TestGeneratePrismaProviders(t *testing.T) {
 	tables, details := ormFixture()
-	if !strings.Contains(GeneratePrismaSchema(DriverMySQL, tables, details), `provider = "mysql"`) {
-		t.Error("mysql provider not rendered")
-	}
-	if !strings.Contains(GeneratePrismaSchema(DriverSQLite, tables, details), `provider = "sqlite"`) {
-		t.Error("sqlite provider not rendered")
+	for driver, provider := range map[Driver]string{
+		DriverMySQL: "mysql", DriverSQLite: "sqlite", DriverMSSQL: "sqlserver",
+	} {
+		out, err := GenerateORM(ORMPrisma, driver, tables, details)
+		if err != nil {
+			t.Fatalf("%s: %v", driver, err)
+		}
+		if !strings.Contains(out, `provider = "`+provider+`"`) {
+			t.Errorf("%s provider not rendered:\n%s", provider, out)
+		}
 	}
 }
 
 func TestGenerateDrizzleSchema(t *testing.T) {
 	tables, details := ormFixture()
-	out := GenerateDrizzleSchema(DriverPostgres, tables, details)
+	out, err := GenerateORM(ORMDrizzle, DriverPostgres, tables, details)
+	if err != nil {
+		t.Fatal(err)
+	}
 	must := []string{
 		`from "drizzle-orm/pg-core"`,
 		`pgTable("users"`,
@@ -105,19 +116,25 @@ func TestGenerateORMRejectsMongo(t *testing.T) {
 	}
 }
 
-func TestBaseType(t *testing.T) {
-	cases := map[string]string{
-		"varchar(255)":             "varchar",
-		"NUMERIC(10,2)":            "numeric",
-		"integer":                  "integer",
-		"int unsigned":             "int",
-		"timestamp with time zone": "timestamp with time zone",
-		"double precision":         "double precision",
-		"text[]":                   "text",
+func TestORMTypeParts(t *testing.T) {
+	cases := map[string]struct {
+		name string
+		args []string
+	}{
+		"varchar(255)":                  {"varchar", []string{"255"}},
+		"NUMERIC(10,2)":                 {"numeric", []string{"10", "2"}},
+		"integer":                       {"integer", nil},
+		"int(10) unsigned zerofill":     {"int unsigned zerofill", []string{"10"}},
+		"timestamp(3) with time zone":   {"timestamp with time zone", []string{"3"}},
+		"double precision":              {"double precision", nil},
+		"enum('a,b','it''s')":           {"enum", []string{"'a,b'", "'it''s'"}},
+		"Map(String, Array(Int8))":      {"map", []string{"String", "Array(Int8)"}},
+		"DateTime64(3, 'Europe/Paris')": {"datetime64", []string{"3", "'Europe/Paris'"}},
 	}
 	for in, want := range cases {
-		if got := baseType(in); got != want {
-			t.Errorf("baseType(%q) = %q, want %q", in, got, want)
+		name, args := ormTypeParts(in)
+		if name != want.name || strings.Join(args, "|") != strings.Join(want.args, "|") {
+			t.Errorf("ormTypeParts(%q) = %q %q, want %q %q", in, name, args, want.name, want.args)
 		}
 	}
 }
@@ -134,8 +151,9 @@ func TestPrismaType(t *testing.T) {
 		"numeric(8,2)": "Decimal",
 	}
 	for in, want := range cases {
-		if got := prismaType(in); got != want {
-			t.Errorf("prismaType(%q) = %q, want %q", in, got, want)
+		got, _, ok := prismaPostgresType(parseORMType(DriverPostgres, in))
+		if !ok || got != want {
+			t.Errorf("prisma scalar for %q = %q (supported %v), want %q", in, got, ok, want)
 		}
 	}
 }

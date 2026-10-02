@@ -107,7 +107,9 @@ taking a frame:
   four red cards said it four times. The release path on a deployment page is not a wiring
   picture but a timeline: one bar in seven segments, each as long as its stage took,
   `components/deploy/run-pipeline.tsx`), and so are the
-  databases section's connection facts and maintenance rows, its find, monitor and generate panels,
+  Databases section's reading pages — the control center's readings, attention list, fleet and found
+  servers, a database's home, its Performance, Advisor, Search and Generate — each a title, a toolbar
+  and a hairline, with every database, found server, generator and search hit on them a lit card,
   and every block on the four Processes pages — the live table, the PM2 applications, the systemd
   units, and the cron jobs, timers and system cron files on Scheduled, each a title, a toolbar and
   a hairline under `StatTile` readings — four, and five on Scheduled (what fires next across cron and
@@ -142,8 +144,13 @@ taking a frame:
   carries its own button rather than as a framed block with a header and nothing in it, and the Git page's repository list under its four readings (its workspace is one framed
   workbench of three `Pane flush` columns with a strip across the top, the way the terminal page is
   drawn);
-  its Browse, Structure and Diagram tabs are each one `Pane` — a working region sized to the window,
-  a rail or an inspector beside a grid or a canvas, with a hairline between the columns. A table
+  the Databases workbenches — Data, Query, Schema, Diagram and Logs on a SQL engine, Keys and Console
+  on Redis, Documents, Aggregations and Schema on MongoDB — are each one frame, a pane's
+  (`rounded-xl border bg-card`) drawn once around the whole of it: a working region sized to the
+  window, a rail or an inspector beside a grid, an editor or a canvas, with a hairline between the
+  columns and no gutter. With nothing chosen a workbench is not blank: its pane opens on the figures
+  of what it would show (a schema's tables, rows and bytes; a Redis database's keys by type; a
+  MongoDB database's collections), which is §15's pass 2 taken inside the frame. A table
   inside a plain panel bleeds by its cells' own padding (`-mx-4` around the `Table`) so its first
   column starts where the title does; a row laid out by hand takes `ROW_BLEED` from `row-list.tsx`,
   which is the same three classes `Row` applies to itself;
@@ -384,7 +391,15 @@ to guess what an error stops; `FormFacts` states what the form operates on as da
 schema-editing form is about to run, nearest the button that runs it.
 The databases section's dialogs had assembled their own forms out of `Label`, `Input` and a
 `space-y-1.5` div and arrived at three label sizes, two input heights and no way to write an error
-beside the field that caused it.
+beside the field that caused it. They are built from these now, and the statement in one is the
+server's own: a structure change (`components/database/schema/change-dialog.tsx`) asks its route with
+`?preview=1` as the reader types and draws the answer, the command stays off until the server has
+planned exactly what the form says, and the run sends the same body. A change that rewrites or may
+refuse rows adds a warning `Notice` under the statement and asks its second question in the dialog's
+own footer rather than in a second dialog, because the subject and the statement it is about are
+already above it; a change that destroys goes through `useConfirm` with the subject named and the
+statement from one preview. A row edit is reviewed the same way (`kit/sql-review.tsx`): the
+statements a change set will run are the server's dry run of it.
 
 **A page that is a form puts its section heads in a rail.** `FormSection aside`, stacked in
 `FormSections`, sets the title (and the section's current state, as data — the address it answers
@@ -1055,8 +1070,11 @@ the reader already knows by their marks — n8n, Grafana, Redis — and set as s
 face it was a wall of words, with the language marks on the Git tab the only colour anywhere in the
 flow. `components/product-logo.tsx` draws each product's *own* logo, in its own colours, on the recessed
 tile `ProjectMark` uses for a deployment's favicon, so a template and the project it becomes are drawn
-the same way: every template card, the five database engines, the images on the Images tab (by the
-last segment of the reference, Docker's whale for the rest), and the settings panel's header. The
+the same way: every template card, each database as the product that answered — its driver's mark, a
+flavour's own where the server is one (TimescaleDB, CockroachDB, TiDB, FerretDB), and the mark of a
+server the inventory sees and nothing here opens (Kafka, Cassandra, etcd) —, the images on the Images
+tab (by the last segment of the reference, Docker's whale for the rest), and the settings panel's
+header. The
 colour lives in the artwork rather than in a token, which is the same argument as the language marks
 — the hue is not this product's to choose — taken one step further: the files are bundled in
 `public/logos/` (the page's `img-src` is its own origin, and §8's locked-down networks cannot reach a
@@ -1075,8 +1093,12 @@ names nothing — a deployment's is a bare image id — is what its image's OCI 
 reference wins when it names a product, because labels are inherited from a base. A stack is drawn as its services'
 products overlapping (`ProductLogos`, the way a group of avatars overlaps; Compose's own mark when
 none has a logo), a volume as the product of the container that keeps its data there, and a
-database connection as its engine — in the workbench switcher and in every engine picker,
-which are one `EngineCard` (`choice-card.tsx`) rather than three shapes that had already drifted.
+database connection as the product that answered, not as its driver: `EngineMark` and `EngineGlyph`
+(`components/database/kit/engine-mark.tsx`) ask the engine registry, so MariaDB is not the MySQL
+dolphin and Valkey is not Redis, on a fleet card, a home's identity tile, the strip's switcher, the
+rail's head and every engine picker, which are one `EngineCard` (`choice-card.tsx`) rather than three
+shapes that had already drifted. A flavour with no artwork of its own draws the database glyph on
+the same tile and never borrows its driver's logo with its own name beside it.
 Networks have no product and keep a glyph on the same tile, so their titles line up with the rest.
 
 **What a backup covers is a product, and so is what a terminal runs.** A coverage row is drawn as
@@ -1362,6 +1384,20 @@ for the file manager's paper page, stay, while the tile draws light copies (`rus
 `pnpm-light.svg`), and two marks already keyed, Valkey's and FreshRSS's, were lifted after the
 contact sheet showed them failing the ground.
 
+The Databases section brought sixteen more, from the same three collections under the same rules:
+dashboard-icons' etcd, CouchDB, Cassandra, OpenSearch, FerretDB and Kafka (its white variant);
+devicon's Memcached, NATS, YugabyteDB and Elasticsearch — dashboard-icons ships Elastic's company
+mark under that name, and a product is drawn as itself —; and Simple Icons' TimescaleDB, TiDB,
+ScyllaDB, DuckDB, CockroachDB and Neo4j, whose dashboard-icons file is the disc that product retired.
+Seven colours were lifted to the L 0.72 rung after the contact sheet: CockroachDB's violet,
+FerretDB's navy, both of OpenSearch's blues, Cassandra's lashes, Elasticsearch's charcoal band and
+Neo4j's blue. SQL Server's file became devicon's silver-and-red mark, its dark red lifted, in place of
+a red outline that covered half a per cent of a 14px glyph; Azure SQL Edge, which no collection
+draws, is keyed to it. Percona Server, KeyDB and Dragonfly are in none of the three and keep the
+database glyph rather than MySQL's or Redis's mark: a product with no licensed artwork has none, and
+is never drawn from memory. ScyllaDB's only licensed rendition is a hairline outline, faint at 14px
+on a 1x screen and left as drawn.
+
 **The same argument buys the git surface its own glyph set.** Heroicons draws no branch, no commit
 and no pull request, so `icons.tsx` maps those words onto the share, hash and chat-bubble marks —
 near enough on any other page, and wrong on the one screen where the reader identifies the thing *by*
@@ -1638,17 +1674,27 @@ the proxy service verbs sit with the engine facts. Detail pages keep their verbs
 and their resource name in the first facts or identity row. The deployment fleet puts its related
 pages and create command with the list filters; an empty fleet has its create command in the empty
 state.
-The Databases section opens on a control center with no tiles — the databases as lit cards drawn as
-their engines, each carrying its own three figures, an attention list under them, the servers found
-here and not yet connected, and the map of what they feed — and a database opens on its own overview:
-the connection string, its facts as one list, its largest tables as bars and what reads it. The
-section took pass 2's `/git` exit on every page (the control center, the topology, a database's
-connection, backups, advisor and logs): each figure went to the card, the header or the lane that
-counts the thing it was about — on Logs, the lens's readings are the counts on its quick-view chips
-(`ServiceLogs readings="chips"`), a reading no view asks being a chip of its own — and every page's
-doc comment names where. Its per-connection pages keep the
-connection switcher, facts, status and New command in one compact strip. Flow pages keep their visible question as the `h1`, since the question is the work on that
-screen (§16).
+The Databases section's reading pages take pass 2 the Overview's way. The control center opens on five
+readings — `StatButton`s, since pressing one narrows the fleet under it — then what needs attention
+as findings that carry their fix, the databases as lit cards drawn as their engines with three
+figures each in the engine's own words, the servers found here and not yet connected, and the
+picture of what they feed. A database opens on its home: the identity line (the engine as its mark,
+the name as the switcher, the commands at its end), six tiles with a meter where a figure has a
+ceiling and a trend where it has a history, one `ChartPanel` of the page's own samples — said to be
+live samples, not recorded history — and then its lists two across. Performance opens on its
+readings over a view strip of pressed buttons and Advisor on its counts by severity over a
+`FindingList`; a view strip there is a `role="group"`, never a navigation landmark, since the rail
+is the section's navigation. Every page of one database but Home carries the same compact identity
+strip — engine mark, switcher, facts, the environment and protected tags, status, Connect and the
+verb menu — and keeps its own name in the screen-reader-only `h1`. The workbenches carry no tiles
+over their frame (§2); on Logs the lens's readings are the counts on its quick-view chips
+(`ServiceLogs readings="chips"`), a reading no view asks being a chip of its own. What gives the
+section its colour is the sanctioned five and nothing else: the engine drawn as itself, figures
+that move, colour that names a kind (`--tag-*` for a Redis key type, a BSON type, a catalogue kind,
+a statement's verb; `hueFor(name, LANES)` for an account, a schema or a namespace; `--git-*` for a
+pending change; `--chart-1..5` for a series), the lit edge on what is taken, and work in flight said
+as it happens (a `BorderBeam` round a server being started, the participle in its row). Flow pages
+keep their visible question as the `h1`, since the question is the work on that screen (§16).
 
 The 0.7.0 pass took two things off it that had been saying the same figure twice: a `MetricStrip`
 of uptime, processes and cores in the header's corner (facts about the machine, now in its identity
@@ -1708,7 +1754,10 @@ the reader through it.
 | Host Overview, metrics, Docker, Security, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
-| Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with an engine picker in a dialog gets the edge on that picker and changes in no other way. |
+| Databases — the control center, the map, a database's home, Search, Generate, Performance, Advisor, Access, Backups, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
+| A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
+| `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's only flow page. |
+| Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with a picker on it — the generators on a database's Generate page — gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. |
 | A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. The page opens on the run's identity line with its verbs — Cancel, Retry, Redeploy, Visit, the release's menu — at the line's end beside its state, and nothing above it: the sequence on `/deploy/new` ended when the project was created, so a first run is read the same way as the fortieth, with no spine claiming the screens before it. |
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
@@ -1786,8 +1835,8 @@ above it. Painting both from one token — which is what shipped first — made 
 ### The lit edge is not register B's property
 
 This is the part that decides how the rest of the product changes. The lit edge belongs to **things
-you pick**, wherever they are — the deploy chooser, a database engine in a dialog, a credential kind
-on a settings page. It is not a flow-page decoration, and `ChoiceCard` carries it for every caller
+you pick**, wherever they are — the deploy chooser, a database engine on Add a database, a credential
+kind on a settings page. It is not a flow-page decoration, and `ChoiceCard` carries it for every caller
 rather than the deploy pages having a better-looking version of a shared component.
 
 What it does **not** belong to is a row you *read*. A reading page answers the pointer with
@@ -1860,17 +1909,17 @@ palette, and a reading page must not grow a use for them.
    `NumberTicker` on a figure that settled, `Confetti` once when the outcome lands in front of the
    reader. On `/deploy/new` the beam is the repository or image row being inspected
    (`ChoiceRow busy`), beside its *Importing…*, so the row that was pressed is the row that answers.
-8. **Hold it to the window.** A flow screen is decided in one view: `<Page fill="xl">` holds it to
-   the window at `xl`, the question, the spine and any strip stay put, and what scrolls is the one
-   list or form longer than the space left — inside its own surface, under its own toolbar and above
-   its own command. A surface with no inner scroll is a surface the page now clips, so each one is
-   capped (`max-h-full`) and scrolls itself. `/deploy/new` is the reference: every source is the same two columns (the
-   focused surface, capped at the window's height with `max-h-full self-start`, and a 22rem column
-   beside it), unfinished setups moved from a block above the strip into a counted button beside the
-   question, and a Configure step with more settings than fit scrolls its fields between the heading
-   and Continue; the Database tab, five engines and two fields, is the one source without a second
-   column. Below `xl` the columns stack and the page scrolls as every other page does — a phone is not
-   a window to hold. `deploy-new.spec.ts` asserts the shell does not scroll at 1280×800 on every source
-   and every Configure step.
+8. **Hold it to the window.** A flow screen is decided in one view: `<Page fill="xl">` holds it to the
+   window at `xl`, the question, the spine and any strip stay put, and what scrolls is the one list or
+   form longer than the space left — inside its own surface, under its own toolbar and above its own
+   command. A surface with no inner scroll is a surface the page now clips, so each one is capped
+   (`max-h-full`) and scrolls itself. `/deploy/new` is the reference: every source is the same two
+   columns (the focused surface, capped at the window's height with `max-h-full self-start`, and a 22rem
+   column beside it), unfinished setups moved from a block above the strip into a counted button beside
+   the question, and a Configure step with more settings than fit scrolls its fields between the heading
+   and Continue; the Database tab, the engine templates and two fields, is the one source without a
+   second column. Below `xl` the columns stack and the page scrolls as every other page does — a phone is
+   not a window to hold. `deploy-new.spec.ts` asserts the shell does not scroll at 1280×800 on every
+   source and every Configure step.
 9. **Verify.** `scripts/test-changed.sh`, then screenshots at 1280 and
    1720 — and look at them. The failure this register exists to catch is one no assertion sees.

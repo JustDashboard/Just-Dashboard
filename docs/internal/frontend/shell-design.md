@@ -1,6 +1,6 @@
 # Frontend shell and design system
 
-The App Router currently has 89 `page.tsx` entry points, including nested database, Docker, proxy,
+The App Router currently has 91 `page.tsx` entry points, including nested database, Docker, proxy,
 security, and deployment workflows plus `/login`. Most page modules are client components; the three
 deployment detail/new wrappers remain server components and hand interaction to client components under
 `components/deploy/`.
@@ -30,9 +30,9 @@ remains switches between views of one page, never between pages (see `components
 Which panel is showing is derived from the route, not remembered, so a pasted link opens with the rail
 already inside the right section. The single piece of state is a look elsewhere without leaving the
 page you are on — the step back out, or a group opened from the list — and it is dropped on the next
-navigation. Three levels exist: the top-level list, a section, and one deployment inside Deployments —
-or, inside a group, the group, a section in it, and that section's pages (Monitoring → Processes →
-PM2; Server configuration → Proxy & TLS → Sites).
+navigation. Three levels exist: the top-level list, a section, and one deployment inside Deployments
+or one database inside Databases — or, inside a group, the group, a section in it, and that section's
+pages (Monitoring → Processes → PM2; Server configuration → Proxy & TLS → Sites).
 
 `components/nav.ts` is the nav registry — `NAV`, `PERSONAL_NAV`, `ACCOUNT_SECTION`, `PROJECT_NAV`,
 `PROJECT_SETTINGS_NAV`, `navMatches`, `navOwns`, `sectionsFor`, `navLocation` — so `app-sidebar.tsx` and
@@ -53,15 +53,46 @@ share no prefix. `sectionsFor` returns the chain of groups and sections a path s
 draws one panel per link of it; the breadcrumb names every link (`navLocation().parents`).
 
 `components/nav-scope.tsx` is for the two panels the route cannot describe. A section calls
-`useNavScope(...)` and the rail draws what it publishes: the databases layout, because which pages exist
-depends on whether the connection is SQL and because every one of them carries `?conn=` (`replaces: true`
-— it stands in place of the static Databases panel); and `deploy/project-shell.tsx`, because a project's
-name and its mark (its favicon or product), its game-only pages and which of its settings pages hold a
-saved change that is not live yet (`PENDING_KIND_PAGE`) are not in the URL (a level *below* Deployments).
-The rail draws a project's rows from the route alone until that registration lands, so the panel does not
-reflow — only the name fills in. The alternative was the rail polling the driver catalogue and a project
-on every page in the product to draw a list the page beneath it already holds. A project's run page
-keeps the project's panel, with Deployments marked as where you are, because a run is opened from there.
+`useNavScope(...)` and the rail draws what it publishes: one database's layout
+(`app/(dashboard)/databases/[id]/layout.tsx`, through `database/shell/nav-scope.tsx`), because the
+connection's name and which pages it has depend on its engine — the engine registry
+(`database/engine.ts`) says Redis has Keys and a Console where a SQL server has Data, Query, Schema and
+a Diagram — and its rows carry the reader's place (`?schema=&table=`) from page to page; and
+`deploy/project-shell.tsx`, because a project's name and its mark (its favicon or product), its
+game-only pages and which of its settings pages hold a saved change that is not live yet
+(`PENDING_KIND_PAGE`) are not in the URL. Both sit a level *below* their section (`/databases/<id>`
+under Databases, `/deploy/<id>` under Deployments), so the back control leads to the section. The rail
+draws a project's rows from the route alone until that registration lands, so the panel does not reflow —
+only the name fills in. It draws a database's from the route and what the tab remembers of it
+(`useSessionState("databases.known")`: by id, the name from the last connection list and — once its pages
+have been open — the flavour and capabilities its summary answered with), so a database opened before in
+this tab is its own panel at once, with exactly the pages that then register. One the tab has not opened,
+or an id the list never held, gets none until its layout registers one: a saved row knows only its
+driver, and a rail of MySQL's pages for a MariaDB server, or of any pages for a database that does not
+exist, is worse than the section's panel standing a moment longer. The memory is the tab's and not the
+browser's because connection names are the server's data and must not outlive a sign-out. The
+alternative was the rail polling the driver catalogue and a project on every page in the
+product to draw a list the page beneath it already holds. A project's run page keeps the project's
+panel, with Deployments marked as where you are, because a run is opened from there.
+
+**Which database is the path, and only the path.** The section's static children in `nav.ts` are the
+three pages about every database at once — Control center (`/databases`), Map (`/databases/map`) and
+Add a database (`/databases/new`, `system.admin`) — and one database's pages are
+`/databases/<id>` and `/databases/<id>/<section>`, built by `sectionHref` in the engine registry and
+never by hand. `database/shell/routes.ts` holds the one spelling of an id (`DATABASE_ID`, digits with
+no leading zero), which the layout, the rail and the palette all read, so `/databases/007` is not
+database 7 to one of them and an unknown address to another. An id no saved connection has is
+"Database not found" with a way back, never some other database; any other path under a database is
+"Page not found" inside its shell (`[id]/[...missing]/page.tsx`), rail and strip kept. A database's
+panel has Home alone and then Work, Schema, Insights and Operate (`database/shell/nav-groups.ts`),
+each holding only what the engine has, in the engine's words. The connection used to be a query
+parameter (`/databases/browse?conn=3`), and those addresses are still out there — a board stores the
+link of every database card drawn on it, and a bookmark outlives every release — so a segment that is
+not a number is read by `legacyDatabasesHref` and replaced, not pushed: `overview` is the home,
+`browse` Data, `structure` Schema, `find` Search, `monitor` Performance, `server` Access,
+`connection` Settings, `diagram`, `query`, `advisor`, `backups`, `logs` and `generate` themselves,
+with `schema`, `table`, `sql`, `source` and `view` carried over, and `/databases/topology` is the
+map. An old page with no valid `conn` opens the control center rather than a guess.
 
 A scope's head is not a section's. A section's name is one of this product's words and is drawn as an
 eyebrow, the rail's label voice; a project or a connection is a name somebody typed, and small caps
@@ -182,7 +213,8 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   `aria-live="polite"` wrapper), `OptionList`/`OptionRow` (a switch with its sentence), `FormFacts`
   (what the form operates on, as data under the title), `Statement` (the SQL a schema-editing form is
   about to run, with a copy) and `FormNote`. The databases section's dialogs are built from these and
-  nothing else.
+  nothing else, and the statement one shows is the server's own plan of the change (`?preview=1`),
+  never a page's approximation of it.
 - `components/stat-tile.tsx` — `StatTile` (a small name over a 24px figure, an optional meter and one
   hint) and `StatGrid`, which runs them across the page with a hairline between cells and no frame
   around them, every tile the same inset and a lone last tile taking its row. `framed` restores the

@@ -14,7 +14,7 @@ import (
 )
 
 // A dependency row links to the page that owns the resource: a backup job's
-// own page, and Databases with the connection selected. A link is only that
+// own page, and a database connection's settings. A link is only that
 // specific once the resource is known to exist; until then it opens the list.
 func TestDependencyDeepLinksOpenTheOwningPage(t *testing.T) {
 	s := testServer(t)
@@ -40,7 +40,7 @@ func TestDependencyDeepLinksOpenTheOwningPage(t *testing.T) {
 	}
 	want := []string{
 		fmt.Sprintf("/backups/%d", backupID), "/backups",
-		fmt.Sprintf("/databases/connection?conn=%d", connectionID), "/databases",
+		fmt.Sprintf("/databases/%d/settings", connectionID), "/databases",
 	}
 	for index, link := range want {
 		if observed[index].DeepLink != link {

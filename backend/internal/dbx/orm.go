@@ -1,8 +1,10 @@
 package dbx
 
 import (
+	"errors"
 	"fmt"
-	"sort"
+	"go/token"
+	"regexp"
 	"strings"
 )
 
@@ -13,659 +15,377 @@ import (
 // Node toolchain on the box. The output is a reviewed starting point, not a
 // guaranteed drop-in — Postgres keeps no canonical DDL, type mappings are
 // lossy in both directions, and relation names are inferred — so every
-// generated file says so in its header.
+// generated file says so in its header, and everything a target could not
+// express comes back as a warning instead of being dropped in silence.
 //
-// These functions are pure: they take an introspected structure and return
-// text, which is what lets them be unit-tested without a database.
+// The generators are pure: they take an introspected structure and return
+// text, which is what lets them be unit-tested without a database. The one
+// file here that talks to a server is orm_catalog.go, and all it does is fill
+// in that structure.
 
 // ORMTarget names a supported code generator.
 type ORMTarget string
 
 const (
-	ORMPrisma  ORMTarget = "prisma"
-	ORMDrizzle ORMTarget = "drizzle"
+	ORMPrisma     ORMTarget = "prisma"
+	ORMDrizzle    ORMTarget = "drizzle"
+	ORMTypeScript ORMTarget = "typescript"
+	ORMZod        ORMTarget = "zod"
+	ORMKysely     ORMTarget = "kysely"
+	ORMTypeORM    ORMTarget = "typeorm"
+	ORMMikroORM   ORMTarget = "mikroorm"
+	ORMSequelize  ORMTarget = "sequelize"
+	ORMSQLAlchemy ORMTarget = "sqlalchemy"
+	ORMDjango     ORMTarget = "django"
+	ORMGorm       ORMTarget = "gorm"
+	ORMGoStructs  ORMTarget = "go"
+	ORMDiesel     ORMTarget = "diesel"
+	ORMEloquent   ORMTarget = "eloquent"
+	ORMJSONSchema ORMTarget = "jsonschema"
+	ORMGraphQL    ORMTarget = "graphql"
+	ORMSQL        ORMTarget = "sql"
 )
 
 func (t ORMTarget) Valid() bool {
-	switch t {
-	case ORMPrisma, ORMDrizzle, ORMTypeScript, ORMZod:
-		return true
-	}
-	return false
+	_, ok := ormTargetSpecFor(t)
+	return ok
 }
 
 // ORMTargets is the list the UI offers, kept here so a new generator appears in
 // the picker without a second list to update.
 func ORMTargets() []ORMTarget {
-	return []ORMTarget{ORMPrisma, ORMDrizzle, ORMTypeScript, ORMZod}
-}
-
-// GenerateORM dispatches to the requested generator. Mongo is rejected here
-// rather than producing a misleading relational schema.
-func GenerateORM(target ORMTarget, driver Driver, tables []Table, details map[string]*TableDetail) (string, error) {
-	if driver == DriverMongo {
-		return "", fmt.Errorf("ORM schema generation covers the SQL engines; use the connection's native tooling for MongoDB")
-	}
-	switch target {
-	case ORMPrisma:
-		return GeneratePrismaSchema(driver, tables, details), nil
-	case ORMDrizzle:
-		return GenerateDrizzleSchema(driver, tables, details), nil
-	case ORMTypeScript:
-		return GenerateTypeScript(tables, details), nil
-	case ORMZod:
-		return GenerateZod(tables, details), nil
-	default:
-		return "", fmt.Errorf("unsupported ORM target %q", target)
-	}
-}
-
-// prismaProvider maps our driver identity onto Prisma's datasource provider.
-func prismaProvider(driver Driver) string {
-	switch driver {
-	case DriverMySQL:
-		return "mysql"
-	case DriverSQLite:
-		return "sqlite"
-	default:
-		return "postgresql"
-	}
-}
-
-// prismaType maps a SQL column type onto a Prisma scalar. The match is on the
-// leading word of the type so that "varchar(255)" and "numeric(10,2)" resolve
-// like their bare forms.
-func prismaType(sqlType string) string {
-	switch baseType(sqlType) {
-	case "bool", "boolean", "bit":
-		return "Boolean"
-	case "smallint", "int2", "integer", "int", "int4", "mediumint", "serial", "smallserial", "year":
-		return "Int"
-	case "bigint", "int8", "bigserial":
-		return "BigInt"
-	case "real", "double", "float", "float4", "float8", "double precision":
-		return "Float"
-	case "numeric", "decimal", "money", "dec":
-		return "Decimal"
-	case "date", "time", "timestamp", "timestamptz", "datetime", "timestamp with time zone", "timestamp without time zone":
-		return "DateTime"
-	case "json", "jsonb":
-		return "Json"
-	case "bytea", "blob", "binary", "varbinary", "longblob", "mediumblob", "tinyblob":
-		return "Bytes"
-	default:
-		return "String"
-	}
-}
-
-// baseType lowercases a column type and strips any length/precision suffix and
-// array/unsigned decorations, leaving the leading type word.
-func baseType(sqlType string) string {
-	t := strings.ToLower(strings.TrimSpace(sqlType))
-	t = strings.TrimSuffix(t, "[]")
-	if i := strings.IndexByte(t, '('); i >= 0 {
-		t = t[:i]
-	}
-	t = strings.TrimSpace(t)
-	for _, suffix := range []string{" unsigned", " zerofill"} {
-		t = strings.TrimSuffix(t, suffix)
-	}
-	// Keep multi-word type names that the maps above expect intact, otherwise
-	// reduce to the first word.
-	switch t {
-	case "double precision", "timestamp with time zone", "timestamp without time zone",
-		"character varying", "timestamp with", "timestamp without":
-		return t
-	}
-	if i := strings.IndexByte(t, ' '); i >= 0 {
-		return t[:i]
-	}
-	return t
-}
-
-func GeneratePrismaSchema(driver Driver, tables []Table, details map[string]*TableDetail) string {
-	var b strings.Builder
-	b.WriteString("// Generated by Just Dashboard from live database introspection.\n")
-	b.WriteString("// A reviewed starting point: verify types, defaults and relation\n")
-	b.WriteString("// names before committing. Set DATABASE_URL in your environment.\n\n")
-	b.WriteString("datasource db {\n")
-	fmt.Fprintf(&b, "  provider = %q\n", prismaProvider(driver))
-	b.WriteString("  url      = env(\"DATABASE_URL\")\n}\n\n")
-	b.WriteString("generator client {\n  provider = \"prisma-client-js\"\n}\n")
-
-	// Back-relations are collected as the forward relations are emitted, then
-	// appended to each parent model: Prisma requires both ends of a relation.
-	backrefs := map[string][]string{}
-	type modelBlock struct {
-		name string
-		text string
-	}
-
-	models := make([]Table, 0, len(tables))
-	for _, t := range tables {
-		if strings.EqualFold(t.Type, "view") {
-			continue
-		}
-		models = append(models, t)
-	}
-
-	blocks := make([]modelBlock, 0, len(models))
-	for _, t := range models {
-		d := details[t.Name]
-		if d == nil {
-			continue
-		}
-		var mb strings.Builder
-		pk := map[string]bool{}
-		for _, c := range d.PrimaryKey {
-			pk[c] = true
-		}
-		uniqueSingle, _ := uniqueSets(d)
-
-		fmt.Fprintf(&mb, "\nmodel %s {\n", prismaModelName(t.Name))
-		for _, c := range d.Columns {
-			field := prismaFieldName(c.Name)
-			typ := prismaType(c.Type)
-			if c.Nullable {
-				typ += "?"
-			}
-			line := fmt.Sprintf("  %s %s", field, typ)
-			if len(d.PrimaryKey) == 1 && pk[c.Name] {
-				line += " @id"
-			}
-			if uniqueSingle[c.Name] {
-				line += " @unique"
-			}
-			if field != c.Name {
-				line += fmt.Sprintf(" @map(%q)", c.Name)
-			}
-			mb.WriteString(line + "\n")
-		}
-		// Forward relations, one per foreign key.
-		for _, fk := range d.ForeignKeys {
-			if fk.RefTable == "" || len(fk.Columns) == 0 {
-				continue
-			}
-			relName := prismaRelationName(t.Name, fk)
-			fwd := relationFieldName(fk)
-			refModel := prismaModelName(fk.RefTable)
-			localFields := mapFields(fk.Columns, prismaFieldName)
-			refFields := mapFields(fk.RefColumns, prismaFieldName)
-			optional := ""
-			if fkNullable(d, fk) {
-				optional = "?"
-			}
-			fmt.Fprintf(&mb, "  %s %s%s @relation(%q, fields: [%s], references: [%s])\n",
-				fwd, refModel, optional, relName,
-				strings.Join(localFields, ", "), strings.Join(refFields, ", "))
-			back := fmt.Sprintf("  %s %s[] @relation(%q)",
-				pluralFieldName(t.Name), prismaModelName(t.Name), relName)
-			backrefs[fk.RefTable] = append(backrefs[fk.RefTable], back)
-		}
-		blocks = append(blocks, modelBlock{name: t.Name, text: mb.String()})
-	}
-
-	for _, blk := range blocks {
-		b.WriteString(blk.text)
-		for _, back := range backrefs[blk.name] {
-			b.WriteString(back + "\n")
-		}
-		// Composite primary key and multi-column unique constraints.
-		d := details[blk.name]
-		if d != nil {
-			if len(d.PrimaryKey) > 1 {
-				fmt.Fprintf(&b, "\n  @@id([%s])\n", strings.Join(mapFields(d.PrimaryKey, prismaFieldName), ", "))
-			}
-			for _, cols := range uniqueMultiOf(d) {
-				fmt.Fprintf(&b, "  @@unique([%s])\n", strings.Join(mapFields(cols, prismaFieldName), ", "))
-			}
-			if prismaModelName(blk.name) != blk.name {
-				fmt.Fprintf(&b, "  @@map(%q)\n", blk.name)
-			}
-		}
-		b.WriteString("}\n")
-	}
-	return b.String()
-}
-
-// uniqueSets splits a table's unique indexes (excluding the primary key) into
-// single-column ones (rendered inline as @unique) and multi-column ones.
-func uniqueSets(d *TableDetail) (single map[string]bool, multi [][]string) {
-	single = map[string]bool{}
-	for _, ix := range d.Indexes {
-		if !ix.Unique || ix.Primary || len(ix.Columns) == 0 {
-			continue
-		}
-		if len(ix.Columns) == 1 {
-			single[ix.Columns[0]] = true
-		} else {
-			multi = append(multi, ix.Columns)
-		}
-	}
-	return single, multi
-}
-
-func uniqueMultiOf(d *TableDetail) [][]string {
-	_, multi := uniqueSets(d)
-	return multi
-}
-
-func fkNullable(d *TableDetail, fk ForeignKey) bool {
-	null := map[string]bool{}
-	for _, c := range d.Columns {
-		null[c.Name] = c.Nullable
-	}
-	for _, c := range fk.Columns {
-		if !null[c] {
-			return false
-		}
-	}
-	return true
-}
-
-func mapFields(cols []string, f func(string) string) []string {
-	out := make([]string, len(cols))
-	for i, c := range cols {
-		out[i] = f(c)
+	out := make([]ORMTarget, 0, len(ormTargetSpecs))
+	for _, s := range ormTargetSpecs {
+		out = append(out, s.id)
 	}
 	return out
 }
 
-// prismaModelName leaves the table name as the model identity when it is a legal
-// Prisma model name, so a matching @@map is only added when the two differ.
-func prismaModelName(table string) string {
-	return sanitizeIdent(table)
+// ErrORMRequest marks a generation request that cannot be honoured as asked —
+// an option the target does not have, a table that is not there, an engine the
+// target has no connector for. The caller's content is at fault, not the
+// server's, which is the difference between a 400 and a 502 at the route.
+var ErrORMRequest = errors.New("orm request")
+
+func ormRequestErrorf(format string, args ...any) error {
+	return fmt.Errorf("%w: "+format, append([]any{ErrORMRequest}, args...)...)
 }
 
-func prismaFieldName(col string) string { return sanitizeIdent(col) }
-
-// sanitizeIdent replaces characters Prisma forbids in an identifier ($, leading
-// digit) so the generated schema parses; the original name is preserved through
-// an @map/@@map at the call site when it differs.
-func sanitizeIdent(name string) string {
-	var b strings.Builder
-	for i, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			if i == 0 {
-				b.WriteByte('_')
-			}
-			b.WriteRune(r)
-		default:
-			b.WriteByte('_')
-		}
-	}
-	s := b.String()
-	if s == "" {
-		return "field"
-	}
-	return s
+// ORMRequestMessage strips the sentinel's own text from an error wrapping
+// ErrORMRequest, leaving the sentence meant for the operator.
+func ORMRequestMessage(err error) string {
+	return strings.TrimPrefix(err.Error(), ErrORMRequest.Error()+": ")
 }
 
-func relationFieldName(fk ForeignKey) string {
-	// user_id -> user, author_id -> author; falls back to the referenced table.
-	if len(fk.Columns) == 1 {
-		base := strings.TrimSuffix(strings.ToLower(fk.Columns[0]), "_id")
-		base = strings.TrimSuffix(base, "id")
-		if base != "" && base != fk.Columns[0] {
-			return sanitizeIdent(camelLower(base))
-		}
-	}
-	return sanitizeIdent(camelLower(fk.RefTable))
+// --- options --------------------------------------------------------------
+
+// ORMOption describes one switch a target accepts, so the form that offers it
+// is drawn from the server's list and cannot offer a switch the generator
+// would refuse.
+type ORMOption struct {
+	ID          string      `json:"id"`
+	Label       string      `json:"label"`
+	Description string      `json:"description"`
+	Type        string      `json:"type"` // "boolean", "select" or "text"
+	Default     any         `json:"default"`
+	Choices     []ORMChoice `json:"choices,omitempty"`
 }
 
-func pluralFieldName(table string) string {
-	n := camelLower(table)
-	if strings.HasSuffix(n, "s") {
-		return n
-	}
-	return n + "s"
+type ORMChoice struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
 }
 
-func prismaRelationName(childTable string, fk ForeignKey) string {
-	return childTable + "_" + strings.Join(fk.Columns, "_")
-}
-
-func camelLower(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToLower(s[:1]) + s[1:]
-}
-
-// --- Drizzle -------------------------------------------------------------
-
-// drizzleImport is the column-builder module for the driver.
-func drizzleImport(driver Driver) (module, table string) {
-	switch driver {
-	case DriverMySQL:
-		return "drizzle-orm/mysql-core", "mysqlTable"
-	case DriverSQLite:
-		return "drizzle-orm/sqlite-core", "sqliteTable"
-	default:
-		return "drizzle-orm/pg-core", "pgTable"
-	}
-}
-
-// drizzleColumn renders a column builder call for the driver and SQL type.
-func drizzleColumn(driver Driver, name, sqlType string) string {
-	q := fmt.Sprintf("%q", name)
-	base := baseType(sqlType)
-	if driver == DriverSQLite {
-		switch prismaType(sqlType) {
-		case "Int", "BigInt", "Boolean", "DateTime":
-			return fmt.Sprintf("integer(%s)", q)
-		case "Float", "Decimal":
-			return fmt.Sprintf("real(%s)", q)
-		case "Bytes":
-			return fmt.Sprintf("blob(%s)", q)
-		default:
-			return fmt.Sprintf("text(%s)", q)
-		}
-	}
-	if driver == DriverMySQL {
-		switch base {
-		case "int", "integer", "int4", "mediumint", "smallint", "int2", "tinyint", "year":
-			return fmt.Sprintf("int(%s)", q)
-		case "bigint", "int8":
-			return fmt.Sprintf("bigint(%s, { mode: \"number\" })", q)
-		case "bool", "boolean":
-			return fmt.Sprintf("boolean(%s)", q)
-		case "numeric", "decimal", "dec":
-			return fmt.Sprintf("decimal(%s)", q)
-		case "float", "double", "real":
-			return fmt.Sprintf("double(%s)", q)
-		case "date":
-			return fmt.Sprintf("date(%s)", q)
-		case "datetime", "timestamp":
-			return fmt.Sprintf("timestamp(%s)", q)
-		case "json":
-			return fmt.Sprintf("json(%s)", q)
-		case "text", "longtext", "mediumtext", "tinytext":
-			return fmt.Sprintf("text(%s)", q)
-		default:
-			return fmt.Sprintf("varchar(%s, { length: 255 })", q)
-		}
-	}
-	// Postgres
-	switch base {
-	case "int", "integer", "int4", "smallint", "int2", "serial", "smallserial":
-		return fmt.Sprintf("integer(%s)", q)
-	case "bigint", "int8", "bigserial":
-		return fmt.Sprintf("bigint(%s, { mode: \"number\" })", q)
-	case "bool", "boolean":
-		return fmt.Sprintf("boolean(%s)", q)
-	case "numeric", "decimal":
-		return fmt.Sprintf("numeric(%s)", q)
-	case "real", "float4":
-		return fmt.Sprintf("real(%s)", q)
-	case "double", "float8", "double precision":
-		return fmt.Sprintf("doublePrecision(%s)", q)
-	case "date":
-		return fmt.Sprintf("date(%s)", q)
-	case "timestamp", "timestamptz", "timestamp with time zone", "timestamp without time zone":
-		return fmt.Sprintf("timestamp(%s)", q)
-	case "json":
-		return fmt.Sprintf("json(%s)", q)
-	case "jsonb":
-		return fmt.Sprintf("jsonb(%s)", q)
-	case "uuid":
-		return fmt.Sprintf("uuid(%s)", q)
-	case "bytea":
-		return fmt.Sprintf("bytea(%s)", q)
-	case "text":
-		return fmt.Sprintf("text(%s)", q)
-	default:
-		return fmt.Sprintf("varchar(%s, { length: 255 })", q)
-	}
-}
-
-func GenerateDrizzleSchema(driver Driver, tables []Table, details map[string]*TableDetail) string {
-	module, tableFn := drizzleImport(driver)
-	// Collect the builder names actually used so the import line is honest.
-	used := map[string]bool{tableFn: true}
-
-	var body strings.Builder
-	for _, t := range tables {
-		if strings.EqualFold(t.Type, "view") {
-			continue
-		}
-		d := details[t.Name]
-		if d == nil {
-			continue
-		}
-		pk := map[string]bool{}
-		for _, c := range d.PrimaryKey {
-			pk[c] = true
-		}
-		single, _ := uniqueSets(d)
-		fmt.Fprintf(&body, "export const %s = %s(%q, {\n", drizzleVar(t.Name), tableFn, t.Name)
-		for _, c := range d.Columns {
-			call := drizzleColumn(driver, c.Name, c.Type)
-			used[callName(call)] = true
-			line := fmt.Sprintf("  %s: %s", drizzleVar(c.Name), call)
-			if len(d.PrimaryKey) == 1 && pk[c.Name] {
-				line += ".primaryKey()"
-			}
-			if !c.Nullable {
-				line += ".notNull()"
-			}
-			if single[c.Name] {
-				line += ".unique()"
-			}
-			body.WriteString(line + ",\n")
-		}
-		body.WriteString("})\n\n")
-	}
-
-	names := make([]string, 0, len(used))
-	for n := range used {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-
-	var b strings.Builder
-	b.WriteString("// Generated by Just Dashboard from live database introspection.\n")
-	b.WriteString("// A reviewed starting point: verify types and add relations as needed.\n\n")
-	fmt.Fprintf(&b, "import { %s } from %q\n\n", strings.Join(names, ", "), module)
-	b.WriteString(strings.TrimRight(body.String(), "\n"))
-	b.WriteString("\n")
-	return b.String()
-}
-
-// callName extracts the builder function name from a rendered call like
-// `varchar("x", …)` so it can be added to the import list.
-func callName(call string) string {
-	if i := strings.IndexByte(call, '('); i >= 0 {
-		return call[:i]
-	}
-	return call
-}
-
-// drizzleVar renders a name as a legal JS identifier for use as a variable or
-// object key; Drizzle keeps the real column name in the builder's first
-// argument, so any sanitising here is cosmetic.
-func drizzleVar(name string) string {
-	s := sanitizeIdent(name)
-	return s
-}
-
-// --- TypeScript and Zod ---------------------------------------------------
-//
-// Prisma and Drizzle are what you generate when the ORM owns the schema. A web
-// developer reading rows out of an existing database and shaping them into an
-// API response wants neither: they want the row's type, and something that
-// validates a payload before it becomes one. Those are the two files below.
-
+// Naming conventions a target can be asked for.
 const (
-	ORMTypeScript ORMTarget = "typescript"
-	ORMZod        ORMTarget = "zod"
+	ORMNamingPreserve = "preserve"
+	ORMNamingCamel    = "camel"
 )
 
-// tsType maps a SQL column onto a TypeScript type.
-//
-// bigint becomes string, not number: a 64-bit integer does not survive
-// JSON.parse intact, and silently rounding an id is the kind of bug that
-// surfaces months later as two records mysteriously becoming one.
-func tsType(sqlType string) string {
-	switch prismaType(sqlType) {
-	case "Boolean":
-		return "boolean"
-	case "Int", "Float":
-		return "number"
-	case "BigInt", "Decimal":
-		return "string"
-	case "DateTime":
-		return "string"
-	case "Json":
-		return "unknown"
-	case "Bytes":
-		return "string"
-	default:
-		return "string"
-	}
+// ORMRequest is the body of a generation request. Every field but the target
+// is optional; a nil switch means "the target's default", which is not the
+// same for every target (views are row types to TypeScript and noise to
+// Prisma), so absence has to stay distinguishable from false.
+type ORMRequest struct {
+	Target  ORMTarget `json:"target"`
+	Schema  string    `json:"schema"`
+	Schemas []string  `json:"schemas"`
+	Tables  []string  `json:"tables"`
+
+	Relations *bool  `json:"relations"`
+	Enums     *bool  `json:"enums"`
+	Defaults  *bool  `json:"defaults"`
+	Views     *bool  `json:"views"`
+	Naming    string `json:"naming"`
+
+	PrismaVersion string `json:"prismaVersion"`
+	Split         *bool  `json:"split"`
+	Package       string `json:"package"`
+	JSONTags      *bool  `json:"jsonTags"`
+	Nulls         string `json:"nulls"`
+	Managed       *bool  `json:"managed"`
+	InsertSchemas *bool  `json:"insertSchemas"`
+	Dates         string `json:"dates"`
+	IfNotExists   *bool  `json:"ifNotExists"`
+	Inputs        *bool  `json:"inputs"`
 }
 
-func zodType(sqlType string) string {
-	switch prismaType(sqlType) {
-	case "Boolean":
-		return "z.boolean()"
-	case "Int":
-		return "z.number().int()"
-	case "Float":
-		return "z.number()"
-	case "BigInt", "Decimal":
-		return "z.string()"
-	case "DateTime":
-		// Coerced rather than z.string(): a date arrives as a string over JSON
-		// and as a Date from a driver, and a schema that only accepts one of
-		// those fails on whichever half of the app it did not anticipate.
-		return "z.coerce.date()"
-	case "Json":
-		return "z.unknown()"
-	default:
-		return "z.string()"
-	}
+// ORMOptions is a request with every switch resolved against its target.
+type ORMOptions struct {
+	Target ORMTarget
+	// Selected is true when the caller named tables. A relation that leaves the
+	// selection is then dropped quietly — it is what was asked for — where one
+	// that leaves the selected schemas is worth a warning.
+	Selected bool
+
+	Relations bool
+	Enums     bool
+	Defaults  bool
+	Views     bool
+	Naming    string
+
+	PrismaVersion string
+	Split         bool
+	Package       string
+	JSONTags      bool
+	Nulls         string
+	Managed       bool
+	InsertSchemas bool
+	Dates         string
+	IfNotExists   bool
+	Inputs        bool
 }
 
-// pascal renders a table name as a type name: user_profiles -> UserProfiles.
-func pascal(name string) string {
-	parts := strings.FieldsFunc(sanitizeIdent(name), func(r rune) bool { return r == '_' })
-	var b strings.Builder
-	for _, p := range parts {
-		if p == "" {
-			continue
-		}
-		b.WriteString(strings.ToUpper(p[:1]))
-		b.WriteString(p[1:])
-	}
-	if b.Len() == 0 {
-		return "Row"
-	}
-	return b.String()
-}
+// ormPackageRe is what a Go package clause accepts and what a directory name
+// tolerates. The value is written into generated source, so it is matched
+// rather than escaped.
+var ormPackageRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
 
-// singular is a deliberately shallow de-pluraliser. A table called `users`
-// should produce a `User`, and getting that right for the common cases is worth
-// more than an inflection library; anything it gets wrong is one rename away
-// and the generated file is meant to be read before it is used.
-func singular(name string) string {
-	switch {
-	case strings.HasSuffix(name, "ies") && len(name) > 3:
-		return name[:len(name)-3] + "y"
-	case strings.HasSuffix(name, "sses"), strings.HasSuffix(name, "shes"), strings.HasSuffix(name, "ches"):
-		return name[:len(name)-2]
-	case strings.HasSuffix(name, "s") && !strings.HasSuffix(name, "ss"):
-		return name[:len(name)-1]
+// Options resolves a request against its target: defaults filled in, choices
+// checked, and any switch the target does not declare refused by name. Silently
+// ignoring one would let a form show a toggle that does nothing.
+func (r ORMRequest) Options() (ORMOptions, error) {
+	spec, ok := ormTargetSpecFor(r.Target)
+	if !ok {
+		return ORMOptions{}, ormRequestErrorf("unsupported ORM target %q", r.Target)
 	}
-	return name
-}
+	o := ORMOptions{Target: r.Target, Selected: len(r.Tables) > 0}
 
-func GenerateTypeScript(tables []Table, details map[string]*TableDetail) string {
-	var b strings.Builder
-	b.WriteString("// Generated by Just Dashboard from live database introspection.\n")
-	b.WriteString("// Row types as the database returns them. A nullable column is `| null`\n")
-	b.WriteString("// rather than optional: the key is always present, its value may not be.\n")
-	for _, t := range tables {
-		d := details[t.Name]
-		if d == nil || len(d.Columns) == 0 {
-			continue
-		}
-		fmt.Fprintf(&b, "\nexport interface %s {\n", pascal(singular(t.Name)))
-		for _, c := range d.Columns {
-			typ := tsType(c.Type)
-			if c.Nullable {
-				typ += " | null"
+	flag := func(id string, given *bool, dst *bool) error {
+		opt, declared := spec.option(id)
+		if !declared {
+			if given != nil {
+				return ormRequestErrorf("option %q does not apply to the %s target", id, spec.label)
 			}
-			fmt.Fprintf(&b, "  %s: %s\n", tsPropertyName(c.Name), typ)
+			return nil
 		}
-		b.WriteString("}\n")
+		*dst, _ = opt.Default.(bool)
+		if given != nil {
+			*dst = *given
+		}
+		return nil
 	}
-	return b.String()
+	choice := func(id, given string, dst *string) error {
+		opt, declared := spec.option(id)
+		if !declared {
+			if given != "" {
+				return ormRequestErrorf("option %q does not apply to the %s target", id, spec.label)
+			}
+			return nil
+		}
+		*dst, _ = opt.Default.(string)
+		if given == "" {
+			return nil
+		}
+		if opt.Type == "select" {
+			values := make([]string, 0, len(opt.Choices))
+			for _, c := range opt.Choices {
+				if c.Value == given {
+					*dst = given
+					return nil
+				}
+				values = append(values, c.Value)
+			}
+			return ormRequestErrorf("%s must be one of %s", id, strings.Join(values, ", "))
+		}
+		*dst = given
+		return nil
+	}
+
+	for _, err := range []error{
+		flag("relations", r.Relations, &o.Relations),
+		flag("enums", r.Enums, &o.Enums),
+		flag("defaults", r.Defaults, &o.Defaults),
+		flag("views", r.Views, &o.Views),
+		flag("split", r.Split, &o.Split),
+		flag("jsonTags", r.JSONTags, &o.JSONTags),
+		flag("managed", r.Managed, &o.Managed),
+		flag("insertSchemas", r.InsertSchemas, &o.InsertSchemas),
+		flag("ifNotExists", r.IfNotExists, &o.IfNotExists),
+		flag("inputs", r.Inputs, &o.Inputs),
+		choice("naming", r.Naming, &o.Naming),
+		choice("nulls", r.Nulls, &o.Nulls),
+		choice("dates", r.Dates, &o.Dates),
+		choice("package", r.Package, &o.Package),
+		choice("prismaVersion", r.PrismaVersion, &o.PrismaVersion),
+	} {
+		if err != nil {
+			return ORMOptions{}, err
+		}
+	}
+	// A keyword fits the pattern and is not a name: `package func` does not parse.
+	if o.Package != "" && (!ormPackageRe.MatchString(o.Package) || token.IsKeyword(o.Package)) {
+		return ORMOptions{}, ormRequestErrorf("package must be a lower-case Go package name")
+	}
+	return o, nil
 }
 
-// tsPropertyName quotes a key that is not a bare JS identifier, rather than
-// renaming it: the key has to match what the database actually returns.
-func tsPropertyName(name string) string {
-	if name == "" {
-		return `""`
-	}
-	for i, r := range name {
-		ok := r == '_' || r == '$' ||
-			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(i > 0 && r >= '0' && r <= '9')
-		if !ok {
-			return fmt.Sprintf("%q", name)
-		}
-	}
-	return name
+// --- result ---------------------------------------------------------------
+
+// ORMFile is one generated file. The name is a bare file name the generator
+// chose, never a path taken from the request.
+type ORMFile struct {
+	Filename string `json:"filename"`
+	Content  string `json:"content"`
 }
 
-func GenerateZod(tables []Table, details map[string]*TableDetail) string {
-	var b strings.Builder
-	b.WriteString("// Generated by Just Dashboard from live database introspection.\n")
-	b.WriteString("// One schema per table, plus an `Insert` variant with the columns the\n")
-	b.WriteString("// database fills in made optional — which is the difference between a\n")
-	b.WriteString("// schema you can validate a row with and one you can validate a form with.\n\n")
-	b.WriteString(`import { z } from "zod"` + "\n")
+// ORMCounts says what went into the output, so the page can state "7 tables,
+// 2 enums" without parsing a language it does not know.
+type ORMCounts struct {
+	Tables    int `json:"tables"`
+	Views     int `json:"views"`
+	Enums     int `json:"enums"`
+	Relations int `json:"relations"`
+}
 
-	for _, t := range tables {
-		d := details[t.Name]
-		if d == nil || len(d.Columns) == 0 {
-			continue
-		}
-		name := pascal(singular(t.Name))
-		fmt.Fprintf(&b, "\nexport const %sSchema = z.object({\n", name)
-		for _, c := range d.Columns {
-			expr := zodType(c.Type)
-			if c.Nullable {
-				expr += ".nullable()"
-			}
-			fmt.Fprintf(&b, "  %s: %s,\n", tsPropertyName(c.Name), expr)
-		}
-		b.WriteString("})\n")
-		fmt.Fprintf(&b, "export type %s = z.infer<typeof %sSchema>\n", name, name)
+// ORMResult is a generation's whole answer. Schema and Filename repeat the
+// first file: they are what the route returned before a target could produce
+// more than one, and a caller that only knows those two still gets a complete
+// file.
+type ORMResult struct {
+	Target   ORMTarget `json:"target"`
+	Language string    `json:"language"`
+	Schema   string    `json:"schema"`
+	Filename string    `json:"filename"`
+	Files    []ORMFile `json:"files"`
+	Warnings []string  `json:"warnings"`
+	Counts   ORMCounts `json:"counts"`
+}
 
-		// The insert variant: anything with a default, or a single-column
-		// primary key the database generates, is optional on the way in.
-		pk := map[string]bool{}
-		for _, c := range d.PrimaryKey {
-			pk[c] = true
-		}
-		optional := []string{}
-		for _, c := range d.Columns {
-			if c.Default != "" || (len(d.PrimaryKey) == 1 && pk[c.Name]) {
-				optional = append(optional, fmt.Sprintf("%q", c.Name))
-			}
-		}
-		if len(optional) > 0 {
-			fmt.Fprintf(&b, "export const %sInsertSchema = %sSchema.partial({ %s })\n",
-				name, name, strings.Join(optional, ": true, ")+": true")
-		} else {
-			fmt.Fprintf(&b, "export const %sInsertSchema = %sSchema\n", name, name)
+// ormWarningCap bounds the warning list. A schema with a thousand expression
+// indexes should say so, not ship a thousand sentences to the browser.
+const ormWarningCap = 200
+
+// GenerateORMFiles renders a loaded schema for one target.
+func GenerateORMFiles(s *ORMSchema, o ORMOptions) (*ORMResult, error) {
+	spec, ok := ormTargetSpecFor(o.Target)
+	if !ok {
+		return nil, ormRequestErrorf("unsupported ORM target %q", o.Target)
+	}
+	if reason := ORMUnsupported(o.Target, s.Driver); reason != "" {
+		return nil, ormRequestErrorf("%s", reason)
+	}
+	g := newORMGen(s, o)
+	if len(g.models) == 0 {
+		return nil, ormRequestErrorf("%s", g.nothingToGenerate())
+	}
+	files := spec.generate(g)
+	if g.refusal != "" {
+		return nil, ormRequestErrorf("%s", g.refusal)
+	}
+	if o.Target != ORMSQL {
+		g.warnSkippedIndexes()
+	}
+	warnings := g.warnings
+	if len(warnings) > ormWarningCap {
+		more := len(warnings) - ormWarningCap
+		warnings = append(warnings[:ormWarningCap:ormWarningCap],
+			fmt.Sprintf("… and %d more notes like these.", more))
+	}
+	if warnings == nil {
+		warnings = []string{}
+	}
+	return &ORMResult{
+		Target: o.Target, Language: spec.language,
+		Schema: files[0].Content, Filename: files[0].Filename,
+		Files: files, Warnings: warnings, Counts: g.counts(),
+	}, nil
+}
+
+// GenerateORM renders a target with its default options from the structures
+// the rest of the package already introspects. It is the form the route used
+// before options existed, kept because it is also the shortest way to ask.
+func GenerateORM(target ORMTarget, driver Driver, tables []Table, details map[string]*TableDetail) (string, error) {
+	if !driver.IsSQL() {
+		return "", errors.New(ormNonSQLReason(driver))
+	}
+	if !target.Valid() {
+		return "", fmt.Errorf("unsupported ORM target %q", target)
+	}
+	opts, err := ORMRequest{Target: target}.Options()
+	if err != nil {
+		return "", err
+	}
+	res, err := GenerateORMFiles(NewORMSchema(driver, tables, details), opts)
+	if err != nil {
+		return "", errors.New(ORMRequestMessage(err))
+	}
+	return res.Schema, nil
+}
+
+// ormNonSQLReason is the refusal for an engine with no relational schema.
+// Mongo is rejected here rather than producing a misleading relational schema.
+func ormNonSQLReason(driver Driver) string {
+	if driver == DriverMongo {
+		return "ORM schema generation covers the SQL engines; use the connection's native tooling for MongoDB"
+	}
+	return fmt.Sprintf("ORM schema generation covers the SQL engines; %s has no relational schema to read", driver)
+}
+
+// ORMUnsupported returns why a target cannot be generated for an engine, or ""
+// when it can. A refusal is the answer here because the alternative is what
+// this code used to do — emit a PostgreSQL schema for a ClickHouse server — and
+// a file that looks right and is wrong is worse than no file.
+func ORMUnsupported(target ORMTarget, driver Driver) string {
+	if !driver.IsSQL() {
+		return ormNonSQLReason(driver)
+	}
+	spec, ok := ormTargetSpecFor(target)
+	if !ok {
+		return fmt.Sprintf("unsupported ORM target %q", target)
+	}
+	for _, d := range spec.engines {
+		if d == driver {
+			return ""
 		}
 	}
-	return b.String()
+	if reason := spec.refusals[driver]; reason != "" {
+		return reason
+	}
+	return fmt.Sprintf("%s cannot be generated for %s", spec.label, ormEngineName(driver, ""))
+}
+
+// ormEngineName is how an engine is named in a sentence.
+func ormEngineName(driver Driver, flavor string) string {
+	switch flavor {
+	case "cockroachdb":
+		return "CockroachDB"
+	case "mariadb":
+		return "MariaDB"
+	}
+	switch driver {
+	case DriverPostgres:
+		return "PostgreSQL"
+	case DriverMySQL:
+		return "MySQL"
+	case DriverSQLite:
+		return "SQLite"
+	case DriverMSSQL:
+		return "SQL Server"
+	case DriverClickHouse:
+		return "ClickHouse"
+	case DriverOracle:
+		return "Oracle"
+	}
+	return string(driver)
 }

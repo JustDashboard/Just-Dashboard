@@ -13,12 +13,37 @@ import (
 func TestExplainRefusesExecutionAndMultipleStatements(t *testing.T) {
 	for _, driver := range []Driver{DriverSQLite, DriverPostgres, DriverMySQL, DriverMSSQL, DriverOracle, DriverClickHouse} {
 		d, _ := DialectFor(driver)
-		for _, query := range []string{"SELECT 1; DELETE FROM t", "ANALYZE DELETE FROM t", "(ANALYZE) DELETE FROM t", "SELECT 1--1; DELETE FROM t", "SELECT $tag$; DELETE FROM t; $tag$", "SELECT 1 /* outer /* inner */; DELETE FROM t */", "SELECT 1 /*!; DELETE FROM t */", "SELECT 1 /*M!; DELETE FROM t */", "SELECT 1 /*m!; DELETE FROM t */"} {
+		for _, query := range []string{"SELECT 1; DELETE FROM t", "ANALYZE DELETE FROM t", "(ANALYZE) DELETE FROM t", "(VERBOSE, ANALYZE) DELETE FROM t", "SELECT $tag$; DELETE FROM t; $tag$", "SELECT 1 /* outer /* inner */; DELETE FROM t */", "SELECT 1 /*!; DELETE FROM t */", "SELECT 1 /*M!; DELETE FROM t */", "SELECT 1 /*m!; DELETE FROM t */", "SELECT 1 /*T![x]; DELETE FROM t */"} {
 			t.Run(string(driver)+"/"+query, func(t *testing.T) {
 				if _, err := d.ExplainPlan(context.Background(), nil, query); err == nil {
 					t.Fatal("unsafe statement was not refused before accessing the database")
 				}
 			})
+		}
+	}
+}
+
+// `--` directly before a character is a comment to five of the engines and two
+// minus signs to MySQL. Where it is a comment the statement ends there, and
+// what follows is never sent; where it is not, the text is refused rather than
+// read one way or the other.
+func TestDoubleDashIsReadAsEachEngineReadsIt(t *testing.T) {
+	const query = "SELECT 1--1; DELETE FROM t"
+	for _, driver := range []Driver{DriverSQLite, DriverPostgres, DriverMSSQL, DriverOracle, DriverClickHouse} {
+		st, err := explainStatement(driver, query)
+		if err != nil {
+			t.Fatalf("%s: %v", driver, err)
+		}
+		if st.SQL != "SELECT 1" {
+			t.Errorf("%s would send %q, want only the statement before the comment", driver, st.SQL)
+		}
+	}
+	for _, driver := range []Driver{DriverMySQL, ""} {
+		if _, err := explainStatement(driver, query); err == nil {
+			t.Errorf("%q: an ambiguous comment was accepted", driver)
+		}
+		if risk := ClassifyFor(driver, query); !risk.Destructive {
+			t.Errorf("%q: classified %+v", driver, risk)
 		}
 	}
 }

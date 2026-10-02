@@ -22,11 +22,15 @@
 #     pages span more than one section (`ui/`, `lib/`, `ChoiceCard`, the shell)
 #     would pick most of the suite for a change that seldom breaks more than
 #     its look, so it runs `design-system.spec.ts` and `navigation.spec.ts`
-#     instead, which open every page. Changed specs, and the specs of a changed
-#     fixture, run as themselves — a fixture followed through relative imports
-#     however deep, so a table under fixtures/proxy/ reaches the spec that
-#     imports proxy-fixtures.ts (`python3 scripts/test_test_changed.py`
-#     checks that) — and any UI change also runs the design-system spec.
+#     instead, which open every page. A module of one section that the shell
+#     reads as well (the Databases engine registry draws the rail) keeps that
+#     section's specs beside those two: its own pages are what it breaks
+#     first. Changed specs, and the specs of a changed fixture, run as
+#     themselves — a fixture followed through relative imports however deep,
+#     so a table under fixtures/proxy/ reaches the spec that imports
+#     proxy-fixtures.ts — and any UI change also runs the design-system spec.
+#     `python3 scripts/test_test_changed.py` checks the fixture's picking and
+#     the section's.
 #
 # Without [base], the base is whichever of origin/main and origin/patch/* the
 # branch is fewest commits ahead of — the branch it was started from.
@@ -64,11 +68,12 @@ if [ "${#changed[@]}" -eq 0 ]; then
 fi
 echo "Against $base: ${#changed[@]} changed files."
 
-# The pages and layouts under app/ that reach this file through `@/` imports,
-# the file itself included when it is one.
+# The pages and layouts under app/ that reach this file through imports — by
+# the `@/` alias or relative to the importing file — the file itself included
+# when it is one.
 pages_of() {
 	local -A seen=()
-	local queue=("$1") f spec
+	local queue=("$1") f spec module importer from
 	while [ "${#queue[@]}" -gt 0 ]; do
 		f=${queue[0]}
 		queue=("${queue[@]:1}")
@@ -81,6 +86,16 @@ pages_of() {
 		mapfile -t -O "${#queue[@]}" queue < <(
 			grep -rlF --include='*.ts' --include='*.tsx' "from \"@/$spec\"" frontend/src || true
 		)
+		# And through relative imports: the parts of the data grid and of the
+		# diagram name each other as "./values", and a change to one of them
+		# reaches a page only by way of the files beside it.
+		module=${f%.*}
+		module=${module%/index}
+		while IFS= read -r importer; do
+			while IFS= read -r from; do
+				if [ "$(normalise "$(dirname "$importer")/$from")" = "$module" ]; then queue+=("$importer"); fi
+			done < <(grep -oE 'from "\.\.?/[^"]+"' "$importer" | sed -E 's/^from "(.*)"$/\1/')
+		done < <(grep -rlE --include='*.ts' --include='*.tsx' "from \"\.\.?/([^\"]*/)?$(basename "$module")\"" frontend/src || true)
 	done
 }
 
@@ -90,6 +105,22 @@ address_of() {
 	path=${path%/*}
 	path=$(sed -E 's#/\([^)]*\)##g' <<<"$path")
 	echo "${path:-/}"
+}
+
+# The section a module is part of, for the directories that are one section's
+# own. The rail and the palette read the Databases engine registry, so a change
+# to it reaches every page — and it is still a database page it breaks first.
+home_section() {
+	case $1 in frontend/src/components/database/*) echo databases ;; esac
+}
+
+# Those of the pages given that are inside a section.
+pages_under() {
+	local section=$1 p
+	shift
+	for p in "$@"; do
+		if [ "$(address_of "$p" | cut -d/ -f2)" = "$section" ]; then echo "$p"; fi
+	done
 }
 
 # The specs naming an address. A `[segment]` matches whatever a spec puts
@@ -159,7 +190,9 @@ for f in "${changed[@]}"; do
 		sections=$(for p in "${reached[@]}"; do address_of "$p" | cut -d/ -f2; done | sort -u | wc -l)
 		if [ "$sections" -gt 1 ]; then
 			broad=1
-			continue
+			home=$(home_section "$f")
+			[ -n "$home" ] || continue
+			mapfile -t reached < <(pages_under "$home" "${reached[@]}")
 		fi
 		for p in "${reached[@]}"; do
 			mapfile -t -O "${#specs[@]}" specs < <(specs_naming "$(address_of "$p")" "$(basename "$p" .tsx)")

@@ -5,6 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ChevronLeft, ChevronRight, ChevronUp, Logout, MagnifyingGlass } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useCommandPalette } from "@/components/command-palette"
 import { Logo, LogoMark } from "@/components/logo"
@@ -28,6 +29,15 @@ import {
   type NavScope,
   type NavScopeEntry,
 } from "@/components/nav-scope"
+import { engineFor, sectionHref } from "@/components/database/engine"
+import { EngineGlyph } from "@/components/database/kit/engine-mark"
+import {
+  KNOWN_DATABASES_KEY,
+  databaseNavGroups,
+  knownDatabase,
+  type KnownDatabase,
+} from "@/components/database/shell/nav-groups"
+import { databaseIdFrom } from "@/components/database/shell/routes"
 import {
   Sidebar,
   SidebarContent,
@@ -170,10 +180,43 @@ function projectIdFrom(pathname: string): number | null {
 }
 
 /**
+ * A database's pages drawn from the route, for the paint before its layout
+ * has read the connection and registered the real panel.
+ *
+ * Which pages a database has depends on what it is, and the route does not
+ * say. The tab remembers: the name from the last list of connections, and
+ * what the server said it is and can do from the last time its pages were
+ * open. So a database opened before in this tab is drawn at once as itself —
+ * its name, its mark, its own pages in its own words — and the panel that
+ * registers is the one already on screen.
+ *
+ * Anything less gets no panel from here. An id the list did not hold may be
+ * a database made a moment ago, or an address that names nothing; one the
+ * list holds and nobody has opened is known only by its driver, and a
+ * MariaDB server drawn with the pages of MySQL would lose two of them when
+ * it registered. The section's own panel standing a moment longer is better
+ * than either.
+ */
+function databasePlaceholder(id: number, known: KnownDatabase): Panel {
+  const engine = engineFor(known)
+  return {
+    key: `scope:${sectionHref(id)}`,
+    named: true,
+    title: known.name,
+    mark: <EngineGlyph engine={engine} className="size-4" />,
+    groups: databaseNavGroups(engine.sections, (section) => sectionHref(id, section)),
+  }
+}
+
+/**
  * Every panel between the top-level list and where you are, outermost first.
  * The last of them is what the rail draws unless you are looking elsewhere.
  */
-function levelsFor(pathname: string, scope: NavScope | null): Panel[] {
+function levelsFor(
+  pathname: string,
+  scope: NavScope | null,
+  knownDatabases: Record<string, KnownDatabase>,
+): Panel[] {
   const levels: Panel[] = [ROOT, ...sectionsFor(pathname).map(fromSection)]
 
   const live = scope && navMatches(scope.path, pathname) ? scope : null
@@ -181,7 +224,12 @@ function levelsFor(pathname: string, scope: NavScope | null): Panel[] {
   else if (live) levels.push(fromScope(live))
   else {
     const project = projectIdFrom(pathname)
+    const database = databaseIdFrom(pathname)
     if (project !== null) levels.push(projectPlaceholder(project))
+    else if (database !== null) {
+      const known = knownDatabase(knownDatabases, database)
+      if (known?.flavor) levels.push(databasePlaceholder(database, known))
+    }
   }
   return levels
 }
@@ -195,7 +243,9 @@ export function AppSidebar() {
   const scope = useNavScopeValue()
   const marks = useNavMarksValue()
 
-  const levels = levelsFor(pathname, scope)
+  const [knownDatabases] = useSessionState<Record<string, KnownDatabase>>(KNOWN_DATABASES_KEY, {})
+
+  const levels = levelsFor(pathname, scope, knownDatabases)
   const chain = sectionsFor(pathname)
 
   // Looking elsewhere — back out a level, or into a group — is the one thing
@@ -371,9 +421,12 @@ export function AppSidebar() {
 /**
  * Whether a row inside a section panel is the page being looked at.
  *
- * An exact match, with one exception: a row whose href carries the section's
- * own state in the query string (the databases panel puts the connection
- * there) is the same page whatever that state says.
+ * An exact match of the path, with one exception: a row whose href carries
+ * the reader's place in its query string (a database's panel keeps the
+ * schema and the table there, so Schema opens on the table Data was showing)
+ * is the same page whatever that place is. A database's Home is
+ * `/databases/<id>` and its other pages hang off that path, which is why
+ * this is not a prefix match: Home is current on Home alone.
  */
 function isCurrent(item: NavScopeEntry, pathname: string) {
   const path = item.href.split("?")[0]

@@ -43,8 +43,32 @@
   forgotten (`forgetSessionState`/`forgetMemoryState` by prefix) when it is closed by hand, never by
   navigation; and `forgetWorkingState` empties both working stores on sign-out. `useQuerySelection`
   keeps a sheet's selection in the address bar and, per page and key, in the session store, so
-  arriving on the rail's bare link puts the last selection back with `replaceState`; the databases
-  layout does the same for `?conn=`, `?schema=` and `?table=`. Every route area was reviewed for this:
+  arriving on the rail's bare link puts the last selection back with `replaceState`. A database's
+  layout does the same for the reader's place inside it — `?schema=&table=`, `?db=&collection=` — per
+  database (`databases.<id>.place`, `database/shell/place.ts`): a page's address holds only what that
+  page can use, so the place the last address stated is kept, every link the shell builds
+  (`useDatabase().href`) carries the part its target can hold, and a bare address is completed from it.
+  Which database is the path (`/databases/<id>`), never remembered. Inside a database a page writes its
+  address through the layout's context and never with a `router.replace` of its own, which the
+  context's next write would undo: `useDatabase().select` replaces, with the writes made in one press
+  batched into one change and read back at once, and `goto` pushes. The shared keys are the selection
+  (`schema`, `table`; `db`, `collection`; `db`, `key`); what a page adds is its own view of it — a
+  filter list, a sort and a page on Data, an object and a view on Schema, a view strip's choice, an
+  open session or statement on Performance — so a pasted link opens on what was being looked at, and
+  opening a table, a key or a view is a history entry while narrowing one is not. A statement handed
+  to Query (`?sql=`, `?saved=`) is read once, opened in a tab of its own and taken out of the address.
+  The stores follow the same three lifetimes under one naming: arrangement is `useViewState` under
+  `databases.<area>.…` where it is the area's (a rail shown, a split's share, the last generator) and
+  `databases.<id>.<area>.…` where it is one database's (a page size, a column layout per table, saved
+  pipelines, the diagram's copy of an arrangement the server also keeps); work in progress is
+  `useSessionState` (`databases.<id>.query.tabs`, a new-table draft, the place, and the rail's memory
+  of the databases this tab has opened, `databases.known`, which holds names and so must not outlive
+  a sign-out); and whatever holds rows of data or a secret — a staged change set, what a tab ran,
+  unsaved Redis values, a console's transcript, staged document edits, a connect form's password — is
+  `useMemoryState` and never reaches Web Storage. One thing is kept beside the stores on purpose: a
+  change of power in flight is written to `sessionStorage` and told over a `BroadcastChannel`
+  (`jd.databases.power`, `database/home/power.ts`), so a reload, or another tab, shows a start or a
+  stop that is under way. Every route area was reviewed for this:
   filters, chips, facets, pagination, chosen sub-tabs, open detail rows, in-progress forms and the
   whole new-project flow are remembered; a search box is no longer the exception it used to be. A
   service's logs keep their reading — source, view, filter, lens, range, window — under the embedding
@@ -67,10 +91,29 @@
   after the server revokes sessions. `password_change_required` responses also return the shell to this
   flow; they never grant access to ordinary feature controls.
 - Database selection belongs to a specific query and result snapshot. Sorting, filtering, paging,
-  refreshing, and changing tables require a fresh selection. Row editors are bound to their original
-  connection and table. Exact integer/decimal SQL values and Redis scan cursors travel as strings;
-  `lib/db-values.ts` preserves precision and rejects non-finite ordinary numeric input. CSV exports
-  escape column names and carriage returns with the same rules as cell values.
+  refreshing, and changing tables require a fresh selection. A staged change set is scoped to one
+  connection and table (`useChangeSet({ scope })` in `database/grid/change-set.ts`): leaving the table
+  takes the set and its undo history with it, and the page asks before a dirty one is left. Exact
+  integer/decimal SQL values and Redis scan cursors travel as strings; `lib/db-values.ts` preserves
+  precision and rejects non-finite ordinary numeric input, the grid computes on them as strings
+  (`database/grid/decimal.ts`), and a JSON value is laid out and compared as text, token by token,
+  never through `JSON.parse`, so a `9007199254740993` goes back as it came. NULL is never drawn or
+  written as an empty string. CSV exports escape column names and carriage returns with the same
+  rules as cell values.
+- What a database engine is, the frontend knows in one module: `components/database/engine.ts`. It holds
+  how an engine is presented — its name and logo by flavour, the words it uses for its objects, which
+  page a capability opens, how a program connects to it — and states no capability: every flag comes from
+  the server's catalogue (`GET /databases/drivers`, per driver and per flavour) and, for one connection,
+  from its summary (`GET /databases/{id}`), resolved for the product that answered. A page asks
+  `engine.kind`, `engine.can(flag)`, `engine.has(section)` and `engine.nouns`; no other file decides from
+  a driver's name what an engine can do. What stays beside the pages is how an engine is *written*, which
+  no flag says: each dialect's quoting, keywords and diagnostic snippets for the editor
+  (`database/query/dialect.ts`, `keywords.ts`, `snippets.ts`), each engine's index methods and
+  foreign-key actions for the schema forms (`database/schema/engine-notes.ts`), and how each driver's
+  connection string spells TLS (`database/connect/dsn.ts`, beside `lib/db-dsn.ts`). The registry's tests
+  and the browser fixture read the catalogue from the file a Go test holds to the route
+  (`backend/internal/api/testdata/database-drivers.json`), so a capability given to an engine or taken
+  from one reaches the frontend's tests as the table the server really serves.
 - PM2 actions and deletes send both the trusted `daemonId` as `user` and numeric `id`, and a PM2
   application's logs are the `pm2:<daemon>/<id>/<name>` source on `/logs/stream` (`pm2Source`, the
   account and name escaped): the application name alone cannot identify a process across multiple

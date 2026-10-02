@@ -3,6 +3,8 @@ package dbx
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 )
 
 type postgresDialect struct{}
@@ -54,7 +56,8 @@ func (postgresDialect) Databases(ctx context.Context, db *sql.DB) ([]Database, e
 // by another session. PostgreSQL returns NULL for its size in that case.
 const postgresTablesQuery = `SELECT n.nspname, c.relname,
 	                CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view'
-	                               WHEN 'm' THEN 'materialized view' ELSE c.relkind::text END,
+	                               WHEN 'm' THEN 'materialized view'
+	                               WHEN 'p' THEN 'partitioned table' ELSE c.relkind::text END,
 	                COALESCE(c.reltuples::bigint, -1),
 	                COALESCE(pg_total_relation_size(c.oid), 0),
 	                COALESCE(obj_description(c.oid), '')
@@ -73,8 +76,39 @@ func (postgresDialect) Tables(ctx context.Context, db *sql.DB, schema string) ([
 	return scanTables(rows)
 }
 
-func (d postgresDialect) Columns(ctx context.Context, db *sql.DB, schema, table string) ([]Column, error) {
-	return infoSchemaColumns(ctx, db, d, schema, table)
+// Columns reads pg_attribute rather than information_schema.columns.
+//
+// The standard view reports an array as "ARRAY" and an enum, a domain or an
+// extension type as "USER-DEFINED", neither of which is a type anything can be
+// created with, and it does not list a materialized view's columns at all.
+// format_type is what psql prints: integer[], mood, character varying(255),
+// timestamp(3) with time zone.
+func (postgresDialect) Columns(ctx context.Context, db *sql.DB, schema, table string) ([]Column, error) {
+	rows, err := db.QueryContext(ctx, `SELECT a.attname,
+	                format_type(a.atttypid, a.atttypmod),
+	                NOT a.attnotnull,
+	                COALESCE(pg_get_expr(d.adbin, d.adrelid), ''),
+	                a.attnum
+	         FROM pg_attribute a
+	         JOIN pg_class c ON c.oid = a.attrelid
+	         JOIN pg_namespace n ON n.oid = c.relnamespace
+	         LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+	         WHERE n.nspname = $1 AND c.relname = $2
+	           AND a.attnum > 0 AND NOT a.attisdropped
+	         ORDER BY a.attnum`, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Column{}
+	for rows.Next() {
+		var c Column
+		if err := rows.Scan(&c.Name, &c.Type, &c.Nullable, &c.Default, &c.Position); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 func (d postgresDialect) PrimaryKey(ctx context.Context, db *sql.DB, schema, table string) ([]string, error) {
@@ -84,16 +118,37 @@ func (d postgresDialect) PrimaryKey(ctx context.Context, db *sql.DB, schema, tab
 // Indexes reads pg_index rather than information_schema, which has no index
 // view at all. unnest ... WITH ORDINALITY is what keeps a composite index's
 // columns in their declared order rather than alphabetical.
+//
+// An expression in an index has no attribute behind it, so it is rendered by
+// pg_get_indexdef rather than dropped — an index on lower(email) used to be
+// listed with no columns at all. Only the key columns are read: the ones an
+// INCLUDE clause carries along are payload, not part of what the index orders
+// or makes unique.
 func (postgresDialect) Indexes(ctx context.Context, db *sql.DB, schema, table string) ([]Index, error) {
-	rows, err := db.QueryContext(ctx, `SELECT i.relname, ix.indisunique, ix.indisprimary, a.attname
+	rows, err := db.QueryContext(ctx, `SELECT i.relname, ix.indisunique, ix.indisprimary,
+	                 COALESCE(a.attname, pg_get_indexdef(ix.indexrelid, k.ord::int, true))
 	          FROM pg_class t
 	          JOIN pg_namespace n ON n.oid = t.relnamespace
 	          JOIN pg_index ix ON t.oid = ix.indrelid
 	          JOIN pg_class i ON i.oid = ix.indexrelid
-	          JOIN unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
-	          JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+	          JOIN unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON k.ord <= ix.indnkeyatts
+	          LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum AND k.attnum > 0
 	          WHERE n.nspname = $1 AND t.relname = $2
 	          ORDER BY i.relname, k.ord`, schema, table)
+	if err != nil {
+		// indnkeyatts arrived in PostgreSQL 11. An older server still has
+		// indexes worth listing, without the distinction it cannot make.
+		rows, err = db.QueryContext(ctx, `SELECT i.relname, ix.indisunique, ix.indisprimary,
+		                 COALESCE(a.attname, pg_get_indexdef(ix.indexrelid, k.ord::int, true))
+		          FROM pg_class t
+		          JOIN pg_namespace n ON n.oid = t.relnamespace
+		          JOIN pg_index ix ON t.oid = ix.indrelid
+		          JOIN pg_class i ON i.oid = ix.indexrelid
+		          JOIN unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+		          LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum AND k.attnum > 0
+		          WHERE n.nspname = $1 AND t.relname = $2
+		          ORDER BY i.relname, k.ord`, schema, table)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -177,12 +232,12 @@ func (postgresDialect) BeforeDropColumn(context.Context, *sql.DB, string, string
 }
 
 // EXPLAIN without ANALYZE plans the statement and does not run it.
-func (postgresDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
-	checked, checkErr := ExplainStatement(query)
+func (d postgresDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
+	checked, checkErr := explainStatement(d.Driver(), query)
 	if checkErr != nil {
 		return nil, checkErr
 	}
-	query = checked
+	query = checked.SQL
 	return RunQuery(ctx, db, "EXPLAIN "+query, 500)
 }
 
@@ -274,3 +329,70 @@ func (d postgresDialect) DropDatabaseSQL(name string) ([]DropStatement, error) {
 // A session cannot drop the database it is in, and the one database every
 // Postgres install has is the maintenance one.
 func (postgresDialect) AdminDatabase() string { return "postgres" }
+
+// --- the workbench ---------------------------------------------------------
+
+func (postgresDialect) readScope() readScope { return readScopeTransaction }
+
+// textMatch uses ILIKE for the case-insensitive form, which can use a trigram
+// index where LOWER() on both sides cannot.
+func (d postgresDialect) textMatch(expr string, kind matchKind, fold bool, ph string) (string, func(string) string) {
+	if !fold {
+		return likeMatch(d, expr, kind, false, ph, likeEscape+"%_")
+	}
+	return d.CastText(expr) + " ILIKE " + ph + " ESCAPE '" + likeEscape + "'",
+		func(value string) string { return likePattern(value, kind, likeEscape+"%_") }
+}
+
+func (d postgresDialect) regexMatch(expr, ph string) string {
+	return d.CastText(expr) + " ~ " + ph
+}
+
+// rowEstimate is the planner's own figure. It is -1 for a table that has never
+// been analysed, which is the honest answer and is passed on as such.
+func (postgresDialect) rowEstimate(ctx context.Context, db *sql.DB, schema, table string) (int64, error) {
+	if schema == "" {
+		schema = "public"
+	}
+	var n int64
+	err := db.QueryRowContext(ctx, `SELECT COALESCE(c.reltuples, -1)::bigint
+	         FROM pg_class c
+	         JOIN pg_namespace n ON n.oid = c.relnamespace
+	         WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r','m','p')`, schema, table).Scan(&n)
+	if err == sql.ErrNoRows {
+		return -1, nil
+	}
+	return n, err
+}
+
+// keyExpr casts the types PostgreSQL defines no equality for. json is the one
+// people meet: jsonb compares, json does not.
+func (d postgresDialect) keyExpr(column Column, quoted string) string {
+	switch strings.ToLower(column.Type) {
+	case "json", "xml", "point", "line", "lseg", "box", "path", "polygon", "circle":
+		return d.CastText(quoted)
+	}
+	return quoted
+}
+
+func (d postgresDialect) byteLength(column Column, quoted string) (string, bool, error) {
+	if strings.EqualFold(column.Type, "bytea") {
+		return "octet_length(" + quoted + ")", false, nil
+	}
+	return "octet_length(" + d.CastText(quoted) + ")", false, nil
+}
+
+func (postgresDialect) explainSQL(_, statement string, opts ExplainOptions) (string, error) {
+	var options []string
+	if opts.Analyze {
+		// BUFFERS is what turns "this was slow" into "this read 40,000 pages".
+		options = append(options, "ANALYZE", "BUFFERS")
+	}
+	if opts.Format == ExplainJSON {
+		options = append(options, "FORMAT JSON")
+	}
+	if len(options) == 0 {
+		return "EXPLAIN " + statement, nil
+	}
+	return fmt.Sprintf("EXPLAIN (%s) %s", strings.Join(options, ", "), statement), nil
+}

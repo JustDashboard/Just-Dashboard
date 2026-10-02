@@ -44,9 +44,10 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
   builds before it builds, what would stop it or deserves a look is shown before Deploy is pressed,
   and a build that still fails names its cause and the setting that fixes it. Every release is
   immutable, so rollback reactivates what ran before. Web services get a health-gated cutover.
-- **Databases you can hand out.** Eight engines browsed, queried and diagrammed from one place. A
-  database started here gets a connection string, and one press opens it to the internet or
-  closes it again.
+- **Every database on the server, each as its own engine.** It finds what is here — in containers,
+  installed on the machine, a SQLite file on disk — and opens each one as what it is: a table editor
+  and a SQL editor for a SQL server, keys and a console for Redis, documents and pipelines for
+  MongoDB. Start one, connect one, mark one protected, back it up, hand out its connection string.
 - **Boards for the server you run.** Sketch with the bundled Excalidraw editor, keep multiple boards
   in the dashboard's own database, and place linked cards for this host, deployment projects and
   database connections. Changes save automatically; an older tab cannot silently replace a newer save.
@@ -215,17 +216,28 @@ health checks and runtime limits remain editable before the first deployment.
 
 ### Databases
 
-![A PostgreSQL database with its masked connection string, table sizes and connected applications](docs/databases.png)
+![A PostgreSQL database's home: live sessions, transactions and cache readings, an activity chart, what needs attention, the busiest statements and the largest tables](docs/databases.png)
 
-PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. The
-section opens on every database at once — which answer, what they take, who is connected, what
-each one feeds — with a map of the deployments, containers and machines reading them, and a
-database opens on its connection string, as the URL, the `.env` line or the shell command, on
-this server or, with one press, from anywhere. Browse and edit rows, change the structure, run
-queries, draw the schema, read the advisor's findings with their fixes, manage the server's
-accounts, databases and extensions, keep and restore dumps, and read the server's own log and the
-statements it recorded as slow. A database installed on the machine itself is connected by letting the
-dashboard make its own account on it.
+Every database on the server, not only the connected ones: containers running or stopped, servers
+installed on the machine and SQLite files on disk are found and listed, each saying what keeps it
+from being opened, and whatever needs attention carries its fix. PostgreSQL, MySQL and MariaDB,
+SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis are opened, and what answers behind them
+is named: TimescaleDB, CockroachDB, YugabyteDB, Percona, TiDB, Valkey, KeyDB, Dragonfly, FerretDB.
+A database has a home of live figures and only the pages and controls its engine has. SQL engines
+get a table editor whose edits are staged, reviewed as statements and applied in one transaction, a
+SQL editor with plans, a schema browser, a diagram, generated model code, and sessions, locks,
+maintenance and an advisor; Redis and its forks a key browser, a console that classifies each
+command before it is sent, and memory analysis; MongoDB documents, an aggregation builder, schema
+analysis and indexes.
+
+A connection marked **protected** refuses every change to its data or schema, for every role;
+reading, taking a dump and stopping a runaway query still work. A backup is a dump taken as a job;
+it can be downloaded, uploaded from elsewhere and restored into the same database — after a safety
+dump, if asked — or into a new one where the engine can make one. Accounts and their grants, the
+server's parameters and where a database is reachable from are edited on its own pages.
+`readonly` reads; `limited` also edits rows, runs statements that destroy nothing, imports, takes
+backups and starts a stopped server; deleting, dropping, stopping, restoring, connecting a database
+and changing accounts or settings are `admin`'s, and deleting a whole database asks for its name.
 
 ### And the rest
 
@@ -331,6 +343,7 @@ The installer writes the ones that matter. These are for tuning afterwards.
 | `JD_NGINX_DIR` | `/etc/nginx` | nginx configuration root. |
 | `JD_CADDYFILE` | `/etc/caddy/Caddyfile` | Caddy configuration file. |
 | `JD_BACKUP_DIR` | `/var/backups/just-dashboard` | Local backup destination and staging. |
+| `JD_DB_UPLOAD_MAX_MB` | `2048` | Largest file one database import or uploaded dump may be, in MiB. |
 | `JD_DATA_DIR` | `/var/lib/just-dashboard` | The dashboard's own database. **Back this up.** |
 
 **First run only**

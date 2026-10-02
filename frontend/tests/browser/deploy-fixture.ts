@@ -1167,7 +1167,7 @@ export const showcaseOperations: DeploymentOperations = {
         resourceId: "11",
         available: true,
         status: "jd-postgres",
-        deepLink: "/databases/connection?conn=11",
+        deepLink: "/databases/11/settings",
       },
       {
         kind: "database",
@@ -1175,7 +1175,7 @@ export const showcaseOperations: DeploymentOperations = {
         resourceId: "12",
         available: true,
         status: "jd-redis",
-        deepLink: "/databases/connection?conn=12",
+        deepLink: "/databases/12/settings",
       },
     ],
   },
@@ -1821,6 +1821,10 @@ const showcaseConnections: DbConnection[] = [
     user: "app",
     database: "app",
     createdAt: ago(800),
+    environment: "",
+    readOnly: false,
+    notes: "",
+    origin: "",
   },
   {
     id: 12,
@@ -1831,6 +1835,10 @@ const showcaseConnections: DbConnection[] = [
     user: "",
     database: "0",
     createdAt: ago(700),
+    environment: "",
+    readOnly: false,
+    notes: "",
+    origin: "",
   },
 ]
 

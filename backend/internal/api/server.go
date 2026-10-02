@@ -47,6 +47,10 @@ type Server struct {
 	databaseProvisionMu    sync.Mutex
 	databaseProvisionNames map[string]bool
 
+	// How the table exports each account started and named ended, for the
+	// page to ask after a download (handlers_db_transfer.go).
+	dbExports exportRegistry
+
 	// The dashboard's own address, for links that leave the dashboard
 	// (notifications, commit statuses). See dashboardEndpoint.
 	endpointMu       sync.Mutex
@@ -59,6 +63,10 @@ type Server struct {
 	// The GitHub accounts' own pictures, read once an hour per account.
 	avatars avatarCache
 
+	// What the database inventory last found on this machine, kept for the
+	// few seconds between two polls (handlers_db_inventory.go).
+	dbInventory dbInventoryState
+
 	// The reference a bare image id was created from, by image id, for
 	// choosing a container's log lens. The container list reports a moved
 	// tag's image as sha256:…, and a Postgres container read as an app is
@@ -68,6 +76,11 @@ type Server struct {
 	// Each database connection's logs as last resolved, by connection id,
 	// for the page's two polls to share (handlers_db_logs.go).
 	dbLogSourcesKept sync.Map
+
+	// What the connection routes remember between requests: each server's
+	// answer about what it is, its last fleet reading, and the unit it was
+	// last seen running under (handlers_db_connection.go).
+	dbConns dbConnState
 
 	modules moduleSet
 }

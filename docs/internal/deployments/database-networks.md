@@ -57,12 +57,16 @@ It reattaches the alias, repairs missing owned application attachments and recor
 old database with the alias or an unrelated alias owner blocks repair. Attach/detach/network mutations
 are audited without connection strings. Cancellation stops reconciliation with the server.
 
-`GET /deploy/{project}/environments/{environment}/database-links` reports the connection identity,
-its engine and database, hostname, network and last observation, scoped to that environment.
-Configuration → Dependencies shows these observations. Connected means the network binding was
-observed; it does not prove database schema or application health. Observations older than 30 seconds
-are marked stale. The database name is read from the sealed DSN the way every other database route
-reads it; a connection whose DSN no longer resolves keeps its row without that name.
+`GET /deploy/{project}/environments/{environment}/database-links` reports the connection identity, its
+engine and database, hostname, network and last observation, scoped to that environment. A project's
+Settings → Databases page shows these observations (`components/deploy/settings/databases.tsx`; the
+Runtime and Variables pages read the same route), and each linked connection there opens its database's
+own home, `/databases/<id>`. From the other side, the database's home lists what uses it and
+`/databases/map` draws every such link (`GET /databases/{id}/consumers`, `GET /databases/topology`).
+Connected means the network binding was observed; it does not prove database schema or application
+health. Observations older than 30 seconds are marked stale. The database name is read from the sealed
+DSN the way every other database route reads it; a connection whose DSN no longer resolves keeps its row
+without that name.
 
 A binding that reconciliation could not repair carries `detail`, the reason of the pass that failed —
 a replaced container that no longer matches the saved identity, an alias another container holds, a

@@ -13,6 +13,9 @@ type schemaQueries struct {
 	columns, primary, indexes, foreign string
 	action                             func(string) string
 	nullIndexColumns                   bool
+	// scanColumn reads a row of columns for an engine whose query is not in
+	// the standard seven-column shape, and returns the table it belongs to.
+	scanColumn func(*sql.Rows) (string, Column, error)
 }
 
 type catalogTable struct{ schema, name string }
@@ -28,7 +31,7 @@ func (c *schemaCatalog) Columns(ctx context.Context, db *sql.DB, schema, table s
 	if value, ok := c.columns[catalogTable{schema, table}]; ok {
 		return value, nil
 	}
-	return c.dialect.Columns(ctx, db, schema, table)
+	return tableColumns(ctx, db, c.dialect, schema, table)
 }
 
 func (c *schemaCatalog) PrimaryKey(ctx context.Context, db *sql.DB, schema, table string) ([]string, error) {
@@ -42,7 +45,7 @@ func (c *schemaCatalog) Indexes(ctx context.Context, db *sql.DB, schema, table s
 	if value, ok := c.indexes[catalogTable{schema, table}]; ok {
 		return value, nil
 	}
-	return c.dialect.Indexes(ctx, db, schema, table)
+	return tableIndexes(ctx, db, c.dialect, schema, table)
 }
 
 func (c *schemaCatalog) ForeignKeys(ctx context.Context, db *sql.DB, schema, table string) ([]ForeignKey, error) {
@@ -52,7 +55,23 @@ func (c *schemaCatalog) ForeignKeys(ctx context.Context, db *sql.DB, schema, tab
 	return c.dialect.ForeignKeys(ctx, db, schema, table)
 }
 
-func withSchemaCatalog(ctx context.Context, db *sql.DB, d Dialect, tables []Table, graph bool) *schemaCatalog {
+// catalogParts says which facts a bulk read fetches. Each caller asks for what
+// it draws: completion needs column names, the relations map needs foreign
+// keys, the diagram needs everything.
+type catalogParts uint8
+
+const (
+	catalogColumns catalogParts = 1 << iota
+	catalogKeys
+	catalogForeign
+	catalogEverything = catalogColumns | catalogKeys | catalogForeign
+)
+
+// errCatalogPartSkipped marks a part the caller did not ask for, which is left
+// unfilled exactly as a refused read is.
+var errCatalogPartSkipped = errors.New("not asked for")
+
+func withSchemaCatalog(ctx context.Context, db *sql.DB, d Dialect, tables []Table, parts catalogParts) *schemaCatalog {
 	c := &schemaCatalog{dialect: d, columns: map[catalogTable][]Column{}, primary: map[catalogTable][]string{},
 		indexes: map[catalogTable][]Index{}, foreign: map[catalogTable][]ForeignKey{}}
 	groups := map[string][]Table{}
@@ -71,7 +90,10 @@ func withSchemaCatalog(ctx context.Context, db *sql.DB, d Dialect, tables []Tabl
 				args = append(args, table.Name)
 				markers[i] = d.Placeholder(i + 2)
 			}
-			read := func(query string, scan func(*sql.Rows) error) error {
+			read := func(part catalogParts, query string, scan func(*sql.Rows) error) error {
+				if parts&part == 0 {
+					return errCatalogPartSkipped
+				}
 				if query == "" {
 					return nil
 				}
@@ -90,7 +112,15 @@ func withSchemaCatalog(ctx context.Context, db *sql.DB, d Dialect, tables []Tabl
 				return rows.Err()
 			}
 			columns := map[string][]Column{}
-			if err := read(queries.columns, func(rows *sql.Rows) error {
+			if err := read(catalogColumns, queries.columns, func(rows *sql.Rows) error {
+				if queries.scanColumn != nil {
+					table, column, err := queries.scanColumn(rows)
+					if err != nil {
+						return err
+					}
+					columns[table] = append(columns[table], column)
+					return nil
+				}
 				var table, nullable string
 				var column Column
 				var length, precision, scale sql.NullInt64
@@ -106,11 +136,8 @@ func withSchemaCatalog(ctx context.Context, db *sql.DB, d Dialect, tables []Tabl
 					c.columns[catalogTable{schema, table.Name}] = columns[table.Name]
 				}
 			}
-			if !graph {
-				continue
-			}
 			primary := map[string][]string{}
-			if err := read(queries.primary, func(rows *sql.Rows) error {
+			if err := read(catalogKeys, queries.primary, func(rows *sql.Rows) error {
 				var table, column string
 				if err := rows.Scan(&table, &column); err != nil {
 					return err
@@ -123,7 +150,7 @@ func withSchemaCatalog(ctx context.Context, db *sql.DB, d Dialect, tables []Tabl
 				}
 			}
 			indexes := map[string]*indexAcc{}
-			if err := read(queries.indexes, func(rows *sql.Rows) error {
+			if err := read(catalogKeys, queries.indexes, func(rows *sql.Rows) error {
 				var table, name string
 				var column sql.NullString
 				var unique bool
@@ -138,8 +165,14 @@ func withSchemaCatalog(ctx context.Context, db *sql.DB, d Dialect, tables []Tabl
 				}
 				if queries.nullIndexColumns {
 					indexes[table].add(name, "", unique, false)
+					ix := indexes[table].byKey[name]
 					if column.Valid {
-						indexes[table].byKey[name].Columns = append(indexes[table].byKey[name].Columns, column.String)
+						ix.Columns = append(ix.Columns, column.String)
+					} else {
+						// A key part with no name is an expression. It keeps
+						// its place so an index on (lower(b), a) is not read
+						// as an index on (a).
+						ix.Columns, ix.Expression = append(ix.Columns, "(expression)"), true
 					}
 				} else {
 					indexes[table].add(name, column.String, unique, false)
@@ -155,7 +188,7 @@ func withSchemaCatalog(ctx context.Context, db *sql.DB, d Dialect, tables []Tabl
 				}
 			}
 			foreign := map[string]*fkAcc{}
-			if err := read(queries.foreign, func(rows *sql.Rows) error {
+			if err := read(catalogForeign, queries.foreign, func(rows *sql.Rows) error {
 				var table, name, column, refSchema, refTable, refColumn, update, del string
 				if err := rows.Scan(&table, &name, &column, nullText{&refSchema}, &refTable, nullText{&refColumn}, nullText{&update}, nullText{&del}); err != nil {
 					return err

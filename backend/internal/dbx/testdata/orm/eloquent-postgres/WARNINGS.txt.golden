@@ -1,0 +1,8 @@
+One partition was left out: a partition holds a slice of its parent table's rows, and the parent is the model.
+public.measurements is a partitioned table. It is emitted as an ordinary model; its partitioning is not something this target can describe.
+public.audit_log has no primary key: the model reads rows, but find(), save() on an existing row and delete() will not work.
+public.measurements has a composite primary key, which Eloquent does not support: the model reads rows, but find(), save() on an existing row and delete() will not work.
+public.order_items has a composite primary key, which Eloquent does not support: the model reads rows, but find(), save() on an existing row and delete() will not work.
+public.shipments.order_id, line_no is a composite foreign key, which Eloquent relations cannot express; the relation was left out.
+Index customers_lower_email_idx on public.customers is over an expression and was left out; it still exists in the database.
+Index customers_active_idx on public.customers covers only some rows and was left out; it still exists in the database.

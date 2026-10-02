@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -124,6 +126,18 @@ func adoptRouter(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
 	s := testServer(t)
 	t.Cleanup(s.Shutdown)
+	// Adopting signs in before it saves. The container these tests adopt
+	// publishes 5432, and whatever really listens there on the machine running
+	// them is not theirs to send a login to: the sign-in is the test's own,
+	// and so is the machine's socket table.
+	s.dbInventory.dial = func(context.Context, dbx.Driver, string) error { return nil }
+	s.dbInventory.host = &dbInventoryHost{
+		listeners: func(context.Context) ([]proxysvc.Listener, error) { return nil, nil },
+		sockets: func(context.Context, func(string) bool) ([]proxysvc.UnixListener, error) {
+			return nil, nil
+		},
+		systemd: func() bool { return false },
+	}
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

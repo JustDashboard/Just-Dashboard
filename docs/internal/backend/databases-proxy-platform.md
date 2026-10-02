@@ -1,156 +1,325 @@
 # Databases, proxy, and platform services
 
-## Databases: eight engines, one shape
+## Databases: every database on the server, each engine as itself
 
-The query runner accepts one statement per request. A trailing semicolon and quoted semicolons are
-supported; executable/nested comments, ambiguous backslash escapes, hash comments, dollar quoting and
-ambiguous double-dash syntax are refused at this authorization boundary. Classification computes the
-strongest risk independently for each statement, so a recognized CREATE/INSERT cannot suppress an
-unknown operation's risk. Every dialect validates explain input as exactly one supported statement
-before adding its fixed plan syntax; user-supplied EXPLAIN/ANALYZE options and additional statements
-never reach the connection.
+The section is two things. For the machine it is an inventory: every database server, database file
+and data directory found here, connected or not, with what is known about each and what keeps the
+rest from being opened. For one database it is that engine's own control panel — a table editor, a
+statement runner, a schema browser and the server's operations for a SQL engine; keys, a console and
+the server's own figures for Redis; documents, pipelines and a command console for MongoDB. Nothing
+is offered for an engine that lacks it, and what an engine has is stated once, on the server (the
+capability table below), never by a page.
 
-SQL Server resets SHOWPLAN using a bounded cancellation-independent context, including after query
-failure. An uncertain enable/reset outcome discards the connection instead of returning its mode to
-the pool. PostgreSQL catalog size queries treat a concurrently dropped relation's NULL size as zero;
-the live regression holds an old catalog snapshot to exercise that case deterministically.
+`internal/dbx` is the engines: connections, dialects, statement classifiers, catalogue reads,
+discovery, dumps. `internal/api` is the routes. `handlers_db.go` mounts `/databases` behind the
+protected-connection guard, and each surface registers its own routes from its own file —
+`mountDatabaseAdminRoutes`, `…RedisRoutes`, `…MongoRoutes`, `…InventoryRoutes`, `…ConnectionRoutes`,
+`…WorkbenchRoutes`, `…SchemaRoutes`, `…OpsRoutes` and `…TransferRoutes` — grouped by the capability
+it needs. [Routes](#routes) lists every one with its capability, whether it is destructive, the
+action it is audited as and what a protected connection does with it. The pages over them are the
+`/databases/*` row of the [frontend feature map](../frontend/feature-map.md), and the checks that
+depend on what a request carries are stated once in
+[request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries).
 
-SQL integer values using a 64-bit driver representation and exact decimal values travel as decimal
-strings. SQL mutation JSON uses `DecodeJSONNumbers` (`UseNumber`) and binds exact numeric strings
-without an intermediate JavaScript/Go float. Query results and streamed exports also normalize nested
-ClickHouse integer arrays/maps and wide integer/decimal driver wrappers. Numeric JSON syntax is
-validated without parsing through float64, and clipboard SQL rejects invalid numeric literals.
-`TestSQLiteExactNumericMutationBrowseAndExport` and `TestLiveExactNumericMutations` exercise adjacent
-BIGINT keys beyond JavaScript's safe range through mutation, browsing and export; the latter verifies
-real PostgreSQL/MariaDB DECIMAL columns when their test DSNs are available. SQLite exact decimals
-require suitable storage (for example TEXT); values already rounded by SQLite's NUMERIC/REAL affinity
-cannot be recovered by the API. The Redis SCAN cursor is a decimal JSON string; requests
-parse it with `ParseUint` at 64 bits, preserving the full unsigned range and rejecting negative or
-overflowing cursors.
+### Engines, flavours and the capability table
 
-`internal/dbx` drives PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and
-Redis on pure-Go drivers, so the image still needs no CGO.
-
-Pool initialization is coordinated per connection ID. Dialing and pinging do not hold the manager's
-map lock, and waiters can cancel independently. Closing or editing a connection invalidates an
-initialization already in progress; its old credentials cannot publish a pool afterwards.
-Completion and diagram reads batch catalogue facts for up to 500 table names per query, with the
-diagram's existing 120-table cap applied first. Each dialect keeps its type spelling, key order and
-referential actions. A refused bulk read falls back to the existing per-table reads so restricted
-accounts retain partial results. Full table details and mutation preconditions use fresh dialect reads.
-
+- **Eight engines on pure-Go drivers**, so the image still needs no CGO: PostgreSQL, MySQL/MariaDB,
+  SQLite, SQL Server, ClickHouse and Oracle through `database/sql`, each behind its own `Dialect`,
+  and MongoDB and Redis through code of their own, because a key or a document is not a row and the
+  vocabulary is part of what makes each engine legible. A `Driver` (`postgres`, `mysql`, `sqlite`,
+  `sqlserver`, `clickhouse`, `oracle`, `mongodb`, `redis`) is how the dashboard talks to a server;
+  what the server *is* is its flavour, below. Discovery knows sixteen more products that no driver
+  here speaks to — Memcached, Elasticsearch, OpenSearch, etcd, Cassandra, ScyllaDB, Neo4j, InfluxDB,
+  CouchDB, RabbitMQ, NATS, Kafka, Qdrant, Meilisearch, Typesense and DuckDB
+  (`dbx/discover_engines.go`) — and lists one it finds with an empty `driver`: "there is a database
+  on this server that this page cannot show you" is a fact the operator is owed, where silence would
+  read as "there is none".
 - **`Dialect` is the whole abstraction**: driver name, quote character, bind marker, pagination tail,
   catalogue queries, DDL keywords, session list, size query — one method each, six implementations. The
   old shape was a `switch driver` inside a dozen functions; it worked at three engines and broke at seven,
   because a missed switch failed at runtime rather than compile time.
-- **Identifiers quoted, values bound, always.** `validateIdent` refuses only what quoting cannot fix (NUL,
-  control characters) rather than a conservative character class — a table called `user-profiles` was
-  listed and then refused to open. Row edits are scoped by primary key and refused without one, or an
-  UPDATE the caller thinks touches one row touches all of them.
-- `rowsql.go` is the one exception and does not generalise: it renders a row as an INSERT **for the
-  clipboard**. Nothing executes what it produces, and no code path may call it and then run the result.
-  `TestLiveRowInsertSQLQuoting` feeds `'); DROP TABLE …` to every live engine and checks the table stands.
-- **Reading is separated from running**: `dbx.Classify` decides destructiveness and fails closed; the
-  handler applies capability and budget by hand. Every dialect's `ExplainPlan` must describe a statement
-  *without executing it* — asserted in the interface, proved by `TestLiveExplainDoesNotExecute`.
-- **The diagnostic surface is what a data browser usually lacks.** `activity.go` lists what the server is
-  running now with the blocking session named, turning twenty "slow" sessions into one culprit, and can
-  stop one; it includes our own connections marked `self`, because hiding them made an idle server report
-  an empty table that reads as a broken query. `size.go` is the per-table breakdown for when the alert
-  fires and nobody knows which table grew (row counts are the engine's estimate — counting forty tables
-  exactly is a full scan to answer a question about *relative* size). `search.go` finds which table holds
-  a value, bounded three ways at once; those bounds are what make it safe to point at production.
-- **The export is the view, not the table.** `/databases/{id}/export` takes the grid's `filters`,
-  `orderBy` and `dir` and assembles the statement through the same `browseSelect` the page fetch uses,
-  so a download taken from a narrowed grid is that grid. It was an unconditional `SELECT * FROM`, which
-  made the panel's own promise — "applied on the server, across the whole table" — the reason the file
-  looked right. The filters are parsed **before** any response header is written: once the body has
-  started, a rejected filter can only arrive as JSON inside a file named `.csv`. `ExportTable` remains
-  as the unfiltered form. The row cap is still 100 000 and still reported only to the audit trail, so
-  the page states the cap in the menu item that spends it and sends it as the request's own `limit`.
-- **An unknown row count says so.** `Table.Rows` (`estimatedRows`) is `-1` where the catalogue has no
-  estimate — a table PostgreSQL has never analysed, a view, SQLite, which keeps no count at all — and
-  `>= 0` only where the engine actually answered. It used to be floored to zero in three dialects and
-  leaked a raw `reltuples` of `-1` in a fourth, so a catalogue that could not say how many rows a table
-  held was indistinguishable from one saying the table was empty, and every table in a fresh database
-  was drawn as having no rows. `Count` on request is the number that is true. The ClickHouse query casts
-  before it substitutes (`ifNull(toInt64(total_rows), -1)`): `total_rows` is `Nullable(UInt64)`, and asking
-  24.8 or 25.8 for a supertype of that and a signed literal is `NO_COMMON_TYPE`, which fails the whole
-  catalogue — 26.x accepts either form, so the version a contributor happens to run decides whether the
-  mistake is visible.
-- **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
-  connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
-  and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
-  read surface; saving and resetting need `service.control` (it is dashboard state, not database state,
-  so it is not in the destructive group) and are audited as `database.diagram.save` and
-  `database.diagram.reset`. The server checks only that the document is a JSON object under 512 KiB:
-  every field is a decision about a picture, and the diagram (`diagram/memory.ts`) is the only thing
-  that decodes it, with the browser's storage as a mirror for roles that cannot save.
-- **A dump for every engine with no external dependency.** Three have a client tool the image can carry;
-  the rest returned `ErrUnsupported` at the moment the operator pressed the button — the worst time to
-  learn a backup was never possible. `dump_sql.go` writes DDL then INSERTs over the open connection,
-  ordered so referenced tables come first (alphabetical fails on the first foreign key); `dump_nosql.go`
-  does Mongo and Redis as gzipped JSON Lines, Redis via `DUMP`/`RESTORE` so every type survives. A native
-  tool that *fails* falls through to the built-in rather than to an error. `dumpLiteral` is the second
-  place putting a value into SQL text (unavoidable — a dump is text) and is per-engine, since a backslash
-  escapes on MySQL and ClickHouse and is a plain character on the other four. `Restore` picks its reader
-  from the file's first bytes, not the driver: a Postgres connection may hold a `PGDMP` archive or our SQL.
-- **A dump the operator can take away, and a database they can remove.** The dump stays on the server
-  (restore reads it) and a copy goes to the browser immediately, because a backup whose only copy is on
-  the machine it protects is not one. `/databases/{id}/backup/download` takes a **name**, not a path, and
-  contains it with a `files.Service` scoped to that connection's dump directory — [invariant 6](../security/invariants.md#invariants-that-must-not-regress) with the
-  right root, since narrowing `JD_FILE_ROOTS` must not stop us handing back a file we wrote.
-  `DELETE /databases/{id}/database` needed `DropDatabaseSQL` and `AdminDatabase` (Postgres and SQL Server
-  refuse to drop the database the session is inside) and has no verb at all on two engines — a SQLite
-  database is a file to unlink, a Redis keyspace can only be emptied, which `DropResult.Gone` reports
-  rather than pretending. The connection is deleted with the database when it was that connection's own.
-  A managed deployment network binding blocks forgetting the connection or dropping its database before
-  data is changed; remove that network through deployment lifecycle first. The same route takes
-  `removeContainer: true`, which removes the Docker container behind the connection (found by its
-  published port at the saved loopback address) and the named volumes it mounted, without signing in —
-  the delete that still works when the stored password no longer matches, which is what a container
-  started over an older data volume produces. A compose-owned container is refused (`compose_managed`);
-  a volume another container uses is kept by Docker and reported as a warning, never forced.
-- **Where a database is reachable from is a reading and a switch, not a trip through three pages.**
-  `GET /databases/{id}/access` (admin) reports the container behind a connection, whether the sync
-  would re-adopt it (`detected` — the page draws no Remove row for one that would come straight back),
-  its exposure read off the port binding (`local`, `public`, `private`, `remote`), the machine's public
-  addresses and the firewall's part of the answer (present, on, an allow rule for the port from
-  anywhere, editable). `PUT /databases/{id}/access` with `exposure: local|public` recreates the
-  container through `dockerx.Recreate` with the one host address changed — the park-and-restore path
-  the Docker page uses, on the same named volume — then adds a `tcp` allow rule for the port where the
-  firewall is on and writable, or removes only the rule this dashboard wrote (matched by its
-  comment). It sits in the destructive group beside the Docker page's Recreate, is refused for a
-  compose-owned container, and audits as `database.access.change` with the binding before and after
-  and what the firewall did. Publishing a database port to every interface is the operator's explicit,
-  audited decision, the same one the Docker page already allows; invariant 7 is about what the
-  dashboard itself binds. `GET /databases/{id}/url?target=public` hands back the saved string with the
-  machine's public address (IPv4 preferred) in place of loopback, for pasting on another machine.
-- **A database made from the Databases page is reachable from anywhere unless the switch says
-  otherwise.** `POST /databases/provision` takes the same `exposure` (`provisionBinding`; empty means
-  `public`): the port is published on `0.0.0.0` and the same `setDBFirewall` opens it, with the
-  exposure, the firewall's word and any firewall error in the `database.server.provision` audit and in
-  the `202` reply (`firewallError` is surfaced as a warning by the dialog). The saved connection still
-  dials loopback — `hostAddress` maps a `0.0.0.0` binding to `127.0.0.1` — so the string under "From
-  anywhere" is the public-address form of the same row. Deployment quick setup sends `exposure: local`
-  because its database is reached over the deployment network.
-- **Live tests skip rather than fail**, or a suite failing for want of a database teaches people to ignore
-  it. Every bug this feature shipped was a catalogue query a unit test string-matched identically and only
-  the engine rejected — SQL Server refusing `ADD COLUMN`, a size query summing every index_id and
-  reporting four times the real size, Postgres's `now()` being the *transaction* timestamp and so
-  reporting a negative session age. Oracle has an optional live fixture using `JD_TEST_ORACLE_DSN`;
-  without a configured server, its unit coverage does not establish live-engine compatibility.
+- **A driver is a wire protocol; a flavour is the product behind it** (`dbx/flavor.go`: MariaDB, Percona
+  and TiDB behind `mysql`; Valkey, KeyDB and Dragonfly behind `redis`; TimescaleDB, CockroachDB and
+  YugabyteDB behind `postgres`; FerretDB behind `mongodb`; Azure SQL Edge behind `sqlserver`).
+  `dbx.DetectFlavor` and `VersionNumber` are pure functions over what the server said — its version
+  string, MySQL's `version_comment`, a Postgres database's extensions, the text of Redis `INFO`, the keys
+  of Mongo's `buildInfo` — and the probes that read those are `IdentifySQL`, `IdentifyRedis`,
+  `IdentifyMongo` and `ProbeIdentity`. The answer is kept per connection for ten minutes and outlives a
+  stop, so a stopped Valkey is still drawn as Valkey, and one that has stopped answering is too, in the
+  fleet as in its own summary.
+- **The capability table is stated once, on the server.** `dbx.Capabilities(driver, flavor)` is one
+  reading of what a product can be asked for; `GET /databases/drivers` serves it per driver and per
+  flavour, with the default port, a DSN example and the filter operators the engine's browse takes
+  (`dbx.FilterOpsFor`), and `GET /databases/{id}` serves it resolved for the flavour that answered, so
+  the page gates on what the server enforces and states nothing a second time. Every flag is stated once.
+  The ones more than one engine family answers for are rows of the table in `dbx/capabilities.go`
+  (`console`, `sessions`, `kill`, `cancel`, `settings`, `replication`, `export`…), where the SQL engines
+  answer from the interfaces their dialects implement (`OpsCapabilities`, `ExplainForms`) and Redis and
+  MongoDB are named beside them; the ones that belong to one surface are registered beside its code from
+  an `init` (`RegisterCapabilities`, in `discovery_`, `admin_`, `workbench_`, `catalog_`, `ops_`,
+  `redis_`, `mongo_`, `transfer_` and `orm_capabilities.go`). A registration replaces a row of the same
+  name for every engine, so a flag stated twice is a defect and `TestCapabilityTableIsCoherent` refuses
+  one. A flag is a yes or a no; a few are a list (`catalogGroups`, `ddlOperations`, `maintenanceActions`,
+  `ormTargets`, `exportFormats`, `importFormats`; empty and never null) or a word where a feature comes
+  in more than one form and `false` where the engine has none (`rowIdentity`, `returnsChangedRow`,
+  `readOnlyScope`, `importAtomic`, `json`, `hashFieldTtl`, `commandReference`). Two names that look alike
+  are two features: `cancel` stops what another session is running (`/activity/cancel`, `/mongo/killop`),
+  `queryCancel` stops a run the editor itself started (`/query/cancel`). `TestCapabilitiesPerEngine`
+  writes out who has each flag by hand, and `TestLiveCapabilityFlagsAnswerOnRealServers` holds a flag
+  that is true to a route that answers.
+- **The served table is also a file, and a test holds the two together.** The frontend's tests run
+  with no server, so what `GET /databases/drivers` answers is kept as
+  `backend/internal/api/testdata/database-drivers.json` — eight drivers, each with the same 117
+  flags (104 a yes or a no, seven a word, six a list) and its flavours' rows — which the engine
+  registry's tests (`frontend/src/components/database/engine.test.js`) and the browser fixture
+  (`frontend/tests/browser/database-fixture.ts`) read. `TestTheDriverCatalogueSnapshotIsCurrent`
+  fails the moment the route and the file differ. After giving a flag to an engine or taking one
+  away, write the file again from `backend/` and then run the frontend's tests against it:
+  `go test ./internal/api -run TestTheDriverCatalogueSnapshotIsCurrent -update-drivers`.
 
+### The inventory: what is on this machine
+
+The section used to list what somebody had connected. It now starts from the machine: the control
+center's "Found on this server" and the add flow's third way in are both this reading, and a server
+is connected by naming the instance found, not by typing its address again.
+
+- **Everything on the machine that holds a database is listed, connected or not.** `GET
+  /databases/inventory` answers `{instances, scans, ignored, detail, checkedAt}`. An instance
+  (`dbx.Instance`) is a server, a file, a data directory or a file embedded in a container, with a stable
+  `key` (`docker:<container>`, `compose:<project>/<service>`, `host:<unit>`, `host:<engine>:<port or
+  socket>`, `file:<path>`, `data:<path>`, `embedded:<container>:<path>`), its engine, driver (empty for a
+  product nothing here opens, which is listed all the same), flavour, state, endpoints, how its
+  credentials are known, why it was taken for what it is, and where it cannot be connected, the reason.
+  Classification is `dbx.Discover`, a pure function of facts; the collectors that read the machine are in
+  `api/database_inventory_*.go`, and each reports its own outcome in `scans`, so a missing Docker daemon
+  is a stated silence and never a failed request. Containers are read with `all=true` and recognised by a
+  ladder — image name, then the variables the stock image sets, then the command, and last a distinctive
+  port, labelled a guess and never connected unasked. Every rung is read against the program in the
+  command position (`readCommand`): a variable an image sets is inherited by everything built on it, so
+  it is believed only while the command names that engine's server or nothing but the image's own
+  entrypoint, and an image started as its own client (`psql`, `mongosh`, `redis-cli`) is not a server on
+  any rung. The in-container port and `--requirepass` are read from the command line only when it is the
+  server's. A container's key is settled before anything is recorded under it: a `docker compose run`
+  container is keyed by its own name, and a second container stating one service's labels falls back to
+  `docker:<name>`. Host servers are one instance per process with several endpoints (both loopback
+  families collapse; MySQL's X port and ClickHouse's HTTP port are side doors), matched on the exact
+  process name, joined to their unix sockets (`proxysvc.ListUnixListeners`) and their systemd unit. A
+  host server is keyed `host:<unit>` only under a unit named for its engine; under a supervisor's unit
+  (`supervisor.service`, `pm2-<user>.service`, `user@<uid>.service`) it is keyed by engine and port, has
+  no `host.unit`, and says in its evidence which unit runs it. Two host servers that still share a key
+  are numbered by address, not by process id, so a restart does not swap them. A MySQL data directory is
+  one only with the `mysql` schema directory beside `ibdata1` or `ib_buffer_pool`; an installed server
+  that is stopped is listed from its unit — including one that is disabled, which systemd unloads and
+  only its unit file names (`procs.ListInstalled`, `dbx.InstalledUnits`), and a stopped Debian PostgreSQL
+  cluster, found by its `/etc/postgresql/<version>/<name>` directory — and a cluster's port is read from
+  its `postgresql.conf`. Files are confirmed by their first sixteen bytes and never opened with a driver
+  to be listed; the walk is server-chosen roots through `files.Resolve`, bounded by depth, visits and
+  time, on a ten-minute cadence or `POST /databases/inventory/scan`. Where `JD_FILE_ROOTS` is narrower
+  than those roots — beneath `/home`, or beside all of them — the file roots themselves are walked: a
+  broad root above a file root is outside the roots as a whole, and the scan used to walk nothing and
+  list no file that `inventory/connect` would still take by its path. A file root with a broad root
+  inside it (`/`) is not walked from its top. A database kept in a container's own writable layer is
+  found through the Engine's diff and archive reads and listed as `embedded`, never connectable. The
+  route is on the read surface: for `system.admin` every container is inspected; for every other role
+  nothing is, and the list is a separate reading built from what those roles already see elsewhere
+  (`detail: "reduced"`). No reading carries a credential.
+- **Connecting is one explicit act about one instance.** `POST /databases/inventory/connect`
+  (`system.admin`) takes a key and, optionally, a name, user, password and database. The server looks
+  the instance up again, reads what its container states (a `*_FILE` secret is read from the container
+  at that moment), signs in, and saves only then, recording the key in `db_connections.origin`. It
+  never tries a server that needs a password without one: `409 credentials_required` names the
+  account, `409 sign_in_failed` carries the engine's own words when what the container states is
+  refused, `400 sign_in_failed` when what the operator typed is. The dashboard's own store is marked
+  `self`, refused with `409 self_database`, and refused again in `containDSN` whatever route offers it.
+  A user or database name is joined to a connection string only as a name: `dbx.BuildDSN` builds
+  nothing for one holding `?`, `/` or a control character (or `@`, `:` in a user), writes MySQL's
+  string with the driver's own `FormatDSN`, and a container whose environment states such a name is
+  listed and not connectable — a `?` in `MYSQL_DATABASE` would otherwise set driver options such as
+  `allowAllFiles` on a saved connection. Signing in to MongoDB with no account runs `listDatabases`,
+  because a ping is answered without authentication.
+  `POST /databases/inventory/ignore` records a key in `db_inventory_ignored`. `POST /databases/sync`
+  keeps its contract and now signs in before saving, records the origin, skips what is ignored and
+  reports it, and runs its host half with Docker absent; forgetting the last connection to a found
+  server marks it ignored (`ignoreOriginOnForget`), so it stays forgotten. It signs in four at a time
+  and remembers a refusal against what was tried (`database_inventory_signin.go`): the same container
+  stating the same credentials is not asked again until either changes or the operator connects it by
+  hand, a server that merely did not answer is retried after two minutes, and a sign-in the request
+  ran out of time for is reported as not tried. `/adopt`, `/host` and
+  `/host/grant` sign in the same way and match an existing connection by driver, address identity
+  (`dbx.AddressIdentity`: every loopback spelling is one place), database and user.
+- **What discovery never does.** It reports how an instance's credentials are *known* — `credentials` is
+  `env`, `args` or `secret-file` (the container states them: its environment, its command line, a file
+  its environment names), `open` (the server takes connections without any), `peer` (the engine admits
+  its own system account over its unix socket, so an account can be made from the host), `needed` or
+  `unknown` — and never the credential. It does not guess a password: a server that wants one is listed
+  as wanting one, and a sign-in is tried only with what the container itself states or the operator
+  typed. It does not open a file with a driver to find out what it is, and listing writes nothing to what
+  it finds: the only rows discovery writes are the dashboard's own (`db_connections` when a connection is
+  saved, `db_inventory_ignored`). How sure a classification is travels with it (`confidence`: `image`,
+  `fingerprint`, `command`, `port`, `process`, `socket`, `unit`, `magic`, `marker`), and `evidence` says
+  why in sentences that name variables and never their values. One reading of the machine answers for
+  twenty seconds (`dbInventoryFresh`), kept apart for administrators and for everybody else because they
+  are different readings, not one filtered into the other.
+- **Testing and saving a connection typed by hand.** `POST /databases/test` uses the same probe for every
+  engine (Redis used to be reported unreachable for having no SQL dialect), and `POST /databases/` takes
+  `probe: true` to dial before saving.
+- **An account made from the host.** `POST /databases/host/grant` (admin) is for the native
+  server whose password nobody knows — the apt-installed Postgres whose `postgres` role has never
+  had one. It runs the engine's client on the host through `hostexec`: `psql` as the host's
+  `postgres` account (looked up in the host's passwd, which is mounted at `/etc`, through
+  `setpriv`) over the Unix socket, where peer authentication admits it, with one `DO` block that
+  creates or resets the account (`format('%I … %L')`, so the server quotes both); `mysql`
+  (or `mariadb`) as root over the socket, making the account for both `localhost` and
+  `127.0.0.1`; `mongosh` under the localhost exception; `clickhouse-client` as `default`. Redis
+  has no accounts, so its `requirepass` is read from `/etc/redis/redis.conf` (or Valkey's).
+  The password is generated on the server unless supplied, reaches the client as one argv
+  element and never a shell, and the connection is probed over TCP before anything is saved;
+  an existing connection to the same server, database and account is re-sealed rather than
+  duplicated, and one to the same address as another account is left as it is. Audited as
+  `database.connection.host.grant` with the account and outcome, never the password.
+  `TestLiveHostPostgresAccount` exercises it as root against a real native server
+  (`JD_TEST_HOST_PG_PORT`).
+- **A database started from the dashboard stays on this server unless the request says otherwise.**
+  `POST /databases/provision` takes an `exposure`, the word the access route below takes
+  (`provisionBinding`; empty means `local`). The
+  default used to be every interface with the firewall opened for it, which is what happened to every
+  operator who did not read the switch, and the exposure the fleet then flags. `public` still publishes
+  on `0.0.0.0` and opens the port through the same `setDBFirewall`, with the exposure, the firewall's
+  word and any firewall error in the `database.server.provision` audit and in the `202` reply. The saved
+  connection dials loopback either way — `hostAddress` maps a `0.0.0.0` binding to `127.0.0.1`.
+  The templates are a closed, server-side list (`provisionTemplates`, offered in `provisionOrder`):
+  PostgreSQL, PostgreSQL with pgvector or PostGIS, TimescaleDB, MySQL, MariaDB, Redis, Valkey, KeyDB,
+  Dragonfly, MongoDB and ClickHouse. Each carries its own closed list of releases; a request names a
+  `version` from it and never an image reference, so what is pulled is always a reference written in
+  that file. `user` and `password` are optional: the account name is held to `provisionUserRe` (and may
+  not be `root` on MySQL or MariaDB, nor given at all to the password-only engines), a supplied password
+  to `provisionPasswordRe` — deliberately narrow, because it is written into a Redis configuration
+  line, a ClickHouse XML file and a MySQL DSN, and a character that means something in any of those is
+  refused rather than escaped three ways. A password the request did not supply is generated and never
+  returned. Every template's every release has to be one `dbx.Detect` recognises and reads the same
+  account back from (`TestProvisionTemplatesAreCoherent`), or the adopt that follows cannot connect it.
+  The Redis-protocol engines that do not read a password from their environment are started through a
+  constant bootstrap (`passwordProvisionBootstrap`) that writes a private configuration and removes it
+  first: the kernel refuses to reopen a file in `/tmp` that was handed to the server's account
+  (`fs.protected_regular`), and without the `rm` the container started once and died on every restart.
+
+### A connection: its record, its state and its power
+
+- **A connection is a thing with a state, not only a row.** `db_connections` carries what the operator
+  says about one — `environment` (a short tag), `read_only`, `notes` — beside what its DSN says, set
+  through `PUT /databases/{id}` field by field (a field left out keeps its value). `GET /databases/` and
+  the fleet list a row whose DSN no longer unseals or whose SQLite file left the file roots as `broken`
+  with the reason, instead of dropping it; `PUT` with a new DSN repairs one and `DELETE` forgets one.
+  Every data route under its id still fails, so the pages outside the section that pick from `GET
+  /databases/` — the backup job form, a deployment's database pickers and dependencies, the command
+  palette, the overview card — draw such a row as one that cannot be opened, with its reason, rather than
+  offer it (`frontend/src/lib/db-connections.ts`).
+- **Forgetting is one function, and it tells discovery.** A row is removed in one place,
+  `forgetConnection`, whichever road asked for it — forgetting the connection, dropping the database it
+  pointed at, removing the container that served it, removing a deployment's resources
+  (`deployment_resource_remover.go`): the row goes unless a deployment is bound to it, the pool is
+  closed, what was kept under the id is dropped, and discovery is told where the connection came from
+  (`originOfConnection` before the row goes, `ignoreOriginOnForget` after), so that when it was the last
+  connection to a found server the next sync does not connect the same server again. The audit entry of
+  the request that removed the row says when that happened: `origin` and `ignored: true` in the detail of
+  `database.connection.delete` and `database.drop`, `ignoredServers` in `deploy.resources.remove`. The
+  connection's JSON carries `origin`, the inventory key of the found server or file it was made from, and
+  `""` for one typed in by hand.
+- **One connection's summary.** `GET /databases/{id}` (read surface) is one connection's reading without
+  dialling any other: what the server says it is, whether it answers, where it runs, which power actions
+  apply, its exposure, bound deployments and the capability flags for its driver and flavour. Where the
+  server is a container, `container` also carries what it may use — `memoryLimit` in bytes, `cpuLimit` in
+  processors, each absent where there is none, and `restartPolicy` — under the names the Docker page's
+  own route uses, read for a stopped container too (one inspect; the listing inspects only the running
+  ones). It answers 200 for a stopped, unreachable or broken connection; those are states, not errors.
+- **Where a server runs is read off the machine each time** (`dbHostView.place`), never stored: the
+  container that publishes or answers at the address, then the
+  process listening on the port and its unit, then a stopped container whose configuration publishes that
+  port, then — for a native server that has stopped — a unit on evidence only: the one the connection was
+  last seen running under (kept in memory), or the engine's only unit when the connection is to the
+  engine's own port. A connection to another port that nothing answers on is a dropped tunnel or a
+  removed container; it is dialled, reads `unreachable`, and is given no unit, because what is decided
+  there is what Start starts. A container or unit known to be down is not dialled. One request reads the
+  listening sockets, the unit list and each stopped container's published ports once and shares them
+  across its connections (`dbHostView`).
+- **Power.** `POST /databases/{id}/power` `{action: start|stop|restart}` acts on that container
+  (`dockerx.Lifecycle`) or unit (`systemctl` on the host through `hostexec`, the unit name validated,
+  an argument vector). The route is in the `service.control` group; `stop` and `restart` additionally
+  need `destructive` and spend `destrLim`, checked by hand because they share the path with `start`.
+  A container is given `dbStopGrace` (90 s) to shut down before Docker kills it, not Docker's own ten —
+  a database answers SIGTERM by writing what it holds — and a request may ask for up to ten minutes
+  with `timeoutSeconds`. An action the summary does not offer for the state the server is in (restart
+  of a stopped one, start of a running one) is refused with `409 power_unavailable` before Docker or
+  systemctl is asked. systemctl is reached through `dbSystemctl`, which a test replaces.
+  Audited as `database.power.<action>`. It never guesses: a unit is taken for the server only when it
+  is named for the engine (what listens on a database's port may be an ssh tunnel, whose unit is
+  sshd's, or `docker-proxy`, whose unit is Docker's), a container found only by its port only when it
+  is the engine — by its image's name or, for a private build or a tag that has moved on, by what the
+  inventory read from its environment and command (a port alone never counts) — and a remote server or a file is refused with `409 power_unavailable` and the
+  reason the summary gave. A compose-owned container is not refused, as it is not on the Docker page:
+  nothing here recreates it. A stopped container is found again by the connection's `origin` (`docker:<name>`
+  or `compose:<project>/<service>`) before its published port is looked for.
+  **A change of power is read by everyone until it settles.** The request is slow by design and the
+  browser that sent it was the only one that knew it was happening, so the server keeps it
+  (`dbConnState.power`, in memory) and `GET /databases/{id}` and the connection's fleet entry carry
+  `inFlight: {action, since}`. It is held while the route is acting, whatever the server reads as —
+  a restart reads `running` before it has gone down — and after the route has answered until the
+  server reads the state the action leaves it in (`stopped` for a stop, `running` for a start or a
+  restart), or `dbPowerSettle` (a minute) has passed: a started container whose engine never answers
+  ends as `unreachable` with nothing in flight. An action that was refused or failed leaves none.
+  Reading is what ends a change, so nothing has to wake up to do it, and the fleet does not keep a
+  failed dial of a connection whose change is still held.
+- **Where a database is reachable from is a reading and a switch, not a trip through three pages.** `GET
+  /databases/{id}/access` (admin) reports the container behind a connection, whether the server is one
+  the sync would connect on its own (`detected`), whether this route can change the binding (`managed`: a
+  container that is not compose's and publishes the engine's port), its exposure read off the port
+  binding (`local`, `public`, `private`, `remote`), the machine's public addresses and the firewall's
+  part of the answer (present, on, an allow rule for the port from anywhere, editable). `PUT
+  /databases/{id}/access` with `exposure: local|public` recreates the container through
+  `dockerx.Recreate` with the one host address changed — the park-and-restore path the Docker page uses,
+  on the same named volume — then adds a `tcp` allow rule for the port where the firewall is on and
+  writable, or removes only the rule this dashboard wrote (matched by its comment). It sits in the
+  destructive group beside the Docker page's Recreate, is refused for a compose-owned container, and
+  audits as `database.access.change` with the binding before and after and what the firewall did.
+  Publishing a database port to every interface is the operator's explicit, audited decision, the same
+  one the Docker page already allows; invariant 7 is about what the dashboard itself binds. `GET
+  /databases/{id}/url?target=public` hands back the saved string with the machine's public address (IPv4
+  preferred) in place of loopback, for pasting on another machine.
+- **A database the operator can remove.** `DELETE /databases/{id}/database` needed `DropDatabaseSQL` and
+  `AdminDatabase` (Postgres and SQL Server refuse to drop the database the session is inside) and has no
+  verb at all on two engines — a SQLite database is a file to unlink, a Redis keyspace can only be
+  emptied, which `DropResult.Gone` reports rather than pretending. The connection is deleted with the
+  database when it was that connection's own. A managed deployment network binding blocks forgetting the
+  connection or dropping its database before data is changed; remove that network through deployment
+  lifecycle first. The same route takes `removeContainer: true`, which removes the Docker container
+  behind the connection (found by its published port at the saved loopback address) and the named volumes
+  it mounted, without signing in — the delete that still works when the stored password no longer
+  matches, which is what a container started over an older data volume produces. A compose-owned
+  container is refused (`compose_managed`); a volume another container uses is kept by Docker and
+  reported as a warning, never forced.
 - **The section opens on every database at once.** `GET /databases/fleet` dials every saved
   connection concurrently (six at a time, twelve seconds each) and hands back the row's facts with
-  what the server answered: reachable, version, latency, the database's size where the engine
-  reports one, its tables/collections/keys, sessions less this dashboard's own pool, where it runs
-  (`docker`, `host`, `remote`, `file` — read through the same `describeDBAccess` the Connection
-  page uses, so the two agree), its exposure, how many deployment environments are bound to it,
-  and when its newest dump landed. For an administrator it also lists what the sync would report
+  what the server answered: reachable, version, flavour, latency, the database's size where the
+  engine reports one, its tables/collections/keys, sessions less this dashboard's own pool, where it
+  runs (`docker`, `host`, `remote`, `file` — read through the same placement the connection's own
+  summary uses, so the two agree), its `state`, its exposure, how many deployment environments are
+  bound to it, and when its newest dump landed. Each entry also carries the summary's own `power`
+  (which of start, stop and restart the power route would take now, or the reason for none),
+  `managed` (whether the access route can change the port's reach) and `inFlight`, read off the
+  placement the entry already needed — no second look at the machine and no dial — so a card
+  offers what the connection's page offers without working either out again. A SQLite connection's
+  `bytes` is its file's size, to every role: its catalogue gives none, and the figure was known only
+  to whoever may read the inventory. A server whose container or unit is down is `stopped`
+  or `paused` and is not dialled; a row that cannot be opened is `broken` and listed all the same. A
+  dial's result is kept for ten seconds per connection (`fleetReadingFor`), under a lock held across
+  the dial, so several pages polling at once cost one connection rather than one each; a restart or
+  replacement of the container drops it. For an administrator it also lists what the sync would report
   and could not connect — a container with no reachable port, a native server waiting for a
-  password — read without writing anything. `GET /databases/topology` (and `/{id}/consumers` for
-  one connection) joins four sources into nodes and edges: `deploy_database_bindings` with the
+  password — read from the inventory's kept reading by the sync's rules (`undetectedServers`),
+  without dialling or writing anything: a stopped server, one the operator set aside and one
+  recognised only by its port are left out, as the sync leaves them alone.
+- **What feeds on what.** `GET /databases/topology` (and `/{id}/consumers` for one connection) joins
+  four sources into nodes and edges: `deploy_database_bindings` with the
   project and environment names, running containers whose environment names the server's
   address, container name, compose service or `db-N.jd.internal` alias (one concurrent inspect
   pass, eight at a time), compose-stack siblings and shared user networks (drawn dashed, as a
@@ -161,72 +330,706 @@ accounts retain partial results. Full table details and mutation preconditions u
   Fleet, topology and consumer reads reuse one Docker list and one inspection per container within
   their request, including the fleet's administrator-only discovery. Each request starts fresh; the
   snapshot is never used for access-changing actions.
+- **A failed dial never quotes the password.** What a failed dial said goes out through `connectError`,
+  which takes the connection's password out of it: a driver reports a connection string it could not use
+  by quoting it. That holds for every route that opens a connection of its own — the Redis and MongoDB
+  pages, the export and the import, a dump, a restore and a copy, the role and privilege routes,
+  maintenance, the drop, the probe every connect path runs (`connectFailed`, `withoutSecrets`) — and
+  `TestNoRouteQuotesAConnectionStringsPassword` asks every route under a connection, with a string its
+  driver refuses, and looks for the password in the answer, the audit trail, the log and the jobs it
+  started. It asks each route twice: with `{}`, and with a request written to pass that route's
+  validation (`dialingRequests`), because a route that reads its body before it dials is never put to the
+  test by an empty one — the privilege routes quoted a password for exactly that reason. The test lifts
+  the request budgets (`apiLim`, `destrLim`): several hundred requests from one account in a second were
+  being turned away at the door after the first hundred and twenty, and a `429` proves nothing. `GET
+  /{id}/url`, whose purpose is to hand the string to an administrator, is the one answer exempt.
+- **A failure is marked worth trying again only where it is** (`retryable` in the error envelope, which
+  is what the page's error state offers its retry on). `dbx.Unreachable` tells a server that was not
+  there to answer — refused, timed out, gone mid-reply, still starting (PostgreSQL's `57P03`, MySQL's
+  1040 and 1053, SQL Server's 18401, Redis's `LOADING`, MongoDB's shutdown and step-down codes, Oracle's
+  `ORA-01033` and the listener's) — from one that answered no: a wrong password, an unknown database, a
+  privilege the account lacks, a connection string nobody could parse. It reads each driver's own error
+  type, and a transport error's, before it reads any words. `connectFailed` marks the first kind for
+  every route, since nothing has been asked of a server that could not be opened; `queryFailed` marks it
+  for a read (`502 query_failed`), Redis's and MongoDB's reads included (`redisFail`, `mongoReadFailed`).
+  A write is never marked: its reply may be what was lost.
+  `TestLiveAReadWhoseServerWentAwayIsWorthAskingAgain` takes each engine's server away behind an open
+  pool, and `TestLiveAWrongPasswordIsNotWorthAskingAgain` has each refuse a login.
+- **Redis is read in the database its connection string names.** A Redis connection is pinged, tested,
+  summarised and read for the fleet in the logical database its connection string names
+  (`dbx.RedisDSNDatabase`), which is where every key route goes: a string naming a database the server
+  does not have used to test healthy and then fail each of them.
+- **Reads that leave the server leave a trail.** `GET /databases/{id}/url`, `/search` and
+  `/backup/download` are written to the audit log with `recordRead`, as `database.connection.reveal`,
+  `database.search` and `database.backup.download`, before the read runs. They used to call
+  `SetAudit`, which does nothing on a GET. `recordRead` writes on a context that outlives the request,
+  so a client that drops the connection does not take the entry with it. `GET /databases/{id}/export`
+  writes its own two entries through `recordTransfer`, which records on a context of its own for the
+  same reason: `database.export` before the first row leaves, and `database.export.finished` with the
+  rows sent and whether it was cut short, recorded as a failure (`502`, with the error) when the
+  stream broke.
+- **One pool per connection, opened once.** Pool initialization is coordinated per connection ID. Dialing
+  and pinging do not hold the manager's map lock, and waiters can cancel independently. Closing or
+  editing a connection invalidates an initialization already in progress; its old credentials cannot
+  publish a pool afterwards.
+
+### Protected connections
+
+A dashboard that can edit a row can edit the wrong row, and the connection it happens on is always
+the one that mattered. Marking a connection protected is one field of its record (`readOnly` on
+`PUT /databases/{id}`, `read_only` in the store); taking the mark off is the same request. The rule
+itself is stated in [request lifecycle](../architecture/request-lifecycle.md#protected-connections);
+this is how it is built, and the Protected column of [Routes](#routes) gives every route its answer.
+
+- **One middleware, and an allowlist.** With `read_only` set, one middleware in front of every database
+  route (`protectReadOnlyConnections`, `handlers_db_protect.go`) refuses each request under
+  `/databases/{id}` that is not a `GET`, `HEAD` or `OPTIONS` with `409 connection_read_only`, for every
+  role, unless its route is on the list in that file (`protectedRoutesAllowed`). It is an allowlist so
+  that a mutating route added later is refused until somebody decides otherwise, and
+  `TestProtectionCoversEveryMutatingRoute` walks the real router against a second list written out by
+  hand that gives every such route its answer (`protectedRouteVerdicts`); a route on neither list fails
+  the test and is refused all the same.
+  - *Always let through*, because they do not change the database: the connection's own record,
+    power and reachability; taking a dump, adding one made elsewhere and deleting one, which are
+    files on this machine (`/backup`, `/backups/upload`, `DELETE /backups`); saved queries and the
+    diagram's arrangement; the POSTs that only read (`/classify`, `/orm`, `/rows/sql`,
+    `/redis/classify`, MongoDB's find, count, document, explain, aggregate preview, schema,
+    validation check and command classify); and stopping work in flight, which changes no data and
+    is what the operator of a production server most needs to be able to do (`/query/cancel`,
+    `/activity/cancel`, `/activity/kill`, `/redis/clients/kill`, `/mongo/killop`).
+  - *By content.* `/query`, `/script`, `/explain` with `analyze`, and `/export/query` are let through
+    when every statement classifies as a read by the rules of the connection's own engine
+    (`dbx.ClassifyFor`: what one engine takes for a string another takes for the end of one, and
+    `SELECT … INTO`, a `WITH` that leads into a `MERGE` or an `INSERT`, and `INTO OUTFILE` are not
+    reads). `/changes` when it is a dry run, which renders the statements and runs none.
+    `/maintenance` when the action is one the engine's list marks `readOnly`, a consistency check.
+    `/redis/command` when the dashboard's own table calls the command a read — the handler asks
+    again once the server has said what the command is there — and `/keys/bulk` when it is a dry
+    run. `/aggregate` and `/mongo/command` when MongoDB's own classifier calls the pipeline or the
+    command a read, and `PATCH`/`DELETE /mongo/documents` when they only count. Each check judges
+    the body as the handler's decoder will read it: either through `protectedFields`, which folds
+    names as encoding/json does and refuses a field named twice or with a letter outside ASCII and
+    any field it does not recognise that could hold a statement, or by decoding into the handler's
+    own request type with the handler's own decoder (`protectedBody`).
+  - *Shown, not run.* A schema form asked for its statement (`/ddl/*?preview=1`) is let through:
+    `runDDL` answers a preview before it executes. The flag is in the address, so it is asked in the
+    middleware itself and not by a check of the body; no other route is opened by it.
+  - *Refused*: rows, structure, imports, a restore, a copy, the drop, roles, privileges, settings,
+    extensions, keys, streams, ACL users, documents, collections, indexes, validation rules, the
+    profiler, a statistics reset.
+  It guards the dashboard's own controls and is as strong as the classification — a `SELECT` that
+  calls a function which writes passes; it is not a sandbox around the server. Restoring a backup
+  run into a connection goes through `/backups`, outside `/databases/{id}`, and is held to the same
+  answer: `handleBackupRestoreDatabase` refuses a protected connection with the same `409`, and the
+  adapter behind it (`backupDatabaseDumper.RestoreDatabase`) refuses again whoever calls it.
+  - *Protection follows the server* where a request reaches past the connection it was addressed
+    to. The mark is on one saved connection, but an account is the server's and a restore or a drop
+    can name another database, so the handlers that do either ask
+    `protectedNeighbour` (`handlers_db_protect.go`) first — every protected saved connection to the
+    same engine at the same address, compared as an identity (`localhost` is `127.0.0.1`):
+    - *Its account* is not changed through anything else. `POST /databases/host/grant` refuses to
+      reset the account a protected connection signs in with **whichever database the request
+      names** (`refuseGrantOnProtected`; it used to match the database too, so a request naming
+      another one, or none, reset the account and made it a superuser). `PUT` and `DELETE
+      …/server/roles/{name}`, MongoDB's `PUT /mongo/users`, `POST /mongo/users/revoke` and `DELETE
+      /mongo/users`, and Redis's `PUT`/`DELETE /redis/acl/{name}` refuse the same account through a
+      neighbouring connection (`refuseNeighbourAccount`), before anything is dialled. A Redis
+      connection that names no user signs in as `default`.
+    - *Its database* is not replaced or removed through a neighbour. `POST /{id}/restore` with
+      `database`, `DELETE /{id}/database` with `database`, and `POST
+      /backups/runs/{runID}/restore-database` with `database` are refused with `409
+      connection_read_only` when a protected connection is on that database
+      (`refuseDatabaseOfProtected`); `removeContainer` is refused while a protected connection is on
+      any database of that server (`refuseServerOfProtected`). A Redis archive restored with no
+      database named writes into the numbered databases its header lists, not into the
+      connection's own, so those are the ones asked about (`restoreDestinations`,
+      `dbx.RedisArchiveDatabases`) — and the ones the job reports as `database` (`"8"`, `"0,3"`).
+    - *Not followed*: a row whose connection string no longer opens has no address to compare, and
+      a SQLite file has no neighbours. Two saved connections to the **same** database, one
+      protected and one not, are two decisions by the operator: the unprotected one's own routes
+      work on it. Granting, creating a database and settings through a neighbour are not held
+      back; they take nothing from the protected connection.
+    `TestAProtectedDatabaseIsNotReplacedOrDroppedThroughANeighbour`,
+    `TestARedisRestoreIsHeldToTheDatabasesItsArchiveNames` and
+    `TestAProtectedConnectionsAccountIsNotChangedThroughANeighbour` hold each route to it.
+
+### The query runner
+
+Reading is separated from running: `dbx` decides destructiveness by the rules of the connection's engine
+and fails closed (`ParseScript` gives every statement its `Risk`; `ClassifyFor` is the strongest of them
+over a whole text), and the handler applies capability and budget by hand (`authoriseSQL`, shared by the
+query, script and analysed-plan routes). Every dialect's `ExplainPlan` must describe a statement *without
+executing it* — asserted in the interface, proved by `TestLiveExplainDoesNotExecute`.
+
+The query runner reads SQL with one lexer per engine (`dbx/sqltoken.go`), and splitting, the leading
+word, the row-returning test and the plan gate all read its tokens — there used to be a splitter and a
+separate comment stripper, and text one called a comment the other called code. Each engine is read its
+own way (a backtick is a quote on MySQL and an operator on PostgreSQL; `#` is a comment on MySQL, a JSON
+operator on PostgreSQL, part of a name on SQL Server and Oracle; PostgreSQL's `$tag$…$tag$` bodies are
+read by PostgreSQL's own rule). What depends on something the text does not say is refused: a quote an
+odd run of backslashes would escape, an executable or nested comment, a bare carriage return inside a
+line comment, a NUL, `--x` on MySQL, Oracle's `q'[…]'`, a `$` or a typographic quote on ClickHouse. A
+refusal classifies as destructive. A statement is sent from its first token to its last, so the
+comments around it never reach the engine.
+
+Below "high" a statement must be one whose leading verb is fully known: a read, an `INSERT`, or a
+`CREATE` of a table, index, view, schema, sequence or type — what the row and schema forms offer at
+the same capability. Merely containing `INTO`, `CREATE` or `INSERT` buys nothing: `VACUUM INTO`,
+`LOAD DATA … INTO TABLE`, `CREATE DATABASE`, `CREATE EXTENSION` and ClickHouse's `INSERT INTO
+FUNCTION` are high. On PostgreSQL a `U&"…"` identifier is high as well, since it can name a server
+function without spelling it. The Redis console applies the same rule to options: `XADD` is judged up
+to its entry id whatever options precede it, `HSETEX`/`HGETEX` wherever their expiry stands, and an
+expiry that cannot be read as a number is dangerous. A dump's database name may not contain `=` or
+begin with `postgres://`, which `pg_dump` would read as a connection string of its own; a connection
+string written as pairs (`host=… password=…`, `server=…;password=…`) is parsed as pairs, never
+passed through as a name.
+
+Classification is per statement and keeps the strongest verdict. The shape (leading word, `WHERE`,
+`RETURNING`) comes from the tokens; the *verbs* are looked for in the statement's raw text, quoted
+text and comments included, so no disagreement about where a quote ends can put one out of sight —
+it over-reports instead (`SELECT 'delete'` is destructive), which is the direction it may be wrong in.
+A dollar-quoted body is at least `high`. SQL Server needs no separator between statements, so there
+any batch keyword anywhere (`EXEC`, `SET`, `BEGIN`…) ends a statement's claim to be a read. What
+replaces rather than adds (`REPLACE INTO`, `… OR REPLACE`), what creates an account, and a PostgreSQL
+function that acts on the server (`pg_terminate_backend`, `lo_export`, `dblink`…) are `high` too: the
+console must not be a cheaper way to do what the kill and drop routes charge for.
+
+A statement classified `read` runs inside the engine's own read-only scope (`dbx/run.go`), so a wrong
+verdict fails instead of writing: a read-only transaction on PostgreSQL, a read-only *session* on
+MySQL/MariaDB (`START TRANSACTION READ ONLY` lets DDL through — it commits implicitly first),
+`query_only` on SQLite, `readonly=2` sent with the query on ClickHouse, and on SQL Server — which has
+none — a transaction that is always rolled back, so a write there succeeds and is undone rather than
+refused. Oracle's read-only transaction is not used: a schema change commits the moment it runs and
+ends the transaction that was meant to refuse it (found live — `CREATE TABLE` and `DROP TABLE` both went
+through), and a table created or altered a few seconds ago cannot be read inside one at all
+(ORA-01466), which failed the last line of every script that makes a table and reads it. What Oracle
+does guarantee is that a query changes no data (DML inside one is ORA-14551), so its scope is that
+nothing but a query is sent: `beginsAsQuery` reads the characters of the text itself — not the lexer's
+or the classifier's reading of it, which is what the scope exists to distrust — and anything that does
+not begin with `SELECT` or `WITH` is refused before it reaches the engine, inside a transaction that is
+rolled back. A ClickHouse account may refuse the setting for two opposite reasons, and the refusals
+read alike, so the server is asked which (`clickhouseReadScope`): an account it already holds to reads
+runs under that limit, and one whose profile pins `readonly` at writable has no scope, so a statement
+called a read is not run on it at all. The scope each engine gives is the capability `readOnlyScope`
+(`enforced`, or `rollback` on SQL Server).
+
+Anything that is not a read runs on a connection of its own that is closed afterwards rather than
+pooled, because a pooled connection carries a `SET`, an open transaction or a temporary table into
+somebody else's request. So is one whose statement was cancelled part-way: Oracle's driver leaves the
+interruption behind for the next statement on that connection to receive.
+
+`POST /databases/{id}/query` takes exactly one statement. `POST …/script` takes several: one
+connection, in order, stop at the first error, optionally one transaction, one result per statement,
+and the capability is decided by the worst statement in it. Both accept a client-chosen `queryId`
+that `POST …/query/cancel` stops; the entry exists only while its request is open, and the statement
+is stopped on the server (MySQL needs a `KILL QUERY` from a second connection; the other drivers
+cancel on the wire). Every dialect validates explain input as exactly one supported statement before
+adding its fixed plan syntax; user-supplied EXPLAIN/ANALYZE options never reach the connection.
+`analyze: true` on `POST …/explain` executes the statement, so the handler asks of it what the query
+route would, and a data-changing statement is measured inside a transaction that is rolled back.
+MySQL from 8.3 gives a measured plan as JSON only in the second version of its JSON plan, so the
+session is set to it first (`mysqlDialect.preparePlan`, `explain_json_format_version = 2`) and is
+not returned to the pool, where it would change the shape of the next request's plain plan; an
+older MySQL has no such variable and its own refusal of the combination is the answer.
+
+SQL Server resets SHOWPLAN using a bounded cancellation-independent context, including after query
+failure. An uncertain enable/reset outcome discards the connection instead of returning its mode to
+the pool.
+
+What a run leaves behind is the dashboard's own: `GET …/history` is the connection's last hundred
+statements with their risk, duration, row counts and the engine's error text (`db_query_history`), and
+a saved query
+(`GET`/`POST …/queries`, `PUT`/`DELETE …/queries/{qid}`, `db_saved_queries`) is dashboard state, so it
+stays editable on a protected connection.
+
+### The table editor: rows, values and cells
+
+- **Identifiers quoted, values bound, always.** `validateIdent` refuses only what quoting cannot fix (NUL,
+  control characters) rather than a conservative character class — a table called `user-profiles` was
+  listed and then refused to open.
+- **The grid's question is the server's statement.** `GET /databases/{id}/browse` takes `filters`
+  (a JSON list of `{column, op, value | values}`, twelve at most), `match=any` to join them with OR,
+  `sort` as several keys, `columns` as a projection, and `limit`, which is clamped to
+  `MaxBrowseRows` (1000; 100 when absent) rather than reset to the default. The primary key is
+  appended to whatever order was asked for as a tie-break, because paging with ties in the order is
+  undefined on every engine: two pages of one sort could show a row twice or skip it. The operators
+  are one list, `dbx.FilterOps` — `eq`, `ne`, `lt`, `lte`, `gt`, `gte`, `in`, `not_in`, `between`,
+  `contains`, `not_contains`, `icontains`, `prefix`, `suffix`, `is_null`, `not_null` — plus `regex`
+  where the dialect is a `regexMatcher` (`FilterOpsFor`; PostgreSQL, MySQL/MariaDB, ClickHouse and
+  Oracle, flag `regexFilter`), served per driver as `filterOps` so the page keeps no second copy
+  that can drift from what the server accepts. A substring operator matches its text as text: `%`
+  and `_` are escaped (`likePattern`), with one escape character on every engine since a backslash
+  means one thing on MySQL and another under `NO_BACKSLASH_ESCAPES`. An in-list holds at most
+  `MaxFilterValues` (200); past that the operator wants a query. One row more than the page is asked
+  for and dropped, which is how `truncated` comes to mean "there is another page" without a count,
+  and the page carries the table's `primaryKey` and the catalogue's `estimatedRows` beside its rows,
+  so one request answers what the grid shows around them. `GET …/count` is the exact figure, on
+  request, under the same filters.
+- **An unknown row count says so.** `Table.Rows` (`estimatedRows`) is `-1` where the catalogue has no
+  estimate — a table PostgreSQL has never analysed, a view, SQLite, which keeps no count at all — and `>=
+  0` only where the engine actually answered (the catalogue and `GET /table` answer a SQLite table's
+  `sqlite_stat1` count where the file has been analysed; the table list does not). It used to be floored
+  to zero in three dialects and leaked a raw `reltuples` of `-1` in a fourth, so a catalogue that could
+  not say how many rows a table held was indistinguishable from one saying the table was empty, and every
+  table in a fresh database was drawn as having no rows. `Count` on request is the number that is true.
+  The ClickHouse query casts before it substitutes (`ifNull(toInt64(total_rows), -1)`): `total_rows` is
+  `Nullable(UInt64)`, and asking 24.8 or 25.8 for a supertype of that and a signed literal is
+  `NO_COMMON_TYPE`, which fails the whole catalogue — 26.x accepts either form, so the version a
+  contributor happens to run decides whether the mistake is visible.
+- **A row edit names one row and is held to it** (`dbx/changes.go`). `POST /databases/{id}/changes`
+  applies the grid's staged inserts, updates and deletes in one transaction. The key is the table's
+  primary key *as the catalogue reports it* — a request cannot choose a looser one — and for a table
+  with none it is the row as it was read, a NULL compared as a NULL. Every UPDATE and DELETE must touch
+  exactly one row or the whole set is rolled back and answered `409 change_conflict` naming the change
+  (`field: changes[i]`, `reason: matched N rows`). MySQL counts rows *changed*, so there the match is
+  counted and locked first. SQL Server's driver adds up every "rows affected" in the batch, a trigger's
+  included, and reports none when the session has `NOCOUNT` on, so there the statement is made to say
+  its own count (`; SELECT @@ROWCOUNT`, read by column name): a table with an audit trigger written
+  without `SET NOCOUNT ON` could not be edited at all. Its deadlock victim (error 1205) is run again
+  like a serialization failure. A set containing a delete needs the destructive capability, checked in
+  the handler. ClickHouse is refused: its sorting key orders rows without identifying one. The older
+  single-row routes are this with a set of one. Row values and keys never reach the audit log.
+  No value is written as the keyword `NULL`, in the statement that runs as in the one shown, and is
+  never bound (`sqlNull`): a bound NULL has to be sent as some type, SQL Server's driver sends it as
+  an `nvarchar`, and a `varbinary`, `binary` or `image` column refuses to be converted from one —
+  a binary cell could be filled from the grid and never emptied.
+  `TestLiveEveryColumnTypeTakesNoValue` sets every type to NULL in an UPDATE and an INSERT on each
+  engine.
+- **A value goes back the way the grid showed it.** A date is shown as RFC 3339, bytes as `\x…`, a
+  decimal as its digits, and an edit — or the whole-row key of a table with no primary key — sends
+  those forms back. Five engines read them by themselves. Oracle reads text into a date by the
+  session's NLS format and has no `=` for a LOB, so three optional dialect hooks say what it needs:
+  `valueWriter` wraps the bind marker of a date column in `TO_DATE` / `TO_TIMESTAMP` /
+  `TO_TIMESTAMP_TZ` with a fixed mask (the value is still bound; browse filters go through the same
+  hook), `keyMatcher` compares a CLOB, NCLOB or BLOB with `DBMS_LOB.COMPARE` and a JSON column with
+  `JSON_EQUAL`, and `columnTexter` gives a substring filter the text the grid shows rather than
+  `01-FEB-24`. `TestLiveARowGoesBackAsTheGridShowedIt` writes every type back as displayed and deletes
+  the row by it, on every engine. The statements a change set shows for review take the same wrappers
+  around their literals, and `TestLiveReviewedStatementsAreTheEnginesOwnSQL` runs them as written.
+- **A cell is typed by its column, not its content.** A binary column is hex whatever its bytes spell
+  (`\x…`, which an edit may send straight back), a result carries each column's `kinds`, and a value cut
+  for the page — a long text, a blob past the preview — is listed in `clipped` with its size and fetched
+  whole by `GET /databases/{id}/cell`. That read is bounded at 8 MiB and the value is measured on the
+  server before it is fetched: `byteLength` is part of `Dialect`, so an engine cannot be added without
+  saying how. Where the engine can only count characters (an Oracle CLOB) the figure is a floor and the
+  refusal says "at least"; a type it cannot measure at all (Oracle's LONG) is not read. A cell's `size`
+  is the bytes of its text or its bytes, and for a number or a boolean — which travel as `json` — the
+  length of its written form; only a NULL has none. A driver's name for a result column is not always
+  what the column is. go-ora names its wire types: a JSON column is a BLOB locator, a BOOLEAN a NUMBER, a
+  BLOB a long raw. An XMLTYPE it reads laid out afresh, and a NULL one not at all: the statement fails
+  or, with other columns in the row, waits until the request runs out of time — one empty XML cell cost
+  the page of the whole table. So a dialect may be a `columnReader`: its tables are then selected column
+  by column (`projectionFor`, an XMLTYPE through `XMLSERIALIZE … NO INDENT`) and typed from the
+  catalogue, in the page, the row a change hands back, the cell read and the value search alike.
+  `withCatalog` is the one extra catalogue read that costs, and only Oracle pays it. A query typed into
+  the editor has no catalogue to ask and is typed by the driver's names, which `ValueKind` knows. A SQL
+  Server `uniqueidentifier` is its GUID text in a page and in a cell, never the sixteen bytes of the wire
+  form. A PostgreSQL `bit` or `bit varying` is kind `text`: the server writes and reads one as the text
+  of its ones and zeros, and called `binary`, as MySQL's is, the cell was edited as bytes and sent back
+  as `\x00001111`, which PostgreSQL refuses.
+- **Exact numbers stay exact.** SQL integer values using a 64-bit driver representation and exact decimal
+  values travel as decimal strings. SQL mutation JSON uses `DecodeJSONNumbers` (`UseNumber`) and binds
+  exact numeric strings without an intermediate JavaScript/Go float. Query results and streamed exports
+  also normalize nested ClickHouse integer arrays/maps and wide integer/decimal driver wrappers. Numeric
+  JSON syntax is validated without parsing through float64, and clipboard SQL rejects invalid numeric
+  literals. `TestSQLiteExactNumericMutationBrowseAndExport` and `TestLiveExactNumericMutations` exercise
+  adjacent BIGINT keys beyond JavaScript's safe range through mutation, browsing and export; the latter
+  verifies real PostgreSQL/MariaDB DECIMAL columns when their test DSNs are available. SQLite exact
+  decimals require suitable storage (for example TEXT); values already rounded by SQLite's NUMERIC/REAL
+  affinity cannot be recovered by the API. The Redis SCAN cursor is a decimal JSON string; requests parse
+  it with `ParseUint` at 64 bits, preserving the full unsigned range and rejecting negative or
+  overflowing cursors.
+- **The engines' credential catalogues are not read by name.** The page, the count, the cell, the
+  export and the value search are on the read surface and take any schema and table, and the
+  connection behind them is usually an administrator's. `guardCredentials` (`dbx/credentials.go`)
+  refuses the relations that hold what accounts sign in with — PostgreSQL's `pg_authid`,
+  `pg_shadow`, `pg_user_mapping(s)`, `pg_subscription` and the two information_schema views over
+  user mappings; MySQL's and MariaDB's `mysql.user`, `global_priv`, `password_history`, `servers`,
+  `slave_master_info`; SQL Server's `sys.sql_logins` and `syslogins`; Oracle's `SYS.USER$`,
+  `USER_HISTORY$`, `LINK$`, `DBA_USERS`, `KU$_USER_VIEW` — with `403 credentials_withheld`, for
+  every role, as MongoDB's `system.users` is. A request that names no schema is resolved as the
+  engine would resolve it (pg_catalog and SQL Server's `sys` are searched implicitly, Oracle falls
+  back to a public synonym, MySQL is asked which database the session is on, so an application's
+  own `user` table is not caught). The search skips them. It is a list of names in front of the
+  forms that read a table by name; a statement in the console is the operator's own and needs a
+  capability a read-only role does not have. `/count` answers a refused filter, an unknown column
+  and a value of the wrong type with `400`, as `/browse` does (`tableReadError`) — it answered `502`.
+  A read whose server has gone away since its pool was opened is not the request's fault and is not
+  answered as one: the same four routes give it `502 query_failed`, marked `retryable` (below).
+- `rowsql.go` is the one exception and does not generalise: it renders a row as an INSERT **for the
+  clipboard**. Nothing executes what it produces, and no code path may call it and then run the result.
+  `TestLiveRowInsertSQLQuoting` feeds `'); DROP TABLE …` to every live engine and checks the table stands.
+  `POST /{id}/rows/sql` reads the table's columns first (`TableRowsInsertSQL`), so the statement
+  names them in the table's own order and writes a numeric column's value bare — the grid carries a
+  64-bit integer and a decimal as text, and copied out as they arrived they were quoted. Only text
+  that is nothing but a number loses its quotes (digits for an integer, digits and a point for a
+  decimal, an exponent for a float); `NaN`, a money column's `$1,234.00` and a zero-filled `007`
+  keep them. The catalogue read is best effort: a server that does not answer, or a table this
+  account cannot see, leaves the statement in the older form, columns by name.
+- **Finding a value is bounded three ways at once** (`dbx/search.go`). `GET /databases/{id}/search`
+  compares a needle, as a case-insensitive substring, with the text form of every column of every
+  table in a schema — which is why each column is cast first: an integer id and a uuid are exactly
+  what people search for, and `LIKE` against them is an error on the stricter engines. It visits at
+  most 60 tables, compares at most 40 columns of each, returns at most 5 matches a table and 200 in
+  all, skips views and the credential relations above, and says how far it got: the tables it read
+  (`tablesScanned`), the ones it could not (`tablesSkipped`) and whether a bound stopped it
+  (`truncated`), so "no matches" can be told from "gave up before reaching it". The
+  bounds are not tuning knobs; they are what makes the feature safe to point at production. It is on
+  the read surface and audited (`database.search`), since the needle is the caller's and the read
+  crosses every table.
+
+### The schema catalogue and schema changes
+
+- **The catalogue is per engine, and optional per group.** `GET /databases/{id}/catalog` lists the
+  schemas and, for one of them, the tables, views, materialized views, routines, triggers, sequences and
+  types; `GET /databases/{id}/object` returns one object's CREATE text. Both are on the read surface. The
+  queries live in `dbx/catalog_<engine>.go` as methods on the dialect types behind `catalogDialect` — a
+  second interface, so the browse, mutate and dump paths do not grow with it. A group an engine lacks is
+  absent from the reply, which is how a tree knows not to draw an empty "Sequences" under MySQL; a group
+  that could not be read is an empty list with its reason under `errors`, because the least-privileged
+  logins are exactly the ones that can read `pg_class` and not `pg_proc`. Each group is bounded (5000,
+  `?limit=` up to 20000) and says when it was cut. Postgres is read from `pg_catalog`, never
+  `information_schema`: the standard views have no row for a materialized view's columns, spell every
+  array `ARRAY` and every enum `USER-DEFINED`, and hide a constraint from a login that holds only SELECT
+  on its table — a read-only account saw every table as keyless.
+- **Bulk catalogue reads are batched and say when they stop.** Completion, relations and diagram reads
+  batch catalogue facts for up to 500 table names per query (`schema_catalog.go`). The diagram draws 120
+  tables unless `?limit=` asks for more (up to 1000) and the outline 5000 (up to 20000); both answer with
+  `truncated`, `total` and `limit`, so a page says how much it left out rather than drawing a third of a
+  schema as if it were all of it. Every map key and node id names a table by `dbx.TableKey(schema,
+  name)`: keyed by the bare name, a table called `users` in two schemas was one entry, and one of them
+  silently took the other's place. Partitions are listed as `partition` and are not drawn; views and
+  materialized views are not asked for foreign keys. Each dialect keeps its type spelling, key order and
+  referential actions; SQL Server's bulk columns are therefore read from `sys.columns` and spelled by
+  `mssqlColumnType`, as a table's own detail is, because information_schema names an alias type by the
+  type under it (`sysname` came back as `nvarchar(128)`) and leaves a `datetime2`'s precision out. A
+  refused bulk read falls back to per-table reads so restricted accounts retain partial results. Full
+  table details use fresh reads.
+- **A table's DDL has two readers.** Where the engine keeps no text of its own (Postgres, SQL Server) the
+  CREATE TABLE is generated. `dbx.Detail` returns the form a dump replays ahead of the rows: columns,
+  defaults, keys, constraints and indexes, and deliberately not identity or generated-column clauses,
+  which refuse the value an INSERT is about to supply. `dbx.DescribeTable` — what `GET
+  /databases/{id}/table` serves — is the same read with the DDL written as the table is declared, and a
+  view answered with its own definition. Both carry check, unique and exclusion constraints, incoming
+  foreign keys, comments, real type names with enum labels, and each index's method, predicate, included
+  columns and size. SQLite and ClickHouse keep a table's check constraints nowhere but in the statement
+  it was created with, so theirs are read out of that statement (`createTableItems`).
+- **A schema change is planned, then shown or run.** There are twenty `/databases/{id}/ddl/*` routes:
+  create, truncate and drop a table; rename a table or a column; add, alter and drop a column; create and
+  drop an index, a foreign key, a unique or check constraint, a view and a schema; comment on a table or
+  a column; create an enum type and add a label to one. What an engine takes of them is its
+  `ddlOperations` list. Every handler builds a `dbx.DDLPlan` — the exact statements, in order — and
+  `runDDL` returns it for `?preview=1` or executes it, so the statement a dialog shows is the server's
+  own and not a page's approximation of it. Each planner starts at `ddlDialect(driver, op)`, which
+  refuses an operation the engine does not have in words that name the engine (`ddlRefusals`): SQLite
+  cannot alter a column or add a constraint to an existing table, and ClickHouse is sent its own form
+  (`RENAME TABLE`, `MODIFY COLUMN`, `ALTER TABLE … DROP INDEX`) or a refusal, never generic DDL.
+  Capability follows cost. A change that only adds needs `service.control`; every drop is behind
+  `s.destructive`; and what depends on the body is decided in `runDDL` and fails closed, for a preview as
+  much as for a run — a new column type, which rewrites the column, and any call in the operator's own
+  SQL (a CHECK condition, an index predicate, a USING conversion, a function default) outside the short
+  lists `pureFunctions` and `safeDefaults`. The engine runs such SQL against rows, and a form must not be
+  a cheaper way to run a function than the console is. `unvouchedCalls` reads the fragment as the
+  engine's tokens, so a name is one name however it is spaced or qualified, and on Postgres names a
+  dotted reference whether or not a parenthesis follows it, because `t.total` there is `total(t)` when
+  `t` has no such column.
+- **What a form writes into a statement cannot leave its place.** A column type is the one fragment that
+  is neither quoted nor bound nor wrapped: it follows the column's name, and what follows it is the rest
+  of the statement. `validateType` (`ddl_type.go`) therefore matches a type against what a type is — a
+  name, one argument list held to what that engine's types take, one of a closed set of qualifiers, array
+  brackets — rather than refusing a list of words: `integer, DROP COLUMN email` was a second action of
+  the same ALTER TABLE, for an account refused that drop on its own route. Free SQL fragments are wrapped
+  in the server's own parentheses and held there by `validateFragment`, which follows each engine's own
+  quoting — a bracket quotes an identifier on SQL Server and is a subscript on Postgres, and a scanner
+  that treated it alike on both would let text hide from one of them. A view's query goes through the
+  query runner's own splitter and classifier. SQLite statements are written unqualified, so a change
+  aimed at an attached database is refused rather than landing on main's table of the same name.
+- **A plan that restates a column says everything again.** MySQL's `MODIFY COLUMN` replaces a whole
+  column definition, SQL Server's `ALTER COLUMN` restates type, collation and nullability together and
+  keeps a default as a constraint object, so those plans read the catalogue first. `readMySQLColumn`
+  carries the collation, default, `AUTO_INCREMENT`, `ON UPDATE`, `INVISIBLE`, a spatial reference system
+  and a MariaDB column's own `CHECK` — which is all that makes a MariaDB JSON column one — and refuses,
+  by name, a column whose `EXTRA` holds an attribute it does not know rather than drop it. A read the
+  engine refuses is `dbx.ErrPlanRead` and answers `502`, not `400`: the request was not wrong. A preview
+  that could not be drawn up leaves no audit entry — a dialog previews as the operator types — while one
+  refused for the capability it would need is recorded under the change's own action. No schema route
+  takes a typed phrase, and dropping a schema never cascades: the engine's refusal of a schema that still
+  holds something is the guard.
+- **The diagram remembers.** `GET/PUT/DELETE /databases/{id}/diagram?schema=` keep one JSON document per
+  connection and schema in `db_diagram_layouts` — positions, hidden tables, notes, colours, detail level
+  and viewport — beside the saved queries that outlive a page for the same reason. Reading it is on the
+  read surface; saving and resetting need `service.control` (it is dashboard state, not database state,
+  so it is not in the destructive group) and are audited as `database.diagram.save` and
+  `database.diagram.reset`. The server checks only that the document is a JSON object under 512 KiB:
+  every field is a decision about a picture, and the diagram (`diagram/memory.ts`) is the only thing
+  that decodes it, with the browser's storage as a mirror for roles that cannot save.
+
+### Operations: watching, maintaining and administering a server
+
+- **The diagnostic surface is what a data browser usually lacks.** `activity.go` lists what the server is
+  running now with the blocking session named, turning twenty "slow" sessions into one culprit, and can
+  stop one; it includes our own connections marked `self`, because hiding them made an idle server report
+  an empty table that reads as a broken query. `size.go` is the per-table breakdown for when the alert
+  fires and nobody knows which table grew (row counts are the engine's estimate — counting forty tables
+  exactly is a full scan to answer a question about *relative* size).
+- **A size read survives a table dropped under it.** PostgreSQL catalog size queries treat a
+  concurrently dropped relation's NULL size as zero; the live regression holds an old catalog
+  snapshot to exercise that case deterministically.
+- **Watching and maintaining a SQL server** (`handlers_db_ops.go`, `mountDatabaseOpsRoutes`;
+  per-engine SQL in `dbx/ops_<engine>.go` behind optional interfaces, so a dialect that has no
+  answer reports `supported:false` with a sentence rather than an error — and so does one whose
+  account was refused the view it reads: "not permitted" names the grant in `reason` and is never a
+  502).
+  - Reads, on the read surface: `GET /{id}/stats` for a SQL engine is one snapshot of raw counters and
+    gauges stamped with this server's clock (`ServerStats`; the page derives rates between two polls —
+    nothing is kept between requests) with the dashboard's own pool under its old key; a server that
+    refuses the snapshot answers 200 with `supported:false`, the refusal as `reason`, and the pool, which
+    was this route's whole answer before there was a snapshot. `/activity` rows gain `status`, wait type
+    and event, application, transaction and query start, `blockedByPids`, and `seconds` is the running
+    statement's age and `0` for a session that is not running one (an idle pooled connection used to read
+    as the longest query). On MySQL an account without the `PROCESS` privilege sees only its own sessions
+    in the process list and is refused the InnoDB transactions it is joined to — and MySQL 8 sends that
+    refusal after the columns, where a result read to its `Close` alone took it for an empty list: the
+    snapshot said nobody was connected and `/activity` listed nobody. The result is read to its end and
+    asked how it ended (`mysqlProcessList`); such an account's `connections` are the server's own totals
+    (`Threads_connected`, `Threads_running`, which need no privilege) with a `notes` entry saying so, and
+    its own sessions are listed. `/locks` lists waiter–blocker pairs and the lock table, bounded at 500:
+    PostgreSQL, MySQL 8 `performance_schema`, MariaDB `INNODB_LOCK_WAITS`, SQL Server
+    (`dm_os_waiting_tasks`, needs `VIEW SERVER STATE`), Oracle (`v$session` names each waiter's blocker,
+    `v$lock` what it asked for; needs grants an application schema lacks). `/replication`: PostgreSQL
+    replicas, slots, publications, subscriptions, receiver; MySQL/MariaDB replica and source status; the
+    other engines say `supported:false`. One question is put to MySQL and MariaDB in each one's spelling,
+    and when neither answers the refusal reported is the one that denies access and names the privilege
+    (`mysqlRefusals`), not the older spelling's syntax error; a note about missing performance_schema
+    counts says whether it is off, unreadable to this account, or empty (`mysqlPerformanceSchemaGap`).
+    `/tablestats` and `/indexstats`: sizes, row and dead-row estimates, scans, last vacuum/analyze, a
+    planner-statistics bloat estimate, unused/duplicate/covered indexes; default 200, clamped to 1000,
+    largest first. MySQL, SQLite and Oracle read up to 20 000 names and rank them here because their
+    sizes arrive from a second read; Oracle's catalogue views are each read once for the schema and
+    joined in Go, because DBA_SEGMENTS joined to ALL_INDEXES in SQL took seconds on a schema of thirty
+    tables. Oracle sizes come from `DBA_SEGMENTS`, or from `USER_SEGMENTS` for the account's own schema,
+    which needs no grant; an Oracle index is never called unused, because `DBA_INDEX_USAGE` is a sample.
+    `/maintenance` is the action list; `/settings[?all=1]`;
+    `/clickhouse/{parts,merges,mutations,queries}`; `/sqlite/file`. The stats poll asks the catalogue
+    which checkpoint view exists (`to_regclass`) instead of trying `pg_stat_checkpointer` and catching
+    the error, which PostgreSQL before 17 wrote to its log on every poll; `pg_stat_statements_info` is
+    asked for the same way.
+  - `POST /{id}/activity/cancel` stops a statement and keeps the session (`pg_cancel_backend`,
+    `KILL QUERY`, Oracle `ALTER SYSTEM CANCEL SQL`); it sits in `s.destructive` beside kill. Audit
+    `database.session.cancel`. Oracle answers the kill of a session that is in the middle of a
+    statement with `ORA-00031: session marked for kill`: the session is ended once it has rolled
+    back, so `oracleKillOutcome` reads that as the kill having worked, where the route answered
+    `400` for a session that was gone a second later.
+  - `POST /{id}/maintenance {action, schema?, table?, index?, options?}` runs one of a closed set
+    per engine and returns the engine's own lines, kept to 500 as they arrive: PostgreSQL (vacuum,
+    vacuum_analyze, analyze, vacuum_full, reindex), MySQL/MariaDB (analyze, check, optimize,
+    repair), SQLite (analyze, optimize, three checks, wal_checkpoint, reindex, vacuum), ClickHouse
+    (optimize), SQL Server (`update_statistics` — `UPDATE STATISTICS` or `sp_updatestats`;
+    `reorganize` and `rebuild` — `ALTER INDEX … REORGANIZE|REBUILD`, the latter optionally
+    `WITH (ONLINE = ON)`; `check` — `DBCC CHECKTABLE|CHECKDB WITH TABLERESULTS`, whose rows are the
+    report and whose severity decides `ok`) and Oracle (`gather_stats` — `DBMS_STATS` for a table
+    or a schema, names passed quoted so they are matched as the catalogue spells them). Where the
+    engine prints nothing a client can read (SQL Server's three besides `check`, Oracle), the lines
+    are read from the catalogue afterwards. The route is `service.control`. **An action that locks
+    a table against the application for as long as it runs, or can lose rows — `vacuum_full`,
+    `reindex`, MySQL `optimize` and `repair`, SQLite `vacuum`, SQL Server `rebuild` — also needs
+    the destructive capability and spends `destrLim`**, checked in the handler before anything is
+    dialled (`MaintenanceAction.NeedsDestructive`, published per action as `requires`): the SQL
+    console refuses those statements to the same account, and a form is never the cheaper way. The
+    actions left on `service.control` read, or work alongside the application; the console's
+    stricter answer to them comes from not knowing what a typed statement does, which a closed
+    list does. The ones that change nothing at all are marked `readOnly`. The request is held for
+    up to thirty minutes; ending it stops the command on the server — pgx sends a cancel request
+    when a cancelled context closes its connection, go-mssqldb an attention signal, and for
+    MySQL/MariaDB the statement runs on one session whose id is killed (`KILL QUERY`) from a second
+    connection, because the driver only closes the socket and the server does not notice that
+    inside a table rebuild. Oracle is late: go-ora sends a break and the server acts on it when it
+    next looks, seconds into a block that is working and not while one sleeps. Audit
+    `database.maintenance`.
+  - `PUT /{id}/settings {name, value | reset}` (`system.admin`) persists one parameter where the
+    engine can: `ALTER SYSTEM` + `pg_reload_conf()`; `SET PERSIST` (MariaDB: `SET GLOBAL`, said to
+    be unpersisted); the four SQLite pragmas stored in the file; SQL Server `sp_configure` +
+    `RECONFIGURE` (an advanced option is revealed for the change and hidden again after it, the
+    option is put back if `RECONFIGURE` refuses the value, and there is no reset because the server
+    publishes no default); Oracle `ALTER SYSTEM SET … [DEFERRED] SCOPE=BOTH` for the parameters a
+    running instance can change — the ones read only at start are listed and not editable, since a
+    wrong value there is an instance that does not come back, and inside a pluggable database only
+    what Oracle lets a container set. The name must be in the engine's own list and its spelling
+    there is what reaches the statement; the value is checked against the type, enum and range the
+    engine publishes (PostgreSQL integers also in octal and hexadecimal, which is how it prints its
+    file modes). `editable` follows the account: a superuser on PostgreSQL, `ALTER SETTINGS` on SQL
+    Server, `ALTER SYSTEM` on Oracle. The list withholds, from a viewer without `system.admin`, the
+    value of a parameter that can hold a credential (`sensitiveSetting`): a list per engine
+    (`primary_conninfo`, the archive and restore commands, `ssl_passphrase_command`,
+    `report_password`, `wsrep_sst_auth`…), any name whose last word is one for a secret, and — on
+    PostgreSQL — an extension's or application's own dotted parameter with such a word anywhere. It
+    is a list and not a pattern on purpose: a pattern on "password" hid `password_encryption`,
+    which the advisor reports to the same viewer. The same rule keeps the value and the statement
+    out of the audit detail. Audit `database.setting.set` / `database.setting.reset`.
+  - `POST /{id}/statements/reset` (the destructive group) zeroes `pg_stat_statements` or the
+    performance_schema digest table for the whole server. No data goes, but the record does, for
+    everyone, and on MySQL the statement is a `TRUNCATE` the console holds to the same capability;
+    the Redis slow-log reset sits in that group too. Audit `database.statements.reset`.
+- **The advisor and statement statistics.** `GET /databases/{id}/advisor?schema=` runs `dbx.Advise`:
+  generic checks over the introspected structure on every SQL engine (tables with no primary key, foreign
+  keys no index begins with; the first 300 tables, with `truncated` and `tablesOmitted` saying so past
+  that; a partitioned table is checked like any other), plus an engine's own `Adviser` — Postgres
+  (unused, duplicate and invalid indexes, never-analysed tables, dead rows, sequence exhaustion,
+  connections near the limit, cache hit ratio, sessions idle in a transaction, transaction-id wraparound,
+  inactive replication slots, `fsync`/`full_page_writes`/ `autovacuum` off, `md5` passwords, a writable
+  `public` schema, superusers besides the connection's own role, no `pg_stat_statements`), MySQL/MariaDB
+  (non-InnoDB tables, free space, connections, the slow log and `performance_schema` off, superusers at
+  any host, anonymous accounts, a small buffer pool), SQLite (journal mode, free pages, a large WAL,
+  never analysed), ClickHouse (too many parts, stuck mutations, accounts without a password, read-only
+  replicas, disk, detached parts), SQL Server (auto-shrink, auto-close, page verify, `sa` enabled, logins
+  without a password policy) and Oracle (invalid objects, never analysed, default passwords,
+  tablespaces). Every finding carries a `category` — `security`, `performance`, `reliability` or
+  `maintenance` (the old `schema` is `reliability`) — the `targets` it is about, each with its own fix
+  statement wherever one can be written without a decision only the operator can make (a table with a
+  unique index over NOT NULL columns is offered the statement that names it the key, one without is
+  offered an identity column only where that cannot break an INSERT that names no columns; a sequence
+  near its ceiling is offered `bigint` for itself and the column it feeds; a finding whose fix is a
+  password, a host or an amount of memory carries none), and a `link` to the page that acts on it. The
+  handler adds what only a server panel can know (`panelAdvice`): no dump or a stale one, read from the
+  same dump directory the fleet reads; a release past its end of life (`dbx.VersionEndOfLife`, a
+  compiled-in table of vendor dates), read where the engine's own number stands in its banner and skipped
+  for a fork that answers with another engine's (YugabyteDB, CockroachDB, TiDB…); and, for an
+  administrator, a port published to every address and a container with no memory limit — a viewer is
+  told in `silences` that those were not assessed. Nothing is executed. With no `schema`, MySQL and
+  ClickHouse check the connection's own database. `GET /databases/{id}/statements?sort=&limit=` reads
+  `pg_stat_statements` (13+ and older column names both),
+  `performance_schema.events_statements_summary_by_digest`, ClickHouse's `system.query_log` over the last
+  day, SQL Server's `sys.dm_exec_query_stats` summed by query hash for plans compiled in this database
+  (the plan cache: no reset, no start time), or Oracle's `v$sqlstats` (no longest execution, so
+  `sort=max` is a 400 there); `sort` is one of a closed set, `limit` clamps at 200, each row carries its
+  `share` of everything tracked, and `supported: false` comes with what would enable it (`enable`) or
+  with the grant the account lacks (`reason`). The text returned is a statement's shape on every engine,
+  never one execution: the list is on the read surface and a literal is somebody's e-mail address.
+  PostgreSQL and MySQL store it that way, ClickHouse is asked to (`normalizeQuery`), and for SQL Server
+  and Oracle `dbx.statementShape` replaces every string and number literal with `?` before the text
+  leaves the package. Advisor reports include server `checkedAt`, `tablesOmitted` and `silences`. Unread
+  engine statistics retain completed structure findings and name the failed source with
+  `engineChecks=false`. The route runs nothing and neither does the report: the Advisor page applies a
+  fix only through a route that authorises it by itself — a maintenance action the engine's list leaves
+  on `service.control`, through `POST …/maintenance`, or a statement `POST …/classify` calls
+  non-destructive, through `POST …/script` — never on a protected connection, and hands everything else
+  to the Query page with the statement in it (`applyVerdict` in
+  `frontend/src/components/database/ops/advisor-fix.ts`).
 - **The server behind a connection.** `dbx.Admin` is an optional second interface a dialect
   implements — Postgres, MySQL/MariaDB, ClickHouse and SQL Server do; SQLite has no server and
   Oracle's account model does not fit — with Mongo (`usersInfo`/`createUser`/`grantRolesToUser`)
   and Redis (`ACL LIST`/`SETUSER`/`DELUSER`, saved where an aclfile exists) mapped onto the same
-  `Role` shape. Routes under `/databases/{id}/server/`: `roles` (list on the read surface; create,
-  alter and `/{name}/grant` under `system.admin`; drop under `s.destructive`, refused for the
-  account the connection signs in with), `databases` (create, and `/connect` to save a sibling
-  connection to another database on the same server under the same credentials, probed before it
-  is stored), `extensions` (list; create and drop for Postgres, listed only for MySQL's plugins)
-  and `settings` (a curated read of `pg_settings`, `global_variables`, `system.server_settings`,
-  `sys.configurations`; Mongo's `serverStatus` and Redis's `INFO` flattened to the same rows).
-  Identifiers go through the dialect's `QuoteIdent`; a grant runs inside the target database on
-  the engines that grant from there (`GrantNeedsDatabase`) through a pool opened for that one
-  statement; a password is the one value no engine binds in `CREATE ROLE`/`CREATE USER`, so it is
-  refused if it carries a control character and quoted by the same per-engine rule `dumpString`
-  applies (`passwordLiteral`). Audited as `database.role.create/alter/drop/grant`,
-  `database.create`, `database.connection.sibling`, `database.extension.create/drop`.
-- **The advisor and statement statistics.** `GET /databases/{id}/advisor?schema=` runs
-  `dbx.Advise`: generic checks over the introspected structure on every SQL engine (tables with no
-  primary key, foreign keys no index begins with, capped at 300 tables), plus an engine's own
-  `Adviser` where it keeps statistics — Postgres (unused indexes over 1 MiB, identical indexes,
-  never-analysed tables, dead rows past a fifth, sequences past 80 % of their ceiling, connections
-  past 80 % of `max_connections`, a cache hit ratio under 90 %, sessions idle in a transaction
-  for five minutes, `password_encryption = md5`, login superusers besides `postgres`, no
-  `pg_stat_statements`) and MySQL (non-InnoDB tables, the slow log and `performance_schema` off,
-  superusers at host `%`, a buffer pool under 128 MiB). The handler prepends one finding no
-  catalogue can make, for an administrator: the server published on every interface with the
-  firewall off or open. Each finding carries the objects it names and, where one statement fixes
-  it, that statement; nothing is executed. `GET /databases/{id}/statements` reads
-  `pg_stat_statements` (13+ and older column names both) or
-  `performance_schema.events_statements_summary_by_digest`, top N by total time, and reports
-  `supported: false` with the reason where neither is there.
-  Advisor reports include server `checkedAt`, `tablesOmitted` and `silences`. Structure scans beyond
-  300 tables report the omitted count. Unread engine statistics retain completed structure findings
-  and name the failed source with `engineChecks=false`. The frontend displays partial/stale reports,
-  disables stale SQL preparation and opens the SQL console for reviewed statements or the owning
-  Structure/Server controls for cases needing a choice; execution still uses existing SQL authorization.
-
+  `Role` shape. Routes under `/databases/{id}/server/`: `roles` (list and `/{name}` detail on the
+  read surface; create, alter and `/{name}/grant` under `system.admin`; drop under
+  `s.destructive`, refused for the account the connection signs in with), `databases` (create,
+  and `/connect` to save a sibling connection to another database on the same server under the
+  same credentials, probed before it is stored; the list of what the server holds is
+  `GET /databases/{id}/schemas`, below), `extensions` (list; create and drop for
+  Postgres, listed only for MySQL's plugins) and `settings` (the short list an operator asks
+  about; the full one is `/databases/{id}/settings`, above). Identifiers go through the dialect's
+  `QuoteIdent`; a grant runs inside the target database on the engines that grant from there
+  (`GrantNeedsDatabase`) through a pool opened for that one request; a password is the one value
+  no engine binds in `CREATE ROLE`/`CREATE USER`, so it is refused if it carries a control
+  character and quoted by the same per-engine rule `dumpString` applies (`passwordLiteral`).
+  Audited as `database.role.create/alter/drop/grant/revoke`, `database.create`,
+  `database.connection.sibling`, `database.extension.create/drop`.
+  - *What else the server holds.* `GET /databases/{id}/schemas` (read surface) is the list the
+    engine's picker is filled with, as `[{name, size?, owner?, encoding?}]`: the server's databases
+    on PostgreSQL (templates left out), MySQL/MariaDB (each schema, with its tables' size), SQL
+    Server (user databases and the one the connection is on) and ClickHouse (`owner` is the
+    database engine); Oracle's schemas, because a schema is the unit one browses there; SQLite's
+    attached files (`main` first, `owner` the path); MongoDB's databases; and Redis's numbered
+    databases with `size` as the count of keys, not bytes. Whether one of them can be opened, or
+    another made, is two capability flags, `serverDatabaseConnect` and `serverDatabaseCreate`
+    (`dbx.CanConnectSibling`, `dbx.CanCreateDatabase`, in `admin_capabilities.go`), and the two
+    routes ask the same functions before they do anything, answering `400 unsupported` where the
+    answer is no. ClickHouse can make a database and cannot be pointed at it by a connection
+    string, so a create that asks for `connect` there is refused before the database is made; it
+    used to be made and then answered as a failure.
+  - *An alter changes what was sent and nothing else.* `roleRequest`'s attributes are pointers and
+    `RoleSpec` carries a `Set*` beside each shared flag, so a body with only a password renders
+    `ALTER ROLE … WITH PASSWORD …` and leaves `SUPERUSER`/`CREATEDB`/`CREATEROLE` as they were (the
+    old renderer wrote all four from booleans that were false when absent, and a password change
+    demoted a superuser). A request is honoured whole or refused: `dbx.CheckRoleRequest` runs in the
+    handler before any engine is dialled and answers `400` naming the attribute for anything outside
+    `EditableRoleAttributes(driver)`, and for `superuser:false` on the engines that can only grant
+    (ClickHouse, MongoDB, Redis) — Redis and MongoDB read a password and one flag and used to answer
+    `200` to a request to lock an account they had not locked. A create is checked the same way on
+    what it *asks for* (a form may send every field at its default); MySQL and SQL Server creates
+    now carry the lock and the create-account right, and drop the half-made account when a later
+    statement fails. `ownAccountRefusal` refuses `login:false`, `locked:true` and `superuser:false`
+    on the account the connection signs in with, as the drop route does: the pool would carry on
+    and every later dial would fail with nothing here able to undo it. A password change on that
+    account re-seals the saved connection string once the new one has been seen to open
+    (`resealOwnPassword`, reported as `connectionUpdated`).
+  - *A drop closes what the forms opened.* PostgreSQL refuses to drop a role that still holds a
+    privilege, and the three-level grant below gives it several: `postgresDialect.DropRole` runs
+    `DROP OWNED BY` and `DROP ROLE` in one transaction — but only for a role that owns nothing in
+    this database (`pg_shdepend`), because `DROP OWNED` also drops what a role owns, and dropping an
+    account must not drop its tables. A role that owns something, or holds grants in another
+    database, is refused in the engine's words and nothing was revoked. SQL Server's `DropRole`
+    first drops the user the login has in each database it can reach (found by `SUSER_SID`, the
+    one the grant forms made with `CREATE USER … FOR LOGIN`), which `DROP LOGIN` leaves orphaned
+    with its grants; a user that owns a schema stops the drop before the login is touched. Both
+    refusals are `dbx.ErrRoleInUse` and answer `400`, not `502`. Redis has no database to grant:
+    `POST …/server/roles/{name}/grant` answers `400` there, with or without `?preview=1`.
+  - *The three-level grant* (`POST …/server/roles/{name}/grant`, `read|write|all`) runs in one transaction
+    on PostgreSQL and covers every schema of the database that is not the engine's own, **an
+    extension's** (membership in `pg_depend`: pg_cron's `cron`, TimescaleDB's catalogues) **or a
+    platform's** (`hdb_catalog`; Supabase's `auth`, `storage`, `vault`… recognised by name only on a
+    server that has the `supabase_admin` role) — `pgGrantSchemas`. The reply and the audit detail
+    list `schemas` and `skippedSchemas` with the reason; `schema` in the body names one schema and
+    grants on it regardless. Default privileges are written for the connection's account and, with
+    `FOR ROLE`, for every other role that owns the schema or a table or sequence in it and that the
+    account is a member of (`pgFutureOwners`); owners it cannot speak for come back in `notes`.
+    `?preview=1` returns the same body with `preview:true` and executes nothing. MySQL escapes `_`
+    and `%` in the database name, which is a pattern at that position.
+  - *Fine-grained privileges.* `GET …/server/privileges` publishes the closed set per engine and
+    level (`PrivilegeLevels`: database, schema, table, sequence, role membership on PostgreSQL;
+    database and table on MySQL/ClickHouse; database, schema, table on SQL Server); a request names
+    privileges from that set and the keyword that reaches the statement is the set's.
+    `POST …/server/roles/{name}/privileges` and its `/revoke` (`system.admin`, `?preview=1`) render
+    through `PrivilegeStatements` and run through `ChangePrivileges`, in one transaction where the
+    engine has transactional grants, connected to the database that holds the object. `future:true`
+    resolves the same owners as the preset and returns them as `futureOwners`; that is the one
+    preview that dials. `GET …/server/grants` lists grants by role or by object (`aclexplode` over
+    databases, schemas, relations and `pg_default_acl`; `SHOW GRANTS` parsed on MySQL, for every
+    host a name has when none is given, the line's password hash never returned;
+    `system.grants`; `sys.database_permissions`), bounded at 1000.
+  - *What a non-administrator is not shown.* The role list and detail are on the read surface, so
+    two things are withheld there: the password entries of a Redis ACL rule (`withoutACLSecrets`),
+    and the values of a PostgreSQL role's own settings (`rolconfig`) whose name is one the settings
+    redaction matches or carries a dot — a parameter PostgreSQL does not define, which is where
+    PostgREST's `pgrst.jwt_secret` and applications' tokens live. The names come back in
+    `configRedacted` (`redactRoleConfig`).
 - **The server's own log, found from its connection.** `GET /databases/{id}/logs/sources`
   (`handlers_db_logs.go`, on the read surface — reading what the server printed is what `/activity`
   already shows any role) answers `{sources, refused?, reason?, note?}`, each source in `/logs/sources`'
   shape plus `primary`, read through the engine's lens by the connection's driver (`driverLens` — a
   Postgres in a custom image is still Postgres). A SQLite file and a server on another machine have none,
-  with the reason. A container behind the connection is `docker:<name>` — the name, so the log survives
-  a recreate. One the connection dials at its own private address is found by that address whatever
-  its image (`containerAt`): one built in-house, or whose moved tag the list names by id, is still the
-  engine the connection says. A server on this machine is followed from its port: the listener (`proxysvc.ListListeners`;
-  behind `docker-proxy`, the container publishing the port, whatever its image says), its process's
-  manager (`procs.ManagerOf`, where a `container` manager is `docker:<name>` again), the files it and up
-  to 64 of its children hold open **for appending** (`/proc/<pid>/fd` with `fdinfo`'s flags, log-like
-  names only — a data file is opened for writing, a log for appending), the engine package's conventional
-  files that exist (`/var/log/postgresql/postgresql-<V>-<C>.log` from the Debian unit's instance name,
-  MySQL's, Redis's, MongoDB's, ClickHouse's), then the unit's journal. The first file is primary even at
-  0 bytes — rotation just emptied it, and the page opens it with its rotated set — and a journal is
-  primary only when no file is the server's (Debian's Postgres writes nothing there but systemd's starts
-  and stops). A path the log roots refuse is listed under `refused` with the reason rather than dropped,
-  and the journal beside it is not made primary, since the statements are in that file. With nothing
-  listening — stopped, crashed or starting, which is when a log is read most — it is found the ways a
-  stopped server can be: a container publishing the port without `docker-proxy`, the container the
-  connection is named after (the sync names adopted containers so), running or not, and the engine's
-  units by name, skipping one serving another port and Debian's umbrella `postgresql.service`, with
-  their files and journals and a `note` saying the server is not answering. Nothing goes through
+  with the reason. A container behind the connection is `docker:<name>` — the name, so the log survives a
+  recreate. One the connection dials at its own private address is found by that address whatever its
+  image (`containerAt`): one built in-house, or whose moved tag the list names by id, is still the engine
+  the connection says. A server on this machine is followed from its port: the listener
+  (`proxysvc.ListListeners`; behind `docker-proxy`, the container publishing the port, whatever its image
+  says), its process's manager (`procs.ManagerOf`, where a `container` manager is `docker:<name>` again),
+  the files it and up to 64 of its children hold open **for appending** (`/proc/<pid>/fd` with `fdinfo`'s
+  flags, log-like names only — a data file is opened for writing, a log for appending), the engine
+  package's conventional files that exist (`/var/log/postgresql/postgresql-<V>-<C>.log` from the Debian
+  unit's instance name, MySQL's, Redis's, MongoDB's, ClickHouse's), then the unit's journal. The first
+  file is primary even at 0 bytes — rotation just emptied it, and the page opens it with its rotated set
+  — and a journal is primary only when no file is the server's (Debian's Postgres writes nothing there
+  but systemd's starts and stops). A path the log roots refuse is listed under `refused` with the reason
+  rather than dropped, and the journal beside it is not made primary, since the statements are in that
+  file. With nothing listening — stopped, crashed or starting, which is when a log is read most — it is
+  found the ways a stopped server can be: a container publishing the port without `docker-proxy`, the
+  container the connection is named after (the sync names adopted containers so), running or not, and the
+  engine's units by name, skipping one serving another port and Debian's umbrella `postgresql.service`,
+  with their files and journals and a `note` saying the server is not answering. Nothing goes through
   `hostexec`: `/proc` is read, the units come from the same systemd listing `/logs/sources` uses, and
   every file through `logs.Allow`. One resolution answers for 45 seconds per connection
-  (`Server.dbLogSourcesKept`, keyed on a hash of the DSN, never stored when the request's deadline cut
-  it short), since the page and its Queries view ask on different cadences and each asking walks every
+  (`Server.dbLogSourcesKept`, keyed on a hash of the DSN, never stored when the request's deadline cut it
+  short), since the page and its Queries view ask on different cadences and each asking walks every
   process's sockets.
 - **The statements it recorded.** `GET /databases/{id}/querylog?since&until&limit&minMs` (read, 15
   seconds; no `since` is the last day, `limit` 200 up to 500, a malformed bound a 400) answers
@@ -248,62 +1051,768 @@ accounts retain partial results. Full table details and mutation preconditions u
   the Queries list is one group (ClickHouse's is `normalized_query_hash` as 12 hex digits). A read that runs
   out of time sets `truncated` with a reason rather than passing a partial list off as the window. Like
   `/activity` and `/statements`, it returns statement text with its literals at read capability.
+
+### Redis
+
+How a console line, a bulk action and an overwriting rename or copy are classified — which is what
+decides the capability each needs — is in
+[request lifecycle](../architecture/request-lifecycle.md#redis-one-route-any-command). What follows
+is the surface itself.
+
+- **Keys and the server are two families of routes.** Routes under `/databases/{id}/keys` are about what
+  is stored and under `/databases/{id}/redis` about the server (`handlers_db_redis*.go`;
+  `dbx/redis*.go`). They serve Redis, Valkey, KeyDB and Dragonfly. No `?db=` means the logical database
+  the connection string names (`dbx.RedisDSNDatabase`), which is not database 0; a database the server
+  will not select is a `400` when the request named it and `connect_failed` when the connection string
+  did. Every key, value, member and field is a `dbx.RedisBytes`: a JSON string when the bytes are UTF-8
+  and `{"base64": …}` when they are not, in both directions, so nothing is mangled. A request
+  distinguishes an absent field from an empty one: on `DELETE /keys`, `member`, `members`, `index`,
+  `expect` or `path` being present makes it a request about the inside of one key, and one that then
+  names nothing there (`"members": []`) is refused rather than read as a request for the key. Reads
+  inside a key are pages (`/keys/members`: `HSCAN`/`SSCAN`/`ZSCAN` cursors, `LRANGE`/`ZRANGE` windows,
+  `XRANGE`, `GETRANGE`); writes name one member and run under `WATCH`, a string save keeps its expiry
+  (`KEEPTTL`), a list is edited by position with the element the caller saw there (`expect`), and
+  renaming a member or field onto one that exists is a `409`, not a removal. An expiry reaches the server
+  as the integer it was given and is read back as the integer the server answers: the driver's
+  `time.Duration` holds 292 years, and an expiry set for the year 9999 wrapped to a negative one, which
+  Redis reads as a delete. One further off than `redisMaxExpiryMs` (2^53−1 ms since the epoch) is
+  refused, because servers before 6.2 overflow near the top of the range. The console and the paged read
+  speak the protocol themselves through `redisReplyReader` (`dbx/redis_wire.go`), which keeps only what a
+  page shows — a console reply is abandoned past 10 000 values or 2 MiB, a member is carried up to 64 KiB
+  with its real size — because the client library reads a whole reply into memory first. `dbx.RedisProbe`
+  asks each server what it is (flavour; standalone, cluster node, sentinel) and which optional commands
+  it has, and a command the server lacks is not sent: the field is absent and the response says why.
+  Redis values never enter the audit log: entries carry key names, types and counts, and for
+  administrative commands the parameter or account name; a refusal's sentence, which is recorded, quotes
+  no member, field or value. Configuration secrets (`requirepass`, `masterauth`, anything named like a
+  password) and ACL password hashes are never returned. `PUT /redis/acl/{name}` refuses to switch off, or
+  take commands or keys away from, the account the dashboard itself connects as, and says so when that
+  account's password changes under the saved connection. `GET /redis/config` is the configuration proper;
+  `/server/settings` for Redis is `INFO`, now with a `counters.*` group. `redisCommandWrites` and
+  `redisBulkWrites` (`handlers_db_redis_readonly.go`) say from a request body alone whether the console
+  or the bulk route would change anything, and the guard for protected connections stands on them: it
+  lets a console read, a classify and a bulk dry run through and nothing else of Redis's. On `DELETE
+  /keys` an empty `path` is refused like an empty `members`, and on `DELETE /keys/stream/groups`
+  `consumer` is read by presence: `""` removes the consumer named `""`, and only its absence destroys the
+  group.
+  - *Looking at a key is not using it.* Redis keeps one clock per key and evicts by it, and the
+    dashboard's reads reset it: a listing measures each key, a page reads it. The routes that only
+    look — `/keys`, `/keys/tree`, `/keys/meta`, `/keys/members`, `/keys/value`, `/keys/raw`,
+    `/keys/stream`, `/keys/stream/pending`, `/redis/analysis` — open a quiet client
+    (`RedisOpenOptions.Quiet`, `Server.redisReader`), which sends `CLIENT NO-TOUCH ON` on each of
+    its connections and on the raw one a page is read over, and a dump does the same, so a nightly
+    backup no longer makes every key its server's most recently used. Redis has the command from
+    7.2 and Valkey throughout; a server without it answers with an error that is ignored, and
+    `features.noTouch` on `GET /redis/server` says which a server is. A write made from the
+    dashboard is use, and counts.
+  - *One field's expiry.* `POST /keys/field/expire {key, field | members, ttl | ttlMs | at}` and
+    `POST /keys/field/persist {key, field | members}` are the key's two routes a level down, for a
+    server with per-field expiry (`features.hashFieldTtl`; the flag `hashFieldTtl` names the
+    release): the same three ways of saying when, a ttl of zero or less that removes the expiry and
+    never the field, and a moment that has passed refused, because setting it deletes the field.
+    They answer `{ok, fields: [{field, pttl}]}` (`-1` no expiry, `-2` no such field), `404` when
+    none of the fields is there, and `400 unsupported` on a server that keeps none. Both are
+    `service.control`, refused on a protected connection, and audited as
+    `database.redis.field.expire` / `.persist` with the key and how many fields — a field's name is
+    data and is not recorded.
+  - *Claiming.* `POST /keys/stream/claim {key, group, consumer, ids, minIdleMs?}` hands a group's
+    pending entries to one of its consumers (`XCLAIM … JUSTID`), and with `auto: true` whatever has
+    been pending for `minIdleMs`, a page at a time by `cursor` and `count` (`XAUTOCLAIM`,
+    `features.streamAutoClaim`; `400 unsupported` without it). Only ids travel, in both
+    directions. `service.control`, as the console classes both commands; refused on a protected
+    connection; audited as `database.redis.stream.claim`.
+  - *A whole member.* `GET /keys/raw` also streams one member of a set or a sorted set. A member
+    has no name but itself and the reader holds only its start, so it is asked for by that:
+    `member` (or `memberB64`) is how it begins and `bytes` its size, both as the page reported
+    them; without `bytes` the member is named whole. The collection is walked with `SSCAN`/`ZSCAN`
+    narrowed to that beginning and the first member of that size that begins so is copied through
+    from the reply it arrived in (`redisCopyMember`); nothing is held.
+
+### MongoDB
+
+How a pipeline and a console command are read to decide what they need is stated once in
+[request lifecycle](../architecture/request-lifecycle.md#mongodb-a-pipeline-or-a-command-is-classified-after-it-is-parsed);
+the detail of each classifier is below, with the surface it guards.
+
+- **MongoDB has a surface of its own.** Routes under `/databases/{id}/mongo/`
+  (`api/handlers_db_mongo*.go`, `dbx/mongo_*.go`) do not pass documents through the SQL grid. A document
+  crosses the wire as **canonical Extended JSON** with a relaxed copy for display (`dbx.MongoDoc`), is
+  addressed by its `_id` as Extended JSON whatever type that is, and is decoded into `bson.Raw`, so a
+  document read and saved back unchanged is byte-identical (`TestCanonicalRoundTripIsByteIdentical`, and
+  live in `TestLiveMongoDocuments`). It also carries a `digest` (SHA-256 of its BSON), which a replace
+  sends back as `expectedDigest` so an edit never overwrites a change made since the read: the stored
+  document is re-read and compared, and the server repeats the comparison in the operation that writes
+  whenever both documents fit one operation (15 MiB together). The two routes that carry whole documents
+  read a body of up to 64 MiB (`decodeMongoDocuments`), because a 16 MiB document is several times that
+  as canonical text. The display copy leaves a 64-bit integer too large for a double in its `$numberLong`
+  form, because a browser would show a different number. Every text field — filter, sort, document,
+  pipeline, command — is Extended JSON or the shell's spelling (`ObjectId("…")`, `ISODate("…")`, unquoted
+  keys, single quotes): `mongo_shell.go` rewrites the shell form into Extended JSON and is tried only
+  when the text is not valid JSON already, since the driver's reader stops at the end of the first value
+  and would accept `{} garbage`.
+  - *Reads are on the read surface* even where they are POSTs (a filter is a document, not a URL
+    parameter): `find` (with a count that is exact when it can be had in five seconds and the
+    collection's estimate otherwise), `count`, `document`, `explain`, `aggregate/preview`, `schema`,
+    `validation/check`, `export`, and the GETs for collections, indexes, validation, the server
+    snapshot, per-database `dbStats`, `currentOp`, the profiler, replication, users and roles. Each
+    carries a Max time the server enforces (default 30 s, at most 5 min).
+  - *Writes need `service.control`*; `DELETE`s of documents, collections, indexes and `killop` are
+    under `s.destructive`; the profiler and accounts need `system.admin`. Several routine routes have
+    one option that removes data and check it by hand with `mongoNeedsDestructive` (capability and
+    `destrLim`): an update of every document (an empty filter with `many`, which must also say
+    `all: true`), a rename with `dropTarget`, a TTL index or a new TTL limit, a smaller cap or a new
+    expiry through `collMod`, and a pipeline that writes.
+  - *A pipeline is classified after it is parsed* (`dbx.MongoClassifyPipeline`): stage names are read
+    off the parsed stages, sub-pipelines of `$lookup`, `$unionWith` and `$facet` included, so
+    `$mergeObjects` is not `$merge` and `"$\u006fut"` is `$out`. A stage that is not on the list of
+    known reads makes the pipeline destructive. A preview never runs a writing stage and refuses an
+    unknown one, which is why it needs no capability.
+  - *The console* (`POST …/mongo/command`) classifies a command by its first key against
+    `mongoCommands`: read, write, destructive or blocked, plus an `admin` flag for what the forms keep
+    to `system.admin` (accounts, the profiler, server parameters). Arguments can raise the class
+    (`aggregate` with `$out`, `update` with an empty filter and `multi`, `findAndModify` with `remove`,
+    `createIndexes` with a TTL, `profile` with anything beside a negative level, and an `explain` of
+    an `aggregate` whose pipeline writes or holds an unknown stage unless its `verbosity` is
+    `queryPlanner` — with execution the pipeline runs, and the console does not leave refusing that
+    to the server). A flag counts as
+    set unless it is absent, null, `false` or a numeric zero (`mongoFlagSet`): servers differ in what
+    they read as true, and 7.0 takes a Decimal128 for `showCredentials` and a string for `repair`. A
+    command that sets a field twice is refused, since which one a server reads depends on the server.
+    A command not in the table is destructive; `shutdown`, the `replSet*`
+    reconfiguration commands, `eval`/`mapReduce`, `applyOps`, sessions and transactions, and
+    `usersInfo` with `showCredentials` are never run. The audit entry is the command's name and the
+    collection it names, never its body, and is set before the gate so a refusal is recorded under
+    the command's own name.
+  - *Credentials are never documents.* `admin.system.users`, `admin.system.keys` and `local.oplog.rs`
+    (whose entries for an account being made carry its verifier) are refused by every route that
+    reads or writes documents, the first browser's included (`mongoNamespace`), by a pipeline stage
+    that names them, across databases too (`mongoGuardPipeline`), and by the console
+    (`MongoGuardCommand`, which also refuses a collection named by UUID in those databases and a
+    view made over them). In `admin` and `local` a read first lists the database's views and follows
+    the one it was asked for to what it reads (`mongoGuardRead`), so a view somebody made over
+    `system.users` with a shell is refused as well. Not followed: a view in any *other* database
+    whose pipeline joins the replication log, when it was made outside the dashboard.
+  - The first Mongo browser's routes (`/documents`, `/collections`, `/collections/indexes`,
+    `/aggregate`) still answer in their old shapes. `/stats` returns the keys it had plus the counters
+    a chart is drawn from and the server's own clock (`timestamp`), so rates are a difference of two
+    snapshots. Audited as `database.document.insert/replace/update/delete/clone`,
+    `database.collection.create/rename/modify/drop`, `database.index.create/modify/drop`,
+    `database.validation.set`, `database.aggregate`, `database.mongo.command/killop/profiler`,
+    `database.role.create/alter/grant/revoke/drop`, and `database.export` for the Mongo export, which
+    connects and opens its cursor before the first header so a failure is an error response rather
+    than an empty file. That entry is written before the first byte, and an export that breaks off
+    afterwards gets a second one marked as a failure.
+
+### Code generation
+
+- **Code generation is one model and seventeen writers.** `POST /databases/{id}/orm` and
+  `GET /databases/orm/targets` stay on the read surface. `orm_catalog.go` reads the schema into an
+  `ORMSchema` — the same `Tables`/`Columns`/`Indexes`/`ForeignKeys` calls `Detail` makes, then per-engine
+  catalogue facts those do not carry: PostgreSQL's real type names (`format_type`, with a domain resolved
+  to its base), which type is an enum and its labels, identity and generated columns, which index is
+  partial, over an expression, on another access method or descending (with `pg_get_indexdef` kept for
+  the SQL target), which relation is a partition; MySQL's `EXTRA` (auto-increment, expression default,
+  `ON UPDATE`); SQL Server's identity, computed columns, filtered indexes and `INCLUDE` columns; Oracle's
+  character lengths. Those queries are best effort: one that fails costs a detail and adds a warning.
+  Tables are keyed by schema and name throughout, so the same table name in two schemas is two models.
+  Types and defaults are parsed per engine (`orm_types.go`, `orm_defaults.go`); a name one engine's
+  reader does not know stays unknown and is reported, never treated as PostgreSQL would treat it. Each
+  target (`orm_<target>.go`) is a pure function of that model, listed in `orm_targets.go` with its
+  language, group, the engines it exists for and its switches — which is what the picker is drawn from,
+  and why a target with no connector for an engine (Prisma for ClickHouse or Oracle, Drizzle for SQL
+  Server) is refused with the reason before the connection is opened, where it used to come out as a
+  PostgreSQL schema. What a target cannot express — a partial index, a composite foreign key in
+  Sequelize, a table with no key in Prisma — comes back in `warnings`, and `schema`/`filename` repeat
+  `files[0]` for callers that only know those two. The CREATE statement an engine keeps is read only for
+  the SQL target (`ORMScope.Statements`): on Oracle `DBMS_METADATA` can take seconds a table. A view's
+  statement is asked for as a view (`pg_get_viewdef`, `sys.sql_modules`, `DBMS_METADATA` with `'VIEW'`),
+  never taken from the dialect's `CreateSQL`, which on those three engines answers a view with a CREATE
+  TABLE built from its columns; SQL Server's goes into the script inside `EXEC`, because CREATE VIEW has
+  to open its batch. `counts` are what is in the files: a model a target leaves out (and says so) is not
+  counted. The tests are golden files per target, engine and option (`testdata/orm`, rewritten with
+  `-update-orm`), line-level expectations beside them, and live tests that skip unless a DSN is set; the
+  PostgreSQL, SQL Server and Oracle ones drop what they made, run the generated SQL and require the same
+  schema back.
+
+### Moving data: export, import, dumps, restore and copy
+
+- **The export is the view, not the table.** `/databases/{id}/export` takes the grid's `filters`,
+  `orderBy` and `dir` and assembles the statement through the same `browseSelect` the page fetch uses,
+  so a download taken from a narrowed grid is that grid. It was an unconditional `SELECT * FROM`, which
+  made the panel's own promise — "applied on the server, across the whole table" — the reason the file
+  looked right. The parameters are parsed **before** any response header is written: once the body has
+  started, a rejected filter can only arrive as JSON inside a file named `.csv`. `ExportTable` remains
+  as the unfiltered form. The formats are `csv`, `tsv`, `json`, `ndjson` and `sql` (INSERT statements
+  in the source dialect, through the dump's literal renderer and from the values as the driver scanned
+  them); `columns` is a projection. A binary value goes out whole, not as the grid's preview. Two SQL
+  Server types are written as what they are rather than as the driver hands them over
+  (`exportValueOf`): a `uniqueidentifier` as its identifier, not the sixteen stored bytes, and a `time`
+  as a time of day, not that time on the first day of the year one — in either form the column would
+  not take the value back. The row cap is `limit`, clamped to `MaxExportRows`, default
+  `DefaultExportRows`.
+- **An export says how it ended, three ways, because no one way reaches every reader**
+  (`handlers_db_transfer.go`, `exportStream`). A response that ended properly declares two trailers,
+  `X-JD-Export-Status` (`complete` or `truncated`) and `X-JD-Export-Rows`. A JSON or NDJSON file that
+  is not complete ends with an object whose only key is `__export`; a SQL file always ends with a
+  comment. And a caller that names its export (`exportId`) can ask `GET /{id}/export/status` afterwards,
+  which is the only way a browser saving a CSV learns it was cut at the limit: browsers show trailers
+  to nothing, and a CSV has nowhere to say it. The registry is memory, keyed by account, connection and
+  name. A **failure** is never a response that ends: the first 64 KiB are held so that a statement
+  refused before then is an ordinary error response, and past that the response is flushed and the
+  connection aborted (`http.ErrAbortHandler`), which a browser reports as a failed download and every
+  client as a failed transfer. A Mongo server that cannot be reached is `502 connect_failed`, where it
+  was an empty file and a 200. `POST /{id}/export/query` exports one statement's result at
+  `service.control`, taking only what `dbx.ClassifyFor` reads as a read and running it inside the
+  same engine read scope a run of it gets (`session.read`, on every engine: a read-only transaction,
+  a session or setting that refuses writes, or a transaction that is rolled back), so what the
+  classifier missed is refused by the server or undone. It used to be scoped on Postgres and MySQL
+  only, which made the same statement rolled back by `/query` and kept by `/export/query` on SQL
+  Server, Oracle, ClickHouse and SQLite.
+- **An import is a stream and one transaction** (`dbx/import*.go`). `POST /{id}/import/upload` is
+  multipart, read as it arrives: an `options` part of JSON, then the `file`, which is never held whole —
+  the cap is `JD_DB_UPLOAD_MAX_MB`, not the JSON body's 4 MiB. The reader is the package's own because an
+  import is asked two things `encoding/csv` cannot answer: which quote character, and whether a field was
+  quoted (an unquoted empty field is NULL, a quoted one the empty string). UTF-16 and Latin-1 are
+  re-encoded as they are read, a byte-order mark deciding over what the caller said. Columns are matched
+  to the table by mapping, by position, or by name; the first thousand rows are profiled and set against
+  each target column's type, and a mismatch is a **warning with the value and its line**, not a refusal.
+  `dryRun` returns that and the first rows as they would be written, and writes nothing. Rows go in as
+  multi-row INSERTs sized under each engine's parameter limit; a refused batch is undone and retried a
+  row at a time, which is what names the line. On Postgres that needs savepoints — a refused statement
+  spoils the transaction, so "skip bad rows" used to import nothing there. `replace` is a `TRUNCATE` only
+  where one can be rolled back (Postgres) and a `DELETE` elsewhere, since MySQL and Oracle commit a
+  TRUNCATE on their own and a failed import left the table empty; it is destructive, checked from the
+  options in the handler like the query runner's SQL. `upsert` is each engine's own form on the primary
+  key or a named unique index. `createTable` infers a type per column and creates the table inside the
+  transaction where DDL is transactional, and drops it by hand on failure where it is not; a column made
+  the key is given a type the engine will index (`nvarchar(450)` on SQL Server, `varchar(255)` on MySQL),
+  since the type inferred for text is not one. Where columns are matched by name, a column the server
+  fills in itself — generated, computed, virtual, a rowversion (`importComputedColumns`) — is left out
+  and the report says so: an export of the table carries it, and matched to it every row was refused.
+  **SQL Server** (`import_mssql.go`) ends the batch *and the transaction* on a text that does not
+  convert, so "skip bad rows" lost every row before the bad one and failed at the commit. There each
+  value is written through `TRY_CONVERT` to the column's own type, and a row with a value that came back
+  NULL is refused by a `RAISERROR` placed in front of the statement, which ends nothing; the rows of a
+  batch are checked together and written together or not at all. `datetime` and `smalldatetime` are read
+  through `datetime2`, because on their own they read `2026-03-04` as the third of April for a login
+  whose language puts the day first. A binary column is given `CONVERT(varbinary(max), …)`, since a NULL
+  arrives as a text; a file that carries the identity column has `IDENTITY_INSERT` switched on for the
+  transaction. The inline route gets the same check from the column types it now looks up, a binary
+  column included: it binds a file's cells as text, and no text is a value for one, so only "no value"
+  passes — converted like the rest — and a cell that holds text is refused as its own row. Left
+  unconverted the NULL was refused as a text, for the whole statement.
+  `TestLiveImportLeavesEveryTypedColumnEmpty` imports a row of nothing but NULLs under every type that
+  could object, on each engine. **Oracle** reads a text as a date by the session's NLS format, so a value
+  in an ISO form is bound as the instant it names (`importISOTime`), and `true`/`false` go into a numeric
+  column as 1 and 0 — `NUMBER(1)` is what a column of them is created as there. ClickHouse has no
+  transaction and its driver cannot continue past a refused row, so `atomic` is false there and a refused
+  row ends the import before anything is sent. Mongo's upload inserts in batches; its `replace` stages
+  the documents and swaps them in with `$out`, which keeps the collection's indexes and leaves it
+  untouched if the file breaks its rules. The inline `/import` route runs on the same engine and keeps
+  its request and response; its Mongo `truncate` now reads the data through before removing anything, and
+  empties the collection rather than dropping it.
+- **A dump for every engine with no external dependency.** Three have a client tool the image can carry;
+  the rest returned `ErrUnsupported` at the moment the operator pressed the button — the worst time to
+  learn a backup was never possible. `dump_sql.go` writes SQL over the open connection; `dump_nosql.go`
+  does Mongo and Redis as gzipped JSON Lines, Redis via `DUMP`/`RESTORE` so every type survives. A native
+  tool that *fails* falls through to the built-in rather than to an error; one that was *stopped* does
+  not. `dumpLiteral` is the second place putting a value into SQL text (unavoidable — a dump is text) and
+  is per-engine, since a backslash escapes on MySQL and ClickHouse and is a plain character on the other
+  four. `Restore` picks its reader from the file's first bytes, not the driver: a Postgres connection may
+  hold a `PGDMP` archive, our SQL, or a plain script somebody uploaded. A mongodump archive is read
+  for the database it came from (`mongoArchiveDatabases`) and confined and redirected with
+  `--nsInclude`/`--nsFrom`/`--nsTo` — it used to be written back over whichever database it named.
+- **A script somebody else wrote is replayed here, never by the engine's client** (`dump_script.go`). A
+  plain pg_dump or a mysqldump used to be piped to `psql` or `mysql`, and a client does more with a
+  script than send it: `\!` and `system` run a shell, both read other files, both reconnect elsewhere.
+  A dump is a file anybody with `service.control` can upload, so restoring one was a second
+  request-defined shell (invariant 6). Reading the script first cannot close that, because where a
+  string ends depends on settings the script changes as it runs (`standard_conforming_strings`,
+  `NO_BACKSLASH_ESCAPES`). So `postgresScript` and `mysqlScript` cut the file into statements by the
+  clients' own rules — dollar quotes, `BEGIN ATOMIC` bodies and `COPY … FROM stdin` blocks (sent with
+  `PgConn.CopyFrom`); `DELIMITER` and conditional comments, which are statement text — and the
+  statements go over the dashboard's connection. A reader that disagrees with the server gets a syntax
+  error and nothing else. The script is read through once before anything runs: a psql meta-command
+  other than `\restrict`/`\unrestrict`, a mysql client command, `\connect`, or a MySQL statement that
+  is a `USE` of another database (wherever on a line, and inside a conditional comment) is refused
+  with the database untouched. Postgres replays as one transaction; a MySQL connection used for a
+  replay has multi-statement queries switched off, so what one statement is stays decided here. The
+  only tools a restore runs are `pg_restore` and `mongorestore`, on archives. This confines the
+  session, not the script: a statement that names another database explicitly still reaches it with
+  the connection's rights, as it would from the query runner.
+- **The built-in dump is a plan, read before a row is** (`dump_sql_plan.go` and the per-engine files).
+  The tables alone restore into a database with no unique constraint, no index and no view, so the plan
+  carries those and the order they replay in: sequences, tables parents-first, rows, then constraints
+  and indexes, foreign keys last, views after everything they read. Postgres is read from `pg_catalog`
+  with the server's own deparsers in a session whose `search_path` is empty, so every name is
+  schema-qualified; the `information_schema` DDL it replaces called an enum `USER-DEFINED` and did not
+  parse. A partition is created `PARTITION OF` its parent and only leaves carry rows; a materialized
+  view is created `WITH NO DATA` and refreshed at the end; an identity column's rows go in
+  `OVERRIDING SYSTEM VALUE` and its sequence is set through `pg_get_serial_sequence`; extension-owned
+  objects are left to `CREATE EXTENSION`. MySQL is scoped to `DATABASE()` — it listed every database the
+  account could see, and the restore began by dropping their tables — written unqualified, with
+  `FOREIGN_KEY_CHECKS` off and the session zone pinned. SQLite replays `sqlite_master`, triggers after
+  the rows. Catalogue text is fenced (`-- jd:statement <word>` … `-- jd:end <word>`) so the reader
+  never lexes a trigger body. The word is made per dump (`newDumpFence`) and only the closing line
+  that carries it closes the fence: what is fenced is somebody else's text — a view's body with its
+  comments kept, a row's long value — and a line of it reading `-- jd:end` used to end the statement
+  there and hand the lines after it to the server as statements of their own. The read is one snapshot
+  where the engine has one, and the replay one transaction where DDL can be rolled back (Postgres,
+  SQLite, SQL Server): a dump that fails on its fortieth statement changes nothing. A restore streams
+  the file; it used to read it whole.
+- **SQL Server and Oracle are dumped from their own catalogues too** (`dump_sql_mssql.go`,
+  `dump_sql_oracle.go`). Both were written from the dialect's column list, which does not say that a
+  column numbers itself, is computed, or is a rowversion: a SQL Server restore gave back tables that no
+  longer handed out an id and failed outright on a rowversion, and an Oracle one failed on the index
+  behind every primary key. SQL Server is read from `sys`, objects the server ships left out: identity,
+  computed and rowversion columns, named defaults, checks, unique constraints, filtered and
+  included-column indexes, schemas other than `dbo`, sequences, and views ordered by
+  `sql_expression_dependencies`. Rows go in under `SET IDENTITY_INSERT` and the counter is reseeded to
+  where it stood, which the rows alone do not say. The engine has no cascading drop, so every foreign
+  key that touches a dumped table — from a table the dump leaves alone as well — is taken off before
+  the drops and put back after the rows. Nothing in the file names the database, which is what lets it
+  load into one made a moment ago. Values are written for the column's type (`mssqlDumpTime`: the
+  ISO form with a `T`, the one spelling read the same under every language setting; `datetime` takes
+  three digits of a second and no more). Oracle's definitions are `DBMS_METADATA`'s, with storage
+  clauses left out, asked for on one connection held for the whole dump because how a definition is
+  written is a setting of the session. A table that is `GENERATED ALWAYS AS IDENTITY` refuses a number
+  given to it and has no "this once", so it is altered to `BY DEFAULT` for its rows and back after
+  them, at the counter's position. A row with a value too long for a literal — four thousand bytes;
+  bytes past two thousand could not be written at all — is a PL/SQL block that builds the value in
+  pieces (`oracleDumpLongRow`); the hex goes through a variable because `HEXTORAW` of a long literal is
+  evaluated when the block is compiled and takes seconds a piece. Tables are dropped `PURGE`, or each
+  restore leaves a copy of what it replaced in the recycle bin against the same quota. Oracle has no
+  `DROP … IF EXISTS` before 23, so its drops are unconditional and one that finds nothing is passed
+  over — but only that one (`dumpDropFoundNothing`): a drop refused because a session still holds rows
+  in a temporary table, or because the login may not make it, stops the restore there and says so,
+  where it used to surface a statement later as a name already taken. A dump is of one
+  schema, the session's or the one named; a schema of the server's own (`oracle_maintained`) is refused,
+  which is what an administrator's login is in unless told otherwise. The dialect-driven plan from the
+  standard catalogue views remains only as the fallback for a server that speaks Postgres's protocol
+  without keeping its catalogue. Their live tests do not run where the connection string lands, since
+  a restore replaces every table in the database it is pointed at: SQL Server's make a database of
+  their own (`JD_TEST_MSSQL_DSN` names the server; the string itself lands in master), Oracle's make a
+  user (`JD_TEST_ORACLE_ADMIN_DSN`), and the shared round trips skip in a database that holds tables
+  they did not make.
+- **Every tool is started through `hostexec` with an argv** (`dump_exec.go`), as a process group, so
+  stopping a job stops `pg_restore`'s workers and not only the process that forked them.
+  `TestNothingHereStartsAProcessOfItsOwn` keeps `os/exec` out of the package. One thing is not taken
+  from `hostexec`: a tool that exists only on the host side of a container boundary is not used — it
+  would dial from the host's network and read paths in the host's mount namespace — and the built-in
+  dumper runs instead.
+- **A dump the operator can take away.** The dump stays on the server (restore reads it) and a copy goes
+  to the browser immediately, because a backup whose only copy is on the machine it protects is not one.
+  `/databases/{id}/backup/download` takes a **name**, not a path, and contains it with a `files.Service`
+  scoped to that connection's dump directory — [invariant
+  6](../security/invariants.md#invariants-that-must-not-regress) with the right root, since narrowing
+  `JD_FILE_ROOTS` must not stop us handing back a file we wrote. Restore resolves through the same scope
+  (`resolveRestoreSource`), by name or by the path the listing reports, and through `files.Resolve` only
+  for a file elsewhere; it used to hold every dump to the roots, so narrowing them stopped the dashboard
+  restoring what it could still download.
 - **The dumps on disk.** `GET /databases/{id}/backups` lists the connection's dump directory
-  newest first with each file's size and format; `DELETE /databases/{id}/backups` (destructive,
-  not typed: the database is still there to dump again) removes one, contained against that
-  directory exactly as the download is. The fleet reads the same listing for "last backup".
-- **An account made from the host.** `POST /databases/host/grant` (admin) is for the native
-  server whose password nobody knows — the apt-installed Postgres whose `postgres` role has never
-  had one. It runs the engine's client on the host through `hostexec`: `psql` as the host's
-  `postgres` account (looked up in the host's passwd, which is mounted at `/etc`, through
-  `setpriv`) over the Unix socket, where peer authentication admits it, with one `DO` block that
-  creates or resets the account (`format('%I … %L')`, so the server quotes both); `mysql`
-  (or `mariadb`) as root over the socket, making the account for both `localhost` and
-  `127.0.0.1`; `mongosh` under the localhost exception; `clickhouse-client` as `default`. Redis
-  has no accounts, so its `requirepass` is read from `/etc/redis/redis.conf` (or Valkey's).
-  The password is generated on the server unless supplied, reaches the client as one argv
-  element and never a shell, and the connection is probed over TCP before anything is saved;
-  an existing connection to the same address is re-sealed rather than duplicated. Audited as
-  `database.connection.host.grant` with the account and outcome, never the password.
-  `TestLiveHostPostgresAccount` exercises it as root against a real native server
-  (`JD_TEST_HOST_PG_PORT`).
+  newest first; `DELETE /databases/{id}/backups` (destructive, not typed: the database is still there
+  to dump again) removes one, contained against that directory exactly as the download is. The fleet
+  reads the same listing for "last backup", and `GET /databases/backups/summary` is every connection's
+  newest dump in one read that dials nothing. What a dump holds — the options it was taken with, the
+  tool and version that wrote it, how long it took, a note, who asked — is in a small file beside it
+  (`<dump>.meta.json`, `dbx/dump_meta.go`), written to a temporary name and renamed. Beside it rather
+  than in a table because the directory is what gets copied off the machine. A file with no
+  description is listed with what its first bytes say it is. `POST /databases/{id}/backups/upload`
+  (`service.control`) streams a dump made elsewhere into the directory through the scoped
+  `files.Service`, under a validated name, capped by `JD_DB_UPLOAD_MAX_MB`; it restores nothing.
+  A dump has no name until it is whole: it is written, or uploaded, in a hidden directory inside the
+  one it is bound for (`dbx.NewDumpStaging`, `.dump-*` and `.upload-*`, cleared after a day if a
+  process died over one) and then given its name by `dbx.PlaceDump`, which claims the name with an
+  exclusive create before renaming onto it. So the listing never holds a file that is still being
+  written, and of two uploads of one name — or two dumps in one second — neither lands on the other.
+- **A dump, a restore and a copy are jobs** (`handlers_db_transfer.go`). `POST /{id}/backup` and
+  `/restore` answer `202` with a `jobs.Job`; the page watches `/jobs/{id}` and its stream, where the
+  lines are the tool's own, and stops it with `/jobs/{id}/cancel`. The last line, on stream `result`,
+  is JSON: what was written or restored. One transfer per connection at a time
+  (`StartExclusive` on `database.transfer.<id>.`; a second is `409 transfer_running` with the running
+  job's id in `error.resource`). The request is audited when it is answered and the outcome when the
+  job ends (`database.backup.finish`, `.restore.finish`, `.copy.finish`). A dump takes `schemaOnly`,
+  `dataOnly`, `tables`, `excludeTables`, `compression`, Redis `databases` and a `note`;
+  `dbx.ValidateDumpOptions` refuses what the engine cannot honour before a job exists, and
+  `dbx.DumpCapabilities` is the same table for the form. A Redis dump covers every numbered database
+  that holds a key unless told which. A restore takes `target` (`"this"` or `{"newDatabase": name}`,
+  which also needs `system.admin`, checked in the handler) and `dumpFirst`, which dumps the database
+  as it is before replacing it and names that file in the result. The dashboard's pooled sessions are
+  closed around a restore. A SQLite file is loaded through the engine's online backup into the file
+  that is there: overwriting it by hand gave a program with it open half of each database, and
+  renaming a new file into place left that program writing to one with no name. `POST /{id}/copy`
+  (`system.admin`) is a dump, a new database and a restore as one job, the dump its own and removed.
+
+### Tests
+
+Which variables name which fixture, which tests fall back to a standard port and which never do, and the
+per-area browser specs are in
+[CONTRIBUTING](../../../CONTRIBUTING.md#running-the-database-tests-against-real-engines).
+
+- **Live tests skip rather than fail**, or a suite failing for want of a database teaches people to ignore
+  it. Every bug this feature shipped was a catalogue query a unit test string-matched identically and only
+  the engine rejected — SQL Server refusing `ADD COLUMN`, a size query summing every index_id and
+  reporting four times the real size, Postgres's `now()` being the *transaction* timestamp and so
+  reporting a negative session age. Oracle has an optional live fixture using `JD_TEST_ORACLE_DSN`;
+  without a configured server, its unit coverage does not establish live-engine compatibility.
+  The table editor and query runner's own live tests (`dbx/live_workbench_test.go`) run each case on
+  PostgreSQL, MariaDB, MySQL 8 (`JD_TEST_MYSQL8_DSN`), SQL Server and Oracle, and never fall back to a
+  standard port: an engine is named by its variable or skipped. The Oracle cases that use the JSON and
+  BOOLEAN types need 23ai, and the two that watch another session (`v$session`) need
+  `JD_TEST_ORACLE_ADMIN_DSN`. On a server shared between runs, point `JD_TEST_MSSQL_DSN` at a database
+  of the run's own; every table these tests make is named `jdwb_…`.
+
+### Routes
+
+Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
+`api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
+and `protectReadOnlyConnections`.
+
+- **Capability** is every capability the route's groups require. `read` is any authenticated role,
+  `readonly` included.
+- **Destructive** is `yes` for a route inside `s.destructive`: the `destructive` capability, which
+  the column before it lists, and the `destrLim` budget. `by content` is a route that serves routine
+  requests too, so its handler asks for that capability and budget by hand when the body makes the
+  request destructive, and fails closed; the word after it is what decides.
+- **Audited as** is the action the entry is recorded under. A `GET` writes none unless it is marked
+  †: those record themselves, before the read runs or when the socket opens. A `POST` that only
+  reads or only probes writes none either (`httpx.SkipAudit`). Every other mutating route names its
+  own action, and the column is that name: what a request is recorded under once its handler has
+  read it. A request refused before that — by `RequireCapability`, by the protected-connection
+  guard, or by the handler's own validation ahead of its first `SetAudit` or `SkipAudit` — is still
+  recorded, as a failure under the middleware's default label. `httpx.AuditMutations` derives that
+  label when the request enters it, which is before the `/databases` subrouter has matched, so for
+  every route here it is the method and the section and nothing more (`post:databases`,
+  `delete:databases`); which route was refused is the entry's `path`.
+- **Protected** is what a connection marked read-only does with the route: `open`, `by content`
+  (let through when the handler's own classification of the body says read), `preview only` (let
+  through with `?preview=1`, which shows the statement and runs nothing) or `refused` with
+  `409 connection_read_only`. It is `protectedRouteVerdicts` in `api/handlers_db_protect_test.go`,
+  the list written out by hand that `TestProtectionCoversEveryMutatingRoute` holds the router to:
+  29 open, 12 by content, 20 preview only, 61 refused.
+
+**Every database** (19)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/databases/` | read | — | — | — |
+| `POST` | `/databases/` | `system.admin` | — | `database.connection.create` | — |
+| `POST` | `/databases/adopt` | `system.admin` | — | `database.connection.adopt`, `.refresh` | — |
+| `GET` | `/databases/backups/summary` | read | — | — | — |
+| `GET` | `/databases/detected` | `system.admin` | — | — | — |
+| `GET` | `/databases/drivers` | read | — | — | — |
+| `GET` | `/databases/fleet` | read | — | — | — |
+| `POST` | `/databases/host` | `system.admin` | — | `database.connection.host` | — |
+| `POST` | `/databases/host/grant` | `system.admin` | — | `database.connection.host.grant` | — |
+| `GET` | `/databases/inventory` | read | — | — | — |
+| `POST` | `/databases/inventory/connect` | `system.admin` | — | `database.inventory.connect` | — |
+| `POST` | `/databases/inventory/ignore` | `system.admin` | — | `database.inventory.ignore`, `.unignore` | — |
+| `POST` | `/databases/inventory/scan` | `system.admin` | — | — | — |
+| `GET` | `/databases/orm/targets` | read | — | — | — |
+| `POST` | `/databases/provision` | `system.admin` | — | `database.server.provision` | — |
+| `GET` | `/databases/provision/options` | `system.admin` | — | — | — |
+| `POST` | `/databases/sync` | `system.admin` | — | `database.connection.sync` | — |
+| `POST` | `/databases/test` | `system.admin` | — | — | — |
+| `GET` | `/databases/topology` | read | — | — | — |
+
+**One connection** (13)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/databases/{id}` | read | — | — | — |
+| `PUT` | `/databases/{id}` | `system.admin` | — | `database.connection.update` | open |
+| `DELETE` | `/databases/{id}` | `system.admin` + `destructive` | yes | `database.connection.delete` | open |
+| `GET` | `/databases/{id}/access` | `system.admin` | — | — | — |
+| `PUT` | `/databases/{id}/access` | `system.admin` + `destructive` | yes | `database.access.change` | open |
+| `GET` | `/databases/{id}/consumers` | read | — | — | — |
+| `DELETE` | `/databases/{id}/database` | `system.admin` + `destructive` | yes | `database.drop` | refused |
+| `GET` | `/databases/{id}/overview` | read | — | — | — |
+| `GET` | `/databases/{id}/ping` | read | — | — | — |
+| `POST` | `/databases/{id}/power` | `service.control` | by content: `stop`, `restart` | `database.power.<action>` | open |
+| `GET` | `/databases/{id}/schemas` | read | — | — | — |
+| `GET` | `/databases/{id}/stats` | read | — | — | — |
+| `GET` | `/databases/{id}/url` | `system.admin` | — | `database.connection.reveal` † | — |
+
+**Rows and statements** (22)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/databases/{id}/browse` | read | — | — | — |
+| `GET` | `/databases/{id}/cell` | read | — | — | — |
+| `POST` | `/databases/{id}/changes` | `service.control` | by content: a delete | `database.rows.change` | by content |
+| `POST` | `/databases/{id}/classify` | read | — | — | open |
+| `GET` | `/databases/{id}/columns` | read | — | — | — |
+| `GET` | `/databases/{id}/count` | read | — | — | — |
+| `POST` | `/databases/{id}/explain` | read | by content: `analyze` | `database.explain` | by content |
+| `GET` | `/databases/{id}/history` | read | — | — | — |
+| `GET` | `/databases/{id}/queries` | read | — | — | — |
+| `POST` | `/databases/{id}/queries` | `service.control` | — | `database.query.save` | open |
+| `PUT` | `/databases/{id}/queries/{qid}` | `service.control` | — | `database.query.update` | open |
+| `DELETE` | `/databases/{id}/queries/{qid}` | `service.control` | — | `database.query.unsave` | open |
+| `POST` | `/databases/{id}/query` | `service.control` | by content: statement | `database.query` | by content |
+| `POST` | `/databases/{id}/query/cancel` | `service.control` | — | `database.query.cancel` | open |
+| `POST` | `/databases/{id}/rows` | `service.control` | — | `database.row.insert` | refused |
+| `PATCH` | `/databases/{id}/rows` | `service.control` | — | `database.row.update` | refused |
+| `DELETE` | `/databases/{id}/rows` | `destructive` | yes | `database.row.delete` | refused |
+| `POST` | `/databases/{id}/rows/sql` | read | — | — | open |
+| `POST` | `/databases/{id}/script` | `service.control` | by content: statements | `database.script` | by content |
+| `GET` | `/databases/{id}/search` | read | — | `database.search` † | — |
+| `GET` | `/databases/{id}/table` | read | — | — | — |
+| `GET` | `/databases/{id}/tables` | read | — | — | — |
+
+**Schema** (28)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/databases/{id}/catalog` | read | — | — | — |
+| `POST` | `/databases/{id}/ddl/column` | `service.control` | by content: plan | `database.ddl.add_column` | preview only |
+| `PATCH` | `/databases/{id}/ddl/column` | `service.control` | by content: plan | `database.ddl.alter_column` | preview only |
+| `DELETE` | `/databases/{id}/ddl/column` | `destructive` | yes | `database.ddl.drop_column` | preview only |
+| `POST` | `/databases/{id}/ddl/comment` | `service.control` | by content: plan | `database.ddl.comment` | preview only |
+| `POST` | `/databases/{id}/ddl/constraint` | `service.control` | by content: plan | `database.ddl.add_constraint` | preview only |
+| `DELETE` | `/databases/{id}/ddl/constraint` | `destructive` | yes | `database.ddl.drop_constraint` | preview only |
+| `POST` | `/databases/{id}/ddl/enum` | `service.control` | by content: plan | `database.ddl.create_enum` | preview only |
+| `POST` | `/databases/{id}/ddl/enum/value` | `service.control` | by content: plan | `database.ddl.add_enum_value` | preview only |
+| `POST` | `/databases/{id}/ddl/foreign-key` | `service.control` | by content: plan | `database.ddl.add_foreign_key` | preview only |
+| `DELETE` | `/databases/{id}/ddl/foreign-key` | `destructive` | yes | `database.ddl.drop_foreign_key` | preview only |
+| `POST` | `/databases/{id}/ddl/index` | `service.control` | by content: plan | `database.ddl.create_index` | preview only |
+| `DELETE` | `/databases/{id}/ddl/index` | `destructive` | yes | `database.ddl.drop_index` | preview only |
+| `POST` | `/databases/{id}/ddl/rename` | `service.control` | by content: plan | `database.ddl.rename` | preview only |
+| `POST` | `/databases/{id}/ddl/schema` | `service.control` | by content: plan | `database.ddl.create_schema` | preview only |
+| `DELETE` | `/databases/{id}/ddl/schema` | `destructive` | yes | `database.ddl.drop_schema` | preview only |
+| `POST` | `/databases/{id}/ddl/table` | `service.control` | by content: plan | `database.ddl.create_table` | preview only |
+| `DELETE` | `/databases/{id}/ddl/table` | `destructive` | yes | `database.ddl.drop_table` | preview only |
+| `POST` | `/databases/{id}/ddl/truncate` | `destructive` | yes | `database.ddl.truncate` | preview only |
+| `POST` | `/databases/{id}/ddl/view` | `service.control` | by content: plan | `database.ddl.create_view` | preview only |
+| `DELETE` | `/databases/{id}/ddl/view` | `destructive` | yes | `database.ddl.drop_view` | preview only |
+| `GET` | `/databases/{id}/diagram` | read | — | — | — |
+| `PUT` | `/databases/{id}/diagram` | `service.control` | — | `database.diagram.save` | open |
+| `DELETE` | `/databases/{id}/diagram` | `service.control` | — | `database.diagram.reset` | open |
+| `GET` | `/databases/{id}/graph` | read | — | — | — |
+| `GET` | `/databases/{id}/object` | read | — | — | — |
+| `GET` | `/databases/{id}/outline` | read | — | — | — |
+| `GET` | `/databases/{id}/relations` | read | — | — | — |
+
+**Operations** (21)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/databases/{id}/activity` | read | — | — | — |
+| `POST` | `/databases/{id}/activity/cancel` | `destructive` | yes | `database.session.cancel` | open |
+| `POST` | `/databases/{id}/activity/kill` | `destructive` | yes | `database.session.kill` | open |
+| `GET` | `/databases/{id}/advisor` | read | — | — | — |
+| `GET` | `/databases/{id}/clickhouse/merges` | read | — | — | — |
+| `GET` | `/databases/{id}/clickhouse/mutations` | read | — | — | — |
+| `GET` | `/databases/{id}/clickhouse/parts` | read | — | — | — |
+| `GET` | `/databases/{id}/clickhouse/queries` | read | — | — | — |
+| `GET` | `/databases/{id}/indexstats` | read | — | — | — |
+| `GET` | `/databases/{id}/locks` | read | — | — | — |
+| `GET` | `/databases/{id}/logs/sources` | read | — | — | — |
+| `GET` | `/databases/{id}/maintenance` | read | — | — | — |
+| `POST` | `/databases/{id}/maintenance` | `service.control` | by content: action | `database.maintenance` | by content |
+| `GET` | `/databases/{id}/querylog` | read | — | — | — |
+| `GET` | `/databases/{id}/replication` | read | — | — | — |
+| `GET` | `/databases/{id}/settings` | read | — | — | — |
+| `PUT` | `/databases/{id}/settings` | `system.admin` | — | `database.setting.set`, `.reset` | refused |
+| `GET` | `/databases/{id}/sqlite/file` | read | — | — | — |
+| `GET` | `/databases/{id}/statements` | read | — | — | — |
+| `POST` | `/databases/{id}/statements/reset` | `destructive` | yes | `database.statements.reset` | refused |
+| `GET` | `/databases/{id}/tablestats` | read | — | — | — |
+
+**The server behind a connection** (16)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `POST` | `/databases/{id}/server/databases` | `system.admin` | — | `database.create`, `database.connection.sibling` | refused |
+| `POST` | `/databases/{id}/server/databases/connect` | `system.admin` | — | `database.connection.sibling` | refused |
+| `GET` | `/databases/{id}/server/extensions` | read | — | — | — |
+| `POST` | `/databases/{id}/server/extensions` | `system.admin` | — | `database.extension.create` | refused |
+| `DELETE` | `/databases/{id}/server/extensions/{name}` | `system.admin` + `destructive` | yes | `database.extension.drop` | refused |
+| `GET` | `/databases/{id}/server/grants` | read | — | — | — |
+| `GET` | `/databases/{id}/server/privileges` | read | — | — | — |
+| `GET` | `/databases/{id}/server/roles` | read | — | — | — |
+| `POST` | `/databases/{id}/server/roles` | `system.admin` | — | `database.role.create` | refused |
+| `GET` | `/databases/{id}/server/roles/{name}` | read | — | — | — |
+| `PUT` | `/databases/{id}/server/roles/{name}` | `system.admin` | — | `database.role.alter` | refused |
+| `DELETE` | `/databases/{id}/server/roles/{name}` | `system.admin` + `destructive` | yes | `database.role.drop` | refused |
+| `POST` | `/databases/{id}/server/roles/{name}/grant` | `system.admin` | — | `database.role.grant` | refused |
+| `POST` | `/databases/{id}/server/roles/{name}/privileges` | `system.admin` | — | `database.role.grant` | refused |
+| `POST` | `/databases/{id}/server/roles/{name}/privileges/revoke` | `system.admin` | — | `database.role.revoke` | refused |
+| `GET` | `/databases/{id}/server/settings` | read | — | — | — |
+
+**Moving data** (13)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `POST` | `/databases/{id}/backup` | `service.control` | — | `database.backup`, `.finish` | open |
+| `GET` | `/databases/{id}/backup/download` | `service.control` | — | `database.backup.download` † | — |
+| `GET` | `/databases/{id}/backups` | read | — | — | — |
+| `DELETE` | `/databases/{id}/backups` | `system.admin` + `destructive` | yes | `database.backup.delete` | open |
+| `POST` | `/databases/{id}/backups/upload` | `service.control` | — | `database.backup.upload` | open |
+| `POST` | `/databases/{id}/copy` | `system.admin` | — | `database.copy`, `.finish` | refused |
+| `GET` | `/databases/{id}/export` | read | — | `database.export`, `.finished` † | — |
+| `POST` | `/databases/{id}/export/query` | `service.control` | — | `database.export.query`, `.finished` | by content |
+| `GET` | `/databases/{id}/export/status` | read | — | — | — |
+| `POST` | `/databases/{id}/import` | `service.control` | by content: `truncate` | `database.import` | refused |
+| `POST` | `/databases/{id}/import/upload` | `service.control` | by content: `replace` | `database.import` | refused |
+| `POST` | `/databases/{id}/orm` | read | — | `database.orm.generate` | open |
+| `POST` | `/databases/{id}/restore` | `destructive` | yes | `database.restore`, `.finish` | refused |
+
+**Redis** (43)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/databases/{id}/keys` | read | — | — | — |
+| `DELETE` | `/databases/{id}/keys` | `destructive` | yes | `database.redis.delete`, `.member.delete` | refused |
+| `POST` | `/databases/{id}/keys/bulk` | `service.control` | by content: `delete`, `expire` | `database.redis.bulk` | by content |
+| `POST` | `/databases/{id}/keys/copy` | `service.control` | by content: `overwrite` | `database.redis.copy` | refused |
+| `POST` | `/databases/{id}/keys/expire` | `service.control` | — | `database.redis.expire` | refused |
+| `POST` | `/databases/{id}/keys/field/expire` | `service.control` | — | `database.redis.field.expire` | refused |
+| `POST` | `/databases/{id}/keys/field/persist` | `service.control` | — | `database.redis.field.persist` | refused |
+| `GET` | `/databases/{id}/keys/members` | read | — | — | — |
+| `GET` | `/databases/{id}/keys/meta` | read | — | — | — |
+| `POST` | `/databases/{id}/keys/persist` | `service.control` | — | `database.redis.persist` | refused |
+| `GET` | `/databases/{id}/keys/raw` | read | — | — | — |
+| `POST` | `/databases/{id}/keys/rename` | `service.control` | by content: `overwrite` | `database.redis.rename` | refused |
+| `GET` | `/databases/{id}/keys/stream` | read | — | — | — |
+| `POST` | `/databases/{id}/keys/stream/ack` | `service.control` | — | `database.redis.stream.ack` | refused |
+| `POST` | `/databases/{id}/keys/stream/claim` | `service.control` | — | `database.redis.stream.claim` | refused |
+| `POST` | `/databases/{id}/keys/stream/groups` | `service.control` | — | `database.redis.stream.group.create`, `.setid` | refused |
+| `DELETE` | `/databases/{id}/keys/stream/groups` | `destructive` | yes | `database.redis.stream.group.delete`, `.consumer.delete` | refused |
+| `GET` | `/databases/{id}/keys/stream/pending` | read | — | — | — |
+| `POST` | `/databases/{id}/keys/stream/trim` | `destructive` | yes | `database.redis.stream.trim` | refused |
+| `GET` | `/databases/{id}/keys/tree` | read | — | — | — |
+| `GET` | `/databases/{id}/keys/value` | read | — | — | — |
+| `POST` | `/databases/{id}/keys/value` | `service.control` | — | `database.redis.set` | refused |
+| `GET` | `/databases/{id}/redis/acl` | read | — | — | — |
+| `PUT` | `/databases/{id}/redis/acl/{name}` | `system.admin` | — | `database.redis.acl.set` | refused |
+| `DELETE` | `/databases/{id}/redis/acl/{name}` | `system.admin` + `destructive` | yes | `database.redis.acl.delete` | refused |
+| `GET` | `/databases/{id}/redis/analysis` | read | — | — | — |
+| `POST` | `/databases/{id}/redis/classify` | read | — | — | open |
+| `GET` | `/databases/{id}/redis/clients` | read | — | — | — |
+| `POST` | `/databases/{id}/redis/clients/kill` | `destructive` | yes | `database.redis.client.kill` | open |
+| `POST` | `/databases/{id}/redis/command` | `service.control` | by content: command | `database.redis.command` | by content |
+| `GET` | `/databases/{id}/redis/commands` | read | — | — | — |
+| `GET` | `/databases/{id}/redis/commandstats` | read | — | — | — |
+| `GET` | `/databases/{id}/redis/config` | read | — | — | — |
+| `PUT` | `/databases/{id}/redis/config` | `system.admin` | — | `database.redis.config.set` | refused |
+| `GET` | `/databases/{id}/redis/latency` | read | — | — | — |
+| `GET` | `/databases/{id}/redis/monitor` | `system.admin` | — | `database.redis.monitor.open` † | — |
+| `POST` | `/databases/{id}/redis/publish` | `service.control` | — | `database.redis.publish` | refused |
+| `GET` | `/databases/{id}/redis/pubsub` | read | — | — | — |
+| `POST` | `/databases/{id}/redis/save` | `service.control` | — | `database.redis.save` | refused |
+| `GET` | `/databases/{id}/redis/server` | read | — | — | — |
+| `GET` | `/databases/{id}/redis/slowlog` | read | — | — | — |
+| `POST` | `/databases/{id}/redis/slowlog/reset` | `destructive` | yes | `database.redis.slowlog.reset` | refused |
+| `GET` | `/databases/{id}/redis/subscribe` | `system.admin` | — | `database.redis.subscribe.open` † | — |
+
+**MongoDB** (49)
+
+| Method | Path | Capability | Destructive | Audited as | Protected |
+| --- | --- | --- | --- | --- | --- |
+| `POST` | `/databases/{id}/aggregate` | `service.control` | by content: pipeline | `database.aggregate` | by content |
+| `POST` | `/databases/{id}/collections` | `service.control` | — | `database.collection.create` | refused |
+| `DELETE` | `/databases/{id}/collections` | `destructive` | yes | `database.collection.drop` | refused |
+| `GET` | `/databases/{id}/collections/indexes` | read | — | — | — |
+| `POST` | `/databases/{id}/documents` | `service.control` | — | `database.document.insert` | refused |
+| `PATCH` | `/databases/{id}/documents` | `service.control` | — | `database.document.replace` | refused |
+| `DELETE` | `/databases/{id}/documents` | `destructive` | yes | `database.document.delete` | refused |
+| `POST` | `/databases/{id}/mongo/aggregate/preview` | read | — | — | open |
+| `GET` | `/databases/{id}/mongo/collection` | read | — | — | — |
+| `GET` | `/databases/{id}/mongo/collections` | read | — | — | — |
+| `POST` | `/databases/{id}/mongo/collections` | `service.control` | — | `database.collection.create` | refused |
+| `PATCH` | `/databases/{id}/mongo/collections` | `service.control` | by content: cap, expiry | `database.collection.modify` | refused |
+| `DELETE` | `/databases/{id}/mongo/collections` | `destructive` | yes | `database.collection.drop` | refused |
+| `POST` | `/databases/{id}/mongo/collections/rename` | `service.control` | by content: `dropTarget` | `database.collection.rename` | refused |
+| `POST` | `/databases/{id}/mongo/command` | `service.control` | by content: command | `database.mongo.command` | by content |
+| `POST` | `/databases/{id}/mongo/command/classify` | read | — | — | open |
+| `GET` | `/databases/{id}/mongo/commands` | read | — | — | — |
+| `POST` | `/databases/{id}/mongo/count` | read | — | — | open |
+| `GET` | `/databases/{id}/mongo/databases` | read | — | — | — |
+| `POST` | `/databases/{id}/mongo/document` | read | — | — | open |
+| `POST` | `/databases/{id}/mongo/documents` | `service.control` | — | `database.document.insert` | refused |
+| `PUT` | `/databases/{id}/mongo/documents` | `service.control` | — | `database.document.replace` | refused |
+| `PATCH` | `/databases/{id}/mongo/documents` | `service.control` | by content: every document | `database.document.update` | by content |
+| `DELETE` | `/databases/{id}/mongo/documents` | `destructive` | yes | `database.document.delete` | by content |
+| `POST` | `/databases/{id}/mongo/documents/clone` | `service.control` | — | `database.document.clone` | refused |
+| `POST` | `/databases/{id}/mongo/explain` | read | — | — | open |
+| `GET` | `/databases/{id}/mongo/export` | read | — | `database.export` † | — |
+| `POST` | `/databases/{id}/mongo/find` | read | — | — | open |
+| `GET` | `/databases/{id}/mongo/indexes` | read | — | — | — |
+| `POST` | `/databases/{id}/mongo/indexes` | `service.control` | by content: TTL | `database.index.create` | refused |
+| `PATCH` | `/databases/{id}/mongo/indexes` | `service.control` | by content: TTL | `database.index.modify` | refused |
+| `DELETE` | `/databases/{id}/mongo/indexes` | `destructive` | yes | `database.index.drop` | refused |
+| `POST` | `/databases/{id}/mongo/killop` | `destructive` | yes | `database.mongo.killop` | open |
+| `GET` | `/databases/{id}/mongo/ops` | read | — | — | — |
+| `GET` | `/databases/{id}/mongo/profiler` | read | — | — | — |
+| `PUT` | `/databases/{id}/mongo/profiler` | `system.admin` | — | `database.mongo.profiler` | refused |
+| `GET` | `/databases/{id}/mongo/replication` | read | — | — | — |
+| `GET` | `/databases/{id}/mongo/roles` | read | — | — | — |
+| `POST` | `/databases/{id}/mongo/schema` | read | — | — | open |
+| `GET` | `/databases/{id}/mongo/server` | read | — | — | — |
+| `GET` | `/databases/{id}/mongo/users` | read | — | — | — |
+| `POST` | `/databases/{id}/mongo/users` | `system.admin` | — | `database.role.create` | refused |
+| `PUT` | `/databases/{id}/mongo/users` | `system.admin` | — | `database.role.alter` | refused |
+| `DELETE` | `/databases/{id}/mongo/users` | `system.admin` + `destructive` | yes | `database.role.drop` | refused |
+| `POST` | `/databases/{id}/mongo/users/grant` | `system.admin` | — | `database.role.grant` | refused |
+| `POST` | `/databases/{id}/mongo/users/revoke` | `system.admin` | — | `database.role.revoke` | refused |
+| `GET` | `/databases/{id}/mongo/validation` | read | — | — | — |
+| `PUT` | `/databases/{id}/mongo/validation` | `service.control` | — | `database.validation.set` | refused |
+| `POST` | `/databases/{id}/mongo/validation/check` | read | — | — | open |
+
+What the table cannot say in a cell:
+
+- `DELETE /databases/{id}/database` is the one typed-phrase route of the section
+  ([invariant 3](../security/invariants.md#invariant-3-which-routes-take-a-typed-phrase)).
+- `POST …/explain` is on the read surface until it carries `analyze`, which executes the statement:
+  the handler then asks for `service.control` and whatever `authoriseSQL` asks of the statement.
+- `POST …/restore` with a new database as its target also needs `system.admin`, checked in the
+  handler; `POST …/redis/command` and `POST …/mongo/command` ask for `system.admin` for the commands
+  their classifiers mark as administrative.
+- A `/ddl/*` route in the `service.control` group needs the destructive capability when its plan
+  rewrites a column's type or calls a function `dbx` does not vouch for (`runDDL`), for a preview as
+  much as for a run.
+- The two Redis live feeds, `…/redis/monitor` and `…/redis/subscribe`, are WebSockets.
+- `GET /databases/inventory`, `GET /databases/fleet` and `GET …/advisor` are `read` and answer more
+  for `system.admin`; the sections above say what.
 
 ### Database provisioning for deployments
 
-Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explicit admin URL read.
-A project's Databases settings reuses the same two reads for a linked connection: `/ping` behind its
-Test connection verb, and `?target=container` behind Copy application URL, which stays admin-only and
-audited there as everywhere else.
-Quick setup provisions with `exposure: local`, so those ports are published to host loopback only;
-the Databases page's own dialog defaults to every interface (above). The data volume is named
-`<container>-data`. With no name supplied, provisioning reserves the first available `jd-<engine>`,
-`jd-<engine>-2`, etc., checking both containers and retained data volumes. In-flight requests reserve
-distinct names before pulling images. Explicit names remain exact and provisioning refuses with
-`409 volume_exists` when that volume already exists:
-an official image that finds a populated data directory skips initialisation, so the freshly generated
+Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explicit admin URL read, and
+draws its engines from the same `GET /databases/provision/options` the add flow reads, so the two offer
+one list of templates. A project's Databases settings reuses the same two reads for a linked connection:
+`/ping` behind its Test connection verb, and `?target=container` behind Copy application URL, which stays
+admin-only and audited there as everywhere else. Quick setup provisions with `exposure: local`, so those
+ports are published to host loopback only, which is also what a request that names no exposure gets (see
+the inventory section above). The data volume is named `<container>-data`. With no name supplied,
+provisioning reserves the first available `jd-<engine>`, `jd-<engine>-2`, etc., checking both containers
+and retained data volumes. In-flight requests reserve distinct names before pulling images. Explicit
+names remain exact and provisioning refuses with `409 volume_exists` when that volume already exists: an
+official image that finds a populated data directory skips initialisation, so the freshly generated
 password is never set and the server refuses every sign-in while looking reachable. The `/ping` reply's
-`error` is surfaced by both creation dialogs so an engine's own refusal is not reported as "not ready".
-Besides the five engines, provisioning offers `pgvector` (`pgvector/pgvector:pg16`) and `postgis`
-(`postgis/postgis:16-3.5-alpine`, listed and accepted only on x86-64, the one architecture it is
-published for): the same PostgreSQL 16 contract with the extension a retrieval or geospatial schema
-creates on its first migration, which the official image lacks. Deployment setup
-preselects one when detection read that extension from the schema. `mongodb` is refused before any pull
-on a CPU without AVX (x86-64) or ARMv8.2 atomics (arm64), where MongoDB 5 and later die with an illegal
-instruction. The URL read also takes `format` and `database`; see
-[deployment database networks](../deployments/database-networks.md).
-`/adopt` is idempotent by driver, address, database and login user: a matching connection gets that row
-back, and when the container's password differs the row is re-sealed in place while preserving its
-transport and query options (audited as `database.connection.refresh`, pool dropped). Different databases,
-users and engines on one address are never overwritten; ambiguous duplicate matches require an explicit
-saved-connection choice. This keeps replacement credentials current — a database
-removed and created again under the same name takes the same loopback port back with a new password,
-and a `${{database.N}}` reference must keep resolving to a URL that works.
-The URL endpoint's `target=container`
-option resolves a matching Docker database to a stable `db-ID.jd.internal` hostname without changing networking or the saved DSN;
-`target=host` and the default retain the original DSN. Replies are non-cacheable and audits contain
-the connection identity and target, never credentials. Setup saves the returned typed database reference.
-Activation and reconciliation own the environment network and database alias, including replacement
-with a different IP. See [deployment database networks](../deployments/database-networks.md).
+`error` is surfaced by both callers — the add flow (`components/database/connect/start.tsx`) and
+deployment quick setup (`components/deploy/quick-database.tsx`) — so an engine's own refusal is not
+reported as "not ready". Two of the templates exist for deployments: `pgvector`
+(`pgvector/pgvector:pg16`) and `postgis` (`postgis/postgis:16-3.5-alpine`, listed and accepted only on
+x86-64, the one architecture it is published for) are the same PostgreSQL 16 contract with the extension
+a retrieval or geospatial schema creates on its first migration, which the official image lacks.
+Deployment setup preselects one when detection read that extension from the schema. `mongodb` is refused
+before any pull on a CPU without AVX (x86-64) or ARMv8.2 atomics (arm64), where MongoDB 5 and later die
+with an illegal instruction. The URL read also takes `format` and `database`; see [deployment database
+networks](../deployments/database-networks.md). `/adopt` signs in before it saves, so the caller's retry
+loop is what waits for the engine. It is idempotent by driver, address, database and login user: a
+matching connection gets that row back, and when the container's password differs the row is re-sealed in
+place — once the new password has been seen to work — while preserving its transport and query options
+(audited as `database.connection.refresh`, pool dropped). Different databases, users and engines on one
+address are never overwritten; ambiguous duplicate matches require an explicit saved-connection choice.
+This keeps replacement credentials current — a database removed and created again under the same name
+takes the same loopback port back with a new password, and a `${{database.N}}` reference must keep
+resolving to a URL that works. The URL endpoint's `target=container` option resolves a matching Docker
+database to a stable `db-ID.jd.internal` hostname without changing networking or the saved DSN;
+`target=host` and the default retain the original DSN. Replies are non-cacheable and audits contain the
+connection identity and target, never credentials. Setup saves the returned typed database reference.
+Activation and reconciliation own the environment network and database alias, including replacement with
+a different IP. See [deployment database networks](../deployments/database-networks.md).
 
 Redis provisioning writes its generated password to a mode-0600 configuration inside the container
 before the official entrypoint drops privileges. Redis requires explicit password configuration;
@@ -315,10 +1824,11 @@ so selecting an application database does not change where the root account auth
 See the [official MongoDB image](https://hub.docker.com/_/mongo/).
 
 `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
-provisions all five supported quick-setup engines, adopts and pings them, authenticates from separate
-application containers, replaces each database at a different IP, and authenticates from the same client
-container using its unchanged URL after reconciliation. It verifies loopback-only publication, network
-ownership and cleanup, then removes its own containers/volumes/networks.
+provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and MongoDB), adopts and pings them,
+authenticates from separate application containers, replaces each database at a different IP, and
+authenticates from the same client container using its unchanged URL after reconciliation. It verifies
+loopback-only publication, network ownership and cleanup, then removes its own
+containers/volumes/networks.
 
 ## Proxy
 

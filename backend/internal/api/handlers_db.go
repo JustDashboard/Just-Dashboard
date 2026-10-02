@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,10 +31,26 @@ type dbConnection struct {
 	User      string     `json:"user"`
 	Database  string     `json:"database"`
 	CreatedAt time.Time  `json:"createdAt"`
+	// What the operator says about the connection rather than what its DSN
+	// does: the environment it serves, whether the dashboard may change what
+	// is in it, and anything worth remembering.
+	Environment string `json:"environment"`
+	ReadOnly    bool   `json:"readOnly"`
+	Notes       string `json:"notes"`
+	// Origin is the key of the server or file on this machine the connection
+	// was made from, as discovery lists it, and empty for one typed in by
+	// hand.
+	Origin string `json:"origin"`
+	// Broken marks a row this process cannot use, with the reason: its sealed
+	// DSN no longer opens, or its file is outside the file roots. The address
+	// fields above are empty on such a row.
+	Broken       bool   `json:"broken,omitempty"`
+	BrokenReason string `json:"brokenReason,omitempty"`
 }
 
 func (s *Server) mountDatabaseRoutes(r chi.Router) {
 	r.Route("/databases", func(r chi.Router) {
+		r.Use(s.protectReadOnlyConnections)
 		r.Method(http.MethodGet, "/", s.handle(s.handleDBConnList))
 		r.Method(http.MethodGet, "/drivers", s.handle(s.handleDBDrivers))
 		r.Group(func(r chi.Router) {
@@ -106,12 +122,18 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/overview", s.handle(s.handleDBOverview))
 		r.Method(http.MethodGet, "/orm/targets", s.handle(s.handleDBTargets))
 		r.Method(http.MethodPost, "/{id}/rows/sql", s.handle(s.handleDBRowSQL))
-		// Redis and Mongo reads. They are separate paths rather than a
-		// pretence that a key or a document is a row: the vocabulary is part of
-		// what makes each engine legible.
-		r.Method(http.MethodGet, "/{id}/keys", s.handle(s.handleRedisScan))
-		r.Method(http.MethodGet, "/{id}/keys/value", s.handle(s.handleRedisGet))
-		r.Method(http.MethodGet, "/{id}/collections/indexes", s.handle(s.handleMongoIndexes))
+		// Redis and Mongo have their own paths rather than a pretence that a
+		// key or a document is a row: the vocabulary is part of what makes each
+		// engine legible. Each engine and each working surface mounts its own
+		// routes from its own file.
+		s.mountDatabaseRedisRoutes(r)
+		s.mountDatabaseMongoRoutes(r)
+		s.mountDatabaseInventoryRoutes(r)
+		s.mountDatabaseConnectionRoutes(r)
+		s.mountDatabaseWorkbenchRoutes(r)
+		s.mountDatabaseSchemaRoutes(r)
+		s.mountDatabaseOpsRoutes(r)
+		s.mountDatabaseTransferRoutes(r)
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapServiceControl))
 			r.Method(http.MethodPost, "/{id}/query", s.handle(s.handleDBQuery))
@@ -137,13 +159,6 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/ddl/column", s.handle(s.handleDDLAddColumn))
 			r.Method(http.MethodPost, "/{id}/ddl/index", s.handle(s.handleDDLCreateIndex))
 			r.Method(http.MethodPost, "/{id}/ddl/rename", s.handle(s.handleDDLRename))
-			r.Method(http.MethodPost, "/{id}/keys/value", s.handle(s.handleRedisSet))
-			r.Method(http.MethodPost, "/{id}/keys/expire", s.handle(s.handleRedisExpire))
-			r.Method(http.MethodPost, "/{id}/keys/rename", s.handle(s.handleRedisRename))
-			r.Method(http.MethodPost, "/{id}/documents", s.handle(s.handleMongoInsert))
-			r.Method(http.MethodPatch, "/{id}/documents", s.handle(s.handleMongoReplace))
-			r.Method(http.MethodPost, "/{id}/aggregate", s.handle(s.handleMongoAggregate))
-			r.Method(http.MethodPost, "/{id}/collections", s.handle(s.handleMongoCreateCollection))
 		})
 		// Everything here uses the destructive capability, tighter budget, and audit.
 		s.destructive(r, func(r chi.Router) {
@@ -158,9 +173,6 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 			r.Method(http.MethodDelete, "/{id}/ddl/column", s.handle(s.handleDDLDropColumn))
 			r.Method(http.MethodDelete, "/{id}/ddl/index", s.handle(s.handleDDLDropIndex))
 			r.Method(http.MethodPost, "/{id}/ddl/truncate", s.handle(s.handleDDLTruncate))
-			r.Method(http.MethodDelete, "/{id}/keys", s.handle(s.handleRedisDelete))
-			r.Method(http.MethodDelete, "/{id}/documents", s.handle(s.handleMongoDelete))
-			r.Method(http.MethodDelete, "/{id}/collections", s.handle(s.handleMongoDropCollection))
 			// Removing the database itself, which is the one thing on this
 			// page that cannot be undone by anything except a dump taken
 			// first. system.admin on top of the destructive group: creating a
@@ -171,28 +183,40 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 	})
 }
 
-func (s *Server) dbConnRow(ctx context.Context, id int64) (*dbConnection, string, error) {
+// dbConnColumns is a row of db_connections in the order scanDBConn reads it.
+const dbConnColumns = `id, name, driver, dsn_enc, created_at, environment, read_only, notes, origin`
+
+// dbConnRecord is a connection as stored: everything but the address, which
+// is inside the sealed DSN.
+type dbConnRecord struct {
+	conn   dbConnection
+	dsnEnc string
+}
+
+func scanDBConn(scan func(...any) error) (*dbConnRecord, error) {
 	var (
-		name, driver, dsnEnc string
-		created              int64
+		rec      dbConnRecord
+		driver   string
+		created  int64
+		readOnly int
 	)
-	err := s.Store.DB.QueryRowContext(ctx,
-		`SELECT name, driver, dsn_enc, created_at FROM db_connections WHERE id = ?`, id).
-		Scan(&name, &driver, &dsnEnc, &created)
-	if err == sql.ErrNoRows {
-		return nil, "", httpx.ErrNotFound
+	if err := scan(&rec.conn.ID, &rec.conn.Name, &driver, &rec.dsnEnc, &created,
+		&rec.conn.Environment, &readOnly, &rec.conn.Notes, &rec.conn.Origin); err != nil {
+		return nil, err
 	}
+	rec.conn.Driver = dbx.Driver(driver)
+	rec.conn.CreatedAt = time.Unix(created, 0).UTC()
+	rec.conn.ReadOnly = readOnly != 0
+	return &rec, nil
+}
+
+// openDBConn unseals a stored connection and reads its address out of the DSN.
+func (s *Server) openDBConn(rec *dbConnRecord) (*dbConnection, string, error) {
+	dsn, err := s.Sealer.Open(rec.dsnEnc)
 	if err != nil {
 		return nil, "", httpx.Internal(err)
 	}
-	dsn, err := s.Sealer.Open(dsnEnc)
-	if err != nil {
-		return nil, "", httpx.Internal(err)
-	}
-	conn := &dbConnection{
-		ID: id, Name: name, Driver: dbx.Driver(driver),
-		CreatedAt: time.Unix(created, 0).UTC(),
-	}
+	conn := rec.conn
 	// Contained again here rather than trusted from the store: the roots may
 	// have been narrowed since this row was written, and every caller that
 	// opens a pool comes through this function.
@@ -203,7 +227,19 @@ func (s *Server) dbConnRow(ctx context.Context, id int64) (*dbConnection, string
 	if info, err := dbx.ParseDSN(conn.Driver, dsn); err == nil {
 		conn.Host, conn.Port, conn.User, conn.Database = info.Host, info.Port, info.User, info.Database
 	}
-	return conn, dsn, nil
+	return &conn, dsn, nil
+}
+
+func (s *Server) dbConnRow(ctx context.Context, id int64) (*dbConnection, string, error) {
+	rec, err := scanDBConn(s.Store.DB.QueryRowContext(ctx,
+		`SELECT `+dbConnColumns+` FROM db_connections WHERE id = ?`, id).Scan)
+	if err == sql.ErrNoRows {
+		return nil, "", httpx.ErrNotFound
+	}
+	if err != nil {
+		return nil, "", httpx.Internal(err)
+	}
+	return s.openDBConn(rec)
 }
 
 func (s *Server) dbPool(ctx context.Context, id int64) (*sql.DB, *dbConnection, error) {
@@ -219,36 +255,66 @@ func (s *Server) dbPool(ctx context.Context, id int64) (*sql.DB, *dbConnection, 
 	}
 	pool, err := s.modules.dbs.Pool(ctx, id, conn.Driver, dsn)
 	if err != nil {
-		return nil, conn, httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+		return nil, conn, connectFailed(dsn, err)
 	}
 	return pool, conn, nil
 }
 
 func (s *Server) handleDBConnList(w http.ResponseWriter, r *http.Request) error {
-	rows, err := s.Store.DB.QueryContext(r.Context(),
-		`SELECT id FROM db_connections ORDER BY name`)
+	out, err := s.allConnections(r.Context())
 	if err != nil {
-		return httpx.Internal(err)
-	}
-	defer rows.Close()
-	ids := []int64{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return httpx.Internal(err)
-		}
-		ids = append(ids, id)
-	}
-	out := []*dbConnection{}
-	for _, id := range ids {
-		conn, _, err := s.dbConnRow(r.Context(), id)
-		if err != nil {
-			continue
-		}
-		out = append(out, conn)
+		return err
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
+}
+
+// allConnections is every saved connection by name, the unusable ones
+// included.
+//
+// A row whose DSN would not open used to be left out, so the connection an
+// operator came to repair was the one connection the page did not show: it
+// vanished from the picker the day the master key or the file roots changed,
+// and stayed in the table where nothing could reach it to forget it. It is
+// listed now, flagged with why, and its id still answers the routes that fix
+// or remove it.
+func (s *Server) allConnections(ctx context.Context) ([]*dbConnection, error) {
+	rows, err := s.Store.DB.QueryContext(ctx,
+		`SELECT `+dbConnColumns+` FROM db_connections ORDER BY name`)
+	if err != nil {
+		return nil, httpx.Internal(err)
+	}
+	defer rows.Close()
+	out := []*dbConnection{}
+	for rows.Next() {
+		rec, err := scanDBConn(rows.Scan)
+		if err != nil {
+			return nil, httpx.Internal(err)
+		}
+		conn, _, err := s.openDBConn(rec)
+		if err != nil {
+			broken := rec.conn
+			broken.Broken, broken.BrokenReason = true, brokenReason(err)
+			conn = &broken
+		}
+		out = append(out, conn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, httpx.Internal(err)
+	}
+	return out, nil
+}
+
+// brokenReason says why a stored connection cannot be used, in a sentence the
+// page prints. A containment refusal already reads that way. A DSN that will
+// not unseal comes back as an internal error whose text is deliberately
+// hidden, and the one cause worth naming is the key it was sealed under.
+func brokenReason(err error) string {
+	var apiErr *httpx.APIError
+	if errors.As(err, &apiErr) && apiErr.Status < http.StatusInternalServerError {
+		return apiErr.Message
+	}
+	return "its stored connection string could not be decrypted; JD_MASTER_KEY is not the key it was saved under"
 }
 
 // connNameRe deliberately excludes "/" and ".." so a connection name cannot
@@ -259,6 +325,36 @@ type createDBConnRequest struct {
 	Name   string     `json:"name"`
 	Driver dbx.Driver `json:"driver"`
 	DSN    string     `json:"dsn"`
+	// Probe dials the server before the connection is saved, and refuses to
+	// save one that does not answer.
+	Probe       bool   `json:"probe"`
+	Environment string `json:"environment"`
+	ReadOnly    bool   `json:"readOnly"`
+	Notes       string `json:"notes"`
+}
+
+// connEnvironmentRe bounds the environment tag the way a name is bounded: it
+// is drawn as a chip beside the connection, and compared across connections.
+var connEnvironmentRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$`)
+
+// maxConnNotes is the most an operator may write about one connection, in
+// bytes.
+const maxConnNotes = 4000
+
+// connLabels validates what the operator says about a connection: an
+// environment that is empty or a short tag, and notes that are text.
+func connLabels(environment, notes string) (string, string, error) {
+	environment = strings.TrimSpace(environment)
+	if environment != "" && !connEnvironmentRe.MatchString(environment) {
+		return "", "", httpx.BadRequest("environment is a short tag of letters, digits, spaces, dots, dashes and underscores")
+	}
+	if len(notes) > maxConnNotes {
+		return "", "", httpx.BadRequest("notes may be at most %d bytes", maxConnNotes)
+	}
+	if strings.ContainsRune(notes, 0) {
+		return "", "", httpx.BadRequest("notes must be text")
+	}
+	return environment, notes, nil
 }
 
 // containDSN puts a SQLite connection's path through the same check every
@@ -299,6 +395,11 @@ func (s *Server) containDSN(driver dbx.Driver, dsn string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The dashboard's own store is never a connection, by any spelling of its
+	// path: see refuseOwnStore.
+	if err := s.refuseOwnStore(driver, resolved); err != nil {
+		return "", err
+	}
 	return dbx.SQLiteDSNWithPath(dsn, resolved), nil
 }
 
@@ -319,17 +420,39 @@ func (s *Server) handleDBConnCreate(w http.ResponseWriter, r *http.Request) erro
 	if !connNameRe.MatchString(req.Name) {
 		return httpx.BadRequest("name may contain letters, digits, spaces, dots, dashes and underscores")
 	}
+	environment, notes, err := connLabels(req.Environment, req.Notes)
+	if err != nil {
+		return err
+	}
 	dsn, err := s.containDSN(req.Driver, req.DSN)
 	if err != nil {
 		return err
+	}
+	if req.Probe {
+		// Dialled before it is stored, for the reason the host route gives: a
+		// connection that cannot answer is a row that looks connected and
+		// fails every request made of it afterwards, and the engine's own
+		// refusal belongs in the form the operator is still looking at.
+		ctx, cancel := timeoutCtx(r, 15*time.Second)
+		_, err := dbx.ProbeIdentity(ctx, req.Driver, dsn)
+		cancel()
+		if err != nil {
+			httpx.SetAudit(r, "database.connection.create", req.Name,
+				map[string]any{"ok": false, "driver": req.Driver})
+			// The refusal is printed in the form and written to the audit
+			// trail beside the entry above, so it is the engine's words
+			// without the password a driver quotes back in them.
+			return httpx.BadRequest("%s", connectError(dsn, err))
+		}
 	}
 	sealed, err := s.Sealer.Seal(dsn)
 	if err != nil {
 		return httpx.Internal(err)
 	}
 	res, err := s.Store.DB.ExecContext(r.Context(),
-		`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES(?,?,?,?)`,
-		req.Name, string(req.Driver), sealed, time.Now().Unix())
+		`INSERT INTO db_connections(name, driver, dsn_enc, created_at, environment, read_only, notes)
+		 VALUES(?,?,?,?,?,?,?)`,
+		req.Name, string(req.Driver), sealed, time.Now().Unix(), environment, req.ReadOnly, notes)
 	if err != nil {
 		return httpx.BadRequest("could not save connection: %v", err)
 	}
@@ -340,8 +463,9 @@ func (s *Server) handleDBConnCreate(w http.ResponseWriter, r *http.Request) erro
 	}
 	// The DSN itself never reaches the audit trail; the parsed host and user
 	// identify the connection without leaking the password.
-	httpx.SetAudit(r, "database.connection.create", req.Name,
-		map[string]any{"driver": req.Driver, "host": conn.Host, "user": conn.User})
+	httpx.SetAudit(r, "database.connection.create", req.Name, map[string]any{
+		"driver": req.Driver, "host": conn.Host, "user": conn.User, "probed": req.Probe,
+	})
 	httpx.JSON(w, http.StatusCreated, conn)
 	return nil
 }
@@ -351,21 +475,22 @@ func (s *Server) handleDBConnDelete(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return httpx.BadRequest("invalid id")
 	}
-	conn, _, err := s.dbConnRow(r.Context(), id)
+	// Read as stored rather than opened: a connection whose DSN no longer
+	// unseals is exactly the one somebody needs to be able to forget.
+	conn, err := s.storedConnection(r.Context(), id)
 	if err != nil {
 		return err
 	}
 	// No typed phrase: this forgets a connection string, it does not touch the
 	// server at the other end of it. Re-adding one is a form, not a restore.
-	result, err := s.Store.DB.ExecContext(r.Context(), `DELETE FROM db_connections WHERE id=? AND NOT EXISTS (SELECT 1 FROM deploy_database_bindings WHERE connection_id=?)`, id, id)
+	forgotten, err := s.forgetConnection(r.Context(), id, httpx.MustPrincipal(r).Username())
 	if err != nil {
-		return httpx.Internal(err)
+		return err
 	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
+	if !forgotten.removed {
 		return httpx.Err(http.StatusConflict, "database_linked", "remove the deployment's managed database network before forgetting this linked connection")
 	}
-	s.modules.dbs.Close(id)
-	httpx.SetAudit(r, "database.connection.delete", conn.Name, nil)
+	httpx.SetAudit(r, "database.connection.delete", conn.Name, forgotten.audited(nil))
 	httpx.NoContent(w)
 	return nil
 }
@@ -395,14 +520,17 @@ func (s *Server) handleDBPing(w http.ResponseWriter, r *http.Request) error {
 	case dbx.DriverMongo:
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": connectError(dsn, err)})
 			return nil
 		}
 		defer client.Disconnect(context.Background())
 	case dbx.DriverRedis:
-		client, err := dbx.RedisClient(r.Context(), dsn, 0)
+		// In the database the connection string names, which is where every
+		// key route goes: a string naming one the server does not have used
+		// to ping healthy and then fail each of them.
+		client, err := dbx.RedisClient(r.Context(), dsn, dbx.RedisDSNDatabase)
 		if err != nil {
-			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": connectError(dsn, err)})
 			return nil
 		}
 		defer client.Close()
@@ -422,8 +550,8 @@ func (s *Server) handleDBPing(w http.ResponseWriter, r *http.Request) error {
 			// Dropped rather than left to expire with the pool's lifetime, so
 			// the next request dials again instead of failing the same way for
 			// half an hour.
-			s.modules.dbs.Close(id)
-			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+			s.dropPoolAfter(id, err)
+			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": connectError(dsn, err)})
 			return nil
 		}
 	}
@@ -443,12 +571,12 @@ func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverMongo {
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		status, err := dbx.MongoServerStatus(r.Context(), client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, map[string]any{"server": status})
 		return nil
@@ -456,21 +584,19 @@ func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverRedis {
 		client, err := dbx.RedisClient(r.Context(), dsn, 0)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Close()
 		info, err := dbx.RedisInfo(r.Context(), client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, map[string]any{"server": info})
 		return nil
 	}
-	if _, _, err := s.dbPool(r.Context(), id); err != nil {
-		return err
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"pool": s.modules.dbs.Stats(id)})
-	return nil
+	// A SQL engine answers with a snapshot of its own counters, and the
+	// pool's beside them where it always was.
+	return s.dbSQLStats(w, r, id)
 }
 
 func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {
@@ -485,12 +611,12 @@ func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverMongo {
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		dbs, err := dbx.MongoDatabases(r.Context(), client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, dbs)
 		return nil
@@ -498,12 +624,12 @@ func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverRedis {
 		client, err := dbx.RedisClient(r.Context(), dsn, 0)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Close()
 		dbs, err := dbx.RedisDatabases(r.Context(), client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, dbs)
 		return nil
@@ -514,7 +640,7 @@ func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {
 	}
 	dbs, err := dbx.ListDatabases(r.Context(), pool, conn.Driver)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, dbs)
 	return nil
@@ -533,7 +659,7 @@ func (s *Server) handleDBTables(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverMongo {
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		if schema == "" {
@@ -544,7 +670,7 @@ func (s *Server) handleDBTables(w http.ResponseWriter, r *http.Request) error {
 		}
 		cols, err := dbx.MongoCollections(r.Context(), client, schema)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, cols)
 		return nil
@@ -555,7 +681,7 @@ func (s *Server) handleDBTables(w http.ResponseWriter, r *http.Request) error {
 	}
 	tables, err := dbx.ListTables(r.Context(), pool, conn.Driver, schema)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, tables)
 	return nil
@@ -573,7 +699,7 @@ func (s *Server) handleDBColumns(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	cols, err := dbx.ListColumns(r.Context(), pool, conn.Driver, q.Get("schema"), q.Get("table"))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, cols)
 	return nil
@@ -595,7 +721,7 @@ func (s *Server) handleDBBrowse(w http.ResponseWriter, r *http.Request) error {
 	if conn.Driver == dbx.DriverMongo {
 		client, err := dbx.MongoClient(r.Context(), dsn)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "connect_failed", err.Error())
+			return connectFailed(dsn, err)
 		}
 		defer client.Disconnect(context.Background())
 		res, err := dbx.MongoFind(r.Context(), client, q.Get("schema"), q.Get("table"), q.Get("filter"), limit, offset)
@@ -605,27 +731,158 @@ func (s *Server) handleDBBrowse(w http.ResponseWriter, r *http.Request) error {
 		httpx.JSON(w, http.StatusOK, res)
 		return nil
 	}
+	opts, err := browseOptions(q)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
 	pool, conn, err := s.dbPool(r.Context(), id)
 	if err != nil {
 		return err
 	}
-	filters, err := parseFilters(q.Get("filters"))
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
+	opts.Limit, opts.Offset = limit, offset
+	// How much of a long text cell a page carries. The rest of a cell that was
+	// cut is one GET /cell away, and a page of a thousand rows cannot afford a
+	// megabyte in each.
+	opts.ClipText = clampInt(atoiDefault(q.Get("cellLimit"), defaultCellLimit), minCellLimit, maxCellLimit)
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	res, err := dbx.Browse(ctx, pool, conn.Driver, dbx.BrowseOptions{
-		Schema: q.Get("schema"), Table: q.Get("table"),
-		Limit: limit, Offset: offset,
-		OrderBy: q.Get("orderBy"), Desc: q.Get("dir") == "desc",
-		Filters: filters,
-	})
+	page, err := dbx.BrowseTablePage(ctx, pool, conn.Driver, opts)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return tableReadError(err)
 	}
-	httpx.JSON(w, http.StatusOK, res)
+	httpx.JSON(w, http.StatusOK, page)
 	return nil
+}
+
+// tableReadError answers a read of a table that the engine, or the dashboard
+// on its behalf, would not make. The connection was open by then, so what went
+// wrong is the request's: a filter the engine has no operator for, a column
+// that is not there, a value that is not of the column's type — in the
+// engine's own words. The page, the count, the cell and the export answer
+// through it, so the grid that asks two of them about the same rows is not
+// told by one that its filter is wrong and by the other that the server is.
+//
+// Open by then, and not necessarily still there: a pool outlives the server
+// it was opened to, and the first read after a stop or a restart finds its
+// connections dead. That one is the server's, not the request's, and is
+// answered as every other read of a server that went away is — worth asking
+// again, which a request that was wrong never is.
+func tableReadError(err error) error {
+	if errors.Is(err, dbx.ErrCredentialsWithheld) {
+		return httpx.Err(http.StatusForbidden, "credentials_withheld", err.Error())
+	}
+	if dbx.Unreachable(err) {
+		return queryFailed(err)
+	}
+	return httpx.BadRequest("%v", err)
+}
+
+const (
+	defaultCellLimit = 4 << 10
+	minCellLimit     = 256
+	maxCellLimit     = 64 << 10
+)
+
+func clampInt(n, low, high int) int {
+	switch {
+	case n < low:
+		return low
+	case n > high:
+		return high
+	}
+	return n
+}
+
+// browseOptions reads what a grid request says about which rows it wants: the
+// table, the conditions and how they combine, the order, and the columns.
+//
+// One function for the page, the count and the export, because those three
+// answering different questions about "the rows I am looking at" is the bug
+// the shared selection in dbx exists to prevent, and it would come straight
+// back if each handler read the query string its own way.
+func browseOptions(q url.Values) (dbx.BrowseOptions, error) {
+	opts := dbx.BrowseOptions{Schema: q.Get("schema"), Table: q.Get("table")}
+	var err error
+	if opts.Filters, err = parseFilters(q.Get("filters")); err != nil {
+		return opts, err
+	}
+	switch q.Get("match") {
+	case "", "all":
+	case "any":
+		opts.MatchAny = true
+	default:
+		return opts, fmt.Errorf("match must be all or any")
+	}
+	if opts.Sort, err = parseSort(q.Get("sort"), q.Get("orderBy"), q.Get("dir")); err != nil {
+		return opts, err
+	}
+	if opts.Columns, err = parseColumns(q.Get("columns")); err != nil {
+		return opts, err
+	}
+	return opts, nil
+}
+
+// parseSort reads the order. Three spellings, most exact first: `sort` is a
+// JSON array of {column, desc}, which can name any column; `orderBy=a:asc,b:desc`
+// is the compact form; and `orderBy=a&dir=desc` is the single column the grid
+// has always sent, which is also what any value without a direction on every
+// part is read as — a column may legitimately contain a comma or a colon, and
+// guessing otherwise would sort by a column that does not exist.
+func parseSort(raw, orderBy, dir string) ([]dbx.SortKey, error) {
+	if strings.TrimSpace(raw) != "" {
+		var keys []dbx.SortKey
+		if err := json.Unmarshal([]byte(raw), &keys); err != nil {
+			return nil, fmt.Errorf("sort must be a JSON array of {column, desc}: %v", err)
+		}
+		if len(keys) > dbx.MaxBrowseColumns {
+			return nil, fmt.Errorf("too many sort columns")
+		}
+		return keys, nil
+	}
+	if orderBy == "" {
+		return nil, nil
+	}
+	parts := strings.Split(orderBy, ",")
+	keys := make([]dbx.SortKey, 0, len(parts))
+	for _, part := range parts {
+		i := strings.LastIndexByte(part, ':')
+		if i <= 0 {
+			keys = nil
+			break
+		}
+		switch strings.ToLower(part[i+1:]) {
+		case "asc":
+			keys = append(keys, dbx.SortKey{Column: part[:i]})
+		case "desc":
+			keys = append(keys, dbx.SortKey{Column: part[:i], Desc: true})
+		default:
+			keys = nil
+		}
+		if keys == nil {
+			break
+		}
+	}
+	if keys != nil {
+		return keys, nil
+	}
+	return []dbx.SortKey{{Column: orderBy, Desc: dir == "desc"}}, nil
+}
+
+// parseColumns reads a projection: a JSON array of names, or a comma-separated
+// list for names that hold no comma.
+func parseColumns(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if strings.HasPrefix(raw, "[") {
+		var cols []string
+		if err := json.Unmarshal([]byte(raw), &cols); err != nil {
+			return nil, fmt.Errorf("columns must be a JSON array of names: %v", err)
+		}
+		return cols, nil
+	}
+	return strings.Split(raw, ","), nil
 }
 
 // parseFilters decodes the grid's filter list, which travels as a JSON array in
@@ -650,18 +907,84 @@ func parseFilters(raw string) ([]dbx.Filter, error) {
 type queryRequest struct {
 	Query   string `json:"query"`
 	MaxRows int    `json:"maxRows"`
+	// QueryID is a name the client chose for this run, so it can ask for the
+	// run to be stopped while the request is still open.
+	QueryID string `json:"queryId"`
+}
+
+// classifyResponse is the verdict on everything in the editor, and on each
+// statement of it, so a script can be marked up line by line.
+type classifyResponse struct {
+	dbx.Risk
+	Statements []dbx.SQLStatement `json:"statements"`
 }
 
 // handleDBClassify lets the editor warn before anything is sent. It is a pure
-// analysis of the text and touches no database.
+// analysis of the text for the connection's engine and touches no database.
 func (s *Server) handleDBClassify(w http.ResponseWriter, r *http.Request) error {
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
 	var req queryRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
 	httpx.SkipAudit(r)
-	httpx.JSON(w, http.StatusOK, dbx.Classify(req.Query))
+	// The engine decides how the text is read — a backtick is a quote on one
+	// and an operator on another — so the connection is looked up, not dialled.
+	conn, err := s.sqlConnection(r, id)
+	if err != nil {
+		return err
+	}
+	statements, err := dbx.ParseScript(conn.Driver, req.Query)
+	if err != nil {
+		// Unreadable is destructive, here as in the runner: the editor must
+		// show the same verdict the run would be held to.
+		httpx.JSON(w, http.StatusOK, classifyResponse{
+			Risk:       dbx.ClassifyFor(conn.Driver, req.Query),
+			Statements: []dbx.SQLStatement{},
+		})
+		return nil
+	}
+	if statements == nil {
+		statements = []dbx.SQLStatement{}
+	}
+	httpx.JSON(w, http.StatusOK, classifyResponse{Risk: dbx.WorstRisk(statements), Statements: statements})
 	return nil
+}
+
+// authoriseSQL turns a verdict on operator-written SQL into a permission. It
+// is the one place that does: the query route, the script route and an
+// executing plan all come through here, so they cannot disagree about what a
+// destructive statement costs.
+func (s *Server) authoriseSQL(r *http.Request, risk dbx.Risk) error {
+	if !risk.Destructive {
+		return nil
+	}
+	p := httpx.MustPrincipal(r)
+	if !p.Can(auth.CapDestructive) {
+		return httpx.Err(http.StatusForbidden, "forbidden",
+			"this statement is destructive and your role does not permit it")
+	}
+	if !s.destrLim.Allow(p.Username() + "|dbquery") {
+		return httpx.Err(http.StatusTooManyRequests, "rate_limited",
+			"too many destructive statements, slow down")
+	}
+	return nil
+}
+
+// sqlConnection returns a connection's record for a route that reads its SQL
+// before dialling, refusing the engines that have none.
+func (s *Server) sqlConnection(r *http.Request, id int64) (*dbConnection, error) {
+	conn, _, err := s.dbConnRow(r.Context(), id)
+	if err != nil {
+		return nil, err
+	}
+	if !conn.Driver.IsSQL() {
+		return nil, httpx.BadRequest("this endpoint is for SQL engines; %s uses its own surface", conn.Driver)
+	}
+	return conn, nil
 }
 
 // handleDBQuery runs arbitrary SQL. A destructive statement additionally
@@ -678,22 +1001,17 @@ func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 	if req.Query == "" {
 		return httpx.BadRequest("query is required")
 	}
-	statement, err := dbx.SingleStatement(req.Query)
+	conn, err := s.sqlConnection(r, id)
+	if err != nil {
+		return err
+	}
+	statement, err := dbx.SingleStatementFor(conn.Driver, req.Query)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
-	req.Query = statement
-	risk := dbx.Classify(req.Query)
-	p := httpx.MustPrincipal(r)
-	if risk.Destructive {
-		if !p.Can(auth.CapDestructive) {
-			return httpx.Err(http.StatusForbidden, "forbidden",
-				"this statement is destructive and your role does not permit it")
-		}
-		if !s.destrLim.Allow(p.Username() + "|dbquery") {
-			return httpx.Err(http.StatusTooManyRequests, "rate_limited",
-				"too many destructive statements, slow down")
-		}
+	risk := statement.Risk
+	if err := s.authoriseSQL(r, risk); err != nil {
+		return err
 	}
 	pool, _, err := s.dbPool(r.Context(), id)
 	if err != nil {
@@ -701,101 +1019,51 @@ func (s *Server) handleDBQuery(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx, cancel := timeoutCtx(r, 120*time.Second)
 	defer cancel()
+	ctx, run, err := s.trackRun(ctx, r, id, req.QueryID)
+	if err != nil {
+		return err
+	}
+	defer run.release()
 	start := time.Now()
-	res, err := dbx.RunQuery(ctx, pool, req.Query, req.MaxRows)
+	res, err := dbx.RunStatement(ctx, pool, conn.Driver, statement, req.MaxRows)
 	elapsed := time.Since(start).Milliseconds()
 	if err != nil {
-		s.recordDBHistory(r.Context(), id, req.Query, risk.Level, false, elapsed, 0)
+		err = run.explain(err)
+		s.recordDBHistory(r.Context(), id, dbHistoryEntry{
+			SQL: statement.SQL, Risk: risk.Level, DurationMs: elapsed, Error: err.Error(),
+		})
 		httpx.SetAudit(r, "database.query", strconv.FormatInt(id, 10),
-			map[string]any{"risk": risk.Level, "error": err.Error()})
-		return httpx.BadRequest("%v", err)
+			map[string]any{"risk": risk.Level, "error": err.Error(), "statement": statement.SQL})
+		return err
 	}
-	s.recordDBHistory(r.Context(), id, req.Query, risk.Level, true, elapsed, res.RowCount)
+	s.recordDBHistory(r.Context(), id, dbHistoryEntry{
+		SQL: statement.SQL, Risk: risk.Level, Success: true, DurationMs: elapsed,
+		RowCount: res.RowCount, RowsAffected: res.Affected,
+	})
 	httpx.SetAudit(r, "database.query", strconv.FormatInt(id, 10), map[string]any{
 		"risk": risk.Level, "destructive": risk.Destructive,
-		"rowsAffected": res.Affected, "rowCount": res.RowCount, "statement": req.Query,
+		"rowsAffected": res.Affected, "rowCount": res.RowCount, "statement": statement.SQL,
 	})
 	httpx.JSON(w, http.StatusOK, map[string]any{"result": res, "risk": risk})
 	return nil
 }
 
-type dbBackupRequest struct {
-	Database string `json:"database"`
-}
-
+// handleDBBackup starts a dump of the connection's database as a job and
+// answers at once with the job (handlers_db_transfer.go).
 func (s *Server) handleDBBackup(w http.ResponseWriter, r *http.Request) error {
-	id, err := parseID(r)
-	if err != nil {
-		return err
-	}
-	var req dbBackupRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	conn, dsn, err := s.dbConnRow(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := timeoutCtx(r, 30*time.Minute)
-	defer cancel()
-	outDir := filepath.Join(s.Cfg.BackupLocalDir, "databases", conn.Name)
-	res, err := dbx.Dump(ctx, conn.Driver, dsn, req.Database, outDir)
-	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "dump_failed", err.Error())
-	}
-	httpx.SetAudit(r, "database.backup", conn.Name,
-		map[string]any{"database": res.Database, "path": res.Path, "size": res.Size})
-	httpx.JSON(w, http.StatusOK, res)
-	return nil
+	return s.startDBBackup(w, r)
 }
 
-type dbRestoreRequest struct {
-	Database string `json:"database"`
-	DumpPath string `json:"dumpPath"`
-}
-
+// handleDBRestore starts a restore as a job. It replaces live data, so it
+// sits in the destructive group; like every restore it takes an ordinary
+// confirmation and no typed phrase.
 func (s *Server) handleDBRestore(w http.ResponseWriter, r *http.Request) error {
-	id, err := parseID(r)
-	if err != nil {
-		return err
-	}
-	var req dbRestoreRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	conn, dsn, err := s.dbConnRow(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	target := req.Database
-	if target == "" {
-		target = conn.Database
-	}
-	// Invariant 6: a client-supplied path goes through files.Resolve, which is
-	// the only thing in the codebase that checks both the literal path and its
-	// symlink-resolved form against JD_FILE_ROOTS. "It stats" was the whole of
-	// the previous check.
-	dumpPath, err := s.modules.files.Resolve(req.DumpPath)
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	ctx, cancel := timeoutCtx(r, 60*time.Minute)
-	defer cancel()
-	out, err := dbx.Restore(ctx, conn.Driver, dsn, req.Database, dumpPath)
-	if err != nil {
-		httpx.SetAudit(r, "database.restore", conn.Name,
-			map[string]any{"database": target, "dumpPath": req.DumpPath, "error": err.Error()})
-		return httpx.Err(http.StatusBadGateway, "restore_failed", err.Error())
-	}
-	httpx.SetAudit(r, "database.restore", conn.Name,
-		map[string]any{"database": target, "dumpPath": req.DumpPath})
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
+	return s.startDBRestore(w, r)
 }
 
-// handleDBConnTest verifies a DSN before it is saved. It reports the server
-// version on success so the operator can see they reached the engine they
-// meant to, and never persists anything.
+// handleDBConnTest verifies a DSN before it is saved. It reports what answered
+// on success — the product and its version — so the operator can see they
+// reached the engine they meant to, and never persists anything.
 func (s *Server) handleDBConnTest(w http.ResponseWriter, r *http.Request) error {
 	var req createDBConnRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
@@ -807,51 +1075,54 @@ func (s *Server) handleDBConnTest(w http.ResponseWriter, r *http.Request) error 
 	if req.DSN == "" {
 		return httpx.BadRequest("dsn is required")
 	}
-	if _, err := s.containDSN(req.Driver, req.DSN); err != nil {
+	dsn, err := s.containDSN(req.Driver, req.DSN)
+	if err != nil {
 		return err
 	}
 	httpx.SkipAudit(r)
 	ctx, cancel := timeoutCtx(r, 15*time.Second)
 	defer cancel()
-	if req.Driver == dbx.DriverMongo {
-		client, err := dbx.MongoClient(ctx, req.DSN)
-		if err != nil {
-			httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-			return nil
-		}
-		defer client.Disconnect(context.Background())
-		httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	// One probe for every engine. Redis used to fall through to the SQL path
+	// and be reported unreachable for having no dialect, which made the test
+	// button fail for a server the save button then connected to.
+	identity, err := dbx.ProbeIdentity(ctx, req.Driver, dsn)
+	if err != nil {
+		httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": connectError(dsn, err)})
 		return nil
 	}
-	probeDSN, err := s.containDSN(req.Driver, req.DSN)
-	if err != nil {
-		return err
-	}
-	version, err := dbx.Probe(ctx, req.Driver, probeDSN)
-	if err != nil {
-		httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return nil
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "version": version})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"ok": true, "version": identity.Version, "versionNumber": identity.Number,
+		"flavor": identity.Flavor, "flavorLabel": dbx.FlavorLabel(identity.Flavor),
+	})
 	return nil
 }
 
+// updateDBConnRequest changes what is named in it and nothing else: a field
+// left out keeps its stored value, which is why the three labels are pointers
+// — an absent "notes" is not a request to erase them.
 type updateDBConnRequest struct {
-	Name string `json:"name"`
-	DSN  string `json:"dsn"`
+	Name        string  `json:"name"`
+	DSN         string  `json:"dsn"`
+	Environment *string `json:"environment"`
+	ReadOnly    *bool   `json:"readOnly"`
+	Notes       *string `json:"notes"`
 }
 
-// handleDBConnUpdate edits a connection's name and, optionally, its DSN. The
-// driver is fixed at creation — changing it would mean the stored secret no
-// longer parses — so it is not editable here. An empty DSN leaves the existing
-// one untouched, so an operator can rename without re-typing a password they
-// cannot read back.
+// handleDBConnUpdate edits a connection's name, its labels and, optionally,
+// its DSN. The driver is fixed at creation — changing it would mean the stored
+// secret no longer parses — so it is not editable here. An empty DSN leaves
+// the existing one untouched, so an operator can rename without re-typing a
+// password they cannot read back.
+//
+// It reads the row as stored rather than opening it, because this is the one
+// route that repairs a broken connection: a DSN that no longer unseals is
+// replaced here, and a handler that had to open it first could never run.
 func (s *Server) handleDBConnUpdate(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
 		return err
 	}
-	conn, _, err := s.dbConnRow(r.Context(), id)
+	conn, err := s.storedConnection(r.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -863,9 +1134,29 @@ func (s *Server) handleDBConnUpdate(w http.ResponseWriter, r *http.Request) erro
 	if name == "" {
 		name = conn.Name
 	}
-	if !connNameRe.MatchString(name) {
+	// Only a name that is being changed is held to the rule. A connection
+	// saved under an older rule keeps its name through an edit that does not
+	// touch it, rather than refusing every change until it is renamed.
+	if name != conn.Name && !connNameRe.MatchString(name) {
 		return httpx.BadRequest("name may contain letters, digits, spaces, dots, dashes and underscores")
 	}
+	environment, notes := conn.Environment, conn.Notes
+	if req.Environment != nil {
+		environment = *req.Environment
+	}
+	if req.Notes != nil {
+		notes = *req.Notes
+	}
+	environment, notes, err = connLabels(environment, notes)
+	if err != nil {
+		return err
+	}
+	readOnly := conn.ReadOnly
+	if req.ReadOnly != nil {
+		readOnly = *req.ReadOnly
+	}
+	set := []string{"name = ?", "environment = ?", "read_only = ?", "notes = ?"}
+	args := []any{name, environment, readOnly, notes}
 	if req.DSN != "" {
 		dsn, err := s.containDSN(conn.Driver, req.DSN)
 		if err != nil {
@@ -875,31 +1166,42 @@ func (s *Server) handleDBConnUpdate(w http.ResponseWriter, r *http.Request) erro
 		if err != nil {
 			return httpx.Internal(err)
 		}
-		if _, err := s.Store.DB.ExecContext(r.Context(),
-			`UPDATE db_connections SET name = ?, dsn_enc = ? WHERE id = ?`, name, sealed, id); err != nil {
-			return httpx.BadRequest("could not update connection: %v", err)
-		}
-		// The pool was opened against the old DSN; drop it so the next request
-		// dials the new one.
-		s.modules.dbs.Close(id)
-	} else {
-		if _, err := s.Store.DB.ExecContext(r.Context(),
-			`UPDATE db_connections SET name = ? WHERE id = ?`, name, id); err != nil {
-			return httpx.BadRequest("could not update connection: %v", err)
-		}
+		set, args = append(set, "dsn_enc = ?"), append(args, sealed)
 	}
-	updated, _, err := s.dbConnRow(r.Context(), id)
+	if _, err := s.Store.DB.ExecContext(r.Context(),
+		`UPDATE db_connections SET `+strings.Join(set, ", ")+` WHERE id = ?`, append(args, id)...); err != nil {
+		return httpx.BadRequest("could not update connection: %v", err)
+	}
+	if req.DSN != "" {
+		// The pool was opened against the old DSN; drop it so the next request
+		// dials the new one, and with it what the old server said it was.
+		s.modules.dbs.Close(id)
+		s.dbConns.forget(id)
+	}
+	updated, err := s.storedConnection(r.Context(), id)
 	if err != nil {
 		return err
 	}
-	httpx.SetAudit(r, "database.connection.update", name,
-		map[string]any{"dsnChanged": req.DSN != ""})
+	detail := map[string]any{"dsnChanged": req.DSN != ""}
+	// Protection is the one label whose change is worth reading back out of
+	// the trail: it is what stood between this connection and a write.
+	if readOnly != conn.ReadOnly {
+		detail["readOnly"] = readOnly
+	}
+	if environment != conn.Environment {
+		detail["environment"] = environment
+	}
+	if notes != conn.Notes {
+		detail["notesChanged"] = true
+	}
+	httpx.SetAudit(r, "database.connection.update", name, detail)
 	httpx.JSON(w, http.StatusOK, updated)
 	return nil
 }
 
 // handleDBTableDetail returns a table's structure: columns, primary key,
-// indexes, foreign keys and the DDL that would recreate it.
+// indexes, constraints, foreign keys in both directions and the DDL that
+// would recreate it.
 func (s *Server) handleDBTableDetail(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -912,112 +1214,43 @@ func (s *Server) handleDBTableDetail(w http.ResponseWriter, r *http.Request) err
 	q := r.URL.Query()
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	detail, err := dbx.Detail(ctx, pool, conn.Driver, q.Get("schema"), q.Get("table"))
+	detail, err := dbx.DescribeTable(ctx, pool, conn.Driver, q.Get("schema"), q.Get("table"))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
+	}
+	// No columns and no catalogue entry is a table that is not there. It used
+	// to come back as an empty structure, which a page drew as a table with
+	// nothing in it.
+	if len(detail.Columns) == 0 && detail.Type == "" {
+		return httpx.Err(http.StatusNotFound, "not_found",
+			fmt.Sprintf("no table or view named %s", q.Get("table")))
 	}
 	httpx.JSON(w, http.StatusOK, detail)
 	return nil
 }
 
-// handleDBExport streams an entire table as CSV or JSON. It is a read, so it
-// needs no capability beyond the browse routes; the row cap is high and a
-// truncated download is flagged in a trailing header rather than silently cut.
+// handleDBExport streams a table, or the rows of it the grid is showing, as a
+// file. It is a read, so it needs no capability beyond the browse routes; the
+// row cap is high, and a download that was cut at it or failed partway says so
+// rather than passing for the whole table (handlers_db_transfer.go).
 func (s *Server) handleDBExport(w http.ResponseWriter, r *http.Request) error {
-	id, err := parseID(r)
-	if err != nil {
-		return err
-	}
-	q := r.URL.Query()
-	table := q.Get("table")
-	if table == "" {
-		return httpx.BadRequest("table is required")
-	}
-	format := dbx.ExportFormat(q.Get("format"))
-	if !format.Valid() {
-		format = dbx.ExportCSV
-	}
-	// The grid's conditions travel with the export, so a download taken from a
-	// narrowed view is that view rather than the whole table. They are parsed
-	// before a single response header is written: once the body has started, a
-	// rejected filter can only arrive as JSON inside a file called .csv.
-	filters, err := parseFilters(q.Get("filters"))
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	conn, dsn, err := s.dbConnRow(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := timeoutCtx(r, 10*time.Minute)
-	defer cancel()
-
-	filename := fmt.Sprintf("%s.%s", table, format.Extension())
-	w.Header().Set("Content-Type", format.ContentType())
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
-
-	var (
-		count     int
-		truncated bool
-	)
-	if conn.Driver == dbx.DriverMongo {
-		// A collection exports through its own path: the column set is the
-		// union of the documents' keys rather than a fixed result shape, and
-		// the filter is a document rather than a WHERE clause.
-		client, cerr := dbx.MongoClient(ctx, dsn)
-		if cerr != nil {
-			httpx.SetAudit(r, "database.export", conn.Name,
-				map[string]any{"table": table, "error": cerr.Error()})
-			return nil
-		}
-		defer client.Disconnect(context.Background())
-		database := q.Get("schema")
-		if database == "" {
-			database = conn.Database
-		}
-		count, truncated, err = dbx.MongoExport(ctx, client, database, table,
-			dbx.MongoFindOptions{Filter: q.Get("filter"), Sort: q.Get("sort")},
-			format, w, atoiDefault(q.Get("limit"), 0))
-	} else {
-		pool, _, perr := s.dbPool(r.Context(), id)
-		if perr != nil {
-			return perr
-		}
-		count, truncated, err = dbx.ExportBrowse(ctx, pool, conn.Driver, dbx.BrowseOptions{
-			Schema: q.Get("schema"), Table: table,
-			OrderBy: q.Get("orderBy"), Desc: q.Get("dir") == "desc",
-			Filters: filters,
-		}, format, w, atoiDefault(q.Get("limit"), 0))
-	}
-	if err != nil {
-		// Headers are already sent, so the error cannot become a JSON body; it is
-		// recorded in the audit trail and the connection is dropped by the client
-		// seeing a short file. This is the one export failure mode worth logging.
-		httpx.SetAudit(r, "database.export", conn.Name,
-			map[string]any{"table": table, "error": err.Error()})
-		return nil
-	}
-	httpx.SetAudit(r, "database.export", conn.Name, map[string]any{
-		"table": table, "format": string(format), "rows": count, "truncated": truncated,
-		"filtered": q.Get("filters") != "",
-	})
-	return nil
+	return s.exportTable(w, r)
 }
 
-type ormRequest struct {
-	Target dbx.ORMTarget `json:"target"`
-	Schema string        `json:"schema"`
-}
-
-// handleDBGenerateORM introspects the connection and returns a generated ORM
-// schema file (Prisma or Drizzle). It is a read of the schema catalogue, so it
-// needs no write capability.
+// handleDBGenerateORM introspects the connection and returns generated code
+// for one target: an ORM schema, a set of types, or the schema as SQL. It is
+// a read of the schema catalogue, so it needs no write capability.
+//
+// The target and its options are checked before the connection is opened, and
+// whether the target exists for this engine at all before anything is read
+// from it: a Prisma schema for a ClickHouse server is refused with the reason
+// rather than answered with something PostgreSQL-shaped.
 func (s *Server) handleDBGenerateORM(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
 		return err
 	}
-	var req ormRequest
+	var req dbx.ORMRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
@@ -1028,31 +1261,47 @@ func (s *Server) handleDBGenerateORM(w http.ResponseWriter, r *http.Request) err
 		}
 		return httpx.BadRequest("target must be one of %s", strings.Join(names, ", "))
 	}
+	opts, err := req.Options()
+	if err != nil {
+		return httpx.BadRequest("%s", dbx.ORMRequestMessage(err))
+	}
+	row, _, err := s.dbConnRow(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	// An engine with no SQL at all is left to dbPool below, which names the
+	// surface it does have.
+	if row.Driver.IsSQL() {
+		if reason := dbx.ORMUnsupported(req.Target, row.Driver); reason != "" {
+			return httpx.BadRequest("%s", reason)
+		}
+	}
 	pool, conn, err := s.dbPool(r.Context(), id)
 	if err != nil {
 		return err
 	}
+	scope, err := req.Scope(conn.Driver, conn.Database)
+	if err != nil {
+		return httpx.BadRequest("%s", dbx.ORMRequestMessage(err))
+	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	tables, err := dbx.ListTables(ctx, pool, conn.Driver, req.Schema)
+	schema, err := dbx.LoadORMSchema(ctx, pool, conn.Driver, scope)
+	if errors.Is(err, dbx.ErrORMRequest) {
+		return httpx.BadRequest("%s", dbx.ORMRequestMessage(err))
+	}
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
-	details := map[string]*dbx.TableDetail{}
-	for _, t := range tables {
-		d, err := dbx.Detail(ctx, pool, conn.Driver, t.Schema, t.Name)
-		if err != nil {
-			continue
-		}
-		details[t.Name] = d
-	}
-	schema, err := dbx.GenerateORM(req.Target, conn.Driver, tables, details)
+	res, err := dbx.GenerateORMFiles(schema, opts)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return httpx.BadRequest("%s", dbx.ORMRequestMessage(err))
 	}
-	filename := ormFilename(req.Target)
-	httpx.SetAudit(r, "database.orm.generate", conn.Name, map[string]any{"target": string(req.Target)})
-	httpx.JSON(w, http.StatusOK, map[string]any{"schema": schema, "filename": filename})
+	httpx.SetAudit(r, "database.orm.generate", conn.Name, map[string]any{
+		"target": string(req.Target), "schemas": scope.Schemas,
+		"tables": res.Counts.Tables, "views": res.Counts.Views, "warnings": len(res.Warnings),
+	})
+	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
 
@@ -1083,7 +1332,7 @@ func (s *Server) handleDBRowInsert(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	res, err := dbx.InsertRow(ctx, pool, conn.Driver, req.Schema, req.Table, req.Values)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return changeError(err)
 	}
 	httpx.SetAudit(r, "database.row.insert", conn.Name,
 		map[string]any{"table": req.Table, "columns": len(req.Values)})
@@ -1114,10 +1363,12 @@ func (s *Server) handleDBRowUpdate(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	res, err := dbx.UpdateRow(ctx, pool, conn.Driver, req.Schema, req.Table, req.Values, req.Key)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return changeError(err)
 	}
+	// The key's columns, not its values: a key is row data like any other, and
+	// row data does not belong in the audit log.
 	httpx.SetAudit(r, "database.row.update", conn.Name,
-		map[string]any{"table": req.Table, "key": req.Key})
+		map[string]any{"table": req.Table, "key": keyColumns(req.Key)})
 	httpx.JSON(w, http.StatusOK, map[string]any{"result": res})
 	return nil
 }
@@ -1155,10 +1406,10 @@ func (s *Server) handleDBRowDelete(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	res, err := dbx.DeleteRow(ctx, pool, conn.Driver, req.Schema, req.Table, req.Key)
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		return changeError(err)
 	}
 	httpx.SetAudit(r, "database.row.delete", conn.Name,
-		map[string]any{"table": req.Table, "key": req.Key})
+		map[string]any{"table": req.Table, "key": keyColumns(req.Key)})
 	httpx.JSON(w, http.StatusOK, map[string]any{"result": res})
 	return nil
 }
@@ -1170,6 +1421,9 @@ type savedQuery struct {
 	Name      string    `json:"name"`
 	SQL       string    `json:"sql"`
 	CreatedAt time.Time `json:"createdAt"`
+	// UpdatedAt is when the query was last renamed or edited; the creation
+	// time until then.
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func (s *Server) handleDBSavedList(w http.ResponseWriter, r *http.Request) error {
@@ -1178,7 +1432,7 @@ func (s *Server) handleDBSavedList(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	rows, err := s.Store.DB.QueryContext(r.Context(),
-		`SELECT id, name, sql, created_at FROM db_saved_queries WHERE connection_id = ? ORDER BY name`, id)
+		`SELECT id, name, sql, created_at, updated_at FROM db_saved_queries WHERE connection_id = ? ORDER BY name`, id)
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -1186,20 +1440,44 @@ func (s *Server) handleDBSavedList(w http.ResponseWriter, r *http.Request) error
 	out := []savedQuery{}
 	for rows.Next() {
 		var q savedQuery
-		var created int64
-		if err := rows.Scan(&q.ID, &q.Name, &q.SQL, &created); err != nil {
+		var created, updated int64
+		if err := rows.Scan(&q.ID, &q.Name, &q.SQL, &created, &updated); err != nil {
 			return httpx.Internal(err)
 		}
-		q.CreatedAt = time.Unix(created, 0).UTC()
+		q.setTimes(created, updated)
 		out = append(out, q)
 	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
+func (q *savedQuery) setTimes(created, updated int64) {
+	q.CreatedAt = time.Unix(created, 0).UTC()
+	q.UpdatedAt = q.CreatedAt
+	// 0 is a query saved before edits were recorded, or never edited.
+	if updated > 0 {
+		q.UpdatedAt = time.Unix(updated, 0).UTC()
+	}
+}
+
 type savedQueryRequest struct {
 	Name string `json:"name"`
 	SQL  string `json:"sql"`
+}
+
+// maxSavedQueryName keeps a saved query's name a name. The statement itself is
+// bounded by the request body.
+const maxSavedQueryName = 200
+
+func (req *savedQueryRequest) validate() error {
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" || strings.TrimSpace(req.SQL) == "" {
+		return httpx.BadRequest("name and sql are required")
+	}
+	if len(req.Name) > maxSavedQueryName {
+		return httpx.BadRequest("a saved query's name may be at most %d characters", maxSavedQueryName)
+	}
+	return nil
 }
 
 func (s *Server) handleDBSavedCreate(w http.ResponseWriter, r *http.Request) error {
@@ -1211,23 +1489,24 @@ func (s *Server) handleDBSavedCreate(w http.ResponseWriter, r *http.Request) err
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if req.Name == "" || req.SQL == "" {
-		return httpx.BadRequest("name and sql are required")
+	if err := req.validate(); err != nil {
+		return err
 	}
 	if _, _, err := s.dbConnRow(r.Context(), id); err != nil {
 		return err
 	}
+	now := time.Now()
 	res, err := s.Store.DB.ExecContext(r.Context(),
-		`INSERT INTO db_saved_queries(connection_id, name, sql, created_at) VALUES(?,?,?,?)`,
-		id, req.Name, req.SQL, time.Now().Unix())
+		`INSERT INTO db_saved_queries(connection_id, name, sql, created_at, updated_at) VALUES(?,?,?,?,?)`,
+		id, req.Name, req.SQL, now.Unix(), now.Unix())
 	if err != nil {
 		return httpx.BadRequest("could not save query: %v", err)
 	}
 	newID, _ := res.LastInsertId()
 	httpx.SetAudit(r, "database.query.save", req.Name, nil)
-	httpx.JSON(w, http.StatusCreated, savedQuery{
-		ID: newID, Name: req.Name, SQL: req.SQL, CreatedAt: time.Now().UTC(),
-	})
+	saved := savedQuery{ID: newID, Name: req.Name, SQL: req.SQL}
+	saved.setTimes(now.Unix(), now.Unix())
+	httpx.JSON(w, http.StatusCreated, saved)
 	return nil
 }
 
@@ -1250,13 +1529,15 @@ func (s *Server) handleDBSavedDelete(w http.ResponseWriter, r *http.Request) err
 }
 
 type historyEntry struct {
-	ID       int64     `json:"id"`
-	SQL      string    `json:"sql"`
-	Risk     string    `json:"risk"`
-	Success  bool      `json:"success"`
-	Duration int64     `json:"durationMs"`
-	RowCount int       `json:"rowCount"`
-	RanAt    time.Time `json:"ranAt"`
+	ID           int64     `json:"id"`
+	SQL          string    `json:"sql"`
+	Risk         string    `json:"risk"`
+	Success      bool      `json:"success"`
+	Duration     int64     `json:"durationMs"`
+	RowCount     int       `json:"rowCount"`
+	RowsAffected int64     `json:"rowsAffected"`
+	Error        string    `json:"error,omitempty"`
+	RanAt        time.Time `json:"ranAt"`
 }
 
 func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {
@@ -1265,12 +1546,15 @@ func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	limit := atoiDefault(r.URL.Query().Get("limit"), 50)
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 {
 		limit = 50
 	}
+	limit = min(limit, 200)
+	// ran_at is whole seconds, and a script records several statements in one;
+	// the id breaks the tie in the order they ran.
 	rows, err := s.Store.DB.QueryContext(r.Context(),
-		`SELECT id, sql, risk, success, duration_ms, row_count, ran_at
-		 FROM db_query_history WHERE connection_id = ? ORDER BY ran_at DESC LIMIT ?`, id, limit)
+		`SELECT id, sql, risk, success, duration_ms, row_count, rows_affected, error, ran_at
+		 FROM db_query_history WHERE connection_id = ? ORDER BY ran_at DESC, id DESC LIMIT ?`, id, limit)
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -1279,7 +1563,8 @@ func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {
 	for rows.Next() {
 		var e historyEntry
 		var success, ranAt int64
-		if err := rows.Scan(&e.ID, &e.SQL, &e.Risk, &success, &e.Duration, &e.RowCount, &ranAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.SQL, &e.Risk, &success, &e.Duration, &e.RowCount,
+			&e.RowsAffected, &e.Error, &ranAt); err != nil {
 			return httpx.Internal(err)
 		}
 		e.Success = success != 0
@@ -1290,19 +1575,41 @@ func (s *Server) handleDBHistory(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// dbHistoryEntry is one statement as the history remembers it.
+type dbHistoryEntry struct {
+	SQL          string
+	Risk         string
+	Success      bool
+	DurationMs   int64
+	RowCount     int
+	RowsAffected int64
+	Error        string
+}
+
+// maxHistoryError bounds the engine's message as it is kept. An error is one
+// line of explanation in a list, and some engines answer with the statement
+// repeated inside it.
+const maxHistoryError = 1000
+
 // recordDBHistory appends a statement to the per-connection history and prunes
 // it to the most recent entries. It never fails the request it records: a
 // history write that errors is logged and swallowed, because losing an audit
 // convenience must not turn a successful query into a failed one.
-func (s *Server) recordDBHistory(ctx context.Context, connID int64, query, risk string, success bool, durationMs int64, rowCount int) {
+func (s *Server) recordDBHistory(ctx context.Context, connID int64, e dbHistoryEntry) {
+	// The request's context may be the very thing that ended the statement —
+	// a cancelled query is exactly the one worth finding in the history.
+	ctx = context.WithoutCancel(ctx)
 	succ := 0
-	if success {
+	if e.Success {
 		succ = 1
 	}
+	if len(e.Error) > maxHistoryError {
+		e.Error = strings.ToValidUTF8(e.Error[:maxHistoryError], "") + "…"
+	}
 	if _, err := s.Store.DB.ExecContext(ctx,
-		`INSERT INTO db_query_history(connection_id, sql, risk, success, duration_ms, row_count, ran_at)
-		 VALUES(?,?,?,?,?,?,?)`,
-		connID, query, risk, succ, durationMs, rowCount, time.Now().Unix()); err != nil {
+		`INSERT INTO db_query_history(connection_id, sql, risk, success, duration_ms, row_count, rows_affected, error, ran_at)
+		 VALUES(?,?,?,?,?,?,?,?,?)`,
+		connID, e.SQL, e.Risk, succ, e.DurationMs, e.RowCount, e.RowsAffected, e.Error, time.Now().Unix()); err != nil {
 		s.Log.Warn("db history write failed", "err", err)
 		return
 	}
@@ -1310,7 +1617,7 @@ func (s *Server) recordDBHistory(ctx context.Context, connID int64, query, risk 
 	// no separate reaper and no unbounded growth.
 	_, _ = s.Store.DB.ExecContext(ctx,
 		`DELETE FROM db_query_history WHERE connection_id = ? AND id NOT IN (
-		    SELECT id FROM db_query_history WHERE connection_id = ? ORDER BY ran_at DESC LIMIT 100
+		    SELECT id FROM db_query_history WHERE connection_id = ? ORDER BY ran_at DESC, id DESC LIMIT 100
 		 )`, connID, connID)
 }
 
@@ -1328,6 +1635,23 @@ type driverInfo struct {
 	DDL         bool       `json:"ddl"`
 	ColumnTypes []string   `json:"columnTypes,omitempty"`
 	FilterOps   []string   `json:"filterOps,omitempty"`
+	// DefaultPort is what the engine listens on when nothing says otherwise;
+	// 0 for an engine that is a file. DSNExample is a connection string in
+	// the form this engine's driver takes.
+	DefaultPort int    `json:"defaultPort"`
+	DSNExample  string `json:"dsnExample"`
+	// Capabilities is every feature flag for the driver's own product, and
+	// Flavors the same reading for each product that speaks its protocol,
+	// the driver's own first.
+	Capabilities map[string]any `json:"capabilities"`
+	Flavors      []flavorInfo   `json:"flavors"`
+}
+
+// flavorInfo is one product a driver can turn out to be connected to.
+type flavorInfo struct {
+	ID           string         `json:"id"`
+	Label        string         `json:"label"`
+	Capabilities map[string]any `json:"capabilities"`
 }
 
 // containerNameRe and dbNameRe bound the two names a provision request can
@@ -1338,15 +1662,18 @@ var (
 	dbNameRe        = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
 )
 
-var driverLabels = map[dbx.Driver]struct{ label, kind, placeholder string }{
-	dbx.DriverPostgres:   {"PostgreSQL", "sql", "postgres://user:password@127.0.0.1:5432/dbname?sslmode=disable"},
-	dbx.DriverMySQL:      {"MySQL / MariaDB", "sql", "user:password@tcp(127.0.0.1:3306)/dbname"},
-	dbx.DriverSQLite:     {"SQLite", "sql", "/var/lib/myapp/data.db"},
-	dbx.DriverMSSQL:      {"SQL Server", "sql", "sqlserver://user:password@127.0.0.1:1433?database=dbname"},
-	dbx.DriverClickHouse: {"ClickHouse", "sql", "clickhouse://user:password@127.0.0.1:9000/default"},
-	dbx.DriverOracle:     {"Oracle", "sql", "oracle://user:password@127.0.0.1:1521/ORCLPDB1"},
-	dbx.DriverMongo:      {"MongoDB", "document", "mongodb://user:password@127.0.0.1:27017/dbname"},
-	dbx.DriverRedis:      {"Redis", "keyvalue", "redis://:password@127.0.0.1:6379/0"},
+var driverLabels = map[dbx.Driver]struct {
+	label, kind, placeholder string
+	port                     int
+}{
+	dbx.DriverPostgres:   {"PostgreSQL", "sql", "postgres://user:password@127.0.0.1:5432/dbname?sslmode=disable", 5432},
+	dbx.DriverMySQL:      {"MySQL / MariaDB", "sql", "user:password@tcp(127.0.0.1:3306)/dbname", 3306},
+	dbx.DriverSQLite:     {"SQLite", "sql", "/var/lib/myapp/data.db", 0},
+	dbx.DriverMSSQL:      {"SQL Server", "sql", "sqlserver://user:password@127.0.0.1:1433?database=dbname", 1433},
+	dbx.DriverClickHouse: {"ClickHouse", "sql", "clickhouse://user:password@127.0.0.1:9000/default", 9000},
+	dbx.DriverOracle:     {"Oracle", "sql", "oracle://user:password@127.0.0.1:1521/ORCLPDB1", 1521},
+	dbx.DriverMongo:      {"MongoDB", "document", "mongodb://user:password@127.0.0.1:27017/dbname", 27017},
+	dbx.DriverRedis:      {"Redis", "keyvalue", "redis://:password@127.0.0.1:6379/0", 6379},
 }
 
 func (s *Server) handleDBDrivers(w http.ResponseWriter, r *http.Request) error {
@@ -1357,11 +1684,19 @@ func (s *Server) handleDBDrivers(w http.ResponseWriter, r *http.Request) error {
 		info := driverInfo{
 			ID: d, Label: meta.label, Kind: meta.kind,
 			Placeholder: meta.placeholder, SQL: d.IsSQL(),
+			DefaultPort: meta.port, DSNExample: meta.placeholder,
+			Capabilities: dbx.Capabilities(d, ""),
+			Flavors:      []flavorInfo{},
 		}
 		if dl, err := dbx.DialectFor(d); err == nil {
 			info.DDL = dl.SupportsDDL()
 			info.ColumnTypes = dl.ColumnTypes()
-			info.FilterOps = dbx.FilterOps()
+			info.FilterOps = dbx.FilterOpsFor(d)
+		}
+		for _, flavor := range dbx.Flavors(d) {
+			info.Flavors = append(info.Flavors, flavorInfo{
+				ID: flavor, Label: dbx.FlavorLabel(flavor), Capabilities: dbx.Capabilities(d, flavor),
+			})
 		}
 		out = append(out, info)
 	}
@@ -1381,18 +1716,15 @@ func (s *Server) handleDBCount(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	q := r.URL.Query()
-	filters, err := parseFilters(q.Get("filters"))
+	opts, err := browseOptions(r.URL.Query())
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
 	ctx, cancel := timeoutCtx(r, 120*time.Second)
 	defer cancel()
-	n, err := dbx.Count(ctx, pool, conn.Driver, dbx.BrowseOptions{
-		Schema: q.Get("schema"), Table: q.Get("table"), Filters: filters,
-	})
+	n, err := dbx.Count(ctx, pool, conn.Driver, opts)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return tableReadError(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"count": n})
 	return nil
@@ -1411,15 +1743,17 @@ func (s *Server) handleDBOutline(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	outline, err := dbx.Outline(ctx, pool, conn.Driver, r.URL.Query().Get("schema"))
+	q := r.URL.Query()
+	outline, err := dbx.OutlineWithLimit(ctx, pool, conn.Driver, q.Get("schema"), atoiDefault(q.Get("limit"), 0))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, outline)
 	return nil
 }
 
-// handleDBRelations returns the foreign-key graph the entity diagram draws.
+// handleDBRelations returns every foreign key in a schema, keyed by the
+// schema-qualified name of the table that holds it (dbx.TableKey).
 func (s *Server) handleDBRelations(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -1433,10 +1767,21 @@ func (s *Server) handleDBRelations(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	rels, err := dbx.Relations(ctx, pool, conn.Driver, r.URL.Query().Get("schema"))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, rels)
 	return nil
+}
+
+type explainRequest struct {
+	Query string `json:"query"`
+	// MaxRows is accepted because the editor sends one request shape to run
+	// and to explain; a plan is never cut to it.
+	MaxRows int `json:"maxRows"`
+	// Analyze runs the statement and reports what happened.
+	Analyze bool `json:"analyze"`
+	// Format is "text" or "json".
+	Format string `json:"format"`
 }
 
 // handleDBExplain returns the engine's plan for a statement.
@@ -1447,98 +1792,78 @@ func (s *Server) handleDBRelations(w http.ResponseWriter, r *http.Request) error
 // on — a "show me the plan" button that quietly executed a DELETE would be the
 // worst control in the product — so it is asserted in the dialect contract and
 // tested against every live engine rather than assumed here.
+//
+// analyze is the exception, and it is not on the read side at all: it executes
+// the statement, so the handler asks of it exactly what running the statement
+// through the query route would be asked — the capability to run SQL, and for
+// a destructive statement the destructive capability and its budget. The plan
+// of a data-changing statement is taken inside a transaction that is rolled
+// back, which changes what is left behind and nothing about who may ask.
 func (s *Server) handleDBExplain(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
 		return err
 	}
-	var req queryRequest
+	var req explainRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
 	if strings.TrimSpace(req.Query) == "" {
 		return httpx.BadRequest("query is required")
 	}
-	pool, conn, err := s.dbPool(r.Context(), id)
+	conn, err := s.sqlConnection(r, id)
 	if err != nil {
 		return err
 	}
-	d, err := dbx.DialectFor(conn.Driver)
+	statement, err := dbx.ExplainTarget(conn.Driver, req.Query)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
+	}
+	if req.Analyze {
+		if !httpx.MustPrincipal(r).Can(auth.CapServiceControl) {
+			return httpx.Err(http.StatusForbidden, "forbidden",
+				"an analysed plan runs the statement, and your role does not permit running SQL")
+		}
+		if err := s.authoriseSQL(r, statement.Risk); err != nil {
+			return err
+		}
+	}
+	pool, _, err := s.dbPool(r.Context(), id)
+	if err != nil {
+		return err
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	res, err := d.ExplainPlan(ctx, pool, req.Query)
+	plan, err := dbx.Explain(ctx, pool, conn.Driver, statement, dbx.ExplainOptions{
+		Analyze: req.Analyze, Format: req.Format,
+	})
 	if err != nil {
+		if req.Analyze {
+			httpx.SetAudit(r, "database.explain", conn.Name, map[string]any{
+				"statement": statement.SQL, "analyze": true, "risk": statement.Risk.Level, "error": err.Error(),
+			})
+		}
+		if errors.Is(err, dbx.ErrExplainUnsupported) {
+			return httpx.Err(http.StatusBadRequest, "unsupported", err.Error())
+		}
 		return httpx.BadRequest("%v", err)
 	}
-	httpx.SetAudit(r, "database.explain", conn.Name, map[string]any{"statement": req.Query})
-	httpx.JSON(w, http.StatusOK, map[string]any{"result": res})
+	httpx.SetAudit(r, "database.explain", conn.Name, map[string]any{
+		"statement": statement.SQL, "analyze": req.Analyze, "format": plan.Format,
+		"risk": statement.Risk.Level, "rolledBack": plan.RolledBack,
+	})
+	httpx.JSON(w, http.StatusOK, plan)
 	return nil
-}
-
-// ormFilename is the name the generated file should be saved under. It lives
-// here rather than in dbx because it is a download-header concern, not a
-// property of the schema — but it stays in one place so a new generator cannot
-// be added without deciding what its file is called.
-func ormFilename(t dbx.ORMTarget) string {
-	switch t {
-	case dbx.ORMPrisma:
-		return "schema.prisma"
-	case dbx.ORMDrizzle:
-		return "schema.ts"
-	case dbx.ORMTypeScript:
-		return "types.ts"
-	case dbx.ORMZod:
-		return "schemas.ts"
-	default:
-		return "schema.txt"
-	}
 }
 
 // handleDBTargets lists the code generators this build offers, so the ORM tab
 // is populated from the server rather than from a second list in TypeScript
-// that drifts the first time a generator is added.
+// that drifts the first time a generator is added. Each one comes with the
+// engines it can be pointed at and the switches it takes, for the same reason.
 func (s *Server) handleDBTargets(w http.ResponseWriter, r *http.Request) error {
 	httpx.SkipAudit(r)
-	out := make([]map[string]string, 0, len(dbx.ORMTargets()))
-	for _, t := range dbx.ORMTargets() {
-		out = append(out, map[string]string{
-			"id": string(t), "label": ormTargetLabel(t), "filename": ormFilename(t),
-			"description": ormTargetBlurb(t),
-		})
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"targets": out})
+	httpx.JSON(w, http.StatusOK, map[string]any{"targets": dbx.ORMTargetCatalogue()})
 	return nil
-}
-
-func ormTargetLabel(t dbx.ORMTarget) string {
-	switch t {
-	case dbx.ORMPrisma:
-		return "Prisma"
-	case dbx.ORMDrizzle:
-		return "Drizzle"
-	case dbx.ORMTypeScript:
-		return "TypeScript types"
-	case dbx.ORMZod:
-		return "Zod schemas"
-	}
-	return string(t)
-}
-
-func ormTargetBlurb(t dbx.ORMTarget) string {
-	switch t {
-	case dbx.ORMPrisma:
-		return "A schema.prisma to drop into an existing Prisma project."
-	case dbx.ORMDrizzle:
-		return "Drizzle ORM table definitions."
-	case dbx.ORMTypeScript:
-		return "Plain interfaces — no runtime dependency, useful with any client."
-	case dbx.ORMZod:
-		return "Runtime validators, plus an insert variant with defaults optional."
-	}
-	return ""
 }
 
 // --- activity -------------------------------------------------------------
@@ -1573,7 +1898,7 @@ func (s *Server) handleDBActivity(w http.ResponseWriter, r *http.Request) error 
 			})
 			return nil
 		}
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"sessions": list, "supported": true})
 	return nil
@@ -1643,12 +1968,15 @@ func (s *Server) handleDBSearch(w http.ResponseWriter, r *http.Request) error {
 	}
 	// A search reads the whole schema, so it is worth an audit entry even
 	// though it changes nothing: it is the one read that touches every table.
-	httpx.SetAudit(r, "database.search", conn.Name, map[string]any{"schema": q.Get("schema")})
+	// Written directly, because a GET never reaches the mutation middleware's
+	// record. The needle is left out: it is as likely to be somebody's email
+	// address as a word.
+	s.recordRead(r, "database.search", conn.Name, map[string]any{"schema": q.Get("schema")}, nil)
 	ctx, cancel := timeoutCtx(r, 120*time.Second)
 	defer cancel()
 	res, err := dbx.Search(ctx, pool, conn.Driver, q.Get("schema"), needle)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
@@ -1671,7 +1999,7 @@ func (s *Server) handleDBOverview(w http.ResponseWriter, r *http.Request) error 
 	defer cancel()
 	res, err := dbx.StorageOverview(ctx, pool, conn.Driver, r.URL.Query().Get("schema"))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
@@ -1691,6 +2019,12 @@ type rowSQLRequest struct {
 // implementation of "what does this row mean in this engine's syntax", and a
 // second one in TypeScript would quote a value differently on the day it
 // mattered. Nothing here executes the statement — it is text for a clipboard.
+//
+// The table's columns are read from the server so that the statement names
+// them in the table's own order and writes its numbers as numbers. That read
+// is the only thing asked of the server and it is best effort: a row that is
+// already on the page is still copied, in the older form, when its server has
+// stopped answering.
 func (s *Server) handleDBRowSQL(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -1706,12 +2040,18 @@ func (s *Server) handleDBRowSQL(w http.ResponseWriter, r *http.Request) error {
 	if len(req.Rows) == 0 {
 		return httpx.BadRequest("at least one row is required")
 	}
-	conn, _, err := s.dbConnRow(r.Context(), id)
+	conn, dsn, err := s.dbConnRow(r.Context(), id)
 	if err != nil {
 		return err
 	}
 	httpx.SkipAudit(r)
-	out, err := dbx.RowsInsertSQL(conn.Driver, req.Schema, req.Table, req.Rows)
+	ctx, cancel := timeoutCtx(r, 15*time.Second)
+	defer cancel()
+	var pool *sql.DB
+	if conn.Driver.IsSQL() {
+		pool, _ = s.modules.dbs.Pool(ctx, id, conn.Driver, dsn)
+	}
+	out, err := dbx.TableRowsInsertSQL(ctx, pool, conn.Driver, req.Schema, req.Table, req.Rows)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
@@ -1750,9 +2090,12 @@ func (s *Server) handleDBGraph(w http.ResponseWriter, r *http.Request) error {
 	// longer budget than a page of rows and a bound on how much it will do.
 	ctx, cancel := timeoutCtx(r, 90*time.Second)
 	defer cancel()
-	graph, err := dbx.BuildSchemaGraph(ctx, pool, conn.Driver, r.URL.Query().Get("schema"))
+	q := r.URL.Query()
+	graph, err := dbx.BuildSchemaGraphWithLimit(ctx, pool, conn.Driver, q.Get("schema"), atoiDefault(q.Get("limit"), 0))
 	if err != nil {
-		return httpx.BadRequest("%v", err)
+		// A catalogue the engine would not read is the engine failing, not the
+		// request being wrong, and is reported the way its sibling reads are.
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, graph)
 	return nil

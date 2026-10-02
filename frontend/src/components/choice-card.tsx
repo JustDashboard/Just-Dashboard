@@ -8,6 +8,7 @@ import { BlurFade } from "@/components/ui/blur-fade"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { ProductLogo } from "@/components/product-logo"
+import { kindWord, type EngineKind } from "@/components/database/engine"
 import { Tag } from "@/components/tag"
 import { cn } from "@/lib/utils"
 
@@ -269,26 +270,6 @@ export function ChoiceCardHint({ className, ...props }: React.ComponentProps<"sp
   )
 }
 
-/** The three kinds `/databases/drivers` sorts every engine into. */
-type EngineKind = "sql" | "document" | "keyvalue"
-
-const KIND_WORD: Record<EngineKind, string> = {
-  sql: "SQL",
-  document: "documents",
-  keyvalue: "key–value",
-}
-
-/**
- * The kind of a driver, for the pickers that list engines to start rather than
- * drivers to connect with — the provisioning options name a driver and nothing
- * more, and the connection dialog's `DbDriverInfo` already carries the kind.
- */
-export function driverKind(driver: string): EngineKind {
-  if (driver === "redis") return "keyvalue"
-  if (driver === "mongodb" || driver === "mongo") return "document"
-  return "sql"
-}
-
 /**
  * One product, as a picker of products draws it: its own logo, its name, and
  * one line of what exactly would be used — the image an engine would run, the
@@ -385,7 +366,7 @@ export function EngineCard({
   /** The engine or driver key the logo is looked up by. */
   engine: string
   label: string
-  /** What kind of store it is, in the drivers' own vocabulary. */
+  /** What kind of store it is, from the engine registry. */
   kind?: EngineKind
   /** A literal under the name: the image that would run. */
   detail?: string
@@ -407,7 +388,7 @@ export function EngineCard({
       working={working}
       onClick={onClick}
     >
-      {kind && <Tag>{KIND_WORD[kind]}</Tag>}
+      {kind && <Tag>{kindWord(kind)}</Tag>}
     </ProductCard>
   )
 }

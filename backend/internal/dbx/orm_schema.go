@@ -1,0 +1,449 @@
+package dbx
+
+import (
+	"fmt"
+	"strings"
+)
+
+// JSON Schema and GraphQL SDL.
+//
+// Neither is an ORM. They are the two schema languages a database's shape is
+// most often restated in by hand — one to validate a payload, one to describe
+// an API — and restating a hundred columns by hand is where the type that was
+// right last month goes wrong.
+
+// --- JSON, in order --------------------------------------------------------
+
+// ormJSONObject is an object whose keys keep the order they were added in. A
+// schema document is read by people, and encoding/json would sort a table's
+// columns alphabetically.
+type ormJSONObject struct {
+	keys   []string
+	values []any
+}
+
+func (o *ormJSONObject) set(key string, value any) *ormJSONObject {
+	o.keys = append(o.keys, key)
+	o.values = append(o.values, value)
+	return o
+}
+
+func ormWriteJSON(b *strings.Builder, v any, indent string) {
+	switch x := v.(type) {
+	case *ormJSONObject:
+		if len(x.keys) == 0 {
+			b.WriteString("{}")
+			return
+		}
+		b.WriteString("{\n")
+		for i, k := range x.keys {
+			b.WriteString(indent + "  " + jsString(k) + ": ")
+			ormWriteJSON(b, x.values[i], indent+"  ")
+			if i < len(x.keys)-1 {
+				b.WriteString(",")
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString(indent + "}")
+	case []any:
+		if len(x) == 0 {
+			b.WriteString("[]")
+			return
+		}
+		// A list of scalars stays on one line; a list of objects does not.
+		inline := true
+		for _, el := range x {
+			if _, ok := el.(*ormJSONObject); ok {
+				inline = false
+			}
+		}
+		if inline {
+			b.WriteString("[")
+			for i, el := range x {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				ormWriteJSON(b, el, indent)
+			}
+			b.WriteString("]")
+			return
+		}
+		b.WriteString("[\n")
+		for i, el := range x {
+			b.WriteString(indent + "  ")
+			ormWriteJSON(b, el, indent+"  ")
+			if i < len(x)-1 {
+				b.WriteString(",")
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString(indent + "]")
+	case string:
+		b.WriteString(jsString(x))
+	case ormJSONRaw:
+		b.WriteString(string(x))
+	case bool:
+		fmt.Fprintf(b, "%t", x)
+	case int:
+		fmt.Fprintf(b, "%d", x)
+	default:
+		b.WriteString("null")
+	}
+}
+
+// ormJSONRaw is text that is already JSON: a number as the catalogue printed it,
+// a default that was itself a JSON literal.
+type ormJSONRaw string
+
+func ormJSONStrings(values []string) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
+}
+
+// --- JSON Schema -----------------------------------------------------------
+
+func generateJSONSchema(g *ormGen) []ORMFile {
+	rules := tsRules(g)
+	rules.escapeTop = nil
+	n := g.names(rules)
+
+	defs := &ormJSONObject{}
+	for _, e := range g.enums {
+		defs.set(n.enum[e], (&ormJSONObject{}).set("type", "string").set("enum", ormJSONStrings(e.Values)))
+	}
+	root := &ormJSONObject{}
+	for _, m := range g.models {
+		props := &ormJSONObject{}
+		var required []any
+		refs := map[string]string{}
+		for _, fk := range m.ForeignKeys {
+			if len(fk.Columns) == 1 && len(fk.RefColumns) == 1 && fk.RefTable != "" {
+				refs[fk.Columns[0]] = fk.RefTable + "." + fk.RefColumns[0]
+			}
+		}
+		for _, c := range m.cols {
+			p := jsonSchemaType(g, n, m, c)
+			if c.Comment != "" {
+				p.set("description", ormOneLine(c.Comment))
+			}
+			if ref := refs[c.Name]; ref != "" {
+				p.set("$comment", "References "+ref+".")
+			}
+			if g.opts.Defaults {
+				switch c.def.Kind {
+				case ormDefString:
+					if !c.t.Array {
+						p.set("default", c.def.Text)
+					}
+				case ormDefNumber:
+					if c.t.isInteger() || c.t.Kind == ormFloat32 || c.t.Kind == ormFloat64 {
+						p.set("default", ormJSONRaw(c.def.Text))
+					} else {
+						p.set("default", c.def.Text)
+					}
+				case ormDefBool:
+					p.set("default", c.def.Bool)
+				case ormDefJSON:
+					p.set("default", ormJSONRaw(c.def.Text))
+				case ormDefEmptyArray:
+					p.set("default", []any{})
+				}
+			}
+			if c.Generated || c.def.Kind == ormDefAuto {
+				p.set("readOnly", true)
+			}
+			props.set(n.field[c], p)
+			if !c.Nullable && !c.dbFills() {
+				required = append(required, n.field[c])
+			}
+		}
+		def := &ormJSONObject{}
+		def.set("title", m.Name)
+		if m.Comment != "" {
+			def.set("description", ormOneLine(m.Comment))
+		}
+		def.set("type", "object").set("properties", props)
+		if len(required) > 0 {
+			def.set("required", required)
+		}
+		def.set("additionalProperties", false)
+		defs.set(n.model[m], def)
+
+		key := m.Name
+		if g.qualified(m) && !(g.driver == DriverPostgres && m.Schema == g.defaultSchema) {
+			key = m.Schema + "." + m.Name
+		}
+		root.set(key, (&ormJSONObject{}).set("type", "array").
+			set("items", (&ormJSONObject{}).set("$ref", "#/$defs/"+n.model[m])))
+	}
+
+	doc := &ormJSONObject{}
+	doc.set("$schema", "https://json-schema.org/draft/2020-12/schema")
+	doc.set("title", strings.Join(g.schemaNames(), ", "))
+	if len(g.schemaNames()) == 0 {
+		doc.values[len(doc.values)-1] = "Database"
+	}
+	doc.set("description", "Generated by Just Dashboard from live database introspection. "+
+		"A reviewed starting point: one definition per table under $defs, and a root object holding rows by table name.")
+	doc.set("type", "object").set("properties", root).set("$defs", defs)
+
+	var b strings.Builder
+	ormWriteJSON(&b, doc, "")
+	b.WriteString("\n")
+	return []ORMFile{{Filename: "schema.json", Content: b.String()}}
+}
+
+// jsonSchemaType maps a column onto a JSON Schema. An integer is described as
+// one even where it is 64 bits wide: JSON has no integer size, and the
+// consumers of a schema document are as often Go or Python as JavaScript.
+func jsonSchemaType(g *ormGen, n *ormNaming, m *ormTable, c *ormCol) *ormJSONObject {
+	t := c.t
+	p := &ormJSONObject{}
+	simple := ""
+	switch t.Kind {
+	case ormBool:
+		simple = "boolean"
+	case ormInt8, ormInt16, ormInt32, ormYear:
+		simple = "integer"
+	case ormInt64:
+		simple = "integer"
+		p.set("format", "int64")
+	case ormFloat32, ormFloat64:
+		simple = "number"
+	case ormBigNum:
+		simple = "string"
+		p.set("pattern", `^-?[0-9]+$`)
+	case ormDecimal, ormMoney:
+		// Exact numerics travel as strings so no digit is lost to a float.
+		simple = "string"
+		if t.Kind == ormDecimal {
+			p.set("pattern", `^-?[0-9]+(\.[0-9]+)?$`)
+		}
+	case ormChar, ormVarchar:
+		simple = "string"
+		if t.Length > 0 {
+			p.set("maxLength", t.Length)
+		}
+	case ormUUID:
+		simple = "string"
+		p.set("format", "uuid")
+	case ormBytes, ormBit:
+		simple = "string"
+		if t.Kind == ormBytes {
+			p.set("contentEncoding", "base64")
+		}
+	case ormDate:
+		simple = "string"
+		p.set("format", "date")
+	case ormTime:
+		simple = "string"
+		p.set("format", "time")
+	case ormDateTime, ormDateTimeTZ:
+		simple = "string"
+		p.set("format", "date-time")
+	case ormJSON:
+		// Any JSON value, null included.
+	case ormEnumKind:
+		if t.Enum != nil {
+			p.set("$ref", "#/$defs/"+n.enum[t.Enum])
+		} else {
+			simple = "string"
+		}
+	case ormUnknown:
+		g.warn("%s.%s has type %s, which has no mapping here; it is described as a string.", g.label(m), c.Name, c.Type)
+		simple = "string"
+	default:
+		simple = "string"
+	}
+	if (t.Kind == ormInt8 || t.Kind == ormInt16 || t.Kind == ormInt32 || t.Kind == ormInt64) && t.Unsigned {
+		p.set("minimum", 0)
+	}
+	if simple != "" {
+		// "type" reads first.
+		p.keys = append([]string{"type"}, p.keys...)
+		p.values = append([]any{simple}, p.values...)
+	}
+	if t.Array {
+		p = (&ormJSONObject{}).set("type", "array").set("items", p)
+		simple = "array"
+	}
+	if !c.Nullable || t.Kind == ormJSON && !t.Array {
+		return p
+	}
+	if simple != "" {
+		p.values[0] = []any{simple, "null"}
+		return p
+	}
+	return (&ormJSONObject{}).set("anyOf", []any{p, (&ormJSONObject{}).set("type", "null")})
+}
+
+// --- GraphQL ---------------------------------------------------------------
+
+// graphqlBuiltins are the names SDL already gives a meaning.
+var graphqlBuiltins = ormWordSet(`Int Float String Boolean ID Query Mutation Subscription
+	BigInt Decimal DateTime Date Time JSON UUID Bytes`)
+
+// graphqlName makes a name GraphQL's grammar accepts. Two leading underscores
+// are reserved for introspection.
+func graphqlName(name string) string {
+	s := sanitizeIdent(name)
+	for strings.HasPrefix(s, "__") {
+		s = s[1:]
+	}
+	return s
+}
+
+func generateGraphQL(g *ormGen) []ORMFile {
+	rules := ormNameRules{
+		model: func(t string) string { return pascal(singular(t)) },
+		field: graphqlName,
+		enum:  pascal,
+		escapeTop: func(s string) string {
+			if graphqlBuiltins[s] {
+				return s + "Record"
+			}
+			return s
+		},
+	}
+	if g.opts.Naming == ORMNamingCamel {
+		rules.field = func(s string) string { return graphqlName(ormCamel(s)) }
+	}
+	n := g.names(rules)
+	scalars := map[string]bool{}
+
+	scalar := func(m *ormTable, c *ormCol, id bool) string {
+		t := c.t
+		var typ string
+		use := func(name string) string { scalars[name] = true; return name }
+		switch t.Kind {
+		case ormBool:
+			typ = "Boolean"
+		case ormInt8, ormInt16, ormInt32, ormYear:
+			typ = "Int"
+			if t.Kind == ormInt32 && t.Unsigned {
+				// GraphQL's Int is 32 bits and signed.
+				typ = use("BigInt")
+			}
+		case ormInt64, ormBigNum:
+			typ = use("BigInt")
+		case ormFloat32, ormFloat64:
+			typ = "Float"
+		case ormDecimal, ormMoney:
+			typ = use("Decimal")
+		case ormUUID:
+			typ = use("UUID")
+		case ormJSON:
+			typ = use("JSON")
+		case ormBytes:
+			typ = use("Bytes")
+		case ormDate:
+			typ = use("Date")
+		case ormTime:
+			typ = use("Time")
+		case ormDateTime, ormDateTimeTZ:
+			typ = use("DateTime")
+		case ormEnumKind:
+			typ = "String"
+			if t.Enum != nil {
+				typ = n.enum[t.Enum]
+			}
+		case ormUnknown:
+			g.warn("%s.%s has type %s, which has no mapping here; it is a String.", g.label(m), c.Name, c.Type)
+			typ = "String"
+		default:
+			typ = "String"
+		}
+		if id && !t.Array {
+			typ = "ID"
+		}
+		if t.Array {
+			typ = "[" + typ + "!]"
+		}
+		return typ
+	}
+
+	var body strings.Builder
+	for _, e := range g.enums {
+		fmt.Fprintf(&body, "\nenum %s {\n", n.enum[e])
+		used := newORMNamer(false, "true", "false", "null")
+		for _, v := range e.Values {
+			name := used.take(graphqlName(v))
+			if name != v {
+				g.warn("Enum value %q of %s is not a GraphQL name; it is declared as %s and has to be mapped back in the resolver.", v, e.Name, name)
+				fmt.Fprintf(&body, "  %s\n", jsString(`"`+v+`" in the database.`))
+			}
+			fmt.Fprintf(&body, "  %s\n", name)
+		}
+		body.WriteString("}\n")
+	}
+	describe := func(indent, text string) string {
+		if text == "" {
+			return ""
+		}
+		return indent + jsString(ormOneLine(text)) + "\n"
+	}
+	for _, m := range g.models {
+		body.WriteString("\n" + describe("", m.Comment))
+		fmt.Fprintf(&body, "type %s {\n", n.model[m])
+		pk := m.singlePK()
+		for _, c := range m.cols {
+			desc := c.Comment
+			if n.field[c] != c.Name {
+				desc = strings.TrimSpace(fmt.Sprintf("Column %q. %s", c.Name, desc))
+			}
+			body.WriteString(describe("  ", desc))
+			typ := scalar(m, c, pk == c)
+			if !c.Nullable {
+				typ += "!"
+			}
+			fmt.Fprintf(&body, "  %s: %s\n", n.field[c], typ)
+		}
+		for _, r := range m.rels {
+			typ := n.model[r.to]
+			if !r.optional {
+				typ += "!"
+			}
+			fmt.Fprintf(&body, "  %s: %s\n", n.fwd[r], typ)
+		}
+		for _, r := range m.back {
+			typ := "[" + n.model[r.from] + "!]!"
+			if r.unique {
+				typ = n.model[r.from]
+			}
+			fmt.Fprintf(&body, "  %s: %s\n", n.back[r], typ)
+		}
+		body.WriteString("}\n")
+
+		if !g.opts.Inputs || m.view {
+			continue
+		}
+		fmt.Fprintf(&body, "\ninput %s {\n", n.top.take(n.model[m]+"Input"))
+		for _, c := range m.cols {
+			if c.Generated {
+				continue
+			}
+			typ := scalar(m, c, pk == c)
+			if !c.Nullable && !c.dbFills() {
+				typ += "!"
+			}
+			fmt.Fprintf(&body, "  %s: %s\n", n.field[c], typ)
+		}
+		body.WriteString("}\n")
+	}
+
+	var b strings.Builder
+	b.WriteString("# Generated by Just Dashboard from live database introspection.\n")
+	b.WriteString("# A reviewed starting point: object types only. Queries, mutations and the\n")
+	b.WriteString("# resolvers behind the custom scalars are yours to add.\n")
+	if names := ormSortedKeys(scalars); len(names) > 0 {
+		b.WriteString("\n")
+		for _, s := range names {
+			b.WriteString("scalar " + s + "\n")
+		}
+	}
+	b.WriteString(body.String())
+	return []ORMFile{{Filename: "schema.graphql", Content: b.String()}}
+}

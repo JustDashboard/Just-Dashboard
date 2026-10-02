@@ -6,12 +6,11 @@ import type { Capability } from "@/lib/types"
 /**
  * A panel of pages the rail cannot know about from the route alone.
  *
- * Two sections need one. The databases section hides the SQL-only pages when
- * the connection is Redis or Mongo, and every one of its pages carries the
- * chosen connection in the query string — neither fact exists outside the
- * section's own layout. A deployment is a place the rail has never heard of
- * until the project's read lands: its name, whether it is a game server, and
- * whether it has changes waiting.
+ * Two sections need one. A database is a place the rail has never heard of
+ * until its connection is read: its name, and which pages its engine has —
+ * Redis has keys and a console where a SQL server has tables, a schema and a
+ * diagram. A deployment is the same: its name, whether it is a game server,
+ * and whether it has changes waiting.
  *
  * So the section registers its own panel here and the rail draws it. The
  * alternative was the rail fetching a project and a driver catalogue of its
@@ -44,8 +43,9 @@ export type NavScope = {
   mark?: React.ReactNode
   /**
    * Whether this stands *in place of* the section panel the route would
-   * otherwise open (databases) or a level below it (one deployment inside
-   * Deployments). It decides what the back control goes back to.
+   * otherwise open or a level below it (one deployment inside Deployments,
+   * one database inside Databases). It decides what the back control goes
+   * back to.
    */
   replaces?: boolean
   groups: {

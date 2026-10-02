@@ -68,6 +68,15 @@ type Dialect interface {
 	Indexes(ctx context.Context, db *sql.DB, schema, table string) ([]Index, error)
 	ForeignKeys(ctx context.Context, db *sql.DB, schema, table string) ([]ForeignKey, error)
 	schemaQueries() schemaQueries
+	// readScope is how this engine is made to refuse writes for the length of
+	// one statement the classifier called a read.
+	readScope() readScope
+	// byteLength renders an expression for a value's size in bytes, so one
+	// cell can be measured before it is fetched. floor says the engine could
+	// only count something no larger than the bytes — a LOB's characters — and
+	// the figure is the least the value can be. An error is a type the engine
+	// cannot measure without reading it, which is then not read.
+	byteLength(column Column, quoted string) (expr string, floor bool, err error)
 	// CreateSQL returns DDL recreating the table. Engines that keep the original
 	// text hand it back; the rest synthesise it from the introspected structure.
 	CreateSQL(ctx context.Context, db *sql.DB, schema, table string, d *TableDetail) (string, error)

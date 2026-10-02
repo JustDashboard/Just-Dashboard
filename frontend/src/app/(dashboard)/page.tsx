@@ -14,6 +14,7 @@ import {
   Shield,
 } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
+import { unusableCount } from "@/lib/db-connections"
 import { bytes, clock, duration, percent, rate, relativeTime } from "@/lib/format"
 import type {
   BackupJob,
@@ -41,6 +42,7 @@ import type { Tone } from "@/components/tone"
 import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import { Sparkline } from "@/components/metrics/sparkline"
+import { engineFor } from "@/components/database/engine"
 import { eventColor } from "@/components/metrics/metric-chart"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import {
@@ -460,9 +462,9 @@ function DatabasesCard() {
     (signal) => get<DbConnection[]>("/databases/", undefined, signal),
     60_000,
   )
-  const engines = [
-    ...new Set((data ?? []).map((c) => (c.driver === "postgres" ? "postgresql" : c.driver))),
-  ]
+  // Drawn as what each one is, in the registry's words: the glyph of its
+  // flavour where the server has said one, of its driver otherwise.
+  const engines = [...new Set((data ?? []).flatMap((conn) => engineFor(conn).logo ?? []))]
   return (
     <ServiceTile
       icon={Database}
@@ -472,7 +474,14 @@ function DatabasesCard() {
       loading={loading && !data}
       unavailable={moduleGone(error)}
       value={data ? (data.length === 0 ? "None yet" : `${data.length} connections`) : undefined}
-      hint={data && data.length === 1 ? "1 connection" : undefined}
+      hint={
+        // A saved connection that no longer opens is counted, and said to be one.
+        unusableCount(data) > 0
+          ? `${unusableCount(data)} cannot be opened`
+          : data && data.length === 1
+            ? "1 connection"
+            : undefined
+      }
     />
   )
 }

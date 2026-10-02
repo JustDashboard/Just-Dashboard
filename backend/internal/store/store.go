@@ -102,7 +102,13 @@ CREATE TABLE IF NOT EXISTS db_connections (
   name       TEXT NOT NULL UNIQUE,
   driver     TEXT NOT NULL,
   dsn_enc    TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  -- What the operator says about the connection, as opposed to what its DSN
+  -- says: which environment it serves, whether the dashboard may change what
+  -- is in it, and anything worth remembering about it.
+  environment TEXT NOT NULL DEFAULT '',
+  read_only   INTEGER NOT NULL DEFAULT 0,
+  notes       TEXT NOT NULL DEFAULT ''
 );
 
 -- Named SQL snippets an operator keeps against a connection. The SQL is stored
@@ -114,7 +120,8 @@ CREATE TABLE IF NOT EXISTS db_saved_queries (
   connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
   sql           TEXT NOT NULL,
-  created_at    INTEGER NOT NULL
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_db_saved_conn ON db_saved_queries(connection_id, name);
 
@@ -130,7 +137,9 @@ CREATE TABLE IF NOT EXISTS db_query_history (
   success       INTEGER NOT NULL DEFAULT 1,
   duration_ms   INTEGER NOT NULL DEFAULT 0,
   row_count     INTEGER NOT NULL DEFAULT 0,
-  ran_at        INTEGER NOT NULL
+  ran_at        INTEGER NOT NULL,
+  rows_affected INTEGER NOT NULL DEFAULT 0,
+  error         TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_db_history_conn ON db_query_history(connection_id, ran_at DESC);
 
@@ -147,6 +156,17 @@ CREATE TABLE IF NOT EXISTS db_diagram_layouts (
   layout        TEXT NOT NULL,
   updated_at    INTEGER NOT NULL,
   PRIMARY KEY (connection_id, schema_name)
+);
+
+-- Databases found on this machine that the operator said to leave alone. The
+-- key is the inventory's own (docker:<container>, compose:<project>/<service>,
+-- host:<unit>, file:<path>), not a connection id: the point of the row is to
+-- outlive the connection that was forgotten, so the next reconcile does not
+-- quietly bring it back.
+CREATE TABLE IF NOT EXISTS db_inventory_ignored (
+  origin     TEXT PRIMARY KEY,
+  ignored_at INTEGER NOT NULL,
+  ignored_by TEXT NOT NULL DEFAULT ''
 );
 
 -- Boards live with the dashboard's other durable state, including embedded
@@ -1090,7 +1110,18 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_git_watches", "reason", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "baseline_revision", "TEXT NOT NULL DEFAULT ''"},
+	// A connection remembers which discovered database it was made from, by
+	// the inventory's key. Where it dials can change — a container is given a
+	// new address when it is recreated — and the key does not.
+	{"db_connections", "origin", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_database_networks", "network_id", "TEXT NOT NULL DEFAULT ''"},
+	// A saved connection gained what the operator says about it: the
+	// environment it serves, a protection that refuses every write made
+	// through the dashboard, and free notes. Existing connections are
+	// unlabelled, unprotected and have none.
+	{"db_connections", "environment", "TEXT NOT NULL DEFAULT ''"},
+	{"db_connections", "read_only", "INTEGER NOT NULL DEFAULT 0"},
+	{"db_connections", "notes", "TEXT NOT NULL DEFAULT ''"},
 	// Reconciliation knew why a binding could not be repaired and threw the
 	// reason away, so the settings page could only say "check that the
 	// container is running". The reason is kept on the binding it belongs to.
@@ -1137,6 +1168,12 @@ var addedColumns = []struct{ table, column, spec string }{
 	{"deploy_runs", "slot_class", "TEXT NOT NULL DEFAULT 'light'"},
 	{"deploy_runs", "metadata_json", "TEXT NOT NULL DEFAULT '{}'"},
 	{"deploy_releases", "expected_downtime", "INTEGER NOT NULL DEFAULT 1"},
+
+	// The query history learned why a statement failed and how many rows a
+	// write changed, and a saved query learned when it was last edited.
+	{"db_query_history", "error", "TEXT NOT NULL DEFAULT ''"},
+	{"db_query_history", "rows_affected", "INTEGER NOT NULL DEFAULT 0"},
+	{"db_saved_queries", "updated_at", "INTEGER NOT NULL DEFAULT 0"},
 
 	// The CPU mode breakdown, added because one "busy" percentage cannot tell
 	// apart a server doing work, a server waiting on a disk, and a hypervisor

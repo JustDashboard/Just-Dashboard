@@ -36,9 +36,12 @@ strategy, and feature ownership behind those rules.
   backup scheduling/storage/restore, and host accounts/SSH keys.
 - [`backend/git-workspace-expansion.md`](backend/git-workspace-expansion.md) — conflict resolution,
   partial staging, recovery, local rebase, worktrees, provider reviews, LFS and patch exchange.
-- [`backend/databases-proxy-platform.md`](backend/databases-proxy-platform.md) — eight database engines,
-  nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent mode, configuration, releases, self-update, and the
-  dashboard's own settings (restart, rebuild, rollback, Tailscale certificates).
+- [`backend/databases-proxy-platform.md`](backend/databases-proxy-platform.md) — the Databases section:
+  the inventory of what is on the machine, connections and protected connections, the capability table,
+  the SQL workbench, schema and operations, the Redis and MongoDB surfaces, code generation, transfer,
+  and the complete `/databases` route table; then nginx/proxy/TLS/DNS, streaming, jobs, secrets, agent
+  mode, configuration, releases, self-update, and the dashboard's own settings (restart, rebuild,
+  rollback, Tailscale certificates).
 - [`boards.md`](boards.md) — Excalidraw integration, server-side board storage, save conflicts, resource
   cards, and board route permissions.
 

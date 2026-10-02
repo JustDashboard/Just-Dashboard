@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -235,12 +236,12 @@ func (d mssqlDialect) BeforeDropColumn(ctx context.Context, db *sql.DB, schema, 
 // connection out of the pool, turns the mode on and off around the one
 // statement, and closes it, which guarantees no pooled connection can be
 // handed back still in plan-only mode.
-func (mssqlDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (result *QueryResult, err error) {
-	checked, checkErr := ExplainStatement(query)
+func (d mssqlDialect) ExplainPlan(ctx context.Context, db *sql.DB, query string) (result *QueryResult, err error) {
+	checked, checkErr := explainStatement(d.Driver(), query)
 	if checkErr != nil {
 		return nil, checkErr
 	}
-	query = checked
+	query = checked.SQL
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -346,3 +347,57 @@ func (d mssqlDialect) DropDatabaseSQL(name string) ([]DropStatement, error) {
 }
 
 func (mssqlDialect) AdminDatabase() string { return "master" }
+
+// --- the workbench ---------------------------------------------------------
+
+// SQL Server has no read-only transaction and its driver refuses to pretend.
+// An ordinary transaction that is always rolled back is what is left.
+func (mssqlDialect) readScope() readScope { return readScopeRollback }
+
+// textMatch escapes [ as well: SQL Server's LIKE reads [a-z] as a character
+// class, so an unescaped bracket in the operator's text is a pattern.
+func (d mssqlDialect) textMatch(expr string, kind matchKind, fold bool, ph string) (string, func(string) string) {
+	return likeMatch(d, expr, kind, fold, ph, likeEscape+"%_[")
+}
+
+func (mssqlDialect) rowEstimate(ctx context.Context, db *sql.DB, schema, table string) (int64, error) {
+	if schema == "" {
+		schema = "dbo"
+	}
+	var n sql.NullInt64
+	err := db.QueryRowContext(ctx, `SELECT SUM(p.rows)
+	         FROM sys.partitions p
+	         JOIN sys.tables t ON t.object_id = p.object_id
+	         JOIN sys.schemas s ON s.schema_id = t.schema_id
+	         WHERE s.name = @p1 AND t.name = @p2 AND p.index_id IN (0,1)`, schema, table).Scan(&n)
+	if err == sql.ErrNoRows || err == nil && !n.Valid {
+		return -1, nil
+	}
+	return n.Int64, err
+}
+
+// keyExpr casts the legacy large-object types, which SQL Server will not
+// compare with = at all.
+func (mssqlDialect) keyExpr(column Column, quoted string) string {
+	switch strings.ToLower(column.Type) {
+	case "text", "ntext", "xml":
+		return "CAST(" + quoted + " AS NVARCHAR(MAX))"
+	case "image":
+		return "CAST(" + quoted + " AS VARBINARY(MAX))"
+	}
+	return quoted
+}
+
+// countedSQL asks for @@ROWCOUNT in the batch the statement runs in. The
+// driver's own figure adds up every "rows affected" the batch produced, so an
+// audit trigger written without SET NOCOUNT ON turned one edited row into
+// three and the edit into a conflict; and a login whose sessions start with
+// NOCOUNT on reported none, which read as the row having gone. @@ROWCOUNT
+// straight after the statement is the statement's own count in both cases.
+func (mssqlDialect) countedSQL(statement string) string {
+	return statement + "; SELECT @@ROWCOUNT AS " + ownCountColumn
+}
+
+func (mssqlDialect) byteLength(_ Column, quoted string) (string, bool, error) {
+	return "DATALENGTH(" + quoted + ")", false, nil
+}
