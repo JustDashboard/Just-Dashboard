@@ -6,7 +6,12 @@ import {
   dragCarriesFiles,
   dragCarriesPaths,
   readDraggedPaths,
+  isWithin,
 } from "@/components/files/media"
+
+// Browsers hide getData during dragover. Keep this tab's native drag payload
+// available so a folder never advertises a drop into itself or its children.
+let currentPaths: string[] = []
 
 export type DropMode = "move" | "copy"
 
@@ -70,6 +75,7 @@ export function useDropTarget({
 
   const accepts = (transfer: DataTransfer) =>
     dir !== null &&
+    !(dragCarriesPaths(transfer) && currentPaths.some((path) => isWithin(dir, path))) &&
     ((paths && !!onDropPaths && dragCarriesPaths(transfer)) ||
       (files && !!onDropFiles && dragCarriesFiles(transfer)))
 
@@ -115,9 +121,39 @@ export function useDropTarget({
 
 /** Starts a drag carrying paths, from a row or a tile. */
 export function startPathDrag(event: React.DragEvent, paths: string[]) {
+  currentPaths = paths
+  const reset = () => {
+    currentPaths = []
+    window.removeEventListener("dragend", reset)
+    window.removeEventListener("drop", reset)
+  }
+  window.addEventListener("dragend", reset)
+  window.addEventListener("drop", reset)
   event.dataTransfer.setData(DRAG_PATHS, JSON.stringify(paths))
   // A plain-text copy too, so a path dropped into a terminal or an editor
   // arrives as the path rather than as nothing.
   event.dataTransfer.setData("text/plain", paths.join("\n"))
   event.dataTransfer.effectAllowed = "copyMove"
+
+  // A compact stack keeps a multi-file drag legible; cloning a whole table
+  // row otherwise produces a ghost as wide as the listing with no count.
+  const preview = document.createElement("div")
+  preview.className =
+    "pointer-events-none fixed flex max-w-64 items-center gap-2 rounded-md border border-hairline bg-popover px-3 py-2 text-body text-foreground"
+  preview.style.left = "-1000px"
+  preview.style.top = "0"
+  const icon = event.currentTarget
+    .querySelector("[data-folder], svg.size-full, img")
+    ?.cloneNode(true) as Element | undefined
+  if (icon) {
+    icon.setAttribute("class", "relative inline-flex size-6 shrink-0")
+    preview.append(icon)
+  }
+  const label = document.createElement("span")
+  label.className = "truncate"
+  label.textContent = paths.length > 1 ? `${paths.length} items` : paths[0].split("/").pop() || "/"
+  preview.append(label)
+  document.body.append(preview)
+  event.dataTransfer.setDragImage(preview, 16, 16)
+  setTimeout(() => preview.remove(), 0)
 }

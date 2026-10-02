@@ -193,6 +193,11 @@ Browse compact tiles, find files by name or matching content, preview, edit with
 saving, drag and drop, upload whole folders, crop pictures, chmod, archive and extract. Text and
 image editors open beside the listing or in a full workspace with a collapsible folder tree.
 Every path is checked against `JD_FILE_ROOTS` before anything happens.
+Click once to inspect and double-click or press Enter to open. After checking an item, click anywhere
+on another item to add or remove it from the selection; Shift selects a range. Drag across empty
+space to select a group (Ctrl/Cmd or Shift adds to it), then drag the group to a folder, breadcrumb or
+sidebar place. Ctrl or Alt copies instead of moving. Selection and clipboard actions float over the
+listing without moving it. Right-click, Shift+F10 or touch long-press opens an item's menu.
 The folder button in the toolbar changes every folder's colour. The inspector and folder menus can
 then set a different colour for one folder.
 

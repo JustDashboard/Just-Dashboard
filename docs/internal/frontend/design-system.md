@@ -1495,7 +1495,13 @@ the folder they act on.
 
 Files and `/files/editor` take the **reading** register: their frames contain independently scrolling
 workbench panes, while directory and selection readings live in the status strip. Tiles use fixed,
-compact columns rather than stretching to fill empty space. The sidebar's active wash and
+compact columns (80/104/128px) and tight gaps rather than stretching to fill empty space. A tile
+contains its icon and name; metadata stays in details view and the inspector. Listing entries have
+no overflow dots: their menus open through right-click, Shift+F10 or touch long-press. Selection and
+clipboard commands float above the listing's foot, with a four-pixel arrival/exit and opacity over
+160ms (instant with reduced motion), so selecting never inserts a row or shifts the workbench.
+Selection washes and drag-source opacity ease; the marquee follows the pointer immediately.
+The sidebar's active wash and
 `aria-current` identify its folder without another dot. Page commands share a 32px height and the
 same primary/secondary hierarchy. Name and content search share a compact keyboard palette with
 file identities, paths and highlighted matching lines. Quick editors keep these same controls when

@@ -313,10 +313,25 @@ large — the picture, the video, or its folder or page — with its name, kind 
 describes the folder being browsed while nothing in it is chosen. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a
 row and a tile alike (images lazily, a video only once it scrolls into view, and playing muted under the
 pointer on a tile). `file-actions.tsx` declares every verb **once, as data**, and renders it into the
-row's overflow button, the tile's, and the right-click menu (`ui/context-menu.tsx`, one root over the
+listing's context menu (`ui/context-menu.tsx`, one root over the
 listing that reads the row from `data-entry-path`); the space between rows gets the folder's verbs.
 `dnd.ts` makes folder rows, sidebar places, crumbs and starred folders drop targets for paths dragged from
-the listing (Ctrl or Alt copies) and for files from the desktop. `uploads.tsx` is the queue — one
+the listing (Ctrl or Alt copies) and for files from the desktop. The listing itself has no overflow
+dots: right-click, Shift+F10 on an entry's name or touch long-press opens its menu. A plain click
+inspects, double-click or Enter opens, and after the first checkbox/modifier selection a plain click
+anywhere on an entry toggles it. Checkbox clicks also establish the Shift-range anchor.
+`selection.ts` holds range and rectangle hit testing; `use-marquee.ts` captures background mouse
+gestures in scroll-content coordinates, selects intersecting entries in either direction, preserves
+the initial selection with Ctrl/Cmd/Shift and scrolls at the listing's edges. Release commits; Escape,
+pointer cancellation or loss restores the snapshot; a background click clears. Touch scrolling and
+native entry dragging remain available. A drag carries the selected group (or just an unselected
+source), draws a compact count preview, fades its sources and highlights accepting folders; a folder
+never advertises a drop into itself or its descendants. After a successful move, the inspector clears
+an entry moved away (including a descendant of a moved folder); copies and failed moves retain it.
+Selection and clipboard actions are animated
+foot overlays with reduced-motion support, leaving the listing's layout unchanged. The grid leaves
+metadata to the inspector and details view; all tile sizes use compact fixed columns and 4px gaps.
+`uploads.tsx` is the queue — one
 `XMLHttpRequest` per file for progress, three at a time, folders walked through the entries API so a
 dropped folder is its contents rather than an empty file named after it — and `conflict-dialog.tsx`
 asks once per operation (replace, keep both, skip) before an upload, move or paste touches a name that
