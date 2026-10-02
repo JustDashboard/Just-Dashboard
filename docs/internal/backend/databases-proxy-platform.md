@@ -1778,6 +1778,15 @@ What the table cannot say in a cell:
 
 ### Database provisioning for deployments
 
+The standalone Database source on `/deploy/new` and Start a new one on `/databases/new` share
+`DatabaseCreation` in `components/database/connect/start.tsx`: the same shelved catalogue, settings
+panel, version and account inputs, validation and explicit public-port choice (local by default).
+Their progress uses the app deployment's stage animation and moving panel border, tied to provision,
+adopt and ping responses. Deploy ends with a masked connection string; Databases opens the connection's
+home. Once a container exists, retries continue adoption/verification and never provision another one;
+Deploy remembers its identity when the reader switches sources. Project linking sheets retain their
+compact `DatabaseQuickDeploy` form and reuse the verified-result renderer, `deploy/database-ready.tsx`.
+
 Deployment setup reuses `/databases/provision`, `/adopt`, `/ping` and the explicit admin URL read, and
 draws its engines from the same `GET /databases/provision/options` the add flow reads, so the two offer
 one list of templates. A project's Databases settings reuses the same two reads for a linked connection:

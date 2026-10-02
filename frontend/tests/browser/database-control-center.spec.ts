@@ -117,7 +117,8 @@ test.describe("the control center", () => {
     await expect(card(page, "cache")).toContainText("Clients")
     await expect(card(page, "app")).toContainText("Collections")
     // The figure nobody reported is a dash on the card, and the dump age is said.
-    await expect(card(page, "shop")).toContainText("backed up 3h ago")
+    // The live clock can add seconds while the preceding readings settle.
+    await expect(card(page, "shop")).toContainText(/backed up 3h(?: \d+[ms])* ago/)
     await expect(card(page, "cache")).toContainText("never backed up")
     await expect(card(page, "shop")).toContainText("shop-db")
 
@@ -1143,7 +1144,7 @@ test.describe("adding a database", () => {
     await panel.getByLabel("Database").fill("orders")
     await panel.getByRole("button", { name: "Create" }).click()
 
-    await expect(panel.locator("[data-slot=flow-steps]")).toBeVisible()
+    await expect(panel.locator("[data-slot=database-progress]")).toBeVisible()
     await expect(page).toHaveURL(/\/databases\/20$/, { timeout: 15_000 })
     expect(server.bodies("POST /databases/provision")).toEqual([
       {

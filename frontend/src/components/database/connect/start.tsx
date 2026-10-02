@@ -5,17 +5,11 @@ import { useRouter } from "next/navigation"
 import { Database, Play } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import type { DbConnection } from "@/lib/types"
+import type { DbConnection, DbDriverInfo } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceGrid, EngineCard } from "@/components/choice-card"
 import { Segments } from "@/components/deploy/settings/segments"
-import {
-  FlowActions,
-  FlowPanel,
-  FlowPanelBody,
-  FlowPanelHeader,
-  FlowSteps,
-} from "@/components/flow"
+import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { Disclosure, Field, FieldRow, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogos } from "@/components/product-logo"
@@ -23,12 +17,11 @@ import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/compon
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { TextShimmer } from "@/components/ui/text-shimmer"
+import { BorderBeam } from "@/components/ui/border-beam"
+import { DatabaseProgress } from "@/components/database/connect/progress"
 import { engineOf, sectionHref } from "@/components/database/engine"
 import {
   EMPTY_PROVISION,
-  PHASE_SENTENCE,
-  PROVISION_STEPS,
   SHELVES,
   provisionImage,
   provisionProblems,
@@ -47,40 +40,62 @@ import { useDatabases } from "@/components/database/shell/databases-context"
 const READY_WITHIN_MS = 3 * 60_000
 
 type Work = { phase: ProvisionPhase; since: number }
-type Failure = { message: string; container?: string }
+type Failure = { message: string; phase: ProvisionPhase }
 
-/**
- * Start a new database on this server: an engine, and at most four answers.
- *
- * The engines are the server's own templates, shelved by the kind of store
- * they are and each drawn as itself. Choosing one opens the screen's one
- * focused surface beside the catalogue: a name, a version from the closed
- * list the server offers, the first database, and how far it reaches — which
- * is this server only unless the reader says otherwise, because the other
- * answer opens a port to the internet. Everything else a connection string
- * would carry is decided by the server and read back off the container: the
- * port is the next one free, the password is generated.
- *
- * Create starts the container and then keeps asking it to connect until the
- * engine inside answers, showing which of the three steps it is on. Waiting
- * here rather than holding one request open is what keeps a slow first boot
- * looking like progress. When it answers, the page lands on the new
- * database's home.
- */
+/** The Databases page opens the saved connection as soon as it answers. */
 export function StartNew({
-  engine: chosen,
+  engine,
   onChoose,
   onStep,
 }: {
-  /** The template the address names. */
   engine: string
   onChoose: (engine: string | null) => void
-  /** Which step of the sequence the screen is on, for the page's spine. */
   onStep: (step: number) => void
 }) {
-  const id = useId()
   const router = useRouter()
   const { drivers, driversSettled, refresh } = useDatabases()
+  return (
+    <DatabaseCreation
+      engine={engine}
+      onChoose={onChoose}
+      onStep={onStep}
+      drivers={drivers}
+      driversSettled={driversSettled}
+      onReady={async (connection) => {
+        notify.success(`${connection.name} is ready`)
+        refresh()
+        router.push(sectionHref(connection.id))
+      }}
+    />
+  )
+}
+
+/**
+ * The same engine catalogue, settings surface and startup sequence on both
+ * creation pages. The caller decides where a verified connection goes next.
+ */
+export function DatabaseCreation({
+  engine: chosen,
+  onChoose,
+  onStep,
+  drivers,
+  driversSettled = true,
+  resume,
+  onStarted,
+  onReady,
+  showAddress = false,
+}: {
+  engine: string
+  onChoose: (engine: string | null) => void
+  onStep?: (step: number) => void
+  drivers?: DbDriverInfo[]
+  driversSettled?: boolean
+  resume?: { container: string; engine: string }
+  onStarted?: (started: { container: string; engine: string }) => void
+  onReady: (connection: DbConnection) => Promise<void>
+  showAddress?: boolean
+}) {
+  const id = useId()
   const templates = usePoll(readTemplates, 0)
   // Whether there is a Docker to start a container in: discovery's own
   // reading of it, which costs nothing more than it already spent.
@@ -92,6 +107,8 @@ export function StartNew({
   const [work, setWork] = useState<Work | null>(null)
   const [failure, setFailure] = useState<Failure>()
   const [elapsed, setElapsed] = useState(0)
+  const [container, setContainer] = useState(resume?.container)
+  const provisioning = useRef(false)
   const alive = useRef(true)
   useEffect(() => {
     alive.current = true
@@ -127,72 +144,83 @@ export function StartNew({
 
   const set = (patch: Partial<ProvisionDraft>) => setDraft((held) => ({ ...held, ...patch }))
   const choose = (engine: string) => {
-    if (work) return
+    if (work || container) return
     if (engine !== chosen) {
       setDraft(EMPTY_PROVISION)
       setFailure(undefined)
     }
     onChoose(engine)
-    onStep(1)
+    onStep?.(1)
     reveal(`${id}-settings`)
   }
 
-  /** Keep asking the started container to connect until its engine answers. */
-  const settle = async (container: string, label: string, started: number) => {
+  /** Adoption proves credentials; a fresh ping rules out temporary first-boot servers. */
+  const settle = async (startedContainer: string, started: number) => {
     const deadline = Date.now() + READY_WITHIN_MS
+    let connection: DbConnection
+    let phase: ProvisionPhase = "wait"
     for (;;) {
       if (!alive.current) return
       try {
+        phase = "wait"
         setWork({ phase: "wait", since: started })
-        const connection = await post<DbConnection>("/databases/adopt", { container })
-        // Adopting proves the engine accepted one connection, which is not
-        // the same as being ready: MySQL and MariaDB accept connections on a
-        // temporary server during their first-boot initialisation and then
-        // restart. A ping that dials again is what makes "it is ready" true.
+        connection = await post<DbConnection>("/databases/adopt", { container: startedContainer })
+        if (!alive.current) return
+        phase = "connect"
         setWork({ phase: "connect", since: started })
         const answer = await get<{ ok: boolean; error?: string }>(
           `/databases/${connection.id}/ping`,
         )
         if (!answer.ok) throw new Error(answer.error || "It is not accepting connections yet.")
-        if (!alive.current) return
-        notify.success(`${label} is ready`, { description: `Connected as ${connection.name}` })
-        refresh()
-        router.push(sectionHref(connection.id))
-        return
+        break
       } catch (err) {
         if (!alive.current) return
         if (Date.now() > deadline) {
-          setFailure({ message: errorMessage(err), container })
+          setFailure({ message: errorMessage(err), phase })
           setWork(null)
-          onStep(1)
+          onStep?.(1)
           return
         }
         await new Promise((resolve) => window.setTimeout(resolve, 2000))
       }
     }
+    if (!alive.current) return
+    await onReady(connection)
   }
 
   const create = async () => {
-    if (!template || work) return
+    if (!template || provisioning.current || Object.keys(provisionProblems(template, draft)).length)
+      return
+    provisioning.current = true
     const started = Date.now()
+    let startedContainer = container
     setElapsed(0)
     setFailure(undefined)
-    setWork({ phase: "start", since: started })
-    onStep(2)
+    setWork({ phase: startedContainer ? "wait" : "start", since: started })
+    onStep?.(2)
     try {
-      const answer = await post<DbProvisionResponse>(
-        "/databases/provision",
-        provisionRequest(template, draft),
-      )
-      if (answer.firewallError) {
-        notify.warning("The firewall was not opened", { description: answer.firewallError })
+      if (!startedContainer) {
+        const answer = await post<DbProvisionResponse>(
+          "/databases/provision",
+          provisionRequest(template, draft),
+        )
+        startedContainer = answer.container
+        // Persist ownership even if the reader changed source during the pull.
+        onStarted?.({ container: startedContainer, engine: template.engine })
+        if (!alive.current) return
+        setContainer(startedContainer)
+        if (answer.firewallError) {
+          notify.warning("The firewall was not opened", { description: answer.firewallError })
+        }
       }
-      await settle(answer.container, template.label, started)
+      await settle(startedContainer, started)
     } catch (err) {
       if (!alive.current) return
-      setFailure({ message: errorMessage(err) })
+      setFailure({ message: errorMessage(err), phase: startedContainer ? "connect" : "start" })
       setWork(null)
-      onStep(1)
+      onStep?.(1)
+    } finally {
+      provisioning.current = false
     }
   }
 
@@ -222,8 +250,11 @@ export function StartNew({
           }
         />
         <PanelBody className="flex min-h-0 flex-1 flex-col gap-3">
+          {templates.error && !templates.data && <ErrorState error={templates.error} />}
           {templates.error && !templates.data && (
-            <ErrorState error={templates.error} onRetry={templates.refresh} />
+            <Button variant="outline" onClick={templates.refresh}>
+              Retry loading database engines
+            </Button>
           )}
           {(!templates.data && !templates.error) || !driversSettled ? (
             <div role="status" aria-label="Loading the engines">
@@ -256,7 +287,7 @@ export function StartNew({
                         detail={one.image}
                         selected={chosen === one.engine}
                         working={Boolean(work) && chosen === one.engine}
-                        disabled={Boolean(work) && chosen !== one.engine}
+                        disabled={(Boolean(work) || Boolean(container)) && chosen !== one.engine}
                         onClick={() => choose(one.engine)}
                       />
                     ))}
@@ -276,8 +307,9 @@ export function StartNew({
           aria-label={`${template.label} settings`}
           aria-busy={Boolean(work)}
           tabIndex={-1}
-          className="order-first min-w-0 scroll-mt-4 xl:order-last xl:max-h-full xl:min-h-0 xl:self-start"
+          className="relative order-first min-w-0 scroll-mt-4 xl:order-last xl:max-h-full xl:min-h-0 xl:self-start"
         >
+          {work && <BorderBeam size={80} duration={6} />}
           <FlowPanelHeader
             title={
               <span className="flex min-w-0 items-center gap-2.5">
@@ -293,18 +325,13 @@ export function StartNew({
           />
           {work ? (
             <FlowPanelBody className="space-y-4 py-6">
-              <FlowSteps
-                steps={[...PROVISION_STEPS]}
-                current={PROVISION_STEPS.findIndex((step) => step.key === work.phase)}
-              />
-              <p className="flex items-baseline justify-between gap-3 text-body" role="status">
-                <TextShimmer className="font-medium">{PHASE_SENTENCE[work.phase]}</TextShimmer>
-                <span className="numeric shrink-0 text-hint text-muted-foreground">{elapsed}s</span>
-              </p>
+              <DatabaseProgress phase={work.phase} elapsed={elapsed} />
               <p className="text-hint leading-relaxed text-muted-foreground">
-                The first start of an engine pulls its image, which can take a few minutes. It opens
-                on the database&apos;s own page when it answers; leave and it is listed under Found
-                on this server.
+                The first start of an engine pulls its image, which can take a few minutes. It opens{" "}
+                {showAddress
+                  ? "with a verified connection string when it answers"
+                  : "on the database's own page when it answers"}
+                ; leave and it is listed under Found on this server.
               </p>
             </FlowPanelBody>
           ) : (
@@ -314,126 +341,117 @@ export function StartNew({
                   <span className="break-words">{noDocker}</span>
                 </Notice>
               )}
-              {failure && (
-                <Notice
-                  tone="danger"
-                  title={
-                    failure.container
-                      ? `${failure.container} started and has not answered`
-                      : "It was not started"
-                  }
-                >
-                  <span className="break-words whitespace-pre-wrap">{failure.message}</span>
-                  {failure.container && (
-                    <span className="mt-2 block">
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={() => {
-                          const started = Date.now()
-                          const container = failure.container as string
-                          setFailure(undefined)
-                          setElapsed(0)
-                          onStep(2)
-                          void settle(container, template.label, started)
-                        }}
-                      >
-                        Keep waiting
-                      </Button>
-                    </span>
-                  )}
+              {container && !failure && (
+                <Notice title="Database container already created">
+                  Continue connection setup for {container}; it will use the same container.
                 </Notice>
               )}
-              <Field
-                label="Name"
-                htmlFor={`${id}-name`}
-                hint="The container's name, and how the database is listed here."
-                error={problems.name}
-              >
-                <Input
-                  id={`${id}-name`}
-                  value={draft.name}
-                  onChange={(event) => set({ name: event.target.value })}
-                  placeholder={`jd-${template.engine}`}
-                  className="font-mono"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </Field>
-              {template.versions.length > 1 && (
-                <Field label="Version">
-                  <Segments
-                    label={`${template.label} version`}
-                    value={version}
-                    onChange={(next) => set({ version: next })}
-                    options={template.versions.map((one) => ({
-                      value: one.version,
-                      label: one.version,
-                      mono: true,
-                    }))}
-                  />
-                </Field>
+              {failure && (
+                <>
+                  <DatabaseProgress phase={failure.phase} elapsed={elapsed} failed />
+                  <Notice
+                    tone="danger"
+                    title={container ? "Database container already created" : "It was not started"}
+                  >
+                    <span className="break-words whitespace-pre-wrap">{failure.message}</span>
+                    {container && (
+                      <span className="mt-2 block">Retry continues setup for {container}.</span>
+                    )}
+                  </Notice>
+                </>
               )}
-              {template.database && (
+              <fieldset disabled={Boolean(container)} className="min-w-0 space-y-4">
                 <Field
-                  label="Database"
-                  htmlFor={`${id}-database`}
-                  hint="Created empty at the first start."
-                  error={problems.database}
+                  label="Name"
+                  htmlFor={`${id}-name`}
+                  hint="The container's name, and how the database is listed here."
+                  error={problems.name}
                 >
                   <Input
-                    id={`${id}-database`}
-                    value={draft.database}
-                    onChange={(event) => set({ database: event.target.value })}
-                    placeholder="app"
+                    id={`${id}-name`}
+                    value={draft.name}
+                    onChange={(event) => set({ name: event.target.value })}
+                    placeholder={`jd-${template.engine}`}
                     className="font-mono"
                     autoComplete="off"
                     spellCheck={false}
                   />
                 </Field>
-              )}
-              <Disclosure quiet summary="Account">
-                <FieldRow columns={template.defaultUser ? 2 : undefined}>
-                  {template.defaultUser && (
-                    <Field label="User" htmlFor={`${id}-user`} error={problems.user}>
-                      <Input
-                        id={`${id}-user`}
-                        value={draft.user}
-                        onChange={(event) => set({ user: event.target.value })}
-                        placeholder={template.defaultUser}
-                        className="font-mono"
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </Field>
-                  )}
-                  <Field
-                    label="Password"
-                    htmlFor={`${id}-password`}
-                    error={problems.password}
-                    hint="Empty generates one, kept sealed with the connection."
-                  >
-                    <Input
-                      id={`${id}-password`}
-                      type="password"
-                      value={draft.password}
-                      onChange={(event) => set({ password: event.target.value })}
-                      placeholder="generated"
-                      className="font-mono"
-                      autoComplete="new-password"
+                {template.versions.length > 1 && (
+                  <Field label="Version">
+                    <Segments
+                      label={`${template.label} version`}
+                      value={version}
+                      onChange={(next) => set({ version: next })}
+                      options={template.versions.map((one) => ({
+                        value: one.version,
+                        label: one.version,
+                        mono: true,
+                      }))}
                     />
                   </Field>
-                </FieldRow>
-              </Disclosure>
-              <OptionList>
-                <OptionRow
-                  // Amber only while it is on: the risk is the choice, not the option.
-                  tone={draft.shared ? "warning" : "default"}
-                  title="Publish its port on every interface and open the firewall for it, so anything on the internet can reach it"
-                  checked={draft.shared}
-                  onCheckedChange={(shared) => set({ shared })}
-                />
-              </OptionList>
+                )}
+                {template.database && (
+                  <Field
+                    label="Database"
+                    htmlFor={`${id}-database`}
+                    hint="Created empty at the first start."
+                    error={problems.database}
+                  >
+                    <Input
+                      id={`${id}-database`}
+                      value={draft.database}
+                      onChange={(event) => set({ database: event.target.value })}
+                      placeholder="app"
+                      className="font-mono"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </Field>
+                )}
+                <Disclosure quiet summary="Account">
+                  <FieldRow columns={template.defaultUser ? 2 : undefined}>
+                    {template.defaultUser && (
+                      <Field label="User" htmlFor={`${id}-user`} error={problems.user}>
+                        <Input
+                          id={`${id}-user`}
+                          value={draft.user}
+                          onChange={(event) => set({ user: event.target.value })}
+                          placeholder={template.defaultUser}
+                          className="font-mono"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      </Field>
+                    )}
+                    <Field
+                      label="Password"
+                      htmlFor={`${id}-password`}
+                      error={problems.password}
+                      hint="Empty generates one, kept sealed with the connection."
+                    >
+                      <Input
+                        id={`${id}-password`}
+                        type="password"
+                        value={draft.password}
+                        onChange={(event) => set({ password: event.target.value })}
+                        placeholder="generated"
+                        className="font-mono"
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                  </FieldRow>
+                </Disclosure>
+                <OptionList>
+                  <OptionRow
+                    // Amber only while it is on: the risk is the choice, not the option.
+                    tone={draft.shared ? "warning" : "default"}
+                    title="Publish its port on every interface and open the firewall for it, so anything on the internet can reach it"
+                    checked={draft.shared}
+                    onCheckedChange={(shared) => set({ shared })}
+                  />
+                </OptionList>
+              </fieldset>
             </FlowPanelBody>
           )}
           {!work && (
@@ -455,7 +473,7 @@ export function StartNew({
             >
               <Button className="h-11 sm:h-9" disabled={blocked} onClick={() => void create()}>
                 <Play />
-                Create
+                {container ? "Retry connection setup" : "Create"}
               </Button>
             </FlowActions>
           )}

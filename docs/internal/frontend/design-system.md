@@ -875,6 +875,14 @@ beam, the fade, and wire marks that draw the products they connect.
 Every one of them honours `prefers-reduced-motion` in JavaScript, because the root CSS rule cannot
 reach a JavaScript-driven animation.
 
+Database creation on `/databases/new` and `/deploy/new?source=database` uses one shared catalogue,
+settings `FlowPanel`, and startup sequence (`database/connect/start.tsx`). While a container is being
+provisioned, adopted or verified, the panel carries `BorderBeam` and `DatabaseProgress` draws the
+release path's own sweeping `Segment`s, stage marks and `TextShimmer` through `RunPhases`. The stages
+advance on API results, including a fresh ping after adoption, and a failed stage stays red for retry;
+there is no estimated percentage or simulated build output. The Databases page opens the verified
+connection's home; Deploy shows the masked connection string through `deploy/database-ready.tsx`.
+
 `ui/bento-grid` was a seventh, and is gone. It drew "Start with something ready" on New project's Git
 tab as cells of unequal size that were buttons; the 2026-09-20 pass removed that grid because the
 source strip above it already listed the same six ways in, and the file then sat unimported for a
@@ -1917,9 +1925,9 @@ palette, and a reading page must not grow a use for them.
    columns (the focused surface, capped at the window's height with `max-h-full self-start`, and a 22rem
    column beside it), unfinished setups moved from a block above the strip into a counted button beside
    the question, and a Configure step with more settings than fit scrolls its fields between the heading
-   and Continue; the Database tab, the engine templates and two fields, is the one source without a
-   second column. Below `xl` the columns stack and the page scrolls as every other page does — a phone is
-   not a window to hold. `deploy-new.spec.ts` asserts the shell does not scroll at 1280×800 on every
+   and Continue. The Database tab shares `/databases/new`'s shelved engine catalogue and settings
+   panel: each column scrolls independently, with the Create command held at the panel's foot. Below
+   `xl` the columns stack and the page scrolls as every other page does — a phone is not a window to hold. `deploy-new.spec.ts` asserts the shell does not scroll at 1280×800 on every
    source and every Configure step.
 9. **Verify.** `scripts/test-changed.sh`, then screenshots at 1280 and
    1720 — and look at them. The failure this register exists to catch is one no assertion sees.

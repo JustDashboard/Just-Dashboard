@@ -336,7 +336,8 @@ held twenty-eight of them.
   two columns: the focused surface, capped at the window with `max-h-full self-start` so a short list
   is not a tall empty panel, and a 22rem column beside it (the identities and the paste field, the
   registry field, the chosen template's settings or a note that they open there, where a stack's files
-  live). Database — five engines and two fields — is one capped panel. The list inside each surface
+  live). Database shares Add a database's shelved engine catalogue and settings panel, each capped
+  at the window with its own scroll. The list inside each surface
   scrolls under its own toolbar; the Configure steps scroll their fields between the question and
   Continue. Unfinished setups left the page's flow for a counted button beside the question. Below
   `xl` everything stacks and scrolls as before (`design-system.md` §17 pass 8).

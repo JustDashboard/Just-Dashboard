@@ -218,6 +218,10 @@ Setup can generate template credentials and suggest a public address, create and
 database on this server, or use an external database connection. Build commands, variables, storage,
 health checks and runtime limits remain editable before the first deployment.
 
+The Database source uses the same engine catalogue and settings panel as Add a database, with animated
+startup stages until the connection is verified. It then offers the connection string and a link to
+the database's page.
+
 ### Databases
 
 ![A PostgreSQL database's home: live sessions, transactions and cache readings, an activity chart, what needs attention, the busiest statements and the largest tables](docs/databases.png)
