@@ -200,6 +200,20 @@ func mongoFailure(err error) error {
 	return httpx.BadRequest("%v", err)
 }
 
+// mongoReadFailed is mongoFailure for a request that only reads — a find, a
+// count, one document, a plan, a sample — whatever its method: when the server
+// went away under it, the answer is marked worth asking again. The requests
+// that write answer through mongoFailure itself and are never marked, since a
+// write whose reply was lost may have been carried out.
+func mongoReadFailed(err error) error {
+	answer := mongoFailure(err)
+	var apiErr *httpx.APIError
+	if errors.As(answer, &apiErr) && apiErr.Code == "query_failed" {
+		return retryable(apiErr, err)
+	}
+	return answer
+}
+
 // mongoReadFailure is the same for a catalogue read, which carries nothing
 // but names: there the server refusing is the server's state — an account
 // without the privilege, a command this version lacks — and is answered 502
@@ -207,9 +221,9 @@ func mongoFailure(err error) error {
 func mongoReadFailure(err error) error {
 	var refused mongo.ServerError
 	if errors.As(err, &refused) && !dbx.MongoTimedOut(err) {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
-	return mongoFailure(err)
+	return mongoReadFailed(err)
 }
 
 // mongoLegacyFailure is for the routes the first Mongo browser used, which
@@ -271,7 +285,7 @@ func (s *Server) handleMongoIndexes(w http.ResponseWriter, r *http.Request) erro
 	defer cancel()
 	indexes, err := dbx.MongoIndexes(ctx, client, db, collection)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	stats, _ := dbx.MongoCollStats(ctx, client, db, collection)
 	httpx.JSON(w, http.StatusOK, map[string]any{"indexes": indexes, "stats": stats})

@@ -100,7 +100,7 @@ func (s *Server) handleDBRoles(w http.ResponseWriter, r *http.Request) error {
 		defer client.Disconnect(context.Background())
 		roles, err = dbx.MongoUsers(ctx, client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 	case dbx.DriverRedis:
 		client, err := dbx.RedisClient(ctx, dsn, 0)
@@ -121,7 +121,7 @@ func (s *Server) handleDBRoles(w http.ResponseWriter, r *http.Request) error {
 		}
 		roles, err = admin.Roles(ctx, pool)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"roles": roles, "supported": true})
@@ -571,6 +571,16 @@ func (s *Server) handleDBDatabaseCreate(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return err
 	}
+	if !dbx.CanCreateDatabase(conn.Driver) {
+		return httpx.Err(http.StatusBadRequest, "unsupported", noDatabaseToCreate(conn.Driver))
+	}
+	// Asked before the database is made: a request to create one and open it
+	// that could only do the first half used to make the database and then
+	// answer that it had failed.
+	if req.Connect && !dbx.CanConnectSibling(conn.Driver) {
+		return httpx.Err(http.StatusBadRequest, "unsupported",
+			noSiblingConnection(conn.Driver)+". Nothing was created; ask for the database without a connection to it")
+	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
 	switch conn.Driver {
@@ -585,8 +595,6 @@ func (s *Server) handleDBDatabaseCreate(w http.ResponseWriter, r *http.Request) 
 		if err := dbx.MongoCreateCollection(ctx, client, name, "_init"); err != nil {
 			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
 		}
-	case dbx.DriverRedis:
-		return httpx.BadRequest("Redis numbers its keyspaces itself; there is nothing to create")
 	default:
 		pool, _, err := s.dbPool(ctx, conn.ID)
 		if err != nil {
@@ -624,11 +632,31 @@ func (s *Server) handleDBDatabaseConnect(w http.ResponseWriter, r *http.Request)
 	return s.saveSiblingConnection(w, r, conn, dsn, name)
 }
 
+// noDatabaseToCreate is why an engine has no database to make on its server.
+func noDatabaseToCreate(d dbx.Driver) string {
+	if d == dbx.DriverRedis {
+		return "Redis numbers its keyspaces itself; there is nothing to create"
+	}
+	return fmt.Sprintf("%s has no server-level management from here", d)
+}
+
+// noSiblingConnection is why another database of an engine's server cannot be
+// saved as a connection of its own.
+func noSiblingConnection(d dbx.Driver) string {
+	switch d {
+	case dbx.DriverRedis:
+		return "Redis numbers its databases, and one is chosen with each request rather than with a connection of its own"
+	case dbx.DriverClickHouse:
+		return "a ClickHouse connection string is not pointed at another database: every statement names its own"
+	}
+	return fmt.Sprintf("%s has one database per connection", d)
+}
+
 // saveSiblingConnection stores a connection to another database on the same
 // server, under the same credentials, named after both.
 func (s *Server) saveSiblingConnection(w http.ResponseWriter, r *http.Request, conn *dbConnection, dsn, database string) error {
-	if conn.Driver == dbx.DriverSQLite || conn.Driver == dbx.DriverOracle {
-		return httpx.BadRequest("%s has one database per connection", conn.Driver)
+	if !dbx.CanConnectSibling(conn.Driver) {
+		return httpx.Err(http.StatusBadRequest, "unsupported", noSiblingConnection(conn.Driver))
 	}
 	sibling := dbx.DSNForDatabase(conn.Driver, dsn, database)
 	if sibling == dsn && database != conn.Database {
@@ -710,7 +738,7 @@ func (s *Server) handleDBExtensions(w http.ResponseWriter, r *http.Request) erro
 		return nil
 	}
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	// Whether they can be changed from here: Postgres yes, MySQL's plugins no.
 	httpx.JSON(w, http.StatusOK, map[string]any{"extensions": list, "supported": true,
@@ -797,7 +825,7 @@ func (s *Server) handleDBSettings(w http.ResponseWriter, r *http.Request) error 
 		defer client.Disconnect(context.Background())
 		status, err := dbx.MongoServerStatus(ctx, client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, map[string]any{"settings": flattenSettings(status), "supported": true})
 		return nil
@@ -809,7 +837,7 @@ func (s *Server) handleDBSettings(w http.ResponseWriter, r *http.Request) error 
 		defer client.Close()
 		info, err := dbx.RedisInfo(ctx, client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, map[string]any{"settings": flattenSettings(info), "supported": true})
 		return nil
@@ -820,7 +848,7 @@ func (s *Server) handleDBSettings(w http.ResponseWriter, r *http.Request) error 
 	}
 	list, err := admin.Settings(ctx, pool)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"settings": list, "supported": true})
 	return nil
@@ -882,7 +910,7 @@ func (s *Server) handleDBAdvisor(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	report, err := dbx.Advise(ctx, pool, conn.Driver, r.URL.Query().Get("schema"))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	// The findings no catalogue can make: where the server is reachable
 	// from, whether anything would bring it back, and what its container is
@@ -1001,7 +1029,7 @@ func (s *Server) handleDBStatements(w http.ResponseWriter, r *http.Request) erro
 		return httpx.BadRequest("%v", err)
 	}
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, report)
 	return nil

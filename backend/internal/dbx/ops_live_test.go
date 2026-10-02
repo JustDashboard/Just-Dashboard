@@ -1948,6 +1948,74 @@ func TestLiveOpsMySQL(t *testing.T) {
 	}
 }
 
+// An account without the PROCESS privilege sees its own sessions in the
+// process list and nobody else's, and is refused the InnoDB transactions the
+// list is joined to. MySQL 8 sends that refusal after the columns, where a
+// result read with Close alone takes it for the end of an empty list: the
+// snapshot said nobody was connected, on a server that was plainly answering,
+// and the session list was empty. What such an account can still be told is
+// the server's own totals, which need no privilege, with a note saying what
+// they are — and its own sessions, listed.
+func TestLiveOpsMySQLWithoutTheProcessPrivilege(t *testing.T) {
+	ran := false
+	for flavour, env := range map[string]string{"mariadb": "JD_TEST_MYSQL_DSN", "mysql8": "JD_TEST_MYSQL8_DSN"} {
+		dsn := os.Getenv(env)
+		if dsn == "" {
+			continue
+		}
+		t.Run(flavour, func(t *testing.T) {
+			db := opsOpen(t, DriverMySQL, dsn, env)
+			ctx := t.Context()
+			var transactions int
+			if db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.INNODB_TRX`).Scan(&transactions) == nil {
+				t.Skipf("the account %s names holds PROCESS", env)
+			}
+			ran = true
+			var name string
+			var connected float64
+			if err := db.QueryRowContext(ctx, `SHOW GLOBAL STATUS LIKE 'Threads_connected'`).Scan(&name, &connected); err != nil {
+				t.Fatal(err)
+			}
+
+			stats, err := ReadServerStats(ctx, db, DriverMySQL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := stats.Connections
+			if c == nil || c.Total < 1 || c.Max <= 0 || c.Active < 1 || c.Active+c.Idle != c.Total || c.IdleInTransaction != 0 || c.Waiting != 0 {
+				t.Fatalf("connections = %+v, want the server's own totals", c)
+			}
+			// Other tests connect and leave while this one reads, so the two
+			// readings are held to each other loosely.
+			if diff := float64(c.Total) - connected; diff < -20 || diff > 20 {
+				t.Errorf("total = %d, the server counts %v connected", c.Total, connected)
+			}
+			said := false
+			for _, note := range stats.Notes {
+				said = said || strings.Contains(note, "PROCESS")
+			}
+			if !said {
+				t.Errorf("nothing says the sessions are the server's totals and not a list: %q", stats.Notes)
+			}
+
+			sessions, err := ListActivity(ctx, db, DriverMySQL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			own := false
+			for _, a := range sessions {
+				own = own || a.Self
+			}
+			if !own {
+				t.Errorf("the account's own session is not listed: %+v", sessions)
+			}
+		})
+	}
+	if !ran {
+		t.Skip("no MySQL account without PROCESS is named by JD_TEST_MYSQL_DSN or JD_TEST_MYSQL8_DSN")
+	}
+}
+
 // --- SQLite --------------------------------------------------------------------
 
 func TestOpsSQLite(t *testing.T) {

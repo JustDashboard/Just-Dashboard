@@ -359,7 +359,7 @@ func buildRedisRules() (map[string]redisRule, map[string]bool) {
 	container(RedisClassRead, "pubsub", "", "PUBSUB")
 	read("pubsub", "PUBSUB CHANNELS", "PUBSUB NUMSUB", "PUBSUB NUMPAT", "PUBSUB SHARDCHANNELS",
 		"PUBSUB SHARDNUMSUB", "PUBSUB HELP")
-	block("pubsub", "turns the connection into a subscription; use the Pub/Sub page, which is built for one",
+	block("pubsub", "turns the connection into a subscription; use the Pub/Sub view, which is built for one",
 		"SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE", "SUNSUBSCRIBE")
 
 	// --- scripting ---
@@ -400,7 +400,7 @@ func buildRedisRules() (map[string]redisRule, map[string]bool) {
 		"REPLICAOF", "SLAVEOF", "FAILOVER")
 	admin("REPLICAOF", "SLAVEOF", "FAILOVER")
 	block("server", "stops the server", "SHUTDOWN")
-	block("server", "streams every command the server runs; use the Profiler, which is built for it", "MONITOR")
+	block("server", "streams every command the server runs; use the Monitor view, which is built for it", "MONITOR")
 	block("server", "is the replication protocol, not a command for a client",
 		"SYNC", "PSYNC", "REPLCONF", "RESTORE-ASKING")
 	container(RedisClassRead, "server", "", "COMMAND")

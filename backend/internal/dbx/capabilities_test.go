@@ -73,6 +73,10 @@ func TestCapabilitiesPerEngine(t *testing.T) {
 		"fileBased":        "sqlite",
 		"openByDefault":    "tidb clickhouse mongodb -ferretdb redis",
 		"dump":             "sql mongodb redis",
+		// Another database on the same server: made there, and opened as a
+		// connection of its own.
+		"serverDatabaseCreate":  "postgres mysql sqlserver clickhouse mongodb",
+		"serverDatabaseConnect": "postgres mysql sqlserver mongodb",
 
 		// the workbench
 		"sql":            "sql",
@@ -327,6 +331,29 @@ func TestCapabilitiesFollowTheCode(t *testing.T) {
 		}
 		if caps["dump"] != true {
 			t.Errorf("%s: every engine can be dumped, got %v", d, caps["dump"])
+		}
+		// A database is made through the engine's server surface, or — MongoDB
+		// — by putting something in it. One of another name is opened where
+		// the connection string can be pointed at it.
+		if wantCreate := adminErr == nil || d == DriverMongo; caps["serverDatabaseCreate"] != wantCreate {
+			t.Errorf("%s: serverDatabaseCreate = %v, want %v", d, caps["serverDatabaseCreate"], wantCreate)
+		}
+		if caps["serverDatabaseConnect"] != CanConnectSibling(d) {
+			t.Errorf("%s: serverDatabaseConnect = %v, CanConnectSibling = %v", d, caps["serverDatabaseConnect"], CanConnectSibling(d))
+		}
+		if CanConnectSibling(d) && !CanCreateDatabase(d) {
+			t.Errorf("%s can open a database of another name and cannot make one", d)
+		}
+	}
+	// What can be opened is what the connection string can be pointed at.
+	for d, dsn := range map[Driver]string{
+		DriverPostgres: "postgres://app:pw@db.internal:5432/shop", DriverMySQL: "app:pw@tcp(db.internal:3306)/shop",
+		DriverMSSQL: "sqlserver://sa:pw@db.internal:1433?database=shop", DriverMongo: "mongodb://db.internal:27017/shop",
+		DriverClickHouse: "clickhouse://app:pw@db.internal:9000/shop", DriverOracle: "oracle://app:pw@db.internal:1521/FREEPDB1",
+		DriverSQLite: "/srv/data/shop.db",
+	} {
+		if repointed := DSNForDatabase(d, dsn, "other") != dsn; repointed != CanConnectSibling(d) {
+			t.Errorf("%s: its connection string names another database = %v, CanConnectSibling = %v", d, repointed, CanConnectSibling(d))
 		}
 	}
 	// SQLite is the one engine with no session list, and says so itself.

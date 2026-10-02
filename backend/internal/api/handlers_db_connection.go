@@ -83,6 +83,10 @@ type dbConnState struct {
 	// only: after the dashboard restarts, a stopped server on a port that is
 	// not its engine's own has no unit until it has been seen running again.
 	units sync.Map
+	// power is the start, stop or restart the power route is carrying out for
+	// each connection, or has just carried out and is waiting to see the
+	// effect of: what the summary and the fleet report as in flight.
+	power sync.Map
 	// probe reads the machine's sockets and units. Nil is the machine itself;
 	// a test hands in one of its own.
 	probe *dbHostProbe
@@ -97,6 +101,7 @@ func (st *dbConnState) forget(id int64) {
 	st.identities.Delete(id)
 	st.readings.Delete(id)
 	st.units.Delete(id)
+	st.power.Delete(id)
 	st.locks.Delete(id)
 }
 
@@ -264,8 +269,36 @@ func (s *Server) dropPoolAfter(id int64, err error) {
 // driver said, with the connection's password taken out of it. Every handler
 // that opens a connection answers a failure to through this, so that no file
 // has a way of its own to quote a connection string back.
+//
+// Nothing has been asked of a server that could not be opened, so the request
+// is safe to send again whatever it was, and is marked worth sending again
+// when the server was simply not there. A wrong password is not: it will be
+// just as wrong the next time.
 func connectFailed(dsn string, err error) error {
-	return httpx.Err(http.StatusBadGateway, "connect_failed", connectError(dsn, err))
+	return retryable(httpx.Err(http.StatusBadGateway, "connect_failed", connectError(dsn, err)), err)
+}
+
+// queryFailed is the answer to a read the server did not answer: a catalogue
+// query, a list of sessions, a snapshot of counters. A read can be asked for
+// again without consequence, so it is marked worth asking again when what
+// went wrong was the server going away.
+//
+// It is for reads only. A write whose reply never arrived may well have been
+// carried out, and a page that offered "Try again" for it would be offering
+// to do it twice; those answer with the same code and no such mark.
+func queryFailed(err error) error {
+	return retryable(httpx.Err(http.StatusBadGateway, "query_failed", err.Error()), err)
+}
+
+// retryable marks an answer as worth trying again when its cause was the
+// server not being there to answer — refused, timed out, gone mid-reply, still
+// starting — and leaves it alone when the server was there and said no. The
+// page's error state offers its retry on that mark and on nothing else.
+func retryable(answer *httpx.APIError, cause error) error {
+	if answer.Status >= http.StatusInternalServerError && dbx.Unreachable(cause) {
+		return answer.Retry()
+	}
+	return answer
 }
 
 // scrubbedError is an error whose text has had a connection's password taken
@@ -514,6 +547,17 @@ type dbContainerRef struct {
 	Health         string `json:"health,omitempty"`
 	ComposeProject string `json:"composeProject,omitempty"`
 	ComposeService string `json:"composeService,omitempty"`
+	// What the container may use and what happens when it exits, under the
+	// names and in the units the Docker page reports them: MemoryLimit in
+	// bytes and CPULimit in processors, each absent where the container has
+	// no limit, and RestartPolicy as Docker spells it.
+	MemoryLimit   int64   `json:"memoryLimit,omitempty"`
+	CPULimit      float64 `json:"cpuLimit,omitempty"`
+	RestartPolicy string  `json:"restartPolicy,omitempty"`
+	// inspected reports that the three above were read. The listing a
+	// placement is found in inspects running containers only, so for any other
+	// they are still to be asked for.
+	inspected bool
 }
 
 // dbUnitRef is the systemd unit behind a connection.
@@ -543,6 +587,96 @@ type dbPower struct {
 	Restart bool   `json:"restart"`
 	Reason  string `json:"reason,omitempty"`
 }
+
+// dbPowerChange is a start, a stop or a restart the power route is carrying
+// out, or has carried out and is waiting to see the effect of.
+//
+// The request that asks for one is slow by design — a container is given a
+// minute and a half to shut down — and the browser that sent it is the only
+// one that knows it is happening. A second browser, the same one after a
+// reload, a card on the control center: each reads "running" beside a server
+// that is being stopped, and offers to stop it. So the change is kept here,
+// by connection, and every reading of that connection carries it.
+//
+// It has two halves. While the route is acting, the change is held whatever
+// the server reads as: a restart reads "running" before it has gone down. Once
+// the route has answered, the change is settling — a started engine reads
+// "unreachable" for the seconds it takes to accept connections — and it ends
+// when the server reads the state the action leaves it in, or when the time
+// allowed for that has passed. A change the route could not carry out ends
+// with the refusal.
+type dbPowerChange struct {
+	// Action is start, stop or restart, and Since when it was asked for.
+	Action string    `json:"action"`
+	Since  time.Time `json:"since"`
+	// done is when the route finished acting; zero while it still is.
+	done time.Time
+}
+
+const (
+	// dbPowerSettle is how long after the route has answered a server is given
+	// to read the state the action leaves it in: the minute an engine may take
+	// to accept connections once its container has started.
+	dbPowerSettle = time.Minute
+	// dbPowerActing bounds a change whose route never said it had finished,
+	// which nothing but a crash of the handler leaves behind: the longest
+	// grace a request may ask for, and the time the action itself takes.
+	dbPowerActing = dbStopGraceLimit + 2*time.Minute
+)
+
+// settles is the state an action leaves the server in.
+func (c *dbPowerChange) settles() string {
+	if c.Action == "stop" {
+		return dbStateStopped
+	}
+	return dbStateRunning
+}
+
+// begin records that the power route is acting on a connection.
+func (st *dbConnState) begin(id int64, action string) *dbPowerChange {
+	change := &dbPowerChange{Action: action, Since: time.Now().UTC()}
+	st.power.Store(id, change)
+	return change
+}
+
+// finish ends the acting half of a change. One that was carried out starts
+// settling; one that failed is over. Either is done only to the change this
+// caller began: a second request that has since taken the connection's slot
+// is left holding it.
+func (st *dbConnState) finish(id int64, change *dbPowerChange, carriedOut bool) {
+	if !carriedOut {
+		st.power.CompareAndDelete(id, change)
+		return
+	}
+	settling := *change
+	settling.done = time.Now()
+	st.power.CompareAndSwap(id, change, &settling)
+}
+
+// inFlight is the change held for a connection whose server reads as state,
+// or nil. Reading is what ends a change that has settled or run out of time,
+// so nothing has to wake up to do it.
+func (st *dbConnState) inFlight(id int64, state string) *dbPowerChange {
+	v, ok := st.power.Load(id)
+	if !ok {
+		return nil
+	}
+	change := v.(*dbPowerChange)
+	switch {
+	case change.done.IsZero():
+		if time.Since(change.Since) < dbPowerActing {
+			return change
+		}
+	case state != change.settles() && time.Since(change.done) < dbPowerSettle:
+		return change
+	}
+	st.power.CompareAndDelete(id, change)
+	return nil
+}
+
+// dbPowerBrokenReason is why a connection that cannot be opened is offered no
+// power action.
+const dbPowerBrokenReason = "The saved connection cannot be read, so where its server runs is not known."
 
 // dbPlacement is where a connection's server runs and what state that is in.
 type dbPlacement struct {
@@ -598,6 +732,11 @@ type dbHostView struct {
 	// what each stopped container's configuration publishes, by container id.
 	managers  sync.Map
 	published sync.Map
+
+	// hasSystemctl is whether there is a systemctl to carry a unit's power
+	// actions out, looked for once however many connections ask.
+	systemctlOnce sync.Once
+	hasSystemctl  bool
 }
 
 // dbManaged is what runs one process, read once.
@@ -638,6 +777,11 @@ func (s *Server) newDBHostView(ctx context.Context) *dbHostView {
 		}
 	}
 	return view
+}
+
+func (v *dbHostView) systemctlAvailable() bool {
+	v.systemctlOnce.Do(func() { v.hasSystemctl = v.systemctl.available() })
+	return v.hasSystemctl
 }
 
 func (v *dbHostView) sockets() []proxysvc.Listener {
@@ -717,6 +861,7 @@ func (v *dbHostView) place(ctx context.Context, conn *dbConnection, dsn string) 
 		// a native server, and its cgroup says otherwise.
 		if d, err := s.modules.docker.Inspect(ctx, listening.ManagerName); err == nil {
 			out.inContainer(&d.Container)
+			out.Container.RestartPolicy = d.RestartPol
 			out.foreign = !s.engineImage(ctx, conn, &d.Container)
 			out.Exposure = listenerExposure(v.sockets(), port)
 			return out
@@ -795,6 +940,8 @@ func (p *dbPlacement) inContainer(c *dockerx.Container) {
 		ID: c.ID, Name: c.Name, Image: c.Image, State: c.State, Status: c.Status, Health: c.Health,
 		ComposeProject: c.Labels["com.docker.compose.project"],
 		ComposeService: c.Labels["com.docker.compose.service"],
+		MemoryLimit:    c.MemoryLimit, CPULimit: c.CPULimit, RestartPolicy: c.RestartPolicy,
+		inspected: c.Inspected,
 	}
 	started := ""
 	if c.StartedAt != nil {
@@ -1011,6 +1158,10 @@ type dbConnSummary struct {
 	Unit      *dbUnitRef      `json:"unit,omitempty"`
 	File      *dbFileRef      `json:"file,omitempty"`
 	Power     dbPower         `json:"power"`
+	// InFlight is the start, stop or restart being carried out on the server
+	// from this dashboard, by whoever asked for it, until the server reads the
+	// state it leaves it in. Absent when there is none.
+	InFlight *dbPowerChange `json:"inFlight,omitempty"`
 	// Exposure is how far the server's port reaches, as far as its binding
 	// says — local, public, private or remote, and unknown beside an unknown
 	// source — and Managed whether the access route can change that.
@@ -1060,7 +1211,7 @@ func (s *Server) handleDBConnSummary(w http.ResponseWriter, r *http.Request) err
 	out.LastBackup = s.newestDump(conn.Name)
 	if conn.Broken {
 		out.Error = conn.BrokenReason
-		out.Power = dbPower{Reason: "The saved connection cannot be read, so where its server runs is not known."}
+		out.Power = dbPower{Reason: dbPowerBrokenReason}
 		httpx.JSON(w, http.StatusOK, out)
 		return nil
 	}
@@ -1070,6 +1221,13 @@ func (s *Server) handleDBConnSummary(w http.ResponseWriter, r *http.Request) err
 	out.Source, out.Container, out.Unit, out.File = place.Source, place.Container, place.Unit, place.File
 	out.Exposure, out.Managed = place.Exposure, place.Managed
 	out.Power = place.power(conn, view.systemctl.available())
+	if c := out.Container; c != nil && !c.inspected {
+		// The listing inspects the containers that are running. One that is
+		// not still has its limits, and they are what it will run under.
+		if detail, err := s.modules.docker.Inspect(ctx, c.ID); err == nil {
+			c.MemoryLimit, c.CPULimit, c.RestartPolicy, c.inspected = detail.MemoryLimit, detail.CPULimit, detail.RestartPol, true
+		}
+	}
 
 	identity, _, known := s.lastIdentity(id, dsn)
 	if place.Down != "" {
@@ -1097,6 +1255,7 @@ func (s *Server) handleDBConnSummary(w http.ResponseWriter, r *http.Request) err
 		out.Version, out.VersionNumber = identity.Version, identity.Number
 		out.Capabilities = dbx.Capabilities(conn.Driver, identity.Flavor)
 	}
+	out.InFlight = s.dbConns.inFlight(id, out.State)
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
@@ -1199,6 +1358,11 @@ func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 	}
 	detail := map[string]any{"via": power.Via}
 	result := map[string]any{"action": req.Action, "via": power.Via}
+	// From here the server is being acted on, and every reading of the
+	// connection says so until it has caught up — or, by the deferred call, at
+	// once when the action could not be carried out.
+	change, carriedOut := s.dbConns.begin(id, req.Action), false
+	defer func() { s.dbConns.finish(id, change, carriedOut) }()
 	switch power.Via {
 	case "docker":
 		detail["container"], detail["id"] = place.Container.Name, place.Container.ID
@@ -1240,6 +1404,7 @@ func (s *Server) handleDBPower(w http.ResponseWriter, r *http.Request) error {
 	// last reading says it answers.
 	s.modules.dbs.Close(id)
 	s.dbConns.stale(id)
+	carriedOut = true
 	httpx.SetAudit(r, "database.power."+req.Action, conn.Name, detail)
 	httpx.JSON(w, http.StatusOK, result)
 	return nil

@@ -41,7 +41,7 @@ func (s *Server) handleMongoPreview(w http.ResponseWriter, r *http.Request) erro
 	defer cancel()
 	res, err := dbx.MongoPreviewPipeline(ctx, client, db, collection, req.MongoPreviewSpec)
 	if err != nil {
-		return mongoFailure(err)
+		return mongoReadFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
@@ -74,7 +74,7 @@ func (s *Server) handleMongoExplain(w http.ResponseWriter, r *http.Request) erro
 	defer cancel()
 	res, err := dbx.MongoExplain(ctx, client, db, collection, req.MongoExplainSpec)
 	if err != nil {
-		return mongoFailure(err)
+		return mongoReadFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
@@ -104,7 +104,7 @@ func (s *Server) handleMongoSchema(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	schema, err := dbx.MongoAnalyseSchema(ctx, client, db, collection, req.MongoSchemaSpec)
 	if err != nil {
-		return mongoFailure(err)
+		return mongoReadFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, schema)
 	return nil

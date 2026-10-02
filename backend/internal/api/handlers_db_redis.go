@@ -198,6 +198,10 @@ func redisKeyParam(q url.Values) (dbx.RedisBytes, error) {
 // a 502, and a request the engine turned down is a 400 carrying the engine's
 // own sentence. A read that the engine refuses is the first kind — the
 // request asked for nothing unusual — and a write is the second.
+//
+// A read that failed because the server was not there — a dropped connection,
+// a server still loading its data — is marked worth asking again. A write is
+// never marked: its reply may be what was lost, and the command may have run.
 func redisFail(err error, write bool) error {
 	var (
 		exists   *dbx.RedisKeyExistsError
@@ -217,9 +221,12 @@ func redisFail(err error, write bool) error {
 	case errors.Is(err, dbx.ErrRedisSentinel):
 		return httpx.Err(http.StatusBadRequest, "sentinel_endpoint", err.Error())
 	case errors.As(err, &network), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		if write {
+			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		}
+		return queryFailed(err)
 	case errors.As(err, &replied) && !write:
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	return httpx.BadRequest("%v", err)
 }

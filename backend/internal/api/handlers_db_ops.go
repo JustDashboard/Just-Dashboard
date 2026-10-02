@@ -180,7 +180,7 @@ func (s *Server) handleDBLocks(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	report, err := dbx.ListLocks(ctx, pool, conn.Driver)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, report)
 	return nil
@@ -200,7 +200,7 @@ func (s *Server) handleDBReplication(w http.ResponseWriter, r *http.Request) err
 	defer cancel()
 	report, err := dbx.ReadReplication(ctx, pool, conn.Driver)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, report)
 	return nil
@@ -231,7 +231,7 @@ func (s *Server) handleDBTableStats(w http.ResponseWriter, r *http.Request) erro
 	defer cancel()
 	report, err := dbx.ReadTableStats(ctx, pool, conn.Driver, statsOptions(r))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, report)
 	return nil
@@ -251,7 +251,7 @@ func (s *Server) handleDBIndexStats(w http.ResponseWriter, r *http.Request) erro
 	defer cancel()
 	report, err := dbx.ReadIndexStats(ctx, pool, conn.Driver, statsOptions(r))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, report)
 	return nil
@@ -503,7 +503,7 @@ func (s *Server) handleDBSettingsList(w http.ResponseWriter, r *http.Request) er
 		return nil
 	}
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	admin := httpx.MustPrincipal(r).Can(auth.CapSystemAdmin)
 	httpx.JSON(w, http.StatusOK, map[string]any{
@@ -617,7 +617,7 @@ func (s *Server) handleDBRoleDetail(w http.ResponseWriter, r *http.Request) erro
 		return httpx.ErrNotFound
 	}
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	redactRoleConfig(conn.Driver, detail, httpx.MustPrincipal(r).Can(auth.CapSystemAdmin))
 	httpx.JSON(w, http.StatusOK, detail)
@@ -661,7 +661,7 @@ func (s *Server) documentRoles(ctx context.Context, conn *dbConnection, dsn stri
 		defer client.Disconnect(context.Background())
 		roles, err := dbx.MongoUsers(ctx, client)
 		if err != nil {
-			return nil, httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return nil, queryFailed(err)
 		}
 		return roles, nil
 	}
@@ -672,7 +672,7 @@ func (s *Server) documentRoles(ctx context.Context, conn *dbConnection, dsn stri
 	defer client.Close()
 	roles, err := dbx.RedisUsers(ctx, client)
 	if err != nil {
-		return nil, httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return nil, queryFailed(err)
 	}
 	return withoutACLSecrets(roles), nil
 }
@@ -723,7 +723,7 @@ func (s *Server) handleDBGrants(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"grants": grants, "truncated": truncated, "supported": true})
 	return nil
@@ -919,7 +919,7 @@ func (s *Server) handleClickHouseParts(w http.ResponseWriter, r *http.Request) e
 	parts, err := dbx.ClickHouseTableParts(ctx, pool, strings.TrimSpace(q.Get("database")),
 		strings.TrimSpace(q.Get("table")), q.Get("inactive") == "1")
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, parts)
 	return nil
@@ -935,7 +935,7 @@ func (s *Server) handleClickHouseMerges(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 	merges, err := dbx.ClickHouseMerges(ctx, pool)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"merges": merges})
 	return nil
@@ -951,7 +951,7 @@ func (s *Server) handleClickHouseMutations(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 	mutations, err := dbx.ClickHouseMutations(ctx, pool, strings.TrimSpace(r.URL.Query().Get("database")))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"mutations": mutations})
 	return nil
@@ -967,7 +967,7 @@ func (s *Server) handleClickHouseQueries(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	queries, err := dbx.ClickHouseQueries(ctx, pool)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"queries": queries})
 	return nil
@@ -986,7 +986,7 @@ func (s *Server) handleSQLiteFile(w http.ResponseWriter, r *http.Request) error 
 	defer cancel()
 	file, err := dbx.ReadSQLiteFile(ctx, pool)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, file)
 	return nil

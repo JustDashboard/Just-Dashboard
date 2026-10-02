@@ -454,6 +454,26 @@ func TestChangesRenderForEachEngine(t *testing.T) {
 	if err != nil || c.sql != "UPDATE [app].[t] SET [name] = DEFAULT WHERE [id] = @p1" {
 		t.Errorf("mssql default = %v %v", c, err)
 	}
+
+	// No value is the keyword, in the statement that runs as in the one shown,
+	// and takes no bind marker: the markers that follow are numbered as if it
+	// were not there. SQL Server's driver sends a bound NULL as an nvarchar,
+	// which a varbinary column will not be converted from.
+	payload := Column{Name: "payload", Type: "varbinary(max)"}
+	c, err = plan(DriverMSSQL, []string{"id"}, id, name, payload).render(Change{
+		Op: ChangeUpdate, Key: map[string]any{"id": 1}, Values: map[string]any{"name": "a", "payload": nil},
+	})
+	if err != nil || c.sql != "UPDATE [app].[t] SET [name] = @p1, [payload] = NULL WHERE [id] = @p2" ||
+		c.rendered != "UPDATE [app].[t] SET [name] = N'a', [payload] = NULL WHERE [id] = 1;" || len(c.args) != 2 {
+		t.Errorf("mssql null = %+v %v", c, err)
+	}
+	c, err = plan(DriverMSSQL, []string{"id"}, id, name, payload).render(Change{
+		Op: ChangeInsert, Values: map[string]any{"id": 2, "name": nil, "payload": nil},
+	})
+	if err != nil || c.sql != "INSERT INTO [app].[t] ([id], [name], [payload]) VALUES (@p1, NULL, NULL)" ||
+		c.rendered != "INSERT INTO [app].[t] ([id], [name], [payload]) VALUES (2, NULL, NULL);" || len(c.args) != 1 {
+		t.Errorf("mssql null insert = %+v %v", c, err)
+	}
 }
 
 // Oracle reads text into a date by the session's NLS format, and has no = for
@@ -499,9 +519,10 @@ func TestChangesRenderOraclesDatesAndLobs(t *testing.T) {
 		t.Errorf("rendered = %s", c.rendered)
 	}
 	// What is not a date in any form this knows is left for Oracle to read,
-	// and to refuse in its own words.
+	// and to refuse in its own words. No value at all is the keyword, with no
+	// mask around it and nothing bound for it.
 	c, err = p.render(Change{Op: ChangeInsert, Values: map[string]any{"ID": json.Number("1"), "D": "next tuesday", "TS": nil}})
-	if err != nil || c.sql != `INSERT INTO "APP"."T" ("D", "ID", "TS") VALUES (:1, :2, :3)` {
+	if err != nil || c.sql != `INSERT INTO "APP"."T" ("D", "ID", "TS") VALUES (:1, :2, NULL)` || len(c.args) != 2 {
 		t.Errorf("an unreadable date = %v %v", c, err)
 	}
 

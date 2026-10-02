@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -29,6 +30,8 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
+	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // --- a machine of the test's own ----------------------------------------------
@@ -44,6 +47,10 @@ type fakeDBContainer struct {
 	hostIP                 string
 	hostPort, port         int
 	labels                 map[string]string
+	// What the container may use and how it restarts, as its configuration
+	// holds them: bytes, billionths of a processor, Docker's own word.
+	memory, nanoCPUs int64
+	restart          string
 }
 
 type fakeDockerEngine struct {
@@ -54,6 +61,10 @@ type fakeDockerEngine struct {
 	// how many times each container's configuration was asked for.
 	graces      []string
 	inspections map[string]int
+	// during is called with the verb while a start, stop or restart is being
+	// carried out and before it takes effect: where a test looks at what the
+	// rest of the dashboard reads in the middle of one.
+	during func(verb string)
 }
 
 var dockerAPIVersion = regexp.MustCompile(`^/v[0-9.]+`)
@@ -86,10 +97,14 @@ func (f *fakeDockerEngine) inspected(name string) int {
 }
 
 func (f *fakeDockerEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := dockerAPIVersion.ReplaceAllString(r.URL.Path, "")
+	if _, verb, acts := strings.Cut(strings.TrimPrefix(path, "/containers/"), "/"); acts && r.Method == http.MethodPost && f.during != nil {
+		// Outside the lock: what it calls reads the engine through this handler.
+		f.during(verb)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	path := dockerAPIVersion.ReplaceAllString(r.URL.Path, "")
 	binding := func(c *fakeDBContainer) map[string]any {
 		return map[string]any{strconv.Itoa(c.port) + "/tcp": []map[string]string{
 			{"HostIp": c.hostIP, "HostPort": strconv.Itoa(c.hostPort)},
@@ -135,7 +150,10 @@ func (f *fakeDockerEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"State": map[string]any{
 				"Status": c.state, "Running": c.state == "running", "StartedAt": "2026-01-02T03:04:05Z",
 			},
-			"HostConfig":      map[string]any{"NetworkMode": "bridge", "PortBindings": binding(c)},
+			"HostConfig": map[string]any{
+				"NetworkMode": "bridge", "PortBindings": binding(c),
+				"Memory": c.memory, "NanoCpus": c.nanoCPUs, "RestartPolicy": map[string]any{"Name": c.restart},
+			},
 			"NetworkSettings": map[string]any{"Ports": binding(c)},
 		})
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/containers/"):
@@ -335,8 +353,11 @@ type summaryView struct {
 		ActiveState string `json:"activeState"`
 	} `json:"unit"`
 	Container *struct {
-		Name  string `json:"name"`
-		State string `json:"state"`
+		Name          string  `json:"name"`
+		State         string  `json:"state"`
+		MemoryLimit   int64   `json:"memoryLimit"`
+		CPULimit      float64 `json:"cpuLimit"`
+		RestartPolicy string  `json:"restartPolicy"`
 	} `json:"container"`
 	File *struct {
 		Path string `json:"path"`
@@ -348,7 +369,12 @@ type summaryView struct {
 		Restart bool   `json:"restart"`
 		Reason  string `json:"reason"`
 	} `json:"power"`
+	InFlight *struct {
+		Action string    `json:"action"`
+		Since  time.Time `json:"since"`
+	} `json:"inFlight"`
 	Exposure     string         `json:"exposure"`
+	Managed      bool           `json:"managed"`
 	Capabilities map[string]any `json:"capabilities"`
 }
 
@@ -929,6 +955,10 @@ func TestPowerStartsAndStopsAUnitThroughSystemctl(t *testing.T) {
 	if status != http.StatusBadGateway || target != "native" || !strings.Contains(detail, unit) || !strings.Contains(detail, "control process exited") {
 		t.Errorf("audit entry = %d %q %s", status, target, detail)
 	}
+	// And a restart that could not be carried out is not one in flight.
+	if got := readJSON[summaryView](t, do(t, admin, http.MethodGet, pathf("/databases/%d", id), "")); got.InFlight != nil {
+		t.Errorf("a restart systemctl refused is still reported in flight: %+v", got.InFlight)
+	}
 }
 
 // The summary says which actions it would accept, and the route holds the
@@ -994,6 +1024,181 @@ func TestPowerGivesAContainerTimeToShutDown(t *testing.T) {
 	}
 	if graces := h.engine.stopGraces(); len(graces) != 2 || graces[0] != "90" || graces[1] != "300" {
 		t.Errorf("Docker was given %v to shut the container down in, want 90 and then 300 seconds", graces)
+	}
+}
+
+// A stop takes as long as the server takes to shut down, and the browser that
+// asked for it is the only one that knows it is happening: a second one reads
+// "running" beside a server that is going away, and offers to stop it. So the
+// change is held by the server and carried by every reading of the connection
+// — while the route is acting, whatever the server reads as, and afterwards
+// until it reads the state the action leaves it in, or the time allowed for
+// that runs out.
+func TestAChangeOfPowerIsReadByEveryBrowserUntilItSettles(t *testing.T) {
+	h := newConnHarness(t)
+	admin, reader := h.as(auth.RoleAdmin), h.as(auth.RoleReadOnly)
+	port, dials := deafPort(t)
+	h.engine.containers = []*fakeDBContainer{{id: "c0ffee", name: "cache", image: "redis:7-alpine", state: "running",
+		hostIP: "127.0.0.1", hostPort: port, port: 6379}}
+	id := h.add("cache", dbx.DriverRedis, fmt.Sprintf("redis://127.0.0.1:%d/0", port))
+	path := pathf("/databases/%d", id)
+	// What another browser reads: the connection's own page and its card.
+	read := func() (summaryView, dbFleetView) {
+		return readJSON[summaryView](t, do(t, reader, http.MethodGet, path, "")),
+			readJSON[dbFleetView](t, do(t, reader, http.MethodGet, "/databases/fleet", ""))
+	}
+	held := func(summary summaryView, fleet dbFleetView) string {
+		if len(fleet.Connections) != 1 {
+			return "no fleet entry"
+		}
+		entry := fleet.Connections[0].InFlight
+		switch {
+		case summary.InFlight == nil && entry == nil:
+			return ""
+		case summary.InFlight == nil || entry == nil:
+			return "the summary and the fleet disagree"
+		case summary.InFlight.Action != entry.Action || !summary.InFlight.Since.Equal(entry.Since):
+			return "the summary and the fleet disagree"
+		}
+		return entry.Action
+	}
+	if got := held(read()); got != "" {
+		t.Fatalf("before anything was asked: %q in flight", got)
+	}
+
+	// In the middle of each action, before Docker has done anything.
+	seen := map[string]string{}
+	h.engine.during = func(verb string) {
+		summary, fleet := read()
+		seen[verb] = held(summary, fleet)
+		if since := summary.InFlight; since != nil && time.Since(since.Since) > time.Minute {
+			seen[verb] = "since " + since.Since.String()
+		}
+	}
+	began := time.Now()
+	for _, action := range []string{"restart", "stop"} {
+		if rec := do(t, admin, http.MethodPost, path+"/power", `{"action":"`+action+`"}`); rec.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", action, rec.Code, rec.Body.String())
+		}
+		if seen[action] != action {
+			t.Errorf("while the %s was being carried out another browser read %q in flight", action, seen[action])
+		}
+	}
+	h.engine.during = nil
+
+	// Stopped, which is what a stop leaves: it is over the moment that is read.
+	summary, fleet := read()
+	if summary.State != dbStateStopped || held(summary, fleet) != "" {
+		t.Errorf("after the stop: state %q with %q in flight", summary.State, held(summary, fleet))
+	}
+
+	// A request the route refuses was never a change.
+	if rec := do(t, admin, http.MethodPost, path+"/power", `{"action":"restart"}`); rec.Code != http.StatusConflict {
+		t.Fatalf("restart of a stopped container = %d", rec.Code)
+	}
+	if got := held(read()); got != "" {
+		t.Errorf("a refused restart is reported as %q in flight", got)
+	}
+
+	// Started: the container runs and the engine does not answer yet, which
+	// is still the start going on. The reading that says so is not kept, or
+	// the card would go on saying it after the engine had begun to answer.
+	if rec := do(t, admin, http.MethodPost, path+"/power", `{"action":"start"}`); rec.Code != http.StatusOK {
+		t.Fatalf("start = %d %s", rec.Code, rec.Body.String())
+	}
+	summary, fleet = read()
+	if summary.State != dbStateUnreachable || held(summary, fleet) != "start" {
+		t.Errorf("after the start: state %q with %q in flight, want the start still held", summary.State, held(summary, fleet))
+	}
+	if since := summary.InFlight; since != nil && (since.Since.Before(began) || since.Since.After(time.Now())) {
+		t.Errorf("since = %v, want when the start was asked for", since.Since)
+	}
+	before := dials.Load()
+	do(t, reader, http.MethodGet, "/databases/fleet", "")
+	if dials.Load() == before {
+		t.Error("the fleet kept a refusal from a server that is still starting")
+	}
+
+	// It does not answer within the time a start is given: the change ends,
+	// and what is left is a server that is unreachable.
+	v, _ := h.s.dbConns.power.Load(id)
+	late := *v.(*dbPowerChange)
+	late.done = time.Now().Add(-dbPowerSettle - time.Second)
+	h.s.dbConns.power.Store(id, &late)
+	summary, fleet = read()
+	if summary.State != dbStateUnreachable || held(summary, fleet) != "" {
+		t.Errorf("a start that never settled is still held: state %q with %q in flight", summary.State, held(summary, fleet))
+	}
+	if _, kept := h.s.dbConns.power.Load(id); kept {
+		t.Error("the change that ran out of time was not let go of")
+	}
+
+	// A handler that never said it had finished is not believed for ever.
+	h.s.dbConns.power.Store(id, &dbPowerChange{Action: "stop", Since: time.Now().Add(-dbPowerActing - time.Second)})
+	if got := held(read()); got != "" {
+		t.Errorf("a change older than any request can run is still held: %q", got)
+	}
+	// And forgetting the connection forgets what was being done to it.
+	h.s.dbConns.begin(id, "restart")
+	h.s.dbConns.forget(id)
+	if _, kept := h.s.dbConns.power.Load(id); kept {
+		t.Error("a forgotten connection kept its change of power")
+	}
+}
+
+// A second request for the same connection takes its slot, and the first one
+// finishing must not end what the second is still doing.
+func TestAChangeOfPowerEndsOnlyItsOwnRecord(t *testing.T) {
+	var st dbConnState
+	first := st.begin(7, "stop")
+	second := st.begin(7, "start")
+	st.finish(7, first, true)
+	if got := st.inFlight(7, dbStateStopped); got != second || got.Action != "start" {
+		t.Fatalf("the first request finishing replaced the second's change: %+v", got)
+	}
+	st.finish(7, first, false)
+	if got := st.inFlight(7, dbStateUnreachable); got != second {
+		t.Fatalf("the first request failing ended the second's change: %+v", got)
+	}
+	st.finish(7, second, true)
+	if got := st.inFlight(7, dbStateUnreachable); got == nil || got.Action != "start" {
+		t.Errorf("a start that was carried out is not held while the engine comes up: %+v", got)
+	}
+	if got := st.inFlight(7, dbStateRunning); got != nil {
+		t.Errorf("a start is still held once the server answers: %+v", got)
+	}
+	if got := st.inFlight(7, dbStateUnreachable); got != nil {
+		t.Errorf("a change that settled came back: %+v", got)
+	}
+}
+
+// What a container may use is part of where a database runs, and the page
+// that shows it read it from the Docker section's own route — which a role
+// may not have, and which a stack with no Docker answers with an error. The
+// summary carries it, for a container that runs and for one that does not.
+func TestSummaryCarriesTheContainersLimits(t *testing.T) {
+	h := newConnHarness(t)
+	admin := h.as(auth.RoleAdmin)
+	port, _ := deafPort(t)
+	box := &fakeDBContainer{id: "c0ffee", name: "cache", image: "redis:7-alpine", state: "running",
+		hostIP: "127.0.0.1", hostPort: port, port: 6379,
+		memory: 512 << 20, nanoCPUs: 1_500_000_000, restart: "unless-stopped"}
+	h.engine.containers = []*fakeDBContainer{box}
+	id := h.add("cache", dbx.DriverRedis, fmt.Sprintf("redis://127.0.0.1:%d/0", port))
+	path := pathf("/databases/%d", id)
+
+	for _, state := range []string{"running", "exited"} {
+		box.state = state
+		got := readJSON[summaryView](t, do(t, admin, http.MethodGet, path, ""))
+		if c := got.Container; c == nil || c.State != state || c.MemoryLimit != 512<<20 || c.CPULimit != 1.5 || c.RestartPolicy != "unless-stopped" {
+			t.Errorf("a container that is %s: %+v, want 512 MiB, 1.5 processors and unless-stopped", state, c)
+		}
+	}
+	// No limit is an absent field, as on the Docker page, not a zero.
+	box.state, box.memory, box.nanoCPUs, box.restart = "running", 0, 0, "no"
+	rec := do(t, admin, http.MethodGet, path, "")
+	if body := rec.Body.String(); strings.Contains(body, "memoryLimit") || strings.Contains(body, "cpuLimit") || !strings.Contains(body, `"restartPolicy":"no"`) {
+		t.Errorf("a container with no limits: %s", body)
 	}
 }
 
@@ -1102,6 +1307,18 @@ type dbFleetView struct {
 		Source      string `json:"source"`
 		Unit        string `json:"unit"`
 		ObjectWord  string `json:"objectWord"`
+		Power       struct {
+			Via     string `json:"via"`
+			Start   bool   `json:"start"`
+			Stop    bool   `json:"stop"`
+			Restart bool   `json:"restart"`
+			Reason  string `json:"reason"`
+		} `json:"power"`
+		Managed  bool `json:"managed"`
+		InFlight *struct {
+			Action string    `json:"action"`
+			Since  time.Time `json:"since"`
+		} `json:"inFlight"`
 	} `json:"connections"`
 }
 
@@ -1153,6 +1370,75 @@ func TestFleetKeepsADialForAFewSecondsAndFlagsBrokenRows(t *testing.T) {
 	do(t, router, http.MethodGet, "/databases/fleet", "")
 	if dials.Load() == after {
 		t.Error("a dropped reading was not taken again")
+	}
+}
+
+// A card offers what the connection's own page offers. The fleet used to
+// carry neither which power actions the route would take nor whether the
+// access route can change the port's reach, so the control center worked both
+// out again from the entry's other fields — a second copy of two decisions the
+// server already makes. Each entry now carries the summary's own answers.
+func TestFleetEntriesCarryTheSummarysPowerAndReach(t *testing.T) {
+	h := newConnHarness(t)
+	admin := h.as(auth.RoleAdmin)
+	stopped, _ := deafPort(t)
+	running, _ := deafPort(t)
+	native, _ := deafPort(t)
+	h.engine.containers = []*fakeDBContainer{
+		{id: "aaa111", name: "sessions", image: "redis:7-alpine", state: "exited", hostIP: "127.0.0.1", hostPort: stopped, port: 6379,
+			labels: map[string]string{"com.docker.compose.project": "shop"}},
+		{id: "bbb222", name: "cache", image: "redis:7-alpine", state: "running", hostIP: "127.0.0.1", hostPort: running, port: 6379},
+	}
+	h.listeners = []proxysvc.Listener{{Protocol: "tcp", Address: "127.0.0.1", Port: uint32(native), PID: 812,
+		Process: "redis-server", Manager: "systemd", ManagerName: "redis-server.service"}}
+	ids := map[string]int64{
+		"stopped container": h.add("sessions", dbx.DriverRedis, fmt.Sprintf("redis://127.0.0.1:%d/0", stopped)),
+		"running container": h.add("cache", dbx.DriverRedis, fmt.Sprintf("redis://127.0.0.1:%d/0", running)),
+		"native unit":       h.add("native", dbx.DriverRedis, fmt.Sprintf("redis://127.0.0.1:%d/0", native)),
+		"file":              h.add("file", dbx.DriverSQLite, filepath.Join(h.s.Cfg.FileRoots[0], "f.db")),
+		"remote":            h.add("remote", dbx.DriverPostgres, "postgres://app:pw@db.example.com:5432/shop"),
+	}
+	res, err := h.s.Store.DB.Exec(
+		`INSERT INTO db_connections(name, driver, dsn_enc, created_at) VALUES('broken','mongodb','nonsense',0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids["broken"], _ = res.LastInsertId()
+
+	fleet := readJSON[dbFleetView](t, do(t, admin, http.MethodGet, "/databases/fleet", ""))
+	if len(fleet.Connections) != len(ids) {
+		t.Fatalf("fleet lists %d connections, want %d", len(fleet.Connections), len(ids))
+	}
+	for name, id := range ids {
+		summary := readJSON[summaryView](t, do(t, admin, http.MethodGet, pathf("/databases/%d", id), ""))
+		for _, entry := range fleet.Connections {
+			if entry.ID != id {
+				continue
+			}
+			if entry.Power != summary.Power || entry.Managed != summary.Managed {
+				t.Errorf("%s: the fleet says power %+v managed=%v, the summary power %+v managed=%v",
+					name, entry.Power, entry.Managed, summary.Power, summary.Managed)
+			}
+			offered := entry.Power.Start || entry.Power.Stop || entry.Power.Restart
+			switch name {
+			case "stopped container":
+				if entry.Power.Via != "docker" || !entry.Power.Start || entry.Power.Stop || entry.Managed {
+					t.Errorf("%s: power %+v managed=%v, want a start through Docker and a port compose owns", name, entry.Power, entry.Managed)
+				}
+			case "running container":
+				if entry.Power.Via != "docker" || entry.Power.Start || !entry.Power.Stop || !entry.Power.Restart || !entry.Managed {
+					t.Errorf("%s: power %+v managed=%v, want stop and restart through Docker and a port that can be restricted", name, entry.Power, entry.Managed)
+				}
+			case "native unit":
+				if entry.Power.Via != "systemd" || !entry.Power.Stop || entry.Managed {
+					t.Errorf("%s: power %+v managed=%v", name, entry.Power, entry.Managed)
+				}
+			default:
+				if entry.Power.Via != "" || offered || entry.Power.Reason == "" || entry.Managed {
+					t.Errorf("%s: power %+v managed=%v, want nothing offered and the reason said", name, entry.Power, entry.Managed)
+				}
+			}
+		}
 	}
 }
 
@@ -1248,6 +1534,7 @@ func TestAFleetReadsTheMachineOnceForAllItsConnections(t *testing.T) {
 var gatedCapabilities = []string{
 	// connections and discovery
 	"server", "provision", "inventoryConnect", "hostAccount", "fileBased", "openByDefault", "dump",
+	"serverDatabaseCreate", "serverDatabaseConnect",
 	// the workbench
 	"sql", "console", "changeSets", "keylessEdits", "updateDefault", "script", "transactions", "queryCancel",
 	"dollarQuoting", "regexFilter", "rowEstimate", "cellRead", "explainJSON", "explainAnalyze",
@@ -1543,6 +1830,150 @@ func TestAnExportIsOnTheTrailEvenWhenTheClientGoesAway(t *testing.T) {
 	do(t, admin, http.MethodGet, pathf("/databases/%d/export", id)+"?table=no_such_table&format=csv", "")
 	if n, failed, detail := entries("database.export.finished"); n != 2 || failed != 1 || !strings.Contains(detail, `"error"`) {
 		t.Errorf("after a failed export: %d closing entries, %d failed (%s)", n, failed, detail)
+	}
+}
+
+// --- a server that is not there ----------------------------------------------------
+
+// errorView is the error envelope as a page reads it.
+type errorView struct {
+	Error struct {
+		Code      string `json:"code"`
+		Message   string `json:"message"`
+		Retryable bool   `json:"retryable"`
+	} `json:"error"`
+}
+
+// A closed port on this machine, for every engine with an address: what a
+// connection reads while its server is stopped, restarting or not up yet.
+func stoppedServers(h *connHarness) map[dbx.Driver]int64 {
+	return map[dbx.Driver]int64{
+		dbx.DriverPostgres:   h.add("pg", dbx.DriverPostgres, "postgres://app:pw@127.0.0.1:1/shop?sslmode=disable"),
+		dbx.DriverMySQL:      h.add("my", dbx.DriverMySQL, "app:pw@tcp(127.0.0.1:1)/shop"),
+		dbx.DriverMSSQL:      h.add("ms", dbx.DriverMSSQL, "sqlserver://sa:pw@127.0.0.1:1?database=shop&encrypt=disable"),
+		dbx.DriverClickHouse: h.add("ch", dbx.DriverClickHouse, "clickhouse://app:pw@127.0.0.1:1/shop"),
+		dbx.DriverOracle:     h.add("ora", dbx.DriverOracle, "oracle://app:pw@127.0.0.1:1/FREEPDB1"),
+		dbx.DriverMongo:      h.add("doc", dbx.DriverMongo, "mongodb://127.0.0.1:1/shop"),
+		dbx.DriverRedis:      h.add("kv", dbx.DriverRedis, "redis://127.0.0.1:1/0"),
+	}
+}
+
+// The page's error state offers "Try again" only where the server marked the
+// failure worth it, and no database route ever did: a page opened in the
+// minute its server was restarting had no button, on any engine. A server
+// that could not be reached is marked, whichever engine it is and whichever
+// route found out. One that answered and said no is not: asking again gets
+// the same answer.
+func TestAServerThatIsNotThereIsWorthAskingAgain(t *testing.T) {
+	h := newConnHarness(t)
+	reader := h.as(auth.RoleReadOnly)
+	servers := stoppedServers(h)
+	reads := map[dbx.Driver][]string{
+		dbx.DriverRedis: {"/databases/%d/keys", "/databases/%d/keys/meta?key=k", "/databases/%d/redis/server", "/databases/%d/schemas"},
+		dbx.DriverMongo: {"/databases/%d/schemas"},
+	}
+	for driver, id := range servers {
+		paths := reads[driver]
+		if paths == nil {
+			paths = []string{"/databases/%d/tables", "/databases/%d/catalog", "/databases/%d/browse?table=t"}
+		}
+		for _, path := range paths {
+			rec := do(t, reader, http.MethodGet, pathf(path, id), "")
+			got := readJSON[errorView](t, rec)
+			if rec.Code != http.StatusBadGateway || got.Error.Code != "connect_failed" || !got.Error.Retryable {
+				t.Errorf("%s: GET %s on a stopped server = %d %s", driver, path, rec.Code, rec.Body.String())
+			}
+		}
+	}
+
+	// A server that is there and refuses what it was sent is not marked. The
+	// connection string of this one names a database that is not a number,
+	// which no number of attempts will make one.
+	refused := h.add("unparsed", dbx.DriverRedis, "redis://127.0.0.1:1/main")
+	rec := do(t, reader, http.MethodGet, pathf("/databases/%d/keys", refused), "")
+	if got := readJSON[errorView](t, rec); rec.Code != http.StatusBadGateway || got.Error.Code != "connect_failed" || got.Error.Retryable {
+		t.Errorf("a connection string nobody can read = %d %s, want it not worth asking again", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "retryable") {
+		t.Errorf("an answer that is not worth asking again says so by leaving the field out: %s", rec.Body.String())
+	}
+}
+
+// The mark is for a request that can be sent again without consequence. A
+// read whose server went away mid-reply can; a write whose reply was lost may
+// already have been carried out, and is answered without it.
+func TestOnlyAReadIsMarkedWorthAskingAgain(t *testing.T) {
+	gone := fmt.Errorf("read tcp 127.0.0.1:52000->127.0.0.1:6379: %w", syscall.ECONNRESET)
+	// How MongoDB's driver says the same thing.
+	unselected := errors.New("server selection error: context deadline exceeded, current topology: { Type: Unknown, Servers: [{ Addr: 127.0.0.1:27017, Type: Unknown, Last error: dial tcp 127.0.0.1:27017: connect: connection refused }, ] }")
+	for _, c := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"a Redis read", redisFail(gone, false), true},
+		{"a Redis write", redisFail(gone, true), false},
+		{"a Redis read the server refused", redisFail(redis.Nil, false), false},
+		{"a SQL read", queryFailed(gone), true},
+		{"a SQL read the server refused", queryFailed(errors.New("permission denied for table pg_authid")), false},
+		{"a MongoDB read", mongoReadFailed(unselected), true},
+		{"a MongoDB catalogue read", mongoReadFailure(unselected), true},
+		{"a MongoDB write", mongoFailure(unselected), false},
+		{"a MongoDB filter the server refused", mongoReadFailed(mongo.CommandError{Code: 2, Message: "unknown operator: $nope"}), false},
+		{"any request whose server could not be opened", connectFailed("redis://127.0.0.1:1/0", gone), true},
+		{"a password the server refused", connectFailed("redis://:pw@127.0.0.1:1/0", errors.New("WRONGPASS invalid username-password pair")), false},
+	} {
+		var answer *httpx.APIError
+		if !errors.As(c.err, &answer) {
+			t.Fatalf("%s: %v is not an API error", c.name, c.err)
+		}
+		if answer.Retryable != c.want {
+			t.Errorf("%s: retryable = %v, want %v (%d %s)", c.name, answer.Retryable, c.want, answer.Status, answer.Code)
+		}
+	}
+}
+
+// Whether another database can be made on a connection's server, and whether
+// one can be opened as a connection of its own, are two flags of the driver
+// catalogue — and the two routes ask the same question before they do
+// anything, so a flag is never a button whose route answers that the engine
+// has no such thing. An engine that can make a database and cannot open it is
+// refused before the database is made, not after.
+func TestServerDatabaseFlagsAreWhatTheRoutesDo(t *testing.T) {
+	h := newConnHarness(t)
+	admin := h.as(auth.RoleAdmin)
+	servers := stoppedServers(h)
+	servers[dbx.DriverSQLite] = h.add("file", dbx.DriverSQLite, filepath.Join(h.s.Cfg.FileRoots[0], "f.db"))
+	if len(servers) != len(dbx.Drivers()) {
+		t.Fatalf("%d engines asked, %d exist", len(servers), len(dbx.Drivers()))
+	}
+	for driver, id := range servers {
+		creates, connects := dbx.Capable(driver, "", "serverDatabaseCreate"), dbx.Capable(driver, "", "serverDatabaseConnect")
+
+		rec := do(t, admin, http.MethodPost, pathf("/databases/%d/server/databases", id), `{"name":"jd_other"}`)
+		got := readJSON[errorView](t, rec)
+		// Every server here is stopped, so a request the route takes up ends
+		// at the dial.
+		if taken := rec.Code == http.StatusBadGateway && got.Error.Code == "connect_failed"; taken != creates {
+			t.Errorf("%s: serverDatabaseCreate = %v and the route answers %d %s", driver, creates, rec.Code, rec.Body.String())
+		}
+		if !creates && (rec.Code != http.StatusBadRequest || got.Error.Code != "unsupported") {
+			t.Errorf("%s: creating a database = %d %s, want 400 unsupported", driver, rec.Code, rec.Body.String())
+		}
+
+		rec = do(t, admin, http.MethodPost, pathf("/databases/%d/server/databases/connect", id), `{"database":"jd_other"}`)
+		got = readJSON[errorView](t, rec)
+		if refused := rec.Code == http.StatusBadRequest && got.Error.Code == "unsupported"; refused == connects {
+			t.Errorf("%s: serverDatabaseConnect = %v and the route answers %d %s", driver, connects, rec.Code, rec.Body.String())
+		}
+
+		if creates && !connects {
+			rec = do(t, admin, http.MethodPost, pathf("/databases/%d/server/databases", id), `{"name":"jd_other","connect":true}`)
+			got = readJSON[errorView](t, rec)
+			if rec.Code != http.StatusBadRequest || got.Error.Code != "unsupported" || !strings.Contains(got.Error.Message, "Nothing was created") {
+				t.Errorf("%s: create and connect = %d %s, want it refused before anything is made", driver, rec.Code, rec.Body.String())
+			}
+		}
 	}
 }
 

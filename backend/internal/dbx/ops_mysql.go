@@ -261,29 +261,21 @@ func (mysqlDialect) ServerStats(ctx context.Context, db *sql.DB) (*ServerStats, 
 	out.DatabaseBytes = int64(size.Float64)
 
 	conns := &ConnectionCounts{Max: limit}
-	crows, err := db.QueryContext(ctx, `
+	ownOnly, err := mysqlProcessList(ctx, db, `
 	  SELECT COALESCE(p.COMMAND, ''), COALESCE(p.USER, ''), COALESCE(p.STATE, ''), t.trx_id IS NOT NULL
 	  FROM information_schema.PROCESSLIST p
-	  LEFT JOIN information_schema.INNODB_TRX t ON t.trx_mysql_thread_id = p.ID`)
-	if err != nil {
-		// Without the PROCESS privilege INNODB_TRX is refused; the list
-		// itself still answers, for the account's own sessions.
-		crows, err = db.QueryContext(ctx, `
-		  SELECT COALESCE(COMMAND, ''), COALESCE(USER, ''), COALESCE(STATE, ''), 0 FROM information_schema.PROCESSLIST`)
-	}
-	if err != nil {
-		out.Notes = append(out.Notes, "Sessions could not be counted: "+err.Error())
-	} else {
-		for crows.Next() {
+	  LEFT JOIN information_schema.INNODB_TRX t ON t.trx_mysql_thread_id = p.ID`, `
+	  SELECT COALESCE(COMMAND, ''), COALESCE(USER, ''), COALESCE(STATE, ''), 0 FROM information_schema.PROCESSLIST`,
+		func() { *conns = ConnectionCounts{Max: limit} },
+		func(rows *sql.Rows) error {
 			var command, user, state string
 			var inTx bool
-			if err := crows.Scan(&command, &user, &state, &inTx); err != nil {
-				crows.Close()
-				return nil, err
+			if err := rows.Scan(&command, &user, &state, &inTx); err != nil {
+				return err
 			}
 			switch mysqlSessionStatus(command, user, inTx) {
 			case SessionBackground:
-				continue
+				return nil
 			case SessionIdle:
 				conns.Idle++
 			case SessionIdleInTransaction:
@@ -295,10 +287,23 @@ func (mysqlDialect) ServerStats(ctx context.Context, db *sql.DB) (*ServerStats, 
 				}
 			}
 			conns.Total++
-		}
-		if err := crows.Close(); err != nil {
-			return nil, err
-		}
+			return nil
+		})
+	switch connected, counted := status["Threads_connected"]; {
+	case err != nil:
+		out.Notes = append(out.Notes, "Sessions could not be counted: "+err.Error())
+	case ownOnly && counted:
+		// The list held this account's own sessions and nobody else's, and a
+		// count of those is not the server's. The server's own two figures
+		// need no privilege: how many clients are connected, and how many of
+		// them are not asleep.
+		running := math.Min(status["Threads_running"], connected)
+		out.Connections = &ConnectionCounts{Max: limit, Total: int(connected), Active: int(running), Idle: int(connected - running)}
+		out.Notes = append(out.Notes, mysqlOwnSessionsNote+
+			" The sessions here are the server's own totals: which of them are inside a transaction or waiting on a lock is not known.")
+	case ownOnly:
+		out.Notes = append(out.Notes, mysqlOwnSessionsNote+" The sessions are not counted.")
+	default:
 		out.Connections = conns
 	}
 
@@ -320,6 +325,45 @@ func (mysqlDialect) ServerStats(ctx context.Context, db *sql.DB) (*ServerStats, 
 		}
 	}
 	return out, nil
+}
+
+// mysqlOwnSessionsNote says why a reading of the sessions is partial.
+const mysqlOwnSessionsNote = "This account lacks the PROCESS privilege, so the process list shows only its own sessions."
+
+// mysqlProcessList reads the process list joined to the InnoDB transactions,
+// and without them where that join is refused: each row of whichever answered
+// is handed to row. ownOnly reports that it was refused for want of a
+// privilege, which is the PROCESS privilege — and without it the list that
+// did answer holds this account's sessions and nobody else's.
+//
+// The refusal does not always arrive where a statement's errors do. MariaDB
+// refuses the statement; MySQL 8 accepts it, sends the columns, and refuses
+// on the first row, which reaches database/sql as a result that simply ends.
+// Read with Close alone that was an empty list and no error: a server with
+// forty clients reported none connected, and a restricted account was shown
+// no sessions where it has its own. So the result is read to its end and
+// asked how it ended. reset undoes what row made of a result that then
+// failed.
+func mysqlProcessList(ctx context.Context, db *sql.DB, joined, plain string, reset func(), row func(*sql.Rows) error) (ownOnly bool, err error) {
+	read := func(query string) error {
+		rows, err := db.QueryContext(ctx, query)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			if err := row(rows); err != nil {
+				return err
+			}
+		}
+		return rows.Err()
+	}
+	refused := read(joined)
+	if refused == nil {
+		return false, nil
+	}
+	reset()
+	return mysqlAccessDenied(refused), read(plain)
 }
 
 // mysqlSessionStatus puts a process-list row into the shared vocabulary. The
@@ -389,34 +433,26 @@ func containsString(list []string, s string) bool {
 // what tells a sleeping connection from one sleeping inside a transaction —
 // the difference between a pooled connection and a held lock.
 func (mysqlDialect) Sessions(ctx context.Context, db *sql.DB) ([]Activity, error) {
-	rows, err := db.QueryContext(ctx, `
+	now := time.Now().UTC()
+	out := []Activity{}
+	_, err := mysqlProcessList(ctx, db, `
 	  SELECT CAST(p.ID AS CHAR), COALESCE(p.USER, ''), COALESCE(p.DB, ''), COALESCE(p.COMMAND, ''),
 	         COALESCE(p.TIME, 0), COALESCE(p.INFO, ''), COALESCE(p.HOST, ''), COALESCE(p.STATE, ''),
 	         CASE WHEN t.trx_id IS NULL THEN -1 ELSE COALESCE(TIMESTAMPDIFF(SECOND, t.trx_started, NOW()), 0) END,
 	         CASE WHEN p.ID = CONNECTION_ID() THEN 1 ELSE 0 END
 	  FROM information_schema.PROCESSLIST p
 	  LEFT JOIN information_schema.INNODB_TRX t ON t.trx_mysql_thread_id = p.ID
-	  ORDER BY p.TIME DESC`)
-	if err != nil {
-		rows, err = db.QueryContext(ctx, `
-		  SELECT CAST(ID AS CHAR), COALESCE(USER, ''), COALESCE(DB, ''), COALESCE(COMMAND, ''),
-		         COALESCE(TIME, 0), COALESCE(INFO, ''), COALESCE(HOST, ''), COALESCE(STATE, ''),
-		         -1, CASE WHEN ID = CONNECTION_ID() THEN 1 ELSE 0 END
-		  FROM information_schema.PROCESSLIST
-		  ORDER BY TIME DESC`)
-		if err != nil {
-			return nil, err
-		}
-	}
-	now := time.Now().UTC()
-	out := []Activity{}
-	for rows.Next() {
+	  ORDER BY p.TIME DESC`, `
+	  SELECT CAST(ID AS CHAR), COALESCE(USER, ''), COALESCE(DB, ''), COALESCE(COMMAND, ''),
+	         COALESCE(TIME, 0), COALESCE(INFO, ''), COALESCE(HOST, ''), COALESCE(STATE, ''),
+	         -1, CASE WHEN ID = CONNECTION_ID() THEN 1 ELSE 0 END
+	  FROM information_schema.PROCESSLIST
+	  ORDER BY TIME DESC`, func() { out = out[:0] }, func(rows *sql.Rows) error {
 		var a Activity
 		var elapsed, txSeconds float64
 		var self int
 		if err := rows.Scan(&a.PID, &a.User, &a.Database, &a.State, &elapsed, &a.Query, &a.Client, &a.Wait, &txSeconds, &self); err != nil {
-			rows.Close()
-			return nil, err
+			return err
 		}
 		a.Self = self != 0
 		a.Status = mysqlSessionStatus(a.State, a.User, txSeconds >= 0)
@@ -437,8 +473,9 @@ func (mysqlDialect) Sessions(ctx context.Context, db *sql.DB) ([]Activity, error
 			a.TransactionStart = &start
 		}
 		out = append(out, a)
-	}
-	if err := rows.Close(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 

@@ -73,7 +73,7 @@ func (s *Server) handleMongoFind(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	res, err := dbx.MongoFindDocuments(ctx, client, db, collection, req.MongoFindSpec, req.Count == nil || *req.Count)
 	if err != nil {
-		return mongoFailure(err)
+		return mongoReadFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
@@ -98,7 +98,7 @@ func (s *Server) handleMongoCount(w http.ResponseWriter, r *http.Request) error 
 	defer cancel()
 	count, err := dbx.MongoCountDocuments(ctx, client, db, collection, req.MongoFindSpec)
 	if err != nil {
-		return mongoFailure(err)
+		return mongoReadFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"count": count})
 	return nil
@@ -129,7 +129,7 @@ func (s *Server) handleMongoDocument(w http.ResponseWriter, r *http.Request) err
 	defer cancel()
 	doc, err := dbx.MongoGetDocument(ctx, client, db, collection, req.ID)
 	if err != nil {
-		return mongoFailure(err)
+		return mongoReadFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"document": doc})
 	return nil
@@ -423,7 +423,7 @@ func (s *Server) handleMongoExport(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	export, err := dbx.MongoOpenExport(ctx, client, db, collection, spec)
 	if err != nil {
-		return mongoFailure(err)
+		return mongoReadFailed(err)
 	}
 	defer export.Close()
 

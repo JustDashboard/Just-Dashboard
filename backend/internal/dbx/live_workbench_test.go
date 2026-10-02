@@ -2261,3 +2261,158 @@ func TestLiveOracleCatalogue(t *testing.T) {
 		t.Error("no session is listed, not even this one")
 	}
 }
+
+// A cell can be emptied, whatever its column holds. The value written is no
+// value at all, and the driver that binds it has to send it as some type:
+// SQL Server's sends an nvarchar, which a varbinary, an image and a
+// sql_variant column refuse to be converted from, so a binary cell could be
+// filled from the grid and never emptied again. Every type a NULL has to
+// agree with is set to it here, in an UPDATE and in an INSERT, on each engine.
+//
+// The Oracle columns include JSON and BOOLEAN, which need 21c and 23ai.
+func TestLiveEveryColumnTypeTakesNoValue(t *testing.T) {
+	tables := map[Driver]struct{ columns, values string }{
+		DriverPostgres: {
+			`s TEXT, i INT, d NUMERIC(20,6), f DOUBLE PRECISION, flag BOOLEAN, dt DATE, ts TIMESTAMPTZ, u UUID,
+			 bin BYTEA, js JSONB, jt JSON, arr INT[], iv INTERVAL, bits BIT(8), vbits BIT VARYING(8), ip INET, x XML`,
+			`'a', 1, 1.5, 1.5, TRUE, DATE '2024-01-02', TIMESTAMPTZ '2024-01-02 03:04:05+02',
+			 '00112233-4455-6677-8899-aabbccddeeff', '\x00ff', '{"a": 1}', '{"a": 1}', '{1,2}', INTERVAL '1 day',
+			 B'10101010', B'101', '10.0.0.1', '<a/>'`,
+		},
+		DriverMySQL: {
+			`s VARCHAR(50), i INT, d DECIMAL(20,6), f DOUBLE, flag TINYINT(1), dt DATE, ts DATETIME(6),
+			 bin VARBINARY(16), fixed BINARY(4), bl BLOB, lbl LONGBLOB, js JSON, en ENUM('x','y'), bits BIT(8), yr YEAR`,
+			`'a', 1, 1.5, 1.5, 1, '2024-01-02', '2024-01-02 03:04:05', 0x00ff, 0x00ff00ff, 0x00ff, 0x00ff,
+			 '{"a": 1}', 'y', b'10101010', 2024`,
+		},
+		DriverMSSQL: {
+			`s NVARCHAR(50), i INT, d DECIMAL(20,6), f FLOAT, m MONEY, flag BIT, dt DATE, dt2 DATETIME2,
+			 dto DATETIMEOFFSET, u UNIQUEIDENTIFIER, bin VARBINARY(16), fixed BINARY(4), lbin VARBINARY(MAX),
+			 img IMAGE, anyv SQL_VARIANT, x XML, tx TEXT, ntx NTEXT`,
+			`N'a', 1, 1.5, 1.5, 12.34, 1, '2024-01-02', '2024-01-02T03:04:05', '2024-01-02T03:04:05+02:00',
+			 '00112233-4455-6677-8899-AABBCCDDEEFF', 0x00ff, 0x00ff00ff, 0x00ff, 0x00ff, CAST(7 AS INT),
+			 '<a>1</a>', 'legacy', N'legacy n'`,
+		},
+		DriverOracle: {
+			`s VARCHAR2(50), i NUMBER(10), d NUMBER(20,6), f BINARY_DOUBLE, dt DATE, ts TIMESTAMP,
+			 tstz TIMESTAMP WITH TIME ZONE, bin RAW(16), lraw BLOB, cl CLOB, ncl NCLOB, js JSON, flag BOOLEAN`,
+			`'a', 1, 1.5, 1.5, DATE '2024-01-02', TIMESTAMP '2024-01-02 03:04:05',
+			 TIMESTAMP '2024-01-02 03:04:05 +02:00', HEXTORAW('00FF'), HEXTORAW('00FF'), 'clob', N'nclob',
+			 JSON('{"a":1}'), TRUE`,
+		},
+	}
+	for _, e := range workbenchEngines() {
+		t.Run(e.name, func(t *testing.T) {
+			db, schema := openWorkbench(t, e)
+			ctx := context.Background()
+			dropAfter(t, db, "jdbf_no_value")
+			spec := tables[e.driver]
+			mustExec(t, db,
+				`CREATE TABLE jdbf_no_value (id INT PRIMARY KEY, `+spec.columns+`)`,
+				`INSERT INTO jdbf_no_value VALUES (1, `+spec.values+`)`)
+			table := e.ident("jdbf_no_value")
+			cols, err := mustDialectFor(e.driver).Columns(ctx, db, schema, table)
+			if err != nil || len(cols) < 2 {
+				t.Fatalf("columns: %v %v", cols, err)
+			}
+			empty := map[string]any{}
+			for _, c := range cols {
+				if !strings.EqualFold(c.Name, "id") {
+					empty[c.Name] = nil
+				}
+			}
+			inserted := map[string]any{e.ident("id"): json.Number("2")}
+			for name := range empty {
+				inserted[name] = nil
+			}
+			res, err := ApplyChanges(ctx, db, e.driver, ChangeSet{Schema: schema, Table: table, Changes: []Change{
+				{Op: ChangeUpdate, Key: e.row(map[string]any{"id": json.Number("1")}), Values: empty},
+				{Op: ChangeInsert, Values: inserted},
+			}})
+			if err != nil {
+				// Which column it was is the useful half of that.
+				t.Errorf("every column set to no value: %v", err)
+				for name := range empty {
+					if _, err := ApplyChanges(ctx, db, e.driver, ChangeSet{Schema: schema, Table: table, Changes: []Change{
+						{Op: ChangeUpdate, Key: e.row(map[string]any{"id": json.Number("1")}), Values: map[string]any{name: nil}},
+					}}); err != nil {
+						t.Errorf("  %s: %v", name, err)
+					}
+				}
+				return
+			}
+			if !res.Applied || len(res.Results) != 2 {
+				t.Fatalf("result = %+v", res)
+			}
+			for _, statement := range res.Statements {
+				if !strings.Contains(statement, "NULL") {
+					t.Errorf("the statement shown does not say NULL: %s", statement)
+				}
+			}
+			for _, c := range cols {
+				if strings.EqualFold(c.Name, "id") {
+					continue
+				}
+				quoted, err := mustDialectFor(e.driver).QuoteIdent(c.Name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var held int
+				if err := db.QueryRow(`SELECT COUNT(*) FROM jdbf_no_value WHERE ` + quoted + ` IS NOT NULL`).Scan(&held); err != nil || held != 0 {
+					t.Errorf("%s (%s) still holds a value in %d rows (%v)", c.Name, c.Type, held, err)
+				}
+			}
+			var rows int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM jdbf_no_value`).Scan(&rows); err != nil || rows != 2 {
+				t.Errorf("rows = %d (%v), want the one emptied and the one inserted empty", rows, err)
+			}
+		})
+	}
+}
+
+// PostgreSQL writes and reads a bit string as the text of its ones and zeros.
+// Its column used to be called binary, so the grid edited it as bytes and sent
+// \x00001111 back, which the server refuses. It is text: shown as it is
+// stored, written back as it is shown, and found by a filter in that form.
+func TestLivePostgresBitStringsAreText(t *testing.T) {
+	e := workbenchEngines()[0]
+	db, schema := openWorkbench(t, e)
+	ctx := context.Background()
+	dropAfter(t, db, "jdbf_bits")
+	mustExec(t, db,
+		`CREATE TABLE jdbf_bits (id INT PRIMARY KEY, fixed BIT(8), varying BIT VARYING(8))`,
+		`INSERT INTO jdbf_bits VALUES (1, B'10101010', B'101'), (2, NULL, NULL)`)
+	read := func(filters ...Filter) *BrowsePage {
+		t.Helper()
+		page, err := BrowseTablePage(ctx, db, e.driver, BrowseOptions{
+			Schema: schema, Table: "jdbf_bits", Sort: []SortKey{{Column: "id"}}, Filters: filters,
+		})
+		if err != nil {
+			t.Fatalf("browse: %v", err)
+		}
+		return page
+	}
+	page := read()
+	for i, name := range page.Columns {
+		if name != "id" && page.Kinds[i] != KindText {
+			t.Errorf("%s (%s) is of kind %q, want %q", name, page.Types[i], page.Kinds[i], KindText)
+		}
+	}
+	row, _ := rowObject(page.QueryResult, 0)
+	if row["fixed"] != "10101010" || row["varying"] != "101" {
+		t.Fatalf("row = %v, want the bits as text", row)
+	}
+	if _, err := ApplyChanges(ctx, db, e.driver, ChangeSet{Schema: schema, Table: "jdbf_bits", Changes: []Change{
+		{Op: ChangeUpdate, Key: map[string]any{"id": json.Number("1")}, Values: map[string]any{"fixed": "00001111", "varying": "11"}},
+		{Op: ChangeUpdate, Key: map[string]any{"id": json.Number("2")}, Values: map[string]any{"fixed": "11110000"}},
+	}}); err != nil {
+		t.Fatalf("bits written back as text: %v", err)
+	}
+	found := read(Filter{Column: "fixed", Op: "eq", Value: "00001111"})
+	if found.RowCount != 1 {
+		t.Fatalf("a filter for the bits as shown found %d rows", found.RowCount)
+	}
+	if row, _ := rowObject(found.QueryResult, 0); row["fixed"] != "00001111" || row["varying"] != "11" {
+		t.Errorf("row = %v after the edit", row)
+	}
+}

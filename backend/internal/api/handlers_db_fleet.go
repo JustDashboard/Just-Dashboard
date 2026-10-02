@@ -84,6 +84,17 @@ type fleetEntry struct {
 	// Unit is the systemd unit a native server runs under, where one does.
 	Unit     string `json:"unit,omitempty"`
 	Exposure string `json:"exposure"`
+	// Power is which of start, stop and restart the power route would accept
+	// for this connection right now, and Managed whether the access route can
+	// change how far its port reaches: the two readings the connection's own
+	// summary gives, so that a card can offer what the connection's page
+	// offers without working either out again from the fields above.
+	Power   dbPower `json:"power"`
+	Managed bool    `json:"managed"`
+	// InFlight is the start, stop or restart being carried out on the server
+	// from this dashboard, as the summary reports it. Absent when there is
+	// none.
+	InFlight *dbPowerChange `json:"inFlight,omitempty"`
 	// Consumers is how many deployment environments are bound to it.
 	Consumers int `json:"consumers"`
 	// LastBackup is when the newest dump of it was taken; nil for never.
@@ -161,6 +172,7 @@ func (s *Server) fillFleetEntry(ctx context.Context, view *dbHostView, e *fleetE
 		// Listed, flagged, and never dialled: there is no DSN to dial with.
 		e.State, e.Error = dbStateBroken, e.BrokenReason
 		e.Source, e.Exposure = dbSourceUnknown, dbSourceUnknown
+		e.Power = dbPower{Reason: dbPowerBrokenReason}
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
@@ -169,10 +181,15 @@ func (s *Server) fillFleetEntry(ctx context.Context, view *dbHostView, e *fleetE
 	if err != nil {
 		e.State, e.Error = dbStateBroken, "the connection could not be read"
 		e.Source, e.Exposure = dbSourceUnknown, dbSourceUnknown
+		e.Power = dbPower{Reason: dbPowerBrokenReason}
 		return
 	}
 	place := view.place(ctx, conn, dsn)
 	e.Source, e.Exposure = place.Source, string(place.Exposure)
+	// Read off the placement the entry already needed: no second look at the
+	// machine, and no dial.
+	e.Power, e.Managed = place.power(conn, view.systemctlAvailable()), place.Managed
+	defer func() { e.InFlight = s.dbConns.inFlight(conn.ID, e.State) }()
 	if place.Container != nil {
 		e.Container, e.ComposeProject = place.Container.Name, place.Container.ComposeProject
 	}
@@ -222,8 +239,11 @@ func (s *Server) fleetReadingFor(ctx context.Context, conn *dbConnection, dsn, m
 	}
 	reading := s.dialFleetReading(ctx, conn, dsn)
 	// A dial the request's own deadline cut short is not an answer about the
-	// server, and keeping it would hand the next poll the same non-answer.
-	if ctx.Err() == nil {
+	// server, and keeping it would hand the next poll the same non-answer. Nor
+	// is a refusal from a server that is being started or restarted from here:
+	// kept, it would go on reading "unreachable" for ten seconds after the
+	// engine had begun to answer, with "Starting…" drawn beside it.
+	if _, changing := s.dbConns.power.Load(conn.ID); ctx.Err() == nil && (reading.OK || !changing) {
 		s.dbConns.readings.Store(conn.ID, fleetReadingKept{dsn: sum, mark: mark, at: time.Now(), reading: reading})
 	}
 	return reading

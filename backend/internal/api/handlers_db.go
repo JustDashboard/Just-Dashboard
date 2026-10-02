@@ -576,7 +576,7 @@ func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) error {
 		defer client.Disconnect(context.Background())
 		status, err := dbx.MongoServerStatus(r.Context(), client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, map[string]any{"server": status})
 		return nil
@@ -589,7 +589,7 @@ func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) error {
 		defer client.Close()
 		info, err := dbx.RedisInfo(r.Context(), client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, map[string]any{"server": info})
 		return nil
@@ -616,7 +616,7 @@ func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {
 		defer client.Disconnect(context.Background())
 		dbs, err := dbx.MongoDatabases(r.Context(), client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, dbs)
 		return nil
@@ -629,7 +629,7 @@ func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {
 		defer client.Close()
 		dbs, err := dbx.RedisDatabases(r.Context(), client)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, dbs)
 		return nil
@@ -640,7 +640,7 @@ func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {
 	}
 	dbs, err := dbx.ListDatabases(r.Context(), pool, conn.Driver)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, dbs)
 	return nil
@@ -670,7 +670,7 @@ func (s *Server) handleDBTables(w http.ResponseWriter, r *http.Request) error {
 		}
 		cols, err := dbx.MongoCollections(r.Context(), client, schema)
 		if err != nil {
-			return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+			return queryFailed(err)
 		}
 		httpx.JSON(w, http.StatusOK, cols)
 		return nil
@@ -681,7 +681,7 @@ func (s *Server) handleDBTables(w http.ResponseWriter, r *http.Request) error {
 	}
 	tables, err := dbx.ListTables(r.Context(), pool, conn.Driver, schema)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, tables)
 	return nil
@@ -699,7 +699,7 @@ func (s *Server) handleDBColumns(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	cols, err := dbx.ListColumns(r.Context(), pool, conn.Driver, q.Get("schema"), q.Get("table"))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, cols)
 	return nil
@@ -1207,7 +1207,7 @@ func (s *Server) handleDBTableDetail(w http.ResponseWriter, r *http.Request) err
 	defer cancel()
 	detail, err := dbx.DescribeTable(ctx, pool, conn.Driver, q.Get("schema"), q.Get("table"))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	// No columns and no catalogue entry is a table that is not there. It used
 	// to come back as an empty structure, which a page drew as a table with
@@ -1282,7 +1282,7 @@ func (s *Server) handleDBGenerateORM(w http.ResponseWriter, r *http.Request) err
 		return httpx.BadRequest("%s", dbx.ORMRequestMessage(err))
 	}
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	res, err := dbx.GenerateORMFiles(schema, opts)
 	if err != nil {
@@ -1737,7 +1737,7 @@ func (s *Server) handleDBOutline(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	outline, err := dbx.OutlineWithLimit(ctx, pool, conn.Driver, q.Get("schema"), atoiDefault(q.Get("limit"), 0))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, outline)
 	return nil
@@ -1758,7 +1758,7 @@ func (s *Server) handleDBRelations(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	rels, err := dbx.Relations(ctx, pool, conn.Driver, r.URL.Query().Get("schema"))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, rels)
 	return nil
@@ -1889,7 +1889,7 @@ func (s *Server) handleDBActivity(w http.ResponseWriter, r *http.Request) error 
 			})
 			return nil
 		}
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"sessions": list, "supported": true})
 	return nil
@@ -1967,7 +1967,7 @@ func (s *Server) handleDBSearch(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	res, err := dbx.Search(ctx, pool, conn.Driver, q.Get("schema"), needle)
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
@@ -1990,7 +1990,7 @@ func (s *Server) handleDBOverview(w http.ResponseWriter, r *http.Request) error 
 	defer cancel()
 	res, err := dbx.StorageOverview(ctx, pool, conn.Driver, r.URL.Query().Get("schema"))
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
@@ -2010,6 +2010,12 @@ type rowSQLRequest struct {
 // implementation of "what does this row mean in this engine's syntax", and a
 // second one in TypeScript would quote a value differently on the day it
 // mattered. Nothing here executes the statement — it is text for a clipboard.
+//
+// The table's columns are read from the server so that the statement names
+// them in the table's own order and writes its numbers as numbers. That read
+// is the only thing asked of the server and it is best effort: a row that is
+// already on the page is still copied, in the older form, when its server has
+// stopped answering.
 func (s *Server) handleDBRowSQL(w http.ResponseWriter, r *http.Request) error {
 	id, err := parseID(r)
 	if err != nil {
@@ -2025,12 +2031,18 @@ func (s *Server) handleDBRowSQL(w http.ResponseWriter, r *http.Request) error {
 	if len(req.Rows) == 0 {
 		return httpx.BadRequest("at least one row is required")
 	}
-	conn, _, err := s.dbConnRow(r.Context(), id)
+	conn, dsn, err := s.dbConnRow(r.Context(), id)
 	if err != nil {
 		return err
 	}
 	httpx.SkipAudit(r)
-	out, err := dbx.RowsInsertSQL(conn.Driver, req.Schema, req.Table, req.Rows)
+	ctx, cancel := timeoutCtx(r, 15*time.Second)
+	defer cancel()
+	var pool *sql.DB
+	if conn.Driver.IsSQL() {
+		pool, _ = s.modules.dbs.Pool(ctx, id, conn.Driver, dsn)
+	}
+	out, err := dbx.TableRowsInsertSQL(ctx, pool, conn.Driver, req.Schema, req.Table, req.Rows)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
@@ -2074,7 +2086,7 @@ func (s *Server) handleDBGraph(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		// A catalogue the engine would not read is the engine failing, not the
 		// request being wrong, and is reported the way its sibling reads are.
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, graph)
 	return nil

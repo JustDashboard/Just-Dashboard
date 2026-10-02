@@ -80,7 +80,7 @@ func (s *Server) handleDBCatalog(w http.ResponseWriter, r *http.Request) error {
 		Schema: q.Get("schema"), All: queryFlag(r, "all"), Limit: atoiDefault(q.Get("limit"), 0),
 	})
 	if err != nil {
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, catalog)
 	return nil
@@ -118,7 +118,7 @@ func (s *Server) handleDBObject(w http.ResponseWriter, r *http.Request) error {
 	case errors.Is(err, dbx.ErrNoDefinition), errors.Is(err, dbx.ErrUnsupported), errors.Is(err, dbx.ErrInvalidObject):
 		return httpx.BadRequest("%v", err)
 	default:
-		return httpx.Err(http.StatusBadGateway, "query_failed", err.Error())
+		return queryFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, def)
 	return nil
