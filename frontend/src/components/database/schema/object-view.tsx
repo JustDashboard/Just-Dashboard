@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Code, Copy, Plus, SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
@@ -40,11 +40,14 @@ type ObjectSelection = Extract<NonNullable<Selected>, { type: "object" }>
  */
 export function ObjectView({
   selected,
+  asked,
   railOpen,
   onToggleRail,
   onChanged,
 }: {
   selected: ObjectSelection
+  /** Counts the times the reader asked for the schema to be read again. */
+  asked: number
   railOpen: boolean
   onToggleRail: () => void
   /** A label was added: the catalogue's copy of the type is stale. */
@@ -69,6 +72,13 @@ export function ObjectView({
     0,
     [id, selected.kind, selected.schema, selected.name, selected.signature, selected.table],
   )
+  const reread = read.refresh
+  const answered = useRef(asked)
+  useEffect(() => {
+    if (answered.current === asked) return
+    answered.current = asked
+    reread()
+  }, [asked, reread])
   const data = read.data
   const group = groupOfKind(selected.kind)
   const routine = selected.kind === "function" || selected.kind === "procedure"

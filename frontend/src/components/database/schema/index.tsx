@@ -133,6 +133,15 @@ export function SqlSchema() {
 
   const refreshCatalog = catalog.refresh
   const refreshDetail = detail.refresh
+  // "Read the schema again" is asked of the tree and means the page: the
+  // object open beside it was read at the same moment and is as stale.
+  const [asked, setAsked] = useState(0)
+  const refreshAll = useCallback(() => {
+    refreshCatalog()
+    refreshDetail()
+    setAsked((n) => n + 1)
+  }, [refreshCatalog, refreshDetail])
+
   // A form that made something goes to what it made, and that address no
   // longer asks for the form. Closing it must not then write the old address
   // back over the new one.
@@ -210,6 +219,7 @@ export function SqlSchema() {
               catalog={catalog}
               selected={selected}
               creations={creations}
+              onRefresh={refreshAll}
               saidBeside={beside && selected === null}
             />
             {beside ? (
@@ -249,6 +259,7 @@ export function SqlSchema() {
             onView={(view: TableViewId) => select({ view: view === "columns" ? null : view })}
             detail={detail}
             catalog={data}
+            asked={asked}
             railOpen={railShown}
             onToggleRail={toggleRail}
             onChanged={() => {
@@ -268,6 +279,7 @@ export function SqlSchema() {
           <ObjectView
             key={`${selected.kind}:${selected.schema}:${selected.name}:${selected.signature}:${selected.table}`}
             selected={selected}
+            asked={asked}
             railOpen={railShown}
             onToggleRail={toggleRail}
             onChanged={refreshCatalog}

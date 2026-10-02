@@ -81,6 +81,7 @@ export function SchemaRail({
   catalog,
   selected,
   creations,
+  onRefresh,
   saidBeside = false,
   className,
 }: {
@@ -88,6 +89,8 @@ export function SchemaRail({
   selected: Selected
   /** What can be made here, for the head's "New" menu; empty where the role or the engine cannot. */
   creations: Verb[]
+  /** Reads the tree again, and with it whatever is open beside it. */
+  onRefresh: () => void
   /** The page says beside the rail what is wrong, with the way on: the rail does not say it twice. */
   saidBeside?: boolean
   className?: string
@@ -163,7 +166,7 @@ export function SchemaRail({
         <IconAction
           label="Read the schema again"
           className="size-7 max-sm:size-8"
-          onClick={catalog.refresh}
+          onClick={onRefresh}
         >
           <RefreshClockwise />
         </IconAction>

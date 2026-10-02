@@ -708,6 +708,17 @@ test("a catalogue that cannot be read offers Retry, and a later failure keeps wh
   ).toBeVisible()
 })
 
+test("reading the schema again reads the open table again with it", async ({ page }) => {
+  const { sent } = await mockSchema(page)
+  await page.goto(TABLE)
+  await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
+  const before = sent.tables.length
+  await page.getByRole("button", { name: "Read the schema again" }).click()
+  await expect.poll(() => sent.tables.length).toBe(before + 1)
+  // What was on screen stays there while it is read.
+  await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
+})
+
 /* ------------------------------------------------------------ new table */
 
 test("?new=table opens the panel; a half-filled column stops it and the statement is the server's", async ({

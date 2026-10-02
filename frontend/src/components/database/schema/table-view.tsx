@@ -26,6 +26,7 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { FormFact } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Metric } from "@/components/page"
@@ -123,6 +124,7 @@ export function TableView({
   onView,
   detail,
   catalog,
+  asked,
   railOpen,
   onToggleRail,
   onChanged,
@@ -136,6 +138,8 @@ export function TableView({
   detail: PollState<DbTableDetail>
   /** The schema's catalogue, for the triggers on this table and where a new view may land. */
   catalog: DbCatalog | undefined
+  /** Counts the times the reader asked for the schema to be read again. */
+  asked: number
   railOpen: boolean
   onToggleRail: () => void
   /** The table's structure changed: what was read of it, and of the schema, is stale. */
@@ -673,7 +677,7 @@ export function TableView({
                 <TableDefinition detail={data} />
               </>
             ) : (
-              <TableStatistics detail={data} mayRun={!readOnly && changeable} />
+              <TableStatistics detail={data} mayRun={!readOnly && changeable} asked={asked} />
             )}
           </div>
         </>
@@ -772,6 +776,8 @@ function Limits({ lines }: { lines: string[] }) {
   )
 }
 
+/** Below this the columns of a table are read down, a column to a block, instead of across. */
+const NARROW = 640
 const HEAD = "h-8 px-3 first:pl-4 last:pr-4"
 const CELL = "px-3 py-1 first:pl-4 last:pr-4"
 /** A row's controls at the row's own height, so a line of the table is a line of text. */
@@ -850,120 +856,163 @@ function Columns({
       : []),
   ]
   const acts = editable || droppable
+  // The readings are drawn across while there is room for them and down when
+  // there is not: one shape, chosen by the width the table is given.
+  const [box, width] = useColumnWidth<HTMLDivElement>()
+  const narrow = width > 0 && width < NARROW
+
+  const marks = (column: DbColumn) => {
+    const reference = foreign.get(column.name)
+    return (
+      <>
+        {detail.primaryKey.includes(column.name) && (
+          <span className="flex items-center gap-1">
+            <Key aria-hidden className="size-3 text-chart-2" />
+            <Tag>{keyWord}</Tag>
+          </span>
+        )}
+        {unique.has(column.name) && (
+          <span className="flex items-center gap-1">
+            <Fingerprint aria-hidden className="size-3 text-muted-foreground" />
+            <Tag>unique</Tag>
+          </span>
+        )}
+        {column.identity && <Tag title={column.identity}>numbered</Tag>}
+        {column.generated && <Tag>computed</Tag>}
+        {reference && (
+          <Link
+            href={href(
+              "schema",
+              tableParams(reference.key.refSchema ?? detail.schema, reference.key.refTable),
+            )}
+            className="flex items-center gap-1 rounded-sm font-mono text-xs text-muted-foreground focus-ring transition-colors hover:text-foreground"
+          >
+            <Linked aria-hidden className="size-3 text-chart-1" />
+            {reference.key.refTable}.{reference.key.refColumns[reference.index]}
+          </Link>
+        )}
+      </>
+    )
+  }
+  const said = (column: DbColumn) =>
+    column.generated ? `= ${column.generated}` : (column.default ?? "")
 
   return (
-    <div className="@container min-h-0 flex-1 overflow-y-auto">
-      <Table>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead className={cn(HEAD, "w-10 pr-0 text-right @max-[52rem]:hidden")}>
-              #
-            </TableHead>
-            <TableHead className={HEAD}>Name</TableHead>
-            <TableHead className={HEAD}>Type</TableHead>
-            <TableHead className={HEAD}>NULL</TableHead>
-            <TableHead className={cn(HEAD, "@max-[34rem]:hidden")}>Default</TableHead>
-            <TableHead className={HEAD}>Key</TableHead>
-            {acts && (
-              <TableHead className={cn(HEAD, "w-px")}>
-                <span className="sr-only">Actions</span>
-              </TableHead>
-            )}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+    <div ref={box} className="@container min-h-0 flex-1 overflow-y-auto">
+      {narrow ? (
+        <ul aria-label="Columns" className="divide-y divide-hairline border-b border-hairline">
           {detail.columns.map((column) => {
-            const reference = foreign.get(column.name)
-            const primary = detail.primaryKey.includes(column.name)
             const verbs = verbsFor(column)
             return (
-              <TableRow key={column.name} className="group">
-                <TableCell
-                  className={cn(
-                    CELL,
-                    "numeric pr-0 text-right text-muted-foreground @max-[52rem]:hidden",
-                  )}
-                >
-                  {column.position}
-                </TableCell>
-                <TableCell className={CELL}>
-                  <span className="font-mono font-medium">{column.name}</span>
+              <li key={column.name} className="group flex items-start gap-2 py-2 pr-2 pl-4">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="font-mono text-xs font-medium">{column.name}</span>
+                    <Tag mono className="block max-w-full truncate" title={column.type}>
+                      {column.type}
+                    </Tag>
+                  </div>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
+                    <span>{column.nullable ? "takes NULL" : "not null"}</span>
+                    {said(column) && (
+                      <span className="max-w-full min-w-0 truncate font-mono" title={said(column)}>
+                        {column.generated ? "" : "default "}
+                        {said(column)}
+                      </span>
+                    )}
+                    {marks(column)}
+                  </div>
                   {column.comment && (
-                    <p
-                      className="max-w-80 truncate text-hint text-muted-foreground"
-                      title={column.comment}
-                    >
-                      {column.comment}
-                    </p>
+                    <p className="text-hint text-muted-foreground">{column.comment}</p>
                   )}
-                </TableCell>
-                <TableCell className={CELL}>
-                  <Tag mono className="block max-w-48 truncate" title={column.type}>
-                    {column.type}
-                  </Tag>
-                </TableCell>
-                <TableCell className={cn(CELL, "text-muted-foreground")}>
-                  {column.nullable ? "yes" : "no"}
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    CELL,
-                    "max-w-40 truncate font-mono text-muted-foreground @max-[34rem]:hidden",
-                  )}
-                  title={column.generated ?? column.default}
-                >
-                  {column.generated ? `= ${column.generated}` : (column.default ?? "")}
-                </TableCell>
-                <TableCell className={CELL}>
-                  <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                    {primary && (
-                      <span className="flex items-center gap-1">
-                        <Key aria-hidden className="size-3 text-chart-2" />
-                        <Tag>{keyWord}</Tag>
-                      </span>
-                    )}
-                    {unique.has(column.name) && (
-                      <span className="flex items-center gap-1">
-                        <Fingerprint aria-hidden className="size-3 text-muted-foreground" />
-                        <Tag>unique</Tag>
-                      </span>
-                    )}
-                    {column.identity && <Tag title={column.identity}>numbered</Tag>}
-                    {column.generated && <Tag>computed</Tag>}
-                    {reference && (
-                      <Link
-                        href={href(
-                          "schema",
-                          tableParams(
-                            reference.key.refSchema ?? detail.schema,
-                            reference.key.refTable,
-                          ),
-                        )}
-                        className="flex items-center gap-1 rounded-sm font-mono text-xs text-muted-foreground focus-ring transition-colors hover:text-foreground"
-                      >
-                        <Linked aria-hidden className="size-3 text-chart-1" />
-                        {reference.key.refTable}.{reference.key.refColumns[reference.index]}
-                      </Link>
-                    )}
-                  </span>
-                </TableCell>
-                {acts && (
-                  <TableCell className={cn(CELL, "pl-0")}>
-                    {verbs.length > 0 && (
-                      <VerbActions
-                        verbs={verbs}
-                        dim
-                        menuLabel={`Actions for ${column.name}`}
-                        className={ROW_ACTIONS}
-                      />
-                    )}
-                  </TableCell>
+                </div>
+                {verbs.length > 0 && (
+                  <VerbActions verbs={verbs} menuLabel={`Actions for ${column.name}`} />
                 )}
-              </TableRow>
+              </li>
             )
           })}
-        </TableBody>
-      </Table>
+        </ul>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className={cn(HEAD, "w-10 pr-0 text-right @max-[52rem]:hidden")}>
+                #
+              </TableHead>
+              <TableHead className={HEAD}>Name</TableHead>
+              <TableHead className={HEAD}>Type</TableHead>
+              <TableHead className={HEAD}>NULL</TableHead>
+              <TableHead className={HEAD}>Default</TableHead>
+              <TableHead className={HEAD}>Key</TableHead>
+              {acts && (
+                <TableHead className={cn(HEAD, "w-px")}>
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {detail.columns.map((column) => {
+              const verbs = verbsFor(column)
+              return (
+                <TableRow key={column.name} className="group">
+                  <TableCell
+                    className={cn(
+                      CELL,
+                      "numeric pr-0 text-right text-muted-foreground @max-[52rem]:hidden",
+                    )}
+                  >
+                    {column.position}
+                  </TableCell>
+                  <TableCell className={CELL}>
+                    <span className="font-mono font-medium">{column.name}</span>
+                    {column.comment && (
+                      <p
+                        className="max-w-80 truncate text-hint text-muted-foreground"
+                        title={column.comment}
+                      >
+                        {column.comment}
+                      </p>
+                    )}
+                  </TableCell>
+                  <TableCell className={CELL}>
+                    <Tag mono className="block max-w-48 truncate" title={column.type}>
+                      {column.type}
+                    </Tag>
+                  </TableCell>
+                  <TableCell className={cn(CELL, "text-muted-foreground")}>
+                    {column.nullable ? "yes" : "no"}
+                  </TableCell>
+                  <TableCell
+                    className={cn(CELL, "max-w-40 truncate font-mono text-muted-foreground")}
+                    title={said(column)}
+                  >
+                    {said(column)}
+                  </TableCell>
+                  <TableCell className={CELL}>
+                    <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                      {marks(column)}
+                    </span>
+                  </TableCell>
+                  {acts && (
+                    <TableCell className={cn(CELL, "pl-0")}>
+                      {verbs.length > 0 && (
+                        <VerbActions
+                          verbs={verbs}
+                          dim
+                          menuLabel={`Actions for ${column.name}`}
+                          className={ROW_ACTIONS}
+                        />
+                      )}
+                    </TableCell>
+                  )}
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      )}
       <Limits
         lines={
           unchangeable

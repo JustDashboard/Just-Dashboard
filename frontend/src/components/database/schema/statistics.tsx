@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ApiError, api, get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -58,10 +58,13 @@ const kept = (value: number | undefined): value is number => value !== undefined
 export function TableStatistics({
   detail,
   mayRun,
+  asked,
 }: {
   detail: DbTableDetail
   /** The connection takes changes here: not protected, and a schema of the reader's own. */
   mayRun: boolean
+  /** Counts the times the reader asked for the schema to be read again. */
+  asked: number
 }) {
   const { id, engine } = useDatabase()
   const stats = usePoll(
@@ -89,10 +92,19 @@ export function TableStatistics({
   const stat = stats.data?.tables?.find(
     (entry) => entry.table === detail.name && (entry.schema === detail.schema || !entry.schema),
   )
-  const refresh = () => {
-    stats.refresh()
-    indexes.refresh()
-  }
+  const refreshStats = stats.refresh
+  const refreshIndexes = indexes.refresh
+  const refresh = useCallback(() => {
+    refreshStats()
+    refreshIndexes()
+  }, [refreshStats, refreshIndexes])
+  // Asked again from the tree: the figures are read again with the rest.
+  const answered = useRef(asked)
+  useEffect(() => {
+    if (answered.current === asked) return
+    answered.current = asked
+    refresh()
+  }, [asked, refresh])
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
