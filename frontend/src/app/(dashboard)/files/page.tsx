@@ -67,7 +67,7 @@ import { PlacesMenu } from "@/components/files/places-menu"
 import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
 import { PreviewPanel } from "@/components/files/preview-panel"
-import { QuickOpen } from "@/components/files/quick-open"
+import { QuickOpen, type FileSearchMode } from "@/components/files/quick-open"
 import {
   archiveHref,
   colourVerb,
@@ -99,7 +99,7 @@ import { startPathDrag, useDropTarget, type DropMode } from "@/components/files/
 import { ResizeHandle } from "@/components/resize-handle"
 import { Meter, utilisationTone } from "@/components/meter"
 import { IconAction } from "@/components/icon-action"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
@@ -134,6 +134,8 @@ const INSPECTOR = { base: 320, min: 260, max: 560 }
 const EMPTY = new Set<string>()
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
+// Reading register: the workbench owns its scroll boundaries; directory and
+// selection counts stay in the listing footer, where they describe the work.
 export default function FilesPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
@@ -195,6 +197,8 @@ export default function FilesPage() {
   const [permsEntry, setPermsEntry] = useState<FileEntry | null>(null)
   const [symlinkOpen, setSymlinkOpen] = useState(false)
   const [quickOpen, setQuickOpen] = useState(false)
+  const [quickMode, setQuickMode] = useState<FileSearchMode>("names")
+  const [searchLocation, setSearchLocation] = useState<{ path: string; line?: number }>()
   const [clip, setClip] = useState<Clip | null>(null)
   // The selection and the active row are scoped to the directory they were
   // made in, so navigating away discards both without a reset effect.
@@ -900,8 +904,15 @@ export default function FilesPage() {
       const mod = event.metaKey || event.ctrlKey
       const key = event.key.toLowerCase()
 
+      if (mod && event.shiftKey && key === "f") {
+        event.preventDefault()
+        setQuickMode("content")
+        setQuickOpen(true)
+        return
+      }
       if (mod && key === "p") {
         event.preventDefault()
+        setQuickMode("names")
         setQuickOpen(true)
         return
       }
@@ -1028,7 +1039,7 @@ export default function FilesPage() {
             <IconAction
               label={showSidebar ? "Hide the sidebar" : "Show the sidebar"}
               aria-pressed={showSidebar}
-              className="hidden size-7 lg:inline-flex"
+              className="hidden size-8 lg:inline-flex"
               onClick={() => setShowSidebar(!showSidebar)}
             >
               {showSidebar ? <SidebarLeftClose /> : <SidebarLeftOpen />}
@@ -1046,7 +1057,7 @@ export default function FilesPage() {
                   size="icon-sm"
                   variant="ghost"
                   aria-label="Places"
-                  className="size-7 text-muted-foreground"
+                  className="size-8 text-muted-foreground"
                 >
                   <Location className="size-3.5" />
                 </Button>
@@ -1066,7 +1077,7 @@ export default function FilesPage() {
                     <button
                       type="button"
                       aria-label="Colour all folders"
-                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md focus-ring transition-colors hover:bg-row-hover"
+                      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md focus-ring transition-colors hover:bg-row-hover"
                     >
                       <FolderSwatch colour={defaultColour ?? "blue"} className="size-4" />
                     </button>
@@ -1085,7 +1096,7 @@ export default function FilesPage() {
               {canWrite && here && (
                 <IconAction
                   label={starred ? "Unstar this folder" : "Star this folder"}
-                  className="size-7"
+                  className="size-8"
                   onClick={() => toggleStar(here.path, here.name)}
                 >
                   {starred ? <StarFill className="text-warning" /> : <Star />}
@@ -1102,7 +1113,10 @@ export default function FilesPage() {
                     size="sm"
                     aria-label="Find"
                     className="text-muted-foreground hover:text-foreground md:w-40 md:justify-start"
-                    onClick={() => setQuickOpen(true)}
+                    onClick={() => {
+                      setQuickMode("names")
+                      setQuickOpen(true)
+                    }}
                   >
                     <MagnifyingGlass className="size-4" />
                     <span className="hidden md:inline">Find</span>
@@ -1111,13 +1125,19 @@ export default function FilesPage() {
                     </kbd>
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Fuzzy-find a file or folder under here</TooltipContent>
+                <TooltipContent>Find files · Ctrl+P / ⌘P</TooltipContent>
               </Tooltip>
-              <SearchDialog
-                path={path ?? "/"}
-                onOpen={(p, isDir) => (isDir ? navigate(p) : setEditing(p))}
-              />
-              <IconAction label="Refresh" className="size-7" onClick={reload}>
+              <IconAction
+                label="Search inside files"
+                className="size-8"
+                onClick={() => {
+                  setQuickMode("content")
+                  setQuickOpen(true)
+                }}
+              >
+                <PreviewDocument />
+              </IconAction>
+              <IconAction label="Refresh" className="size-8" onClick={reload}>
                 <RefreshClockwise />
               </IconAction>
               <ToggleGroup
@@ -1127,12 +1147,12 @@ export default function FilesPage() {
                 value={view}
                 onValueChange={(v) => v && setView(v)}
                 aria-label="View"
-                className="h-7"
+                className="h-8"
               >
-                <ToggleGroupItem value="list" aria-label="Details" className="h-7 min-w-7 px-1.5">
+                <ToggleGroupItem value="list" aria-label="Details" className="h-8 min-w-8 px-1.5">
                   <ListUnordered className="size-3.5" />
                 </ToggleGroupItem>
-                <ToggleGroupItem value="grid" aria-label="Tiles" className="h-7 min-w-7 px-1.5">
+                <ToggleGroupItem value="grid" aria-label="Tiles" className="h-8 min-w-8 px-1.5">
                   <GridSquare className="size-3.5" />
                 </ToggleGroupItem>
               </ToggleGroup>
@@ -1182,7 +1202,7 @@ export default function FilesPage() {
               <IconAction
                 label={showInspector ? "Hide the details" : "Show the details"}
                 aria-pressed={showInspector}
-                className="hidden size-7 xl:inline-flex"
+                className="hidden size-8 xl:inline-flex"
                 onClick={() => setShowInspector(!showInspector)}
               >
                 {showInspector ? <SidebarRightClose /> : <SidebarRightOpen />}
@@ -1496,7 +1516,15 @@ export default function FilesPage() {
         onOpenChange={setQuickOpen}
         root={path ?? "/"}
         home={places.data?.home}
-        onOpenPath={(p, isDir) => (isDir ? navigate(p) : setEditing(p))}
+        entries={listing.data?.entries}
+        initialMode={quickMode}
+        onOpenPath={(p, isDir, line) => {
+          if (isDir) navigate(p)
+          else {
+            setSearchLocation({ path: p, line })
+            setEditing(p)
+          }
+        }}
       />
       <MediaViewer
         items={viewable}
@@ -1519,11 +1547,14 @@ export default function FilesPage() {
       />
       <FileEditorSheet
         path={editing}
+        root={path ?? undefined}
+        revealLine={searchLocation?.path === editing ? searchLocation.line : undefined}
         onOpenChange={(open) => !open && setEditing(null)}
         onSaved={reload}
       />
       <ImageEditorSheet
         path={editingImage}
+        root={path ?? undefined}
         modified={activeEntry?.path === editingImage ? activeEntry?.modified : undefined}
         onOpenChange={(open) => !open && setEditingImage(null)}
         onSaved={() => {
@@ -1607,7 +1638,7 @@ function ArrangeMenu({
             <Button
               variant="ghost"
               size="icon-sm"
-              className="size-7 text-muted-foreground"
+              className="size-8 text-muted-foreground"
               aria-label="Arrange"
             >
               <SettingsSliders className="size-3.5" />
@@ -1930,101 +1961,5 @@ function SymlinkBody({
         </div>
       </div>
     </Modal>
-  )
-}
-
-/**
- * The other search: a literal substring or a regular expression, optionally
- * inside file contents.
- *
- * It stays next to the fuzzy finder rather than being replaced by it because
- * the two answer different questions — this one is "which files mention this
- * connection string", and no amount of name matching answers that.
- */
-function SearchDialog({
-  path,
-  onOpen,
-}: {
-  path: string
-  onOpen: (path: string, isDir: boolean) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const [content, setContent] = useState(true)
-  const [regex, setRegex] = useState(false)
-  const [hits, setHits] = useState<
-    { path: string; name: string; isDir: boolean; line?: number; snippet?: string }[]
-  >([])
-  const [busy, setBusy] = useState(false)
-
-  const run = async () => {
-    if (!query) return
-    setBusy(true)
-    try {
-      setHits(await get("/files/search", { path, q: query, content, regex, limit: 200 }))
-    } catch (err) {
-      notify.error("Search failed", err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <>
-      <IconAction label="Search inside files" className="size-7" onClick={() => setOpen(true)}>
-        <PreviewDocument />
-      </IconAction>
-      <Modal
-        open={open}
-        onOpenChange={setOpen}
-        size="lg"
-        title={<>Search under {truncateMiddle(path, 40)}</>}
-      >
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && run()}
-              placeholder={content ? "Text to find inside files" : "File or directory name"}
-            />
-            <Button onClick={run} disabled={busy || !query} pending={busy}>
-              Search
-            </Button>
-          </div>
-          <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-2 text-body">
-              <Checkbox checked={content} onCheckedChange={(v) => setContent(v === true)} />
-              Search inside file contents
-            </label>
-            <label className="flex items-center gap-2 text-body">
-              <Checkbox checked={regex} onCheckedChange={(v) => setRegex(v === true)} />
-              Regular expression
-            </label>
-          </div>
-          <div className="max-h-80 space-y-0.5 overflow-auto">
-            {hits.map((hit) => (
-              <button
-                key={`${hit.path}:${hit.line ?? 0}`}
-                className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-accent"
-                onClick={() => {
-                  onOpen(hit.path, hit.isDir)
-                  setOpen(false)
-                }}
-              >
-                <span className="block truncate font-mono text-xs">{hit.path}</span>
-                {hit.snippet && (
-                  <span className="block truncate text-hint text-muted-foreground">
-                    line {hit.line}: {hit.snippet}
-                  </span>
-                )}
-              </button>
-            ))}
-            {!busy && hits.length === 0 && query && <EmptyNote>No matches.</EmptyNote>}
-          </div>
-        </div>
-      </Modal>
-    </>
   )
 }
