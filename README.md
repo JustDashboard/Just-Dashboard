@@ -214,10 +214,8 @@ health checks and runtime limits remain editable before the first deployment.
 
 ### Databases
 
-![A PostgreSQL database with its masked connection string, table sizes and connected applications](docs/databases.png)
+![A PostgreSQL database's home: live sessions, transactions and cache readings, an activity chart, what needs attention, the busiest statements and the largest tables](docs/databases.png)
 
-<!-- LEAD: docs/databases.png above still shows the page before the rebuild; it is re-shot for this
-     release, and the alt text goes with the new picture. -->
 Every database on the server, not only the connected ones: containers running or stopped, servers
 installed on the machine and SQLite files on disk are found and listed, each saying what keeps it
 from being opened, and whatever needs attention carries its fix. PostgreSQL, MySQL and MariaDB,
