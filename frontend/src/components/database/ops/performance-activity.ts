@@ -1,5 +1,6 @@
 import type {
   DbActivity,
+  DbActivityResponse,
   DbLockWait,
   DbSessionStatus,
 } from "@/components/database/ops/performance-types"
@@ -142,6 +143,44 @@ export function countByState(sessions: readonly DbActivity[]): Record<DbSessionS
   }
   for (const session of sessions) counts[statusOf(session)] += 1
   return counts
+}
+
+/**
+ * What the session list says at a glance: how many are working, how many are
+ * held up, how many hold a transaction open and do nothing.
+ *
+ * The page's headline figures are taken from this where the list can be read,
+ * rather than from the server's own counters: the tile and the chip under it
+ * are then one count of one list, and they cannot disagree. A counter can —
+ * PostgreSQL counts a session waiting on a lock among the active ones, and
+ * MySQL's counters know nothing of a row lock — and a page that prints "0
+ * waiting" over a list with a blocked session in it is wrong where it matters.
+ */
+export type SessionTally = {
+  working: number
+  waiting: number
+  inTransaction: number
+  idle: number
+  /** The only session working is the dashboard's own read of the list. */
+  onlyOwn: boolean
+}
+
+/**
+ * The tally of a session list, or nothing where the list is not one to count:
+ * the engine refused it, or it came back empty — which is an account that may
+ * not list sessions, since the one that asked is always on the server.
+ */
+export function tallySessions(answer: DbActivityResponse | undefined): SessionTally | undefined {
+  if (!answer?.supported || answer.sessions.length === 0) return undefined
+  const counts = countByState(answer.sessions)
+  const working = answer.sessions.filter((session) => statusOf(session) === "active")
+  return {
+    working: counts.active,
+    waiting: counts.blocked,
+    inTransaction: counts.idle_in_transaction,
+    idle: counts.idle,
+    onlyOwn: working.length > 0 && working.every((session) => session.self),
+  }
 }
 
 /**

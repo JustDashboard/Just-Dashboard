@@ -2,6 +2,7 @@
 
 import { memo, useMemo } from "react"
 import { duration } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import { Metric, MetricStrip } from "@/components/page"
 import {
@@ -14,11 +15,10 @@ import {
 } from "@/components/database/home/charts"
 import { chartRows, heldSeconds, type Sample } from "@/components/database/home/samples"
 import { SAMPLE_EVERY_MS } from "@/components/database/home/use-samples"
-import { OVERVIEW_CHARTS } from "@/components/database/ops/performance-figures"
+import { overviewCharts, quietChart } from "@/components/database/ops/performance-figures"
 import { Notes } from "@/components/database/ops/performance-parts"
 import type { DbServerStats } from "@/components/database/ops/performance-types"
-
-const QUIET_CACHE = "No block was read in this window, so there is no hit rate to draw."
+import { useDatabase } from "@/components/database/shell/database-context"
 
 /**
  * What the server has been doing since this page was opened, as every chart
@@ -30,6 +30,12 @@ const QUIET_CACHE = "No block was read in this window, so there is no hit rate t
  * seconds, a rate the difference of two — so a chart of rates is empty for
  * the first seconds and nothing here is recorded history: the charts start
  * again when the page does. The line under them says so.
+ *
+ * A chart with nothing above zero in the window is not drawn: on a quiet
+ * server half of them would be one flat line each. They are named in a
+ * sentence under the ones that have something to show, and each comes back
+ * the moment it moves. The charts drawn fill their rows — two across, three
+ * where there is the width — whatever their number.
  *
  * Under the charts is the one thing here that is about the dashboard and not
  * the server: the connections it holds to it for its own reads.
@@ -47,22 +53,29 @@ export function OverviewView({
   /** Why the latest poll failed. What was sampled before it is still drawn. */
   error?: Error
 }) {
+  const { engine } = useDatabase()
+  const transactions = engine.can("transactions")
+  const locks = engine.can("locks")
+  const charts = useMemo(() => overviewCharts({ transactions, locks }), [transactions, locks])
   const newest = samples[samples.length - 1]
   // Until a sample says which charts this engine fills, the first four hold
-  // the page's shape. After that the list is held by which charts are
-  // offered, not by the samples: it is the same from one sample to the next.
-  const offeredKey = newest
-    ? offeredViews(OVERVIEW_CHARTS, newest)
-        .map((entry) => entry.id)
-        .join(" ")
-    : ""
-  const offered = useMemo(
-    () =>
-      offeredKey
-        ? OVERVIEW_CHARTS.filter((entry) => offeredKey.split(" ").includes(entry.id))
-        : OVERVIEW_CHARTS.slice(0, 4),
-    [offeredKey],
-  )
+  // the page's shape. After that the two lists are held by which charts are
+  // in them, not by the samples: they are the same from one sample to the
+  // next, and `ChartPanel` is memoised on what it is handed.
+  const offered = newest ? offeredViews(charts, newest) : charts.slice(0, 4)
+  const drawnKey = offered
+    .filter((chart) => !quietChart(chart, samples))
+    .map((chart) => chart.id)
+    .join(" ")
+  const offeredKey = offered.map((chart) => chart.id).join(" ")
+  const { drawn, quiet } = useMemo(() => {
+    const ids = new Set(drawnKey.split(" "))
+    const all = charts.filter((chart) => offeredKey.split(" ").includes(chart.id))
+    return {
+      drawn: all.filter((chart) => ids.has(chart.id)),
+      quiet: all.filter((chart) => !ids.has(chart.id)),
+    }
+  }, [charts, drawnKey, offeredKey])
   const held = heldSeconds(samples)
   const every = SAMPLE_EVERY_MS / 1000
   const note = loading
@@ -74,18 +87,29 @@ export function OverviewView({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2 2xl:grid-cols-3 [&>*]:min-w-0">
-        {offered.map((chart) => (
-          <OverviewChart
-            key={chart.id}
-            chart={chart}
-            samples={samples}
-            // A share has nothing to say about a window in which nothing was
-            // asked of the cache; that is not a rate still on its way.
-            note={chart.unit === "percent" && samples.length > 1 ? QUIET_CACHE : note}
-          />
-        ))}
-      </div>
+      {drawn.length > 0 && (
+        <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2 2xl:grid-cols-6 [&>*]:min-w-0">
+          {drawn.map((chart, index) => (
+            <OverviewChart
+              key={chart.id}
+              chart={chart}
+              samples={samples}
+              note={note}
+              className={spanOf(index, drawn.length)}
+            />
+          ))}
+        </div>
+      )}
+      {quiet.length > 0 && (
+        <p className="text-body leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground">
+            {drawn.length > 0 ? "Nothing else has moved." : "Nothing has moved."}
+          </span>{" "}
+          {sentence(quiet.map((chart) => chart.label.toLowerCase()))}{" "}
+          {quiet.length === 1 ? "has" : "have"} been at zero for as long as this page has been open.
+          Each is drawn when it moves.
+        </p>
+      )}
       <p className="text-hint text-muted-foreground">
         {held > 0
           ? `Live readings over the last ${duration(held)}, one every ${every} seconds since this page was opened. Nothing here is recorded: the charts start again when the page does.`
@@ -111,6 +135,31 @@ export function OverviewView({
   )
 }
 
+/** "a", "a and b", "a, b and c". */
+function sentence(words: string[]): string {
+  const text =
+    words.length <= 1
+      ? (words[0] ?? "")
+      : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/**
+ * How many columns a chart takes, so that every row of charts is full. Two
+ * across, a chart left alone on the last row takes the row. Three across the
+ * grid has six tracks: a chart takes two, and the charts of a last row that
+ * would be short take three each — one left over joins the three before it
+ * as two rows of two, since a single chart across the whole page is a line
+ * six times wider than it is tall.
+ */
+function spanOf(index: number, count: number): string {
+  const lone = count % 2 === 1 && index === count - 1 ? "lg:max-2xl:col-span-2" : ""
+  if (count === 1) return cn(lone, "2xl:col-span-6")
+  const over = count % 3
+  const halves = over === 1 ? 4 : over === 2 ? 2 : 0
+  return cn(lone, index >= count - halves ? "2xl:col-span-3" : "2xl:col-span-2")
+}
+
 /**
  * One chart of the Overview. Its rows and its axis are worked out here and
  * held by what they are, so a new sample redraws the charts whose lines moved
@@ -120,10 +169,12 @@ const OverviewChart = memo(function OverviewChart({
   chart,
   samples,
   note,
+  className,
 }: {
   chart: ChartView
   samples: readonly Sample[]
   note: string
+  className: string
 }) {
   const rows = useMemo(
     () => drawnRows(chartRows(samples, chart.sources), chart.series),
@@ -155,6 +206,7 @@ const OverviewChart = memo(function OverviewChart({
       height={160}
       showPeaks={false}
       note={note}
+      className={className}
     />
   )
 })

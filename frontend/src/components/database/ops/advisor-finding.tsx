@@ -6,14 +6,12 @@ import { CodeBracket, Copy, Wrench } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { FormFact, FormNote, Statement } from "@/components/form"
+import { FormNote, Statement } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { Well } from "@/components/panel"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { nameHue } from "@/components/database/home/kinds"
-import { EngineMark } from "@/components/database/kit"
+import type { ApplyRequest } from "@/components/database/ops/advisor-apply"
 import {
   applyVerdict,
   kindWord,
@@ -25,7 +23,6 @@ import {
 } from "@/components/database/ops/advisor-fix"
 import { classifyStatement } from "@/components/database/ops/performance-api"
 import type { Maintenance } from "@/components/database/ops/performance-maintenance"
-import { targetWords } from "@/components/database/ops/performance-storage"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** How many objects a finding lists before the rest fold away. */
@@ -39,22 +36,20 @@ const SHOWN = 8
  * always be copied, and opened on the Query page by a role that may run
  * statements. It is applied from here only where the server marks it safe —
  * one of the engine's own maintenance actions that locks nothing, or a
- * statement its classifier says destroys nothing — and then behind a
- * confirmation that names the object and repeats the statement. Why a fix is
+ * statement its classifier says destroys nothing — and then behind a question
+ * that names the object and says what will run (`ApplyDialog`). Why a fix is
  * not offered here is said in a line, so the absence of the button is not a
  * puzzle.
  */
 export function FindingBody({
   advice,
   maintenance,
-  confirm,
-  onApplyStatements,
+  onApply,
 }: {
   advice: DbAdvice
   maintenance: Maintenance
-  confirm: (request: ConfirmRequest) => void
-  /** Runs statements through the server's script route, and reports what happened. */
-  onApplyStatements: (sql: string) => Promise<void>
+  /** Asks about a fix before it is applied. */
+  onApply: (request: ApplyRequest) => void
 }) {
   const { id, engine, readOnly, goto, href } = useDatabase()
   const { can } = useAuth()
@@ -88,90 +83,26 @@ export function FindingBody({
   const whole = targets.length > 0 ? verdictFor(0) : applyVerdict({ readOnly, mayControl })
   const several = targets.filter((target) => target.sql).length > 1
 
-  const subject = (name: React.ReactNode, kind: string): ConfirmRequest["subject"] => ({
-    mark: <EngineMark engine={engine} size="sm" />,
-    name,
-    facts: <FormFact label="Fixes">{kind}</FormFact>,
-  })
-
   const applyOne = (target: DbAdviceTarget, index: number) => {
     const verdict = verdictFor(index)
     if (!verdict.apply) return
-    if (verdict.via === "maintenance") {
-      const { action, request } = verdict.fix
-      const verb = { key: action.id, label: action.label, action, request }
-      confirm({
-        title: `Apply: ${action.label.toLowerCase()}`,
-        subject: subject(
-          <span className="font-mono">{targetWords(request, engine.nouns.object)}</span>,
-          advice.title,
-        ),
-        description: (
-          <>
-            <p>{action.description}</p>
-            {target.sql && (
-              <Well className="max-h-32 overflow-auto text-hint whitespace-pre-wrap">
-                {target.sql}
-              </Well>
-            )}
-          </>
-        ),
-        confirmLabel: action.label,
-        action: async () => {
-          maintenance.run(verb)
-          return "reported"
-        },
-      })
-      return
-    }
-    const sql = target.sql ?? ""
-    confirm({
-      title: "Apply the fix",
-      subject: subject(<span className="font-mono">{targetName(target)}</span>, advice.title),
-      description: (
-        <>
-          <p>This statement is run on the server now.</p>
-          <Well className="max-h-40 overflow-auto text-hint whitespace-pre-wrap">{sql}</Well>
-        </>
-      ),
-      confirmLabel: "Apply",
-      action: async () => {
-        await onApplyStatements(sql)
-        return "reported"
-      },
-    })
+    const about = { finding: advice.title, on: targetName(target), named: true }
+    if (verdict.via === "maintenance") onApply({ ...about, via: "maintenance", fix: verdict.fix })
+    else onApply({ ...about, via: "statement", sql: target.sql ?? "" })
   }
 
   const applyAll = () => {
     if (!whole.apply || !advice.sql) return
     if (whole.via === "maintenance") return applyOne(targets[0], 0)
-    const sql = advice.sql
-    const count = statementsOf(sql).length
-    confirm({
-      title: "Apply the fix",
-      subject: subject(
-        targets.length === 1 ? (
-          <span className="font-mono">{targetName(targets[0])}</span>
-        ) : (
-          `${targets.length} ${kindWord(targets[0]?.kind ?? "object", targets.length)}`
-        ),
-        advice.title,
-      ),
-      description: (
-        <>
-          <p>
-            {count === 1
-              ? "This statement is run on the server now."
-              : `These ${count} statements are run on the server now, in order, stopping at the first that fails.`}
-          </p>
-          <Well className="max-h-40 overflow-auto text-hint whitespace-pre-wrap">{sql}</Well>
-        </>
-      ),
-      confirmLabel: count === 1 ? "Apply" : `Apply ${count} statements`,
-      action: async () => {
-        await onApplyStatements(sql)
-        return "reported"
-      },
+    onApply({
+      finding: advice.title,
+      on:
+        targets.length === 1
+          ? targetName(targets[0])
+          : `${targets.length} ${kindWord(targets[0]?.kind ?? "object", targets.length)}`,
+      named: targets.length === 1,
+      via: "statement",
+      sql: advice.sql,
     })
   }
 

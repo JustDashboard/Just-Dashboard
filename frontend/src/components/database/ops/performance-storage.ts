@@ -62,6 +62,62 @@ export function tableColumns(tables: readonly DbTableStat[]): Set<TableColumn> {
   return columns
 }
 
+/**
+ * What each column of the table takes, in pixels. The table is laid out
+ * fixed — the name has what the others leave — so whether it fits is
+ * arithmetic, and it is done on the width of the view, not the window: the
+ * rail beside the page takes its share of every window.
+ */
+const TABLE_WIDTHS = {
+  name: 190,
+  rows: 64,
+  size: 152,
+  actions: 48,
+  dead: 100,
+  bloat: 104,
+  scans: 132,
+  parts: 64,
+  compression: 100,
+  vacuum: 128,
+  analyze: 128,
+} as const
+
+/** The columns given up for room, first to last: what qualifies a figure goes before the figure. */
+const DROPPED_FIRST = ["scans", "bloat", "compression", "analyze", "vacuum"] as const
+
+/** Under this the table is not a table: its rows are drawn down, and nothing is dropped. */
+export const TABLE_FROM = 560
+
+/**
+ * The columns a table of this width draws, of the ones the engine fills, or
+ * `null` where there is no room for a table at all. Columns go one at a time
+ * until the rest fit; a width that would take more than that is the other
+ * layout, with every figure in it.
+ */
+export function fittedColumns(
+  columns: ReadonlySet<TableColumn>,
+  width: number,
+): Set<TableColumn> | null {
+  if (width < TABLE_FROM) return null
+  const kept = new Set(columns)
+  const needed = () =>
+    TABLE_WIDTHS.name +
+    TABLE_WIDTHS.rows +
+    TABLE_WIDTHS.size +
+    TABLE_WIDTHS.actions +
+    [...kept].reduce((sum, column) => sum + (column === "engine" ? 0 : TABLE_WIDTHS[column]), 0)
+  for (const column of DROPPED_FIRST) {
+    if (needed() <= width) break
+    kept.delete(column)
+  }
+  return kept
+}
+
+/** A column's width in the fixed table, as a style. The name's is left to the table. */
+export function columnWidth(column: Exclude<keyof typeof TABLE_WIDTHS, "name">): { width: number } {
+  return { width: TABLE_WIDTHS[column] }
+}
+
 /** The newer of a manual run and the engine's own, and which it was. */
 export function lastRun(
   manual: string | undefined,

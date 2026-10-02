@@ -6,7 +6,6 @@ import { errorMessage } from "@/lib/api"
 import { duration } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { useConfirm } from "@/components/confirm-dialog"
 import { Segments } from "@/components/deploy/settings/segments"
 import { FormFact, FormFacts, FormNote, Statement } from "@/components/form"
 import { Modal } from "@/components/modal"
@@ -19,6 +18,7 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import type { Verb } from "@/components/verbs"
 import { EngineMark } from "@/components/database/kit"
 import { readMaintenance, runMaintenance } from "@/components/database/ops/performance-api"
+import { useAsk, useReturnFocus } from "@/components/database/ops/performance-parts"
 import {
   byAction,
   confirmsFirst,
@@ -54,11 +54,18 @@ type Run = {
  * server. When it ends the dialog holds the statements that ran and the
  * engine's own output. An action that locks what it works on, or can lose
  * rows, is asked about first with the table named.
+ *
+ * Whichever way a run ends — refused at the question, stopped, finished and
+ * closed — the keyboard goes back to the menu or the button that started it.
  */
 export function useMaintenance(onDone?: () => void) {
   const { id, engine, readOnly } = useDatabase()
   const { can } = useAuth()
-  const { confirm, dialog } = useConfirm()
+  // One memory for the question and the run after it: both give the keyboard
+  // back to the control that started them.
+  const focus = useReturnFocus()
+  const { remember, restore } = focus
+  const { confirm, dialog } = useAsk(focus)
   const [run, setRun] = useState<Run | null>(null)
   const controller = useRef<AbortController | null>(null)
   const list = usePoll((signal) => readMaintenance(id, signal), 0, [id], {
@@ -99,7 +106,10 @@ export function useMaintenance(onDone?: () => void) {
 
   const start = useCallback(
     (verb: MaintenanceVerb) => {
-      if (!confirmsFirst(verb.action)) return begin(verb)
+      if (!confirmsFirst(verb.action)) {
+        remember()
+        return begin(verb)
+      }
       const on = targetWords(verb.request, engine.nouns.object)
       confirm({
         title: verb.label,
@@ -128,7 +138,7 @@ export function useMaintenance(onDone?: () => void) {
         },
       })
     },
-    [begin, confirm, engine],
+    [begin, confirm, engine, remember],
   )
 
   /** The verbs for one target, as a row's menu or a header's draws them. */
@@ -147,6 +157,7 @@ export function useMaintenance(onDone?: () => void) {
   const close = () => {
     controller.current?.abort()
     setRun(null)
+    restore()
   }
 
   return {
@@ -155,8 +166,15 @@ export function useMaintenance(onDone?: () => void) {
     actions,
     verbsFor,
     start,
-    /** Runs a verb at once, for a caller that has asked about it in its own words. */
-    run: begin,
+    /**
+     * Runs a verb at once, for a caller that has asked about it in its own
+     * words. `from` is the control the keyboard goes back to when the run's
+     * dialog closes.
+     */
+    run: (verb: MaintenanceVerb, from?: HTMLElement | null) => {
+      remember(from ?? null)
+      begin(verb)
+    },
     /** The verbs a target has, with the action behind each. */
     forTarget: (target: MaintenanceTarget) =>
       maintenanceVerbs(actions ?? [], target, { can, readOnly }),
@@ -172,6 +190,27 @@ export function useMaintenance(onDone?: () => void) {
 }
 
 export type Maintenance = ReturnType<typeof useMaintenance>
+
+/**
+ * The engine's list of actions could not be read, so no row carries its
+ * menu: said where the menus would have been, with the way to ask again. A
+ * view whose verbs are simply absent reads as an engine that has none.
+ */
+export function MaintenanceUnread({ maintenance }: { maintenance: Maintenance }) {
+  const list = maintenance.list
+  if (list.data || !list.error) return null
+  return (
+    <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <FormNote tone="warning" className="min-w-0">
+        The maintenance this engine offers could not be read, so nothing here carries its menu:{" "}
+        <span className="wrap-anywhere">{errorMessage(list.error)}</span>
+      </FormNote>
+      <Button size="xs" variant="outline" onClick={list.refresh}>
+        Try again
+      </Button>
+    </div>
+  )
+}
 
 /**
  * The actions for one target, each with the engine's own sentence about what
@@ -211,7 +250,11 @@ function MaintenanceRow({
   maintenance: Maintenance
   on: string
 }) {
-  const [chosen, setChosen] = useState(verbs[0].key)
+  // Where an action can run without holding its lock, that is the answer
+  // already chosen: the one that stops the table is a deliberate second press.
+  const [chosen, setChosen] = useState(
+    () => (verbs.find((entry) => entry.request.options?.concurrently) ?? verbs[0]).key,
+  )
   const verb = verbs.find((entry) => entry.key === chosen) ?? verbs[0]
   const action = verb.action
   return (

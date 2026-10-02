@@ -1,11 +1,12 @@
 "use client"
 
 import { useAuth } from "@/hooks/use-auth"
-import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
+import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { FormFact } from "@/components/form"
 import { Well } from "@/components/panel"
 import { EngineMark } from "@/components/database/kit"
 import { cancelStatement, endSession } from "@/components/database/ops/performance-api"
+import { useAsk } from "@/components/database/ops/performance-parts"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** As much of a session as stopping it needs: which one, and what tells it from its neighbours. */
@@ -26,7 +27,8 @@ export type Stoppable = { pid: string; user?: string; application?: string; quer
 export function useStops(onDone: () => void) {
   const { id, conn, engine } = useDatabase()
   const { can } = useAuth()
-  const { confirm, dialog } = useConfirm()
+  // The confirmation gives the keyboard back to the button that asked.
+  const { confirm, dialog } = useAsk()
   const may = can("destructive")
 
   const subject = (session: Stoppable): ConfirmRequest["subject"] => ({

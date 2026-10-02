@@ -12,6 +12,8 @@ import {
   maintenanceFix,
   statementsOf,
   targetName,
+  buildsIndex,
+  concurrently,
 } from "./advisor-fix"
 
 const finding = (id, level, category, extra = {}) => ({
@@ -248,4 +250,30 @@ test("a fix is its statements, one to a line", () => {
     "CREATE INDEX a ON t (x);",
     "CREATE INDEX b ON t (y);",
   ])
+})
+
+describe("a fix that builds an index", () => {
+  test("is told from one that does not", () => {
+    expect(
+      buildsIndex('CREATE INDEX "orders_customer_id_idx" ON "public"."orders" ("customer_id");'),
+    ).toBe(true)
+    expect(buildsIndex("create unique index i on t (x)")).toBe(true)
+    expect(buildsIndex("CREATE INDEX CONCURRENTLY i ON t (x)")).toBe(false)
+    expect(buildsIndex('DROP INDEX "public"."i";')).toBe(false)
+    expect(buildsIndex("ALTER TABLE t ADD PRIMARY KEY (id)")).toBe(false)
+  })
+
+  test("is the same index built alongside the table's writes", () => {
+    expect(concurrently('CREATE INDEX "i" ON "public"."orders" ("customer_id");')).toBe(
+      'CREATE INDEX CONCURRENTLY "i" ON "public"."orders" ("customer_id");',
+    )
+    expect(concurrently("CREATE UNIQUE INDEX i ON t (x)")).toBe(
+      "CREATE UNIQUE INDEX CONCURRENTLY i ON t (x)",
+    )
+    // Already concurrent, or not an index at all: left as the server wrote it.
+    expect(concurrently("CREATE INDEX CONCURRENTLY i ON t (x)")).toBe(
+      "CREATE INDEX CONCURRENTLY i ON t (x)",
+    )
+    expect(concurrently("VACUUM t")).toBe("VACUUM t")
+  })
 })

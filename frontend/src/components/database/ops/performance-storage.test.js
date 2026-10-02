@@ -5,6 +5,7 @@ import {
   countFlags,
   counted,
   deadShare,
+  fittedColumns,
   flaggedBytes,
   indexFlags,
   lastRun,
@@ -325,5 +326,40 @@ describe("the maintenance a target is offered", () => {
     expect(targetWords({ action: "reindex", schema: "public" }, "table")).toBe(
       "every table of public",
     )
+  })
+})
+
+describe("the columns a table of a given width draws", () => {
+  const postgres = new Set(["dead", "bloat", "scans", "vacuum", "analyze"])
+
+  test("every column where there is the width for them", () => {
+    expect([...fittedColumns(postgres, 1400)].sort()).toEqual([...postgres].sort())
+  })
+
+  test("go one at a time, what qualifies a figure before the figure", () => {
+    // A laptop's width beside the rail: the scans go first, then the estimate.
+    expect(fittedColumns(postgres, 968).has("scans")).toBe(false)
+    expect(fittedColumns(postgres, 968).has("bloat")).toBe(true)
+    const narrower = fittedColumns(postgres, 840)
+    expect(narrower.has("bloat")).toBe(false)
+    expect(narrower.has("vacuum")).toBe(true)
+    expect(narrower.has("analyze")).toBe(true)
+    const narrowest = fittedColumns(postgres, 600)
+    expect([...narrowest]).toEqual(["dead"])
+  })
+
+  test("an engine that fills few columns keeps them all at a width another could not", () => {
+    const mysql = new Set(["engine", "bloat"])
+    expect([...fittedColumns(mysql, 600)].sort()).toEqual(["bloat", "engine"])
+  })
+
+  test("under the width of a table the rows are drawn down, and nothing is dropped", () => {
+    expect(fittedColumns(postgres, 559)).toBeNull()
+    expect(fittedColumns(postgres, 0)).toBeNull()
+  })
+
+  test("the set it is handed is not the one it changes", () => {
+    fittedColumns(postgres, 600)
+    expect(postgres.size).toBe(5)
   })
 })

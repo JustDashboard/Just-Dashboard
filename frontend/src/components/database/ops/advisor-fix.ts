@@ -316,6 +316,24 @@ export function applyVerdict(input: {
   return { apply: false, reason: "" }
 }
 
+/**
+ * Whether a statement builds an index the plain way: `CREATE INDEX` with
+ * nothing said about doing it alongside the table's writes. The classifier
+ * calls it harmless, and it destroys nothing — but on an engine that also
+ * has a concurrent build, the plain one holds every write to the table until
+ * it is done.
+ */
+export function buildsIndex(sql: string): boolean {
+  return /^\s*create\s+(?:unique\s+)?index\b/i.test(sql) && !/\bconcurrently\b/i.test(sql)
+}
+
+/** The same index built alongside the table's writes. */
+export function concurrently(sql: string): string {
+  return buildsIndex(sql)
+    ? sql.replace(/^(\s*create\s+(?:unique\s+)?index)\b/i, "$1 CONCURRENTLY")
+    : sql
+}
+
 /** One statement of a fix, without the semicolon that ends it. */
 export function statementsOf(sql: string): string[] {
   return sql

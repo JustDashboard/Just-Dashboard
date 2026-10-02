@@ -12,8 +12,15 @@ import { mockDatabases, type DatabaseMock } from "./database-fixture"
  * that fails over what is already shown leaves it there; a control is drawn
  * only for the role that may use it, and nothing that changes data is drawn
  * on a protected connection; a finding's fix is applied from the page only
- * where the server marks it safe, and behind a confirmation that names what
- * it is about.
+ * where the server marks it safe, and behind a question that names what it
+ * is about and says what will run.
+ *
+ * And the ones a review of them added: the readings are counts of the session
+ * list, so a tile and the chip under it cannot disagree; nothing under the
+ * readings moves once it is drawn; a table is exactly as wide as the view it
+ * is in, at a laptop's width too; a read that does not come back says what it
+ * is waiting for; and the keyboard goes back to where it was when a panel or
+ * a confirmation closes.
  */
 
 // These pages make several reads on arrival, and on a machine that is busy
@@ -903,12 +910,12 @@ async function mockOps(
     const call = calls.get(key) ?? 0
     calls.set(key, call + 1)
     const answer = answers[key]
-    const value =
-      typeof answer === "function"
-        ? (answer as (call: number, url: URL, body: unknown) => unknown)(call, url, body)
-        : answer
+    // An answer may be a promise: a read held until the test lets it go.
+    const value = await (typeof answer === "function"
+      ? (answer as (call: number, url: URL, body: unknown) => unknown)(call, url, body)
+      : answer)
     if (isReply(value)) return route.fulfill({ status: value.status, json: value.body })
-    return route.fulfill({ json: value })
+    return route.fulfill({ json: value }).catch(() => undefined)
   })
   return { ...mock, seen, sent, calls }
 }
@@ -966,9 +973,15 @@ test("the page opens on its readings and offers the views its engine has", async
     "Transactions",
     "Cache hit",
   ])
+  // Who is working and who is waiting are counts of the session list: the
+  // server's counters say three active and two waiting, and call the session
+  // held up an active one. The list has two working and one held up.
+  await expect(tile(page, "Working now")).toContainText("2")
   await expect(tile(page, "Working now")).toContainText("1 more idle in a transaction")
+  await expect(tile(page, "Sessions")).toContainText("2 working · 1 waiting")
   // Somebody is waiting: the figure takes the tone, not a badge.
-  await expect(tile(page, "Waiting on a lock").locator(".text-warning")).toHaveText("2")
+  await expect(tile(page, "Waiting on a lock").locator(".text-warning")).toHaveText("1")
+  await expect(view(page, /^Locks/)).toHaveText(/Locks\s*1/)
   await expect(tile(page, "Longest statement")).toContainText("48s")
   // A rate is two readings apart: none is stated after one.
   await expect(tile(page, "Transactions")).toContainText("The rate needs a second reading")
@@ -988,8 +1001,11 @@ test("the page opens on its readings and offers the views its engine has", async
   // The charts are the page's own samples, and say so.
   await expect(page.getByText(/Nothing here is recorded/)).toBeVisible()
   await expect(page.getByRole("heading", { name: "Sessions", level: 2 })).toBeVisible()
-  // Only the snapshot is read until a view asks for more.
-  expect(ops.seen.filter((request) => !request.endsWith("/stats"))).toEqual([])
+  // A chart with nothing above zero in the window is named, not drawn flat.
+  await expect(page.getByText(/Nothing else has moved\./)).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Lock waits and deadlocks" })).toHaveCount(0)
+  // The snapshot and the session list are the page's; a view's own read waits for the view.
+  expect(ops.seen.filter((request) => !/\/(stats|activity)$/.test(request))).toEqual([])
 })
 
 test("a file-based engine is read as its file, and is asked nothing a server would be", async ({
@@ -1261,14 +1277,25 @@ test("statements are ranked by their share, ordered by the server, and one opens
   await asked
   await expect(page).toHaveURL(/sort=mean/)
 
-  // A shape cannot be planned: it is handed to Query, where values go in.
+  // A shape is planned with values put where its placeholders stand: one
+  // field for each, named by the words before it.
   await rows.nth(1).click()
   await expect(page).toHaveURL(/statement=s1/)
   const panel = dialog(page)
-  await expect(panel).toContainText("an engine cannot plan a statement without its values")
-  await expect(panel.getByRole("button", { name: "Explain" })).toHaveCount(0)
+  await expect(panel).toContainText("an engine plans values")
+  const value = panel.getByRole("textbox", { name: "The value for $1, after customer_id =" })
+  await value.fill("42")
+  await panel.getByRole("button", { name: "Explain with these values" }).click()
+  await expect(panel).toContainText("Seq Scan on order_items")
+  expect(ops.sent.find((sent) => sent.request === "POST 1/explain")?.body).toEqual({
+    query: "SELECT *\n  FROM orders\n WHERE customer_id = 42",
+    format: "text",
+  })
   await page.keyboard.press("Escape")
   await expect(page).not.toHaveURL(/statement=/)
+  // The keyboard goes back to the row that opened it.
+  await expect(rows.nth(1)).toBeFocused()
+  ops.sent.length = 0
 
   // One with no values in it is planned as it stands. Nothing is executed.
   await rows.nth(3).click()
@@ -1491,8 +1518,12 @@ test("tables show what the engine keeps, flag what is overdue, and run its maint
     "href",
     "/databases/1/data?schema=public&table=orders",
   )
-  // The choice inside an action is one control on its row.
-  await dialog(page).getByRole("radio", { name: "concurrently" }).click()
+  // The choice inside an action is one control on its row, and the answer
+  // already chosen is the one that does not stop the table.
+  await expect(dialog(page).getByRole("radio", { name: "concurrently" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  )
   await dialog(page).getByRole("button", { name: "Reindex concurrently: public.orders" }).click()
   await dialog(page).getByRole("button", { name: "Reindex concurrently" }).click()
   await expect
@@ -1656,6 +1687,497 @@ test("a stopped server keeps its pages and is asked nothing", async ({ page }) =
 })
 
 // ---------------------------------------------------------------------------
+// What a review of the page asked for
+// ---------------------------------------------------------------------------
+
+/** A read the test holds open, and lets go when it chooses. */
+function held<T>() {
+  let release: (value: T) => void = () => {}
+  const until = new Promise<T>((resolve) => {
+    release = resolve
+  })
+  return { until, release }
+}
+
+test("the tiles are the session list's counts, whatever the server's counters say", async ({
+  page,
+}) => {
+  await holdTime(page)
+  // An engine whose counters know nothing of a row lock: nobody waits, by them.
+  await mockOps(page, {
+    answers: {
+      "GET 1/stats": (call: number) => ({
+        ...stats(call),
+        connections: { total: 5, active: 3, idle: 1, idleInTransaction: 1, waiting: 0, max: 151 },
+      }),
+    },
+  })
+  await visit(page, "/databases/1/performance?view=sessions")
+  const chips = region(page, "Sessions").getByRole("group", { name: "Sessions by state" })
+  await expect(chips.getByRole("button", { name: /Blocked/ })).toHaveText(/Blocked\s*1/)
+  await expect(chips.getByRole("button", { name: /Active/ })).toHaveText(/Active\s*2/)
+  // The tile says what the chip says, and the tab that shows who holds the lock counts it.
+  await expect(tile(page, "Waiting on a lock").locator(".text-warning")).toHaveText("1")
+  await expect(tile(page, "Waiting on a lock")).toContainText("Locks says who holds them")
+  await expect(tile(page, "Working now")).toContainText("2")
+  await expect(view(page, /^Locks/)).toHaveText(/Locks\s*1/)
+
+  // The chart is drawn from the same counts: a sample carries the list's tally.
+  await tick(page)
+  await view(page, /^Overview$/).click()
+  const sessions = page
+    .locator("[data-slot=panel]")
+    .filter({ has: page.getByRole("heading", { name: "Sessions", level: 2 }) })
+  await expect(sessions.getByRole("row", { name: /Waiting on a lock/ })).toContainText("1")
+  await expect(sessions.getByRole("row", { name: /Working/ })).toContainText("2")
+})
+
+test("nothing under the readings moves once it is drawn", async ({ page }) => {
+  await holdTime(page)
+  const first = held<null>()
+  await mockOps(page, {
+    answers: {
+      "GET 1/stats": (call: number) =>
+        call === 0 ? first.until.then(() => stats(0)) : stats(call),
+    },
+  })
+  await visit(page, "/databases/1/performance?view=sessions")
+  await expect(sessionRow(page, "52")).toBeVisible()
+  const strip = async () => {
+    // Once the page's own arrival has finished: that is a movement of four pixels, on purpose.
+    await expect
+      .poll(() => page.locator("[data-slot=page]").evaluate((el) => getComputedStyle(el).transform))
+      .toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/)
+    return views(page).evaluate((el) => Math.round(el.getBoundingClientRect().top))
+  }
+  // Before any figure has been read.
+  const bones = await strip()
+  first.release(null)
+  await expect(tile(page, "Sessions")).toContainText("12")
+  expect(await strip()).toBe(bones)
+  // And when the trends have their second point and are drawn. A tick is
+  // let land before the next: the page asks again only once it has answered.
+  await tick(page)
+  await expect(tile(page, "Transactions")).toContainText("a second")
+  await tick(page)
+  await expect(tile(page, "Transactions").getByRole("img")).toBeVisible()
+  await expect(tile(page, "Waiting on a lock").getByRole("img")).toBeVisible()
+  expect(await strip()).toBe(bones)
+  const row = () =>
+    sessionRow(page, "52").evaluate((el) => Math.round(el.getBoundingClientRect().top))
+  const before = await row()
+  await tick(page)
+  expect(await row()).toBe(before)
+})
+
+test("a blocker is a session if the server says who it is, and is cancelled only if it runs a statement", async ({
+  page,
+}) => {
+  await mockOps(page, {
+    answers: {
+      "GET 1/activity": {
+        supported: true,
+        sessions: [
+          session("2472", "idle_in_transaction", {
+            user: "root",
+            state: "Sleep",
+            application: "inventory-cli",
+            transactionSeconds: 25,
+          }),
+          session("2473", "blocked", {
+            user: "root",
+            application: "inventory-worker",
+            seconds: 24,
+            blockedByPids: ["2472"],
+            query: "UPDATE items SET id = id WHERE id = 1",
+          }),
+        ],
+      },
+      "GET 1/locks": {
+        supported: true,
+        truncated: false,
+        locks: [],
+        waits: [
+          // The lock list calls an open transaction "running", and has no statement for it.
+          wait("2473", "2472", {
+            waitingUser: "root",
+            blockingUser: "root",
+            blockingState: "RUNNING",
+            blockingQuery: undefined,
+            blockingSeconds: 25,
+            waitingQuery: "UPDATE items SET id = id WHERE id = 1",
+          }),
+          // No account named: not a session at all.
+          wait("88", "prepared-9", {
+            blockingUser: undefined,
+            blockingQuery: undefined,
+            blockingState: undefined,
+          }),
+        ],
+      },
+    },
+  })
+  await visit(page, "/databases/1/performance?view=locks")
+  const tree = region(page, "Locks").getByRole("list", { name: "Blocking sessions" })
+  const session2472 = tree.locator("> li").filter({ hasText: "Session 2472" })
+  await expect(session2472).toContainText("No statement is running")
+  await expect(session2472).not.toContainText("Not a session")
+  // Which application, from the session list: on a pooled server every account is the same.
+  await expect(session2472).toContainText("inventory-cli")
+  await expect(session2472).toContainText("idle in transaction")
+  await expect(session2472).toContainText("inventory-worker")
+  // Nothing to cancel on a session that runs nothing; ending it is what lets go.
+  await expect(
+    page.getByRole("button", { name: "Cancel the statement of session 2472" }),
+  ).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Terminate session 2472" })).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Cancel the statement of session 2473" }),
+  ).toBeVisible()
+
+  const phantom = tree.locator("> li").filter({ hasText: "Session prepared-9" })
+  await expect(phantom).toContainText("Not a session")
+  await expect(page.getByRole("button", { name: /session prepared-9$/ })).toHaveCount(0)
+})
+
+test("two statements with one digest are two rows, each opening its own figures", async ({
+  page,
+}) => {
+  const keyed: string[] = []
+  page.on("console", (message) => {
+    if (/same key/.test(message.text())) keyed.push(message.text())
+  })
+  await mockOps(page, {
+    answers: {
+      "GET 1/statements": {
+        ...STATEMENTS,
+        statements: [
+          statement("d1", "SELECT SCHEMA ( )", 0.5, { calls: 6 }),
+          statement("d1", "SELECT SCHEMA ( )", 0.3, { calls: 5 }),
+          statement("s3", "SELECT count(*) FROM order_items", 0.2),
+        ],
+      },
+    },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  const rows = region(page, "Statements").getByRole("row")
+  await expect(rows).toHaveCount(4)
+  await rows.nth(2).click()
+  await expect(page).toHaveURL(/statement=d1(~|%7E)1/)
+  await expect(dialog(page)).toContainText("30%")
+  // Calls: the second row's five, not the first's six.
+  await expect(dialog(page).getByText("5", { exact: true })).toBeVisible()
+  await expect(dialog(page).getByText("6", { exact: true })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await rows.nth(1).click()
+  await expect(dialog(page).getByText("6", { exact: true })).toBeVisible()
+  // One row is the open one. (The page under a panel is out of the accessibility tree.)
+  await expect(page.locator("[data-slot=page] tr[data-state=selected]")).toHaveCount(1)
+  expect(keyed).toEqual([])
+})
+
+test("a statement with more placeholders than a form is quick for is handed to Query", async ({
+  page,
+}) => {
+  const many = `SELECT ${Array.from({ length: 20 }, (_, n) => `$${n + 1}`).join(", ")}`
+  await mockOps(page, {
+    answers: {
+      "GET 1/statements": { ...STATEMENTS, statements: [statement("m1", many, 1)] },
+    },
+  })
+  await visit(page, "/databases/1/performance?view=statements&statement=m1")
+  await expect(dialog(page)).toContainText("This shape has 20 placeholders")
+  await expect(dialog(page).getByRole("textbox")).toHaveCount(0)
+  await expect(dialog(page).getByRole("button", { name: "Open in Query" })).toBeVisible()
+})
+
+test("a read that does not come back says what it is waiting for, and a failure after a long silence says it was one", async ({
+  page,
+}) => {
+  await holdTime(page)
+  let read = held<unknown>()
+  await mockOps(page, { answers: { "GET 1/tablestats": () => read.until } })
+  await visit(page, "/databases/1/performance?view=tables")
+  await expect(tile(page, "Sessions")).toContainText("12")
+  // A moment's wait is a skeleton and nothing more.
+  await expect(page.getByText(/^Waiting for/)).toHaveCount(0)
+  await tick(page)
+  await expect(page.getByText("Waiting for PostgreSQL to answer")).toBeVisible()
+  await expect(
+    page.getByText(/stands behind any session that holds an exclusive lock/),
+  ).toBeVisible()
+
+  // Half a minute later whatever stands between gives the read up.
+  await tick(page, 25_000)
+  const first = read
+  read = held<unknown>()
+  first.release(failing("Internal Server Error", 500))
+  await expect(page.getByText("Could not read the tables")).toBeVisible()
+  await expect(page.getByText(/The read was given up after 30s without an answer/)).toBeVisible()
+
+  // Asked again, it is the wait again and not the old failure.
+  await page.getByRole("button", { name: "Try again" }).click()
+  await expect(page.getByText("Could not read the tables")).toHaveCount(0)
+  await tick(page)
+  await expect(page.getByText("Waiting for PostgreSQL to answer")).toBeVisible()
+
+  // The way to who is in the way.
+  await page.getByRole("button", { name: "See who is waiting on whom" }).click()
+  await expect(page).toHaveURL(/view=locks/)
+  await expect(region(page, "Locks")).toContainText("3 sessions are waiting behind one other.")
+  read.release(TABLESTATS)
+})
+
+test("a refusal that came at once is not called a wait", async ({ page }) => {
+  await mockOps(page, {
+    answers: { "GET 1/tablestats": failing("pq: permission denied for table pg_statistic") },
+  })
+  await visit(page, "/databases/1/performance?view=tables")
+  await expect(page.getByText("Could not read the tables")).toBeVisible()
+  await expect(page.getByText(/permission denied for table pg_statistic/)).toBeVisible()
+  await expect(page.getByText(/The read was given up/)).toHaveCount(0)
+})
+
+test("the keyboard goes back to where it was when a panel or a question closes", async ({
+  page,
+}) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=sessions")
+
+  // A session's panel, opened from its row and closed with Escape.
+  await sessionRow(page, "52").focus()
+  await page.keyboard.press("Enter")
+  await expect(dialog(page)).toContainText("Session 52")
+  // The panel is in the address: a link to one session opens on it.
+  await expect(page).toHaveURL(/session=52/)
+  await page.keyboard.press("Escape")
+  await expect(dialog(page)).toHaveCount(0)
+  await expect(sessionRow(page, "52")).toBeFocused()
+  await expect(page).not.toHaveURL(/session=/)
+
+  // A confirmation refused.
+  const cancel = page.getByRole("button", { name: "Cancel the statement of session 52" })
+  await cancel.focus()
+  await page.keyboard.press("Enter")
+  await expect(dialog(page)).toContainText("Cancel statement")
+  await page.keyboard.press("Escape")
+  await expect(cancel).toBeFocused()
+
+  // A table's panel, a run from a list in it, and a question from a row's menu.
+  await view(page, /^Tables$/).click()
+  const open = region(page, "Tables").getByRole("button", { name: "Open public.orders" })
+  await open.focus()
+  await page.keyboard.press("Enter")
+  await expect(dialog(page)).toContainText("Sequential scans")
+  const analyze = dialog(page).getByRole("button", {
+    name: "Analyze: public.orders",
+    exact: true,
+  })
+  await analyze.click()
+  await expect(dialog(page).last()).toContainText("Finished")
+  await dialog(page).last().getByRole("button", { name: "Close" }).first().click()
+  await expect(analyze).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(open).toBeFocused()
+
+  const menu = page.getByRole("button", { name: "Maintain public.orders" })
+  await menu.focus()
+  await page.keyboard.press("Enter")
+  await page.getByRole("menuitem", { name: "Vacuum full" }).click()
+  await expect(dialog(page)).toContainText("nothing can read or write the table")
+  await dialog(page).getByRole("button", { name: "Cancel" }).click()
+  await expect(menu).toBeFocused()
+})
+
+test("a session by its address, and one the list does not hold", async ({ page }) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=sessions&session=40%2C77")
+  await expect(dialog(page)).toContainText("Session 40,77")
+  await expect(dialog(page)).toContainText("billing-worker")
+  // The engine's word for what a held-up session waits on is in its panel…
+  await expect(dialog(page)).toContainText("Lock:transactionid")
+  await page.keyboard.press("Escape")
+  // …and the list's "Waiting on" is only what a reader can act on: who it is behind.
+  await expect(sessionRow(page, "40,77")).toContainText("behind")
+  await expect(sessionRow(page, "52")).not.toContainText("ClientRead")
+
+  await visit(page, "/databases/1/performance?view=sessions&session=nope")
+  await expect(dialog(page)).toContainText("Not in the session list")
+})
+
+test("a session that is not waiting has nothing under Waiting on", async ({ page }) => {
+  await mockOps(page, {
+    answers: {
+      "GET 1/activity": {
+        supported: true,
+        sessions: [
+          session("52", "active", { seconds: 3, wait: "Timeout:PgSleep", query: "SELECT 1" }),
+          session("53", "idle_in_transaction", {
+            transactionSeconds: 3,
+            wait: "Client:ClientRead",
+          }),
+        ],
+      },
+    },
+  })
+  await visit(page, "/databases/1/performance?view=sessions")
+  await expect(sessionRow(page, "52")).toBeVisible()
+  await expect(region(page, "Sessions")).not.toContainText("PgSleep")
+  await expect(region(page, "Sessions")).not.toContainText("ClientRead")
+  // It is the engine's word for what the thread is doing, and is in the panel as that.
+  await sessionRow(page, "52").click()
+  await expect(dialog(page).getByText("Doing", { exact: true })).toBeVisible()
+  await expect(dialog(page)).toContainText("Timeout:PgSleep")
+})
+
+test("the idle sessions stand in the same columns as the ones above them", async ({ page }) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=sessions")
+  const sessions = region(page, "Sessions")
+  await sessions.getByRole("button", { name: /1 idle session/ }).click()
+  await expect(sessionRow(page, "900")).toBeVisible()
+  const lefts = (pid: string) =>
+    sessionRow(page, pid).evaluate((row) =>
+      [...row.querySelectorAll("td")].map((cell) => Math.round(cell.getBoundingClientRect().left)),
+    )
+  expect(await lefts("900")).toEqual(await lefts("52"))
+  // One head, drawn once: the second run's is there for a screen reader only.
+  const heads = sessions.getByRole("columnheader", { name: "State", exact: true })
+  await expect(heads).toHaveCount(2)
+  await expect(sessions.locator("thead").nth(1)).toHaveClass(/sr-only/)
+})
+
+test("a view is a place: Back from one is the one before", async ({ page }) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/performance")
+  await expect(view(page, /^Overview$/)).toHaveAttribute("aria-pressed", "true")
+  await view(page, /^Sessions/).click()
+  await expect(page).toHaveURL(/view=sessions/)
+  await view(page, /^Locks/).click()
+  await expect(page).toHaveURL(/view=locks/)
+  await expect(region(page, "Locks")).toBeVisible()
+
+  await page.goBack()
+  await expect(view(page, /^Sessions/)).toHaveAttribute("aria-pressed", "true")
+  await expect(region(page, "Sessions")).toBeVisible()
+  await page.goBack()
+  await expect(view(page, /^Overview$/)).toHaveAttribute("aria-pressed", "true")
+  await page.goForward()
+  await expect(view(page, /^Sessions/)).toHaveAttribute("aria-pressed", "true")
+  // What a view was narrowed to comes back with it.
+  await region(page, "Sessions")
+    .getByRole("group", { name: "Sessions by state" })
+    .getByRole("button", { name: /Blocked/ })
+    .click()
+  await expect(page).toHaveURL(/state=blocked/)
+  await view(page, /^Statements$/).click()
+  await expect(page).not.toHaveURL(/state=/)
+  await page.goBack()
+  await expect(page).toHaveURL(/view=sessions&state=blocked|state=blocked&view=sessions/)
+})
+
+test("an address that names a schema or a table the database does not hold narrows and opens nothing", async ({
+  page,
+}) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/performance?view=tables&scope=nope&object=public%2Fgone")
+  const tables = region(page, "Tables")
+  await expect(tables.getByRole("row")).toHaveCount(5)
+  await expect(
+    tables
+      .getByRole("group", { name: "Narrow to one of the schemas" })
+      .getByRole("button", { name: /All schemas/ }),
+  ).toHaveAttribute("aria-pressed", "true")
+  await expect(dialog(page)).toHaveCount(0)
+  await expect(page).not.toHaveURL(/scope=|object=/)
+})
+
+test("the engine's maintenance that could not be read is said, not left out", async ({ page }) => {
+  let down = true
+  await mockOps(page, {
+    answers: {
+      "GET 1/maintenance": () =>
+        down ? failing("pq: canceling statement due to statement timeout") : POSTGRES_ACTIONS,
+    },
+  })
+  await visit(page, "/databases/1/performance?view=tables")
+  const tables = region(page, "Tables")
+  await expect(tables.getByRole("row")).toHaveCount(5)
+  await expect(
+    tables.getByText(/The maintenance this engine offers could not be read/),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Maintain/ })).toHaveCount(0)
+  down = false
+  await tables.getByRole("button", { name: "Try again" }).click()
+  await expect(page.getByRole("button", { name: "Maintain public.orders" })).toBeVisible()
+  await expect(tables.getByText(/could not be read/)).toHaveCount(0)
+})
+
+test("a table gives up its columns one at a time as the view narrows, and is rows when it has no room", async ({
+  page,
+}) => {
+  await mockOps(page)
+  const tables = region(page, "Tables")
+  const heads = () =>
+    tables
+      .getByRole("columnheader")
+      .evaluateAll((cells) => cells.map((cell) => cell.textContent?.trim()).filter(Boolean))
+
+  await page.setViewportSize({ width: 1720, height: 900 })
+  await visit(page, "/databases/1/performance?view=tables")
+  await expect(tables.getByRole("row")).toHaveCount(5)
+  expect(await heads()).toEqual([
+    "Table",
+    "Rows",
+    "Size",
+    "Dead rows",
+    "Unused space",
+    "Sequential scans",
+    "Vacuumed",
+    "Analysed",
+    "Actions",
+  ])
+  // A laptop, with the rail beside the page: what qualifies a figure goes before the figure.
+  await page.setViewportSize({ width: 1152, height: 900 })
+  await expect
+    .poll(heads)
+    .toEqual(["Table", "Rows", "Size", "Dead rows", "Vacuumed", "Analysed", "Actions"])
+  await page.setViewportSize({ width: 1024, height: 900 })
+  await expect.poll(heads).toEqual(["Table", "Rows", "Size", "Dead rows", "Vacuumed", "Actions"])
+  // What its own column said is said on the row.
+  await expect(tables.getByRole("row", { name: /import_staging/ })).toContainText("never analysed")
+  // The menu is on screen at every one of them.
+  const menu = page.getByRole("button", { name: "Maintain public.orders" })
+  const box = await menu.boundingBox()
+  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(1024)
+
+  // No room for a table: every table as rows, and nothing dropped.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(tables.getByRole("table")).toHaveCount(0)
+  await expect(tables.getByRole("listitem").filter({ hasText: "import_staging" })).toContainText(
+    "never analysed",
+  )
+  await expect(menu).toBeVisible()
+})
+
+test("an analytic engine's charts leave out what it has no notion of", async ({ page }) => {
+  await holdTime(page)
+  await mockOps(page, AS_CLICKHOUSE)
+  await visit(page, "/databases/2/performance")
+  await expect(tile(page, "Running queries")).toContainText("2")
+  await tick(page)
+  const sessions = page
+    .locator("[data-slot=panel]")
+    .filter({ has: page.getByRole("heading", { name: "Sessions", level: 2 }) })
+  await expect(sessions.getByRole("row", { name: /Open/ })).toBeVisible()
+  // It has no transactions to sit idle in and no lock waits: neither is a line at zero.
+  await expect(sessions).not.toContainText("Idle in a transaction")
+  await expect(sessions).not.toContainText("Waiting on a lock")
+  // Its parts are the whole server's, and the tile says so.
+  await expect(tile(page, "Parts")).toContainText("on this server")
+})
+
+// ---------------------------------------------------------------------------
 // Advisor
 // ---------------------------------------------------------------------------
 
@@ -1703,7 +2225,48 @@ test("the advisor counts its findings by severity and by category, and each narr
   // What the report could not assess is said, and what the release has left.
   const rests = region(page, "What the report rests on")
   await expect(rests).toContainText("Accounts could not be assessed")
-  await expect(rests).toContainText("PostgreSQL 16 is maintained until")
+  await expect(rests).toContainText("PostgreSQL 16")
+  await expect(rests).toContainText("Maintained")
+  await expect(rests).toContainText("768 days from now")
+})
+
+test("a report arrives open: every finding of a short one, the worst of a long one", async ({
+  page,
+}) => {
+  await mockOps(page)
+  await visit(page, "/databases/1/advisor")
+  // Six findings: the page is what each is about and what fixes it, not a list of titles.
+  const open = findings(page).locator("[data-slot=accordion-item][data-state=open]")
+  await expect(open).toHaveCount(6)
+  await expect(findings(page)).toContainText('CREATE INDEX "orders_customer_id_idx"')
+
+  // A finding the reader closed stays closed, and one left open stays open,
+  // when a filter that hid them is taken off again.
+  await finding(page, /No backup/).click()
+  await expect(open).toHaveCount(5)
+  await page.getByRole("button", { name: "Show only the notice" }).click()
+  await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(1)
+  await page.getByRole("button", { name: "Show only the notice" }).click()
+  await expect(open).toHaveCount(5)
+  await expect(finding(page, /No backup/)).toHaveAttribute("aria-expanded", "false")
+
+  // A long report opens on its worst three; the server lists them worst first.
+  const many = Array.from({ length: 9 }, (_, n) =>
+    advice(`check-${n}`, n === 0 ? "critical" : "warning", "performance", {
+      title: `Finding number ${n}`,
+    }),
+  )
+  await mockOps(page, { answers: { "GET 1/advisor": { ...ADVISOR, findings: many } } })
+  await visit(page, "/databases/1/advisor")
+  await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(9)
+  await expect(open).toHaveCount(3)
+  await expect(finding(page, "Finding number 0")).toHaveAttribute("aria-expanded", "true")
+  await expect(finding(page, "Finding number 3")).toHaveAttribute("aria-expanded", "false")
+
+  // A link to one finding opens that one.
+  await visit(page, "/databases/1/advisor?finding=check-7")
+  await expect(open).toHaveCount(1)
+  await expect(finding(page, "Finding number 7")).toHaveAttribute("aria-expanded", "true")
 })
 
 test("a fix the server classes as safe is applied behind a confirmation that names its object", async ({
@@ -1732,39 +2295,66 @@ test("a fix the server classes as safe is applied behind a confirmation that nam
     },
   })
   await visit(page, "/databases/1/advisor")
-  await finding(page, /2 foreign keys with no index/).click()
 
   const body = findings(page)
+  const about = body
+    .locator("[data-slot=accordion-item]")
+    .filter({ hasText: "2 foreign keys with no index" })
   await expect(
-    body.getByRole("list", { name: "What it is about" }).getByRole("listitem"),
+    about.getByRole("list", { name: "What it is about" }).getByRole("listitem"),
   ).toHaveCount(2)
-  await expect(body).toContainText('CREATE INDEX "orders_customer_id_idx"')
+  await expect(about).toContainText('CREATE INDEX "orders_customer_id_idx"')
   // The server was asked what it makes of the statement.
   await expect.poll(() => ops.sent.map((sent) => sent.request)).toContain("POST 1/classify")
 
-  await body.getByRole("button", { name: "Apply all 2" }).click()
+  const apply = body.getByRole("button", { name: "Apply all 2" })
+  await apply.click()
   const confirm = dialog(page)
   await expect(confirm).toContainText("2 tables")
-  await expect(confirm).toContainText("These 2 statements are run on the server now")
+  await expect(confirm).toContainText("Statements, run in this order")
+  // It creates indexes and destroys nothing: the command wears the brand, not the red.
+  const command = confirm.getByRole("button", { name: "Apply 2 statements" })
+  await expect(command).not.toHaveAttribute("data-variant", "destructive")
+  // An index is built alongside the table's writes unless the reader says
+  // otherwise, and the statement shown is the one that will run.
+  await expect(confirm.getByRole("radio", { name: "Concurrently" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  )
+  await expect(confirm).toContainText('CREATE INDEX CONCURRENTLY "order_items_product_id_idx"')
+  await confirm.getByRole("radio", { name: "Blocking writes" }).click()
+  await expect(confirm).toContainText("The table takes no writes until the index is built")
   await expect(confirm).toContainText('CREATE INDEX "order_items_product_id_idx"')
-  await confirm.getByRole("button", { name: "Apply 2 statements" }).click()
+  await confirm.getByRole("radio", { name: "Concurrently" }).click()
+  // Refused, the keyboard is back on the button that asked.
+  await confirm.getByRole("button", { name: "Cancel" }).click()
+  await expect(apply).toBeFocused()
+  expect(ops.sent.filter((sent) => sent.request === "POST 1/script")).toEqual([])
 
+  await apply.click()
+  await dialog(page).getByRole("button", { name: "Apply 2 statements" }).click()
   await expect
     .poll(() => ops.sent.find((sent) => sent.request === "POST 1/script")?.body)
     .toEqual({
-      script: ADVISOR.findings[2].sql,
+      script: (ADVISOR.findings[2].sql ?? "").replaceAll(
+        "CREATE INDEX",
+        "CREATE INDEX CONCURRENTLY",
+      ),
     })
   // The report is read again, and the finding is gone.
   await expect(finding(page, /2 foreign keys with no index/)).toHaveCount(0)
   await expect(tile(page, "Warnings")).toContainText("3")
+  // The button that asked went with it: the keyboard is left in the list, not on the page's body.
+  await expect(findings(page)).toBeFocused()
 })
 
 test("one object's fix is applied on its own, from its row", async ({ page }) => {
   const ops = await mockOps(page)
   await visit(page, "/databases/1/advisor")
-  await finding(page, /2 foreign keys with no index/).click()
   await page.getByRole("button", { name: "Apply the fix to public.order_items" }).click()
   await expect(dialog(page)).toContainText("public.order_items")
+  // The plain build is the reader's to choose, with what it costs said first.
+  await dialog(page).getByRole("radio", { name: "Blocking writes" }).click()
   await dialog(page).getByRole("button", { name: "Apply", exact: true }).click()
   await expect
     .poll(() => ops.sent.find((sent) => sent.request === "POST 1/script")?.body)
@@ -1773,13 +2363,53 @@ test("one object's fix is applied on its own, from its row", async ({ page }) =>
     })
 })
 
+test("an engine with one way of building an index is offered no choice of two", async ({
+  page,
+}) => {
+  // The file-based engine has no concurrent build: its statement runs as the server wrote it.
+  const ops = await mockOps(page, {
+    answers: {
+      "GET 7/advisor": {
+        ...ADVISOR,
+        silences: [],
+        endOfLife: undefined,
+        findings: [
+          advice("unindexed-foreign-key", "warning", "performance", {
+            title: "1 foreign key with no index",
+            targets: [
+              {
+                kind: "table",
+                name: "notes",
+                detail: "notebook_id",
+                sql: 'CREATE INDEX "notes_notebook_id_idx" ON "notes" ("notebook_id");',
+              },
+            ],
+            sql: 'CREATE INDEX "notes_notebook_id_idx" ON "notes" ("notebook_id");',
+          }),
+        ],
+      },
+      "POST 7/classify": classify,
+      "POST 7/script": { statements: [{ index: 0, sql: "", status: "ok" }], failed: -1 },
+    },
+  })
+  await visit(page, "/databases/7/advisor")
+  await findings(page).getByRole("button", { name: "Apply", exact: true }).click()
+  await expect(dialog(page)).toContainText("Building an index reads the whole table")
+  await expect(dialog(page).getByRole("radio")).toHaveCount(0)
+  await dialog(page).getByRole("button", { name: "Apply", exact: true }).click()
+  await expect
+    .poll(() => ops.sent.find((sent) => sent.request === "POST 7/script")?.body)
+    .toEqual({ script: 'CREATE INDEX "notes_notebook_id_idx" ON "notes" ("notebook_id");' })
+})
+
 test("a fix the server classes as destructive is only handed to Query, and says why", async ({
   page,
 }) => {
   await mockOps(page)
   await visit(page, "/databases/1/advisor")
-  await finding(page, /1 table with no primary key/).click()
   const body = findings(page)
+    .locator("[data-slot=accordion-item]")
+    .filter({ hasText: "1 table with no primary key" })
   await expect(body).toContainText("ALTER TABLE")
   await expect(body).toContainText("it is reviewed and run on the Query page")
   await expect(body.getByRole("button", { name: /^Apply/ })).toHaveCount(0)
@@ -1794,18 +2424,35 @@ test("a fix that is the engine's own maintenance is run as maintenance, with its
 }) => {
   const ops = await mockOps(page)
   await visit(page, "/databases/1/advisor")
-  await finding(page, /1 table carrying dead rows/).click()
-  // It is not put to the classifier: the engine's list already marks it safe.
-  await findings(page).getByRole("button", { name: "Apply: vacuum and analyze" }).click()
+  const apply = findings(page).getByRole("button", { name: "Apply: vacuum and analyze" })
+  await apply.click()
+  // The question names the table and the engine's action. It prints no
+  // statement: the one the server runs is its own to write, and is shown,
+  // with what the engine said, by the run.
   await expect(dialog(page)).toContainText("public.sessions_log")
-  await dialog(page).getByRole("button", { name: "Vacuum and analyze" }).click()
+  await expect(dialog(page)).toContainText("refreshes the planner's statistics in the same pass")
+  await expect(dialog(page)).not.toContainText("VACUUM ANALYZE")
+  const command = dialog(page).getByRole("button", { name: "Vacuum and analyze" })
+  await expect(command).not.toHaveAttribute("data-variant", "destructive")
+  await command.click()
+  await expect(dialog(page)).toContainText('VACUUM (VERBOSE, ANALYZE) "public"."sessions_log"')
   await expect(dialog(page)).toContainText("tuples: 40000 removed")
-  expect(ops.sent.map((sent) => sent.request)).toEqual(["POST 1/maintenance"])
-  expect(ops.sent[0].body).toEqual({
+  // It is not put to the classifier: the engine's list already marks it safe.
+  const changes = ops.sent.filter((sent) => sent.request !== "POST 1/classify")
+  expect(changes.map((sent) => sent.request)).toEqual(["POST 1/maintenance"])
+  expect(changes[0].body).toEqual({
     action: "vacuum_analyze",
     schema: "public",
     table: "sessions_log",
   })
+  expect(
+    ops.sent
+      .filter((sent) => sent.request === "POST 1/classify")
+      .some((sent) => /VACUUM/.test((sent.body as { query: string }).query)),
+  ).toBe(false)
+  // When the run's dialog closes the keyboard is back on the button that asked.
+  await dialog(page).getByRole("button", { name: "Close" }).first().click()
+  await expect(apply).toBeFocused()
 })
 
 test("a finding with a page of this database to act on opens it, and no other", async ({
@@ -1830,10 +2477,10 @@ test("a finding with a page of this database to act on opens it, and no other", 
     },
   })
   await visit(page, "/databases/1/advisor")
-  await finding(page, /Somewhere else/).click()
-  await finding(page, /Outside/).click()
-  await expect(findings(page).getByRole("button", { name: /^Open / })).toHaveCount(0)
-  await finding(page, /No backup/).click()
+  // All three arrive open: only the one that names a page of this database has a way to it.
+  await expect(findings(page).getByText("What to do about elsewhere.")).toBeVisible()
+  await expect(findings(page).getByText("What to do about outside.")).toBeVisible()
+  await expect(findings(page).getByRole("button", { name: /^Open / })).toHaveCount(1)
   await findings(page).getByRole("button", { name: "Open Backups" }).click()
   await expect(page).toHaveURL(/\/databases\/1\/backups$/)
 })
@@ -1851,7 +2498,6 @@ test("a report that did not cover everything says how far it got", async ({ page
 test("no fix is applied on a protected connection, or by a role that may not", async ({ page }) => {
   const ops = await mockOps(page, { rows: { 1: { readOnly: true } } })
   await visit(page, "/databases/1/advisor")
-  await finding(page, /2 foreign keys with no index/).click()
   await expect(findings(page)).toContainText("This connection is protected")
   await expect(findings(page).getByRole("button", { name: /^Apply/ })).toHaveCount(0)
   // Nothing was asked of the classifier either.
@@ -1859,7 +2505,6 @@ test("no fix is applied on a protected connection, or by a role that may not", a
 
   await mockOps(page, { viewer: true })
   await visit(page, "/databases/1/advisor")
-  await finding(page, /2 foreign keys with no index/).click()
   await expect(findings(page)).toContainText("Your role may read the fix and not run it")
   await expect(findings(page).getByRole("button", { name: /^(Apply|Open in Query)/ })).toHaveCount(
     0,
@@ -1901,7 +2546,6 @@ test("a statement fix that fails part way says where it stopped", async ({ page 
     },
   })
   await visit(page, "/databases/1/advisor")
-  await finding(page, /2 foreign keys with no index/).click()
   await findings(page).getByRole("button", { name: "Apply all 2" }).click()
   await dialog(page).getByRole("button", { name: "Apply 2 statements" }).click()
   await expect(page.getByText("The fix stopped after 1 statement")).toBeVisible()
@@ -2090,6 +2734,14 @@ async function keepsTheRules(page: Page, what: string, overlay = false) {
       .some((el) => el.scrollWidth > el.clientWidth + 1),
   )
   expect(sideways, `${what} scrolls sideways`).toBe(false)
+  // A table is as wide as the view it is in: none is cut off behind a
+  // scroll of its own, at whatever width the rail leaves the page.
+  const clipped = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>("[data-slot=page] [data-slot=table-container]")]
+      .filter((el) => el.scrollWidth > el.clientWidth + 1)
+      .map((el) => `${el.scrollWidth} in ${el.clientWidth}: ${el.textContent?.slice(0, 60)}`),
+  )
+  expect(clipped, `tables wider than ${what}`).toEqual([])
   // A sheet drawn over the page takes the page out of the accessibility tree.
   if (overlay) return
   // The page's name is said once, to assistive technology; the rail shows where this is.
@@ -2101,6 +2753,10 @@ async function keepsTheRules(page: Page, what: string, overlay = false) {
 for (const [label, viewport] of [
   ["", { width: 1280, height: 900 }],
   [" at a wide window", { width: 1720, height: 1000 }],
+  // The widths of an ordinary laptop, where the rail takes a quarter of the window.
+  [" at 1152 wide", { width: 1152, height: 900 }],
+  [" at 1024 wide", { width: 1024, height: 900 }],
+  [" at 900 wide", { width: 900, height: 900 }],
   [" at a tablet's width", { width: 820, height: 1000 }],
   [" at a phone's width", { width: 390, height: 844 }],
 ] as const) {
@@ -2123,30 +2779,44 @@ for (const [label, viewport] of [
       await visit(page, `/databases/1/performance${name ? `?view=${name}` : ""}`)
       await expect(tile(page, "Sessions")).toContainText("12")
       await page.waitForLoadState("networkidle")
+      // What a view folds away is part of it: the lock table, the idle sessions.
+      for (const fold of await page
+        .locator("[data-slot=page] details:not([open]) > summary")
+        .all()) {
+        await fold.click()
+      }
       await keepsTheRules(page, `the ${name || "overview"} view`)
     }
     await visit(page, "/databases/7/performance")
     await expect(region(page, "Maintenance").getByRole("button").first()).toBeVisible()
     await keepsTheRules(page, "a file's performance page")
-    for (const name of ["sessions", "parts", "merges"]) {
-      await visit(page, `/databases/2/performance?view=${name}`)
+    for (const name of ["", "sessions", "parts", "merges"]) {
+      await visit(page, `/databases/2/performance${name ? `?view=${name}` : ""}`)
       await expect(tile(page, "Running queries")).toContainText("2")
       await page.waitForLoadState("networkidle")
-      await keepsTheRules(page, `an analytic engine's ${name} view`)
+      for (const fold of await page
+        .locator("[data-slot=page] details:not([open]) > summary")
+        .all()) {
+        await fold.click()
+      }
+      await keepsTheRules(page, `an analytic engine's ${name || "overview"} view`)
     }
 
     // With the sheets open over their lists.
     await visit(page, "/databases/1/performance?view=sessions")
-    await page.getByRole("button", { name: /1 idle session/ }).click()
     await page.getByRole("button", { name: "Terminate session 12,3301" }).first().click()
     await expect(dialog(page)).toContainText("Terminate session")
     await keepsTheRules(page, "the sessions with a confirmation open", true)
     await visit(page, "/databases/1/performance?view=tables&object=public%2Forders")
     await expect(dialog(page)).toContainText("Maintenance")
     await keepsTheRules(page, "a table's panel", true)
-    await visit(page, "/databases/1/performance?view=statements&statement=s3")
+    await visit(page, "/databases/1/performance?view=statements&statement=s2")
     await expect(dialog(page)).toContainText("Of runtime")
+    await expect(dialog(page).getByRole("textbox")).toHaveCount(2)
     await keepsTheRules(page, "a statement's panel", true)
+    await visit(page, "/databases/1/performance?view=sessions&session=40%2C77")
+    await expect(dialog(page)).toContainText("Session 40,77")
+    await keepsTheRules(page, "a session's panel", true)
   })
 
   test(`the Advisor and what could not be read keep the rules${label}`, async ({ page }) => {
@@ -2154,12 +2824,14 @@ for (const [label, viewport] of [
     await page.setViewportSize(viewport)
     await mockOps(page)
     await visit(page, "/databases/1/advisor")
-    await finding(page, /2 foreign keys with no index/).click()
-    await finding(page, /1 table with no primary key/).click()
-    await finding(page, /No backup/).click()
     await expect(findings(page).getByRole("button", { name: "Open Backups" })).toBeVisible()
+    await expect(findings(page).getByRole("button", { name: "Apply all 2" })).toBeVisible()
     await page.waitForLoadState("networkidle")
     await keepsTheRules(page, "the advisor with findings open")
+    await findings(page).getByRole("button", { name: "Apply all 2" }).click()
+    await expect(dialog(page)).toContainText("Statements, run in this order")
+    await keepsTheRules(page, "the advisor's question before a fix", true)
+    await page.keyboard.press("Escape")
 
     await visit(page, "/databases/7/advisor")
     await expect(page.getByText(/found nothing to fix/)).toBeVisible()

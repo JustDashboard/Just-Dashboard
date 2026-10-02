@@ -14,6 +14,7 @@ import {
   stateSeconds,
   statusOf,
   stopsFor,
+  tallySessions,
   waitingSessions,
 } from "./performance-activity"
 
@@ -232,5 +233,44 @@ describe("the tree of waits", () => {
 
   test("no waits is no tree", () => {
     expect(lockTree([])).toEqual([])
+  })
+})
+
+describe("the session list at a glance", () => {
+  const list = (sessions, supported = true) => ({ supported, sessions })
+
+  test("counts who is working, who is held up and who holds a transaction open", () => {
+    const tally = tallySessions(
+      list([
+        session("1", "active"),
+        session("2", "blocked", { blockedByPids: ["3"] }),
+        session("3", "idle_in_transaction"),
+        session("4", "idle"),
+        session("5", "idle"),
+        session("6", "background"),
+      ]),
+    )
+    // A session waiting on a lock is not one of the working.
+    expect(tally).toEqual({ working: 1, waiting: 1, inTransaction: 1, idle: 2, onlyOwn: false })
+  })
+
+  test("says when the only one working is the page's own read", () => {
+    expect(
+      tallySessions(list([session("1", "active", { self: true }), session("2", "idle")])),
+    ).toMatchObject({
+      working: 1,
+      onlyOwn: true,
+    })
+    expect(
+      tallySessions(list([session("1", "active", { self: true }), session("2", "active")])).onlyOwn,
+    ).toBe(false)
+    expect(tallySessions(list([session("2", "idle")])).onlyOwn).toBe(false)
+  })
+
+  test("a list that is not one to count gives no tally", () => {
+    // Refused by the engine, or empty: an account that may not list sessions.
+    expect(tallySessions(list([session("1", "active")], false))).toBeUndefined()
+    expect(tallySessions(list([]))).toBeUndefined()
+    expect(tallySessions(undefined)).toBeUndefined()
   })
 })

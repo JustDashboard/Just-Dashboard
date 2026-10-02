@@ -1,13 +1,13 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { CodeBracket, GridSquare, Wrench } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { bytes, percent, relativeTime, timestamp } from "@/lib/format"
 import { useViewState } from "@/lib/view-state"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { FormFact, FormFacts, FormNote } from "@/components/form"
 import { Detail, DetailList, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -29,6 +29,7 @@ import { compact } from "@/components/database/home/readings"
 import { STORAGE_LIMIT, readTableStats } from "@/components/database/ops/performance-api"
 import {
   MaintenanceList,
+  MaintenanceUnread,
   useMaintenance,
   type Maintenance,
 } from "@/components/database/ops/performance-maintenance"
@@ -41,11 +42,15 @@ import {
   SortHead,
   Stale,
   ViewRead,
+  useReturnFocus,
+  RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import {
+  columnWidth,
   compressionRatio,
   counted,
   deadShare,
+  fittedColumns,
   isTableSort,
   lastRun,
   needsVacuum,
@@ -86,24 +91,34 @@ const PARTS = [
  */
 export function TablesView() {
   const { id, engine, param, select } = useDatabase()
-  const wide = useMediaQuery("(min-width: 900px)")
-  const roomy = useMediaQuery("(min-width: 1500px)")
+  const [frame, width] = useColumnWidth<HTMLDivElement>()
   const stats = usePoll((signal) => readTableStats(id, signal), 60_000, [id])
   const maintenance = useMaintenance(stats.refresh)
+  const focus = useReturnFocus()
   const [filter, setFilter] = useState("")
   const [order, setOrder] = useViewState<{ by: string; descending: boolean }>(
     `databases.${id}.performance.tables.order`,
     { by: "size", descending: true },
   )
   const by: TableSort = isTableSort(order.by) ? order.by : "size"
-  const scope = param("scope")
   const objects = engine.nouns.objects
   const title = objects[0].toUpperCase() + objects.slice(1)
   const noun = engine.nouns.object[0].toUpperCase() + engine.nouns.object.slice(1)
 
   const all = stats.data?.tables
   const schemas = useMemo(() => schemasOf(all ?? []), [all])
-  const columns = useMemo(() => tableColumns(all ?? []), [all])
+  // A schema the address names and the list does not hold narrows nothing:
+  // the list is every schema's, and the address is put right.
+  const asked = param("scope")
+  const scope = all && !schemas.some((schema) => schema.name === asked) ? "" : asked
+  useEffect(() => {
+    if (asked && !scope) select({ scope: null })
+  }, [asked, scope, select])
+
+  const every = useMemo(() => tableColumns(all ?? []), [all])
+  // Which shape, and which columns: by the width of the view itself, chosen
+  // once and drawn once.
+  const columns = fittedColumns(every, width)
   const largest = useMemo(
     () => (all ?? []).reduce((most, table) => Math.max(most, table.totalBytes), 0),
     [all],
@@ -131,17 +146,34 @@ export function TablesView() {
     />
   )
 
-  const opened = parseObject(param("object"))
+  const object = param("object")
+  const opened = parseObject(object)
   const open = opened
     ? all?.find((table) => table.schema === opened.schema && table.table === opened.name)
     : undefined
-  const openTable = (table: DbTableStat) =>
+  // A table the address names and the database no longer holds opens
+  // nothing, and does not stay in the address to be pasted on.
+  useEffect(() => {
+    if (object && all && !open) select({ object: null })
+  }, [object, all, open, select])
+  const openTable = (table: DbTableStat) => {
+    focus.remember()
     select({ object: objectParam(table.schema, table.table) })
+  }
   const whole = maintenance.verbsFor({})
   const toast = (all ?? []).some((table) => table.toastBytes > 0)
+  const named = (table: DbTableStat) => (
+    <>
+      <KindGlyph kind={rowObjectKind(table.kind)} />
+      <RowLink mono onClick={() => openTable(table)}>
+        <span className="sr-only">Open </span>
+        <ObjectName schema={schemas.length > 1 ? table.schema : undefined} name={table.table} />
+      </RowLink>
+    </>
+  )
 
   return (
-    <Panel plain aria-label={title}>
+    <Panel plain aria-label={title} ref={frame} className="focus-ring" {...RETURNS_FOCUS}>
       {maintenance.dialogs}
       <PanelHeader
         title={title}
@@ -170,7 +202,12 @@ export function TablesView() {
           </>
         }
       />
-      <ViewRead poll={stats} what={`the ${objects}`} skeleton={<LoadingPanel plain rows={8} />}>
+      <ViewRead
+        poll={stats}
+        what={`the ${objects}`}
+        locking={engine.can("locks")}
+        skeleton={<LoadingPanel plain rows={8} />}
+      >
         {(data) =>
           !data.supported ? (
             <div className="pt-4">
@@ -181,6 +218,7 @@ export function TablesView() {
             </div>
           ) : (
             <div className="animate-rise space-y-3 pt-3">
+              <MaintenanceUnread maintenance={maintenance} />
               <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-6 gap-y-2">
                 <ScopeChips
                   schemas={schemas}
@@ -213,8 +251,23 @@ export function TablesView() {
                   <EmptyNote className="px-4">
                     No {engine.nouns.object} matches {filter.trim() || scope}.
                   </EmptyNote>
-                ) : wide ? (
-                  <Table>
+                ) : columns ? (
+                  // Laid out fixed: every column has its width and the name
+                  // has the rest, so the table is exactly as wide as the view.
+                  <Table className="table-fixed">
+                    <colgroup>
+                      <col />
+                      <col style={columnWidth("rows")} />
+                      <col style={columnWidth("size")} />
+                      {columns.has("dead") && <col style={columnWidth("dead")} />}
+                      {columns.has("bloat") && <col style={columnWidth("bloat")} />}
+                      {columns.has("scans") && <col style={columnWidth("scans")} />}
+                      {columns.has("parts") && <col style={columnWidth("parts")} />}
+                      {columns.has("compression") && <col style={columnWidth("compression")} />}
+                      {columns.has("vacuum") && <col style={columnWidth("vacuum")} />}
+                      {columns.has("analyze") && <col style={columnWidth("analyze")} />}
+                      <col style={columnWidth("actions")} />
+                    </colgroup>
                     <TableHeader>
                       <TableRow className="hover:bg-transparent">
                         {head(noun, "name")}
@@ -222,7 +275,7 @@ export function TablesView() {
                         {head("Size", "size", "px-2")}
                         {columns.has("dead") && head("Dead rows", "dead", "px-2")}
                         {columns.has("bloat") && head("Unused space", "bloat", "px-2")}
-                        {columns.has("scans") && roomy && head("Sequential scans", "scans", "px-2")}
+                        {columns.has("scans") && head("Sequential scans", "scans", "px-2")}
                         {columns.has("parts") && (
                           <TableHead className="px-2 text-right">Parts</TableHead>
                         )}
@@ -231,7 +284,7 @@ export function TablesView() {
                         )}
                         {columns.has("vacuum") && <TableHead className="px-2">Vacuumed</TableHead>}
                         {columns.has("analyze") && <TableHead className="px-2">Analysed</TableHead>}
-                        <TableHead>
+                        <TableHead className="px-2">
                           <span className="sr-only">Actions</span>
                         </TableHead>
                       </TableRow>
@@ -242,18 +295,19 @@ export function TablesView() {
                           key={objectParam(table.schema, table.table)}
                           data-state={open === table ? "selected" : undefined}
                         >
-                          <TableCell className="max-w-72 py-2">
+                          <TableCell className="py-2">
                             <span className="flex min-w-0 items-center gap-2">
-                              <KindGlyph kind={rowObjectKind(table.kind)} />
-                              <RowLink mono onClick={() => openTable(table)}>
-                                <span className="sr-only">Open </span>
-                                <ObjectName
-                                  schema={schemas.length > 1 ? table.schema : undefined}
-                                  name={table.table}
-                                />
-                              </RowLink>
+                              {named(table)}
                               {table.engine && <Tag mono>{table.engine}</Tag>}
-                              {table.kind && table.kind !== "table" && <Tag>{table.kind}</Tag>}
+                              {table.kind && table.kind !== "table" && (
+                                <Tag className="truncate">{table.kind}</Tag>
+                              )}
+                              {/* What its own column would have said, where the column gave way. */}
+                              {!columns.has("analyze") && neverAnalysed(table, every) && (
+                                <Tag tone="warning" className="shrink-0">
+                                  never analysed
+                                </Tag>
+                              )}
                             </span>
                           </TableCell>
                           <TableCell className="numeric px-2 py-2 text-right">
@@ -276,7 +330,7 @@ export function TablesView() {
                               )}
                             </TableCell>
                           )}
-                          {columns.has("scans") && roomy && (
+                          {columns.has("scans") && (
                             <TableCell className="px-2 py-2 text-right">
                               <Scans table={table} />
                             </TableCell>
@@ -292,20 +346,20 @@ export function TablesView() {
                             </TableCell>
                           )}
                           {columns.has("vacuum") && (
-                            <TableCell className="px-2 py-2">
+                            <TableCell className="truncate px-2 py-2">
                               <Kept run={lastRun(table.lastVacuum, table.lastAutovacuum)} />
                             </TableCell>
                           )}
                           {columns.has("analyze") && (
-                            <TableCell className="px-2 py-2">
-                              {neverAnalysed(table, columns) ? (
+                            <TableCell className="truncate px-2 py-2">
+                              {neverAnalysed(table, every) ? (
                                 <span className="text-warning">never</span>
                               ) : (
                                 <Kept run={lastRun(table.lastAnalyze, table.lastAutoanalyze)} />
                               )}
                             </TableCell>
                           )}
-                          <TableCell className="py-1 text-right">
+                          <TableCell className="px-2 py-1 text-right">
                             <TableVerbs table={table} maintenance={maintenance} />
                           </TableCell>
                         </TableRow>
@@ -320,14 +374,9 @@ export function TablesView() {
                         className="space-y-1.5 px-4 py-2.5"
                       >
                         <div className="flex min-w-0 items-center gap-2">
-                          <KindGlyph kind={rowObjectKind(table.kind)} />
-                          <RowLink mono className="flex-1" onClick={() => openTable(table)}>
-                            <span className="sr-only">Open </span>
-                            <ObjectName
-                              schema={schemas.length > 1 ? table.schema : undefined}
-                              name={table.table}
-                            />
-                          </RowLink>
+                          <span className="flex min-w-0 flex-1 items-center gap-2">
+                            {named(table)}
+                          </span>
                           <TableVerbs table={table} maintenance={maintenance} />
                         </div>
                         <SizeBar table={table} largest={largest} />
@@ -338,7 +387,7 @@ export function TablesView() {
                               {compact(table.deadRows)} dead rows
                             </span>
                           )}
-                          {neverAnalysed(table, columns) && (
+                          {neverAnalysed(table, every) && (
                             <span className="text-warning">never analysed</span>
                           )}
                         </p>
@@ -353,7 +402,7 @@ export function TablesView() {
                   that.
                 </FormNote>
               )}
-              {columns.has("bloat") && (
+              {columns?.has("bloat") && (
                 <FormNote>
                   Unused space is what a table holds and is not using. Where the engine has to work
                   it out from its statistics it is an estimate, as fresh as the last analyse.
@@ -368,9 +417,12 @@ export function TablesView() {
       {open && (
         <TablePanel
           table={open}
-          columns={columns}
+          columns={every}
           maintenance={maintenance}
-          onClose={() => select({ object: null })}
+          onClose={() => {
+            select({ object: null })
+            focus.restore()
+          }}
         />
       )}
     </Panel>
@@ -385,11 +437,11 @@ function SizeBar({ table, largest }: { table: DbTableStat; largest: number }) {
   )
   const sum = parts.reduce((total, part) => total + part.bytes, 0)
   return (
-    <span className="flex min-w-36 items-center justify-end gap-2.5">
+    <span className="flex min-w-0 items-center justify-end gap-2.5">
       <span
         role="img"
         aria-label={parts.map((part) => `${part.label} ${bytes(part.bytes)}`).join(", ")}
-        className="relative h-1 min-w-12 flex-1 overflow-hidden rounded-full bg-meter-track"
+        className="relative h-1 min-w-10 flex-1 overflow-hidden rounded-full bg-meter-track"
       >
         <span
           className="absolute inset-y-0 left-0 flex gap-px"

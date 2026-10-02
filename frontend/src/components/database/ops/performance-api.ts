@@ -30,6 +30,22 @@ import type {
 
 const base = (id: number) => `/databases/${id}`
 
+/**
+ * A read whose failure says how long it had been waiting. A read queued
+ * behind a lock does not fail: it is given up, half a minute later, by
+ * whatever stands between the page and the server — and the page says that
+ * differently from a refusal (`ViewRead`).
+ */
+export async function timed<T>(work: Promise<T>): Promise<T> {
+  const since = Date.now()
+  try {
+    return await work
+  } catch (error) {
+    if (error instanceof Error) Object.assign(error, { waitedMs: Date.now() - since })
+    throw error
+  }
+}
+
 export const readActivity = (id: number, signal?: AbortSignal) =>
   read<DbActivityResponse>(
     `${base(id)}/activity`,
@@ -48,30 +64,36 @@ export const readLocks = (id: number, signal?: AbortSignal) =>
   read<DbLocks>(`${base(id)}/locks`, (answer) => Array.isArray(answer.waits), undefined, signal)
 
 export const readReplication = (id: number, signal?: AbortSignal) =>
-  read<DbReplication>(
-    `${base(id)}/replication`,
-    (answer) => Array.isArray(answer.replicas),
-    undefined,
-    signal,
+  timed(
+    read<DbReplication>(
+      `${base(id)}/replication`,
+      (answer) => Array.isArray(answer.replicas),
+      undefined,
+      signal,
+    ),
   )
 
 /** How many tables or indexes one read asks for; the server's cap is 1000. */
 export const STORAGE_LIMIT = 500
 
 export const readTableStats = (id: number, signal?: AbortSignal) =>
-  read<DbTableStats>(
-    `${base(id)}/tablestats`,
-    (answer) => Array.isArray(answer.tables),
-    { limit: STORAGE_LIMIT },
-    signal,
+  timed(
+    read<DbTableStats>(
+      `${base(id)}/tablestats`,
+      (answer) => Array.isArray(answer.tables),
+      { limit: STORAGE_LIMIT },
+      signal,
+    ),
   )
 
 export const readIndexStats = (id: number, signal?: AbortSignal) =>
-  read<DbIndexStats>(
-    `${base(id)}/indexstats`,
-    (answer) => Array.isArray(answer.indexes),
-    { limit: STORAGE_LIMIT },
-    signal,
+  timed(
+    read<DbIndexStats>(
+      `${base(id)}/indexstats`,
+      (answer) => Array.isArray(answer.indexes),
+      { limit: STORAGE_LIMIT },
+      signal,
+    ),
   )
 
 export const readMaintenance = (id: number, signal?: AbortSignal) =>

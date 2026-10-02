@@ -7,9 +7,8 @@ import { copyText } from "@/lib/clipboard"
 import { bytes, duration, timestamp } from "@/lib/format"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { usePoll } from "@/hooks/use-poll"
-import { useConfirm } from "@/components/confirm-dialog"
+import { usePoll, type PollState } from "@/hooks/use-poll"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { Disclosure, FormFact } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Meter } from "@/components/meter"
@@ -45,7 +44,7 @@ import {
   statusOf,
   stopsFor,
 } from "@/components/database/ops/performance-activity"
-import { endSession, readActivity, readChQueries } from "@/components/database/ops/performance-api"
+import { endSession, readChQueries } from "@/components/database/ops/performance-api"
 import {
   Named,
   NoFigure,
@@ -54,17 +53,25 @@ import {
   Stale,
   StatementLine,
   ViewRead,
+  useAsk,
+  useReturnFocus,
+  RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { useStops } from "@/components/database/ops/performance-stops"
 import type {
   ChQuery,
   DbActivity,
+  DbActivityResponse,
   DbSessionStatus,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 
-/** How often the session list is read while the view is open. */
-const EVERY_MS = 5000
+/**
+ * How wide the view has to be for the sessions to be a table. Measured on
+ * the view itself, not the window: the rail beside the page takes its share
+ * of every window, and more of a narrow one.
+ */
+const TABLE_FROM = 780
 
 const isState = (value: string): value is DbSessionStatus =>
   SESSION_STATES.some((state) => state.id === value)
@@ -88,20 +95,30 @@ const isState = (value: string): value is DbSessionStatus =>
  * Stopping a statement and ending a session change no data, so they are
  * offered on a protected connection too — to a role that may remove things.
  */
-export function SessionsView() {
+export function SessionsView({ activity }: { activity: PollState<DbActivityResponse> }) {
   const { engine } = useDatabase()
   // An analytic engine has no sessions that sit idle: what is on it is the
   // queries running now, and it has more to say about each.
-  return engine.can("clickhouseViews") ? <RunningQueries /> : <Sessions />
+  return engine.can("clickhouseViews") ? <RunningQueries /> : <Sessions activity={activity} />
 }
 
-function Sessions() {
+function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
   const { id, param, select } = useDatabase()
-  const wide = useMediaQuery("(min-width: 1100px)")
-  const activity = usePoll((signal) => readActivity(id, signal), EVERY_MS, [id])
+  const [frame, width] = useColumnWidth<HTMLDivElement>()
+  const wide = width >= TABLE_FROM
   const [filter, setFilter] = useState("")
   const [idleOpen, setIdleOpen] = useViewState(`databases.${id}.performance.idle`, false)
-  const [openPid, setOpenPid] = useState<string | null>(null)
+  // The session whose panel is open is in the address, so a link to one
+  // session opens on it.
+  const openPid = param("session") || null
+  const focus = useReturnFocus()
+  const setOpenPid = (pid: string | null) => {
+    // The press that opens the panel is where the keyboard goes back to; a
+    // press inside it, from one session to the one it waits on, is not.
+    if (pid && !openPid) focus.remember()
+    select({ session: pid })
+    if (!pid) focus.restore()
+  }
   // The session whose panel is open is kept as it was last seen, so a session
   // that ends while it is being read does not take the panel with it.
   const [kept, setKept] = useState<DbActivity | null>(null)
@@ -134,7 +151,7 @@ function Sessions() {
   }
 
   return (
-    <Panel plain aria-label="Sessions">
+    <Panel plain aria-label="Sessions" ref={frame} className="focus-ring" {...RETURNS_FOCUS}>
       {stopping.dialog}
       <PanelHeader
         title="Sessions"
@@ -242,7 +259,7 @@ function Sessions() {
                 >
                   {idleOpen && (
                     <div className="-mx-4">
-                      <SessionRows sessions={idle} {...rowProps} />
+                      <SessionRows sessions={idle} {...rowProps} continued />
                     </div>
                   )}
                 </Disclosure>
@@ -332,7 +349,13 @@ function Who({ session }: { session: DbActivity }) {
   )
 }
 
-/** What a session waits on, and the sessions on either side of it in the queue. */
+/**
+ * What a session waits on, and the sessions on either side of it in the
+ * queue. Only a session that is held up is waiting on something a reader can
+ * act on: the engine's word for what every other thread is doing — a client
+ * that has not sent its next statement, a sleep — is its state, not a wait,
+ * and is in the session's panel.
+ */
 function Waiting({
   session,
   queued,
@@ -347,7 +370,8 @@ function Waiting({
 }) {
   const behind = blockersOf(session)
   const holding = queued.get(session.pid) ?? 0
-  if (behind.length === 0 && holding === 0 && !session.wait) return quiet ? null : <NoFigure />
+  const lock = statusOf(session) === "blocked" && behind.length === 0 ? session.wait : undefined
+  if (behind.length === 0 && holding === 0 && !lock) return quiet ? null : <NoFigure />
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
       {holding > 0 && (
@@ -355,7 +379,7 @@ function Waiting({
           blocking {holding.toLocaleString()}
         </Tag>
       )}
-      {behind.length > 0 ? (
+      {behind.length > 0 && (
         <span className="flex min-w-0 items-center gap-1 text-hint text-muted-foreground">
           behind
           {behind.slice(0, 3).map((pid) => (
@@ -371,13 +395,11 @@ function Waiting({
           ))}
           {behind.length > 3 && <span>+{behind.length - 3}</span>}
         </span>
-      ) : (
-        session.wait &&
-        holding === 0 && (
-          <span className="min-w-0 truncate text-hint text-muted-foreground" title={session.wait}>
-            {session.wait}
-          </span>
-        )
+      )}
+      {lock && (
+        <span className="min-w-0 truncate text-hint text-muted-foreground" title={lock}>
+          {lock}
+        </span>
       )}
     </span>
   )
@@ -415,9 +437,18 @@ function Stops({
 /**
  * The sessions as a table where there is room for one, and drawn down — a
  * state, who, the statement, what it waits on — where there is not: chosen
- * once by the window's width rather than drawn twice and half hidden.
+ * once by the width of the view rather than drawn twice and half hidden.
+ *
+ * The columns are a fixed width each and the statement takes the rest, so
+ * the idle sessions folded under the list stand in the same columns as the
+ * ones above them. That second run is the same table continued: its head is
+ * there for a screen reader and not drawn again.
  */
-function SessionRows({ sessions, ...tools }: { sessions: DbActivity[] } & RowTools) {
+function SessionRows({
+  sessions,
+  continued,
+  ...tools
+}: { sessions: DbActivity[]; continued?: boolean } & RowTools) {
   const { queued, wide, onOpen } = tools
   if (!wide) {
     return (
@@ -455,8 +486,16 @@ function SessionRows({ sessions, ...tools }: { sessions: DbActivity[] } & RowToo
     )
   }
   return (
-    <Table>
-      <TableHeader>
+    <Table className="table-fixed">
+      <colgroup>
+        <col className="w-40" />
+        <col className="w-48" />
+        <col className="w-14" />
+        <col className="w-40" />
+        <col />
+        <col className="w-[5.5rem]" />
+      </colgroup>
+      <TableHeader className={continued ? "sr-only" : undefined}>
         <TableRow className="hover:bg-transparent">
           <TableHead>State</TableHead>
           <TableHead className="px-2">Session</TableHead>
@@ -476,12 +515,12 @@ function SessionRows({ sessions, ...tools }: { sessions: DbActivity[] } & RowToo
             aria-label={`Session ${session.pid}`}
           >
             <TableCell className="py-2">
-              <span className="flex items-center gap-2">
+              <span className="flex min-w-0 items-center gap-2">
                 <SessionState status={statusOf(session)} late={Boolean(concernOf(session))} />
-                {session.self && <Tag>this dashboard</Tag>}
+                {session.self && <Tag className="truncate">this dashboard</Tag>}
               </span>
             </TableCell>
-            <TableCell className="max-w-64 px-2 py-2">
+            <TableCell className="px-2 py-2">
               <Who session={session} />
               <span className="flex min-w-0 items-center gap-1.5 font-mono text-hint text-muted-foreground">
                 <span>{session.pid}</span>
@@ -491,10 +530,10 @@ function SessionRows({ sessions, ...tools }: { sessions: DbActivity[] } & RowToo
             <TableCell className="px-2 py-2 text-right">
               <StateFigure session={session} />
             </TableCell>
-            <TableCell className="max-w-56 px-2 py-2">
+            <TableCell className="px-2 py-2">
               <Waiting session={session} queued={queued} onOpen={onOpen} />
             </TableCell>
-            <TableCell className="w-full max-w-0 px-2 py-2">
+            <TableCell className="px-2 py-2">
               {session.query ? <StatementLine text={session.query} /> : <NoFigure />}
             </TableCell>
             <TableCell className="py-1">
@@ -666,7 +705,12 @@ function SessionPanel({
             </Detail>
           )}
           {session.wait && (
-            <Detail label="Waiting on" className="font-mono wrap-anywhere">
+            // The engine's own word for what the thread is doing: a lock it
+            // waits on, or only a client that has not sent its next statement.
+            <Detail
+              label={status === "blocked" ? "Waiting on" : "Doing"}
+              className="font-mono wrap-anywhere"
+            >
               {session.wait}
             </Detail>
           )}
@@ -722,9 +766,42 @@ function SessionPanel({
 function RunningQueries() {
   const { id, conn, engine } = useDatabase()
   const { can } = useAuth()
-  const { confirm, dialog } = useConfirm()
+  const { confirm, dialog } = useAsk()
   const queries = usePoll((signal) => readChQueries(id, signal), 3000, [id])
+  const [frame, width] = useColumnWidth<HTMLDivElement>()
   const mayStop = can("destructive") && engine.can("kill")
+  const progress = (query: ChQuery) =>
+    query.cancelled ? (
+      <Tag tone="warning">stopping</Tag>
+    ) : query.progress >= 0 ? (
+      <span className="flex w-28 items-center gap-2">
+        <Meter
+          value={query.progress * 100}
+          size="thin"
+          label="Rows read of the estimate"
+          className="flex-1"
+        />
+        <span className="numeric text-hint text-muted-foreground">
+          {Math.round(query.progress * 100)}%
+        </span>
+      </span>
+    ) : (
+      <span className="text-hint text-muted-foreground">no estimate</span>
+    )
+  const elapsed = (query: ChQuery) => (
+    <span
+      className={cn("numeric", query.elapsed >= THRESHOLDS.active && "font-medium text-warning")}
+    >
+      {query.elapsed < 1 ? "<1s" : duration(query.elapsed)}
+    </span>
+  )
+  const stopper = (query: ChQuery) =>
+    mayStop &&
+    !query.cancelled && (
+      <IconAction label={`Stop query ${query.id}`} onClick={() => stop(query)}>
+        <StopCircle />
+      </IconAction>
+    )
 
   const stop = (query: ChQuery) =>
     confirm({
@@ -755,7 +832,7 @@ function RunningQueries() {
     })
 
   return (
-    <Panel plain aria-label="Running queries">
+    <Panel plain aria-label="Running queries" ref={frame} className="focus-ring" {...RETURNS_FOCUS}>
       {dialog}
       <PanelHeader title="Running queries" actions={<Stale poll={queries} />} />
       <ViewRead
@@ -771,6 +848,34 @@ function RunningQueries() {
                 <EmptyNote className="px-4">
                   Nothing is running but this page&apos;s own read of the list.
                 </EmptyNote>
+              ) : width < TABLE_FROM ? (
+                // Drawn down where a table has no room: nothing is dropped.
+                <ul className="divide-y divide-hairline border-y border-hairline">
+                  {others.map((query) => (
+                    <li key={query.id} className="space-y-1.5 px-4 py-2.5 text-xs">
+                      <div className="flex min-w-0 items-center justify-between gap-3">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Named name={query.user} className="font-medium" />
+                          <span className="truncate font-mono text-hint text-muted-foreground">
+                            {[query.kind, query.clientName].filter(Boolean).join(" · ")}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          {elapsed(query)}
+                          {stopper(query)}
+                        </span>
+                      </div>
+                      <StatementLine text={query.query} className="text-hint text-foreground/80" />
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
+                        {progress(query)}
+                        <span className="numeric">
+                          {compact(query.rowsRead)} rows · {bytes(query.bytesRead)} read
+                        </span>
+                        <span className="numeric">{bytes(query.memory)} held</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               ) : (
                 <Table>
                   <TableHeader>
@@ -800,33 +905,8 @@ function RunningQueries() {
                         <TableCell className="px-2 py-2">
                           <Named name={query.user} />
                         </TableCell>
-                        <TableCell
-                          className={cn(
-                            "numeric px-2 py-2 text-right",
-                            query.elapsed >= THRESHOLDS.active && "font-medium text-warning",
-                          )}
-                        >
-                          {query.elapsed < 1 ? "<1s" : duration(query.elapsed)}
-                        </TableCell>
-                        <TableCell className="px-2 py-2">
-                          {query.cancelled ? (
-                            <Tag tone="warning">stopping</Tag>
-                          ) : query.progress >= 0 ? (
-                            <span className="flex w-28 items-center gap-2">
-                              <Meter
-                                value={query.progress * 100}
-                                size="thin"
-                                label="Rows read of the estimate"
-                                className="flex-1"
-                              />
-                              <span className="numeric text-hint text-muted-foreground">
-                                {Math.round(query.progress * 100)}%
-                              </span>
-                            </span>
-                          ) : (
-                            <span className="text-hint text-muted-foreground">no estimate</span>
-                          )}
-                        </TableCell>
+                        <TableCell className="px-2 py-2 text-right">{elapsed(query)}</TableCell>
+                        <TableCell className="px-2 py-2">{progress(query)}</TableCell>
                         <TableCell className="numeric px-2 py-2 text-right">
                           {compact(query.rowsRead)} rows
                           <span className="block text-hint text-muted-foreground">
@@ -839,16 +919,7 @@ function RunningQueries() {
                             peak {bytes(query.peakMemory)}
                           </span>
                         </TableCell>
-                        <TableCell className="py-1 text-right">
-                          {mayStop && !query.cancelled && (
-                            <IconAction
-                              label={`Stop query ${query.id}`}
-                              onClick={() => stop(query)}
-                            >
-                              <StopCircle />
-                            </IconAction>
-                          )}
-                        </TableCell>
+                        <TableCell className="py-1 text-right">{stopper(query)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

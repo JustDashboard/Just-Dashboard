@@ -73,6 +73,7 @@ export function ReplicationView() {
       <ViewRead
         poll={replication}
         what="the replication state"
+        locking={engine.can("locks")}
         skeleton={<LoadingPanel plain rows={5} />}
       >
         {(data) => {
@@ -126,8 +127,8 @@ export function ReplicationView() {
                         <TableHead>Replica</TableHead>
                         <TableHead className="px-2">State</TableHead>
                         <TableHead className="px-2">Behind</TableHead>
-                        <TableHead className="px-2 max-md:hidden">Replayed to</TableHead>
-                        <TableHead className="max-sm:hidden">Connected</TableHead>
+                        <TableHead className="px-2 @max-[46rem]:hidden">Replayed to</TableHead>
+                        <TableHead className="@max-[38rem]:hidden">Connected</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -155,11 +156,11 @@ export function ReplicationView() {
                           <TableCell className="px-2 py-2">
                             <Lag seconds={replica.lagSeconds} size={replica.lagBytes} />
                           </TableCell>
-                          <TableCell className="px-2 py-2 font-mono text-muted-foreground max-md:hidden">
+                          <TableCell className="px-2 py-2 font-mono text-muted-foreground @max-[46rem]:hidden">
                             {replica.replayLsn || <NoFigure />}
                           </TableCell>
                           <TableCell
-                            className="py-2 text-muted-foreground max-sm:hidden"
+                            className="py-2 text-muted-foreground @max-[38rem]:hidden"
                             title={timestamp(replica.since)}
                           >
                             {replica.since ? relativeTime(replica.since) : <NoFigure />}
@@ -181,7 +182,7 @@ export function ReplicationView() {
                         <TableHead>Publication</TableHead>
                         <TableHead className="px-2">Tables</TableHead>
                         <TableHead className="px-2">Publishes</TableHead>
-                        <TableHead className="max-sm:hidden">Owner</TableHead>
+                        <TableHead className="@max-[38rem]:hidden">Owner</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -202,7 +203,7 @@ export function ReplicationView() {
                                 ))}
                             </span>
                           </TableCell>
-                          <TableCell className="py-2 max-sm:hidden">
+                          <TableCell className="py-2 @max-[38rem]:hidden">
                             {publication.owner ? <Named name={publication.owner} /> : <NoFigure />}
                           </TableCell>
                         </TableRow>
@@ -220,7 +221,7 @@ export function ReplicationView() {
                         <TableHead>Subscription</TableHead>
                         <TableHead className="px-2">State</TableHead>
                         <TableHead className="px-2">To</TableHead>
-                        <TableHead className="max-sm:hidden">Last message</TableHead>
+                        <TableHead className="@max-[38rem]:hidden">Last message</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -249,7 +250,7 @@ export function ReplicationView() {
                             {subscription.publications.join(", ")}
                           </TableCell>
                           <TableCell
-                            className="py-2 text-muted-foreground max-sm:hidden"
+                            className="py-2 text-muted-foreground @max-[38rem]:hidden"
                             title={timestamp(subscription.lastMessage)}
                           >
                             {subscription.lastMessage ? (
@@ -294,7 +295,9 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
   return (
     <section className="space-y-1">
       <p className="eyebrow">{title}</p>
-      <div className="-mx-4">{children}</div>
+      {/* A container: the tables inside give up a column by this block's
+          width, not the window's. */}
+      <div className="@container -mx-4">{children}</div>
     </section>
   )
 }
@@ -308,7 +311,7 @@ function Slots({ slots }: { slots: DbReplicationSlot[] }) {
             <TableHead>Slot</TableHead>
             <TableHead className="px-2">Read by</TableHead>
             <TableHead className="px-2 text-right">Log held back</TableHead>
-            <TableHead className="max-sm:hidden">Kind</TableHead>
+            <TableHead className="@max-[38rem]:hidden">Kind</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -326,7 +329,7 @@ function Slots({ slots }: { slots: DbReplicationSlot[] }) {
               <TableCell className="numeric px-2 py-2 text-right">
                 {slot.retainedBytes < 0 ? <NoFigure /> : bytes(slot.retainedBytes)}
               </TableCell>
-              <TableCell className="py-2 max-sm:hidden">
+              <TableCell className="py-2 @max-[38rem]:hidden">
                 <span className="flex flex-wrap items-center gap-x-2.5">
                   {slot.type && <Tag>{slot.type}</Tag>}
                   {slot.plugin && <Tag mono>{slot.plugin}</Tag>}

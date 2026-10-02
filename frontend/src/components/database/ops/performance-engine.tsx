@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
-import { bytes, duration, relativeTime, timestamp } from "@/lib/format"
+import { bytes, duration, relativeTime, timestamp, plural } from "@/lib/format"
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { Disclosure, FormNote } from "@/components/form"
@@ -95,7 +95,7 @@ export function PartsView() {
                   ))}
                 </ChipStrip>
               )}
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className="@container group-data-[plain]/panel:-mx-4">
                 {shown.length === 0 ? (
                   <EmptyNote className="px-4">
                     No table of <span className="font-mono">{data.database}</span> has a part yet:
@@ -109,8 +109,10 @@ export function PartsView() {
                         <TableHead className="px-2 text-right">Parts</TableHead>
                         <TableHead className="px-2 text-right">Rows</TableHead>
                         <TableHead className="px-2">On disk</TableHead>
-                        <TableHead className="px-2 text-right max-sm:hidden">Compressed</TableHead>
-                        <TableHead className="max-md:hidden">Last written</TableHead>
+                        <TableHead className="px-2 text-right @max-[38rem]:hidden">
+                          Compressed
+                        </TableHead>
+                        <TableHead className="@max-[46rem]:hidden">Last written</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -129,10 +131,10 @@ export function PartsView() {
                             {compact(partition.rows)}
                           </TableCell>
                           <TableCell className="px-2 py-2">
-                            <span className="flex min-w-32 items-center gap-2.5">
+                            <span className="flex items-center justify-end gap-2.5 @min-[30rem]:min-w-32">
                               <span
                                 aria-hidden
-                                className="relative h-1 min-w-10 flex-1 overflow-hidden rounded-full bg-meter-track"
+                                className="relative h-1 min-w-10 flex-1 overflow-hidden rounded-full bg-meter-track @max-[30rem]:hidden"
                               >
                                 <span
                                   className="absolute inset-y-0 left-0 rounded-full bg-(--chart-1)"
@@ -146,11 +148,11 @@ export function PartsView() {
                               </span>
                             </span>
                           </TableCell>
-                          <TableCell className="numeric px-2 py-2 text-right text-muted-foreground max-sm:hidden">
+                          <TableCell className="numeric px-2 py-2 text-right text-muted-foreground @max-[38rem]:hidden">
                             {ratio(partition) ?? <NoFigure />}
                           </TableCell>
                           <TableCell
-                            className="py-2 text-muted-foreground max-md:hidden"
+                            className="py-2 text-muted-foreground @max-[46rem]:hidden"
                             title={timestamp(partition.modified)}
                           >
                             {partition.modified ? relativeTime(partition.modified) : <NoFigure />}
@@ -174,7 +176,7 @@ export function PartsView() {
                   summary={<>Every part · {listed.length.toLocaleString()}</>}
                 >
                   {open && (
-                    <div className="-mx-4">
+                    <div className="@container -mx-4">
                       <Table containerClassName="max-h-[28rem]">
                         <TableHeader>
                           <TableRow className="hover:bg-transparent">
@@ -182,8 +184,10 @@ export function PartsView() {
                             <TableHead className="px-2">Of</TableHead>
                             <TableHead className="px-2 text-right">Rows</TableHead>
                             <TableHead className="px-2 text-right">On disk</TableHead>
-                            <TableHead className="px-2 text-right max-sm:hidden">Merged</TableHead>
-                            <TableHead className="max-md:hidden">Stored as</TableHead>
+                            <TableHead className="px-2 text-right @max-[38rem]:hidden">
+                              Merged
+                            </TableHead>
+                            <TableHead className="@max-[46rem]:hidden">Stored as</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -200,12 +204,12 @@ export function PartsView() {
                                 {bytes(part.bytes)}
                               </TableCell>
                               <TableCell
-                                className="numeric px-2 py-2 text-right text-muted-foreground max-sm:hidden"
+                                className="numeric px-2 py-2 text-right text-muted-foreground @max-[38rem]:hidden"
                                 title="How many rounds of merging produced this part"
                               >
                                 {part.level === 0 ? "not yet" : `${part.level}×`}
                               </TableCell>
-                              <TableCell className="py-2 max-md:hidden">
+                              <TableCell className="py-2 @max-[46rem]:hidden">
                                 <span className="flex items-center gap-2.5">
                                   <Tag>{part.type}</Tag>
                                   <Tag mono>{part.disk}</Tag>
@@ -244,7 +248,7 @@ export function MergesView() {
         <PanelHeader title="Merges running" actions={<Stale poll={merges} />} />
         <ViewRead poll={merges} what="the merges" skeleton={<LoadingPanel plain rows={3} />}>
           {(data) => (
-            <PanelBody flush className="animate-rise group-data-[plain]/panel:-mx-4">
+            <PanelBody flush className="@container animate-rise group-data-[plain]/panel:-mx-4">
               {data.merges.length === 0 ? (
                 <EmptyNote className="px-4">
                   No merge is running. The server merges parts in the background as inserts arrive.
@@ -257,8 +261,8 @@ export function MergesView() {
                       <TableHead className="px-2">Progress</TableHead>
                       <TableHead className="px-2 text-right">For</TableHead>
                       <TableHead className="px-2 text-right">Parts</TableHead>
-                      <TableHead className="px-2 text-right max-sm:hidden">Size</TableHead>
-                      <TableHead className="text-right max-md:hidden">Memory</TableHead>
+                      <TableHead className="px-2 text-right @max-[38rem]:hidden">Size</TableHead>
+                      <TableHead className="text-right @max-[46rem]:hidden">Memory</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -292,10 +296,10 @@ export function MergesView() {
                         <TableCell className="numeric px-2 py-2 text-right">
                           {merge.parts.toLocaleString()}
                         </TableCell>
-                        <TableCell className="numeric px-2 py-2 text-right max-sm:hidden">
+                        <TableCell className="numeric px-2 py-2 text-right @max-[38rem]:hidden">
                           {bytes(merge.bytes)}
                         </TableCell>
-                        <TableCell className="numeric py-2 text-right text-muted-foreground max-md:hidden">
+                        <TableCell className="numeric py-2 text-right text-muted-foreground @max-[46rem]:hidden">
                           {bytes(merge.memory)}
                         </TableCell>
                       </TableRow>
@@ -312,7 +316,7 @@ export function MergesView() {
         <PanelHeader title="Mutations" actions={<Stale poll={mutations} />} />
         <ViewRead poll={mutations} what="the mutations" skeleton={<LoadingPanel plain rows={3} />}>
           {(data) => (
-            <PanelBody flush className="animate-rise group-data-[plain]/panel:-mx-4">
+            <PanelBody flush className="@container animate-rise group-data-[plain]/panel:-mx-4">
               {data.mutations.length === 0 ? (
                 <EmptyNote className="px-4">
                   No mutation has been asked of this database. An ALTER TABLE … UPDATE or DELETE
@@ -325,7 +329,7 @@ export function MergesView() {
                       <TableHead>Table</TableHead>
                       <TableHead className="px-2">State</TableHead>
                       <TableHead className="px-2">Command</TableHead>
-                      <TableHead className="max-sm:hidden">Asked</TableHead>
+                      <TableHead className="@max-[38rem]:hidden">Asked</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -342,7 +346,7 @@ export function MergesView() {
                                 ? "Failing"
                                 : mutation.done
                                   ? "Done"
-                                  : `${mutation.partsToDo.toLocaleString()} parts to do`
+                                  : `${plural(mutation.partsToDo, "part")} to do`
                             }
                           />
                         </TableCell>
@@ -358,7 +362,7 @@ export function MergesView() {
                           )}
                         </TableCell>
                         <TableCell
-                          className="py-2 text-muted-foreground max-sm:hidden"
+                          className="py-2 text-muted-foreground @max-[38rem]:hidden"
                           title={timestamp(mutation.created)}
                         >
                           {mutation.created ? relativeTime(mutation.created) : <NoFigure />}
