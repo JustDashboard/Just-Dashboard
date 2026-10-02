@@ -11,9 +11,10 @@ import {
   type ServiceLogsView,
 } from "@/components/logs/service-logs"
 import { Pane } from "@/components/panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { LoadingRows, Notice } from "@/components/state"
 import type { Engine } from "@/components/database/engine"
-import { EngineGlyph, SectionFrame } from "@/components/database/kit"
+import { CouldNotRead } from "@/components/database/home/blocks"
+import { SectionFrame } from "@/components/database/kit"
 import { DatabaseQueries } from "@/components/database/ops/queries-view"
 import { queryNoun } from "@/components/database/ops/queries"
 import { useDatabase } from "@/components/database/shell/database-context"
@@ -65,16 +66,23 @@ export function Logs() {
   return (
     <SectionFrame section="logs">
       {found.error && !latest ? (
-        <ErrorState error={found.error} onRetry={found.refresh} />
+        // Where the server's log is could not be found out: said, with the
+        // way to ask again, rather than left to the next poll.
+        <CouldNotRead
+          what="where this server writes its log"
+          error={found.error}
+          onRetry={found.refresh}
+        />
       ) : !latest ? (
         <Pane className="min-h-0 flex-1">
           <LoadingRows rows={8} className="p-3" />
         </Pane>
       ) : latest.sources.length > 0 ? (
-        <ServerLogs conn={conn} found={latest} onQuery={onQuery} />
+        <ServerLogs conn={conn} engine={engine} found={latest} onQuery={onQuery} />
       ) : held ? (
         <ServerLogs
           conn={conn}
+          engine={engine}
           found={{
             ...held,
             note: "Nothing answers for this connection any more, so the server may have stopped. This is the log it was writing.",
@@ -96,15 +104,17 @@ export function Logs() {
 
 function ServerLogs({
   conn,
+  engine,
   found,
   onQuery,
 }: {
   conn: DbConnection
+  engine: Engine
   found: DbLogSources
   onQuery?: (sql: string) => void
 }) {
   const { select, param } = useDatabase()
-  const noun = queryNoun(conn.driver)
+  const noun = queryNoun(engine)
   const sources = found.sources
   const primary = sources.find((s) => s.primary)
 
@@ -120,7 +130,9 @@ function ServerLogs({
     {
       id: "queries",
       label: noun.view,
-      render: (ctx) => <DatabaseQueries conn={conn} ctx={onServerLog(ctx)} onQuery={onQuery} />,
+      render: (ctx) => (
+        <DatabaseQueries conn={conn} engine={engine} ctx={onServerLog(ctx)} onQuery={onQuery} />
+      ),
     },
   ]
 
@@ -175,25 +187,10 @@ function QueriesAlone({
   refused?: DbLogSources["refused"]
   onQuery?: (sql: string) => void
 }) {
-  const noun = queryNoun(conn.driver)
   const why = reason ?? (refused?.length ? `${refused[0].path} is ${refused[0].reason}.` : "")
   return (
     <Pane className="min-h-[24rem] flex-1">
-      <div className="flex shrink-0 items-start gap-x-2 border-b border-hairline px-2.5 py-2.5">
-        <EngineGlyph engine={engine} className="mt-px" />
-        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-0.5">
-          <span className="shrink-0 text-body font-medium">
-            {/* A file has no server keeping a log; its list is what was run from here. */}
-            {engine.can("server") ? noun.title : "Statements run from here"}
-          </span>
-          {why && (
-            <span className="min-w-0 basis-64 text-hint text-pretty text-muted-foreground max-sm:basis-full sm:flex-1">
-              {why}
-            </span>
-          )}
-        </div>
-      </div>
-      <DatabaseQueries conn={conn} onQuery={onQuery} />
+      <DatabaseQueries conn={conn} engine={engine} onQuery={onQuery} heading={{ why }} />
     </Pane>
   )
 }
