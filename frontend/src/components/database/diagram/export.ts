@@ -1,8 +1,20 @@
 import type { Edge, Node } from "@xyflow/react"
-import type { DbGraphColumn, DbGraphTable, DbSchemaGraph } from "@/lib/types"
-import type { DiagramColor, DiagramDetail, DiagramDocument } from "./memory"
-import { visibleColumns } from "./layout"
-import { HEADER_HEIGHT, NODE_WIDTH, NOTE_HEIGHT, ROW_HEIGHT, shortType } from "./table-node"
+import type { DiagramColor, DiagramDocument } from "@/components/database/diagram/document"
+import {
+  HEADER_HEIGHT,
+  NODE_WIDTH,
+  NOTE_HEIGHT,
+  ROW_HEIGHT,
+  compactRows,
+  shortType,
+  visibleColumns,
+  type DiagramDetail,
+} from "@/components/database/diagram/geometry"
+import type {
+  DbGraphColumn,
+  DbGraphTable,
+  DbSchemaGraph,
+} from "@/components/database/diagram/types"
 
 /**
  * The diagram, taken away.
@@ -85,7 +97,9 @@ function anchor(
 }
 
 export function renderSvg({ graph, nodes, edges, detail, colors, notes, title }: SvgInput): string {
-  const byName = new Map(graph.tables.map((t) => [t.name, t]))
+  const byId = new Map(graph.tables.map((t) => [t.id, t]))
+  // A picture of several schemas names each table with its schema.
+  const qualified = new Set(graph.tables.map((t) => t.schema)).size > 1
   const nodeOf = new Map(nodes.map((n) => [n.id, n]))
   const PAD = 40
   let minX = Infinity
@@ -125,13 +139,13 @@ export function renderSvg({ graph, nodes, edges, detail, colors, notes, title }:
     const rel = (e.data as { relation?: DbSchemaGraph["edges"][number] })?.relation
     const s = nodeOf.get(e.source)
     const t = nodeOf.get(e.target)
-    const st = byName.get(e.source)
-    const tt = byName.get(e.target)
+    const st = byId.get(e.source)
+    const tt = byId.get(e.target)
     if (!rel || !s || !t || !st || !tt) continue
-    const sSide = (e.sourceHandle ?? "").includes(".right.") ? "right" : "left"
-    const tSide = (e.targetHandle ?? "").includes(".right.") ? "right" : "left"
-    const a = anchor(s, st, detail === "names" ? "" : rel.fromColumn, sSide, detail)
-    const b = anchor(t, tt, detail === "names" ? "" : rel.toColumn, tSide, detail)
+    const sSide = (e.sourceHandle ?? "").endsWith("right.s") ? "right" : "left"
+    const tSide = (e.targetHandle ?? "").endsWith("right.t") ? "right" : "left"
+    const a = anchor(s, st, rel.fromColumn, sSide, detail)
+    const b = anchor(t, tt, rel.toColumn, tSide, detail)
     const x1 = a.x + ox
     const y1 = a.y + oy
     const x2 = b.x + ox
@@ -150,13 +164,13 @@ export function renderSvg({ graph, nodes, edges, detail, colors, notes, title }:
   }
 
   for (const n of nodes) {
-    const t = byName.get(n.id)
+    const t = byId.get(n.id)
     if (!t) continue
     const x = n.position.x + ox
     const y = n.position.y + oy
     const rows = visibleColumns(t, detail)
     const more = detail === "keys" && rows.length < t.columns.length ? 1 : 0
-    const note = notes[t.name]
+    const note = notes[t.id]
     const h = n.height ?? HEADER_HEIGHT + rows.length * ROW_HEIGHT
     parts.push(`<g>`)
     parts.push(
@@ -164,18 +178,18 @@ export function renderSvg({ graph, nodes, edges, detail, colors, notes, title }:
       `<path d="M ${x} ${y + 8} a 8 8 0 0 1 8 -8 h ${NODE_WIDTH - 16} a 8 8 0 0 1 8 8 v ${HEADER_HEIGHT - 8} h ${-NODE_WIDTH} z" fill="${PALETTE.header}"/>`,
       `<line x1="${x}" y1="${y + HEADER_HEIGHT}" x2="${x + NODE_WIDTH}" y2="${y + HEADER_HEIGHT}" stroke="${PALETTE.hairline}"/>`,
     )
-    const color = colors[t.name]
+    const color = colors[t.id]
     if (color) {
       parts.push(
         `<rect x="${x}" y="${y + 8}" width="3" height="${h - 16}" fill="${TAG_HEX[color]}"/>`,
       )
     }
     parts.push(
-      `<text x="${x + 10}" y="${y + HEADER_HEIGHT / 2 + 4}" fill="${PALETTE.text}" font-family="${MONO}" font-size="12" font-weight="600">${esc(t.name)}</text>`,
+      `<text x="${x + 10}" y="${y + HEADER_HEIGHT / 2 + 4}" fill="${PALETTE.text}" font-family="${MONO}" font-size="12" font-weight="600">${esc(trim(qualified && t.schema ? `${t.schema}.${t.name}` : t.name, 28))}</text>`,
     )
     if (t.rows > 0) {
       parts.push(
-        `<text x="${x + NODE_WIDTH - 10}" y="${y + HEADER_HEIGHT / 2 + 4}" fill="${PALETTE.muted}" font-size="10" text-anchor="end">${esc(compact(t.rows))}</text>`,
+        `<text x="${x + NODE_WIDTH - 10}" y="${y + HEADER_HEIGHT / 2 + 4}" fill="${PALETTE.muted}" font-size="10" text-anchor="end">${esc(compactRows(t.rows))}</text>`,
       )
     }
     rows.forEach((c, i) => {
@@ -222,10 +236,16 @@ function trim(s: string, max: number) {
   return s.length > max ? s.slice(0, max - 1) + "…" : s
 }
 
-function compact(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
-  return `${(n / 1_000_000).toFixed(1)}M`
+/**
+ * How each table is named where a name is all there is: bare while the
+ * picture holds one schema, with its schema once it holds more — two schemas'
+ * `orders` are two entities, not one drawn twice.
+ */
+function labels(tables: readonly DbGraphTable[]): Map<string, { schema: string; name: string }> {
+  const qualified = new Set(tables.map((t) => t.schema)).size > 1
+  return new Map(
+    tables.map((t) => [t.id, { schema: qualified || !t.schema ? t.schema : "", name: t.name }]),
+  )
 }
 
 /** A Mermaid `erDiagram`, for a README or a pull request that GitHub renders. */
@@ -233,9 +253,14 @@ export function toMermaid(graph: DbSchemaGraph, hidden: Set<string>): string {
   const ident = (s: string) => s.replace(/[^A-Za-z0-9_]/g, "_")
   const type = (s: string) => s.replace(/\s+/g, "_").replace(/[^A-Za-z0-9_()[\]]/g, "")
   const lines = ["erDiagram"]
-  const shown = graph.tables.filter((t) => !hidden.has(t.name))
+  const shown = graph.tables.filter((t) => !hidden.has(t.id))
+  const named = labels(shown)
+  const entity = (id: string) => {
+    const label = named.get(id)!
+    return ident(label.schema ? `${label.schema}_${label.name}` : label.name)
+  }
   for (const t of shown) {
-    lines.push(`  ${ident(t.name)} {`)
+    lines.push(`  ${entity(t.id)} {`)
     for (const c of t.columns) {
       const flags = [c.primaryKey && "PK", c.foreignKey && "FK", c.unique && !c.primaryKey && "UK"]
         .filter(Boolean)
@@ -244,11 +269,10 @@ export function toMermaid(graph: DbSchemaGraph, hidden: Set<string>): string {
     }
     lines.push("  }")
   }
-  const present = new Set(shown.map((t) => t.name))
   for (const e of graph.edges) {
-    if (!present.has(e.fromTable) || !present.has(e.toTable)) continue
+    if (!named.has(e.from) || !named.has(e.to)) continue
     const crow = e.cardinality === "one-to-one" ? "||--||" : "}o--||"
-    lines.push(`  ${ident(e.fromTable)} ${crow} ${ident(e.toTable)} : "${ident(e.fromColumn)}"`)
+    lines.push(`  ${entity(e.from)} ${crow} ${entity(e.to)} : "${ident(e.fromColumn)}"`)
   }
   return lines.join("\n") + "\n"
 }
@@ -260,11 +284,12 @@ export function toDbml(
   notes: Record<string, string>,
 ): string {
   const q = (s: string) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(s) ? s : `"${s.replace(/"/g, '\\"')}"`)
-  const shown = graph.tables.filter((t) => !hidden.has(t.name))
+  const shown = graph.tables.filter((t) => !hidden.has(t.id))
+  const present = new Map(shown.map((t) => [t.id, t]))
+  const name = (t: DbGraphTable) => (t.schema ? `${q(t.schema)}.${q(t.name)}` : q(t.name))
   const out: string[] = []
   for (const t of shown) {
-    const name = t.schema ? `${q(t.schema)}.${q(t.name)}` : q(t.name)
-    out.push(`Table ${name} {`)
+    out.push(`Table ${name(t)} {`)
     for (const c of t.columns) {
       const settings = [
         c.primaryKey && "pk",
@@ -274,18 +299,17 @@ export function toDbml(
       const type = /\s/.test(c.type) ? `"${c.type}"` : c.type
       out.push(`  ${q(c.name)} ${type}${settings.length ? ` [${settings.join(", ")}]` : ""}`)
     }
-    if (notes[t.name]) out.push(`  Note: '${notes[t.name].replace(/'/g, "\\'")}'`)
+    if (notes[t.id]) out.push(`  Note: '${notes[t.id].replace(/'/g, "\\'")}'`)
     out.push("}", "")
   }
-  const present = new Set(shown.map((t) => t.name))
   for (const e of graph.edges) {
-    if (!present.has(e.fromTable) || !present.has(e.toTable)) continue
+    const from = present.get(e.from)
+    const to = present.get(e.to)
+    if (!from || !to) continue
     const rel = e.cardinality === "one-to-one" ? "-" : ">"
     const del =
       e.onDelete && e.onDelete !== "NO ACTION" ? ` [delete: ${e.onDelete.toLowerCase()}]` : ""
-    out.push(
-      `Ref: ${q(e.fromTable)}.${q(e.fromColumn)} ${rel} ${q(e.toTable)}.${q(e.toColumn)}${del}`,
-    )
+    out.push(`Ref: ${name(from)}.${q(e.fromColumn)} ${rel} ${name(to)}.${q(e.toColumn)}${del}`)
   }
   return out.join("\n") + "\n"
 }

@@ -2,7 +2,7 @@
 
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from "@xyflow/react"
 import { cn } from "@/lib/utils"
-import type { DbGraphEdge } from "@/lib/types"
+import type { DbGraphEdge } from "@/components/database/diagram/types"
 
 export type RelationEdgeData = {
   relation: DbGraphEdge
@@ -79,8 +79,10 @@ export function RelationEdge({
             )}
           >
             {rel.cardinality === "one-to-one" ? "1 — 1" : "n — 1"}
+            {/* What the key does on delete is a property of it, not a state:
+                it is said in the label's own ink. */}
             {lit && rel.onDelete && rel.onDelete !== "NO ACTION" && (
-              <span className="ml-1 text-destructive/80">
+              <span className="ml-1 font-sans text-muted-foreground">
                 on delete {rel.onDelete.toLowerCase()}
               </span>
             )}
