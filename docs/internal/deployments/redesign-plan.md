@@ -126,7 +126,7 @@ screens below live in `frontend/src/components/deploy/` and are covered by
 | `/deploy` | Projects: in-progress runs, search, state chips, a grid of project cards (or rows) with the workload mark, the address, the branch and commit subject, the Compose service count and one status word (until 2026-09-24; see "Life and colour"). `?view=archived` lists archived projects with Restore and Delete permanently. |
 | `/deploy/notifications` | The fleet-level notification channels (Discord, Slack, Telegram, e-mail, signed webhook) with test delivery, pause, history and removal. |
 | `/deploy/new` | One page: unfinished setups to resume, a source strip (Git repository, Docker image, Template, Database, Compose) and a configure form (name, type, build & output settings, environment variables, database, public address, an Advanced disclosure) that ends in Deploy or Save only. `?draft=` resumes a draft and `?mode=advanced` opens Advanced. |
-| `/deploy/[id]` | The project shell (name, status word, Visit, the one command, a verbs menu, a facts row; its pages are the sidebar's third level, not a tab strip) and the Overview: the production block with the site preview and its facts, findings that need attention, recent deployments, live usage (until 2026-09-24; see "Life and colour"). |
+| `/deploy/[id]` | The project shell (one compact header: the address, status word, the one command, a verbs menu, a facts row; its pages are the sidebar's third level, not a tab strip) and the Overview: the production block with the site preview and its facts, findings that need attention, recent deployments, live usage (until 2026-09-24; see "Life and colour"). |
 | `/deploy/[id]/deployments` | Success and weekly frequency with the daily chart, a compact release/recovery timing list, and counted underlined status filters above the run rows — status, duration, title, commit subject, branch · sha · trigger · time — with Roll back, Compare with live, Pin, Retry and Cancel behind each row, and older pages on request. Filter and environment changes preserve the results' height for the page visit so the controls and shell scroll position stay steady. |
 | `/deploy/[id]/logs`, `/runtime`, `/console` | Five traffic readings and an alerts line over one pane of five views (three until 2026-09-27) — Requests (what the ingress served, from a record the server keeps in memory, with deploy and container marks on the chart, and each request's own lines and what the proxy said inline), Insights (the window faceted: failing pages, scanners, bots, sources, slowest, and the output's exceptions), Output (what the containers wrote, per service), Builds (the recent runs' transcripts) and Events (Docker's exits, OOM kills, restarts and health flips, crash loops folded), see [`request-observability.md`](request-observability.md); services, live usage and recorded charts, routes/storage/backup evidence; a shell inside the live container. Game servers add `/players` and `/game-settings`. |
 | `/deploy/[id]/settings/*` | General, Build, Runtime (with the health-check editor), Variables, Domains, Storage, Databases & backups, Automation (webhooks with their delivery log, schedules, previews), Danger zone — each a run of rail sections whose forms end in their own Save (a stack of setting cards with a footer Save until 2026-09-24), reached from the Settings group on the rail rather than a rail of their own. |
@@ -407,10 +407,11 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   channel beside the cards under what was delivered and what failed in the last day, and opens a
   channel's own sheet of attempts grouped by day, each linked to the run it announced. A signed webhook's
   secret is shown once, in the sheet that made it, with the command that verifies a signature.
-- **A project** opens on the identity line the host Overview does: its favicon or product, the
-  address with the certificate's state in the lock's colour, source, branch and runtime on one
-  facts row, then release timing and automatic-deployment state on a second. Its state and what
-  needs attention are stacked at every width; commit and actor details stay in the deployment
+- **A project** opens on one compact header: its favicon or product, the address with the
+  certificate's state in the lock's colour, its state and what needs attention beside it, and the
+  command at the end, over one line of facts — source, branch, runtime, release timing and
+  automatic-deployment state. The rail leads back and the address opens the site, so the header
+  carries no back link or Visit button; commit and actor details stay in the deployment
   history and run pages. The Overview is,
   in order, the run in flight as the runs list's own row (confetti once if it goes live while
   watched), Production — the website tile, now switchable to a phone's width, beside the wiring

@@ -353,38 +353,20 @@ export function ProjectProvider({
 }
 
 /**
- * The project shell's silhouette while its first read is in flight: the way
- * back and the name with the command's place beside it, then the identity
- * line under them — the mark's tile, where it answers, the facts — then the
- * page's own: the Overview's preview, wiring and readings on the Overview, a
- * plain block elsewhere. It was a page titled "Deployment" over a framed
- * table, so every project opened on a heading and a box that were both
- * replaced a moment later by different ones.
+ * The project shell's silhouette while its first read is in flight: its one
+ * header row — the mark's tile, where it answers over the facts, the command's
+ * place at the end — then the page's own: the Overview's preview, wiring and
+ * readings on the Overview, a plain block elsewhere. It was a page titled
+ * "Deployment" over a framed table, so every project opened on a heading and
+ * a box that were both replaced a moment later by different ones.
  */
 function ShellSkeleton({ projectId }: { projectId: number }) {
   const overview = usePathname() === `/deploy/${projectId}`
   return (
-    <Page aria-busy="true">
-      <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0 space-y-1.5">
-          <p className="eyebrow">
-            <Link
-              href="/deploy"
-              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-            >
-              <ArrowLeft className="size-3" /> Deployments
-            </Link>
-          </p>
-          <h1 className="sr-only">Loading deployment</h1>
-          <Skeleton aria-hidden className="h-8 w-56 max-w-full" />
-        </div>
-        <div aria-hidden className="flex shrink-0 items-center gap-2">
-          <Skeleton className="h-8 w-20" />
-          <Skeleton className="h-8 w-32" />
-        </div>
-      </div>
-      <div aria-hidden className="flex min-w-0 items-center gap-4 border-b border-hairline pb-6">
-        <Skeleton className="size-12 shrink-0 rounded-xl" />
+    <Page aria-busy="true" className="pt-4 md:pt-5">
+      <h1 className="sr-only">Loading deployment</h1>
+      <div aria-hidden className="flex min-w-0 items-center gap-3 border-b border-hairline pb-4">
+        <Skeleton className="size-10 shrink-0 rounded-lg" />
         <div className="min-w-0 flex-1 space-y-2">
           <Skeleton className="h-4 w-44 max-w-full" />
           <div className="flex min-w-0 gap-3">
@@ -393,6 +375,7 @@ function ShellSkeleton({ projectId }: { projectId: number }) {
             <Skeleton className="hidden h-3 w-40 sm:block" />
           </div>
         </div>
+        <Skeleton className="h-8 w-28 shrink-0" />
       </div>
       {overview ? <OverviewSkeleton /> : <LoadingPanel plain />}
     </Page>

@@ -9,7 +9,7 @@ import {
   run,
 } from "./deploy-fixture"
 
-test("the project header separates source, release and health readings across screen sizes", async ({
+test("the project header is one compact row that keeps its readings apart across screen sizes", async ({
   page,
 }, testInfo) => {
   await page.emulateMedia({ reducedMotion: "reduce" })
@@ -51,14 +51,21 @@ test("the project header separates source, release and health readings across sc
     await expect(
       identity.getByRole("link", { name: "Automatic deployment settings" }),
     ).toHaveAttribute("href", "/deploy/7/settings/general#automatic-deployment")
-    const [source, release, state, assessment] = await Promise.all(
-      ["acme/api", "Release #2", "Ready", "All checks passed"].map((label) =>
+    // The rail leads back and the address leads to the site: neither is repeated here.
+    await expect(page.locator("[data-slot=page-context]")).toHaveCount(0)
+    await expect(page.getByRole("link", { name: "Visit", exact: true })).toHaveCount(0)
+    const [state, assessment] = await Promise.all(
+      ["Ready", "All checks passed"].map((label) =>
         identity.getByText(label, { exact: true }).boundingBox(),
       ),
     )
-    expect(release!.y).toBeGreaterThanOrEqual(source!.y + source!.height)
-    // Inline status spans used to share a line box on desktop and collide.
-    expect(assessment!.y).toBeGreaterThanOrEqual(state!.y + state!.height)
+    // The state and the assessment share a line now; they collided when they first did.
+    expect(
+      assessment!.y >= state!.y + state!.height || assessment!.x >= state!.x + state!.width,
+    ).toBe(true)
+    // It repeats above every project page, so on a desktop it is the height of
+    // its tile and command rather than a block the page's content waits under.
+    if (width >= 1280) expect((await identity.boundingBox())!.height).toBeLessThanOrEqual(64)
     await expect(identity.getByText(completed.metadata.commit.subject)).toHaveCount(0)
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
