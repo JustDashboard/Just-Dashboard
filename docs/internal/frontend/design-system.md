@@ -717,6 +717,11 @@ rather than assembling its own recharts tree — adding a measurement should mea
 - The x-axis is **numeric over time**, never a category axis of pre-formatted labels: a category axis
   spaces every bucket equally, which lies whenever the record has a hole in it.
 - A series with no numbers anywhere in the window is **dropped rather than drawn flat at zero**.
+- **A measure some days have and others do not is a mark on each day that has one**, on the
+  window's own days, never a line through the days that do. Deployment history's release time per
+  day was a sparkline over the days something shipped: four releases a week apart drew as one
+  slope, with no date and no scale to read it against. It is a bar on its day now, a tick on a
+  day nothing succeeded, the window's median ruled across and the top of the scale named.
 - **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
   magnitude.
 - The hovered instant lives outside React, as a timestamp rather than a row index.
@@ -1636,9 +1641,15 @@ The passes, in order. Each one is a diff you can review on its own.
    project's Runtime page carries each count in the header of the block it counts, with the four
    moving readings — processor, memory, processes, network — as the live usage tiles.
 
-   Deployment history also takes this exit: success and weekly frequency sit with the releases-per-day
-   chart, while median duration, its trend and recovery time are a compact timing list beside it.
-   The four readings keep their basis and window without a separate strip of tiles over the records.
+   Deployment history also takes this exit: each pair of readings stands over the chart it explains.
+   Success and weekly frequency sit over releases per day; median duration and recovery time sit over
+   release time per day, which draws the same days at the same height beside it, with the window's
+   median as a dashed rule and the slowest day naming the top of its scale. Why the releases failed
+   runs under both, each cause a share of every failed release — and a lone cause a line with its
+   count, since a bar with nothing beside it compares nothing. The timing was a list of two figures
+   set at the far edge of their labels over a trend with no scale, and the reason a single full bar:
+   a drawing that cannot be read off is not a reading. The four readings keep their basis and window
+   without a separate strip of tiles over the records.
    The project Overview retains its delivery tiles. History's counted status filters use the
    underlined view-strip look as toggle buttons; filtering the same records does not make them ARIA
    tabs. Switching status or environment reserves the results' height for the page visit, so a
