@@ -766,6 +766,24 @@ stays editable on a protected connection.
 
 ### Operations: watching, maintaining and administering a server
 
+- **Recorded database activity** (`api/database_metrics.go`) starts in `Server.Start` and stops before
+  the database pools. It reads saved SQL servers, Redis-family servers and MongoDB every 30 seconds
+  with four workers, an eight-second per-connection deadline and a 25-second collection deadline.
+  Redis statistics reads disable command retries and honor the context deadline for socket replies.
+  SQLite has no activity counters and is skipped. It uses the same bounded statistics readers as
+  `GET /{id}/stats`, never a keyspace scan or application-table read. Successful snapshots are saved
+  in `db_metric_samples` for seven days, with pruning even when engines fail to answer. History is
+  keyed by connection and a hash of the saved driver and sealed DSN, so a replaced connection target
+  cannot inherit another target's history; an in-flight read is saved only if that target still matches.
+  Forgetting the connection cascades to its samples. No credentials, rows, query text or key values
+  are recorded. `GET /{id}/stats/history?hours=1` is on the read surface, accepts 1–168 hours, returns
+  the newest raw totals in each of at most about 720 time buckets and carries missed intervals as gaps.
+  It reads only the dashboard store, so history survives restarts and remains readable during an
+  engine outage. Home offers 1h, 6h, 24h and 7d ranges and derives rates from stored totals; negative
+  counter deltas and recording gaps longer than 90 seconds are never drawn as continuous rates.
+  History begins when this version of the dashboard starts; past activity cannot be reconstructed
+  from engine totals.
+
 - **The diagnostic surface is what a data browser usually lacks.** `activity.go` lists what the server is
   running now with the blocking session named, turning twenty "slow" sessions into one culprit, and can
   stop one; it includes our own connections marked `self`, because hiding them made an idle server report
@@ -781,8 +799,8 @@ stays editable on a protected connection.
   account was refused the view it reads: "not permitted" names the grant in `reason` and is never a
   502).
   - Reads, on the read surface: `GET /{id}/stats` for a SQL engine is one snapshot of raw counters and
-    gauges stamped with this server's clock (`ServerStats`; the page derives rates between two polls —
-    nothing is kept between requests) with the dashboard's own pool under its old key; a server that
+    gauges stamped with this server's clock (`ServerStats`; rates are derived from recorded totals) with
+    the dashboard's own pool under its old key; a server that
     refuses the snapshot answers 200 with `supported:false`, the refusal as `reason`, and the pool, which
     was this route's whole answer before there was a snapshot. `/activity` rows gain `status`, wait type
     and event, application, transaction and query start, `blockedByPids`, and `seconds` is the running
@@ -1544,6 +1562,7 @@ and `protectReadOnlyConnections`.
 | `GET` | `/databases/{id}/columns` | read | — | — | — |
 | `GET` | `/databases/{id}/count` | read | — | — | — |
 | `POST` | `/databases/{id}/explain` | read | by content: `analyze` | `database.explain` | by content |
+| `GET` | `/databases/{id}/stats/history` | read | — | — | — |
 | `GET` | `/databases/{id}/history` | read | — | — | — |
 | `GET` | `/databases/{id}/queries` | read | — | — | — |
 | `POST` | `/databases/{id}/queries` | `service.control` | — | `database.query.save` | open |

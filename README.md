@@ -229,14 +229,16 @@ the database's page.
 
 ### Databases
 
-![A PostgreSQL database's home: live sessions, transactions and cache readings, an activity chart, what needs attention, the busiest statements and the largest tables](docs/databases.png)
+![A PostgreSQL database's home: its activity chart, what needs attention, the busiest statements and the largest tables](docs/databases.png)
 
 Every database on the server, not only the connected ones: containers running or stopped, servers
 installed on the machine and SQLite files on disk are found and listed, each saying what keeps it
 from being opened, and whatever needs attention carries its fix. PostgreSQL, MySQL and MariaDB,
 SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis are opened, and what answers behind them
 is named: TimescaleDB, CockroachDB, YugabyteDB, Percona, TiDB, Valkey, KeyDB, Dragonfly, FerretDB.
-A database has a home of live figures and only the pages and controls its engine has. SQL engines
+A database has a home with recorded activity and only the pages and controls its engine has.
+Activity is collected every 30 seconds while the dashboard runs and kept for seven days, even while
+its pages are closed; the chart can show the last hour, six hours, day or week. SQL engines
 get a table editor whose edits are staged, reviewed as statements and applied in one transaction, a
 SQL editor with plans, a schema browser, a diagram, generated model code, and sessions, locks,
 maintenance and an advisor; Redis and its forks a key browser, a console that classifies each

@@ -1,28 +1,5 @@
 "use client"
 
-import { useCallback, useMemo } from "react"
-import Link from "next/link"
-import {
-  ArrowRight,
-  Cross,
-  GridSquare,
-  Plus,
-  RefreshClockwise,
-  Table as TableGlyph,
-} from "@/components/icons"
-import { relativeTime } from "@/lib/format"
-import { useViewState } from "@/lib/view-state"
-import type { DbFleetEntry, DbTopoNode } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { Segments } from "@/components/deploy/settings/segments"
-import { IconAction } from "@/components/icon-action"
-import { Page, PageContext, SearchInput, Section } from "@/components/page"
-import { ProductLogos } from "@/components/product-logo"
-import { EmptyState } from "@/components/state"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { engineOf, type Engine } from "@/components/database/engine"
 import { FoundList } from "@/components/database/connect/found-list"
 import {
   connectsItself,
@@ -30,24 +7,20 @@ import {
   waitingServers,
 } from "@/components/database/connect/inventory"
 import { useFound } from "@/components/database/connect/use-found"
+import { engineOf, type Engine } from "@/components/database/engine"
 import { Attention } from "@/components/database/fleet/attention"
 import {
-  FLEET_SHOWS,
   groupFleet,
   matchesQuery,
-  matchesShow,
   nextSort,
-  orderForShow,
   sortRows,
   type FleetGrouping,
-  type FleetShow,
   type FleetSort,
   type FleetSortKey,
 } from "@/components/database/fleet/fleet"
 import { FleetCard } from "@/components/database/fleet/fleet-card"
 import { FleetTable } from "@/components/database/fleet/fleet-table"
 import { ReadFailed } from "@/components/database/fleet/read-failed"
-import { FleetReadings, ReadingsSkeleton } from "@/components/database/fleet/readings"
 import { Shelves } from "@/components/database/fleet/shelves"
 import { useAddress, useTypedParam } from "@/components/database/fleet/use-address"
 import { useFleet, useInventory } from "@/components/database/fleet/use-fleet"
@@ -57,13 +30,27 @@ import { Wiring } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASES_MAP_HREF } from "@/components/database/shell/routes"
-
-const SHOW_WORDS: Record<Exclude<FleetShow, "all">, string> = {
-  down: "Not running",
-  stored: "By what they store",
-  busy: "With open sessions",
-  unprotected: "No backup in the last day",
-}
+import { Segments } from "@/components/deploy/settings/segments"
+import { IconAction } from "@/components/icon-action"
+import {
+  ArrowRight,
+  GridSquare,
+  Plus,
+  RefreshClockwise,
+  Table as TableGlyph,
+} from "@/components/icons"
+import { Page, PageContext, SearchInput, Section } from "@/components/page"
+import { ProductLogos } from "@/components/product-logo"
+import { EmptyState } from "@/components/state"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useMediaQuery } from "@/hooks/use-mobile"
+import { relativeTime } from "@/lib/format"
+import type { DbFleetEntry, DbTopoNode } from "@/lib/types"
+import { useViewState } from "@/lib/view-state"
+import Link from "next/link"
+import { useCallback, useMemo } from "react"
 
 const GROUPINGS: { value: FleetGrouping; label: string }[] = [
   { value: "place", label: "Where it runs" },
@@ -78,9 +65,7 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  * The control center: every database on this server, and what each needs.
  *
  * A reading page (§15) built from the questions somebody arriving at
- * *Databases* has, in the order they are asked. Are they all up, how much do
- * they hold, is anything using them, are they backed up — five figures, each
- * of which narrows the fleet to the databases it is about. What needs a hand,
+ * *Databases* has, in the order they are asked. What needs a hand,
  * with the fix as the action. Then the fleet itself: every saved connection
  * as a card you open, drawn as its engine with its own readings on it,
  * shelved by where it runs — or laid across as a table when there are many to
@@ -93,10 +78,9 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  * it has answered, a failed poll of anything leaves what is drawn where it
  * is and says so beside the time of the last reading.
  *
- * What narrows the fleet (`show`, `engine`, `q`) is in the address, so a link
- * to "the ones that are not running" is that; how it is arranged (shelves,
- * cards or table, the table's order) is the reader's own and kept in view
- * state.
+ * Search and engine filters are in the address; how the fleet is arranged
+ * (shelves, cards or table, the table's order) is the reader's own and kept
+ * in view state. Legacy metric-card `show` parameters are ignored.
  */
 export function ControlCenter() {
   const { admin, engineFor, newHref } = useDatabases()
@@ -125,8 +109,6 @@ export function ControlCenter() {
   // offered.
   const roomy = useMediaQuery("(min-width: 1024px)")
 
-  const asked = address.read("show") as FleetShow
-  const show: FleetShow = FLEET_SHOWS.includes(asked) ? asked : "all"
   const engineFilter = address.read("engine")
   const [query, setQuery] = useTypedParam("q")
   const { fleet, entries, backups, feeds, concernsOf, storedOf, topology } = data
@@ -143,18 +125,12 @@ export function ControlCenter() {
   }, [entries, engineFor])
 
   const shown = useMemo(() => {
-    const narrowed = entries.filter(
+    return entries.filter(
       (entry) =>
-        matchesShow(entry, show, {
-          backup: backups.get(entry.id),
-          dumps: data.dumps(entry),
-          stored: storedOf(entry) ?? 0,
-        }) &&
         (!engineFilter || engineFor(entry).id === engineFilter) &&
         matchesQuery(entry, query, engineFor(entry).label),
     )
-    return orderForShow(narrowed, show, storedOf)
-  }, [entries, show, engineFilter, query, backups, data, storedOf, engineFor])
+  }, [entries, engineFilter, query, engineFor])
 
   const shelves = useMemo(() => foundShelves(inventory.data), [inventory.data])
   const ready = shelves.servers.filter(connectsItself).length
@@ -227,7 +203,6 @@ export function ControlCenter() {
           <ReadFailed error={fleet.error} onRetry={fleet.refresh} every="30 seconds" />
         ) : (
           <div role="status" aria-label="Loading databases" className="flex flex-col gap-8">
-            <ReadingsSkeleton />
             <div className="grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-3">
               {[0, 1, 2, 3, 4, 5].map((card) => (
                 <Skeleton key={card} className="h-44 rounded-xl" />
@@ -285,8 +260,7 @@ export function ControlCenter() {
     )
   }
 
-  const narrowed = show !== "all" || engineFilter !== "" || query !== ""
-  const allRunning = show === "down" && !engineFilter && !query
+  const narrowed = engineFilter !== "" || query !== ""
   const clear = () => address.set({ show: null, engine: null, q: null })
   const groups = groupFleet(shown, grouping, (entry) => engineFor(entry).label)
   const table = roomy && view === "table"
@@ -307,13 +281,6 @@ export function ControlCenter() {
             </>
           )
         }
-      />
-
-      <FleetReadings
-        data={data}
-        engines={engines.flatMap((one) => (one.engine.logo ? [one.engine.logo] : []))}
-        show={show}
-        onShow={(next) => address.set({ show: next === "all" ? null : next })}
       />
 
       <Attention
@@ -386,15 +353,8 @@ export function ControlCenter() {
               )}
             </span>
           </div>
-          {(show !== "all" || engines.length > 1) && (
+          {engines.length > 1 && (
             <ChipStrip role="group" aria-label="Narrow the databases">
-              {show !== "all" && (
-                <FilterChip selected onClick={() => address.set({ show: null })}>
-                  {SHOW_WORDS[show]}
-                  <Cross aria-hidden className="size-3 opacity-70" />
-                  <span className="sr-only">, remove</span>
-                </FilterChip>
-              )}
               {engines.length > 1 && (
                 <>
                   <FilterChip
@@ -423,13 +383,9 @@ export function ControlCenter() {
 
         {shown.length === 0 ? (
           <EmptyState
-            title={allRunning ? "Every database is running" : "No database matches"}
-            // Good news needs no second sentence: one that says nothing
-            // matched reads like a filter that failed.
+            title="No database matches"
             description={
-              narrowed && !allRunning
-                ? "Nothing in the fleet matches what the list is narrowed to."
-                : undefined
+              narrowed ? "Nothing in the fleet matches what the list is narrowed to." : undefined
             }
             action={
               <Button size="sm" variant="outline" onClick={clear}>

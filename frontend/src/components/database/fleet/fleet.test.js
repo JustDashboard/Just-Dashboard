@@ -9,9 +9,7 @@ import {
   fleetReadings,
   groupFleet,
   matchesQuery,
-  matchesShow,
   nextSort,
-  orderForShow,
   powerOffers,
   pushSample,
   reachWord,
@@ -183,16 +181,13 @@ describe("what a database holds", () => {
     expect(storedBytes(entry({ id: 7, bytes: 10 }), new Map([[7, 99]]))).toBe(10)
   })
 
-  test("is one answer for the tile, the narrowing and both orders", () => {
+  test("the table uses discovery's measurement when the engine reports no size", () => {
     const measured = new Map([[7, 4096]])
     const storedOf = (one) => storedBytes(one, measured)
     const list = [entry({ id: 1, name: "shop", bytes: 1024 }), file]
     const readings = fleetReadings({ connections: list }, { now: NOW, storedOf })
     expect(readings.bytes).toBe(5120)
     expect(readings.sized).toBe(2)
-    expect(matchesShow(file, "stored", { stored: storedOf(file) })).toBe(true)
-    expect(matchesShow(file, "stored")).toBe(false)
-    expect(orderForShow(list, "stored", storedOf).map((one) => one.name)).toEqual(["notes", "shop"])
     expect(
       sortRows(list, { key: "size", dir: "desc" }, () => undefined, storedOf).map(
         (one) => one.name,
@@ -232,42 +227,7 @@ describe("the order of the cards", () => {
   })
 })
 
-describe("what a reading narrows the fleet to", () => {
-  const up = entry({ id: 1, name: "up" })
-  const stopped = entry({ id: 2, name: "stopped", ok: false, state: "stopped", sessions: 0 })
-  const unsized = entry({ id: 3, name: "file", sizesKnown: false, bytes: 0, sessions: 0 })
-
-  test("down is everything not running, stored what reported a size, busy what has sessions", () => {
-    const names = (show) =>
-      [up, stopped, unsized]
-        .filter((one) => matchesShow(one, show, { now: NOW }))
-        .map((o) => o.name)
-    expect(names("all")).toEqual(["up", "stopped", "file"])
-    expect(names("down")).toEqual(["stopped"])
-    expect(names("stored")).toEqual(["up", "stopped"])
-    expect(names("busy")).toEqual(["up"])
-  })
-
-  test("unprotected is no dump from the last day, among what can be dumped", () => {
-    const fresh = entry({ lastBackup: "2026-09-25T06:00:00Z" })
-    const old = entry({ lastBackup: "2026-09-23T06:00:00Z" })
-    const never = entry({ lastBackup: undefined })
-    expect(matchesShow(fresh, "unprotected", { now: NOW })).toBe(false)
-    expect(matchesShow(old, "unprotected", { now: NOW })).toBe(true)
-    expect(matchesShow(never, "unprotected", { now: NOW })).toBe(true)
-    expect(matchesShow(never, "unprotected", { now: NOW, dumps: false })).toBe(false)
-  })
-
-  test("stored and busy are read largest and busiest first", () => {
-    const list = [
-      entry({ name: "a", bytes: 1, sessions: 9 }),
-      entry({ name: "b", bytes: 5, sessions: 1 }),
-    ]
-    expect(orderForShow(list, "stored").map((one) => one.name)).toEqual(["b", "a"])
-    expect(orderForShow(list, "busy").map((one) => one.name)).toEqual(["a", "b"])
-    expect(orderForShow(list, "down")).toBe(list)
-  })
-
+describe("the fleet's search", () => {
   test("words match the name, the engine's label, the container and the environment", () => {
     const one = entry({ flavor: "mariadb", environment: "staging" })
     expect(matchesQuery(one, "")).toBe(true)

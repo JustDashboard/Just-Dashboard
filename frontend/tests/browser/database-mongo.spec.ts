@@ -1735,7 +1735,8 @@ test.describe("documents", () => {
       verbosity: "queryPlanner",
     })
     await dialog.getByRole("radio", { name: "Run it" }).click()
-    await expect(dialog.getByText("Documents examined")).toBeVisible()
+    await expect(dialog.getByText(/examined 1,500 documents/)).toBeVisible()
+    await expect(dialog).toContainText("5 ms (server estimate)")
     await expect(dialog).toContainText("1,500")
     expect(mongo.asked("POST /mongo/explain").at(-1)?.body.verbosity).toBe("executionStats")
   })
@@ -2220,9 +2221,7 @@ test.describe("schema", () => {
 })
 
 test.describe("performance", () => {
-  test("the readings move with the page's own samples, and the home's link opens the profiler", async ({
-    page,
-  }) => {
+  test("performance keeps its charts and profiler without metric cards", async ({ page }) => {
     await mockMongo(page, {
       profiler: {
         level: 1,
@@ -2253,13 +2252,14 @@ test.describe("performance", () => {
       },
     })
     await page.goto(PERFORMANCE)
-    const tiles = page.locator("[data-slot=stat-tile]")
-    await expect(tiles).toHaveCount(5)
-    await expect(tiles.nth(1)).toContainText("12")
-    await expect(tiles.nth(1)).toContainText("of 400 allowed")
-    await expect(tiles.nth(2)).toContainText("25.0%")
-    // A rate is the difference of two samples: 30 queries and 60 commands in 3 seconds.
-    await expect(tiles.nth(0)).toContainText("30.0", { timeout: 15_000 })
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+    const operations = page.locator("[data-slot=panel]").filter({
+      has: page.getByRole("heading", { name: "Operations", exact: true }),
+    })
+    await expect(operations.getByRole("row", { name: /^Queries/ })).toContainText(
+      /[1-9][\d.]*\/s/,
+      { timeout: 15_000 },
+    )
 
     await page.goto(`${PERFORMANCE}?view=slow`)
     const slow = page.locator("[data-slot=mongo-slow-operation]")
@@ -2461,7 +2461,7 @@ test.describe("performance", () => {
     ).toBeVisible()
     mongo.heal()
     await page.getByRole("button", { name: "Try again" }).click()
-    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(5)
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   })
 })
 
@@ -2657,7 +2657,7 @@ for (const [label, viewport] of [
 
     for (const view of ["", "operations", "slow", "replication"]) {
       await page.goto(view ? `${PERFORMANCE}?view=${view}` : PERFORMANCE)
-      await expect(page.locator("[data-slot=stat-tile]").first()).toBeVisible()
+      await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
       await expectTheRules(page, `performance ${view || "overview"}`)
     }
   })

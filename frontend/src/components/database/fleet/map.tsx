@@ -1,29 +1,10 @@
 "use client"
 
-import { useCallback, useMemo } from "react"
-import Link from "next/link"
-import { Plus } from "@/components/icons"
-import { plural } from "@/lib/format"
-import type { DbTopoNode } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { usePoll } from "@/hooks/use-poll"
-import { Page, PageContext } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ProductGlyphs, ProductLogos } from "@/components/product-logo"
-import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, EmptyState } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { Button } from "@/components/ui/button"
-import { NumberTicker } from "@/components/ui/number-ticker"
-import { Skeleton } from "@/components/ui/skeleton"
 import { engineOf, type Engine } from "@/components/database/engine"
 import {
   describeEdge,
   edgeRank,
   splitTopology,
-  topologyReadings,
   worstStatus,
 } from "@/components/database/fleet/fleet"
 import { readFleet, readTopology } from "@/components/database/fleet/read"
@@ -39,14 +20,28 @@ import {
 } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import { Plus } from "@/components/icons"
+import { Page, PageContext } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ProductLogos } from "@/components/product-logo"
+import { Row, RowList } from "@/components/row-list"
+import { EmptyNote, EmptyState } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useMediaQuery } from "@/hooks/use-mobile"
+import { usePoll } from "@/hooks/use-poll"
+import { plural } from "@/lib/format"
+import type { DbTopoNode } from "@/lib/types"
+import Link from "next/link"
+import { useCallback, useMemo } from "react"
 
 /**
  * The map: what feeds what, as one picture.
  *
- * A reading page. It opens on the picture's own figures — how many databases
- * are drawn, how many things read them, how many sessions the wires are
- * carrying, how many links are wrong — then the picture at full size with
- * what its lines mean, and beside it (below it, on a narrower screen) every
+ * The picture at full size carries its legend and, beside it (below it
+ * on a narrower screen), every
  * reader as a row: which databases reach it, how each link is known, whether
  * the link holds. The chips narrow the picture to one engine's databases and
  * the readers they feed; the choice is in the address.
@@ -88,7 +83,6 @@ export function DatabaseMap() {
 
   const all = useMemo(() => splitTopology(topology.data), [topology.data])
   const split = useMemo(() => splitTopology(topology.data, keep), [topology.data, keep])
-  const readings = topologyReadings(split)
   const engines = useMemo(() => {
     const seen = new Map<string, { engine: Engine; count: number }>()
     for (const node of all.databases) {
@@ -108,15 +102,6 @@ export function DatabaseMap() {
           <ReadFailed error={topology.error} onRetry={topology.refresh} every="30 seconds" />
         ) : (
           <div role="status" aria-label="Loading the map" className="flex flex-col gap-8">
-            <StatGrid columns={4} dense aria-hidden>
-              {["Databases", "Readers", "Sessions", "Links"].map((label) => (
-                <div key={label} className="flex min-w-0 flex-col gap-1.5 px-5 py-4">
-                  <p className="eyebrow truncate">{label}</p>
-                  <Skeleton className="h-7 w-12" />
-                  <Skeleton className="h-3 w-24" />
-                </div>
-              ))}
-            </StatGrid>
             <Skeleton className="h-96 rounded-xl" />
           </div>
         )}
@@ -152,50 +137,6 @@ export function DatabaseMap() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Databases" title="Map" />
-
-      <StatGrid columns={4} dense>
-        <StatTile
-          label="Databases"
-          value={<NumberTicker value={readings.databases} />}
-          hint={
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate">
-                {engineFilter ? `of ${all.databases.length}` : plural(engines.length, "engine")}
-              </span>
-              <ProductGlyphs
-                ids={engines.flatMap((one) => (one.engine.logo ? [one.engine.logo] : []))}
-              />
-            </span>
-          }
-        />
-        <StatTile
-          label="Readers"
-          value={<NumberTicker value={readings.consumers} />}
-          hint={
-            readings.consumers === 0
-              ? "nothing seen reading them"
-              : `over ${plural(readings.links, "link")}`
-          }
-        />
-        <StatTile
-          label="Sessions"
-          value={readings.sessions.toLocaleString()}
-          trailing="open"
-          hint="carried by the lit wires"
-        />
-        <StatTile
-          label="Links wrong"
-          value={readings.wrong.toLocaleString()}
-          tone={readings.wrong > 0 ? "warning" : "default"}
-          hint={
-            topology.error
-              ? "the last check did not finish"
-              : readings.wrong > 0
-                ? "broken or stale"
-                : "every link holds"
-          }
-        />
-      </StatGrid>
 
       <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
         {engines.length > 1 && (

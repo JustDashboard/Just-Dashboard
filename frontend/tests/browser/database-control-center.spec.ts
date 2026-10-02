@@ -18,8 +18,6 @@ const card = (page: Page, name: string) =>
   page
     .locator("[data-card=database]")
     .filter({ has: page.getByRole("link", { name: `Open ${name}` }) })
-const tile = (page: Page, label: string) =>
-  page.locator("[data-slot=stat-tile]").filter({ has: page.getByText(label, { exact: true }) })
 const foundRow = (page: Page, name: string) =>
   page.locator("[data-slot=choice-row]").filter({ hasText: name }).first()
 const scroller = (page: Page) => page.locator("[data-slot=page]").first().locator("xpath=..")
@@ -72,25 +70,14 @@ function manyDatabases(count: number) {
 }
 
 test.describe("the control center", () => {
-  test("reads the fleet as five figures and cards in their engine's words, shelved by where they run", async ({
+  test("reads the fleet as cards in their engine's words, shelved by where they run", async ({
     page,
   }) => {
     await mockFleet(page, { dumps: { 4: null, 5: 60 } })
     await page.goto("/databases")
-
-    await expect(tile(page, "Databases")).toContainText("5 engines")
-    await expect(tile(page, "Running")).toContainText("of 5")
-    // The file's engine reports no size and discovery measured it: it is in
-    // the sum, and the tile says which database holds the most of it.
-    await expect(tile(page, "Stored")).toContainText("33.6 MB")
-    await expect(tile(page, "Stored")).toContainText("shop holds 23.4 MB of it")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
     await expect(card(page, "notes")).toContainText("312.0 KB")
-    // The two that are a share of the fleet draw the share.
-    await expect(tile(page, "Running").getByRole("meter")).toHaveAttribute("aria-valuenow", "100")
-    await expect(tile(page, "Backed up").getByRole("meter")).toHaveAttribute("aria-valuenow", "60")
-    await expect(tile(page, "Sessions")).toContainText("14")
-    await expect(tile(page, "Backed up")).toContainText("3")
-    await expect(tile(page, "Backed up")).toContainText("1 never backed up")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
     for (const [shelf, names] of [
       ["Containers", ["blog", "cache", "shop"]],
@@ -139,62 +126,17 @@ test.describe("the control center", () => {
     await expect(page).toHaveURL(/\/databases\/1$/)
   })
 
-  test("a reading narrows the fleet, the address says which, and Back undoes it", async ({
-    page,
-  }) => {
-    await mockFleet(page, {
-      fleet: {
-        2: { ok: false, state: "stopped" },
-        4: {
-          ok: false,
-          state: "unreachable",
-          error: "dial tcp 127.0.0.1:6379: connection refused",
-        },
-      },
+  for (const show of ["down", "stored", "busy", "unprotected"]) {
+    test(`the removed metric filter ${show} cannot narrow the fleet`, async ({ page }) => {
+      await mockFleet(page, { fleet: { 2: { ok: false, state: "stopped" } } })
+      await page.goto(`/databases?show=${show}`)
+      await expect(page.locator("[data-card=database]")).toHaveCount(5)
+      await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+      await expect(
+        page.getByRole("button", { name: "Show the databases that are not running" }),
+      ).toHaveCount(0)
     })
-    await page.goto("/databases")
-    await expect(tile(page, "Running")).toContainText("1 stopped · 1 not answering")
-
-    await page.getByRole("button", { name: "Show the databases that are not running" }).click()
-    expect(where(page)).toBe("/databases?show=down")
-    await expect(page.locator("[data-card=database]")).toHaveCount(2)
-    await expect(card(page, "shop")).toHaveCount(0)
-    // What the server said stands where the figures would be.
-    await expect(card(page, "cache")).toContainText("connection refused")
-
-    // A pasted link is the same view.
-    await page.reload()
-    await expect(page.locator("[data-card=database]")).toHaveCount(2)
-    await expect(page.getByRole("button", { name: "Show every database again" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    )
-
-    await page.goBack()
-    await expect(page.locator("[data-card=database]")).toHaveCount(5)
-    await page.goForward()
-    await page.getByRole("button", { name: /Not running/ }).click()
-    expect(where(page)).toBe("/databases")
-  })
-
-  test("a fleet with nothing down says so as good news, not as a filter that found nothing", async ({
-    page,
-  }) => {
-    await mockFleet(page)
-    await page.goto("/databases?show=down")
-    const empty = page.locator("[data-slot=empty-state]")
-    await expect(empty).toContainText("Every database is running")
-    await expect(empty).not.toContainText("Nothing in the fleet matches")
-    // The engines' own reset chip does not read as a second answer to the reading's.
-    await expect(page.getByRole("button", { name: /^All engines/ })).toBeVisible()
-    await expect(page.getByRole("button", { name: /^Not running/ })).toBeVisible()
-    // A reading that narrowed to the files keeps them: the size discovery measured counts.
-    await page.goto("/databases?show=stored")
-    await expect(page.locator("[data-card=database]")).toHaveCount(5)
-    await expect(page.getByRole("link", { name: /^Open / }).first()).toHaveAccessibleName(
-      "Open shop",
-    )
-  })
+  }
 
   test("engines and words narrow it too, and nothing left offers the way back", async ({
     page,
@@ -654,8 +596,7 @@ test.describe("the control center", () => {
     await expect(page.getByRole("button", { name: "Scan this server again" })).toHaveCount(0)
     await expect(page.getByRole("heading", { name: "Found on this server" })).toHaveCount(0)
     await expect(card(page, "blog").getByRole("button", { name: "Start blog" })).toHaveCount(0)
-    // Nobody measured the file for this role: one answer still, and it is "unknown".
-    await expect(tile(page, "Stored")).toContainText("1 of 5 did not report a size")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
     await expect(card(page, "notes")).toContainText("—")
     await card(page, "shop").getByRole("button", { name: "Actions for shop" }).click()
     await expect(page.getByRole("menuitem")).toHaveText(["Settings"])
@@ -678,7 +619,7 @@ test.describe("the control center", () => {
     })
     await page.goto("/databases")
     await expect(page.getByRole("status", { name: "Loading databases" })).toBeVisible()
-    await expect(page.locator("[data-slot=stat-grid]")).toContainText("Backed up")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
     answer = "failing"
     first.release()
@@ -698,7 +639,7 @@ test.describe("the control center", () => {
       timeout: 15_000,
     })
     await expect(card(page, "shop")).toBeVisible()
-    await expect(tile(page, "Running")).toContainText("of 5")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   })
 
   test("an empty server says so, offers the way to add one, and lists what was found under it", async ({
@@ -990,16 +931,12 @@ test.describe("found on this server", () => {
 })
 
 test.describe("the map", () => {
-  test("draws what feeds what, with its figures, and narrows to an engine in the address", async ({
+  test("draws what feeds what without metric cards, and narrows to an engine in the address", async ({
     page,
   }) => {
     await mockFleet(page)
     await page.goto("/databases/map")
-
-    await expect(tile(page, "Databases")).toContainText("5 engines")
-    await expect(tile(page, "Readers")).toContainText("over 6 links")
-    await expect(tile(page, "Sessions")).toContainText("12")
-    await expect(tile(page, "Links wrong")).toContainText("broken or stale")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
     const picture = page.locator("[data-slot=wiring]")
     await expect(

@@ -1,15 +1,6 @@
 "use client"
 
-import Link from "next/link"
-import { bytes } from "@/lib/format"
 import { BarList, type BarListItem } from "@/components/bar-list"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { EmptyState } from "@/components/state"
-import { Button } from "@/components/ui/button"
-import { NumberTicker } from "@/components/ui/number-ticker"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Tag } from "@/components/tag"
-import { Plus } from "@/components/icons"
 import { grouped } from "@/components/database/data/view"
 import type { SectionId } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
@@ -17,6 +8,13 @@ import { CollectionMark, collectionKind } from "@/components/database/mongo/kind
 import { DatabaseMark } from "@/components/database/mongo/rail"
 import type { Catalog, Mongo } from "@/components/database/mongo/use-mongo"
 import { ReadError } from "@/components/database/redis/read-error"
+import { Plus } from "@/components/icons"
+import { EmptyState } from "@/components/state"
+import { Tag } from "@/components/tag"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { bytes } from "@/lib/format"
+import Link from "next/link"
 
 /** How many collections the ranked list draws; the rail has all of them. */
 const RANKED = 12
@@ -203,14 +201,6 @@ export function DatabasePane({
     )
   }
 
-  const measured = own.filter((entry) => entry.statsKnown)
-  const views = own.filter((entry) => entry.type === "view").length
-  const documents = measured.reduce((sum, entry) => sum + entry.count, 0)
-  const size = measured.reduce((sum, entry) => sum + entry.size, 0)
-  const stored = measured.reduce((sum, entry) => sum + entry.storageSize, 0)
-  const indexes = measured.reduce((sum, entry) => sum + entry.indexCount, 0)
-  const indexSize = measured.reduce((sum, entry) => sum + entry.indexSize, 0)
-
   const ranked = [...own].sort((a, b) => b.size - a.size || a.name.localeCompare(b.name))
   const largest = Math.max(...ranked.map((entry) => entry.size), 1)
   const bars: BarListItem[] = ranked.slice(0, RANKED).map((entry) => ({
@@ -233,37 +223,6 @@ export function DatabasePane({
       {head}
       <div className="@container min-h-0 flex-1 overflow-auto">
         <div className="animate-rise space-y-7 px-5 pt-1 pb-6">
-          {/* Bled by the tiles' own inset, so a tile's figure starts on the
-              line every heading under it starts on. */}
-          <StatGrid columns={4} dense className="-mx-5 border-b border-hairline">
-            <StatTile
-              label="Collections"
-              value={data ? <NumberTicker value={own.length - views} /> : "—"}
-              hint={
-                !data
-                  ? undefined
-                  : views > 0
-                    ? `and ${grouped(views)} ${views === 1 ? "view" : "views"}`
-                    : "no views"
-              }
-            />
-            <StatTile
-              label="Documents"
-              value={data ? <NumberTicker value={documents} /> : "—"}
-              hint={data?.statsTruncated ? "of the collections measured" : "in every collection"}
-            />
-            <StatTile
-              label="Data"
-              value={data ? bytes(size) : "—"}
-              hint={data ? `${bytes(stored)} on disk, compressed` : undefined}
-            />
-            <StatTile
-              label="Indexes"
-              value={data ? <NumberTicker value={indexes} /> : "—"}
-              hint={data ? `${bytes(indexSize)} on disk` : undefined}
-            />
-          </StatGrid>
-
           {!data ? (
             <div className="space-y-3" aria-hidden>
               <Skeleton className="h-3.5 w-36" />

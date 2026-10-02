@@ -633,10 +633,6 @@ async function visit(page: Page, path: string) {
 const LIMITED = ["read", "service.control"]
 
 const dialog = (page: Page) => page.getByRole("dialog")
-const tile = (page: Page, label: string) =>
-  page.locator("[data-slot=stat-tile]").filter({
-    has: page.locator("p.eyebrow").getByText(label, { exact: true }),
-  })
 const dumps = (page: Page) => page.getByRole("region", { name: "Dumps" })
 const dumpRow = (page: Page, file: string) => dumps(page).getByRole("row").filter({ hasText: file })
 const progress = (page: Page) => page.locator("[data-slot=transfer-progress]")
@@ -647,16 +643,14 @@ const where = (page: Page) => new URL(page.url()).pathname + new URL(page.url())
 // Backups
 // ---------------------------------------------------------------------------
 
-test("backups open on when it was last backed up and every dump with what it holds", async ({
-  page,
-}) => {
+test("backups show their schedule action and every dump without metric cards", async ({ page }) => {
   await mockOperate(page)
   await visit(page, "/databases/1/backups")
-
-  await expect(tile(page, "Last backup")).toContainText("2h")
-  await expect(tile(page, "Size")).toContainText("1.0 MB")
-  await expect(tile(page, "Kept")).toContainText("4")
-  await expect(tile(page, "Schedule")).toContainText("None")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Manage backup schedule" })).toHaveAttribute(
+    "href",
+    "/backups?database=1",
+  )
 
   await expect(dumpRow(page, "shop_main-new.dump")).toContainText("before the migration")
   await expect(dumpRow(page, "shop_main-new.dump")).toContainText("Everything")
@@ -667,6 +661,33 @@ test("backups open on when it was last backed up and every dump with what it hol
   // An uploaded file says what it is, not that it holds everything.
   await expect(dumpRow(page, "categories.sql")).not.toContainText("Everything")
   await expect(dumps(page)).toContainText("/var/backups/jd/databases/shop")
+})
+
+test("the backup schedule keeps its state and next run beside its action", async ({ page }) => {
+  let enabled = false
+  await mockOperate(page, {
+    answers: {
+      "GET /backups/": () => [
+        {
+          id: 9,
+          name: "Nightly database dump",
+          databaseDumps: [1],
+          enabled,
+          nextRun: "2026-10-03T02:00:00Z",
+        },
+      ],
+    },
+  })
+  await visit(page, "/databases/1/backups")
+  await expect(page.getByText("Nightly database dump · Paused")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Manage backup schedule" })).toHaveAttribute(
+    "href",
+    "/backups?database=1",
+  )
+  enabled = true
+  await page.reload()
+  await expect(page.getByText(/Nightly database dump · Next/)).toBeVisible()
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 })
 
 test("a dump is begun with the options chosen, shown in place, and followed to its end", async ({
@@ -978,9 +999,7 @@ test("a protected connection keeps its dumps and offers no restore and no copy",
   await expect(dumps(page)).toContainText("This connection is protected")
 })
 
-test("dumps that could not be read say so and are tried again; figures are dashes, never zeros", async ({
-  page,
-}) => {
+test("dumps that could not be read say so and can be tried again", async ({ page }) => {
   let failing = true
   await mockOperate(page, {
     answers: {
@@ -991,8 +1010,7 @@ test("dumps that could not be read say so and are tried again; figures are dashe
   await visit(page, "/databases/1/backups")
   await expect(dumps(page).getByRole("status")).toContainText("Could not read the dumps")
   await expect(dumps(page)).toContainText("the dump directory could not be listed")
-  await expect(tile(page, "Last backup")).toContainText("could not be read")
-  await expect(tile(page, "Kept")).not.toContainText("0")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   failing = false
   await dumps(page).getByRole("button", { name: "Try again" }).click()
@@ -1004,7 +1022,7 @@ test("a database with no dump says what to do, and never backed up is a warning"
 }) => {
   await mockOperate(page)
   await visit(page, "/databases/5/backups")
-  await expect(tile(page, "Last backup")).toContainText("Never")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(dumps(page)).toContainText("No dump of app is kept here")
   await expect(dumps(page).getByRole("button", { name: "Back up now" }).last()).toBeVisible()
 })
@@ -2026,11 +2044,7 @@ test("accounts open on who can sign in, with the dashboard's own account marked"
 }) => {
   await mockOperate(page)
   await visit(page, "/databases/1/access")
-
-  await expect(tile(page, "Accounts")).toContainText("4")
-  await expect(tile(page, "Administrators")).toContainText("1")
-  await expect(tile(page, "Signed in now")).toContainText("2")
-  await expect(tile(page, "Cannot sign in")).toContainText("2")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   await expect(account(page, "app")).toContainText("this connection")
   await expect(account(page, "app")).toContainText("administrator")
@@ -2040,10 +2054,10 @@ test("accounts open on who can sign in, with the dashboard's own account marked"
   await expect(account(page, "pg_monitor")).toContainText("system")
 
   // A reading narrows the list, and the address says which.
-  await page.getByRole("button", { name: "Only accounts that cannot sign in" }).click()
+  await page.getByRole("button", { name: "Cannot sign in" }).click()
   await expect(accounts(page).locator("[data-slot=choice-row]")).toHaveCount(2)
   await expect.poll(() => where(page)).toBe("/databases/1/access?show=blocked")
-  await page.getByRole("button", { name: "Every account" }).click()
+  await page.getByRole("button", { name: "All accounts" }).click()
   await accounts(page).getByLabel("Filter the accounts").fill("report")
   await expect(accounts(page).locator("[data-slot=choice-row]")).toHaveCount(1)
 })
@@ -2288,7 +2302,7 @@ test("opening an account is a step: Back closes its panel and leaves the list as
 }) => {
   await mockOperate(page)
   await visit(page, "/databases/1/access")
-  await page.getByRole("button", { name: "Only the administrators" }).click()
+  await page.getByRole("button", { name: "Administrators" }).click()
   await expect.poll(() => where(page)).toBe("/databases/1/access?show=admins")
   await account(page, "app").getByRole("button", { name: "Open app" }).click()
   await expect(panel(page)).toBeVisible()
@@ -2479,7 +2493,7 @@ test("a protected connection reads its accounts and draws no way to change one",
   expect(server.sent).toEqual([])
 })
 
-test("accounts that cannot be read say so in the server's words; the figures are dashes", async ({
+test("accounts that cannot be read say so in the server's words without metric cards", async ({
   page,
 }) => {
   await mockOperate(page, {
@@ -2491,8 +2505,7 @@ test("accounts that cannot be read say so in the server's words; the figures are
   await expect(accounts(page).getByRole("status")).toContainText("Could not read the accounts")
   await expect(accounts(page)).toContainText("SELECT command denied for table user")
   await expect(accounts(page).getByRole("button", { name: "Try again" })).toBeVisible()
-  await expect(tile(page, "Accounts")).toContainText("could not be read")
-  await expect(tile(page, "Accounts")).not.toContainText("0")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 })
 
 test("a key–value server's users are rules, and the dashboard's own user keeps what would cut it off", async ({
@@ -2509,7 +2522,7 @@ test("a key–value server's users are rules, and the dashboard's own user keeps
   })
   await visit(page, "/databases/4/access")
   const users = page.getByRole("region", { name: "Users" })
-  await expect(tile(page, "Any password")).toContainText("1")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(users).toContainText("Every command on every key")
   await expect(users).toContainText("-@all +@read +@write on ~jobs:*")
   // No SQL account route is asked of it.
@@ -2587,7 +2600,7 @@ test("a document database's users hold roles on databases, granted and taken one
   })
   await visit(page, "/databases/5/access")
   const list = page.getByRole("region", { name: "Accounts" })
-  await expect(tile(page, "Users")).toContainText("2")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(list).toContainText("readWrite@app_main")
   await expect(list).toContainText("this connection")
 
@@ -2633,7 +2646,7 @@ test("a document database with no user says what that means, not that the list i
 }) => {
   await mockOperate(page, { answers: { "GET 5/mongo/users": { users: [] } } })
   await visit(page, "/databases/5/access")
-  await expect(tile(page, "Users")).toContainText("the server asks nobody")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(page.getByRole("region", { name: "Accounts" })).toContainText(
     "A server with no user accepts every connection that reaches it",
   )
@@ -2773,7 +2786,7 @@ for (const [label, viewport] of [
     for (const [path, region] of SURFACES) {
       await visit(page, path)
       await expect(page.getByRole("region", { name: region })).toBeVisible()
-      await expect(page.locator("[data-slot=stat-tile]").first()).not.toContainText("could not")
+      await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
       await keepsTheRules(page, `${path}${label}`)
     }
     for (const path of [

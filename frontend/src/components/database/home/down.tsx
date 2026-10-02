@@ -1,11 +1,12 @@
 "use client"
 
-import Link from "next/link"
-import { Pause, Play, Stop, Warning } from "@/components/icons"
-import { plural } from "@/lib/format"
-import { cn } from "@/lib/utils"
-import { Notice } from "@/components/state"
-import { Button } from "@/components/ui/button"
+import { Activity } from "@/components/database/home/activity"
+import {
+  CLICKHOUSE_VIEWS,
+  MONGO_VIEWS,
+  REDIS_VIEWS,
+  SQL_VIEWS,
+} from "@/components/database/home/charts"
 import { HomeIdentity } from "@/components/database/home/identity"
 import { Columns } from "@/components/database/home/layout"
 import { POWER } from "@/components/database/home/power"
@@ -15,9 +16,19 @@ import {
   RunsAs,
   useBackups,
 } from "@/components/database/home/reference"
+import { mongoSample, redisSample, sqlSample } from "@/components/database/home/samples"
 import { StateRegion } from "@/components/database/home/state-region"
+import type { DbServerStats, MongoStats, RedisStats } from "@/components/database/home/types"
+import { useSamples } from "@/components/database/home/use-samples"
 import { usePower } from "@/components/database/home/verbs"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Pause, Play, Stop, Warning } from "@/components/icons"
+import { Notice } from "@/components/state"
+import { Button } from "@/components/ui/button"
+import { plural } from "@/lib/format"
+import { cn } from "@/lib/utils"
+import Link from "next/link"
+import { useCallback } from "react"
 
 /**
  * The home of a database that is not answering.
@@ -40,6 +51,7 @@ export function DownHome() {
       <StateRegion>
         <StateNotice />
       </StateRegion>
+      {engine.can("stats") && !engine.can("fileBased") && <RecordedHistory />}
       {known && (
         <Columns>
           <RunsAs />
@@ -173,5 +185,39 @@ function Actions({ className, children }: { className?: string; children: React.
     <div className={cn("flex flex-wrap items-center gap-2 pt-1.5 empty:hidden", className)}>
       {children}
     </div>
+  )
+}
+
+/** Retained samples need only the dashboard store; the stopped engine is not dialed. */
+function RecordedHistory() {
+  const { id, engine } = useDatabase()
+  const normalize = useCallback(
+    (answer: DbServerStats | RedisStats | MongoStats) =>
+      engine.kind === "keyvalue"
+        ? redisSample(answer as RedisStats)
+        : engine.kind === "document"
+          ? mongoSample(answer as MongoStats)
+          : sqlSample(answer as DbServerStats),
+    [engine.kind],
+  )
+  const stats = useSamples(id, normalize, false)
+  const views =
+    engine.kind === "keyvalue"
+      ? REDIS_VIEWS
+      : engine.kind === "document"
+        ? MONGO_VIEWS
+        : engine.can("clickhouseViews")
+          ? CLICKHOUSE_VIEWS
+          : SQL_VIEWS
+  return (
+    <Activity
+      id={id}
+      views={views}
+      samples={stats.samples}
+      loading={stats.loading}
+      error={stats.error}
+      hours={stats.hours}
+      onHours={stats.setHours}
+    />
   )
 }

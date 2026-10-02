@@ -80,7 +80,10 @@ type Server struct {
 	// What the connection routes remember between requests: each server's
 	// answer about what it is, its last fleet reading, and the unit it was
 	// last seen running under (handlers_db_connection.go).
-	dbConns dbConnState
+	dbConns        dbConnState
+	dbMetricsStop  context.CancelFunc
+	dbMetricsDone  chan struct{}
+	dbMetricOffset int
 
 	modules moduleSet
 }
@@ -146,6 +149,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// going red, and the daemon keeps none of it. A host with no Docker
 	// simply never connects, which is a steady state rather than an error.
 	s.modules.dockerEvents.Start(ctx)
+	s.startDatabaseMetrics(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,
 	// because after a successful one *this* process is the evidence it worked
@@ -230,6 +234,7 @@ func (s *Server) Shutdown() {
 		<-s.ingressDone
 	}
 	s.stopProxyExtras()
+	s.stopDatabaseMetrics()
 	s.modules.metrics.Stop()
 	s.modules.backupSched.Stop()
 	s.modules.deploySchedule.Stop()

@@ -1,26 +1,18 @@
 import type { DbServerStats, MongoStats, RedisStats } from "@/components/database/home/types"
 
-/**
- * The readings a home keeps while it is open.
- *
- * The server answers `GET /databases/{id}/stats` with raw totals and keeps
- * nothing between two asks, so a rate exists only on the page: two samples,
- * the difference of a counter, divided by the time between them on the clock
- * the answer itself states. The page holds the last sixty samples — five
- * minutes of them at one every five seconds — and everything a tile's trend
- * or the chart draws is derived from that run. Nothing here is recorded
- * history, and the page says so.
- */
+/** Raw totals and gauges from the server’s retained statistics snapshots. */
 export type Sample = {
   /** When it was read, in milliseconds, on the clock the answer states. */
   at: number
+  /** A missed recording interval: do not derive rates across it. */
+  gap?: boolean
   /** Raw totals that only grow. Never a rate. */
   counters: Record<string, number>
   /** Readings of now. */
   gauges: Record<string, number>
 }
 
-/** How many samples a home holds. */
+/** How many readings a page-local performance window holds. */
 export const WINDOW = 60
 
 /**
@@ -48,6 +40,7 @@ const list = (keys: string | readonly string[]) => (typeof keys === "string" ? [
 
 /** How far a counter (or the sum of several) moved between two samples. */
 function moved(a: Sample, b: Sample, keys: readonly string[]): number | undefined {
+  if (b.gap) return undefined
   const before = total(a, keys)
   const after = total(b, keys)
   if (before === undefined || after === undefined) return undefined
@@ -193,7 +186,7 @@ export function chartRows(
   samples: readonly Sample[],
   sources: readonly Source[],
 ): ({ ts: number } & Record<string, number>)[] {
-  return samples.map((sample, index) => {
+  return samples.flatMap((sample, index) => {
     const row: { ts: number } & Record<string, number> = { ts: sample.at }
     const before = index > 0 ? samples[index - 1] : undefined
     for (const source of sources) {
@@ -208,7 +201,7 @@ export function chartRows(
       }
       if (value !== undefined) row[source.key] = value
     }
-    return row
+    return sample.gap ? [{ ts: sample.at - 1 }, row] : [row]
   })
 }
 
@@ -253,6 +246,7 @@ export function sqlSample(stats: DbServerStats): Sample | undefined {
         ? numbers({
             sessions: sessions.total,
             sessionsActive: sessions.active,
+            sessionsWorking: Math.max(0, sessions.active - sessions.waiting),
             sessionsIdle: sessions.idle,
             sessionsIdleInTransaction: sessions.idleInTransaction,
             sessionsWaiting: sessions.waiting,
@@ -292,7 +286,7 @@ export function redisSample(stats: RedisStats): Sample | undefined {
 
 const MEBIBYTE = 1024 * 1024
 
-/** MongoDB's `serverStatus`, flattened to the names the home's tiles and chart read. */
+/** MongoDB's `serverStatus`, flattened to the names the activity chart reads. */
 export function mongoSample(stats: MongoStats): Sample | undefined {
   const server = stats.server
   const at = server?.timestamp
@@ -337,3 +331,22 @@ export const MONGO_OPS = [
   "ops.getmore",
   "ops.command",
 ] as const
+
+/** Use the recorder's clock for every engine, leaving outages as explicit gaps. */
+export function historySamples<T>(
+  snapshots: readonly { at: number; stats: T; gap: boolean }[],
+  toSample: (answer: T) => Sample | undefined,
+): readonly Sample[] {
+  return snapshots.flatMap((snapshot) => {
+    if (
+      !snapshot ||
+      !Number.isFinite(snapshot.at) ||
+      !snapshot.stats ||
+      typeof snapshot.stats !== "object"
+    ) {
+      return []
+    }
+    const sample = toSample(snapshot.stats)
+    return sample ? [{ ...sample, at: snapshot.at, gap: snapshot.gap }] : []
+  })
+}

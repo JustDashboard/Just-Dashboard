@@ -102,6 +102,8 @@ type RedisOpenOptions struct {
 	// ReadTimeout bounds one command's reply. Zero is the eight seconds an
 	// administrative read gets.
 	ReadTimeout time.Duration
+	// RespectContext caps every reply by the caller's remaining read budget.
+	RespectContext bool
 	// Retry lets the driver send a command again when its reply did not
 	// arrive. That is right for a dump walking a keyspace, where every
 	// command can be repeated, and wrong for an operator's edit: a command
@@ -140,6 +142,7 @@ func RedisOpen(ctx context.Context, dsn string, o RedisOpenOptions) (*redis.Clie
 	}
 	opt.DialTimeout = 8 * time.Second
 	opt.ReadTimeout = 8 * time.Second
+	opt.ContextTimeoutEnabled = o.RespectContext
 	if o.ReadTimeout > 0 {
 		opt.ReadTimeout = o.ReadTimeout
 	}

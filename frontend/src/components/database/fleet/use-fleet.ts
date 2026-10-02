@@ -1,18 +1,11 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
-import { post } from "@/lib/api"
-import type { DbFleetEntry } from "@/lib/types"
-import { usePoll } from "@/hooks/use-poll"
 import {
   backupReadings,
   feedsByConnection,
   fleetConcerns,
-  fleetReadings,
-  pushSample,
   sortFleet,
   storedBytes,
-  type Sample,
 } from "@/components/database/fleet/fleet"
 import {
   readBackupSummary,
@@ -22,6 +15,10 @@ import {
 } from "@/components/database/fleet/read"
 import type { DbInventory } from "@/components/database/fleet/types"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import { usePoll } from "@/hooks/use-poll"
+import { post } from "@/lib/api"
+import type { DbFleetEntry } from "@/lib/types"
+import { useCallback, useMemo, useState } from "react"
 
 /** How often the fleet is read, and how often while something is not answering. */
 const STEADY_MS = 30_000
@@ -78,32 +75,17 @@ export function useFleet(measured?: ReadonlyMap<number, number>) {
     [fleet.data, concernsOf],
   )
   const storedOf = useCallback((entry: DbFleetEntry) => storedBytes(entry, measured), [measured])
-  const readings = useMemo(
-    () => fleetReadings(fleet.data, { backups, dumps, storedOf }),
-    [fleet.data, backups, dumps, storedOf],
-  )
-
-  // The Sessions tile's trend is this page's own: one sample for each reading
-  // of the fleet while it is open, so the line fills in as the reader watches
-  // and claims no history it does not have.
-  const stamp = fleet.data?.checkedAt
-  const [held, setHeld] = useState<{ stamp?: string; samples: Sample[] }>({ samples: [] })
-  if (stamp && stamp !== held.stamp) {
-    setHeld({ stamp, samples: pushSample(held.samples, stamp, readings.sessions) })
-  }
 
   return {
     fleet,
     summary,
     topology,
     entries,
-    readings,
     backups,
     feeds,
     dumps,
     storedOf,
     concernsOf,
-    sessionSamples: held.samples,
   }
 }
 

@@ -1,50 +1,64 @@
 "use client"
 
-import { useRef } from "react"
-import { get } from "@/lib/api"
+import { historySamples, type Sample } from "@/components/database/home/samples"
+import { read } from "@/components/database/home/read"
 import { usePoll } from "@/hooks/use-poll"
-import { pushSample, type Sample } from "@/components/database/home/samples"
+import { get } from "@/lib/api"
+import { useViewState } from "@/lib/view-state"
+import { useMemo } from "react"
 
-const NONE: readonly Sample[] = []
+export const SAMPLE_EVERY_MS = 30_000
+export const HISTORY_RANGES = [
+  { hours: 1, label: "1 hour" },
+  { hours: 6, label: "6 hours" },
+  { hours: 24, label: "24 hours" },
+  { hours: 168, label: "7 days" },
+] as const
 
-/** How often a home asks for the snapshot. The server keeps nothing between two asks. */
-export const SAMPLE_EVERY_MS = 5_000
+export type StatsHistory<T> = { samples: { at: number; stats: T; gap: boolean }[] }
 
-/**
- * A database's statistics, read every five seconds and kept: the newest
- * answer, and the run of samples every rate, trend and chart on the home is
- * derived from. A poll that fails leaves both as they were, with the error
- * beside them — the tiles keep their last figures and say they have stopped.
- *
- * `enabled` is whether the server is there to ask: a stopped one is not
- * dialled, here any more than by the summary.
- */
+/** Read history independently of the live snapshot so an offline server
+ * still has recorded activity. Failed refreshes retain the previous run. */
 export function useSamples<T>(
   id: number,
   toSample: (answer: T) => Sample | undefined,
   enabled: boolean,
+  historyEnabled = true,
 ) {
-  const held = useRef<readonly Sample[]>(NONE)
-  const poll = usePoll(
-    async (signal) => {
-      const answer = await get<T>(`/databases/${id}/stats`, undefined, signal)
-      const sample = toSample(answer)
-      // An answer with no clock in it is not this route's: there is nothing
-      // to divide a counter by, and nothing a tile could honestly show.
-      if (!sample) throw new Error("The server answered in a form this page does not read.")
-      held.current = pushSample(held.current, sample)
-      return { answer, samples: held.current }
-    },
+  const [chosen, setHours] = useViewState(`databases.${id}.history.hours`, 1)
+  const hours = HISTORY_RANGES.some((range) => range.hours === chosen) ? chosen : 1
+  const live = usePoll(
+    (signal) => get<T>(`/databases/${id}/stats`, undefined, signal),
     SAMPLE_EVERY_MS,
     [id],
     { enabled },
   )
+  const history = usePoll(
+    (signal) =>
+      read<StatsHistory<T>>(
+        `/databases/${id}/stats/history`,
+        (answer) => Array.isArray(answer.samples),
+        { hours },
+        signal,
+      ),
+    SAMPLE_EVERY_MS,
+    [id, hours],
+    { enabled: historyEnabled },
+  )
+  const samples = useMemo(
+    () => historySamples(history.data?.samples ?? [], toSample),
+    [history.data, toSample],
+  )
   return {
-    answer: poll.data?.answer,
-    samples: poll.data?.samples ?? NONE,
-    /** Nothing has answered yet. */
-    loading: poll.loading,
-    error: poll.error,
-    refresh: poll.refresh,
+    answer: live.data,
+    samples,
+    hours,
+    setHours,
+    loading: history.loading,
+    error: history.error ?? live.error,
+    refresh: () => {
+      history.refresh()
+      live.refresh()
+    },
   }
 }

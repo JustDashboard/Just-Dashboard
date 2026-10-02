@@ -18,6 +18,14 @@
   requests on hidden tabs. Its fixed-length dependency list identifies the resource: changing it
   immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
   retain the same resource's data. Cleanup aborts the request and ignores late responses.
+- Database activity (`components/database/home/use-samples.ts`) reads retained snapshots from
+  `GET /databases/{id}/stats/history` every 30 seconds, independently of the live snapshot read.
+  The selected 1h, 6h, 24h or 7d range is view state per connection; the samples live in the backend
+  store, rather than a browser-owned rolling buffer. Failed refreshes retain the last result, and a
+  stopped database can show history without dialing its engine. Counter resets and recording gaps
+  longer than 90 seconds break chart lines and rates; missing snapshots are ignored. Historical
+  working-session counts are the recorded active count minus the recorded waiting count, while live
+  session filters use the current session list. SQLite has no activity chart or recording poll.
 - `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
   ref so a fresh closure does not rebuild the socket.
 - Persisted view/session values use individual Web Storage entries, so changing a small filter does not
