@@ -107,3 +107,27 @@ Large listing retry with longer assertion deadline
 Running 1 test using 1 worker
   ✓  1 [chromium] › tests/browser/files-ui.spec.ts:254:5 › large listings retain find, selection and keyboard menu focus (36.0s)
   1 passed (38.9s)
+
+File-opening assertions follow-up
+Existing hosted verification found a strict-mode violation from a generic dialog selector:
+the closing Find files dialog and the newly opened notes.md editor briefly coexist.
+Both opening tests now target the named editor and verify the Find files dialog closes.
+
+Focused: JD_BROWSER_BASE_URL=http://127.0.0.1:43129 bunx playwright test tests/browser/files-ui.spec.ts -g 'find responds from the current listing|content search highlights matches' --workers=1
+  2 passed (21.9s)
+
+Follow-up gate: JD_BROWSER_BASE_URL=http://127.0.0.1:43129 scripts/test-changed.sh bb2e60be47c8b4fbe9fa6a9c275340d9d2b33a5e
+All matched files use Prettier code style; ESLint and TypeScript exit 0.
+ 2812 pass
+ 0 fail
+ 11724 expect() calls
+Browser specs: tests/browser/files-ui.spec.ts
+Running 27 tests using 4 workers
+All seven fixed search palette tests and both corrected opening tests pass.
+  2 failed (30-second test deadlines: large-list focus and full-editor screenshot)
+  25 passed (2.1m)
+
+Retry: JD_BROWSER_BASE_URL=http://127.0.0.1:43129 bunx playwright test --config=/tmp/jd-files-search-slow.config.ts tests/browser/files-ui.spec.ts -g 'large listings retain find|full editors and the search palette fit'
+  large listings retain find, selection and keyboard menu focus (25.9s)
+  full editors and the search palette fit desktop and phone widths (15.1s)
+  2 passed (44.2s)

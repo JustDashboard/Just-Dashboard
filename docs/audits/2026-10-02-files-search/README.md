@@ -66,6 +66,16 @@ cases pass with a temporary local configuration using a 20-second assertion dead
 scenarios therefore passed; the default-timeout gate itself was not green. No assertions, application
 behavior, committed Playwright configuration or CI were changed to address these timing limits.
 
+Hosted verification exposed an ambiguous existing file-opening assertion: the closing search dialog
+briefly overlaps the new editor during dismissal. The name and content search tests now target the
+`notes.md` editor explicitly and verify that the search dialog finishes closing. Both tests pass
+locally at the normal deadlines; the screenshots and recordings remain current because this
+follow-up changes only the tests. The follow-up gate against `bb2e60be` passes formatting, lint,
+types and all 2,812 unit tests. Of its 27 Files browser scenarios, 25 pass at the default deadlines;
+the large-list focus and full-editor screenshot cases exceed the 30-second test deadline and pass
+unchanged with the temporary local configuration above. All seven search animation cases and both
+corrected file-opening cases pass in the default-deadline run.
+
 [Verification output](verification.txt) preserves the commands, summaries and temporary timeout
 configuration. The captures are from the task worktree's final production build.
 

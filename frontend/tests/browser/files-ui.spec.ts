@@ -362,7 +362,8 @@ test("find responds from the current listing before a disk search and opens from
   await input.fill("ntsmd")
   await expect(page.getByRole("option")).toContainText("notes.md")
   await input.press("Enter")
-  await expect(page.getByRole("dialog")).toContainText("notes.md")
+  await expect(page.getByRole("dialog", { name: "notes.md", exact: true })).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Find files", exact: true })).toBeHidden()
   await expect(page.getByRole("button", { name: "Open full editor" })).toBeVisible()
 })
 
@@ -404,7 +405,8 @@ test("content search highlights matches, opens at the line and rejects stale res
   await expect(page.getByRole("option")).not.toContainText("old hello")
   await input.press("Enter")
   await expect(page.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByRole("dialog")).toContainText("Ln 2")
+  await expect(page.getByRole("dialog", { name: "notes.md", exact: true })).toContainText("Ln 2")
+  await expect(page.getByRole("dialog", { name: "Find files", exact: true })).toBeHidden()
 })
 
 test.describe("fixed search palette", () => {
