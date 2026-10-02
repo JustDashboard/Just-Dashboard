@@ -4,9 +4,6 @@ The App Router keeps route entry files thin where a feature has reusable panels 
 orchestration where splitting it would hide the workflow. Backend capability checks remain authoritative;
 hiding a control through `useAuth().can()` is affordance only.
 
-<!-- LEAD-ENGINES: the `/databases` row describes the engines whose pages are in this tree (SQL, the
-     Redis family, MongoDB). The Memcached and Elasticsearch/OpenSearch pages, and their directories
-     under `components/database/`, are added to it when they land. -->
 <!-- LEAD-PAGES: a database's Access, Backups and Settings pages are stubs in this tree
      (`components/database/ops/access.tsx`, `backups.tsx` and `settings.tsx` draw `shell/area-stub.tsx`;
      `ops/verbs.ts` declares no verbs). The `/databases` row says so in the sentence beginning

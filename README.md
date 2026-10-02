@@ -218,9 +218,6 @@ health checks and runtime limits remain editable before the first deployment.
 
 <!-- LEAD: docs/databases.png above still shows the page before the rebuild; it is re-shot for this
      release, and the alt text goes with the new picture. -->
-<!-- LEAD-ENGINES: the engines named below are the ones this tree opens. Memcached and
-     Elasticsearch/OpenSearch are added to the list and to the per-engine sentence when their drivers
-     merge; until then they are among the servers that are found and listed but not opened. -->
 <!-- LEAD-PAGES: a database's Access, Backups and Settings pages are stubs in this tree
      (frontend/src/components/database/ops/{access,backups,settings}.tsx), so nothing below describes
      them: a dump is taken from the control center or a database's home, and nothing yet downloads,

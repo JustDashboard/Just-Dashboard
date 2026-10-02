@@ -25,8 +25,6 @@ services, handles signals, and supports the isolated self-update worker and loca
 for the host to run. The packages under
 `backend/internal/` are:
 
-<!-- LEAD-ENGINES: the `dbx` row names the Redis and MongoDB surfaces; add the Memcached and
-     Elasticsearch/OpenSearch clients to it when they merge. -->
 | Package | Responsibility | Detailed reference |
 | --- | --- | --- |
 | `accesslog` | The ingress request record: reading Caddy's JSON and nginx's combined or timed lines into one shape, the bounded store of them and the summaries the deployment pages draw | [`../deployments/request-observability.md`](../deployments/request-observability.md) |

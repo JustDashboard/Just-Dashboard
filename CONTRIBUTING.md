@@ -374,8 +374,6 @@ fixture alongside the others. The cases that use the JSON and BOOLEAN types need
 was used, identify that validation limit in the pull request; unit results do not establish that the
 generated statements work against an Oracle server.
 
-<!-- LEAD-ENGINES: the Memcached and Elasticsearch/OpenSearch tests are not in this tree. Add their
-     variables to the table above, with whether each falls back, when the drivers merge. -->
 
 ### Two files a test holds to the code
 

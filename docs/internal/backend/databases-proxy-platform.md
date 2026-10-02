@@ -23,12 +23,6 @@ depend on what a request carries are stated once in
 
 ### Engines, flavours and the capability table
 
-<!-- LEAD-ENGINES: the Memcached and Elasticsearch/OpenSearch drivers are not in this tree. When they
-     merge, the first bullet's count and list, the sixteen driverless products (three of them move)
-     and the driver ids all change; `backend/internal/dbx/dbx.go` and `discover_engines.go` are the
-     source. So do "six implementations" of `Dialect` if either is given one, and, in the last bullet
-     of this section, "eight drivers" and "117 flags (104 a yes or a no, seven a word, six a list)",
-     which are counted from `backend/internal/api/testdata/database-drivers.json` as it is here. -->
 - **Eight engines on pure-Go drivers**, so the image still needs no CGO: PostgreSQL, MySQL/MariaDB,
   SQLite, SQL Server, ClickHouse and Oracle through `database/sql`, each behind its own `Dialect`,
   and MongoDB and Redis through code of their own, because a key or a document is not a row and the
@@ -1456,10 +1450,6 @@ per-area browser specs are in
 
 ### Routes
 
-<!-- LEAD-ENGINES: the tables below and the figures in this section (224 routes; 29 open, 12 by
-     content, 20 preview only, 61 refused; the per-table counts) are generated from the mount functions
-     of this tree. Generate them again when the Memcached and Elasticsearch/OpenSearch routes are
-     mounted, and give the two engines their own tables after MongoDB. -->
 Every route under `/api/v1/databases`, read off the mount functions (`mountDatabaseRoutes` in
 `api/handlers_db.go` and the nine it calls): 224 of them. The whole tree sits behind authentication
 and `protectReadOnlyConnections`.
