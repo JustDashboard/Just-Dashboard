@@ -1457,6 +1457,32 @@ test.describe("aggregations", () => {
     await expect(page.getByRole("menuitem", { name: /^Paid orders/ })).toBeVisible()
   })
 
+  test("a pipeline that only reads becomes a view of its collection, with its stages as written", async ({
+    page,
+  }) => {
+    const mongo = await mockMongo(page)
+    await page.goto(`${QUERY}?db=${DB}&collection=orders`)
+    await build(page, '[ { $match: { status: "paid" } }, { $limit: 5 } ]')
+    await page.getByRole("button", { name: "Export" }).click()
+    await page.getByRole("menuitem", { name: "Create a view from it…" }).click()
+    const dialog = page.getByRole("dialog", { name: "New collection" })
+    await dialog.getByLabel("Name").fill("paid_orders")
+    await dialog.getByRole("button", { name: "Create view" }).click()
+    await expect.poll(() => where(page)).toContain("collection=paid_orders")
+    expect(mongo.asked("POST /mongo/collections").at(-1)?.body).toMatchObject({
+      database: DB,
+      collection: "paid_orders",
+      viewOn: "orders",
+      pipeline: '[\n  { $match: { status: "paid" } },\n  { $limit: 5 }\n]',
+    })
+
+    // A view is nothing to write into: a pipeline that writes is not offered as one.
+    await page.goto(`${QUERY}?db=${DB}&collection=orders`)
+    await build(page, '[ { $out: "copy" } ]')
+    await page.getByRole("button", { name: "Export" }).click()
+    await expect(page.getByRole("menuitem", { name: "Create a view from it…" })).toBeDisabled()
+  })
+
   test("the console says what a command is before it runs, confirms a removal, and never runs a blocked one", async ({
     page,
   }) => {
@@ -1755,9 +1781,7 @@ test.describe("performance", () => {
     await expect(rows).toHaveCount(1)
     await expect(rows).toContainText(`query ${DB}.orders`)
     await expect(rows).toContainText("42 s")
-    await expect(
-      page.getByText("The heartbeat of one connected client is not listed"),
-    ).toBeVisible()
+    await expect(page.getByText("Not listed: the heartbeat of one connected client.")).toBeVisible()
 
     await rows.getByRole("button", { name: `Stop query ${DB}.orders` }).click()
     const confirm = page.getByRole("dialog", { name: "Stop operation" })

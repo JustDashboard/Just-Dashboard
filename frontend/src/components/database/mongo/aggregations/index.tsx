@@ -75,6 +75,7 @@ function Aggregations(workbench: Workbench) {
           mongo={mongo}
           collection={collection}
           confirm={confirm}
+          newCollection={newCollection}
         />
       ) : (
         <DatabasePane mongo={mongo} catalog={catalog} section="query" onNew={newCollection} />

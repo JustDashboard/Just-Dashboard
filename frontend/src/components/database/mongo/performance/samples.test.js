@@ -154,6 +154,7 @@ describe("words", () => {
   })
 
   test("a ratio in the fewest digits that say it", () => {
+    expect(ratio(0)).toBe("0")
     expect(ratio(1)).toBe("1.0")
     expect(ratio(3.55)).toBe("3.5")
     expect(ratio(12.4)).toBe("12")

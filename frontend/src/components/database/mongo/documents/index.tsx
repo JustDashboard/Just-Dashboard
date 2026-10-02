@@ -26,8 +26,9 @@ import { FormFact, FormFacts } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { PaneFooter } from "@/components/panel"
-import { EmptyState, LoadingRows } from "@/components/state"
+import { EmptyState } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -98,6 +99,21 @@ import {
   type Workbench,
 } from "@/components/database/mongo/workbench"
 import { ReadError } from "@/components/database/redis/read-error"
+
+/** The documents before they land: a few of them, each a short run of fields. */
+function DocumentsSkeleton() {
+  return (
+    <div aria-hidden className="divide-y divide-hairline">
+      {[0, 1, 2, 3].map((block) => (
+        <div key={block} className="space-y-2.5 px-3 py-3 pl-8">
+          {[52, 36, 28, 44, 32].map((width, line) => (
+            <Skeleton key={line} className="h-3" style={{ width: `${width - block * 3}%` }} />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 type View = "list" | "json" | "table"
 const VIEWS: { id: View; label: string }[] = [
@@ -448,7 +464,7 @@ function Documents({
       {result?.truncated && (
         <span
           className="text-hint whitespace-nowrap text-warning"
-          title="A page ends at 8 MiB of documents. The next page carries on from here."
+          title="A page ends at 8 MiB of documents, and this one ended there before it was full. Choose fewer documents a page to read the ones it left out."
         >
           page cut at 8 MiB
         </span>
@@ -675,7 +691,7 @@ function Documents({
             {poll.error && !result ? (
               <ReadError error={poll.error} onRetry={poll.refresh} className="m-4" />
             ) : !result ? (
-              <LoadingRows rows={10} className="p-4" />
+              <DocumentsSkeleton />
             ) : empty ? (
               <EmptyState
                 mark={<EngineMark engine={engine} />}

@@ -53,6 +53,9 @@ import type { Mongo } from "@/components/database/mongo/use-mongo"
 
 type NewKind = "collection" | "capped" | "timeseries" | "view"
 
+/** A view to be made: what it reads, and the pipeline it reads it through. */
+export type ViewPreset = { viewOn: string; pipeline: string }
+
 const KIND_HINT: Record<NewKind, string> = {
   collection: "Documents of any shape, kept until they are deleted.",
   capped: "A fixed size: the oldest documents make room for new ones.",
@@ -118,22 +121,38 @@ export function NewCollectionDialog({
   mongo,
   collections,
   open,
+  view,
   onOpenChange,
   onCreated,
 }: {
   mongo: Mongo
   collections: MongoCollection[]
   open: boolean
+  /** Opens on a view of this collection through this pipeline: "save the pipeline as a view". */
+  view?: ViewPreset
   onOpenChange: (open: boolean) => void
   onCreated: (name: string) => void
 }) {
   const { id, database, engine } = mongo
-  const [draft, setDraft] = useState<Draft>(EMPTY)
+  const [draft, setDraft] = useState<Draft>(() =>
+    view ? { ...EMPTY, kind: "view", viewOn: view.viewOn, pipeline: view.pipeline } : EMPTY,
+  )
   const [busy, setBusy] = useState(false)
   const [refused, setRefused] = useState("")
   const set = (patch: Partial<Draft>) => {
     setDraft((held) => ({ ...held, ...patch }))
     setRefused("")
+  }
+  // Closed — by the reader, or by the address moving to what was made — the
+  // form starts again from nothing the next time it opens.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (wasOpen !== open) {
+    setWasOpen(open)
+    if (!open) {
+      setDraft(EMPTY)
+      setRefused("")
+      setBusy(false)
+    }
   }
 
   const kinds: NewKind[] = [
@@ -166,12 +185,7 @@ export function NewCollectionDialog({
     (draft.kind === "view" && !draft.viewOn)
 
   const close = (next: boolean) => {
-    if (busy) return
-    onOpenChange(next)
-    if (!next) {
-      setDraft(EMPTY)
-      setRefused("")
-    }
+    if (!busy) onOpenChange(next)
   }
 
   const create = async () => {
@@ -204,13 +218,13 @@ export function NewCollectionDialog({
     try {
       await createCollection(id, request)
       notify.success(`Created ${name}`)
-      setDraft(EMPTY)
       // The caller goes to the new collection, which closes this dialog: one
-      // change of address rather than a close and then a move.
+      // change of address rather than a close and then a move. Until the
+      // address has moved the dialog stays as it is, its command still busy,
+      // rather than showing an emptied form for a moment.
       onCreated(name)
     } catch (err) {
       setRefused(errorMessage(err))
-    } finally {
       setBusy(false)
     }
   }

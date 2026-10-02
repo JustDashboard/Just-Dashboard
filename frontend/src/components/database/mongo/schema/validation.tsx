@@ -310,7 +310,8 @@ export function ValidationView({ mongo, catalog, collection: info, confirm }: Wo
             </div>
           </div>
 
-          <div className="min-w-0 space-y-4">
+          {/* Its first label sits on the line the rule's heading is on. */}
+          <div className="min-w-0 space-y-4 @4xl:pt-1">
             <Field label="How strictly" hint={LEVEL_HINT[draft.level]}>
               <Segments
                 label="Validation level"

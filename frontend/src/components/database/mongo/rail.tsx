@@ -5,7 +5,6 @@ import Link from "next/link"
 import {
   ChevronDown,
   ChevronRight,
-  Layers,
   MoreHorizontal,
   Plus,
   RefreshClockwise,
@@ -15,7 +14,7 @@ import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
-import { EmptyNote, EmptyState } from "@/components/state"
+import { EmptyNote } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -165,24 +164,10 @@ export function CollectionRail({
         ) : !data ? (
           <RailSkeleton />
         ) : data.collections.length === 0 ? (
-          <EmptyState
-            className="mt-2 border-0 px-2 py-8"
-            icon={Layers}
-            title={`No ${engine.nouns.objects} in ${database}`}
-            description={
-              onNew
-                ? `A ${engine.nouns.container} exists once it holds a ${engine.nouns.object}. Create the first one here.`
-                : `Nothing in this ${engine.nouns.container} holds ${engine.nouns.rows} yet.`
-            }
-            action={
-              onNew && (
-                <Button size="sm" variant="outline" onClick={onNew}>
-                  <Plus />
-                  New {engine.nouns.object}
-                </Button>
-              )
-            }
-          />
+          // The pane beside this says it, with the way to make the first one.
+          <EmptyNote className="px-2 py-6">
+            No {engine.nouns.objects} in {database} yet.
+          </EmptyNote>
         ) : matched === 0 ? (
           <div className="px-2 py-6 text-center">
             <p className="text-body text-muted-foreground">Nothing here is called that.</p>

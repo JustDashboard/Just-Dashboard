@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Copy,
   Download,
+  Eye,
   FloppyDisk,
   Play,
   Plus,
@@ -99,7 +100,8 @@ export function PipelineView({
   mongo,
   collection: info,
   confirm,
-}: Pick<Workbench, "mongo" | "collection" | "confirm">) {
+  newCollection,
+}: Pick<Workbench, "mongo" | "collection" | "confirm" | "newCollection">) {
   const { id, target, database, collection, engine, readOnly, canRun, canDestroy } = mongo
   const scope = `${database}\u0000${collection}`
 
@@ -326,6 +328,21 @@ export function PipelineView({
                 <Download className="size-3.5" />
                 Download as a file
               </DropdownMenuItem>
+              {newCollection && engine.can("views") && info?.type !== "view" && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    // A view may not write, and is made of stages the server can read.
+                    disabled={!sendable || writes || enabled.length === 0}
+                    onSelect={() =>
+                      newCollection({ viewOn: collection, pipeline: listText(stages) })
+                    }
+                  >
+                    <Eye className="size-3.5" />
+                    Create a view from it…
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
           <label className="flex h-7 cursor-pointer items-center gap-1.5 px-1.5 text-xs font-medium">
@@ -420,6 +437,11 @@ export function PipelineView({
                     ])
                   }
                   onRemove={() => change(stages.filter((held) => held.id !== stage.id))}
+                  onRun={
+                    canRun && sendable && enabled.length > 0 && mayRun && !running
+                      ? pressRun
+                      : undefined
+                  }
                 />
               ))}
             </ol>

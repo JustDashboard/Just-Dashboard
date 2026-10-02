@@ -25,6 +25,7 @@ import { classifyCommand, mongoCommands, runCommand } from "@/components/databas
 import { parseDocument } from "@/components/database/mongo/bson"
 import { BsonTree } from "@/components/database/mongo/bson-tree"
 import { CodeField } from "@/components/database/mongo/code-field"
+import { effectColor } from "@/components/database/mongo/kinds"
 import { DatabaseMark } from "@/components/database/mongo/rail"
 import { shapeProblem } from "@/components/database/mongo/shell"
 import type {
@@ -42,15 +43,15 @@ const capitalised = (text: string) => text.charAt(0).toUpperCase() + text.slice(
 const KEPT = 40
 
 /**
- * What a command does, as the server classes it. The hues are the ones the
- * section gives a statement's first word wherever statements are listed: a
- * read blue, a write violet, a removal pink — none of them a reading of state.
+ * What a command does, as the server classes it, in the hue the section
+ * gives a statement of that effect wherever statements are listed. A command
+ * that is never run has no effect, and no hue.
  */
-const CLASS: Record<MongoCommandClass, { word: string; className: string }> = {
-  read: { word: "reads", className: "text-(--tag-blue)" },
-  write: { word: "writes", className: "text-(--tag-violet)" },
-  destructive: { word: "removes or stops", className: "text-(--tag-pink)" },
-  blocked: { word: "never run", className: "text-muted-foreground line-through" },
+const CLASS: Record<MongoCommandClass, { word: string; color: string | undefined }> = {
+  read: { word: "reads", color: effectColor("read") },
+  write: { word: "writes", color: effectColor("change") },
+  destructive: { word: "removes or stops", color: effectColor("remove") },
+  blocked: { word: "never run", color: undefined },
 }
 
 const NEEDS: Record<MongoCapability, string> = {
@@ -307,7 +308,9 @@ export function ConsoleView({
             {verdict && !shape && (
               <span className="flex shrink-0 items-center gap-1.5">
                 <span className="font-mono text-xs text-foreground">{verdict.command}</span>{" "}
-                <span className={CLASS[verdict.class].className}>{CLASS[verdict.class].word}</span>{" "}
+                <span style={{ color: CLASS[verdict.class].color }}>
+                  {CLASS[verdict.class].word}
+                </span>{" "}
                 {verdict.target && <span className="font-mono">{verdict.target} </span>}
                 {verdict.admin && <span>(an administrator&rsquo;s command) </span>}
               </span>
@@ -362,7 +365,10 @@ export function ConsoleView({
                     <span className="min-w-0 flex-1 truncate font-mono text-xs">
                       {entry.command}
                     </span>
-                    <span className={cn("shrink-0 text-hint", CLASS[entry.class].className)}>
+                    <span
+                      className="shrink-0 text-hint"
+                      style={{ color: CLASS[entry.class].color }}
+                    >
                       {CLASS[entry.class].word}
                       {entry.admin ? " · admin" : ""}
                     </span>
@@ -400,7 +406,7 @@ function TranscriptEntry({ entry, onAgain }: { entry: Entry; onAgain: () => void
           {entry.verdict && word ? (
             <>
               {entry.command.slice(0, entry.command.indexOf(word))}
-              <span className={CLASS[entry.verdict.class].className}>{word}</span>
+              <span style={{ color: CLASS[entry.verdict.class].color }}>{word}</span>
               {entry.command.slice(entry.command.indexOf(word) + word.length)}
             </>
           ) : (

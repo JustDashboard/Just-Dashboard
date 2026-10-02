@@ -18,6 +18,7 @@ import {
   NewCollectionDialog,
   RenameCollectionDialog,
   dropRequest,
+  type ViewPreset,
 } from "@/components/database/mongo/collection-dialogs"
 import { DatabasePane } from "@/components/database/mongo/database-pane"
 import type { QueryDraft } from "@/components/database/mongo/query"
@@ -49,8 +50,11 @@ export type Workbench = {
   /** Opens Export for the open collection, with the query on screen when there is one. */
   exportCollection: (draft?: QueryDraft) => void
   exporting: boolean
-  /** Opens New collection; absent where the role, the engine or the connection cannot. */
-  newCollection: (() => void) | undefined
+  /**
+   * Opens New collection — on a view through a pipeline, when one is given.
+   * Absent where the role, the engine or the connection cannot.
+   */
+  newCollection: ((view?: ViewPreset) => void) | undefined
 }
 
 /**
@@ -100,6 +104,9 @@ export function MongoWorkbench({
   // SQL pages' links ask for New table: another page can link straight to it.
   const creating = param("new") === "collection"
   const setCreating = (open: boolean) => select({ new: open ? "collection" : null })
+  const [preset, setPreset] = useState<ViewPreset>()
+  // A view the dialog was opened on belongs to that opening alone.
+  if (!creating && preset) setPreset(undefined)
   const [renaming, setRenaming] = useState<MongoCollection | null>(null)
   const [exporting, setExporting] = useState<{ collection: string; draft?: QueryDraft } | null>(
     null,
@@ -122,6 +129,14 @@ export function MongoWorkbench({
 
   const listed = catalog.collections.data?.collections ?? []
   const canCreate = canWrite && engine.can("collections") && Boolean(database)
+
+  /** Opens New collection, on a view through a pipeline when one is given. */
+  const openNew = canCreate
+    ? (view?: ViewPreset) => {
+        setPreset(view)
+        setCreating(true)
+      }
+    : undefined
 
   const verbsFor = (entry: MongoCollection): Verb[] => {
     const elsewhere: Verb[] = WORK.filter((other) => other !== section && engine.has(other)).map(
@@ -200,7 +215,7 @@ export function MongoWorkbench({
     confirm,
     exportCollection: (draft) => setExporting({ collection, draft }),
     exporting: exporter.running !== null,
-    newCollection: canCreate ? () => setCreating(true) : undefined,
+    newCollection: openNew,
   }
 
   return (
@@ -219,7 +234,7 @@ export function MongoWorkbench({
               catalog={catalog}
               section={section}
               verbsFor={verbsFor}
-              onNew={canCreate ? () => setCreating(true) : undefined}
+              onNew={openNew && (() => openNew())}
               onHide={() => (wide ? setRailShown(false) : setRailOver(false))}
             />
             <ResizeHandle
@@ -242,7 +257,7 @@ export function MongoWorkbench({
             catalog={catalog}
             section={section}
             leading={leading}
-            onNew={canCreate ? () => setCreating(true) : undefined}
+            onNew={openNew && (() => openNew())}
           />
         ) : missing ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -272,6 +287,9 @@ export function MongoWorkbench({
         <NewCollectionDialog
           mongo={mongo}
           collections={listed}
+          // Opened on a view, the dialog starts from that view; else from nothing.
+          key={preset ? `view:${preset.viewOn}:${preset.pipeline}` : "new"}
+          view={preset}
           open={creating}
           onOpenChange={setCreating}
           onCreated={(name) => {

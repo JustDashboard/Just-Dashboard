@@ -170,6 +170,7 @@ export function lifetimeTargeting(server: MongoServer): number | null {
 
 /** "1.3", "12", "140": a ratio in the fewest digits that say it. */
 export function ratio(value: number): string {
+  if (value === 0) return "0"
   if (value >= 100) return Math.round(value).toLocaleString("en-US")
   if (value >= 10) return value.toFixed(0)
   return value.toFixed(1)

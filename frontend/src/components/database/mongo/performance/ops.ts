@@ -19,8 +19,39 @@ export function isHeartbeat(operation: MongoOperation): boolean {
   )
 }
 
-/** The operations a reader came to see, and how many heartbeats were left out of them. */
-export function withoutHeartbeats(operations: readonly MongoOperation[]) {
-  const shown = operations.filter((operation) => !isHeartbeat(operation))
-  return { shown, heartbeats: operations.length - shown.length }
+/** Whether an operation is the server's own background work: nobody's connection asked for it. */
+export function isInternal(operation: MongoOperation): boolean {
+  return !operation.client
+}
+
+/**
+ * The operations a reader came to see — the work clients asked for — with
+ * how many heartbeats and how many of the server's own tasks were left out.
+ */
+export function clientWork(operations: readonly MongoOperation[]) {
+  const heartbeats = operations.filter(isHeartbeat).length
+  const internal = operations.filter(isInternal).length
+  return {
+    shown: operations.filter((operation) => !isHeartbeat(operation) && !isInternal(operation)),
+    heartbeats,
+    internal,
+  }
+}
+
+/** "the heartbeats of 2 connected clients and 3 of the server's own tasks": what a list left out, or `""`. */
+export function leftOutWords(heartbeats: number, internal: number): string {
+  return [
+    heartbeats === 1
+      ? "the heartbeat of one connected client"
+      : heartbeats > 1
+        ? `the heartbeats of ${heartbeats} connected clients`
+        : "",
+    internal === 1
+      ? "one task of the server's own"
+      : internal > 1
+        ? `${internal} tasks of the server's own`
+        : "",
+  ]
+    .filter(Boolean)
+    .join(" and ")
 }

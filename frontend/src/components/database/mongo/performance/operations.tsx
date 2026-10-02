@@ -23,8 +23,9 @@ import { nameHue } from "@/components/database/home/kinds"
 import { EngineMark } from "@/components/database/kit"
 import { killOperation, mongoOperations } from "@/components/database/mongo/api"
 import {
+  clientWork,
+  leftOutWords,
   operationTitle as title,
-  withoutHeartbeats,
 } from "@/components/database/mongo/performance/ops"
 import { runningWords } from "@/components/database/mongo/performance/samples"
 import type { MongoOperation } from "@/components/database/mongo/types"
@@ -41,8 +42,9 @@ const LONG_SECONDS = 10
  * long, for whom, with what plan. Stopping one asks the server to interrupt
  * it at its next safe point — not instantly — and is offered to a role that
  * may remove things, on a protected connection too, since it changes no data.
- * The dashboard's own request for this list is left out by the server, and
- * the heartbeat each connected driver keeps open is left out here.
+ * The dashboard's own request for this list is left out by the server; the
+ * heartbeat each connected driver keeps open and the server's own tasks are
+ * left out here, until the reader asks for them.
  */
 export function OperationsView({
   mongo,
@@ -54,18 +56,15 @@ export function OperationsView({
   const { id, conn, engine, canKill } = mongo
   const [all, setAll] = useState(false)
   const operations = usePoll((signal) => mongoOperations(id, all, signal), 3000, [id, all])
-  // A driver's heartbeat is always running and is nobody's work: it is listed
-  // only with the idle connections, when the reader asks for everything.
+  // A driver's heartbeat and the server's own tasks are always running and
+  // are nobody's work: they are listed only when the reader asks for everything.
   const read = operations.data
-  const { shown: rows, heartbeats } = useMemo(
-    () =>
-      !read
-        ? { shown: undefined, heartbeats: 0 }
-        : all
-          ? { shown: read, heartbeats: 0 }
-          : withoutHeartbeats(read),
-    [read, all],
-  )
+  const { shown: rows, leftOut } = useMemo(() => {
+    if (!read) return { shown: undefined, leftOut: "" }
+    if (all) return { shown: read, leftOut: "" }
+    const work = clientWork(read)
+    return { shown: work.shown, leftOut: leftOutWords(work.heartbeats, work.internal) }
+  }, [read, all])
   const arrived = useArrivals((rows ?? []).map((row, index) => row.opId || `idle:${index}`))
 
   if (operations.error && !rows) {
@@ -123,10 +122,7 @@ export function OperationsView({
       <PanelBody flush className="group-data-[plain]/panel:-mx-4">
         {rows.length === 0 ? (
           <EmptyNote>
-            Nothing is running right now
-            {heartbeats > 0
-              ? `, beside the ${heartbeats === 1 ? "heartbeat of one connected client" : `heartbeats of ${heartbeats} connected clients`}.`
-              : "."}
+            No client has work in progress right now.{leftOut ? ` Not listed: ${leftOut}.` : ""}
           </EmptyNote>
         ) : (
           <Table>
@@ -227,12 +223,8 @@ export function OperationsView({
             </TableBody>
           </Table>
         )}
-        {rows.length > 0 && heartbeats > 0 && (
-          <p className="px-4 pt-2 text-hint text-muted-foreground">
-            {heartbeats === 1
-              ? "The heartbeat of one connected client is not listed."
-              : `The heartbeats of ${heartbeats} connected clients are not listed.`}
-          </p>
+        {rows.length > 0 && leftOut && (
+          <p className="px-4 pt-2 text-hint text-muted-foreground">Not listed: {leftOut}.</p>
         )}
       </PanelBody>
     </Panel>

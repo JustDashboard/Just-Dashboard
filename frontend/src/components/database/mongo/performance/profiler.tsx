@@ -32,6 +32,7 @@ import {
 import { nameHue } from "@/components/database/home/kinds"
 import { EngineMark } from "@/components/database/kit"
 import { mongoProfiler, setProfiler } from "@/components/database/mongo/api"
+import { operationColor } from "@/components/database/mongo/kinds"
 import { DatabaseMark } from "@/components/database/mongo/rail"
 import type {
   MongoDatabase,
@@ -50,23 +51,6 @@ const LEVEL_HINT: Record<MongoProfilerLevel, string> = {
   0: "Nothing is recorded. What was recorded before is kept.",
   1: "Operations slower than the threshold are recorded.",
   2: "Every operation is recorded, which costs the server throughput. For a short look only.",
-}
-
-/**
- * What an operation does, by its kind. The hues are the ones the section
- * gives a statement's first word wherever statements are listed: a read
- * blue, an insert green, a change violet, a removal pink.
- */
-const OP_HUE: Record<string, string> = {
-  query: "text-(--tag-blue)",
-  getmore: "text-(--tag-blue)",
-  command: "text-(--tag-blue)",
-  count: "text-(--tag-blue)",
-  distinct: "text-(--tag-blue)",
-  insert: "text-(--tag-green)",
-  update: "text-(--tag-violet)",
-  remove: "text-(--tag-pink)",
-  delete: "text-(--tag-pink)",
 }
 
 const grouped = (n: number) => n.toLocaleString("en-US")
@@ -296,7 +280,8 @@ export function ProfilerView({
                             <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
                           )}
                           <span className="min-w-0 truncate font-mono font-medium">
-                            <span className={OP_HUE[entry.op]}>{entry.op}</span> {entry.ns}
+                            <span style={{ color: operationColor(entry.op) }}>{entry.op}</span>{" "}
+                            {entry.ns}
                           </span>
                         </button>
                       </TableCell>

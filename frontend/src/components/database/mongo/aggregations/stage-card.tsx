@@ -110,6 +110,7 @@ export function StageCard({
   onMove,
   onDuplicate,
   onRemove,
+  onRun,
 }: {
   target: MongoTarget
   stage: Stage
@@ -130,6 +131,8 @@ export function StageCard({
   onMove: (by: -1 | 1) => void
   onDuplicate: () => void
   onRemove: () => void
+  /** Ctrl+Enter / Cmd+Enter in the stage's text: run the pipeline, where it can be. */
+  onRun?: () => void
 }) {
   const spec = stageSpec(stage.op)
   const preview = usePreview(target, stage.enabled ? prefix : null, index, auto, nonce)
@@ -224,6 +227,7 @@ export function StageCard({
             aria-describedby={problem ? `${bodyId}-problem` : undefined}
             className="max-h-96 min-h-16"
             onChange={(body) => onChange({ ...stage, body })}
+            onSubmit={onRun}
           />
           {problem && (
             <p

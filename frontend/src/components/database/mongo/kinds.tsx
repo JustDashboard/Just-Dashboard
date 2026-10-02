@@ -1,24 +1,21 @@
-import {
-  ChartActivity,
-  Eye,
-  Layers,
-  RotateClockwise,
-  SettingsGear,
-  type Icon,
-} from "@/components/icons"
+import { ChartActivity, Layers, RotateClockwise, SettingsGear, type Icon } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Tag } from "@/components/tag"
+import { ROW_OBJECT_KINDS } from "@/components/database/data/kinds"
 import { KIND_HUE } from "@/components/database/grid/legend"
+import { statementVerb } from "@/components/database/home/kinds"
 import { TYPE_LABEL, type BsonType } from "@/components/database/mongo/bson"
 import type { MongoCollection } from "@/components/database/mongo/types"
 
 /**
- * The two legends of the MongoDB pages: what kind of thing a collection is,
- * and what type a value has.
+ * The legends of the MongoDB pages: what kind of thing a collection is, what
+ * type a value has, and what an operation does.
  *
- * Both draw from the `--tag-*` set, which sits at one lightness so no kind
- * reads louder than another, and neither borrows green, amber or red — on
- * these pages those mean a field added, changed and removed.
+ * All draw from the `--tag-*` set, which sits at one lightness so no kind
+ * reads louder than another, and none is a reading of state. A value is
+ * never written in green, amber or red: beside a document those mean a
+ * field added, changed and removed. (Green is the fill of text in a
+ * composition bar, on a page where nothing is being edited.)
  */
 
 /* ----------------------------------------------------------- BSON families */
@@ -113,6 +110,43 @@ export function TypeTag({ type, className }: { type: string; className?: string 
   )
 }
 
+/* ------------------------------------------------------------- operations */
+
+/** What an operation does to the data, whatever the server calls it. */
+export type OperationEffect = "read" | "insert" | "change" | "remove"
+
+// The hue the section gives a statement's first word wherever statements are
+// listed — a read blue, an insert green, a change violet, a removal pink —
+// taken from that one legend rather than written out again.
+const EFFECT_VERB: Record<OperationEffect, string> = {
+  read: "select",
+  insert: "insert",
+  change: "update",
+  remove: "delete",
+}
+
+/** The colour of an effect, as the statement legend has it. */
+export function effectColor(effect: OperationEffect): string | undefined {
+  return statementVerb(EFFECT_VERB[effect])?.color
+}
+
+const OPERATION_EFFECT: Record<string, OperationEffect> = {
+  query: "read",
+  getmore: "read",
+  command: "read",
+  count: "read",
+  distinct: "read",
+  insert: "insert",
+  update: "change",
+  remove: "remove",
+  delete: "remove",
+}
+
+/** The colour of an operation by the word the profiler and `currentOp` use for it; none for a word they do not. */
+export function operationColor(op: string): string | undefined {
+  return Object.hasOwn(OPERATION_EFFECT, op) ? effectColor(OPERATION_EFFECT[op]) : undefined
+}
+
 /* -------------------------------------------------------- collection kinds */
 
 export type CollectionKind = "collection" | "view" | "timeseries" | "capped" | "system"
@@ -122,7 +156,7 @@ type CollectionKindSpec = { label: string; icon: Icon; hue: string }
 export const COLLECTION_KINDS: Record<CollectionKind, CollectionKindSpec> = {
   collection: { label: "Collection", icon: Layers, hue: "text-(--tag-blue)" },
   // The same hue a view has among SQL objects: one kind, one colour, across engines.
-  view: { label: "View", icon: Eye, hue: "text-(--tag-violet)" },
+  view: { label: "View", icon: ROW_OBJECT_KINDS.view.icon, hue: ROW_OBJECT_KINDS.view.hue },
   timeseries: { label: "Time series", icon: ChartActivity, hue: "text-(--tag-cyan)" },
   capped: { label: "Capped", icon: RotateClockwise, hue: "text-(--tag-pink)" },
   system: { label: "System", icon: SettingsGear, hue: "text-muted-foreground" },
