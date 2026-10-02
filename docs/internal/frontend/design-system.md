@@ -1504,6 +1504,13 @@ same primary/secondary hierarchy. Name and content search share a compact keyboa
 file identities, paths and highlighted matching lines. Quick editors keep these same controls when
 opened in the full workspace beside a collapsible tree.
 
+The Files search palette reserves its viewport-bounded height before results arrive. The input is
+borderless even while focused, with the caret and active result carrying its keyboard state; other
+controls retain their focus rings. Only the results scroll. Header controls and footer notices reserve
+space so typing, loading and partial results do not move the frame. Result arrivals and departures
+fade, with departing rows immediately inert; reduced motion renders the next state immediately. The
+search body stays mounted through the dialog's closing animation so dismissal does not collapse it.
+
 A `Pane`'s chrome strip is the one place a small inline glyph still sits beside a name (the git tools
 column, the session rail). A pane is a region of a workspace rather than a block of content, its strip
 is deliberately tighter than a panel's, and the mark there is a bare 14px outline rather than a tinted

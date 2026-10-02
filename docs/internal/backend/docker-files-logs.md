@@ -332,7 +332,12 @@ diff review (`diff.ts`, a prefix/suffix-trimmed LCS capped at a few million cell
 Content-search results reveal their matching line. `quick-open.tsx` shares one keyboard palette for
 names (Ctrl/Cmd+P) and contents (Ctrl/Cmd+Shift+F), with immediate current-listing name matches,
 cancelled stale requests, hidden/case/regex controls, a wider scope and explicit partial/error states.
-The palette sizes to its results; a failed disk request leaves current-listing matches available. The listing polls every twenty seconds and refetches
+The palette keeps a fixed viewport-bounded frame, with independently scrolling results and reserved
+footer space for partial/unreadable notices. The search input has no active border or outline; the
+caret, selected result and keyboard navigation carry its state. Results fade in and out without
+resizing the frame; exiting rows immediately become inert and hidden from assistive technology, and
+reduced motion shows each state immediately. A failed disk request leaves current-listing matches
+available. The listing polls every twenty seconds and refetches
 hidden-file flips in place; the parent row is offered only where the parent is inside the roots; a bulk
 delete that includes a folder uses ordinary confirmation like a single one. Two layout rules are easy to undo: **the
 listing body does not scroll** (a sticky table header sticks to its nearest scrolling ancestor), and
