@@ -3,12 +3,17 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
@@ -429,4 +434,319 @@ func TestLiveProtectedConnectionIsNotWrittenTo(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A server that is there and refuses the password is not one to ask again:
+// the next attempt is refused the same way, and a page that offered "Try
+// again" for it would be offering nothing. Each engine says no in its own
+// words, and each has to be read as a no and not as a server that is away.
+func TestLiveAWrongPasswordIsNotWorthAskingAgain(t *testing.T) {
+	const wrong = "not-the-password"
+	inURL := func(dsn string) string {
+		u, err := url.Parse(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u.User = url.UserPassword(u.User.Username(), wrong)
+		return u.String()
+	}
+	nobody := func(dsn string) string {
+		u, err := url.Parse(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u.User = url.UserPassword("jd-nobody", wrong)
+		return u.String()
+	}
+	for _, c := range []struct {
+		driver dbx.Driver
+		env    string
+		refuse func(dsn string) string
+		read   string
+	}{
+		{dbx.DriverPostgres, "JD_TEST_POSTGRES_DSN", inURL, "/tables"},
+		{dbx.DriverMySQL, "JD_TEST_MYSQL_DSN", func(dsn string) string {
+			user, rest, _ := strings.Cut(dsn, "@")
+			name, _, _ := strings.Cut(user, ":")
+			return name + ":" + wrong + "@" + rest
+		}, "/tables"},
+		{dbx.DriverMSSQL, "JD_TEST_MSSQL_DSN", inURL, "/tables"},
+		{dbx.DriverClickHouse, "JD_TEST_CLICKHOUSE_DSN", inURL, "/tables"},
+		// The two fixtures that ask for no password: an account that is not
+		// there is what each refuses. A Redis whose default user has none
+		// takes any password given for it.
+		{dbx.DriverRedis, "JD_TEST_REDIS_DSN", nobody, "/keys"},
+		{dbx.DriverMongo, "JD_TEST_MONGO_DSN", nobody, "/schemas"},
+	} {
+		t.Run(string(c.driver), func(t *testing.T) {
+			dsn := os.Getenv(c.env)
+			if dsn == "" {
+				t.Skipf("%s unset", c.env)
+			}
+			// Reached first with the password it has, so that a refusal is
+			// the password's and not a server that is down.
+			liveAPIRouter(t, c.driver, dsn)
+			h := newConnHarness(t)
+			id := h.add("refused", c.driver, c.refuse(dsn))
+			rec := do(t, h.as(auth.RoleReadOnly), http.MethodGet, pathf("/databases/%d", id)+c.read, "")
+			got := readJSON[errorView](t, rec)
+			if rec.Code != http.StatusBadGateway || got.Error.Code != "connect_failed" {
+				t.Fatalf("a wrong password = %d %s, want 502 connect_failed", rec.Code, rec.Body.String())
+			}
+			if got.Error.Retryable {
+				t.Errorf("a wrong password is marked worth asking again: %s", got.Error.Message)
+			}
+			if strings.Contains(rec.Body.String(), wrong) {
+				t.Errorf("the refusal repeats the password: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+// relay stands between the dashboard and a real server, so that a test can
+// take the server away without stopping one other tests share: it forwards
+// every connection until cut, and then refuses them and drops the ones it has.
+func relay(t *testing.T, backend string) (addr string, cut func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		mu    sync.Mutex
+		conns []net.Conn
+		gone  bool
+	)
+	go func() {
+		for {
+			client, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			server, err := net.Dial("tcp", backend)
+			if err != nil {
+				client.Close()
+				continue
+			}
+			mu.Lock()
+			if gone {
+				mu.Unlock()
+				client.Close()
+				server.Close()
+				continue
+			}
+			conns = append(conns, client, server)
+			mu.Unlock()
+			go func() { _, _ = io.Copy(server, client); server.Close() }()
+			go func() { _, _ = io.Copy(client, server); client.Close() }()
+		}
+	}()
+	cut = func() {
+		mu.Lock()
+		defer mu.Unlock()
+		gone = true
+		ln.Close()
+		for _, c := range conns {
+			c.Close()
+		}
+	}
+	t.Cleanup(cut)
+	return ln.Addr().String(), cut
+}
+
+// A page that is open when its server goes away — stopped, restarted, the
+// network gone — asks again on its next poll and is answered by a pool whose
+// connections are dead. That is a read whose server is not there, and it is
+// marked worth asking again whichever of the two codes it arrives under: the
+// one for a server that could not be opened, or the one for a read it did not
+// answer.
+func TestLiveAReadWhoseServerWentAwayIsWorthAskingAgain(t *testing.T) {
+	throughURL := func(dsn, addr string) (string, string) {
+		u, err := url.Parse(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backend := u.Host
+		u.Host = addr
+		return u.String(), backend
+	}
+	for _, c := range []struct {
+		driver  dbx.Driver
+		env     string
+		through func(dsn, addr string) (string, string)
+		read    string
+	}{
+		{dbx.DriverPostgres, "JD_TEST_POSTGRES_DSN", throughURL, "/tables"},
+		// A page of rows answers a request that was wrong with a 400. This is
+		// not one, and must not be taken for one.
+		{dbx.DriverPostgres, "JD_TEST_POSTGRES_DSN", throughURL, "/browse?schema=pg_catalog&table=pg_namespace"},
+		{dbx.DriverPostgres, "JD_TEST_POSTGRES_DSN", throughURL, "/count?schema=pg_catalog&table=pg_namespace"},
+		{dbx.DriverMySQL, "JD_TEST_MYSQL_DSN", func(dsn, addr string) (string, string) {
+			before, rest, _ := strings.Cut(dsn, "tcp(")
+			backend, after, _ := strings.Cut(rest, ")")
+			return before + "tcp(" + addr + ")" + after, backend
+		}, "/tables"},
+		{dbx.DriverMSSQL, "JD_TEST_MSSQL_DSN", throughURL, "/tables"},
+		{dbx.DriverClickHouse, "JD_TEST_CLICKHOUSE_DSN", throughURL, "/tables"},
+		{dbx.DriverRedis, "JD_TEST_REDIS_DSN", throughURL, "/keys"},
+		{dbx.DriverMongo, "JD_TEST_MONGO_DSN", throughURL, "/schemas"},
+	} {
+		t.Run(string(c.driver)+c.read, func(t *testing.T) {
+			dsn := os.Getenv(c.env)
+			if dsn == "" {
+				t.Skipf("%s unset", c.env)
+			}
+			// The server's own address is read out of the connection string
+			// before the relay's is written into it.
+			_, backend := c.through(dsn, "127.0.0.1:1")
+			addr, cut := relay(t, backend)
+			relayed, _ := c.through(dsn, addr)
+			_, router, id := liveAPIRouter(t, c.driver, relayed)
+			path := pathf("/databases/%d", id) + c.read
+			if rec := do(t, router, http.MethodGet, path, ""); rec.Code != http.StatusOK {
+				t.Fatalf("a read while the server is there = %d %s", rec.Code, rec.Body.String())
+			}
+			cut()
+			rec := do(t, router, http.MethodGet, path, "")
+			got := readJSON[errorView](t, rec)
+			if rec.Code != http.StatusBadGateway || (got.Error.Code != "connect_failed" && got.Error.Code != "query_failed") {
+				t.Fatalf("a read after the server went away = %d %s", rec.Code, rec.Body.String())
+			}
+			if !got.Error.Retryable {
+				t.Errorf("a read whose server went away is not marked worth asking again: %s %s", got.Error.Code, got.Error.Message)
+			}
+		})
+	}
+}
+
+// The connection's reading of a container the machine's own Docker runs: what
+// it may use, what the power route would do to it, and a change of power from
+// the moment it is asked for until the engine has caught up — on the summary
+// and on the fleet entry, which have to agree.
+//
+// JD_TEST_POWER_REDIS_DSN names a Redis in a container this test may stop and
+// start: one of its own, published on loopback, from an image detection knows
+// as Redis. It has no default, because stopping a server is not something to
+// do to one somebody else is using.
+func TestLivePowerIsReadInFlightOnARealContainer(t *testing.T) {
+	dsn := os.Getenv("JD_TEST_POWER_REDIS_DSN")
+	if dsn == "" {
+		t.Skip("set JD_TEST_POWER_REDIS_DSN to a Redis in a container this test may stop and start")
+	}
+	h := &connHarness{t: t, s: testServer(t)}
+	h.s.Cfg.BackupLocalDir = t.TempDir()
+	docker := dockerx.New(envOr("JD_TEST_DOCKER_HOST", "unix:///var/run/docker.sock"))
+	t.Cleanup(func() { _ = docker.Close() })
+	h.s.modules.docker = docker
+	admin, reader := h.as(auth.RoleAdmin), h.as(auth.RoleReadOnly)
+	id := h.add("power", dbx.DriverRedis, dsn)
+	path := pathf("/databases/%d", id)
+
+	// Read as another browser would: by a role that may only look.
+	read := func() (summaryView, dbFleetView) {
+		t.Helper()
+		summary := readJSON[summaryView](t, do(t, reader, http.MethodGet, path, ""))
+		fleet := readJSON[dbFleetView](t, do(t, reader, http.MethodGet, "/databases/fleet", ""))
+		if len(fleet.Connections) != 1 {
+			t.Fatalf("fleet = %+v", fleet.Connections)
+		}
+		return summary, fleet
+	}
+	summary, fleet := read()
+	if summary.Source != "docker" || summary.Container == nil || summary.State != dbStateRunning {
+		t.Skipf("%s is not a running container this dashboard can see: %+v", dsn, summary)
+	}
+	name := summary.Container.Name
+	if !strings.HasPrefix(name, "jdcc-") {
+		t.Skipf("%s is not one of this run's containers; it is left alone", name)
+	}
+	t.Cleanup(func() {
+		// Left running, as it was found.
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_ = docker.Lifecycle(ctx, name, dockerx.ActionStart, nil)
+	})
+
+	// What the daemon says the container may use is what the summary says,
+	// running or not.
+	limits := func(when string, got summaryView) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		detail, err := docker.Inspect(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := got.Container
+		if c == nil || c.MemoryLimit != detail.MemoryLimit || c.CPULimit != detail.CPULimit || c.RestartPolicy != detail.RestartPol {
+			t.Errorf("%s: the summary says %+v, Docker says memory %d, %v processors, restart %q",
+				when, c, detail.MemoryLimit, detail.CPULimit, detail.RestartPol)
+		}
+		t.Logf("%s: memory %d, %v processors, restart %q", when, detail.MemoryLimit, detail.CPULimit, detail.RestartPol)
+	}
+	limits("running", summary)
+	agree := func(when string, summary summaryView, fleet dbFleetView) {
+		t.Helper()
+		entry := fleet.Connections[0]
+		if entry.Power != summary.Power || entry.Managed != summary.Managed || entry.State != summary.State {
+			t.Errorf("%s: the fleet says %s, power %+v, managed=%v; the summary %s, power %+v, managed=%v",
+				when, entry.State, entry.Power, entry.Managed, summary.State, summary.Power, summary.Managed)
+		}
+		if (entry.InFlight == nil) != (summary.InFlight == nil) {
+			t.Errorf("%s: in flight on the fleet = %+v, on the summary = %+v", when, entry.InFlight, summary.InFlight)
+		}
+	}
+	agree("running", summary, fleet)
+	if summary.Power.Via != "docker" || !summary.Power.Stop || !summary.Power.Restart || summary.Power.Start || summary.InFlight != nil {
+		t.Fatalf("a running container: power %+v, in flight %+v", summary.Power, summary.InFlight)
+	}
+
+	power := func(action string) {
+		t.Helper()
+		if rec := do(t, admin, http.MethodPost, path+"/power", `{"action":"`+action+`","timeoutSeconds":20}`); rec.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", action, rec.Code, rec.Body.String())
+		}
+	}
+	// Until the server reads the state the action leaves it in, every reading
+	// carries the change; from then on none does.
+	settle := func(action, state string) {
+		t.Helper()
+		deadline := time.Now().Add(dbPowerSettle)
+		for {
+			summary, fleet := read()
+			agree("after "+action, summary, fleet)
+			if summary.State == state {
+				if summary.InFlight != nil {
+					t.Errorf("%s: the server reads %s and the change is still in flight: %+v", action, state, summary.InFlight)
+				}
+				return
+			}
+			if summary.InFlight == nil || summary.InFlight.Action != action {
+				t.Errorf("%s: the server reads %s, not yet %s, and the change in flight is %+v", action, summary.State, state, summary.InFlight)
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: the server never read %s: %+v", action, state, summary)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	power("stop")
+	settle("stop", dbStateStopped)
+	summary, fleet = read()
+	agree("stopped", summary, fleet)
+	if !summary.Power.Start || summary.Power.Stop || summary.Power.Restart {
+		t.Errorf("a stopped container: power %+v", summary.Power)
+	}
+	limits("stopped", summary)
+
+	power("start")
+	settle("start", dbStateRunning)
+	power("restart")
+	settle("restart", dbStateRunning)
+	summary, fleet = read()
+	agree("after the restart", summary, fleet)
+	if !summary.Power.Stop || summary.InFlight != nil || fleet.Connections[0].InFlight != nil {
+		t.Errorf("after the restart: power %+v, in flight %+v", summary.Power, summary.InFlight)
+	}
 }

@@ -212,6 +212,15 @@ func (s *Server) fillFleetEntry(ctx context.Context, view *dbHostView, e *fleetE
 	if e.OK {
 		e.State = dbStateRunning
 	}
+	if place.File != nil && !e.SizesKnown {
+		// A SQLite database is its file, and its catalogue gives no size for a
+		// table or for itself: the file's own is the answer, to every role,
+		// where it used to be known only to whoever may read the inventory.
+		// Read after the dial, which is what creates a file that was not there.
+		if file := fileRef(place.File.Path); file.Exists {
+			e.Bytes, e.SizesKnown = file.Size, true
+		}
+	}
 }
 
 // fleetReadingFor is a connection's dial, shared between the requests that

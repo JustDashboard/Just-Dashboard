@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -606,6 +607,27 @@ func TestSummaryOfAFileConnection(t *testing.T) {
 	}
 	if rec = do(t, router, http.MethodGet, "/databases/999", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("a connection that does not exist = %d, want 404", rec.Code)
+	}
+
+	// The file's size is the database's, and the fleet says so to a role that
+	// reads nothing else about the machine. SQLite's catalogue has no figure
+	// for it, so the card of a file used to say its size was not reported.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO notes(body) VALUES ('one')`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	h.s.dbConns.stale(id)
+	st, err := os.Stat(path)
+	if err != nil || st.Size() == 0 {
+		t.Fatalf("the file was not written: %v", err)
+	}
+	fleet := readJSON[dbFleetView](t, do(t, router, http.MethodGet, "/databases/fleet", ""))
+	if len(fleet.Connections) != 1 || !fleet.Connections[0].SizesKnown || fleet.Connections[0].Bytes != st.Size() {
+		t.Errorf("fleet entry of a file of %d bytes = %+v", st.Size(), fleet.Connections)
 	}
 }
 
@@ -1307,6 +1329,8 @@ type dbFleetView struct {
 		Source      string `json:"source"`
 		Unit        string `json:"unit"`
 		ObjectWord  string `json:"objectWord"`
+		Bytes       int64  `json:"bytes"`
+		SizesKnown  bool   `json:"sizesKnown"`
 		Power       struct {
 			Via     string `json:"via"`
 			Start   bool   `json:"start"`

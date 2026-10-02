@@ -92,7 +92,11 @@ destructive, so `DEL` is; so is a command that stores its result over another ke
 already passed, whichever command sets it (`EXPIRE k 0`, `SET k v PXAT 1`, `HEXPIRE h 0 …`).
 `PUT /redis/config` is `system.admin`, so `CONFIG SET` is. An expiry still to come is a write however soon
 it falls, as setting one key's expiry from the form has always been, and `SET` over a key is a write
-whatever the key held. `POST /keys/bulk` (`delete` and `expire`, not a dry run), and `overwrite` on
+whatever the key held. The forms for one hash field's expiry (`POST /keys/field/expire`, `/persist`) and for
+claiming a group's pending entries (`POST /keys/stream/claim`) are `service.control` for the same reason
+`HEXPIRE` and `XCLAIM` are writes in the console: the first sets an expiry still to come or removes one and
+refuses the one that has passed, and the second moves who an entry is pending for and removes nothing.
+`POST /keys/bulk` (`delete` and `expire`, not a dry run), and `overwrite` on
 `/keys/rename` and `/keys/copy`, apply the same capability and budget by hand for the same reason.
 
 Two Redis routes are WebSockets, both `system.admin`: `GET /databases/{id}/redis/monitor` (MONITOR shows

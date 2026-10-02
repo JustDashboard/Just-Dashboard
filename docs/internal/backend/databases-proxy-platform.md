@@ -180,6 +180,12 @@ holds something is the guard.
   like a serialization failure. A set containing a delete needs the destructive capability, checked in
   the handler. ClickHouse is refused: its sorting key orders rows without identifying one. The older
   single-row routes are this with a set of one. Row values and keys never reach the audit log.
+  No value is written as the keyword `NULL`, in the statement that runs as in the one shown, and is
+  never bound (`sqlNull`): a bound NULL has to be sent as some type, SQL Server's driver sends it as
+  an `nvarchar`, and a `varbinary`, `binary` or `image` column refuses to be converted from one —
+  a binary cell could be filled from the grid and never emptied.
+  `TestLiveEveryColumnTypeTakesNoValue` sets every type to NULL in an UPDATE and an INSERT on each
+  engine.
 - **A value goes back the way the grid showed it.** A date is shown as RFC 3339, bytes as `\x…`, a
   decimal as its digits, and an edit — or the whole-row key of a table with no primary key — sends
   those forms back. Five engines read them by themselves. Oracle reads text into a date by the
@@ -206,6 +212,8 @@ holds something is the guard.
   forms that read a table by name; a statement in the console is the operator's own and needs a
   capability a read-only role does not have. `/count` answers a refused filter, an unknown column
   and a value of the wrong type with `400`, as `/browse` does (`tableReadError`) — it answered `502`.
+  A read whose server has gone away since its pool was opened is not the request's fault and is not
+  answered as one: the same four routes give it `502 query_failed`, marked `retryable` (below).
 - **A cell is typed by its column, not its content.** A binary column is hex whatever its bytes spell
   (`\x…`, which an edit may send straight back), a result carries each column's `kinds`, and a value
   cut for the page — a long text, a blob past the preview — is listed in `clipped` with its size and
@@ -224,10 +232,20 @@ holds something is the guard.
   change hands back, the cell read and the value search alike. `withCatalog` is the one extra catalogue read that costs,
   and only Oracle pays it. A query typed into the editor has no catalogue to ask and is typed by the
   driver's names, which `ValueKind` knows. A SQL Server `uniqueidentifier` is its GUID text in a page
-  and in a cell, never the sixteen bytes of the wire form.
+  and in a cell, never the sixteen bytes of the wire form. A PostgreSQL `bit` or `bit varying` is
+  kind `text`: the server writes and reads one as the text of its ones and zeros, and called
+  `binary`, as MySQL's is, the cell was edited as bytes and sent back as `\x00001111`, which
+  PostgreSQL refuses.
 - `rowsql.go` is the one exception and does not generalise: it renders a row as an INSERT **for the
   clipboard**. Nothing executes what it produces, and no code path may call it and then run the result.
   `TestLiveRowInsertSQLQuoting` feeds `'); DROP TABLE …` to every live engine and checks the table stands.
+  `POST /{id}/rows/sql` reads the table's columns first (`TableRowsInsertSQL`), so the statement
+  names them in the table's own order and writes a numeric column's value bare — the grid carries a
+  64-bit integer and a decimal as text, and copied out as they arrived they were quoted. Only text
+  that is nothing but a number loses its quotes (digits for an integer, digits and a point for a
+  decimal, an exponent for a float); `NaN`, a money column's `$1,234.00` and a zero-filled `007`
+  keep them. The catalogue read is best effort: a server that does not answer, or a table this
+  account cannot see, leaves the statement in the older form, columns by name.
 - **Reading is separated from running**: `dbx.ClassifyFor` decides destructiveness for the
   connection's engine and fails closed; the handler applies capability and budget by hand
   (`authoriseSQL`, shared by the query, script and analysed-plan routes). Every dialect's `ExplainPlan` must describe a statement
@@ -301,7 +319,12 @@ holds something is the guard.
   a login whose language puts the day first. A binary column is given `CONVERT(varbinary(max), …)`,
   since a NULL arrives as a text; a file that carries the identity column has `IDENTITY_INSERT`
   switched on for the transaction. The inline route gets the same check from the column types it now
-  looks up. **Oracle** reads a text as a date by the session's NLS format, so a value in an ISO form is
+  looks up, a binary column included: it binds a file's cells as text, and no text is a value for one,
+  so only "no value" passes — converted like the rest — and a cell that holds text is refused as its
+  own row. Left unconverted the NULL was refused as a text, for the whole statement.
+  `TestLiveImportLeavesEveryTypedColumnEmpty` imports a row of nothing but NULLs under every type
+  that could object, on each engine.
+  **Oracle** reads a text as a date by the session's NLS format, so a value in an ISO form is
   bound as the instant it names (`isoTime`), and `true`/`false` go into a numeric column as 1 and 0 —
   `NUMBER(1)` is what a column of them is created as there. ClickHouse
   has no transaction and its driver cannot continue past a refused row, so `atomic` is false there and
@@ -522,8 +545,12 @@ holds something is the guard.
   `origin`, the inventory key of the found server or file it was made from, and `""` for one typed
   in by hand. `GET /databases/{id}` (read surface) is one connection's reading without dialling any
   other: what the server says it is, whether it answers, where it runs, which power actions apply, its
-  exposure, bound deployments and the capability flags for its driver and flavour. It answers 200 for a
-  stopped, unreachable or broken connection; those are states, not errors. Where a server runs is read
+  exposure, bound deployments and the capability flags for its driver and flavour. Where the server is
+  a container, `container` also carries what it may use — `memoryLimit` in bytes, `cpuLimit` in
+  processors, each absent where there is none, and `restartPolicy` — under the names the Docker
+  page's own route uses, read for a stopped container too (one inspect; the listing inspects only
+  the running ones). It answers 200 for a stopped, unreachable or broken connection; those are
+  states, not errors. Where a server runs is read
   off the machine each time (`dbHostView.place`), never stored: the container that publishes or answers
   at the address, then the process listening on the port and its unit, then a stopped container whose
   configuration publishes that port, then — for a native server that has stopped — a unit on evidence
@@ -545,7 +572,20 @@ holds something is the guard.
   privilege routes quoted a password for exactly that reason. The test lifts the request budgets
   (`apiLim`, `destrLim`): several hundred requests from one account in a second were being turned
   away at the door after the first hundred and twenty, and a `429` proves nothing. `GET /{id}/url`,
-  whose purpose is to hand the string to an administrator, is the one answer exempt. A Redis connection is pinged, tested, summarised and
+  whose purpose is to hand the string to an administrator, is the one answer exempt.
+  **A failure is marked worth trying again only where it is** (`retryable` in the error envelope,
+  which is what the page's error state offers its retry on). `dbx.Unreachable` tells a server that
+  was not there to answer — refused, timed out, gone mid-reply, still starting (PostgreSQL's
+  `57P03`, MySQL's 1040 and 1053, SQL Server's 18401, Redis's `LOADING`, MongoDB's shutdown and
+  step-down codes, Oracle's `ORA-01033` and the listener's) — from one that answered no: a wrong
+  password, an unknown database, a privilege the account lacks, a connection string nobody could
+  parse. It reads each driver's own error type, and a transport error's, before it reads any words.
+  `connectFailed` marks the first kind for every route, since nothing has been asked of a server
+  that could not be opened; `queryFailed` marks it for a read (`502 query_failed`), Redis's and
+  MongoDB's reads included (`redisFail`, `mongoReadFailed`). A write is never marked: its reply may
+  be what was lost. `TestLiveAReadWhoseServerWentAwayIsWorthAskingAgain` takes each engine's
+  server away behind an open pool, and `TestLiveAWrongPasswordIsNotWorthAskingAgain` has each
+  refuse a login. A Redis connection is pinged, tested, summarised and
   read for the fleet in the logical database its connection string names (`dbx.RedisDSNDatabase`),
   which is where every key route goes: a string naming a database the server does not have used to
   test healthy and then fail each of them.
@@ -564,6 +604,16 @@ holds something is the guard.
   image is the engine's, and a remote server or a file is refused with `409 power_unavailable` and the
   reason the summary gave. A compose-owned container is not refused, as it is not on the Docker page:
   nothing here recreates it.
+  **A change of power is read by everyone until it settles.** The request is slow by design and the
+  browser that sent it was the only one that knew it was happening, so the server keeps it
+  (`dbConnState.power`, in memory) and `GET /databases/{id}` and the connection's fleet entry carry
+  `inFlight: {action, since}`. It is held while the route is acting, whatever the server reads as —
+  a restart reads `running` before it has gone down — and after the route has answered until the
+  server reads the state the action leaves it in (`stopped` for a stop, `running` for a start or a
+  restart), or `dbPowerSettle` (a minute) has passed: a started container whose engine never answers
+  ends as `unreachable` with nothing in flight. An action that was refused or failed leaves none.
+  Reading is what ends a change, so nothing has to wake up to do it, and the fleet does not keep a
+  failed dial of a connection whose change is still held.
 - **Protected connections.** With `read_only` set, one middleware in front of every database route
   (`protectReadOnlyConnections`, `handlers_db_protect.go`) refuses each request under
   `/databases/{id}` that is not a read with `409 connection_read_only`, unless its route is on the
@@ -652,7 +702,7 @@ holds something is the guard.
   `export`…), where the SQL engines answer from the interfaces their dialects implement
   (`OpsCapabilities`, `ExplainForms`) and Redis and MongoDB are named beside them; the ones that
   belong to one surface are registered beside its code from an `init` (`RegisterCapabilities`, in
-  `discovery_`, `workbench_`, `catalog_`, `ops_`, `redis_`, `mongo_`, `transfer_` and
+  `discovery_`, `admin_`, `workbench_`, `catalog_`, `ops_`, `redis_`, `mongo_`, `transfer_` and
   `orm_capabilities.go`). A registration replaces a row of the same name for every engine, so a
   flag stated twice is a defect and `TestCapabilityTableIsCoherent` refuses one. A flag is a yes or
   a no; a few are a list (`catalogGroups`, `ddlOperations`, `maintenanceActions`, `ormTargets`,
@@ -758,7 +808,13 @@ holds something is the guard.
   engine reports one, its tables/collections/keys, sessions less this dashboard's own pool, where it
   runs (`docker`, `host`, `remote`, `file` — read through the same placement the connection's own
   summary uses, so the two agree), its `state`, its exposure, how many deployment environments are
-  bound to it, and when its newest dump landed. A server whose container or unit is down is `stopped`
+  bound to it, and when its newest dump landed. Each entry also carries the summary's own `power`
+  (which of start, stop and restart the power route would take now, or the reason for none),
+  `managed` (whether the access route can change the port's reach) and `inFlight`, read off the
+  placement the entry already needed — no second look at the machine and no dial — so a card
+  offers what the connection's page offers without working either out again. A SQLite connection's
+  `bytes` is its file's size, to every role: its catalogue gives none, and the figure was known only
+  to whoever may read the inventory. A server whose container or unit is down is `stopped`
   or `paused` and is not dialled; a row that cannot be opened is `broken` and listed all the same. A
   dial's result is kept for ten seconds per connection (`fleetReadingFor`), under a lock held across
   the dial, so several pages polling at once cost one connection rather than one each; a restart or
@@ -786,7 +842,8 @@ holds something is the guard.
   read surface; create, alter and `/{name}/grant` under `system.admin`; drop under
   `s.destructive`, refused for the account the connection signs in with), `databases` (create,
   and `/connect` to save a sibling connection to another database on the same server under the
-  same credentials, probed before it is stored), `extensions` (list; create and drop for
+  same credentials, probed before it is stored; the list of what the server holds is
+  `GET /databases/{id}/schemas`, below), `extensions` (list; create and drop for
   Postgres, listed only for MySQL's plugins) and `settings` (the short list an operator asks
   about; the full one is `/databases/{id}/settings`, below). Identifiers go through the dialect's
   `QuoteIdent`; a grant runs inside the target database on the engines that grant from there
@@ -795,6 +852,19 @@ holds something is the guard.
   character and quoted by the same per-engine rule `dumpString` applies (`passwordLiteral`).
   Audited as `database.role.create/alter/drop/grant/revoke`, `database.create`,
   `database.connection.sibling`, `database.extension.create/drop`.
+  - *What else the server holds.* `GET /databases/{id}/schemas` (read surface) is the list the
+    engine's picker is filled with, as `[{name, size?, owner?, encoding?}]`: the server's databases
+    on PostgreSQL (templates left out), MySQL/MariaDB (each schema, with its tables' size), SQL
+    Server (user databases and the one the connection is on) and ClickHouse (`owner` is the
+    database engine); Oracle's schemas, because a schema is the unit one browses there; SQLite's
+    attached files (`main` first, `owner` the path); MongoDB's databases; and Redis's numbered
+    databases with `size` as the count of keys, not bytes. Whether one of them can be opened, or
+    another made, is two capability flags, `serverDatabaseConnect` and `serverDatabaseCreate`
+    (`dbx.CanConnectSibling`, `dbx.CanCreateDatabase`, in `admin_capabilities.go`), and the two
+    routes ask the same functions before they do anything, answering `400 unsupported` where the
+    answer is no. ClickHouse can make a database and cannot be pointed at it by a connection
+    string, so a create that asks for `connect` there is refused before the database is made; it
+    used to be made and then answered as a failure.
   - *An alter changes what was sent and nothing else.* `roleRequest`'s attributes are pointers and
     `RoleSpec` carries a `Set*` beside each shared flag, so a body with only a password renders
     `ALTER ROLE … WITH PASSWORD …` and leaves `SUPERUSER`/`CREATEDB`/`CREATEROLE` as they were (the
@@ -863,7 +933,14 @@ holds something is the guard.
     and the pool, which was this route's whole answer before there was a snapshot. `/activity` rows
     gain `status`, wait type and event, application, transaction and query start, `blockedByPids`,
     and `seconds` is the running statement's age and `0` for a session that is not running one (an
-    idle pooled connection used to read as the longest query). `/locks` lists waiter–blocker pairs
+    idle pooled connection used to read as the longest query). On MySQL an account without the
+    `PROCESS` privilege sees only its own sessions in the process list and is refused the InnoDB
+    transactions it is joined to — and MySQL 8 sends that refusal after the columns, where a result
+    read to its `Close` alone took it for an empty list: the snapshot said nobody was connected and
+    `/activity` listed nobody. The result is read to its end and asked how it ended
+    (`mysqlProcessList`); such an account's `connections` are the server's own totals
+    (`Threads_connected`, `Threads_running`, which need no privilege) with a `notes` entry saying
+    so, and its own sessions are listed. `/locks` lists waiter–blocker pairs
     and the lock table, bounded at 500: PostgreSQL, MySQL 8 `performance_schema`, MariaDB
     `INNODB_LOCK_WAITS`, SQL Server (`dm_os_waiting_tasks`, needs `VIEW SERVER STATE`), Oracle
     (`v$session` names each waiter's blocker, `v$lock` what it asked for; needs grants an
@@ -978,6 +1055,38 @@ holds something is the guard.
   through and nothing else of Redis's. On `DELETE /keys` an empty `path` is refused like an empty
   `members`, and on `DELETE /keys/stream/groups` `consumer` is read by presence: `""` removes the
   consumer named `""`, and only its absence destroys the group.
+  - *Looking at a key is not using it.* Redis keeps one clock per key and evicts by it, and the
+    dashboard's reads reset it: a listing measures each key, a page reads it. The routes that only
+    look — `/keys`, `/keys/tree`, `/keys/meta`, `/keys/members`, `/keys/value`, `/keys/raw`,
+    `/keys/stream`, `/keys/stream/pending`, `/redis/analysis` — open a quiet client
+    (`RedisOpenOptions.Quiet`, `Server.redisReader`), which sends `CLIENT NO-TOUCH ON` on each of
+    its connections and on the raw one a page is read over, and a dump does the same, so a nightly
+    backup no longer makes every key its server's most recently used. Redis has the command from
+    7.2 and Valkey throughout; a server without it answers with an error that is ignored, and
+    `features.noTouch` on `GET /redis/server` says which a server is. A write made from the
+    dashboard is use, and counts.
+  - *One field's expiry.* `POST /keys/field/expire {key, field | members, ttl | ttlMs | at}` and
+    `POST /keys/field/persist {key, field | members}` are the key's two routes a level down, for a
+    server with per-field expiry (`features.hashFieldTtl`; the flag `hashFieldTtl` names the
+    release): the same three ways of saying when, a ttl of zero or less that removes the expiry and
+    never the field, and a moment that has passed refused, because setting it deletes the field.
+    They answer `{ok, fields: [{field, pttl}]}` (`-1` no expiry, `-2` no such field), `404` when
+    none of the fields is there, and `400 unsupported` on a server that keeps none. Both are
+    `service.control`, refused on a protected connection, and audited as
+    `database.redis.field.expire` / `.persist` with the key and how many fields — a field's name is
+    data and is not recorded.
+  - *Claiming.* `POST /keys/stream/claim {key, group, consumer, ids, minIdleMs?}` hands a group's
+    pending entries to one of its consumers (`XCLAIM … JUSTID`), and with `auto: true` whatever has
+    been pending for `minIdleMs`, a page at a time by `cursor` and `count` (`XAUTOCLAIM`,
+    `features.streamAutoClaim`; `400 unsupported` without it). Only ids travel, in both
+    directions. `service.control`, as the console classes both commands; refused on a protected
+    connection; audited as `database.redis.stream.claim`.
+  - *A whole member.* `GET /keys/raw` also streams one member of a set or a sorted set. A member
+    has no name but itself and the reader holds only its start, so it is asked for by that:
+    `member` (or `memberB64`) is how it begins and `bytes` its size, both as the page reported
+    them; without `bytes` the member is named whole. The collection is walked with `SSCAN`/`ZSCAN`
+    narrowed to that beginning and the first member of that size that begins so is copied through
+    from the reply it arrived in (`redisCopyMember`); nothing is held.
 - **The advisor and statement statistics.** `GET /databases/{id}/advisor?schema=` runs
   `dbx.Advise`: generic checks over the introspected structure on every SQL engine (tables with no
   primary key, foreign keys no index begins with; the first 300 tables, with `truncated` and

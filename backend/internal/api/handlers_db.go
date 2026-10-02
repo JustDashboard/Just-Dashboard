@@ -761,9 +761,18 @@ func (s *Server) handleDBBrowse(w http.ResponseWriter, r *http.Request) error {
 // engine's own words. The page, the count, the cell and the export answer
 // through it, so the grid that asks two of them about the same rows is not
 // told by one that its filter is wrong and by the other that the server is.
+//
+// Open by then, and not necessarily still there: a pool outlives the server
+// it was opened to, and the first read after a stop or a restart finds its
+// connections dead. That one is the server's, not the request's, and is
+// answered as every other read of a server that went away is — worth asking
+// again, which a request that was wrong never is.
 func tableReadError(err error) error {
 	if errors.Is(err, dbx.ErrCredentialsWithheld) {
 		return httpx.Err(http.StatusForbidden, "credentials_withheld", err.Error())
+	}
+	if dbx.Unreachable(err) {
+		return queryFailed(err)
 	}
 	return httpx.BadRequest("%v", err)
 }
