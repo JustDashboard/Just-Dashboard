@@ -1,6 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import Link from "next/link"
 import {
   CloudUpload,
@@ -16,7 +24,6 @@ import {
   Wrench,
 } from "@/components/icons"
 import { ApiError, post } from "@/lib/api"
-import { usePanelSize } from "@/lib/panel-size"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
@@ -56,8 +63,9 @@ import {
 import { SqlReview } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
-import { EXPORT_FORMATS, EXPORT_ROWS } from "@/components/database/data/export"
+import { EXPORT_FORMATS, EXPORT_ROWS, EXPORT_ROWS_MAX } from "@/components/database/data/export"
 import { FilterBar } from "@/components/database/data/filter-bar"
+import { focusAfterDialog } from "@/components/database/data/focus"
 import {
   encodeFilters,
   filterLabel,
@@ -67,6 +75,7 @@ import {
 import { ChangeBar, Pager } from "@/components/database/data/foot"
 import { ImportDialog } from "@/components/database/data/import-dialog"
 import { RowInspector } from "@/components/database/data/inspector"
+import { INSPECTOR } from "@/components/database/data/panes"
 import { KindGlyph, ROW_OBJECT_KINDS, rowObjectKind } from "@/components/database/data/kinds"
 import {
   changeSummary,
@@ -91,13 +100,16 @@ import {
   type ViewState,
 } from "@/components/database/data/view"
 
-const INSPECTOR = { min: 280, max: 640, fallback: 360 }
 const VIEWS: { key: TableView; label: string }[] = [
   { key: "data", label: "Data" },
   { key: "structure", label: "Structure" },
   { key: "definition", label: "Definition" },
 ]
 const NO_ERRORS: Record<string, string> = {}
+
+/** A phone's finger: the strip's controls stand a third taller under `sm`. */
+const TOUCH = "max-sm:h-8"
+const TOUCH_ICON = "max-sm:size-8"
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
@@ -107,7 +119,33 @@ export interface TableWorkbenchHandle {
   review: () => void
   /** Reads the rows again: they were changed from outside the grid. */
   reload: () => void
+  /** Puts the keyboard on the rows. */
+  focus: () => void
 }
+
+/** The row panel as the page above arranges it: whether it is open, and how it shares the frame. */
+export interface RowPanel {
+  open: boolean
+  setOpen: (open: boolean) => void
+  /** It lies over the table rather than standing beside the rows. */
+  over: boolean
+  /** Its width as a column, and the widest it can be dragged to here. */
+  width: number
+  max: number
+  setWidth: (px: number, commit?: boolean) => void
+  resetWidth: () => void
+}
+
+/** What a review shows, kept as it was asked for: the set behind it may be gone before it has closed. */
+interface Review {
+  open: boolean
+  title: string
+  summary: string
+  statements: string[]
+  danger: boolean
+}
+
+const NO_REVIEW: Review = { open: false, title: "", summary: "", statements: [], danger: false }
 
 /**
  * One table, worked on: the strip that names it, switches between its rows,
@@ -130,7 +168,7 @@ export function TableWorkbench({
   guard,
   railOpen,
   onToggleRail,
-  wide,
+  panel,
   onExport,
   exporting,
   onWritten,
@@ -147,8 +185,7 @@ export function TableWorkbench({
   guard: (heading: string, run: () => void) => void
   railOpen: boolean
   onToggleRail: () => void
-  /** There is room for the rail and the inspector beside the grid. */
-  wide: boolean
+  panel: RowPanel
   onExport: (request: ExportRequest) => void
   exporting: boolean
   /** Rows were written: figures elsewhere on the page are stale. */
@@ -255,11 +292,8 @@ export function TableWorkbench({
 
   /* -------------------------------------------------------- the inspector */
 
-  const [inspecting, setInspecting] = useViewState("databases.data.inspector", false)
-  const [inspectorWidth, setInspectorWidth, resetInspectorWidth] = usePanelSize(
-    "databases.data.inspector",
-    INSPECTOR.fallback,
-  )
+  const inspecting = panel.open
+  const setInspecting = panel.setOpen
   const [activeRow, setActiveRow] = useState(-1)
   const onSelectionChange = useCallback(
     (selection: GridSelection) => setActiveRow(selection.active ? selection.active.row : -1),
@@ -297,12 +331,14 @@ export function TableWorkbench({
     () => (built.payload ? relaxGuards(built.payload, columns) : null),
     [built.payload, columns],
   )
-  const [review, setReview] = useState<string[] | null>(null)
+  const [review, setReview] = useState<Review>(NO_REVIEW)
   const [reviewing, setReviewing] = useState(false)
   const [applying, setApplying] = useState(false)
   const [refused, setRefused] = useState<Refusal | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>(NO_ERRORS)
   const dirty = changeSet.dirty
+  const counts = changeSet.counts
+  const total = counts.total
   // A refusal is about the set that was sent; once that set is gone, so is it.
   const shownRefusal = dirty ? refused : null
   const rowErrors = dirty ? errors : NO_ERRORS
@@ -335,8 +371,13 @@ export function TableWorkbench({
     [built.refs, drawnIndex],
   )
 
+  const reviewFrom = useRef<HTMLElement | null>(null)
   const openReview = useCallback(async () => {
     if (!payload || reviewing) return
+    // What asked for the review, to go back to: the bar's own button, or —
+    // from the shortcut or the question before leaving — nothing in particular.
+    const asking = document.activeElement
+    reviewFrom.current = asking instanceof HTMLElement ? asking : null
     setReviewing(true)
     try {
       const planned = await post<ChangesResponse>(`/databases/${id}/changes`, {
@@ -345,19 +386,38 @@ export function TableWorkbench({
       })
       setRefused(null)
       setErrors(NO_ERRORS)
-      setReview(planned.statements)
+      setReview({
+        open: true,
+        title: `Apply ${counts.total === 1 ? "1 change" : `${grouped(counts.total)} changes`} to ${table}`,
+        summary: changeSummary(counts),
+        statements: planned.statements,
+        danger: counts.deletes > 0,
+      })
     } catch (err) {
       turnedDown(err)
     } finally {
       setReviewing(false)
     }
-  }, [id, payload, reviewing, turnedDown])
+  }, [id, payload, reviewing, turnedDown, counts, table])
+
+  // The review, the question before leaving and the change bar are all opened
+  // from the rows and return to none of them: when one goes, the keyboard is
+  // put back on the grid rather than left on the document.
+  const toRows = useCallback(() => focusAfterDialog(() => grid.current?.focus()), [])
+  const closeReview = useCallback(() => {
+    setReview((held) => ({ ...held, open: false }))
+    focusAfterDialog(() => {
+      const from = reviewFrom.current
+      // The button that opened it, while it still stands in the bar.
+      if (from?.isConnected && from.closest("[data-slot=change-bar]")) from.focus()
+      else grid.current?.focus()
+    })
+  }, [])
 
   // On a database its operator marked production, Apply in the bar reads the
   // statements back first: the one press that writes is made looking at them.
   const cautious = (conn.environment ?? "").trim().toLowerCase() === "production"
 
-  const total = changeSet.counts.total
   const apply = useCallback(async () => {
     if (!payload || applying) return
     setApplying(true)
@@ -366,7 +426,6 @@ export function TableWorkbench({
       changeSet.reset()
       setRefused(null)
       setErrors(NO_ERRORS)
-      setReview(null)
       count.forget()
       browse.refresh()
       onWritten()
@@ -377,12 +436,24 @@ export function TableWorkbench({
           : undefined,
       )
     } catch (err) {
-      setReview(null)
       turnedDown(err)
     } finally {
       setApplying(false)
+      closeReview()
     }
-  }, [id, payload, applying, changeSet, count, browse, onWritten, total, table, turnedDown])
+  }, [
+    id,
+    payload,
+    applying,
+    changeSet,
+    count,
+    browse,
+    onWritten,
+    total,
+    table,
+    turnedDown,
+    closeReview,
+  ])
 
   // Asked for from outside: the guard's "Review them".
   const reload = browse.refresh
@@ -395,6 +466,7 @@ export function TableWorkbench({
         forget()
         reload()
       },
+      focus: () => grid.current?.focus(),
     }),
     [openReview, forget, reload],
   )
@@ -464,6 +536,7 @@ export function TableWorkbench({
 
   const [importing, setImporting] = useState(false)
   const [onlyShown, setOnlyShown] = useState(false)
+  const [exportRows, setExportRows] = useState(EXPORT_ROWS)
   const hidden = layout.hidden.length > 0
 
   const exportAs = (format: ExportRequest["format"]) => {
@@ -472,6 +545,7 @@ export function TableWorkbench({
       schema,
       table,
       format,
+      limit: exportRows,
       view: { filters: view.filters, match: view.match, sort: view.sort },
       columns:
         onlyShown && hidden
@@ -508,49 +582,85 @@ export function TableWorkbench({
   const canAlter = can("service.control") && !readOnly && engine.can("ddl") && engine.has("schema")
   const missing = detail.error instanceof ApiError && detail.error.status === 404
 
+  const tabsId = useId()
+  const tabs = useRef<HTMLDivElement>(null)
+  // A tab list is one stop of the keyboard: the arrows move along it, and the
+  // view follows the focus.
+  const onTabKey = (event: React.KeyboardEvent) => {
+    const at = VIEWS.findIndex((entry) => entry.key === view.view)
+    const to =
+      event.key === "ArrowRight"
+        ? (at + 1) % VIEWS.length
+        : event.key === "ArrowLeft"
+          ? (at + VIEWS.length - 1) % VIEWS.length
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? VIEWS.length - 1
+              : -1
+    if (to < 0) return
+    event.preventDefault()
+    setView({ view: VIEWS[to].key })
+    tabs.current?.querySelector<HTMLElement>(`[data-view="${VIEWS[to].key}"]`)?.focus()
+  }
+
   const strip = (
     // The strip lays itself out by its own width, not the window's: the rail
-    // and the row panel beside it decide how much of the window it has. Its
-    // commands keep their glyphs and drop their words as it narrows, and the
-    // name gives way before anything wraps.
+    // and the row panel beside it decide how much of the window it has. With
+    // room it is one line, and the name gives way — down to a floor, never to
+    // nothing — before anything else does. Without, the commands take a
+    // second line under the name and the views.
     <div className="@container shrink-0 border-b border-hairline bg-surface-header">
-      <div className="flex min-h-10 items-stretch pr-1.5 pl-1.5 @max-lg:flex-wrap">
-        <div className="flex max-w-full min-w-0 items-center gap-1.5 py-1 pr-2 @max-lg:max-w-[11rem]">
+      <div className="flex min-h-10 items-stretch px-1.5 @max-[34rem]:flex-wrap">
+        <div className="flex min-w-0 items-center gap-1.5 py-1 pr-2 @max-[34rem]:max-w-[calc(100%-13.5rem)]">
           <IconAction
             label={railOpen ? "Hide the tables" : "Show the tables"}
             aria-pressed={railOpen}
-            className="size-7 shrink-0"
+            className={cn("size-7 shrink-0", TOUCH_ICON)}
             onClick={onToggleRail}
           >
             {railOpen ? <SidebarLeftClose /> : <SidebarLeftOpen />}
           </IconAction>
           <KindGlyph kind={kind} />
-          <h2 className="flex min-w-0 items-baseline font-mono text-body font-medium">
+          <h2
+            className="flex min-w-0 items-baseline font-mono text-body font-medium"
+            title={schema ? `${schema}.${table}` : table}
+          >
             {schema && (
-              <span className="shrink-0 text-muted-foreground @max-lg:hidden">{schema}.</span>
+              // The schema is also the rail's heading; the name is only here.
+              <span className="shrink-0 text-muted-foreground @max-3xl:hidden">{schema}.</span>
             )}
-            <span className="truncate">{table}</span>
+            <span className="min-w-[6ch] truncate">{table}</span>
           </h2>
-          {kind !== "table" && <Tag>{word}</Tag>}
+          {kind !== "table" && <Tag className="shrink-0">{word}</Tag>}
         </div>
         {!missing && (
           <div
+            ref={tabs}
             role="tablist"
             aria-label="View of the table"
             className="flex shrink-0 items-stretch"
+            onKeyDown={onTabKey}
           >
-            {VIEWS.map((entry) => (
-              <button
-                key={entry.key}
-                type="button"
-                role="tab"
-                aria-selected={view.view === entry.key}
-                className={cn(tabClasses(view.view === entry.key, "h-10"), "max-sm:px-2")}
-                onClick={() => setView({ view: entry.key })}
-              >
-                {entry.label}
-              </button>
-            ))}
+            {VIEWS.map((entry) => {
+              const selected = view.view === entry.key
+              return (
+                <button
+                  key={entry.key}
+                  type="button"
+                  role="tab"
+                  id={`${tabsId}-${entry.key}`}
+                  data-view={entry.key}
+                  aria-selected={selected}
+                  aria-controls={selected ? `${tabsId}-panel` : undefined}
+                  tabIndex={selected ? 0 : -1}
+                  className={cn(tabClasses(selected, "h-10"), "max-sm:px-2")}
+                  onClick={() => setView({ view: entry.key })}
+                >
+                  {entry.label}
+                </button>
+              )
+            })}
           </div>
         )}
         {!missing && (
@@ -562,11 +672,17 @@ export function TableWorkbench({
                     type="button"
                     size="xs"
                     variant="outline"
+                    aria-label="Insert row"
+                    className={TOUCH}
                     disabled={!page}
                     onClick={() => grid.current?.insertRow()}
                   >
                     <Plus />
-                    Insert row
+                    {/* The word gives way where the strip is one tight line:
+                        beside the row panel, between the widths where the
+                        commands have a line of their own and where there is
+                        room for everything. */}
+                    <span className="@min-[34rem]:@max-2xl:hidden">Insert row</span>
                   </Button>
                 )}
                 {canImport && info && (
@@ -575,10 +691,11 @@ export function TableWorkbench({
                     size="xs"
                     variant="outline"
                     aria-label="Import"
+                    className={TOUCH}
                     onClick={() => guard("Importing", () => setImporting(true))}
                   >
                     <CloudUpload />
-                    <span className="hidden @3xl:inline">Import</span>
+                    <span className="hidden @4xl:inline">Import</span>
                   </Button>
                 )}
                 {engine.capabilities.exportFormats.length > 0 && (
@@ -589,10 +706,11 @@ export function TableWorkbench({
                         size="xs"
                         variant="outline"
                         aria-label="Export"
+                        className={TOUCH}
                         pending={exporting}
                       >
                         <Download />
-                        <span className="hidden @3xl:inline">Export</span>
+                        <span className="hidden @4xl:inline">Export</span>
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-64">
@@ -600,7 +718,7 @@ export function TableWorkbench({
                       quiet voice: a sentence is not a group's name. */}
                       <p className="px-2 pt-1.5 pb-1 text-hint text-muted-foreground">
                         {filtered ? "The rows these filters match" : "Every row of the table"}, up
-                        to {grouped(EXPORT_ROWS)}
+                        to {grouped(exportRows)}
                       </p>
                       {engine.capabilities.exportFormats.map((format) => (
                         <DropdownMenuItem key={format} onSelect={() => exportAs(format)}>
@@ -610,17 +728,26 @@ export function TableWorkbench({
                           </span>
                         </DropdownMenuItem>
                       ))}
+                      <DropdownMenuSeparator />
+                      {/* The cap is the reader's to raise before the export,
+                      not only after one came back short. */}
+                      <DropdownMenuCheckboxItem
+                        checked={exportRows === EXPORT_ROWS_MAX}
+                        onSelect={(event) => event.preventDefault()}
+                        onCheckedChange={(checked) =>
+                          setExportRows(checked === true ? EXPORT_ROWS_MAX : EXPORT_ROWS)
+                        }
+                      >
+                        Up to {grouped(EXPORT_ROWS_MAX)} rows
+                      </DropdownMenuCheckboxItem>
                       {hidden && engine.can("exportColumns") && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuCheckboxItem
-                            checked={onlyShown}
-                            onSelect={(event) => event.preventDefault()}
-                            onCheckedChange={(checked) => setOnlyShown(checked === true)}
-                          >
-                            Only the columns shown
-                          </DropdownMenuCheckboxItem>
-                        </>
+                        <DropdownMenuCheckboxItem
+                          checked={onlyShown}
+                          onSelect={(event) => event.preventDefault()}
+                          onCheckedChange={(checked) => setOnlyShown(checked === true)}
+                        >
+                          Only the columns shown
+                        </DropdownMenuCheckboxItem>
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -631,20 +758,25 @@ export function TableWorkbench({
                     size="xs"
                     variant="ghost"
                     aria-label="Open as query"
+                    className={TOUCH}
                     disabled={!page}
                     onClick={openAsQuery}
                   >
                     <Terminal />
-                    <span className="hidden @4xl:inline">Open as query</span>
+                    <span className="hidden @5xl:inline">Open as query</span>
                   </Button>
                 )}
-                <IconAction label="Read the rows again" className="size-7" onClick={refresh}>
+                <IconAction
+                  label="Read the rows again"
+                  className={cn("size-7", TOUCH_ICON)}
+                  onClick={refresh}
+                >
                   <RefreshClockwise />
                 </IconAction>
                 <IconAction
                   label={inspecting ? "Hide the row" : "Show the row"}
                   aria-pressed={inspecting}
-                  className="size-7"
+                  className={cn("size-7", TOUCH_ICON)}
                   onClick={() => setInspecting(!inspecting)}
                 >
                   {inspecting ? <SidebarRightClose /> : <SidebarRightOpen />}
@@ -652,7 +784,7 @@ export function TableWorkbench({
               </>
             ) : (
               engine.has("schema") && (
-                <Button type="button" size="xs" variant="outline" asChild>
+                <Button type="button" size="xs" variant="outline" className={TOUCH} asChild>
                   <Link href={structureHref}>
                     <Wrench />
                     {canAlter ? "Change it in Schema" : "Open in Schema"}
@@ -735,9 +867,11 @@ export function TableWorkbench({
         onFollowForeignKey={onFollow}
         onCopySQL={(data) => void onCopySQL(data)}
         toolbar={
-          // One line, whatever it holds: a run of chips that wrapped would
-          // move the grid down a row each time a filter was added.
-          <div className="flex min-w-0 flex-1 [scrollbar-width:none] items-center gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+          // Every condition and every sort key is on screen: the run wraps to
+          // another line rather than scroll what orders the rows out of sight.
+          // On a phone, where three lines of chips would be half the table, it
+          // is one line that scrolls sideways and fades at the edge it runs past.
+          <div className="flex min-w-0 flex-1 [scrollbar-width:none] items-center gap-1.5 max-sm:overflow-x-auto max-sm:[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] max-sm:pr-5 sm:flex-wrap [&::-webkit-scrollbar]:hidden">
             <FilterBar
               columns={columns}
               filters={view.filters}
@@ -862,7 +996,7 @@ export function TableWorkbench({
         footer={
           dirty ? (
             <ChangeBar
-              counts={changeSet.counts}
+              counts={counts}
               problems={built.problems}
               applying={applying}
               reviewing={reviewing}
@@ -872,6 +1006,8 @@ export function TableWorkbench({
                 changeSet.discardAll()
                 setRefused(null)
                 setErrors(NO_ERRORS)
+                // The bar goes with the set, and the button with the bar.
+                toRows()
               }}
               onApply={() => void (cautious ? openReview() : apply())}
             />
@@ -905,28 +1041,39 @@ export function TableWorkbench({
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {strip}
-        {body}
+        {missing ? (
+          body
+        ) : (
+          <div
+            role="tabpanel"
+            id={`${tabsId}-panel`}
+            aria-labelledby={`${tabsId}-${view.view}`}
+            className="flex min-h-0 min-w-0 flex-1 flex-col"
+          >
+            {body}
+          </div>
+        )}
       </div>
 
       {inspectorShown && (
         <div
-          style={{ "--jd-data-inspector": `${inspectorWidth}px` } as React.CSSProperties}
+          style={{ "--jd-data-inspector": `${panel.width}px` } as React.CSSProperties}
           className={cn(
             "flex min-h-0 flex-col border-hairline bg-card",
-            wide ? "relative w-(--jd-data-inspector) shrink-0 border-l" : "absolute inset-0 z-30",
+            panel.over
+              ? "absolute inset-0 z-30"
+              : "relative w-(--jd-data-inspector) shrink-0 border-l",
           )}
         >
-          {wide && (
+          {!panel.over && (
             <ResizeHandle
               side="right"
               label="Row panel width"
-              value={inspectorWidth}
+              value={panel.width}
               min={INSPECTOR.min}
-              max={INSPECTOR.max}
-              onChange={(px, commit) =>
-                setInspectorWidth(clamp(px, INSPECTOR.min, INSPECTOR.max), commit)
-              }
-              onReset={resetInspectorWidth}
+              max={panel.max}
+              onChange={(px, commit) => panel.setWidth(clamp(px, INSPECTOR.min, panel.max), commit)}
+              onReset={panel.resetWidth}
               className="absolute inset-y-0 -left-1 z-20"
             />
           )}
@@ -953,32 +1100,28 @@ export function TableWorkbench({
         </div>
       )}
 
-      {review && (
-        <SqlReview
-          open
-          onOpenChange={(open) => !open && !applying && setReview(null)}
-          title={`Apply ${total === 1 ? "1 change" : `${grouped(total)} changes`} to ${table}`}
-          statements={review}
-          command="Apply"
-          pending={applying}
-          danger={changeSet.counts.deletes > 0}
-          note={
-            cautious
-              ? "A production database. One transaction: every statement takes effect, or none does."
-              : "One transaction: every statement takes effect, or none does."
-          }
-          onRun={() => void apply()}
-        >
-          <p className="numeric text-body text-muted-foreground">
-            {changeSummary(changeSet.counts)}
-          </p>
-        </SqlReview>
-      )}
+      <SqlReview
+        open={review.open}
+        onOpenChange={(open) => !open && !applying && closeReview()}
+        title={review.title}
+        statements={review.statements}
+        command="Apply"
+        pending={applying}
+        danger={review.danger}
+        note={
+          cautious
+            ? "A production database. One transaction: every statement takes effect, or none does."
+            : "One transaction: every statement takes effect, or none does."
+        }
+        onRun={() => void apply()}
+      >
+        <p className="numeric text-body text-muted-foreground">{review.summary}</p>
+      </SqlReview>
       {info && (
         <ImportDialog
           open={importing}
           onOpenChange={setImporting}
-          detail={info}
+          target={{ kind: "table", detail: info }}
           onImported={() => {
             count.forget()
             browse.refresh()

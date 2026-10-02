@@ -2,6 +2,8 @@
 
 import { useMemo, useRef, useState } from "react"
 import {
+  ArrowDown,
+  ArrowUp,
   Check,
   ChevronDown,
   ChevronRight,
@@ -18,8 +20,10 @@ import { Input } from "@/components/ui/input"
 import { VALUE_KIND_CLASS, jsonPath } from "@/components/database/kit"
 import {
   addChild,
+  moveChild,
   parseJsonDoc,
   removeChild,
+  renameKey,
   replaceNode,
   scalarLiteral,
   scalarText,
@@ -45,12 +49,13 @@ const HUE: Record<JsonNode["kind"], string> = {
 }
 
 const ACTION =
-  "flex size-5 items-center justify-center rounded-sm text-muted-foreground focus-ring hover:text-foreground"
+  "flex size-5 items-center justify-center rounded-sm text-muted-foreground focus-ring hover:text-foreground max-sm:size-7"
 
 /**
  * A JSON field's document as a tree — read one level at a time and, when
- * `onChange` is given, edited where it stands: press a value to type another,
- * add a key to an object or an item to an array, take one out.
+ * `onChange` is given, edited where it stands: press a value to type another
+ * or a key to rename it, add a key to an object or an item to an array, move
+ * an item up or down its array, take one out.
  *
  * It is drawn like the section's `JsonTree` and differs from it in what it is
  * a tree *of*: the document's own text, not the values JavaScript makes of
@@ -136,6 +141,7 @@ function Node({
   const [open, setOpen] = useState(depth < expand)
   const [shown, setShown] = useState(PAGE)
   const [editing, setEditing] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState<string>()
   const what = name === undefined ? label : String(name)
@@ -173,6 +179,20 @@ function Node({
     onChange(replaceNode(text, node, read.literal))
   }
 
+  const keyed = onChange !== undefined && parent?.kind === "object" && index !== undefined
+  const rename = (typed: string) => {
+    if (!keyed) return
+    const renamed = renameKey(text, parent, index, typed)
+    if (!renamed.ok) {
+      setError(renamed.error)
+      return
+    }
+    setRenaming(false)
+    setError(undefined)
+    if (renamed.text !== text) onChange(renamed.text)
+  }
+  const siblings = parent?.kind === "array" ? parent.items.length : 0
+
   return (
     <div>
       <div
@@ -194,14 +214,46 @@ function Node({
         ) : (
           <span className="size-4 shrink-0" />
         )}
-        {name !== undefined && (
-          <span className="max-w-[45%] shrink-0 truncate text-muted-foreground">
-            {name}
-            <span className="text-muted-foreground/50">:</span>
-          </span>
-        )}
+        {name !== undefined &&
+          (renaming ? (
+            <ScalarInput
+              initial={String(name)}
+              label={`Name of the key ${what}`}
+              invalid={error !== undefined}
+              className="max-w-[45%]"
+              onSettle={rename}
+              onCancel={() => {
+                setRenaming(false)
+                setError(undefined)
+              }}
+            />
+          ) : (
+            // Beside a value the name keeps its place and the value is cut;
+            // beside a count the name is what gives, so "2 keys" is never "2 ke…".
+            <span
+              title={String(name)}
+              className={cn(
+                "flex min-w-0 items-center text-muted-foreground",
+                container ? "min-w-[2ch]" : "max-w-[45%] shrink-0",
+              )}
+            >
+              {keyed ? (
+                <button
+                  type="button"
+                  aria-label={`Rename the key ${what}`}
+                  onClick={() => setRenaming(true)}
+                  className="-ml-1 min-w-0 truncate rounded-sm pl-1 text-left focus-ring transition-colors hover:bg-control-hover hover:text-foreground"
+                >
+                  {name}
+                </button>
+              ) : (
+                <span className="min-w-0 truncate">{name}</span>
+              )}
+              <span className="shrink-0 text-muted-foreground/50">:</span>
+            </span>
+          ))}
         {container ? (
-          <span className="min-w-0 truncate text-muted-foreground/70">
+          <span className="shrink-0 whitespace-nowrap text-muted-foreground/70">
             {node.kind === "array" ? "[ ]" : "{ }"} {sizeOf(node)}
           </span>
         ) : editing ? (
@@ -232,7 +284,7 @@ function Node({
             <Scalar node={node} text={text} />
           </span>
         )}
-        {!editing && (
+        {!editing && !renaming && (
           <RowActions className="ml-auto pl-2">
             <button
               type="button"
@@ -272,6 +324,30 @@ function Node({
               >
                 <Plus className="size-3" />
               </button>
+            )}
+            {onChange && parent && index !== undefined && siblings > 1 && (
+              <>
+                <button
+                  type="button"
+                  aria-label={`Move item ${what} up`}
+                  title="Move up"
+                  disabled={index === 0}
+                  onClick={() => onChange(moveChild(text, parent, index, index - 1))}
+                  className={cn(ACTION, "disabled:opacity-30")}
+                >
+                  <ArrowUp className="size-3" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Move item ${what} down`}
+                  title="Move down"
+                  disabled={index === siblings - 1}
+                  onClick={() => onChange(moveChild(text, parent, index, index + 1))}
+                  className={cn(ACTION, "disabled:opacity-30")}
+                >
+                  <ArrowDown className="size-3" />
+                </button>
+              </>
             )}
             {onChange && parent && index !== undefined && (
               <button
@@ -361,12 +437,14 @@ function ScalarInput({
   initial,
   label,
   invalid,
+  className,
   onSettle,
   onCancel,
 }: {
   initial: string
   label: string
   invalid: boolean
+  className?: string
   onSettle: (typed: string) => void
   onCancel: () => void
 }) {
@@ -387,7 +465,7 @@ function ScalarInput({
       aria-invalid={invalid || undefined}
       spellCheck={false}
       autoComplete="off"
-      className={FIELD}
+      className={cn(FIELD, className)}
       onFocus={(event) => event.currentTarget.select()}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={settle}

@@ -265,8 +265,22 @@ export interface DbImportOptions {
   /** Source column → table column; "" leaves the source column out. */
   mapping?: Record<string, string>
   mode?: DbImportMode
+  /** What an upsert matches rows by; absent = the primary key. */
+  conflict?: { constraint?: string; columns?: string[] }
   skipBadRows?: boolean
   dryRun?: boolean
+  /** Import into a table that does not exist yet; `columns` override the inferred ones by name. */
+  createTable?: { columns?: DbNewColumn[] }
+}
+
+/** A column of a table the import makes. */
+export interface DbNewColumn {
+  name: string
+  /** "" = the type the server inferred from the file. */
+  type: string
+  notNull: boolean
+  primaryKey: boolean
+  default?: string
 }
 
 export interface DbImportColumn {
@@ -301,6 +315,8 @@ export interface DbImportReport {
   errors: DbImportRowError[]
   errorsTruncated: boolean
   preview?: { columns: string[]; rows: (string | null)[][] }
+  /** With `createTable`: the statement the table is made with, and whether it was. */
+  create?: { statement: string; columns: DbNewColumn[]; created: boolean }
   key?: string[]
   statement: string
   atomic: boolean

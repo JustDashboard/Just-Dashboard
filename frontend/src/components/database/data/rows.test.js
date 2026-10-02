@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { ApiError } from "@/lib/api"
 import {
+  bitTextColumns,
   cellKey,
   changeSummary,
   guardable,
   inspectRow,
+  pickerLabel,
+  pickerSearch,
   refusal,
   relaxGuards,
   rowIdentity,
@@ -227,5 +230,78 @@ describe("a refused set", () => {
       conflict: false,
       message: "network",
     })
+  })
+})
+
+describe("a bit string written as text", () => {
+  const page = (types, kinds, rows) => ({ types, kinds, rows })
+  test("a bit column whose values are ones and zeros is text, not bytes", () => {
+    expect(
+      bitTextColumns(
+        page(
+          ["INT4", "BIT", "VARBIT"],
+          ["integer", "binary", "binary"],
+          [
+            ["1", "10101010", "101"],
+            ["2", null, ""],
+          ],
+        ),
+      ),
+    ).toEqual([1, 2])
+  })
+  test("one an engine sends as bytes stays bytes", () => {
+    expect(bitTextColumns(page(["BIT"], ["binary"], [["\\x0f"]]))).toEqual([])
+  })
+  test("a real bytes column that happens to hold ones and zeros is not taken", () => {
+    expect(bitTextColumns(page(["BYTEA"], ["binary"], [["0101"]]))).toEqual([])
+  })
+  test("SQL Server's bit is its boolean and is left to the server's word", () => {
+    expect(bitTextColumns(page(["BIT"], ["boolean"], [[true]]))).toEqual([])
+  })
+  test("with no value to go by, the server's word stands", () => {
+    expect(bitTextColumns(page(["BIT"], ["binary"], [[null]]))).toEqual([])
+    expect(bitTextColumns(page(["BIT"], ["binary"], []))).toEqual([])
+    expect(bitTextColumns(undefined)).toEqual([])
+  })
+})
+
+describe("finding the row a foreign key should point at", () => {
+  const shape = {
+    columns: ["id", "email", "full_name", "tier", "created_at", "avatar"],
+    kinds: ["integer", "text", "text", "other", "datetime", "binary"],
+  }
+  const ops = ["eq", "contains", "icontains"]
+  test("a word is looked for inside the text columns, whatever its case", () => {
+    expect(pickerSearch(shape, "id", "ann", ops)).toEqual({
+      exact: null,
+      inside: [
+        { column: "email", op: "icontains", value: "ann" },
+        { column: "full_name", op: "icontains", value: "ann" },
+      ],
+    })
+  })
+  test("a number is also the key itself, compared whole and asked for apart", () => {
+    const search = pickerSearch(shape, "id", "41", ops)
+    expect(search.exact).toEqual({ column: "id", op: "eq", value: "41" })
+    expect(search.inside).toHaveLength(2)
+  })
+  test("digits past 2^53 go as the text they were typed as", () => {
+    expect(pickerSearch(shape, "id", "9007199254740993", ops).exact.value).toBe("9007199254740993")
+  })
+  test("an engine without the case-blind operator uses the plain one", () => {
+    expect(pickerSearch(shape, "id", "ann", ["eq", "contains"]).inside[0].op).toBe("contains")
+  })
+  test("a word nothing can be compared with makes no search", () => {
+    const numbers = { columns: ["id", "qty"], kinds: ["integer", "integer"] }
+    expect(pickerSearch(numbers, "id", "ann", ops)).toEqual({ exact: null, inside: [] })
+    expect(pickerSearch(shape, "id", "41", [])).toEqual({ exact: null, inside: [] })
+  })
+  test("a row is told apart by its readable values, the text ones first", () => {
+    const row = ["41", "ann@example.com", "Ann Lee", "pro", "2026-01-02T03:04:05Z", "\\x00ff"]
+    expect(pickerLabel(shape.columns, shape.kinds, row, 0)).toBe("ann@example.com · Ann Lee · pro")
+  })
+  test("NULL, the empty string and structures are passed over", () => {
+    const row = ["41", null, "", { a: 1 }, null, "\\x00ff"]
+    expect(pickerLabel(shape.columns, shape.kinds, row, 0)).toBe("")
   })
 })

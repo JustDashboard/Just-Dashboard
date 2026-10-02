@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
   addChild,
+  moveChild,
   parseJsonDoc,
   removeChild,
+  renameKey,
   replaceNode,
   scalarLiteral,
   scalarText,
@@ -179,5 +181,60 @@ describe("adding a child", () => {
   })
   test("a scalar holds nothing", () => {
     expect(addChild("1", parseJsonDoc("1"), "2").ok).toBe(false)
+  })
+})
+
+describe("renaming a key", () => {
+  test("only the key's own token is rewritten", () => {
+    const next = renameKey(DOC, parseJsonDoc(DOC), 1, "bee")
+    expect(next).toEqual({
+      ok: true,
+      text: '{"id": 9007199254740993, "bee": 1, "10": [true, null, "x"], "who": {"name": "Ana \\"A\\""}}',
+    })
+  })
+  test("a name that needs escaping is written as JSON writes it", () => {
+    const text = '{"a": 1}'
+    expect(renameKey(text, parseJsonDoc(text), 0, 'say "hi"').text).toBe('{"say \\"hi\\"": 1}')
+  })
+  test("the name another entry has is refused, and no name at all is", () => {
+    expect(renameKey(DOC, parseJsonDoc(DOC), 1, "id")).toEqual({
+      ok: false,
+      error: "This object already has a key called id",
+    })
+    expect(renameKey(DOC, parseJsonDoc(DOC), 1, "").ok).toBe(false)
+  })
+  test("its own name changes nothing, and an array has no keys", () => {
+    expect(renameKey(DOC, parseJsonDoc(DOC), 1, "b")).toEqual({ ok: true, text: DOC })
+    expect(renameKey("[1]", parseJsonDoc("[1]"), 0, "a").ok).toBe(false)
+  })
+})
+
+describe("moving a child", () => {
+  test("an item changes places with its neighbour, and the commas stay", () => {
+    const text = '[1, "two",  {"n": 9007199254740993}]'
+    expect(moveChild(text, parseJsonDoc(text), 2, 1)).toBe('[1, {"n": 9007199254740993},  "two"]')
+    expect(moveChild(text, parseJsonDoc(text), 0, 1)).toBe('["two", 1,  {"n": 9007199254740993}]')
+  })
+  test("to the far end, past several", () => {
+    expect(moveChild("[1,2,3,4]", parseJsonDoc("[1,2,3,4]"), 0, 3)).toBe("[2,3,4,1]")
+    expect(moveChild("[1,2,3,4]", parseJsonDoc("[1,2,3,4]"), 3, 0)).toBe("[4,1,2,3]")
+  })
+  test("a document laid out a line an item keeps its layout", () => {
+    const text = "[\n  1,\n  2\n]"
+    expect(moveChild(text, parseJsonDoc(text), 1, 0)).toBe("[\n  2,\n  1\n]")
+  })
+  test("an entry of an object moves with its key", () => {
+    const text = '{"a": 1, "b": 2}'
+    expect(moveChild(text, parseJsonDoc(text), 1, 0)).toBe('{"b": 2, "a": 1}')
+  })
+  test("inside a nested array, the rest of the document is untouched", () => {
+    const list = parseJsonDoc(DOC).entries[2].value
+    expect(moveChild(DOC, list, 0, 2)).toBe(
+      '{"id": 9007199254740993, "b": 1, "10": [null, "x", true], "who": {"name": "Ana \\"A\\""}}',
+    )
+  })
+  test("a place that is not there, or its own, changes nothing", () => {
+    expect(moveChild("[1,2]", parseJsonDoc("[1,2]"), 0, 5)).toBe("[1,2]")
+    expect(moveChild("[1,2]", parseJsonDoc("[1,2]"), 1, 1)).toBe("[1,2]")
   })
 })

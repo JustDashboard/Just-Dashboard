@@ -14,6 +14,7 @@ import {
   type GridRow,
   type RowOrigin,
 } from "@/components/database/grid"
+import type { Filter } from "@/components/database/data/types"
 
 /**
  * One row as the table editor's own parts read it — the inspector beside the
@@ -56,6 +57,30 @@ export function rowOrigin(
     cell.row === index && columns[cell.column] ? [columns[cell.column].key] : [],
   )
   return { values, clipped: cut }
+}
+
+const BIT_STRING = /^(?:bit|varbit|bit varying)\b/i
+
+/**
+ * The columns of a page that hold strings of bits written as text.
+ *
+ * The server calls every bit-string column `binary`, and an engine that sends
+ * one as bytes (`\x0f`) is edited as bytes. PostgreSQL sends and takes
+ * `00001111`: a bytes editor there wrote `\x00001111`, which the engine
+ * refuses. Which of the two a column is, its values say — so a column typed as
+ * a bit string is text where the page holds one written in ones and zeros.
+ */
+export function bitTextColumns(
+  page:
+    { types: readonly string[]; kinds?: readonly string[]; rows: readonly GridRow[] } | undefined,
+): number[] {
+  if (!page?.kinds) return []
+  return page.kinds.flatMap((kind, index) => {
+    if (kind !== "binary" || !BIT_STRING.test(page.types[index] ?? "")) return []
+    const held = page.rows.map((row) => row[index]).filter((value) => value !== null)
+    const written = held.length > 0 && held.every((v) => typeof v === "string" && /^[01]*$/.test(v))
+    return written ? [index] : []
+  })
 }
 
 export type RowState = "clean" | "inserted" | "updated" | "deleted"
@@ -282,4 +307,86 @@ export function refusal(error: unknown, refs: readonly ChangeRef[]): Refusal {
     conflict,
     message,
   }
+}
+
+/* ------------------------------------------------- a foreign key's picker */
+
+/** What the table a key points at is made of: its columns and what each holds. */
+export interface PickerShape {
+  columns: readonly string[]
+  kinds: readonly string[]
+}
+
+/** How many of a table's text columns a typed word is looked for in. */
+const SEARCHED = 6
+
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * How a referenced row is found by a typed word. `exact` is the key equal to
+ * the word, where the word can be a key at all: a number typed for an integer
+ * key is row 41 itself, and is listed first — not lost among every row with
+ * 41 somewhere in its email. `inside` is the word within one of the table's
+ * text columns, any of which may hold it.
+ *
+ * Both empty when the engine offers nothing to compare with; the caller then
+ * has no search to make.
+ */
+export function pickerSearch(
+  shape: PickerShape,
+  key: string,
+  word: string,
+  operators: readonly string[],
+): { exact: Filter | null; inside: Filter[] } {
+  const kind = shape.kinds[shape.columns.indexOf(key)]
+  const whole =
+    kind === "integer"
+      ? /^-?\d+$/.test(word)
+      : kind === "decimal" || kind === "float"
+        ? /^-?\d+(?:\.\d+)?$/.test(word)
+        : kind === "uuid" && UUID_TEXT.test(word)
+  const exact: Filter | null =
+    whole && operators.includes("eq") ? { column: key, op: "eq", value: word } : null
+  const op = operators.includes("icontains")
+    ? "icontains"
+    : operators.includes("contains")
+      ? "contains"
+      : null
+  const inside: Filter[] = []
+  if (op) {
+    const textual = shape.columns.filter((_, index) => shape.kinds[index] === "text")
+    for (const column of textual.slice(0, SEARCHED)) inside.push({ column, op, value: word })
+  }
+  return { exact, inside }
+}
+
+/** The kinds whose values say nothing in a line of text. */
+const UNREADABLE = new Set(["binary", "json", "array"])
+
+/**
+ * What tells a referenced row from its neighbours beside its key: its first
+ * few values that can be read at a glance, the text ones first.
+ */
+export function pickerLabel(
+  columns: readonly string[],
+  kinds: readonly string[],
+  row: GridRow,
+  keyAt: number,
+): string {
+  const readable = columns
+    .map((_, index) => index)
+    .filter((index) => index !== keyAt && !UNREADABLE.has(kinds[index] ?? ""))
+    .filter((index) => {
+      const value = row[index]
+      return value !== null && value !== undefined && value !== "" && typeof value !== "object"
+    })
+  const text = readable.filter((index) => kinds[index] === "text")
+  const rest = readable.filter((index) => kinds[index] !== "text")
+  return [...text, ...rest]
+    .slice(0, 3)
+    .map((index) => {
+      const value = String(row[index])
+      return value.length > 40 ? `${value.slice(0, 40)}…` : value
+    })
+    .join(" · ")
 }

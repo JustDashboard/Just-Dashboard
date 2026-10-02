@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
 import { columnKind, type GridColumn } from "@/components/database/grid"
+import { bitTextColumns } from "@/components/database/data/rows"
 import type { BrowsePage, DbCatalog, DbTableDetail } from "@/components/database/data/types"
 import { browseQuery, countKey, rowsQuery, type ViewState } from "@/components/database/data/view"
 
@@ -211,7 +212,8 @@ export function useGridColumns(
   page: BrowsePage | undefined,
   detail: DbTableDetail | undefined,
 ): GridColumn[] {
-  const signature = JSON.stringify([page?.columns, page?.types, page?.kinds])
+  const bits = bitTextColumns(page)
+  const signature = JSON.stringify([page?.columns, page?.types, page?.kinds, bits])
   return useMemo<GridColumn[]>(() => {
     if (!detail) return []
     const primary = new Set(detail.primaryKey)
@@ -228,11 +230,13 @@ export function useGridColumns(
         key: name,
         name,
         typeName,
-        kind: columnKind({
-          typeName,
-          serverKind: page?.kinds?.[index],
-          enumValues: meta?.enumValues,
-        }),
+        kind: bits.includes(index)
+          ? "unknown"
+          : columnKind({
+              typeName,
+              serverKind: page?.kinds?.[index],
+              enumValues: meta?.enumValues,
+            }),
         nullable: meta?.nullable,
         primaryKey: primary.has(name),
         foreignKey: foreign && {

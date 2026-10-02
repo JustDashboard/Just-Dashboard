@@ -1,22 +1,29 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useRef, useState } from "react"
 import { Copy, Download, Layout, Trash, Backspace } from "@/components/icons"
 import { api } from "@/lib/api"
 import { bytes } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
-import { useConfirm } from "@/components/confirm-dialog"
+import { ConfirmDialog, type ConfirmRequest } from "@/components/confirm-dialog"
 import { FormFact, Statement } from "@/components/form"
 import type { Verb } from "@/components/verbs"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { EXPORT_FORMATS } from "@/components/database/data/export"
+import { focusAfterDialog } from "@/components/database/data/focus"
 import { ROW_OBJECT_KINDS, type RowObjectKind } from "@/components/database/data/kinds"
 import type { DbCatalogObject, DbDdlResult } from "@/components/database/data/types"
 import type { ExportRequest } from "@/components/database/data/use-export"
 import { grouped } from "@/components/database/data/view"
+
+/** The attribute a row's menu button is found by again, and what it holds for an object. */
+export const ACTIONS_OF = "data-actions-of"
+export function actionsOf(object: Pick<DbCatalogObject, "schema" | "name">) {
+  return `${object.schema}.${object.name}`
+}
 
 /**
  * What a row of the rail can be asked to do, as data for its one menu: read
@@ -38,7 +45,30 @@ export function useTableVerbs({
 }) {
   const { id, engine, readOnly, goto } = useDatabase()
   const { can } = useAuth()
-  const { confirm, dialog } = useConfirm()
+  // The confirmation is the one every destructive act goes through; it is held
+  // here rather than by `useConfirm` so that closing it can hand the keyboard
+  // back to the row whose menu asked. A dialog nobody's button opened returns
+  // focus to nothing, and the menu that asked had closed before it opened.
+  const [request, setRequest] = useState<ConfirmRequest | null>(null)
+  const asked = useRef("")
+  const dialog = (
+    <ConfirmDialog
+      request={request}
+      onOpenChange={(open) => {
+        if (open) return
+        setRequest(null)
+        const row = asked.current
+        focusAfterDialog(() => {
+          const rail = document.querySelector("[data-slot=table-rail]")
+          const back =
+            rail?.querySelector<HTMLElement>(`[${ACTIONS_OF}="${CSS.escape(row)}"]`) ??
+            // The row went with its table: the rail's own first field.
+            rail?.querySelector<HTMLElement>("input")
+          back?.focus()
+        })
+      }}
+    />
+  )
 
   const destroy = useCallback(
     async (object: DbCatalogObject, kind: RowObjectKind, change: "truncate" | "drop") => {
@@ -79,7 +109,8 @@ export function useTableVerbs({
       }
       const word = ROW_OBJECT_KINDS[kind].label.toLowerCase()
       const title = change === "truncate" ? `Empty ${word}` : `Drop ${word}`
-      confirm({
+      asked.current = actionsOf(object)
+      setRequest({
         title,
         confirmLabel: title,
         subject: {
@@ -113,7 +144,7 @@ export function useTableVerbs({
         },
       })
     },
-    [id, engine, confirm, onChanged],
+    [id, engine, onChanged],
   )
 
   const verbsFor = useCallback(

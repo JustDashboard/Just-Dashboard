@@ -33,6 +33,7 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { RowField } from "@/components/database/data/field"
 import { encodeFilters, filterText } from "@/components/database/data/filters"
 import { ForeignKeyPeek } from "@/components/database/data/fk-peek"
+import { ForeignKeyPicker } from "@/components/database/data/fk-picker"
 import { KindGlyph } from "@/components/database/data/kinds"
 import {
   cellKey,
@@ -102,7 +103,10 @@ export function RowInspector({
   onMove: (index: number) => void
   onClose: () => void
 }) {
-  const { id } = useDatabase()
+  const { id, engine } = useDatabase()
+  // A key is called one where it tells a row from the others. ClickHouse's is
+  // the order its rows are stored in, and repeats: it is called that.
+  const identifies = engine.capabilities.rowIdentity !== "none"
   const [query, setQuery] = useState("")
   // The whole of values the page carried only the start of, by row and column.
   const [whole, setWhole] = useState<Record<string, CellValue>>({})
@@ -210,7 +214,7 @@ export function RowInspector({
         <span className="flex-1" />
         <IconAction
           label="Previous row"
-          className="size-7"
+          className="size-7 max-sm:size-8"
           disabled={!row || row.index <= 0}
           onClick={() => row && onMove(row.index - 1)}
         >
@@ -218,13 +222,13 @@ export function RowInspector({
         </IconAction>
         <IconAction
           label="Next row"
-          className="size-7"
+          className="size-7 max-sm:size-8"
           disabled={!row || row.index >= rows - 1}
           onClick={() => row && onMove(row.index + 1)}
         >
           <ChevronDown />
         </IconAction>
-        <IconAction label="Hide the row" className="size-7" onClick={onClose}>
+        <IconAction label="Hide the row" className="size-7 max-sm:size-8" onClick={onClose}>
           <SidebarRightClose />
         </IconAction>
       </div>
@@ -257,8 +261,11 @@ export function RowInspector({
               const compared = cell.column.foreignKey ? filterText(readable(value)) : null
               return (
                 <RowField
-                  key={cell.column.key}
+                  // By row as well as by column: a draft the column refused
+                  // belongs to the row it was typed on, not to the next one.
+                  key={slot}
                   cell={cell}
+                  keyWord={cell.column.primaryKey ? (identifies ? "key" : "sort key") : null}
                   inserted={row.state === "inserted"}
                   lock={lock}
                   allowDefault={
@@ -298,12 +305,24 @@ export function RowInspector({
                       Save the stored value as a file
                     </Button>
                   )}
-                  {cell.column.foreignKey && compared !== null && (
-                    <ForeignKeyPeek
-                      foreignKey={cell.column.foreignKey}
-                      value={compared}
-                      schema={schema}
-                    />
+                  {cell.column.foreignKey && (lock === null || compared !== null) && (
+                    <div className="flex min-w-0 flex-wrap items-center gap-1">
+                      {lock === null && (
+                        <ForeignKeyPicker
+                          foreignKey={cell.column.foreignKey}
+                          schema={schema}
+                          current={compared}
+                          onPick={(picked) => stage(cell, picked)}
+                        />
+                      )}
+                      {compared !== null && (
+                        <ForeignKeyPeek
+                          foreignKey={cell.column.foreignKey}
+                          value={compared}
+                          schema={schema}
+                        />
+                      )}
+                    </div>
                   )}
                 </RowField>
               )
@@ -323,6 +342,7 @@ export function RowInspector({
               type="button"
               size="xs"
               variant="ghost"
+              className="max-sm:h-8"
               onClick={() =>
                 void copyText(JSON.stringify(rowRecord(row), null, 2), "Row copied as JSON")
               }
@@ -335,6 +355,7 @@ export function RowInspector({
                 type="button"
                 size="xs"
                 variant="ghost"
+                className="max-sm:h-8"
                 onClick={() => {
                   const values = Object.fromEntries(
                     row.cells.map((cell) => [cell.column.key, cell.value]),
@@ -351,6 +372,7 @@ export function RowInspector({
                 type="button"
                 size="xs"
                 variant="ghost"
+                className="max-sm:h-8"
                 onClick={() => changeSet.revertRow(row.id)}
               >
                 <RotateCounterClockwise />
@@ -362,6 +384,7 @@ export function RowInspector({
                 type="button"
                 size="xs"
                 variant="ghost"
+                className="max-sm:h-8"
                 onClick={() => changeSet.revertRow(row.id)}
               >
                 <Trash />
@@ -376,7 +399,7 @@ export function RowInspector({
                   type="button"
                   size="xs"
                   variant="ghost"
-                  className="text-destructive"
+                  className="text-destructive max-sm:h-8"
                   onClick={() => changeSet.deleteRows([{ rowId: row.id, origin: row.origin }])}
                 >
                   <Trash />

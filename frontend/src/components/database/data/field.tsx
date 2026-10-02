@@ -63,6 +63,7 @@ const NULL_CHOICE = "\u0000null"
  */
 export function RowField({
   cell,
+  keyWord,
   inserted,
   lock,
   allowDefault,
@@ -72,6 +73,8 @@ export function RowField({
   children,
 }: {
   cell: InspectedCell
+  /** What the column is to the table's key — "key", "sort key" — or null when it is no part of it. */
+  keyWord: string | null
   /** The row is a staged new one: an unset column takes its default. */
   inserted: boolean
   /** Why this field cannot be edited, or null when it can. */
@@ -131,7 +134,7 @@ export function RowField({
         <label htmlFor={id} className="min-w-0 truncate font-mono text-xs font-medium">
           {column.name}
         </label>
-        {column.primaryKey && <Tag>key</Tag>}
+        {keyWord && <Tag className="shrink-0">{keyWord}</Tag>}
         {column.generated && <Tag>computed</Tag>}
         <Tag mono className="ml-auto max-w-[50%] min-w-0 truncate" title={column.typeName}>
           {column.typeName || "?"}
@@ -202,6 +205,24 @@ export function RowField({
   )
 }
 
+const ZONED = /tz|with time zone|offset/i
+
+/**
+ * The text a field opens on: the grid's, less a zone the column does not keep.
+ *
+ * A `timestamp without time zone` travels as an instant at UTC, and the grid's
+ * editor spells that offset out. In a column that stores none it reads as a
+ * property of the value — `03:04:05+00:00` — that the reader would then be
+ * careful to keep, or to change. The field shows what the column holds.
+ */
+function openText(value: EditValue | undefined, column: GridColumn): string {
+  const text = editText(value, column)
+  if ((column.kind === "datetime" || column.kind === "time") && !ZONED.test(column.typeName)) {
+    return text.replace(/(?:Z|[+-]00:00)$/, "")
+  }
+  return text
+}
+
 /** What an empty control says it holds: nothing typed is one of three different things. */
 function vacancy(value: EditValue | undefined): string {
   if (value === undefined || isDefault(value)) return "DEFAULT"
@@ -234,7 +255,7 @@ function Reading({
     return (
       <div id={id} className="max-h-64 overflow-auto">
         <JsonDocTree
-          text={typeof value === "string" ? value : editText(value, column)}
+          text={typeof value === "string" ? value : openText(value, column)}
           label={column.name}
         />
       </div>
@@ -248,7 +269,7 @@ function Reading({
       </p>
     )
   }
-  const whole = editText(value, column)
+  const whole = openText(value, column)
   return (
     <p
       id={id}
@@ -303,7 +324,7 @@ type ControlProps = {
  * cannot hold stays in the field with the reason under it.
  */
 function useDraft({ column, value, onStage }: Omit<ControlProps, "id">) {
-  const opened = editText(value, column)
+  const opened = openText(value, column)
   const [draft, setDraft] = useState(opened)
   const [error, setError] = useState<string>()
   // The set changed under the field — an edit in the grid, an undo, a revert:

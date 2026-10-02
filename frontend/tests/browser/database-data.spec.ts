@@ -79,9 +79,20 @@ const rowsOf = (count: number): Cell[][] =>
     String((i + 1) * 2),
   ])
 
+/** A table of the types the row panel has to open as what the column holds. */
+const TYPED_COLUMNS = [
+  { name: "id", type: "integer", nullable: false, position: 1 },
+  { name: "bits", type: "bit(8)", nullable: true, position: 2 },
+  { name: "seen", type: "timestamp without time zone", nullable: true, position: 3 },
+]
+
 type EditorMock = DatabaseMock & {
   /** How many rows `items` holds. */
   total?: number
+  /** The rows `items` holds, in place of the generated ones. */
+  held?: Cell[][]
+  /** What `POST /import/upload` answers when it is not a dry run. */
+  imported?: { status: number; body: unknown }
   /** Fields laid over a table's detail, by table name. */
   details?: Record<string, Record<string, unknown>>
   /** What `POST /changes` answers when it is not a dry run. */
@@ -114,8 +125,8 @@ async function mockEditor(page: Page, options: EditorMock = {}) {
     exports: [] as URL[],
     imports: [] as { options: Record<string, unknown>; file: string }[],
   }
-  const total = options.total ?? 250
-  const all = rowsOf(total)
+  const all = options.held ?? rowsOf(options.total ?? 250)
+  const total = all.length
 
   if (options.capabilities) {
     await page.route("**/api/v1/auth/session", (route) =>
@@ -176,7 +187,11 @@ async function mockEditor(page: Page, options: EditorMock = {}) {
       }
       const view = table === "item_names" ? { type: "view", primaryKey: [], indexes: [] } : {}
       const docs = table === "docs" ? { columns: DOCS_COLUMNS } : {}
-      return json(route, detailOf(table, { ...view, ...docs, ...options.details?.[table] }))
+      const typed = table === "typed" ? { columns: TYPED_COLUMNS } : {}
+      return json(
+        route,
+        detailOf(table, { ...view, ...docs, ...typed, ...options.details?.[table] }),
+      )
     }
     if (rest === "/browse") {
       sent.browse.push(url)
@@ -192,6 +207,24 @@ async function mockEditor(page: Page, options: EditorMock = {}) {
           duration: "1ms",
           truncated: false,
           statement: 'SELECT * FROM "public"."docs" ORDER BY "id" ASC LIMIT $1 OFFSET $2',
+          primaryKey: ["id"],
+          estimatedRows: 1,
+          sort: [{ column: "id", desc: false }],
+          limit: 100,
+          offset: 0,
+        })
+      }
+      if (table === "typed") {
+        return json(route, {
+          columns: ["id", "bits", "seen"],
+          types: ["INT4", "BIT", "TIMESTAMP"],
+          kinds: ["integer", "binary", "datetime"],
+          rows: [["1", "10101010", "2026-01-02T03:04:05.5Z"]],
+          rowCount: 1,
+          rowsAffected: 0,
+          duration: "1ms",
+          truncated: false,
+          statement: 'SELECT * FROM "public"."typed" ORDER BY "id" ASC LIMIT $1 OFFSET $2',
           primaryKey: ["id"],
           estimatedRows: 1,
           sort: [{ column: "id", desc: false }],
@@ -222,6 +255,11 @@ async function mockEditor(page: Page, options: EditorMock = {}) {
         const at = COLUMNS.findIndex((column) => column.name === filter.column)
         if (filter.op === "eq") rows = rows.filter((row) => row[at] === filter.value)
         if (filter.op === "is_null") rows = rows.filter((row) => row[at] === null)
+      }
+      // "Any of these": the first condition alone stands for the set here.
+      if (url.searchParams.get("match") === "any" && filters[0]?.op === "icontains") {
+        const word = (filters[0].value ?? "").toLowerCase()
+        rows = all.filter((row) => String(row[1]).toLowerCase().includes(word))
       }
       if (sort[0]?.column === "id" && sort[0].desc) rows = [...rows].reverse()
       const pageRows = rows.slice(offset, offset + limit)
@@ -325,6 +363,9 @@ async function mockEditor(page: Page, options: EditorMock = {}) {
       }
       const parsed = JSON.parse(optionsPart) as Record<string, unknown>
       sent.imports.push({ options: parsed, file: filePart })
+      if (!parsed.dryRun && options.imported) {
+        return json(route, options.imported.body, options.imported.status)
+      }
       const mapping = (parsed.mapping as Record<string, string> | undefined) ?? {
         Name: "name",
         Quantity: "",
@@ -363,9 +404,28 @@ async function mockEditor(page: Page, options: EditorMock = {}) {
           ? { columns: ["name"], rows: [["Imported one"], [null]] }
           : undefined,
         statement: 'INSERT INTO "public"."items" ("name") VALUES ($1)',
+        // A table the import makes: named as asked, of the columns that go in.
+        create: parsed.createTable
+          ? {
+              statement: `CREATE TABLE "public"."${String(parsed.table)}" (\n  ${Object.values(
+                mapping,
+              )
+                .filter(Boolean)
+                .map((name) => `"${name}" text`)
+                .join(",\n  ")}\n)`,
+              columns: [],
+              created: !parsed.dryRun,
+            }
+          : undefined,
         atomic: true,
         warnings: [],
       })
+    }
+    if (rest.startsWith("/ddl/")) {
+      // What a structure change would run, and that it ran.
+      const body = request.postDataJSON() as Record<string, unknown>
+      const statement = `TRUNCATE TABLE "public"."${String(body.table)}"`
+      return json(route, { statement, statements: [statement] })
     }
     return route.fallback()
   })
@@ -447,7 +507,12 @@ test("the rail lists what holds rows by kind, and a table is a link and a step o
 test("a schema that is not there says so instead of listing nothing", async ({ page }) => {
   await mockEditor(page)
   await page.goto(`${DATA}?schema=dropped`)
-  await expect(page.getByText("No schema called dropped")).toBeVisible()
+  // Said once, with the way on — and nothing is offered to be made in it: the
+  // page used to call it an empty schema and offer "New table" there.
+  await expect(page.getByText("No schema called dropped")).toHaveCount(1)
+  await expect(page.getByText("No tables yet")).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "New table" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Import a file as a new table" })).toHaveCount(0)
   await page.getByRole("link", { name: "Open public" }).click()
   await expect(page.getByRole("link", { name: /^items/ })).toBeVisible()
 
@@ -805,7 +870,9 @@ test("a role that may change rows and not destroy is offered no delete", async (
   await expect(
     page.getByRole("complementary", { name: "Row" }).getByRole("button", { name: "Delete" }),
   ).toHaveCount(0)
-  // Nor the rail's verbs that destroy.
+  // Nor the rail's verbs that destroy. (At this width the rail stood aside
+  // for the row; asking for it back puts the row away.)
+  await page.getByRole("button", { name: "Show the tables" }).click()
   await page.getByRole("button", { name: "Actions for items" }).click()
   await expect(page.getByRole("menuitem", { name: "Empty…" })).toHaveCount(0)
   await expect(page.getByRole("menuitem", { name: "Drop…" })).toHaveCount(0)
@@ -1097,6 +1164,518 @@ test("copy as INSERT asks the server for the statement of whole rows", async ({
     .toContain('INSERT INTO "public"."items"')
 })
 
+/* ------------------------------------------------- narrow frames, a phone */
+
+/** Counts the times the document itself was asked for again: a link the router did not handle. */
+function documentReads(page: Page) {
+  const read = { count: 0 }
+  page.on("request", (request) => {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) read.count++
+  })
+  return read
+}
+
+test("on a phone, choosing a table in the rail keeps the page, and staged edits are asked about", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockEditor(page)
+  await page.goto(ITEMS)
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  const reads = documentReads(page)
+  await page.evaluate(() => Object.assign(window, { __kept: true }))
+  const rail = page.getByRole("navigation", { name: "tables of this schema" })
+
+  // The rail lies over the table and is put away by choosing one — by the
+  // router, in this document. It used to be taken off the page before its
+  // link had acted, and the browser followed the link itself.
+  await page.getByRole("button", { name: "Show the tables" }).click()
+  await rail.getByRole("link", { name: /^other/ }).click()
+  await expect(title(page)).toContainText("other")
+  await expect(rail).toHaveCount(0)
+  expect(reads.count).toBe(0)
+  expect(await page.evaluate(() => "__kept" in window)).toBe(true)
+
+  // With an edit staged the same press is asked about by the page, not by
+  // the browser's own "leave site?".
+  await edit(page, 0, 1, "Staged")
+  await expect(bar(page)).toContainText("1 change")
+  await page.getByRole("button", { name: "Show the tables" }).click()
+  await rail.getByRole("link", { name: /^items/ }).click()
+  const guard = page.getByRole("dialog", { name: "Unapplied changes" })
+  await expect(guard).toContainText("Opening items")
+  await guard.getByRole("button", { name: "Keep editing" }).click()
+  await expect(title(page)).toContainText("other")
+  await expect(bar(page)).toContainText("1 change")
+  expect(reads.count).toBe(0)
+  await bar(page).getByRole("button", { name: "Discard", exact: true }).click()
+
+  // Another schema is a place with no table open in it yet: the rail stays
+  // up to choose one from, and the page is still this page.
+  await page.getByRole("button", { name: "Show the tables" }).click()
+  await rail.getByRole("button", { name: "schema: public" }).click()
+  await page.getByRole("menuitem", { name: /^sales/ }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/data?schema=sales")
+  await expect(rail).toBeVisible()
+  expect(reads.count).toBe(0)
+  expect(await page.evaluate(() => "__kept" in window)).toBe(true)
+})
+
+test("a row opened in a frame too narrow for three columns takes the rail's place, or lies over the table", async ({
+  page,
+}) => {
+  await mockEditor(page)
+  const rail = page.getByRole("navigation", { name: "tables of this schema" })
+  const panel = page.getByRole("complementary", { name: "Row" })
+  const frame = page.locator("[data-slot=table-editor]")
+  const widthOf = async (target: ReturnType<Page["locator"]>) =>
+    (await target.boundingBox())?.width ?? 0
+
+  // 1280: the rail and the panel together would leave the rows a strip. The
+  // rail steps aside while the row is open and comes back when it closes.
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto(ITEMS)
+  await expect(rail).toBeVisible()
+  await cell(page, 1, 1).click()
+  await page.keyboard.press("Space")
+  await expect(panel).toContainText("Row 2")
+  await expect(rail).toHaveCount(0)
+  expect(await widthOf(grid(page))).toBeGreaterThanOrEqual(640)
+  // Asking for the tables puts the row away: there is room for one of them.
+  await page.getByRole("button", { name: "Show the tables" }).click()
+  await expect(rail).toBeVisible()
+  await expect(panel).toHaveCount(0)
+  await cell(page, 1, 1).click()
+  await page.keyboard.press("Space")
+  await panel.getByRole("button", { name: "Hide the row" }).click()
+  await expect(rail).toBeVisible()
+
+  // 1024: not even the panel alone leaves the rows their floor, so it lies
+  // over the table as it does on a phone, and the rail stays where it was.
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await cell(page, 1, 1).click()
+  await page.keyboard.press("Space")
+  await expect(panel).toContainText("Row 2")
+  expect(await widthOf(panel)).toBeGreaterThan((await widthOf(frame)) - 4)
+  await panel.getByRole("button", { name: "Hide the row" }).click()
+  await expect(rail).toBeVisible()
+
+  // 1720: all three, side by side.
+  await page.setViewportSize({ width: 1720, height: 900 })
+  await cell(page, 1, 1).click()
+  await page.keyboard.press("Space")
+  await expect(panel).toBeVisible()
+  await expect(rail).toBeVisible()
+  expect(await widthOf(grid(page))).toBeGreaterThanOrEqual(640)
+})
+
+test("the strip names the table and the toolbar shows every condition, at the widths between", async ({
+  page,
+}) => {
+  await mockEditor(page)
+  const filters = JSON.stringify([
+    { column: "note", op: "is_null" },
+    { column: "qty", op: "gte", value: "2" },
+    { column: "name", op: "contains", value: "Item with a long word in it" },
+  ])
+  const sort = JSON.stringify([
+    { column: "id", desc: true },
+    { column: "qty", desc: false },
+  ])
+  const frame = page.locator("[data-slot=table-editor]")
+  for (const width of [820, 900, 1024, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(
+      `${ITEMS}&filters=${encodeURIComponent(filters)}&sort=${encodeURIComponent(sort)}`,
+    )
+    await expect(grid(page)).toBeVisible()
+    // The name is there to read: it used to give way to nothing while the
+    // schema before it stayed.
+    const name = await title(page).getByText("items", { exact: true }).boundingBox()
+    expect(name?.width ?? 0, `the table's name at ${width}`).toBeGreaterThanOrEqual(30)
+    // Every chip of what filters and orders the rows is inside the frame.
+    const edge = await frame.boundingBox()
+    for (const chip of await page.getByRole("group", { name: /^(Filter:|Sorted by)/ }).all()) {
+      await expect(chip).toBeVisible()
+      const box = await chip.boundingBox()
+      expect(
+        (box?.x ?? 0) + (box?.width ?? 0),
+        `a chip runs past the frame at ${width}`,
+      ).toBeLessThanOrEqual((edge?.x ?? 0) + (edge?.width ?? 0))
+    }
+    await expect(page.getByRole("group", { name: /^Sorted by/ })).toHaveCount(2)
+    await expect(page.getByRole("group", { name: "Rows match" })).toBeVisible()
+  }
+})
+
+/* ------------------------------------------------- writes to the address */
+
+test("of two writes made before the first has landed, the second stands", async ({ page }) => {
+  await mockEditor(page)
+  await page.goto(ITEMS)
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  // The router's own reads are held back, so a second press lands while the
+  // first write to the address is still on its way.
+  await page.route("**/*", async (route) => {
+    const request = route.request()
+    if (request.headers()["rsc"] === "1" || request.url().includes("_rsc=")) {
+      await new Promise((resolve) => setTimeout(resolve, 700))
+    }
+    await route.fallback()
+  })
+
+  // Structure, then Data at once: the second asks for the address the router
+  // still shows, and used to be lost to the first landing after it.
+  await page.getByRole("tab", { name: "Structure" }).click()
+  await page.getByRole("tab", { name: "Data" }).click()
+  await page.waitForTimeout(2500)
+  await expect(page.getByRole("tab", { name: "Data" })).toHaveAttribute("aria-selected", "true")
+  await expect.poll(() => where(page)).toBe("/databases/1/data?schema=public&table=items")
+
+  // A filter applied and removed at once stays removed.
+  await page.getByRole("button", { name: "Filter", exact: true }).click()
+  await page.getByRole("combobox", { name: "Column" }).click()
+  await page.getByRole("option", { name: "note", exact: true }).click()
+  await page.getByRole("combobox", { name: "Condition" }).click()
+  await page.getByRole("option", { name: "is NULL", exact: true }).click()
+  await page.getByRole("button", { name: "Apply", exact: true }).click()
+  await page.getByRole("button", { name: /^Remove the filter/ }).click()
+  await page.waitForTimeout(2500)
+  await expect(page.getByRole("group", { name: /^Filter:/ })).toHaveCount(0)
+  await expect.poll(() => where(page)).toBe("/databases/1/data?schema=public&table=items")
+
+  // And two writes that both move on still end on the second.
+  await page.getByRole("button", { name: "Next page" }).click()
+  await page.getByRole("button", { name: "Next page" }).click()
+  await expect.poll(() => where(page)).toContain("page=3")
+  await expect(cell(page, 0, 0)).toHaveText("201")
+})
+
+/* ------------------------------------------------ keyboard and its focus */
+
+const inGrid = (page: Page) =>
+  page.evaluate(() => document.activeElement?.closest("[data-slot=data-grid]") != null)
+
+test("closing a dialog hands the keyboard back to where the reader was working", async ({
+  page,
+}) => {
+  await mockEditor(page)
+  await page.goto(ITEMS)
+  await edit(page, 0, 1, "Staged")
+
+  // The review, opened by the shortcut from a cell: back to the rows.
+  await page.keyboard.press("ControlOrMeta+s")
+  const review = page.getByRole("dialog", { name: "Apply 1 change to items" })
+  await expect(review).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(review).toHaveCount(0)
+  await expect.poll(() => inGrid(page)).toBe(true)
+
+  // Opened by its button: back to the button, which stayed a button while
+  // the statements were fetched.
+  const reviewButton = bar(page).getByRole("button", { name: "Review", exact: true })
+  await reviewButton.focus()
+  await page.keyboard.press("Enter")
+  await expect(review).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(review).toHaveCount(0)
+  await expect(reviewButton).toBeFocused()
+
+  // The question before leaving.
+  await page.getByRole("link", { name: /^other/ }).click()
+  const guard = page.getByRole("dialog", { name: "Unapplied changes" })
+  await expect(guard).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(guard).toHaveCount(0)
+  await expect.poll(() => inGrid(page)).toBe(true)
+
+  // Discard takes the bar away, and the button with it.
+  await bar(page).getByRole("button", { name: "Discard", exact: true }).click()
+  await expect(bar(page)).toHaveCount(0)
+  await expect.poll(() => inGrid(page)).toBe(true)
+
+  // A confirmation asked for from a row of the rail: back to that row's menu.
+  const actions = page.getByRole("button", { name: "Actions for items" })
+  await actions.click()
+  await page.getByRole("menuitem", { name: "Empty…" }).click()
+  const confirm = page.getByRole("dialog", { name: "Empty table" })
+  await expect(confirm).toContainText('TRUNCATE TABLE "public"."items"')
+  await page.keyboard.press("Escape")
+  await expect(confirm).toHaveCount(0)
+  await expect(actions).toBeFocused()
+})
+
+test("the views of a table are one stop of the keyboard, moved along with the arrows", async ({
+  page,
+}) => {
+  await mockEditor(page)
+  await page.goto(ITEMS)
+  const tab = (name: string) => page.getByRole("tab", { name })
+  await expect(tab("Data")).toHaveAttribute("tabindex", "0")
+  await expect(tab("Structure")).toHaveAttribute("tabindex", "-1")
+  await tab("Data").focus()
+  await page.keyboard.press("ArrowRight")
+  await expect(tab("Structure")).toBeFocused()
+  await expect(tab("Structure")).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByRole("tabpanel", { name: "Structure" })).toContainText("Columns")
+  await page.keyboard.press("End")
+  await expect(tab("Definition")).toHaveAttribute("aria-selected", "true")
+  await page.keyboard.press("ArrowRight")
+  await expect(tab("Data")).toBeFocused()
+  await expect(page.getByRole("tabpanel", { name: "Data" })).toBeVisible()
+  await expect.poll(() => where(page)).toBe("/databases/1/data?schema=public&table=items")
+})
+
+/* --------------------------------------------------------- the row panel */
+
+test("the row panel shows the row it names, not what was typed on the one before", async ({
+  page,
+}) => {
+  // Two rows that hold the same quantity: the field used to tell a new row
+  // only by a new value, and kept the refused draft of the first over the second.
+  await mockEditor(page, {
+    held: [
+      ["1", "First", null, "4"],
+      ["2", "Second", null, "4"],
+    ],
+  })
+  await page.goto(ITEMS)
+  await cell(page, 0, 1).click()
+  await page.keyboard.press("Space")
+  const panel = page.getByRole("complementary", { name: "Row" })
+  const qty = field(page, "qty").getByRole("textbox")
+  await qty.fill("abc")
+  await qty.press("Enter")
+  await expect(field(page, "qty").getByRole("alert")).toContainText("Whole numbers only")
+  await panel.getByRole("button", { name: "Next row" }).click()
+  await expect(panel).toContainText("Row 2")
+  await expect(qty).toHaveValue("4")
+  await expect(field(page, "qty").getByRole("alert")).toHaveCount(0)
+  await expect(bar(page)).toHaveCount(0)
+})
+
+test("a field opens on what its column holds: a bit string as text, a zone-less moment without a zone", async ({
+  page,
+}) => {
+  const { sent } = await mockEditor(page)
+  await page.goto(`${DATA}?schema=public&table=typed`)
+  await cell(page, 0, 1).click()
+  await page.keyboard.press("Space")
+  // The column stores no zone: the field does not show one to be kept.
+  await expect(field(page, "seen").getByRole("textbox")).toHaveValue("2026-01-02 03:04:05.5")
+  // A string of bits is typed as one. As bytes it went out as \x11110000,
+  // which the engine refuses.
+  const bits = field(page, "bits").getByRole("textbox")
+  await expect(bits).toHaveValue("10101010")
+  await bits.fill("11110000")
+  await bits.press("Enter")
+  await bar(page).getByRole("button", { name: "Apply", exact: true }).click()
+  await expect(bar(page)).toHaveCount(0)
+  expect(applied(sent)[0].changes).toEqual([
+    { op: "update", key: { id: "1", bits: "10101010" }, values: { bits: "11110000" } },
+  ])
+})
+
+test("a foreign key is chosen from the rows it can point at", async ({ page }) => {
+  const { sent } = await mockEditor(page, {
+    details: {
+      items: {
+        foreignKeys: [
+          { name: "items_qty_fkey", columns: ["qty"], refTable: "other", refColumns: ["id"] },
+        ],
+      },
+    },
+  })
+  await page.goto(ITEMS)
+  await cell(page, 0, 1).click()
+  await page.keyboard.press("Space")
+  await field(page, "qty").getByRole("button", { name: "Choose" }).click()
+  const rows = page.getByRole("listbox", { name: "Rows of other" })
+  // The row the key points at now stands first, marked.
+  await expect(rows.getByRole("option").first()).toContainText("Item 2")
+  await expect(rows.getByRole("option", { selected: true })).toHaveCount(1)
+
+  // A word is looked for in the referenced table itself, by the server.
+  await page.getByRole("textbox", { name: "Find a row of other" }).fill("item 17")
+  await expect(rows.getByRole("option")).toHaveCount(11)
+  const asked = sent.browse.filter((url) => url.searchParams.get("table") === "other").at(-1)
+  expect(asked?.searchParams.get("match")).toBe("any")
+  expect(JSON.parse(asked?.searchParams.get("filters") ?? "[]")).toEqual([
+    { column: "name", op: "icontains", value: "item 17" },
+    { column: "note", op: "icontains", value: "item 17" },
+  ])
+  // A number is the key itself, asked for whole and listed first.
+  await page.getByRole("textbox", { name: "Find a row of other" }).fill("41")
+  await expect(rows.getByRole("option").first()).toContainText("Item 41")
+
+  await page.keyboard.press("ArrowDown")
+  await page.keyboard.press("Enter")
+  await expect(rows).toHaveCount(0)
+  await expect(field(page, "qty").getByRole("textbox")).toHaveValue("41")
+  await bar(page).getByRole("button", { name: "Apply", exact: true }).click()
+  await expect(bar(page)).toHaveCount(0)
+  expect(applied(sent)[0].changes).toEqual([
+    { op: "update", key: { id: "1", qty: "2" }, values: { qty: "41" } },
+  ])
+})
+
+test("a key of a document is renamed and an item moved, and the rest goes back as it came", async ({
+  page,
+}) => {
+  const { sent } = await mockEditor(page)
+  await page.goto(`${DATA}?schema=public&table=docs`)
+  await cell(page, 0, 1).click()
+  await page.keyboard.press("Space")
+  const tree = field(page, "meta").locator("[data-slot=json-doc-tree]")
+
+  // A name the object already has is refused where it is typed.
+  await tree.getByRole("button", { name: "Rename the key theme" }).click()
+  await page.keyboard.insertText("big")
+  await page.keyboard.press("Enter")
+  await expect(field(page, "meta").getByRole("alert")).toContainText("already has a key called big")
+  await page.keyboard.press("ControlOrMeta+a")
+  await page.keyboard.insertText("mode")
+  await page.keyboard.press("Enter")
+  await expect(tree.getByRole("button", { name: "Rename the key mode" })).toBeVisible()
+
+  // Two items, and the second moved before the first.
+  await tree.getByRole("button", { name: "Add an item to tags" }).click()
+  await page.getByRole("textbox", { name: "New value" }).fill("b")
+  await page.keyboard.press("Enter")
+  await tree.getByRole("button", { name: "Move item 1 up" }).click()
+
+  await bar(page).getByRole("button", { name: "Apply", exact: true }).click()
+  await expect(bar(page)).toHaveCount(0)
+  expect(applied(sent)[0].changes).toEqual([
+    {
+      op: "update",
+      key: { id: "1", meta: DOCUMENT },
+      values: { meta: '{"mode": "dark", "big": 9007199254740993, "tags": ["b", "a"]}' },
+    },
+  ])
+})
+
+/* ------------------------------------------------- import, the other ways */
+
+test("a refused import is said beside the button that was pressed", async ({ page }) => {
+  await mockEditor(page, {
+    imported: {
+      status: 400,
+      body: {
+        error: {
+          code: "bad_request",
+          message: 'row 2 (line 3): null value in column "name" — nothing was imported',
+        },
+      },
+    },
+  })
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.goto(ITEMS)
+  await page.getByRole("button", { name: "Import", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Import into items" })
+  await dialog.locator("input[type=file]").setInputFiles({
+    name: "items.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Name,Quantity\nImported one,7\n,9\n"),
+  })
+  const statement = dialog.getByText('INSERT INTO "public"."items"')
+  await expect(statement).toBeVisible()
+  // The reader is at the end of the preview, where the mapping was checked.
+  await statement.scrollIntoViewIfNeeded()
+  await dialog.getByRole("button", { name: "Import", exact: true }).click()
+  const refusal = dialog.getByRole("alert")
+  await expect(refusal).toContainText("nothing was imported")
+  await expect(refusal).toBeInViewport({ ratio: 1 })
+  // And the dialog is still the dialog it was: the file can be sent again.
+  await expect(dialog.getByRole("button", { name: "Import", exact: true })).toBeEnabled()
+})
+
+test("an upsert says what makes two rows the same, and a file becomes a new table", async ({
+  page,
+}) => {
+  const { sent } = await mockEditor(page, {
+    details: {
+      items: {
+        indexes: [
+          { name: "items_pkey", columns: ["id"], unique: true, primary: true },
+          { name: "items_name_key", columns: ["name"], unique: true, primary: false },
+          { name: "items_note_idx", columns: ["note"], unique: false, primary: false },
+        ],
+      },
+    },
+  })
+  const file = {
+    name: "Spare Parts.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Name,Quantity\nImported one,7\n"),
+  }
+  await page.goto(ITEMS)
+  await page.getByRole("button", { name: "Import", exact: true }).click()
+  const into = page.getByRole("dialog", { name: "Import into items" })
+  await into.locator("input[type=file]").setInputFiles(file)
+  await into.getByRole("radio", { name: "Add or update" }).click()
+  // The primary key unless the reader says otherwise; a unique index is offered, a plain one not.
+  await expect.poll(() => sent.imports.at(-1)?.options.mode).toBe("upsert")
+  expect(sent.imports.at(-1)?.options.conflict).toBeUndefined()
+  await into.getByRole("combobox", { name: "What rows are matched by" }).click()
+  await expect(page.getByRole("option")).toHaveCount(2)
+  await page.getByRole("option", { name: /items_name_key/ }).click()
+  await expect.poll(() => sent.imports.at(-1)?.options.conflict).toEqual({ columns: ["name"] })
+  await page.keyboard.press("Escape")
+  await expect(into).toHaveCount(0)
+
+  // The same file as a table of its own, from the rail.
+  await page.getByRole("button", { name: "Import a file as a new table" }).click()
+  const made = page.getByRole("dialog", { name: "Import a file as a new table" })
+  await made.locator("input[type=file]").setInputFiles(file)
+  const name = made.getByRole("textbox", { name: "Name of the new table" })
+  await expect(name).toHaveValue("spare_parts")
+  await expect(made).toContainText('CREATE TABLE "public"."spare_parts"')
+  // A name the schema already uses is refused where it is typed.
+  await name.fill("items")
+  await expect(made).toContainText("already has a table called items")
+  await expect(made.getByRole("button", { name: "Create and import" })).toBeDisabled()
+  await name.fill("spare_parts")
+  // A column is renamed, retyped and made the key before anything exists.
+  await made.getByRole("textbox", { name: "The column made of Quantity" }).fill("qty")
+  await made.getByRole("textbox", { name: "The type of qty" }).fill("integer")
+  await made.getByRole("checkbox", { name: "qty is part of the primary key" }).click()
+  await expect
+    .poll(() => sent.imports.at(-1)?.options)
+    .toMatchObject({
+      table: "spare_parts",
+      dryRun: true,
+      mapping: { Name: "name", Quantity: "qty" },
+      createTable: {
+        columns: [{ name: "qty", type: "integer", notNull: true, primaryKey: true }],
+      },
+    })
+  await expect(made.getByRole("button", { name: "Create and import" })).toBeEnabled()
+  await made.getByRole("button", { name: "Create and import" }).click()
+  await expect(made).toContainText("created")
+  const real = sent.imports.filter((upload) => upload.options.dryRun !== true)
+  expect(real).toHaveLength(1)
+  expect(real[0].options).toMatchObject({ table: "spare_parts", mode: "insert" })
+  expect(real[0].file).toContain("Imported one,7")
+  // Done opens the table that was made.
+  await made.getByRole("button", { name: "Done" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/data?schema=public&table=spare_parts")
+})
+
+test("an export can be asked for past the usual number of rows before it runs", async ({
+  page,
+}) => {
+  const { sent } = await mockEditor(page)
+  await page.goto(ITEMS)
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+  await page.getByRole("button", { name: "Export", exact: true }).click()
+  await page.getByRole("menuitemcheckbox", { name: "Up to 1,000,000 rows" }).click()
+  await expect(page.getByRole("menu")).toContainText("up to 1,000,000")
+  await page.getByRole("menuitem", { name: /^CSV/ }).click()
+  await expect.poll(() => sent.exports.length).toBe(1)
+  expect(sent.exports[0].searchParams.get("limit")).toBe("1000000")
+})
+
 /* --------------------------------------------------- the design system */
 
 /** Every visible button with no text of its own and no name from anywhere else. */
@@ -1200,7 +1779,15 @@ for (const [label, viewport] of [
   test(`the table editor keeps the design system's rules${label}`, async ({ page }) => {
     test.setTimeout(90_000)
     await page.setViewportSize(viewport)
-    await mockEditor(page)
+    await mockEditor(page, {
+      details: {
+        items: {
+          foreignKeys: [
+            { name: "items_qty_fkey", columns: ["qty"], refTable: "other", refColumns: ["id"] },
+          ],
+        },
+      },
+    })
     const filters = JSON.stringify([
       { column: "note", op: "is_null" },
       { column: "qty", op: "eq", value: "2" },
@@ -1226,6 +1813,10 @@ for (const [label, viewport] of [
     await page.getByRole("button", { name: "Show the row" }).click()
     await expect(page.getByRole("complementary", { name: "Row" })).toContainText("Row 1")
     await keepsTheRules(page, "the row inspector")
+    await field(page, "qty").getByRole("button", { name: "Choose" }).click()
+    await expect(page.getByRole("listbox", { name: "Rows of other" })).toContainText("Item 2")
+    await keepsTheRules(page, "the rows a foreign key can point at")
+    await page.keyboard.press("Escape")
     await page
       .getByRole("complementary", { name: "Row" })
       .getByRole("button", { name: "Hide the row" })
@@ -1258,6 +1849,20 @@ for (const [label, viewport] of [
     await page.getByRole("button", { name: "Import", exact: true }).click()
     await expect(page.getByRole("dialog", { name: "Import into items" })).toBeVisible()
     await keepsTheRules(page, "the import dialog")
+    await page.keyboard.press("Escape")
+
+    // A file as a table of its own, with the columns it would be made of.
+    if (viewport.width < 640) await page.getByRole("button", { name: "Show the tables" }).click()
+    await page.getByRole("button", { name: "Import a file as a new table" }).click()
+    const made = page.getByRole("dialog", { name: "Import a file as a new table" })
+    await made.locator("input[type=file]").setInputFiles({
+      name: "parts.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("Name,Quantity\nImported one,7\n"),
+    })
+    await expect(made).toContainText('CREATE TABLE "public"."parts"')
+    await keepsTheRules(page, "a file as a new table")
+    await page.keyboard.press("Escape")
 
     // A document in the row panel, with the row a new key is typed in.
     await page.goto(`${DATA}?schema=public&table=docs`)

@@ -214,6 +214,52 @@ export function addChild(
   return { ok: true, text: `${text.slice(0, last)}, ${piece}${text.slice(last)}` }
 }
 
+/**
+ * The document with the `index`-th key of an object given another name. Only
+ * the key's own token is rewritten: its value, and where the entry stands
+ * among the others, are untouched. A name another entry of the object already
+ * has is refused, for the reason a new key is.
+ */
+export function renameKey(
+  text: string,
+  parent: JsonNode,
+  index: number,
+  key: string,
+): { ok: true; text: string } | { ok: false; error: string } {
+  if (parent.kind !== "object") return { ok: false, error: "Only an object has keys" }
+  const entry = parent.entries[index]
+  if (!entry) return { ok: true, text }
+  if (key === "") return { ok: false, error: "A key needs a name" }
+  if (parent.entries.some((other, at) => at !== index && other.key === key)) {
+    return { ok: false, error: `This object already has a key called ${key}` }
+  }
+  if (key === entry.key) return { ok: true, text }
+  return {
+    ok: true,
+    text: text.slice(0, entry.keyStart) + JSON.stringify(key) + text.slice(entry.keyEnd),
+  }
+}
+
+/**
+ * The document with the `from`-th child of a container moved to stand `to`-th.
+ * The children change places and nothing else does: the commas, the spaces and
+ * the line breaks between them stay where they were, so a document laid out
+ * one item a line is still laid out so.
+ */
+export function moveChild(text: string, parent: JsonNode, from: number, to: number): string {
+  const spans = childSpans(parent)
+  if (!spans[from] || !spans[to] || from === to) return text
+  const pieces = spans.map((span) => text.slice(span.start, span.end))
+  const [moved] = pieces.splice(from, 1)
+  pieces.splice(to, 0, moved)
+  let out = text.slice(0, spans[0].start)
+  pieces.forEach((piece, at) => {
+    out += piece
+    out += text.slice(spans[at].end, at + 1 < spans.length ? spans[at + 1].start : parent.end)
+  })
+  return out + text.slice(parent.end)
+}
+
 /** How many values a container holds, as its closed row says it: "3 keys", "1 item". */
 export function sizeOf(node: JsonNode): string {
   const n =

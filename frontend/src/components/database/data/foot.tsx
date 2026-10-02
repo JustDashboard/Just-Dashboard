@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { ChevronLeft, ChevronRight } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
+import { Spinner } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -111,7 +112,7 @@ export function Pager({
       <div className="flex items-center gap-0.5">
         <IconAction
           label="Previous page"
-          className="size-6"
+          className="size-6 max-sm:size-8"
           disabled={!facts.hasPrevious}
           onClick={() => onPage(pageNumber - 1)}
         >
@@ -120,7 +121,7 @@ export function Pager({
         <PageField page={pageNumber} last={facts.lastPage} onPage={onPage} />
         <IconAction
           label="Next page"
-          className="size-6"
+          className="size-6 max-sm:size-8"
           disabled={!facts.hasNext}
           onClick={() => onPage(pageNumber + 1)}
         >
@@ -157,7 +158,7 @@ function PageField({
         value={draft ?? String(page)}
         inputMode="numeric"
         aria-label="Page"
-        className="h-6 w-11 px-1 text-center text-xs sm:h-6 sm:text-xs"
+        className="h-8 w-11 px-1 text-center text-xs sm:h-6 sm:text-xs"
         onChange={(event) => setDraft(event.target.value.replace(/\D/g, ""))}
         onBlur={() => draft !== null && go()}
         onKeyDown={(event) => {
@@ -221,26 +222,40 @@ export function ChangeBar({
           {changeSummary(counts)}
         </span>
       )}
-      <Button type="button" size="xs" variant="outline" disabled={applying} onClick={onDiscard}>
-        Discard
-      </Button>
       <Button
         type="button"
         size="xs"
         variant="outline"
+        className="max-sm:h-8"
+        disabled={applying}
+        onClick={onDiscard}
+      >
+        Discard
+      </Button>
+      {/* Busy, not disabled, while the statements are fetched: a button that
+          is switched off under the keyboard drops it on the document, and the
+          review that opens next would have nothing to come back to. */}
+      <Button
+        type="button"
+        size="xs"
+        variant="outline"
+        className="max-sm:h-8"
         disabled={blocked || applying}
-        pending={reviewing}
+        aria-busy={reviewing || undefined}
         onClick={onReview}
       >
+        {reviewing && <Spinner className="size-3" />}
         Review
       </Button>
       <Button
         type="button"
         size="xs"
-        disabled={blocked || reviewing}
-        pending={applying}
+        className="max-sm:h-8"
+        disabled={blocked}
+        aria-busy={applying || reviewing || undefined}
         onClick={onApply}
       >
+        {applying && <Spinner className="size-3" />}
         {confirms ? "Apply…" : "Apply"}
       </Button>
     </div>

@@ -91,24 +91,24 @@ export function FilterBar({
           operators={operators}
           onApply={(filter) => onFiltersChange([...filters, filter])}
         >
-          <Button type="button" size="xs" variant="outline">
+          <Button type="button" size="xs" variant="outline" className="shrink-0 max-sm:h-8">
             <FilterIcon />
             {filters.length === 0 ? "Filter" : "Add filter"}
           </Button>
         </FilterPopover>
       )}
       {filters.length > 1 && (
-        <div role="group" aria-label="Rows match" className="flex items-center gap-0.5">
+        <div role="group" aria-label="Rows match" className="flex shrink-0 items-center gap-0.5">
           <FilterChip
             selected={match === "all"}
-            className="h-6 px-2"
+            className="h-8 px-2 sm:h-6"
             onClick={() => onMatchChange("all")}
           >
             All
           </FilterChip>
           <FilterChip
             selected={match === "any"}
-            className="h-6 px-2"
+            className="h-8 px-2 sm:h-6"
             onClick={() => onMatchChange("any")}
           >
             Any
@@ -116,71 +116,83 @@ export function FilterBar({
         </div>
       )}
 
-      {sort.length > 0 && <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-hairline" />}
-      {sort.map((key, index) => (
-        <span
-          key={key.column}
-          role="group"
-          aria-label={`Sorted by ${key.column}, ${key.desc ? "descending" : "ascending"}`}
-          className="inline-flex h-6 min-w-0 shrink-0 items-center rounded-md border border-hairline bg-accent"
-        >
-          <button
-            type="button"
-            aria-label={`Sort ${key.column} ${key.desc ? "ascending" : "descending"} instead`}
-            className="flex h-6 min-w-0 items-center gap-1 rounded-l-md pr-1 pl-1.5 text-hint font-medium focus-ring-inset"
-            onClick={() =>
-              onSortChange(sort.map((k, i) => (i === index ? { ...k, desc: !k.desc } : k)))
-            }
+      {/* The order travels as one run: where the strip wraps, its keys stay
+          together on their own line rather than trail the conditions singly. */}
+      <div
+        role="group"
+        aria-label="Order of the rows"
+        className="flex min-w-0 shrink-0 items-center gap-1.5 sm:shrink sm:flex-wrap"
+      >
+        {sort.map((key, index) => (
+          <span
+            key={key.column}
+            role="group"
+            aria-label={`Sorted by ${key.column}, ${key.desc ? "descending" : "ascending"}`}
+            className="inline-flex h-8 min-w-0 shrink-0 items-center rounded-md border border-hairline bg-accent sm:h-6"
           >
-            {key.desc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />}
-            <span className="max-w-40 truncate font-mono">{key.column}</span>
-            {sort.length > 1 && <span className="numeric opacity-60">{index + 1}</span>}
-          </button>
-          <button
-            type="button"
-            aria-label={`Stop sorting by ${key.column}`}
-            className="flex size-6 items-center justify-center rounded-r-md text-muted-foreground focus-ring-inset transition-colors hover:text-foreground"
-            onClick={() => onSortChange(sort.filter((_, i) => i !== index))}
-          >
-            <Cross className="size-3" />
-          </button>
-        </span>
-      ))}
-      {unsorted.length > 0 && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            {sort.length === 0 ? (
-              <Button type="button" size="xs" variant="ghost" className="text-muted-foreground">
-                <ArrowUp />
-                Sort
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Then sort by another column"
-                className="text-muted-foreground"
-              >
-                <Plus />
-              </Button>
-            )}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="max-h-72 w-56">
-            {unsorted.map((column) => (
-              <DropdownMenuItem
-                key={column.key}
-                onSelect={() => onSortChange([...sort, { column: column.name, desc: false }])}
-              >
-                <span className="min-w-0 flex-1 truncate font-mono text-xs">{column.name}</span>
-                <span className="max-w-24 shrink-0 truncate text-hint text-muted-foreground">
-                  {column.typeName}
-                </span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+            <button
+              type="button"
+              aria-label={`Sort ${key.column} ${key.desc ? "ascending" : "descending"} instead`}
+              className="flex h-full min-w-0 items-center gap-1 rounded-l-md pr-1 pl-1.5 text-hint font-medium focus-ring-inset"
+              onClick={() =>
+                onSortChange(sort.map((k, i) => (i === index ? { ...k, desc: !k.desc } : k)))
+              }
+            >
+              {key.desc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />}
+              <span className="max-w-40 truncate font-mono">{key.column}</span>
+              {sort.length > 1 && <span className="numeric opacity-60">{index + 1}</span>}
+            </button>
+            <button
+              type="button"
+              aria-label={`Stop sorting by ${key.column}`}
+              className="flex h-full w-6 items-center justify-center rounded-r-md text-muted-foreground focus-ring-inset transition-colors hover:text-foreground max-sm:w-8"
+              onClick={() => onSortChange(sort.filter((_, i) => i !== index))}
+            >
+              <Cross className="size-3" />
+            </button>
+          </span>
+        ))}
+        {unsorted.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              {sort.length === 0 ? (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  className="shrink-0 text-muted-foreground max-sm:h-8"
+                >
+                  <ArrowUp />
+                  Sort
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label="Then sort by another column"
+                  className="shrink-0 text-muted-foreground max-sm:size-8"
+                >
+                  <Plus />
+                </Button>
+              )}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-72 w-56">
+              {unsorted.map((column) => (
+                <DropdownMenuItem
+                  key={column.key}
+                  onSelect={() => onSortChange([...sort, { column: column.name, desc: false }])}
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{column.name}</span>
+                  <span className="max-w-24 shrink-0 truncate text-hint text-muted-foreground">
+                    {column.typeName}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
     </>
   )
 }
@@ -205,7 +217,7 @@ function FilterEntry({
     <span
       role="group"
       aria-label={`Filter: ${label}`}
-      className="inline-flex h-6 max-w-full min-w-0 shrink-0 items-center rounded-md border border-hairline bg-accent"
+      className="inline-flex h-8 max-w-full min-w-0 shrink-0 items-center rounded-md border border-hairline bg-accent sm:h-6"
     >
       <FilterPopover
         columns={columns}
@@ -216,7 +228,7 @@ function FilterEntry({
       >
         <button
           type="button"
-          className="flex h-6 min-w-0 items-center rounded-l-md pr-1 pl-2 text-hint font-medium focus-ring-inset"
+          className="flex h-full min-w-0 items-center rounded-l-md pr-1 pl-2 text-hint font-medium focus-ring-inset"
         >
           <span className="max-w-64 truncate font-mono">{label}</span>
         </button>
@@ -224,7 +236,7 @@ function FilterEntry({
       <button
         type="button"
         aria-label={`Remove the filter ${label}`}
-        className="flex size-6 shrink-0 items-center justify-center rounded-r-md text-muted-foreground focus-ring-inset transition-colors hover:text-foreground"
+        className="flex h-full w-6 shrink-0 items-center justify-center rounded-r-md text-muted-foreground focus-ring-inset transition-colors hover:text-foreground max-sm:w-8"
         onClick={onRemove}
       >
         <Cross className="size-3" />

@@ -20,10 +20,12 @@ import {
   OptionRow,
   Statement,
 } from "@/components/form"
+import { Meter } from "@/components/meter"
 import { Modal } from "@/components/modal"
 import { ErrorState, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -43,12 +45,20 @@ import {
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
+import {
+  newColumns,
+  tableNameFrom,
+  uploadProgress,
+  upsertKeys,
+  type ColumnOverride,
+} from "@/components/database/data/import"
 import type {
   DbImportMode,
   DbImportOptions,
   DbImportReport,
   DbTableDetail,
 } from "@/components/database/data/types"
+import { uploadForm } from "@/components/database/data/upload"
 import { grouped } from "@/components/database/data/view"
 
 /** How much of a file a dry run is sent: the server reads its first thousand rows and no more. */
@@ -64,6 +74,16 @@ const FORMAT_LABEL: Record<DbImportFormat, string> = {
 /** The picker's entry for "leave this column out": a name no column can have. */
 const SKIP = "\u0000skip"
 
+/** Where the rows go: a table that is there, or one the import makes. */
+export type ImportTarget =
+  | { kind: "table"; detail: DbTableDetail }
+  | {
+      kind: "new"
+      schema: string
+      /** The names the schema already uses: a new table cannot take one. */
+      taken: readonly string[]
+    }
+
 type Settings = {
   /** Empty = let the server tell by the file's name. */
   format: DbImportFormat | ""
@@ -72,6 +92,8 @@ type Settings = {
   encoding: "utf-8" | "utf-16" | "latin-1"
   nullToken: string
   mode: DbImportMode
+  /** Which of the table's keys an upsert matches by: its place in `upsertKeys`. */
+  key: number
   skipBadRows: boolean
 }
 
@@ -82,18 +104,36 @@ const START: Settings = {
   encoding: "utf-8",
   nullToken: "",
   mode: "insert",
+  key: 0,
   skipBadRows: false,
 }
 
+type Run = {
+  report?: DbImportReport
+  error?: Error
+  pending: boolean
+  /** Bytes of the file that have left the browser, of how many. */
+  sent: number
+  total: number
+}
+
+const IDLE: Run = { pending: false, sent: 0, total: 0 }
+
 /**
- * A file into this table, looked at before it is written.
+ * A file's rows written into a table, looked at before they are.
  *
  * Choosing a file reads only its first megabyte and asks the server what it
  * would do with it: which of the file's columns goes to which of the table's,
  * what each looks like, the first rows exactly as they would be written, and
  * the statement a row is written with. Nothing is written by that, and every
  * change to the mapping or the options asks again. Only Import sends the
- * whole file — once, in one transaction where the engine has them.
+ * whole file — once, in one transaction where the engine has them — and says
+ * how much of it has left the browser while it does.
+ *
+ * The table can be one the import makes: the server reads what each column of
+ * the file holds and proposes the table, the reader names it, renames or
+ * retypes a column and says which are its key, and the statement that would
+ * create it is shown before anything runs.
  *
  * Replace empties the table first, so it is offered only to a role that may
  * destroy and is confirmed against the table by name.
@@ -101,14 +141,14 @@ const START: Settings = {
 export function ImportDialog({
   open,
   onOpenChange,
-  detail,
+  target,
   onImported,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  detail: DbTableDetail
-  /** Rows were written: the page on screen is stale. */
-  onImported: () => void
+  target: ImportTarget
+  /** Rows were written into the table named: what is on screen is stale. */
+  onImported: (table: string) => void
 }) {
   const { id, engine } = useDatabase()
   const { can } = useAuth()
@@ -119,46 +159,74 @@ export function ImportDialog({
   // Source column → table column, as the reader left it. Empty until they touch
   // one: the server's own matching stands until then.
   const [mapping, setMapping] = useState<Record<string, string> | null>(null)
+  // A new table: its name, and what the reader said of its columns.
+  const [name, setName] = useState("")
+  const [overrides, setOverrides] = useState<Record<string, ColumnOverride>>({})
   const [plan, setPlan] = useState<{ report?: DbImportReport; error?: Error; pending: boolean }>({
     pending: false,
   })
-  const [run, setRun] = useState<{ report?: DbImportReport; error?: Error; pending: boolean }>({
-    pending: false,
-  })
+  const [run, setRun] = useState<Run>(IDLE)
   const flight = useRef<AbortController | null>(null)
 
+  const detail = target.kind === "table" ? target.detail : null
+  const schema = target.kind === "table" ? target.detail.schema : target.schema
+  const table = detail ? detail.name : name.trim()
+  const taken = target.kind === "new" && target.taken.includes(table)
+  const named = table !== "" && !taken
+
   const formats = engine.capabilities.importFormats
+  const keys = useMemo(() => (detail ? upsertKeys(detail) : []), [detail])
   const modes = useMemo(() => {
     const list: { value: DbImportMode; label: string }[] = [{ value: "insert", label: "Add rows" }]
-    if (engine.can("importUpsert") && detail.primaryKey.length > 0) {
+    if (!detail) return list
+    if (engine.can("importUpsert") && keys.length > 0) {
       list.push({ value: "upsert", label: "Add or update" })
     }
     if (engine.can("importReplace") && can("destructive")) {
       list.push({ value: "replace", label: "Replace all rows" })
     }
     return list
-  }, [engine, detail.primaryKey.length, can])
+  }, [engine, detail, keys.length, can])
+  const matchedBy = keys[settings.key] ?? keys[0]
+
+  const report = plan.report
+  const columns = useMemo(() => report?.columns ?? [], [report])
+  const made = useMemo(
+    () =>
+      newColumns(
+        columns.map((column) => ({
+          source: column.source,
+          target: mapping ? (mapping[column.source] ?? "") : column.target,
+        })),
+        overrides,
+      ),
+    [columns, mapping, overrides],
+  )
 
   const options = useMemo<DbImportOptions>(() => {
     const out: DbImportOptions = {
-      schema: detail.schema,
-      table: detail.name,
+      schema,
+      table,
       header: settings.header,
       encoding: settings.encoding,
-      mode: settings.mode,
+      mode: detail ? settings.mode : "insert",
       skipBadRows: settings.skipBadRows,
     }
     if (settings.format) out.format = settings.format
     if (settings.delimiter) out.delimiter = settings.delimiter
     if (settings.nullToken) out.nullToken = settings.nullToken
     if (mapping) out.mapping = mapping
+    if (detail && settings.mode === "upsert" && matchedBy && !matchedBy.primary) {
+      out.conflict = { columns: matchedBy.columns }
+    }
+    if (!detail) out.createTable = made.length > 0 ? { columns: made } : {}
     return out
-  }, [detail.schema, detail.name, settings, mapping])
+  }, [schema, table, detail, settings, mapping, matchedBy, made])
 
   // The dry run: asked again whenever the file or what is asked of it changes.
   const signature = JSON.stringify(options)
   useEffect(() => {
-    if (!file || !open) return
+    if (!file || !open || !named) return
     const controller = new AbortController()
     const timer = setTimeout(() => {
       setPlan((held) => ({ ...held, pending: true }))
@@ -171,7 +239,7 @@ export function ImportDialog({
       postForm<DbImportReport>(`/databases/${id}/import/upload`, body, {
         signal: controller.signal,
       }).then(
-        (report) => setPlan({ report, pending: false }),
+        (answer) => setPlan({ report: answer, pending: false }),
         (err: unknown) => {
           if (controller.signal.aborted) return
           setPlan((held) => ({
@@ -187,14 +255,25 @@ export function ImportDialog({
       clearTimeout(timer)
       controller.abort()
     }
-  }, [id, file, open, signature])
+  }, [id, file, open, named, signature])
+
+  const take = (next: File) => {
+    setFile(next)
+    setMapping(null)
+    setOverrides({})
+    if (target.kind === "new" && name.trim() === "") setName(tableNameFrom(next.name))
+    setPlan({ pending: true })
+    setRun(IDLE)
+  }
 
   const reset = () => {
     setFile(null)
     setSettings(START)
     setMapping(null)
+    setName("")
+    setOverrides({})
     setPlan({ pending: false })
-    setRun({ pending: false })
+    setRun(IDLE)
   }
 
   const close = (next: boolean) => {
@@ -209,24 +288,25 @@ export function ImportDialog({
     if (!file) return
     const controller = new AbortController()
     flight.current = controller
-    setRun({ pending: true })
+    setRun({ pending: true, sent: 0, total: file.size })
     const body = new FormData()
     body.append("options", JSON.stringify(options))
     body.append("file", file, file.name)
     try {
-      const report = await postForm<DbImportReport>(`/databases/${id}/import/upload`, body, {
+      const answer = await uploadForm<DbImportReport>(`/databases/${id}/import/upload`, body, {
         signal: controller.signal,
+        onProgress: (sent, total) => setRun((held) => ({ ...held, sent, total })),
       })
-      setRun({ report, pending: false })
-      onImported()
+      setRun({ ...IDLE, report: answer })
+      onImported(table)
     } catch (err) {
       setRun({
+        ...IDLE,
         error: controller.signal.aborted
           ? new Error("The import was cancelled. Nothing was written.")
           : err instanceof Error
             ? err
             : new Error(String(err)),
-        pending: false,
       })
     } finally {
       flight.current = null
@@ -234,7 +314,7 @@ export function ImportDialog({
   }
 
   const start = () => {
-    if (settings.mode !== "replace") {
+    if (!detail || settings.mode !== "replace") {
       void send()
       return
     }
@@ -269,17 +349,22 @@ export function ImportDialog({
     })
   }
 
-  const report = plan.report
-  const columns = report?.columns ?? []
-  const targets = detail.columns.filter((column) => !column.generated)
-  const mapped = columns.filter((column) => column.target !== "").length
+  const targets = detail ? detail.columns.filter((column) => !column.generated) : []
+  const targetOf = (source: string, served: string) => (mapping ? (mapping[source] ?? "") : served)
+  const mapped = columns.filter((column) => targetOf(column.source, column.target) !== "").length
   const done = run.report
+  const progress = uploadProgress(run.sent, run.total)
 
-  const pick = (source: string, target: string) => {
+  const pick = (source: string, next: string) => {
     const base =
       mapping ?? Object.fromEntries(columns.map((column) => [column.source, column.target]))
-    setMapping({ ...base, [source]: target === SKIP ? "" : target })
+    setMapping({ ...base, [source]: next === SKIP ? "" : next })
   }
+  const override = (source: string, patch: ColumnOverride) =>
+    setOverrides((held) => ({ ...held, [source]: { ...held[source], ...patch } }))
+
+  const tabular = report?.format === "csv" || report?.format === "tsv" || !report
+  const qualified = `${schema ? `${schema}.` : ""}${table}`
 
   return (
     <>
@@ -287,20 +372,52 @@ export function ImportDialog({
         open={open}
         onOpenChange={close}
         size="xl"
-        title={`Import into ${detail.name}`}
-        description="A file's rows written into this table, previewed first"
+        title={detail ? `Import into ${detail.name}` : "Import a file as a new table"}
+        description={
+          detail
+            ? "A file's rows written into this table, previewed first"
+            : "A table made from a file's columns and filled with its rows, previewed first"
+        }
         footer={
           done ? (
             <Button onClick={() => close(false)}>Done</Button>
           ) : (
             <>
-              <p className="mr-auto min-w-0 text-hint text-muted-foreground">
-                {run.pending
-                  ? "The whole file is being sent. It is one request and one transaction."
-                  : report
-                    ? `${grouped(report.rowsRead)} rows read from the start of the file · ${mapped} of ${columns.length} columns go in`
+              {run.error && !run.pending ? (
+                // Why the import did not happen, beside the button that was
+                // pressed: the body may be scrolled anywhere, and said at its
+                // top the refusal was out of sight with nothing changed on screen.
+                <p
+                  role="alert"
+                  className="mr-auto min-w-0 basis-full text-hint break-words text-destructive sm:flex-1 sm:basis-0"
+                >
+                  {run.error.message}
+                </p>
+              ) : run.pending ? (
+                <div className="mr-auto min-w-0 basis-full space-y-1.5 sm:flex-1 sm:basis-0">
+                  <p className="numeric text-hint text-muted-foreground" aria-live="polite">
+                    {progress.sending ? (
+                      progress.words
+                    ) : (
+                      <TextShimmer>{progress.words}</TextShimmer>
+                    )}
+                  </p>
+                  <Meter
+                    size="thin"
+                    value={progress.percent}
+                    label="How much of the file has been sent"
+                    className="max-w-64"
+                  />
+                </div>
+              ) : (
+                <p className="mr-auto min-w-0 text-hint text-muted-foreground">
+                  {report
+                    ? detail
+                      ? `${grouped(report.rowsRead)} rows read from the start of the file · ${mapped} of ${columns.length} columns go in`
+                      : `${grouped(report.rowsRead)} rows read from the start of the file · a table of ${mapped} ${mapped === 1 ? "column" : "columns"} is made`
                     : "Nothing is written until Import is pressed."}
-              </p>
+                </p>
+              )}
               {run.pending ? (
                 <Button variant="outline" onClick={() => flight.current?.abort()}>
                   Cancel the import
@@ -311,33 +428,56 @@ export function ImportDialog({
                 </Button>
               )}
               <Button
-                disabled={!file || !report || mapped === 0 || plan.pending || Boolean(plan.error)}
+                disabled={
+                  !file || !report || !named || mapped === 0 || plan.pending || Boolean(plan.error)
+                }
                 pending={run.pending}
                 onClick={start}
               >
-                Import
+                {detail ? "Import" : "Create and import"}
               </Button>
             </>
           )
         }
       >
-        <div className="grid gap-5">
+        {/* While the file is on its way the form is what was sent: it is not edited under it. */}
+        <div className="grid gap-5" inert={run.pending || undefined}>
           <div className="flex min-w-0 items-center gap-3">
             <EngineMark engine={engine} size="sm" />
             <div className="min-w-0 space-y-0.5">
-              <p className="truncate font-mono text-body font-medium">
-                {detail.schema ? `${detail.schema}.` : ""}
-                {detail.name}
+              <p className="flex min-w-0 items-center gap-2 font-mono text-body font-medium">
+                <span className="min-w-0 truncate">
+                  {detail || table ? qualified : `A new ${engine.nouns.object}`}
+                </span>
+                {!detail && <Tag className="shrink-0">not made yet</Tag>}
               </p>
               <FormFacts>
-                <FormFact label="Columns">{detail.columns.length}</FormFact>
-                {detail.estimatedRows >= 0 && (
-                  <FormFact label="Rows">about {grouped(detail.estimatedRows)}</FormFact>
-                )}
-                {detail.primaryKey.length > 0 && (
-                  <FormFact label="Key" mono>
-                    {detail.primaryKey.join(", ")}
-                  </FormFact>
+                {detail ? (
+                  <>
+                    <FormFact label="Columns">{detail.columns.length}</FormFact>
+                    {detail.estimatedRows >= 0 && (
+                      <FormFact label="Rows">about {grouped(detail.estimatedRows)}</FormFact>
+                    )}
+                    {detail.primaryKey.length > 0 && (
+                      <FormFact label="Key" mono>
+                        {detail.primaryKey.join(", ")}
+                      </FormFact>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {schema && (
+                      <FormFact
+                        label={engine.nouns.container.replace(/^./, (first) => first.toUpperCase())}
+                        mono
+                      >
+                        {schema}
+                      </FormFact>
+                    )}
+                    <FormFact label="Columns">
+                      {report ? `${mapped} from the file` : "read from the file"}
+                    </FormFact>
+                  </>
                 )}
               </FormFacts>
             </div>
@@ -355,11 +495,7 @@ export function ImportDialog({
                 onChange={(event) => {
                   const next = event.currentTarget.files?.[0] ?? null
                   event.currentTarget.value = ""
-                  if (!next) return
-                  setFile(next)
-                  setMapping(null)
-                  setPlan({ pending: true })
-                  setRun({ pending: false })
+                  if (next) take(next)
                 }}
               />
               {!file ? (
@@ -371,9 +507,7 @@ export function ImportDialog({
                   onDrop={(event) => {
                     event.preventDefault()
                     const dropped = event.dataTransfer.files[0]
-                    if (!dropped) return
-                    setFile(dropped)
-                    setPlan({ pending: true })
+                    if (dropped) take(dropped)
                   }}
                 >
                   <CloudUpload className="size-5 text-muted-foreground" />
@@ -401,7 +535,28 @@ export function ImportDialog({
                 </div>
               )}
 
-              {run.error && <ErrorState error={run.error} />}
+              {file && !detail && (
+                <Field
+                  label={`Name of the new ${engine.nouns.object}`}
+                  htmlFor="import-new-name"
+                  error={
+                    taken
+                      ? `${schema || `This ${engine.nouns.container}`} already has a ${engine.nouns.object} called ${table}. Open it and import into it instead.`
+                      : undefined
+                  }
+                >
+                  <Input
+                    id="import-new-name"
+                    value={name}
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder="orders_2026"
+                    aria-invalid={taken || undefined}
+                    className="max-w-sm font-mono sm:h-8"
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </Field>
+              )}
 
               {file && (
                 <>
@@ -455,7 +610,7 @@ export function ImportDialog({
                         />
                       </Field>
                     </FieldRow>
-                    {(report?.format === "csv" || report?.format === "tsv" || !report) && (
+                    {tabular && (
                       <FieldRow columns={3}>
                         <Field label="Separator" hint="One character. Blank = the format's own.">
                           <Input
@@ -472,12 +627,13 @@ export function ImportDialog({
                       </FieldRow>
                     )}
                     <OptionList>
-                      {(report?.format === "csv" || report?.format === "tsv" || !report) && (
+                      {tabular && (
                         <OptionRow
                           title="The first line names the columns"
                           checked={settings.header}
                           onCheckedChange={(header) => {
                             setMapping(null)
+                            setOverrides({})
                             setSettings((held) => ({ ...held, header }))
                           }}
                         />
@@ -492,7 +648,7 @@ export function ImportDialog({
                     </OptionList>
                   </FormSection>
 
-                  {modes.length > 1 && (
+                  {modes.length > 1 && detail && (
                     <FormSection title="What happens to the rows already there">
                       <Segments
                         label="Import mode"
@@ -501,11 +657,45 @@ export function ImportDialog({
                         onChange={(mode) => setSettings((held) => ({ ...held, mode }))}
                       />
                       {settings.mode === "upsert" && (
-                        <FormNote>
-                          A row of the file whose{" "}
-                          {report?.key?.join(", ") || detail.primaryKey.join(", ")} is already in
-                          the table updates that row; the others are added.
-                        </FormNote>
+                        <>
+                          {keys.length > 1 && (
+                            <Field label="A row of the file is the same row when it has the same">
+                              <Select
+                                value={String(Math.min(settings.key, keys.length - 1))}
+                                onValueChange={(next) =>
+                                  setSettings((held) => ({ ...held, key: Number(next) }))
+                                }
+                              >
+                                <SelectTrigger
+                                  size="sm"
+                                  aria-label="What rows are matched by"
+                                  className="w-full max-w-sm"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {keys.map((key, at) => (
+                                    <SelectItem key={key.label} value={String(at)}>
+                                      <span className="font-mono text-xs">
+                                        {key.columns.join(", ")}
+                                      </span>
+                                      <span className="text-hint text-muted-foreground">
+                                        {key.label}
+                                      </span>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </Field>
+                          )}
+                          <FormNote>
+                            A row of the file whose{" "}
+                            <span className="font-mono">
+                              {(report?.key ?? matchedBy?.columns ?? []).join(", ")}
+                            </span>{" "}
+                            is already in the table updates that row; the others are added.
+                          </FormNote>
+                        </>
                       )}
                       {settings.mode === "replace" && (
                         <FormNote tone="danger">
@@ -515,14 +705,22 @@ export function ImportDialog({
                     </FormSection>
                   )}
 
-                  {plan.error && <ErrorState error={plan.error} />}
+                  {plan.error && named && <ErrorState error={plan.error} />}
                   {report?.warnings.map((warning) => (
                     <Notice key={warning} tone="warning" title={warning} />
                   ))}
 
-                  {report ? (
+                  {!named ? (
+                    <p className="py-4 text-center text-body text-muted-foreground">
+                      {taken
+                        ? "Give the table a name that is free."
+                        : "Name the table to see what would be made of the file."}
+                    </p>
+                  ) : report ? (
                     <>
-                      <FormSection title="Which column goes where">
+                      <FormSection
+                        title={detail ? "Which column goes where" : "The columns it is made of"}
+                      >
                         {/* Framed: a table owns its sideways scroll (§2). */}
                         <div
                           className={cn(
@@ -535,60 +733,110 @@ export function ImportDialog({
                               <TableRow className="hover:bg-transparent">
                                 <TableHead className="h-8">In the file</TableHead>
                                 <TableHead className="h-8">Looks like</TableHead>
-                                <TableHead className="h-8">Goes to</TableHead>
+                                <TableHead className="h-8">
+                                  {detail ? "Goes to" : "Column"}
+                                </TableHead>
+                                {!detail && <TableHead className="h-8">Type</TableHead>}
+                                {!detail && <TableHead className="h-8">Key</TableHead>}
                                 <TableHead className="h-8">Examples</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {columns.map((column) => (
-                                <TableRow
-                                  key={`${column.index}:${column.source}`}
-                                  className="hover:bg-transparent"
-                                >
-                                  <TableCell className="py-1.5 font-mono font-medium">
-                                    {column.source}
-                                  </TableCell>
-                                  <TableCell className="py-1.5 text-muted-foreground">
-                                    {column.inferred}
-                                  </TableCell>
-                                  <TableCell className="py-1.5">
-                                    <Select
-                                      value={column.target || SKIP}
-                                      onValueChange={(next) => pick(column.source, next)}
-                                    >
-                                      <SelectTrigger
-                                        size="sm"
-                                        aria-label={`Where ${column.source} goes`}
-                                        className="h-7 w-48 font-mono text-xs sm:data-[size=sm]:h-7"
-                                      >
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value={SKIP} className="text-xs italic">
-                                          Not imported
-                                        </SelectItem>
-                                        {targets.map((target) => (
-                                          <SelectItem
-                                            key={target.name}
-                                            value={target.name}
-                                            className="font-mono text-xs"
+                              {columns.map((column) => {
+                                const goes = targetOf(column.source, column.target)
+                                const mine = overrides[column.source]
+                                return (
+                                  <TableRow
+                                    key={`${column.index}:${column.source}`}
+                                    className="hover:bg-transparent"
+                                  >
+                                    <TableCell className="py-1.5 font-mono font-medium">
+                                      {column.source}
+                                    </TableCell>
+                                    <TableCell className="py-1.5 text-muted-foreground">
+                                      {column.inferred}
+                                    </TableCell>
+                                    <TableCell className="py-1.5">
+                                      {detail ? (
+                                        <Select
+                                          value={goes || SKIP}
+                                          onValueChange={(next) => pick(column.source, next)}
+                                        >
+                                          <SelectTrigger
+                                            size="sm"
+                                            aria-label={`Where ${column.source} goes`}
+                                            className="h-7 w-48 font-mono text-xs sm:data-[size=sm]:h-7"
                                           >
-                                            {target.name}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                    {column.warning && (
-                                      <p className="mt-1 max-w-64 text-hint whitespace-normal text-warning">
-                                        {column.warning}
-                                      </p>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value={SKIP} className="text-xs italic">
+                                              Not imported
+                                            </SelectItem>
+                                            {targets.map((entry) => (
+                                              <SelectItem
+                                                key={entry.name}
+                                                value={entry.name}
+                                                className="font-mono text-xs"
+                                              >
+                                                {entry.name}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      ) : (
+                                        <Input
+                                          value={goes}
+                                          aria-label={`The column made of ${column.source}`}
+                                          placeholder="Left out"
+                                          spellCheck={false}
+                                          autoComplete="off"
+                                          className="h-8 w-44 font-mono placeholder:italic sm:h-7 sm:text-xs"
+                                          onChange={(event) =>
+                                            pick(column.source, event.target.value)
+                                          }
+                                        />
+                                      )}
+                                      {column.warning && (
+                                        <p className="mt-1 max-w-64 text-hint whitespace-normal text-warning">
+                                          {column.warning}
+                                        </p>
+                                      )}
+                                    </TableCell>
+                                    {!detail && (
+                                      <TableCell className="py-1.5">
+                                        <Input
+                                          value={mine?.type ?? ""}
+                                          aria-label={`The type of ${goes || column.source}`}
+                                          placeholder={column.targetType ?? ""}
+                                          disabled={goes === ""}
+                                          spellCheck={false}
+                                          autoComplete="off"
+                                          className="h-8 w-36 font-mono sm:h-7 sm:text-xs"
+                                          onChange={(event) =>
+                                            override(column.source, { type: event.target.value })
+                                          }
+                                        />
+                                      </TableCell>
                                     )}
-                                  </TableCell>
-                                  <TableCell className="max-w-72 truncate py-1.5 font-mono text-muted-foreground">
-                                    {column.examples.join(" · ")}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
+                                    {!detail && (
+                                      <TableCell className="py-1.5">
+                                        <Checkbox
+                                          checked={mine?.key === true}
+                                          disabled={goes === ""}
+                                          aria-label={`${goes || column.source} is part of the primary key`}
+                                          onCheckedChange={(checked) =>
+                                            override(column.source, { key: checked === true })
+                                          }
+                                        />
+                                      </TableCell>
+                                    )}
+                                    <TableCell className="max-w-72 truncate py-1.5 font-mono text-muted-foreground">
+                                      {column.examples.join(" · ")}
+                                    </TableCell>
+                                  </TableRow>
+                                )
+                              })}
                             </TableBody>
                           </Table>
                         </div>
@@ -600,9 +848,9 @@ export function ImportDialog({
                             <Table containerClassName="max-h-64">
                               <TableHeader>
                                 <TableRow className="hover:bg-transparent">
-                                  {report.preview.columns.map((name) => (
-                                    <TableHead key={name} className="h-8 font-mono">
-                                      {name}
+                                  {report.preview.columns.map((column) => (
+                                    <TableHead key={column} className="h-8 font-mono">
+                                      {column}
                                     </TableHead>
                                   ))}
                                 </TableRow>
@@ -636,6 +884,13 @@ export function ImportDialog({
                         </FormSection>
                       )}
 
+                      {report.create && (
+                        <Statement
+                          label="The table is made with"
+                          sql={report.create.statement}
+                          placeholder=""
+                        />
+                      )}
                       <Statement
                         label="One row is written with"
                         sql={report.statement}
@@ -665,6 +920,7 @@ function ImportResult({ report }: { report: DbImportReport }) {
   return (
     <div className="grid gap-4">
       <FormFacts>
+        {report.create?.created && <FormFact label="Table">created</FormFact>}
         <FormFact label="Read">{grouped(report.rowsRead)} rows</FormFact>
         <FormFact label="Added">{grouped(report.inserted)}</FormFact>
         {report.mode === "upsert" && <FormFact label="Updated">{grouped(report.updated)}</FormFact>}

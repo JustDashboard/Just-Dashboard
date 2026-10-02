@@ -2,7 +2,14 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { ChevronDown, MoreHorizontal, Plus, RefreshClockwise, Table } from "@/components/icons"
+import {
+  ChevronDown,
+  CloudUpload,
+  MoreHorizontal,
+  Plus,
+  RefreshClockwise,
+  Table,
+} from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { hueFor, LANES } from "@/lib/hue"
 import { useAuth } from "@/hooks/use-auth"
@@ -29,6 +36,7 @@ import {
   ROW_OBJECT_KINDS,
   type RowObjectKind,
 } from "@/components/database/data/kinds"
+import { ACTIONS_OF, actionsOf } from "@/components/database/data/table-verbs"
 import type { DbCatalog, DbCatalogObject, DbCatalogSchema } from "@/components/database/data/types"
 import { compactCount, grouped } from "@/components/database/data/view"
 
@@ -59,7 +67,8 @@ export function TableRail({
   current,
   staged,
   verbsFor,
-  errorBeside = false,
+  onImportNew,
+  saidBeside = false,
   className,
 }: {
   catalog: PollState<DbCatalog>
@@ -68,8 +77,13 @@ export function TableRail({
   /** Tables holding unapplied changes, by `tableKey`, with how many. */
   staged: Readonly<Record<string, number>>
   verbsFor: (object: DbCatalogObject, kind: RowObjectKind) => Verb[]
-  /** The page says beside the rail why the list could not be read: the rail does not say it twice. */
-  errorBeside?: boolean
+  /** Opens "import a file as a new table"; absent where the role or the engine cannot. */
+  onImportNew?: () => void
+  /**
+   * The page says beside the rail what is wrong — the list could not be read,
+   * the schema is not there — with the way on: the rail does not say it twice.
+   */
+  saidBeside?: boolean
   className?: string
 }) {
   const { engine, href, readOnly } = useDatabase()
@@ -101,6 +115,7 @@ export function TableRail({
 
   return (
     <nav
+      data-slot="table-rail"
       aria-label={`${engine.nouns.objects} of this ${engine.nouns.container}`}
       className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}
     >
@@ -112,16 +127,25 @@ export function TableRail({
             {engine.nouns.objects}
           </span>
         )}
-        {canCreate && (
-          <IconAction label={`New ${engine.nouns.object}`} className="size-7" asChild>
+        {canCreate && known && (
+          <IconAction label={`New ${engine.nouns.object}`} className="size-7 max-sm:size-8" asChild>
             <Link href={newTable}>
               <Plus />
             </Link>
           </IconAction>
         )}
+        {onImportNew && known && (
+          <IconAction
+            label={`Import a file as a new ${engine.nouns.object}`}
+            className="size-7 max-sm:size-8"
+            onClick={onImportNew}
+          >
+            <CloudUpload />
+          </IconAction>
+        )}
         <IconAction
           label={`Read the ${engine.nouns.objects} again`}
-          className="size-7"
+          className="size-7 max-sm:size-8"
           onClick={catalog.refresh}
         >
           <RefreshClockwise />
@@ -140,7 +164,7 @@ export function TableRail({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {!data && catalog.error ? (
-          errorBeside ? (
+          saidBeside ? (
             <EmptyNote className="px-2 py-6">
               The {engine.nouns.objects} could not be read.
             </EmptyNote>
@@ -150,19 +174,23 @@ export function TableRail({
         ) : !data ? (
           <RailSkeleton />
         ) : !known ? (
-          <EmptyState
-            className="mt-2 border-0 px-2 py-8"
-            icon={Table}
-            title={`No ${engine.nouns.container} called ${schema}`}
-            description={`This connection has no such ${engine.nouns.container}. It may have been dropped since the link was made.`}
-            action={
-              <Button size="sm" variant="outline" asChild>
-                <Link href={href("data", { schema: data.defaultSchema || null, table: null })}>
-                  Open {data.defaultSchema || `the default ${engine.nouns.container}`}
-                </Link>
-              </Button>
-            }
-          />
+          saidBeside ? (
+            <EmptyNote className="px-2 py-6">Nothing is listed.</EmptyNote>
+          ) : (
+            <EmptyState
+              className="mt-2 border-0 px-2 py-8"
+              icon={Table}
+              title={`No ${engine.nouns.container} called ${schema}`}
+              description={`This connection has no such ${engine.nouns.container}. It may have been dropped since the link was made.`}
+              action={
+                <Button size="sm" variant="outline" asChild>
+                  <Link href={href("data", { schema: data.defaultSchema || null, table: null })}>
+                    Open {data.defaultSchema || `the default ${engine.nouns.container}`}
+                  </Link>
+                </Button>
+              }
+            />
+          )
         ) : total === 0 ? (
           <EmptyState
             className="mt-2 border-0 px-2 py-8"
@@ -175,12 +203,20 @@ export function TableRail({
             }
             action={
               canCreate && (
-                <Button size="sm" variant="outline" asChild>
-                  <Link href={newTable}>
-                    <Plus />
-                    New {engine.nouns.object}
-                  </Link>
-                </Button>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href={newTable}>
+                      <Plus />
+                      New {engine.nouns.object}
+                    </Link>
+                  </Button>
+                  {onImportNew && (
+                    <Button size="sm" variant="outline" onClick={onImportNew}>
+                      <CloudUpload />
+                      Import a file
+                    </Button>
+                  )}
+                </div>
               )
             }
           />
@@ -252,7 +288,7 @@ function RailGroup({
               key={`${object.schema}.${object.name}`}
               data-current={selected || undefined}
               className={cn(
-                "group flex h-7 items-center rounded-md transition-colors",
+                "group flex h-7 items-center rounded-md transition-colors max-sm:h-9",
                 selected ? "bg-accent" : "hover:bg-row-hover",
               )}
             >
@@ -260,7 +296,7 @@ function RailGroup({
                 href={href("data", { schema: object.schema, table: object.name })}
                 aria-current={selected ? "page" : undefined}
                 title={object.comment || object.detail || undefined}
-                className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md pr-1 pl-2 focus-ring-inset"
+                className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pr-1 pl-2 focus-ring-inset"
               >
                 <KindGlyph kind={kind} />
                 <span className="min-w-0 flex-1 truncate font-mono text-xs">{object.name}</span>
@@ -287,7 +323,8 @@ function RailGroup({
                     size="icon-xs"
                     variant="ghost"
                     aria-label={`Actions for ${object.name}`}
-                    className={cn("mr-0.5 shrink-0", rowReveal())}
+                    {...{ [ACTIONS_OF]: actionsOf(object) }}
+                    className={cn("mr-0.5 shrink-0 max-sm:size-8", rowReveal())}
                   >
                     <MoreHorizontal className="size-3.5" />
                   </Button>
