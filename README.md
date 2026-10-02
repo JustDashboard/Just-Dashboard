@@ -218,14 +218,6 @@ health checks and runtime limits remain editable before the first deployment.
 
 <!-- LEAD: docs/databases.png above still shows the page before the rebuild; it is re-shot for this
      release, and the alt text goes with the new picture. -->
-<!-- LEAD-PAGES: a database's Access, Backups and Settings pages are stubs in this tree
-     (frontend/src/components/database/ops/{access,backups,settings}.tsx), so nothing below describes
-     them: a dump is taken from the control center or a database's home, and nothing yet downloads,
-     uploads or restores one from this section. When the pages merge, read them and add one sentence
-     to the second paragraph. What the backend already holds them to: a dump can be downloaded,
-     uploaded from elsewhere and restored into the same database, after a safety dump on request, or
-     into a new one where the engine has `restoreNewDatabase` (not SQLite, ClickHouse or Oracle);
-     accounts and grants exist where the engine has `roles` (not SQLite or Oracle). -->
 Every database on the server, not only the connected ones: containers running or stopped, servers
 installed on the machine and SQLite files on disk are found and listed, each saying what keeps it
 from being opened, and whatever needs attention carries its fix. PostgreSQL, MySQL and MariaDB,
@@ -239,7 +231,10 @@ command before it is sent, and memory analysis; MongoDB documents, an aggregatio
 analysis and indexes.
 
 A connection marked **protected** refuses every change to its data or schema, for every role;
-reading, taking a dump and stopping a runaway query still work. A backup is a dump taken as a job.
+reading, taking a dump and stopping a runaway query still work. A backup is a dump taken as a job;
+it can be downloaded, uploaded from elsewhere and restored into the same database — after a safety
+dump, if asked — or into a new one where the engine can make one. Accounts and their grants, the
+server's parameters and where a database is reachable from are edited on its own pages.
 `readonly` reads; `limited` also edits rows, runs statements that destroy nothing, imports, takes
 backups and starts a stopped server; deleting, dropping, stopping, restoring, connecting a database
 and changing accounts or settings are `admin`'s, and deleting a whole database asks for its name.
