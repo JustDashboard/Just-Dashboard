@@ -103,9 +103,9 @@ test("editing a Discord channel keeps its webhook hidden until Replace delivery 
 })
 
 /**
- * The readings, the cards and the channel's sheet all answer one question —
- * are the messages arriving — from the list's own last delivery and strip and
- * from each channel's log.
+ * The cards, the recent messages and the channel's sheet all answer one
+ * question — are the messages arriving — from the list's own last delivery
+ * and strip and from each channel's log.
  */
 test("each channel says how its last message went, and its sheet reads every attempt", async ({
   page,
@@ -192,27 +192,51 @@ test("each channel says how its last message went, and its sheet reads every att
   })
 
   await page.goto("/deploy/notifications")
-  const tiles = page.locator("[data-slot=stat-tile]")
-  await expect(tiles).toHaveCount(4)
-  await expect(tiles.nth(0)).toContainText("1 paused")
-  await expect(tiles.nth(1)).toContainText("1")
-  // One message given up on in the last day, one still being retried.
-  await expect(tiles.nth(2).locator(".text-destructive")).toHaveText("1")
-  await expect(tiles.nth(2)).toContainText("Status hook · server error")
-  await expect(tiles.nth(2)).toContainText("1 retrying")
-  await expect(tiles.nth(3)).toContainText("Run failed to Status hook")
+  // The page has no tiles: its figures stand where the things they count are.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  const channels = page.locator("[data-slot=panel]").filter({
+    has: page.getByRole("heading", { name: "Channels", exact: true }),
+  })
+  await expect(channels.locator("[data-slot=panel-header]")).toContainText("2 channels · 1 paused")
+
+  // The messages, newest first, each one row whatever number of attempts it
+  // took, under what the last day came to: one delivered, one given up on,
+  // one still being retried.
+  const recent = page.locator("[data-slot=panel]").filter({
+    has: page.getByRole("heading", { name: "Recent messages", exact: true }),
+  })
+  const counts = recent.locator("[data-slot=panel-header]")
+  await expect(counts).toContainText("1 delivered · 1 failed · 1 retrying · last 24h")
+  await expect(counts.locator(".text-destructive")).toHaveText("1")
+  const messages = page.getByRole("list", { name: "Recent messages" }).getByRole("listitem")
+  await expect(messages).toHaveCount(4)
+  await expect(messages.nth(0)).toContainText("Run started · run 41")
+  await expect(messages.nth(0)).toContainText("Sending")
+  await expect(messages.nth(1)).toContainText("Release live · run 39")
+  await expect(messages.nth(1)).toContainText(/retrying in/)
+  await expect(messages.nth(2)).toContainText("Run failed · run 40")
+  await expect(messages.nth(2)).toContainText("Status hook · 2h ago · attempt 2 · server error")
+  await expect(messages.nth(2).getByText("Failed", { exact: true })).toBeVisible()
+  await expect(messages.nth(3)).toContainText("Test message")
 
   // The picture is a picture, not a second list of the same channels.
-  await expect(page.getByRole("group", { name: "Where deployment events go" })).toBeVisible()
-  await expect(page.getByRole("listitem").filter({ hasText: "Status hook" })).toHaveCount(1)
+  const picture = page.getByRole("group", { name: "Where deployment events go" })
+  await expect(picture).toBeVisible()
+  await expect(picture.getByRole("listitem")).toHaveCount(0)
 
   const cards = page.getByRole("list", { name: "Notification channels" }).getByRole("listitem")
+  await expect(cards).toHaveCount(2)
   // The channel that gave up on its last message comes first.
   await expect(cards.first()).toContainText("Status hook")
   const hook = cards.filter({ hasText: "Status hook" })
   await expect(hook.getByText(/^failed 2h/)).toBeVisible()
   await expect(hook.getByRole("img", { name: "Last 2 deliveries: 1 failed" })).toBeVisible()
   await expect(hook).toContainText("Started, Failed")
+  // One line: the verbs stand on the card's middle, where a second line under
+  // the name had left them level with the name over an empty corner.
+  const card = (await hook.boundingBox())!
+  const verb = (await hook.getByRole("button", { name: "Send test", exact: true }).boundingBox())!
+  expect(Math.abs(card.y + card.height / 2 - (verb.y + verb.height / 2))).toBeLessThanOrEqual(1)
   // A paused channel refuses every delivery, so the test is not offered.
   const pings = cards.filter({ hasText: "Release pings" })
   await expect(pings.getByText("Paused", { exact: true })).toBeVisible()

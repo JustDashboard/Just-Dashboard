@@ -197,8 +197,8 @@ tokens; see `docs/internal/frontend/design-system.md` §11):
   only — bound to the recorded website address, one host, one megabyte, remembered for an hour
   (`project-mark.tsx`, `handlers_deploy_favicon.go`).
 - **Notifications:** the projects on the left, this server in the middle and a mark per channel on
-  the right, with dashed rings an administrator presses to add a kind not yet set up; the rows under
-  it are the list.
+  the right, with dashed rings an administrator presses to add a kind not yet set up, drawn on the
+  page's own ground over the dot grid rather than in a frame; the cards under it are the list.
 - **Projects:** cards land one after another, a card whose run is in progress carries a light
   around its frame and a seven-dot release path beside its state; the in-progress rows carry the
   same dots. **New project:** "Start with something ready" is a bento of the five other ways in.
@@ -400,10 +400,11 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   drawn as the host it signs in to, naming the projects that read through it; its sheet opens on
   the four kinds as cards or, when editing, on the credential, draws the host's product as it is
   typed, and names a pasted token by its prefix or a key by its first line, warning on a mismatch
-  or a public key. **Notifications** opens on whether messages arrive — channels, delivered and
-  failed in the last day, the last message — draws each channel as its service in the picture and
-  on its card with its last fourteen attempts, orders failing channels first, and opens a channel's
-  own sheet of attempts grouped by day, each linked to the run it announced. A signed webhook's
+  or a public key. **Notifications** opens on the picture of where an outcome goes, draws each
+  channel as its service there and on its card — one line, with how its last message went and its
+  last fourteen attempts — orders failing channels first, lists the recent messages across every
+  channel beside the cards under what was delivered and what failed in the last day, and opens a
+  channel's own sheet of attempts grouped by day, each linked to the run it announced. A signed webhook's
   secret is shown once, in the sheet that made it, with the command that verifies a signature.
 - **A project** opens on the identity line the host Overview does: its favicon or product, the
   address with the certificate's state in the lock's colour, source, branch and runtime on one

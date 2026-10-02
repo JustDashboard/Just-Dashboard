@@ -77,10 +77,8 @@ taking a frame:
   service, a webhook, a schedule, a variable, a linked database) a lit card — a `ChoiceRow` in a
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
   edge (what keeps a frame there is, first, a *picture*, because a picture needs an edge to read as
-  one thing: the GitHub App on Credentials — the accounts that
-  installed it, the App and this server — where an outcome goes on Notifications — the projects
-  on the left, this server in the middle, a mark per channel on the right, dashed rings for the
-  kinds not yet added — and four on the settings pages, each inside its rail section and drawn through
+  one thing: the GitHub App on Credentials — the accounts that installed it, the App and this
+  server — and four on the settings pages, each inside its rail section and drawn through
   `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`:
   General's automatic deployment (the repository, the watch, the deploys), Runtime's where it
   listens (the domain, this server, the container, with an amber *Anywhere* node when the port is
@@ -99,7 +97,12 @@ taking a frame:
   (`components/deploy/wire.tsx`) draws one more picture that sits *unframed* because it is inside a
   block that already has its edge: the way a request reaches a project on the overview — source,
   live release, runtime, domains, each drawn as its product — in the column beside the preview; each
-  mark paints the ground under its tint so the line never shows through it. The preview beside it is the
+  mark paints the ground under its tint so the line never shows through it. And one that is
+  unframed because it is the page's opening rather than a block on it: where an outcome goes on
+  Notifications — the projects on the left, this server in the middle, a mark per channel on the
+  right, dashed rings for the kinds not yet added — stands on the page's own ground over
+  `wire-grid`, the dot grid that fades out towards its edges, which gives the picture a middle
+  where a border gave it an outline. The preview beside it is the
   Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
   and the two shells, Docker's and a game server's, are `Pane`s and a game's raw settings file is
   a `Well`, for §7's reasons; and the Danger zone is one `border-rule-danger` panel, because
@@ -789,7 +792,7 @@ above:
   draw down beside them; `ChoiceRow` given its `index` staggers every lit list the same way, capped
   at twelve so a long list does not spend a second arriving, and `ChoiceCard` staggers a grid by its
   `index`, a beat each and uncapped. `NumberTicker` counts a figure up to its value once it lands:
-  the fleet's live and build-slot figures, the Credentials and Notifications readings, the
+  the fleet's live and build-slot figures, the Credentials readings, the
   Overview's requests, the delivery insights, the run page's traffic after activation, Automation's
   revisions awaiting review and alerts firing, the live usage tiles, and the readings on
   Packages, System users and the audit log. A figure that follows a
@@ -1564,9 +1567,8 @@ The passes, in order. Each one is a diff you can review on its own.
    counts to the chips, with the cards ordered worst first. Credentials opens on how many are held
    and across which hosts, how many a source reads through, how many were never used and when one
    last was; the GitHub App's state moved out of the tiles into its own section, where its header
-   and its setup path already said it. Notifications opens on whether messages are arriving — a
-   message retried until it went out counts once, as delivered. The Logs page's readings each carry
-   their last hour, as the host Overview's do.
+   and its setup path already said it. The Logs page's readings each carry their last hour, as the
+   host Overview's do.
 
    **And the one page with no tiles, which is the shape of the argument for dropping this pass.**
    `/git` had four — repositories, uncommitted, behind, unpushed — and the operator asked for them to
@@ -1580,6 +1582,12 @@ The passes, in order. Each one is a diff you can review on its own.
    Backups took it too: its four readings (jobs, last backup, next backup, stored) each said what
    one job's card says, so the counts went to the Jobs header and the rest to the cards, ordered
    worst first under an attention list of the jobs that failed or went quiet.
+
+   Notifications took it as well. Its four (channels, delivered and failed in the last day, the
+   last message) went to the Channels header, which counts the channels and the paused, and to a
+   list of the recent messages beside the cards: the day's delivered, failed and retrying are the
+   counts in that list's header — a message retried until it went out is one row and counts once,
+   as delivered — and the last message is its first row, naming the run it announced.
 
    The dashboard's own two pages took the same exit in 0.7.0, and the reason generalises: a figure
    on a page you configure is best drawn beside the control that sets it. Version's Installed,
