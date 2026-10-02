@@ -1,25 +1,6 @@
 "use client"
 
-import { useId, useMemo, useState } from "react"
-import { Trash, UserPlus } from "@/components/icons"
-import { del, errorMessage, put } from "@/lib/api"
-import { notify } from "@/lib/toast"
-import { useAuth } from "@/hooks/use-auth"
-import { usePoll } from "@/hooks/use-poll"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { Field, FormFact, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
-import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { Notice } from "@/components/state"
-import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
-import { ChipStrip, FilterChip } from "@/components/tabs"
-import { Tag } from "@/components/tag"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
-import { VerbBar, VerbMenu, type Verb } from "@/components/verbs"
 import { generatePassword } from "@/components/database/connect/rules"
 import {
   CardsSkeleton,
@@ -51,6 +32,23 @@ import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Field, FormFact, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
+import { Trash, UserPlus } from "@/components/icons"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { Notice } from "@/components/state"
+import { ChipStrip, FilterChip } from "@/components/tabs"
+import { Tag } from "@/components/tag"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { VerbBar, VerbMenu, type Verb } from "@/components/verbs"
+import { useAuth } from "@/hooks/use-auth"
+import { usePoll } from "@/hooks/use-poll"
+import { del, errorMessage, put } from "@/lib/api"
+import { notify } from "@/lib/toast"
+import { useId, useMemo, useState } from "react"
 
 type Show = "" | "enabled" | "unrestricted" | "open"
 
@@ -74,7 +72,7 @@ function tagsOf(user: RedisACLUser) {
  * A key–value server's ACL users: who may connect, and the rule each is held
  * to — which commands, on which keys, on which channels.
  *
- * The readings narrow the list: every user, the ones switched on, the ones
+ * List filters select every user, the ones switched on, the ones
  * held to nothing, the ones that accept any password. A user opens in a panel
  * with its rule as the server holds it and the form that changes it; only the
  * part of the rule that was edited is sent.
@@ -117,7 +115,6 @@ export function RedisAccess() {
       (show === "unrestricted" && user.unrestricted) ||
       (show === "open" && user.noPassword && user.enabled),
   )
-  const open = users.filter((user) => user.noPassword && user.enabled).length
 
   if (down) {
     return (
@@ -127,38 +124,6 @@ export function RedisAccess() {
     )
   }
 
-  const tile = (
-    key: Show,
-    label: string,
-    value: number,
-    hint: string,
-    name: string,
-    warn = false,
-  ) => (
-    <StatButton
-      label={name}
-      pressed={key !== "" && show === key}
-      onClick={() => select({ show: show === key || key === "" ? null : key })}
-    >
-      <StatTile
-        className="h-full transition-colors group-hover:bg-row-hover"
-        label={label}
-        tone={data && warn && value > 0 ? "warning" : "default"}
-        value={
-          data ? (
-            <span key="value" className="animate-rise">
-              {value}
-            </span>
-          ) : acl.error ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <Skeleton className="my-1 h-6 w-12" />
-          )
-        }
-        hint={data ? hint : acl.error ? "could not be read" : undefined}
-      />
-    </StatButton>
-  )
   const beside = width >= BESIDE_FROM
   const dropRequest = (user: RedisACLUser, after?: () => void): ConfirmRequest => ({
     title: "Delete user",
@@ -187,32 +152,6 @@ export function RedisAccess() {
 
   return (
     <SectionFrame section="access">
-      <StatGrid columns={4} dense role="group" aria-label="Users at a glance">
-        {tile("", "Users", users.length, "in the server's ACL", "Every user")}
-        {tile(
-          "enabled",
-          "Switched on",
-          users.filter((user) => user.enabled).length,
-          "may connect",
-          "Only users that are switched on",
-        )}
-        {tile(
-          "unrestricted",
-          "Unrestricted",
-          users.filter((user) => user.unrestricted).length,
-          "every command on every key",
-          "Only users held to nothing",
-        )}
-        {tile(
-          "open",
-          "Any password",
-          open,
-          open > 0 ? "need no password" : "none goes without one",
-          "Only users that accept any password",
-          true,
-        )}
-      </StatGrid>
-
       <Panel plain aria-label="Users" ref={frame}>
         <PanelHeader
           title="Users"
@@ -229,6 +168,24 @@ export function RedisAccess() {
             </>
           }
         />
+        <ChipStrip role="group" aria-label="Filter accounts" className="px-1 py-2">
+          {(
+            [
+              ["", "All users"],
+              ["enabled", "Switched on"],
+              ["unrestricted", "Unrestricted"],
+              ["open", "Any password"],
+            ] as const
+          ).map(([key, label]) => (
+            <FilterChip
+              key={key}
+              selected={show === key}
+              onClick={() => select({ show: key || null })}
+            >
+              {label}
+            </FilterChip>
+          ))}
+        </ChipStrip>
         <PanelBody>
           {!data ? (
             acl.error ? (

@@ -489,6 +489,21 @@ async function mockHome(
     const key = `${method} ${match[1]}${match[2]}`
     seen.push(key)
     if (method !== "GET") sent.push({ request: key, body: route.request().postDataJSON() })
+    if (method === "GET" && match[2] === "/stats/history" && !Object.hasOwn(table, key)) {
+      const saved = table[`GET ${match[1]}/stats`]
+      if (saved === undefined) return route.fulfill({ json: { samples: [] } })
+      const samples = []
+      const call = calls.get(key) ?? 0
+      calls.set(key, call + 1)
+      for (let index = 0; index < 3; index++) {
+        const value = await (typeof saved === "function"
+          ? (saved as (call: number) => unknown)(call * 3 + index)
+          : saved)
+        if (isReply(value)) return route.fulfill({ status: value.status, json: value.body })
+        samples.push({ at: Date.parse(NOW) - 60_000 + index * 5_000, stats: value, gap: false })
+      }
+      return route.fulfill({ json: { samples, everySeconds: 30, retentionHours: 168 } })
+    }
     if (!Object.hasOwn(table, key)) return route.fallback()
     const call = calls.get(key) ?? 0
     calls.set(key, call + 1)
@@ -512,18 +527,10 @@ async function holdTime(page: Page) {
 }
 
 /** Lets time pass on the page: by default, as far as the next reading. */
-const tick = (page: Page, ms = 5_000) => page.clock.runFor(ms)
+const tick = (page: Page, ms = 30_000) => page.clock.runFor(ms)
 
 const block = (page: Page, name: string) => page.getByRole("region", { name, exact: true })
-const tile = (page: Page, label: string) =>
-  page.locator("[data-slot=stat-tile]").filter({
-    has: page.locator("p.eyebrow").getByText(label, { exact: true }),
-  })
-const tiles = (page: Page) =>
-  page
-    .locator("[data-slot=stat-tile] p.eyebrow")
-    .evaluateAll((labels) => labels.map((label) => label.textContent?.trim()))
-/** What a block's ranked rows are called aloud, in order. */
+
 const names = (scope: ReturnType<typeof block>) =>
   scope
     .locator("[data-slot=bar-list] button")
@@ -588,7 +595,9 @@ const STOPPED = {
 
 // ---------------------------------------------------------------------------
 
-test("a SQL database's home is its figures, read off the server", async ({ page }) => {
+test("a SQL database's home keeps its identity and actions without metric cards", async ({
+  page,
+}) => {
   await holdTime(page)
   const home = await mockHome(page, {
     summaries: { 1: { ...IN_DOCKER, lastBackup: DUMP.takenAt } },
@@ -609,42 +618,25 @@ test("a SQL database's home is its figures, read off the server", async ({ page 
     "href",
     "/databases/1/query",
   )
-
-  await expect
-    .poll(() => tiles(page))
-    .toEqual(["Sessions", "Transactions", "Cache hit", "Size", "Tables", "Last backup"])
-  await expect(tile(page, "Sessions")).toContainText("12")
-  await expect(tile(page, "Sessions")).toContainText("of 100")
-  await expect(tile(page, "Sessions").getByRole("meter")).toHaveAttribute("aria-valuenow", "12")
-  await expect(tile(page, "Size")).toContainText("23.4 MB")
-  await expect(tile(page, "Tables")).toContainText("about 69K rows")
-  await expect(tile(page, "Last backup")).toContainText("3h ago")
-  await expect(tile(page, "Last backup")).toContainText("pg_dump")
-
-  // One reading is no rate: the tile says what it is waiting for.
-  await expect(tile(page, "Transactions")).toContainText("The rate needs a second reading")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await tick(page)
-  // Fifty more commits, five seconds later on the answer's own clock.
-  await expect(tile(page, "Transactions")).toContainText("10")
-  await expect(tile(page, "Transactions")).toContainText("a second")
-  await expect(tile(page, "Transactions")).toContainText("1,000 rows read · 10 written")
-  await expect(tile(page, "Cache hit")).toContainText("99.0%")
-  // A count that stands is counted up to, once there is time to count in.
-  await expect(tile(page, "Tables")).toContainText("2")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(identity).toContainText("up 12h 46m")
 
   // The page reads this database, not every database.
   expect(home.asked).not.toContain("GET /databases/fleet")
 })
 
-test("the chart draws the page's own samples and says they are not a record", async ({ page }) => {
+test("the chart opens on saved activity and keeps its range and view after reload", async ({
+  page,
+}) => {
   await holdTime(page)
   await mockHome(page)
   await visit(page, "/databases/1")
 
   const activity = block(page, "Activity")
-  await expect(activity).toContainText("Nothing here is recorded")
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(activity).toContainText("kept for 7 days")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   // The views are the strip every switch between views of a page wears.
   const views = activity.getByRole("tablist", { name: "What the chart shows" })
   await expect(views.getByRole("tab")).toHaveText(["Sessions", "Throughput", "Rows", "Cache"])
@@ -653,14 +645,14 @@ test("the chart draws the page's own samples and says they are not a record", as
     "true",
   )
 
-  await tick(page)
-  await expect(activity).toContainText(/Live readings over the last \d+s/)
+  await expect(activity).toContainText(/Recorded activity over/)
   await expect(activity).toContainText("Open")
   await views.getByRole("tab", { name: "Throughput" }).click()
   await expect(activity).toContainText("Transactions")
   await expect(activity).toContainText("10/s")
-  // Two readings are one rate: it is drawn, as the one point it is.
-  await expect(activity.locator(".recharts-dot").first()).toBeVisible()
+  await expect(activity.locator(".recharts-area-curve").first()).toHaveAttribute("d", /^M/)
+  await activity.getByRole("combobox", { name: "Activity history range" }).selectOption("24")
+  await expect(activity.getByRole("combobox", { name: "Activity history range" })).toHaveValue("24")
 
   // The view is the reader's arrangement of this database's home: it is there on return.
   await tick(page, 1_000)
@@ -669,6 +661,9 @@ test("the chart draws the page's own samples and says they are not a record", as
     "aria-selected",
     "true",
   )
+  await expect(
+    block(page, "Activity").getByRole("combobox", { name: "Activity history range" }),
+  ).toHaveValue("24")
 })
 
 test("a chart of a few sessions counts them in ones", async ({ page }) => {
@@ -682,7 +677,7 @@ test("a chart of a few sessions counts them in ones", async ({ page }) => {
     },
   })
   await visit(page, "/databases/1")
-  await expect(tile(page, "Sessions")).toContainText("3")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await tick(page)
   // A scale fitted to three put ticks at 2.25 and 1.5 and printed "3, 2, 2, 1, 0".
   await expect
@@ -707,12 +702,7 @@ test("a server that lists no session to the account says so, and charts none", a
     },
   })
   await visit(page, "/databases/1")
-  await expect(tile(page, "Sessions")).toContainText("—")
-  await expect(tile(page, "Sessions")).toContainText(
-    "Not listed to this account · 2 threads running",
-  )
-  await expect(tile(page, "Sessions")).not.toContainText("of 151")
-  await expect(tile(page, "Sessions").getByRole("meter")).toHaveCount(0)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(block(page, "Activity").getByRole("tab")).toHaveText(["Throughput", "Rows", "Cache"])
 })
 
@@ -861,18 +851,15 @@ test("a block that could not be read says so, is tried again, and the rest stays
   await expect(largest).toContainText("Could not read the tables")
   await expect(largest).toContainText("statement timeout")
   await expect(largest).not.toContainText("No tables yet")
-  await expect(tile(page, "Tables")).toContainText("Could not be counted")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(block(page, "Used by")).toContainText("Could not read what uses it")
   // Every other block read what it asked for.
   await expect(block(page, "Busiest statements")).toContainText("SELECT * FROM orders")
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   await largest.getByRole("button", { name: "Try again" }).click()
   await expect(largest).toContainText("analytics.events")
-  // The figure counts up to its value when it is looked at, and the press
-  // that retried scrolled it off the top.
-  await tile(page, "Tables").scrollIntoViewIfNeeded()
-  await expect(tile(page, "Tables")).toContainText("2")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   expect(home.calls.get("GET 1/tablestats")).toBe(2)
 })
 
@@ -888,9 +875,7 @@ test("statistics that cannot be read are dashes, never zeros, with the way to tr
   await visit(page, "/databases/1")
 
   await expect(page.getByText("Could not read the server's statistics")).toBeVisible()
-  await expect(tile(page, "Sessions")).toContainText("—")
-  await expect(tile(page, "Sessions")).toContainText("Could not be read")
-  await expect(tile(page, "Sessions")).not.toContainText("0")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(block(page, "Activity")).toContainText("permission denied")
 
   await page
@@ -898,33 +883,37 @@ test("statistics that cannot be read are dashes, never zeros, with the way to tr
     .filter({ hasText: "the server's statistics" })
     .getByRole("button", { name: "Try again" })
     .click()
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(page.getByText("Could not read the server's statistics")).toHaveCount(0)
 })
 
-test("a poll that fails over figures already shown leaves them, and says it stopped", async ({
+test("saved activity stays visible when the live statistics become unavailable", async ({
   page,
 }) => {
   await holdTime(page)
   await mockHome(page, {
     answers: {
-      "GET 1/stats": (call: number) => (call < 2 ? sqlStats(call) : failing("connection reset")),
+      "GET 1/stats": (call: number) => (call === 0 ? sqlStats(call) : failing("connection reset")),
+      "GET 1/stats/history": {
+        samples: [0, 1, 2].map((index) => ({
+          at: Date.parse(NOW) - 90_000 + index * 30_000,
+          stats: sqlStats(index),
+          gap: false,
+        })),
+      },
     },
   })
   await visit(page, "/databases/1")
-  await expect(tile(page, "Sessions")).toContainText("12")
+  const activity = block(page, "Activity")
+  await expect(activity).toContainText("Recorded activity over")
+  await expect(activity.locator(".recharts-area-curve").first()).toHaveAttribute("d", /^M/)
+  // The history can render before the live poll has settled and scheduled its next read.
+  await expect(page.locator("[data-slot=host-identity]")).toContainText("up 12h 46m")
   await tick(page)
-  await expect(tile(page, "Transactions")).toContainText("10")
-
-  await tick(page)
-  await expect(block(page, "Activity").getByText("Not updating")).toBeVisible()
-  await expect(tile(page, "Transactions")).toContainText("10")
-  await expect(tile(page, "Sessions")).toContainText("12")
-  // The figures are the ones before, and each tile says so and since when.
-  for (const label of ["Sessions", "Transactions", "Cache hit", "Size"]) {
-    await expect(tile(page, label)).toContainText(/as of \d\d:\d\d:\d\d · not updating/)
-  }
-  await expect(tile(page, "Tables")).not.toContainText("not updating")
+  await expect(activity.getByText("Not updating")).toBeVisible()
+  await expect(activity.locator(".recharts-area-curve").first()).toHaveAttribute("d", /^M/)
+  await expect(activity).toContainText("Recorded activity over")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(page.getByText("Could not read the server's statistics")).toHaveCount(0)
 })
 
@@ -948,10 +937,7 @@ test("a snapshot the engine refuses is said in its words, and the home goes on",
   await visit(page, "/databases/1")
   await expect(page.getByText("This server's statistics are not available")).toBeVisible()
   await expect(page.getByText("permission denied for view pg_stat_database")).toBeVisible()
-  await expect(tile(page, "Sessions")).toContainText("Not reported to this account")
-  // A size the engine did not state is not a database of zero bytes.
-  await expect(tile(page, "Size")).toContainText("—")
-  await expect(tile(page, "Size")).not.toContainText("0 B")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(block(page, "Largest tables")).toContainText("analytics.events")
 })
 
@@ -972,18 +958,9 @@ test("a key–value store has its own home and is asked nothing of a SQL server'
     "href",
     "/databases/4/query",
   )
-  await expect
-    .poll(() => tiles(page))
-    .toEqual(["Commands", "Memory", "Hit rate", "Clients", "Keys", "Last save"])
-  await expect(tile(page, "Memory")).toContainText("8.0 MB")
-  await expect(tile(page, "Memory")).toContainText("no limit set")
-  await expect(tile(page, "Keys")).toContainText("28.6K")
-  await expect(tile(page, "Keys")).toContainText("20.5K with an expiry")
-  await expect(tile(page, "Last save")).toContainText("10m ago")
-  await expect(tile(page, "Last save")).toContainText("12 changes since")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await tick(page)
-  await expect(tile(page, "Commands")).toContainText("100")
-  await expect(tile(page, "Hit rate")).toContainText("75.0%")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   // No advisor on the server: what needs attention is read off its own answers.
   await expect(block(page, "Needs attention")).toContainText(
@@ -1048,20 +1025,11 @@ test("a document database has its own home, and its profiler is switched on by a
   await expect(
     page.locator("[data-slot=host-identity]").getByRole("link", { name: "Open documents" }),
   ).toHaveAttribute("href", "/databases/5/data")
-  await expect
-    .poll(() => tiles(page))
-    .toEqual(["Operations", "Connections", "Cache used", "Data size", "Collections", "Last backup"])
-  await expect(tile(page, "Connections")).toContainText("of 100")
-  await expect(tile(page, "Cache used")).toContainText("64.0 MB")
-  await expect(tile(page, "Cache used").getByRole("meter")).toHaveAttribute("aria-valuenow", "25")
-  await expect(tile(page, "Data size")).toContainText("1.3 MB")
-  // Two figures for one database, each said to be what it is.
-  await expect(tile(page, "Data size")).toContainText("uncompressed")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(block(page, "Databases on this server")).toContainText("760.0 KB on disk")
-  await expect(tile(page, "Collections")).toContainText("about 7,500 documents")
-  await expect(tile(page, "Last backup")).toContainText("Never")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await tick(page)
-  await expect(tile(page, "Operations")).toContainText("10")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   const slow = block(page, "Slowest operations")
   await expect(slow).toContainText("The profiler of app_main is off")
@@ -1097,14 +1065,7 @@ test("a file-based database is its file: no sessions, no chart, no server to rea
     },
   })
   await visit(page, "/databases/7")
-
-  await expect
-    .poll(() => tiles(page))
-    .toEqual(["File size", "WAL size", "Pages", "Free pages", "Journal mode", "Last backup"])
-  await expect(tile(page, "File size")).toContainText("312.0 KB")
-  await expect(tile(page, "File size")).toContainText("3 tables · 1 index")
-  await expect(tile(page, "Pages")).toContainText("× 4 KB")
-  await expect(tile(page, "Journal mode")).toContainText("DELETE")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   await expect(block(page, "The file")).toContainText("/srv/notes/notes.db")
   await expect(block(page, "The file")).toContainText("3 tables · 1 index · 1 view")
@@ -1141,11 +1102,18 @@ test("a stopped database keeps its home, is asked nothing, and Start brings it b
   await expect(block(page, "Runs as")).toContainText("postgres:16-alpine")
   await expect(block(page, "Reachable from")).toContainText("This server only")
   await expect(block(page, "Backups")).toContainText("one can be taken once the server answers")
+  await expect(block(page, "Activity")).toContainText("Recorded activity over")
+  await expect(block(page, "Activity").locator(".recharts-area-curve").first()).toHaveAttribute(
+    "d",
+    /^M/,
+  )
   // Nothing opens what cannot be opened, or dumps what cannot be dialled.
   await expect(page.getByRole("link", { name: "Open data" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Back up now" })).toHaveCount(0)
   await page.waitForLoadState("networkidle")
-  expect(home.seen.filter((request) => !/\/(backups|access)$/.test(request))).toEqual([])
+  expect(
+    home.seen.filter((request) => !/\/(backups|access|stats\/history)$/.test(request)),
+  ).toEqual([])
 
   // What Docker lets the container use is read from Docker, not from the engine.
   await expect(block(page, "Runs as")).toContainText("512 MB of memory · 1.5 cores")
@@ -1173,7 +1141,7 @@ test("a stopped database keeps its home, is asked nothing, and Start brings it b
   expect(home.sent).toEqual([{ request: "POST 1/power", body: { action: "start" } }])
 
   starting.release()
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(page.locator("[data-slot=database-changing]")).toHaveCount(0)
   await expect(page.locator("[data-slot=database-status]")).toHaveText("connected")
 })
@@ -1192,7 +1160,7 @@ test("Stop is confirmed with the server named, and the home follows it down", as
     })
   })
   await visit(page, "/databases/1")
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   await menu(page).click()
   expect(await menuWords(page)).toEqual([
@@ -1230,7 +1198,7 @@ test("Stop is confirmed with the server named, and the home follows it down", as
   await expect(identity.getByRole("button", { name: "Open data" })).toBeDisabled()
   await expect(identity.getByRole("button", { name: "Query" })).toBeDisabled()
   await expect(identity.getByRole("link", { name: "Open data" })).toHaveCount(0)
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   stopping.release()
   await expect(page.getByText("shop is stopped")).toBeVisible()
@@ -1308,7 +1276,7 @@ test("a change in flight is still said after a reload, and Start is not offered 
   // Nobody here is waiting on the request any more: the change ends when the
   // server reads the state a start settles in.
   summary = summaryOf(SHOP, IN_DOCKER)
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(page.locator("[data-slot=database-changing]")).toHaveCount(0)
   await expect(page.locator("[data-slot=database-status]")).toHaveText("connected")
 })
@@ -1341,7 +1309,7 @@ test("a verb is drawn only for the role that may use it", async ({ page }) => {
   // Reading only: no verb that changes anything, started or stopped.
   await mockHome(page, { viewer: true, summaries: { 1: IN_DOCKER, 2: STOPPED } })
   await visit(page, "/databases/1")
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await menu(page).click()
   // Settings is a page a reader may open; nothing on it writes for them.
   expect(await menuWords(page)).toEqual(["Check connection", "Settings"])
@@ -1361,7 +1329,7 @@ test("starting is service control; stopping, restarting and protecting ask for m
     summaries: { 1: IN_DOCKER, 2: STOPPED },
   })
   await visit(page, "/databases/1")
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await menu(page).click()
   expect(await menuWords(page)).toEqual(["Check connection", "Back up now", "Settings"])
   await page.keyboard.press("Escape")
@@ -1488,14 +1456,18 @@ test("a database that refuses, and a connection that cannot be opened, each say 
   await expect
     .poll(() => home.asked.filter((request) => request === "GET /databases/1").length)
     .toBeGreaterThan(before)
-  expect(home.seen.filter((request) => request.includes("/stats"))).toEqual([])
+  expect(home.seen.filter((request) => request.endsWith("/stats"))).toEqual([])
 
   await visit(page, "/databases/4")
   await expect(page.getByText("This connection cannot be opened")).toBeVisible()
   await expect(page.getByText("The stored connection string no longer opens.")).toBeVisible()
   // Nothing is known about where it runs, so nothing is said about it.
   await expect(page.getByRole("region", { name: "Runs as" })).toHaveCount(0)
-  expect(home.seen.filter((request) => request.startsWith("GET 4/"))).toEqual([])
+  expect(
+    home.seen.filter(
+      (request) => request.startsWith("GET 4/") && !request.endsWith("/stats/history"),
+    ),
+  ).toEqual([])
 })
 
 test("Back up now starts a dump, shows it running, and lists it when it ends", async ({ page }) => {
@@ -1526,12 +1498,12 @@ test("Back up now starts a dump, shows it running, and lists it when it ends", a
 
   const backups = block(page, "Backups")
   await expect(backups).toContainText("No dump of shop has been taken here")
-  await expect(tile(page, "Last backup")).toContainText("Never")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await backups.getByRole("button", { name: "Back up now" }).click()
 
   await expect(backups.locator("[data-slot=backup-running]")).toHaveText("Dump shop…")
   await expect(backups.getByRole("button", { name: "Back up now" })).toHaveCount(0)
-  await expect(tile(page, "Last backup")).toContainText("A dump is being taken now")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   expect(home.sent).toEqual([{ request: "POST 1/backup", body: {} }])
 
   // A dump in flight is watched every two seconds, not every thirty.
@@ -1544,7 +1516,7 @@ test("Back up now starts a dump, shows it running, and lists it when it ends", a
   await tick(page, 1_000)
   await expect(page.getByText("Backup of shop taken")).toBeVisible()
   await expect(backups.getByRole("img", { name: "The last 2 dumps" })).toBeVisible()
-  await expect(tile(page, "Last backup")).toContainText("3h ago")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(backups.getByRole("button", { name: "Back up now" })).toBeVisible()
 })
 
@@ -1827,7 +1799,7 @@ for (const [label, viewport] of [
 
     for (const conn of [SHOP, CACHE, APP, NOTES]) {
       await visit(page, `/databases/${conn.id}`)
-      await expect(page.locator("[data-slot=stat-tile]").first()).toBeVisible()
+      await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
       await page.waitForLoadState("networkidle")
       await tick(page)
       await page.waitForLoadState("networkidle")
@@ -1887,7 +1859,7 @@ test("a long name with every label keeps its line where the rail leaves it littl
   for (const width of [768, 834, 900, 1024, 1280]) {
     await page.setViewportSize({ width, height: 900 })
     await visit(page, "/databases/1")
-    await expect(tile(page, "Sessions")).toContainText("12")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
     await identityHolds(page, `a ${width}px window`)
     // Its commands are all there, and none is pushed off the line's end.
     const line = page.locator("[data-slot=host-identity]")
@@ -1904,71 +1876,29 @@ test("a long name with every label keeps its line where the rail leaves it littl
   }
 })
 
-test("the six figures sit three across on a laptop, six where there is room, two on a phone", async ({
-  page,
-}) => {
-  await mockHome(page)
-  const columns = () =>
-    page
-      .locator("[data-slot=stat-grid]")
-      .first()
-      .evaluate((grid) => getComputedStyle(grid).gridTemplateColumns.split(" ").length)
-  const edges = () =>
-    page.locator("[data-slot=stat-grid] > *").evaluateAll((cells) =>
-      cells.map((cell) => {
-        const style = getComputedStyle(cell)
-        return `${parseFloat(style.borderLeftWidth)}/${parseFloat(style.borderTopWidth)}`
-      }),
-    )
-
-  await page.setViewportSize({ width: 1280, height: 900 })
-  await visit(page, "/databases/1")
-  await expect(tile(page, "Sessions")).toContainText("12")
-  expect(await columns()).toBe(3)
-  // A hairline between cells and only between them: left/top, cell by cell.
-  expect(await edges()).toEqual(["0/0", "1/0", "1/0", "0/1", "1/1", "1/1"])
-
-  await page.setViewportSize({ width: 1720, height: 900 })
-  expect(await columns()).toBe(6)
-  expect(await edges()).toEqual(["0/0", "1/0", "1/0", "1/0", "1/0", "1/0"])
-
-  // Two across on a phone: six short figures are not a screen and a half.
-  await page.setViewportSize({ width: 390, height: 844 })
-  expect(await columns()).toBe(2)
-  expect(await edges()).toEqual(["0/0", "1/0", "0/1", "1/1", "0/1", "1/1"])
-})
-
-test("the size is drawn by what it is made of, and the list under it is the legend", async ({
-  page,
-}) => {
-  await mockHome(page)
-  await visit(page, "/databases/1")
-
-  const size = tile(page, "Size")
-  await expect(size).toContainText("23.4 MB")
-  await expect(size).toContainText("on disk")
-  await expect(
-    size.getByRole("img", { name: "Size, by its largest parts: events 9.4 MB, orders 3.2 MB" }),
-  ).toBeVisible()
-  // The same two colours, in the same order, before the rows that name them.
-  const swatch = (scope: ReturnType<typeof block>, selector: string) =>
-    scope
-      .locator(selector)
-      .evaluateAll((dots) => dots.map((dot) => getComputedStyle(dot).backgroundColor))
-  const legend = await swatch(size, "p span.size-1\\.5")
-  expect(legend).toHaveLength(2)
-  expect(new Set(legend).size).toBe(2)
-  expect(
-    await swatch(block(page, "Largest tables"), "[data-slot=bar-list] span.size-1\\.5"),
-  ).toEqual(legend)
-})
+for (const width of [390, 1280, 1720]) {
+  test(`activity and its range remain usable without metric cards at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockHome(page)
+    await visit(page, "/databases/1")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+    await expect(
+      block(page, "Activity").getByRole("combobox", { name: "Activity history range" }),
+    ).toBeVisible()
+    await expect(block(page, "Largest tables")).toBeVisible()
+    expect(
+      await page.locator("[data-slot=page]").evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+    ).toBe(true)
+  })
+}
 
 test("an empty database says so in words that fit what the reader may do", async ({ page }) => {
   const empty = { ...TABLESTATS, tables: [] }
   await mockHome(page, { answers: { "GET 1/tablestats": empty } })
   await visit(page, "/databases/1")
-  await expect(tile(page, "Tables")).toContainText("no tables yet")
-  await expect(tile(page, "Tables")).not.toContainText("keeps no row estimate")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(block(page, "Largest tables")).toContainText("Create one in Schema")
 
   // A protected connection is not told to do what would be refused.
@@ -1989,7 +1919,7 @@ test("an engine that reports no statistics has the figures it can read, and no c
     summaries: { 1: { ...IN_DOCKER, capabilities: { stats: false, statements: false } } },
   })
   await visit(page, "/databases/1")
-  await expect.poll(() => tiles(page)).toEqual(["Tables", "Last backup"])
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(page.getByRole("region", { name: "Activity" })).toHaveCount(0)
   await expect(page.getByRole("region", { name: "Busiest statements" })).toHaveCount(0)
   await expect(block(page, "Largest tables")).toContainText("analytics.events")

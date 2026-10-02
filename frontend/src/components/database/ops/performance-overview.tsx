@@ -1,10 +1,5 @@
 "use client"
 
-import { memo, useMemo } from "react"
-import { duration } from "@/lib/format"
-import { cn } from "@/lib/utils"
-import { ChartPanel } from "@/components/metrics/chart-panel"
-import { Metric, MetricStrip } from "@/components/page"
 import {
   CHART_UNITS,
   drawnRows,
@@ -19,27 +14,12 @@ import { overviewCharts, quietChart } from "@/components/database/ops/performanc
 import { Notes } from "@/components/database/ops/performance-parts"
 import type { DbServerStats } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { ChartPanel } from "@/components/metrics/chart-panel"
+import { Metric, MetricStrip } from "@/components/page"
+import { duration } from "@/lib/format"
+import { cn } from "@/lib/utils"
+import { memo, useMemo } from "react"
 
-/**
- * What the server has been doing since this page was opened, as every chart
- * its engine can fill: sessions by what they are doing, transactions,
- * statements, rows, the cache, lock trouble, what it writes to its log and
- * sends over the network.
- *
- * The charts are drawn from the page's own samples — one snapshot every few
- * seconds, a rate the difference of two — so a chart of rates is empty for
- * the first seconds and nothing here is recorded history: the charts start
- * again when the page does. The line under them says so.
- *
- * A chart with nothing above zero in the window is not drawn: on a quiet
- * server half of them would be one flat line each. They are named in a
- * sentence under the ones that have something to show, and each comes back
- * the moment it moves. The charts drawn fill their rows — two across, three
- * where there is the width — whatever their number.
- *
- * Under the charts is the one thing here that is about the dashboard and not
- * the server: the connections it holds to it for its own reads.
- */
 export function OverviewView({
   samples,
   stats,
@@ -82,7 +62,7 @@ export function OverviewView({
     ? "Reading the server…"
     : error && samples.length === 0
       ? `The server's statistics could not be read: ${error.message}`
-      : `A rate is the difference between two readings: the first appears ${every * 2} seconds after the page opens.`
+      : "The recorder is collecting activity; rates need two saved readings."
   const pool = stats?.pool
 
   return (
@@ -106,14 +86,14 @@ export function OverviewView({
             {drawn.length > 0 ? "Nothing else has moved." : "Nothing has moved."}
           </span>{" "}
           {sentence(quiet.map((chart) => chart.label.toLowerCase()))}{" "}
-          {quiet.length === 1 ? "has" : "have"} been at zero for as long as this page has been open.
-          Each is drawn when it moves.
+          {quiet.length === 1 ? "has" : "have"} been at zero throughout the recorded window. Each is
+          drawn when it moves.
         </p>
       )}
       <p className="text-hint text-muted-foreground">
         {held > 0
-          ? `Live readings over the last ${duration(held)}, one every ${every} seconds since this page was opened. Nothing here is recorded: the charts start again when the page does.`
-          : `Live readings, one every ${every} seconds since this page was opened. Nothing here is recorded: the charts start again when the page does.`}
+          ? `Recorded activity over ${duration(held)}, collected every ${every} seconds and kept for 7 days.`
+          : "Activity is recorded in the background and kept for 7 days."}
       </p>
       <Notes notes={stats?.notes} />
       {pool && (

@@ -1,11 +1,5 @@
 "use client"
 
-import { memo, useMemo } from "react"
-import { duration } from "@/lib/format"
-import type { MetricEvent } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
-import { ChartPanel } from "@/components/metrics/chart-panel"
-import { tabClasses } from "@/components/tabs"
 import { NotUpdating } from "@/components/database/home/blocks"
 import {
   CHART_UNITS,
@@ -16,25 +10,16 @@ import {
   type ChartView,
 } from "@/components/database/home/charts"
 import { chartRows, heldSeconds, type Sample } from "@/components/database/home/samples"
-import { SAMPLE_EVERY_MS } from "@/components/database/home/use-samples"
+import { HISTORY_RANGES, SAMPLE_EVERY_MS } from "@/components/database/home/use-samples"
+import { ChartPanel } from "@/components/metrics/chart-panel"
+import { tabClasses } from "@/components/tabs"
+import { duration } from "@/lib/format"
+import type { MetricEvent } from "@/lib/types"
+import { useViewState } from "@/lib/view-state"
+import { cn } from "@/lib/utils"
+import { memo, useMemo } from "react"
 
-/**
- * What the server has been doing while this page was open: one chart, and a
- * strip of views choosing which group of its readings is drawn.
- *
- * It is drawn from the samples the page itself has taken — at most the last
- * five minutes — and says so under the plot. Nothing here is recorded: a
- * reader who opens the page after an incident sees a chart that starts now,
- * and the line under it is why that is not a fault.
- *
- * The strip is the underlined one every switch between views of a page wears
- * (§8), set in the chart's own header so the block keeps one title and one
- * rule: the header gives up its bottom padding and the current view's
- * underline lies on the hairline, the way a strip's does anywhere else.
- *
- * A dump taken or a restart while the page is open is marked on the time
- * axis, so a step in a line is read next to what caused it.
- */
+/** Recorded engine activity, available before this page is opened. */
 export const Activity = memo(function Activity({
   id,
   views,
@@ -42,8 +27,12 @@ export const Activity = memo(function Activity({
   loading,
   error,
   events,
+  hours,
+  onHours,
 }: {
   id: number
+  hours: number
+  onHours: (hours: number) => void
   views: readonly ChartView[]
   samples: readonly Sample[]
   /** No sample has landed yet. */
@@ -63,7 +52,7 @@ export const Activity = memo(function Activity({
   const unit = current ? CHART_UNITS[current.unit] : undefined
   // The axis of a count or a rate is stepped here, on round figures. Held by
   // what the ticks are, not by the rows: the chart is memoised on its props,
-  // and a new array of the same ticks every five seconds would redraw it.
+  // and a new array of the same ticks on every refresh would redraw it.
   const stepped = unit?.stepped
   const steps =
     stepped && current ? roundTicks(highest(rows, current.series), stepped === "whole") : undefined
@@ -85,21 +74,40 @@ export const Activity = memo(function Activity({
         plain
         // The selector names the header twice only to outweigh the panel's own
         // padding rule, which is as specific as a plain one here would be.
-        className={
-          several
-            ? "[&>[data-slot=panel-header]>div:first-child]:pb-2.5 [&>[data-slot=panel-header][data-slot]]:items-end [&>[data-slot=panel-header][data-slot]]:pb-0"
-            : undefined
-        }
+        className={cn(
+          "[&>[data-slot=panel-header]>div:last-child]:max-w-full",
+          several &&
+            "[&>[data-slot=panel-header]>div:first-child]:pb-2.5 [&>[data-slot=panel-header][data-slot]]:items-end [&>[data-slot=panel-header][data-slot]]:pb-0",
+        )}
         title="Activity"
         actions={
           <>
+            <label className="flex items-center gap-2 pb-2.5 text-hint text-muted-foreground">
+              <span className="sr-only">Activity history range</span>
+              <select
+                aria-label="Activity history range"
+                value={hours}
+                onChange={(event) => onHours(Number(event.target.value))}
+                className="h-9 rounded-md border border-input bg-background px-2 text-foreground focus-ring"
+              >
+                {HISTORY_RANGES.map((range) => (
+                  <option key={range.hours} value={range.hours}>
+                    {range.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             {error && samples.length > 0 && (
               <span className={several ? "flex pb-2.5" : "flex"}>
                 <NotUpdating error={error} />
               </span>
             )}
             {several && (
-              <div role="tablist" aria-label="What the chart shows" className="-mb-px flex">
+              <div
+                role="tablist"
+                aria-label="What the chart shows"
+                className="-mb-px flex max-w-full min-w-0 overflow-x-auto"
+              >
                 {offered.map((entry) => (
                   <button
                     key={entry.id}
@@ -131,13 +139,13 @@ export const Activity = memo(function Activity({
             ? "Reading the server…"
             : error && samples.length === 0
               ? `The server's statistics could not be read: ${error.message}`
-              : `Readings arrive every ${SAMPLE_EVERY_MS / 1000} seconds; a rate is drawn from the second one on.`
+              : `The recorder is collecting activity; rates need two saved readings.`
         }
         footer={
           <p className="text-hint text-muted-foreground">
             {held > 0
-              ? `Live readings over the last ${duration(held)}, one every ${SAMPLE_EVERY_MS / 1000} seconds since this page was opened. Nothing here is recorded.`
-              : `Live readings, one every ${SAMPLE_EVERY_MS / 1000} seconds since this page was opened. Nothing here is recorded.`}
+              ? `Recorded activity over ${duration(held)}. Collected every ${SAMPLE_EVERY_MS / 1000} seconds, including while this page is closed; kept for 7 days.`
+              : "Activity is recorded in the background every 30 seconds and kept for 7 days."}
           </p>
         }
       />

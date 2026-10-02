@@ -17,8 +17,9 @@ information (`ErrorState` in `components/state.tsx`), not an error.
 
 `Server.Start(ctx)` is separate from `New` so failing to schedule background work is reported by `main`
 rather than swallowed in construction. It starts the metrics recorder (here, not lazily — its whole
-purpose is to have been running while nobody was looking), the Docker event log, the self-update check,
-the backup scheduler, `selfupdate.Installer.Reconcile`, `selfcfg.Applier.Reconcile` and the Tailscale
+purpose is to have been running while nobody was looking), the database activity recorder, the Docker
+event log, the self-update check, the backup scheduler, `selfupdate.Installer.Reconcile`,
+`selfcfg.Applier.Reconcile` and the Tailscale
 certificate keeper. `Shutdown` releases what outlives a request:
 sampler, scheduler, live PTYs, database pools, Docker client. A held terminal session is let go rather
 than ended — its holder is a systemd unit of its own on the host — and module setup takes every
@@ -145,7 +146,7 @@ State is SQLite in `JD_DATA_DIR`, schema as one `CREATE TABLE IF NOT EXISTS` blo
 `internal/store/store.go` with no migration tool ([invariant 8](../security/invariants.md#invariants-that-must-not-regress)). The file is still named `vpsd.db`
 through the rename: moving it would strand every existing install's accounts, audit log and secrets.
 Tables are grouped by owner: authentication and audit (`users`, `recovery_codes`, `sessions`,
-`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`); boards (`boards`); backups
+`api_tokens`, `audit_log`); databases (`db_connections`, `db_saved_queries`, `db_query_history`, `db_diagram_layouts`, `db_inventory_ignored`, `db_metric_samples`); boards (`boards`); backups
 (`backup_jobs`, `backup_runs`, `backup_restore_tests`); legacy deployment compatibility (`deploy_projects`, `deploy_env`,
 `deploy_runs`); normalized deployment environments, credentials, sources, plans, releases, artifacts,
 runtimes, steps, logs, dependencies, checks, triggers, delivery records, variable and plan snapshots,

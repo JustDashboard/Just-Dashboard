@@ -64,6 +64,10 @@ failed moves retain it.
 An additional keyboard check opens Rename from Shift+F10 with Enter, verifies that its name input
 receives focus and keeps the original filename, and cancels without leaving the dialog open.
 
+The integration follow-up waits for the listing's `animate-rise` entrance to finish before recording
+the selection geometry baseline. All three selection/clipboard comparisons remain exact; this keeps
+the entrance animation's subpixel movement out of the selection measurements.
+
 Browser verification is Chromium against mocked API routes; no real server files are moved or
 uploaded by these fixtures. WebKit installation was attempted, but launching it is unavailable on
 this host because its GTK, ICU, GStreamer and other runtime libraries are absent. A real macOS/Safari

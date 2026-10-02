@@ -1,15 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { bytes, percent } from "@/lib/format"
-import { cn } from "@/lib/utils"
-import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { utilisationTone } from "@/components/meter"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { tabClasses } from "@/components/tabs"
-import { Skeleton } from "@/components/ui/skeleton"
 import { BlockedState, SectionError, SectionFrame } from "@/components/database/kit"
 import { mongoDatabases, mongoServer } from "@/components/database/mongo/api"
 import { OperationsView } from "@/components/database/mongo/performance/operations"
@@ -17,26 +8,21 @@ import { OverviewView } from "@/components/database/mongo/performance/overview"
 import { ProfilerView } from "@/components/database/mongo/performance/profiler"
 import { ReplicationView } from "@/components/database/mongo/performance/replication"
 import {
-  OPERATIONS,
   addSample,
-  latest,
-  lifetimeTargeting,
-  ratio,
   reportsNothing,
-  seriesOf,
   statRows,
 } from "@/components/database/mongo/performance/samples"
 import type { MongoServer } from "@/components/database/mongo/types"
 import { useMongo } from "@/components/database/mongo/use-mongo"
-import { micros, perSecond } from "@/components/database/redis/performance/samples"
 import { worthRetrying } from "@/components/database/redis/read-error"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { tabClasses } from "@/components/tabs"
+import { usePoll } from "@/hooks/use-poll"
+import { cn } from "@/lib/utils"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 /** How often the counters are read: one `serverStatus` each time. */
 const EVERY_MS = 3000
-
-/** Documents examined for each returned, past which a query is doing work it should not. */
-const POOR_TARGETING = 100
 
 type View = "overview" | "operations" | "slow" | "replication"
 
@@ -57,7 +43,7 @@ type View = "overview" | "operations" | "slow" | "replication"
  * the profiler kept; and, on a replica set, its members.
  *
  * A server that only speaks the protocol may answer with no counters at all.
- * It is then said to have none — five tiles of zeros would read as a server
+ * It is then said to have none — a chart of zeros would read as a server
  * at rest — and the page keeps what such a server does report: what it is,
  * and what its databases hold.
  */
@@ -109,105 +95,14 @@ export function MongoPerformance() {
 
   const now = newest
   const silent = now !== undefined && reportsNothing(now)
-  const ops = latest(rows, "ops")
-  const total = now ? OPERATIONS.reduce((sum, kind) => sum + (now.opcounters[kind] ?? 0), 0) : 0
-  const limit = now ? now.connections.current + now.connections.available : 0
-  const connectionFill = now && limit > 0 ? (now.connections.current / limit) * 100 : undefined
-  const cache = now?.cache
-  const cacheFill = cache && cache.maxBytes > 0 ? (cache.bytes / cache.maxBytes) * 100 : undefined
-  const targeting = latest(rows, "targeting") ?? (now ? lifetimeTargeting(now) : null)
-  const targetingLive = latest(rows, "targeting") !== null
-  const readLatency = latest(rows, "readLatency")
-  const writeLatency = latest(rows, "writeLatency")
 
   return (
     <SectionFrame section="performance">
       {dialog}
-      {silent ? (
-        <BlockedState engine={engine} thing="performance counters" className="animate-rise">
-          It answers the server&rsquo;s status with no counts of operations, connections or traffic,
-          so there is no rate to draw. What it is and what it holds are below.
+      {silent && (
+        <BlockedState engine={engine} thing="performance counters">
+          This server reports no activity counters. Its database details are below.
         </BlockedState>
-      ) : !now ? (
-        <StatGrid columns={5} dense aria-hidden>
-          {Array.from({ length: 5 }, (_, i) => (
-            <div key={i} className="space-y-2.5 px-5 py-4">
-              <Skeleton className="h-2.5 w-16" />
-              <Skeleton className="h-7 w-24" />
-              <Skeleton className="h-3 w-32" />
-            </div>
-          ))}
-        </StatGrid>
-      ) : (
-        <StatGrid columns={5} dense key="readings" className="animate-rise">
-          <StatTile
-            label="Operations a second"
-            value={ops === null ? "—" : perSecond(ops)}
-            trend={
-              <TileTrend
-                values={seriesOf(rows, "ops")}
-                label="Operations a second"
-                color="var(--chart-1)"
-              />
-            }
-            hint={`${total.toLocaleString("en-US")} since it started`}
-          />
-          <StatTile
-            label="Connections"
-            value={now.connections.current.toLocaleString("en-US")}
-            meter={connectionFill}
-            tone={connectionFill !== undefined ? utilisationTone(connectionFill) : "default"}
-            hint={`of ${limit.toLocaleString("en-US")} allowed · ${now.connections.active.toLocaleString("en-US")} doing work`}
-          />
-          <StatTile
-            label="Cache"
-            value={cacheFill === undefined ? "—" : percent(cacheFill)}
-            meter={cacheFill}
-            tone={cacheFill !== undefined ? utilisationTone(cacheFill) : "default"}
-            hint={
-              cache
-                ? `${bytes(cache.bytes)} of ${bytes(cache.maxBytes)} · ${bytes(cache.dirtyBytes)} not yet written`
-                : "This storage engine reports no cache"
-            }
-          />
-          <StatTile
-            label="Query targeting"
-            value={targeting === null ? "—" : ratio(targeting)}
-            tone={targeting !== null && targeting >= POOR_TARGETING ? "warning" : "default"}
-            trend={
-              <TileTrend
-                values={seriesOf(rows, "targeting")}
-                label="Documents examined for each returned"
-                color="var(--chart-3)"
-              />
-            }
-            hint={
-              targeting === null
-                ? "nothing returned yet"
-                : targetingLive
-                  ? "examined per returned, just now"
-                  : "examined per returned, since start"
-            }
-          />
-          <StatTile
-            label="A read takes"
-            value={readLatency === null ? "—" : micros(readLatency)}
-            trend={
-              <TileTrend
-                values={seriesOf(rows, "readLatency")}
-                label="Time a read takes"
-                color="var(--chart-4)"
-              />
-            }
-            hint={
-              readLatency === null
-                ? "no read just now"
-                : writeLatency === null
-                  ? "on average, just now"
-                  : `a write ${micros(writeLatency)}`
-            }
-          />
-        </StatGrid>
       )}
 
       <div className="min-w-0 space-y-6">

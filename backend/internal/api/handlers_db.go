@@ -94,6 +94,7 @@ func (s *Server) mountDatabaseRoutes(r chi.Router) {
 		s.mountDatabaseAdminRoutes(r)
 		r.Method(http.MethodGet, "/{id}/ping", s.handle(s.handleDBPing))
 		r.Method(http.MethodGet, "/{id}/stats", s.handle(s.handleDBStats))
+		r.Method(http.MethodGet, "/{id}/stats/history", s.handle(s.handleDBStatsHistory))
 		r.Method(http.MethodGet, "/{id}/schemas", s.handle(s.handleDBList))
 		r.Method(http.MethodGet, "/{id}/tables", s.handle(s.handleDBTables))
 		r.Method(http.MethodGet, "/{id}/columns", s.handle(s.handleDBColumns))
@@ -568,35 +569,14 @@ func (s *Server) handleDBStats(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if conn.Driver == dbx.DriverMongo {
-		client, err := dbx.MongoClient(r.Context(), dsn)
-		if err != nil {
-			return connectFailed(dsn, err)
-		}
-		defer client.Disconnect(context.Background())
-		status, err := dbx.MongoServerStatus(r.Context(), client)
-		if err != nil {
-			return queryFailed(err)
-		}
-		httpx.JSON(w, http.StatusOK, map[string]any{"server": status})
-		return nil
+	ctx, cancel := timeoutCtx(r, 15*time.Second)
+	defer cancel()
+	snapshot, err := s.readDatabaseStats(ctx, conn, dsn)
+	if err != nil {
+		return err
 	}
-	if conn.Driver == dbx.DriverRedis {
-		client, err := dbx.RedisClient(r.Context(), dsn, 0)
-		if err != nil {
-			return connectFailed(dsn, err)
-		}
-		defer client.Close()
-		info, err := dbx.RedisInfo(r.Context(), client)
-		if err != nil {
-			return queryFailed(err)
-		}
-		httpx.JSON(w, http.StatusOK, map[string]any{"server": info})
-		return nil
-	}
-	// A SQL engine answers with a snapshot of its own counters, and the
-	// pool's beside them where it always was.
-	return s.dbSQLStats(w, r, id)
+	httpx.JSON(w, http.StatusOK, snapshot)
+	return nil
 }
 
 func (s *Server) handleDBList(w http.ResponseWriter, r *http.Request) error {

@@ -22,18 +22,13 @@ const HOMES: Partial<Record<EngineKind, ComponentType>> = {
 /**
  * A database's front page: this engine's control panel.
  *
- * It reads top to bottom as the host Overview does (§15) — what this is
- * (`HomeIdentity`), its headline figures as tiles with a ceiling or a trend
- * where one exists, one chart of what it has been doing while the page was
- * open, what needs somebody beside what it spends its time on, what it holds
- * beside what uses it, and the reference facts last. Which figures, and which
- * blocks, are the engine family's own: a SQL server, a key–value store and a
- * document database each have a home built from the same blocks.
+ * It starts with the identity and verbs, recorded activity, attention and
+ * rankings, then reference facts. Each engine family supplies its own blocks.
  *
  * A server that is not answering — stopped, paused, refusing, or a saved
  * connection that can no longer be opened — keeps its home: the same line,
  * what state it is in, the one thing to do about it, and the facts that need
- * no dial. Its engine is asked nothing until it is back.
+ * no dial, including retained history. Its engine is asked nothing until it is back.
  *
  * The page's name is the `h1` `SectionFrame` writes for assistive technology
  * (§14); the name drawn on the line is the switcher, which is a control.
@@ -44,8 +39,6 @@ export function DatabaseHome() {
   const answering = status.state === "running"
   return (
     <SectionFrame section="home">
-      {/* Keyed on whether the server answers: a home that comes back starts
-          its samples again rather than joining them across the gap. */}
       {answering && Home ? <Home key="answering" /> : <DownHome key="down" />}
     </SectionFrame>
   )

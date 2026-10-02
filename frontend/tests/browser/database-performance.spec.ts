@@ -906,6 +906,17 @@ async function mockOps(
     seen.push(key)
     const body = method === "GET" ? undefined : route.request().postDataJSON()
     if (method !== "GET") sent.push({ request: key, body, query: url.search })
+    if (method === "GET" && match[2] === "/stats/history" && !Object.hasOwn(answers, key)) {
+      const saved = answers[`GET ${match[1]}/stats`]
+      if (saved === undefined) return route.fulfill({ json: { samples: [] } })
+      const samples = []
+      for (let index = 0; index < 3; index++) {
+        const value = await (typeof saved === "function" ? saved(index, url) : saved)
+        if (isReply(value)) return route.fulfill({ status: value.status, json: value.body })
+        samples.push({ at: Date.parse(NOW) - 60_000 + index * 5_000, stats: value, gap: false })
+      }
+      return route.fulfill({ json: { samples, everySeconds: 30, retentionHours: 168 } })
+    }
     if (!Object.hasOwn(answers, key)) return route.fallback()
     const call = calls.get(key) ?? 0
     calls.set(key, call + 1)
@@ -928,7 +939,7 @@ async function holdTime(page: Page) {
   await page.clock.install({ time: new Date(NOW) })
   await page.clock.pauseAt(new Date(Date.parse(NOW) + 1_000))
 }
-const tick = (page: Page, ms = 5_000) => page.clock.runFor(ms)
+const tick = (page: Page, ms = 30_000) => page.clock.runFor(ms)
 
 /** Opens a page of the section and waits for the list of connections to have answered. */
 async function visit(page: Page, path: string) {
@@ -942,14 +953,6 @@ async function visit(page: Page, path: string) {
 
 const views = (page: Page) => page.getByRole("group", { name: "Performance views" })
 const view = (page: Page, name: string | RegExp) => views(page).getByRole("button", { name })
-const tile = (page: Page, label: string) =>
-  page.locator("[data-slot=stat-tile]").filter({
-    has: page.locator("p.eyebrow").getByText(label, { exact: true }),
-  })
-const tiles = (page: Page) =>
-  page
-    .locator("[data-slot=stat-tile] p.eyebrow")
-    .evaluateAll((labels) => labels.map((label) => label.textContent?.trim()))
 const region = (page: Page, name: string) => page.getByRole("region", { name, exact: true })
 const sessionRow = (page: Page, pid: string) =>
   page.getByRole("row", { name: `Session ${pid}`, exact: true })
@@ -959,34 +962,17 @@ const dialog = (page: Page) => page.getByRole("dialog")
 // Performance
 // ---------------------------------------------------------------------------
 
-test("the page opens on its readings and offers the views its engine has", async ({ page }) => {
+test("the page opens on recorded activity and offers the views its engine has", async ({
+  page,
+}) => {
   await holdTime(page)
   const ops = await mockOps(page)
   await visit(page, "/databases/1/performance")
-
-  await expect(tile(page, "Sessions")).toContainText("12")
-  expect(await tiles(page)).toEqual([
-    "Sessions",
-    "Working now",
-    "Waiting on a lock",
-    "Longest statement",
-    "Transactions",
-    "Cache hit",
-  ])
-  // Who is working and who is waiting are counts of the session list: the
-  // server's counters say three active and two waiting, and call the session
-  // held up an active one. The list has two working and one held up.
-  await expect(tile(page, "Working now")).toContainText("2")
-  await expect(tile(page, "Working now")).toContainText("1 more idle in a transaction")
-  await expect(tile(page, "Sessions")).toContainText("2 working · 1 waiting")
-  // Somebody is waiting: the figure takes the tone, not a badge.
-  await expect(tile(page, "Waiting on a lock").locator(".text-warning")).toHaveText("1")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(view(page, /^Locks/)).toHaveText(/Locks\s*1/)
-  await expect(tile(page, "Longest statement")).toContainText("48s")
-  // A rate is two readings apart: none is stated after one.
-  await expect(tile(page, "Transactions")).toContainText("The rate needs a second reading")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await tick(page)
-  await expect(tile(page, "Transactions")).toContainText("10")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   await expect(views(page).getByRole("button")).toHaveText([
     /^Overview$/,
@@ -998,14 +984,16 @@ test("the page opens on its readings and offers the views its engine has", async
     /^Replication$/,
   ])
   await expect(view(page, /^Overview$/)).toHaveAttribute("aria-pressed", "true")
-  // The charts are the page's own samples, and say so.
-  await expect(page.getByText(/Nothing here is recorded/)).toBeVisible()
+  // The charts show saved activity as soon as the page opens.
+  await expect(page.getByText(/Recorded activity/)).toBeVisible()
   await expect(page.getByRole("heading", { name: "Sessions", level: 2 })).toBeVisible()
   // A chart with nothing above zero in the window is named, not drawn flat.
   await expect(page.getByText(/Nothing else has moved\./)).toBeVisible()
   await expect(page.getByRole("heading", { name: "Lock waits and deadlocks" })).toHaveCount(0)
   // The snapshot and the session list are the page's; a view's own read waits for the view.
-  expect(ops.seen.filter((request) => !/\/(stats|activity)$/.test(request))).toEqual([])
+  expect(ops.seen.filter((request) => !/\/(stats|stats\/history|activity)$/.test(request))).toEqual(
+    [],
+  )
 })
 
 test("a file-based engine is read as its file, and is asked nothing a server would be", async ({
@@ -1017,13 +1005,7 @@ test("a file-based engine is read as its file, and is asked nothing a server wou
 
   await expect(views(page).getByRole("button")).toHaveText(["File", "Tables", "Indexes"])
   await expect(view(page, "File")).toHaveAttribute("aria-pressed", "true")
-  expect(await tiles(page)).toEqual([
-    "File size",
-    "WAL size",
-    "Pages",
-    "Free pages",
-    "Journal mode",
-  ])
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(region(page, "The file")).toContainText("/srv/notes/notes.db")
 
   // The engine's own housekeeping, with a choice inside an action as one control.
@@ -1401,13 +1383,12 @@ test("statistics that cannot be read are dashes, never zeros, with the way to tr
   })
   await visit(page, "/databases/1/performance?view=replication")
   await expect(page.getByText("Could not read the server's statistics")).toBeVisible()
-  await expect(tile(page, "Sessions")).toContainText("—")
-  await expect(tile(page, "Sessions")).toContainText("Could not be read")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   // The view under the figures is its own read, and is there.
   await expect(region(page, "Replication")).toContainText("Primary")
   down = false
   await page.getByRole("button", { name: "Try again" }).click()
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 })
 
 test("a snapshot the engine refuses is said in its words, and the views go on", async ({
@@ -1430,7 +1411,7 @@ test("a snapshot the engine refuses is said in its words, and the views go on", 
   await visit(page, "/databases/1/performance?view=sessions")
   await expect(page.getByText("This server's statistics are not available")).toBeVisible()
   await expect(page.getByText("permission denied for view pg_stat_database")).toBeVisible()
-  await expect(tile(page, "Sessions")).toContainText("—")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(sessionRow(page, "52")).toBeVisible()
 })
 
@@ -1640,7 +1621,7 @@ test("an analytic engine is read by its queries, parts and merges", async ({ pag
     /^Parts$/,
     /^Merges/,
   ])
-  expect(await tiles(page)).toContain("Running queries")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   await view(page, /^Running queries/).click()
   const queries = region(page, "Running queries")
@@ -1699,9 +1680,7 @@ function held<T>() {
   return { until, release }
 }
 
-test("the tiles are the session list's counts, whatever the server's counters say", async ({
-  page,
-}) => {
+test("session filters use the live list while charts use recorded statistics", async ({ page }) => {
   await holdTime(page)
   // An engine whose counters know nothing of a row lock: nobody waits, by them.
   await mockOps(page, {
@@ -1716,23 +1695,20 @@ test("the tiles are the session list's counts, whatever the server's counters sa
   const chips = region(page, "Sessions").getByRole("group", { name: "Sessions by state" })
   await expect(chips.getByRole("button", { name: /Blocked/ })).toHaveText(/Blocked\s*1/)
   await expect(chips.getByRole("button", { name: /Active/ })).toHaveText(/Active\s*2/)
-  // The tile says what the chip says, and the tab that shows who holds the lock counts it.
-  await expect(tile(page, "Waiting on a lock").locator(".text-warning")).toHaveText("1")
-  await expect(tile(page, "Waiting on a lock")).toContainText("Locks says who holds them")
-  await expect(tile(page, "Working now")).toContainText("2")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(view(page, /^Locks/)).toHaveText(/Locks\s*1/)
 
-  // The chart is drawn from the same counts: a sample carries the list's tally.
+  // A historical chart uses saved engine counts rather than today's session list.
   await tick(page)
   await view(page, /^Overview$/).click()
   const sessions = page
     .locator("[data-slot=panel]")
     .filter({ has: page.getByRole("heading", { name: "Sessions", level: 2 }) })
-  await expect(sessions.getByRole("row", { name: /Waiting on a lock/ })).toContainText("1")
-  await expect(sessions.getByRole("row", { name: /Working/ })).toContainText("2")
+  await expect(sessions.getByRole("row", { name: /Waiting on a lock/ })).toContainText("0")
+  await expect(sessions.getByRole("row", { name: /Working/ })).toContainText("3")
 })
 
-test("nothing under the readings moves once it is drawn", async ({ page }) => {
+test("the session controls and rows stay in place while statistics update", async ({ page }) => {
   await holdTime(page)
   const first = held<null>()
   await mockOps(page, {
@@ -1753,15 +1729,14 @@ test("nothing under the readings moves once it is drawn", async ({ page }) => {
   // Before any figure has been read.
   const bones = await strip()
   first.release(null)
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   expect(await strip()).toBe(bones)
   // And when the trends have their second point and are drawn. A tick is
   // let land before the next: the page asks again only once it has answered.
   await tick(page)
-  await expect(tile(page, "Transactions")).toContainText("a second")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await tick(page)
-  await expect(tile(page, "Transactions").getByRole("img")).toBeVisible()
-  await expect(tile(page, "Waiting on a lock").getByRole("img")).toBeVisible()
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   expect(await strip()).toBe(bones)
   const row = () =>
     sessionRow(page, "52").evaluate((el) => Math.round(el.getBoundingClientRect().top))
@@ -1898,10 +1873,10 @@ test("a read that does not come back says what it is waiting for, and a failure 
   let read = held<unknown>()
   await mockOps(page, { answers: { "GET 1/tablestats": () => read.until } })
   await visit(page, "/databases/1/performance?view=tables")
-  await expect(tile(page, "Sessions")).toContainText("12")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   // A moment's wait is a skeleton and nothing more.
   await expect(page.getByText(/^Waiting for/)).toHaveCount(0)
-  await tick(page)
+  await tick(page, 5_000)
   await expect(page.getByText("Waiting for PostgreSQL to answer")).toBeVisible()
   await expect(
     page.getByText(/stands behind any session that holds an exclusive lock/),
@@ -1918,7 +1893,7 @@ test("a read that does not come back says what it is waiting for, and a failure 
   // Asked again, it is the wait again and not the old failure.
   await page.getByRole("button", { name: "Try again" }).click()
   await expect(page.getByText("Could not read the tables")).toHaveCount(0)
-  await tick(page)
+  await tick(page, 5_000)
   await expect(page.getByText("Waiting for PostgreSQL to answer")).toBeVisible()
 
   // The way to who is in the way.
@@ -2164,7 +2139,7 @@ test("an analytic engine's charts leave out what it has no notion of", async ({ 
   await holdTime(page)
   await mockOps(page, AS_CLICKHOUSE)
   await visit(page, "/databases/2/performance")
-  await expect(tile(page, "Running queries")).toContainText("2")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await tick(page)
   const sessions = page
     .locator("[data-slot=panel]")
@@ -2173,8 +2148,7 @@ test("an analytic engine's charts leave out what it has no notion of", async ({ 
   // It has no transactions to sit idle in and no lock waits: neither is a line at zero.
   await expect(sessions).not.toContainText("Idle in a transaction")
   await expect(sessions).not.toContainText("Waiting on a lock")
-  // Its parts are the whole server's, and the tile says so.
-  await expect(tile(page, "Parts")).toContainText("on this server")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 })
 
 // ---------------------------------------------------------------------------
@@ -2190,12 +2164,7 @@ test("the advisor counts its findings by severity and by category, and each narr
 }) => {
   await mockOps(page)
   await visit(page, "/databases/1/advisor")
-
-  await expect(tile(page, "Critical")).toContainText("1")
-  await expect(tile(page, "Warnings")).toContainText("4")
-  await expect(tile(page, "Notices")).toContainText("1")
-  await expect(tile(page, "Checked")).toContainText("9")
-  await expect(tile(page, "Critical").locator(".text-destructive")).toHaveText("1")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
   const chips = findings(page).getByRole("group", { name: "Findings by category" })
   await expect(chips.getByRole("button")).toHaveText([
@@ -2208,7 +2177,7 @@ test("the advisor counts its findings by severity and by category, and each narr
   await expect(finding(page, /1 table with no primary key/)).toContainText("public.audit_log")
   await expect(finding(page, /2 foreign keys with no index/)).toContainText("2 tables")
 
-  await page.getByRole("button", { name: "Show only the warnings" }).click()
+  await page.getByRole("button", { name: "Warnings" }).click()
   await expect(page).toHaveURL(/level=warning/)
   await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(4)
   // The chips count what the severity leaves.
@@ -2244,9 +2213,9 @@ test("a report arrives open: every finding of a short one, the worst of a long o
   // when a filter that hid them is taken off again.
   await finding(page, /No backup/).click()
   await expect(open).toHaveCount(5)
-  await page.getByRole("button", { name: "Show only the notice" }).click()
+  await page.getByRole("button", { name: "Notices" }).click()
   await expect(findings(page).locator("[data-slot=accordion-item]")).toHaveCount(1)
-  await page.getByRole("button", { name: "Show only the notice" }).click()
+  await page.getByRole("button", { name: "Notices" }).click()
   await expect(open).toHaveCount(5)
   await expect(finding(page, /No backup/)).toHaveAttribute("aria-expanded", "false")
 
@@ -2343,7 +2312,7 @@ test("a fix the server classes as safe is applied behind a confirmation that nam
     })
   // The report is read again, and the finding is gone.
   await expect(finding(page, /2 foreign keys with no index/)).toHaveCount(0)
-  await expect(tile(page, "Warnings")).toContainText("3")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   // The button that asked went with it: the keyboard is left in the list, not on the page's body.
   await expect(findings(page)).toBeFocused()
 })
@@ -2525,7 +2494,7 @@ test("a report that could not be read says so, and is read again on request", as
   await expect(page.getByText("pq: too many connections")).toBeVisible()
   down = false
   await page.getByRole("button", { name: "Try again" }).click()
-  await expect(tile(page, "Warnings")).toContainText("4")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 })
 
 test("a statement fix that fails part way says where it stopped", async ({ page }) => {
@@ -2777,7 +2746,7 @@ for (const [label, viewport] of [
       "replication",
     ]) {
       await visit(page, `/databases/1/performance${name ? `?view=${name}` : ""}`)
-      await expect(tile(page, "Sessions")).toContainText("12")
+      await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
       await page.waitForLoadState("networkidle")
       // What a view folds away is part of it: the lock table, the idle sessions.
       for (const fold of await page
@@ -2792,7 +2761,7 @@ for (const [label, viewport] of [
     await keepsTheRules(page, "a file's performance page")
     for (const name of ["", "sessions", "parts", "merges"]) {
       await visit(page, `/databases/2/performance${name ? `?view=${name}` : ""}`)
-      await expect(tile(page, "Running queries")).toContainText("2")
+      await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
       await page.waitForLoadState("networkidle")
       for (const fold of await page
         .locator("[data-slot=page] details:not([open]) > summary")

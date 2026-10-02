@@ -1,17 +1,5 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { cn } from "@/lib/utils"
-import { Segments } from "@/components/deploy/settings/segments"
-import { FormNote } from "@/components/form"
-import { Meter } from "@/components/meter"
-import { Modal } from "@/components/modal"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { LoadingRows } from "@/components/state"
-import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
-import { Tag } from "@/components/tag"
-import { NumberTicker } from "@/components/ui/number-ticker"
 import { CodeView } from "@/components/database/kit"
 import { explain, type MongoTarget } from "@/components/database/mongo/api"
 import { parseJson, printJson } from "@/components/database/mongo/bson"
@@ -23,6 +11,16 @@ import type {
 } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
 import { ReadError } from "@/components/database/redis/read-error"
+import { Segments } from "@/components/deploy/settings/segments"
+import { FormNote } from "@/components/form"
+import { Meter } from "@/components/meter"
+import { Modal } from "@/components/modal"
+import { LoadingRows } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { tabClasses } from "@/components/tabs"
+import { Tag } from "@/components/tag"
+import { cn } from "@/lib/utils"
+import { useEffect, useMemo, useState } from "react"
 
 /** What is explained: a find as the query bar states it, or a pipeline. */
 export type ExplainSubject =
@@ -30,9 +28,6 @@ export type ExplainSubject =
   | { kind: "pipeline"; pipeline: string; statement: string }
 
 const grouped = (n: number | null) => (n === null ? "—" : n.toLocaleString("en-US"))
-
-/** A figure of a run, counted up to as it arrives; a dash where the server gave none. */
-const figure = (n: number | null) => (n === null ? "—" : <NumberTicker value={n} />)
 
 /** Every node of a plan with how deep it sits, the last thing done first. */
 function flatten(node: MongoPlanNode, depth = 0): { node: MongoPlanNode; depth: number }[] {
@@ -111,11 +106,6 @@ function Explain({
     }
   }, [data])
 
-  const ratio =
-    summary?.executed && summary.docsExamined !== null && summary.returned
-      ? summary.docsExamined / summary.returned
-      : null
-
   return (
     <Modal
       open
@@ -148,42 +138,21 @@ function Explain({
       ) : (
         <div className="animate-rise space-y-4" key={answer.verbosity}>
           {data.note && <FormNote tone="warning">{data.note}</FormNote>}
-          {summary?.executed ? (
-            <StatGrid columns={4} dense framed>
-              <StatTile label="Returned" value={figure(summary.returned)} hint="documents" />
-              <StatTile
-                label="Documents examined"
-                value={figure(summary.docsExamined)}
-                tone={ratio !== null && ratio > 10 ? "warning" : "default"}
-                hint={
-                  ratio === null
-                    ? summary.returned === 0
-                      ? "to return none"
-                      : undefined
-                    : ratio <= 1
-                      ? "one for each returned"
-                      : `${ratio.toFixed(ratio < 10 ? 1 : 0)} for each returned`
-                }
-              />
-              <StatTile
-                label="Index keys examined"
-                value={figure(summary.keysExamined)}
-                hint={summary.indexesUsed.length === 0 ? "no index used" : undefined}
-              />
-              <StatTile
-                label="Time"
-                value={figure(summary.timeMs)}
-                trailing={summary.timeMs === null ? undefined : "ms"}
-                hint="the server's own estimate"
-              />
-            </StatGrid>
-          ) : (
+          {!summary?.executed && (
             <FormNote>
               This is the plan without running it, so no step has figures.
               {canRun ? " Run it to see what each step examines and returns." : ""}
             </FormNote>
           )}
 
+          {summary?.executed && (
+            <p className="text-body text-muted-foreground">
+              Returned {grouped(summary.returned)} documents
+              {summary.timeMs !== null ? ` in ${grouped(summary.timeMs)} ms (server estimate)` : ""}
+              ; examined {grouped(summary.docsExamined)} documents and{" "}
+              {grouped(summary.keysExamined)} index keys.
+            </p>
+          )}
           {summary && (
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
               {summary.collectionScan ? (

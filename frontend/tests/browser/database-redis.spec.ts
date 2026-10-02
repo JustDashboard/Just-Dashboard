@@ -1543,7 +1543,7 @@ test.describe("keys", () => {
     await page.goto(KEYS)
     const made = page.locator("[data-slot=redis-keyspace]")
     await expect(made.getByRole("heading", { name: "db0" })).toBeVisible()
-    await expect(made.locator("[data-slot=stat-tile]").first()).toContainText("9")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
     // The mix of types, in the legend's hues, from the walk the tree already made.
     await expect(made.getByRole("img", { name: /String 3, Hash 2/ })).toBeVisible()
     expect(redis.asked("/keys/tree").filter((call) => !call.query.has("prefix")).length).toBe(1)
@@ -1951,20 +1951,18 @@ test.describe("console", () => {
 })
 
 test.describe("performance", () => {
-  test("the readings head the page, and a rate is drawn from two samples", async ({ page }) => {
+  test("performance keeps its charts and derives rates without metric cards", async ({ page }) => {
     await mockRedis(page)
     await page.goto(PERFORMANCE)
 
-    const tiles = page.locator("[data-slot=stat-tile]")
-    await expect(tiles).toHaveCount(5)
-    await expect(tiles.nth(1)).toContainText("7.6 MB")
-    await expect(tiles.nth(2)).toContainText("90.0%")
-    await expect(tiles.nth(3)).toContainText("3")
-    await expect(tiles.nth(4)).toContainText("9")
-    // 600 commands between two readings three seconds apart: about 200 a second.
-    await expect(tiles.nth(0)).toContainText(/^Commands a second(19\d|20\d|21\d)/, {
-      timeout: 15_000,
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+    const throughput = page.locator("[data-slot=panel]").filter({
+      has: page.getByRole("heading", { name: "Throughput", exact: true }),
     })
+    await expect(throughput.getByRole("row", { name: /^Commands/ })).toContainText(
+      /[1-9][\d.]*\/s/,
+      { timeout: 15_000 },
+    )
     await expect(page.getByRole("heading", { name: "Throughput" })).toBeVisible()
     await expect(page.getByText("since this page was opened")).toBeVisible()
     // The keyspace, database by database.
@@ -2074,7 +2072,7 @@ test.describe("performance", () => {
     ).toBeVisible()
     redis.heal()
     await page.getByRole("button", { name: "Try again" }).click()
-    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(5)
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   })
 })
 
@@ -2232,7 +2230,7 @@ for (const [label, viewport] of [
     }
     for (const view of ["", "memory", "slowlog", "clients", "commands", "persistence"]) {
       await page.goto(view ? `${PERFORMANCE}?view=${view}` : PERFORMANCE)
-      await expect(page.locator("[data-slot=stat-tile]").first()).toBeVisible()
+      await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
       await expectTheRules(page, `performance ${view || "overview"}`)
     }
   })

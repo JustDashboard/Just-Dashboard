@@ -1,67 +1,27 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
-import {
-  Archive,
-  CloudUpload,
-  Copy,
-  Download,
-  RotateCounterClockwise,
-  Trash,
-} from "@/components/icons"
-import { del, downloadUrl, get, post } from "@/lib/api"
-import { describeCron } from "@/lib/cron"
-import { bytes, clockMinute, duration, plural, relativeTime, timestamp } from "@/lib/format"
-import { notify } from "@/lib/toast"
-import type { BackupJob, DbConnection, Job } from "@/lib/types"
-import { useAuth } from "@/hooks/use-auth"
-import { usePoll } from "@/hooks/use-poll"
+import Link from "next/link"
+
 import { useConfirm } from "@/components/confirm-dialog"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { FormNote } from "@/components/form"
-import { OutcomeStrip } from "@/components/outcome-strip"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, LoadingPanel } from "@/components/state"
-import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
-import { StatusDot, type DotTone } from "@/components/status-dot"
-import { FilterChip } from "@/components/tabs"
-import { Tag } from "@/components/tag"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { VerbActions, type Verb } from "@/components/verbs"
 import { sectionHref } from "@/components/database/engine"
 import { CouldNotRead, NotUpdating, staleOf } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { EngineMark, ProtectedTag, SectionFrame } from "@/components/database/kit"
 import { CopyDatabase } from "@/components/database/ops/backups-copy"
+import type { WatchedJob } from "@/components/database/ops/backups-job"
 import {
   AfterAction,
   TransferProgress,
   useTransferJob,
 } from "@/components/database/ops/backups-job"
-import type { WatchedJob } from "@/components/database/ops/backups-job"
 import {
-  backupAge,
   holdsWords,
-  keptBytes,
-  lastBackup,
   nameParts,
   originWord,
-  outcomesLabel,
   scheduledDump,
   summaryWords,
   tookWords,
   transferKind,
-  transferOutcomes,
   transferPrefix,
 } from "@/components/database/ops/backups-model"
 import { DumpFacts, RestoreDump } from "@/components/database/ops/backups-restore"
@@ -72,6 +32,39 @@ import { useAddressStep } from "@/components/database/ops/settings-step"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { FormNote } from "@/components/form"
+import {
+  Archive,
+  CloudUpload,
+  Copy,
+  Download,
+  RotateCounterClockwise,
+  Trash,
+} from "@/components/icons"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { EmptyState, LoadingPanel } from "@/components/state"
+import { StatusDot, type DotTone } from "@/components/status-dot"
+import { FilterChip } from "@/components/tabs"
+import { Tag } from "@/components/tag"
+import { Button } from "@/components/ui/button"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { VerbActions, type Verb } from "@/components/verbs"
+import { useAuth } from "@/hooks/use-auth"
+import { usePoll } from "@/hooks/use-poll"
+import { del, downloadUrl, get, post } from "@/lib/api"
+import { bytes, clockMinute, relativeTime, timestamp } from "@/lib/format"
+import { notify } from "@/lib/toast"
+import type { BackupJob, DbConnection, Job } from "@/lib/types"
+import { useRouter } from "next/navigation"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 /** The width of the list itself from which a dump is a row of a table rather than a block of lines. */
 const TABLE_FROM = 600
@@ -96,9 +89,8 @@ type Asking =
  * address carries `?job=`) and a reload or a second window shows the same
  * progress.
  *
- * Reading register. The four figures are tiles; the fourth is a way to the
- * server's scheduled backup jobs, which is where a schedule for these dumps
- * is kept.
+ * The schedule action leads to the server's backup jobs, where these dumps
+ * are scheduled.
  */
 export function Backups() {
   const { id, conn, engine, readOnly, status, select, param, href } = useDatabase()
@@ -217,11 +209,6 @@ export function Backups() {
     can("system.admin") && !readOnly && engine.can("copy") && Boolean(data?.options.newDatabase)
   const mayUpload = mayDump && engine.can("dumpUpload")
   const idle = !running
-
-  const outcomes = useMemo(
-    () => transferOutcomes(files, jobs.data ?? [], running, relativeTime),
-    [files, jobs.data, running],
-  )
 
   const download = (file: DbBackupFile) => {
     const link = document.createElement("a")
@@ -365,15 +352,21 @@ export function Backups() {
     </>
   )
 
+  const schedule = scheduledDump(scheduled.data ?? [], id)
   return (
     <SectionFrame section="backups">
-      <BackupReadings
-        files={data ? files : undefined}
-        failed={!data && Boolean(backups.error)}
-        outcomes={outcomes}
-        schedule={scheduledDump(scheduled.data ?? [], id)}
-        scheduleRead={scheduled.data !== undefined || Boolean(scheduled.error)}
-      />
+      <div className="flex flex-wrap items-center gap-3 text-hint text-muted-foreground">
+        {scheduled.data && (
+          <span className="max-w-full min-w-0 break-words">
+            {schedule
+              ? `${schedule.name} · ${schedule.enabled ? (schedule.nextRun ? `Next ${timestamp(schedule.nextRun)}` : "Scheduled") : "Paused"}`
+              : "No scheduled backup job"}
+          </span>
+        )}
+        <Button size="sm" variant="outline" asChild>
+          <Link href={`/backups?database=${id}`}>Manage backup schedule</Link>
+        </Button>
+      </div>
 
       {transfer.current && (
         <TransferProgress
@@ -722,136 +715,5 @@ function DumpHolds({ file }: { file: DbBackupFile }) {
     <span className="block truncate" title={[contents, summary].filter(Boolean).join(" · ")}>
       {[contents, summary].filter(Boolean).join(" · ")}
     </span>
-  )
-}
-
-/**
- * The four readings: when it was last backed up, how large that dump is, how
- * much is kept with how the last operations ended, and whether anything takes
- * these dumps on a schedule.
- */
-function BackupReadings({
-  files,
-  failed,
-  outcomes,
-  schedule,
-  scheduleRead,
-}: {
-  /** Undefined until the list has been read. */
-  files: DbBackupFile[] | undefined
-  /** The list could not be read: the figures are not known, which is not "none". */
-  failed: boolean
-  outcomes: ReturnType<typeof transferOutcomes>
-  schedule: BackupJob | undefined
-  scheduleRead: boolean
-}) {
-  const { id, conn } = useDatabase()
-  const waiting = <Skeleton className="my-1 h-6 w-24" />
-  const unread = <span className="text-muted-foreground">—</span>
-  const last = files ? lastBackup(files) : undefined
-  // The time the ages are read against: held, and moved on twice a minute,
-  // so the tiles say the same thing however often the page draws.
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(timer)
-  }, [])
-  const age = backupAge(last, now)
-  const figure = (value: React.ReactNode) => (files ? value : failed ? unread : waiting)
-  const next = schedule?.enabled && schedule.nextRun ? Date.parse(schedule.nextRun) : NaN
-  return (
-    <StatGrid columns={4} dense aria-label="Backups at a glance" role="group">
-      <StatTile
-        label="Last backup"
-        tone={files && age.stale ? "warning" : "default"}
-        value={figure(
-          <span key="value" className="animate-rise">
-            {last ? relativeTime(last.takenAt) : "Never"}
-          </span>,
-        )}
-        hint={
-          !files
-            ? failed
-              ? "could not be read"
-              : undefined
-            : last
-              ? `${timestamp(last.takenAt)}${last.by ? ` · by ${last.by}` : ""}`
-              : `no dump of ${conn.name} has been taken here`
-        }
-      />
-      <StatTile
-        label="Size"
-        value={figure(
-          <span key="value" className="animate-rise">
-            {last ? bytes(last.size) : "—"}
-          </span>,
-        )}
-        hint={
-          last
-            ? [last.tool ?? last.format, tookWords(last.durationMs)].filter(Boolean).join(" · ")
-            : files
-              ? "of the newest dump"
-              : undefined
-        }
-      />
-      <StatTile
-        label="Kept"
-        value={figure(
-          <span key="value" className="animate-rise">
-            {files?.length ?? 0}
-          </span>,
-        )}
-        trailing={files && files.length > 0 ? bytes(keptBytes(files)) : undefined}
-        hint={
-          outcomes.length > 0 ? (
-            <span className="flex items-center gap-2">
-              <OutcomeStrip items={outcomes} label={outcomesLabel(outcomes)} />
-              <span className="truncate">
-                {outcomes.some((one) => one.tone === "danger")
-                  ? `${plural(outcomes.filter((one) => one.tone === "danger").length, "failure")} among the last`
-                  : "how the last ended"}
-              </span>
-            </span>
-          ) : files ? (
-            "nothing yet"
-          ) : undefined
-        }
-      />
-      <StatLink
-        href={`/backups?database=${id}`}
-        label={
-          schedule
-            ? `Open the backup job ${schedule.name}`
-            : `Add ${conn.name} to a scheduled backup job`
-        }
-      >
-        <StatTile
-          className="h-full transition-colors group-hover:bg-row-hover"
-          label="Schedule"
-          value={
-            !scheduleRead ? (
-              waiting
-            ) : (
-              <span key="value" className="animate-rise">
-                {schedule
-                  ? schedule.enabled
-                    ? Number.isFinite(next)
-                      ? `in ${duration(Math.max(0, (next - now) / 1000))}`
-                      : "On"
-                    : "Paused"
-                  : "None"}
-              </span>
-            )
-          }
-          hint={
-            !scheduleRead
-              ? undefined
-              : schedule
-                ? `${describeCron(schedule.schedule)} · ${schedule.name}`
-                : "no backup job takes these dumps"
-          }
-        />
-      </StatLink>
-    </StatGrid>
   )
 }

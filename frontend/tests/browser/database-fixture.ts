@@ -264,6 +264,8 @@ export async function mockDatabases(page: Page, options: DatabaseMock = {}) {
       return json(route, summaryOf(conn, options.summaries?.[conn.id]))
     }
     if (rest === "/ping") return json(route, { ok: true })
+    if (rest === "/stats/history")
+      return json(route, { samples: [], everySeconds: 30, retentionHours: 168 })
     if (rest === "/access") {
       return json(route, {
         detected: true,

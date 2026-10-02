@@ -1,17 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { bytes, percent } from "@/lib/format"
-import { usePoll } from "@/hooks/use-poll"
-import { utilisationTone } from "@/components/meter"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Notice } from "@/components/state"
-import { ChipCount, tabClasses } from "@/components/tabs"
-import { Skeleton } from "@/components/ui/skeleton"
 import { SectionError, SectionFrame } from "@/components/database/kit"
 import { redisStats } from "@/components/database/redis/api"
-import { worthRetrying } from "@/components/database/redis/read-error"
 import { ClientsView } from "@/components/database/redis/performance/clients"
 import { CommandsView } from "@/components/database/redis/performance/commands"
 import { MemoryView } from "@/components/database/redis/performance/memory"
@@ -19,15 +9,17 @@ import { OverviewView } from "@/components/database/redis/performance/overview"
 import { PersistenceView } from "@/components/database/redis/performance/persistence"
 import {
   addSample,
-  lifetimeHitRate,
-  perSecond,
-  seriesOf,
   statRows,
   type StatSample,
 } from "@/components/database/redis/performance/samples"
 import { SlowlogView } from "@/components/database/redis/performance/slowlog"
+import { worthRetrying } from "@/components/database/redis/read-error"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
+import { Notice } from "@/components/state"
+import { ChipCount, tabClasses } from "@/components/tabs"
+import { usePoll } from "@/hooks/use-poll"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 /** How often the counters are read: one INFO each time. */
 const EVERY_MS = 3000
@@ -94,118 +86,11 @@ export function RedisPerformance() {
     )
   }
 
-  const now = newest?.counters
-  const row = rows[rows.length - 1]
-  const memory = server.data?.memory
-  // Against its own limit where it has one, else against the machine's memory:
-  // a server with no limit still has a ceiling, and it is the host's.
-  const ceiling = now?.maxmemory || memory?.max || memory?.systemTotal || 0
-  const used = now?.used_memory
-  const fill = used !== undefined && ceiling > 0 ? (used / ceiling) * 100 : undefined
-  const limited = Boolean(now?.maxmemory || memory?.max)
-  const hitRate = now ? lifetimeHitRate(now) : null
-  const clients = now?.connected_clients
-  const spaces = server.data?.keyspace.length ?? 0
+  const clients = newest?.counters.connected_clients
 
   return (
     <SectionFrame section="performance">
       {server.data?.notice && <Notice title="About this server">{server.data.notice}</Notice>}
-      {!now ? (
-        <StatGrid columns={5} dense aria-hidden>
-          {Array.from({ length: 5 }, (_, i) => (
-            <div key={i} className="space-y-2.5 px-5 py-4">
-              <Skeleton className="h-2.5 w-16" />
-              <Skeleton className="h-7 w-24" />
-              <Skeleton className="h-3 w-32" />
-            </div>
-          ))}
-        </StatGrid>
-      ) : (
-        <StatGrid columns={5} dense key="readings" className="animate-rise">
-          <StatTile
-            label="Commands a second"
-            value={perSecond(row?.ops ?? now.instantaneous_ops_per_sec ?? 0)}
-            trend={
-              <TileTrend
-                values={seriesOf(rows, "ops")}
-                label="Commands a second"
-                color="var(--chart-1)"
-              />
-            }
-            hint={
-              now.total_commands_processed === undefined
-                ? undefined
-                : `${now.total_commands_processed.toLocaleString()} since it started`
-            }
-          />
-          <StatTile
-            label="Memory"
-            value={used === undefined ? "—" : bytes(used)}
-            meter={fill}
-            tone={limited && fill !== undefined ? utilisationTone(fill) : "default"}
-            hint={
-              used === undefined
-                ? "The server does not report it"
-                : limited
-                  ? `of a ${bytes(ceiling)} limit${memory?.policy ? ` · ${memory.policy}` : ""}`
-                  : ceiling > 0
-                    ? `no limit · the machine has ${bytes(ceiling)}`
-                    : "no limit set"
-            }
-          />
-          <StatTile
-            label="Hit rate"
-            value={hitRate === null ? "—" : percent(hitRate)}
-            trend={
-              <TileTrend
-                values={seriesOf(rows, "hitRate")}
-                label="Hit rate"
-                color="var(--chart-5)"
-                max={100}
-              />
-            }
-            hint={
-              hitRate === null
-                ? "No key has been looked up yet"
-                : `${(now.keyspace_hits ?? 0).toLocaleString()} hits · ${(now.keyspace_misses ?? 0).toLocaleString()} misses`
-            }
-          />
-          <StatTile
-            label="Clients"
-            value={clients === undefined ? "—" : clients.toLocaleString()}
-            trend={
-              <TileTrend
-                values={seriesOf(rows, "clients")}
-                label="Clients"
-                color="var(--chart-2)"
-              />
-            }
-            tone={now.blocked_clients ? "warning" : "default"}
-            hint={
-              now.blocked_clients
-                ? `${now.blocked_clients.toLocaleString()} blocked on a command`
-                : now.rejected_connections
-                  ? `${now.rejected_connections.toLocaleString()} refused since it started`
-                  : "none blocked"
-            }
-          />
-          <StatTile
-            label="Keys"
-            value={now.keys === undefined ? "—" : now.keys.toLocaleString()}
-            trend={
-              <TileTrend values={seriesOf(rows, "keys")} label="Keys" color="var(--chart-4)" />
-            }
-            // The server counts its keys over every numbered database, and
-            // says so first: it is the clause a truncated hint must not lose.
-            hint={[
-              spaces > 1 ? `in all ${spaces} databases` : "",
-              now.expires === undefined ? "" : `${now.expires.toLocaleString()} set to expire`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          />
-        </StatGrid>
-      )}
 
       <div className="min-w-0 space-y-6">
         {/* A strip of pressed buttons, not a landmark: these are six readings

@@ -1,43 +1,6 @@
 "use client"
 
-import { useId, useMemo, useState } from "react"
-import Link from "next/link"
-import { Cross, Key, Plus, Trash, UserPlus } from "@/components/icons"
-import { del, errorMessage, post, put } from "@/lib/api"
-import { plural } from "@/lib/format"
-import { notify } from "@/lib/toast"
-import { cn } from "@/lib/utils"
-import { useAuth } from "@/hooks/use-auth"
-import { usePoll } from "@/hooks/use-poll"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
-import {
-  Disclosure,
-  Field,
-  FieldRow,
-  FormFact,
-  FormFacts,
-  FormNote,
-  FormSection,
-} from "@/components/form"
-import { IconAction } from "@/components/icon-action"
-import { Panel, PanelBody } from "@/components/panel"
-import { LoadingRows, Notice } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
-import { Tag } from "@/components/tag"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
-import { VerbBar, VerbMenu, type Verb } from "@/components/verbs"
 import { generatePassword } from "@/components/database/connect/rules"
 import {
   CardsSkeleton,
@@ -71,6 +34,41 @@ import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import {
+  Disclosure,
+  Field,
+  FieldRow,
+  FormFact,
+  FormFacts,
+  FormNote,
+  FormSection,
+} from "@/components/form"
+import { IconAction } from "@/components/icon-action"
+import { Cross, Key, Plus, Trash, UserPlus } from "@/components/icons"
+import { Panel, PanelBody } from "@/components/panel"
+import { LoadingRows, Notice } from "@/components/state"
+import { ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
+import { Tag } from "@/components/tag"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { VerbBar, VerbMenu, type Verb } from "@/components/verbs"
+import { useAuth } from "@/hooks/use-auth"
+import { usePoll } from "@/hooks/use-poll"
+import { del, errorMessage, post, put } from "@/lib/api"
+import { plural } from "@/lib/format"
+import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
+import Link from "next/link"
+import { useId, useMemo, useState } from "react"
 
 const BESIDE_FROM = 640
 
@@ -138,7 +136,7 @@ function userTags(user: MongoUser) {
  * and the page says that rather than "empty".
  */
 export function MongoAccess() {
-  const { id, conn, readOnly, status, param, goto } = useDatabase()
+  const { id, readOnly, status, param, goto } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const account = useOpenAccount()
@@ -203,50 +201,10 @@ export function MongoAccess() {
   })
 
   const data = users.data
-  const admins = list.filter((user) => user.superuser).length
-  const homes = new Set(list.map((user) => user.db)).size
-  const figure = (value: number) =>
-    data ? (
-      <span key="value" className="animate-rise">
-        {value}
-      </span>
-    ) : users.error ? (
-      <span className="text-muted-foreground">—</span>
-    ) : (
-      <Skeleton className="my-1 h-6 w-12" />
-    )
-  const unread = !data && users.error ? "could not be read" : undefined
   const current = list.find((user) => user.user === opened && user.db === openedDb)
 
   return (
     <SectionFrame section="access">
-      <StatGrid columns={3} dense role="group" aria-label="Accounts at a glance">
-        <StatTile
-          label="Users"
-          value={figure(list.length)}
-          tone={data && list.length === 0 ? "warning" : "default"}
-          hint={
-            data
-              ? list.length === 0
-                ? "the server asks nobody"
-                : conn.user
-                  ? `connected as ${conn.user}`
-                  : "connected as nobody"
-              : unread
-          }
-        />
-        <StatTile
-          label="Administrators"
-          value={figure(admins)}
-          hint={data ? "hold root on the server" : unread}
-        />
-        <StatTile
-          label="Account databases"
-          value={figure(homes)}
-          hint={data ? "where users are kept" : unread}
-        />
-      </StatGrid>
-
       <Panel plain aria-label="Accounts" ref={frame}>
         {/* The views of the page as a strip on the panel's own hairline, its commands at the end. */}
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-hairline">

@@ -1,23 +1,21 @@
 "use client"
 
-import Link from "next/link"
-import { duration, percent, plural } from "@/lib/format"
-import { LANES, hueFor } from "@/lib/hue"
 import { BarList, type BarListItem } from "@/components/bar-list"
-import { EmptyState } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Tag } from "@/components/tag"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { EngineMark } from "@/components/database/kit"
 import { bytesId, bytesLabel } from "@/components/database/redis/bytes"
 import { TypeComposition, type TypeShare } from "@/components/database/redis/composition"
-import { kindLabel } from "@/components/database/redis/kinds"
 import { scanProgress, type TreeLevel } from "@/components/database/redis/keys/scan"
+import { kindLabel } from "@/components/database/redis/kinds"
 import { ReadError } from "@/components/database/redis/read-error"
 import type { RedisTreeFolder } from "@/components/database/redis/types"
 import type { Paged } from "@/components/database/redis/use-paged"
 import type { Redis } from "@/components/database/redis/use-redis"
+import { EmptyState } from "@/components/state"
+import { Tag } from "@/components/tag"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { LANES, hueFor } from "@/lib/hue"
+import Link from "next/link"
 
 /** How many namespaces are ranked: the rest are in the tree. */
 const RANKED = 12
@@ -33,9 +31,7 @@ const RANKED = 12
  * namespaces hold them — and every part of it is a way in: a type narrows the
  * rail to that type, a namespace lists its keys.
  *
- * The four tiles are this pane's and not the page's: a workbench has no row
- * of readings above it, and these stand in the place of the key the reader
- * has not picked yet.
+ * The namespaces and key types stand in the place of a key until one is picked.
  */
 export function Keyspace({
   redis,
@@ -86,7 +82,6 @@ export function Keyspace({
     const to = typeof folder.pattern === "string" ? folder.pattern : undefined
     return to ? { ...item, onClick: () => onNamespace(to) } : item
   })
-  const share = space && space.keys > 0 ? (space.expires / space.keys) * 100 : undefined
   // The server's other numbered databases, where it has any: how its keys
   // are spread over them, and the way to each.
   const spaces = server.data?.features.databases ? server.data.keyspace : []
@@ -163,52 +158,6 @@ export function Keyspace({
       {head}
       <div className="@container min-h-0 flex-1 overflow-auto">
         <div className="animate-rise space-y-7 px-5 pt-1 pb-6">
-          {/* Bled by the tiles' own inset, so a tile's figure starts on the
-              line every heading under it starts on. */}
-          <StatGrid columns={4} dense className="-mx-5 border-b border-hairline">
-            <StatTile
-              label="Keys"
-              value={total === undefined ? "—" : total.toLocaleString()}
-              hint={
-                narrowed && level
-                  ? `${level.count.toLocaleString()} match the filter`
-                  : spaces.length > 1
-                    ? `of ${everywhere.toLocaleString()} on the server`
-                    : undefined
-              }
-            />
-            <StatTile
-              label="Set to expire"
-              value={space ? space.expires.toLocaleString() : "—"}
-              meter={share}
-              hint={
-                share === undefined
-                  ? "The server has not said"
-                  : space?.expires === 0
-                    ? "every key is kept for good"
-                    : `${percent(share)} of the keys`
-              }
-            />
-            <StatTile
-              label="Average time left"
-              value={space && space.expires > 0 ? duration(space.avgTtlMs / 1000) : "—"}
-              hint={space && space.expires > 0 ? "over the keys that expire" : "no key expires"}
-            />
-            <StatTile
-              label="Namespaces"
-              value={level ? (folders.length + level.foldersOmitted).toLocaleString() : "—"}
-              hint={
-                !level
-                  ? undefined
-                  : level.keyCount > 0
-                    ? `${plural(level.keyCount, "key")} outside one`
-                    : narrowed
-                      ? "that hold a match"
-                      : "every key is in one"
-              }
-            />
-          </StatGrid>
-
           {walk.error && !level ? (
             <ReadError error={walk.error} onRetry={walk.reload} />
           ) : !level ? (

@@ -1,29 +1,27 @@
 "use client"
 
-import { useEffect, useMemo, useRef } from "react"
-import Link from "next/link"
-import { SidebarLeftOpen } from "@/components/icons"
-import { get } from "@/lib/api"
-import { bytes, percent, plural } from "@/lib/format"
-import { cn } from "@/lib/utils"
-import { usePoll } from "@/hooks/use-poll"
 import { BarList } from "@/components/bar-list"
-import { IconAction } from "@/components/icon-action"
-import { StatGrid, StatTile } from "@/components/stat-tile"
-import { Tag } from "@/components/tag"
-import { Button } from "@/components/ui/button"
-import { NumberTicker } from "@/components/ui/number-ticker"
-import { Skeleton } from "@/components/ui/skeleton"
-import { VerbMenu, type Verb } from "@/components/verbs"
 import { compactCount, grouped } from "@/components/database/data/view"
 import { EngineMark } from "@/components/database/kit"
-import { useDatabase } from "@/components/database/shell/database-context"
 import { objectParams, tableParams } from "@/components/database/schema/address"
 import { GroupGlyph, groupSpec } from "@/components/database/schema/kinds"
 import { schemaFigures } from "@/components/database/schema/landing-figures"
 import { SchemaMark } from "@/components/database/schema/rail"
 import { Composition } from "@/components/database/schema/statistics"
 import type { DbCatalog, DbTableStats, SchemaObject } from "@/components/database/schema/types"
+import { useDatabase } from "@/components/database/shell/database-context"
+import { IconAction } from "@/components/icon-action"
+import { SidebarLeftOpen } from "@/components/icons"
+import { Tag } from "@/components/tag"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { VerbMenu, type Verb } from "@/components/verbs"
+import { usePoll } from "@/hooks/use-poll"
+import { get } from "@/lib/api"
+import { bytes } from "@/lib/format"
+import { cn } from "@/lib/utils"
+import Link from "next/link"
+import { useEffect, useMemo, useRef } from "react"
 
 /** How many labels of an enum are printed before the rest are counted. */
 const LABELS = 8
@@ -119,9 +117,6 @@ export function SchemaLanding({
     info?.default && "names resolve here by default",
   ].filter(Boolean)
   const beside = enums.length > 0 || views.length > 0 || figures.reads !== null
-  const indexShare =
-    figures.indexBytes !== null && figures.bytes ? (figures.indexBytes / figures.bytes) * 100 : null
-  const pending = <Skeleton className="my-1 h-6 w-16" />
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -174,88 +169,6 @@ export function SchemaLanding({
           </div>
 
           {note && <p className="text-hint leading-relaxed text-muted-foreground">{note}</p>}
-
-          {total > 0 && (
-            // Bled to the pane's edges: the tiles keep their own inset, which
-            // is the page's, so the figures start on the line the name does.
-            <StatGrid
-              dense
-              // While the engine is being asked the fourth figure keeps its
-              // place, so the run does not re-divide when the answer lands.
-              columns={indexShare !== null || measuring ? 4 : 3}
-              className="-mx-5 border-y border-hairline"
-            >
-              <StatTile
-                label={groupSpec("tables").plural}
-                value={<NumberTicker value={figures.tables} />}
-                hint={
-                  figures.others.length > 0
-                    ? `and ${figures.others
-                        .map(({ group, count }) =>
-                          plural(count, groupSpec(group).label.toLowerCase()),
-                        )
-                        .join(", ")}`
-                    : undefined
-                }
-              />
-              <StatTile
-                label="Rows"
-                value={
-                  figures.rows !== null ? (
-                    <span key="rows" className="animate-rise" title={grouped(figures.rows)}>
-                      ~{compactCount(figures.rows)}
-                    </span>
-                  ) : measuring ? (
-                    pending
-                  ) : (
-                    "not counted"
-                  )
-                }
-                hint={
-                  figures.rows !== null
-                    ? "the engine's estimate"
-                    : measuring
-                      ? undefined
-                      : `${engine.label} keeps no estimate`
-                }
-              />
-              <StatTile
-                label="On disk"
-                value={
-                  figures.bytes !== null ? (
-                    <span key="bytes" className="animate-rise">
-                      {bytes(figures.bytes)}
-                    </span>
-                  ) : measuring ? (
-                    pending
-                  ) : (
-                    "not measured"
-                  )
-                }
-                hint={
-                  figures.bytes === null
-                    ? undefined
-                    : figures.reclaimable && figures.reclaimable * 20 > figures.bytes
-                      ? `about ${bytes(figures.reclaimable)} reclaimable, estimated`
-                      : `${plural(figures.measured, "table")} with their indexes`
-                }
-              />
-              {indexShare !== null ? (
-                <StatTile
-                  label="In indexes"
-                  value={
-                    <span key="indexes" className="animate-rise">
-                      {indexShare > 0 && indexShare < 0.1 ? "under 0.1%" : percent(indexShare)}
-                    </span>
-                  }
-                  meter={indexShare}
-                  hint={`${bytes(figures.indexBytes)} of what is on disk`}
-                />
-              ) : (
-                measuring && <StatTile label="In indexes" value={pending} />
-              )}
-            </StatGrid>
-          )}
 
           {total > 0 && (
             <div
