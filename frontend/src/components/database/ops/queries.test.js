@@ -12,13 +12,38 @@ import {
   sourceWords,
 } from "./queries"
 
+/** As much of the registry's entry as the vocabulary reads. */
+const engine = (kind, statement, server = true) => ({
+  kind,
+  nouns: { statement, statements: `${statement}s` },
+  can: (flag) => flag === "server" && server,
+})
+const POSTGRES = engine("sql", "statement")
+const MYSQL = engine("sql", "statement")
+const SQLITE = engine("sql", "statement", false)
+const REDIS = engine("keyvalue", "command")
+const MONGO = engine("document", "operation")
+
 describe("queryNoun", () => {
-  test("each engine is read in its own words", () => {
-    expect(queryNoun("postgres").title).toBe("Slow statements")
-    expect(queryNoun("redis")).toMatchObject({ view: "Commands", title: "Slow commands" })
-    expect(queryNoun("mongodb").title).toBe("Slow operations")
-    expect(queryNoun("clickhouse").title).toBe("Queries")
-    expect(queryNoun("mysql").view).toBe("Queries")
+  test("each engine is read in its own words, from the registry", () => {
+    expect(queryNoun(POSTGRES).title).toBe("Slow statements")
+    expect(queryNoun(REDIS)).toMatchObject({ view: "Commands", title: "Slow commands" })
+    expect(queryNoun(MONGO)).toMatchObject({ view: "Queries", title: "Slow operations" })
+    expect(queryNoun(MYSQL).view).toBe("Queries")
+  })
+
+  test("a file has no server keeping a list: its own is what was run from here", () => {
+    expect(queryNoun(SQLITE)).toMatchObject({ title: "Run from here", one: "statement" })
+  })
+
+  test("a list read from the server's own query tables is a list of queries", () => {
+    expect(queryNoun(MYSQL, "slow_log")).toMatchObject({ title: "Slow queries", one: "query" })
+    expect(queryNoun(MYSQL, "statements_history").many).toBe("queries")
+    // system.query_log holds every query, slow or not.
+    expect(queryNoun(engine("sql", "statement"), "query_log").title).toBe("Queries")
+    // A server log's slow lines are statements, whatever the engine.
+    expect(queryNoun(POSTGRES, "log").title).toBe("Slow statements")
+    expect(queryNoun(REDIS, "slowlog").title).toBe("Slow commands")
   })
 })
 
@@ -89,8 +114,8 @@ test("a window's start is counted back from now", () => {
 })
 
 test("a count is said in the view's own noun", () => {
-  expect(countWords(1, queryNoun("postgres"))).toBe("1 statement")
-  expect(countWords(12, queryNoun("redis"))).toBe("12 commands")
+  expect(countWords(1, queryNoun(POSTGRES))).toBe("1 statement")
+  expect(countWords(12, queryNoun(REDIS))).toBe("12 commands")
 })
 
 test("a row keeps its key when a newer statement arrives above it", () => {

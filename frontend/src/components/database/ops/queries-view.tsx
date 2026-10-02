@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
   ClockRewind,
   CodeBracket,
@@ -17,7 +17,13 @@ import { clock, timestamp } from "@/lib/format"
 import { useLogView } from "@/lib/log-view"
 import { latency, latencyTone } from "@/lib/requests"
 import { useSessionState } from "@/lib/view-state"
-import type { DbConnection, DbHistoryEntry, DbQueryEntry, DbQueryLog } from "@/lib/types"
+import type {
+  DbConnection,
+  DbDriverInfo,
+  DbHistoryEntry,
+  DbQueryEntry,
+  DbQueryLog,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
@@ -26,10 +32,13 @@ import { laneStyle } from "@/components/logs/log-text"
 import { Address } from "@/components/deploy/request-marks"
 import { FactDot } from "@/components/metrics/host-identity"
 import { PaneFooter, Well } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, LoadingRows, Notice } from "@/components/state"
 import { ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
+import { engineFor, type Engine } from "@/components/database/engine"
+import { CouldNotRead } from "@/components/database/home/blocks"
+import { EngineGlyph } from "@/components/database/kit"
 import { StatementsPanel } from "@/components/database/ops/statements-panel"
 import {
   QUERY_RANGES,
@@ -43,18 +52,13 @@ import {
   refreshEvery,
   sortEntries,
   sourceWords,
+  type QueryNoun,
   type QueryOrder,
   type QueryRange,
 } from "@/components/database/ops/queries"
 
 /** How many rows one read asks for; the server's cap is 500. */
 const LIMIT = 200
-
-/** The engines whose statements the query console runs. */
-const NOT_SQL = new Set(["redis", "mongodb"])
-
-/** The engines that keep statement statistics for the Top statements list. */
-const TOP_STATEMENTS = new Set(["postgres", "mysql"])
 
 type Reading = QueryOrder | "top"
 
@@ -68,7 +72,8 @@ export function databaseQueriesView(
 ): ServiceLogsView {
   return {
     id: "queries",
-    label: queryNoun(conn.driver).view,
+    // Named before any catalogue is read: the view's word is the registry's own.
+    label: queryNoun(engineFor(conn)).view,
     render: (ctx) => <DatabaseQueries conn={conn} ctx={ctx} onQuery={onQuery} />,
   }
 }
@@ -96,25 +101,47 @@ export function databaseQueriesView(
  * simply have nowhere to send the reader. `onQuery` is where the page runs a
  * statement — the Databases section's query console — offered to an account
  * that may run one, on an engine that speaks SQL.
+ *
+ * What the engine is — its words, whether it keeps statement statistics,
+ * whether it is a server at all — is the registry's to say. The database's
+ * own page hands its engine in; the host's Logs page has only the connection,
+ * so the view reads the catalogue itself and the registry answers from that.
  */
 export function DatabaseQueries({
   conn,
+  engine: given,
   ctx,
   onQuery,
+  heading,
 }: {
   conn: DbConnection
+  /** The registry's entry for the connection, where the page already has it. */
+  engine?: Engine
   ctx?: ServiceLogsContext
   onQuery?: (sql: string) => void
+  /**
+   * The view stands alone, with no log beside it: it draws its own title,
+   * and why there is no log to read.
+   */
+  heading?: { why?: string }
 }) {
   const { can } = useAuth()
-  const noun = queryNoun(conn.driver)
-  const sqlite = conn.driver === "sqlite"
+  const catalogue = usePoll(
+    (signal) => get<DbDriverInfo[]>("/databases/drivers", undefined, signal),
+    0,
+    [],
+    { enabled: !given },
+  )
+  const drivers = catalogue.data
+  const engine = useMemo(() => given ?? engineFor(conn, drivers), [given, conn, drivers])
+  // A file has no server keeping a list: its own is what this dashboard ran.
+  const sqlite = !engine.can("server")
   const [range, setRange] = useSessionState<QueryRange>(`databases.${conn.id}.queries.range`, "24h")
   const [reading, setReading] = useSessionState<Reading>(
     `databases.${conn.id}.queries.reading`,
     "latest",
   )
-  const top = TOP_STATEMENTS.has(conn.driver)
+  const top = engine.can("statements")
   const shown: Reading = reading === "top" && !top ? "latest" : reading
 
   const log = usePoll(
@@ -137,13 +164,13 @@ export function DatabaseQueries({
     { enabled: sqlite },
   )
 
-  const openInQuery =
-    onQuery && !NOT_SQL.has(conn.driver) && can("service.control") ? onQuery : undefined
+  const openInQuery = onQuery && engine.can("sql") && can("service.control") ? onQuery : undefined
 
   const result = sqlite ? history : log
   const entries = sqlite ? historyEntries(history.data ?? []) : (log.data?.entries ?? [])
   const rows = sortEntries(entries, shown === "slowest" ? "slowest" : "latest")
   const data = log.data
+  const noun = queryNoun(engine, sqlite ? undefined : data?.source)
   // A global setting Postgres reports as off can be on for one database or
   // one role (ALTER DATABASE … SET), so rows in its log answer the Notice
   // better than the setting does. MySQL's rows beside it are the stand-in the
@@ -153,6 +180,23 @@ export function DatabaseQueries({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {heading && (
+        // The one sentence the reader came for, beside the name and wrapping
+        // rather than cut.
+        <div className="flex shrink-0 items-start gap-x-2 border-b border-hairline px-2.5 py-2.5">
+          <EngineGlyph engine={engine} className="mt-px" />
+          <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+            <span className="shrink-0 text-body font-medium">
+              {sqlite ? "Statements run from here" : noun.title}
+            </span>
+            {heading.why && (
+              <span className="min-w-0 basis-64 text-hint text-pretty text-muted-foreground max-sm:basis-full sm:flex-1">
+                {heading.why}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
       <div className="flex min-h-9 shrink-0 items-stretch border-b border-hairline">
         <ChipStrip
           aria-label="Which statements"
@@ -192,22 +236,22 @@ export function DatabaseQueries({
 
       {shown === "top" ? (
         <div className="min-h-0 flex-1 overflow-auto p-4">
-          <StatementsPanel conn={conn} title="Top statements" />
+          <StatementsPanel id={conn.id} title="Top statements" onQuery={openInQuery} />
         </div>
       ) : (
         <>
           <div className="min-h-0 flex-1 overflow-auto bg-surface-sunken">
             {enable && (
-              <EnableNotice
-                enable={enable}
-                driver={conn.driver}
-                onQuery={openInQuery}
-                className="m-3"
-              />
+              <EnableNotice enable={enable} noun={noun} onQuery={openInQuery} className="m-3" />
             )}
             {result.error && !result.data ? (
               <div className="p-6">
-                <ErrorState error={result.error} className="max-w-lg" />
+                <CouldNotRead
+                  what={`the ${noun.many}`}
+                  error={result.error}
+                  onRetry={result.refresh}
+                  className="max-w-lg"
+                />
               </div>
             ) : !result.data ? (
               <LoadingRows rows={8} className="p-3" />
@@ -278,7 +322,7 @@ function QueriesEmpty({
   range,
 }: {
   log?: DbQueryLog
-  noun: ReturnType<typeof queryNoun>
+  noun: QueryNoun
   range: QueryRange
 }) {
   if (!log) {
@@ -286,7 +330,7 @@ function QueriesEmpty({
       <EmptyState
         icon={Database}
         title="Nothing run from here yet"
-        description="A SQLite database is a file, not a server, so nothing records its statements but this dashboard. What is run on the Query page is listed here."
+        description="This database is a file, not a server, so nothing records its statements but this dashboard. What is run on the Query page is listed here."
       />
     )
   }
@@ -338,12 +382,12 @@ const ENABLE_WORDS: Record<string, (current: string) => string> = {
  */
 function EnableNotice({
   enable,
-  driver,
+  noun,
   onQuery,
   className,
 }: {
   enable: NonNullable<DbQueryLog["enable"]>
-  driver: string
+  noun: QueryNoun
   onQuery?: (sql: string) => void
   className?: string
 }) {
@@ -353,11 +397,7 @@ function EnableNotice({
       tone="warning"
       icon={Warning}
       className={className}
-      title={
-        driver === "postgres"
-          ? "Slow statements are not being logged"
-          : "Slow queries are not being recorded"
-      }
+      title={`${noun.title} are not being recorded`}
     >
       <div className="max-w-3xl space-y-2">
         <p>{words ? words(enable.current) : `${enable.setting} is ${enable.current}.`}</p>
@@ -399,7 +439,7 @@ function QueryRows({
   onQuery,
 }: {
   entries: DbQueryEntry[]
-  noun: ReturnType<typeof queryNoun>
+  noun: QueryNoun
   ctx?: ServiceLogsContext
   range: QueryRange
   fromLog: boolean
@@ -572,7 +612,7 @@ function QueryDetail({
   onQuery,
 }: {
   entry: DbQueryEntry
-  noun: ReturnType<typeof queryNoun>
+  noun: QueryNoun
   ctx?: ServiceLogsContext
   /** The list's window, which "every time this shape was slow" searches. */
   range: QueryRange

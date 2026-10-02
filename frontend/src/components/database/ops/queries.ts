@@ -1,4 +1,5 @@
-import type { DbDriver, DbHistoryEntry, DbQueryEntry, DbQueryLog } from "@/lib/types"
+import type { DbHistoryEntry, DbQueryEntry, DbQueryLog } from "@/lib/types"
+import type { Engine } from "@/components/database/engine"
 
 /**
  * The Queries view's decisions, kept apart from its drawing: what each
@@ -17,26 +18,44 @@ export type QueryNoun = {
   many: string
 }
 
+/** As much of an engine as the vocabulary is read from: the registry's entry, or a part of it. */
+export type QueryEngine = Pick<Engine, "kind" | "nouns" | "can">
+
+/** Where a server says its list was read: a table that holds queries, not a log of statements. */
+const QUERY_TABLES: ReadonlySet<DbQueryLog["source"]> = new Set([
+  "slow_log",
+  "statements_history",
+  "query_log",
+])
+
 /**
  * Each engine in its own vocabulary: Redis runs commands and Mongo
  * operations, and a list called "Slow statements" over SLOWLOG reads as
  * someone else's page.
+ *
+ * The words come from the registry — what the engine calls a statement, and
+ * whether it is a server at all — and from the server's own answer: a list
+ * read from `mysql.slow_log` or `system.query_log` is a list of queries in
+ * the engine's own name for it, and `query_log` holds every query, slow or
+ * not. Until a list has answered, an engine is read by the registry's word.
  */
-export function queryNoun(driver: DbDriver): QueryNoun {
-  switch (driver) {
-    case "redis":
-      return { view: "Commands", title: "Slow commands", one: "command", many: "commands" }
-    case "mongodb":
-      return { view: "Queries", title: "Slow operations", one: "operation", many: "operations" }
-    case "mysql":
-      return { view: "Queries", title: "Slow queries", one: "query", many: "queries" }
-    case "clickhouse":
-      // system.query_log holds every query, slow or not.
-      return { view: "Queries", title: "Queries", one: "query", many: "queries" }
-    case "sqlite":
-      return { view: "Queries", title: "Run from here", one: "statement", many: "statements" }
+export function queryNoun(engine: QueryEngine, source?: DbQueryLog["source"]): QueryNoun {
+  const queries = source !== undefined && QUERY_TABLES.has(source)
+  const one = queries ? "query" : engine.nouns.statement
+  const many = queries ? "queries" : engine.nouns.statements
+  const capital = (word: string) => word[0].toUpperCase() + word.slice(1)
+  return {
+    // A key–value store has no queries: its view is named for what it runs.
+    view: engine.kind === "keyvalue" ? capital(engine.nouns.statements) : "Queries",
+    title: !engine.can("server")
+      ? // A file has no server keeping a log: its list is what was run from here.
+        "Run from here"
+      : source === "query_log"
+        ? "Queries"
+        : `Slow ${many}`,
+    one,
+    many,
   }
-  return { view: "Queries", title: "Slow statements", one: "statement", many: "statements" }
 }
 
 const SOURCE_WORDS: Record<DbQueryLog["source"], string> = {
