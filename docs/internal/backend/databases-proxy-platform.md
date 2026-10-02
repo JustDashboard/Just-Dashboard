@@ -253,10 +253,12 @@ is connected by naming the instance found, not by typing its address again.
   systemctl is asked. systemctl is reached through `dbSystemctl`, which a test replaces.
   Audited as `database.power.<action>`. It never guesses: a unit is taken for the server only when it
   is named for the engine (what listens on a database's port may be an ssh tunnel, whose unit is
-  sshd's, or `docker-proxy`, whose unit is Docker's), a container found only by its port only when its
-  image is the engine's, and a remote server or a file is refused with `409 power_unavailable` and the
+  sshd's, or `docker-proxy`, whose unit is Docker's), a container found only by its port only when it
+  is the engine — by its image's name or, for a private build or a tag that has moved on, by what the
+  inventory read from its environment and command (a port alone never counts) — and a remote server or a file is refused with `409 power_unavailable` and the
   reason the summary gave. A compose-owned container is not refused, as it is not on the Docker page:
-  nothing here recreates it.
+  nothing here recreates it. A stopped container is found again by the connection's `origin` (`docker:<name>`
+  or `compose:<project>/<service>`) before its published port is looked for.
   **A change of power is read by everyone until it settles.** The request is slow by design and the
   browser that sent it was the only one that knew it was happening, so the server keeps it
   (`dbConnState.power`, in memory) and `GET /databases/{id}` and the connection's fleet entry carry
