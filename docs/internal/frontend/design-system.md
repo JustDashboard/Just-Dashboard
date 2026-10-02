@@ -1493,6 +1493,14 @@ the chosen one `bg-accent` like every selection. The Files page is a workbench a
 and a Git working copy, has no page header: its commands sit in the strip across the workbench, beside
 the folder they act on.
 
+Files and `/files/editor` take the **reading** register: their frames contain independently scrolling
+workbench panes, while directory and selection readings live in the status strip. Tiles use fixed,
+compact columns rather than stretching to fill empty space. The sidebar's active wash and
+`aria-current` identify its folder without another dot. Page commands share a 32px height and the
+same primary/secondary hierarchy. Name and content search share a compact keyboard palette with
+file identities, paths and highlighted matching lines. Quick editors keep these same controls when
+opened in the full workspace beside a collapsible tree.
+
 A `Pane`'s chrome strip is the one place a small inline glyph still sits beside a name (the git tools
 column, the session rail). A pane is a region of a workspace rather than a block of content, its strip
 is deliberately tighter than a panel's, and the mark there is a bare 14px outline rather than a tinted

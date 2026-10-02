@@ -62,7 +62,8 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
 - **Backups that know what is not backed up.** Every volume, stack, deployment, repository and
   database listed, one press from a job, with writers frozen while the archive is taken.
 - **A real shell, a real file manager, the repositories on the disk.** Host shells that survive
-  the tab closing, a file manager with previews and an editor, and every Git checkout with
+  the tab closing, a compact file manager with name/content search, previews, Monaco and image editors
+  that open beside the listing or in a full workspace with a file tree, and every Git checkout with
   staging, history, branches and pull requests.
 
 ## Install
@@ -184,9 +185,10 @@ resource page. Board editing needs `service.control`, and deletion asks for the 
 
 ![The file manager with coloured folders and a Compose file preview](docs/files.png)
 
-Browse, preview, edit with a diff before saving, drag and drop, upload whole folders, crop
-pictures, chmod, search by content, archive and extract. Every path is checked against
-`JD_FILE_ROOTS` before anything happens.
+Browse compact tiles, find files by name or matching content, preview, edit with a diff before
+saving, drag and drop, upload whole folders, crop pictures, chmod, archive and extract. Text and
+image editors open beside the listing or in a full workspace with a collapsible folder tree.
+Every path is checked against `JD_FILE_ROOTS` before anything happens.
 The folder button in the toolbar changes every folder's colour. The inspector and folder menus can
 then set a different colour for one folder.
 

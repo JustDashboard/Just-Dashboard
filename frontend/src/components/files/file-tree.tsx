@@ -171,13 +171,13 @@ export function FileTree({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshTick])
 
-  // Reveal the folder being browsed: open every folder above it, so a
-  // double-click in the listing is answered by the tree unfolding to where
-  // the operator now is, the way a navigator pane does.
+  // Reveal the browsed folder or open file by unfolding its ancestors, so a
+  // search result deep in the tree is visible without walking there again.
   useEffect(() => {
-    if (!activeDir || activeDir === root) return
-    if (!activeDir.startsWith(root === "/" ? "/" : root + "/")) return
-    const parts = activeDir
+    const target = activeDir ?? activeFile
+    if (!target || target === root) return
+    if (!target.startsWith(root === "/" ? "/" : root + "/")) return
+    const parts = target
       .slice(root === "/" ? 1 : root.length + 1)
       .split("/")
       .filter(Boolean)
@@ -196,7 +196,7 @@ export function FileTree({
     })
     for (const p of ancestors) if (!children[p] && !loading.has(p)) void load(p)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeDir, root])
+  }, [activeDir, activeFile, root])
 
   /**
    * Opens a folder without the possibility of closing it.

@@ -449,9 +449,13 @@ func (s *Server) handleFileSearch(w http.ResponseWriter, r *http.Request) error 
 	if q.Get("q") == "" {
 		return httpx.BadRequest("q query parameter is required")
 	}
-	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	deadline := 60 * time.Second
+	if q.Get("detailed") == "true" {
+		deadline = 3 * time.Second
+	}
+	ctx, cancel := timeoutCtx(r, deadline)
 	defer cancel()
-	hits, err := s.modules.files.Search(ctx, files.SearchOptions{
+	result, err := s.modules.files.SearchDetailed(ctx, files.SearchOptions{
 		Root:       defaultStr(q.Get("path"), "/"),
 		Query:      q.Get("q"),
 		Content:    q.Get("content") == "true",
@@ -459,10 +463,19 @@ func (s *Server) handleFileSearch(w http.ResponseWriter, r *http.Request) error 
 		IgnoreCase: q.Get("ignoreCase") != "false",
 		MaxDepth:   atoiDefault(q.Get("depth"), 12),
 		Limit:      atoiDefault(q.Get("limit"), 500),
+		SkipHidden: q.Get("hidden") == "false",
+		AllLines:   q.Get("detailed") == "true",
 	})
 	if err != nil {
+		if errors.Is(err, files.ErrInvalidSearch) {
+			return httpx.BadRequest("%s", err.Error())
+		}
 		return mapFileError(err)
 	}
-	httpx.JSON(w, http.StatusOK, hits)
+	if q.Get("detailed") == "true" {
+		httpx.JSON(w, http.StatusOK, result)
+	} else {
+		httpx.JSON(w, http.StatusOK, result.Hits)
+	}
 	return nil
 }

@@ -1,63 +1,55 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { CornerDownLeft, FolderOpen, MagnifyingGlass, TextFormat } from "@/components/icons"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { CornerDownLeft, Cross, FolderOpen, MagnifyingGlass } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, relativeTime } from "@/lib/format"
+import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { FileFindResult } from "@/lib/types"
+import type { FileEntry, FileFindResult } from "@/lib/types"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Spinner } from "@/components/state"
+import { Button } from "@/components/ui/button"
+import { ErrorState, Spinner } from "@/components/state"
 import { FileIcon } from "@/components/files/file-icon"
 import { PaletteModal } from "@/components/modal"
 import { PaneFooter } from "@/components/panel"
+import { tabClasses } from "@/components/tabs"
+import { localFileMatches, mergeFileMatches, type FileSearchHit } from "./search"
 
-/**
- * Type three letters, get the file.
- *
- * The page already had a Search dialog and it answers a different question: a
- * literal substring or a regular expression, optionally inside file contents,
- * for when you know what you are looking for. This is the other one, and it is
- * the one people do fifty times a day — half-remembering a name and most of
- * where it lives. `ngxconf` finds nginx.conf; `srcapp` finds src/app.
- *
- * The matching and the ranking are the server's (see files.Find), because it
- * is the only side that can walk the disk. What is here is the part that makes
- * a fuzzy finder usable: it searches as you type, the keyboard never has to
- * leave the input, and the characters that matched are underlined so the
- * ranking is legible rather than magic.
- */
+export type FileSearchMode = "names" | "content"
+
 export function QuickOpen({
   open,
   onOpenChange,
   root,
   home,
+  entries = [],
+  initialMode = "names",
   onOpenPath,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Where the walk starts — the folder being browsed. */
   root: string
-  /** The wider scope to offer, when the folder being browsed is not it. */
   home?: string
-  onOpenPath: (path: string, isDir: boolean) => void
+  entries?: FileEntry[]
+  initialMode?: FileSearchMode
+  onOpenPath: (path: string, isDir: boolean, line?: number) => void
 }) {
   return (
     <PaletteModal
       open={open}
       onOpenChange={onOpenChange}
-      label="Go to a file"
-      description={`Fuzzy search for a file or folder under ${root}`}
+      label="Find files"
+      description="Find a file by name or search its contents. Arrow keys select, Enter opens."
     >
-      {/* Mounted only while open, so every visit starts with an empty box
-            rather than yesterday's query and its stale results. */}
       {open && (
-        <QuickOpenBody
+        <SearchBody
           root={root}
           home={home}
-          onChoose={(path, isDir) => {
+          entries={entries}
+          initialMode={initialMode}
+          onChoose={(hit) => {
             onOpenChange(false)
-            onOpenPath(path, isDir)
+            onOpenPath(hit.path, hit.isDir, hit.line)
           }}
         />
       )}
@@ -65,205 +57,395 @@ export function QuickOpen({
   )
 }
 
-function QuickOpenBody({
+function SearchBody({
   root,
   home,
+  entries,
+  initialMode,
   onChoose,
 }: {
   root: string
   home?: string
-  onChoose: (path: string, isDir: boolean) => void
+  entries: FileEntry[]
+  initialMode: FileSearchMode
+  onChoose: (hit: FileSearchHit) => void
 }) {
   const [query, setQuery] = useState("")
+  const [mode, setMode] = useState(initialMode)
   const [hidden, setHidden] = useState(false)
-  // The folder being browsed is the right default — it is the thing being
-  // worked on — but a finder that can only ever see one folder sends people
-  // back to the breadcrumb to get to where the file actually is. Widening is
-  // one click, and the footer says which of the two answered.
   const [wide, setWide] = useState(false)
+  const [regex, setRegex] = useState(false)
+  const [matchCase, setMatchCase] = useState(false)
+  const [run, setRun] = useState(0)
+  const [selected, setSelected] = useState<string>()
+  const [pending, setPending] = useState<string>()
+  const [answer, setAnswer] = useState<{
+    key: string
+    hits: FileSearchHit[]
+    truncated?: boolean
+    elapsedMs?: number
+    unreadable?: number
+    error?: Error
+  }>()
+  const input = useRef<HTMLInputElement>(null)
+  const list = useRef<HTMLDivElement>(null)
+  const id = useId()
   const scope = wide && home ? home : root
-  const [result, setResult] = useState<FileFindResult>()
-  const [busy, setBusy] = useState(false)
-  const [cursor, setCursor] = useState(0)
-
-  const ready = query.trim().length >= 2
+  const trimmed = query.trim()
+  const ready = trimmed.length >= (mode === "names" ? 2 : 1)
+  const key = JSON.stringify([scope, trimmed, mode, hidden, regex, matchCase, run])
+  const current = answer?.key === key ? answer : undefined
+  const busy = ready && (!current || pending === key)
+  const local = useMemo(
+    () =>
+      mode === "names" && scope === root
+        ? localFileMatches(
+            entries.filter((e) => hidden || !e.name.startsWith(".")),
+            query,
+          )
+        : [],
+    [entries, hidden, mode, query, root, scope],
+  )
+  const hits =
+    mode === "names" ? mergeFileMatches(local, current?.hits ?? []) : (current?.hits ?? [])
+  const cursor = Math.max(
+    0,
+    hits.findIndex((hit) => hit.path + ":" + (hit.line ?? 0) === selected),
+  )
 
   useEffect(() => {
     if (!ready) return
     const controller = new AbortController()
-    // Debounced rather than per keystroke: each run is a bounded walk of the
-    // tree, and a request per character would have four of them racing.
-    const timer = setTimeout(() => {
-      setBusy(true)
-      get<FileFindResult>(
-        "/files/find",
-        { path: scope, q: query, hidden, limit: 60 },
-        controller.signal,
-      )
-        .then((res) => {
-          setResult(res)
-          setCursor(0)
-        })
-        .catch(() => undefined)
-        .finally(() => !controller.signal.aborted && setBusy(false))
-    }, 130)
+    const timer = setTimeout(
+      async () => {
+        setPending(key)
+        try {
+          if (mode === "names") {
+            const result = await get<FileFindResult>(
+              "/files/find",
+              {
+                path: scope,
+                q: trimmed,
+                hidden,
+                limit: 60,
+              },
+              controller.signal,
+            )
+            if (!controller.signal.aborted) setAnswer({ key, ...result })
+          } else {
+            const result = await get<{
+              hits: FileSearchHit[]
+              truncated: boolean
+              elapsedMs: number
+              unreadable: number
+            }>(
+              "/files/search",
+              {
+                path: scope,
+                q: trimmed,
+                content: true,
+                regex,
+                ignoreCase: !matchCase,
+                hidden,
+                limit: 200,
+                detailed: true,
+              },
+              controller.signal,
+            )
+            if (!controller.signal.aborted) setAnswer({ key, ...result })
+          }
+        } catch (error) {
+          if (!controller.signal.aborted) setAnswer({ key, hits: [], error: error as Error })
+        } finally {
+          if (!controller.signal.aborted) setPending(undefined)
+        }
+      },
+      run ? 0 : mode === "names" ? 130 : 400,
+    )
     return () => {
       clearTimeout(timer)
       controller.abort()
     }
-  }, [query, hidden, scope, ready])
+  }, [key, matchCase, mode, ready, regex, hidden, run, scope, trimmed])
 
-  // Derived rather than cleared: a query too short to search shows nothing,
-  // and the last answer stays in hand for when it grows back.
-  const hits = ready ? (result?.hits ?? []) : []
-
-  const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault()
-      setCursor((c) => Math.min(hits.length - 1, c + 1))
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault()
-      setCursor((c) => Math.max(0, c - 1))
-    } else if (event.key === "Enter" && hits[cursor]) {
-      event.preventDefault()
-      onChoose(hits[cursor].path, hits[cursor].isDir)
-    }
-  }
+  useEffect(() => {
+    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" })
+  }, [cursor, hits.length])
 
   return (
-    // min-w-0 is load-bearing: the dialog is a grid, a grid item's minimum
-    // width is its content, and one long absolute path in the footer would
-    // otherwise push the whole panel wider than the dialog it sits in.
-    <div className="min-w-0" onKeyDown={onKeyDown}>
+    <div className="min-w-0">
       <div className="flex items-center gap-2 border-b border-hairline px-3">
-        <MagnifyingGlass className="size-4 shrink-0 text-muted-foreground" />
+        <MagnifyingGlass aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         <input
+          ref={input}
           autoFocus
+          role="combobox"
+          aria-label={mode === "names" ? "Find by name" : "Search file contents"}
+          aria-expanded
+          aria-autocomplete="list"
+          aria-controls={id + "-results"}
+          aria-activedescendant={hits[cursor] ? id + "-" + cursor : undefined}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Part of a name, in order — ngxconf, srcapp, dockcomp"
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setRun(0)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault()
+              const next =
+                (cursor + (event.key === "ArrowDown" ? 1 : -1) + hits.length) % hits.length
+              if (hits[next]) setSelected(hits[next].path + ":" + (hits[next].line ?? 0))
+            } else if (event.key === "Enter") {
+              event.preventDefault()
+              if (hits[cursor]) onChoose(hits[cursor])
+              else if (ready) setRun((v) => v + 1)
+            }
+          }}
+          placeholder={mode === "names" ? "Find a file or folder…" : "Find text inside files…"}
           spellCheck={false}
-          className="h-12 flex-1 bg-transparent text-sm focus-ring placeholder:text-muted-foreground"
+          className="h-12 min-w-0 flex-1 bg-transparent text-body focus-ring-inset placeholder:text-muted-foreground"
         />
         {busy && <Spinner className="size-4 text-muted-foreground" />}
+        {query && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Clear search"
+            onClick={() => {
+              setQuery("")
+              input.current?.focus()
+            }}
+          >
+            <Cross />
+          </Button>
+        )}
       </div>
 
-      <div className="max-h-[52vh] overflow-y-auto p-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-3">
+        <div role="group" aria-label="Search mode" className="flex gap-3">
+          {(["names", "content"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={mode === value}
+              className={tabClasses(mode === value, "h-9")}
+              onClick={() => {
+                setMode(value)
+                setRun(0)
+                input.current?.focus()
+              }}
+            >
+              {value === "names" ? "Names" : "Contents"}
+            </button>
+          ))}
+        </div>
+        {mode === "content" && (
+          <div className="flex items-center gap-1">
+            <Button
+              size="icon-xs"
+              variant={matchCase ? "secondary" : "ghost"}
+              aria-label="Match case"
+              aria-pressed={matchCase}
+              onClick={() => setMatchCase((v) => !v)}
+            >
+              Aa
+            </Button>
+            <Button
+              size="icon-xs"
+              variant={regex ? "secondary" : "ghost"}
+              aria-label="Regular expression"
+              aria-pressed={regex}
+              onClick={() => setRegex((v) => !v)}
+            >
+              .*
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <div
+        ref={list}
+        id={id + "-results"}
+        role="listbox"
+        aria-label="Search results"
+        aria-busy={busy}
+        className="max-h-[min(24rem,48vh)] overflow-y-auto p-1"
+      >
+        {current?.error && (
+          <ErrorState error={current.error} onRetry={() => setRun((v) => v + 1)} className="m-3" />
+        )}
         {hits.map((hit, i) => (
           <button
-            key={hit.path}
+            key={hit.path + ":" + (hit.line ?? 0)}
+            id={id + "-" + i}
+            type="button"
+            role="option"
+            aria-selected={i === cursor}
+            tabIndex={-1}
             className={cn(
-              "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left",
+              "flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
               i === cursor ? "bg-accent text-accent-foreground" : "hover:bg-menu-hover",
             )}
-            onMouseEnter={() => setCursor(i)}
-            onClick={() => onChoose(hit.path, hit.isDir)}
+            onMouseMove={() => setSelected(hit.path + ":" + (hit.line ?? 0))}
+            onClick={() => onChoose(hit)}
           >
-            <FileIcon
-              entry={{ name: hit.name, path: hit.path, isDir: hit.isDir, isSymlink: false }}
-              className="size-5"
-            />
+            <FileIcon entry={{ ...hit, isSymlink: false }} className="mt-0.5 size-6 shrink-0" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-body">
                 <Highlighted text={hit.name} matches={hit.matches} />
               </span>
               <span className="block truncate font-mono text-hint text-muted-foreground">
-                {hit.dir === "." ? "" : `${hit.dir}/`}
+                {hit.path.startsWith(scope + "/") ? hit.path.slice(scope.length + 1) : hit.path}
+                {hit.line ? ":" + hit.line : ""}
               </span>
+              {hit.snippet && (
+                <span className="mt-1 block truncate font-mono text-body text-muted-foreground">
+                  <Snippet
+                    text={hit.snippet}
+                    ranges={hit.ranges}
+                    query={trimmed}
+                    regex={regex}
+                    matchCase={matchCase}
+                  />
+                </span>
+              )}
             </span>
-            <span className="numeric shrink-0 text-hint text-muted-foreground">
-              {hit.isDir ? relativeTime(hit.modified) : bytes(hit.size)}
+            <span className="numeric shrink-0 pt-0.5 text-hint text-muted-foreground">
+              {hit.isDir ? "Folder" : hit.size === undefined ? "" : bytes(hit.size)}
             </span>
           </button>
         ))}
-
-        {!busy && ready && hits.length === 0 && (
-          <p className="py-8 text-center text-body text-muted-foreground">
-            Nothing under this folder matches those letters, in that order.
-          </p>
-        )}
-        {!ready && (
-          <p className="flex items-center justify-center gap-2 py-8 text-center text-body text-muted-foreground">
-            <TextFormat className="size-4" />
-            Type at least two characters. They need only appear in order.
-          </p>
+        {!current?.error && hits.length === 0 && (
+          <div className="flex min-h-40 flex-col items-center justify-center gap-2 px-5 text-center text-body text-muted-foreground">
+            {busy ? (
+              <>
+                <Spinner className="size-5" />
+                <span>Searching this folder…</span>
+              </>
+            ) : ready ? (
+              <>
+                <span className="font-medium text-foreground">No matches for “{trimmed}”</span>
+                <span>Try fewer words, include hidden files, or search from home.</span>
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-foreground">
+                  {mode === "names" ? "Find your next file" : "Search inside your files"}
+                </span>
+                <span>
+                  {mode === "names"
+                    ? "Type a few letters of its name or path."
+                    : "Type text or a regular expression to find matching lines."}
+                </span>
+              </>
+            )}
+          </div>
         )}
       </div>
 
-      <PaneFooter className="justify-between gap-3 px-3 text-hint text-muted-foreground">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <FolderOpen className="size-3 shrink-0" />
-          <span className="truncate font-mono">{scope}</span>
-          {home && home !== root && (
-            <button
-              type="button"
-              className="shrink-0 rounded-sm border border-hairline px-1.5 py-0.5 hover:bg-accent hover:text-accent-foreground"
-              onClick={() => setWide((v) => !v)}
-            >
-              {wide ? "search this folder" : "search from home"}
-            </button>
-          )}
-        </span>
-        <span className="flex shrink-0 items-center gap-3">
-          <label className="flex items-center gap-1.5">
-            <Checkbox checked={hidden} onCheckedChange={(v) => setHidden(v === true)} />
-            Hidden files
-          </label>
-          {ready && result?.truncated && (
-            <span className="numeric text-warning">
-              partial — {result.visited.toLocaleString()} looked at
-            </span>
-          )}
-          {ready && result && !result.truncated && <span>{result.elapsedMs} ms</span>}
-          <span className="flex items-center gap-1">
-            <CornerDownLeft className="size-3" />
-            open
+      <PaneFooter className="flex-wrap justify-between gap-x-3 gap-y-2 px-3 py-2 text-hint text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <FolderOpen aria-hidden className="size-3 shrink-0" />
+          <span className="max-w-48 truncate font-mono" title={scope}>
+            {scope}
           </span>
+          {home && home !== root && (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => {
+                setWide((v) => !v)
+                setRun(0)
+              }}
+            >
+              {wide ? "This folder" : "From home"}
+            </Button>
+          )}
+        </div>
+        <label className="flex items-center gap-1.5">
+          <Checkbox checked={hidden} onCheckedChange={(v) => setHidden(v === true)} />
+          Hidden files
+        </label>
+        <span role="status" aria-live="polite" className={cn(current?.truncated && "text-warning")}>
+          {current?.truncated
+            ? "Partial results · narrow your search"
+            : busy
+              ? "Searching…"
+              : hits.length + (mode === "content" ? " matches" : " files")}
         </span>
+        <span className="flex items-center gap-1">
+          <CornerDownLeft aria-hidden className="size-3" />
+          Open
+        </span>
+        {!!current?.unreadable && (
+          <span className="w-full text-warning">
+            {current.unreadable} entries could not be read.
+          </span>
+        )}
       </PaneFooter>
     </div>
   )
 }
 
-/**
- * The matched characters, underlined.
- *
- * The offsets are UTF-16 code units — the server counts them that way for
- * exactly this reason — so slicing the string by them is correct even for a
- * name carrying an accent or an emoji.
- */
 function Highlighted({ text, matches }: { text: string; matches?: number[] }) {
-  const segments = useMemo(() => {
-    if (!matches || matches.length === 0) return [{ text, hit: false }]
-    const hits = new Set(matches)
-    const out: { text: string; hit: boolean }[] = []
-    let start = 0
-    let current = hits.has(0)
-    // Sliced by code unit, and the offsets always land on a character
-    // boundary because the server converted them from rune indices — so a
-    // surrogate pair is never cut in half into a replacement glyph.
-    for (let i = 1; i <= text.length; i++) {
-      const hit = hits.has(i)
-      if (i === text.length || hit !== current) {
-        out.push({ text: text.slice(start, i), hit: current })
-        start = i
-        current = hit
-      }
-    }
-    return out
-  }, [text, matches])
-
+  const positions = new Set(matches)
+  let offset = 0
   return (
     <>
-      {segments.map((segment, i) =>
-        segment.hit ? (
-          <b key={i} className="font-semibold text-primary underline underline-offset-2">
-            {segment.text}
+      {Array.from(text).map((char) => {
+        const index = offset
+        offset += char.length
+        return positions.has(index) ? (
+          <b key={index} className="font-semibold text-brand">
+            {char}
           </b>
         ) : (
-          <span key={i}>{segment.text}</span>
-        ),
-      )}
+          <span key={index}>{char}</span>
+        )
+      })}
+    </>
+  )
+}
+
+function Snippet({
+  text,
+  query,
+  regex,
+  matchCase,
+  ranges,
+}: {
+  text: string
+  query: string
+  regex: boolean
+  matchCase: boolean
+  ranges?: [number, number][]
+}) {
+  if (ranges?.length) {
+    const parts: React.ReactNode[] = []
+    let offset = 0
+    ranges.forEach(([start, end], index) => {
+      parts.push(<span key={"plain" + index}>{text.slice(offset, start)}</span>)
+      parts.push(
+        <mark key={"match" + index} className="bg-wash-brand text-brand">
+          {text.slice(start, end)}
+        </mark>,
+      )
+      offset = end
+    })
+    parts.push(<span key="end">{text.slice(offset)}</span>)
+    return <>{parts}</>
+  }
+  if (regex || !query) return <>{text}</>
+  const index = (matchCase ? text : text.toLocaleLowerCase()).indexOf(
+    matchCase ? query : query.toLocaleLowerCase(),
+  )
+  if (index < 0) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, index)}
+      <mark className="bg-wash-brand text-brand">{text.slice(index, index + query.length)}</mark>
+      {text.slice(index + query.length)}
     </>
   )
 }
