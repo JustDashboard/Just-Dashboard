@@ -805,3 +805,50 @@ func TestLiveMSSQLDumpOfTheLessOrdinary(t *testing.T) {
 		}
 	}
 }
+
+// The inline route binds every value as the text the file held, and SQL
+// Server takes no text for a binary column — not even the text that is no
+// value at all, which arrives typed as one. So a file with an empty cell
+// under a varbinary or an image column could not be imported there: the
+// refusal is the statement's, it ends the batch, and it took the rows around
+// it too. No value is converted to the column's type like the rest, and a
+// cell that does hold text is refused for its own row, in the file's terms.
+func TestLiveMSSQLInlineImportLeavesABinaryColumnEmpty(t *testing.T) {
+	db, _ := liveOwnMSSQL(t, "jd_bf_inline")
+	ctx := context.Background()
+	execAll(t, db, `CREATE TABLE dbo.blobs (
+		id int NOT NULL PRIMARY KEY,
+		raw varbinary(16) NULL,
+		fixed binary(4) NULL,
+		img image NULL,
+		label nvarchar(20) NULL
+	)`)
+	count := func(where string) string {
+		return queryString(t, db, `SELECT CAST(COUNT(*) AS varchar(10)) FROM dbo.blobs WHERE `+where)
+	}
+
+	res, err := ImportCSV(ctx, db, DriverMSSQL, strings.NewReader(
+		"id,raw,fixed,img,label\n1,\\N,\\N,\\N,one\n2,\\N,\\N,\\N,\\N\n"),
+		ImportOptions{Schema: "dbo", Table: "blobs", HasHeader: true, NullAs: `\N`})
+	if err != nil || res.Inserted != 2 || res.Failed != 0 {
+		t.Fatalf("an import that leaves the binary columns empty: %+v, %v", res, err)
+	}
+	if got := count(`raw IS NULL AND fixed IS NULL AND img IS NULL`); got != "2" {
+		t.Errorf("%s rows hold no value in their binary columns, want 2", got)
+	}
+
+	// Text under a binary column is still not a value for it. It is refused
+	// as the row it is in, and the rows either side of it are written.
+	res, err = ImportCSV(ctx, db, DriverMSSQL, strings.NewReader(
+		"id,raw,label\n3,\\N,three\n4,not bytes,four\n5,\\N,five\n"),
+		ImportOptions{Schema: "dbo", Table: "blobs", HasHeader: true, NullAs: `\N`})
+	if err != nil || res.Inserted != 2 || res.Failed != 1 || len(res.Errors) != 1 || !strings.Contains(res.Errors[0], "raw") {
+		t.Fatalf("an import with text under a binary column: %+v, %v", res, err)
+	}
+	if got := count(`id IN (3, 5) AND raw IS NULL`); got != "2" {
+		t.Errorf("%s of the two good rows were written, want both", got)
+	}
+	if got := count(`id = 4`); got != "0" {
+		t.Errorf("the row with text under a binary column was written")
+	}
+}

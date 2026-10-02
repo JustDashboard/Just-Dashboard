@@ -108,6 +108,14 @@ type RedisOpenOptions struct {
 	// whose reply was lost may well have run, and a second RPUSH or XADD is a
 	// second element.
 	Retry bool
+	// Quiet asks the server not to count what this client reads as use of a
+	// key. Redis keeps one clock per key — when it was last read or written —
+	// and evicts by it; measuring a key's size or opening it from the
+	// dashboard reset that clock, so a key idle for a week read "idle for 0
+	// seconds" the moment anybody looked at it, and a nightly dump made every
+	// key on the server its most recently used. It is for a client that only
+	// looks. An operator's own edit is use, and is counted as such.
+	Quiet bool
 }
 
 // RedisClient dials an instance. Like the Mongo client this is opened per
@@ -141,6 +149,9 @@ func RedisOpen(ctx context.Context, dsn string, o RedisOpenOptions) (*redis.Clie
 	if !o.Retry {
 		opt.MaxRetries = -1
 	}
+	if o.Quiet {
+		opt.OnConnect = redisQuietConnection
+	}
 	client := redis.NewClient(opt)
 	pingCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -152,6 +163,16 @@ func RedisOpen(ctx context.Context, dsn string, o RedisOpenOptions) (*redis.Clie
 		return nil, err
 	}
 	return client, nil
+}
+
+// redisQuietConnection turns CLIENT NO-TOUCH on for one connection of a quiet
+// client, as each is opened. Redis has it from 7.2 and Valkey from its first
+// release; a server that has never heard of it answers with an error, which
+// is not this connection's failure: its reads count as they always did, and
+// the server's profile (Features.NoTouch) is what says so to a page.
+func redisQuietConnection(ctx context.Context, conn *redis.Conn) error {
+	_ = conn.Do(ctx, "client", "no-touch", "on").Err()
+	return nil
 }
 
 // RedisDatabaseError is a logical database the server would not select: a

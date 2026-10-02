@@ -27,6 +27,12 @@ func TestValueKind(t *testing.T) {
 		{DriverMySQL, "MEDIUMBLOB", KindBinary},
 		{DriverMySQL, "BIT", KindBinary},
 		{DriverMSSQL, "BIT", KindBoolean},
+		// PostgreSQL's bit strings travel as the text of their bits.
+		{DriverPostgres, "BIT", KindText},
+		{DriverPostgres, "VARBIT", KindText},
+		{DriverPostgres, "bit(8)", KindText},
+		{DriverPostgres, "bit varying(8)", KindText},
+		{DriverMySQL, "bit(8)", KindBinary},
 		{DriverMSSQL, "TIMESTAMP", KindBinary},
 		{DriverMSSQL, "UNIQUEIDENTIFIER", KindUUID},
 		// What catalogues report for a table column.

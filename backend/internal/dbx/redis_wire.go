@@ -132,6 +132,13 @@ func (w *redisWire) login(db int) error {
 	return w.use(db)
 }
 
+// quiet asks the server not to count what this connection reads as use of a
+// key, as a quiet client's connections do (RedisOpenOptions.Quiet). A server
+// without the command answers with an error and is read as before.
+func (w *redisWire) quiet() {
+	_, _ = w.ask("CLIENT", "NO-TOUCH", "ON")
+}
+
 // use selects a logical database. Zero is where a connection starts.
 func (w *redisWire) use(db int) error {
 	if db <= 0 {

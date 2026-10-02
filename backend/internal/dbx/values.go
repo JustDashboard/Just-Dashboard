@@ -246,10 +246,17 @@ func ValueKind(driver Driver, typeName string) string {
 	switch {
 	case first == "BOOL" || first == "BOOLEAN":
 		return KindBoolean
-	case first == "BIT":
+	case first == "BIT", first == "VARBIT" && driver == DriverPostgres:
 		// SQL Server's bit is its boolean; elsewhere it is a string of bits.
-		if driver == DriverMSSQL {
+		// MySQL hands one over as the bytes it is stored in, and takes those
+		// back. PostgreSQL writes and reads one as the text of its ones and
+		// zeros — 00001111 — and called binary, the cell was edited as bytes
+		// and sent back as \x00001111, which the server refuses.
+		switch driver {
+		case DriverMSSQL:
 			return KindBoolean
+		case DriverPostgres:
+			return KindText
 		}
 		return KindBinary
 	case first == "INTERVAL" || strings.HasPrefix(first, "INTERVAL"):

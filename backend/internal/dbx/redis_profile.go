@@ -137,6 +137,14 @@ type RedisFeatures struct {
 	PubSub         bool `json:"pubsub"`
 	Functions      bool `json:"functions"`
 	AOF            bool `json:"aof"`
+	// NoTouch says the dashboard's own reads leave a key's idle time and
+	// access frequency as they were (CLIENT NO-TOUCH), so both are the
+	// application's. Without it a key that has just been listed or opened
+	// reads as just used.
+	NoTouch bool `json:"noTouch"`
+	// StreamAutoClaim is XAUTOCLAIM: claiming whatever a group has left
+	// pending for long enough, without naming the entries.
+	StreamAutoClaim bool `json:"streamAutoClaim"`
 }
 
 // RedisProfile is what one server said it is.
@@ -163,7 +171,7 @@ type RedisProfile struct {
 var redisProbed = []string{
 	"object", "memory", "unlink", "copy", "httl", "xadd", "json.get", "ft._list",
 	"ts.get", "latency", "slowlog", "config", "acl", "client", "monitor",
-	"psubscribe", "function", "bgrewriteaof",
+	"psubscribe", "function", "bgrewriteaof", "client|no-touch", "xautoclaim",
 }
 
 // RedisProbe asks a server what it is and what it has. One pipeline, three
@@ -278,15 +286,21 @@ func (p *RedisProfile) features() RedisFeatures {
 		PubSub:      p.has("psubscribe", 2, 0),
 		Functions:   p.has("function", 7, 0),
 		AOF:         p.has("bgrewriteaof", 1, 0),
+		// A subcommand is asked about by its full name, which only a server
+		// with subcommands in its table (Redis 7) understands; an older one
+		// answers that it has no such command, which is also true.
+		NoTouch:         p.has("client|no-touch", 7, 2),
+		StreamAutoClaim: p.has("xautoclaim", 6, 2),
 	}
 	switch p.Flavor {
 	case RedisFlavorDragonfly:
 		// Dragonfly answers to a Redis 7 version number and is not Redis 7:
-		// COMMAND DOCS is a syntax error, there is no append-only file, and
-		// its HTTL is its own command with other arguments.
-		f.CommandDocs, f.AOF, f.HashFieldTTL = false, false, false
+		// COMMAND DOCS is a syntax error, there is no append-only file, its
+		// HTTL is its own command with other arguments, and it keeps no idle
+		// time per key for a read to leave alone.
+		f.CommandDocs, f.AOF, f.HashFieldTTL, f.NoTouch = false, false, false, false
 	case RedisFlavorKeyDB:
-		f.HashFieldTTL = false
+		f.HashFieldTTL, f.NoTouch = false, false
 	}
 	if p.Mode == "sentinel" {
 		// A sentinel holds no keys. What is left is what it answers about

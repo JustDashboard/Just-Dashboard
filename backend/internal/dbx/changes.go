@@ -209,6 +209,19 @@ type changePlan struct {
 	changes []plannedChange
 }
 
+// sqlNull is how a change writes "no value": the keyword, in the statement
+// itself, and never a bound argument.
+//
+// A bound NULL has to be given a type on the way to the server, and the
+// driver has only the Go nil to choose one from. SQL Server's sends it as an
+// nvarchar, which a varbinary, an image or a sql_variant-typed comparison
+// refuses to be converted from ("Implicit conversion from data type nvarchar
+// to varbinary is not allowed"), so a binary cell could be filled from the
+// grid and never emptied again. The keyword has no type to disagree with any
+// column, on any engine, and it is this package's own word rather than
+// anything a request carried.
+const sqlNull = "NULL"
+
 // isDefault recognises {"$default": true}: write the column's default.
 func isDefault(v any) bool {
 	m, ok := v.(map[string]any)
@@ -391,6 +404,12 @@ func (p *changePlan) render(c Change) (*plannedChange, error) {
 				// every engine, including the ones with no DEFAULT keyword.
 				continue
 			}
+			if c.Values[name] == nil {
+				names = append(names, quoted)
+				marks = append(marks, sqlNull)
+				literals = append(literals, sqlNull)
+				continue
+			}
 			arg, write, literal, err := p.operand(col, c.Values[name])
 			if err != nil {
 				return nil, err
@@ -445,6 +464,11 @@ func (p *changePlan) render(c Change) (*plannedChange, error) {
 				}
 				sets = append(sets, quoted+" = DEFAULT")
 				literals = append(literals, quoted+" = DEFAULT")
+				continue
+			}
+			if c.Values[name] == nil {
+				sets = append(sets, quoted+" = "+sqlNull)
+				literals = append(literals, quoted+" = "+sqlNull)
 				continue
 			}
 			arg, write, literal, err := p.operand(col, c.Values[name])

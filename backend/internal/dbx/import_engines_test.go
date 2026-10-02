@@ -43,10 +43,11 @@ func TestMSSQLImportValueConvertsToTheColumnsType(t *testing.T) {
 			t.Errorf("%q:\n got %s | %s\nwant %s | %s", c.typeName, value, failed, c.value, c.failed)
 		}
 	}
-	// The inline route binds whatever text the file held, so a binary column
-	// is left to refuse it.
-	if value, _ := mssqlImportValue("varbinary(MAX)", "@p1", false); value != "@p1" {
-		t.Errorf("a binary column on the inline route = %s", value)
+	// The inline route binds whatever text the file held, and no text is a
+	// value for a binary column: only no value passes, converted to the
+	// column's type like the rest, and anything else is refused as its row.
+	if value, failed := mssqlImportValue("varbinary(MAX)", "@p1", false); value != "CONVERT(varbinary(max), @p1)" || failed != "@p1 IS NOT NULL" {
+		t.Errorf("a binary column on the inline route = %s | %s", value, failed)
 	}
 }
 
@@ -98,9 +99,11 @@ func TestMSSQLImportStatementsCheckBeforeTheyWrite(t *testing.T) {
 	if got := mssqlImportPlan(t, false, ImportModeInsert, "nvarchar(10)", "varchar(20)").insertStatement(1); got != "INSERT INTO [dbo].[t] ([id], [name]) VALUES (@p1, @p2)" {
 		t.Errorf("all text = %s", got)
 	}
-	// The inline route checks what converts and leaves a binary column be.
+	// The inline route checks what converts, and takes nothing but no value
+	// for a binary column.
 	legacy := mssqlImportPlan(t, true, ImportModeInsert, "int", "varbinary(MAX)").insertStatement(1)
-	if !strings.HasSuffix(legacy, "VALUES (TRY_CONVERT(int, @p1), @p2)") || !strings.HasPrefix(legacy, "IF @p1 IS NOT NULL") {
+	if !strings.HasSuffix(legacy, "VALUES (TRY_CONVERT(int, @p1), CONVERT(varbinary(max), @p2))") || !strings.HasPrefix(legacy, "IF @p1 IS NOT NULL") ||
+		!strings.Contains(legacy, "IF @p2 IS NOT NULL RAISERROR(N'jd-import-convert:2', 16, 1) ELSE ") {
 		t.Errorf("inline route = %s", legacy)
 	}
 	// And no other engine's statement changes.

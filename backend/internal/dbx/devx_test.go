@@ -2,6 +2,8 @@ package dbx
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -154,6 +156,107 @@ func TestRowsInsertSQLRendersEachRow(t *testing.T) {
 	}
 	if n := strings.Count(out, "INSERT INTO"); n != 2 {
 		t.Errorf("statements = %d, want 2:\n%s", n, out)
+	}
+}
+
+// With the table's columns in hand the statement is the one a person would
+// have written: the columns in the table's order, and a number as a number.
+// The grid shows a 64-bit integer and a decimal as text, because a browser's
+// number holds neither, and copied out as they arrived they were quoted.
+func TestRowInsertSQLFollowsTheTable(t *testing.T) {
+	columns := []Column{
+		{Name: "id", Type: "bigint"}, {Name: "name", Type: "text"}, {Name: "price", Type: "numeric(12,2)"},
+		{Name: "ratio", Type: "double precision"}, {Name: "ok", Type: "boolean"}, {Name: "payload", Type: "bytea"},
+	}
+	got, err := rowInsertSQL(DriverPostgres, "public", "customers", columns, map[string]any{
+		"payload": `\xdeadbeef`, "ok": true, "ratio": "1.5e-3", "price": "12.50", "name": "42",
+		"id": "9007199254740993", "extra": "kept",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `INSERT INTO "public"."customers" ("id", "name", "price", "ratio", "ok", "payload", "extra")` + "\n" +
+		`VALUES (9007199254740993, '42', 12.50, 1.5e-3, TRUE, '\xdeadbeef'::bytea, 'kept');`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+
+	// What is in a numeric column and is not a number an engine reads bare
+	// keeps its quotes, and nothing a value holds can leave them.
+	for _, c := range []struct {
+		column Column
+		value  any
+		want   string
+	}{
+		{Column{Name: "a", Type: "numeric"}, "NaN", "'NaN'"},
+		{Column{Name: "a", Type: "integer"}, "007; DROP TABLE t", "'007; DROP TABLE t'"},
+		{Column{Name: "a", Type: "integer"}, "1 OR 1=1", "'1 OR 1=1'"},
+		{Column{Name: "a", Type: "integer"}, "1.5", "'1.5'"},
+		{Column{Name: "a", Type: "numeric(10,2)"}, "1e5", "'1e5'"},
+		{Column{Name: "a", Type: "money"}, "$1,234.00", "'$1,234.00'"},
+		{Column{Name: "a", Type: "integer"}, "", "''"},
+		{Column{Name: "a", Type: "integer"}, "-12", "-12"},
+		{Column{Name: "a", Type: "integer"}, nil, "NULL"},
+		{Column{Name: "a", Type: "integer"}, json.Number("7"), "7"},
+		{Column{Name: "a", Type: "text"}, "12", "'12'"},
+	} {
+		got, err := rowInsertSQL(DriverPostgres, "", "t", []Column{c.column}, map[string]any{"a": c.value})
+		if err != nil || !strings.HasSuffix(got, "VALUES ("+c.want+");") {
+			t.Errorf("%s %v = %q (%v), want a VALUES of %s", c.column.Type, c.value, got, err, c.want)
+		}
+	}
+
+	// Each engine's own spelling of a number's type is read.
+	for _, c := range []struct {
+		driver Driver
+		typ    string
+	}{
+		{DriverMySQL, "bigint unsigned"}, {DriverMySQL, "decimal(20,6)"}, {DriverMSSQL, "money"},
+		{DriverOracle, "NUMBER(19,0)"}, {DriverOracle, "NUMBER"}, {DriverClickHouse, "Nullable(UInt64)"},
+		{DriverClickHouse, "Decimal(18, 4)"}, {DriverSQLite, "INTEGER"},
+	} {
+		got, err := rowInsertSQL(c.driver, "", "t", []Column{{Name: "a", Type: c.typ}}, map[string]any{"a": "18446744073709551615"})
+		if err != nil || !strings.HasSuffix(got, "VALUES (18446744073709551615);") {
+			t.Errorf("%s %s = %q (%v), want the number bare", c.driver, c.typ, got, err)
+		}
+	}
+}
+
+// The catalogue is read from the server the row came from, and a server that
+// cannot be asked leaves the statement as it has always been written.
+func TestTableRowsInsertSQLReadsTheCatalogue(t *testing.T) {
+	db := changeDB(t)
+	ctx := context.Background()
+	rows := []map[string]any{{"name": "Ann", "id": "1", "age": "31", "big": "9223372036854775807", "doc": nil}}
+
+	got, err := TableRowsInsertSQL(ctx, db, DriverSQLite, "", "people", rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `INSERT INTO "people" ("id", "name", "age", "big", "doc")` + "\n" +
+		`VALUES (1, 'Ann', 31, 9223372036854775807, NULL);`; got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	if _, err := db.Exec(`DELETE FROM people WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(got); err != nil {
+		t.Errorf("the statement does not run on the engine it was written for: %v", err)
+	}
+
+	plain, err := RowsInsertSQL(DriverSQLite, "", "people", rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, db := range map[string]*sql.DB{"no pool": nil, "a table that is not there": db} {
+		table := "people"
+		if db != nil {
+			table = "nonesuch"
+			plain, _ = RowsInsertSQL(DriverSQLite, "", table, rows)
+		}
+		if got, err := TableRowsInsertSQL(ctx, db, DriverSQLite, "", table, rows); err != nil || got != plain {
+			t.Errorf("%s: %q (%v), want %q", name, got, err, plain)
+		}
 	}
 }
 

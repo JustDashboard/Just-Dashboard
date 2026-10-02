@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -354,4 +355,124 @@ func RedisStreamAck(ctx context.Context, client *redis.Client, key, group RedisB
 		return 0, RedisExplainError(ctx, client, err)
 	}
 	return n, nil
+}
+
+// RedisStreamClaim hands pending entries of a consumer group to one of its
+// consumers: the entries named, or — Auto — whatever has been pending long
+// enough, a page at a time.
+type RedisStreamClaim struct {
+	Key   RedisBytes
+	Group RedisBytes
+	// Consumer is who the entries go to. It is a pointer for the reason a
+	// removal's is: a consumer may be named "", and that is a name.
+	Consumer *RedisBytes
+	IDs      []string
+	// MinIdleMs keeps the claim to entries nobody has been handed for at
+	// least that long, so one a consumer is working on is not taken from it.
+	MinIdleMs int64
+	Auto      bool
+	// Cursor is where an automatic claim starts looking; empty is the oldest.
+	Cursor string
+	Count  int
+}
+
+// RedisStreamClaimed is what a claim moved.
+type RedisStreamClaimed struct {
+	// Claimed are the entries now pending for the consumer.
+	Claimed []string `json:"claimed"`
+	// Deleted are entries that were pending and are no longer in the stream.
+	// The server drops them from the pending list as it finds them, and from
+	// Redis 7 says which.
+	Deleted []string `json:"deleted"`
+	// Cursor continues an automatic claim, while Done is false.
+	Cursor string `json:"cursor"`
+	Done   bool   `json:"done"`
+}
+
+// ErrRedisNoAutoClaim is an automatic claim asked of a server without one.
+var ErrRedisNoAutoClaim = errors.New("this server has no XAUTOCLAIM (it came with Redis 6.2); name the entries to claim instead")
+
+// RedisStreamClaimEntries moves pending entries to a consumer.
+//
+// Only the ids travel, in both directions (JUSTID): what an entry holds is the
+// application's, and a claim made from a form has no use for it. Claimed that
+// way an entry's delivery count is left as it was, which is right for a move
+// an operator made — it was not delivered again, it was reassigned.
+//
+// profile may be nil; it is asked for only by an automatic claim.
+func RedisStreamClaimEntries(ctx context.Context, client *redis.Client, profile *RedisProfile, c RedisStreamClaim) (*RedisStreamClaimed, error) {
+	switch {
+	case c.Group == "":
+		return nil, fmt.Errorf("a consumer group is required")
+	case c.Consumer == nil:
+		return nil, fmt.Errorf("name the consumer the entries go to")
+	case c.MinIdleMs < 0:
+		return nil, fmt.Errorf("minIdleMs cannot be negative")
+	case c.Auto && len(c.IDs) > 0:
+		return nil, fmt.Errorf("claim the entries named or whatever has been idle long enough, not both")
+	case !c.Auto && len(c.IDs) == 0:
+		return nil, fmt.Errorf("name at least one entry id to claim, or ask for an automatic claim")
+	case len(c.IDs) > redisMaxPageRows:
+		return nil, fmt.Errorf("at most %d entries are claimed at once", redisMaxPageRows)
+	}
+	out := &RedisStreamClaimed{Claimed: []string{}, Deleted: []string{}, Cursor: "0-0", Done: true}
+	idle := strconv.FormatInt(c.MinIdleMs, 10)
+	if !c.Auto {
+		args := make([]any, 0, len(c.IDs)+6)
+		args = append(args, "XCLAIM", string(c.Key), string(c.Group), string(*c.Consumer), idle)
+		for _, id := range c.IDs {
+			if !redisStreamIDRe.MatchString(id) {
+				return nil, fmt.Errorf("an entry is claimed by its id, such as 1700000000000-0")
+			}
+			args = append(args, id)
+		}
+		raw, err := client.Do(ctx, append(args, "JUSTID")...).Result()
+		if err != nil && err != redis.Nil {
+			return nil, RedisExplainError(ctx, client, err)
+		}
+		out.Claimed = redisStringList(raw)
+		return out, nil
+	}
+
+	if profile == nil {
+		var err error
+		if profile, err = RedisProbe(ctx, client); err != nil {
+			return nil, err
+		}
+	}
+	if !profile.Features.StreamAutoClaim {
+		return nil, ErrRedisNoAutoClaim
+	}
+	start := "0-0"
+	if c.Cursor != "" {
+		if !redisStreamIDRe.MatchString(c.Cursor) {
+			return nil, fmt.Errorf("invalid cursor")
+		}
+		start = c.Cursor
+	}
+	if c.Count <= 0 {
+		c.Count = redisDefaultPageRows
+	}
+	if c.Count > redisMaxPageRows {
+		c.Count = redisMaxPageRows
+	}
+	raw, err := client.Do(ctx, "XAUTOCLAIM", string(c.Key), string(c.Group), string(*c.Consumer), idle, start,
+		"COUNT", c.Count, "JUSTID").Result()
+	if err != nil && err != redis.Nil {
+		return nil, RedisExplainError(ctx, client, err)
+	}
+	// The next cursor, the ids claimed, and from Redis 7 the ids that were
+	// pending for entries since deleted.
+	reply := redisSlice(raw)
+	if len(reply) < 2 {
+		return nil, fmt.Errorf("the server's answer to XAUTOCLAIM was not a cursor and a list")
+	}
+	out.Claimed = redisStringList(reply[1])
+	if len(reply) > 2 {
+		out.Deleted = redisStringList(reply[2])
+	}
+	if next := redisText(reply[0]); next != "0-0" && next != "" {
+		out.Cursor, out.Done = next, false
+	}
+	return out, nil
 }

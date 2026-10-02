@@ -453,7 +453,7 @@ func (s *Server) handleMongoValidationCheck(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 	check, err := dbx.MongoCheckValidation(ctx, client, db, collection, req.Validator, req.Samples, req.MaxTimeMS)
 	if err != nil {
-		return mongoFailure(err)
+		return mongoReadFailed(err)
 	}
 	httpx.JSON(w, http.StatusOK, check)
 	return nil

@@ -1342,3 +1342,387 @@ func TestLiveAPIRedisSentinelIsNamedAsOne(t *testing.T) {
 		}
 	}
 }
+
+// redisFeatures is what the server behind a live connection says it has.
+func redisFeatures(t *testing.T, h http.Handler, id int64) dbx.RedisFeatures {
+	t.Helper()
+	var server struct {
+		Features dbx.RedisFeatures `json:"features"`
+	}
+	wantStatus(t, call(t, h, id, http.MethodGet, "/redis/server", "", &server), 200, "", "the server's profile")
+	return server.Features
+}
+
+// A key's idle time is how long since anything used it, and the dashboard
+// looking at a key is not the application using it. Listing a key read its
+// size and opening it read its contents, and each reset the clock: a key
+// nothing had touched for a week read "idle for 0 seconds" to whoever came to
+// find out. Every route that only looks now leaves the clock alone, on a
+// server that can be asked to (Redis 7.2, Valkey). A write is still use.
+func TestLiveAPIRedisLookingAtAKeyDoesNotUseIt(t *testing.T) {
+	_, h, id, direct := redisLive(t, "JD_TEST_REDIS_DSN", auth.RoleAdmin)
+	ctx := context.Background()
+	features := redisFeatures(t, h, id)
+	if !features.NoTouch || !features.ObjectIdleTime {
+		t.Skipf("this server cannot leave a key's idle time alone, or keeps none: %+v", features)
+	}
+	prefix := redisAPIPrefix + "idle:"
+	keys := map[string]string{
+		"string": prefix + "string", "hash": prefix + "hash", "list": prefix + "list",
+		"set": prefix + "set", "zset": prefix + "zset", "stream": prefix + "stream",
+	}
+	direct.Set(ctx, keys["string"], "value", 0)
+	direct.HSet(ctx, keys["hash"], "f", "v")
+	direct.RPush(ctx, keys["list"], "a", "b")
+	direct.SAdd(ctx, keys["set"], "m")
+	direct.ZAdd(ctx, keys["zset"], redis.Z{Score: 1, Member: "m"})
+	direct.XAdd(ctx, &redis.XAddArgs{Stream: keys["stream"], Values: map[string]any{"f": "v"}})
+	direct.XGroupCreate(ctx, keys["stream"], "g", "0")
+	// Put back as a key nothing has used for an hour: a restore may say how
+	// long its key had been idle, which saves the test an hour of waiting.
+	const hour = 3600
+	for _, key := range keys {
+		payload, err := direct.Dump(ctx, key).Result()
+		if err != nil {
+			t.Fatal(err)
+		}
+		direct.Del(ctx, key)
+		if err := direct.Do(ctx, "RESTORE", key, 0, payload, "IDLETIME", hour).Err(); err != nil {
+			t.Skipf("this server restores no idle time: %v", err)
+		}
+	}
+	idle := func(key string) int64 {
+		t.Helper()
+		// OBJECT does not count as use on any version.
+		n, err := direct.Do(ctx, "OBJECT", "IDLETIME", key).Int64()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for kind, key := range keys {
+		if n := idle(key); n < hour {
+			t.Fatalf("the %s was restored idle for %d seconds, want an hour", kind, n)
+		}
+	}
+
+	q := url.QueryEscape
+	for _, path := range []string{
+		"/keys?pattern=" + q(prefix+"*") + "&memory=1",
+		"/keys?pattern=" + q(prefix+"*") + "&type=hash",
+		"/keys?pattern=" + q(keys["list"]),
+		"/keys/tree?prefix=" + q(prefix),
+		"/keys/meta?key=" + q(keys["string"]),
+		"/keys/meta?key=" + q(keys["hash"]),
+		"/keys/members?key=" + q(keys["string"]),
+		"/keys/members?key=" + q(keys["hash"]),
+		"/keys/members?key=" + q(keys["list"]),
+		"/keys/members?key=" + q(keys["set"]),
+		"/keys/members?key=" + q(keys["zset"]),
+		"/keys/members?key=" + q(keys["stream"]),
+		"/keys/value?key=" + q(keys["hash"]),
+		"/keys/raw?key=" + q(keys["string"]),
+		"/keys/raw?key=" + q(keys["hash"]) + "&field=f",
+		"/keys/raw?key=" + q(keys["list"]) + "&index=1",
+		"/keys/raw?key=" + q(keys["set"]) + "&member=m",
+		"/keys/raw?key=" + q(keys["zset"]) + "&member=m",
+		"/keys/stream?key=" + q(keys["stream"]),
+		"/keys/stream/pending?key=" + q(keys["stream"]) + "&group=g",
+		"/redis/analysis",
+	} {
+		wantStatus(t, call(t, h, id, http.MethodGet, path, "", nil), 200, "", "GET "+path)
+		for kind, key := range keys {
+			if n := idle(key); n < hour {
+				t.Fatalf("GET %s reset the idle time of the %s to %d seconds", path, kind, n)
+			}
+		}
+	}
+	// And what the page is told is the application's hour, twice running.
+	for range 2 {
+		var meta dbx.RedisKeyMeta
+		call(t, h, id, http.MethodGet, "/keys/meta?key="+q(keys["hash"]), "", &meta)
+		if meta.IdleSeconds == nil || *meta.IdleSeconds < hour {
+			t.Fatalf("the key's facts say it has been idle for %v seconds, want the hour", meta.IdleSeconds)
+		}
+	}
+
+	// An edit made from the dashboard is use of the key, and counts.
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/value", `{"key":"`+keys["string"]+`","value":"edited"}`, nil), 200, "", "an edit")
+	if n := idle(keys["string"]); n >= hour {
+		t.Errorf("an edit left the key idle for %d seconds: a write is use", n)
+	}
+}
+
+// One field of a hash may have an expiry of its own, on Redis 7.4 and Valkey
+// 9. The page could show it and had no route to change it with, so it went
+// through the console's. The two routes are the key's own, a level down: the
+// same three ways of saying when, a ttl of zero that removes the expiry and
+// never the field, and a moment that has passed refused as the delete it is.
+func TestLiveAPIRedisAFieldsExpiryIsSetAndRemoved(t *testing.T) {
+	s, h, id, direct := redisLive(t, "JD_TEST_REDIS_DSN", auth.RoleAdmin)
+	ctx := context.Background()
+	key := redisAPIPrefix + "fieldttl:h"
+	const named = "field-whose-name-is-data"
+	direct.HSet(ctx, key, named, "1", "b", "2", "c", "3")
+	direct.Set(ctx, redisAPIPrefix+"fieldttl:s", "v", 0)
+
+	if !redisFeatures(t, h, id).HashFieldTTL {
+		// A server that keeps none says so, and is asked for nothing.
+		rec := call(t, h, id, http.MethodPost, "/keys/field/expire", `{"key":"`+key+`","field":"b","ttl":60}`, nil)
+		wantStatus(t, rec, 400, "unsupported", "a field expiry on a server without one")
+		rec = call(t, h, id, http.MethodPost, "/keys/field/persist", `{"key":"`+key+`","field":"b"}`, nil)
+		wantStatus(t, rec, 400, "unsupported", "removing a field expiry on a server without one")
+		if n := direct.HLen(ctx, key).Val(); n != 3 {
+			t.Errorf("the hash holds %d fields after the refusals, want 3", n)
+		}
+		return
+	}
+	type answer struct {
+		OK     bool `json:"ok"`
+		Fields []struct {
+			Field dbx.RedisBytes `json:"field"`
+			PTTL  int64          `json:"pttl"`
+		} `json:"fields"`
+	}
+	left := func(field string) int64 {
+		t.Helper()
+		ttls, err := direct.Do(ctx, "HPTTL", key, "FIELDS", 1, field).Int64Slice()
+		if err != nil || len(ttls) != 1 {
+			t.Fatalf("HPTTL %s: %v %v", field, ttls, err)
+		}
+		return ttls[0]
+	}
+
+	var got answer
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/field/expire", `{"key":"`+key+`","field":"`+named+`","ttl":120}`, &got), 200, "", "an expiry in seconds")
+	if len(got.Fields) != 1 || string(got.Fields[0].Field) != named || got.Fields[0].PTTL <= 0 || got.Fields[0].PTTL > 120_000 {
+		t.Errorf("answer = %+v, want the field with two minutes left", got)
+	}
+	if ms := left(named); ms <= 0 || ms > 120_000 {
+		t.Errorf("the server says %d ms are left, want up to two minutes", ms)
+	}
+	// Several at once, one of them not there.
+	got = answer{}
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/field/expire", `{"key":"`+key+`","members":["b","nope"],"ttlMs":60000}`, &got), 200, "", "an expiry in milliseconds on several fields")
+	if len(got.Fields) != 2 || got.Fields[0].PTTL <= 0 || got.Fields[1].PTTL != -2 {
+		t.Errorf("answer = %+v, want time left on b and -2 for a field that is not there", got)
+	}
+	at := time.Now().Add(time.Hour).UnixMilli()
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/field/expire", fmt.Sprintf(`{"key":%q,"field":"c","at":%d}`, key, at), nil), 200, "", "an expiry at a moment")
+	if ms := left("c"); ms < 3_500_000 || ms > 3_600_000 {
+		t.Errorf("a field set to expire in an hour has %d ms left", ms)
+	}
+
+	// Removed, by the route that says so and by a ttl of zero. Neither takes
+	// the field.
+	got = answer{}
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/field/persist", `{"key":"`+key+`","field":"`+named+`"}`, &got), 200, "", "removing an expiry")
+	if len(got.Fields) != 1 || got.Fields[0].PTTL != -1 || left(named) != -1 {
+		t.Errorf("after persist: %+v, the server says %d", got, left(named))
+	}
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/field/expire", `{"key":"`+key+`","field":"b","ttl":0}`, nil), 200, "", "a ttl of zero")
+	if left("b") != -1 || !direct.HExists(ctx, key, "b").Val() {
+		t.Errorf("a ttl of zero left b with %d ms and present=%v, want no expiry and the field kept", left("b"), direct.HExists(ctx, key, "b").Val())
+	}
+
+	// A moment that has passed would delete the field, and is refused as that.
+	past := time.Now().Add(-time.Minute).UnixMilli()
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/field/expire", fmt.Sprintf(`{"key":%q,"field":"c","at":%d}`, key, past), nil), 400, "bad_request", "an expiry that has passed")
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/field/expire", `{"key":"`+key+`","field":"c","ttl":60,"ttlMs":5}`, nil), 400, "bad_request", "an expiry given two ways")
+	if n := direct.HLen(ctx, key).Val(); n != 3 {
+		t.Errorf("the hash holds %d fields after the refusals, want 3", n)
+	}
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/field/expire", `{"key":"`+key+`","field":"nope","ttl":60}`, nil), 404, "member_not_found", "a field that is not there")
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/field/expire", `{"key":"`+redisAPIPrefix+`fieldttl:none","field":"a","ttl":60}`, nil), 404, "key_not_found", "a key that is not there")
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/field/expire", `{"key":"`+redisAPIPrefix+`fieldttl:s","field":"a","ttl":60}`, nil), 400, "bad_request", "a key that is not a hash")
+
+	// service.control may, as it may set a key's expiry; a reader may not.
+	_, limited, limitedID := redisRouter(t, auth.RoleLimited, os.Getenv("JD_TEST_REDIS_DSN"))
+	wantStatus(t, call(t, limited, limitedID, http.MethodPost, "/keys/field/expire", `{"key":"`+key+`","field":"b","ttl":60}`, nil), 200, "", "a field expiry by service.control")
+	_, reader, readerID := redisRouter(t, auth.RoleReadOnly, os.Getenv("JD_TEST_REDIS_DSN"))
+	wantStatus(t, call(t, reader, readerID, http.MethodPost, "/keys/field/persist", `{"key":"`+key+`","field":"b"}`, nil), 403, "forbidden", "a field expiry by a reader")
+
+	// The trail says which key and how many fields, never which fields: a
+	// field's name is data as often as it is a label.
+	trail := auditTrail(t, s)
+	if !strings.Contains(trail, "database.redis.field.expire cache 200") || !strings.Contains(trail, "database.redis.field.persist cache 200") ||
+		!strings.Contains(trail, `"fields":2`) || !strings.Contains(trail, key) {
+		t.Errorf("audit trail:\n%s", trail)
+	}
+	if strings.Contains(trail, named) {
+		t.Errorf("a field's name is on the audit trail:\n%s", trail)
+	}
+}
+
+// A group's pending entries belong to the consumer that was handed them, and
+// when that consumer is gone they sit there. The page could acknowledge one
+// and could not give it to anybody else. A claim moves the ones named, or
+// whatever has been pending long enough, to a consumer of the group — the
+// ids only, in both directions: what an entry holds is not asked for.
+func TestLiveAPIRedisPendingEntriesAreClaimed(t *testing.T) {
+	s, h, id, direct := redisLive(t, "JD_TEST_REDIS_DSN", auth.RoleAdmin)
+	ctx := context.Background()
+	key := redisAPIPrefix + "claim:x"
+	var ids []string
+	for i := 0; i < 3; i++ {
+		entry, err := direct.XAdd(ctx, &redis.XAddArgs{Stream: key, Values: map[string]any{"secret": "entry-payload"}}).Result()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, entry)
+	}
+	direct.XGroupCreate(ctx, key, "g", "0")
+	if err := direct.XReadGroup(ctx, &redis.XReadGroupArgs{Group: "g", Consumer: "alice", Streams: []string{key, ">"}, Count: 3, Block: -1}).Err(); err != nil {
+		t.Fatal(err)
+	}
+	owners := func() map[string]string {
+		t.Helper()
+		var page dbx.RedisStreamPendingPage
+		call(t, h, id, http.MethodGet, "/keys/stream/pending?key="+key+"&group=g", "", &page)
+		out := map[string]string{}
+		for _, e := range page.Entries {
+			out[e.ID] = string(e.Consumer)
+		}
+		return out
+	}
+	if got := owners(); len(got) != 3 || got[ids[0]] != "alice" {
+		t.Fatalf("before: %v", got)
+	}
+
+	var claimed dbx.RedisStreamClaimed
+	body := fmt.Sprintf(`{"key":%q,"group":"g","consumer":"bob","ids":[%q]}`, key, ids[0])
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/stream/claim", body, &claimed), 200, "", "claiming one entry")
+	if len(claimed.Claimed) != 1 || claimed.Claimed[0] != ids[0] || !claimed.Done {
+		t.Errorf("claimed = %+v, want the one entry", claimed)
+	}
+	if got := owners(); got[ids[0]] != "bob" || got[ids[1]] != "alice" || got[ids[2]] != "alice" {
+		t.Errorf("after the claim: %v", got)
+	}
+
+	// Only what has been pending long enough: nothing has been for an hour.
+	claimed = dbx.RedisStreamClaimed{}
+	body = fmt.Sprintf(`{"key":%q,"group":"g","consumer":"carol","ids":[%q,%q],"minIdleMs":3600000}`, key, ids[1], ids[2])
+	wantStatus(t, call(t, h, id, http.MethodPost, "/keys/stream/claim", body, &claimed), 200, "", "claiming entries that are not idle yet")
+	if len(claimed.Claimed) != 0 || owners()[ids[1]] != "alice" {
+		t.Errorf("entries a consumer was handed a moment ago were taken from it: %+v %v", claimed, owners())
+	}
+
+	// Whatever is pending, without naming it.
+	if redisFeatures(t, h, id).StreamAutoClaim {
+		claimed = dbx.RedisStreamClaimed{}
+		body = fmt.Sprintf(`{"key":%q,"group":"g","consumer":"carol","auto":true,"count":2}`, key)
+		wantStatus(t, call(t, h, id, http.MethodPost, "/keys/stream/claim", body, &claimed), 200, "", "an automatic claim")
+		if len(claimed.Claimed) != 2 || claimed.Done || claimed.Cursor == "" || claimed.Cursor == "0-0" {
+			t.Fatalf("the first page of an automatic claim = %+v, want two entries and somewhere to continue", claimed)
+		}
+		next := dbx.RedisStreamClaimed{}
+		body = fmt.Sprintf(`{"key":%q,"group":"g","consumer":"carol","auto":true,"count":2,"cursor":%q}`, key, claimed.Cursor)
+		wantStatus(t, call(t, h, id, http.MethodPost, "/keys/stream/claim", body, &next), 200, "", "the rest of an automatic claim")
+		if len(next.Claimed) != 1 || !next.Done {
+			t.Errorf("the second page = %+v, want the last entry and the end", next)
+		}
+		for entry, owner := range owners() {
+			if owner != "carol" {
+				t.Errorf("%s is pending for %q after everything was claimed for carol", entry, owner)
+			}
+		}
+	} else {
+		body = fmt.Sprintf(`{"key":%q,"group":"g","consumer":"carol","auto":true}`, key)
+		wantStatus(t, call(t, h, id, http.MethodPost, "/keys/stream/claim", body, nil), 400, "unsupported", "an automatic claim on a server without one")
+	}
+
+	for what, body := range map[string]string{
+		"no consumer":            fmt.Sprintf(`{"key":%q,"group":"g","ids":[%q]}`, key, ids[0]),
+		"no group":               fmt.Sprintf(`{"key":%q,"consumer":"bob","ids":[%q]}`, key, ids[0]),
+		"nothing to claim":       fmt.Sprintf(`{"key":%q,"group":"g","consumer":"bob"}`, key),
+		"both ways at once":      fmt.Sprintf(`{"key":%q,"group":"g","consumer":"bob","auto":true,"ids":[%q]}`, key, ids[0]),
+		"not an entry id":        fmt.Sprintf(`{"key":%q,"group":"g","consumer":"bob","ids":["1-0; FLUSHALL"]}`, key),
+		"a negative idle time":   fmt.Sprintf(`{"key":%q,"group":"g","consumer":"bob","ids":[%q],"minIdleMs":-1}`, key, ids[0]),
+		"a group that is not it": fmt.Sprintf(`{"key":%q,"group":"nope","consumer":"bob","ids":[%q]}`, key, ids[0]),
+	} {
+		wantStatus(t, call(t, h, id, http.MethodPost, "/keys/stream/claim", body, nil), 400, "bad_request", what)
+	}
+	if n := direct.XLen(ctx, key).Val(); n != 3 {
+		t.Errorf("the stream holds %d entries after being claimed from, want 3", n)
+	}
+
+	_, reader, readerID := redisRouter(t, auth.RoleReadOnly, os.Getenv("JD_TEST_REDIS_DSN"))
+	body = fmt.Sprintf(`{"key":%q,"group":"g","consumer":"bob","ids":[%q]}`, key, ids[0])
+	wantStatus(t, call(t, reader, readerID, http.MethodPost, "/keys/stream/claim", body, nil), 403, "forbidden", "a claim by a reader")
+
+	trail := auditTrail(t, s)
+	if !strings.Contains(trail, "database.redis.stream.claim cache 200") || !strings.Contains(trail, `"consumer":"bob"`) || !strings.Contains(trail, `"claimed":1`) {
+		t.Errorf("audit trail:\n%s", trail)
+	}
+	if strings.Contains(trail, "entry-payload") {
+		t.Errorf("an entry's contents are on the audit trail:\n%s", trail)
+	}
+}
+
+// A page shows the first 64 KiB of a long member and says how long it really
+// is. A string, a hash field and a list element could then be downloaded
+// whole; a member of a set or of a sorted set could not, because it has no
+// name to ask for it by except itself, and the page holds only its start. It
+// is asked for by that: how it begins, and how many bytes it is.
+func TestLiveAPIRedisAWholeMemberOfASetIsDownloaded(t *testing.T) {
+	_, h, id, direct := redisLive(t, "JD_TEST_REDIS_DSN", auth.RoleReadOnly)
+	ctx := context.Background()
+	// Not text, and long enough to be cut twice over.
+	long := make([]byte, 200<<10)
+	for i := range long {
+		long[i] = byte(i*7 + i>>8)
+	}
+	// The same beginning and another size, and the same size with another
+	// beginning: neither is the one asked for.
+	longer := append(append([]byte{}, long...), "tail"...)
+	other := append([]byte{}, long...)
+	other[0] ^= 0xff
+	for kind, key := range map[string]string{"set": redisAPIPrefix + "whole:set", "zset": redisAPIPrefix + "whole:zset"} {
+		for i, member := range [][]byte{longer, other, long, []byte("small"), []byte("")} {
+			var err error
+			if kind == "set" {
+				err = direct.SAdd(ctx, key, member).Err()
+			} else {
+				err = direct.ZAdd(ctx, key, redis.Z{Score: float64(i), Member: member}).Err()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		// What the page was given: the start of it, marked as cut, with its size.
+		var page dbx.RedisMembers
+		call(t, h, id, http.MethodGet, "/keys/members?key="+key, "", &page)
+		var begins []byte
+		for _, row := range page.Rows {
+			if row.Truncated && row.Bytes != nil && *row.Bytes == int64(len(long)) && row.Value != nil && (*row.Value)[0] == dbx.RedisBytes(long)[0] {
+				begins = []byte(*row.Value)
+			}
+		}
+		if len(begins) == 0 || len(begins) >= len(long) {
+			t.Fatalf("%s: the page did not hand over the start of the long member: %d rows", kind, len(page.Rows))
+		}
+
+		for what, prefix := range map[string][]byte{"all the page kept": begins, "its first kilobyte": begins[:1024]} {
+			path := fmt.Sprintf("/keys/raw?key=%s&memberB64=%s&bytes=%d", key, url.QueryEscape(base64.StdEncoding.EncodeToString(prefix)), len(long))
+			rec := call(t, h, id, http.MethodGet, path, "", nil)
+			if rec.Code != http.StatusOK || rec.Body.String() != string(long) {
+				t.Fatalf("%s named by %s: %d with %d bytes, want the %d of the member", kind, what, rec.Code, rec.Body.Len(), len(long))
+			}
+			if rec.Header().Get("Content-Length") != fmt.Sprint(len(long)) || !strings.Contains(rec.Header().Get("Content-Disposition"), "attachment") {
+				t.Errorf("%s: headers = %v", kind, rec.Header())
+			}
+		}
+		// A member that is whole is named by itself, the empty one included.
+		for _, member := range []string{"small", ""} {
+			rec := call(t, h, id, http.MethodGet, "/keys/raw?key="+key+"&member="+member, "", nil)
+			if rec.Code != http.StatusOK || rec.Body.String() != member {
+				t.Errorf("%s: the member %q = %d %q", kind, member, rec.Code, rec.Body.String())
+			}
+		}
+		wantStatus(t, call(t, h, id, http.MethodGet, "/keys/raw?key="+key+"&member=nope", "", nil), 404, "member_not_found", kind+": a member that is not there")
+		wantStatus(t, call(t, h, id, http.MethodGet, "/keys/raw?key="+key+"&member=small&bytes=9", "", nil), 404, "member_not_found", kind+": the right beginning and the wrong size")
+		wantStatus(t, call(t, h, id, http.MethodGet, "/keys/raw?key="+key+"&member=small&bytes=2", "", nil), 400, "bad_request", kind+": a size shorter than the beginning")
+		wantStatus(t, call(t, h, id, http.MethodGet, "/keys/raw?key="+key+"&member=&bytes=5", "", nil), 400, "bad_request", kind+": a size and no beginning")
+		wantStatus(t, call(t, h, id, http.MethodGet, "/keys/raw?key="+key, "", nil), 400, "bad_request", kind+": no member named")
+	}
+}

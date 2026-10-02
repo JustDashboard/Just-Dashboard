@@ -1,6 +1,7 @@
 package dbx
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -205,6 +206,8 @@ func RedisReadMembers(ctx context.Context, client *redis.Client, profile *RedisP
 	if err := wire.login(client.Options().DB); err != nil {
 		return nil, err
 	}
+	// A page is somebody looking, not the application using the key.
+	wire.quiet()
 	pager := &redisPager{wire: wire}
 	switch typ {
 	case "string":
@@ -798,13 +801,20 @@ func (g *redisPager) readJSON(page *RedisMembers, o RedisMembersOptions) error {
 }
 
 // RedisWhole names one value to be read in full: a string key, one field of
-// a hash, or one element of a list.
+// a hash, one element of a list, or one member of a set or a sorted set.
 type RedisWhole struct {
 	Key RedisBytes
 	// Field is a hash field's name; Index a list position. Neither is given
 	// for a string.
 	Field *RedisBytes
 	Index *int64
+	// Member names a member of a set or a sorted set, which has no name but
+	// itself. Whoever is asking for the whole of one was shown only its
+	// start, so that is what it is named by: Member is how it begins and Size
+	// how many bytes it is, both as the page that cut it reported them. With
+	// no Size, Member is the member, all of it.
+	Member *RedisBytes
+	Size   *int64
 }
 
 // redisWholeTimeout bounds the copy of one value, which may be the half
@@ -835,10 +845,11 @@ func RedisCopyWhole(ctx context.Context, client *redis.Client, v RedisWhole, ope
 		args = []string{"HGET", key, string(*v.Field)}
 	case typ == "list" && v.Index != nil:
 		args = []string{"LINDEX", key, strconv.FormatInt(*v.Index, 10)}
-	case typ == "string", typ == "hash", typ == "list":
-		return fmt.Errorf("say which value of the %s to read: nothing for a string, a field for a hash, a position for a list", typ)
+	case (typ == "set" || typ == "zset") && v.Member != nil:
+	case typ == "string", typ == "hash", typ == "list", typ == "set", typ == "zset":
+		return fmt.Errorf("say which value of the %s to read: nothing for a string, a field for a hash, a position for a list, a member for a set or a sorted set", typ)
 	default:
-		return fmt.Errorf("only a string, a hash field or a list element can be read whole; a %s has neither", typ)
+		return fmt.Errorf("only a string, a hash field, a list element or a member of a set can be read whole; a %s has none of them", typ)
 	}
 	wire, err := redisDialOptions(ctx, client.Options())
 	if err != nil {
@@ -847,6 +858,11 @@ func RedisCopyWhole(ctx context.Context, client *redis.Client, v RedisWhole, ope
 	defer wire.close()
 	if err := wire.login(client.Options().DB); err != nil {
 		return err
+	}
+	// A download is somebody looking, like the page it was asked from.
+	wire.quiet()
+	if args == nil {
+		return redisCopyMember(ctx, wire, typ, v, open)
 	}
 	if err := wire.send(redisWholeTimeout, args...); err != nil {
 		return err
@@ -874,9 +890,157 @@ func RedisCopyWhole(ctx context.Context, client *redis.Client, v RedisWhole, ope
 	return err
 }
 
-// ErrRedisMemberNotFound is a hash field or a list position that is not
-// there, in a key that is.
-var ErrRedisMemberNotFound = errors.New("that field or position is not in the key; it may have been removed")
+// ErrRedisMemberNotFound is a hash field, a list position or a member that
+// is not there, in a key that is.
+var ErrRedisMemberNotFound = errors.New("that field, position or member is not in the key; it may have been removed")
+
+const (
+	// redisMemberSearchBudget is how long a set is searched for the member a
+	// download names before the search is given up.
+	redisMemberSearchBudget = 30 * time.Second
+	// redisMemberMatchBytes is how much of the member's beginning the server
+	// is asked to match. The rest of what was given is compared here, as the
+	// members go past.
+	redisMemberMatchBytes = 256
+)
+
+// redisCopyMember streams one member of a set or a sorted set.
+//
+// A member has no name to ask for it by except itself, and the reader who
+// wants the whole of one has only its beginning. So the collection is walked
+// with the scan that looks at members — narrowed by the server to those that
+// begin the same way — and each member that goes past is measured against
+// what was asked for: the same size, the same beginning. The first that is
+// both is copied straight through from the reply it arrived in. Nothing is
+// held: a member that is not the one is read past, and the one that is goes to
+// the writer a buffer at a time.
+func redisCopyMember(ctx context.Context, wire *redisWire, typ string, v RedisWhole, open func(size int64) (io.Writer, error)) error {
+	begins := string(*v.Member)
+	size := int64(len(begins))
+	if v.Size != nil {
+		size = *v.Size
+	}
+	switch {
+	case len(begins) > redisMaxMemberBytes:
+		return fmt.Errorf("the beginning of a member is at most the %d bytes a page shows of one", redisMaxMemberBytes)
+	case size < int64(len(begins)):
+		return fmt.Errorf("a member cannot be shorter than its beginning: bytes is its whole size")
+	case begins == "" && size > 0:
+		return fmt.Errorf("say how the member begins; its size alone does not name it")
+	}
+	verb, width := "SSCAN", 1
+	if typ == "zset" {
+		// Member and score, side by side.
+		verb, width = "ZSCAN", 2
+	}
+	match := begins
+	if len(match) > redisMemberMatchBytes {
+		match = match[:redisMemberMatchBytes]
+	}
+	pattern := redisGlobEscape(match) + "*"
+	started := time.Now()
+	cursor := "0"
+	for {
+		if err := wire.send(redisPageTimeout, verb, string(v.Key), cursor, "MATCH", pattern, "COUNT", strconv.Itoa(redisScanBatch)); err != nil {
+			return err
+		}
+		head, err := redisReplyHeader(wire.rd, '*')
+		if err != nil {
+			return err
+		}
+		if head != 2 {
+			return fmt.Errorf("the server's answer to %s was not a cursor and a list", verb)
+		}
+		n, err := redisReplyHeader(wire.rd, '$')
+		if err != nil {
+			return err
+		}
+		if n > 32 {
+			return fmt.Errorf("the server's answer to %s carried no cursor", verb)
+		}
+		next := make([]byte, n+2)
+		if _, err := io.ReadFull(wire.rd, next); err != nil {
+			return err
+		}
+		cursor = string(next[:n])
+		items, err := redisReplyHeader(wire.rd, '*')
+		if err != nil {
+			return err
+		}
+		for i := int64(0); i < items; i++ {
+			length, err := redisReplyHeader(wire.rd, '$')
+			if err != nil {
+				return err
+			}
+			if i%int64(width) != 0 || length != size {
+				if err := redisDiscard(wire.rd, length+2); err != nil {
+					return err
+				}
+				continue
+			}
+			lead := make([]byte, len(begins))
+			if _, err := io.ReadFull(wire.rd, lead); err != nil {
+				return err
+			}
+			if string(lead) != begins {
+				if err := redisDiscard(wire.rd, length-int64(len(lead))+2); err != nil {
+					return err
+				}
+				continue
+			}
+			// The one. Whatever follows it in the reply is left unread: the
+			// connection is closed when this returns.
+			wire.conn.SetDeadline(time.Now().Add(redisWholeTimeout))
+			out, err := open(size)
+			if err != nil {
+				return err
+			}
+			if _, err := out.Write(lead); err != nil {
+				return err
+			}
+			_, err = io.CopyN(out, wire.rd, size-int64(len(lead)))
+			return err
+		}
+		if cursor == "0" {
+			return ErrRedisMemberNotFound
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if time.Since(started) > redisMemberSearchBudget {
+			return fmt.Errorf("the member was not found in the %s a search is given; the collection is too large to look through for it",
+				redisMemberSearchBudget)
+		}
+	}
+}
+
+// redisReplyHeader reads the first line of an array or of a string in the
+// older protocol and returns the count it declares: elements for '*', bytes
+// for '$'. An error reply is returned as the server's error.
+func redisReplyHeader(rd *bufio.Reader, kind byte) (int64, error) {
+	line, _, err := redisReadLine(rd, 64<<10)
+	if err != nil {
+		return 0, err
+	}
+	if strings.HasPrefix(line, "-") {
+		msg := strings.TrimPrefix(line, "-")
+		if sentence, ok := redisExplainCluster(msg); ok {
+			return 0, errors.New(sentence)
+		}
+		return 0, redisServerError(msg)
+	}
+	n, err := strconv.ParseInt(strings.TrimPrefix(line, string(kind)), 10, 64)
+	if err != nil || len(line) == 0 || line[0] != kind || n < 0 {
+		return 0, fmt.Errorf("the server's answer was not the list of members that was asked for")
+	}
+	return n, nil
+}
+
+// redisDiscard reads past n bytes without keeping them.
+func redisDiscard(rd *bufio.Reader, n int64) error {
+	_, err := io.CopyN(io.Discard, rd, n)
+	return err
+}
 
 // RedisKeyMeta is what the server knows about a key without reading it.
 type RedisKeyMeta struct {

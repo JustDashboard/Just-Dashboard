@@ -344,6 +344,29 @@ func TestRedisClassifyFlagsSlowCommands(t *testing.T) {
 	}
 }
 
+// A refusal that sends the reader somewhere else has to name a place the
+// product has. The console page has three views — Console, Pub/Sub and
+// Monitor — and MONITOR's refusal pointed at "the Profiler", which is not one
+// of them and is nowhere else either.
+func TestRedisRefusalsNameAViewThatExists(t *testing.T) {
+	for command, view := range map[string]string{
+		"MONITOR": "the Monitor view", "SUBSCRIBE": "the Pub/Sub view", "PSUBSCRIBE": "the Pub/Sub view",
+		"SSUBSCRIBE": "the Pub/Sub view",
+	} {
+		v := RedisClassify([]string{command, "x"}, nil)
+		if v.Class != RedisClassBlocked || len(v.Reasons) != 1 || !strings.Contains(v.Reasons[0], "use "+view+",") {
+			t.Errorf("%s = %s %q, want a refusal that points at %s", command, v.Class, v.Reasons, view)
+		}
+	}
+	// Whatever a reason tells the reader to use is one of the places above.
+	for name, rule := range redisRules {
+		if _, place, ok := strings.Cut(rule.reason, "; use the "); ok &&
+			!strings.HasPrefix(place, "Monitor view,") && !strings.HasPrefix(place, "Pub/Sub view,") {
+			t.Errorf("rule %q sends the reader to %q, which is not a view of the console page", name, place)
+		}
+	}
+}
+
 // Every rule has to be reachable by the name the classifier computes, or it
 // is a row that silently does nothing.
 func TestRedisRulesAreWellFormed(t *testing.T) {

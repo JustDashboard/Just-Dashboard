@@ -40,7 +40,9 @@ var mssqlImportTypeText = regexp.MustCompile(`^[a-z][a-z0-9]*(\((max|[0-9]+(,[0-
 //
 // bytes says whether a binary column's values arrive as bytes. Where they
 // arrive as whatever text the file held — the inline route, which reads no
-// \x form — the text is left for the server to refuse as it always has.
+// \x form — no text is a value for the column, and any is refused as its own
+// row. Only "no value" passes, converted like the rest: left as it was bound
+// it is typed as a text, and the server refused the whole statement for it.
 func mssqlImportValue(typeName, mark string, bytes bool) (value, failed string) {
 	t := strings.ToLower(strings.TrimSpace(typeName))
 	if !mssqlImportTypeText.MatchString(t) {
@@ -53,12 +55,13 @@ func mssqlImportValue(typeName, mark string, bytes bool) (value, failed string) 
 	var try string
 	switch base {
 	case "binary", "varbinary", "image":
-		if !bytes {
-			return mark, ""
-		}
 		// A NULL is sent as a text with nothing in it, which a binary column
 		// refuses for being a text.
-		return "CONVERT(varbinary(max), " + mark + ")", ""
+		value = "CONVERT(varbinary(max), " + mark + ")"
+		if !bytes {
+			return value, mark + " IS NOT NULL"
+		}
+		return value, ""
 	case "datetime", "smalldatetime":
 		// Read as the wider type first, which takes every ISO spelling the
 		// same way under every language setting. On their own these two read

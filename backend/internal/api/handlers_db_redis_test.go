@@ -77,6 +77,13 @@ var redisMutations = map[auth.Capability][]redisRoute{
 		{http.MethodPost, "/redis/publish", `{"channel":"c","message":"m"}`},
 		// An expiry that is still to come is a write, however soon.
 		{http.MethodPost, "/keys/expire", `{"key":"k","ttlMs":1}`},
+		// One field's expiry is the key's, a level down; a claim moves who a
+		// group's pending entries belong to and removes none.
+		{http.MethodPost, "/keys/field/expire", `{"key":"h","field":"f","ttl":60}`},
+		{http.MethodPost, "/keys/field/expire", `{"key":"h","members":["f","g"],"ttlMs":1}`},
+		{http.MethodPost, "/keys/field/persist", `{"key":"h","field":"f"}`},
+		{http.MethodPost, "/keys/stream/claim", `{"key":"s","group":"g","consumer":"c","ids":["1-0"]}`},
+		{http.MethodPost, "/keys/stream/claim", `{"key":"s","group":"g","consumer":"c","auto":true,"minIdleMs":60000}`},
 		{http.MethodPost, "/redis/command", `{"command":"PEXPIRE k 1"}`},
 	},
 	auth.CapDestructive: {
@@ -130,6 +137,7 @@ var redisReads = []redisRoute{
 	{http.MethodGet, "/keys/meta?key=k", ``},
 	{http.MethodGet, "/keys/members?key=k", ``},
 	{http.MethodGet, "/keys/raw?key=k", ``},
+	{http.MethodGet, "/keys/raw?key=k&member=m&bytes=70000", ``},
 	{http.MethodGet, "/keys/stream?key=k", ``},
 	{http.MethodGet, "/keys/stream/pending?key=k&group=g", ``},
 	{http.MethodGet, "/redis/server", ``},
@@ -348,6 +356,9 @@ func TestRedisRequestsAreValidatedBeforeDialling(t *testing.T) {
 		{http.MethodGet, "/keys/raw", ``},
 		{http.MethodGet, "/keys/raw?key=k&index=first", ``},
 		{http.MethodGet, "/keys/raw?key=k&fieldB64=***", ``},
+		{http.MethodGet, "/keys/raw?key=k&memberB64=***", ``},
+		{http.MethodGet, "/keys/raw?key=k&member=m&bytes=many", ``},
+		{http.MethodGet, "/keys/raw?key=k&member=m&bytes=-1", ``},
 		{http.MethodGet, "/keys/stream/pending?key=k", ``},
 		{http.MethodGet, "/keys/tree?cursor=abc", ``},
 		// The decoder refuses a field it does not know, on every route.
@@ -367,6 +378,10 @@ func TestRedisRequestsAreValidatedBeforeDialling(t *testing.T) {
 		{http.MethodPost, "/keys/bulk", `{"pattern":"*","action":"delete"}`},
 		{http.MethodPost, "/keys/bulk", `{"pattern":"**","action":"expire","ttl":5}`},
 		{http.MethodPost, "/keys/stream/trim", `{"maxLen":5}`},
+		{http.MethodPost, "/keys/stream/claim", `{"group":"g","consumer":"c","ids":["1-0"]}`},
+		{http.MethodPost, "/keys/field/expire", `{"key":"h","ttl":60}`},
+		{http.MethodPost, "/keys/field/expire", `{"field":"f","ttl":60}`},
+		{http.MethodPost, "/keys/field/persist", `{"key":"h","members":[]}`},
 		{http.MethodPost, "/redis/save", `{"mode":"save"}`},
 		{http.MethodPost, "/redis/publish", `{"message":"m"}`},
 		{http.MethodPut, "/redis/config", `{"value":"1"}`},

@@ -1489,6 +1489,13 @@ func TestLiveRedisDumpCoversEveryNumberedDatabase(t *testing.T) {
 	}
 	seed()
 	t.Cleanup(func() { conn.FlushAll(context.Background()) })
+	// One key put back as nothing has used it for an hour, to see what being
+	// dumped does to that.
+	const hour = 3600
+	conn.Select(ctx, 5)
+	payload := conn.Dump(ctx, "five:a").Val()
+	conn.Del(ctx, "five:a")
+	aged := conn.Do(ctx, "RESTORE", "five:a", time.Hour.Milliseconds(), payload, "IDLETIME", hour).Err() == nil
 
 	var lines []string
 	res, err := DumpWith(ctx, DriverRedis, dsn, t.TempDir(), DumpOptions{Progress: func(l string) { lines = append(lines, l) }})
@@ -1497,6 +1504,15 @@ func TestLiveRedisDumpCoversEveryNumberedDatabase(t *testing.T) {
 	}
 	if res.Database != "0,2,5" || res.Summary != "6 keys in 3 databases" || len(lines) != 3 {
 		t.Fatalf("result = %+v, progress %q", res, lines)
+	}
+	// A dump reads every key and is not the application using any of them:
+	// counted as use, the nightly backup made every key on the server its
+	// most recently used.
+	if profile, err := RedisProbe(ctx, client); aged && err == nil && profile.Features.NoTouch && profile.Features.ObjectIdleTime {
+		conn.Select(ctx, 5)
+		if idle, err := conn.Do(ctx, "OBJECT", "IDLETIME", "five:a").Int64(); err != nil || idle < hour {
+			t.Errorf("the dump left the key idle for %d seconds (%v), want the hour it had", idle, err)
+		}
 	}
 	conn.FlushAll(ctx)
 	out, err := RestoreWith(ctx, DriverRedis, dsn, res.Path, RestoreOptions{})
@@ -1656,6 +1672,81 @@ func TestLiveImportLeavesOutWhatTheServerComputes(t *testing.T) {
 			var gross float64
 			if err := db.QueryRowContext(ctx, `SELECT gross FROM jd_gen WHERE id = 2`).Scan(&gross); err != nil || gross != 40 {
 				t.Errorf("gross = %v (%v), want what the table computes", gross, err)
+			}
+		})
+	}
+}
+
+// "No value" has to be taken by a column of every type, on every engine: one
+// that types what it is sent may refuse a NULL for arriving as the wrong type,
+// as SQL Server does for a binary column bound a text. Each engine is asked
+// for a row of nothing but NULLs under the types that could object, by the
+// route that reads a file against the table and — where it binds a file's
+// cells as the text they are, which ClickHouse's driver takes for no number —
+// by the inline one.
+func TestLiveImportLeavesEveryTypedColumnEmpty(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		driver  Driver
+		env     string
+		columns string
+		// suffix is what follows the column list in CREATE TABLE.
+		suffix string
+		inline bool
+	}{
+		{"postgres", DriverPostgres, "JD_TEST_POSTGRES_DSN",
+			`id INT PRIMARY KEY, bin BYTEA, js JSONB, u UUID, n NUMERIC(10,2), ts TIMESTAMPTZ, flag BOOLEAN, arr INT[], bits BIT(8)`, "", true},
+		{"mariadb", DriverMySQL, "JD_TEST_MYSQL_DSN",
+			`id INT PRIMARY KEY, bin VARBINARY(16), bl BLOB, js JSON, n DECIMAL(10,2), ts DATETIME, flag TINYINT(1), bits BIT(8)`, "", true},
+		{"mysql8", DriverMySQL, "JD_TEST_MYSQL8_DSN",
+			`id INT PRIMARY KEY, bin VARBINARY(16), bl BLOB, js JSON, n DECIMAL(10,2), ts DATETIME, flag TINYINT(1), bits BIT(8)`, "", true},
+		{"clickhouse", DriverClickHouse, "JD_TEST_CLICKHOUSE_DSN",
+			`id UInt64, i Nullable(Int32), u Nullable(UUID), n Nullable(Decimal(10,2)), ts Nullable(DateTime), d Nullable(Date),
+			 f Nullable(Float64), s Nullable(String), fs Nullable(FixedString(4)), flag Nullable(Bool), ip Nullable(IPv4)`,
+			" ENGINE = MergeTree ORDER BY id", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if os.Getenv(c.env) == "" {
+				t.Skipf("set %s to run this", c.env)
+			}
+			db := liveSQL(t, c.driver, c.env, "")
+			ctx := context.Background()
+			execAll(t, db, `DROP TABLE IF EXISTS jdbf_import_null`, `CREATE TABLE jdbf_import_null (`+c.columns+`)`+c.suffix)
+			t.Cleanup(func() { db.Exec(`DROP TABLE IF EXISTS jdbf_import_null`) })
+			d := mustDialectFor(c.driver)
+			cols, err := d.Columns(ctx, db, catalogSchema(ctx, db, d, ""), "jdbf_import_null")
+			if err != nil || len(cols) < 2 {
+				t.Fatalf("columns: %v %v", cols, err)
+			}
+			file := func(id, null string) io.Reader {
+				header, row := make([]string, len(cols)), make([]string, len(cols))
+				for i, col := range cols {
+					header[i], row[i] = col.Name, null
+				}
+				row[0] = id
+				return strings.NewReader(strings.Join(header, ",") + "\n" + strings.Join(row, ",") + "\n")
+			}
+			rows := "1"
+			report, err := Import(ctx, db, c.driver, file("1", ""), ImportSpec{Table: "jdbf_import_null"})
+			if err != nil || report.Inserted != 1 {
+				t.Fatalf("a row of no values, read against the table: %+v, %v", report, err)
+			}
+			if c.inline {
+				rows = "2"
+				res, err := ImportCSV(ctx, db, c.driver, file("2", `\N`),
+					ImportOptions{Table: "jdbf_import_null", HasHeader: true, NullAs: `\N`, StopOnError: true})
+				if err != nil || res.Inserted != 1 || res.Failed != 0 {
+					t.Fatalf("a row of no values, bound as text: %+v, %v", res, err)
+				}
+			}
+			for _, col := range cols[1:] {
+				quoted, err := d.QuoteIdent(col.Name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := queryString(t, db, `SELECT `+d.CastText(`COUNT(*)`)+` FROM jdbf_import_null WHERE `+quoted+` IS NULL`); got != rows {
+					t.Errorf("%s (%s): %s rows hold no value, want %s", col.Name, col.Type, got, rows)
+				}
 			}
 		})
 	}
