@@ -13,9 +13,12 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -23,6 +26,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/ptyhold"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
@@ -72,6 +76,22 @@ func terminalServerWithTLS(t *testing.T, tlsMode string) (*Server, http.Handler)
 	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL, cfg.Require2FA)
 	s := New(cfg, log, st, svc, sealer, audit.New(st, log), nil)
 	s.modules.term.SetClipboardRootForTest(t.TempDir())
+	// A short path fits Unix sockets even when the test's own name is long.
+	holders, err := os.MkdirTemp("", "jd-api-terminal-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(holders) })
+	s.modules.term.SetHolderLauncherForTest(holders, func(_ context.Context, _, socket string) error {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestTerminalHolderProcess$")
+		cmd.Env = append(os.Environ(), "JD_TEST_API_HOLDER="+socket)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		go cmd.Wait()
+		return nil
+	})
 	if _, err := s.modules.term.Account(); err != nil {
 		t.Skipf("no account to open a session as: %v", err)
 	}
@@ -141,9 +161,137 @@ func (c apiCall) ok(method, path string, body any, confirm string) *httptest.Res
 }
 
 type listResponse struct {
-	Enabled  bool             `json:"enabled"`
-	Folders  []terminalFolder `json:"folders"`
-	Sessions []workspace      `json:"sessions"`
+	Enabled          bool             `json:"enabled"`
+	Persistent       bool             `json:"persistent"`
+	PersistenceError string           `json:"persistenceError"`
+	Folders          []terminalFolder `json:"folders"`
+	Sessions         []workspace      `json:"sessions"`
+}
+
+// The API fixture uses this test binary as a real, independently running holder.
+func TestTerminalHolderProcess(t *testing.T) {
+	socket := os.Getenv("JD_TEST_API_HOLDER")
+	if socket == "" {
+		t.Skip("terminal holder helper process")
+	}
+	if err := ptyhold.Run(socket); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTerminalCreateRequiresRestartProtection(t *testing.T) {
+	s, handler := terminalServer(t)
+	s.modules.term.SetHolderLauncherForTest("", nil)
+	api := apiCall{t, handler}
+	listing := api.list()
+	if listing.Persistent || listing.PersistenceError == "" {
+		t.Fatalf("missing protection was not reported: %+v", listing)
+	}
+	response := api.do(http.MethodPost, "/terminal/", map[string]any{}, "")
+	if response.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(response.Body.String(), "terminal_persistence_unavailable") {
+		t.Fatalf("unprotected create = %d: %s", response.Code, response.Body.String())
+	}
+	if len(s.modules.term.List()) != 0 {
+		t.Fatal("an unprotected terminal was created")
+	}
+}
+
+func TestTerminalWindowRequiresRestartProtectionWithoutEndingExistingWork(t *testing.T) {
+	s, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	created := api.create("agent", "")
+	sess, err := s.modules.term.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.modules.term.SetHolderLauncherForTest("", nil)
+	response := api.do(http.MethodPost, "/terminal/"+created.ID+"/windows", map[string]any{}, "")
+	if response.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(response.Body.String(), "terminal_persistence_unavailable") {
+		t.Fatalf("unprotected window = %d: %s", response.Code, response.Body.String())
+	}
+	if got := api.list(); len(got.Sessions) != 1 || got.Sessions[0].Windows != 1 {
+		t.Fatalf("existing work was changed: %+v", got)
+	}
+	if err := syscall.Kill(sess.PID, 0); err != nil {
+		t.Fatalf("existing terminal ended: %v", err)
+	}
+}
+
+func TestTerminalWorkContinuesAfterTheLastBrowserDisconnects(t *testing.T) {
+	s, handler := terminalServer(t)
+	api := apiCall{t, handler}
+	created := api.create("unattended", "")
+	sess, err := s.modules.term.Get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/terminal/" + created.ID + "/attach"
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	marker := filepath.Join(t.TempDir(), "finished")
+	release := filepath.Join(filepath.Dir(marker), "continue")
+	command := "while [ ! -f " + strconv.Quote(release) + " ]; do sleep 0.05; done; echo done > " +
+		strconv.Quote(marker) + "; echo disconnected-$((6*7))\r"
+	if err := conn.WriteMessage(websocket.BinaryMessage, []byte(command)); err != nil {
+		t.Fatal(err)
+	}
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	var seen []byte
+	for !bytes.Contains(seen, []byte("while [")) {
+		kind, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind == websocket.BinaryMessage {
+			seen = append(seen, data...)
+		}
+	}
+	conn.Close()
+	deadline := time.Now().Add(10 * time.Second)
+	for sess.Attached() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the disconnected browser remained subscribed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if data, err := os.ReadFile(marker); err == nil && string(data) == "done\n" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("work stopped after the last browser disconnected")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := syscall.Kill(sess.PID, 0); err != nil {
+		t.Fatalf("the terminal ended after finishing the unattended command: %v", err)
+	}
+	back, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer back.Close()
+	back.SetReadDeadline(time.Now().Add(10 * time.Second))
+	seen = nil
+	for !bytes.Contains(seen, []byte("disconnected-42")) {
+		kind, data, err := back.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind == websocket.BinaryMessage {
+			seen = append(seen, data...)
+		}
+	}
 }
 
 func (c apiCall) list() listResponse {

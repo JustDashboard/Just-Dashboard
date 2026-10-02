@@ -39,8 +39,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 
 type TerminalList = {
   enabled: boolean
-  /** Whether a session outlives the dashboard, held on the host, or ends when it restarts. */
+  /** Whether new sessions can be protected across dashboard restarts. */
   persistent: boolean
+  persistenceError?: string
   login: { user: string; home: string; shell: string; error?: string }
   sessions: TerminalWorkspace[]
 }
@@ -474,6 +475,13 @@ export default function TerminalPage() {
 
   return (
     <Page fill className="gap-2 px-2 py-2 md:px-3 md:py-3">
+      {data.persistenceError && (
+        <div role="alert">
+          <Notice icon={ShieldOff} tone="danger" title="New terminals are unavailable">
+            {data.persistenceError}. Existing sessions keep running on the server.
+          </Notice>
+        </div>
+      )}
       {data.login.error && (
         <Notice icon={ShieldOff} tone="danger" title="No account to log in as">
           {data.login.error} Set <code className="font-mono">JD_TERMINAL_USER</code> to an account
@@ -564,11 +572,11 @@ export default function TerminalPage() {
                 title="No sessions yet"
                 description={
                   data.persistent
-                    ? "Sessions keep running on the server until you close them, even with this page closed or the dashboard restarting."
-                    : "Sessions keep running with this page closed, but end when the dashboard restarts."
+                    ? "Sessions keep running on the server until you close them, even with nobody connected or the dashboard restarting or rebuilding."
+                    : "Restore restart protection before opening a terminal."
                 }
                 action={
-                  <Button size="sm" onClick={() => void openSession()}>
+                  <Button size="sm" disabled={!data.persistent} onClick={() => void openSession()}>
                     <Plus className="size-4" />
                     Open session
                   </Button>

@@ -71,6 +71,8 @@ func mapTermError(err error) error {
 	switch {
 	case errors.Is(err, term.ErrDisabled):
 		return httpx.Err(http.StatusServiceUnavailable, "terminal_disabled", err.Error())
+	case errors.Is(err, term.ErrPersistenceUnavailable):
+		return httpx.Err(http.StatusServiceUnavailable, "terminal_persistence_unavailable", err.Error())
 	case errors.Is(err, term.ErrNotFound):
 		return httpx.ErrNotFound
 	case errors.Is(err, term.ErrTooMany):
@@ -194,12 +196,18 @@ func (s *Server) handleTerminalList(w http.ResponseWriter, r *http.Request) erro
 	if accountErr != nil {
 		login["error"] = accountErr.Error()
 	}
+	var persistenceError string
+	if s.modules.term.Enabled() {
+		if err := s.modules.term.PersistenceError(); err != nil {
+			persistenceError = err.Error()
+		}
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"enabled": s.modules.term.Enabled(),
-		// Whether a session outlives the dashboard — held on the host — or
-		// ends when it restarts, which the page says before you rely on it.
-		"persistent": s.modules.term.Holding(),
-		"login":      login,
+		// Existing holders can still be reached when setup for new ones fails.
+		"persistent":       s.modules.term.Holding(),
+		"persistenceError": persistenceError,
+		"login":            login,
 		// The folders come with the listing rather than from a second
 		// request, because the rail cannot be drawn without both and two
 		// polls would render a session in a folder that has not arrived yet

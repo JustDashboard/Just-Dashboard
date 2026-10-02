@@ -38,6 +38,13 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	if dir := os.Getenv("JD_TEST_TERMINAL_MANAGER"); dir != "" {
+		if err := runHeldManagerProcess(dir); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	// A parent tmux session overrides TMUX_TMPDIR unless cleared first.
 	if err := os.Unsetenv("TMUX"); err != nil {
 		fmt.Fprintln(os.Stderr, "clear inherited tmux server:", err)

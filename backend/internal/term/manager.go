@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"sort"
@@ -36,10 +37,11 @@ type Manager struct {
 	clipboard  *clipboardStore
 	shellDir   string
 	// holders is the directory of held sessions' sockets, and launch starts
-	// a holder for one; both are unset when sessions end with this process.
+	// a new holder. Adoption can succeed even when launch setup fails.
 	// See held.go.
-	holders string
-	launch  func(ctx context.Context, id, socket string) error
+	holders    string
+	launch     func(ctx context.Context, id, socket string) error
+	holdingErr error
 }
 
 // reserve takes one of the session slots, or reports that none are free. The
@@ -76,7 +78,7 @@ func NewManager(enabled bool, shell, username string) *Manager {
 	// the wrong machine — and offer persistence backed by a tmux server that
 	// can never see them.
 	m.useTmux = hostexec.AvailableOnHost("tmux")
-	go m.reap()
+	go m.cleanupClipboard()
 	return m
 }
 
@@ -108,13 +110,17 @@ type CreateOptions struct {
 	WindowName  string
 }
 
-// Create spawns a session. When tmux is present and persistence is requested
-// the shell runs inside `tmux new-session -A`, so the session outlives both the
-// browser tab and a restart of this process — the same guarantee an operator
-// gets from SSH plus tmux, which is why it is worth the extra layer.
+// Create requires a host holder for direct PTYs: silently falling back to a
+// process-owned terminal would lose an operator's work on the next restart.
+// Legacy callers may still request a persistent tmux session.
 func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, error) {
 	if !m.enabled {
 		return nil, ErrDisabled
+	}
+	if !(m.useTmux && opts.Persist) {
+		if err := m.PersistenceError(); err != nil {
+			return nil, err
+		}
 	}
 	release, err := m.reserve()
 	if err != nil {
@@ -210,7 +216,7 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 		// The holder runs on the host already, so the directory is its own
 		// to start in and needs no crossing.
 		if err := m.spawnHeld(ctx, sess, argv, startDir); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrPersistenceUnavailable, err)
 		}
 	} else {
 		// CommandOnHost always crosses into the host's namespaces, even though
@@ -927,42 +933,25 @@ func terminalEnv(base []string, sessionID string) []string {
 	)
 }
 
-// reap closes sessions nobody is attached to and that have seen no output for
-// idleDetach. A forgotten root shell is a standing risk, so it is not left open
-// indefinitely; tmux-backed sessions survive this because closing them only
-// detaches. A held session is never reaped: it is there precisely so work can
-// run with nobody watching — an agent waiting a night for its next message —
-// and it ends when the operator closes it.
-func (m *Manager) reap() {
+// Clipboard expiry must never end a terminal. An agent can be silent or waiting
+// for input for days with nobody attached and still be work the operator keeps.
+func (m *Manager) cleanupClipboard() {
 	t := time.NewTicker(5 * time.Minute)
-	for range t.C {
-		sessions := m.List()
-		if m.clipboard != nil {
-			live := make(map[string]bool, len(sessions))
-			for _, sess := range sessions {
-				live[sess.ID] = true
-			}
-			m.clipboard.cleanupExpired(time.Now().Add(-ClipboardTTL), live)
-		}
-		cutoff := time.Now().Add(-idleDetach)
-		for _, s := range sessions {
-			if s.holder != nil || s.Attached() > 0 || !s.LastActive().Before(cutoff) {
-				continue
-			}
-			if s.Persisted {
-				// Detach only. The tmux session, its processes and its
-				// scrollback all continue and it reappears under "still
-				// running" with its name — releasing the PTY and the slot
-				// without ending anybody's work.
-				m.Detach(s.ID)
-				continue
-			}
-			// Nothing is holding this one but us, so releasing the PTY *is*
-			// ending it. A forgotten root shell on a host with no tmux is a
-			// standing risk, and there is no third option available.
-			m.Kill(context.Background(), s.ID)
-		}
+	for now := range t.C {
+		m.cleanupClipboardAt(now)
 	}
+}
+
+func (m *Manager) cleanupClipboardAt(now time.Time) {
+	if m.clipboard == nil {
+		return
+	}
+	sessions := m.List()
+	live := make(map[string]bool, len(sessions))
+	for _, sess := range sessions {
+		live[sess.ID] = true
+	}
+	m.clipboard.cleanupExpired(now.Add(-ClipboardTTL), live)
 }
 
 func (m *Manager) Shutdown() {

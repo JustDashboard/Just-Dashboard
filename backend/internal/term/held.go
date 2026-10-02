@@ -30,24 +30,14 @@ const holderName = "jd-terminal-holder"
 var heldID = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
 // HoldSessions makes new windows outlive this process and takes back the ones
-// that already have. It says why when it cannot, and the terminal then works as
-// it always did, ending with the dashboard: the holder runs as a systemd unit
-// on the host from a copy under the data directory, so it needs root, a host
-// running systemd, and a data directory the host sees at the same path.
-func (m *Manager) HoldSessions(dataDir string) error {
+// that already have. If new holders cannot be started, Create refuses to open
+// a direct PTY rather than lose it on restart. Existing holders are adopted
+// first so a failed setup for new windows does not hide running work.
+func (m *Manager) HoldSessions(dataDir string) (err error) {
+	defer func() { m.holdingErr = err }()
+	m.launch = nil
 	if os.Geteuid() != 0 {
 		return errors.New("the dashboard is not running as root")
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	src := filepath.Join(filepath.Dir(exe), holderName)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if hostexec.CommandOnHost(ctx, "test", "-d", "/run/systemd/system").Run() != nil ||
-		!hostexec.AvailableOnHost("systemd-run") {
-		return errors.New("the host is not running systemd")
 	}
 	dir := filepath.Join(dataDir, "terminal")
 	// A unix socket's path has 107 bytes to live in, and a data directory
@@ -61,6 +51,19 @@ func (m *Manager) HoldSessions(dataDir string) error {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
+	m.holders = dir
+	m.adopt()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if hostexec.CommandOnHost(ctx, "test", "-d", "/run/systemd/system").Run() != nil ||
+		!hostexec.AvailableOnHost("systemd-run") {
+		return errors.New("the host is not running systemd")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	src := filepath.Join(filepath.Dir(exe), holderName)
 	bin := filepath.Join(dir, holderName)
 	if err := installHolder(src, bin); err != nil {
 		return err
@@ -68,7 +71,6 @@ func (m *Manager) HoldSessions(dataDir string) error {
 	if hostexec.CommandOnHost(ctx, "test", "-x", bin).Run() != nil {
 		return fmt.Errorf("the host cannot see %s at the same path", dir)
 	}
-	m.holders = dir
 	m.launch = func(ctx context.Context, id, socket string) error {
 		// KillMode=process: the unit ending is the holder ending, which is
 		// the session's end already. Anything the operator deliberately left
@@ -83,12 +85,28 @@ func (m *Manager) HoldSessions(dataDir string) error {
 		}
 		return nil
 	}
-	m.adopt()
 	return nil
 }
 
-// Holding reports whether sessions outlive this process.
-func (m *Manager) Holding() bool { return m.holders != "" }
+// Holding reports whether new sessions can be held outside this process.
+func (m *Manager) Holding() bool { return m.launch != nil }
+
+// PersistenceError explains why new direct terminals cannot be protected.
+func (m *Manager) PersistenceError() error {
+	if m.Holding() {
+		return nil
+	}
+	if m.holdingErr != nil {
+		return fmt.Errorf("%w: %w", ErrPersistenceUnavailable, m.holdingErr)
+	}
+	return ErrPersistenceUnavailable
+}
+
+// SetHolderLauncherForTest lets API tests run real holders as isolated child
+// processes without creating units on the developer's systemd host.
+func (m *Manager) SetHolderLauncherForTest(dir string, launch func(context.Context, string, string) error) {
+	m.holders, m.launch, m.holdingErr = dir, launch, nil
+}
 
 // installHolder copies the holder to where the host can run it. An identical
 // copy is left alone: a running holder pins the file it was started from, so
@@ -131,6 +149,9 @@ func (m *Manager) adopt() {
 	for _, entry := range entries {
 		id, ok := strings.CutSuffix(entry.Name(), ".sock")
 		if !ok || !heldID.MatchString(id) {
+			continue
+		}
+		if _, err := m.Get(id); err == nil {
 			continue
 		}
 		socket := filepath.Join(m.holders, entry.Name())

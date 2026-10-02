@@ -370,12 +370,16 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 
 - **New session always opens a direct PTY, held on the host.** New window creates a sibling direct PTY
-  and the browser connects each visited window's emulator to that window's opaque id. Where the host
-  runs systemd each PTY is owned by a holder rather than by the dashboard
+  and the browser connects each visited window's emulator to that window's opaque id. Each PTY must
+  be owned by a host holder rather than by the dashboard
   ([`processes-terminal-github.md`](../backend/processes-terminal-github.md#sessions-outlive-the-dashboard)),
   so a session keeps running — an agent included — with every browser closed and across dashboard
-  restarts, until it is closed or its shell exits. The listing's `persistent` says which, and the empty
-  state says so before anybody relies on it. There is still no pane model and no multiplexer.
+  restarts, rebuilds and upgrades, until it is closed or its shell exits. There is no idle timeout.
+  The listing's `persistent` says whether new holders can be started; `persistenceError` supplies the
+  reason when they cannot, shown in a danger notice while existing windows remain usable. The empty
+  state disables Open session until protection is available, and the API refuses all new terminals
+  and windows with HTTP 503 rather than falling back to a terminal that would end on restart. A host
+  reboot ends running terminals. There is still no pane model and no multiplexer.
 - **A dropped socket reconnects by itself.** A terminal-page pane whose socket closes (the dashboard
   restarting, a laptop waking, the network) retries on its own, backing off from one second to ten,
   and the banner says the session is still running and that it is reconnecting; Reconnect only skips

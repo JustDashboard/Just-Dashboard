@@ -152,7 +152,7 @@ func (s *Server) initModules() {
 		// After the shell setup, because a held session is started with the
 		// login SetupShell assembles.
 		if err := s.modules.term.HoldSessions(s.Cfg.DataDir); err != nil {
-			s.Log.Warn("terminal sessions will end when the dashboard restarts", "error", err)
+			s.Log.Warn("new terminal sessions are unavailable until restart protection is restored", "error", err)
 		}
 	}
 	s.modules.files = files.New(s.Cfg.FileRoots)

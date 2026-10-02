@@ -24,9 +24,10 @@ import (
 )
 
 var (
-	ErrDisabled = errors.New("the web terminal is disabled in this dashboard's configuration")
-	ErrNotFound = errors.New("terminal session not found")
-	ErrTooMany  = errors.New("too many terminal sessions are already open")
+	ErrDisabled               = errors.New("the web terminal is disabled in this dashboard's configuration")
+	ErrNotFound               = errors.New("terminal session not found")
+	ErrTooMany                = errors.New("too many terminal sessions are already open")
+	ErrPersistenceUnavailable = errors.New("terminal sessions cannot be opened until restart protection is available")
 	// The limit counts PTY windows, because each direct window owns a process,
 	// file descriptor and reader goroutine even when no browser is attached.
 	maxSessions  = 32
