@@ -107,8 +107,11 @@ Deployment preflight and runtime diagnosis carry measured evidence, field fixes/
 silences, with deployment/recovery/settings controls owned by the deployment module. Backup findings
 open the failed run and its logs, rerun, target test/edit, resume and recovery controls; unprotected
 resources prefill a backup job. Failed coverage reads remain visible and disable new protection from
-stale evidence. Database fleet findings open connection/exposure/backup owners. Database catalogue
-findings open reviewed SQL in the existing console or Structure/Server controls; SQL execution retains
+stale evidence. Database fleet findings carry their fix on the control center — start the server,
+restrict its port to this server, back it up now, connect a found server — or open the database's
+Settings. Database catalogue findings are applied from the Advisor page only where the server itself
+marks the fix safe (a maintenance action that locks nothing, a statement the classifier calls
+non-destructive) and otherwise open in the Query page for review; SQL execution retains
 its original authorization. Capped schema scans report omitted tables and failed engine reads retain
 completed structural evidence with silences instead of claiming a complete report.
 

@@ -204,7 +204,8 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveDeploymentComposeStorage -count=1 -v`.
 - Changes to database provisioning or deployment connection URLs also run
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDeploymentDatabaseConnection -count=1 -v`
-  on a Docker host. It exercises all five quick-setup engines from separate application containers,
+  on a Docker host. It provisions five of the templates (PostgreSQL, MySQL, MariaDB, Redis and
+  MongoDB), reaches each from separate application containers,
   replaces databases at a different IP, reconnects the same clients using their original URLs,
   verifies ownership/removal, and cleans up its own containers, volumes and networks. Compose network
   integration also runs `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run TestLiveComposeDatabaseNetworkMerge -count=1 -v`.
@@ -279,20 +280,70 @@ unit tests prove the generated SQL is the SQL intended; only a live server
 proves it is SQL that server accepts, and the catalogue queries are exactly
 where that gap bites — every engine spells its metadata differently.
 
-Each engine reads a DSN from an environment variable, defaulting to a local
-instance on the standard port:
+### The rule: no variable, no test — with six exceptions
 
-| Variable | Default |
+A live test names its engine by an environment variable and skips without it.
+Six variables are older than that rule and fall back to a local instance on
+the engine's standard port in the suites written before it — the fixtures of
+`dbx/live_test.go` and the tests built on them, the dump, drop, transfer and
+credential tests, and `api/handlers_db_live_test.go`:
+
+| Variable | Fallback |
 | --- | --- |
 | `JD_TEST_POSTGRES_DSN` | `postgres://jdtest:jdtest@127.0.0.1:5432/jdtest?sslmode=disable` |
-| `JD_TEST_MYSQL_DSN` | `jdtest:jdtest@tcp(127.0.0.1:3306)/jdtest` |
+| `JD_TEST_MYSQL_DSN` | `jdtest:jdtest@tcp(127.0.0.1:3306)/jdtest` (the MariaDB fixture) |
 | `JD_TEST_MSSQL_DSN` | `sqlserver://sa:…@127.0.0.1:1433?database=master` |
 | `JD_TEST_ORACLE_DSN` | `oracle://jdtest:jdtest@127.0.0.1:1521/FREEPDB1` |
 | `JD_TEST_CLICKHOUSE_DSN` | `clickhouse://default@127.0.0.1:9000/default` |
 | `JD_TEST_MONGO_DSN` | `mongodb://127.0.0.1:27017/jdtest` |
-| `JD_TEST_REDIS_DSN` | `redis://127.0.0.1:6379/0` |
 
-The quickest way to get all of them is containers:
+Those tests create, drop and restore. **On a machine where a standard port is a
+real database, set all six explicitly before running anything under
+`internal/dbx` or `internal/api`** — to a fixture, or to an address nothing
+listens on, which makes the test skip. The two administrator variables below
+fall back the same way in the tests that drop databases and read credential
+catalogues. SQLite needs nothing: it is embedded, and its fixture is a file in
+the test's own temporary directory.
+
+Every other variable has no fallback, on purpose: the tests behind it write,
+stop a server or change its configuration, and an address nobody chose is as
+likely to be somebody's data as a fixture.
+
+| Variable | What it must be | Used by |
+| --- | --- | --- |
+| `JD_TEST_REDIS_DSN` | a Redis the tests may write to, under the `jdb4:`, `jdb4api:`, `jdtest:`, `jdscan:` and `jdapi:` prefixes, in the logical database the string names | every Redis test |
+| `JD_TEST_MYSQL8_DSN` | MySQL 8 itself; `JD_TEST_MYSQL_DSN` is MariaDB in every suite | workbench, catalogue, operations, transfer |
+| `JD_TEST_MYSQL_ADMIN_DSN`, `JD_TEST_MYSQL8_ADMIN_DSN` | a login that may create and drop databases and accounts on those two servers (falls back to `root` on 3306 in the drop and credential tests) | drop, transfer, operations, catalogue, accounts |
+| `JD_TEST_ORACLE_ADMIN_DSN` | an account that may read the `V$` views and create users (falls back to `system` on 1521 in the drop and credential tests) | sessions, locks, dumps, drop |
+| `JD_TEST_B3_MSSQL_DSN`, `JD_TEST_B3_ORACLE_DSN`, `JD_TEST_B3_ORACLE_ADMIN_DSN`, `JD_TEST_B3_MYSQL8_ADMIN_DSN` | the operations suite's own servers, read before the shared variable of the same engine | `dbx/ops_live_test.go`, `api/handlers_db_ops_live_test.go` |
+| `JD_TEST_MARIADB_DSN`, `JD_TEST_VALKEY_DSN`, `JD_TEST_KEYDB_DSN`, `JD_TEST_DRAGONFLY_DSN` | one server of each flavour | flavour detection, the capability flags against real servers |
+| `JD_TEST_MONGO_RS_DSN` | a MongoDB replica set the run owns: accounts and views are made in `admin` | replication, accounts, the credential guards |
+| `JD_TEST_MONGO_AUTH_DSN` | a MongoDB with access control on | `TestLiveMongoSignIn` |
+| `JD_TEST_REDIS_ADMIN_DSN` | a Redis the run owns outright: configuration, users, slow log, clients, MONITOR, pub/sub | `TestLiveRedis*`, `TestLiveAPIRedis*` |
+| `JD_TEST_REDIS_OWN_DSN` | a Redis whose numbered databases the run may flush | dumps of every numbered database |
+| `JD_TEST_REDIS_FLAVORS` | `valkey=redis://…,keydb=redis://…,dragonfly=redis://…,redis=redis://…` | the Redis surface on each fork |
+| `JD_TEST_REDIS_CLUSTER_DSN` | a node started with `--cluster-enabled yes` | cluster notices |
+| `JD_TEST_REDIS_SENTINEL_DSN` | a Redis Sentinel | sentinel notices |
+| `JD_TEST_REDIS_REPLICA_DSN` | a replica of the admin server | replication |
+| `JD_TEST_ORM_MSSQL_DSN`, `JD_TEST_ORM_ORACLE_DSN`, `JD_TEST_ORM_MYSQL8_DSN`, `JD_TEST_ORM_COCKROACH_DSN` | a database the generator tests may create and drop their schema in | `dbx/orm_live_test.go` |
+| `JD_TEST_ORM_POSTGRES_OLD_DSNS` | older PostgreSQL releases, separated by spaces | `TestLiveORMOlderPostgres` |
+
+Some tests reach past a database to the machine and run only when asked:
+
+| Variable | What it does |
+| --- | --- |
+| `JD_TEST_INVENTORY_LIVE=1` | reads this machine's real Docker daemon, sockets, units and files (`TestLiveInventory`); it only reads |
+| `JD_TEST_INVENTORY_CONTAINER=<name>` | signs in to that one container and nothing else (`TestLiveInventoryConnects`) |
+| `JD_TEST_PROVISION_ENGINES=redis,valkey,clickhouse:24.8` | starts each named template, connects it the way the page does and turns it off and on again (`TestLiveProvisionAdoptAndPower`); it creates and removes its own containers and volumes |
+| `JD_TEST_POWER_REDIS_DSN` | a Redis in a container the test may stop and start (`TestLivePowerIsReadInFlightOnARealContainer`) |
+| `JD_TEST_HOST_PG_PORT=<port>` | a PostgreSQL installed on the host, run as root: the host account bootstrap (`TestLiveHostPostgresAccount`) and the log sources read off `/proc` (`TestLiveHostDBLogSources`) |
+
+The ones that need Docker (the inventory, provisioning and power tests) read
+`JD_TEST_DOCKER_HOST` where the daemon is not at `unix:///var/run/docker.sock`.
+
+### Fixtures
+
+The quickest way to get the engines is containers:
 
 ```bash
 docker run -d -p 5432:5432 -e POSTGRES_USER=jdtest -e POSTGRES_PASSWORD=jdtest -e POSTGRES_DB=jdtest postgres:16
@@ -303,26 +354,61 @@ docker run -d -p 27017:27017 mongo:8
 docker run -d -p 6379:6379 redis:7
 ```
 
-Then `go test ./internal/dbx/ ./internal/api/ -run Live -v` and watch which
-engines report rather than skip. SQLite needs nothing — it is embedded.
+Then, from `backend/`, with `JD_TEST_REDIS_DSN=redis://127.0.0.1:6379/0` set
+for the Redis one, `go test ./internal/dbx/ ./internal/api/ -run Live -count=1 -v`
+and watch which engines report rather than skip. Publish the containers on
+other ports and set the variables instead wherever 5432, 3306 or 6379 is
+already somebody's server.
 
-The Redis key and server tests (`TestLiveRedis*`, `TestLiveAPIRedis*`) are the
-exception to the defaults: they run only when `JD_TEST_REDIS_DSN` is set. They
-write, and the port every Redis listens on is as likely to be somebody's real
-data as a fixture. They write only under the `jdb4:`, `jdb4api:`, `jdtest:`,
-`jdscan:` and `jdapi:` prefixes, in the logical database the connection string
-names. The tests that change a server itself have variables of their own,
-again with no default:
-
-| Variable | What it must be |
-| --- | --- |
-| `JD_TEST_REDIS_ADMIN_DSN` | a Redis the run owns outright: configuration, users, slow log, clients, MONITOR, pub/sub |
-| `JD_TEST_REDIS_FLAVORS` | `valkey=redis://…,keydb=redis://…,dragonfly=redis://…,redis=redis://…` |
-| `JD_TEST_REDIS_CLUSTER_DSN` | a node started with `--cluster-enabled yes` |
-| `JD_TEST_REDIS_SENTINEL_DSN` | a Redis Sentinel |
-| `JD_TEST_REDIS_REPLICA_DSN` | a replica of the admin server |
+On a server shared between runs, point `JD_TEST_MSSQL_DSN` at a database of the
+run's own: the workbench tests name every table they make `jdwb_…`, the
+operations suite works in a database called `jd_b3`, and the dump tests make a
+database (SQL Server) or a user (Oracle) of their own, because a restore
+replaces every table where it lands.
 
 Oracle has unit coverage for statement guards, SQL rendering and adapter behavior. Live server
 coverage requires an available Oracle instance: set `JD_TEST_ORACLE_DSN` to run the existing Oracle
-fixture alongside the others. If no server was used, identify that validation limit in the pull request;
-unit results do not establish that the generated statements work against an Oracle server.
+fixture alongside the others. The cases that use the JSON and BOOLEAN types need 23ai. If no server
+was used, identify that validation limit in the pull request; unit results do not establish that the
+generated statements work against an Oracle server.
+
+<!-- LEAD-ENGINES: the Memcached and Elasticsearch/OpenSearch tests are not in this tree. Add their
+     variables to the table above, with whether each falls back, when the drivers merge. -->
+
+### Two files a test holds to the code
+
+- **The capability table.** What `GET /databases/drivers` answers is kept as
+  `backend/internal/api/testdata/database-drivers.json`, which the frontend's
+  engine registry tests and the browser fixture read, since they run with no
+  server. `TestTheDriverCatalogueSnapshotIsCurrent` fails when the route and the
+  file differ. After giving an engine a capability or taking one away, write the
+  file again and run the frontend's tests against it:
+
+  ```bash
+  cd backend && go test ./internal/api -run TestTheDriverCatalogueSnapshotIsCurrent -update-drivers
+  cd ../frontend && bun test src/components/database
+  ```
+
+- **Generated code.** Each generator's output for each engine and option is a
+  golden file under `backend/internal/dbx/testdata/orm`. After a deliberate
+  change to a generator, rewrite them with
+  `go test ./internal/dbx -run TestORMGolden -update-orm` and read the diff.
+
+### The Databases pages
+
+Each area of the section has its own browser spec over one mocked server
+(`frontend/tests/browser/database-fixture.ts`, which answers with the driver
+catalogue above, and `database-fleet-fixture.ts` for a machine with and without
+Docker): `database-shell.spec.ts`, `database-control-center.spec.ts`,
+`database-home.spec.ts`, `database-data.spec.ts`, `database-query.spec.ts`,
+`database-schema.spec.ts`, `database-redis.spec.ts`, `database-mongo.spec.ts`,
+`database-performance.spec.ts` and `database-logos.spec.ts`.
+`scripts/test-changed.sh` picks the ones a change can reach — a file under
+`frontend/src/components/database/` runs every spec that opens a `/databases`
+page — together with `design-system.spec.ts`, which walks every Databases page
+at 1280 and at 390. Run one by hand against a production build:
+
+```bash
+cd frontend && bun run build && bun run start --hostname 127.0.0.1 --port 43117 &
+bunx playwright test tests/browser/database-data.spec.ts
+```

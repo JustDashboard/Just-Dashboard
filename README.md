@@ -44,9 +44,10 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
   builds before it builds, what would stop it or deserves a look is shown before Deploy is pressed,
   and a build that still fails names its cause and the setting that fixes it. Every release is
   immutable, so rollback reactivates what ran before. Web services get a health-gated cutover.
-- **Databases you can hand out.** Eight engines browsed, queried and diagrammed from one place. A
-  database started here gets a connection string, and one press opens it to the internet or
-  closes it again.
+- **Every database on the server, each as its own engine.** It finds what is here — in containers,
+  installed on the machine, a SQLite file on disk — and opens each one as what it is: a table editor
+  and a SQL editor for a SQL server, keys and a console for Redis, documents and pipelines for
+  MongoDB. Start one, connect one, mark one protected, back it up, hand out its connection string.
 - **Boards for the server you run.** Sketch with the bundled Excalidraw editor, keep multiple boards
   in the dashboard's own database, and place linked cards for this host, deployment projects and
   database connections. Changes save automatically; an older tab cannot silently replace a newer save.
@@ -215,15 +216,45 @@ health checks and runtime limits remain editable before the first deployment.
 
 ![A PostgreSQL database with its masked connection string, table sizes and connected applications](docs/databases.png)
 
-PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis. The
-section opens on every database at once — which answer, what they take, who is connected, what
-each one feeds — with a map of the deployments, containers and machines reading them, and a
-database opens on its connection string, as the URL, the `.env` line or the shell command, on
-this server or, with one press, from anywhere. Browse and edit rows, change the structure, run
-queries, draw the schema, read the advisor's findings with their fixes, manage the server's
-accounts, databases and extensions, keep and restore dumps, and read the server's own log and the
-statements it recorded as slow. A database installed on the machine itself is connected by letting the
-dashboard make its own account on it.
+<!-- LEAD: docs/databases.png above still shows the page before the rebuild; it is re-shot for this
+     release, and the alt text goes with the new picture. -->
+<!-- LEAD-ENGINES: the engine list in the next paragraph and the bullets under it name the engines
+     in this tree. Memcached and Elasticsearch/OpenSearch are added to both when their drivers merge;
+     until then they are among the servers that are found and listed but not opened. -->
+The section opens on every database on the server, not only the ones somebody connected: the
+control center lists what it found by looking — containers running or stopped, servers installed on
+the machine, SQLite files on disk, engines it has no driver for — and says of each what keeps it
+from being opened. Readings say how many are running, what they store, who is connected and which
+have no recent backup, and whatever needs attention carries its fix. Add a database by starting
+one in a container, connecting to one that already runs, or taking one that was found; a new one
+answers on this server only unless you say otherwise.
+
+It opens PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis,
+and names what answers behind them — TimescaleDB, CockroachDB, YugabyteDB, Percona, TiDB, Valkey,
+KeyDB, Dragonfly, FerretDB, Azure SQL Edge. Each database has a home of live figures and the pages
+of its own engine, never a page the engine has no use for:
+
+- **SQL engines.** A table editor whose edits are staged, reviewed as the statements the server
+  will run and applied in one transaction; a SQL editor with tabs, completion, cancel, plans and
+  charts; a schema browser where every change shows its statement before it runs; a diagram; a
+  search for a value anywhere; model and type code from seventeen generators; and sessions, locks,
+  slow statements, table and index statistics, maintenance and an advisor whose findings carry
+  their fix.
+- **Redis, Valkey, KeyDB and Dragonfly.** A key browser with a namespace tree and an editor per
+  type, a console that classifies each command before it is sent, memory analysis, the slow log
+  and clients.
+- **MongoDB.** Documents as a list, as JSON or as a table under a query bar, an aggregation
+  builder with a preview after every stage, schema analysis, indexes, validation rules, and
+  current and slow operations.
+
+Every engine also has its backups, its logs and its settings, and its accounts and grants where
+the engine has accounts. A backup runs as a job and can be downloaded, uploaded from elsewhere, and
+restored into the same database, after a safety dump if you ask for one, or into a new one. A connection marked **protected** refuses every
+change made through the dashboard, for every role; reading, taking a dump and stopping a runaway
+query still work. `readonly` browses and reads; `limited` also edits rows, runs statements that
+destroy nothing, imports, takes backups and starts a stopped server; deleting, dropping, stopping,
+restoring, connecting or removing a database, and changing its accounts or settings are `admin`'s,
+and deleting an entire database asks for its name.
 
 ### And the rest
 
