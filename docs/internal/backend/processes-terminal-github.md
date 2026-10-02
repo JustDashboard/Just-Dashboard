@@ -120,7 +120,7 @@ socket-activated service's port.
 
 **Every window is a direct PTY.** There is no multiplexer and no pane/split layer. A dashboard session
 is a workspace grouping independent PTYs as windows; each window therefore keeps native terminal
-capability negotiation. Where the host allows it, each PTY is held on the host rather than by this
+capability negotiation. Each new PTY must be held on the host rather than by this
 process, so it outlives the dashboard (below). Closing a session ends all of its windows, while closing
 one window leaves its siblings running.
 
@@ -183,14 +183,33 @@ sends a hangup and drops the dashboard's copy of the master, the holder closes i
 hangs the terminal up; a shell still there after three seconds is killed, then the holder tells the
 dashboard and exits, and the unit is collected. `KillMode=process` makes the unit ending the holder
 ending: anything the operator deliberately left running (`nohup`, `disown`) survives as it would an ssh
-session closing. Held sessions are never reaped for idleness — they exist so work can run with nobody
-watching. Protocol: SOCK_SEQPACKET, one packet per message whose first byte is its kind, versioned by
+session closing. Terminals have no idle timeout, and the periodic clipboard cleanup never detaches or
+kills a session — work can run or wait for input with nobody watching. Protocol: SOCK_SEQPACKET,
+one packet per message whose first byte is its kind, versioned by
 `ptyhold.Version`, which a newer dashboard must keep speaking to the holders already running.
 
 Where holding is impossible — not root, a host without systemd, a data directory the host does not see at
-the same path, a path too long for a socket — `HoldSessions` says why in the log and the terminal works as
-before, each PTY in this process and ending with it; the listing's `persistent` is then false and the
-page says so. A server that reboots ends every session either way.
+the same path, a path too long for a socket — `HoldSessions` records the reason and new direct PTYs are
+refused with HTTP 503 (`terminal_persistence_unavailable`). There is no process-owned fallback. The
+listing's `persistent` reports readiness to create new held terminals; `persistenceError` supplies the
+reason, which the page displays. Existing holders are adopted before checking systemd or installing the
+new holder binary, so a failure preparing new terminals still leaves running windows accessible.
+Adoption skips windows already attached to avoid duplicate readers if setup is retried. Legacy tmux
+callers remain supported internally, but the terminal API never creates a tmux session. A server that
+reboots ends every running terminal.
+
+`TestHeldWindowsSurviveManagerProcessExit` starts two windows in a separate manager process, exercises
+clean shutdown and abrupt process termination, verifies their work completes with no manager or browser
+attached, then adopts the same PIDs and workspace/window ids. It also advances clipboard maintenance
+beyond the former idle timeout and verifies both terminals remain usable. The API tests use real isolated
+holder processes, and verify that losing the ability to start holders refuses new sessions/windows
+without ending existing work.
+With `JD_TERMINAL_SYSTEMD_LIVE=1`, the same process-exit test starts real host systemd units through
+`HoldSessions` and replaces the installed holder executable while its existing processes are running.
+Build `cmd/terminal-holder` as `jd-terminal-holder` beside a compiled `internal/term` test binary and
+run that binary as root with the variable set. It owns temporary state and units only; it never
+restarts the installed dashboard. `TestHolderSetupFailureStillAdoptsRunningWindows` also runs as root
+and proves that a failed holder installation preserves access to existing windows.
 
 **What a window is doing is read off the PTY, not asked of the shell** (`activity.go`). Two facts, both
 available without touching the account's shell configuration. The title is parsed out of the byte stream

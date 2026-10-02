@@ -169,7 +169,11 @@ throttling; unavailable readings stay distinct from zero activity.
 
 A real PTY into a host account. Sessions group windows, each named after what it is running,
 and they keep running on the server until you close them — with the tab closed, and across
-dashboard restarts and upgrades — so an agent left working is still working when you come back.
+dashboard restarts, rebuilds and upgrades — so an agent left working is still working when you come back,
+even with nobody connected. Terminals have no idle timeout. Restart protection requires a host running
+systemd and the dashboard's data directory mounted at the same path on the host; if that protection
+cannot be set up, new sessions are refused with a reason instead of opening a terminal that would end
+on restart. Existing held sessions remain running. Rebooting the Linux server ends running terminals.
 Files and Git sit beside the shell.
 
 ### Boards

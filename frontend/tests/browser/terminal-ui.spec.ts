@@ -9,7 +9,7 @@ type Connection = {
   focus: number
 }
 
-async function terminalFixture(page: Page, renderer: "dom" | "webgl") {
+async function terminalFixture(page: Page, renderer: "dom" | "webgl", persistenceError?: string) {
   const connections = new Map<string, Connection[]>()
   const errors: string[] = []
   const windows = new Map([
@@ -39,6 +39,8 @@ async function terminalFixture(page: Page, renderer: "dom" | "webgl") {
       return route.fulfill({
         json: {
           enabled: true,
+          persistent: !persistenceError,
+          persistenceError,
           login: { user: "operator", home: "/home/operator", shell: "/bin/bash" },
           folders: [],
           sessions: Array.from(windows, ([id, items]) => ({
@@ -115,6 +117,38 @@ async function terminalFixture(page: Page, renderer: "dom" | "webgl") {
   const strip = page.getByLabel("Terminal windows")
   return { connections, errors, strip }
 }
+
+test("explains unavailable restart protection while keeping existing terminals usable", async ({
+  page,
+}) => {
+  const persistenceError = "The host is not running systemd"
+  const { connections, errors } = await terminalFixture(page, "dom", persistenceError)
+  await expect(
+    page.getByRole("alert").filter({ hasText: "New terminals are unavailable" }),
+  ).toContainText(persistenceError)
+  await expect(
+    page.getByText("Existing sessions keep running on the server.", { exact: false }),
+  ).toBeVisible()
+  expect(connections.get("window-a")?.[0].closed).toBe(false)
+
+  await page.route("**/api/v1/terminal/", (route) =>
+    route.fulfill({
+      json: {
+        enabled: true,
+        persistent: false,
+        persistenceError,
+        login: { user: "operator", home: "/home/operator", shell: "/bin/bash" },
+        sessions: [],
+      },
+    }),
+  )
+  await page.reload()
+  await expect(
+    page.getByText("Restore restart protection before opening a terminal."),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open session", exact: true })).toBeDisabled()
+  expect(errors).toEqual([])
+})
 
 async function scrollback(page: Page) {
   await page.getByRole("button", { name: "Terminal actions", exact: true }).click()

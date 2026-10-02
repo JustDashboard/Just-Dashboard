@@ -60,8 +60,12 @@ Integration families skip rather than fail when their dependencies are absent:
   suites and daemon-wide prune tests require the separate opt-ins documented in `CONTRIBUTING.md`.
 - **`term` and the terminal half of `api`** drive real PTYs. Direct-session tests isolate clipboard
   storage and never touch an operator shell; the remaining legacy tmux tests inside `term` take a private
-  server in that package's `TestMain` (`TMUX_TMPDIR`). Held-session tests never reach systemd: the test
-  binary re-executes itself as the holder (`JD_TEST_HOLDER`), and `ptyhold` runs its holder in-process.
+  server in that package's `TestMain` (`TMUX_TMPDIR`). By default, held-session tests re-execute the
+  test binary as an isolated holder (`JD_TEST_HOLDER` in `term`, `JD_TEST_API_HOLDER` in `api`), and
+  `ptyhold` runs its holder in-process. Process-exit tests also run a separate manager so shutdown and
+  crashes can be checked with no dashboard or browser attached. Optional root/systemd verification
+  (`JD_TERMINAL_SYSTEMD_LIVE=1`) starts temporary host units and replaces the installed holder binary;
+  see [terminal lifetime verification](../audits/2026-10-02-terminal-persistence/README.md).
 
 Extend these when you touch the matching surface: security — `httpx/confirm_test.go`,
 `api/routes_test.go`, `api/docker_spec_test.go`, `files/files_test.go`, `safepath/safepath_test.go`,
