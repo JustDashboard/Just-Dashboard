@@ -123,5 +123,5 @@ export type ProvisionPhase = (typeof PROVISION_STEPS)[number]["key"]
 export const PHASE_SENTENCE: Record<ProvisionPhase, string> = {
   start: "Pulling the image and starting the container…",
   wait: "Waiting for the engine to accept connections…",
-  connect: "Signing in and saving the connection…",
+  connect: "Verifying the saved connection…",
 }

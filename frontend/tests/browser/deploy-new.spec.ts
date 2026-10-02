@@ -35,7 +35,7 @@ test("the source strip switches the active source and is the only way in", async
   )
 
   await page.getByRole("button", { name: "Database", exact: true }).click()
-  await expect(page.getByRole("heading", { name: "Start a database" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Engines" })).toBeVisible()
 
   await page.getByRole("button", { name: "Docker image", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Choose an image" })).toBeVisible()
