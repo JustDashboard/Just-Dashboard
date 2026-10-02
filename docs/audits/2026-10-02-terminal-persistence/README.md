@@ -13,6 +13,9 @@ cleanup has been removed. Host reboot and explicitly closing a terminal still en
   and vet, selected Go tests, and 68 browser tests from the terminal and design-system specs.
 - Focused Go race tests passed for process exit/recovery, holder setup failure, refusing unprotected
   session/window creation, and work continuing after the last browser disconnects.
+- The background-work tests release their work only after the manager has exited or the last browser
+  has detached. `scripts/test-changed.sh 627bff87`, focused race tests, and the live systemd tests also
+  passed for this deterministic test refinement.
 - Live root/systemd tests passed for clean shutdown, forced manager termination, replacing the
   installed holder executable while both windows were running, and adopting a running window when
   preparing new holders fails. The same shell PIDs and workspace/window identities were recovered.

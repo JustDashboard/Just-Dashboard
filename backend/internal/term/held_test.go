@@ -94,7 +94,8 @@ func runHeldManagerProcess(dir string) error {
 	sessions := []*Session{first, second}
 	for _, sess := range sessions {
 		marker := filepath.Join(dir, sess.ID+".finished")
-		command := fmt.Sprintf("sleep 0.5; echo done > %q; echo offline-$((6*7))\n", marker)
+		command := fmt.Sprintf("while [ ! -f %q ]; do sleep 0.05; done; echo done > %q; echo offline-$((6*7))\n",
+			filepath.Join(dir, "continue"), marker)
 		if _, err := sess.Write([]byte(command)); err != nil {
 			return err
 		}
@@ -187,6 +188,9 @@ func TestHeldWindowsSurviveManagerProcessExit(t *testing.T) {
 				in.Close()
 			}
 			if err := cmd.Wait(); err != nil && !crash {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "continue"), nil, 0o600); err != nil {
 				t.Fatal(err)
 			}
 			for _, previous := range started {

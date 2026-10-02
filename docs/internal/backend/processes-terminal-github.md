@@ -203,7 +203,8 @@ clean shutdown and abrupt process termination, verifies their work completes wit
 attached, then adopts the same PIDs and workspace/window ids. It also advances clipboard maintenance
 beyond the former idle timeout and verifies both terminals remain usable. The API tests use real isolated
 holder processes, and verify that losing the ability to start holders refuses new sessions/windows
-without ending existing work.
+without ending existing work. The process-exit and last-browser tests release their work only after
+the manager or browser has gone, so completion cannot race ahead of the disconnect being tested.
 With `JD_TERMINAL_SYSTEMD_LIVE=1`, the same process-exit test starts real host systemd units through
 `HoldSessions` and replaces the installed holder executable while its existing processes are running.
 Build `cmd/terminal-holder` as `jd-terminal-holder` beside a compiled `internal/term` test binary and

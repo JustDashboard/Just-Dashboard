@@ -236,13 +236,15 @@ func TestTerminalWorkContinuesAfterTheLastBrowserDisconnects(t *testing.T) {
 	}
 	defer conn.Close()
 	marker := filepath.Join(t.TempDir(), "finished")
-	command := "sleep 0.5; echo done > " + strconv.Quote(marker) + "; echo disconnected-$((6*7))\r"
+	release := filepath.Join(filepath.Dir(marker), "continue")
+	command := "while [ ! -f " + strconv.Quote(release) + " ]; do sleep 0.05; done; echo done > " +
+		strconv.Quote(marker) + "; echo disconnected-$((6*7))\r"
 	if err := conn.WriteMessage(websocket.BinaryMessage, []byte(command)); err != nil {
 		t.Fatal(err)
 	}
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	var seen []byte
-	for !bytes.Contains(seen, []byte("sleep 0.5")) {
+	for !bytes.Contains(seen, []byte("while [")) {
 		kind, data, err := conn.ReadMessage()
 		if err != nil {
 			t.Fatal(err)
@@ -258,6 +260,9 @@ func TestTerminalWorkContinuesAfterTheLastBrowserDisconnects(t *testing.T) {
 			t.Fatal("the disconnected browser remained subscribed")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	for {
 		if data, err := os.ReadFile(marker); err == nil && string(data) == "done\n" {
