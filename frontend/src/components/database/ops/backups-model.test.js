@@ -6,12 +6,15 @@ import {
   holdsWords,
   keptBytes,
   lastBackup,
+  nameParts,
   newDatabaseProblem,
   originWord,
   outcomesLabel,
   restoreEffect,
+  restoreReach,
   resultWords,
   scheduledDump,
+  summaryWords,
   tableChoice,
   tookWords,
   transferKind,
@@ -122,6 +125,44 @@ describe("what a dump holds", () => {
     expect(holdsWords({ contents: {}, origin: "upload" }, TABLES)).toBe("")
     expect(holdsWords({ contents: {}, origin: "dump" }, TABLES)).toBe("Everything")
     expect(holdsWords({ contents: { tables: ["a"] }, origin: "safety" }, TABLES)).toBe("1 table")
+  })
+
+  test("on a server that numbers its databases a dump is of numbers, never of everything", () => {
+    const keys = { object: "key", objects: "keys" }
+    expect(holdsWords({ contents: {}, origin: "dump", database: "9" }, keys, true)).toBe("db 9")
+    expect(holdsWords({ contents: {}, origin: "safety", database: "1,2,9" }, keys, true)).toBe(
+      "3 numbered databases",
+    )
+    // A SQL database may be named with digits: only a numbered server reads it as a number.
+    expect(holdsWords({ contents: {}, origin: "dump", database: "9" }, TABLES)).toBe("Everything")
+    expect(holdsWords({ contents: {}, origin: "upload", database: "9" }, keys, true)).toBe("")
+  })
+
+  test("a summary that only names the tool again is left out", () => {
+    expect(summaryWords({ summary: "written by pg_dump", tool: "pg_dump", format: "x" })).toBe("")
+    expect(summaryWords({ summary: "Written by SQL", format: "SQL" })).toBe("")
+    expect(
+      summaryWords({ summary: "2 tables, 200031 rows", tool: "built-in", format: "SQL" }),
+    ).toBe("2 tables, 200031 rows")
+    expect(summaryWords({ format: "SQL" })).toBe("")
+    // How many numbered databases is already said as what the dump holds.
+    expect(
+      summaryWords({ summary: "28100 keys in 10 databases", tool: "built-in", format: "x" }, true),
+    ).toBe("28100 keys")
+    expect(
+      summaryWords({ summary: "6 keys in 1 database", tool: "built-in", format: "x" }, true),
+    ).toBe("6 keys")
+  })
+
+  test("a long name gives way at its start, and keeps the end that tells dumps apart", () => {
+    expect(nameParts("notes.sqlite")).toEqual({ head: "notes.sqlite", tail: "" })
+    expect(nameParts("shop_a9-20261002-073954.dump")).toEqual({
+      head: "shop_a9-20261002",
+      tail: "-073954.dump",
+    })
+    const { head, tail } = nameParts("redis-all-20261002-080909.jsonl.gz")
+    expect(head + tail).toBe("redis-all-20261002-080909.jsonl.gz")
+    expect(tail).toHaveLength(12)
   })
 
   test("an origin is said only when it is not the ordinary one", () => {
@@ -250,6 +291,44 @@ describe("what a restore does, by what the dump is", () => {
     expect(restoreEffect(file("a", { format: "compressed SQL", origin: "upload" }))).toContain(
       "as written",
     )
+  })
+})
+
+describe("where a key–value dump goes back to", () => {
+  test("a dump of the connection's own number reaches nothing else", () => {
+    expect(restoreReach({ database: "9" }, "9")).toEqual({
+      numbers: ["9"],
+      others: [],
+      here: "db 9",
+      several: false,
+    })
+  })
+
+  test("a dump of several numbers names the ones that are not the connection's", () => {
+    const reach = restoreReach({ database: "1,2,9,10" }, "9")
+    expect(reach.others).toEqual(["1", "2", "10"])
+    expect(reach.here).toBe("databases 1, 2, 9, 10")
+    expect(reach.several).toBe(true)
+  })
+
+  test("a connection with no number named is on database 0", () => {
+    expect(restoreReach({ database: "0,3" }, "").others).toEqual(["3"])
+    expect(restoreReach({ database: "0" }, "").others).toEqual([])
+  })
+
+  test("a dump of one other number is not this connection's", () => {
+    const reach = restoreReach({ database: "3" }, "9")
+    expect(reach.others).toEqual(["3"])
+    expect(reach.here).toBe("db 3")
+    expect(reach.several).toBe(false)
+  })
+
+  test("a dump that does not say what it holds is of an unknown number of them", () => {
+    const reach = restoreReach({}, "9")
+    expect(reach.numbers).toEqual([])
+    expect(reach.others).toEqual([])
+    expect(reach.several).toBe(true)
+    expect(reach.here).toContain("numbered databases")
   })
 })
 

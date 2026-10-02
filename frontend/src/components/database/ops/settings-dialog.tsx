@@ -17,6 +17,79 @@ export type TaskSubject = {
 }
 
 /**
+ * What a surface asks before a slip closes it over unsaved work.
+ *
+ * Escape, the close button and a press outside all arrive as one call
+ * (`dismiss`): it does nothing while a request is in flight, asks when
+ * something would be lost, and closes otherwise. While it is asking, a second
+ * slip means "no". The question is drawn in the surface's own footer
+ * (`DiscardQuestion`) and takes the keyboard; the answer "keep editing" hands
+ * it back to the field it was taken from.
+ */
+export function useDiscardGuard({
+  dirty,
+  busy,
+  onClose,
+}: {
+  dirty: boolean
+  busy: boolean
+  onClose: () => void
+}) {
+  const [asking, setAsking] = useState(false)
+  // The surface under the question stays live: what would have been lost can
+  // be saved or discarded there, and then there is nothing left to ask about.
+  if (asking && !dirty) setAsking(false)
+  const keep = useRef<HTMLButtonElement>(null)
+  const typing = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!asking) return
+    typing.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    keep.current?.focus()
+    return () => {
+      if (typing.current?.isConnected) typing.current.focus()
+    }
+  }, [asking])
+  const dismiss = (open: boolean) => {
+    if (open || busy) return
+    if (asking) setAsking(false)
+    else if (dirty) setAsking(true)
+    else onClose()
+  }
+  return { asking, dismiss, keep, stay: () => setAsking(false) }
+}
+
+/** The footer of a surface that is asking whether to lose what it holds. */
+export function DiscardQuestion({
+  question,
+  stayLabel = "Keep editing",
+  discardLabel = "Discard",
+  keep,
+  onStay,
+  onDiscard,
+}: {
+  question: string
+  stayLabel?: string
+  discardLabel?: string
+  keep: React.RefObject<HTMLButtonElement | null>
+  onStay: () => void
+  onDiscard: () => void
+}) {
+  return (
+    <>
+      <p role="alert" className="mr-auto min-w-0 text-body">
+        {question}
+      </p>
+      <Button ref={keep} variant="outline" onClick={onStay}>
+        {stayLabel}
+      </Button>
+      <Button variant="destructive" onClick={onDiscard}>
+        {discardLabel}
+      </Button>
+    </>
+  )
+}
+
+/**
  * One task of the Access, Backups and Settings pages as a dialog: the thing
  * it acts on, the form, why the server turned it down when it did, and the
  * one command.
@@ -46,6 +119,8 @@ export function TaskDialog({
   disabled,
   cancelLabel = "Cancel",
   discardQuestion = "Close and lose what you entered?",
+  stayLabel,
+  discardLabel,
   onRun,
   onClose,
   children,
@@ -70,36 +145,22 @@ export function TaskDialog({
   /** The command destroys or replaces something. */
   destructive?: boolean
   disabled?: boolean
-  cancelLabel?: string
+  /**
+   * `null` draws no second button: a step that shows something once has one
+   * way out, and every other way of closing it asks first.
+   */
+  cancelLabel?: string | null
   /** What the footer asks before a slip closes a dialog that holds something. */
   discardQuestion?: string
+  /** The two answers to it, where "Keep editing" and "Discard" are not the words. */
+  stayLabel?: string
+  discardLabel?: string
   onRun?: () => void
   onClose: () => void
   children: React.ReactNode
 }) {
   const form = useId()
-  const [asking, setAsking] = useState(false)
-  // The footer's question takes the keyboard, and hands it back to the field
-  // it was taken from when the answer is to go on editing.
-  const keep = useRef<HTMLButtonElement>(null)
-  const typing = useRef<HTMLElement | null>(null)
-  useEffect(() => {
-    if (!asking) return
-    typing.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    keep.current?.focus()
-    return () => {
-      if (typing.current?.isConnected) typing.current.focus()
-    }
-  }, [asking])
-
-  // Escape and a press outside: never while the request runs, and not past
-  // typed work without asking. While the footer is asking, either means "no".
-  const dismiss = (open: boolean) => {
-    if (open || busy) return
-    if (asking) setAsking(false)
-    else if (dirty) setAsking(true)
-    else onClose()
-  }
+  const { asking, dismiss, keep, stay } = useDiscardGuard({ dirty, busy, onClose })
 
   return (
     <Modal
@@ -110,23 +171,22 @@ export function TaskDialog({
       size={size}
       footer={
         asking ? (
-          <>
-            <p role="alert" className="mr-auto min-w-0 text-body">
-              {discardQuestion}
-            </p>
-            <Button ref={keep} variant="outline" onClick={() => setAsking(false)}>
-              Keep editing
-            </Button>
-            <Button variant="destructive" onClick={onClose}>
-              Discard
-            </Button>
-          </>
+          <DiscardQuestion
+            question={discardQuestion}
+            stayLabel={stayLabel}
+            discardLabel={discardLabel}
+            keep={keep}
+            onStay={stay}
+            onDiscard={onClose}
+          />
         ) : (
           <>
             {note && <FormNote className="mr-auto min-w-0 max-sm:basis-full">{note}</FormNote>}
-            <Button variant="outline" onClick={onClose} disabled={busy}>
-              {cancelLabel}
-            </Button>
+            {cancelLabel !== null && (
+              <Button variant="outline" onClick={onClose} disabled={busy}>
+                {cancelLabel}
+              </Button>
+            )}
             {secondary}
             {command && (
               <Button

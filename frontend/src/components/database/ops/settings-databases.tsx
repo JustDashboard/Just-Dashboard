@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 import type { DbConnection } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceRow } from "@/components/flow"
+import { ChoiceRow, GroupRule } from "@/components/flow"
 import { Field, FormFact, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,7 @@ import { read } from "@/components/database/home/read"
 import { EngineMark } from "@/components/database/kit"
 import { isDown } from "@/components/database/ops/performance-parts"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
+import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 
@@ -49,6 +50,12 @@ const LISTED = 8
  * On a server that numbers its databases there is nothing to make or to
  * connect: every one is a number away from the same connection, so each card
  * opens the keys of that number.
+ *
+ * Two shapes, because there are two kinds of thing. A database with a way in
+ * — this one, one saved as a connection, a numbered one — is a card you take.
+ * One the dashboard has no connection to is a row you read, with Connect at
+ * its edge: twenty of them as cards, each led by the same dimmed engine mark,
+ * was a wall of marks that told none of them apart.
  */
 export function ServerDatabasesSection() {
   const { id, conn, engine, readOnly, status, href } = useDatabase()
@@ -121,12 +128,35 @@ export function ServerDatabasesSection() {
     }
   }
 
-  const shown = all ? rows : rows.slice(0, LISTED)
+  const taken = rows.filter((row) => numbered || row.current || row.saved)
+  const others = rows.filter((row) => !numbered && !row.current && !row.saved)
+  const listed = all ? others : others.slice(0, LISTED)
   const total = list.data?.length ?? 0
+  const factsOf = (database: DbServerDatabase, saved: DbConnection | undefined) => {
+    const facts: React.ReactNode[] = []
+    if (numbered) facts.push(plural(database.size ?? 0, "key"))
+    else if (database.size) facts.push(bytes(database.size))
+    if (database.owner && !engine.can("fileBased")) {
+      facts.push(
+        <>
+          owned by <span style={{ color: nameHue(database.owner) }}>{database.owner}</span>
+        </>,
+      )
+    }
+    if (database.encoding) facts.push(database.encoding)
+    if (saved) facts.push(`saved as ${saved.name}`)
+    return facts.map((fact, index) => (
+      <span key={index}>
+        {index > 0 && " · "}
+        {fact}
+      </span>
+    ))
+  }
   return (
     <FormSection
       aside
       id="databases"
+      className={UNDER_STRIP}
       title={numbered ? "Numbered databases" : "Databases on this server"}
       hint={
         list.data ? (
@@ -161,62 +191,66 @@ export function ServerDatabasesSection() {
             : "The server lists no database to this account."}
         </p>
       ) : (
-        <div className="animate-rise space-y-2">
-          <ul data-slot="choice-list" className="grid min-w-0 gap-2 sm:grid-cols-2">
-            {shown.map(({ database, current, saved }) => {
-              const goes = numbered
-                ? href("data", { db: database.name })
-                : saved && !current
-                  ? sectionHref(saved.id)
-                  : undefined
-              const facts: React.ReactNode[] = []
-              if (numbered) facts.push(plural(database.size ?? 0, "key"))
-              else if (database.size) facts.push(bytes(database.size))
-              if (database.owner && !engine.can("fileBased")) {
-                facts.push(
-                  <>
-                    owned by{" "}
-                    <span style={{ color: nameHue(database.owner) }}>{database.owner}</span>
-                  </>,
+        <div className="animate-rise space-y-4">
+          {taken.length > 0 && (
+            <ul
+              data-slot="choice-list"
+              className={cn("grid min-w-0 gap-2", taken.length > 1 && "sm:grid-cols-2")}
+            >
+              {taken.map(({ database, current, saved }) => {
+                const goes = numbered
+                  ? href("data", { db: database.name })
+                  : saved && !current
+                    ? sectionHref(saved.id)
+                    : undefined
+                return (
+                  <ChoiceRow
+                    key={database.name}
+                    href={goes}
+                    disabled={!goes}
+                    verb={
+                      numbered
+                        ? `Browse the keys of database ${database.name}`
+                        : saved && !current
+                          ? `Open ${saved.name}`
+                          : database.name
+                    }
+                    // A connection is drawn as its engine. A numbered database is
+                    // not a connection: its number is all that tells it apart.
+                    leading={
+                      numbered ? undefined : (
+                        <EngineMark engine={saved ? engineFor(saved) : engine} size="sm" />
+                      )
+                    }
+                    title={
+                      <span className="font-mono text-xs">
+                        {numbered ? `db ${database.name}` : database.name}
+                      </span>
+                    }
+                    description={factsOf(database, current ? undefined : saved)}
+                    trailing={current ? <Tag>this one</Tag> : undefined}
+                  />
                 )
-              }
-              if (database.encoding) facts.push(database.encoding)
-              if (saved && !current) facts.push(`saved as ${saved.name}`)
-              return (
-                <ChoiceRow
-                  key={database.name}
-                  href={goes}
-                  disabled={!goes}
-                  verb={
-                    numbered
-                      ? `Browse the keys of database ${database.name}`
-                      : saved
-                        ? `Open ${saved.name}`
-                        : database.name
-                  }
-                  leading={
-                    <span className={cn("flex", !numbered && !saved && !current && "opacity-45")}>
-                      <EngineMark engine={saved ? engineFor(saved) : engine} size="sm" />
+              })}
+            </ul>
+          )}
+          {others.length > 0 && (
+            <div>
+              <GroupRule label="Not connected" count={others.length} />
+              <ul className="divide-y divide-hairline" aria-label="Databases with no connection">
+                {listed.map(({ database }) => (
+                  <li
+                    key={database.name}
+                    data-database={database.name}
+                    className="grid min-h-10 min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto]"
+                  >
+                    <span className="min-w-0 truncate font-mono text-xs" title={database.name}>
+                      {database.name}
                     </span>
-                  }
-                  title={
-                    <span className="font-mono text-xs">
-                      {numbered ? `db ${database.name}` : database.name}
+                    <span className="min-w-0 truncate text-hint text-muted-foreground max-sm:order-last max-sm:col-span-2">
+                      {factsOf(database, undefined)}
                     </span>
-                  }
-                  description={
-                    facts.length > 0
-                      ? facts.map((fact, index) => (
-                          <span key={index}>
-                            {index > 0 && " · "}
-                            {fact}
-                          </span>
-                        ))
-                      : undefined
-                  }
-                  trailing={current ? <Tag>this one</Tag> : undefined}
-                  actions={
-                    !numbered && !saved && !current && mayConnect ? (
+                    {mayConnect && (
                       <Button
                         size="xs"
                         variant="outline"
@@ -227,22 +261,22 @@ export function ServerDatabasesSection() {
                       >
                         Connect
                       </Button>
-                    ) : undefined
-                  }
-                />
-              )
-            })}
-          </ul>
-          {rows.length > LISTED && (
-            <Button
-              size="xs"
-              variant="ghost"
-              className="-ml-2"
-              aria-expanded={all}
-              onClick={() => setAll(!all)}
-            >
-              {all ? "Show fewer" : `Show all ${rows.length}`}
-            </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {others.length > LISTED && (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="mt-1 -ml-2"
+                  aria-expanded={all}
+                  onClick={() => setAll(!all)}
+                >
+                  {all ? "Show fewer" : `Show all ${others.length}`}
+                </Button>
+              )}
+            </div>
           )}
         </div>
       )}

@@ -40,6 +40,7 @@ import {
   notesProblem,
   type ConnectionDraft,
 } from "@/components/database/ops/settings-model"
+import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import type { DbConnectionSummary } from "@/components/database/shell/types"
@@ -133,6 +134,7 @@ export function ConnectionSection() {
     <FormSection
       aside
       id="connection"
+      className={UNDER_STRIP}
       title="Connection"
       hint={
         <>
@@ -348,6 +350,12 @@ type Tested = { dsn: string; answer: DbTestResponse }
  * so nothing is lost by changing a password. A string with something the
  * fields do not cover is edited whole.
  *
+ * The two editors are one string. Going to the whole string writes what the
+ * fields have made of it, every time; coming back from a string that was
+ * retyped lays the fields over that string. Neither holds a copy the other
+ * has moved on from — the whole string is hidden as a password is, so a stale
+ * one could not be seen.
+ *
  * Test dials the new string before anything is saved. Save is live once that
  * exact string has answered, or once the reader says to save it untested.
  */
@@ -355,6 +363,8 @@ function EditAddress({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
   const { id, conn, engine, summary } = useDatabase()
   const field = useId()
   const [stored, setStored] = useState<string>()
+  // The string the fields are laid over: the saved one, until the whole string is retyped.
+  const [base, setBase] = useState<string>()
   const [unread, setUnread] = useState<string>()
   const [shape, setShape] = useState<"fields" | "whole">("fields")
   const [edits, setEdits] = useState<{
@@ -365,6 +375,7 @@ function EditAddress({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
     database?: string
   }>({})
   const [whole, setWhole] = useState("")
+  const [unfielded, setUnfielded] = useState(false)
   const [untested, setUntested] = useState(false)
   const [tested, setTested] = useState<Tested>()
   const [testing, setTesting] = useState(false)
@@ -375,7 +386,9 @@ function EditAddress({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
     let cancelled = false
     get<{ url: string }>(`/databases/${id}/url`, { target: "host" })
       .then((answer) => {
-        if (!cancelled) setStored(answer.url)
+        if (cancelled) return
+        setStored(answer.url)
+        setBase(answer.url)
       })
       .catch((err) => {
         if (cancelled) return
@@ -389,15 +402,16 @@ function EditAddress({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
     }
   }, [id])
 
-  const parts = stored !== undefined ? readDsn(stored) : undefined
-  const file = parts?.shape === "path"
+  const parts = base !== undefined ? readDsn(base) : undefined
+  // A file's connection is its path; every other engine's string is an address.
+  const file = stored !== undefined && readDsn(stored).shape === "path"
   // An empty password field keeps the saved one; the other fields say what they hold.
   const change = {
     ...edits,
     ...(edits.password === undefined || edits.password === "" ? { password: undefined } : {}),
   }
-  const dsn =
-    shape === "whole" ? whole.trim() : stored !== undefined ? patchDsn(stored, change) : ""
+  const fromFields = base !== undefined ? patchDsn(base, change) : ""
+  const dsn = shape === "whole" ? whole.trim() : fromFields
   const changed = dsn !== "" && dsn !== stored
   const passed = tested?.dsn === dsn && tested.answer.ok ? tested.answer : undefined
   const failed = tested?.dsn === dsn && !tested.answer.ok ? tested.answer.error : undefined
@@ -482,11 +496,21 @@ function EditAddress({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
           value={shape}
           disabled={stored === undefined}
           onChange={(next) => {
-            setShape(next)
-            // The whole string starts as what the fields had made of it.
-            if (next === "whole" && !whole && stored !== undefined)
-              setWhole(patchDsn(stored, change))
+            if (next === shape) return
             setRefusal(undefined)
+            setUnfielded(false)
+            const typed = whole.trim()
+            if (next === "fields" && typed && typed !== fromFields) {
+              // A string the fields cannot take apart stays where it can be read whole.
+              if (readDsn(typed).shape === "path") {
+                setUnfielded(true)
+                return
+              }
+              setBase(typed)
+              setEdits({})
+            }
+            if (next === "whole") setWhole(fromFields)
+            setShape(next)
           }}
           options={[
             { value: "fields", label: "Fields" },
@@ -495,6 +519,12 @@ function EditAddress({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
         />
       )}
 
+      {unfielded && (
+        <FormNote role="status">
+          The fields cannot take this string apart — it is not written as an address — so it is
+          edited whole.
+        </FormNote>
+      )}
       {unread && (
         <Notice tone="warning" title="The saved string could not be read">
           <span className="break-words">{unread}</span> Type the whole string again to repair the
@@ -521,6 +551,7 @@ function EditAddress({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
             onChange={(event) => {
               setWhole(event.target.value)
               setRefusal(undefined)
+              setUnfielded(false)
             }}
             placeholder={engine.dsnExample}
             className="font-mono"
@@ -623,7 +654,9 @@ function EditAddress({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
             />
           </Field>
           <div className="space-y-1.5" data-slot="kept-options">
-            <p className="text-body font-medium">Kept as saved</p>
+            <p className="text-body font-medium">
+              {base === stored ? "Kept as saved" : "Kept as written"}
+            </p>
             {parts.options.length > 0 ? (
               <p className="flex flex-wrap gap-1.5">
                 {parts.options.map((option) => (

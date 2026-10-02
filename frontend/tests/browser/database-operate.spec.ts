@@ -16,7 +16,11 @@ import { mockDatabases, type DatabaseMock } from "./database-fixture"
  * offered at all where the connection names none. A control is drawn only
  * for the role that may use it, nothing that writes is drawn on a protected
  * connection, and the account the dashboard itself signs in with keeps what
- * would lock the dashboard out.
+ * would lock the dashboard out. Work that is staged or typed is not lost to a
+ * slip — in a dialog or in an account's panel — and a secret shown once has
+ * one way out. On a server that numbers its databases a dump is of the
+ * connection's own number unless the reader widens it, and a dump that
+ * reaches other numbers is restored only by a press that says so.
  */
 
 // These pages make several reads on arrival, and on a machine that is busy
@@ -716,6 +720,8 @@ test("a dump is begun with the options chosen, shown in place, and followed to i
   await progress(page).getByRole("button", { name: "Dismiss" }).click()
   await expect(progress(page)).toHaveCount(0)
   await expect.poll(() => where(page)).toBe("/databases/1/backups")
+  // The console went, and its Dismiss with it: the keyboard is on the page's command.
+  await expect(page.getByRole("button", { name: "Back up now" })).toBeFocused()
 })
 
 test("a transfer already running is shown on arrival, and can be stopped by the role that may", async ({
@@ -1018,23 +1024,172 @@ test("an engine that keeps one database per connection offers no copy and no new
   await expect(dialog(page)).toContainText(".bak")
 })
 
-test("a key–value server's dump names its numbered databases", async ({ page }) => {
+const NUMBERED_OPTIONS = {
+  ...DUMP_OPTIONS,
+  schemaOnly: false,
+  dataOnly: false,
+  tables: false,
+  compression: false,
+  databases: true,
+}
+
+/** A transfer of the key–value connection: a job is shown only by the connection it is of. */
+const CACHE_JOB = { kind: "database.transfer.4.backup", title: "Dump cache", target: "cache" }
+const CACHE_JOB_RESTORE = {
+  kind: "database.transfer.4.restore",
+  title: "Restore cache",
+  target: "cache",
+}
+
+const keyDump = (file: string, database: string, over: Record<string, unknown> = {}) =>
+  dump(file, {
+    format: "JSON Lines",
+    tool: "built-in",
+    toolVersion: "0.7.0",
+    database,
+    summary: `${database.split(",").length * 6} keys in ${database.split(",").length} databases`,
+    ...over,
+  })
+
+test("a key–value dump is of the connection's own numbered database unless the reader widens it", async ({
+  page,
+}) => {
   const server = await mockOperate(page, {
     answers: {
-      "POST 4/backup": job("j9", "backup", "running"),
-      "GET /jobs/j9": jobThatEnds("j9", "backup", {}),
+      "POST 4/backup": job("j9", "backup", "running", CACHE_JOB),
+      "GET /jobs/j9": jobThatEnds("j9", "backup", {}, CACHE_JOB),
     },
   })
   await visit(page, "/databases/4/backups")
-  await page.getByRole("button", { name: "Back up now" }).first().click()
-  // Only the databases that hold keys are offered.
-  const numbered = dialog(page).getByRole("group", { name: "Numbered databases that hold keys" })
-  await expect(numbered.getByRole("button")).toHaveCount(2)
+  const open = () => page.getByRole("button", { name: "Back up now" }).first().click()
+  const numbered = dialog(page).getByRole("group", { name: "Numbered databases in the dump" })
+  const run = dialog(page).getByRole("button", { name: "Back up now" })
+
+  await open()
+  // Its own number, the others that hold keys, and the way to all of them.
+  await expect(numbered.getByRole("button")).toHaveCount(3)
+  await expect(numbered.getByRole("button", { name: /db 0/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(numbered.getByRole("button", { name: /db 3/ })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  )
+  await expect(dialog(page)).toContainText("Only db 0, the one this connection is on.")
+  // With none pressed there is nothing to dump: an empty choice never means every database.
+  await numbered.getByRole("button", { name: /db 0/ }).click()
+  await expect(run).toBeDisabled()
+  await numbered.getByRole("button", { name: /db 0/ }).click()
   await numbered.getByRole("button", { name: /db 3/ }).click()
-  await dialog(page).getByRole("button", { name: "Back up now" }).click()
+  await expect(dialog(page)).toContainText("1 of them is not this connection")
+  await run.click()
   await expect
     .poll(() => server.sent.find((one) => one.request === "POST 4/backup")?.body)
-    .toEqual({ databases: [3] })
+    .toEqual({ databases: [0, 3] })
+
+  // Untouched, the form sends the connection's own number and no other.
+  await progress(page).getByRole("button", { name: "Dismiss" }).click()
+  await open()
+  await run.click()
+  await expect
+    .poll(() => server.sent.filter((one) => one.request === "POST 4/backup").at(-1)?.body)
+    .toEqual({ databases: [0] })
+
+  // Every numbered database is a press the reader makes, and the request then names none.
+  await progress(page).getByRole("button", { name: "Dismiss" }).click()
+  await open()
+  await numbered.getByRole("button", { name: "Every database" }).click()
+  await expect(dialog(page)).toContainText("Every numbered database of the server")
+  await run.click()
+  await expect
+    .poll(() => server.sent.filter((one) => one.request === "POST 4/backup").at(-1)?.body)
+    .toEqual({})
+})
+
+test("a dump that reaches other numbered databases is restored only by a press that says so", async ({
+  page,
+}) => {
+  const server = await mockOperate(page, {
+    answers: {
+      "GET 4/backups": {
+        dir: "/var/backups/jd/databases/cache",
+        options: NUMBERED_OPTIONS,
+        files: [keyDump("cache-all.jsonl.gz", "0,1,3"), keyDump("cache-own.jsonl.gz", "0")],
+      },
+      "POST 4/restore": job("j6", "restore", "running", CACHE_JOB_RESTORE),
+      "GET /jobs/j6": jobThatEnds("j6", "restore", { database: "0,1,3" }, CACHE_JOB_RESTORE),
+    },
+  })
+  await visit(page, "/databases/4/backups")
+  // What a dump holds is said by number, never as "everything".
+  await expect(dumpRow(page, "cache-all.jsonl.gz")).toContainText("3 numbered databases")
+  await expect(dumpRow(page, "cache-own.jsonl.gz")).toContainText("db 0")
+
+  await dumpRow(page, "cache-all.jsonl.gz")
+    .getByRole("button", { name: /^Restore/ })
+    .click()
+  const back = dialog(page).getByRole("button", { name: /Back where it came from/ })
+  const run = dialog(page).getByRole("button", { name: "Restore…" })
+  // Nothing is chosen for the reader, and nothing runs until they choose.
+  await expect(back).toHaveAttribute("aria-pressed", "false")
+  await expect(run).toBeDisabled()
+  await expect(dialog(page)).toContainText(
+    "This dump reaches past db 0, the database this connection is on",
+  )
+  await expect(dialog(page)).toContainText("It also holds databases 1, 3")
+  // Several numbers cannot be loaded into one other number.
+  await expect(dialog(page).getByRole("button", { name: /Another numbered database/ })).toHaveCount(
+    0,
+  )
+  await back.click()
+  await expect(dialog(page)).toContainText("What databases 0, 1, 3 hold now is replaced")
+  await run.click()
+
+  const confirm = page.getByRole("dialog", { name: "Restore over databases 0, 1, 3" })
+  await expect(confirm).toContainText(
+    "It writes into databases 1, 3, which are not the database this connection is on.",
+  )
+  await confirm.getByRole("button", { name: "Restore", exact: true }).click()
+  await expect
+    .poll(() => server.sent.find((one) => one.request === "POST 4/restore")?.body)
+    .toEqual({ file: "cache-all.jsonl.gz", target: "this", dumpFirst: true })
+  await progress(page).getByRole("button", { name: "Dismiss" }).click()
+
+  // A dump of the connection's own number goes back to it, as any restore does.
+  await dumpRow(page, "cache-own.jsonl.gz")
+    .getByRole("button", { name: /^Restore/ })
+    .click()
+  await expect(
+    dialog(page).getByRole("button", { name: /Back where it came from/ }),
+  ).toHaveAttribute("aria-pressed", "true")
+  await expect(dialog(page)).toContainText("What db 0 holds now is replaced")
+  await expect(
+    dialog(page).getByRole("button", { name: /Another numbered database/ }),
+  ).toBeVisible()
+})
+
+test("a transfer of another connection named in the address is not shown as this one's", async ({
+  page,
+}) => {
+  await mockOperate(page, {
+    answers: {
+      "GET /jobs/j2x": {
+        job: {
+          ...job("j2x", "restore", "succeeded", { endedAt: NOW }),
+          kind: "database.transfer.2.restore",
+        },
+        lines: [line(1, "stdout", "restored blog")],
+      },
+    },
+  })
+  await visit(page, "/databases/1/backups?job=j2x")
+  await expect(dumps(page)).toBeVisible()
+  await expect(
+    page.getByText("No dump, restore or copy of shop is kept under that id"),
+  ).toBeVisible()
+  await expect(progress(page)).toHaveCount(0)
+  await expect(page.getByText("restored blog")).toHaveCount(0)
 })
 
 // ---------------------------------------------------------------------------
@@ -1042,7 +1197,7 @@ test("a key–value server's dump names its numbered databases", async ({ page }
 // ---------------------------------------------------------------------------
 
 test("settings are a form in sections, with only the sections the engine has", async ({ page }) => {
-  await mockOperate(page)
+  const server = await mockOperate(page)
   await visit(page, "/databases/1/settings")
   for (const id of [
     "connection",
@@ -1068,6 +1223,71 @@ test("settings are a form in sections, with only the sections the engine has", a
   for (const id of ["reachability", "extensions", "databases"]) {
     await expect(section(page, id)).toHaveCount(0)
   }
+
+  // A document database answers the parameters route with status counters:
+  // those are Performance's, and Settings draws no section for them.
+  await visit(page, "/databases/5/settings")
+  await expect(section(page, "connection")).toBeVisible()
+  await expect(section(page, "databases")).toBeVisible()
+  await expect(section(page, "parameters")).toHaveCount(0)
+  expect(server.seen).not.toContain("GET 5/settings")
+})
+
+/** Whether a section's head is in the part of the window a reader sees first. */
+const landed = (page: Page, id: string) =>
+  page.evaluate((name) => {
+    const head = document.querySelector(`section#${name} h3`)
+    const strip = document.querySelector("[data-slot=settings-sections]")
+    if (!head || !strip) return false
+    const [at, under] = [head.getBoundingClientRect(), strip.getBoundingClientRect()]
+    return at.top >= under.bottom - 1 && at.top < window.innerHeight * 0.75
+  }, id)
+
+test("an address that names a section lands on it, and the strip jumps between them", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 700 })
+  await mockOperate(page)
+  const strip = page.getByRole("navigation", { name: "Sections of Settings" })
+
+  await visit(page, "/databases/1/settings#danger")
+  await expect.poll(() => landed(page, "danger")).toBe(true)
+  await expect(strip.getByRole("link", { name: "Danger zone" })).toHaveAttribute(
+    "aria-current",
+    "location",
+  )
+
+  // A link to one parameter shows the parameters, not the connection's form.
+  await visit(page, "/databases/1/settings?q=work_mem")
+  await expect(section(page, "parameters").locator("[data-parameter=work_mem]")).toBeVisible()
+  await expect.poll(() => landed(page, "parameters")).toBe(true)
+
+  // The strip names the sections this engine has, and a press goes to one.
+  await visit(page, "/databases/1/settings")
+  await expect(strip.getByRole("link")).toHaveText([
+    "Connection",
+    "Reachability",
+    "Server parameters",
+    "Extensions",
+    "Databases",
+    "Danger zone",
+  ])
+  await expect(strip.getByRole("link", { name: "Connection" })).toHaveAttribute(
+    "aria-current",
+    "location",
+  )
+  await strip.getByRole("link", { name: "Extensions" }).click()
+  await expect.poll(() => landed(page, "extensions")).toBe(true)
+  await expect.poll(() => new URL(page.url()).hash).toBe("#extensions")
+  await expect(strip.getByRole("link", { name: "Extensions" })).toHaveAttribute(
+    "aria-current",
+    "location",
+  )
+  // The strip stays where it is while the page moves under it.
+  expect(await strip.evaluate((el) => Math.round(el.getBoundingClientRect().top))).toBeLessThan(120)
+
+  await visit(page, "/databases/7/settings")
+  await expect(strip.getByRole("link")).toHaveText(["Connection", "Parameters", "Danger zone"])
 })
 
 test("saving the connection's labels sends only what changed", async ({ page }) => {
@@ -1206,6 +1426,54 @@ test("typed work in a dialog is not lost to Escape, and a save without a test is
     })
 })
 
+test("the two editors of the address are one string, and a closed dialog gives the keyboard back", async ({
+  page,
+}) => {
+  await mockOperate(page)
+  await visit(page, "/databases/1/settings")
+  const edit = section(page, "connection").getByRole("button", { name: "Edit", exact: true })
+  await edit.click()
+  const fields = dialog(page).getByRole("radio", { name: "Fields" })
+  const whole = dialog(page).getByRole("radio", { name: "Whole string" })
+  const string = dialog(page).getByLabel("Connection string")
+  const options = "?sslmode=verify-full&connect_timeout=5"
+
+  await expect(dialog(page).getByLabel("Host")).toHaveValue("127.0.0.1")
+  await dialog(page).getByLabel("Host").fill("localhost")
+  await whole.click()
+  await expect(string).toHaveValue(`postgres://app:s3cret@localhost:5432/shop_main${options}`)
+  // Back to the fields and on: the whole string follows every field, not only the first visit.
+  await fields.click()
+  await dialog(page).getByLabel("Port").fill("5433")
+  await whole.click()
+  await expect(string).toHaveValue(`postgres://app:s3cret@localhost:5433/shop_main${options}`)
+
+  // A string retyped whole is what the fields are then laid over.
+  await string.fill("postgres://app:s3cret@db.internal:6000/shop_main?sslmode=require")
+  await fields.click()
+  await expect(dialog(page).getByLabel("Host")).toHaveValue("db.internal")
+  await expect(dialog(page).getByLabel("Port")).toHaveValue("6000")
+  await expect(dialog(page).locator("[data-slot=kept-options]")).toContainText("sslmode=require")
+  await expect(dialog(page).locator("[data-slot=kept-options]")).not.toContainText(
+    "connect_timeout",
+  )
+  await expect(dialog(page).locator("[data-slot=connection-preview]")).toHaveText(
+    "postgres://app:••••••@db.internal:6000/shop_main?sslmode=require",
+  )
+
+  // One the fields cannot take apart stays whole, and says why.
+  await whole.click()
+  await string.fill("not an address")
+  await fields.click()
+  await expect(whole).toBeChecked()
+  await expect(dialog(page)).toContainText("The fields cannot take this string apart")
+
+  await page.keyboard.press("Escape")
+  await dialog(page).getByRole("button", { name: "Discard" }).click()
+  await expect(dialog(page)).toHaveCount(0)
+  await expect(edit).toBeFocused()
+})
+
 test("publishing a server is two answers with their consequences, confirmed with the rule named", async ({
   page,
 }) => {
@@ -1312,6 +1580,10 @@ test("parameters are grouped, searchable, and changed with what ran shown afterw
     name: "bgwriter_delay",
     value: "250",
   })
+  // An engine with a default to reset to offers that, in the dialog, and no second way back.
+  await expect(
+    parameters.locator("[data-slot=parameter-change]").getByRole("button", { name: /^Put back/ }),
+  ).toHaveCount(0)
 
   // One that is not the default can be put back to it.
   await row.getByRole("button", { name: "Change bgwriter_delay" }).click()
@@ -1323,6 +1595,23 @@ test("parameters are grouped, searchable, and changed with what ran shown afterw
     name: "bgwriter_delay",
     reset: true,
   })
+})
+
+test("a chip pressed right after typing keeps the search that was typed", async ({ page }) => {
+  await mockOperate(page)
+  await visit(page, "/databases/1/settings")
+  const parameters = section(page, "parameters")
+  const search = parameters.getByLabel("Filter the parameters")
+  await search.fill("bgwriter")
+  await expect.poll(() => where(page)).toBe("/databases/1/settings?q=bgwriter")
+  // Typed, and narrowed before the address has caught up with the typing.
+  await search.fill("shared")
+  await parameters.getByRole("button", { name: /^Changed/ }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/settings?q=shared&only=changed")
+  await expect(parameters.locator("[data-parameter]")).toHaveCount(1)
+  await expect(parameters.locator("[data-parameter=shared_buffers]")).toBeVisible()
+  await page.waitForTimeout(700)
+  expect(where(page)).toBe("/databases/1/settings?q=shared&only=changed")
 })
 
 test("a parameter says what it is: waiting for a restart, withheld, or not the reader's to change", async ({
@@ -1401,6 +1690,19 @@ test("a key–value server's parameters are its own configuration, and a secret 
       value: "256",
       rewrite: true,
     })
+  // What ran is shown with the parameter named as it is written, not in the label's capitals.
+  const change = parameters.locator("[data-slot=parameter-change]")
+  await expect(change).toContainText("CONFIG SET slowlog-max-len 256")
+  await expect(change.locator("p.eyebrow")).toHaveText("What ran")
+  // The server publishes no default to reset to: the change is put back to what it was.
+  await change.getByRole("button", { name: "Put back 128" }).click()
+  await expect
+    .poll(() => server.sent.filter((one) => one.request === "PUT 4/redis/config").at(-1)?.body)
+    .toEqual({ name: "slowlog-max-len", value: "128", rewrite: true })
+  await expect(change).toContainText("CONFIG SET slowlog-max-len 128")
+  await expect(change).toContainText("Put back to 128.")
+  await expect(change.getByRole("button", { name: /^Put back/ })).toHaveCount(0)
+
   // It has modules where a SQL engine has extensions.
   await expect(section(page, "extensions").getByRole("heading", { level: 3 })).toHaveText("Modules")
   await expect(section(page, "extensions")).toContainText("ReJSON")
@@ -1419,6 +1721,15 @@ test("an extension is enabled with one press and disabled after being asked", as
   })
   await visit(page, "/databases/1/settings")
   const extensions = section(page, "extensions")
+  // A row you read: the name, its version, and the whole sentence that says what it is.
+  const enabled = extensions.locator("[data-extension=pg_stat_statements]")
+  await expect(enabled).toContainText("1.10")
+  await expect(enabled).toContainText(
+    "track planning and execution statistics of all SQL statements executed",
+  )
+  // Nothing here is taken, so nothing here is a card, and no mark is repeated down the list.
+  await expect(extensions.locator("[data-slot=choice-row]")).toHaveCount(0)
+  await expect(extensions.locator("img, [data-slot=product-logo]")).toHaveCount(0)
   await extensions.getByRole("button", { name: "Disable pg_stat_statements" }).click()
   await expect(dialog(page)).toContainText("pg_stat_statements")
   await dialog(page).getByRole("button", { name: "Disable", exact: true }).click()
@@ -1444,6 +1755,10 @@ test("another database of the server is opened as a connection, and a new one ma
   })
   await visit(page, "/databases/1/settings")
   const databases = section(page, "databases")
+  // The one this connection is on is a card; one with no connection is a row with its command.
+  await expect(databases.locator("[data-slot=choice-row]")).toHaveCount(1)
+  await expect(databases.locator("[data-slot=choice-row]")).toContainText("shop_main")
+  await expect(databases.locator("[data-database=shop_staging]")).toContainText("owned by app")
   await databases.getByRole("button", { name: "Connect shop_staging" }).click()
   await expect
     .poll(() => server.sent.find((one) => one.request === "POST 1/server/databases/connect")?.body)
@@ -1667,6 +1982,24 @@ test("the database's menu backs it up, opens its settings and forgets it, for th
   await dialog(page).getByRole("button", { name: "Cancel" }).click()
 })
 
+test("on a server that numbers its databases the menu's dump is of the connection's own number", async ({
+  page,
+}) => {
+  const server = await mockOperate(page, {
+    answers: {
+      "POST 4/backup": job("j5", "backup", "running", CACHE_JOB),
+      "GET /jobs/j5": jobThatEnds("j5", "backup", { file: "cache.jsonl.gz", size: 10 }, CACHE_JOB),
+    },
+  })
+  await visit(page, "/databases/4/backups")
+  await page.getByRole("button", { name: "Actions for cache" }).click()
+  await page.getByRole("menuitem", { name: "Back up now" }).click()
+  // One press in a menu never dumps the server's other tenants.
+  await expect
+    .poll(() => server.sent.find((one) => one.request === "POST 4/backup")?.body)
+    .toEqual({ databases: [0] })
+})
+
 test("a viewer's menu holds nothing that dumps or forgets", async ({ page }) => {
   await mockOperate(page, { viewer: true })
   await visit(page, "/databases/1/backups")
@@ -1769,12 +2102,21 @@ test("a new account shows the grant the server plans, and ends on the string it 
     level: "read",
   })
 
-  // A slip does not lose the only sight of the password.
+  // The step has one command. Nothing beside it closes the dialog without asking.
+  await expect(dialog(page).getByRole("button", { name: "Cancel" })).toHaveCount(0)
+  await expect(dialog(page).getByRole("button", { name: "Close", exact: true })).toHaveCount(1)
+  // A slip does not lose the only sight of the password: Escape asks, and so does the corner's close.
   await page.keyboard.press("Escape")
   await expect(dialog(page)).toContainText("The password is not shown again")
-  await dialog(page).getByRole("button", { name: "Keep editing" }).click()
+  await dialog(page).getByRole("button", { name: "Go back" }).click()
+  await dialog(page).getByRole("button", { name: "Close", exact: true }).first().click()
+  await expect(dialog(page)).toContainText("The password is not shown again")
+  await dialog(page).getByRole("button", { name: "Go back" }).click()
+  await expect(dialog(page).locator("[data-slot=secret-shown]")).toContainText(password)
   await dialog(page).getByRole("button", { name: "I have saved it" }).click()
   await expect(dialog(page)).toHaveCount(0)
+  // The keyboard is back on the control that opened the dialog.
+  await expect(accounts(page).getByRole("button", { name: "New account" })).toBeFocused()
 })
 
 test("a new password is the only thing sent, and the connection's own account says what became of it", async ({
@@ -1895,6 +2237,127 @@ test("grants are pressed on a matrix, read as the server's statements, and only 
       "POST 1/server/roles/reporting/privileges",
       { level: "table", schema: "public", table: "orders", privileges: ["UPDATE"] },
     ],
+  ])
+})
+
+test("staged grants and edited attributes are not lost to a slip in the account's panel", async ({
+  page,
+}) => {
+  const server = await mockOperate(page)
+  await visit(page, "/databases/1/access?account=reporting")
+  await expect(matrix(page).locator("[data-object=orders]")).toBeVisible()
+
+  // Nothing staged: Escape closes it.
+  await page.keyboard.press("Escape")
+  await expect(panel(page)).toHaveCount(0)
+  await expect.poll(() => where(page)).toBe("/databases/1/access")
+
+  await account(page, "reporting").getByRole("button", { name: "Open reporting" }).click()
+  await matrix(page).getByRole("button", { name: "UPDATE on orders" }).click()
+  await matrix(page).getByRole("button", { name: "SELECT on customers" }).click()
+  await panel(page).getByRole("switch", { name: "It can create databases" }).click()
+
+  // Escape, the corner's close and a press outside all ask first.
+  await page.keyboard.press("Escape")
+  await expect(panel(page)).toContainText("Close and lose 3 changes that were not saved?")
+  await panel(page).getByRole("button", { name: "Keep editing" }).click()
+  await expect(panel(page).locator("[data-slot=grants-pending]")).toContainText(
+    "2 changes not applied",
+  )
+  await panel(page).getByRole("button", { name: "Close", exact: true }).click()
+  await expect(panel(page)).toContainText("Close and lose 3 changes that were not saved?")
+  // A second slip while it is asking means "no".
+  await page.keyboard.press("Escape")
+  await expect(panel(page).getByRole("button", { name: "Close anyway" })).toHaveCount(0)
+  await expect(panel(page).locator("[data-slot=grants-pending]")).toBeVisible()
+  await expect(panel(page).getByRole("switch", { name: "It can create databases" })).toBeChecked()
+
+  await page.keyboard.press("Escape")
+  await panel(page).getByRole("button", { name: "Close anyway" }).click()
+  await expect(panel(page)).toHaveCount(0)
+  await expect.poll(() => where(page)).toBe("/databases/1/access")
+  // Nothing was sent, and the keyboard is back on the row that opened the panel.
+  expect(server.sent).toEqual([])
+  await expect(
+    account(page, "reporting").getByRole("button", { name: "Open reporting" }),
+  ).toBeFocused()
+})
+
+test("opening an account is a step: Back closes its panel and leaves the list as it was", async ({
+  page,
+}) => {
+  await mockOperate(page)
+  await visit(page, "/databases/1/access")
+  await page.getByRole("button", { name: "Only the administrators" }).click()
+  await expect.poll(() => where(page)).toBe("/databases/1/access?show=admins")
+  await account(page, "app").getByRole("button", { name: "Open app" }).click()
+  await expect(panel(page)).toBeVisible()
+  await expect.poll(() => where(page)).toBe("/databases/1/access?show=admins&account=app")
+
+  await page.goBack()
+  await expect(panel(page)).toHaveCount(0)
+  await expect.poll(() => where(page)).toBe("/databases/1/access?show=admins")
+  await expect(accounts(page).locator("[data-slot=choice-row]")).toHaveCount(1)
+
+  // Closed from the panel itself, it leaves no second entry to go back through.
+  await account(page, "app").getByRole("button", { name: "Open app" }).click()
+  await expect(panel(page)).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(panel(page)).toHaveCount(0)
+  await expect.poll(() => where(page)).toBe("/databases/1/access?show=admins")
+  await page.goForward()
+  await expect(panel(page)).toBeVisible()
+})
+
+test("memberships list the roles an account is in, and another is added from a menu", async ({
+  page,
+}) => {
+  const server = await mockOperate(page, {
+    answers: {
+      "GET 1/server/roles/reporting": detail("reporting", {
+        grants: REPORTING_GRANTS,
+        memberOf: ["readers"],
+      }),
+      "POST 1/server/roles/reporting/privileges": (_call: number, url: URL, body: unknown) => ({
+        ...(url.searchParams.get("preview") ? { preview: true } : { ok: true }),
+        statements: [`GRANT "${(body as { memberOf: string }).memberOf}" TO "reporting"`],
+      }),
+      "POST 1/server/roles/reporting/privileges/revoke": (_call: number, url: URL) => ({
+        ...(url.searchParams.get("preview") ? { preview: true } : { ok: true }),
+        statements: ['REVOKE "readers" FROM "reporting"'],
+      }),
+    },
+  })
+  await visit(page, "/databases/1/access?account=reporting")
+  const members = panel(page).locator("[data-slot=memberships]")
+  // Only what it is in: the server's other roles are not drawn as if it were a member of each.
+  await expect(members.getByRole("button", { name: "readers" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(members.getByRole("group").getByRole("button")).toHaveCount(1)
+  await expect(members).not.toContainText("app")
+
+  await members.getByRole("button", { name: "Add to a role" }).click()
+  // The engine's own roles are not offered, and the one it is in is not offered again.
+  await expect(page.getByRole("menuitem")).toHaveText(["app"])
+  await page.getByRole("menuitem", { name: "app" }).click()
+  await members.getByRole("button", { name: "readers" }).click()
+  await expect(panel(page).locator("[data-slot=grants-pending]")).toContainText(
+    "2 changes not applied",
+  )
+
+  await panel(page).getByRole("button", { name: "Review…" }).click()
+  const review = page.getByRole("dialog", { name: "Change what reporting holds" })
+  await expect(review).toContainText('GRANT "app" TO "reporting"')
+  await expect(review).toContainText('REVOKE "readers" FROM "reporting"')
+  // A role's name is drawn as it is written, beside the label's small capitals.
+  await expect(review.locator("p.eyebrow span.normal-case")).toHaveText(["readers", "app"])
+  await review.getByRole("button", { name: "Apply" }).click()
+  await expect(review).toHaveCount(0)
+  expect(server.sent.filter((one) => one.query === "").map((one) => one.body)).toEqual([
+    { level: "role", memberOf: "readers" },
+    { level: "role", memberOf: "app" },
   ])
 })
 
@@ -2063,7 +2526,15 @@ test("a key–value server's users are rules, and the dashboard's own user keeps
       keys: ["~jobs:*", "%R~shared:*"],
     })
   await expect(panel(page)).toContainText("keeps its users in memory")
+  // A rule being rewritten is not lost to Escape either.
+  await panel(page).getByLabel("Channels").fill("jobs:*")
   await page.keyboard.press("Escape")
+  await expect(panel(page)).toContainText("Close and lose the edits to this user’s rule?")
+  await panel(page).getByRole("button", { name: "Keep editing" }).click()
+  await expect(panel(page).getByLabel("Channels")).toHaveValue("jobs:*")
+  await page.keyboard.press("Escape")
+  await panel(page).getByRole("button", { name: "Close anyway" }).click()
+  await expect(panel(page)).toHaveCount(0)
 
   await users.getByRole("button", { name: "Open default", exact: true }).click()
   await expect(panel(page).locator("[data-slot=acl-held]")).toContainText(
@@ -2295,6 +2766,8 @@ for (const [label, viewport] of [
   test(`the access, backups and settings pages keep the design system's rules${label}`, async ({
     page,
   }) => {
+    // Eleven pages are opened one after another: on a busy machine that is more than a minute.
+    test.setTimeout(180_000)
     await page.setViewportSize(viewport)
     await mockOperate(page)
     for (const [path, region] of SURFACES) {
@@ -2313,6 +2786,17 @@ for (const [label, viewport] of [
       await expect(section(page, "parameters").getByRole("button").first()).toBeVisible()
       await keepsTheRules(page, `${path}${label}`)
     }
+    await visit(page, "/databases/5/settings")
+    await expect(section(page, "danger")).toBeVisible()
+    await expect(section(page, "databases").locator("[data-database]").first()).toBeVisible()
+    await keepsTheRules(page, `/databases/5/settings${label}`)
+    // Landed on a section, with the catalogue of what could be enabled open.
+    await visit(page, "/databases/1/settings#extensions")
+    await section(page, "extensions")
+      .getByRole("button", { name: /^Available/ })
+      .click()
+    await expect(section(page, "extensions").locator("[data-extension=pgcrypto]")).toBeVisible()
+    await keepsTheRules(page, `/databases/1/settings#extensions${label}`)
     // Settings with a search on, so the parameter rows themselves are drawn.
     await visit(page, "/databases/1/settings?q=e")
     await expect(section(page, "parameters").locator("[data-parameter]").first()).toBeVisible()
@@ -2320,6 +2804,7 @@ for (const [label, viewport] of [
   })
 
   test(`an account's panel and the dialogs keep the rules${label}`, async ({ page }) => {
+    test.setTimeout(120_000)
     await page.setViewportSize(viewport)
     await mockOperate(page, {
       answers: {
@@ -2334,6 +2819,13 @@ for (const [label, viewport] of [
     await expect(matrix(page).locator("[data-object=orders]")).toBeVisible()
     await matrix(page).getByRole("button", { name: "UPDATE on orders" }).click()
     await keepsTheRules(page, `the account panel${label}`, true)
+    // The question the panel asks before it closes over staged work.
+    await page.keyboard.press("Escape")
+    await expect(panel(page).getByRole("button", { name: "Close anyway" })).toBeVisible()
+    await keepsTheRules(page, `the account panel asking${label}`, true)
+    // On a phone a privilege is a finger's height.
+    const chip = await matrix(page).getByRole("button", { name: "UPDATE on orders" }).boundingBox()
+    expect(chip?.height ?? 0).toBeGreaterThanOrEqual(viewport.width < 640 ? 36 : 24)
 
     await visit(page, "/databases/1/access")
     await accounts(page).getByRole("button", { name: "New account" }).click()

@@ -31,6 +31,11 @@ export type WatchedJob = {
  * reads it every second while it runs. When it ends the last reading stays
  * on screen with what it produced, until the reader dismisses it.
  *
+ * A job is this connection's when its kind opens with `prefix`. An id from
+ * the address that names another connection's transfer — a link pasted on
+ * the wrong database — is treated as one the server does not have: its output
+ * is not drawn here as if it were about this database.
+ *
  * `onEnd` fires once per job, on the reading that first shows it finished —
  * for a job that was running when the page attached to it (`live`). One that
  * was already over, opened from a link, is shown and not announced: nothing
@@ -38,6 +43,7 @@ export type WatchedJob = {
  */
 export function useTransferJob(
   watched: string,
+  prefix: string,
   live: boolean,
   onEnd: (ended: WatchedJob) => void,
 ): { current: WatchedJob | undefined; missing: boolean; stop: () => Promise<void> } {
@@ -66,6 +72,10 @@ export function useTransferJob(
           controller.signal,
         )
         if (cancelled) return
+        if (!answer.job.kind.startsWith(prefix)) {
+          setState({ id: watched, missing: true })
+          return
+        }
         const reading: WatchedJob = {
           job: answer.job,
           lines: answer.lines,
@@ -96,7 +106,7 @@ export function useTransferJob(
       controller.abort()
       clearTimeout(timer)
     }
-  }, [watched])
+  }, [watched, prefix])
 
   const stop = useCallback(async () => {
     if (!watched) return

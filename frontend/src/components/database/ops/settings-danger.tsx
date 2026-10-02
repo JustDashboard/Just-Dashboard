@@ -19,6 +19,7 @@ import {
   useForgetConnection,
 } from "@/components/database/ops/settings-forget"
 import { dropEffect, dropPhrase, type DropKind } from "@/components/database/ops/settings-model"
+import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASES_HREF } from "@/components/database/shell/routes"
@@ -256,7 +257,12 @@ export function DangerSection({ confirm }: { confirm: (request: ConfirmRequest) 
 
   if (rows.length === 0) return null
   return (
-    <FormSection aside id="danger" title={<span className="text-destructive">Danger zone</span>}>
+    <FormSection
+      aside
+      id="danger"
+      className={UNDER_STRIP}
+      title={<span className="text-destructive">Danger zone</span>}
+    >
       {/* Framed in the danger rule: the one edge on the page, around what cannot be undone. */}
       <Panel className="divide-y divide-hairline border-rule-danger">{rows}</Panel>
     </FormSection>

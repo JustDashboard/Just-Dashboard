@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { Plus, UserPlus } from "@/components/icons"
 import { errorMessage, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -13,6 +14,7 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
+import { VerbMenu } from "@/components/verbs"
 import { nameHue } from "@/components/database/home/kinds"
 import { read } from "@/components/database/home/read"
 import {
@@ -55,6 +57,12 @@ const CATALOG_GROUPS: Record<"table" | "sequence", string[]> = {
 }
 
 /**
+ * One privilege as a chip. On a phone it is a finger's height; beside a
+ * pointer it is the small mono word a matrix of them needs to be.
+ */
+const PRIVILEGE_CHIP = "h-9 px-2.5 font-mono text-micro sm:h-6 sm:px-2"
+
+/**
  * What one account holds, object by object, and the way to change it.
  *
  * A level at a time — databases, schemas, tables, sequences, as the engine
@@ -66,13 +74,19 @@ const CATALOG_GROUPS: Record<"table" | "sequence", string[]> = {
  * pressed: no revoke takes it away.
  *
  * Roles the account is a member of are staged the same way, on engines that
- * have memberships.
+ * have memberships: the ones it is in are listed, and a role is added from a
+ * menu of the others — a list of every role on the server would read as a
+ * list of memberships.
+ *
+ * `onPending` is told how many changes are staged, so that the sheet around
+ * it can ask before it closes over them.
  */
 export function GrantsMatrix({
   detail,
   levels,
   roles,
   editable,
+  onPending,
   onApplied,
 }: {
   detail: DbRoleDetail
@@ -82,6 +96,8 @@ export function GrantsMatrix({
   roles: string[]
   /** The reader may grant and revoke, on a connection that is not protected. */
   editable: boolean
+  /** How many changes are staged and not applied. */
+  onPending?: (count: number) => void
   onApplied: () => void
 }) {
   const { id, conn, engine } = useDatabase()
@@ -105,6 +121,10 @@ export function GrantsMatrix({
   const [wanted, setWanted] = useState<Wanted>({})
   const [members, setMembers] = useState<Membership[]>([])
   const [reviewing, setReviewing] = useState(false)
+  const pending = Object.keys(wanted).length + members.length
+  useEffect(() => {
+    onPending?.(pending)
+  }, [pending, onPending])
 
   // Which container an object of this level is named inside: a schema of the
   // connection's database, or a database of the server.
@@ -227,7 +247,9 @@ export function GrantsMatrix({
       return next === was ? rest : [...rest, { role, member: next }]
     })
 
-  const pending = Object.keys(wanted).length + members.length
+  // The roles it is in — with one staged to be added — and the ones it could be put in.
+  const inRoles = [...new Set([...(detail.memberOf ?? []), ...members.map((one) => one.role)])]
+  const addable = roles.filter((role) => !inRoles.includes(role))
   const later =
     scoped && level.future
       ? heldLater(detail.grants, { level: level.level, schema: currentScope }, level)
@@ -235,40 +257,64 @@ export function GrantsMatrix({
 
   return (
     <div className="space-y-4" data-slot="grants-matrix">
-      {memberships && (roles.length > 0 || (detail.memberOf?.length ?? 0) > 0) && (
-        <div className="space-y-1.5">
+      {memberships && (roles.length > 0 || inRoles.length > 0) && (
+        <div className="space-y-1.5" data-slot="memberships">
           <p className="text-body font-medium">Member of</p>
-          {editable ? (
-            <ChipStrip role="group" aria-label="Roles it is a member of: pressed where it is one">
-              {roles.map((role) => {
-                const was = Boolean(detail.memberOf?.includes(role))
-                const now = memberNow(role)
-                return (
-                  <FilterChip
-                    key={role}
-                    selected={now}
-                    className={cn("font-mono", now !== was && !now && "line-through")}
-                    style={
-                      now !== was ? { color: `var(--git-${now ? "added" : "deleted"})` } : undefined
-                    }
-                    onClick={() => pressMember(role)}
-                  >
-                    <span style={now === was ? { color: nameHue(role) } : undefined}>{role}</span>
-                  </FilterChip>
-                )
-              })}
-            </ChipStrip>
-          ) : detail.memberOf && detail.memberOf.length > 0 ? (
-            <p className="flex flex-wrap gap-1.5">
-              {detail.memberOf.map((role) => (
-                <Tag key={role} mono>
-                  {role}
-                </Tag>
-              ))}
-            </p>
-          ) : (
-            <FormNote>It is a member of no other role.</FormNote>
-          )}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+            {inRoles.length === 0 ? (
+              <span className="text-hint text-muted-foreground">No other role.</span>
+            ) : editable ? (
+              <ChipStrip
+                role="group"
+                aria-label="Roles it is a member of: press one to take it out"
+              >
+                {inRoles.map((role) => {
+                  const was = Boolean(detail.memberOf?.includes(role))
+                  const now = memberNow(role)
+                  return (
+                    <FilterChip
+                      key={role}
+                      selected={now}
+                      className={cn("font-mono", was && !now && "line-through")}
+                      style={
+                        now !== was
+                          ? { color: `var(--git-${now ? "added" : "deleted"})` }
+                          : undefined
+                      }
+                      onClick={() => pressMember(role)}
+                    >
+                      <span style={now === was ? { color: nameHue(role) } : undefined}>{role}</span>
+                    </FilterChip>
+                  )
+                })}
+              </ChipStrip>
+            ) : (
+              <span className="flex flex-wrap gap-1.5">
+                {inRoles.map((role) => (
+                  <Tag key={role} mono>
+                    {role}
+                  </Tag>
+                ))}
+              </span>
+            )}
+            {editable && addable.length > 0 && (
+              <VerbMenu
+                align="start"
+                verbs={addable.map((role) => ({
+                  key: role,
+                  label: role,
+                  icon: UserPlus,
+                  run: () => pressMember(role),
+                }))}
+                trigger={
+                  <Button size="xs" variant="ghost">
+                    <Plus />
+                    Add to a role
+                  </Button>
+                }
+              />
+            )}
+          </div>
           {detail.members.length > 0 && (
             <FormNote>
               Its own members: <span className="font-mono">{detail.members.join(", ")}</span>
@@ -345,7 +391,17 @@ export function GrantsMatrix({
                 <span className="w-40 shrink-0 pt-1 text-xs font-medium">
                   {LEVEL_WORD[level.level].every}
                 </span>
-                <span className="flex min-w-0 flex-1 flex-wrap gap-1">
+                <span className="flex min-w-0 flex-1 flex-wrap gap-1.5 sm:gap-1">
+                  {/* The rows under it open with ALL: this one keeps that
+                      column empty, so a privilege stands over itself. */}
+                  {hasAll && (
+                    <span
+                      aria-hidden
+                      className={cn("invisible inline-flex shrink-0 border", PRIVILEGE_CHIP)}
+                    >
+                      ALL
+                    </span>
+                  )}
                   {domain.map((privilege) => {
                     const everywhere = objects.every((name) => {
                       const cell = cellOf(name)
@@ -357,7 +413,7 @@ export function GrantsMatrix({
                       <FilterChip
                         key={privilege}
                         selected={everywhere}
-                        className="h-6 px-2 font-mono text-micro"
+                        className={PRIVILEGE_CHIP}
                         aria-label={`${privilege} on every ${LEVEL_WORD[level.level].one} in ${currentScope}`}
                         onClick={() => pressEvery(privilege)}
                       >
@@ -384,13 +440,13 @@ export function GrantsMatrix({
                   <span className="w-40 shrink-0 truncate pt-1 font-mono text-xs" title={name}>
                     {name}
                   </span>
-                  <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                  <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 sm:gap-1">
                     {editable ? (
                       <>
                         {hasAll && (
                           <FilterChip
                             selected={full}
-                            className="h-6 px-2 font-mono text-micro"
+                            className={PRIVILEGE_CHIP}
                             aria-label={`ALL on ${name}`}
                             onClick={() => pressAll(cell)}
                           >
@@ -408,7 +464,7 @@ export function GrantsMatrix({
                               disabled={owned}
                               aria-label={`${privilege} on ${name}`}
                               className={cn(
-                                "h-6 px-2 font-mono text-micro",
+                                PRIVILEGE_CHIP,
                                 was && !is && "line-through",
                                 owned && "opacity-60",
                               )}
@@ -531,6 +587,16 @@ export function GrantsMatrix({
 }
 
 type Previewed = { planned: Planned; statements: string[]; notes: string[]; error?: string }
+
+/** What a request is about, over its statements: the act in the label's small caps, the name as written. */
+function PlannedLabel({ planned }: { planned: Planned }) {
+  return (
+    <>
+      {planned.act}{" "}
+      <span className="font-mono tracking-normal text-foreground normal-case">{planned.on}</span>
+    </>
+  )
+}
 
 /**
  * The statements a set of grant changes will run, as the server writes them,
@@ -686,7 +752,7 @@ function GrantsReview({
           previewed.map((one, index) => (
             <div key={index} className="space-y-1.5">
               <Statement
-                label={one.planned.about}
+                label={<PlannedLabel planned={one.planned} />}
                 sql={one.statements.join(";\n")}
                 placeholder={
                   one.error

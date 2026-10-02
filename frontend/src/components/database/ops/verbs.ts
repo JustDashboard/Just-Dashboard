@@ -52,9 +52,11 @@ async function reportBackup(job: Job, name: string, show: () => void) {
  * All three are allowed on a protected connection, as the routes are.
  *
  * Back up now takes the dump the Backups page takes with nothing chosen: the
- * whole database, the tool's own defaults. On that page the dump is shown in
- * place; anywhere else a toast says it began, with the way there, and another
- * says how it ended.
+ * whole database, the tool's own defaults — and, on a server that numbers its
+ * databases, the connection's own number only, as that page's form opens on.
+ * A request that names none would dump every tenant of the server from one
+ * press in a menu. On that page the dump is shown in place; anywhere else a
+ * toast says it began, with the way there, and another says how it ended.
  */
 export const useOperateVerbs: DatabaseVerbSource = ({ confirm }: DatabaseVerbTools) => {
   const { id, conn, engine, status, href, select } = useDatabase()
@@ -68,12 +70,14 @@ export const useOperateVerbs: DatabaseVerbSource = ({ confirm }: DatabaseVerbToo
   const backups = href("backups")
   const onBackups = pathname === backups.split("?")[0]
   const check = status.refresh
+  const numbered = engine.can("dumpDatabases")
+  const own = Number(conn.database || "0")
 
   const backUp = useCallback(async () => {
     const show = (jobId: string) => () => router.push(href("backups", { job: jobId }))
     setStarting(true)
     try {
-      const job = await post<Job>(`/databases/${id}/backup`, {})
+      const job = await post<Job>(`/databases/${id}/backup`, numbered ? { databases: [own] } : {})
       // On the page that shows a dump in place, the address is what attaches it.
       if (onBackups) select({ job: job.id })
       else {
@@ -93,7 +97,7 @@ export const useOperateVerbs: DatabaseVerbSource = ({ confirm }: DatabaseVerbToo
     } finally {
       setStarting(false)
     }
-  }, [id, name, onBackups, select, router, href, check])
+  }, [id, name, numbered, own, onBackups, select, router, href, check])
 
   const mayDump = can("service.control") && engine.has("backups")
   const mayForget = can("system.admin") && can("destructive")

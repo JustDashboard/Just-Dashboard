@@ -200,8 +200,9 @@ export function SecretShown({
         <p className="text-body font-medium">Connect as {user}</p>
         <AccountSnippet dsn={dsn} user={user} database={database} />
         <FormNote>
-          The address is the one this dashboard dials. From another machine, use the address Connect
-          gives for it.
+          The address is the one this dashboard dials, and the string carries none of the options
+          this connection is saved with — a TLS mode, a replica set: add the ones the server asks
+          for. From another machine, use the address Connect gives for it.
         </FormNote>
       </div>
       {notes?.map((note) => (

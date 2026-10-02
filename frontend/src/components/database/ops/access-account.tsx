@@ -18,7 +18,6 @@ import {
   OptionList,
   OptionRow,
 } from "@/components/form"
-import { SidePanel } from "@/components/side-panel"
 import { LoadingRows } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -38,6 +37,7 @@ import {
   type AttributeField,
 } from "@/components/database/ops/access-model"
 import { ChangePassword } from "@/components/database/ops/access-new"
+import { AccountSheet } from "@/components/database/ops/access-panel"
 import { AccountMark, AccountName } from "@/components/database/ops/access-parts"
 import type {
   DbPrivileges,
@@ -99,6 +99,9 @@ export function dropAccountRequest(
  * switches that were thrown: an account's other attributes are never restated
  * and so never reset. The dashboard's own account keeps the switches that
  * would lock the dashboard out, drawn and held, with the reason.
+ *
+ * What is edited and not saved — attributes, staged grants and memberships —
+ * is counted, and the panel asks before it closes over any of it.
  */
 export function AccountPanel({
   name,
@@ -126,6 +129,7 @@ export function AccountPanel({
   const [saving, setSaving] = useState(false)
   const [refusal, setRefusal] = useState<string>()
   const [password, setPassword] = useState(false)
+  const [staged, setStaged] = useState(0)
   const detail = usePoll(
     (signal) =>
       read<DbRoleDetail>(
@@ -229,11 +233,17 @@ export function AccountPanel({
     .filter((role, index, list) => list.indexOf(role) === index)
 
   return (
-    <SidePanel
-      open
-      onOpenChange={(open) => !open && onClose()}
+    <AccountSheet
       width="lg"
-      initialFocus="body"
+      lose={
+        count + staged === 0
+          ? undefined
+          : count + staged === 1
+            ? "1 change that was not saved"
+            : `${count + staged} changes that were not saved`
+      }
+      busy={saving}
+      onClose={onClose}
       title={
         <>
           <AccountMark name={name} size="sm" />
@@ -444,6 +454,7 @@ export function AccountPanel({
                 levels={privileges.levels}
                 roles={others}
                 editable={mayEdit}
+                onPending={setStaged}
                 onApplied={() => {
                   detail.refresh()
                   onChanged()
@@ -467,6 +478,6 @@ export function AccountPanel({
           onClose={() => setPassword(false)}
         />
       )}
-    </SidePanel>
+    </AccountSheet>
   )
 }

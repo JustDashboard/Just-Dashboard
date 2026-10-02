@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Archive,
@@ -54,9 +54,11 @@ import {
   holdsWords,
   keptBytes,
   lastBackup,
+  nameParts,
   originWord,
   outcomesLabel,
   scheduledDump,
+  summaryWords,
   tookWords,
   transferKind,
   transferOutcomes,
@@ -66,11 +68,16 @@ import { DumpFacts, RestoreDump } from "@/components/database/ops/backups-restor
 import { TakeDump } from "@/components/database/ops/backups-take"
 import type { DbBackupFile, DbBackups } from "@/components/database/ops/backups-types"
 import { UploadDump } from "@/components/database/ops/backups-upload"
+import { useAddressStep } from "@/components/database/ops/settings-step"
+import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
 
 /** The width of the list itself from which a dump is a row of a table rather than a block of lines. */
-const TABLE_FROM = 760
+const TABLE_FROM = 600
+
+/** The key of the address that names the transfer on screen. */
+const JOB_KEY = ["job"] as const
 
 /** The width from which the page's three commands stand beside the panel's title. */
 const COMMANDS_FROM = 600
@@ -103,6 +110,11 @@ export function Backups() {
   const [busy, setBusy] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [frame, width] = useColumnWidth<HTMLDivElement>()
+  const step = useAddressStep("backups", JOB_KEY)
+  const command = useRef<HTMLButtonElement>(null)
+  // The dialogs of this page are opened by state: this hands the keyboard
+  // back to the button or the row that opened one.
+  useFocusReturn()
 
   // Every thirty seconds, and every two while a transfer runs: a dump in
   // flight is not in the list, and the list is where its end shows.
@@ -169,7 +181,7 @@ export function Backups() {
     },
     [refreshBackups, refreshJobs, check, name],
   )
-  const transfer = useTransferJob(watchedId, live, onEnd)
+  const transfer = useTransferJob(watchedId, prefix, live, onEnd)
 
   const watch = (job: Job | string) => {
     const jobId = typeof job === "string" ? job : job.id
@@ -181,8 +193,19 @@ export function Backups() {
   }
   const dismiss = () => {
     if (watchedId) setDismissed((held) => [...held, watchedId])
-    select({ job: null })
+    step.close()
+    // The console goes, and its Dismiss with it: the keyboard is put on the
+    // page's command, or on the list where the role has none.
+    requestAnimationFrame(() => {
+      const next = command.current && !command.current.disabled ? command.current : null
+      ;(next ?? document.querySelector<HTMLElement>("[data-dumps]"))?.focus({
+        preventScroll: true,
+      })
+    })
   }
+  // A transfer opened from the recent ones is a step the reader took; with
+  // one already on screen it takes that one's place.
+  const openJob = (jobId: string) => (named ? select({ job: jobId }) : step.open({ job: jobId }))
 
   const data = backups.data
   const files = useMemo(() => data?.files ?? [], [data])
@@ -330,6 +353,7 @@ export function Backups() {
       )}
       {mayDump && (
         <Button
+          ref={command}
           size="sm"
           disabled={!idle || !answering || !data}
           onClick={() => setAsking({ kind: "take" })}
@@ -362,14 +386,22 @@ export function Backups() {
       )}
       {transfer.missing && named && (
         <FormNote role="status">
-          The server no longer keeps the output of that operation: it remembers its last fifty.{" "}
+          No dump, restore or copy of {conn.name} is kept under that id: the server remembers its
+          last fifty operations, and shows a database only its own.{" "}
           <button type="button" className="rounded-sm underline focus-ring" onClick={dismiss}>
             Dismiss
           </button>
         </FormNote>
       )}
 
-      <Panel plain aria-label="Dumps" ref={frame}>
+      <Panel
+        plain
+        aria-label="Dumps"
+        ref={frame}
+        data-dumps=""
+        tabIndex={-1}
+        className="outline-none"
+      >
         <PanelHeader
           title={
             <span className="flex items-baseline gap-2">
@@ -413,11 +445,7 @@ export function Backups() {
                 or copied from this page.
               </FormNote>
             )}
-            <RecentTransfers
-              jobs={jobs.data ?? []}
-              current={watchedId}
-              onOpen={(jobId) => select({ job: jobId })}
-            />
+            <RecentTransfers jobs={jobs.data ?? []} current={watchedId} onOpen={openJob} />
             {files.length === 0 ? (
               <EmptyState
                 mark={<EngineMark engine={engine} size="md" />}
@@ -438,15 +466,16 @@ export function Backups() {
                 }
               />
             ) : width >= TABLE_FROM ? (
+              // Five columns of two lines each: what a dump holds over the tool
+              // that wrote it, its size over how long it took. The name keeps
+              // the width that leaves.
               <PanelBody flush className="group-data-[plain]/panel:-mx-4">
                 <Table className="table-fixed">
                   <colgroup>
                     <col className="w-32" />
                     <col />
-                    <col className="w-44" />
-                    <col className="w-32" />
-                    <col className="w-20" />
-                    <col className="w-24" />
+                    <col className="w-[26%]" />
+                    <col className="w-28" />
                     <col className="w-28" />
                   </colgroup>
                   <TableHeader>
@@ -454,9 +483,7 @@ export function Backups() {
                       <TableHead>Taken</TableHead>
                       <TableHead className="px-2">Dump</TableHead>
                       <TableHead className="px-2">Holds</TableHead>
-                      <TableHead className="px-2">Written by</TableHead>
                       <TableHead className="px-2 text-right">Size</TableHead>
-                      <TableHead className="px-2 text-right">Took</TableHead>
                       <TableHead className="px-2">
                         <span className="sr-only">Actions</span>
                       </TableHead>
@@ -478,22 +505,19 @@ export function Backups() {
                         <TableCell className="px-2 py-2 align-top">
                           <DumpName file={file} />
                         </TableCell>
-                        <TableCell className="px-2 py-2 align-top whitespace-normal">
-                          <DumpHolds file={file} />
-                        </TableCell>
                         <TableCell className="px-2 py-2 align-top">
-                          <span className="block truncate">{file.tool ?? file.format}</span>
-                          {file.toolVersion && (
-                            <span className="numeric block truncate text-hint text-muted-foreground">
-                              {file.toolVersion}
-                            </span>
-                          )}
+                          <DumpHolds file={file} />
+                          <span className="block truncate text-hint text-muted-foreground">
+                            {toolWords(file)}
+                          </span>
                         </TableCell>
                         <TableCell className="numeric px-2 py-2 text-right align-top">
-                          {bytes(file.size)}
-                        </TableCell>
-                        <TableCell className="numeric px-2 py-2 text-right align-top text-muted-foreground">
-                          {tookWords(file.durationMs) || "—"}
+                          <span className="block">{bytes(file.size)}</span>
+                          {tookWords(file.durationMs) && (
+                            <span className="block truncate text-hint text-muted-foreground">
+                              {tookWords(file.durationMs)}
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell className="px-2 py-1 align-top">
                           <VerbActions dim verbs={verbsFor(file)} className="justify-end" />
@@ -504,22 +528,34 @@ export function Backups() {
                 </Table>
               </PanelBody>
             ) : (
+              // Too narrow for columns: a dump is its name with its commands,
+              // and one line of everything the columns said.
               <ul className="-mx-4 divide-y divide-hairline border-y border-hairline">
                 {files.map((file) => (
-                  <li key={file.file} className="group space-y-1.5 px-4 py-2.5 text-xs">
-                    <div className="flex min-w-0 items-start gap-2">
+                  <li key={file.file} className="group px-4 py-2 text-xs">
+                    <div className="flex min-w-0 items-center gap-2">
                       <div className="min-w-0 flex-1">
-                        <DumpName file={file} />
+                        <DumpName file={file} bare />
                       </div>
                       <VerbActions dim verbs={verbsFor(file)} />
                     </div>
-                    <p className="numeric flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
+                    <p className="numeric flex flex-wrap gap-x-2.5 gap-y-0.5 text-hint text-muted-foreground">
                       <span title={timestamp(file.takenAt)}>{relativeTime(file.takenAt)}</span>
                       <span>{bytes(file.size)}</span>
-                      <span>{file.tool ?? file.format}</span>
+                      {holdsWords(file, engine.nouns, engine.can("dumpDatabases")) && (
+                        <span className="text-foreground">
+                          {holdsWords(file, engine.nouns, engine.can("dumpDatabases"))}
+                        </span>
+                      )}
+                      {summaryWords(file, engine.can("dumpDatabases")) && (
+                        <span>{summaryWords(file, engine.can("dumpDatabases"))}</span>
+                      )}
+                      <span>{toolWords(file)}</span>
                       {tookWords(file.durationMs) && <span>{tookWords(file.durationMs)}</span>}
                     </p>
-                    <DumpHolds file={file} />
+                    {file.note && (
+                      <p className="truncate pt-0.5 text-hint text-muted-foreground">{file.note}</p>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -626,20 +662,48 @@ function RecentTransfers({
   )
 }
 
-/** A dump's own name, where it came from when that is worth saying, and its note. */
-function DumpName({ file }: { file: DbBackupFile }) {
+/** The tool that wrote a dump, with its version where the dump says it. */
+function toolWords(file: DbBackupFile): string {
+  return [file.tool ?? file.format, file.toolVersion].filter(Boolean).join(" ")
+}
+
+/**
+ * A dump's own name, where it came from when that is worth saying, and its
+ * note. A name too long for its column is cut in the middle: the end of it —
+ * when it was taken, what kind of file it is — is what tells dumps apart.
+ */
+function DumpName({ file, bare }: { file: DbBackupFile; bare?: boolean }) {
   const origin = originWord(file.origin)
-  return (
-    <>
+  const { head, tail } = nameParts(file.file)
+  const name = (
+    <span className="flex min-w-0 font-mono" title={file.file}>
+      <span className="min-w-0 truncate">{head}</span>
+      {tail && <span className="shrink-0">{tail}</span>}
+    </span>
+  )
+  // Too narrow for columns, the name shares its line with the row's commands
+  // and the note has a line of its own under the figures.
+  if (bare) {
+    return (
       <span className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 truncate font-mono" title={file.file}>
-          {file.file}
-        </span>
+        {name}
         {origin && <Tag>{origin}</Tag>}
       </span>
-      {file.note && (
-        <span className="block truncate text-hint text-muted-foreground" title={file.note}>
-          {file.note}
+    )
+  }
+  // In a column the name has the whole width: where the dump came from is
+  // said on the line under it, before its note.
+  return (
+    <>
+      {name}
+      {(origin || file.note) && (
+        <span className="flex min-w-0 items-center gap-2">
+          {origin && <Tag className="shrink-0">{origin}</Tag>}
+          {file.note && (
+            <span className="min-w-0 truncate text-hint text-muted-foreground" title={file.note}>
+              {file.note}
+            </span>
+          )}
         </span>
       )}
     </>
@@ -649,17 +713,15 @@ function DumpName({ file }: { file: DbBackupFile }) {
 /** What a dump holds: what it was asked for, and what the tool said it wrote. */
 function DumpHolds({ file }: { file: DbBackupFile }) {
   const { engine } = useDatabase()
-  const contents = holdsWords(file, engine.nouns)
-  if (!contents && !file.summary) {
-    return <span className="text-muted-foreground">Not described</span>
+  const contents = holdsWords(file, engine.nouns, engine.can("dumpDatabases"))
+  const summary = summaryWords(file, engine.can("dumpDatabases"))
+  if (!contents && !summary) {
+    return <span className="block truncate text-muted-foreground">Not described</span>
   }
   return (
-    <>
-      {contents && <span className="block">{contents}</span>}
-      {file.summary && (
-        <span className="block text-hint text-muted-foreground">{file.summary}</span>
-      )}
-    </>
+    <span className="block truncate" title={[contents, summary].filter(Boolean).join(" · ")}>
+      {[contents, summary].filter(Boolean).join(" · ")}
+    </span>
   )
 }
 

@@ -322,6 +322,9 @@ describe("the requests a set of presses becomes", () => {
       privileges: ["UPDATE"],
     })
     expect(planned[0].about).toBe("Revoke on table public.customers")
+    // The act and the name apart: the name is never set in the label's small caps.
+    expect(planned[0].act).toBe("Revoke on table")
+    expect(planned[0].on).toBe("public.customers")
   })
 
   test("every privilege of the level at once is asked for by its own word", () => {

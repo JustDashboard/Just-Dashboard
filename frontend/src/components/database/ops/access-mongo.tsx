@@ -23,7 +23,6 @@ import {
 } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody } from "@/components/panel"
-import { SidePanel } from "@/components/side-panel"
 import { LoadingRows, Notice } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
@@ -55,6 +54,7 @@ import {
   roleWord,
   sameRole,
 } from "@/components/database/ops/access-model"
+import { AccountSheet, useOpenAccount } from "@/components/database/ops/access-panel"
 import {
   AccountMark,
   AccountName,
@@ -69,6 +69,7 @@ import type {
 } from "@/components/database/ops/access-types"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
+import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 const BESIDE_FROM = 640
@@ -137,9 +138,11 @@ function userTags(user: MongoUser) {
  * and the page says that rather than "empty".
  */
 export function MongoAccess() {
-  const { id, conn, readOnly, status, param, select, goto } = useDatabase()
+  const { id, conn, readOnly, status, param, goto } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
+  const account = useOpenAccount()
+  useFocusReturn()
   const down = isDown(status.state)
   const view = param("view") === "roles" ? "roles" : "users"
   const opened = param("account")
@@ -330,7 +333,7 @@ export function MongoAccess() {
                   return (
                     <ChoiceRow
                       key={`${user.db}.${user.user}`}
-                      onSelect={() => select({ account: user.user, host: user.db })}
+                      onSelect={() => account.open(user.user, user.db)}
                       verb={`Open ${user.user} of ${user.db}`}
                       leading={<AccountMark name={user.user} />}
                       title={<AccountName name={user.user} host={user.db} />}
@@ -375,8 +378,8 @@ export function MongoAccess() {
           mayDrop={mayDrop}
           onChanged={users.refresh}
           onPassword={setPassword}
-          onDrop={(user) => confirm(dropRequest(user, () => select({ account: null, host: null })))}
-          onClose={() => select({ account: null, host: null })}
+          onDrop={(user) => confirm(dropRequest(user, account.close))}
+          onClose={account.close}
         />
       )}
       {creating && (
@@ -552,11 +555,12 @@ function UserPanel({
     : []
 
   return (
-    <SidePanel
-      open
-      onOpenChange={(open) => !open && onClose()}
+    <AccountSheet
       width="md"
-      initialFocus="body"
+      // A role is granted or taken at the press: nothing is staged here, and
+      // the sheet only waits for a change that is on its way.
+      busy={busy !== undefined}
+      onClose={onClose}
       title={
         <>
           <AccountMark name={name} size="sm" />
@@ -632,7 +636,7 @@ function UserPanel({
           </FormSection>
         </div>
       )}
-    </SidePanel>
+    </AccountSheet>
   )
 }
 
@@ -687,8 +691,10 @@ function NewUser({
         size="lg"
         dirty
         busy={false}
-        cancelLabel="Close"
+        cancelLabel={null}
         discardQuestion="Close? The password is not shown again."
+        stayLabel="Go back"
+        discardLabel="Close"
         command="I have saved it"
         onRun={onClose}
         onClose={onClose}
@@ -835,8 +841,10 @@ function UserPassword({
         size="lg"
         dirty
         busy={false}
-        cancelLabel="Close"
+        cancelLabel={null}
         discardQuestion="Close? The password is not shown again."
+        stayLabel="Go back"
+        discardLabel="Close"
         command="I have saved it"
         onRun={onClose}
         onClose={onClose}

@@ -11,7 +11,6 @@ import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FormFact, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { SidePanel } from "@/components/side-panel"
 import { Notice } from "@/components/state"
 import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
 import { ChipStrip, FilterChip } from "@/components/tabs"
@@ -40,6 +39,7 @@ import {
   ruleList,
   type AclDraft,
 } from "@/components/database/ops/access-model"
+import { AccountSheet, useOpenAccount } from "@/components/database/ops/access-panel"
 import {
   AccountMark,
   AccountName,
@@ -49,6 +49,7 @@ import {
 import type { RedisACL, RedisACLChange, RedisACLUser } from "@/components/database/ops/access-types"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
+import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 type Show = "" | "enabled" | "unrestricted" | "open"
@@ -86,6 +87,8 @@ export function RedisAccess() {
   const { id, engine, readOnly, status, param, select } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
+  const account = useOpenAccount()
+  useFocusReturn()
   const down = isDown(status.state)
   const [creating, setCreating] = useState(false)
   const [frame, width] = useColumnWidth<HTMLDivElement>()
@@ -273,7 +276,7 @@ export function RedisAccess() {
                   return (
                     <ChoiceRow
                       key={user.name}
-                      onSelect={() => select({ account: user.name })}
+                      onSelect={() => account.open(user.name)}
                       verb={`Open ${user.name}`}
                       leading={<AccountMark name={user.name} />}
                       title={<AccountName name={user.name} />}
@@ -311,8 +314,8 @@ export function RedisAccess() {
           mayEdit={mayEdit}
           mayDelete={mayDelete}
           onChanged={acl.refresh}
-          onDelete={(user) => confirm(dropRequest(user, () => select({ account: null })))}
-          onClose={() => select({ account: null })}
+          onDelete={(user) => confirm(dropRequest(user, account.close))}
+          onClose={account.close}
         />
       )}
       {creating && (
@@ -509,11 +512,11 @@ function UserPanel({
       : []
 
   return (
-    <SidePanel
-      open
-      onOpenChange={(open) => !open && onClose()}
+    <AccountSheet
       width="md"
-      initialFocus="body"
+      lose={changed ? "the edits to this user\u2019s rule" : undefined}
+      busy={saving}
+      onClose={onClose}
       title={
         <>
           <AccountMark name={name} size="sm" />
@@ -617,7 +620,7 @@ function UserPanel({
           </FormSection>
         </div>
       )}
-    </SidePanel>
+    </AccountSheet>
   )
 }
 
@@ -671,8 +674,10 @@ function NewUser({
         size="lg"
         dirty
         busy={false}
-        cancelLabel="Close"
+        cancelLabel={null}
         discardQuestion="Close? The password is not shown again."
+        stayLabel="Go back"
+        discardLabel="Close"
         command="I have saved it"
         onRun={onClose}
         onClose={onClose}

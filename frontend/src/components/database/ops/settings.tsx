@@ -8,8 +8,14 @@ import { ConnectionSection } from "@/components/database/ops/settings-connection
 import { DangerSection } from "@/components/database/ops/settings-danger"
 import { ServerDatabasesSection } from "@/components/database/ops/settings-databases"
 import { ExtensionsSection } from "@/components/database/ops/settings-extensions"
+import {
+  SectionJump,
+  useSectionAnchor,
+  type SettingsSection,
+} from "@/components/database/ops/settings-nav"
 import { ParametersSection } from "@/components/database/ops/settings-parameters"
 import { ReachabilitySection } from "@/components/database/ops/settings-reach"
+import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /**
@@ -30,24 +36,52 @@ import { useDatabase } from "@/components/database/shell/database-context"
  *
  * Every section has an anchor (`#connection`, `#reachability`, `#parameters`,
  * `#extensions`, `#databases`, `#danger`), and `?q=` narrows the parameters,
- * so a link from another page can land on one of them.
+ * so a link from another page lands on one of them. The same anchors are the
+ * strip at the top of the page: it is long, and its last section is the one a
+ * reader most often comes for.
  */
 export function Settings() {
-  const { engine } = useDatabase()
+  const { engine, param } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
+  // Every dialog here is opened by state: this hands the keyboard back to
+  // the control that opened one.
+  useFocusReturn()
+  useSectionAnchor(param("q") || param("only") ? "parameters" : "")
   const server = engine.can("server")
+  const keyvalue = engine.kind === "keyvalue"
+  // A document database answers the parameters route with the counters of
+  // its status command: readings, which are Performance's to draw.
+  const parameters = engine.can("settings") && engine.kind !== "document"
+  const extensions = engine.can("extensions") || keyvalue
+  const danger = can("system.admin") && can("destructive")
+  const sections: SettingsSection[] = [
+    { id: "connection", title: "Connection" },
+    ...(server ? [{ id: "reachability", title: "Reachability" }] : []),
+    ...(parameters
+      ? [{ id: "parameters", title: engine.can("fileBased") ? "Parameters" : "Server parameters" }]
+      : []),
+    ...(extensions ? [{ id: "extensions", title: keyvalue ? "Modules" : "Extensions" }] : []),
+    ...(server
+      ? [
+          {
+            id: "databases",
+            title: engine.can("logicalDatabases") ? "Numbered databases" : "Databases",
+          },
+        ]
+      : []),
+    ...(danger ? [{ id: "danger", title: "Danger zone" }] : []),
+  ]
   return (
     <SectionFrame section="settings">
+      {sections.length > 2 && <SectionJump sections={sections} />}
       <FormSections railFrom="xl">
         <ConnectionSection />
         {server && <ReachabilitySection confirm={confirm} />}
-        {engine.can("settings") && <ParametersSection />}
-        {(engine.can("extensions") || engine.kind === "keyvalue") && (
-          <ExtensionsSection confirm={confirm} />
-        )}
+        {parameters && <ParametersSection />}
+        {extensions && <ExtensionsSection confirm={confirm} />}
         {server && <ServerDatabasesSection />}
-        {can("system.admin") && can("destructive") && <DangerSection confirm={confirm} />}
+        {danger && <DangerSection confirm={confirm} />}
       </FormSections>
       {dialog}
     </SectionFrame>

@@ -93,10 +93,47 @@ export function contentsWords(
  * this page's options: its empty description is "not known", not "everything".
  */
 export function holdsWords(
-  file: Pick<DbBackupFile, "contents" | "origin">,
+  file: Pick<DbBackupFile, "contents" | "origin" | "database">,
   nouns: { object: string; objects: string },
+  /** The server numbers its databases: a dump is of some of those numbers. */
+  numbered = false,
 ): string {
-  return file.origin === "upload" ? "" : contentsWords(file.contents, nouns)
+  if (file.origin === "upload") return ""
+  if (numbered) {
+    // Which numbers a dump holds is what a restore of it writes into: said
+    // by number, never as "everything".
+    const numbers = (file.database ?? "").split(",").filter(Boolean)
+    if (numbers.length === 1) return `db ${numbers[0]}`
+    if (numbers.length > 1) return `${numbers.length} numbered databases`
+  }
+  return contentsWords(file.contents, nouns)
+}
+
+/**
+ * What the tool said it wrote, when that says something: "4 tables, 1054
+ * rows". A summary that only names the tool again ("written by pg_dump") is
+ * left out — the tool is already said beside it.
+ */
+export function summaryWords(
+  file: Pick<DbBackupFile, "summary" | "tool" | "format">,
+  /** The server numbers its databases: how many the dump holds is said as what it holds. */
+  numbered = false,
+): string {
+  const summary = (file.summary ?? "").trim()
+  if (!summary) return ""
+  const tool = (file.tool ?? file.format).toLowerCase()
+  if (summary.toLowerCase() === `written by ${tool}`) return ""
+  return numbered ? summary.replace(/ in \d+ databases?$/, "") : summary
+}
+
+/**
+ * A dump's name in two parts, so a narrow column can cut it in the middle:
+ * the end — the time it was taken and its extension, which is what tells two
+ * dumps apart — is always drawn, and the start gives way.
+ */
+export function nameParts(name: string, keep = 12): { head: string; tail: string } {
+  if (name.length <= keep + 8) return { head: name, tail: "" }
+  return { head: name.slice(0, -keep), tail: name.slice(-keep) }
 }
 
 /** Where a dump came from, when that is not the ordinary answer. */
@@ -237,6 +274,44 @@ export function newDatabaseProblem(
     return "That is the database this connection is on."
   }
   return undefined
+}
+
+/**
+ * Where a dump of a server that numbers its databases goes back to. Every key
+ * returns to the number it was dumped from, so a dump of several numbers is
+ * a restore into several — and the ones that are not the connection's own are
+ * what the reader has to be told about before anything runs.
+ */
+export function restoreReach(
+  file: Pick<DbBackupFile, "database">,
+  current: string,
+): {
+  /** The numbers the dump holds, as it lists them. Empty when it does not say. */
+  numbers: string[]
+  /** Those of them that are not the database this connection is on. */
+  others: string[]
+  /** Where it goes, in words: "db 9", "databases 1, 2, 9". */
+  here: string
+  /** More than one database, or an unknown number of them: the verb after `here` is plural. */
+  several: boolean
+} {
+  const own = Number(current || "0")
+  const numbers = (file.database ?? "")
+    .split(",")
+    .map((one) => one.trim())
+    .filter(Boolean)
+  const others = numbers.filter((one) => Number(one) !== own)
+  return {
+    numbers,
+    others,
+    here:
+      numbers.length > 1
+        ? `databases ${numbers.join(", ")}`
+        : numbers.length === 1
+          ? `db ${numbers[0]}`
+          : "the numbered databases its keys came from",
+    several: numbers.length !== 1,
+  }
 }
 
 /**

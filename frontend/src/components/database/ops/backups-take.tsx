@@ -5,6 +5,7 @@ import { Archive } from "@/components/icons"
 import { ApiError, errorMessage, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import type { Job } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { Segments } from "@/components/deploy/settings/segments"
 import { Field, FormFact, FormNote } from "@/components/form"
@@ -86,6 +87,12 @@ function useNumberedDatabases(enabled: boolean) {
  * them, how it is compressed, and — on a server that numbers its databases —
  * which of them.
  *
+ * There it opens on the connection's own number and nothing else. The other
+ * numbers of the server are other tenants' keys as often as not, and a dump
+ * that holds them is one a restore writes back over them: taking every
+ * numbered database is a press the reader makes, never what an untouched
+ * form sends.
+ *
  * The dump itself is a job on the server. The dialog only begins it: the page
  * underneath shows it running.
  */
@@ -109,7 +116,10 @@ export function TakeDump({
   const [typed, setTyped] = useState("")
   const [filter, setFilter] = useState("")
   const [compression, setCompression] = useState<Compression>("default")
-  const [numbered, setNumbered] = useState<number[]>([])
+  // The numbered database this connection is on: the one a dump is of unless told otherwise.
+  const own = Number(conn.database || "0")
+  const [numbered, setNumbered] = useState<number[]>([own])
+  const [every, setEvery] = useState(false)
   const [note, setNote] = useState("")
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string>()
@@ -134,7 +144,18 @@ export function TakeDump({
         .split(/[\n,]+/)
         .map((name) => name.trim())
         .filter(Boolean)
-  const holding = (databases.data ?? []).filter((one) => (one.size ?? 0) > 0)
+  // The connection's own number first, then the others that hold a key.
+  const holding = (databases.data ?? [])
+    .filter((one) => (one.size ?? 0) > 0 || Number(one.name) === own)
+    .sort(
+      (a, b) =>
+        Number(Number(b.name) === own) - Number(Number(a.name) === own) ||
+        Number(a.name) - Number(b.name),
+    )
+  const beyond = every
+    ? holding.filter((one) => Number(one.name) !== own).length
+    : numbered.filter((number) => number !== own).length
+  const noNumber = options.databases && !every && numbered.length === 0
 
   const noteBytes = new TextEncoder().encode(note).length
   const incomplete = mode !== "all" && chosen.length === 0
@@ -142,7 +163,9 @@ export function TakeDump({
     scope !== "all" ||
     mode !== "all" ||
     compression !== "default" ||
-    numbered.length > 0 ||
+    every ||
+    numbered.length !== 1 ||
+    numbered[0] !== own ||
     note.trim() !== ""
 
   const start = async () => {
@@ -153,7 +176,8 @@ export function TakeDump({
       ...(scope === "data" ? { dataOnly: true } : {}),
       ...tableChoice(mode, chosen),
       ...(compression !== "default" ? { compression } : {}),
-      ...(numbered.length > 0 ? { databases: [...numbered].sort((a, b) => a - b) } : {}),
+      // With none named the server takes every numbered database that holds a key.
+      ...(options.databases && !every ? { databases: [...numbered].sort((a, b) => a - b) } : {}),
       ...(note.trim() ? { note: note.trim() } : {}),
     }
     try {
@@ -187,9 +211,9 @@ export function TakeDump({
             {engine.label}
             {summary?.versionNumber ? ` ${summary.versionNumber}` : ""}
           </FormFact>
-          {conn.database && !options.databases && (
+          {(conn.database || options.databases) && (
             <FormFact label={engine.databaseField} mono>
-              {conn.database}
+              {options.databases ? own : conn.database}
             </FormFact>
           )}
         </>,
@@ -200,7 +224,7 @@ export function TakeDump({
       note="It runs on the server; this page shows it."
       command="Back up now"
       commandIcon={Archive}
-      disabled={incomplete || noteBytes > NOTE_BYTES}
+      disabled={incomplete || noNumber || noteBytes > NOTE_BYTES}
       onRun={() => void start()}
       onClose={onClose}
     >
@@ -317,43 +341,51 @@ export function TakeDump({
         <Field
           label="Which numbered databases"
           hint={
-            numbered.length === 0
-              ? "Every numbered database that holds a key is in the dump."
-              : `Only ${plural(numbered.length, "database")} of this server.`
+            noNumber
+              ? undefined
+              : beyond === 0
+                ? `Only db ${own}, the one this connection is on.`
+                : every
+                  ? `Every numbered database of the server that holds a key: ${plural(beyond, "of them is", "of them are")} not this connection\u2019s.`
+                  : `${plural(numbered.length, "database")} of this server: ${plural(beyond, "of them is", "of them are")} not this connection\u2019s.`
           }
+          error={noNumber ? "Press at least one numbered database." : ""}
         >
           {databases.data ? (
-            holding.length === 0 ? (
-              <FormNote>None of its numbered databases holds a key yet.</FormNote>
-            ) : (
-              <ChipStrip role="group" aria-label="Numbered databases that hold keys">
-                {holding.map((one) => {
-                  const number = Number(one.name)
-                  const on = numbered.includes(number)
-                  return (
-                    <FilterChip
-                      key={one.name}
-                      selected={on}
-                      className="font-mono"
-                      onClick={() =>
-                        setNumbered((held) =>
-                          on ? held.filter((n) => n !== number) : [...held, number],
-                        )
-                      }
-                    >
-                      db {one.name}
-                      <span className="numeric text-micro opacity-60">
-                        {(one.size ?? 0).toLocaleString()}
-                      </span>
-                    </FilterChip>
-                  )
-                })}
-              </ChipStrip>
-            )
+            <ChipStrip role="group" aria-label="Numbered databases in the dump">
+              {holding.map((one) => {
+                const number = Number(one.name)
+                const on = every ? (one.size ?? 0) > 0 : numbered.includes(number)
+                return (
+                  <FilterChip
+                    key={one.name}
+                    selected={on}
+                    disabled={every}
+                    className={cn("font-mono", every && "opacity-60")}
+                    onClick={() =>
+                      setNumbered((held) =>
+                        on ? held.filter((n) => n !== number) : [...held, number],
+                      )
+                    }
+                  >
+                    db {one.name}
+                    <span className="numeric text-micro opacity-60">
+                      {(one.size ?? 0).toLocaleString()}
+                    </span>
+                    {number === own && <span className="sr-only">, this connection</span>}
+                  </FilterChip>
+                )
+              })}
+              {holding.length > 1 && (
+                <FilterChip selected={every} onClick={() => setEvery(!every)}>
+                  Every database
+                </FilterChip>
+              )}
+            </ChipStrip>
           ) : databases.error ? (
             <FormNote>
-              The numbered databases could not be listed ({errorMessage(databases.error)}); the dump
-              takes every one that holds a key.
+              The other numbered databases could not be listed ({errorMessage(databases.error)}):
+              the dump is of db {own}.
             </FormNote>
           ) : (
             <Skeleton className="h-7 w-48" aria-hidden />

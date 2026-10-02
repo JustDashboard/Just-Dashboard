@@ -24,6 +24,7 @@ import {
   firewallWords,
   reachRefusal,
 } from "@/components/database/ops/settings-model"
+import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /**
@@ -150,6 +151,7 @@ export function ReachabilitySection({ confirm }: { confirm: (request: ConfirmReq
     <FormSection
       aside
       id="reachability"
+      className={UNDER_STRIP}
       title="Reachability"
       hint={
         <span className="flex">

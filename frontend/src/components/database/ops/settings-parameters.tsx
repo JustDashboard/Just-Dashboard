@@ -5,6 +5,7 @@ import { Pencil } from "@/components/icons"
 import { errorMessage, put } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { Segments } from "@/components/deploy/settings/segments"
@@ -19,7 +20,7 @@ import {
   OptionRow,
   Statement,
 } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
+import { ROW_REVEAL } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
 import { LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -48,6 +49,7 @@ import {
   type RedisConfig,
   type RedisConfigChange,
 } from "@/components/database/ops/settings-parameters-model"
+import { UNDER_STRIP } from "@/components/database/ops/settings-nav"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** Where the list came from, which decides how one of its parameters is set. */
@@ -66,7 +68,19 @@ type Listed = {
 }
 
 /** What the last change did, kept on the page beside the statements that ran. */
-type Done = { name: string; statements: string[]; words: string; tone: "default" | "warning" }
+type Done = {
+  name: string
+  statements: string[]
+  words: string
+  tone: "default" | "warning"
+  /**
+   * What it was before, on a server with no reset: the change can be put
+   * back from where it is reported. Absent for a secret, which was never read.
+   */
+  previous?: string
+  /** A key–value change that was also written to the configuration file. */
+  rewrite?: boolean
+}
 
 /** How many rows a filtered list draws before the rest wait behind a press. */
 const SHOWN = 120
@@ -84,14 +98,18 @@ const SHOWN = 120
  *
  * A SQL engine's list is `GET /settings`; a key–value server's is its own
  * `GET /redis/config`, whose values it sets without types or defaults. A
- * document database answers `/settings` with its status figures, which is
- * what the section is called there.
+ * document database answers `/settings` with the counters of its status
+ * command — readings, which belong to Performance — so the page does not draw
+ * this section for one.
+ *
+ * Where the server publishes no default (its configuration, or an engine
+ * whose list carries none) there is nothing to reset to: the change just made
+ * can be put back to what it was, from the line that reports it.
  */
 export function ParametersSection() {
   const { id, conn, engine, readOnly, status, param, select } = useDatabase()
   const { can } = useAuth()
   const keyvalue = engine.kind === "keyvalue"
-  const figures = engine.kind === "document"
   const down = isDown(status.state)
   const [search, setSearch] = useState(() => param("q"))
   const only = (param("only") || "") as ParameterFilter
@@ -99,6 +117,7 @@ export function ParametersSection() {
   const [opened, setOpened] = useState<string[]>([])
   const [editing, setEditing] = useState<Parameter>()
   const [done, setDone] = useState<Done>()
+  const [undoing, setUndoing] = useState(false)
 
   const list = usePoll<Listed>(
     async (signal) => {
@@ -139,16 +158,28 @@ export function ParametersSection() {
   )
 
   // The search is the field's own text; the address follows it a moment
-  // later, so a link to this page can name a parameter.
+  // later, so a link to this page can name a parameter. The writer is held in
+  // a ref: it is a new function whenever the address moves, and a timer torn
+  // down for that would never write what was typed.
   const written = useRef(search)
+  const write = useRef(select)
+  useEffect(() => {
+    write.current = select
+  })
   useEffect(() => {
     if (written.current === search) return
     const timer = setTimeout(() => {
       written.current = search
-      select({ q: search.trim() || null })
+      write.current({ q: search.trim() || null })
     }, 400)
     return () => clearTimeout(timer)
-  }, [search, select])
+  }, [search])
+  // A chip writes the search with it, in one change: pressed inside those
+  // 400 ms it would otherwise leave the address on the text before.
+  const narrow = (next: ParameterFilter) => {
+    written.current = search
+    select({ only: next || null, q: search.trim() || null })
+  }
 
   const data = list.data
   const parameters = useMemo(() => data?.parameters ?? [], [data])
@@ -171,18 +202,61 @@ export function ParametersSection() {
     (data?.source === "settings" || engine.can("settingsWrite"))
   const editable = (parameter: Parameter) => mayEdit && parameter.editable && !parameter.redacted
 
+  // A list with no default and no row marked as changed is one the server
+  // cannot reset: its changes are put back instead.
+  const resets =
+    data?.source === "settings" &&
+    parameters.some((one) => one.changed || one.default !== undefined)
+
   // A file has no server: its parameters are the file's own.
-  const title = figures
-    ? "Server status"
-    : engine.can("fileBased")
-      ? "Parameters"
-      : "Server parameters"
-  const noun = figures ? "figure" : "parameter"
+  const title = engine.can("fileBased") ? "Parameters" : "Server parameters"
+  const noun = "parameter"
+
+  const putBack = async (change: Done) => {
+    if (change.previous === undefined || !data) return
+    setUndoing(true)
+    try {
+      if (data.source === "config") {
+        const answer = await put<RedisConfigChange>(`/databases/${id}/redis/config`, {
+          name: change.name,
+          value: change.previous,
+          ...(change.rewrite ? { rewrite: true } : {}),
+        })
+        setDone({
+          name: change.name,
+          statements: [
+            `CONFIG SET ${change.name} ${change.previous}`,
+            ...(answer.rewritten ? ["CONFIG REWRITE"] : []),
+          ],
+          words: `Put back to ${change.previous}.`,
+          tone: "default",
+        })
+      } else {
+        const answer = await put<DbSettingChange>(`/databases/${id}/settings`, {
+          name: change.name,
+          value: change.previous,
+        })
+        setDone({
+          name: change.name,
+          statements: answer.statements,
+          words: `Put back to ${answer.value}. ${changeWords(answer)}`,
+          tone: answer.restartRequired ? "warning" : "default",
+        })
+      }
+      notify.success(`Put ${change.name} back`)
+      window.setTimeout(list.refresh, 1200)
+    } catch (err) {
+      notify.error(`Could not put ${change.name} back`, err)
+    } finally {
+      setUndoing(false)
+    }
+  }
 
   return (
     <FormSection
       aside
       id="parameters"
+      className={UNDER_STRIP}
       title={title}
       hint={
         data?.supported ? (
@@ -227,13 +301,23 @@ export function ParametersSection() {
           {done && (
             <div className="space-y-1.5" data-slot="parameter-change" role="status">
               {done.statements.length > 0 && (
-                <Statement
-                  label={`What ran for ${done.name}`}
-                  sql={done.statements.join(";\n")}
-                  placeholder=""
-                />
+                <Statement label="What ran" sql={done.statements.join(";\n")} placeholder="" />
               )}
-              <FormNote tone={done.tone}>{done.words}</FormNote>
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                <FormNote tone={done.tone} className="min-w-0 flex-1">
+                  <span className="font-mono text-foreground">{done.name}</span> — {done.words}
+                </FormNote>
+                {mayEdit && !resets && done.previous !== undefined && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    pending={undoing}
+                    onClick={() => void putBack(done)}
+                  >
+                    Put back <span className="font-mono">{done.previous || "empty"}</span>
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 
@@ -249,14 +333,14 @@ export function ParametersSection() {
             />
             {(changed > 0 || pending > 0 || only !== "") && (
               <ChipStrip role="group" aria-label={`Which ${noun}s are listed`}>
-                <FilterChip selected={only === ""} onClick={() => select({ only: null })}>
+                <FilterChip selected={only === ""} onClick={() => narrow("")}>
                   All
                   <ChipCount>{parameters.length}</ChipCount>
                 </FilterChip>
                 {(changed > 0 || only === "changed") && (
                   <FilterChip
                     selected={only === "changed"}
-                    onClick={() => select({ only: only === "changed" ? null : "changed" })}
+                    onClick={() => narrow(only === "changed" ? "" : "changed")}
                   >
                     Changed
                     <ChipCount>{changed}</ChipCount>
@@ -265,7 +349,7 @@ export function ParametersSection() {
                 {(pending > 0 || only === "pending") && (
                   <FilterChip
                     selected={only === "pending"}
-                    onClick={() => select({ only: only === "pending" ? null : "pending" })}
+                    onClick={() => narrow(only === "pending" ? "" : "pending")}
                   >
                     Waiting for a restart
                     <ChipCount>{pending}</ChipCount>
@@ -275,16 +359,10 @@ export function ParametersSection() {
             )}
           </div>
 
-          {!data.writable && !figures && (
+          {!data.writable && (
             <FormNote>
               {engine.label} lists its parameters here and takes changes to them in its own
               configuration.
-            </FormNote>
-          )}
-          {figures && (
-            <FormNote>
-              These are the figures {engine.label} reports about itself. Its parameters are set in
-              its configuration file, or with setParameter from the console.
             </FormNote>
           )}
           {data.source === "config" && mayEdit && !data.rewritable && (
@@ -306,6 +384,7 @@ export function ParametersSection() {
                     <GroupRule label={group.name} count={group.parameters.length} />
                     <ParameterRows
                       parameters={group.parameters}
+                      editing={mayEdit}
                       editable={editable}
                       onEdit={setEditing}
                     />
@@ -348,6 +427,7 @@ export function ParametersSection() {
                   {opened.includes(group.name) && (
                     <ParameterRows
                       parameters={group.parameters}
+                      editing={mayEdit}
                       editable={editable}
                       onEdit={setEditing}
                     />
@@ -363,6 +443,7 @@ export function ParametersSection() {
         <EditParameter
           parameter={editing}
           source={data.source}
+          resets={Boolean(resets)}
           rewritable={Boolean(data.rewritable)}
           onClose={() => setEditing(undefined)}
           onDone={(result) => {
@@ -378,13 +459,21 @@ export function ParametersSection() {
   )
 }
 
-/** One heading's parameters: name and what it means on the left, its value at the right. */
+/**
+ * One heading's parameters: name and what it means on the left, its value at
+ * the right. Where a parameter can be changed its value is the control — the
+ * whole of it is pressed, and a pencil appears beside it under the pointer —
+ * so a list of forty rows is forty values, not forty glyphs.
+ */
 function ParameterRows({
   parameters,
+  editing,
   editable,
   onEdit,
 }: {
   parameters: Parameter[]
+  /** The reader may change parameters here: every row keeps the pencil's place, so values line up. */
+  editing: boolean
   editable: (parameter: Parameter) => boolean
   onEdit: (parameter: Parameter) => void
 }) {
@@ -392,6 +481,16 @@ function ParameterRows({
     <ul className="divide-y divide-hairline">
       {parameters.map((parameter) => {
         const readable = readableValue(parameter)
+        const value = (
+          <>
+            <ParameterValue parameter={parameter} />
+            {readable && (
+              <span className="numeric block truncate text-hint text-muted-foreground">
+                {readable}
+              </span>
+            )}
+          </>
+        )
         return (
           <li
             key={parameter.name}
@@ -411,23 +510,25 @@ function ParameterRows({
                 </p>
               )}
             </div>
-            <div className="max-w-[45%] min-w-0 shrink-0 text-right">
-              <ParameterValue parameter={parameter} />
-              {readable && (
-                <p className="numeric truncate text-hint text-muted-foreground">{readable}</p>
-              )}
-            </div>
-            <div className="flex w-8 shrink-0 justify-end">
-              {editable(parameter) && (
-                <IconAction
-                  label={`Change ${parameter.name}`}
-                  className="-my-1.5"
-                  onClick={() => onEdit(parameter)}
-                >
-                  <Pencil />
-                </IconAction>
-              )}
-            </div>
+            {editable(parameter) ? (
+              <button
+                type="button"
+                aria-label={`Change ${parameter.name}`}
+                onClick={() => onEdit(parameter)}
+                className="-my-1 -mr-2 flex max-w-[48%] min-w-0 shrink-0 items-start gap-2 rounded-md px-2 py-1 text-right focus-ring transition-colors hover:bg-row-hover"
+              >
+                <span className="min-w-0">{value}</span>
+                <Pencil
+                  className={cn("mt-0.5 size-3.5 shrink-0 text-muted-foreground", ROW_REVEAL)}
+                />
+              </button>
+            ) : (
+              <div
+                className={cn("max-w-[45%] min-w-0 shrink-0 text-right", editing && "pr-[22px]")}
+              >
+                {value}
+              </div>
+            )}
           </li>
         )
       })}
@@ -438,23 +539,23 @@ function ParameterRows({
 /** A value as the server prints it: never empty where it is hidden, unset or blank. */
 function ParameterValue({ parameter }: { parameter: Parameter }) {
   if (parameter.redacted) {
-    return <p className="text-xs text-muted-foreground italic">hidden</p>
+    return <span className="block text-xs text-muted-foreground italic">hidden</span>
   }
   if (parameter.secret) {
     return (
-      <p className="text-xs text-muted-foreground italic">
+      <span className="block text-xs text-muted-foreground italic">
         {parameter.secret.set ? "set" : "not set"}
-      </p>
+      </span>
     )
   }
   if (parameter.value === "") {
-    return <p className="text-xs text-muted-foreground italic">empty</p>
+    return <span className="block text-xs text-muted-foreground italic">empty</span>
   }
   return (
-    <p className="truncate font-mono text-xs" title={parameter.value}>
+    <span className="block truncate font-mono text-xs" title={parameter.value}>
       {parameter.value}
       {parameter.unit && <span className="text-muted-foreground"> {parameter.unit}</span>}
-    </p>
+    </span>
   )
 }
 
@@ -468,12 +569,15 @@ function ParameterValue({ parameter }: { parameter: Parameter }) {
 function EditParameter({
   parameter,
   source,
+  resets,
   rewritable,
   onClose,
   onDone,
 }: {
   parameter: Parameter
   source: Source
+  /** The server can put a parameter back to a default it publishes. */
+  resets: boolean
   rewritable: boolean
   onClose: () => void
   onDone: (done: Done) => void
@@ -519,6 +623,8 @@ function EditParameter({
           ],
           words: [kept, answer.notice].filter(Boolean).join(" "),
           tone: answer.notice || answer.rewriteError ? "warning" : "default",
+          previous: parameter.secret ? undefined : parameter.value,
+          rewrite: answer.rewritten,
         })
         return
       }
@@ -536,6 +642,7 @@ function EditParameter({
         statements: answer.statements,
         words: changeWords(answer),
         tone: answer.restartRequired || !answer.persisted ? "warning" : "default",
+        previous: reset || parameter.redacted ? undefined : parameter.value,
       })
     } catch (err) {
       setRefusal(errorMessage(err))
@@ -672,6 +779,13 @@ function EditParameter({
       {source === "config" && !rewritable && (
         <FormNote>
           There is no configuration file to write it to: it lasts until the server restarts.
+        </FormNote>
+      )}
+      {!resets && (
+        <FormNote>
+          {engine.label} publishes no default for {source === "config" ? "its configuration" : "it"}
+          , so there is no reset. A change made here can be put back to what it was from the line it
+          leaves on the page.
         </FormNote>
       )}
     </TaskDialog>

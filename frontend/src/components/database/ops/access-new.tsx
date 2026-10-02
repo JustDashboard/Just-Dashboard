@@ -204,8 +204,10 @@ export function NewAccount({
         size="lg"
         dirty
         busy={false}
-        cancelLabel="Close"
+        cancelLabel={null}
         discardQuestion="Close? The password is not shown again."
+        stayLabel="Go back"
+        discardLabel="Close"
         command="I have saved it"
         onRun={onClose}
         onClose={onClose}
@@ -481,8 +483,10 @@ export function ChangePassword({
         size="lg"
         dirty
         busy={false}
-        cancelLabel="Close"
+        cancelLabel={null}
         discardQuestion="Close? The password is not shown again."
+        stayLabel="Go back"
+        discardLabel="Close"
         command="I have saved it"
         onRun={onClose}
         onClose={onClose}

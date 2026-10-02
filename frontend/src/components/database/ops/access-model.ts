@@ -378,8 +378,11 @@ export type Membership = { role: string; member: boolean }
 export type Planned = {
   action: "grant" | "revoke"
   body: DbPrivilegeRequest
-  /** What it is about, for the line above its statements. */
+  /** What it is about, in a sentence: for a refusal that names it. */
   about: string
+  /** The same in two parts — the act, and the object as the engine writes it. */
+  act: string
+  on: string
 }
 
 export type PlanOptions = {
@@ -390,13 +393,14 @@ export type PlanOptions = {
   future?: boolean
 }
 
-function objectWords(cell: Cell): string {
-  if (cell.level === "database") return `database ${cell.database ?? ""}`
-  if (cell.level === "schema") return `schema ${cell.schema ?? ""}`
+/** An object as a kind and its name: "table" and "public.orders". */
+function objectWords(cell: Cell): { kind: string; name: string } {
+  if (cell.level === "database") return { kind: "database", name: cell.database ?? "" }
+  if (cell.level === "schema") return { kind: "schema", name: cell.schema ?? "" }
   const scope = cell.schema ?? cell.database ?? ""
   const kind = cell.level === "sequence" ? "sequence" : "table"
-  if (!cell.table) return `every ${kind} in ${scope}`
-  return `${kind} ${scope ? `${scope}.` : ""}${cell.table}`
+  if (!cell.table) return { kind: `every ${kind} in`, name: scope }
+  return { kind, name: `${scope ? `${scope}.` : ""}${cell.table}` }
 }
 
 /**
@@ -480,9 +484,13 @@ export function plannedRequests(
       level !== undefined &&
       levelPrivileges(level).every((one) => privileges.includes(one))
     const future = options.future && level?.future && cell.table === ""
+    const object = objectWords(cell)
+    const act = `${action === "grant" ? "Grant on" : "Revoke on"} ${object.kind}`
     planned.push({
       action,
-      about: `${action === "grant" ? "Grant on" : "Revoke on"} ${objectWords(cell)}`,
+      about: `${act} ${object.name}`,
+      act,
+      on: object.name,
       body: {
         ...base,
         level: cell.level,
@@ -507,11 +515,12 @@ export function plannedRequests(
     send("grant", change.cell, change.grant)
   }
   for (const membership of memberships) {
+    const act = membership.member ? "Make it a member of" : "Take it out of"
     planned.push({
       action: membership.member ? "grant" : "revoke",
-      about: membership.member
-        ? `Make it a member of ${membership.role}`
-        : `Take it out of ${membership.role}`,
+      about: `${act} ${membership.role}`,
+      act,
+      on: membership.role,
       body: { ...base, level: "role", memberOf: membership.role },
     })
   }

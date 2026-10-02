@@ -37,6 +37,7 @@ import {
   type AccountShow,
 } from "@/components/database/ops/access-model"
 import { ChangePassword, NewAccount } from "@/components/database/ops/access-new"
+import { useOpenAccount } from "@/components/database/ops/access-panel"
 import { AccountMark, AccountName } from "@/components/database/ops/access-parts"
 import type {
   DbGrants,
@@ -45,6 +46,7 @@ import type {
   DbRoles,
 } from "@/components/database/ops/access-types"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
+import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 /** The width of the list from which an account's tags stand beside its name rather than under it. */
@@ -69,6 +71,10 @@ export function SqlAccess() {
   const { id, conn, engine, readOnly, status, param, select } = useDatabase()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
+  const account = useOpenAccount()
+  // The panel and every dialog here are opened by state: this hands the
+  // keyboard back to the row or the button that opened one.
+  useFocusReturn()
   const down = isDown(status.state)
   const [search, setSearch] = useState("")
   const [creating, setCreating] = useState(false)
@@ -139,9 +145,6 @@ export function SqlAccess() {
     roles.refresh()
     grants.refresh()
   }
-  const open = (role: DbRole | undefined) =>
-    select({ account: role?.name ?? null, host: role?.host ?? null })
-
   const verbsFor = (role: DbRole): Verb[] => {
     const own = isOwnAccount(role, conn)
     return [
@@ -245,7 +248,6 @@ export function SqlAccess() {
               {staleOf(roles) && <NotUpdating error={staleOf(roles)!} />}
               {readOnly && <ProtectedTag />}
               <SearchInput
-                dense
                 aria-label="Filter the accounts"
                 placeholder="Filter by name"
                 value={search}
@@ -329,7 +331,7 @@ export function SqlAccess() {
                   return (
                     <ChoiceRow
                       key={key}
-                      onSelect={() => open(role)}
+                      onSelect={() => account.open(role.name, role.host)}
                       verb={`Open ${key}`}
                       leading={<AccountMark name={role.name} />}
                       title={<AccountName name={role.name} host={role.host} />}
@@ -372,7 +374,7 @@ export function SqlAccess() {
           privileges={privileges.data}
           confirm={confirm}
           onChanged={refresh}
-          onClose={() => open(undefined)}
+          onClose={account.close}
         />
       )}
       {creating && (
