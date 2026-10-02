@@ -20,3 +20,9 @@ Verification includes `bun run build`, `scripts/test-changed.sh patch/0.7.1`, an
 `database-creation.spec.ts` for both pages: full form submissions, API-driven stages, a failed first-boot
 ping, readiness timeout/retry without duplicate provisioning, and reduced motion at phone width.
 Existing Deploy regressions also cover source-switch resumption and retrying a failed URL read.
+
+The final changed-file run passed formatting, ESLint, TypeScript and all 2,812 unit tests. It selected
+294 browser cases: 290 passed in the parallel run and four existing inventory, draft-reload and
+automation cases hit timing limits on the shared machine. All four passed when rerun with
+`bunx playwright test <spec> --grep <case> --workers=1` against the same production build, with no
+product changes or timeout increases. All six new creation cases passed in the parallel run.
