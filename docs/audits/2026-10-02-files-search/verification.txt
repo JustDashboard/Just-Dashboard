@@ -1,0 +1,109 @@
+Build: bun run build (exit 0)
+Focused: JD_FILES_SEARCH_VIDEO=1 JD_BROWSER_BASE_URL=http://127.0.0.1:43129 bunx playwright test tests/browser/files-ui.spec.ts -g "fixed search palette" --workers=2 (exit 0)
+Gate: JD_BROWSER_BASE_URL=http://127.0.0.1:43129 taskset -c 0-3 scripts/test-changed.sh patch/0.7.1 (exit 1: timing failures below)
+Retry: JD_BROWSER_BASE_URL=http://127.0.0.1:43129 bunx playwright test tests/browser/design-system.spec.ts tests/browser/docker-ui.spec.ts tests/browser/files-ui.spec.ts tests/browser/server-advisor.spec.ts --last-failed --workers=1 --timeout=90000 (exit 1: 3 remaining timing failures)
+Patient retries: bunx playwright test --config=/tmp/jd-files-search-slow.config.ts with the respective failing test titles (both exit 0).
+
+Temporary local config (outside the repository):
+import { defineConfig } from "/home/ubuntu/Just-Dashboard-worktrees/files-search-stability/frontend/node_modules/@playwright/test/index.mjs"
+import base from "/home/ubuntu/Just-Dashboard-worktrees/files-search-stability/frontend/playwright.config.ts"
+
+export default defineConfig({
+  ...base,
+  testDir: "/home/ubuntu/Just-Dashboard-worktrees/files-search-stability/frontend/tests/browser",
+  outputDir: "/tmp/jd-files-search-slow-results",
+  workers: 1,
+  timeout: 90000,
+  expect: { timeout: 20000 },
+})
+
+
+Focused recording run
+Running 7 tests using 2 workers
+  ✓  2 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › names keeps its frame still through every result state on desktop (46.7s)
+  ✓  1 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › content keeps its frame still through every result state on desktop (49.7s)
+  ✓  3 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › names keeps its frame still through every result state on phone (27.2s)
+  ✓  4 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › content keeps its frame still through every result state on phone (31.6s)
+  ✓  5 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › names keeps its frame still through every result state on landscape (28.8s)
+  ✓  6 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › content keeps its frame still through every result state on landscape (32.7s)
+  ✓  7 [chromium] › tests/browser/files-ui.spec.ts:613:7 › fixed search palette › reduced motion shows results immediately and scope controls remain reachable (12.8s)
+  7 passed (2.1m)
+
+Required gate
+Against patch/0.7.1: 15 changed files.
+Checking formatting...
+All matched files use Prettier code style!
+ 2812 pass
+ 0 fail
+ 11724 expect() calls
+Browser specs: tests/browser/design-system.spec.ts tests/browser/docker-ui.spec.ts tests/browser/files-ui.spec.ts tests/browser/server-advisor.spec.ts
+Running 153 tests using 4 workers
+  ✓  128 [chromium] › tests/browser/files-ui.spec.ts:312:5 › the commands sit in the workbench's strip, not in a page header (7.1s)
+  ✓  129 [chromium] › tests/browser/files-ui.spec.ts:288:5 › the sidebar is a fixed list of places that stays put while browsing (9.7s)
+  ✓  130 [chromium] › tests/browser/files-ui.spec.ts:327:5 › tiles stay compact and toolbar controls share a height (12.9s)
+  ✓  131 [chromium] › tests/browser/files-ui.spec.ts:351:5 › find responds from the current listing before a disk search and opens from the keyboard (12.3s)
+  ✘  127 [chromium] › tests/browser/files-ui.spec.ts:254:5 › large listings retain find, selection and keyboard menu focus (42.5s)
+  ✓  132 [chromium] › tests/browser/files-ui.spec.ts:369:5 › content search highlights matches, opens at the line and rejects stale results (26.8s)
+  ✓  133 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › names keeps its frame still through every result state on desktop (41.1s)
+  ✓  134 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › content keeps its frame still through every result state on desktop (53.3s)
+  ✓  136 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › names keeps its frame still through every result state on phone (40.8s)
+  ✓  135 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › content keeps its frame still through every result state on phone (42.7s)
+  ✓  139 [chromium] › tests/browser/files-ui.spec.ts:613:7 › fixed search palette › reduced motion shows results immediately and scope controls remain reachable (14.6s)
+  ✓  137 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › names keeps its frame still through every result state on landscape (34.0s)
+  ✓  142 [chromium] › tests/browser/files-ui.spec.ts:707:5 › local name results remain usable when the disk search fails (11.3s)
+  ✓  140 [chromium] › tests/browser/files-ui.spec.ts:641:5 › the full editor preserves the sheet draft, saves it and navigates through a collapsible tree (30.0s)
+  ✓  143 [chromium] › tests/browser/files-ui.spec.ts:726:5 › a deep-linked file unfolds its ancestor folders in the full editor (5.4s)
+  ✓  138 [chromium] › tests/browser/files-ui.spec.ts:417:11 › fixed search palette › content keeps its frame still through every result state on landscape (39.3s)
+  ✓  146 [chromium] › tests/browser/files-ui.spec.ts:814:5 › image export saves live adjustments and a copy keeps the source dirty (13.9s)
+  ✘  141 [chromium] › tests/browser/files-ui.spec.ts:673:5 › unsaved full-page edits are guarded when changing files or leaving (33.4s)
+  ✓  144 [chromium] › tests/browser/files-ui.spec.ts:747:5 › image edits have crop handles, redo and a full editor that keeps the edit (23.0s)
+  ✓  147 [chromium] › tests/browser/files-ui.spec.ts:862:5 › a folder's colour is drawn everywhere it is and saved on the server (14.3s)
+  ✓  148 [chromium] › tests/browser/files-ui.spec.ts:959:5 › pictures are visible in the listing and Space opens the viewer (15.2s)
+  ✘  145 [chromium] › tests/browser/files-ui.spec.ts:770:5 › full editors and the search palette fit desktop and phone widths (35.5s)
+  ✓  150 [chromium] › tests/browser/files-ui.spec.ts:988:5 › a right-click offers the row's verbs, or the folder's between rows (15.5s)
+  ✓  151 [chromium] › tests/browser/files-ui.spec.ts:1007:5 › an upload whose name is taken asks first, and keep-both sends a numbered name (9.2s)
+  ✓  149 [chromium] › tests/browser/files-ui.spec.ts:900:5 › the compact toolbar control colours all folders and individual colours still work (23.2s)
+  ✓  153 [chromium] › tests/browser/files-ui.spec.ts:1063:7 › with no hover available › row actions on /files are visible without a pointer (5.1s)
+  ✓  152 [chromium] › tests/browser/files-ui.spec.ts:1039:5 › every icon-only control on /files has an accessible name (6.0s)
+  5) [chromium] › tests/browser/files-ui.spec.ts:254:5 › large listings retain find, selection and keyboard menu focus
+  6) [chromium] › tests/browser/files-ui.spec.ts:673:5 › unsaved full-page edits are guarded when changing files or leaving
+  7) [chromium] › tests/browser/files-ui.spec.ts:770:5 › full editors and the search palette fit desktop and phone widths
+  12 failed
+    [chromium] › tests/browser/files-ui.spec.ts:254:5 › large listings retain find, selection and keyboard menu focus
+    [chromium] › tests/browser/files-ui.spec.ts:673:5 › unsaved full-page edits are guarded when changing files or leaving
+    [chromium] › tests/browser/files-ui.spec.ts:770:5 › full editors and the search palette fit desktop and phone widths
+  141 passed (10.2m)
+
+Serial retry
+Running 12 tests using 1 worker
+  ✓   1 [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 1024px (36.7s)
+  ✓   2 [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 1600px (38.9s)
+  ✘   3 [chromium] › tests/browser/docker-ui.spec.ts:1631:5 › a volume's contents are in the volume, not a page away (12.8s)
+  ✓   4 [chromium] › tests/browser/docker-ui.spec.ts:1933:5 › host networking explains unavailable attribution and stopped containers keep history (16.0s)
+  ✓   5 [chromium] › tests/browser/server-advisor.spec.ts:145:5 › storage evidence is requested on demand and reviewed cleanup retains a copy (46.4s)
+  ✓   6 [chromium] › tests/browser/server-advisor.spec.ts:223:5 › storage investigation fits desktop and mobile widths (31.6s)
+  ✓   7 [chromium] › tests/browser/server-advisor.spec.ts:373:5 › reviewed configuration replacement preserves credentials and needs explicit confirmation (9.2s)
+  ✓   8 [chromium] › tests/browser/server-advisor.spec.ts:438:5 › Health names unassessed sources instead of claiming every check passed (12.2s)
+  ✘   9 [chromium] › tests/browser/server-advisor.spec.ts:471:5 › an unavailable first Health read stays visible and can be retried (10.6s)
+  ✘  10 [chromium] › tests/browser/files-ui.spec.ts:254:5 › large listings retain find, selection and keyboard menu focus (47.4s)
+  ✓  11 [chromium] › tests/browser/files-ui.spec.ts:673:5 › unsaved full-page edits are guarded when changing files or leaving (22.9s)
+  ✓  12 [chromium] › tests/browser/files-ui.spec.ts:770:5 › full editors and the search palette fit desktop and phone widths (17.8s)
+  1) [chromium] › tests/browser/docker-ui.spec.ts:1631:5 › a volume's contents are in the volume, not a page away
+  2) [chromium] › tests/browser/files-ui.spec.ts:254:5 › large listings retain find, selection and keyboard menu focus
+  3) [chromium] › tests/browser/server-advisor.spec.ts:471:5 › an unavailable first Health read stays visible and can be retried
+  3 failed
+    [chromium] › tests/browser/docker-ui.spec.ts:1631:5 › a volume's contents are in the volume, not a page away
+    [chromium] › tests/browser/files-ui.spec.ts:254:5 › large listings retain find, selection and keyboard menu focus
+    [chromium] › tests/browser/server-advisor.spec.ts:471:5 › an unavailable first Health read stays visible and can be retried
+  9 passed (5.4m)
+
+Volume editor and Health retry with longer assertion deadline
+Running 2 tests using 1 worker
+  ✓  1 [chromium] › tests/browser/docker-ui.spec.ts:1631:5 › a volume's contents are in the volume, not a page away (8.9s)
+  ✓  2 [chromium] › tests/browser/server-advisor.spec.ts:471:5 › an unavailable first Health read stays visible and can be retried (10.7s)
+  2 passed (21.3s)
+
+Large listing retry with longer assertion deadline
+Running 1 test using 1 worker
+  ✓  1 [chromium] › tests/browser/files-ui.spec.ts:254:5 › large listings retain find, selection and keyboard menu focus (36.0s)
+  1 passed (38.9s)

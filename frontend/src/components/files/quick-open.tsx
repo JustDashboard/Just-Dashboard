@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { forwardRef, useEffect, useId, useMemo, useRef, useState } from "react"
+import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react"
 import { CornerDownLeft, Cross, FolderOpen, MagnifyingGlass } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes } from "@/lib/format"
@@ -40,19 +41,18 @@ export function QuickOpen({
       onOpenChange={onOpenChange}
       label="Find files"
       description="Find a file by name or search its contents. Arrow keys select, Enter opens."
+      className="flex h-[min(34rem,calc(100dvh-2rem))] w-[calc(100%-2rem)] flex-col"
     >
-      {open && (
-        <SearchBody
-          root={root}
-          home={home}
-          entries={entries}
-          initialMode={initialMode}
-          onChoose={(hit) => {
-            onOpenChange(false)
-            onOpenPath(hit.path, hit.isDir, hit.line)
-          }}
-        />
-      )}
+      <SearchBody
+        root={root}
+        home={home}
+        entries={entries}
+        initialMode={initialMode}
+        onChoose={(hit) => {
+          onOpenChange(false)
+          onOpenPath(hit.path, hit.isDir, hit.line)
+        }}
+      />
     </PaletteModal>
   )
 }
@@ -90,6 +90,9 @@ function SearchBody({
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const id = useId()
+  const reduced = useReducedMotion()
+  const hitId = (hit: FileSearchHit) =>
+    id + "-" + encodeURIComponent(hit.path + ":" + (hit.line ?? 0))
   const scope = wide && home ? home : root
   const trimmed = query.trim()
   const ready = trimmed.length >= (mode === "names" ? 2 : 1)
@@ -169,12 +172,14 @@ function SearchBody({
   }, [key, matchCase, mode, ready, regex, hidden, run, scope, trimmed])
 
   useEffect(() => {
-    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" })
+    list.current
+      ?.querySelector(':not([inert]) > [aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" })
   }, [cursor, hits.length])
 
   return (
-    <div className="min-w-0">
-      <div className="flex items-center gap-2 border-b border-hairline px-3">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b border-hairline px-3">
         <MagnifyingGlass aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         <input
           ref={input}
@@ -184,7 +189,7 @@ function SearchBody({
           aria-expanded
           aria-autocomplete="list"
           aria-controls={id + "-results"}
-          aria-activedescendant={hits[cursor] ? id + "-" + cursor : undefined}
+          aria-activedescendant={hits[cursor] ? hitId(hits[cursor]) : undefined}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value)
@@ -204,25 +209,29 @@ function SearchBody({
           }}
           placeholder={mode === "names" ? "Find a file or folder…" : "Find text inside files…"}
           spellCheck={false}
-          className="h-12 min-w-0 flex-1 bg-transparent text-body focus-ring-inset placeholder:text-muted-foreground"
+          className="h-12 min-w-0 flex-1 border-0 bg-transparent text-body shadow-none outline-none placeholder:text-muted-foreground"
         />
-        {busy && <Spinner className="size-4 text-muted-foreground" />}
-        {query && (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Clear search"
-            onClick={() => {
-              setQuery("")
-              input.current?.focus()
-            }}
-          >
-            <Cross />
-          </Button>
-        )}
+        <span className="flex size-4 shrink-0 items-center justify-center">
+          {busy && <Spinner className="size-4 text-muted-foreground" />}
+        </span>
+        <span className="size-6 shrink-0">
+          {query && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Clear search"
+              onClick={() => {
+                setQuery("")
+                input.current?.focus()
+              }}
+            >
+              <Cross />
+            </Button>
+          )}
+        </span>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-3">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline px-3">
         <div role="group" aria-label="Search mode" className="flex gap-3">
           {(["names", "content"] as const).map((value) => (
             <button
@@ -270,84 +279,108 @@ function SearchBody({
         role="listbox"
         aria-label="Search results"
         aria-busy={busy}
-        className="max-h-[min(24rem,48vh)] overflow-y-auto p-1"
+        className="min-h-0 flex-1 [scrollbar-gutter:stable] overflow-y-auto p-1"
       >
-        {current?.error && (
-          <ErrorState error={current.error} onRetry={() => setRun((v) => v + 1)} className="m-3" />
-        )}
-        {hits.map((hit, i) => (
-          <button
-            key={hit.path + ":" + (hit.line ?? 0)}
-            id={id + "-" + i}
-            type="button"
-            role="option"
-            aria-selected={i === cursor}
-            tabIndex={-1}
-            className={cn(
-              "flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
-              i === cursor ? "bg-accent text-accent-foreground" : "hover:bg-menu-hover",
+        <div className="relative min-h-full">
+          <AnimatePresence initial={false} mode="popLayout">
+            {current?.error && (
+              <ResultTransition key="error" reduced={reduced}>
+                <ErrorState
+                  error={current.error}
+                  onRetry={() => setRun((v) => v + 1)}
+                  className="m-3"
+                />
+              </ResultTransition>
             )}
-            onMouseMove={() => setSelected(hit.path + ":" + (hit.line ?? 0))}
-            onClick={() => onChoose(hit)}
-          >
-            <FileIcon entry={{ ...hit, isSymlink: false }} className="mt-0.5 size-6 shrink-0" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-body">
-                <Highlighted text={hit.name} matches={hit.matches} />
-              </span>
-              <span className="block truncate font-mono text-hint text-muted-foreground">
-                {hit.path.startsWith(scope + "/") ? hit.path.slice(scope.length + 1) : hit.path}
-                {hit.line ? ":" + hit.line : ""}
-              </span>
-              {hit.snippet && (
-                <span className="mt-1 block truncate font-mono text-body text-muted-foreground">
-                  <Snippet
-                    text={hit.snippet}
-                    ranges={hit.ranges}
-                    query={trimmed}
-                    regex={regex}
-                    matchCase={matchCase}
+            {hits.map((hit, i) => (
+              <ResultTransition key={hit.path + ":" + (hit.line ?? 0)} reduced={reduced}>
+                <button
+                  id={hitId(hit)}
+                  type="button"
+                  role="option"
+                  aria-selected={i === cursor}
+                  tabIndex={-1}
+                  className={cn(
+                    "flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
+                    i === cursor ? "bg-accent text-accent-foreground" : "hover:bg-menu-hover",
+                  )}
+                  onMouseMove={() => setSelected(hit.path + ":" + (hit.line ?? 0))}
+                  onClick={() => onChoose(hit)}
+                >
+                  <FileIcon
+                    entry={{ ...hit, isSymlink: false }}
+                    className="mt-0.5 size-6 shrink-0"
                   />
-                </span>
-              )}
-            </span>
-            <span className="numeric shrink-0 pt-0.5 text-hint text-muted-foreground">
-              {hit.isDir ? "Folder" : hit.size === undefined ? "" : bytes(hit.size)}
-            </span>
-          </button>
-        ))}
-        {!current?.error && hits.length === 0 && (
-          <div className="flex min-h-40 flex-col items-center justify-center gap-2 px-5 text-center text-body text-muted-foreground">
-            {busy ? (
-              <>
-                <Spinner className="size-5" />
-                <span>Searching this folder…</span>
-              </>
-            ) : ready ? (
-              <>
-                <span className="font-medium text-foreground">No matches for “{trimmed}”</span>
-                <span>Try fewer words, include hidden files, or search from home.</span>
-              </>
-            ) : (
-              <>
-                <span className="font-medium text-foreground">
-                  {mode === "names" ? "Find your next file" : "Search inside your files"}
-                </span>
-                <span>
-                  {mode === "names"
-                    ? "Type a few letters of its name or path."
-                    : "Type text or a regular expression to find matching lines."}
-                </span>
-              </>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-body">
+                      <Highlighted text={hit.name} matches={hit.matches} />
+                    </span>
+                    <span className="block truncate font-mono text-hint text-muted-foreground">
+                      {hit.path.startsWith(scope + "/")
+                        ? hit.path.slice(scope.length + 1)
+                        : hit.path}
+                      {hit.line ? ":" + hit.line : ""}
+                    </span>
+                    {hit.snippet && (
+                      <span className="mt-1 block truncate font-mono text-body text-muted-foreground">
+                        <Snippet
+                          text={hit.snippet}
+                          ranges={hit.ranges}
+                          query={trimmed}
+                          regex={regex}
+                          matchCase={matchCase}
+                        />
+                      </span>
+                    )}
+                  </span>
+                  <span className="numeric shrink-0 pt-0.5 text-hint text-muted-foreground">
+                    {hit.isDir ? "Folder" : hit.size === undefined ? "" : bytes(hit.size)}
+                  </span>
+                </button>
+              </ResultTransition>
+            ))}
+            {!current?.error && hits.length === 0 && (
+              <ResultTransition
+                key={busy ? "busy" : ready ? "empty" : "prompt"}
+                reduced={reduced}
+                className="absolute inset-0"
+              >
+                <div className="flex h-full flex-col items-center justify-center gap-2 px-5 text-center text-body text-muted-foreground">
+                  {busy ? (
+                    <>
+                      <Spinner className="size-5" />
+                      <span>Searching this folder…</span>
+                    </>
+                  ) : ready ? (
+                    <>
+                      <span className="font-medium text-foreground">
+                        No matches for “{trimmed}”
+                      </span>
+                      <span>Try fewer words, include hidden files, or search from home.</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-medium text-foreground">
+                        {mode === "names" ? "Find your next file" : "Search inside your files"}
+                      </span>
+                      <span>
+                        {mode === "names"
+                          ? "Type a few letters of its name or path."
+                          : "Type text or a regular expression to find matching lines."}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </ResultTransition>
             )}
-          </div>
-        )}
+          </AnimatePresence>
+        </div>
       </div>
 
-      <PaneFooter className="flex-wrap justify-between gap-x-3 gap-y-2 px-3 py-2 text-hint text-muted-foreground">
+      <PaneFooter className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-3 py-2 text-hint text-muted-foreground sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
         <div className="flex min-w-0 items-center gap-1.5">
           <FolderOpen aria-hidden className="size-3 shrink-0" />
-          <span className="max-w-48 truncate font-mono" title={scope}>
+          <span className="min-w-0 flex-1 truncate font-mono" title={scope}>
             {scope}
           </span>
           {home && home !== root && (
@@ -367,7 +400,12 @@ function SearchBody({
           <Checkbox checked={hidden} onCheckedChange={(v) => setHidden(v === true)} />
           Hidden files
         </label>
-        <span role="status" aria-live="polite" className={cn(current?.truncated && "text-warning")}>
+        <span
+          role="status"
+          aria-live="polite"
+          className={cn("truncate", current?.truncated && "text-warning")}
+          title={current?.truncated ? "Partial results · narrow your search" : undefined}
+        >
           {current?.truncated
             ? "Partial results · narrow your search"
             : busy
@@ -378,15 +416,43 @@ function SearchBody({
           <CornerDownLeft aria-hidden className="size-3" />
           Open
         </span>
-        {!!current?.unreadable && (
-          <span className="w-full text-warning">
-            {current.unreadable} entries could not be read.
-          </span>
-        )}
+        <span
+          className="col-span-full min-h-5 truncate text-warning"
+          title={
+            current?.unreadable ? `${current.unreadable} entries could not be read.` : undefined
+          }
+        >
+          {!!current?.unreadable && `${current.unreadable} entries could not be read.`}
+        </span>
       </PaneFooter>
     </div>
   )
 }
+
+// Exiting rows keep their pixels for the fade, but immediately leave keyboard
+// and screen-reader navigation so an old search can never be opened.
+const ResultTransition = forwardRef<
+  HTMLDivElement,
+  { children: React.ReactNode; reduced: boolean | null; className?: string }
+>(function ResultTransition({ children, reduced, className }, ref) {
+  const present = useIsPresent()
+  return (
+    <motion.div
+      ref={ref}
+      data-search-result=""
+      inert={!present}
+      aria-hidden={!present || undefined}
+      layout={reduced ? false : "position"}
+      initial={reduced ? false : { opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, transition: { duration: reduced ? 0 : 0.1 } }}
+      transition={{ duration: reduced ? 0 : 0.16, ease: "easeOut" }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  )
+})
 
 function Highlighted({ text, matches }: { text: string; matches?: number[] }) {
   const positions = new Set(matches)

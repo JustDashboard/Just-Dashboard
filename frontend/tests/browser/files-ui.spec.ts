@@ -1,5 +1,12 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 
+test.use({
+  video:
+    process.env.JD_FILES_SEARCH_VIDEO === "1"
+      ? { mode: "on", size: { width: 1280, height: 960 } }
+      : "off",
+})
+
 /**
  * The file manager as a person meets it, against a mocked API.
  *
@@ -400,6 +407,237 @@ test("content search highlights matches, opens at the line and rejects stale res
   await expect(page.getByRole("dialog")).toContainText("Ln 2")
 })
 
+test.describe("fixed search palette", () => {
+  for (const viewport of [
+    { name: "desktop", width: 1280, height: 960 },
+    { name: "phone", width: 375, height: 812 },
+    { name: "landscape", width: 640, height: 375 },
+  ]) {
+    for (const mode of ["names", "content"] as const) {
+      test(`${mode} keeps its frame still through every result state on ${viewport.name}`, async ({
+        page,
+      }, testInfo) => {
+        test.setTimeout(60_000)
+        await page.setViewportSize(viewport)
+        await mockFiles(page)
+        await page.route(
+          `**/api/v1/files/${mode === "names" ? "find" : "search"}**`,
+          async (route) => {
+            const q = new URL(route.request().url()).searchParams.get("q")!
+            await new Promise((resolve) => setTimeout(resolve, 300))
+            if (q === "error")
+              return json(
+                route,
+                {
+                  error: { code: "internal", message: "Disk search unavailable", retryable: true },
+                },
+                500,
+              )
+            const count = q === "many" ? 30 : q === "single" ? 1 : q === "partial" ? 24 : 0
+            await json(route, {
+              hits: Array.from({ length: count }, (_, i) => ({
+                ...entry(`${q}-${String(i).padStart(2, "0")}.md`),
+                ...(mode === "content"
+                  ? { line: i + 1, snippet: `The ${q} matching line`, ranges: [[4, 4 + q.length]] }
+                  : {}),
+              })),
+              truncated: q === "partial",
+              unreadable: q === "partial" ? 37 : 0,
+              elapsedMs: 300,
+            })
+          },
+        )
+        await openFiles(page)
+        const trigger = page.getByRole("button", {
+          name: mode === "names" ? "Find" : "Search inside files",
+          exact: true,
+        })
+        await trigger.click()
+        const dialog = page.getByRole("dialog", { name: "Find files" })
+        const input = dialog.getByRole("combobox")
+        const results = dialog.getByRole("listbox", { name: "Search results" })
+        await expect(input).toBeFocused()
+        await dialog.evaluate(async (el) => {
+          await Promise.all(el.getAnimations().map((a) => a.finished))
+        })
+        await dialog.evaluate((el) => {
+          const samples: { bounds: number[]; entering: boolean; exiting: boolean }[] = []
+          Object.assign(el, { searchSamples: samples })
+          const sample = () => {
+            if (!el.isConnected) return
+            const rects = [
+              el,
+              el.querySelector("input")!,
+              el.querySelector('[role="listbox"]')!,
+              el.querySelector('[data-slot="pane-footer"]')!,
+            ]
+            const bounds = rects.flatMap((node) => {
+              const { x, y, width, height } = node.getBoundingClientRect()
+              return [x, y, width, height]
+            })
+            let entering = false
+            let exiting = false
+            for (const node of el.querySelectorAll("[data-search-result]")) {
+              const opacity = Number(getComputedStyle(node).opacity)
+              if (opacity > 0 && opacity < 1) {
+                if (node.hasAttribute("inert")) exiting = true
+                else entering = true
+              }
+            }
+            samples.push({ bounds, entering, exiting })
+            requestAnimationFrame(sample)
+          }
+          requestAnimationFrame(sample)
+        })
+        const border = await input.evaluate((el) => {
+          const style = getComputedStyle(el)
+          return { outline: style.outlineStyle, border: style.borderWidth }
+        })
+        expect(border).toEqual({ outline: "none", border: "0px" })
+        const frame = (await dialog.boundingBox())!
+        expect(frame.x).toBeGreaterThanOrEqual(15)
+        expect(frame.y).toBeGreaterThanOrEqual(15)
+        expect(frame.x + frame.width).toBeLessThanOrEqual(viewport.width - 15)
+        expect(frame.y + frame.height).toBeLessThanOrEqual(viewport.height - 15)
+        for (const [query, count] of [
+          ["many", 30],
+          ["single", 1],
+          ["missing", 0],
+          ["partial", 24],
+          ["error", 0],
+        ] as const) {
+          if (query === "many") await input.pressSequentially(query, { delay: 55 })
+          else await input.fill(query)
+          await expect(results).toHaveAttribute("aria-busy", "false")
+          await expect(results.getByRole("option")).toHaveCount(count)
+          if (count) {
+            const first = results.getByRole("option").first()
+            await expect(first.locator("..")).toHaveCSS("opacity", "1")
+            await expect(input).toHaveAttribute(
+              "aria-activedescendant",
+              (await first.getAttribute("id"))!,
+            )
+            if (mode === "content") await expect(first.locator("mark")).toHaveText(query)
+            if (query === "many") {
+              await input.press("ArrowUp")
+              await expect(results.getByRole("option").last()).toHaveAttribute(
+                "aria-selected",
+                "true",
+              )
+              await expect(results.getByRole("option").last()).toBeInViewport()
+              await input.press("ArrowDown")
+              await expect(first).toHaveAttribute("aria-selected", "true")
+            }
+          } else await expect(input).not.toHaveAttribute("aria-activedescendant")
+          if (query === "missing") await expect(results).toContainText("Try fewer words")
+          if (query === "partial") {
+            await expect(dialog.getByRole("status")).toContainText("Partial results")
+            await expect(dialog).toContainText("37 entries could not be read")
+          }
+          if (query === "error") await expect(results).toContainText("Disk search unavailable")
+          if (query === "many" || query === "single")
+            await page.screenshot({
+              path: `test-results/files-search-${mode}-${viewport.name}-${query}.png`,
+            })
+          await expect(input).toBeFocused()
+        }
+        await results.getByRole("button", { name: /Try again/ }).click()
+        await expect(results).toHaveAttribute("aria-busy", "false")
+        await input.fill("partial")
+        await expect(results.getByRole("option")).toHaveCount(24)
+        if (mode === "content") {
+          await dialog.getByRole("button", { name: "Match case", exact: true }).click()
+          await expect(results).toHaveAttribute("aria-busy", "false")
+          await dialog.getByRole("button", { name: "Regular expression", exact: true }).click()
+          await expect(results).toHaveAttribute("aria-busy", "false")
+        }
+        await dialog.getByText("Hidden files", { exact: true }).click()
+        await expect(results).toHaveAttribute("aria-busy", "false")
+        await dialog.getByRole("button", { name: "Clear search" }).click()
+        await expect(input).toHaveValue("")
+        await expect(input).toBeFocused()
+        await dialog
+          .getByRole("button", { name: mode === "names" ? "Contents" : "Names", exact: true })
+          .click()
+        await expect(input).toBeFocused()
+        const samples = await dialog.evaluate(
+          (el) =>
+            (
+              el as unknown as {
+                searchSamples: { bounds: number[]; entering: boolean; exiting: boolean }[]
+              }
+            ).searchSamples,
+        )
+        expect(samples.length).toBeGreaterThan(20)
+        for (let i = 0; i < samples[0].bounds.length; i++) {
+          const values = samples.map((sample) => sample.bounds[i])
+          expect(
+            Math.max(...values) - Math.min(...values),
+            `frame coordinate ${i} moved`,
+          ).toBeLessThan(0.6)
+        }
+        expect(
+          samples.some((sample) => sample.entering),
+          "results fade in",
+        ).toBe(true)
+        expect(
+          samples.some((sample) => sample.exiting),
+          "results fade out",
+        ).toBe(true)
+        await testInfo.attach("frame-measurements", {
+          body: JSON.stringify(
+            {
+              viewport,
+              mode,
+              frames: samples.length,
+              maximumMovement: Math.max(
+                ...samples[0].bounds.map((_, i) => {
+                  const values = samples.map((sample) => sample.bounds[i])
+                  return Math.max(...values) - Math.min(...values)
+                }),
+              ),
+              fadeIn: samples.some((sample) => sample.entering),
+              fadeOut: samples.some((sample) => sample.exiting),
+            },
+            null,
+            2,
+          ),
+          contentType: "application/json",
+        })
+        await page.keyboard.press("Escape")
+        await expect(dialog).toBeHidden()
+      })
+    }
+  }
+
+  test("reduced motion shows results immediately and scope controls remain reachable", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await mockFiles(page)
+    await openFiles(page)
+    await page.getByRole("navigation", { name: "Places" }).locator("button[title='/etc']").click()
+    await expect(page.getByRole("button", { name: "Folders in /etc" })).toBeVisible()
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.getByRole("button", { name: "Find", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "Find files" })
+    const input = dialog.getByRole("combobox")
+    const frame = await dialog.boundingBox()
+    await expect(dialog.getByRole("button", { name: "From home" })).toBeInViewport()
+    await dialog.getByRole("button", { name: "From home" }).click()
+    await expect(dialog.getByRole("button", { name: "This folder" })).toBeInViewport()
+    await input.fill("missing")
+    await expect(dialog.getByRole("listbox")).toHaveAttribute("aria-busy", "false")
+    const result = dialog.locator("[data-search-result]")
+    await expect(result).toHaveCSS("opacity", "1")
+    await expect(result).toHaveCSS("transform", "none")
+    expect(await dialog.boundingBox()).toEqual(frame)
+    await page.screenshot({ path: "test-results/files-search-scope-phone.png" })
+    await page.keyboard.press("Escape")
+    await expect(dialog).toBeHidden()
+  })
+})
+
 test("the full editor preserves the sheet draft, saves it and navigates through a collapsible tree", async ({
   page,
 }) => {
@@ -542,7 +780,7 @@ test("full editors and the search palette fit desktop and phone widths", async (
   await page.getByRole("combobox", { name: "Find by name" }).fill("ntsmd")
   await expect(page.getByRole("option")).toContainText("notes.md")
   const resultBounds = await page.getByRole("listbox", { name: "Search results" }).boundingBox()
-  expect(resultBounds!.height).toBeLessThan(120)
+  expect(resultBounds!.height).toBeGreaterThan(300)
   await page.screenshot({ path: "test-results/files-find-1720.png" })
   await page.keyboard.press("Enter")
   await page.getByRole("button", { name: "Open full editor" }).click()
