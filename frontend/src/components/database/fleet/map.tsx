@@ -5,12 +5,13 @@ import Link from "next/link"
 import { Plus } from "@/components/icons"
 import { plural } from "@/lib/format"
 import type { DbTopoNode } from "@/lib/types"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyphs, ProductLogos } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { EmptyNote, EmptyState } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
@@ -26,6 +27,7 @@ import {
   worstStatus,
 } from "@/components/database/fleet/fleet"
 import { readFleet, readTopology } from "@/components/database/fleet/read"
+import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { useAddress } from "@/components/database/fleet/use-address"
 import {
   ConsumerMark,
@@ -49,6 +51,11 @@ import { useDatabases } from "@/components/database/shell/databases-context"
  * the link holds. The chips narrow the picture to one engine's databases and
  * the readers they feed; the choice is in the address.
  *
+ * Below the width that draws the wires the picture has no lane of readers:
+ * there it could only list them, and the list under it already does, with
+ * each link explained and each row a way to the reader. One account of them,
+ * not two.
+ *
  * The lines are what the server found, not what anybody drew: a deployment's
  * binding, a name in a container's environment, a shared stack or network, an
  * open session.
@@ -61,6 +68,9 @@ export function DatabaseMap() {
   // `mysql`), so the marks follow it where it has been read.
   const fleet = usePoll(readFleet, 60_000)
   const engineFilter = address.read("engine")
+  // The width from which the picture draws its wires (`Wiring` lays its
+  // lanes side by side from `lg`).
+  const wired = useMediaQuery("(min-width: 1024px)")
 
   const engineOfNode = useCallback(
     (node: DbTopoNode): Engine => {
@@ -95,7 +105,7 @@ export function DatabaseMap() {
       <Page className="animate-rise">
         <PageContext eyebrow="Databases" title="Map" />
         {topology.error ? (
-          <ErrorState error={topology.error} onRetry={topology.refresh} />
+          <ReadFailed error={topology.error} onRetry={topology.refresh} every="30 seconds" />
         ) : (
           <div role="status" aria-label="Loading the map" className="flex flex-col gap-8">
             <StatGrid columns={4} dense aria-hidden>
@@ -215,7 +225,7 @@ export function DatabaseMap() {
 
       <div className="grid min-w-0 items-start gap-8 2xl:grid-cols-[minmax(0,1fr)_24rem] [&>*]:min-w-0">
         {split.databases.length > 0 ? (
-          <Wiring topology={topology.data} keep={keep} engineOf={engineOfNode} />
+          <Wiring topology={topology.data} keep={keep} engineOf={engineOfNode} readers={wired} />
         ) : (
           <EmptyState
             title="No database of that engine"
@@ -262,9 +272,33 @@ export function DatabaseMap() {
                           </span>
                         </>
                       }
-                      subtitle={sources
-                        .map((source) => `${source.from.name} — ${describeEdge(source.edge)}`)
-                        .join("; ")}
+                      // One line for each database that reaches it: which
+                      // one, drawn as itself, and how the link is known. The
+                      // lines wrap rather than cut — they are the list's
+                      // reason to exist beside the picture.
+                      subtitle={
+                        <span className="mt-0.5 flex flex-col gap-0.5 whitespace-normal">
+                          {sources.map((source) => (
+                            <span
+                              key={source.from.id}
+                              className="flex min-w-0 items-baseline gap-1.5"
+                            >
+                              <span className="flex shrink-0 translate-y-0.5">
+                                <EngineGlyph
+                                  engine={engineOfNode(source.from)}
+                                  className="size-3"
+                                />
+                              </span>
+                              <span className="min-w-0">
+                                <span className="font-medium text-foreground/85">
+                                  {source.from.name}
+                                </span>{" "}
+                                {describeEdge(source.edge)}
+                              </span>
+                            </span>
+                          ))}
+                        </span>
+                      }
                       trailing={
                         edgeRank(worst) >= 2 || (node.status && node.kind !== "host") ? (
                           <Status

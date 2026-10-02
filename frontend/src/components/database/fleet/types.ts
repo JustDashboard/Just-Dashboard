@@ -238,6 +238,18 @@ export type DbTestResponse =
   | { ok: true; version: string; versionNumber: string; flavor: DbFlavor; flavorLabel: string }
   | { ok: false; error: string }
 
+/** `POST /databases/host`: sign in to a server on this machine by its address, and save it. */
+export type DbHostConnectRequest = {
+  driver: DbDriver
+  host: string
+  port: number
+  user: string
+  password: string
+  database: string
+  /** Empty takes the server's own name. */
+  name: string
+}
+
 export type DbHostGrantRequest = {
   driver: DbDriver
   host: string

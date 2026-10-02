@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   backupReadings,
+  concernGroups,
+  concernLevel,
   describeEdge,
   feedsByConnection,
   fleetConcerns,
@@ -18,6 +20,7 @@ import {
   sortRows,
   splitTopology,
   STALE_BACKUP_MS,
+  storedBytes,
   topologyReadings,
   whereWord,
   worstStatus,
@@ -100,9 +103,11 @@ describe("what needs attention", () => {
     expect(kinds(concerns)).toEqual(["broken"])
   })
 
-  test("a stale dump is a notice, and the dump directories win over the fleet's own date", () => {
+  test("a stale dump weighs what a missing one does, and the dump directories win over the fleet's own date", () => {
     const old = new Date(NOW - STALE_BACKUP_MS - 1000).toISOString()
     expect(kinds(fleetConcerns(entry({ lastBackup: old }), { now: NOW }))).toEqual(["stale-backup"])
+    // One weight for the list of findings, the card and the table.
+    expect(fleetConcerns(entry({ lastBackup: old }), { now: NOW })[0].level).toBe("warning")
     expect(
       kinds(
         fleetConcerns(entry({ lastBackup: old }), {
@@ -118,6 +123,81 @@ describe("what needs attention", () => {
 
   test("an engine nothing can dump is not 'never backed up'", () => {
     expect(fleetConcerns(entry({ lastBackup: undefined }), { now: NOW, dumps: false })).toEqual([])
+  })
+
+  test("a fact is said at the level of the concern it is about", () => {
+    const concerns = fleetConcerns(entry({ exposure: "public", lastBackup: undefined }), {
+      now: NOW,
+    })
+    expect(concernLevel(concerns, "public")).toBe("warning")
+    expect(concernLevel(concerns, "stale-backup", "never-backed-up")).toBe("warning")
+    expect(concernLevel(concerns, "unreachable")).toBeUndefined()
+    expect(concernLevel([], "public")).toBeUndefined()
+  })
+})
+
+describe("the attention list's findings", () => {
+  const concernsOf = (one) => fleetConcerns(one, { now: NOW })
+  const open = (id) => entry({ id, name: `db${id}`, exposure: "public" })
+
+  test("two databases with one concern are two findings; more are one that names them", () => {
+    const two = concernGroups([open(1), open(2)], concernsOf)
+    expect(two).toHaveLength(1)
+    expect(two[0]).toMatchObject({ kind: "public", grouped: false })
+    const many = concernGroups([open(1), open(2), open(3), open(4)], concernsOf)
+    expect(many[0].grouped).toBe(true)
+    expect(many[0].entries.map((one) => one.name)).toEqual(["db1", "db2", "db3", "db4"])
+  })
+
+  test("forty databases are a handful of findings, worst first", () => {
+    const fleet = Array.from({ length: 40 }, (_, index) =>
+      entry({
+        id: index + 1,
+        name: `db${index + 1}`,
+        ok: index % 10 !== 0,
+        state: index % 10 === 0 ? "unreachable" : "running",
+        exposure: index % 5 === 1 ? "public" : "local",
+        lastBackup: index % 2 ? undefined : "2026-09-25T00:00:00Z",
+      }),
+    )
+    const groups = concernGroups(fleet, concernsOf)
+    expect(groups.map((group) => group.kind)).toEqual(["unreachable", "public", "never-backed-up"])
+    expect(groups.every((group) => group.grouped)).toBe(true)
+    expect(groups.map((group) => group.entries.length)).toEqual([4, 8, 20])
+  })
+
+  test("a database with two concerns stands in both", () => {
+    const groups = concernGroups([entry({ exposure: "public", lastBackup: undefined })], concernsOf)
+    expect(groups.map((group) => group.kind)).toEqual(["public", "never-backed-up"])
+  })
+})
+
+describe("what a database holds", () => {
+  const file = entry({ id: 7, name: "notes", sizesKnown: false, bytes: 0 })
+
+  test("is what its engine reported, else what discovery measured, else unknown", () => {
+    expect(storedBytes(entry({ bytes: 2048 }))).toBe(2048)
+    expect(storedBytes(file)).toBeUndefined()
+    expect(storedBytes(file, new Map([[7, 319_488]]))).toBe(319_488)
+    // The engine's own figure wins over a measurement of something else.
+    expect(storedBytes(entry({ id: 7, bytes: 10 }), new Map([[7, 99]]))).toBe(10)
+  })
+
+  test("is one answer for the tile, the narrowing and both orders", () => {
+    const measured = new Map([[7, 4096]])
+    const storedOf = (one) => storedBytes(one, measured)
+    const list = [entry({ id: 1, name: "shop", bytes: 1024 }), file]
+    const readings = fleetReadings({ connections: list }, { now: NOW, storedOf })
+    expect(readings.bytes).toBe(5120)
+    expect(readings.sized).toBe(2)
+    expect(matchesShow(file, "stored", { stored: storedOf(file) })).toBe(true)
+    expect(matchesShow(file, "stored")).toBe(false)
+    expect(orderForShow(list, "stored", storedOf).map((one) => one.name)).toEqual(["notes", "shop"])
+    expect(
+      sortRows(list, { key: "size", dir: "desc" }, () => undefined, storedOf).map(
+        (one) => one.name,
+      ),
+    ).toEqual(["notes", "shop"])
   })
 })
 
@@ -195,6 +275,13 @@ describe("what a reading narrows the fleet to", () => {
     expect(matchesQuery(one, "maria", "MariaDB")).toBe(true)
     expect(matchesQuery(one, "staging")).toBe(true)
     expect(matchesQuery(one, "redis")).toBe(false)
+  })
+
+  test("the address a card prints finds it: the port, and the host with it", () => {
+    const one = entry({ host: "127.0.0.1", port: "55432" })
+    expect(matchesQuery(one, "55432")).toBe(true)
+    expect(matchesQuery(one, "127.0.0.1:55432")).toBe(true)
+    expect(matchesQuery(one, "55433")).toBe(false)
   })
 })
 

@@ -39,9 +39,9 @@ export const EMPTY_CONNECT_FIELDS: ConnectFields = {
 type Spelling = { params?: Record<string, string>; scheme?: string }
 
 /**
- * How each driver's string says each mode. A mode a driver has no spelling
- * for is not offered: Redis has no "encrypt without verifying" in a URL, and
- * an Oracle wallet does not fit in one, so its string is pasted whole.
+ * How each driver's string says each mode. A file has no transport and takes
+ * no control. An Oracle wallet does not fit in a string: its three modes are
+ * the ones that need none, and a wallet's address is pasted whole.
  */
 const TLS: Record<DbDriver, Partial<Record<TlsMode, Spelling>>> = {
   postgres: {
@@ -59,7 +59,11 @@ const TLS: Record<DbDriver, Partial<Record<TlsMode, Spelling>>> = {
     on: { params: { tls: "true", tlsInsecure: "true" } },
     verify: { params: { tls: "true" } },
   },
-  redis: { off: {}, verify: { scheme: "rediss" } },
+  redis: {
+    off: {},
+    on: { scheme: "rediss", params: { skip_verify: "true" } },
+    verify: { scheme: "rediss" },
+  },
   sqlserver: {
     off: { params: { encrypt: "disable" } },
     on: { params: { encrypt: "true", TrustServerCertificate: "true" } },
@@ -70,7 +74,11 @@ const TLS: Record<DbDriver, Partial<Record<TlsMode, Spelling>>> = {
     on: { params: { secure: "true", skip_verify: "true" } },
     verify: { params: { secure: "true" } },
   },
-  oracle: {},
+  oracle: {
+    off: {},
+    on: { params: { SSL: "true", "SSL VERIFY": "false" } },
+    verify: { params: { SSL: "true" } },
+  },
   sqlite: {},
 }
 
@@ -113,7 +121,7 @@ export function composeDsn(driver: DbDriver, fields: ConnectFields): string {
   if (spelling.scheme) dsn = dsn.replace(/^[a-z]+:\/\//, `${spelling.scheme}://`)
   const params = Object.entries(spelling.params ?? {})
     .filter(([name]) => name !== written)
-    .map(([name, value]) => `${name}=${encodeURIComponent(value)}`)
+    .map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`)
     .join("&")
   if (!params) return dsn
   return `${dsn}${dsn.includes("?") ? "&" : "?"}${params}`
@@ -127,14 +135,42 @@ export function maskedDsn(driver: DbDriver, fields: ConnectFields): string {
   return composeDsn(driver, { ...fields, password: MASK }).replace(encodeURIComponent(MASK), MASK)
 }
 
-/** A pasted string with whatever stands where a password would hidden. */
+/**
+ * A pasted string with whatever stands where a password would hidden: the
+ * part of a URL between the account and the host, and a password given as a
+ * parameter, which is how SQL Server and ClickHouse strings often carry it.
+ */
 export function maskPasted(text: string): string {
-  return text.replace(/(:\/\/[^:/?#@\s]*:)[^@\s]*(@)/, `$1${MASK}$2`).replace(
-    // MySQL's own form has no scheme, and its password is not escaped, so it
-    // may hold an `@` of its own: `user:p@ss@tcp(host)/db`.
-    /^([^:/?#@\s]+:).*(@(?:tcp|unix)\()/,
-    `$1${MASK}$2`,
+  return (
+    text
+      // The password runs to the last `@` before the address ends: one typed
+      // unescaped may hold an `@` of its own (`user:p@ss@host`).
+      .replace(/^([a-z][a-z0-9+.-]*:\/\/[^:/?#@\s]*:)[^/?#\s]*@/i, `$1${MASK}@`)
+      // MySQL's own form has no scheme, and its password is not escaped
+      // either: `user:p@ss@tcp(host)/db`.
+      .replace(/^([^:/?#@\s]+:).*(@(?:tcp|unix)\()/, `$1${MASK}$2`)
+      .replace(/(^|[?&;\s])((?:password|passwd|pwd|pass)=)[^&;\s]*/gi, `$1$2${MASK}`)
   )
+}
+
+/**
+ * The host and the database a pasted string names, for the name a connection
+ * is offered: a string pasted whole is not in the fields, and the name
+ * suggested for it was the engine's, whatever it pointed at.
+ */
+export function addressOfPasted(text: string): { host: string; database: string } {
+  const raw = text.trim()
+  const native = /@(?:tcp)\(([^:)]+)(?::\d+)?\)\/([^?]*)/.exec(raw)
+  if (native) return { host: native[1], database: safeDecode(native[2]) }
+  const url =
+    /^[a-z][a-z0-9+.-]*:\/\/(?:[^/?#]*@)?(\[[^\]]+\]|[^:/?#,]+)[^/?#]*(?:\/([^?#]*))?(?:\?([^#]*))?/i.exec(
+      raw,
+    )
+  if (!url) return { host: "", database: "" }
+  const [, host, path = "", query = ""] = url
+  // SQL Server names its database in a parameter, not in the path.
+  const named = /(?:^|&)database=([^&]*)/i.exec(query)?.[1]
+  return { host, database: safeDecode(named ?? path) }
 }
 
 const SCHEMES: Record<string, DbDriver> = {

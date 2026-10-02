@@ -576,6 +576,22 @@ export type FleetMock = DatabaseMock & {
   /** The newest dump of a connection by id, as hours ago; `null` for none. Every one has a recent dump otherwise. */
   dumps?: Record<number, number | null>
   topology?: typeof TOPOLOGY
+  /**
+   * The two lists the fleet itself carries of servers found running and not
+   * connected: containers that state no usable password, and servers
+   * installed on the machine. Both empty unless given.
+   */
+  reported?: {
+    unreachable?: { container: string; driver: string; reason: string }[]
+    needsCredentials?: {
+      driver: string
+      host: string
+      port: number
+      name: string
+      user?: string
+      database?: string
+    }[]
+  }
 }
 
 type Answer = { status?: number; body?: unknown } | void
@@ -643,8 +659,8 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
             connections: list().map((conn) =>
               fleetEntry(conn, { lastBackup: dumpOf(conn.id), ...options.fleet?.[conn.id] }),
             ),
-            unreachable: [],
-            needsCredentials: [],
+            unreachable: options.reported?.unreachable ?? [],
+            needsCredentials: options.reported?.needsCredentials ?? [],
             checkedAt: new Date().toISOString(),
           },
         }
@@ -743,6 +759,11 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
             environment: String(body.environment ?? ""),
             readOnly: Boolean(body.readOnly),
           }),
+        }
+      case "POST /databases/host":
+        return {
+          status: 201,
+          body: connect(String(body.name || "postgres on this host"), String(body.driver)),
         }
       case "POST /databases/host/grant":
         return { status: 201, body: connect("postgres 17 main on this host", "postgres") }

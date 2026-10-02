@@ -40,14 +40,39 @@ export function freeName(base: string, taken: readonly string[]): string {
   }
 }
 
-/** The name a connection typed in by hand is offered: the database, else the host. */
+/** An address that is a number rather than a name: an IPv4 or IPv6 literal. */
+function numericHost(host: string): boolean {
+  return /^[0-9.]+$/.test(host) || host.includes(":")
+}
+
+/**
+ * The name a connection typed in by hand is offered: what it holds, else
+ * where it is, else what it is.
+ *
+ * The database's own name is the best one, unless it is a number — a Redis
+ * index, which names nothing ("1"). A host's first label is the next
+ * ("db.example.com" → "db"), unless the host is this machine or an address
+ * in digits, whose first label is a number too ("10"); such a server is
+ * named for its engine and where it is ("redis-10.0.0.9"), or just its engine
+ * when it is here.
+ */
 export function suggestedName(
   fields: { host: string; database: string },
   fallback: string,
   taken: readonly string[],
 ): string {
-  const file = fields.database.split("/").pop() ?? ""
-  const base = file.replace(/\.(db|sqlite3?|duckdb)$/i, "") || fields.host.split(".")[0] || fallback
+  const file = fields.database.trim().split("/").pop() ?? ""
+  const database = file.replace(/\.(db|sqlite3?|duckdb)$/i, "")
+  const host = fields.host.trim().replace(/^\[|\]$/g, "")
+  const here = host === "" || host === "localhost" || host === "127.0.0.1" || host === "::1"
+  const base =
+    database && !/^\d+$/.test(database)
+      ? database
+      : here
+        ? fallback
+        : numericHost(host)
+          ? `${fallback}-${host.replace(/:/g, ".")}`
+          : host.split(".")[0]
   return freeName(base, taken)
 }
 

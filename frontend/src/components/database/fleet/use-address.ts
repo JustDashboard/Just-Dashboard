@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 /**
@@ -31,4 +31,35 @@ export function useAddress() {
   )
   const read = useCallback((key: string) => search.get(key) ?? "", [search])
   return { read, set }
+}
+
+/**
+ * A field whose text is in the address: what is typed is held here and shown
+ * at once, and the address follows it.
+ *
+ * Bound straight to the address, a field is re-given its own value a moment
+ * after every keystroke — the address is read back asynchronously — and the
+ * caret jumps to the end of the text each time, so a letter typed in the
+ * middle of a word lands there and the next one does not. The field therefore
+ * owns its text. What it wrote to the address is remembered until it is read
+ * back, which is how a change that came from somewhere else — Back, a link —
+ * is told from its own echo and taken as the new text.
+ */
+export function useTypedParam(key: string): [string, (text: string) => void] {
+  const { read, set } = useAddress()
+  const said = read(key)
+  const [box, setBox] = useState({ text: said, seen: said, sent: [] as string[] })
+  if (said !== box.seen) {
+    const echo = box.sent.indexOf(said)
+    setBox(
+      echo >= 0
+        ? { ...box, seen: said, sent: box.sent.slice(echo + 1) }
+        : { text: said, seen: said, sent: [] },
+    )
+  }
+  const type = (text: string) => {
+    setBox((held) => ({ ...held, text, sent: [...held.sent, text] }))
+    set({ [key]: text }, "replace")
+  }
+  return [box.text, type]
 }

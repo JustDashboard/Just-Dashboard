@@ -11,6 +11,7 @@ import {
   fleetReadings,
   pushSample,
   sortFleet,
+  storedBytes,
   type Sample,
 } from "@/components/database/fleet/fleet"
 import {
@@ -36,8 +37,12 @@ const WATCHING_MS = 5_000
  * leaves what is drawn where it is. It is read every thirty seconds, and
  * every five while a database is down or being started — the reader is
  * waiting for that one to change.
+ *
+ * `measured` is what discovery weighed on disk for the connections that are
+ * files, by connection id: the engine reports no size for those, and the one
+ * figure every part of the page says for "stored" is worked out here.
  */
-export function useFleet() {
+export function useFleet(measured?: ReadonlyMap<number, number>) {
   const { engineFor } = useDatabases()
   const [interval, setIntervalMs] = useState(STEADY_MS)
   const fleet = usePoll(readFleet, interval)
@@ -72,9 +77,10 @@ export function useFleet() {
     () => sortFleet(fleet.data?.connections ?? [], concernsOf),
     [fleet.data, concernsOf],
   )
+  const storedOf = useCallback((entry: DbFleetEntry) => storedBytes(entry, measured), [measured])
   const readings = useMemo(
-    () => fleetReadings(fleet.data, { backups, dumps }),
-    [fleet.data, backups, dumps],
+    () => fleetReadings(fleet.data, { backups, dumps, storedOf }),
+    [fleet.data, backups, dumps, storedOf],
   )
 
   // The Sessions tile's trend is this page's own: one sample for each reading
@@ -95,6 +101,7 @@ export function useFleet() {
     backups,
     feeds,
     dumps,
+    storedOf,
     concernsOf,
     sessionSamples: held.samples,
   }

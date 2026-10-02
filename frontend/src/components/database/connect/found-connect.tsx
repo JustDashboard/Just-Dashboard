@@ -26,7 +26,11 @@ import {
   CONNECTION_NAME,
   generatePassword,
 } from "@/components/database/connect/rules"
-import type { DbHostGrantRequest, DbInstance } from "@/components/database/fleet/types"
+import type {
+  DbHostConnectRequest,
+  DbHostGrantRequest,
+  DbInstance,
+} from "@/components/database/fleet/types"
 import { EngineMark } from "@/components/database/kit"
 
 /**
@@ -49,6 +53,7 @@ import { EngineMark } from "@/components/database/kit"
  * that exists and answers nothing.
  */
 export function FoundConnectDialog({
+  open,
   instance,
   engine,
   choice,
@@ -56,6 +61,7 @@ export function FoundConnectDialog({
   onClose,
   onConnected,
 }: {
+  open: boolean
   instance: DbInstance
   engine: Engine
   /** Whether an account can be made from this machine as well. */
@@ -106,13 +112,25 @@ export function FoundConnectDialog({
               name: name.trim(),
               superuser,
             } satisfies DbHostGrantRequest)
-          : await post<DbConnection>("/databases/inventory/connect", {
-              key: instance.key,
-              name: name.trim() || undefined,
-              user: user.trim() || undefined,
-              password,
-              database: database.trim() || undefined,
-            })
+          : instance.key === "" && endpoint?.port && instance.driver !== ""
+            ? // No key: the fleet reported this server while the inventory
+              // could not be read, so it is signed in to by its address.
+              await post<DbConnection>("/databases/host", {
+                driver: instance.driver,
+                host: endpoint.host ?? "127.0.0.1",
+                port: endpoint.port,
+                user: user.trim(),
+                password,
+                database: database.trim(),
+                name: name.trim(),
+              } satisfies DbHostConnectRequest)
+            : await post<DbConnection>("/databases/inventory/connect", {
+                key: instance.key,
+                name: name.trim() || undefined,
+                user: user.trim() || undefined,
+                password,
+                database: database.trim() || undefined,
+              })
       onConnected(connection)
     } catch (err) {
       setError(errorMessage(err))
@@ -140,7 +158,7 @@ export function FoundConnectDialog({
 
   return (
     <Modal
-      open
+      open={open}
       onOpenChange={(open) => !open && !busy && onClose()}
       title={`Connect ${instance.name}`}
       description={`${engine.label} was found on this server and states no password the dashboard can read.`}

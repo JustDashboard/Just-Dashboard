@@ -48,6 +48,7 @@ export function Wiring({
   keep,
   engineOf,
   compact,
+  readers = true,
   className,
 }: {
   topology: DbTopology
@@ -57,6 +58,11 @@ export function Wiring({
   engineOf: (node: DbTopoNode) => Engine
   /** The control center's version: smaller marks, fewer words. */
   compact?: boolean
+  /**
+   * Draw the lane of readers. False where something beside the picture lists
+   * them and the wires that would join the two lanes are not drawn.
+   */
+  readers?: boolean
   className?: string
 }) {
   const { databases, consumers, edges, feeds, fedBy } = useMemo(
@@ -102,7 +108,7 @@ export function Wiring({
       )}
     >
       <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
-      {edges.map((edge, index) => {
+      {(readers ? edges : []).map((edge, index) => {
         const from = refFor(edge.from)
         const to = refFor(edge.to)
         if (!from || !to) return null
@@ -181,63 +187,65 @@ export function Wiring({
         {/* The lane the wires cross. Nothing is drawn in it on purpose. */}
         <div aria-hidden className="hidden lg:block" />
 
-        <div className="min-w-0">
-          <LaneHead count={consumers.length}>What reads them</LaneHead>
-          <ol
-            className={cn("flex flex-col", compact ? "gap-4" : "gap-5")}
-            aria-label="What reads them"
-          >
-            {consumers.length === 0 && (
-              <li className="text-hint leading-relaxed text-muted-foreground">
-                Nothing has been seen reading these yet. A deployment that links a database, a
-                container whose environment names one, or an open session will appear here.
-              </li>
-            )}
-            {consumers.map((node) => {
-              const sources = fedBy.get(node.id) ?? []
-              const worst = worstStatus(sources.map((source) => source.edge))
-              return (
-                <li
-                  key={node.id}
-                  {...watch(node.id)}
-                  className={cn("transition-opacity", !related(node.id) && "opacity-40")}
-                >
-                  <WireNode
-                    nodeRef={refFor(node.id)}
-                    mark={<ConsumerMark node={node} worst={worst} size={size} />}
-                    eyebrow={consumerKind(node)}
-                    title={
-                      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span className="min-w-0 truncate">{node.name}</span>
-                        {node.kind !== "host" && (edgeRank(worst) >= 2 || node.status) && (
-                          <Status
-                            verdict={consumerVerdict(worst, node.status)}
-                            label={consumerWord(worst, node.status)}
-                          />
-                        )}
-                      </span>
-                    }
-                    hint={
-                      <>
-                        {/* Which databases reach it — in words below `lg`,
-                            where the wires are not drawn. */}
-                        <span className="lg:hidden">
-                          {sources.map((source) => source.from.name).join(", ")}
-                          {sources.length > 0 && " · "}
-                        </span>
-                        {sources.length === 1
-                          ? compact
-                            ? shortEdge(sources[0].edge)
-                            : describeEdge(sources[0].edge)
-                          : linksLine(sources.map((source) => source.edge))}
-                      </>
-                    }
-                  />
+        {readers && (
+          <div className="min-w-0">
+            <LaneHead count={consumers.length}>What reads them</LaneHead>
+            <ol
+              className={cn("flex flex-col", compact ? "gap-4" : "gap-5")}
+              aria-label="What reads them"
+            >
+              {consumers.length === 0 && (
+                <li className="text-hint leading-relaxed text-muted-foreground">
+                  Nothing has been seen reading these yet. A deployment that links a database, a
+                  container whose environment names one, or an open session will appear here.
                 </li>
-              )
-            })}
-          </ol>
-        </div>
+              )}
+              {consumers.map((node) => {
+                const sources = fedBy.get(node.id) ?? []
+                const worst = worstStatus(sources.map((source) => source.edge))
+                return (
+                  <li
+                    key={node.id}
+                    {...watch(node.id)}
+                    className={cn("transition-opacity", !related(node.id) && "opacity-40")}
+                  >
+                    <WireNode
+                      nodeRef={refFor(node.id)}
+                      mark={<ConsumerMark node={node} worst={worst} size={size} />}
+                      eyebrow={consumerKind(node)}
+                      title={
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <span className="min-w-0 truncate">{node.name}</span>
+                          {node.kind !== "host" && (edgeRank(worst) >= 2 || node.status) && (
+                            <Status
+                              verdict={consumerVerdict(worst, node.status)}
+                              label={consumerWord(worst, node.status)}
+                            />
+                          )}
+                        </span>
+                      }
+                      hint={
+                        <>
+                          {/* Which databases reach it — in words below `lg`,
+                            where the wires are not drawn. */}
+                          <span className="lg:hidden">
+                            {sources.map((source) => source.from.name).join(", ")}
+                            {sources.length > 0 && " · "}
+                          </span>
+                          {sources.length === 1
+                            ? compact
+                              ? shortEdge(sources[0].edge)
+                              : describeEdge(sources[0].edge)
+                            : linksLine(sources.map((source) => source.edge))}
+                        </>
+                      }
+                    />
+                  </li>
+                )
+              })}
+            </ol>
+          </div>
+        )}
       </div>
     </div>
   )

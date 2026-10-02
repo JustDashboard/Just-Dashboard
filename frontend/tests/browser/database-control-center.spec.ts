@@ -24,6 +24,53 @@ const foundRow = (page: Page, name: string) =>
   page.locator("[data-slot=choice-row]").filter({ hasText: name }).first()
 const scroller = (page: Page) => page.locator("[data-slot=page]").first().locator("xpath=..")
 
+/** A server with many databases, long names and awkward figures among them. */
+function manyDatabases(count: number) {
+  const engines = [
+    ["postgres", "postgres", "tables"],
+    ["mysql", "mariadb", "tables"],
+    ["redis", "valkey", "keys"],
+    ["mongodb", "mongodb", "collections"],
+    ["clickhouse", "clickhouse", "tables"],
+    ["sqlserver", "sqlserver", "tables"],
+  ]
+  return Array.from({ length: count }, (_, i) => {
+    const [driver, flavor, objectWord] = engines[i % engines.length]
+    const down = i % 11 === 0
+    return {
+      id: 100 + i,
+      name: i % 7 === 0 ? `customer-facing-production-replica-eu-west-${i}` : `db-${i}`,
+      driver,
+      flavor,
+      host: "127.0.0.1",
+      port: String(5000 + i),
+      user: "app",
+      database: "main",
+      createdAt: new Date().toISOString(),
+      environment: i % 3 === 0 ? "production" : i % 3 === 1 ? "staging" : "",
+      readOnly: i % 5 === 0,
+      notes: "",
+      origin: "",
+      ok: !down,
+      state: down ? "unreachable" : "running",
+      error: down ? "dial tcp: connection refused" : undefined,
+      latencyMs: 3,
+      bytes: 1_000_000 * (i + 1) * 97,
+      sizesKnown: true,
+      objects: i === 4 ? 123_456_789_012 : 12 * i,
+      objectWord,
+      sessions: i === 5 ? 1_234_567 : i % 9,
+      source: i % 4 === 0 ? "host" : "docker",
+      container: i % 4 === 0 ? undefined : `a-rather-long-container-name-for-db-${i}-1`,
+      unit: i % 8 === 0 ? "postgresql@16-main.service" : undefined,
+      exposure: i % 6 === 0 ? "public" : "local",
+      consumers: i % 2,
+      versionNumber: "16.4.1-ubuntu0.24.04.1+build7",
+      lastBackup: i % 2 ? new Date(Date.now() - 3_600_000 * i).toISOString() : undefined,
+    }
+  })
+}
+
 test.describe("the control center", () => {
   test("reads the fleet as five figures and cards in their engine's words, shelved by where they run", async ({
     page,
@@ -33,8 +80,14 @@ test.describe("the control center", () => {
 
     await expect(tile(page, "Databases")).toContainText("5 engines")
     await expect(tile(page, "Running")).toContainText("of 5")
-    // The file reported no size: the sum says how many did, and is not a zero.
-    await expect(tile(page, "Stored")).toContainText("1 of 5 did not report a size")
+    // The file's engine reports no size and discovery measured it: it is in
+    // the sum, and the tile says which database holds the most of it.
+    await expect(tile(page, "Stored")).toContainText("33.6 MB")
+    await expect(tile(page, "Stored")).toContainText("shop holds 23.4 MB of it")
+    await expect(card(page, "notes")).toContainText("312.0 KB")
+    // The two that are a share of the fleet draw the share.
+    await expect(tile(page, "Running").getByRole("meter")).toHaveAttribute("aria-valuenow", "100")
+    await expect(tile(page, "Backed up").getByRole("meter")).toHaveAttribute("aria-valuenow", "60")
     await expect(tile(page, "Sessions")).toContainText("14")
     await expect(tile(page, "Backed up")).toContainText("3")
     await expect(tile(page, "Backed up")).toContainText("1 never backed up")
@@ -49,6 +102,13 @@ test.describe("the control center", () => {
         await expect(list.getByRole("link", { name: `Open ${name}` })).toBeVisible()
       }
     }
+
+    // A shelf is as wide as its cards: the two short ones stand side by side under their
+    // own rules, below the one that fills its row.
+    const top = async (shelf: string) =>
+      (await page.getByRole("list", { name: shelf }).boundingBox())?.y ?? -1
+    expect(await top("Files")).toBe(await top("Elsewhere"))
+    expect(await top("Containers")).toBeLessThan(await top("Files"))
 
     // MariaDB behind the mysql driver is drawn and named as itself.
     await expect(card(page, "blog")).toContainText("MariaDB 11.8.9")
@@ -116,6 +176,25 @@ test.describe("the control center", () => {
     expect(where(page)).toBe("/databases")
   })
 
+  test("a fleet with nothing down says so as good news, not as a filter that found nothing", async ({
+    page,
+  }) => {
+    await mockFleet(page)
+    await page.goto("/databases?show=down")
+    const empty = page.locator("[data-slot=empty-state]")
+    await expect(empty).toContainText("Every database is running")
+    await expect(empty).not.toContainText("Nothing in the fleet matches")
+    // The engines' own reset chip does not read as a second answer to the reading's.
+    await expect(page.getByRole("button", { name: /^All engines/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: /^Not running/ })).toBeVisible()
+    // A reading that narrowed to the files keeps them: the size discovery measured counts.
+    await page.goto("/databases?show=stored")
+    await expect(page.locator("[data-card=database]")).toHaveCount(5)
+    await expect(page.getByRole("link", { name: /^Open / }).first()).toHaveAccessibleName(
+      "Open shop",
+    )
+  })
+
   test("engines and words narrow it too, and nothing left offers the way back", async ({
     page,
   }) => {
@@ -125,9 +204,26 @@ test.describe("the control center", () => {
     await page.getByRole("button", { name: /^MariaDB/ }).click()
     expect(where(page)).toBe("/databases?engine=mariadb")
     await expect(page.locator("[data-card=database]")).toHaveCount(1)
-    await page.getByRole("button", { name: /^All/ }).click()
+    await page.getByRole("button", { name: /^All engines/ }).click()
 
-    await page.getByLabel("Filter databases").fill("cache")
+    const box = page.getByLabel("Filter databases")
+    await box.fill("cache")
+    await expect(page.locator("[data-card=database]")).toHaveCount(1)
+    expect(where(page)).toBe("/databases?q=cache")
+    // A letter typed into the middle of the text stays where it was typed:
+    // the field owns its text and the address follows it.
+    await box.press("Home")
+    await box.press("ArrowRight")
+    await page.keyboard.type("XY", { delay: 40 })
+    await expect(box).toHaveValue("cXYache")
+    // The address a card prints finds its database: the port, and host with port.
+    await box.fill("5432")
+    await expect(page.locator("[data-card=database]")).toHaveCount(1)
+    await expect(card(page, "shop")).toBeVisible()
+    // Back to an address with other words puts them in the field.
+    await box.fill("")
+    await page.goto("/databases?q=blog")
+    await expect(page.getByLabel("Filter databases")).toHaveValue("blog")
     await expect(page.locator("[data-card=database]")).toHaveCount(1)
     await page.getByLabel("Filter databases").fill("nothing-like-this")
     await expect(page.getByText("No database matches")).toBeVisible()
@@ -155,9 +251,17 @@ test.describe("the control center", () => {
 
     await page.getByRole("radio", { name: "Table" }).click()
     const table = page.getByRole("table")
-    // The figures to compare stay on screen at this width; the engine and
-    // the place, which the name's mark and the shelves say, join them on a
-    // wider one.
+    // The figures to compare stay on screen at this width. The engine and the
+    // place are still said — on a second line under the name — and take
+    // columns of their own on a wider one.
+    await expect(table.getByRole("row", { name: /shop/ })).toContainText("PostgreSQL 16.4")
+    await expect(table.getByRole("row", { name: /shop/ })).toContainText("shop-db")
+    await expect(table.getByRole("row", { name: /app/ })).toContainText("db.example.com:27017")
+    expect(
+      await page
+        .locator("[data-slot=table-container]")
+        .evaluate((el) => el.scrollWidth - el.clientWidth),
+    ).toBeLessThanOrEqual(1)
     await expect(table.getByRole("columnheader")).toHaveText([
       "Status",
       "Name",
@@ -184,8 +288,8 @@ test.describe("the control center", () => {
       "Actions",
     ])
     await expect(table.getByRole("row", { name: /shop/ })).toContainText("shop-db")
-    // The file's size was not reported: a dash, never 0 B.
-    await expect(table.getByRole("row", { name: /notes/ })).toContainText("—")
+    // The file's size is the one the card gives: what discovery measured.
+    await expect(table.getByRole("row", { name: /notes/ })).toContainText("312.0 KB")
     await table.getByRole("button", { name: "Size" }).click()
     await expect(table.getByRole("columnheader", { name: "Size" })).toHaveAttribute(
       "aria-sort",
@@ -224,8 +328,11 @@ test.describe("the control center", () => {
     // The worst stands first, and a public port does not hide the missing dump.
     await expect(attention.getByRole("button").first()).toContainText("cache cannot be reached")
     await expect(finding(/shop is reachable from the internet/)).toBeVisible()
-    await expect(finding(/2 databases have never been backed up/)).toBeVisible()
+    await expect(finding(/shop has never been backed up/)).toBeVisible()
+    await expect(finding(/cache has never been backed up/)).toBeVisible()
     await expect(finding(/app was last backed up/)).toBeVisible()
+    // Eight findings are short of a fold: nothing is hidden to save one line.
+    await expect(attention.getByRole("button", { name: /^Show \d+ more$/ })).toHaveCount(0)
     await expect(finding(/postgresql@17-main is running here and needs a password/)).toBeVisible()
 
     // Stopped while two deployments use it: the fix is Start, and it runs.
@@ -244,13 +351,160 @@ test.describe("the control center", () => {
       .poll(() => server.bodies("PUT /databases/1/access"))
       .toEqual([{ exposure: "local" }])
 
-    // Never dumped: each can be dumped from the finding, and the job is watched.
-    await finding(/2 databases have never been backed up/).click()
-    // One that does not answer cannot be dumped, and is offered no dump.
-    await expect(attention.getByRole("button", { name: "Back up cache now" })).toHaveCount(0)
-    await attention.getByRole("button", { name: "Back up shop now" }).click()
+    // Never dumped: it can be dumped from the finding, and the job is watched.
+    await finding(/shop has never been backed up/).click()
+    await attention.getByRole("button", { name: "Back up now" }).click()
     await expect(page.getByText("shop backed up")).toBeVisible()
     expect(server.bodies("POST /databases/1/backup")).toEqual([{}])
+    // One that does not answer cannot be dumped, and is offered no dump.
+    await finding(/cache has never been backed up/).click()
+    await expect(attention.getByRole("button", { name: "Open backups" })).toBeVisible()
+    await expect(attention.getByRole("button", { name: "Back up now" })).toHaveCount(1)
+  })
+
+  test("forty databases are a handful of findings, each naming its databases with their fix", async ({
+    page,
+  }) => {
+    const server = await mockFleet(page)
+    server.answer("GET /databases/fleet", () => ({
+      body: {
+        connections: manyDatabases(40),
+        unreachable: [],
+        needsCredentials: [],
+        checkedAt: new Date().toISOString(),
+      },
+    }))
+    server.answer("GET /databases/backups/summary", () => ({ body: { connections: [] } }))
+    await page.goto("/databases")
+    const attention = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "Needs attention" }),
+    })
+    const rows = attention.locator("[data-slot=accordion-item]")
+
+    await expect(
+      attention.getByRole("button", { name: /^4 databases cannot be reached/ }),
+    ).toBeVisible()
+    await expect(
+      attention.getByRole("button", { name: /^7 databases are reachable from the internet/ }),
+    ).toBeVisible()
+    await expect(
+      attention.getByRole("button", { name: /^20 databases have never been backed up/ }),
+    ).toBeVisible()
+    // What is wrong, not what it is wrong with: four rows, not thirty-two.
+    await expect(rows).toHaveCount(4)
+    // The fleet starts on the first screen.
+    const fleetTop = await page.getByRole("heading", { name: "All databases" }).boundingBox()
+    expect(fleetTop?.y ?? 9999).toBeLessThan(600)
+
+    // Each database keeps its own fix inside the finding that names it.
+    await attention.getByRole("button", { name: /^7 databases are reachable/ }).click()
+    const targets = attention.getByRole("list", {
+      name: "7 databases are reachable from the internet",
+    })
+    await expect(targets.getByRole("listitem")).toHaveCount(7)
+    // One in a container of its own can be restricted from here; one installed on the
+    // machine is changed where it is declared.
+    await expect(targets.getByRole("button", { name: "Open settings: db-12" })).toBeVisible()
+    await targets.getByRole("button", { name: "Restrict to this server: db-18" }).click()
+    await expect(page.getByRole("dialog")).toContainText("Restrict db-18 to this server")
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click()
+
+    // Nothing spills out of a card or the page, whatever the names and figures are.
+    expect(
+      await scroller(page).evaluate((el) => el.scrollWidth - el.clientWidth),
+    ).toBeLessThanOrEqual(1)
+    await page.getByRole("radio", { name: "Table" }).click()
+    expect(
+      await page
+        .locator("[data-slot=table-container]")
+        .evaluate((el) => el.scrollWidth - el.clientWidth),
+    ).toBeLessThanOrEqual(1)
+    await page.getByRole("radio", { name: "Cards" }).click()
+  })
+
+  test("past eight findings the rest wait behind a count", async ({ page }) => {
+    await mockFleet(page, {
+      dumps: { 1: null, 2: null, 4: 400, 5: 400 },
+      fleet: {
+        1: { exposure: "public" },
+        2: { exposure: "public", ok: false, state: "stopped", consumers: 1 },
+        4: { ok: false, state: "unreachable", error: "connection refused" },
+        5: { ok: false, state: "unreachable", error: "connection refused" },
+        7: { ok: false, state: "paused", container: "notes-box", source: "docker" },
+      },
+    })
+    await page.goto("/databases")
+    const attention = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "Needs attention" }),
+    })
+    const rows = attention.locator("[data-slot=accordion-item]")
+    await expect(rows).toHaveCount(6)
+    const more = attention.getByRole("button", { name: /^Show \d+ more$/ })
+    await expect(more).toHaveAttribute("aria-expanded", "false")
+    await more.click()
+    await expect(attention.getByRole("button", { name: "Show fewer" })).toBeVisible()
+    expect(await rows.count()).toBeGreaterThan(8)
+  })
+
+  test("a card says what is wrong in one weight, keeps its labels out of its readings, and cuts nothing it prints", async ({
+    page,
+  }) => {
+    await mockFleet(page, {
+      dumps: { 4: null, 5: 400 },
+      rows: { 1: { environment: "staging" }, 5: { environment: "production", readOnly: true } },
+      fleet: {
+        1: {
+          ok: false,
+          state: "unreachable",
+          error:
+            'failed to connect to `user=app database=shop_main`: 127.0.0.1:5432 (127.0.0.1): failed SASL auth: FATAL: password authentication failed for user "app" (SQLSTATE 28P01)',
+        },
+        2: { ok: false, state: "stopped" },
+      },
+    })
+    await page.goto("/databases")
+
+    // The engine's own noun is read whole at this width.
+    const noun = card(page, "app").getByText("Collections", { exact: true })
+    expect(await noun.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+
+    // Two whole lines of the server's answer and no part of a third.
+    const said = card(page, "shop").locator("[data-slot=fleet-error]")
+    const lines = await said.evaluate((el) => {
+      const style = getComputedStyle(el)
+      return el.getBoundingClientRect().height / parseFloat(style.lineHeight)
+    })
+    expect(lines).toBeCloseTo(2, 1)
+    await expect(said).toHaveAttribute("title", /SQLSTATE 28P01/)
+
+    // The card that says what the server answered is one press from where it is fixed.
+    await expect(
+      card(page, "shop").getByRole("link", { name: "Settings of shop" }),
+    ).toHaveAttribute("href", "/databases/1/settings")
+
+    // The operator's labels stand in the head; the line of facts holds readings only.
+    await expect(card(page, "shop").locator("[data-slot=fleet-facts] [data-slot=tag]")).toHaveCount(
+      0,
+    )
+    await expect(card(page, "app").locator("[data-slot=fleet-facts] [data-slot=tag]")).toHaveCount(
+      0,
+    )
+    await expect(card(page, "shop").getByText("staging", { exact: true })).toBeVisible()
+    await expect(card(page, "app").getByText("production", { exact: true })).toBeVisible()
+    await expect(card(page, "app").getByText("protected", { exact: true })).toBeAttached()
+    const facts = card(page, "app").locator("[data-slot=fleet-facts]")
+    expect((await facts.boundingBox())?.height ?? 99).toBeLessThan(24)
+
+    // A dump over a week old weighs the same on the card as in the list of findings.
+    const hue = (el: Element) => getComputedStyle(el).color
+    const stale = await facts.getByText(/^backed up/).evaluate(hue)
+    const never = await card(page, "cache").getByText("never backed up").evaluate(hue)
+    expect(stale).toBe(never)
+
+    // Start is the one fix a stopped database offers, and is not drawn stepped back.
+    const start = card(page, "blog").getByRole("button", { name: "Start blog" })
+    const name = card(page, "blog").getByRole("link", { name: "Open blog" })
+    expect(await start.evaluate(hue)).toBe(await name.evaluate(hue))
   })
 
   test("a stopped server keeps its card with Start, and says it is starting until it has", async ({
@@ -322,12 +576,26 @@ test.describe("the control center", () => {
     await page.getByRole("menuitem", { name: "Forget" }).click()
     const dialog = page.getByRole("dialog")
     await expect(dialog).toContainText("The database itself and its data are not touched")
+    // Before it is tried, a link is a possibility, not a refusal already given.
+    await expect(dialog).toContainText(
+      "If one of them is linked through a managed database network",
+    )
     await dialog.getByRole("button", { name: "Forget" }).click()
+    // The refusal is read in the dialog, beside the question, in plain words.
     await expect(
-      page.getByText(/shop is linked to a deployment through a managed database network/),
+      dialog.getByText("It is linked to a deployment, so it was not forgotten"),
     ).toBeVisible()
+    await expect(dialog).toContainText(
+      "Remove the link under that deployment's Settings › Databases",
+    )
+    await expect(
+      page.getByText("shop is linked to a deployment through a managed database network."),
+    ).toBeVisible()
+    await expect(page.getByText(/Error:/)).toHaveCount(0)
     await dialog.getByRole("button", { name: "Cancel" }).click()
     await expect(card(page, "shop")).toBeVisible()
+    // The keyboard goes back to the database's own menu, not to the top of the page.
+    await expect(card(page, "shop").getByRole("button", { name: "Actions for shop" })).toBeFocused()
 
     // One nothing is linked to goes, and its card with it.
     await card(page, "cache").getByRole("button", { name: "Actions for cache" }).click()
@@ -335,6 +603,40 @@ test.describe("the control center", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Forget" }).click()
     await expect(page.getByText("Forgot cache")).toBeVisible()
     await expect(card(page, "cache")).toHaveCount(0)
+  })
+
+  test("forgetting promises the ignore list only where the server will use it", async ({
+    page,
+  }) => {
+    await mockFleet(page, {
+      rows: {
+        1: { origin: "docker:shop-db" },
+        2: { origin: "docker:blog-db-1" },
+        4: { origin: "docker:blog-db-1" },
+        7: { origin: "file:/srv/notes/notes.db" },
+      },
+    })
+    await page.goto("/databases")
+    const asks = async (name: string) => {
+      await card(page, name)
+        .getByRole("button", { name: `Actions for ${name}` })
+        .click()
+      await page.getByRole("menuitem", { name: "Forget" }).click()
+      const text = await page.getByRole("dialog").innerText()
+      await page.keyboard.press("Escape")
+      await expect(page.getByRole("dialog")).toHaveCount(0)
+      await expect(
+        card(page, name).getByRole("button", { name: `Actions for ${name}` }),
+      ).toBeFocused()
+      return text
+    }
+    // The last connection to a found server: it is set aside with it.
+    expect(await asks("shop")).toContain("put on the ignore list")
+    // A file is never put there, nor a server another connection still points at,
+    // nor a connection nobody found.
+    expect(await asks("notes")).not.toContain("ignore list")
+    expect(await asks("blog")).not.toContain("ignore list")
+    expect(await asks("app")).not.toContain("ignore list")
   })
 
   test("a role that only reads is drawn no command it cannot use and asks for no inventory", async ({
@@ -351,6 +653,9 @@ test.describe("the control center", () => {
     await expect(page.getByRole("button", { name: "Scan this server again" })).toHaveCount(0)
     await expect(page.getByRole("heading", { name: "Found on this server" })).toHaveCount(0)
     await expect(card(page, "blog").getByRole("button", { name: "Start blog" })).toHaveCount(0)
+    // Nobody measured the file for this role: one answer still, and it is "unknown".
+    await expect(tile(page, "Stored")).toContainText("1 of 5 did not report a size")
+    await expect(card(page, "notes")).toContainText("—")
     await card(page, "shop").getByRole("button", { name: "Actions for shop" }).click()
     await expect(page.getByRole("menuitem")).toHaveText(["Settings"])
     expect(server.asked).not.toContain("GET /databases/inventory")
@@ -367,7 +672,8 @@ test.describe("the control center", () => {
     })
     server.answer("GET /databases/fleet", async () => {
       if (answer === "held") await first.until
-      if (answer === "failing") return refusal(500, "internal", "the fleet could not be read", true)
+      // Not marked as worth retrying, which is how most failures of a read arrive.
+      if (answer === "failing") return refusal(500, "internal", "the fleet could not be read")
     })
     await page.goto("/databases")
     await expect(page.getByRole("status", { name: "Loading databases" })).toBeVisible()
@@ -378,7 +684,11 @@ test.describe("the control center", () => {
     await expect(
       page.getByRole("alert").filter({ hasText: "the fleet could not be read" }),
     ).toBeVisible()
+    // The page keeps its commands and says when it will ask by itself.
+    await expect(page.getByRole("main").getByRole("link", { name: "Add a database" })).toBeVisible()
+    await expect(page.getByText("It is asked again by itself every 30 seconds.")).toBeVisible()
     answer = "given"
+    await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(1)
     await page.getByRole("button", { name: "Try again" }).click()
     await expect(card(page, "shop")).toBeVisible()
 
@@ -418,7 +728,13 @@ test.describe("found on this server", () => {
     await expect(found.getByRole("button", { name: "Connect orders-db" })).toBeVisible()
     await expect(found.getByRole("button", { name: "Connect postgresql@17-main" })).toBeVisible()
     await expect(found.getByRole("button", { name: "Start old-mysql" })).toBeVisible()
-    await expect(foundRow(page, "old-mysql")).toContainText("the container is exited")
+    await expect(foundRow(page, "old-mysql")).toContainText(
+      "The container is exited — start it to connect.",
+    )
+    // One that is up and waits says what it waits for.
+    await expect(foundRow(page, "postgresql@17-main")).toContainText(
+      "Its accounts are kept in its own catalogue",
+    )
     await expect(found.getByRole("button", { name: "Start redis-server" })).toBeVisible()
     await expect(found.getByRole("button", { name: "Open data.db" })).toBeVisible()
 
@@ -483,6 +799,109 @@ test.describe("found on this server", () => {
       password: "right",
       database: "orders",
     })
+  })
+
+  test("a container the fleet says already refused what it states is asked for its password, not tried again", async ({
+    page,
+  }) => {
+    const server = await mockFleet(page, {
+      reported: {
+        unreachable: [
+          {
+            container: "orders-db",
+            driver: "postgres",
+            reason:
+              'it did not accept the credentials its container states (password authentication failed for user "orders") — connect it with the password it actually uses',
+          },
+        ],
+      },
+    })
+    await page.goto("/databases")
+    await expect(foundRow(page, "orders-db")).toContainText(
+      "It did not accept the credentials its container states",
+    )
+    const press = page.getByRole("button", { name: "Connect orders-db" })
+    await press.click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog.getByLabel("Password")).toBeVisible()
+    expect(server.bodies("POST /databases/inventory/connect")).toEqual([])
+    // Closing it gives the keyboard back to the row it was opened from.
+    await page.keyboard.press("Escape")
+    await expect(dialog).toHaveCount(0)
+    await expect(press).toBeFocused()
+    // What was typed before a cancel is not what the next opening starts from.
+    await press.click()
+    await dialog.getByLabel("Password").fill("half-typed")
+    await dialog.getByRole("button", { name: "Cancel" }).click()
+    await expect(press).toBeFocused()
+    await press.click()
+    await expect(dialog.getByLabel("Password")).toHaveValue("")
+  })
+
+  test("when the inventory cannot be read, what the fleet reported is still listed and a host server connects by its address", async ({
+    page,
+  }) => {
+    const server = await mockFleet(page, {
+      reported: {
+        unreachable: [
+          {
+            container: "orders-db",
+            driver: "postgres",
+            reason: "its container states no password — connect it with the one it uses",
+          },
+        ],
+        needsCredentials: [
+          {
+            driver: "postgres",
+            host: "127.0.0.1",
+            port: 5438,
+            name: "postgres 17 main on this host",
+            user: "postgres",
+            database: "postgres",
+          },
+        ],
+      },
+    })
+    server.answer("GET /databases/inventory", () =>
+      refusal(502, "bad_gateway", "the inventory did not answer"),
+    )
+    await page.goto("/databases")
+    const found = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "Found on this server" }),
+    })
+    await expect(
+      found.getByRole("alert").filter({ hasText: "the inventory did not answer" }),
+    ).toBeVisible()
+    await expect(found.getByRole("button", { name: "Try again" })).toBeVisible()
+    await expect(found.getByText("Reported with the fleet")).toBeVisible()
+    await expect(foundRow(page, "orders-db")).toContainText("Its container states no password")
+    // Both are in the list of what needs a hand, too.
+    const attention = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "Needs attention" }),
+    })
+    await expect(
+      attention.getByRole("button", { name: /postgres 17 main on this host is running here/ }),
+    ).toBeVisible()
+
+    await found.getByRole("button", { name: "Connect postgres 17 main on this host" }).click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("button", { name: "I know a password" }).click()
+    await expect(dialog.getByLabel("User")).toHaveValue("postgres")
+    await dialog.getByLabel("Password", { exact: true }).fill("s3cret")
+    await dialog.getByRole("button", { name: "Connect", exact: true }).click()
+    await expect(page.getByText("Connected postgres on this host")).toBeVisible()
+    expect(server.bodies("POST /databases/host")).toEqual([
+      {
+        driver: "postgres",
+        host: "127.0.0.1",
+        port: 5438,
+        user: "postgres",
+        password: "s3cret",
+        database: "postgres",
+        name: "",
+      },
+    ])
+    expect(server.bodies("POST /databases/inventory/connect")).toEqual([])
   })
 
   test("a native server offers an account made from this machine, with its password shown before it is used", async ({
@@ -600,7 +1019,23 @@ test.describe("the map", () => {
     // The broken link stands first, and says so.
     await expect(readers.locator("[data-slot=row]").first()).toContainText("worker")
     await expect(readers.locator("[data-slot=row]").first()).toContainText("link broken")
-    await expect(readers).toContainText("shop — linked by its deployment · 3 open sessions")
+    // Each database that reaches a reader has a line of its own, read whole.
+    await expect(readers).toContainText("shop linked by its deployment · 3 open sessions")
+    await expect(readers.locator("[data-slot=row]").first()).toContainText(
+      "blog linked by its deployment",
+    )
+    await page.setViewportSize({ width: 1720, height: 1000 })
+    expect(
+      await readers.evaluate(
+        (list) =>
+          [...list.querySelectorAll("*")].filter(
+            (el) =>
+              getComputedStyle(el).textOverflow === "ellipsis" &&
+              el.scrollWidth > el.clientWidth + 1,
+          ).length,
+      ),
+    ).toBe(0)
+    await page.setViewportSize({ width: 1280, height: 720 })
 
     await page.getByRole("button", { name: /^Redis/ }).click()
     expect(where(page)).toBe("/databases/map?engine=redis")
@@ -612,16 +1047,31 @@ test.describe("the map", () => {
     await expect(readers.locator("[data-slot=row]")).toHaveCount(4)
   })
 
+  test("where no wire is drawn the readers are listed once, not twice", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mockFleet(page)
+    await page.goto("/databases/map")
+    const picture = page.locator("[data-slot=wiring]")
+    await expect(
+      picture.getByRole("list", { name: "Databases" }).getByRole("listitem"),
+    ).toHaveCount(5)
+    await expect(picture.getByRole("list", { name: "What reads them" })).toHaveCount(0)
+    await expect(page.locator("[data-slot=row-list] [data-slot=row]")).toHaveCount(4)
+    await expect(page.locator("[data-slot=row]").filter({ hasText: "worker" })).toHaveCount(1)
+    await expect(picture).not.toContainText("worker")
+  })
+
   test("says when it could not be read, and when there is nothing to map", async ({ page }) => {
     const server = await mockFleet(page)
     let failing = true
     server.answer("GET /databases/topology", () => {
-      if (failing) return refusal(500, "internal", "the map could not be drawn", true)
+      if (failing) return refusal(500, "internal", "the map could not be drawn")
     })
     await page.goto("/databases/map")
     await expect(
       page.getByRole("alert").filter({ hasText: "the map could not be drawn" }),
     ).toBeVisible()
+    await expect(page.getByText("It is asked again by itself every 30 seconds.")).toBeVisible()
     failing = false
     await page.getByRole("button", { name: "Try again" }).click()
     await expect(page.locator("[data-slot=wiring]")).toBeVisible()
@@ -759,7 +1209,7 @@ test.describe("adding a database", () => {
     const panel = page.locator("[data-slot=flow-panel]")
     const connect = panel.getByRole("button", { name: "Connect", exact: true })
 
-    await expect(panel.getByRole("button", { name: "Test" })).toBeDisabled()
+    await expect(panel.getByRole("button", { name: "Test", exact: true })).toBeDisabled()
     await panel.getByLabel("Host").fill("db.example.com")
     await panel.getByLabel("User").fill("app")
     await panel.getByLabel("Password").fill("wrong")
@@ -769,22 +1219,23 @@ test.describe("adding a database", () => {
       "postgres://app:••••••@db.example.com:5432/shop?sslmode=disable",
     )
     await expect(connect).toBeDisabled()
-    await panel.getByRole("button", { name: "Test" }).click()
+    await panel.getByRole("button", { name: "Test", exact: true }).click()
     await expect(panel).toContainText("It refused the connection")
     await expect(connect).toBeDisabled()
 
     await panel.getByLabel("Password").fill("right")
     await panel.getByRole("radio", { name: "Verified" }).click()
-    await panel.getByRole("button", { name: "Test" }).click()
+    await panel.getByRole("button", { name: "Test", exact: true }).click()
     await expect(panel.locator("[data-slot=test-result]")).toHaveText("Answered: PostgreSQL 16.4")
     await expect(connect).toBeEnabled()
     // Changing the address after the test is a string nobody has dialled.
     await panel.getByLabel("Port").fill("6543")
     await expect(connect).toBeDisabled()
-    await panel.getByRole("button", { name: "Test" }).click()
+    await panel.getByRole("button", { name: "Test", exact: true }).click()
     await expect(connect).toBeEnabled()
 
-    await panel.getByRole("radio", { name: "Production" }).click()
+    await panel.getByRole("button", { name: "production", exact: true }).click()
+    await expect(panel.getByLabel("Environment")).toHaveValue("production")
     await panel.getByRole("switch", { name: /Protect it/ }).click()
     await connect.click()
     await expect(page).toHaveURL(/\/databases\/20$/)
@@ -836,6 +1287,127 @@ test.describe("adding a database", () => {
     })
   })
 
+  test("an environment is a word of the operator's own, held to the server's rule, and fits a phone", async ({
+    page,
+  }) => {
+    const server = await mockFleet(page)
+    await page.goto("/databases/new?mode=connect&engine=postgres")
+    const panel = page.locator("[data-slot=flow-panel]")
+    const connect = panel.getByRole("button", { name: "Connect", exact: true })
+    await panel.getByLabel("Host").fill("db.example.com")
+    await panel.getByLabel("Database", { exact: true }).fill("shop")
+    await panel.getByRole("button", { name: "Test", exact: true }).click()
+    await expect(connect).toBeEnabled()
+
+    const field = panel.getByLabel("Environment")
+    await field.fill("eu/west")
+    await expect(panel.getByRole("alert")).toContainText("Up to 32 letters, digits")
+    await expect(connect).toBeDisabled()
+    await panel.getByRole("button", { name: "staging", exact: true }).click()
+    await expect(field).toHaveValue("staging")
+    await expect(panel.getByRole("button", { name: "staging", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    // A second press takes the word away again.
+    await panel.getByRole("button", { name: "staging", exact: true }).click()
+    await expect(field).toHaveValue("")
+    await field.fill("eu-west qa")
+
+    // Nothing of the form runs off its panel at a phone's width.
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect(
+      await panel.evaluate((el) => {
+        const edge = el.getBoundingClientRect().right
+        return [...el.querySelectorAll("*")].filter(
+          (child) => child.getBoundingClientRect().right > edge + 1,
+        ).length
+      }),
+    ).toBe(0)
+    await page.setViewportSize({ width: 1280, height: 720 })
+
+    await connect.click()
+    await expect(page).toHaveURL(/\/databases\/20$/)
+    expect(server.bodies("POST /databases/").at(-1)).toMatchObject({ environment: "eu-west qa" })
+  })
+
+  test("a pasted string is shown with every password in it hidden, and follows the reader to the engine it names", async ({
+    page,
+  }) => {
+    await mockFleet(page)
+    await page.goto("/databases/new?mode=connect&engine=sqlserver")
+    let panel = page.locator("[data-slot=flow-panel]")
+    await panel.getByRole("radio", { name: "URL" }).click()
+    const preview = panel.locator("[data-slot=connection-preview]")
+
+    await panel
+      .getByLabel("Connection string")
+      .fill(
+        "sqlserver://127.0.0.1:51433?database=shop_a1&user id=sa&password=Sup3rSecret&encrypt=disable",
+      )
+    await expect(preview).toContainText("password=••••••&encrypt=disable")
+    await expect(preview).not.toContainText("Sup3rSecret")
+    // The name offered is read off the string, not off the empty fields.
+    await expect(panel.getByLabel("Name")).toHaveAttribute("placeholder", "shop_a1")
+
+    await page.goto("/databases/new?mode=connect&engine=postgres")
+    panel = page.locator("[data-slot=flow-panel]")
+    await panel.getByRole("radio", { name: "URL" }).click()
+    await panel
+      .getByLabel("Connection string")
+      .fill("postgres://jdtest:p@ss:w0rd@127.0.0.1:55432/shop_a1")
+    await expect(panel.locator("[data-slot=connection-preview]")).toHaveText(
+      "postgres://jdtest:••••••@127.0.0.1:55432/shop_a1",
+    )
+
+    // Another engine's address: switching to it takes the string along.
+    const pasted = "mysql://jdtest:jdtest@127.0.0.1:53307/inventory_a1"
+    await panel.getByLabel("Connection string").fill(pasted)
+    await expect(panel.getByRole("alert")).toContainText("That is a MySQL address.")
+    await panel.getByRole("button", { name: "Switch engine" }).click()
+    expect(where(page)).toBe("/databases/new?mode=connect&engine=mysql")
+    panel = page.locator("[data-slot=flow-panel]")
+    await expect(panel.getByLabel("Connection string")).toHaveValue(pasted)
+    await expect(panel.getByLabel("Name")).toHaveAttribute("placeholder", "inventory_a1")
+  })
+
+  test("a number names nothing, and every engine that has a transport says how it is encrypted", async ({
+    page,
+  }) => {
+    const server = await mockFleet(page)
+    await page.goto("/databases/new?mode=connect&engine=redis")
+    let panel = page.locator("[data-slot=flow-panel]")
+    await panel.getByLabel("Host").fill("10.255.255.1")
+    await panel.getByLabel("Database index").fill("1")
+    await expect(panel.getByLabel("Name")).toHaveAttribute("placeholder", "redis-10.255.255.1")
+    await panel.getByLabel("Host").fill("127.0.0.1")
+    await expect(panel.getByLabel("Name")).toHaveAttribute("placeholder", "redis")
+    await panel.getByRole("radio", { name: "Required" }).click()
+    await panel.getByRole("button", { name: "Test", exact: true }).click()
+    await expect
+      .poll(() => server.bodies("POST /databases/test").at(-1))
+      .toEqual({
+        driver: "redis",
+        dsn: "rediss://127.0.0.1:6379/1?skip_verify=true",
+      })
+
+    await page.goto("/databases/new?mode=connect&engine=oracle")
+    panel = page.locator("[data-slot=flow-panel]")
+    await panel.getByLabel("Host").fill("ora.example.com")
+    await panel.getByLabel("Service name").fill("FREEPDB1")
+    await expect(
+      panel.getByRole("radiogroup", { name: "Encryption" }).getByRole("radio"),
+    ).toHaveText(["Off", "Required", "Verified"])
+    await panel.getByRole("radio", { name: "Required" }).click()
+    await panel.getByRole("button", { name: "Test", exact: true }).click()
+    await expect
+      .poll(() => server.bodies("POST /databases/test").at(-1))
+      .toEqual({
+        driver: "oracle",
+        dsn: "oracle://ora.example.com:1521/FREEPDB1?SSL=true&SSL%20VERIFY=false",
+      })
+  })
+
   test("a file-based engine asks for a path and says where it may be", async ({ page }) => {
     const server = await mockFleet(page)
     await page.goto("/databases/new?mode=connect&engine=sqlite")
@@ -845,7 +1417,7 @@ test.describe("adding a database", () => {
     await expect(panel.getByRole("radio", { name: "URL" })).toHaveCount(0)
     await expect(panel).toContainText("inside /srv or /home")
     await panel.getByLabel("Database file").fill("/srv/app/reports.db")
-    await panel.getByRole("button", { name: "Test" }).click()
+    await panel.getByRole("button", { name: "Test", exact: true }).click()
     await expect(panel.locator("[data-slot=test-result]")).toBeVisible()
     await panel.getByRole("button", { name: "Connect", exact: true }).click()
     await expect(page).toHaveURL(/\/databases\/20$/)
@@ -865,6 +1437,8 @@ test.describe("adding a database", () => {
     await expect(dialog).toContainText("Connect postgresql@17-main")
     await dialog.getByRole("button", { name: "Cancel" }).click()
     await expect(dialog).toHaveCount(0)
+    // The keyboard is left on the server the link was for.
+    await expect(page.getByRole("button", { name: "Connect postgresql@17-main" })).toBeFocused()
 
     await page.getByRole("button", { name: "Connect sessions" }).click()
     await expect(page).toHaveURL(/\/databases\/20$/)

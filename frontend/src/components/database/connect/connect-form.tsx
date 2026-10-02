@@ -22,6 +22,7 @@ import { engineOf, sectionHref } from "@/components/database/engine"
 import {
   EMPTY_CONNECT_FIELDS,
   TLS_WORD,
+  addressOfPasted,
   composeDsn,
   driverOfUrl,
   maskPasted,
@@ -30,8 +31,12 @@ import {
   tlsModes,
   type ConnectFields,
 } from "@/components/database/connect/dsn"
+import {
+  EnvironmentField,
+  environmentProblem,
+} from "@/components/database/connect/environment-field"
 import { reveal } from "@/components/database/connect/reveal"
-import { CONNECTION_NAME, ENVIRONMENTS, suggestedName } from "@/components/database/connect/rules"
+import { CONNECTION_NAME, suggestedName } from "@/components/database/connect/rules"
 import type { DbCreateRequest, DbTestResponse } from "@/components/database/fleet/types"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
@@ -121,11 +126,23 @@ export function ConnectExisting({
         : fields.host.trim()
           ? composeDsn(driver, fields)
           : ""
+  const otherEngine = driver && shape === "url" ? driverOfUrl(pasted) : undefined
+  const mismatch = otherEngine && otherEngine !== driver ? otherEngine : undefined
+  // The engine a pasted string really names keeps its own draft, and that is
+  // where the string goes when the reader switches to it: without this the
+  // other engine opened on its empty fields and the paste was gone.
+  const [, setOtherShape] = useMemoryState<"fields" | "url">(
+    `${DRAFT}.${mismatch ?? chosen}.shape`,
+    "fields",
+  )
+  const [, setOtherPasted] = useMemoryState(`${DRAFT}.${mismatch ?? chosen}.url`, "")
   const typedName = name.trim()
   const offered = engine
     ? suggestedName(
-        fields,
-        engine.label.toLowerCase(),
+        // A string pasted whole is not in the fields: it is read for what it
+        // points at.
+        shape === "url" && !fileBased ? addressOfPasted(dsn) : fields,
+        engine.id,
         connections.map((conn) => conn.name),
       )
     : ""
@@ -138,9 +155,12 @@ export function ConnectExisting({
         : undefined
   const passed = tested?.dsn === dsn && tested.answer.ok ? tested.answer : undefined
   const failed = tested?.dsn === dsn && !tested.answer.ok ? tested.answer.error : undefined
-  const otherEngine = driver && shape === "url" ? driverOfUrl(pasted) : undefined
-  const mismatch = otherEngine && otherEngine !== driver ? otherEngine : undefined
-  const ready = dsn !== "" && finalName !== "" && !nameProblem && (Boolean(passed) || untested)
+  const ready =
+    dsn !== "" &&
+    finalName !== "" &&
+    !nameProblem &&
+    !environmentProblem(environment) &&
+    (Boolean(passed) || untested)
 
   const test = async () => {
     if (!driver || !dsn) return
@@ -169,7 +189,7 @@ export function ConnectExisting({
         // Asked to dial even after a passing test: the test and the save are
         // two requests, and only the save's own dial is the one that counts.
         probe: !untested,
-        environment: environment || undefined,
+        environment: environment.trim() || undefined,
         readOnly: readOnly || undefined,
       } satisfies DbCreateRequest)
       forgetMemoryState(DRAFT)
@@ -295,7 +315,15 @@ export function ConnectExisting({
                 }
                 trailing={
                   mismatch && (
-                    <Button size="xs" variant="ghost" onClick={() => choose(mismatch)}>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => {
+                        setOtherPasted(pasted)
+                        setOtherShape("url")
+                        choose(mismatch)
+                      }}
+                    >
                       Switch engine
                     </Button>
                   )
@@ -430,20 +458,11 @@ export function ConnectExisting({
                 autoComplete="off"
               />
             </Field>
-            <Field label="Environment">
-              <Segments
-                label="Environment"
-                value={environment || "none"}
-                onChange={(next) => setEnvironment(next === "none" ? "" : next)}
-                options={[
-                  { value: "none", label: "None" },
-                  ...ENVIRONMENTS.map((word) => ({
-                    value: word as string,
-                    label: word[0].toUpperCase() + word.slice(1),
-                  })),
-                ]}
-              />
-            </Field>
+            <EnvironmentField
+              id={`${id}-environment`}
+              value={environment}
+              onChange={setEnvironment}
+            />
             <OptionList>
               <OptionRow
                 title="Protect it: refuse every change made to its data or schema through this dashboard"

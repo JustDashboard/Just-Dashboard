@@ -18,11 +18,18 @@ import type { DbAccessChange, DbFleetEntry, Job } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { FormFact } from "@/components/form"
+import { Notice } from "@/components/state"
 import type { Verb } from "@/components/verbs"
 import { sectionHref } from "@/components/database/engine"
 import { powerOffers, whereWord } from "@/components/database/fleet/fleet"
 import type { DbPowerAction, DbPowerResponse } from "@/components/database/fleet/types"
 import type { FleetData } from "@/components/database/fleet/use-fleet"
+import {
+  createRefusal,
+  useRefusal,
+  type FleetConfirm,
+  type Refusal,
+} from "@/components/database/fleet/use-fleet-confirm"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
 
@@ -63,7 +70,7 @@ export function useFleetControl({
   onForgotten,
 }: {
   data: FleetData
-  confirm: (request: ConfirmRequest) => void
+  confirm: FleetConfirm
   /** The saved connections changed: discovery has something new to say. */
   onForgotten?: () => void
 }) {
@@ -85,6 +92,9 @@ export function useFleetControl({
       }),
     [],
   )
+
+  /** The control a confirmation gives the keyboard back to: the database's own menu. */
+  const menuOf = (entry: DbFleetEntry) => `Actions for ${entry.name}`
 
   const subjectOf = (entry: DbFleetEntry): ConfirmRequest["subject"] => {
     const engine = engineFor(entry)
@@ -142,33 +152,36 @@ export function useFleetControl({
       return
     }
     const where = whereWord(entry)
-    confirm({
-      title: `${POWER[action].label} ${entry.name}`,
-      subject: subjectOf(entry),
-      description: (
-        <>
-          <p>
-            {action === "stop"
-              ? `Stops ${where.text}. Every open session is dropped and the database answers nothing until it is started again.`
-              : `Restarts ${where.text}. Every open session is dropped and the database is away while it comes back.`}
-          </p>
-          {entry.consumers > 0 && (
+    confirm(
+      {
+        title: `${POWER[action].label} ${entry.name}`,
+        subject: subjectOf(entry),
+        description: (
+          <>
             <p>
-              {plural(entry.consumers, "deployment environment")}{" "}
-              {entry.consumers === 1 ? "is" : "are"} bound to it and will lose{" "}
-              {entry.consumers === 1 ? "its" : "their"} database for as long.
+              {action === "stop"
+                ? `Stops ${where.text}. Every open session is dropped and the database answers nothing until it is started again.`
+                : `Restarts ${where.text}. Every open session is dropped and the database is away while it comes back.`}
             </p>
-          )}
-        </>
-      ),
-      confirmLabel: POWER[action].label,
-      // The request is held for as long as the server takes to shut down;
-      // the card says so, and the dialog does not stay open over it.
-      action: async () => {
-        void runPower(entry, action)
-        return "reported"
+            {entry.consumers > 0 && (
+              <p>
+                {plural(entry.consumers, "deployment environment")}{" "}
+                {entry.consumers === 1 ? "is" : "are"} bound to it and will lose{" "}
+                {entry.consumers === 1 ? "its" : "their"} database for as long.
+              </p>
+            )}
+          </>
+        ),
+        confirmLabel: POWER[action].label,
+        // The request is held for as long as the server takes to shut down;
+        // the card says so, and the dialog does not stay open over it.
+        action: async () => {
+          void runPower(entry, action)
+          return "reported"
+        },
       },
-    })
+      menuOf(entry),
+    )
   }
 
   /** Take a dump now and watch the job to its end, so a failure is said. */
@@ -198,88 +211,92 @@ export function useFleetControl({
     entry.exposure === "public" && entry.source === "docker" && !entry.composeProject
 
   const restrict = (entry: DbFleetEntry) => {
-    confirm({
-      title: `Restrict ${entry.name} to this server`,
-      subject: subjectOf(entry),
-      description: (
-        <>
-          <p>
-            Recreates {whereWord(entry).text} with its port bound to this server only and closes the
-            firewall rule opened for it. The data is kept; every open session is dropped while the
-            container is replaced.
-          </p>
-          <p>Anything that reaches it from another machine stops reaching it.</p>
-        </>
-      ),
-      confirmLabel: "Restrict",
-      action: async () => {
-        void (async () => {
-          mark(entry.id, "Restricting")
-          try {
-            const change = await put<DbAccessChange>(`/databases/${entry.id}/access`, {
-              exposure: "local",
-            })
-            if (change.firewallError) {
-              notify.warning(`${entry.name} is bound to this server, the firewall rule is not`, {
-                description: change.firewallError,
+    confirm(
+      {
+        title: `Restrict ${entry.name} to this server`,
+        subject: subjectOf(entry),
+        description: (
+          <>
+            <p>
+              Recreates {whereWord(entry).text} with its port bound to this server only and closes
+              the firewall rule opened for it. The data is kept; every open session is dropped while
+              the container is replaced.
+            </p>
+            <p>Anything that reaches it from another machine stops reaching it.</p>
+          </>
+        ),
+        confirmLabel: "Restrict",
+        action: async () => {
+          void (async () => {
+            mark(entry.id, "Restricting")
+            try {
+              const change = await put<DbAccessChange>(`/databases/${entry.id}/access`, {
+                exposure: "local",
               })
-            } else notify.success(`${entry.name} is reachable from this server only`)
-          } catch (err) {
-            notify.error(`Could not restrict ${entry.name}`, err)
-          } finally {
-            mark(entry.id)
-            refreshFleet()
-          }
-        })()
-        return "reported"
+              if (change.firewallError) {
+                notify.warning(`${entry.name} is bound to this server, the firewall rule is not`, {
+                  description: change.firewallError,
+                })
+              } else notify.success(`${entry.name} is reachable from this server only`)
+            } catch (err) {
+              notify.error(`Could not restrict ${entry.name}`, err)
+            } finally {
+              mark(entry.id)
+              refreshFleet()
+            }
+          })()
+          return "reported"
+        },
       },
-    })
+      menuOf(entry),
+    )
   }
 
   const forget = (entry: DbFleetEntry) => {
-    confirm({
-      title: `Forget ${entry.name}`,
-      subject: subjectOf(entry),
-      description: (
-        <>
-          <p>
-            Removes the saved connection and its stored password from the dashboard. The database
-            itself and its data are not touched
-            {entry.origin
-              ? ", and it is put on the ignore list so discovery does not connect it again."
-              : "."}
-          </p>
-          {entry.consumers > 0 && (
-            <p>
-              {plural(entry.consumers, "deployment environment")}{" "}
-              {entry.consumers === 1 ? "is" : "are"} bound to it. A connection a deployment is
-              linked to cannot be forgotten until that link is removed in the deployment&apos;s
-              settings.
-            </p>
-          )}
-        </>
-      ),
-      confirmLabel: "Forget",
-      action: async () => {
-        try {
-          await del(`/databases/${entry.id}`)
-        } catch (err) {
-          if (err instanceof ApiError && err.code === "database_linked") {
-            throw new Error(
-              `${entry.name} is linked to a deployment through a managed database network. Remove the link under that deployment's Settings › Databases, then forget it here.`,
-            )
+    // The server puts the found server a connection came from on the ignore
+    // list only when this was the last connection to it, and never for a
+    // file: the dialog promises it only where it will happen.
+    const ignores =
+      Boolean(entry.origin) &&
+      !entry.origin.startsWith("file:") &&
+      !data.entries.some((other) => other.id !== entry.id && other.origin === entry.origin)
+    const refusal = createRefusal()
+    confirm(
+      {
+        title: `Forget ${entry.name}`,
+        subject: subjectOf(entry),
+        description: <ForgetBody entry={entry} ignores={ignores} refusal={refusal} />,
+        confirmLabel: "Forget",
+        action: async () => {
+          refusal.say(undefined)
+          try {
+            await del(`/databases/${entry.id}`)
+          } catch (err) {
+            if (err instanceof ApiError && err.code === "database_linked") {
+              refusal.say(
+                `Remove the link under that deployment's Settings › Databases, then forget ${entry.name} here.`,
+              )
+              // The dialog announces what it is thrown; this is the sentence
+              // it prints, with the way out left to the dialog itself.
+              throw new ApiError(
+                err.status,
+                err.code,
+                `${entry.name} is linked to a deployment through a managed database network.`,
+              )
+            }
+            throw err
           }
-          throw err
-        }
-        notify.success(`Forgot ${entry.name}`)
-        refreshConnections()
-        refreshFleet()
-        refreshSummary()
-        data.topology.refresh()
-        onForgotten?.()
-        return "reported"
+          notify.success(`Forgot ${entry.name}`)
+          refreshConnections()
+          refreshFleet()
+          refreshSummary()
+          data.topology.refresh()
+          onForgotten?.()
+          return "reported"
+        },
       },
-    })
+      menuOf(entry),
+    )
   }
 
   const allowed = {
@@ -367,3 +384,43 @@ export function useFleetControl({
 }
 
 export type FleetControl = ReturnType<typeof useFleetControl>
+
+/**
+ * What forgetting a connection does, and — once the server has turned it down
+ * — why it did not.
+ */
+function ForgetBody({
+  entry,
+  ignores,
+  refusal,
+}: {
+  entry: DbFleetEntry
+  /** The server it was found as is put on the ignore list with it. */
+  ignores: boolean
+  refusal: Refusal
+}) {
+  const refused = useRefusal(refusal)
+  return (
+    <>
+      {refused && (
+        <Notice tone="danger" title="It is linked to a deployment, so it was not forgotten">
+          {refused}
+        </Notice>
+      )}
+      <p>
+        Removes the saved connection and its stored password from the dashboard. The database itself
+        and its data are not touched
+        {ignores
+          ? ", and it is put on the ignore list so discovery does not connect it again."
+          : "."}
+      </p>
+      {entry.consumers > 0 && !refused && (
+        <p>
+          {plural(entry.consumers, "deployment environment")} {entry.consumers === 1 ? "is" : "are"}{" "}
+          bound to it. If one of them is linked through a managed database network the server
+          refuses, and that link has to be removed in the deployment&apos;s settings first.
+        </p>
+      )}
+    </>
+  )
+}

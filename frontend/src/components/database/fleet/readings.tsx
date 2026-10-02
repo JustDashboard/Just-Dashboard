@@ -18,7 +18,15 @@ const TILE = "h-full transition-colors group-hover:bg-row-hover"
  * sessions open, the ones with no dump from the last day.
  *
  * Every figure says where it came from in its hint, and one that could not be
- * read says so: a fleet that did not answer is a dash, never a zero.
+ * read says so: a fleet that did not answer is a dash, never a zero. The two
+ * that are a share of the fleet — how many answer, how many have a dump from
+ * the last day — draw that share as a bar under the figure; the one that
+ * moves between readings, open sessions, counts to its new value and keeps
+ * its own line since the page was opened.
+ *
+ * The counts that are compared with each other are drawn at once: a total
+ * that counted up to nine stood at eight beside "9 of 9" for most of a
+ * second, and for that second the page said a database was missing.
  */
 export function FleetReadings({
   data,
@@ -32,7 +40,7 @@ export function FleetReadings({
   show: FleetShow
   onShow: (show: FleetShow) => void
 }) {
-  const { readings, sessionSamples, fleet, summary } = data
+  const { readings, sessionSamples, fleet, summary, entries, storedOf } = data
   const toggle = (which: FleetShow) => onShow(show === which ? "all" : which)
   const awayWords = [
     readings.stopped > 0 && `${readings.stopped} stopped`,
@@ -41,6 +49,10 @@ export function FleetReadings({
   const unsized = readings.total - readings.sized
   const stale = readings.dumpable - readings.fresh
   const summaryFailed = Boolean(summary.error && !summary.data)
+  const largest = entries.reduce<{ name: string; size: number } | undefined>((held, entry) => {
+    const size = storedOf(entry) ?? 0
+    return size > (held?.size ?? 0) ? { name: entry.name, size } : held
+  }, undefined)
 
   return (
     <StatGrid columns={5} dense className="animate-rise">
@@ -48,7 +60,7 @@ export function FleetReadings({
         <StatTile
           className={TILE}
           label="Databases"
-          value={<NumberTicker value={readings.total} />}
+          value={readings.total.toLocaleString()}
           hint={
             fleet.error ? (
               "the last check did not finish"
@@ -74,6 +86,7 @@ export function FleetReadings({
           label="Running"
           value={readings.running.toLocaleString()}
           trailing={`of ${readings.total.toLocaleString()}`}
+          meter={readings.total > 0 ? (readings.running / readings.total) * 100 : undefined}
           tone={readings.failing > 0 ? "danger" : readings.stopped > 0 ? "warning" : "default"}
           hint={
             awayWords.length > 0
@@ -99,7 +112,9 @@ export function FleetReadings({
               ? "no server reported its size"
               : unsized > 0
                 ? `${unsized} of ${readings.total} did not report a size`
-                : `across ${plural(readings.sized, "database")}`
+                : largest && readings.sized > 1
+                  ? `${largest.name} holds ${bytes(largest.size)} of it`
+                  : `across ${plural(readings.sized, "database")}`
           }
         />
       </StatButton>
@@ -114,7 +129,7 @@ export function FleetReadings({
         <StatTile
           className={TILE}
           label="Sessions"
-          value={readings.answering > 0 ? readings.sessions.toLocaleString() : "—"}
+          value={readings.answering > 0 ? <NumberTicker value={readings.sessions} /> : "—"}
           trailing={readings.answering > 0 ? "open" : undefined}
           trend={
             <TileTrend
@@ -145,6 +160,7 @@ export function FleetReadings({
           label="Backed up"
           value={readings.dumpable > 0 ? readings.fresh.toLocaleString() : "—"}
           trailing={readings.dumpable > 0 ? `of ${readings.dumpable}` : undefined}
+          meter={readings.dumpable > 0 ? (readings.fresh / readings.dumpable) * 100 : undefined}
           tone={readings.dumpable > 0 && stale > 0 ? "warning" : "default"}
           hint={
             summaryFailed

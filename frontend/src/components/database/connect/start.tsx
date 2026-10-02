@@ -18,7 +18,7 @@ import {
 } from "@/components/flow"
 import { Disclosure, Field, FieldRow, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ProductLogo, ProductLogos } from "@/components/product-logo"
+import { ProductLogos } from "@/components/product-logo"
 import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -40,6 +40,7 @@ import {
 import { reveal } from "@/components/database/connect/reveal"
 import { readInventory, readTemplates } from "@/components/database/fleet/read"
 import type { DbProvisionResponse } from "@/components/database/fleet/types"
+import { EngineMark } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
 
 /** How long a started engine is asked for before the page says it has not answered. */
@@ -245,7 +246,11 @@ export function StartNew({
                     {group.entries.map((one) => (
                       <EngineCard
                         key={one.engine}
-                        engine={one.engine}
+                        // Drawn as the product that answers, through the
+                        // registry: a flavour with artwork of its own gets
+                        // it, and one with none keeps the database glyph
+                        // rather than its driver's logo.
+                        engine={engineOf(one.flavor, drivers).logo ?? ""}
                         label={one.label}
                         kind={engineOf(one.flavor, drivers).kind}
                         detail={one.image}
@@ -276,7 +281,7 @@ export function StartNew({
           <FlowPanelHeader
             title={
               <span className="flex min-w-0 items-center gap-2.5">
-                <ProductLogo id={template.engine} size="sm" fallback={Database} />
+                <EngineMark engine={engineOf(template.flavor, drivers)} size="sm" />
                 <span className="truncate">{template.label}</span>
               </span>
             }

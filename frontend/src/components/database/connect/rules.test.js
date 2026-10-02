@@ -49,6 +49,22 @@ describe("the name a connection is offered", () => {
     expect(suggestedName({ host: "h", database: "shop" }, "x", ["Shop", "shop-2"])).toBe("shop-3")
   })
 
+  test("a number names nothing: a Redis index, the first octet of an address", () => {
+    expect(suggestedName({ host: "127.0.0.1", database: "1" }, "redis", [])).toBe("redis")
+    expect(suggestedName({ host: "localhost", database: "0" }, "redis", ["redis"])).toBe("redis-2")
+    expect(suggestedName({ host: "10.255.255.1", database: "1" }, "redis", [])).toBe(
+      "redis-10.255.255.1",
+    )
+    expect(suggestedName({ host: "cache.internal", database: "1" }, "redis", [])).toBe("cache")
+    expect(suggestedName({ host: "[::1]", database: "" }, "postgres", [])).toBe("postgres")
+    expect(suggestedName({ host: "2001:db8::7", database: "" }, "postgres", [])).toBe(
+      "postgres-2001.db8..7",
+    )
+    expect(
+      CONNECTION_NAME.test(suggestedName({ host: "2001:db8::7", database: "" }, "postgres", [])),
+    ).toBe(true)
+  })
+
   test("a name is made of what the rule allows", () => {
     expect(CONNECTION_NAME.test(freeName("my/db:1", []))).toBe(true)
     expect(freeName("///", [])).toBe("database")

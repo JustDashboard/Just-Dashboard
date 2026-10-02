@@ -2,13 +2,14 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight, Play } from "@/components/icons"
+import { ArrowRight, LockClosed, Play } from "@/components/icons"
 import { bytes, relativeTime, truncateMiddle } from "@/lib/format"
 import type { DbFleetEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { CONTROL } from "@/components/flow"
 import { Metric } from "@/components/page"
 import { ProductGlyphs } from "@/components/product-logo"
+import { Tag } from "@/components/tag"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
@@ -17,13 +18,14 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { sectionHref, type Engine } from "@/components/database/engine"
 import {
+  concernLevel,
   reachWord,
   whereWord,
   type BackupReading,
   type Concern,
 } from "@/components/database/fleet/fleet"
 import type { FleetControl } from "@/components/database/fleet/use-fleet-control"
-import { EngineMark, EnvironmentTag, ProtectedTag } from "@/components/database/kit"
+import { EngineMark, EnvironmentTag } from "@/components/database/kit"
 import { DatabaseStatusMark, fleetStatus } from "@/components/database/shell/status"
 
 /** What a card's third figure is called: a key–value store has clients, not sessions. */
@@ -34,6 +36,35 @@ export function sessionsWord(engine: Engine) {
 /** The engine's word for what it holds, as a column or a figure is headed. */
 export function objectsWord(entry: DbFleetEntry) {
   return entry.objectWord[0].toUpperCase() + entry.objectWord.slice(1)
+}
+
+/**
+ * The hue a fact is said in: none while nothing is wrong with it, and the
+ * level of the concern it is about once something is — the same level the
+ * attention list gives it, so one fact never has two weights on one page.
+ */
+export function factTone(level: Concern["level"] | undefined) {
+  if (level === "critical") return "text-destructive"
+  if (level === "warning") return "text-warning"
+  return undefined
+}
+
+/**
+ * A protected connection, where there is room for a mark and not for the
+ * word: a card's head, a table's name cell. The word is on the database's own
+ * pages; here it is the lock, named for a reader who cannot see it and
+ * spelled out to a pointer that rests on it.
+ */
+export function ProtectedMark({ className }: { className?: string }) {
+  return (
+    <Tag
+      icon={LockClosed}
+      title="Protected: the dashboard refuses every change to its data or schema"
+      className={className}
+    >
+      <span className="sr-only">protected</span>
+    </Tag>
+  )
 }
 
 /** The two pages of a database the work is done on, in the engine's own words. */
@@ -55,6 +86,12 @@ export function workPages(engine: Engine) {
  * which take a colour only when one of them is wrong. A stopped server keeps
  * its card with its figures stepped back and Start as its verb; one that is
  * being started, stopped or dumped runs a light round its edge and says so.
+ *
+ * What the operator said of it — what it is for, that it is protected — are
+ * properties, not readings, and stand at the edge of the head's two lines:
+ * the lock beside the menu, the environment after the engine. In the line of
+ * facts an amber `staging` sat beside an amber "never backed up" and nobody
+ * could tell which of them was the problem.
  */
 export function FleetCard({
   entry,
@@ -62,7 +99,7 @@ export function FleetCard({
   concerns,
   backup,
   feeds,
-  fileSize,
+  stored,
   control,
   index,
 }: {
@@ -71,8 +108,8 @@ export function FleetCard({
   concerns: Concern[]
   backup: BackupReading | undefined
   feeds: { products: string[]; count: number } | undefined
-  /** What a file weighs, where discovery measured it and the engine reports no size. */
-  fileSize?: number
+  /** What it holds in bytes, where anybody knows: the page's one answer. */
+  stored: number | undefined
   control: FleetControl
   index: number
 }) {
@@ -84,8 +121,8 @@ export function FleetCard({
   const failed = !entry.ok && !down
   const where = whereWord(entry)
   const has = (kind: Concern["kind"]) => concerns.some((concern) => concern.kind === kind)
-  const stored = entry.sizesKnown ? entry.bytes : fileSize
   const pages = workPages(engine)
+  const product = `${engine.label}${entry.versionNumber ? ` ${entry.versionNumber}` : ""}`
 
   return (
     // The slot is the one every lit row in the section carries: a card is a
@@ -120,6 +157,7 @@ export function FleetCard({
                 {entry.name}
               </Link>
               <span className="-my-1 -mr-1.5 flex items-center gap-1">
+                {entry.readOnly && <ProtectedMark className="mr-1" />}
                 <ArrowRight
                   aria-hidden
                   className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
@@ -134,23 +172,33 @@ export function FleetCard({
                 )}
                 {/* A hair of padding: flush with its text, a truncating box
                     clips the last glyph without earning the ellipsis. */}
-                <span className="min-w-0 truncate pr-0.5">
-                  {engine.label}
-                  {entry.versionNumber ? ` ${entry.versionNumber}` : ""}
+                <span className="min-w-0 flex-1 truncate pr-0.5" title={product}>
+                  {product}
                 </span>
+                <EnvironmentTag environment={entry.environment} className="max-w-28" />
               </div>
             </div>
 
             {failed ? (
               // What the server said, where its figures would be: a failure
-              // is never drawn as three zeros.
-              <p className="line-clamp-2 min-h-10 font-mono text-hint leading-relaxed break-words text-destructive">
-                {status.error || "The server did not answer."}
-              </p>
+              // is never drawn as three zeros. Two whole lines and no part
+              // of a third: the block is the height of two lines of its own
+              // leading, inside the height the figures take on other cards.
+              <div className="flex min-h-10 min-w-0 items-start">
+                <p
+                  data-slot="fleet-error"
+                  title={status.error}
+                  className="line-clamp-2 min-w-0 font-mono text-hint leading-4.5 break-words text-destructive"
+                >
+                  {status.error || "The server did not answer."}
+                </p>
+              </div>
             ) : (
+              // The middle column is the engine's own noun and the widest of
+              // the three words ("Collections"), so it takes the larger share.
               <div
                 className={cn(
-                  "grid min-h-10 grid-cols-3 gap-x-3 [&>*+*]:border-l [&>*+*]:border-hairline [&>*+*]:pl-3",
+                  "grid min-h-10 grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-x-2.5 [&>*+*]:border-l [&>*+*]:border-hairline [&>*+*]:pl-2.5",
                   down && "opacity-60",
                 )}
               >
@@ -169,7 +217,10 @@ export function FleetCard({
             {/* Gaps separate the facts rather than a middle dot, which is left
                 dangling at the end of a line wherever this wraps. */}
             <div className="mt-auto flex min-w-0 flex-col gap-2 border-t border-hairline pt-3 text-hint text-muted-foreground">
-              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              <div
+                data-slot="fleet-facts"
+                className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
+              >
                 {feeds && feeds.count > 0 && (
                   <span className="flex shrink-0 items-center gap-1.5">
                     feeds
@@ -178,23 +229,28 @@ export function FleetCard({
                   </span>
                 )}
                 {backup?.newest ? (
-                  <span className={cn("shrink-0", has("stale-backup") && "text-warning")}>
+                  <span
+                    className={cn("shrink-0", factTone(concernLevel(concerns, "stale-backup")))}
+                  >
                     backed up {relativeTime(backup.newest)}
                   </span>
                 ) : (
                   has("never-backed-up") && (
-                    <span className="shrink-0 text-warning">never backed up</span>
+                    <span
+                      className={cn(
+                        "shrink-0",
+                        factTone(concernLevel(concerns, "never-backed-up")),
+                      )}
+                    >
+                      never backed up
+                    </span>
                   )
                 )}
                 {entry.exposure !== "unknown" && (
-                  <span className={cn("shrink-0", has("public") && "text-warning")}>
+                  <span className={cn("shrink-0", factTone(concernLevel(concerns, "public")))}>
                     {has("public") ? "open to the internet" : reachWord(entry.exposure)}
                   </span>
                 )}
-                {/* The labels the operator gave it close the line of facts:
-                    properties of the database, at the row's edge (§4). */}
-                <EnvironmentTag environment={entry.environment} />
-                {entry.readOnly && <ProtectedTag />}
               </div>
               {/* Where it runs, and beside it the ways in: the card's last
                   line is the same line on every card. */}
@@ -211,16 +267,18 @@ export function FleetCard({
                     <Button
                       size="xs"
                       variant="outline"
+                      // The foot is muted and an outline button takes its
+                      // ink from where it stands: the one fix a stopped
+                      // database offers must not be the dimmest thing on it.
+                      className="text-foreground"
                       onClick={() => control.power(entry, "start")}
                       aria-label={`Start ${entry.name}`}
                     >
                       <Play className="size-3" />
                       Start
                     </Button>
-                  ) : (
-                    // The ways in are offered on a server that answers; one
-                    // that does not is opened by its card, to see why.
-                    entry.ok &&
+                  ) : entry.ok ? (
+                    // The ways in are offered on a server that answers.
                     pages.map((page) => (
                       <Button
                         key={page.id}
@@ -237,6 +295,20 @@ export function FleetCard({
                         </Link>
                       </Button>
                     ))
+                  ) : (
+                    // One that fails is fixed where its address and password
+                    // are kept: the same fix its finding offers, one press
+                    // from the card that says what the server answered.
+                    failed && (
+                      <Button size="xs" variant="ghost" className="text-foreground" asChild>
+                        <Link
+                          href={sectionHref(entry.id, "settings")}
+                          aria-label={`Settings of ${entry.name}`}
+                        >
+                          Settings
+                        </Link>
+                      </Button>
+                    )
                   )}
                 </span>
               </div>

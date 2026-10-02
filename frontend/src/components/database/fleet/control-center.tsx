@@ -14,19 +14,21 @@ import { relativeTime } from "@/lib/format"
 import { useViewState } from "@/lib/view-state"
 import type { DbFleetEntry, DbTopoNode } from "@/lib/types"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { useConfirm } from "@/components/confirm-dialog"
 import { Segments } from "@/components/deploy/settings/segments"
-import { GroupRule } from "@/components/flow"
 import { IconAction } from "@/components/icon-action"
 import { Page, PageContext, SearchInput, Section } from "@/components/page"
 import { ProductLogos } from "@/components/product-logo"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyState } from "@/components/state"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { engineOf, type Engine } from "@/components/database/engine"
 import { FoundList } from "@/components/database/connect/found-list"
-import { connectsItself, foundShelves } from "@/components/database/connect/inventory"
+import {
+  connectsItself,
+  foundShelves,
+  waitingServers,
+} from "@/components/database/connect/inventory"
 import { useFound } from "@/components/database/connect/use-found"
 import { Attention } from "@/components/database/fleet/attention"
 import {
@@ -44,9 +46,12 @@ import {
 } from "@/components/database/fleet/fleet"
 import { FleetCard } from "@/components/database/fleet/fleet-card"
 import { FleetTable } from "@/components/database/fleet/fleet-table"
+import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { FleetReadings, ReadingsSkeleton } from "@/components/database/fleet/readings"
-import { useAddress } from "@/components/database/fleet/use-address"
+import { Shelves } from "@/components/database/fleet/shelves"
+import { useAddress, useTypedParam } from "@/components/database/fleet/use-address"
 import { useFleet, useInventory } from "@/components/database/fleet/use-fleet"
+import { useFleetConfirm } from "@/components/database/fleet/use-fleet-confirm"
 import { useFleetControl } from "@/components/database/fleet/use-fleet-control"
 import { Wiring } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
@@ -95,9 +100,19 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  */
 export function ControlCenter() {
   const { admin, engineFor, newHref } = useDatabases()
-  const data = useFleet()
   const inventory = useInventory(admin)
-  const { confirm, dialog } = useConfirm()
+  // What a file weighs, where the engine reports no size and discovery
+  // measured the file: by the connection it was found to belong to.
+  const measured = useMemo(() => {
+    const sizes = new Map<number, number>()
+    for (const instance of inventory.data?.instances ?? []) {
+      if (!instance.file) continue
+      for (const id of instance.connections) sizes.set(id, instance.file.size)
+    }
+    return sizes
+  }, [inventory.data])
+  const data = useFleet(measured)
+  const { confirm, dialog } = useFleetConfirm()
   const control = useFleetControl({ data, confirm, onForgotten: inventory.refresh })
   const refreshFleet = data.fleet.refresh
   const found = useFound({ inventory, onConnected: refreshFleet, onSynced: refreshFleet })
@@ -113,8 +128,8 @@ export function ControlCenter() {
   const asked = address.read("show") as FleetShow
   const show: FleetShow = FLEET_SHOWS.includes(asked) ? asked : "all"
   const engineFilter = address.read("engine")
-  const query = address.read("q")
-  const { fleet, entries, backups, feeds, concernsOf, topology } = data
+  const [query, setQuery] = useTypedParam("q")
+  const { fleet, entries, backups, feeds, concernsOf, storedOf, topology } = data
 
   const engines = useMemo(() => {
     const seen = new Map<string, { engine: Engine; count: number }>()
@@ -130,26 +145,30 @@ export function ControlCenter() {
   const shown = useMemo(() => {
     const narrowed = entries.filter(
       (entry) =>
-        matchesShow(entry, show, { backup: backups.get(entry.id), dumps: data.dumps(entry) }) &&
+        matchesShow(entry, show, {
+          backup: backups.get(entry.id),
+          dumps: data.dumps(entry),
+          stored: storedOf(entry) ?? 0,
+        }) &&
         (!engineFilter || engineFor(entry).id === engineFilter) &&
         matchesQuery(entry, query, engineFor(entry).label),
     )
-    return orderForShow(narrowed, show)
-  }, [entries, show, engineFilter, query, backups, data, engineFor])
-
-  // What a file weighs, where the engine reports no size and discovery
-  // measured the file: by the connection it was found to belong to.
-  const fileSizes = useMemo(() => {
-    const sizes = new Map<number, number>()
-    for (const instance of inventory.data?.instances ?? []) {
-      if (!instance.file) continue
-      for (const id of instance.connections) sizes.set(id, instance.file.size)
-    }
-    return sizes
-  }, [inventory.data])
+    return orderForShow(narrowed, show, storedOf)
+  }, [entries, show, engineFilter, query, backups, data, storedOf, engineFor])
 
   const shelves = useMemo(() => foundShelves(inventory.data), [inventory.data])
   const ready = shelves.servers.filter(connectsItself).length
+  // The servers found running here that only a password keeps from being
+  // connected: the inventory's reading, and — until it has answered, or when
+  // it could not — the two lists the fleet itself carries.
+  const waiting = useMemo(
+    () => (admin ? waitingServers(fleet.data, inventory.data) : []),
+    [admin, fleet.data, inventory.data],
+  )
+  const refusals = useMemo(
+    () => new Map((fleet.data?.unreachable ?? []).map((one) => [one.container, one.reason])),
+    [fleet.data],
+  )
 
   // A database node on the map is its connection: drawn as what answered.
   const byId = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
@@ -189,9 +208,23 @@ export function ControlCenter() {
   if (!fleet.data) {
     return (
       <Page className="animate-rise">
-        <PageContext eyebrow="Apps" title="Databases" />
+        {/* The page's commands stay through a failed read: adding a database
+            does not need the fleet to have answered. */}
+        <PageContext
+          eyebrow="Apps"
+          title="Databases"
+          className="justify-end"
+          actions={
+            admin && (
+              <>
+                {scan}
+                {add}
+              </>
+            )
+          }
+        />
         {fleet.error ? (
-          <ErrorState error={fleet.error} onRetry={fleet.refresh} />
+          <ReadFailed error={fleet.error} onRetry={fleet.refresh} every="30 seconds" />
         ) : (
           <div role="status" aria-label="Loading databases" className="flex flex-col gap-8">
             <ReadingsSkeleton />
@@ -228,7 +261,7 @@ export function ControlCenter() {
         </span>
       }
     >
-      <FoundList inventory={inventory} found={found} />
+      <FoundList inventory={inventory} found={found} waiting={waiting} refusals={refusals} />
     </Section>
   )
 
@@ -253,6 +286,7 @@ export function ControlCenter() {
   }
 
   const narrowed = show !== "all" || engineFilter !== "" || query !== ""
+  const allRunning = show === "down" && !engineFilter && !query
   const clear = () => address.set({ show: null, engine: null, q: null })
   const groups = groupFleet(shown, grouping, (entry) => engineFor(entry).label)
   const table = roomy && view === "table"
@@ -286,7 +320,7 @@ export function ControlCenter() {
         data={data}
         control={control}
         found={admin ? found : undefined}
-        instances={inventory.data?.instances ?? []}
+        waiting={waiting}
       />
 
       <Section
@@ -310,7 +344,7 @@ export function ControlCenter() {
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
             <SearchInput
               value={query}
-              onChange={(event) => address.set({ q: event.target.value }, "replace")}
+              onChange={(event) => setQuery(event.target.value)}
               placeholder="Filter databases"
               aria-label="Filter databases"
             />
@@ -367,7 +401,7 @@ export function ControlCenter() {
                     selected={engineFilter === ""}
                     onClick={() => address.set({ engine: null })}
                   >
-                    All <ChipCount>{entries.length}</ChipCount>
+                    All engines <ChipCount>{entries.length}</ChipCount>
                   </FilterChip>
                   {engines.map(({ engine, count }) => (
                     <FilterChip
@@ -389,13 +423,13 @@ export function ControlCenter() {
 
         {shown.length === 0 ? (
           <EmptyState
-            title={
-              show === "down" && !engineFilter && !query
-                ? "Every database is running"
-                : "No database matches"
-            }
+            title={allRunning ? "Every database is running" : "No database matches"}
+            // Good news needs no second sentence: one that says nothing
+            // matched reads like a filter that failed.
             description={
-              narrowed ? "Nothing in the fleet matches what the list is narrowed to." : undefined
+              narrowed && !allRunning
+                ? "Nothing in the fleet matches what the list is narrowed to."
+                : undefined
             }
             action={
               <Button size="sm" variant="outline" onClick={clear}>
@@ -405,49 +439,38 @@ export function ControlCenter() {
           />
         ) : table ? (
           <FleetTable
-            entries={sortRows(shown, sort, (entry) => backups.get(entry.id)?.newest)}
+            entries={sortRows(shown, sort, (entry) => backups.get(entry.id)?.newest, storedOf)}
             engineOf={engineFor}
             concernsOf={concernsOf}
             backups={backups}
             feeds={feeds}
+            storedOf={storedOf}
             control={control}
             sort={sort}
             onSort={onSort}
           />
         ) : (
-          <div className="flex min-w-0 flex-col gap-5">
-            {groups.map((group) => (
-              <div key={group.key} className="flex min-w-0 flex-col gap-3">
-                <GroupRule
-                  label={group.label}
-                  count={group.entries.length}
-                  leading={
-                    grouping === "engine" ? (
-                      <EngineGlyph engine={engineFor(group.entries[0])} />
-                    ) : undefined
-                  }
-                />
-                <ul
-                  aria-label={group.label}
-                  className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(19rem,100%),1fr))] gap-3"
-                >
-                  {group.entries.map((entry: DbFleetEntry) => (
-                    <FleetCard
-                      key={entry.id}
-                      entry={entry}
-                      engine={engineFor(entry)}
-                      concerns={concernsOf(entry)}
-                      backup={backups.get(entry.id)}
-                      feeds={feeds.get(entry.id)}
-                      fileSize={fileSizes.get(entry.id)}
-                      control={control}
-                      index={position.get(entry.id) ?? 0}
-                    />
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
+          <Shelves
+            groups={groups}
+            leading={
+              grouping === "engine"
+                ? (group) => <EngineGlyph engine={engineFor(group.entries[0])} />
+                : undefined
+            }
+            card={(entry: DbFleetEntry) => (
+              <FleetCard
+                key={entry.id}
+                entry={entry}
+                engine={engineFor(entry)}
+                concerns={concernsOf(entry)}
+                backup={backups.get(entry.id)}
+                feeds={feeds.get(entry.id)}
+                stored={storedOf(entry)}
+                control={control}
+                index={position.get(entry.id) ?? 0}
+              />
+            )}
+          />
         )}
       </Section>
 
@@ -482,7 +505,7 @@ export function ControlCenter() {
             </p>
           )
         ) : topology.error ? (
-          <ErrorState error={topology.error} onRetry={topology.refresh} />
+          <ReadFailed error={topology.error} onRetry={topology.refresh} every="45 seconds" />
         ) : (
           <Skeleton className="h-40 rounded-xl" />
         )}

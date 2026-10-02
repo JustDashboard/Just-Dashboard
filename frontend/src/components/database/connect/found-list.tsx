@@ -6,28 +6,35 @@ import { bytes, relativeTime } from "@/lib/format"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
 import { Disclosure } from "@/components/form"
 import { DimActions, IconAction } from "@/components/icon-action"
-import { EmptyNote, ErrorState } from "@/components/state"
+import { EmptyNote } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
+import { engineOf } from "@/components/database/engine"
 import {
+  asSentence,
+  foundActionWords,
   foundShelves,
   instanceState,
   instanceWhere,
   scanNotes,
   scanSilences,
   scanningFiles,
-  type FoundAction,
+  whyWaiting,
+  type WaitingServer,
 } from "@/components/database/connect/inventory"
 import type { Found } from "@/components/database/connect/use-found"
+import { ReadFailed } from "@/components/database/fleet/read-failed"
 import type { DbInstance } from "@/components/database/fleet/types"
 import type { InventoryData } from "@/components/database/fleet/use-fleet"
 import { EngineMark } from "@/components/database/kit"
+import { useDatabases } from "@/components/database/shell/databases-context"
 
 /** How many of a shelf are drawn before the rest fold behind a count. */
-const SHELF_ROWS = 6
+const SERVER_ROWS = 8
+const FILE_ROWS = 4
 
 /**
  * Everything discovery found on this machine that no saved connection points
@@ -37,18 +44,24 @@ const SHELF_ROWS = 6
  * Each is something you take, so each is a lit row whose press is the one
  * thing to do with it — connect it, open the file, start what is down, or go
  * to the container or unit that owns it. What stops a row being connected is
- * its second line, in the server's own sentence. Files that are some
- * program's private state and what the operator said to leave alone are
- * counted behind folds rather than listed among things to act on.
+ * the line under it, as a sentence. Files that are some program's private
+ * state and what the operator said to leave alone are counted behind folds
+ * rather than listed among things to act on, and a long shelf shows its first
+ * rows and counts the rest.
  *
  * A collector that could not read is said so above the list: an empty list
- * under a Docker that did not answer is not a server with no containers.
+ * under a Docker that did not answer is not a server with no containers. And
+ * when the whole reading failed, the servers the fleet itself reported as
+ * waiting for a password are still listed under the failure, so the one thing
+ * the reader came to do is not lost with it.
  */
 export function FoundList({
   inventory,
   found,
   fresh,
   first,
+  waiting,
+  refusals,
 }: {
   inventory: InventoryData
   found: Found
@@ -56,12 +69,24 @@ export function FoundList({
   fresh?: boolean
   /** The instance the page was opened for, which stands first. */
   first?: string
+  /** What the fleet says is waiting for a password, for when this reading has failed. */
+  waiting?: WaitingServer[]
+  /** What a container answered the last time it was tried, by its name. */
+  refusals?: ReadonlyMap<string, string>
 }) {
+  const [allServers, setAllServers] = useState(false)
   const [allFiles, setAllFiles] = useState(false)
   const data = inventory.data
 
   if (!data) {
-    if (inventory.error) return <ErrorState error={inventory.error} onRetry={inventory.refresh} />
+    if (inventory.error) {
+      return (
+        <div className="min-w-0 space-y-5">
+          <ReadFailed error={inventory.error} onRetry={inventory.refresh} every="30 seconds" />
+          {waiting && waiting.length > 0 && <Reported waiting={waiting} found={found} />}
+        </div>
+      )
+    }
     return (
       <div className="space-y-2" role="status" aria-label="Looking at this server">
         {[0, 1, 2].map((row) => (
@@ -78,13 +103,15 @@ export function FoundList({
     (a, b) => Number(b.key === first) - Number(a.key === first),
   )
   const files = [...shelves.files].sort((a, b) => Number(b.key === first) - Number(a.key === first))
-  const shownFiles = allFiles ? files : files.slice(0, SHELF_ROWS)
+  const shownServers = allServers ? servers : servers.slice(0, SERVER_ROWS)
+  const shownFiles = allFiles ? files : files.slice(0, FILE_ROWS)
   const nothing = servers.length === 0 && files.length === 0
   const row = (instance: DbInstance, index: number) => (
     <FoundRow
       key={instance.key}
       instance={instance}
       found={found}
+      refusal={refusals?.get(instance.name)}
       index={fresh ? index : undefined}
     />
   )
@@ -103,7 +130,7 @@ export function FoundList({
             </p>
           ))}
           {notes.map((note) => (
-            <p key={note}>{note}</p>
+            <p key={note}>{asSentence(note)}</p>
           ))}
         </div>
       )}
@@ -119,7 +146,14 @@ export function FoundList({
       {servers.length > 0 && (
         <div className="space-y-2.5">
           <GroupRule label="Servers" count={servers.length} />
-          <ChoiceList>{servers.map(row)}</ChoiceList>
+          <ChoiceList>{shownServers.map(row)}</ChoiceList>
+          {servers.length > SERVER_ROWS && (
+            <More
+              all={allServers}
+              rest={servers.length - SERVER_ROWS}
+              onToggle={() => setAllServers((all) => !all)}
+            />
+          )}
         </div>
       )}
 
@@ -127,15 +161,12 @@ export function FoundList({
         <div className="space-y-2.5">
           <GroupRule label="Files" count={files.length} />
           <ChoiceList>{shownFiles.map(row)}</ChoiceList>
-          {files.length > SHELF_ROWS && (
-            <Button
-              size="xs"
-              variant="ghost"
-              className="text-muted-foreground"
-              onClick={() => setAllFiles((all) => !all)}
-            >
-              {allFiles ? "Show fewer" : `Show ${files.length - SHELF_ROWS} more`}
-            </Button>
+          {files.length > FILE_ROWS && (
+            <More
+              all={allFiles}
+              rest={files.length - FILE_ROWS}
+              onToggle={() => setAllFiles((all) => !all)}
+            />
           )}
         </div>
       )}
@@ -194,43 +225,98 @@ export function FoundList({
   )
 }
 
-/** The word a row's press is named with, and the one drawn before its arrow. */
-function actionWords(action: FoundAction, name: string): { verb: string; word: string } {
-  switch (action.kind) {
-    case "connect":
-    case "credentials":
-      return { verb: `Connect ${name}`, word: "Connect" }
-    case "open":
-      return { verb: `Open ${name}`, word: "Open file" }
-    case "start-container":
-      return { verb: `Start ${name}`, word: "Start container" }
-    case "start-unit":
-      return { verb: `Start ${name}`, word: "Start service" }
-    case "look":
-      return { verb: `${action.label} ${name}`, word: action.label }
-    case "none":
-      return { verb: name, word: "" }
-  }
+/** The rest of a long shelf, behind its count. */
+function More({ all, rest, onToggle }: { all: boolean; rest: number; onToggle: () => void }) {
+  return (
+    <Button
+      size="xs"
+      variant="ghost"
+      className="text-muted-foreground"
+      aria-expanded={all}
+      onClick={onToggle}
+    >
+      {all ? "Show fewer" : `Show ${rest} more`}
+    </Button>
+  )
+}
+
+/**
+ * The servers the fleet reported as waiting for a password, listed where the
+ * inventory would have been. A server installed on this machine is connected
+ * by its address from here; a container needs the inventory's own reading,
+ * so its row says why it waits and leaves the press to the retry above.
+ */
+function Reported({ waiting, found }: { waiting: WaitingServer[]; found: Found }) {
+  const { drivers } = useDatabases()
+  return (
+    <div className="space-y-2.5">
+      <GroupRule label="Reported with the fleet" count={waiting.length} />
+      <ChoiceList>
+        {waiting.map((server) => {
+          const engine = engineOf(server.engine, drivers)
+          const host = server.via.kind === "host" ? server.via.server : undefined
+          return (
+            <ChoiceRow
+              key={server.id}
+              disabled={!host}
+              onSelect={() => host && found.askHost(host)}
+              verb={`Connect ${server.name}`}
+              leading={<EngineMark engine={engine} size="sm" />}
+              title={
+                <>
+                  {server.name}
+                  <span className="ml-2 text-hint font-normal text-muted-foreground">
+                    {engine.label}
+                  </span>
+                </>
+              }
+              description={
+                host ? <span className="font-mono">{`${host.host}:${host.port}`}</span> : undefined
+              }
+              trailing={
+                host && <span className="text-xs font-medium whitespace-nowrap">Connect</span>
+              }
+            >
+              {server.reason && (
+                <p className="pl-11 text-hint leading-relaxed text-muted-foreground">
+                  {server.reason}
+                </p>
+              )}
+            </ChoiceRow>
+          )
+        })}
+      </ChoiceList>
+    </div>
+  )
 }
 
 function FoundRow({
   instance,
   found,
+  refusal,
   index,
 }: {
   instance: DbInstance
   found: Found
+  /** What it answered the last time it was tried with what it states. */
+  refusal?: string
   index?: number
 }) {
   const engine = found.engineOfInstance(instance)
   const action = found.actionOf(instance)
-  const words = actionWords(action, instance.name)
+  const words = foundActionWords(action, instance.name)
   const where = instanceWhere(instance)
   const busy = found.busyWord(instance)
   const failure = found.failures[instance.key]
-  // What stops it being connected, in the server's sentence; for one that
-  // can be, nothing — its press says what happens.
-  const why = failure ?? (instance.connectable ? undefined : instance.reason)
+  // What stands between it and a connection, as one sentence: what it just
+  // answered, what it answered the last time everything was tried, the
+  // password nothing here states, or why it cannot be connected at all. One
+  // that only needs its press has nothing to explain.
+  const wantsPassword = action.kind === "connect" && Boolean(refusal?.includes("connect it with"))
+  const why =
+    failure ??
+    asSentence(refusal) ??
+    (instance.connectable ? whyWaiting(instance) : asSentence(instance.reason))
 
   return (
     <ChoiceRow
@@ -238,7 +324,10 @@ function FoundRow({
       busy={Boolean(busy)}
       disabled={action.kind === "none" || Boolean(busy)}
       href={action.kind === "look" ? action.href : undefined}
-      onSelect={() => found.act(instance)}
+      // One that already refused what it states is not tried with it again:
+      // the server's own sentence asks for the password, so the press opens
+      // the form.
+      onSelect={() => (wantsPassword ? found.ask(instance) : found.act(instance))}
       verb={words.verb}
       leading={<EngineMark engine={engine} size="sm" />}
       title={
@@ -293,8 +382,8 @@ function FoundRow({
         <p
           className={
             failure
-              ? "text-hint leading-relaxed break-words text-destructive"
-              : "text-hint leading-relaxed text-muted-foreground"
+              ? "pl-11 text-hint leading-relaxed break-words text-destructive"
+              : "pl-11 text-hint leading-relaxed text-muted-foreground"
           }
         >
           {why}

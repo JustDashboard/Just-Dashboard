@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { ChevronDown, ChevronUp } from "@/components/icons"
-import { bytes, relativeTime } from "@/lib/format"
+import { bytes, relativeTime, truncateMiddle } from "@/lib/format"
 import type { DbFleetEntry } from "@/lib/types"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
@@ -21,6 +21,7 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { sectionHref, type Engine } from "@/components/database/engine"
 import {
+  concernLevel,
   reachWord,
   whereWord,
   type BackupReading,
@@ -28,8 +29,9 @@ import {
   type FleetSort,
   type FleetSortKey,
 } from "@/components/database/fleet/fleet"
+import { ProtectedMark, factTone } from "@/components/database/fleet/fleet-card"
 import type { FleetControl } from "@/components/database/fleet/use-fleet-control"
-import { EngineGlyph, EnvironmentTag, ProtectedTag } from "@/components/database/kit"
+import { EngineGlyph, EnvironmentTag } from "@/components/database/kit"
 import { DatabaseStatusMark, fleetStatus } from "@/components/database/shell/status"
 
 /**
@@ -48,6 +50,7 @@ export function FleetTable({
   concernsOf,
   backups,
   feeds,
+  storedOf,
   control,
   sort,
   onSort,
@@ -57,17 +60,23 @@ export function FleetTable({
   concernsOf: (entry: DbFleetEntry) => Concern[]
   backups: Map<number, BackupReading>
   feeds: Map<number, { products: string[]; count: number }>
+  /** What each database holds, where anybody knows: the same answer the cards give. */
+  storedOf: (entry: DbFleetEntry) => number | undefined
   control: FleetControl
   sort: FleetSort
   onSort: (key: FleetSortKey) => void
 }) {
-  // Eleven columns need the widest shell. Below it the two that the name's
-  // own mark and the cards' shelves already say — the engine, where it runs —
-  // step out, so the figures being compared stay on screen (§12).
+  // Eleven columns need the widest shell. Below it the two that only name the
+  // database — its engine, where it runs — are said on a second line under
+  // the name instead of in columns of their own, so nothing the table says is
+  // dropped and the figures being compared stay on screen (§12).
   const wide = useMediaQuery("(min-width: 1536px)")
   return (
     <Panel className="min-w-0">
-      <Table>
+      {/* Below the widest shell the cells stand a step closer together: nine
+          columns of figures and a name fit the page without a sideways
+          scroll, whatever the figures are. */}
+      <Table className={cn(!wide && "[&_td]:px-3 [&_th]:px-3")}>
         <TableHeader>
           <TableRow>
             <TableHead>Status</TableHead>
@@ -96,6 +105,8 @@ export function FleetTable({
             const busy = control.busyWord(entry)
             const down = entry.state === "stopped" || entry.state === "paused"
             const quiet = !entry.ok
+            const stored = storedOf(entry)
+            const product = `${engine.label}${entry.versionNumber ? ` ${entry.versionNumber}` : ""}`
             return (
               <TableRow key={entry.id} className="group" data-state-of={entry.state}>
                 <TableCell>
@@ -105,31 +116,41 @@ export function FleetTable({
                     <DatabaseStatusMark status={fleetStatus(entry)} />
                   )}
                 </TableCell>
-                <TableCell className="max-w-64">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="flex shrink-0"
-                      title={`${engine.label}${entry.versionNumber ? ` ${entry.versionNumber}` : ""} · ${where.text}`}
-                    >
-                      <EngineGlyph engine={engine} className={cn(down && "opacity-60")} />
+                <TableCell>
+                  {/* The cap is on this box, not the cell: a table sizes a
+                      cell to its content, and only a box with a width of its
+                      own can make a long name give way. */}
+                  <span className={cn("flex min-w-0 flex-col gap-0.5", wide ? "w-64" : "w-60")}>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="flex shrink-0" title={product}>
+                        <EngineGlyph engine={engine} className={cn(down && "opacity-60")} />
+                      </span>
+                      <Link
+                        href={sectionHref(entry.id)}
+                        aria-label={`Open ${entry.name}`}
+                        title={entry.name}
+                        className="min-w-0 truncate rounded-sm pr-0.5 text-body font-medium focus-ring hover:underline"
+                      >
+                        {entry.name}
+                      </Link>
+                      <EnvironmentTag environment={entry.environment} className="max-w-24" />
+                      {entry.readOnly && <ProtectedMark />}
                     </span>
-                    <Link
-                      href={sectionHref(entry.id)}
-                      aria-label={`Open ${entry.name}`}
-                      className="max-w-full min-w-0 truncate rounded-sm text-body font-medium focus-ring hover:underline"
-                    >
-                      {entry.name}
-                    </Link>
-                    <EnvironmentTag environment={entry.environment} />
-                    {entry.readOnly && <ProtectedTag />}
+                    {!wide && (
+                      <span
+                        className="flex min-w-0 items-baseline gap-1.5 pl-[1.375rem] text-hint text-muted-foreground"
+                        title={`${product} · ${where.text}`}
+                      >
+                        <span className="shrink-0">{product}</span>
+                        {/* Cut in the middle: the end of a path is the file's name. */}
+                        <span className={cn("min-w-0 truncate", where.mono && "font-mono")}>
+                          {truncateMiddle(where.text, 24)}
+                        </span>
+                      </span>
+                    )}
                   </span>
                 </TableCell>
-                {wide && (
-                  <TableCell className="text-muted-foreground">
-                    {engine.label}
-                    {entry.versionNumber ? ` ${entry.versionNumber}` : ""}
-                  </TableCell>
-                )}
+                {wide && <TableCell className="text-muted-foreground">{product}</TableCell>}
                 {wide && (
                   <TableCell className="max-w-56">
                     <span
@@ -144,7 +165,7 @@ export function FleetTable({
                   </TableCell>
                 )}
                 <TableCell className="numeric text-right">
-                  {entry.sizesKnown ? bytes(entry.bytes) : "—"}
+                  {stored !== undefined ? bytes(stored) : "—"}
                 </TableCell>
                 <TableCell className="numeric text-right">
                   {quiet ? (
@@ -171,8 +192,8 @@ export function FleetTable({
                 </TableCell>
                 <TableCell
                   className={cn(
-                    "text-muted-foreground",
-                    (has("never-backed-up") || has("stale-backup")) && "text-warning",
+                    "whitespace-nowrap text-muted-foreground",
+                    factTone(concernLevel(concerns, "never-backed-up", "stale-backup")),
                   )}
                 >
                   {backup?.newest
@@ -181,7 +202,12 @@ export function FleetTable({
                       ? "never"
                       : "—"}
                 </TableCell>
-                <TableCell className={cn("text-muted-foreground", has("public") && "text-warning")}>
+                <TableCell
+                  className={cn(
+                    "whitespace-nowrap text-muted-foreground",
+                    factTone(concernLevel(concerns, "public")),
+                  )}
+                >
                   {reachWord(entry.exposure)}
                 </TableCell>
                 <TableCell className="w-10 py-0 text-right">

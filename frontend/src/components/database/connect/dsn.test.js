@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  addressOfPasted,
   EMPTY_CONNECT_FIELDS,
   composeDsn,
   driverOfUrl,
@@ -70,14 +71,32 @@ describe("the string the connect form sends", () => {
     )
   })
 
-  test("a mode a driver cannot say falls back to its first, and is not offered", () => {
-    expect(tlsModes("redis")).toEqual(["off", "verify"])
-    expect(tlsModes("oracle")).toEqual([])
-    expect(tlsModes("postgres")).toEqual(["off", "on", "verify"])
-    expect(composeDsn("redis", fields({ user: "", tls: "on" }))).toStartWith("redis://")
-    expect(composeDsn("oracle", fields({ tls: "verify", database: "FREEPDB1" }))).toBe(
+  test("Redis says it with its scheme, Oracle with parameters whose names hold a space", () => {
+    expect(tlsModes("redis")).toEqual(["off", "on", "verify"])
+    expect(composeDsn("redis", fields({ user: "", tls: "off", database: "1" }))).toStartWith(
+      "redis://",
+    )
+    expect(composeDsn("redis", fields({ user: "", tls: "verify", database: "1" }))).toBe(
+      "rediss://:s3cret@db.example.com:6379/1",
+    )
+    expect(composeDsn("redis", fields({ user: "", tls: "on", database: "1" }))).toBe(
+      "rediss://:s3cret@db.example.com:6379/1?skip_verify=true",
+    )
+    expect(tlsModes("oracle")).toEqual(["off", "on", "verify"])
+    expect(composeDsn("oracle", fields({ tls: "off", database: "FREEPDB1" }))).toBe(
       "oracle://app:s3cret@db.example.com:1521/FREEPDB1",
     )
+    expect(composeDsn("oracle", fields({ tls: "on", database: "FREEPDB1" }))).toBe(
+      "oracle://app:s3cret@db.example.com:1521/FREEPDB1?SSL=true&SSL%20VERIFY=false",
+    )
+    expect(composeDsn("oracle", fields({ tls: "verify", database: "FREEPDB1" }))).toEndWith(
+      "/FREEPDB1?SSL=true",
+    )
+  })
+
+  test("a file has no transport to encrypt, and is offered no mode", () => {
+    expect(tlsModes("sqlite")).toEqual([])
+    expect(tlsModes("postgres")).toEqual(["off", "on", "verify"])
   })
 
   test("a file is its path", () => {
@@ -102,6 +121,48 @@ describe("what is shown of a string", () => {
     expect(maskPasted("app:s3cret@tcp(h:3306)/d")).toBe("app:••••••@tcp(h:3306)/d")
     expect(maskPasted("app:p@ss@tcp(h:3306)/d")).toBe("app:••••••@tcp(h:3306)/d")
     expect(maskPasted("mongodb://h:27017/d")).toBe("mongodb://h:27017/d")
+  })
+
+  test("a password with an @ of its own is hidden whole, and so is one given as a parameter", () => {
+    expect(maskPasted("postgres://jdtest:p@ss:w0rd@127.0.0.1:55432/shop")).toBe(
+      "postgres://jdtest:••••••@127.0.0.1:55432/shop",
+    )
+    expect(
+      maskPasted(
+        "sqlserver://127.0.0.1:51433?database=shop&user id=sa&password=Sup3rSecret&encrypt=disable",
+      ),
+    ).toBe("sqlserver://127.0.0.1:51433?database=shop&user id=sa&password=••••••&encrypt=disable")
+    expect(maskPasted("clickhouse://h:9000/d?username=app&Password=s3cret")).toBe(
+      "clickhouse://h:9000/d?username=app&Password=••••••",
+    )
+    expect(maskPasted("host=h user=app password=s3cret dbname=d")).toBe(
+      "host=h user=app password=•••••• dbname=d",
+    )
+    // The path and the parameters after the address are not a password.
+    expect(maskPasted("postgres://app@h/d?options=a@b")).toBe("postgres://app@h/d?options=a@b")
+  })
+})
+
+describe("what a pasted string points at", () => {
+  test("the host and the database, from a URL and from MySQL's own form", () => {
+    expect(addressOfPasted("postgres://app:pw@db.example.com:5432/shop?sslmode=disable")).toEqual({
+      host: "db.example.com",
+      database: "shop",
+    })
+    expect(addressOfPasted("app:p@ss@tcp(10.0.0.9:3306)/inventory?tls=true")).toEqual({
+      host: "10.0.0.9",
+      database: "inventory",
+    })
+    expect(addressOfPasted("redis://:pw@cache.internal:6379/1")).toEqual({
+      host: "cache.internal",
+      database: "1",
+    })
+    expect(addressOfPasted("sqlserver://sa:pw@127.0.0.1:1433?database=shop_a1")).toEqual({
+      host: "127.0.0.1",
+      database: "shop_a1",
+    })
+    expect(addressOfPasted("postgres://app:p@ss@[::1]:5432/d").host).toBe("[::1]")
+    expect(addressOfPasted("not a string")).toEqual({ host: "", database: "" })
   })
 })
 

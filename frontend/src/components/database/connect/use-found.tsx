@@ -3,10 +3,16 @@
 import { useCallback, useEffect, useState } from "react"
 import { ApiError, errorMessage, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import type { DbConnection } from "@/lib/types"
+import type { DbConnection, DbCredentialServer } from "@/lib/types"
 import { engineOf, type Engine } from "@/components/database/engine"
 import { FoundConnectDialog } from "@/components/database/connect/found-connect"
-import { foundAction, type FoundAction } from "@/components/database/connect/inventory"
+import { returnFocus } from "@/components/database/connect/focus"
+import {
+  foundAction,
+  foundActionWords,
+  hostInstance,
+  type FoundAction,
+} from "@/components/database/connect/inventory"
 import type { DbInstance, DbSyncReport } from "@/components/database/fleet/types"
 import type { InventoryData } from "@/components/database/fleet/use-fleet"
 import { useDatabases } from "@/components/database/shell/databases-context"
@@ -39,7 +45,18 @@ export function useFound({
   const [pending, setPending] = useState<Record<string, string>>({})
   const [settling, setSettling] = useState<Record<string, string>>({})
   const [failures, setFailures] = useState<Record<string, string>>({})
-  const [asking, setAsking] = useState<{ instance: DbInstance; message?: string } | null>(null)
+  // The form stays mounted while it closes, so the dialog can hand the
+  // keyboard back; `open` is what is toggled, and the instance it was opened
+  // on is kept until the next one is asked for.
+  const [asking, setAsking] = useState<{
+    instance: DbInstance
+    message?: string
+    open: boolean
+    /** Which asking this is: each one is a form of its own. */
+    turn: number
+  } | null>(null)
+  const ask = (instance: DbInstance, message?: string) =>
+    setAsking((held) => ({ instance, message, open: true, turn: (held?.turn ?? 0) + 1 }))
   const [syncing, setSyncing] = useState(false)
   const refreshInventory = inventory.refresh
 
@@ -94,7 +111,7 @@ export function useFound({
           // The server's two wordings for a failed sign-in with nothing typed:
           // only this one is about the credentials, and a password answers it.
           (err.code === "sign_in_failed" && err.message.includes("did not accept the credentials")))
-      if (refused) setAsking({ instance, message: errorMessage(err) })
+      if (refused) ask(instance, errorMessage(err))
       else {
         fail(instance.key, errorMessage(err))
         // Whatever it was, the list is older than the server's answer.
@@ -147,7 +164,7 @@ export function useFound({
         void connect(instance)
         break
       case "credentials":
-        setAsking({ instance })
+        ask(instance)
         break
       case "start-container":
         void start(instance, `/docker/containers/${encodeURIComponent(action.id)}/start`)
@@ -202,14 +219,25 @@ export function useFound({
   const busyWord = (instance: DbInstance): string | undefined =>
     pending[instance.key] ?? (instance.state !== "running" ? settling[instance.key] : undefined)
 
+  const close = () => {
+    if (!asking) return
+    setAsking({ ...asking, open: false })
+    // The row it was opened from redrew itself while it was signing in, so
+    // the dialog may have nothing to give the keyboard back to.
+    returnFocus(foundActionWords(actionOf(asking.instance), asking.instance.name).verb)
+  }
   const dialog = asking && (
     <FoundConnectDialog
-      key={asking.instance.key}
+      // A new form for each time it is asked: what was typed for one server,
+      // or before a cancel — a password, half of one — is not what the next
+      // opening starts from.
+      key={asking.turn}
+      open={asking.open}
       instance={asking.instance}
       engine={engineOfInstance(asking.instance)}
       choice={choiceOf(actionOf(asking.instance))}
       message={asking.message}
-      onClose={() => setAsking(null)}
+      onClose={close}
       onConnected={(connection) => {
         const instance = asking.instance
         setAsking(null)
@@ -222,7 +250,13 @@ export function useFound({
     act,
     actionOf,
     engineOfInstance,
-    ask: (instance: DbInstance) => setAsking({ instance }),
+    ask: (instance: DbInstance) => ask(instance),
+    /**
+     * The password form for a host server the fleet reported while the
+     * inventory could not be read: there is no key to connect it by, so the
+     * form signs in by its address.
+     */
+    askHost: (server: DbCredentialServer) => ask(hostInstance(server)),
     ignore,
     connectAll,
     syncing,

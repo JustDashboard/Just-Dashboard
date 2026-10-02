@@ -1,3 +1,4 @@
+import type { DbCredentialServer, DbDriver, DbFleet } from "@/lib/types"
 import type { DbInstance, DbInventory, DbInventoryScan } from "@/components/database/fleet/types"
 
 /**
@@ -85,6 +86,28 @@ export function foundAction(instance: DbInstance, hostAccount = false): FoundAct
   }
   const elsewhere = instanceHref(instance)
   return elsewhere ? { kind: "look", ...elsewhere } : { kind: "none" }
+}
+
+/** The name a row's press is given, and the word drawn before its arrow. */
+export function foundActionWords(
+  action: FoundAction,
+  name: string,
+): { verb: string; word: string } {
+  switch (action.kind) {
+    case "connect":
+    case "credentials":
+      return { verb: `Connect ${name}`, word: "Connect" }
+    case "open":
+      return { verb: `Open ${name}`, word: "Open file" }
+    case "start-container":
+      return { verb: `Start ${name}`, word: "Start container" }
+    case "start-unit":
+      return { verb: `Start ${name}`, word: "Start service" }
+    case "look":
+      return { verb: `${action.label} ${name}`, word: action.label }
+    case "none":
+      return { verb: name, word: "" }
+  }
 }
 
 /** The address a connection would dial, or the path of a file. */
@@ -186,16 +209,145 @@ export function connectsItself(instance: DbInstance): boolean {
   )
 }
 
-/** A server that is up and waits only for a password nothing here states. */
-export function needsPassword(instance: DbInstance): boolean {
-  return (
-    instance.kind === "server" &&
-    instance.connectable &&
-    instance.driver !== "" &&
-    instance.connections.length === 0 &&
-    !instance.ignored &&
-    (instance.credentials === "needed" || instance.credentials === "peer")
-  )
+/**
+ * Why a server that is up is not connected yet, in one sentence: the thing
+ * between it and a connection is a password nothing on this machine states.
+ * A server that cannot be connected at all carries the inventory's own
+ * `reason` instead; one that states its credentials has nothing to explain.
+ */
+export function whyWaiting(instance: DbInstance): string | undefined {
+  if (instance.kind !== "server" || !instance.connectable || instance.driver === "")
+    return undefined
+  switch (instance.credentials) {
+    case "peer":
+      return "Its accounts are kept in its own catalogue, where the dashboard cannot read a password."
+    case "needed":
+    case "unknown":
+      return instance.container
+        ? "Its container states no password — connect it with the one it uses."
+        : "Nothing on this server states its password — connect it with the one it uses."
+    default:
+      return undefined
+  }
+}
+
+/** One address, however it is spelled: every loopback spelling is this machine. */
+function addressOf(host: string | undefined, port: number | undefined): string {
+  const bare = (host ?? "").replace(/^\[|\]$/g, "").toLowerCase()
+  const local = ["", "localhost", "127.0.0.1", "::1", "0.0.0.0"].includes(bare)
+  return `${local ? "local" : bare}:${port ?? ""}`
+}
+
+/**
+ * A server the fleet says is waiting for a password, as the instance the
+ * inventory would have listed: what the password form is opened on when the
+ * inventory itself could not be read. It has no key, which is what tells the
+ * form to sign in by address (`POST /databases/host`) rather than by key.
+ */
+export function hostInstance(server: DbCredentialServer): DbInstance {
+  return {
+    key: "",
+    kind: "server",
+    name: server.name,
+    engine: server.driver,
+    driver: server.driver as DbDriver,
+    label: "",
+    source: "host",
+    state: "running",
+    endpoints: [{ kind: "tcp", host: server.host, port: server.port, primary: true }],
+    host: { process: server.process },
+    user: server.user,
+    database: server.database,
+    // An installed server authenticates this machine's own accounts by who
+    // they are, which is what lets the dashboard make itself one.
+    credentials: "peer",
+    confidence: "process",
+    evidence: [],
+    connectable: true,
+    connections: [],
+  }
+}
+
+/** A server that is up on this machine and waits for a password to be connected. */
+export type WaitingServer = {
+  id: string
+  name: string
+  /** What to draw it as: the instance's flavour or engine, or the fleet's driver. */
+  engine: string
+  /** The sentence of why it is not connected. */
+  reason: string
+  /**
+   * How it is connected from here: the inventory's instance by its key, a
+   * host server by its address, or — for a container the inventory has not
+   * listed — nothing yet but the way to the list.
+   */
+  via:
+    | { kind: "instance"; instance: DbInstance }
+    | { kind: "host"; server: DbCredentialServer }
+    | { kind: "list" }
+}
+
+/**
+ * Every server on this machine that is running, found, and held back only by
+ * a password — the inventory's reading and the fleet's own two lists as one.
+ *
+ * The inventory is the fuller account and wins wherever it lists the server:
+ * it has the key a connection is made by, and it knows what the operator set
+ * aside. The fleet's lists arrive with the fleet itself, so they are what is
+ * left to show while the inventory is still being read or when it could not
+ * be: a host server still gets its password form, by address.
+ */
+export function waitingServers(
+  fleet: Pick<DbFleet, "unreachable" | "needsCredentials"> | undefined,
+  inventory: DbInventory | undefined,
+): WaitingServer[] {
+  const instances = inventory?.instances ?? []
+  const said = new Map((fleet?.unreachable ?? []).map((one) => [one.container, one.reason]))
+  const out: WaitingServer[] = []
+  for (const instance of instances) {
+    const open = instance.connections.length === 0 && !instance.ignored && !instance.self
+    if (!open || !whyWaiting(instance)) continue
+    out.push({
+      id: instance.key,
+      name: instance.name,
+      engine: instance.flavor ?? instance.engine,
+      reason: asSentence(said.get(instance.name)) ?? whyWaiting(instance) ?? "",
+      via: { kind: "instance", instance },
+    })
+  }
+  // With the inventory in hand there is nothing the fleet's lists can add: a
+  // server it leaves out is connected, ignored, or gone.
+  if (inventory) return out
+  for (const server of fleet?.needsCredentials ?? []) {
+    out.push({
+      id: `host:${server.driver}:${addressOf(server.host, server.port)}`,
+      name: server.name,
+      engine: server.driver,
+      reason: "Nothing on this server states its password — connect it with the one it uses.",
+      via: { kind: "host", server },
+    })
+  }
+  for (const server of fleet?.unreachable ?? []) {
+    out.push({
+      id: `container:${server.container}`,
+      name: server.container,
+      engine: server.driver,
+      reason: asSentence(server.reason) ?? "",
+      via: { kind: "list" },
+    })
+  }
+  return out
+}
+
+/**
+ * The server's lower-case clause ("the container is exited — start it to
+ * connect") as a sentence of its own, which is how a row prints it.
+ */
+export function asSentence(clause: string | undefined): string | undefined {
+  const text = clause?.trim()
+  if (!text) return undefined
+  const capital = text[0].toUpperCase() + text.slice(1)
+  return /[.!?]$/.test(capital) ? capital : `${capital}.`
 }
 
 const SCAN_WORDS: Record<DbInventoryScan["source"], string> = {

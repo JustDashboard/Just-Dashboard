@@ -1,17 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import {
+  asSentence,
   connectsItself,
   foundAction,
+  foundActionWords,
   foundShelves,
+  hostInstance,
   instanceAddress,
   instanceHref,
   instanceState,
   instanceWhere,
-  needsPassword,
   privateState,
   scanNotes,
   scanSilences,
   scanningFiles,
+  waitingServers,
+  whyWaiting,
 } from "./inventory"
 
 function instance(over = {}) {
@@ -264,13 +268,92 @@ describe("the shelves of what was found", () => {
     expect(connectsItself(stopped)).toBe(false)
     expect(connectsItself(file)).toBe(false)
   })
+})
 
-  test("a server waiting for a password is one that is up, unconnected and not ignored", () => {
-    expect(needsPassword(native)).toBe(true)
-    expect(needsPassword(instance({ credentials: "needed" }))).toBe(true)
-    expect(needsPassword({ ...native, ignored: true })).toBe(false)
-    expect(needsPassword({ ...native, connections: [4] })).toBe(false)
-    expect(needsPassword(instance())).toBe(false)
+describe("a server that waits for a password", () => {
+  const inventory = (instances) => ({ instances, scans: [], ignored: [], detail: "full" })
+  const fleet = {
+    unreachable: [
+      {
+        container: "orders-db",
+        driver: "postgres",
+        reason: "its container states no password — connect it with the one it uses",
+      },
+    ],
+    needsCredentials: [
+      { driver: "postgres", host: "127.0.0.1", port: 5440, name: "postgres on this host" },
+    ],
+  }
+  const silent = instance({ key: "docker:orders-db", name: "orders-db", credentials: "needed" })
+
+  test("says why in one sentence, and one that states its credentials says nothing", () => {
+    expect(whyWaiting(native)).toContain("its own catalogue")
+    expect(whyWaiting(silent)).toContain("Its container states no password")
+    expect(whyWaiting(instance({ credentials: "unknown", container: undefined }))).toContain(
+      "Nothing on this server states its password",
+    )
+    expect(whyWaiting(instance())).toBeUndefined()
+    expect(whyWaiting(stopped)).toBeUndefined()
+    expect(whyWaiting(file)).toBeUndefined()
+  })
+
+  test("is the inventory's when it has answered: up, unconnected, not ignored", () => {
+    const waiting = waitingServers(
+      fleet,
+      inventory([
+        native,
+        silent,
+        instance(),
+        { ...native, key: "host:b", ignored: true },
+        { ...native, key: "host:c", connections: [4] },
+      ]),
+    )
+    expect(waiting.map((one) => one.id)).toEqual([native.key, "docker:orders-db"])
+    expect(waiting.every((one) => one.via.kind === "instance")).toBe(true)
+    // The fleet's sentence for a container that was tried stands for it.
+    expect(waiting[1].reason).toBe(
+      "Its container states no password — connect it with the one it uses.",
+    )
+  })
+
+  test("is what the fleet reported while the inventory has not answered", () => {
+    const waiting = waitingServers(fleet, undefined)
+    expect(waiting.map((one) => [one.name, one.via.kind])).toEqual([
+      ["postgres on this host", "host"],
+      ["orders-db", "list"],
+    ])
+    expect(waitingServers(undefined, undefined)).toEqual([])
+    // With the inventory in hand the fleet adds nothing it leaves out.
+    expect(waitingServers(fleet, inventory([]))).toEqual([])
+  })
+
+  test("a server the fleet reported is opened as an instance with no key, by its address", () => {
+    const made = hostInstance(fleet.needsCredentials[0])
+    expect(made.key).toBe("")
+    expect(made.endpoints).toEqual([{ kind: "tcp", host: "127.0.0.1", port: 5440, primary: true }])
+    expect(foundAction(made, true)).toEqual({ kind: "credentials", choice: true })
+    expect(foundAction(made, false)).toEqual({ kind: "credentials", choice: false })
+  })
+
+  test("the server's clause is printed as a sentence", () => {
+    expect(asSentence("the container is exited — start it to connect")).toBe(
+      "The container is exited — start it to connect.",
+    )
+    expect(asSentence("Already a sentence.")).toBe("Already a sentence.")
+    expect(asSentence("  ")).toBeUndefined()
+    expect(asSentence(undefined)).toBeUndefined()
+  })
+
+  test("a row's press is named for what it does", () => {
+    expect(foundActionWords({ kind: "credentials", choice: true }, "pg")).toEqual({
+      verb: "Connect pg",
+      word: "Connect",
+    })
+    expect(foundActionWords({ kind: "open" }, "notes.db").word).toBe("Open file")
+    expect(foundActionWords({ kind: "look", href: "/x", label: "Open stack" }, "db").verb).toBe(
+      "Open stack db",
+    )
+    expect(foundActionWords({ kind: "none" }, "vpsd.db")).toEqual({ verb: "vpsd.db", word: "" })
   })
 })
 

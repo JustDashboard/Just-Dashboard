@@ -97,7 +97,9 @@ export function fleetConcerns(
     if (!newest) {
       out.push({ kind: "never-backed-up", level: "warning", reason: "never backed up" })
     } else if (now - Date.parse(newest) > STALE_BACKUP_MS) {
-      out.push({ kind: "stale-backup", level: "notice", reason: "last backup is over a week old" })
+      // The same weight as none at all, on the tile, the card and the list:
+      // a dump nobody has taken for a week protects last week's data.
+      out.push({ kind: "stale-backup", level: "warning", reason: "last backup is over a week old" })
     }
   }
   return out
@@ -117,6 +119,87 @@ export function sortFleet(
   return [...entries].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
 }
 
+/**
+ * How loudly a fact on a card or in a table cell is said: the level of the
+ * concern it is about, so the list of findings, the card and the table never
+ * give one fact three weights.
+ */
+export function concernLevel(
+  concerns: readonly Concern[],
+  ...kinds: ConcernKind[]
+): Concern["level"] | undefined {
+  return concerns.find((concern) => kinds.includes(concern.kind))?.level
+}
+
+/** The order the kinds of concern are listed in, inside one level. */
+const KIND_ORDER: readonly ConcernKind[] = [
+  "broken",
+  "unreachable",
+  "stopped",
+  "paused",
+  "public",
+  "never-backed-up",
+  "stale-backup",
+]
+
+/** Past this many databases with the same concern, they are one finding that names them. */
+export const GROUP_ABOVE = 2
+
+export type ConcernGroup = {
+  kind: ConcernKind
+  level: Concern["level"]
+  entries: DbFleetEntry[]
+  /** One finding for all of them, rather than one each. */
+  grouped: boolean
+}
+
+/**
+ * The fleet's concerns as the attention list draws them: by what is wrong,
+ * worst first. Two databases with the same thing wrong are two findings; more
+ * than that are one finding naming them, because forty databases with seven
+ * open ports are one fact about the server, not seven rows that push the
+ * fleet off the screen.
+ */
+export function concernGroups(
+  entries: readonly DbFleetEntry[],
+  concernsOf: (entry: DbFleetEntry) => Concern[],
+): ConcernGroup[] {
+  const groups = new Map<ConcernKind, ConcernGroup>()
+  for (const entry of entries) {
+    for (const concern of concernsOf(entry)) {
+      const held = groups.get(concern.kind) ?? {
+        kind: concern.kind,
+        level: concern.level,
+        entries: [],
+        grouped: false,
+      }
+      held.entries.push(entry)
+      groups.set(concern.kind, held)
+    }
+  }
+  return [...groups.values()]
+    .map((group) => ({ ...group, grouped: group.entries.length > GROUP_ABOVE }))
+    .sort(
+      (a, b) =>
+        LEVEL_RANK[a.level] - LEVEL_RANK[b.level] ||
+        KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind),
+    )
+}
+
+/**
+ * What a database holds, in bytes: what its engine reported, or — for a file
+ * the engine says nothing about — what discovery measured on disk. One answer
+ * for the tile, the card, the table and the order they are put in; undefined
+ * where nobody knows.
+ */
+export function storedBytes(
+  entry: DbFleetEntry,
+  measured?: ReadonlyMap<number, number>,
+): number | undefined {
+  if (entry.sizesKnown) return entry.bytes
+  return measured?.get(entry.id)
+}
+
 /** Which part of the fleet a reading narrows the cards to. */
 export type FleetShow = "all" | "down" | "stored" | "busy" | "unprotected"
 
@@ -126,7 +209,7 @@ export const FLEET_SHOWS: readonly FleetShow[] = ["all", "down", "stored", "busy
 export function matchesShow(
   entry: DbFleetEntry,
   show: FleetShow,
-  options: { backup?: BackupReading; dumps?: boolean; now?: number } = {},
+  options: { backup?: BackupReading; dumps?: boolean; now?: number; stored?: number } = {},
 ): boolean {
   switch (show) {
     case "all":
@@ -134,7 +217,7 @@ export function matchesShow(
     case "down":
       return entry.state !== "running" || !entry.ok
     case "stored":
-      return entry.sizesKnown && entry.bytes > 0
+      return (options.stored ?? storedBytes(entry) ?? 0) > 0
     case "busy":
       return entry.sessions > 0
     case "unprotected": {
@@ -146,8 +229,14 @@ export function matchesShow(
 }
 
 /** A narrowed fleet in the order its reading asks for: the largest, the busiest. */
-export function orderForShow(entries: DbFleetEntry[], show: FleetShow): DbFleetEntry[] {
-  if (show === "stored") return [...entries].sort((a, b) => b.bytes - a.bytes)
+export function orderForShow(
+  entries: DbFleetEntry[],
+  show: FleetShow,
+  storedOf: (entry: DbFleetEntry) => number | undefined = storedBytes,
+): DbFleetEntry[] {
+  if (show === "stored") {
+    return [...entries].sort((a, b) => (storedOf(b) ?? 0) - (storedOf(a) ?? 0))
+  }
   if (show === "busy") return [...entries].sort((a, b) => b.sessions - a.sessions)
   return entries
 }
@@ -162,6 +251,8 @@ export function matchesQuery(entry: DbFleetEntry, query: string, engineLabel = "
     engineLabel,
     entry.database,
     entry.host,
+    // The address as a card prints it, so the port read off one finds it.
+    entry.port ? `${entry.host}:${entry.port}` : "",
     entry.container ?? "",
     entry.unit ?? "",
     entry.environment ?? "",
@@ -180,6 +271,7 @@ export function sortRows(
   entries: DbFleetEntry[],
   sort: FleetSort,
   backupOf: (entry: DbFleetEntry) => string | undefined,
+  storedOf: (entry: DbFleetEntry) => number | undefined = storedBytes,
 ): DbFleetEntry[] {
   if (!sort) return entries
   const value = (entry: DbFleetEntry): number | string => {
@@ -188,7 +280,7 @@ export function sortRows(
         return entry.name.toLowerCase()
       case "size":
         // A size nobody reported sorts below every size that was.
-        return entry.sizesKnown ? entry.bytes : -1
+        return storedOf(entry) ?? -1
       case "objects":
         return entry.objects
       case "sessions":
@@ -338,6 +430,8 @@ export function fleetReadings(
   options: {
     backups?: Map<number, BackupReading>
     dumps?: (entry: DbFleetEntry) => boolean
+    /** What each database holds, where it is known: `storedBytes` unless given. */
+    storedOf?: (entry: DbFleetEntry) => number | undefined
     now?: number
   } = {},
 ) {
@@ -346,7 +440,8 @@ export function fleetReadings(
   const running = list.filter((e) => e.ok && e.state === "running").length
   const stopped = list.filter((e) => e.state === "stopped" || e.state === "paused").length
   const failing = list.length - running - stopped
-  const sized = list.filter((e) => e.sizesKnown)
+  const storedOf = options.storedOf ?? storedBytes
+  const sizes = list.flatMap((e) => storedOf(e) ?? [])
   const answering = list.filter((e) => e.ok)
   const dumpable = list.filter((e) => !e.broken && (options.dumps?.(e) ?? true))
   const newestOf = (e: DbFleetEntry) =>
@@ -361,8 +456,8 @@ export function fleetReadings(
     stopped,
     failing,
     /** The sum of the sizes that were reported; `sized` says how many were. */
-    bytes: sized.reduce((sum, e) => sum + e.bytes, 0),
-    sized: sized.length,
+    bytes: sizes.reduce((sum, size) => sum + size, 0),
+    sized: sizes.length,
     /** Open sessions across the servers that answered; `answering` says how many did. */
     sessions: answering.reduce((sum, e) => sum + e.sessions, 0),
     answering: answering.length,
