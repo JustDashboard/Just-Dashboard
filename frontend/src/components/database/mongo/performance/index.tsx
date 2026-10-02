@@ -170,10 +170,10 @@ export function MongoPerformance() {
             }
             hint={
               targeting === null
-                ? "No query has returned a document yet"
+                ? "nothing returned yet"
                 : targetingLive
-                  ? "examined for each returned, just now"
-                  : "examined for each returned, since it started"
+                  ? "examined per returned, just now"
+                  : "examined per returned, since start"
             }
           />
           <StatTile
@@ -188,9 +188,9 @@ export function MongoPerformance() {
             }
             hint={
               readLatency === null
-                ? "No read between the last two readings"
+                ? "no read just now"
                 : writeLatency === null
-                  ? "on average, over the last reading"
+                  ? "on average, just now"
                   : `a write ${micros(writeLatency)}`
             }
           />

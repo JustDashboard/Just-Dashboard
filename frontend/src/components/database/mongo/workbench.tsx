@@ -72,6 +72,7 @@ export type Workbench = {
 export function MongoWorkbench({
   section,
   standalone,
+  collectionFree,
   children,
 }: {
   section: SectionId
@@ -81,6 +82,11 @@ export function MongoWorkbench({
    * itself where its view does need one.
    */
   standalone?: boolean
+  /**
+   * The view on screen needs no collection. On a phone the rail stands over
+   * the page until a collection is chosen; over such a view it must not.
+   */
+  collectionFree?: boolean
   children: (workbench: Workbench) => React.ReactNode
 }) {
   const mongo = useMongo()
@@ -110,7 +116,7 @@ export function MongoWorkbench({
     setHeldCollection(collection)
     setRailOver(false)
   }
-  const railVisible = wide ? railShown : railOver || !collection
+  const railVisible = wide ? railShown : railOver || (!collection && !collectionFree)
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize("databases.mongo.rail", RAIL.base)
   const railPx = Math.min(Math.max(railWidth, RAIL.min), RAIL.max)
 

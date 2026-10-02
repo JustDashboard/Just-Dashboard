@@ -99,11 +99,15 @@ function ruleGrammar(text: string): string {
  * saved, Check counts the existing documents it would reject and shows a few
  * of them. The check reads the collection; it changes nothing.
  */
-export function ValidationView({ mongo, collection: info, confirm }: Workbench) {
+export function ValidationView({ mongo, catalog, collection: info, confirm }: Workbench) {
   const { id, target, database, collection, engine, canWrite, href } = mongo
   const view = info?.type === "view"
+  // What the collection is comes from the list. Until the list has answered
+  // (or failed), the rule is not asked for: a view has none, and the server
+  // refuses the question.
+  const known = info !== undefined || Boolean(catalog.collections.error)
   const poll = usePoll((signal) => mongoValidation(target, signal), 0, [id, database, collection], {
-    enabled: !view,
+    enabled: known && !view,
   })
   // What is being typed is kept for the tab, per collection: a look at the
   // indexes and back does not lose a half-written rule.
@@ -120,6 +124,7 @@ export function ValidationView({ mongo, collection: info, confirm }: Workbench) 
   const [busy, setBusy] = useState<"checking" | "saving" | null>(null)
   const [refused, setRefused] = useState("")
   const formatRef = useRef<(() => void) | null>(null)
+  const resultRef = useRef<HTMLElement>(null)
 
   const stored = poll.data
   const saved = useMemo<Draft | undefined>(
@@ -197,6 +202,10 @@ export function ValidationView({ mongo, collection: info, confirm }: Workbench) 
       setChecked({ of: draft.validator, error: errorMessage(err) })
     } finally {
       setBusy(null)
+      // The answer is drawn under the form: it is brought into sight.
+      requestAnimationFrame(() =>
+        resultRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+      )
     }
   }
 
@@ -271,14 +280,14 @@ export function ValidationView({ mongo, collection: info, confirm }: Workbench) 
                   Start from a $jsonSchema
                 </Button>
               )}
-              {!empty && (
+              {!empty && canWrite && ruleGrammar(draft.validator) === "json" && !problem && (
                 <Button size="xs" variant="ghost" onClick={() => formatRef.current?.()}>
                   Format
                 </Button>
               )}
             </div>
             {/* A frame because the editor is a working region with its own scroll. */}
-            <div className="h-[min(28rem,50svh)] overflow-hidden rounded-lg border border-hairline bg-surface-sunken">
+            <div className="h-[min(22rem,38svh)] overflow-hidden rounded-lg border border-hairline bg-surface-sunken @4xl:h-[min(30rem,55svh)]">
               <CodeEditor
                 value={draft.validator}
                 language={ruleGrammar(draft.validator)}
@@ -374,7 +383,11 @@ export function ValidationView({ mongo, collection: info, confirm }: Workbench) 
         </div>
 
         {check && (
-          <section aria-label="Result of the check" className="animate-rise space-y-3 pt-5">
+          <section
+            ref={resultRef}
+            aria-label="Result of the check"
+            className="animate-rise space-y-3 pt-5"
+          >
             {check.error !== undefined ? (
               <Notice tone="danger" title="The check could not be run">
                 {check.error}

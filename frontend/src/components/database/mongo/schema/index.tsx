@@ -90,7 +90,11 @@ function Schema(workbench: Workbench) {
         </div>
       </WorkbenchHead>
       {view === "indexes" ? (
-        <IndexesView mongo={mongo} confirm={workbench.confirm} />
+        <IndexesView
+          mongo={mongo}
+          confirm={workbench.confirm}
+          onChanged={workbench.catalog.refresh}
+        />
       ) : view === "validation" ? (
         <ValidationView {...workbench} />
       ) : (

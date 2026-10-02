@@ -325,6 +325,7 @@ function FieldRow({
           {missing > 0 && !element && (
             <button
               type="button"
+              aria-label={`Find the ${missing.toLocaleString("en-US")} documents without ${field.path}`}
               onClick={() => onAsk(missingClause(field.path))}
               className="rounded-sm underline decoration-dotted underline-offset-2 focus-ring hover:text-foreground"
             >
@@ -355,6 +356,12 @@ function FieldRow({
                       title={
                         clause === null
                           ? "The value was cut short in the sample, so it cannot be searched for exactly"
+                          : `Find the documents where ${field.path} is ${entry.value}`
+                      }
+                      // The press is named for what it does, not for the value alone.
+                      aria-label={
+                        clause === null
+                          ? `${entry.value}, cut short in the sample`
                           : `Find the documents where ${field.path} is ${entry.value}`
                       }
                       onClick={() => clause && onAsk(clause)}

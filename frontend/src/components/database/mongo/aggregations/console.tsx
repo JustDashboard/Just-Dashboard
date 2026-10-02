@@ -36,6 +36,8 @@ import type {
 import type { Workbench } from "@/components/database/mongo/workbench"
 import { ReadError } from "@/components/database/redis/read-error"
 
+const capitalised = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
 /** How many commands the transcript keeps. */
 const KEPT = 40
 
@@ -132,7 +134,9 @@ export function ConsoleView({
         : !current?.data
           ? null
           : verdict?.class === "blocked"
-            ? (verdict.reason ?? "This command is never run from here.")
+            ? verdict.reason
+              ? `${capitalised(verdict.reason)}.`
+              : "This command is never run from here."
             : protectedRefusal
               ? "The connection is protected: only a command that reads is run."
               : !current.data.allowed || !canRun
@@ -301,24 +305,22 @@ export function ConsoleView({
             className="flex min-h-5 min-w-0 flex-wrap items-center gap-x-2 text-hint text-muted-foreground"
           >
             {verdict && !shape && (
-              <>
-                <span className="font-mono text-xs text-foreground">{verdict.command}</span>
-                <span className={CLASS[verdict.class].className}>{CLASS[verdict.class].word}</span>
-                {verdict.admin && <span>· an administrator&rsquo;s command</span>}
-                {verdict.target && (
-                  <span>
-                    · on <span className="font-mono">{verdict.target}</span>
-                  </span>
-                )}
-              </>
+              <span className="flex shrink-0 items-center gap-1.5">
+                <span className="font-mono text-xs text-foreground">{verdict.command}</span>{" "}
+                <span className={CLASS[verdict.class].className}>{CLASS[verdict.class].word}</span>{" "}
+                {verdict.target && <span className="font-mono">{verdict.target} </span>}
+                {verdict.admin && <span>(an administrator&rsquo;s command) </span>}
+              </span>
             )}
             {why ? (
               <span className={cn("min-w-0", (shape || current?.error) && "text-destructive")}>
-                {verdict && !shape ? "· " : ""}
                 {why}
               </span>
             ) : verdict?.class === "destructive" ? (
-              <span>· {verdict.reason}. Asked for once more before it runs.</span>
+              <span className="min-w-0">
+                {verdict.reason ? `${capitalised(verdict.reason)}. ` : ""}It is asked for once more
+                before it runs.
+              </span>
             ) : !canRun && !text.trim() ? (
               <span>Your role cannot run commands; what one would do is still said here.</span>
             ) : null}

@@ -89,7 +89,14 @@ function usageWords(index: MongoIndex): { figure: string; since: string } | null
  * index is how to find out: the planner stops using it, it is still kept up
  * to date, and unhiding it costs nothing — a drop cannot be undone.
  */
-export function IndexesView({ mongo, confirm }: Pick<Workbench, "mongo" | "confirm">) {
+export function IndexesView({
+  mongo,
+  confirm,
+  onChanged,
+}: Pick<Workbench, "mongo" | "confirm"> & {
+  /** An index was made or dropped: the collection's own count of them is out of date. */
+  onChanged: () => void
+}) {
   const { id, target, database, collection, engine, canWrite, canDestroy } = mongo
   const poll = usePoll((signal) => mongoIndexes(target, signal), 30_000, [id, database, collection])
   const [creating, setCreating] = useState(false)
@@ -161,7 +168,10 @@ export function IndexesView({ mongo, confirm }: Pick<Workbench, "mongo" | "confi
                 action: async () => {
                   await dropIndex(target, index.name)
                 },
-                onDone: poll.refresh,
+                onDone: () => {
+                  poll.refresh()
+                  onChanged()
+                },
               }),
           },
         ]
@@ -319,7 +329,10 @@ export function IndexesView({ mongo, confirm }: Pick<Workbench, "mongo" | "confi
           open={creating}
           existing={indexes ?? []}
           onOpenChange={setCreating}
-          onCreated={poll.refresh}
+          onCreated={() => {
+            poll.refresh()
+            onChanged()
+          }}
         />
       )}
     </div>

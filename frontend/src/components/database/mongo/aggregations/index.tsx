@@ -1,6 +1,7 @@
 "use client"
 
 import { tabClasses } from "@/components/tabs"
+import { useDatabase } from "@/components/database/shell/database-context"
 import { ConsoleView } from "@/components/database/mongo/aggregations/console"
 import { PipelineView } from "@/components/database/mongo/aggregations/pipeline-view"
 import { DatabasePane } from "@/components/database/mongo/database-pane"
@@ -27,8 +28,13 @@ const VIEWS: { id: View; label: string }[] = [
  * address too (`?view=command`).
  */
 export function MongoAggregations() {
+  const { param, engine } = useDatabase()
   return (
-    <MongoWorkbench section="query" standalone>
+    <MongoWorkbench
+      section="query"
+      standalone
+      collectionFree={param("view") === "command" && engine.can("console")}
+    >
       {(workbench) => <Aggregations {...workbench} />}
     </MongoWorkbench>
   )

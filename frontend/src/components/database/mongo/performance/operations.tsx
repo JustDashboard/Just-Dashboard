@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { StopCircle } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
@@ -22,6 +22,10 @@ import {
 import { nameHue } from "@/components/database/home/kinds"
 import { EngineMark } from "@/components/database/kit"
 import { killOperation, mongoOperations } from "@/components/database/mongo/api"
+import {
+  operationTitle as title,
+  withoutHeartbeats,
+} from "@/components/database/mongo/performance/ops"
 import { runningWords } from "@/components/database/mongo/performance/samples"
 import type { MongoOperation } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
@@ -30,12 +34,6 @@ import { ReadError } from "@/components/database/redis/read-error"
 /** How long an operation runs before its time is a reading worth a hue. */
 const LONG_SECONDS = 10
 
-/** One line for an operation that says what it is on: `find orders`, or its description. */
-function title(operation: MongoOperation): string {
-  if (!operation.op || operation.op === "none") return operation.desc || "idle"
-  return operation.ns ? `${operation.op} ${operation.ns}` : operation.op
-}
-
 /**
  * What the server is running right now, longest first.
  *
@@ -43,7 +41,8 @@ function title(operation: MongoOperation): string {
  * long, for whom, with what plan. Stopping one asks the server to interrupt
  * it at its next safe point — not instantly — and is offered to a role that
  * may remove things, on a protected connection too, since it changes no data.
- * The dashboard's own request for this list is left out by the server.
+ * The dashboard's own request for this list is left out by the server, and
+ * the heartbeat each connected driver keeps open is left out here.
  */
 export function OperationsView({
   mongo,
@@ -55,7 +54,18 @@ export function OperationsView({
   const { id, conn, engine, canKill } = mongo
   const [all, setAll] = useState(false)
   const operations = usePoll((signal) => mongoOperations(id, all, signal), 3000, [id, all])
-  const rows = operations.data
+  // A driver's heartbeat is always running and is nobody's work: it is listed
+  // only with the idle connections, when the reader asks for everything.
+  const read = operations.data
+  const { shown: rows, heartbeats } = useMemo(
+    () =>
+      !read
+        ? { shown: undefined, heartbeats: 0 }
+        : all
+          ? { shown: read, heartbeats: 0 }
+          : withoutHeartbeats(read),
+    [read, all],
+  )
   const arrived = useArrivals((rows ?? []).map((row, index) => row.opId || `idle:${index}`))
 
   if (operations.error && !rows) {
@@ -99,7 +109,7 @@ export function OperationsView({
       <div className="pt-3">
         <OptionList>
           <OptionRow
-            title="Also list idle connections and the server's own background work"
+            title="Also list idle connections, drivers' heartbeats and the server's own background work"
             checked={all}
             onCheckedChange={setAll}
           />
@@ -112,7 +122,12 @@ export function OperationsView({
       )}
       <PanelBody flush className="group-data-[plain]/panel:-mx-4">
         {rows.length === 0 ? (
-          <EmptyNote>Nothing is running right now.</EmptyNote>
+          <EmptyNote>
+            Nothing is running right now
+            {heartbeats > 0
+              ? `, beside the ${heartbeats === 1 ? "heartbeat of one connected client" : `heartbeats of ${heartbeats} connected clients`}.`
+              : "."}
+          </EmptyNote>
         ) : (
           <Table>
             <TableHeader>
@@ -211,6 +226,13 @@ export function OperationsView({
               })}
             </TableBody>
           </Table>
+        )}
+        {rows.length > 0 && heartbeats > 0 && (
+          <p className="px-4 pt-2 text-hint text-muted-foreground">
+            {heartbeats === 1
+              ? "The heartbeat of one connected client is not listed."
+              : `The heartbeats of ${heartbeats} connected clients are not listed.`}
+          </p>
         )}
       </PanelBody>
     </Panel>

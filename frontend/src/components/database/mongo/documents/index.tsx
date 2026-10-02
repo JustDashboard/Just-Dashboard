@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   ChevronDoubleDown,
   ChevronLeft,
@@ -111,8 +111,8 @@ const VIEWS: { id: View; label: string }[] = [
  * that is open, found with MongoDB's own query bar and read three ways.
  *
  * The database, the collection, the query and the page are in the address, so
- * a pasted link opens on the same documents and Back returns to the query
- * before. A document is edited as the canonical Extended JSON it is stored
+ * a pasted link opens on the same documents; opening a collection is a step
+ * of history, so Back returns to the one before. A document is edited as the canonical Extended JSON it is stored
  * as — nothing here passes it through a JavaScript number or a plain object,
  * which is how the old editor rewrote a document's types by saving it — or a
  * field at a time, as the update that change is.
@@ -164,6 +164,11 @@ function Documents({
   // What Schema's "add this value to the filter" builds on: the query this
   // collection was last asked.
   const [, setMemory] = useSessionState<Record<string, QueryDraft>>(queryMemoryKey(id), {})
+  useEffect(() => {
+    // Whatever put the query in the address — Find, a link from Schema, a
+    // pasted address, Back — it is the query the collection was last asked.
+    setMemory((held) => ({ ...held, [collectionKey(database, collection)]: applied }))
+  }, [applied, database, collection, setMemory])
   const [epoch, setEpoch] = useState(0)
 
   const [size, setSize] = useViewState<number>(`databases.${id}.mongo.pageSize`, DEFAULT_PAGE)
@@ -258,8 +263,11 @@ function Documents({
 
   const apply = (next: QueryDraft) => {
     setHistory((held) => withHistory(held, { database, collection, draft: next, at: Date.now() }))
-    setMemory((held) => ({ ...held, [collectionKey(database, collection)]: next }))
     setEdits({})
+    // Like a filter or a sort on the SQL pages, a query replaces the address
+    // rather than adding to history: Back is the collection before, not every
+    // query typed on the way. It is taken at once — the page does not wait
+    // for the router to show it.
     select({ ...addressOf(next), page: null })
     // The same query asked again is still a fresh read.
     setEpoch((n) => n + 1)
