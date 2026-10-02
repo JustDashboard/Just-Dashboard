@@ -66,11 +66,13 @@ cannot classify is the destructive kind. The Databases routes among them are mar
 the [route table](../backend/databases-proxy-platform.md#routes).
 
 - **SQL statements.** `POST /databases/{id}/query`, `…/script` and an analysed `…/explain` classify
-  their SQL by the rules of the connection's own engine (`dbx.ClassifyFor`) and ask for what the
-  verdict requires (`authoriseSQL`); a script is judged by its worst statement, and a statement the
-  lexer cannot read with certainty is destructive. `POST …/export/query` takes only a statement that
-  classifies as a read.
-- **Rows.** `POST …/changes` asks for `destructive` when the set holds a delete.
+  their SQL by the rules of the connection's own engine (`dbx.ParseScript`, which gives every
+  statement its `Risk`) and ask for what the verdict requires (`authoriseSQL`); a script is judged by
+  its worst statement, and a statement the lexer cannot read with certainty is destructive.
+  `POST …/export/query` takes only a statement that classifies as a read.
+- **Rows.** `POST …/changes` classifies nothing: its handler counts the operations the set holds and
+  asks for `destructive`, and spends `destrLim`, when one of them is a delete. A dry run, which
+  renders the statements and runs none, asks for neither.
 - **Schema forms.** A `/ddl/*` route that only adds asks for `service.control`. `api.runDDL` asks for
   `destructive` on top of it when the plan changes a column's type, which rewrites the column, or
   when the operator's own SQL in it (a CHECK condition, an index predicate, a USING conversion, a

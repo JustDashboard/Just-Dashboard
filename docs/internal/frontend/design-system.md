@@ -1741,6 +1741,9 @@ flow page; Settings is a reading of a project's configuration that happens to be
 page is one where there is a **sequence with an outcome at the end**, and the screen's job is to get
 the reader through it.
 
+<!-- LEAD-PAGES: the Databases row below names Access, Backups and Settings as reading pages. That
+     is what the engine registry declares them (no `workbench`), and what their stubs draw; the pages
+     themselves are not built in this tree. Read the row again when they merge. -->
 | Page | Register | Why |
 | --- | --- | --- |
 | Host Overview, metrics, Docker, Security, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |

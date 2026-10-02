@@ -302,8 +302,10 @@ real database, set all six explicitly before running anything under
 `internal/dbx` or `internal/api`** — to a fixture, or to an address nothing
 listens on, which makes the test skip. The two administrator variables below
 fall back the same way in the tests that drop databases and read credential
-catalogues. SQLite needs nothing: it is embedded, and its fixture is a file in
-the test's own temporary directory.
+catalogues. SQLite needs no server: it is embedded, and its fixture is a file in
+the test's own temporary directory unless `JD_TEST_SQLITE_DSN` names another
+(`JD_TEST_SQLITE_DROP_DSN` for the file the drop test makes and unlinks). Leave
+both unset: set, they point tests that create and drop tables at that file.
 
 Every other variable has no fallback, on purpose: the tests behind it write,
 stop a server or change its configuration, and an address nobody chose is as
@@ -318,7 +320,7 @@ likely to be somebody's data as a fixture.
 | `JD_TEST_B3_MSSQL_DSN`, `JD_TEST_B3_ORACLE_DSN`, `JD_TEST_B3_ORACLE_ADMIN_DSN`, `JD_TEST_B3_MYSQL8_ADMIN_DSN` | the operations suite's own servers, read before the shared variable of the same engine | `dbx/ops_live_test.go`, `api/handlers_db_ops_live_test.go` |
 | `JD_TEST_MARIADB_DSN`, `JD_TEST_VALKEY_DSN`, `JD_TEST_KEYDB_DSN`, `JD_TEST_DRAGONFLY_DSN` | one server of each flavour | flavour detection, the capability flags against real servers |
 | `JD_TEST_MONGO_RS_DSN` | a MongoDB replica set the run owns: accounts and views are made in `admin` | replication, accounts, the credential guards |
-| `JD_TEST_MONGO_AUTH_DSN` | a MongoDB with access control on | `TestLiveMongoSignIn` |
+| `JD_TEST_MONGO_AUTH_DSN` | a MongoDB with access control on | `TestLiveMongoSignInIsNotAPing` |
 | `JD_TEST_REDIS_ADMIN_DSN` | a Redis the run owns outright: configuration, users, slow log, clients, MONITOR, pub/sub | `TestLiveRedis*`, `TestLiveAPIRedis*` |
 | `JD_TEST_REDIS_OWN_DSN` | a Redis whose numbered databases the run may flush | dumps of every numbered database |
 | `JD_TEST_REDIS_FLAVORS` | `valkey=redis://…,keydb=redis://…,dragonfly=redis://…,redis=redis://…` | the Redis surface on each fork |
@@ -332,8 +334,8 @@ Some tests reach past a database to the machine and run only when asked:
 
 | Variable | What it does |
 | --- | --- |
-| `JD_TEST_INVENTORY_LIVE=1` | reads this machine's real Docker daemon, sockets, units and files (`TestLiveInventory`); it only reads |
-| `JD_TEST_INVENTORY_CONTAINER=<name>` | signs in to that one container and nothing else (`TestLiveInventoryConnects`) |
+| `JD_TEST_INVENTORY_LIVE=1` | reads this machine's real Docker daemon, sockets, units and files (`TestLiveInventoryNeverCarriesAContainerSecret`); it only reads |
+| `JD_TEST_INVENTORY_CONTAINER=<name>` | signs in to that one container and nothing else (`TestLiveInventoryConnectsAContainerByKey`) |
 | `JD_TEST_PROVISION_ENGINES=redis,valkey,clickhouse:24.8` | starts each named template, connects it the way the page does and turns it off and on again (`TestLiveProvisionAdoptAndPower`); it creates and removes its own containers and volumes |
 | `JD_TEST_POWER_REDIS_DSN` | a Redis in a container the test may stop and start (`TestLivePowerIsReadInFlightOnARealContainer`) |
 | `JD_TEST_HOST_PG_PORT=<port>` | a PostgreSQL installed on the host, run as root: the host account bootstrap (`TestLiveHostPostgresAccount`) and the log sources read off `/proc` (`TestLiveHostDBLogSources`) |
@@ -403,12 +405,20 @@ Docker): `database-shell.spec.ts`, `database-control-center.spec.ts`,
 `database-home.spec.ts`, `database-data.spec.ts`, `database-query.spec.ts`,
 `database-schema.spec.ts`, `database-redis.spec.ts`, `database-mongo.spec.ts`,
 `database-performance.spec.ts` and `database-logos.spec.ts`.
-`scripts/test-changed.sh` picks the ones a change can reach — a file under
-`frontend/src/components/database/` runs every spec that opens a `/databases`
-page — together with `design-system.spec.ts`, which walks every Databases page
-at 1280 and at 390. Run one by hand against a production build:
+`scripts/test-changed.sh` picks the ones a change can reach: it follows a
+changed file through its imports to the pages that use it and runs the specs
+that name those pages' addresses. A generator's file reaches the Generate page
+and runs the one spec that opens it; the engine registry and the shell, which
+every page reads, run every Databases spec. A changed component or stylesheet
+also runs `design-system.spec.ts`, which walks every Databases page at 1280 and
+at 390.
+Run one by hand against a production build:
 
 ```bash
-cd frontend && bun run build && bun run start --hostname 127.0.0.1 --port 43117 &
+cd frontend
+bun run build
 bunx playwright test tests/browser/database-data.spec.ts
 ```
+
+Playwright serves that build on 127.0.0.1:43117 itself, or uses the server
+already listening there.

@@ -16,8 +16,10 @@ A change that weakens any of these has to say so explicitly.
    wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
    request, the handler checks by hand and fails closed, and each such check has one owner:
-   - `dbx.ClassifyFor` for SQL, read by the rules of the connection's own engine: the query, script
-     and analysed-plan routes, and a change set that deletes rows;
+   - `api.authoriseSQL` for SQL, on the verdict `dbx` reads off each statement by the rules of the
+     connection's own engine (`dbx.ParseScript`): the query, script and analysed-plan routes;
+   - the handler of `POST …/changes` for a change set, by the operations it holds: one that deletes
+     rows needs the destructive capability;
    - `api.runDDL` for a schema form that changes a column's type or whose own SQL (a CHECK condition,
      an index predicate, a USING conversion, a function default) calls anything `dbx` does not vouch
      for — either needs the destructive capability on a route that otherwise asks for

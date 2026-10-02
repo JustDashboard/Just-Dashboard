@@ -180,7 +180,8 @@ is connected by naming the instance found, not by typing its address again.
   has no accounts, so its `requirepass` is read from `/etc/redis/redis.conf` (or Valkey's).
   The password is generated on the server unless supplied, reaches the client as one argv
   element and never a shell, and the connection is probed over TCP before anything is saved;
-  an existing connection to the same address is re-sealed rather than duplicated. Audited as
+  an existing connection to the same server, database and account is re-sealed rather than
+  duplicated, and one to the same address as another account is left as it is. Audited as
   `database.connection.host.grant` with the account and outcome, never the password.
   `TestLiveHostPostgresAccount` exercises it as root against a real native server
   (`JD_TEST_HOST_PG_PORT`).
@@ -362,13 +363,15 @@ is connected by naming the instance found, not by typing its address again.
   summarised and read for the fleet in the logical database its connection string names
   (`dbx.RedisDSNDatabase`), which is where every key route goes: a string naming a database the server
   does not have used to test healthy and then fail each of them.
-- **Reads that leave the server leave a trail.** `GET /databases/{id}/url`, `/export`, `/search` and
-  `/backup/download` are written to the audit log with `recordRead`, as
-  `database.connection.reveal`, `database.export`, `database.search` and `database.backup.download`,
-  before the read runs. They used to call `SetAudit`, which does nothing on a GET. `recordRead` writes
-  on a context that outlives the request, so a client that drops the connection does not take the
-  entry with it. An export is closed by a second entry, `database.export.finished`, with the rows sent
-  and whether it was cut short, recorded as a failure (`502`, with the error) when the stream broke.
+- **Reads that leave the server leave a trail.** `GET /databases/{id}/url`, `/search` and
+  `/backup/download` are written to the audit log with `recordRead`, as `database.connection.reveal`,
+  `database.search` and `database.backup.download`, before the read runs. They used to call
+  `SetAudit`, which does nothing on a GET. `recordRead` writes on a context that outlives the request,
+  so a client that drops the connection does not take the entry with it. `GET /databases/{id}/export`
+  writes its own two entries through `recordTransfer`, which records on a context of its own for the
+  same reason: `database.export` before the first row leaves, and `database.export.finished` with the
+  rows sent and whether it was cut short, recorded as a failure (`502`, with the error) when the
+  stream broke.
 - **One pool per connection, opened once.** Pool initialization is coordinated per connection ID. Dialing
   and pinging do not hold the manager's map lock, and waiters can cancel independently. Closing or
   editing a connection invalidates an initialization already in progress; its old credentials cannot
@@ -456,10 +459,11 @@ this is how it is built, and the Protected column of [Routes](#routes) gives eve
 
 ### The query runner
 
-Reading is separated from running: `dbx.ClassifyFor` decides destructiveness for the connection's
-engine and fails closed, and the handler applies capability and budget by hand (`authoriseSQL`, shared
-by the query, script and analysed-plan routes). Every dialect's `ExplainPlan` must describe a statement
-*without executing it* — asserted in the interface, proved by `TestLiveExplainDoesNotExecute`.
+Reading is separated from running: `dbx` decides destructiveness by the rules of the connection's engine
+and fails closed (`ParseScript` gives every statement its `Risk`; `ClassifyFor` is the strongest of them
+over a whole text), and the handler applies capability and budget by hand (`authoriseSQL`, shared by the
+query, script and analysed-plan routes). Every dialect's `ExplainPlan` must describe a statement *without
+executing it* — asserted in the interface, proved by `TestLiveExplainDoesNotExecute`.
 
 The query runner reads SQL with one lexer per engine (`dbx/sqltoken.go`), and splitting, the leading
 word, the row-returning test and the plan gate all read its tokens — there used to be a splitter and a
@@ -659,8 +663,9 @@ stays editable on a protected connection.
   table in a schema — which is why each column is cast first: an integer id and a uuid are exactly
   what people search for, and `LIKE` against them is an error on the stricter engines. It visits at
   most 60 tables, compares at most 40 columns of each, returns at most 5 matches a table and 200 in
-  all, skips views and the credential relations above, and says what it left out (`tablesScanned`,
-  `tablesSkipped`, `truncated`), so "no matches" can be told from "gave up before reaching it". The
+  all, skips views and the credential relations above, and says how far it got: the tables it read
+  (`tablesScanned`), the ones it could not (`tablesSkipped`) and whether a bound stopped it
+  (`truncated`), so "no matches" can be told from "gave up before reaching it". The
   bounds are not tuning knobs; they are what makes the feature safe to point at production. It is on
   the read surface and audited (`database.search`), since the needle is the caller's and the read
   crosses every table.
@@ -702,24 +707,24 @@ stays editable on a protected connection.
   columns and size. SQLite and ClickHouse keep a table's check constraints nowhere but in the statement
   it was created with, so theirs are read out of that statement (`createTableItems`).
 - **A schema change is planned, then shown or run.** There are twenty `/databases/{id}/ddl/*` routes:
-  create, rename, truncate and drop a table; add, alter and drop a column; create and drop an index, a
-  foreign key, a unique or check constraint, a view and a schema; comment on a table or a column;
-  create an enum type and add a label to one. What an engine takes of them is its `ddlOperations`
-  list. Every handler builds a `dbx.DDLPlan` — the exact statements, in order — and `runDDL` returns
-  it for `?preview=1` or executes it, so the statement a dialog shows is the server's own and not a
-  page's approximation of it. Each
-  planner starts at `ddlDialect(driver, op)`, which refuses an operation the engine does not have in
-  words that name the engine (`ddlRefusals`): SQLite cannot alter a column or add a constraint to an
-  existing table, and ClickHouse is sent its own form (`RENAME TABLE`, `MODIFY COLUMN`, `ALTER TABLE …
-  DROP INDEX`) or a refusal, never generic DDL. Capability follows cost. A change that only adds needs
-  `service.control`; every drop is behind `s.destructive`; and what depends on the body is decided in
-  `runDDL` and fails closed, for a preview as much as for a run — a new column type, which rewrites the
-  column, and any call in the operator's own SQL (a CHECK condition, an index predicate, a USING
-  conversion, a function default) outside the short lists `pureFunctions` and `safeDefaults`. The engine
-  runs such SQL against rows, and a form must not be a cheaper way to run a function than the console is.
-  `unvouchedCalls` reads the fragment as the engine's tokens, so a name is one name however it is spaced
-  or qualified, and on Postgres names a dotted reference whether or not a parenthesis follows it, because
-  `t.total` there is `total(t)` when `t` has no such column.
+  create, truncate and drop a table; rename a table or a column; add, alter and drop a column; create and
+  drop an index, a foreign key, a unique or check constraint, a view and a schema; comment on a table or
+  a column; create an enum type and add a label to one. What an engine takes of them is its
+  `ddlOperations` list. Every handler builds a `dbx.DDLPlan` — the exact statements, in order — and
+  `runDDL` returns it for `?preview=1` or executes it, so the statement a dialog shows is the server's
+  own and not a page's approximation of it. Each planner starts at `ddlDialect(driver, op)`, which
+  refuses an operation the engine does not have in words that name the engine (`ddlRefusals`): SQLite
+  cannot alter a column or add a constraint to an existing table, and ClickHouse is sent its own form
+  (`RENAME TABLE`, `MODIFY COLUMN`, `ALTER TABLE … DROP INDEX`) or a refusal, never generic DDL.
+  Capability follows cost. A change that only adds needs `service.control`; every drop is behind
+  `s.destructive`; and what depends on the body is decided in `runDDL` and fails closed, for a preview as
+  much as for a run — a new column type, which rewrites the column, and any call in the operator's own
+  SQL (a CHECK condition, an index predicate, a USING conversion, a function default) outside the short
+  lists `pureFunctions` and `safeDefaults`. The engine runs such SQL against rows, and a form must not be
+  a cheaper way to run a function than the console is. `unvouchedCalls` reads the fragment as the
+  engine's tokens, so a name is one name however it is spaced or qualified, and on Postgres names a
+  dotted reference whether or not a parenthesis follows it, because `t.total` there is `total(t)` when
+  `t` has no such column.
 - **What a form writes into a statement cannot leave its place.** A column type is the one fragment that
   is neither quoted nor bound nor wrapped: it follows the column's name, and what follows it is the rest
   of the statement. `validateType` (`ddl_type.go`) therefore matches a type against what a type is — a
@@ -1467,8 +1472,14 @@ and `protectReadOnlyConnections`.
   request destructive, and fails closed; the word after it is what decides.
 - **Audited as** is the action the entry is recorded under. A `GET` writes none unless it is marked
   †: those record themselves, before the read runs or when the socket opens. A `POST` that only
-  reads or only probes writes none either (`httpx.SkipAudit`); every other mutating route names its
-  own action, so none falls back to the middleware's default label (`post:databases.…`).
+  reads or only probes writes none either (`httpx.SkipAudit`). Every other mutating route names its
+  own action, and the column is that name: what a request is recorded under once its handler has
+  read it. A request refused before that — by `RequireCapability`, by the protected-connection
+  guard, or by the handler's own validation ahead of its first `SetAudit` or `SkipAudit` — is still
+  recorded, as a failure under the middleware's default label. `httpx.AuditMutations` derives that
+  label when the request enters it, which is before the `/databases` subrouter has matched, so for
+  every route here it is the method and the section and nothing more (`post:databases`,
+  `delete:databases`); which route was refused is the entry's `path`.
 - **Protected** is what a connection marked read-only does with the route: `open`, `by content`
   (let through when the handler's own classification of the body says read), `preview only` (let
   through with `?preview=1`, which shows the statement and runs nothing) or `refused` with

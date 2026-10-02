@@ -218,43 +218,34 @@ health checks and runtime limits remain editable before the first deployment.
 
 <!-- LEAD: docs/databases.png above still shows the page before the rebuild; it is re-shot for this
      release, and the alt text goes with the new picture. -->
-<!-- LEAD-ENGINES: the engine list in the next paragraph and the bullets under it name the engines
-     in this tree. Memcached and Elasticsearch/OpenSearch are added to both when their drivers merge;
-     until then they are among the servers that are found and listed but not opened. -->
-The section opens on every database on the server, not only the ones somebody connected: the
-control center lists what it found by looking — containers running or stopped, servers installed on
-the machine, SQLite files on disk, engines it has no driver for — and says of each what keeps it
-from being opened. Readings say how many are running, what they store, who is connected and which
-have no recent backup, and whatever needs attention carries its fix. Add a database by starting
-one in a container, connecting to one that already runs, or taking one that was found; a new one
-answers on this server only unless you say otherwise.
+<!-- LEAD-ENGINES: the engines named below are the ones this tree opens. Memcached and
+     Elasticsearch/OpenSearch are added to the list and to the per-engine sentence when their drivers
+     merge; until then they are among the servers that are found and listed but not opened. -->
+<!-- LEAD-PAGES: a database's Access, Backups and Settings pages are stubs in this tree
+     (frontend/src/components/database/ops/{access,backups,settings}.tsx), so nothing below describes
+     them: a dump is taken from the control center or a database's home, and nothing yet downloads,
+     uploads or restores one from this section. When the pages merge, read them and add one sentence
+     to the second paragraph. What the backend already holds them to: a dump can be downloaded,
+     uploaded from elsewhere and restored into the same database, after a safety dump on request, or
+     into a new one where the engine has `restoreNewDatabase` (not SQLite, ClickHouse or Oracle);
+     accounts and grants exist where the engine has `roles` (not SQLite or Oracle). -->
+Every database on the server, not only the connected ones: containers running or stopped, servers
+installed on the machine and SQLite files on disk are found and listed, each saying what keeps it
+from being opened, and whatever needs attention carries its fix. PostgreSQL, MySQL and MariaDB,
+SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis are opened, and what answers behind them
+is named: TimescaleDB, CockroachDB, YugabyteDB, Percona, TiDB, Valkey, KeyDB, Dragonfly, FerretDB.
+A database has a home of live figures and only the pages and controls its engine has. SQL engines
+get a table editor whose edits are staged, reviewed as statements and applied in one transaction, a
+SQL editor with plans, a schema browser, a diagram, generated model code, and sessions, locks,
+maintenance and an advisor; Redis and its forks a key browser, a console that classifies each
+command before it is sent, and memory analysis; MongoDB documents, an aggregation builder, schema
+analysis and indexes.
 
-It opens PostgreSQL, MySQL and MariaDB, SQLite, SQL Server, ClickHouse, Oracle, MongoDB and Redis,
-and names what answers behind them — TimescaleDB, CockroachDB, YugabyteDB, Percona, TiDB, Valkey,
-KeyDB, Dragonfly, FerretDB, Azure SQL Edge. Each database has a home of live figures and the pages
-of its own engine, never a page the engine has no use for:
-
-- **SQL engines.** A table editor whose edits are staged, reviewed as the statements the server
-  will run and applied in one transaction; a SQL editor with tabs, completion, cancel, plans and
-  charts; a schema browser where every change shows its statement before it runs; a diagram; a
-  search for a value anywhere; model and type code from seventeen generators; and sessions, locks,
-  slow statements, table and index statistics, maintenance and an advisor whose findings carry
-  their fix.
-- **Redis, Valkey, KeyDB and Dragonfly.** A key browser with a namespace tree and an editor per
-  type, a console that classifies each command before it is sent, memory analysis, the slow log
-  and clients.
-- **MongoDB.** Documents as a list, as JSON or as a table under a query bar, an aggregation
-  builder with a preview after every stage, schema analysis, indexes, validation rules, and
-  current and slow operations.
-
-Every engine also has its backups, its logs and its settings, and its accounts and grants where
-the engine has accounts. A backup runs as a job and can be downloaded, uploaded from elsewhere, and
-restored into the same database, after a safety dump if you ask for one, or into a new one. A connection marked **protected** refuses every
-change made through the dashboard, for every role; reading, taking a dump and stopping a runaway
-query still work. `readonly` browses and reads; `limited` also edits rows, runs statements that
-destroy nothing, imports, takes backups and starts a stopped server; deleting, dropping, stopping,
-restoring, connecting or removing a database, and changing its accounts or settings are `admin`'s,
-and deleting an entire database asks for its name.
+A connection marked **protected** refuses every change to its data or schema, for every role;
+reading, taking a dump and stopping a runaway query still work. A backup is a dump taken as a job.
+`readonly` reads; `limited` also edits rows, runs statements that destroy nothing, imports, takes
+backups and starts a stopped server; deleting, dropping, stopping, restoring, connecting a database
+and changing accounts or settings are `admin`'s, and deleting a whole database asks for its name.
 
 ### And the rest
 

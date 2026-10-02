@@ -48,7 +48,8 @@ development server or an unrelated dashboard on port 3000. Rebuild after fronten
 browser tests alone. `JD_BROWSER_BASE_URL` selects an explicitly managed test frontend instead.
 Generated Playwright reports and traces are excluded from source linting.
 
-**Backend testing.** 33 internal packages carry unit and integration tests. Unit fixtures are isolated;
+**Backend testing.** 38 of the 39 internal packages carry unit and integration tests (every one but
+`audit`). Unit fixtures are isolated;
 live database and Docker tests can contact reachable services, so configure disposable test targets.
 Integration families skip rather than fail when their dependencies are absent:
 

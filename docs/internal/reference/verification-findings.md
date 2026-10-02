@@ -39,7 +39,8 @@ stored paths under current roots as well. Git's parallel resolver remains a desi
 ## Verified inventory drift corrected in this documentation change
 
 - The audit remediation raises `backend/go.mod` and the backend Docker build to Go 1.26.8 for standard-library security fixes.
-- 33 `backend/internal` packages currently contain tests.
+- 33 `backend/internal` packages contained tests at that audit. 38 of the 39 do now, every one but
+  `audit`.
 - `frontend/src/app` contained 48 page entry files at that audit, not 18; three deployment wrappers
   are server components. The count is 90 since the Databases rebuild; the
   [repository map](repository-map.md#frontend) carries the current figure.
