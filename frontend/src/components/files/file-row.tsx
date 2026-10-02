@@ -12,7 +12,7 @@ import { useNearViewport } from "@/hooks/use-near-viewport"
 import { IconAction, RowActions } from "@/components/icon-action"
 import { TableCell, TableRow } from "@/components/ui/table"
 import { Thumbnail } from "@/components/files/thumbnail"
-import { FileActionsButton, type FileActions, type RowCaps } from "@/components/files/file-actions"
+import type { FileActions, RowCaps } from "@/components/files/file-actions"
 import { mediaKind } from "@/components/files/media"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"
 
@@ -52,6 +52,7 @@ export function FileRow({
   selected,
   active,
   dimmed,
+  dragging,
   caps,
   onToggle,
   onSelect,
@@ -67,6 +68,7 @@ export function FileRow({
   active?: boolean
   /** Faded because it is on the clipboard waiting to be moved. */
   dimmed?: boolean
+  dragging?: boolean
   caps: RowCaps
   onToggle: (checked: boolean) => void
   onSelect: (event: React.MouseEvent) => void
@@ -108,12 +110,14 @@ export function FileRow({
       }}
       data-entry-path={entry.path}
       data-state={selected ? "selected" : undefined}
+      data-dragging={dragging || undefined}
       draggable={caps.write && !!onDragStart}
       onDragStart={onDragStart}
       {...drop.handlers}
       className={cn(
-        "group cursor-pointer focus-ring-inset select-none",
+        "group cursor-pointer focus-ring-inset transition-opacity duration-150 select-none",
         dimmed && "opacity-50",
+        dragging && "opacity-40",
         active && "bg-accent",
         drop.over && "bg-wash-brand",
       )}
@@ -151,7 +155,17 @@ export function FileRow({
               className="flex max-w-full items-center text-left text-body hover:underline"
               onClick={(e) => {
                 e.stopPropagation()
+                onSelect(e)
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation()
                 onOpen()
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  onOpen()
+                }
               }}
               title={entry.name}
             >
@@ -220,12 +234,6 @@ export function FileRow({
               )}
             </>
           )}
-          <FileActionsButton
-            entry={entry}
-            caps={caps}
-            actions={actions}
-            className="size-7 p-0 text-muted-foreground hover:text-foreground"
-          />
         </RowActions>
       </TableCell>
     </TableRow>

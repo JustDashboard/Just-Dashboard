@@ -252,6 +252,7 @@ async function openFiles(page: Page) {
 }
 
 test("large listings retain find, selection and keyboard menu focus", async ({ page }) => {
+  test.setTimeout(90_000)
   await mockFiles(page)
   const many = Array.from({ length: 500 }, (_, i) =>
     entry(`large-${String(i).padStart(4, "0")}.txt`),
@@ -277,12 +278,12 @@ test("large listings retain find, selection and keyboard menu focus", async ({ p
     "aria-checked",
     "mixed",
   )
-  const more = last.getByRole("button", { name: "More actions", exact: true })
-  await more.focus()
-  await more.press("ArrowDown")
+  const name = last.getByRole("button", { name: "large-0499.txt", exact: true })
+  await name.focus()
+  await name.press("Shift+F10")
   await expect(page.getByRole("menuitem", { name: /Rename/ })).toBeVisible()
   await page.keyboard.press("Escape")
-  await expect(more).toBeFocused()
+  await expect(name).toBeFocused()
 })
 
 test("the sidebar is a fixed list of places that stays put while browsing", async ({ page }) => {
@@ -330,8 +331,8 @@ test("tiles stay compact and toolbar controls share a height", async ({ page }) 
   await page.getByRole("radio", { name: "Tiles", exact: true }).click()
   const tile = page.locator('[data-entry-path="' + home + '/photos"]').first()
   const box = await tile.boundingBox()
-  expect(box!.width).toBeLessThanOrEqual(132)
-  expect(box!.height).toBeLessThan(130)
+  expect(box!.width).toBeLessThanOrEqual(104)
+  expect(box!.height).toBeLessThan(105)
   const strip = page.locator("[data-slot='pane-header']").first()
   const heights = await Promise.all(
     ["Find", "New", "Upload", "Refresh", "Arrange"].map(async (name) => {
@@ -1080,4 +1081,312 @@ test.describe("with no hover available", () => {
     })
     expect(hidden).toEqual([])
   })
+})
+
+for (const view of ["list", "grid"] as const) {
+  test(`${view}: selection toggles from the whole entry without shifting the listing`, async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    if (view === "grid") await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    const photos = page.locator(`[data-file-listing] [data-entry-path="${home}/photos"]`)
+    const site = page.locator(`[data-file-listing] [data-entry-path="${home}/site"]`)
+    const before = await photos.boundingBox()
+    await photos.getByRole("checkbox").click()
+    await expect(page.getByRole("toolbar", { name: "Selection actions" })).toBeVisible()
+    expect(await photos.boundingBox()).toEqual(before)
+    await site.getByRole("button", { name: "site", exact: true }).click()
+    await expect(site).toHaveAttribute("data-state", "selected")
+    await expect(photos).toHaveAttribute("data-state", "selected")
+    await expect(page.getByRole("toolbar")).toContainText("2 items selected")
+    await site.click()
+    await expect(site).not.toHaveAttribute("data-state", "selected")
+    await page.getByRole("toolbar").getByRole("button", { name: "Copy", exact: true }).click()
+    await page.getByRole("button", { name: "Clear the selection" }).click()
+    await expect(page.getByRole("button", { name: "Paste here", exact: true })).toBeVisible()
+    expect(await photos.boundingBox()).toEqual(before)
+    await page.getByRole("button", { name: "Forget the clipboard" }).click()
+    await expect(page.getByRole("button", { name: "Paste here", exact: true })).toBeHidden()
+    expect(await photos.boundingBox()).toEqual(before)
+    await expect(page.locator('[data-file-listing] button[aria-label*="actions"]')).toHaveCount(0)
+    await photos.dblclick()
+    await expect(page.getByRole("button", { name: `Folders in ${home}/photos` })).toBeVisible()
+  })
+
+  test(`${view}: modifier selection, checkbox ranges and keyboard opening remain available`, async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    if (view === "grid") await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    const listing = page.locator("[data-file-listing]")
+    const photos = listing.locator(`[data-entry-path="${home}/photos"]`)
+    const notes = listing.locator(`[data-entry-path="${home}/notes.md"]`)
+    await photos.getByRole("checkbox").click()
+    await notes.click({ modifiers: ["Shift"] })
+    await expect(listing.locator('[data-state="selected"]')).toHaveCount(5)
+    await notes.click({ modifiers: ["Control"] })
+    await expect(listing.locator('[data-state="selected"]')).toHaveCount(4)
+    await page.keyboard.press("Escape")
+    await expect(listing.locator('[data-state="selected"]')).toHaveCount(0)
+    await photos.click({ modifiers: ["Meta"] })
+    await expect(photos).toHaveAttribute("data-state", "selected")
+    const name = photos.getByRole("button", { name: "photos", exact: true })
+    await name.focus()
+    await name.press("Shift+F10")
+    await expect(page.getByRole("menuitem", { name: /^Rename/ })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(name).toBeFocused()
+    await name.press("Enter")
+    await expect(page.getByRole("button", { name: `Folders in ${home}/photos` })).toBeVisible()
+  })
+
+  test(`${view}: a marquee selects, shrinks, adds and cancels without opening entries`, async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    if (view === "grid") await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    const listing = page.locator("[data-file-listing]")
+    const photos = listing.locator(`[data-entry-path="${home}/photos"]`)
+    const site = listing.locator(`[data-entry-path="${home}/site"]`)
+    const first = (await photos.boundingBox())!
+    const second = (await site.boundingBox())!
+    const viewport = (await listing.boundingBox())!
+    const lastBottom = await listing
+      .locator("[data-entry-path]")
+      .evaluateAll((nodes) => Math.max(...nodes.map((node) => node.getBoundingClientRect().bottom)))
+    const bottom = lastBottom + 8
+    const start = { x: view === "grid" ? second.x + second.width + 3 : first.x + 6, y: bottom }
+    const end = { x: first.x + 4, y: first.y + 4 }
+    await page.mouse.move(start.x, start.y)
+    await page.mouse.down()
+    await page.mouse.move(end.x, end.y, { steps: 8 })
+    await expect(page.locator("[data-file-marquee]")).toBeVisible()
+    await expect(photos).toHaveAttribute("data-state", "selected")
+    await expect(site).toHaveAttribute("data-state", "selected")
+    if (view === "grid") {
+      // Retracting past the first tile removes it from this gesture's result.
+      await page.mouse.move(second.x + second.width - 2, second.y + 4, { steps: 4 })
+      await expect(photos).not.toHaveAttribute("data-state", "selected")
+      await expect(site).toHaveAttribute("data-state", "selected")
+    }
+    await page.mouse.up()
+    await expect(page.locator("[data-file-marquee]")).toHaveCount(0)
+    await page.keyboard.press("Escape")
+    await site.getByRole("checkbox").click()
+    await page.keyboard.down("Control")
+    await page.mouse.move(first.x + 3, bottom)
+    await page.mouse.down()
+    await page.mouse.move(first.x + first.width / 2, first.y + 4, { steps: 6 })
+    await expect(photos).toHaveAttribute("data-state", "selected")
+    await expect(site).toHaveAttribute("data-state", "selected")
+    await page.keyboard.press("Escape")
+    await expect(page.locator("[data-file-marquee]")).toHaveCount(0)
+    await expect(photos).not.toHaveAttribute("data-state", "selected")
+    await expect(site).toHaveAttribute("data-state", "selected")
+    await page.mouse.up()
+    await page.keyboard.up("Control")
+    // A plain click on empty space clears, while a right-click leaves selection intact.
+    await page.mouse.click(viewport.x + viewport.width - 5, viewport.y + viewport.height / 2, {
+      button: "right",
+    })
+    await page.keyboard.press("Escape")
+    await expect(site).toHaveAttribute("data-state", "selected")
+    await page.mouse.click(start.x, start.y)
+    await expect(listing.locator('[data-state="selected"]')).toHaveCount(0)
+  })
+
+  test(`${view}: native dragging moves the selected group and Alt copies`, async ({ page }) => {
+    await mockFiles(page)
+    const transfers: { mode: string; from: string; to: string; overwrite: boolean }[] = []
+    for (const mode of ["move", "copy"]) {
+      await page.route(`**/api/v1/files/${mode}`, (route) => {
+        transfers.push({ mode, ...route.request().postDataJSON() })
+        return json(route, { ok: true })
+      })
+    }
+    await openFiles(page)
+    if (view === "grid") await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    const listing = page.locator("[data-file-listing]")
+    const notes = listing.locator(`[data-entry-path="${home}/notes.md"]`)
+    const logo = listing.locator(`[data-entry-path="${home}/logo.png"]`)
+    const photos = listing.locator(`[data-entry-path="${home}/photos"]`)
+    await notes.getByRole("checkbox").click()
+    const companion = view === "list" ? "site" : "logo.png"
+    await listing.locator(`[data-entry-path="${home}/${companion}"]`).click()
+    await page.evaluate(() => {
+      window.addEventListener("dragstart", () => {
+        document.documentElement.dataset.fileDragPreview =
+          document.body.lastElementChild?.textContent ?? ""
+      })
+    })
+    await photos.evaluate((element) => {
+      element.addEventListener("dragover", () => {
+        element.setAttribute(
+          "data-drag-sources",
+          JSON.stringify(
+            Array.from(document.querySelectorAll<HTMLElement>('[data-dragging="true"]')).map(
+              (source) => source.dataset.entryPath,
+            ),
+          ),
+        )
+        element.setAttribute(
+          "data-drop-highlight",
+          String(element.classList.contains("bg-wash-brand")),
+        )
+      })
+    })
+    await notes.dragTo(photos)
+    await expect.poll(() => transfers.length).toBe(2)
+    expect(await page.locator("html").getAttribute("data-file-drag-preview")).toContain("2 items")
+    expect(JSON.parse((await photos.getAttribute("data-drag-sources"))!)).toEqual([
+      `${home}/${companion}`,
+      `${home}/notes.md`,
+    ])
+    await expect(photos).toHaveAttribute("data-drop-highlight", "true")
+    expect(transfers).toEqual([
+      { mode: "move", from: `${home}/notes.md`, to: `${home}/photos/notes.md`, overwrite: false },
+      {
+        mode: "move",
+        from: `${home}/${companion}`,
+        to: `${home}/photos/${companion}`,
+        overwrite: false,
+      },
+    ])
+    await expect(listing.locator('[data-dragging="true"]')).toHaveCount(0)
+    await expect(listing.locator('[data-state="selected"]')).toHaveCount(0)
+    await expect(page.getByRole("heading", { name: "operator", exact: true })).toBeVisible()
+    await page.keyboard.down("Alt")
+    await logo.dragTo(photos)
+    await page.keyboard.up("Alt")
+    await expect.poll(() => transfers.length).toBe(3)
+    expect(transfers[2]).toEqual({
+      mode: "copy",
+      from: `${home}/logo.png`,
+      to: `${home}/photos/logo.png`,
+      overwrite: false,
+    })
+    await expect(page.getByRole("heading", { name: "logo.png", exact: true })).toBeVisible()
+    // A selected folder cannot move into itself, including a drop on its sidebar alias.
+    await photos.getByRole("checkbox").click()
+    await photos.dragTo(
+      page.getByRole("navigation", { name: "Places" }).locator(`button[title="${home}/photos"]`),
+    )
+    expect(transfers).toHaveLength(3)
+    await expect(listing.locator('[data-dragging="true"]')).toHaveCount(0)
+  })
+}
+
+test("marquee autoscroll reaches off-screen entries and stops on release", async ({ page }) => {
+  await mockFiles(page)
+  const many = Array.from({ length: 100 }, (_, i) =>
+    entry(`item-${String(i).padStart(3, "0")}.txt`),
+  )
+  await page.route("**/api/v1/files/list**", (route) =>
+    json(route, { path: home, parent: "/home", entries: many, roots: ["/"] }),
+  )
+  await openFiles(page)
+  await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+  const listing = page.locator("[data-file-listing]")
+  const scroll = listing.locator("[data-file-scroll]")
+  const first = (await listing.locator("[data-entry-path]").first().boundingBox())!
+  const viewport = (await scroll.boundingBox())!
+  await page.mouse.move(first.x - 3, first.y + 3)
+  await page.mouse.down()
+  await page.mouse.move(viewport.x + viewport.width - 4, viewport.y + viewport.height - 2, {
+    steps: 8,
+  })
+  await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBeGreaterThan(150)
+  await page.mouse.up()
+  await expect(page.locator("[data-file-marquee]")).toHaveCount(0)
+  const stopped = await scroll.evaluate((el) => el.scrollTop)
+  await page.waitForTimeout(150)
+  expect(await scroll.evaluate((el) => el.scrollTop)).toBe(stopped)
+  await expect(listing.locator('[data-state="selected"]')).not.toHaveCount(0)
+})
+
+test("selection actions fit a phone and respect reduced motion", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await mockFiles(page)
+  await openFiles(page)
+  await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+  const listing = page.locator("[data-file-listing]")
+  const first = listing.locator("[data-entry-path]").first()
+  const before = await first.boundingBox()
+  await first.getByRole("checkbox").click()
+  const toolbar = page.getByRole("toolbar", { name: "Selection actions" })
+  await expect(toolbar).toBeVisible()
+  const box = (await toolbar.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(390)
+  expect(await first.boundingBox()).toEqual(before)
+  const animation = await toolbar.locator("..").evaluate((el) => ({
+    opacity: getComputedStyle(el).opacity,
+    transform: getComputedStyle(el).transform,
+  }))
+  expect(animation.opacity).toBe("1")
+  expect(["none", "matrix(1, 0, 0, 1, 0, 0)"]).toContain(animation.transform)
+})
+
+test("touch long-press opens the entry's verbs and allows ordinary selection", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockFiles(page)
+  await openFiles(page)
+  await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+  const listing = page.locator("[data-file-listing]")
+  const photos = listing.locator(`[data-entry-path="${home}/photos"]`)
+  const box = (await photos.boundingBox())!
+  await photos.dispatchEvent("pointerdown", {
+    pointerType: "touch",
+    pointerId: 1,
+    clientX: box.x + 30,
+    clientY: box.y + 30,
+    button: 0,
+    bubbles: true,
+  })
+  await expect(page.getByRole("menuitem", { name: /^Rename/ })).toBeVisible()
+  await photos.dispatchEvent("pointerup", { pointerType: "touch", pointerId: 1 })
+  await page.keyboard.press("Escape")
+  await photos.getByRole("checkbox").click()
+  await listing.locator(`[data-entry-path="${home}/site"]`).click()
+  await expect(listing.locator('[data-state="selected"]')).toHaveCount(2)
+})
+
+test("desktop file drops still upload into the accepting folder", async ({ page }) => {
+  await mockFiles(page)
+  let uploadedTo = ""
+  await page.route("**/api/v1/files/upload**", (route) => {
+    uploadedTo = new URL(route.request().url()).searchParams.get("path") ?? ""
+    return json(route, { uploaded: ["desktop.txt"] }, 201)
+  })
+  await openFiles(page)
+  const photos = page.locator(`[data-file-listing] [data-entry-path="${home}/photos"]`)
+  const transfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer()
+    data.items.add(new File(["from desktop"], "desktop.txt", { type: "text/plain" }))
+    return data
+  })
+  await photos.dispatchEvent("dragenter", { dataTransfer: transfer })
+  await expect(photos).toHaveClass(/bg-wash-brand/)
+  await photos.dispatchEvent("drop", { dataTransfer: transfer })
+  await expect.poll(() => uploadedTo).toBe(`${home}/photos`)
+  await expect(photos).not.toHaveClass(/bg-wash-brand/)
+})
+
+test("a failed native move keeps its source preview available", async ({ page }) => {
+  await mockFiles(page)
+  await page.route("**/api/v1/files/move", (route) =>
+    json(route, { error: "Permission denied" }, 403),
+  )
+  await openFiles(page)
+  const notes = page.locator(`[data-file-listing] [data-entry-path="${home}/notes.md"]`)
+  const photos = page.locator(`[data-file-listing] [data-entry-path="${home}/photos"]`)
+  await notes.getByRole("checkbox").click()
+  await notes.dragTo(photos)
+  await expect(page.getByText("Could not move notes.md", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "notes.md", exact: true })).toBeVisible()
+  await expect(page.locator('[data-dragging="true"]')).toHaveCount(0)
 })

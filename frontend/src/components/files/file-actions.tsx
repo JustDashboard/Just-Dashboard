@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useState } from "react"
+import { Fragment, useRef, useState } from "react"
 import Link from "next/link"
 import {
   ArrowMove,
@@ -15,7 +15,6 @@ import {
   FolderOpen,
   GitHubMark,
   Image as ImageIcon,
-  MoreHorizontal,
   Pencil,
   Shield,
   Star,
@@ -26,17 +25,6 @@ import {
 } from "@/components/icons"
 import { downloadUrl } from "@/lib/api"
 import type { FileEntry } from "@/lib/types"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -85,10 +73,8 @@ export type FileActions = {
 /**
  * One verb, as data.
  *
- * The listing offers its verbs in three places — the row's overflow button,
- * the tile's, and the right-click menu on either — and three lists is how a
- * verb ends up in one of them only. So the verbs are declared once, here, and
- * each surface only decides which primitive to draw them into.
+ * Entry and background actions share one renderer, keeping each capability
+ * and verb in the data rather than separate lists of menu controls.
  */
 export type Verb = {
   id: string
@@ -301,11 +287,6 @@ type SubmenuComponents = {
   SubContent: React.ComponentType<{ className?: string; children?: React.ReactNode }>
 }
 
-const DROPDOWN_SUBMENU: SubmenuComponents = {
-  Sub: DropdownMenuSub,
-  SubTrigger: DropdownMenuSubTrigger,
-  SubContent: DropdownMenuSubContent,
-}
 const CONTEXT_SUBMENU: SubmenuComponents = {
   Sub: ContextMenuSub,
   SubTrigger: ContextMenuSubTrigger,
@@ -401,96 +382,6 @@ function VerbItem({
 }
 
 /**
- * The overflow menu behind a row's or a tile's "…" button. The trigger is
- * passed in as `children` so each view can style its own button and the menu
- * itself stays identical.
- */
-export function FileActionsMenu({
-  entry,
-  caps,
-  actions,
-  children,
-  open,
-  onOpenChange,
-}: {
-  entry: FileEntry
-  caps: RowCaps
-  actions: FileActions
-  children: React.ReactNode
-  open?: boolean
-  onOpenChange?: (open: boolean) => void
-}) {
-  return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
-      {children}
-      <DropdownMenuContent align="end" className="w-56">
-        <VerbList
-          groups={fileVerbs(entry, caps, actions)}
-          Item={DropdownMenuItem}
-          Separator={DropdownMenuSeparator}
-          submenu={DROPDOWN_SUBMENU}
-        />
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-// Thousands of closed menus cost more to mount than the directory's text.
-// Keep the trigger immediately usable; instantiate its menu on first use and
-// retain it afterwards so Radix can restore focus when it closes.
-export function FileActionsButton({
-  entry,
-  caps,
-  actions,
-  className,
-  label = "More actions",
-}: {
-  entry: FileEntry
-  caps: RowCaps
-  actions: FileActions
-  className?: string
-  label?: string
-}) {
-  const [mounted, setMounted] = useState(false)
-  const [open, setOpen] = useState(false)
-  const activate = () => {
-    setMounted(true)
-    setOpen(true)
-  }
-  const button = (
-    <Button
-      size="icon-xs"
-      variant="ghost"
-      aria-label={label}
-      aria-haspopup="menu"
-      aria-expanded={open}
-      title="Rename, move, copy, permissions, delete"
-      className={className}
-      onClick={mounted ? undefined : activate}
-      onKeyDown={
-        mounted
-          ? undefined
-          : (event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault()
-                activate()
-              }
-            }
-      }
-    >
-      <MoreHorizontal className="size-3.5" />
-    </Button>
-  )
-  return mounted ? (
-    <FileActionsMenu entry={entry} caps={caps} actions={actions} open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
-    </FileActionsMenu>
-  ) : (
-    button
-  )
-}
-
-/**
  * The right-click menu over the whole listing.
  *
  * One menu root for the listing rather than one per row: the row under the
@@ -520,6 +411,7 @@ export function ListingContextMenu({
   children: React.ReactNode
 }) {
   const [target, setTarget] = useState<FileEntry | null>(null)
+  const returnFocus = useRef<HTMLElement | null>(null)
   const groups = target ? fileVerbs(target, caps, actionsFor(target)) : background
   return (
     <ContextMenu
@@ -530,7 +422,33 @@ export function ListingContextMenu({
       <ContextMenuTrigger asChild>
         <div
           className={className}
+          onPointerDownCapture={(event) => {
+            if (event.pointerType !== "touch" && event.pointerType !== "pen") return
+            // Radix's long-press opens directly from pointerdown, without
+            // dispatching the contextmenu event used by a mouse.
+            const el = (event.target as HTMLElement).closest<HTMLElement>("[data-entry-path]")
+            const entry = el?.dataset.entryPath ? resolve(el.dataset.entryPath) : undefined
+            setTarget(entry ?? null)
+            onTarget?.(entry ?? null)
+          }}
+          onKeyDownCapture={(event) => {
+            if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return
+            const el = (event.target as HTMLElement).closest<HTMLElement>("[data-entry-path]")
+            if (!el) return
+            event.preventDefault()
+            returnFocus.current = event.target as HTMLElement
+            const rect = el.getBoundingClientRect()
+            el.dispatchEvent(
+              new MouseEvent("contextmenu", {
+                bubbles: true,
+                cancelable: true,
+                clientX: rect.left + Math.min(rect.width / 2, 80),
+                clientY: rect.top + rect.height / 2,
+              }),
+            )
+          }}
           onContextMenuCapture={(event) => {
+            if (event.nativeEvent.isTrusted) returnFocus.current = null
             const el = (event.target as HTMLElement).closest<HTMLElement>("[data-entry-path]")
             const entry = el?.dataset.entryPath ? resolve(el.dataset.entryPath) : undefined
             setTarget(entry ?? null)
@@ -540,7 +458,16 @@ export function ListingContextMenu({
           {children}
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-56">
+      <ContextMenuContent
+        className="w-56"
+        onCloseAutoFocus={(event) => {
+          const target = returnFocus.current
+          returnFocus.current = null
+          if (!target?.isConnected) return
+          event.preventDefault()
+          target.focus({ preventScroll: true })
+        }}
+      >
         <VerbList
           groups={groups}
           Item={ContextMenuItem}

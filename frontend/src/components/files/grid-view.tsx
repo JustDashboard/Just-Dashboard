@@ -1,11 +1,10 @@
 "use client"
 
-import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
 import { FileSelection } from "@/components/files/file-selection"
 import { useNearViewport } from "@/hooks/use-near-viewport"
-import { FileActionsButton, type FileActions, type RowCaps } from "@/components/files/file-actions"
+import type { RowCaps } from "@/components/files/file-actions"
 import { Thumbnail } from "@/components/files/thumbnail"
 import { rowReveal } from "@/components/icon-action"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"
@@ -28,6 +27,7 @@ export function GridView({
   selected,
   activePath,
   dimmed,
+  dragging,
   caps,
   size,
   onToggle,
@@ -36,7 +36,6 @@ export function GridView({
   onDragStart,
   onDropPaths,
   onDropFiles,
-  actions,
 }: {
   entries: FileEntry[]
   selected: Set<string>
@@ -44,6 +43,7 @@ export function GridView({
   activePath: string | null
   /** Paths on the clipboard waiting to be moved. */
   dimmed: Set<string>
+  dragging: Set<string>
   caps: RowCaps
   size: TileSize
   onToggle: (entry: FileEntry, checked: boolean) => void
@@ -52,12 +52,11 @@ export function GridView({
   onDragStart?: (entry: FileEntry, event: React.DragEvent) => void
   onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
   onDropFiles?: (transfer: DataTransfer, dir: string) => void
-  actions: (entry: FileEntry) => FileActions
 }) {
-  const width = size === "sm" ? "6rem" : size === "lg" ? "10rem" : "8rem"
+  const width = size === "sm" ? "5rem" : size === "lg" ? "8rem" : "6.5rem"
   return (
     <div
-      className="grid content-start justify-start gap-x-2 gap-y-3 p-3"
+      className="grid content-start justify-start gap-x-1 gap-y-1 p-2 pb-24"
       style={{ gridTemplateColumns: `repeat(auto-fill, minmax(0, ${width}))` }}
     >
       {entries.map((entry) => (
@@ -67,6 +66,7 @@ export function GridView({
           selected={selected.has(entry.path)}
           active={activePath === entry.path}
           dimmed={dimmed.has(entry.path)}
+          dragging={dragging.has(entry.path)}
           caps={caps}
           size={size}
           onToggle={(checked) => onToggle(entry, checked)}
@@ -75,7 +75,6 @@ export function GridView({
           onDragStart={onDragStart ? (event) => onDragStart(entry, event) : undefined}
           onDropPaths={onDropPaths}
           onDropFiles={onDropFiles}
-          actions={actions(entry)}
         />
       ))}
     </div>
@@ -87,6 +86,7 @@ function Tile({
   selected,
   active,
   dimmed,
+  dragging,
   caps,
   size,
   onToggle,
@@ -95,12 +95,12 @@ function Tile({
   onDragStart,
   onDropPaths,
   onDropFiles,
-  actions,
 }: {
   entry: FileEntry
   selected: boolean
   active: boolean
   dimmed: boolean
+  dragging: boolean
   caps: RowCaps
   size: TileSize
   onToggle: (checked: boolean) => void
@@ -109,7 +109,6 @@ function Tile({
   onDragStart?: (event: React.DragEvent) => void
   onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
   onDropFiles?: (transfer: DataTransfer, dir: string) => void
-  actions: FileActions
 }) {
   const [viewportRef, near] = useNearViewport<HTMLDivElement>()
   const drop = useDropTarget({
@@ -118,26 +117,26 @@ function Tile({
     onDropFiles,
   })
 
-  // The tile is a click target, not a control: its name is the real button,
-  // and the wrapper's handlers are a convenience for the pointer. A wrapper
-  // with `role="button"` would announce the checkbox, the menu and the name
-  // to a screen reader as one control's label.
+  // The name owns keyboard activation; the wrapper makes the whole tile
+  // available to the pointer without nesting its checkbox in a button.
   return (
     <div
       ref={viewportRef}
       data-entry-path={entry.path}
       data-state={selected ? "selected" : undefined}
+      data-dragging={dragging || undefined}
       draggable={caps.write && !!onDragStart}
       onDragStart={onDragStart}
       {...drop.handlers}
       onClick={onSelect}
       onDoubleClick={onOpen}
       className={cn(
-        "group relative flex cursor-pointer flex-col items-center gap-1 rounded-md border border-transparent px-1.5 py-2 text-center transition-colors select-none",
+        "group relative flex cursor-pointer flex-col items-center gap-1 rounded-md border border-transparent px-1.5 py-1.5 text-center transition-[background-color,border-color,opacity] duration-150 select-none",
         "hover:bg-row-hover",
         (active || selected) && "bg-accent",
         active && "border-rule-brand",
         dimmed && "opacity-50",
+        dragging && "opacity-40",
         drop.over && "border-rule-brand bg-wash-brand",
       )}
       title={entry.name}
@@ -152,20 +151,6 @@ function Tile({
           onCheckedChange={(v) => onToggle(v === true)}
           aria-label={`Select ${entry.name}`}
           className="bg-card"
-        />
-      </span>
-
-      <span
-        className={cn("absolute top-1 right-1 z-10", rowReveal())}
-        onClick={(e) => e.stopPropagation()}
-        onDoubleClick={(e) => e.stopPropagation()}
-      >
-        <FileActionsButton
-          entry={entry}
-          caps={caps}
-          actions={actions}
-          label={`Actions for ${entry.name}`}
-          className="bg-card/80 text-muted-foreground hover:text-foreground"
         />
       </span>
 
@@ -202,9 +187,6 @@ function Tile({
         >
           {entry.name}
         </button>
-        <span className="mt-0.5 block truncate text-micro text-muted-foreground">
-          {entry.isDir ? relativeTime(entry.modified) : bytes(entry.size)}
-        </span>
       </span>
     </div>
   )

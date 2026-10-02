@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { useMarquee } from "@/components/files/use-marquee"
+import { rangePaths } from "@/components/files/selection"
 import {
   ArrowMove,
   ArrowUp,
@@ -144,6 +147,8 @@ export default function FilesPage() {
   const canWrite = can("file.write")
   const canDestruct = can("destructive")
   const canAdmin = can("system.admin")
+  const reducedMotion = useReducedMotion()
+  const [dragging, setDragging] = useState<Set<string>>(EMPTY)
   const caps = useMemo(
     () => ({ write: canWrite, destruct: canDestruct, admin: canAdmin }),
     [canWrite, canDestruct, canAdmin],
@@ -372,45 +377,70 @@ export default function FilesPage() {
 
   // --- selection ---
 
-  const clearSelection = useCallback(
-    () => setSelection({ dir: path ?? "/", paths: new Set() }),
-    [path],
-  )
+  const clearSelection = useCallback(() => {
+    anchor.current = null
+    setSelection({ dir: path ?? "/", paths: new Set() })
+  }, [path])
   const setSelected = useCallback(
-    (paths: Set<string>) => setSelection({ dir: path ?? "/", paths }),
+    (paths: Set<string>) =>
+      setSelection((previous) => {
+        if (
+          previous.dir === path &&
+          previous.paths.size === paths.size &&
+          [...paths].every((p) => previous.paths.has(p))
+        )
+          return previous
+        return { dir: path ?? "/", paths }
+      }),
     [path],
   )
-  const toggleSelected = (entry: FileEntry, checked: boolean) =>
+  const toggleSelected = (entry: FileEntry, checked: boolean) => {
+    anchor.current = entry.path
+    setActive({ dir: path ?? "/", entry })
     setSelection((prev) => {
       const paths = new Set(prev.dir === path ? prev.paths : [])
       if (checked) paths.add(entry.path)
       else paths.delete(entry.path)
       return { dir: path ?? "/", paths }
     })
+  }
 
-  /** Plain click makes a row active; Ctrl toggles it; Shift takes the range. */
+  /** Once selection begins, the whole entry toggles; double-click and Enter still open. */
   const selectRow = (
     entry: FileEntry,
-    event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
+    event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; detail?: number },
   ) => {
+    if ((event.detail ?? 1) > 1) return
     const mod = event.ctrlKey || event.metaKey
     if (event.shiftKey && anchor.current) {
-      const a = entries.findIndex((e) => e.path === anchor.current)
-      const b = entries.findIndex((e) => e.path === entry.path)
-      if (a >= 0 && b >= 0) {
-        const [lo, hi] = a < b ? [a, b] : [b, a]
-        const paths = new Set(mod ? selected : [])
-        for (let i = lo; i <= hi; i++) paths.add(entries[i].path)
-        setSelected(paths)
-      }
-    } else if (mod) {
+      setSelected(
+        new Set([
+          ...(mod ? selected : []),
+          ...rangePaths(
+            entries.map((e) => e.path),
+            anchor.current,
+            entry.path,
+          ),
+        ]),
+      )
+    } else if (mod || selected.size > 0) {
       toggleSelected(entry, !selected.has(entry.path))
-      anchor.current = entry.path
     } else {
       anchor.current = entry.path
     }
     setActive({ dir: path ?? "/", entry })
   }
+
+  const marquee = useMarquee({
+    scope: `${path}:${view}:${tile}`,
+    selected,
+    onSelect: setSelected,
+    onClear: () => {
+      clearSelection()
+      setActive(null)
+      anchor.current = null
+    },
+  })
 
   const navigate = useCallback(
     (next: string) => {
@@ -533,6 +563,7 @@ export default function FilesPage() {
         policy = answer
       }
       let ok = 0
+      const moved = new Set<string>()
       for (const src of targets) {
         const base = baseOf(src)
         let name = base
@@ -546,6 +577,7 @@ export default function FilesPage() {
         try {
           await post(`/files/${mode}`, { from: src, to: joinPath(dest, name), overwrite })
           taken.add(name)
+          if (mode === "move") moved.add(src)
           ok++
         } catch (err) {
           notify.error(`Could not ${mode} ${base}`, err)
@@ -554,7 +586,16 @@ export default function FilesPage() {
       if (ok > 0) {
         const where = dest === path ? "" : ` to ${truncateMiddle(dest, 40)}`
         notify.success(`${mode === "move" ? "Moved" : "Copied"} ${plural(ok, "item")}${where}`)
-        if (mode === "move") afterLabelledChange(targets)
+        if (mode === "move") {
+          afterLabelledChange([...moved])
+          setActive((previous) =>
+            previous &&
+            previous.dir === path &&
+            [...moved].some((src) => isWithin(previous.entry.path, src))
+              ? null
+              : previous,
+          )
+        }
       }
       clearSelection()
       reload()
@@ -836,7 +877,12 @@ export default function FilesPage() {
   ]
 
   const dragStart = (entry: FileEntry, event: React.DragEvent) => {
-    startPathDrag(event, selected.has(entry.path) ? [...selected] : [entry.path])
+    const paths = selected.has(entry.path) ? [...selected] : [entry.path]
+    setDragging(new Set(paths))
+    if (!selected.has(entry.path)) setSelected(new Set(paths))
+    anchor.current = entry.path
+    setActive({ dir: path ?? "/", entry })
+    startPathDrag(event, paths)
   }
 
   // Files from the desktop dropped anywhere on the listing land in the folder
@@ -1236,48 +1282,71 @@ export default function FilesPage() {
               </div>
             )}
 
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              {selected.size > 0 ? (
-                <SelectionBar
-                  count={selected.size}
-                  size={selectedBytes}
-                  canWrite={canWrite}
-                  canDestruct={canDestruct}
-                  archiveHref={archiveHref(path ?? "/", [...selected], "zip")}
-                  onCopy={() => cutCopy("copy", [...selected])}
-                  onCut={() => cutCopy("cut", [...selected])}
-                  onDelete={bulkDelete}
-                  onClear={clearSelection}
-                />
-              ) : (
-                clip && (
-                  <div className="flex items-center gap-2 border-b border-hairline px-3 py-1.5 text-xs">
-                    {clip.mode === "cut" ? (
-                      <ArrowMove className="size-3.5 text-muted-foreground" />
-                    ) : (
-                      <Clipboard className="size-3.5 text-muted-foreground" />
-                    )}
-                    <span className="text-muted-foreground">
-                      {plural(clip.paths.length, "item")} ready to{" "}
-                      {clip.mode === "cut" ? "move" : "copy"}
-                    </span>
-                    <span className="flex-1" />
-                    {canWrite && (
-                      <Button size="xs" onClick={() => void paste()}>
-                        <Clipboard className="size-3.5" />
-                        Paste here
-                      </Button>
-                    )}
-                    <IconAction
-                      label="Forget the clipboard"
-                      className="size-6"
-                      onClick={() => setClip(null)}
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              <div
+                data-file-actions
+                className="pointer-events-none absolute inset-x-2 bottom-12 z-20 flex justify-center"
+              >
+                <AnimatePresence initial={false} mode="wait">
+                  {selected.size > 0 ? (
+                    <motion.div
+                      key="selection"
+                      initial={{ opacity: 0, y: reducedMotion ? 0 : 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: reducedMotion ? 0 : 4 }}
+                      transition={{ duration: reducedMotion ? 0 : 0.16 }}
+                      className="pointer-events-auto max-w-full"
                     >
-                      <Cross />
-                    </IconAction>
-                  </div>
-                )
-              )}
+                      <SelectionBar
+                        count={selected.size}
+                        size={selectedBytes}
+                        canWrite={canWrite}
+                        canDestruct={canDestruct}
+                        archiveHref={archiveHref(path ?? "/", [...selected], "zip")}
+                        onCopy={() => cutCopy("copy", [...selected])}
+                        onCut={() => cutCopy("cut", [...selected])}
+                        onDelete={bulkDelete}
+                        onClear={clearSelection}
+                      />
+                    </motion.div>
+                  ) : (
+                    clip && (
+                      <motion.div
+                        key="clipboard"
+                        initial={{ opacity: 0, y: reducedMotion ? 0 : 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: reducedMotion ? 0 : 4 }}
+                        transition={{ duration: reducedMotion ? 0 : 0.16 }}
+                        className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-md border border-hairline bg-popover px-3 py-2 text-xs"
+                      >
+                        {clip.mode === "cut" ? (
+                          <ArrowMove className="size-3.5 text-muted-foreground" />
+                        ) : (
+                          <Clipboard className="size-3.5 text-muted-foreground" />
+                        )}
+                        <span className="text-muted-foreground">
+                          {plural(clip.paths.length, "item")} ready to{" "}
+                          {clip.mode === "cut" ? "move" : "copy"}
+                        </span>
+                        <span className="flex-1" />
+                        {canWrite && (
+                          <Button size="xs" onClick={() => void paste()}>
+                            <Clipboard className="size-3.5" />
+                            Paste here
+                          </Button>
+                        )}
+                        <IconAction
+                          label="Forget the clipboard"
+                          className="size-6"
+                          onClick={() => setClip(null)}
+                        >
+                          <Cross />
+                        </IconAction>
+                      </motion.div>
+                    )
+                  )}
+                </AnimatePresence>
+              </div>
 
               {/* The body does not scroll; whatever is inside it does. That is
                   what keeps the table's header stuck to the top of the list: a
@@ -1293,7 +1362,11 @@ export default function FilesPage() {
                 className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
               >
                 <div
+                  data-file-listing
                   className="@container relative flex min-h-0 flex-1 flex-col overflow-hidden"
+                  {...marquee.handlers}
+                  onDragEnd={() => setDragging(EMPTY)}
+                  onDropCapture={() => setDragging(EMPTY)}
                   {...dropZone.handlers}
                 >
                   {dropZone.over && (
@@ -1307,7 +1380,11 @@ export default function FilesPage() {
                   {listing.error && <ErrorState error={listing.error} className="m-4" />}
 
                   {listing.data && view === "grid" && (
-                    <div key={path} className="min-h-0 flex-1 animate-rise overflow-auto">
+                    <div
+                      data-file-scroll
+                      key={path}
+                      className="min-h-0 flex-1 animate-rise overflow-auto"
+                    >
                       {entries.length === 0 ? (
                         <EmptyFolder canWrite={canWrite} onUpload={openFileInput} />
                       ) : (
@@ -1316,6 +1393,7 @@ export default function FilesPage() {
                           selected={selected}
                           activePath={activeEntry?.path ?? null}
                           dimmed={dimmed}
+                          dragging={dragging}
                           caps={caps}
                           size={tile}
                           onToggle={toggleSelected}
@@ -1324,7 +1402,6 @@ export default function FilesPage() {
                           onDragStart={canWrite ? dragStart : undefined}
                           onDropPaths={dropInto}
                           onDropFiles={dropFilesInto}
-                          actions={actionsFor}
                         />
                       )}
                     </div>
@@ -1335,7 +1412,7 @@ export default function FilesPage() {
                       key={path}
                       className="relative min-h-0 flex-1 animate-rise overflow-hidden"
                     >
-                      <Table containerClassName="h-full">
+                      <Table className="mb-24" containerClassName="h-full">
                         <TableHeader className={stickyTableHeader}>
                           <TableRow>
                             <TableHead className="w-8">
@@ -1412,6 +1489,7 @@ export default function FilesPage() {
                               selected={selected.has(entry.path)}
                               active={activeEntry?.path === entry.path}
                               dimmed={dimmed.has(entry.path)}
+                              dragging={dragging.has(entry.path)}
                               caps={caps}
                               onToggle={(checked) => toggleSelected(entry, checked)}
                               onSelect={(event) => selectRow(entry, event)}
@@ -1434,6 +1512,19 @@ export default function FilesPage() {
                         </TableBody>
                       </Table>
                     </div>
+                  )}
+                  {marquee.box && (
+                    <div
+                      data-file-marquee
+                      aria-hidden
+                      className="pointer-events-none absolute z-10 rounded-sm border border-rule-brand bg-wash-brand"
+                      style={{
+                        left: marquee.box.left,
+                        top: marquee.box.top,
+                        width: Math.max(0, marquee.box.right - marquee.box.left),
+                        height: Math.max(0, marquee.box.bottom - marquee.box.top),
+                      }}
+                    />
                   )}
                 </div>
               </ListingContextMenu>
@@ -1736,7 +1827,7 @@ function SortHead({
   )
 }
 
-/** The strip that replaces the toolbar's quiet state once rows are checked. */
+/** Selection commands float within the workbench, so the entries keep their positions. */
 function SelectionBar({
   count,
   size,
@@ -1759,7 +1850,11 @@ function SelectionBar({
   onClear: () => void
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-hairline px-3 py-1.5">
+    <div
+      role="toolbar"
+      aria-label="Selection actions"
+      className="flex flex-wrap items-center gap-1.5 rounded-md border border-hairline bg-popover px-2.5 py-2"
+    >
       <span className="numeric mr-1 text-body font-medium">
         {plural(count, "item")} selected
         {size > 0 && (
