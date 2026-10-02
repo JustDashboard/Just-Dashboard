@@ -138,6 +138,13 @@ func TestLiveBackupDumpsAndRestoresAPostgresDatabase(t *testing.T) {
 	if err := drill.QueryRowContext(t.Context(), `SELECT note FROM orders ORDER BY id LIMIT 1`).Scan(&note); err != nil || note != "canary-before-backup" {
 		t.Fatalf("restored drill database = %q, %v", note, err)
 	}
+	// A restore closes the dashboard's pooled sessions on the connection, so
+	// nothing reads through one opened before it; a request after it opens a
+	// new one, as this does.
+	pool, _, err = s.dbPool(t.Context(), conn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var live int
 	if err := pool.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM orders`).Scan(&live); err != nil || live != 0 {
 		t.Fatalf("restore touched the live database: %d rows, %v", live, err)
