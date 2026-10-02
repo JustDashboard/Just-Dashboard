@@ -90,8 +90,11 @@ drawn; and solid.svg in its #2C4F7C lifted to #81a7da, the L 0.72 rung.
 
 mysql.svg is devicon's mysql-original.svg (https://github.com/devicons/devicon),
 recoloured from #00618A to #57afe0 so it reads on a dark ground; sqlite.svg is
-devicon's sqlite-original.svg and sqlserver.svg its microsoftsqlserver-plain.svg,
-both unchanged. All three are used under the MIT License:
+devicon's sqlite-original.svg, unchanged; and sqlserver.svg is its
+microsoftsqlserver-original.svg as of v2.17.0, the silver and red mark rather
+than the single-colour outline, with the darker red of its gradient, #a91d22,
+lifted to #ff726a, the same hue at the L 0.72 rung. All three are used under
+the MIT License:
 
   Copyright (c) 2015 konpa
 
@@ -128,6 +131,45 @@ pnpm-light.svg is devicon's pnpm-original.svg, as pnpm.svg is, with its
 charcoal #4c4c4c lifted to #a4a4a4, the same grey at the L 0.72 rung, for the
 tile a package manager is drawn on; pnpm.svg stays as it was for the file
 manager's paper page.
+
+The database engines the Databases pages draw — the products a driver talks
+to under another name, and the servers found on a machine that the dashboard
+cannot open — come from the same three collections.
+
+From homarr-labs/dashboard-icons, under the Apache License 2.0: etcd.svg and
+couchdb.svg keep their names and are unchanged. cassandra.svg is its
+apache-cassandra.svg with the charcoal #373535 of the eye's lids and lashes
+lifted to #a6a4a4; opensearch.svg had both of its blues lifted, #003b5c to
+#77abd2 and #005eb8 to #60a7ff; and ferretdb.svg had its navy #092032 lifted
+to #8ea8c0, and the drawing program's ids, class and style element folded into
+one fill attribute — each the same hue at the L 0.72 rung, so the mark reads
+on a dark ground. kafka.svg is its kafka-dark.svg, the white mark it draws for
+a dark theme, without the XML declaration, title, role and fixed size that
+file carries.
+
+From devicon v2.17.0, under the MIT License above: nats.svg and yugabytedb.svg
+are its nats-original.svg and yugabytedb-original.svg, and memcached.svg its
+memcached-plain.svg, unchanged. elasticsearch.svg is its
+elasticsearch-original.svg, the engine's own three bands — the file
+dashboard-icons ships under that name is its elastic.svg, the company's mark —
+with the charcoal #343741 of the middle band lifted to #a0a4b0, the same hue
+at the L 0.72 rung, and the file's indentation removed.
+
+From Simple Icons 16.33.0 (https://simpleicons.org), CC0 1.0, without the title
+and role its files carry and filled because Simple Icons ships the path alone:
+timescaledb.svg (its timescale.svg), tidb.svg, scylladb.svg and duckdb.svg in
+their brand colour (#FDB515, #DC150B, #6CD5E7, #FFF000); cockroachdb.svg (its
+cockroachlabs.svg) in its #6933FF lifted to #9b95ff; and neo4j.svg, the mark
+Neo4j uses now where dashboard-icons draws the disc it retired, in its #4581C3
+lifted to #6ba8ed — both the same hue at the L 0.72 rung. scylladb.svg is a
+hairline outline, the only rendition any of the three collections has, and is
+faint as the smallest glyph on a screen of ordinary density; it is left as the
+collection draws it rather than thickened by hand.
+
+Azure SQL Edge has no file: none of the three collections draws it a mark of
+its own, and it is drawn with sqlserver.svg, the engine it is. Percona Server,
+KeyDB and Dragonfly are in none of the three either and have no logo here; the
+pages draw them with a plain database glyph rather than another product's mark.
 
 mono/ holds the single-colour marks pressed into a folder's face. Every file
 there is from Simple Icons (https://simpleicons.org), CC0 1.0, unchanged, renamed

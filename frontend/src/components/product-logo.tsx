@@ -54,6 +54,21 @@ import { cn } from "@/lib/utils"
  * devicon's, drawn for paper, stay the file manager's, and the tile draws a
  * light one, because Rust's black gear and pnpm's charcoal squares vanish on
  * this ground.
+ *
+ * The Databases pages draw every server as the product that answered, so the
+ * flavours a driver talks to and the engines the inventory can see and not
+ * open have marks too, keyed by the ids the backend's product table uses
+ * (`timescaledb`, `cockroachdb`, `scylladb`): a CockroachDB cluster under the
+ * PostgreSQL elephant is the wrong product's name on the row. They come from
+ * the same three collections under the same rules — homarr's where it draws
+ * the product's own, current mark, devicon's for Memcached, NATS and
+ * YugabyteDB, Simple Icons' path in the brand's colour for the rest, a navy
+ * lifted to L 0.72. Two of homarr's are neither: its Elasticsearch file is
+ * Elastic's, the company's cluster, so the engine is devicon's three bands;
+ * and its Neo4j is the disc that product retired, so the mark is Simple
+ * Icons'. Percona Server, KeyDB and Dragonfly are in none of the three, so
+ * they have no key here and keep the database glyph: a mark is never drawn
+ * from memory.
  */
 const LOGOS: Record<string, string> = {
   actual: "actual-budget.svg",
@@ -71,6 +86,9 @@ const LOGOS: Record<string, string> = {
   audiobookshelf: "audiobookshelf.svg",
   aws: "aws.svg",
   azure: "azure.svg",
+  // No collection draws SQL Edge a mark of its own: it is the SQL Server
+  // engine built for small machines, and is drawn as the engine it is.
+  "azure-sql-edge": "sqlserver.svg",
   backblaze: "backblaze.svg",
   beszel: "beszel.svg",
   bing: "bing.svg",
@@ -78,13 +96,16 @@ const LOGOS: Record<string, string> = {
   brave: "brave.svg",
   bun: "bun.svg",
   caddy: "caddy.svg",
+  cassandra: "cassandra.svg",
   centos: "centos.svg",
   chrome: "chrome.svg",
   claude: "claude.svg",
   clickhouse: "clickhouse.svg",
   cloudflare: "cloudflare.svg",
+  cockroachdb: "cockroachdb.svg",
   "code-server": "code-server.webp",
   codeberg: "codeberg.svg",
+  couchdb: "couchdb.svg",
   curl: "curl.svg",
   cyberchef: "cyberchef.svg",
   dart: "dart.svg",
@@ -100,17 +121,21 @@ const LOGOS: Record<string, string> = {
   dotnet: "dotnet.svg",
   dozzle: "dozzle.svg",
   drawio: "drawio.svg",
+  duckdb: "duckdb.svg",
   duckduckgo: "duckduckgo.svg",
   edge: "edge.svg",
+  elasticsearch: "elasticsearch.svg",
   eleventy: "eleventy.svg",
   elixir: "elixir.svg",
   ember: "ember.svg",
+  etcd: "etcd.svg",
   express: "express.svg",
   facebook: "facebook.svg",
   fail2ban: "fail2ban.webp",
   fastapi: "fastapi.svg",
   fastify: "fastify.svg",
   fedora: "fedora.svg",
+  ferretdb: "ferretdb.svg",
   filebrowser: "filebrowser.svg",
   firefox: "firefox.svg",
   flask: "flask.svg",
@@ -139,6 +164,7 @@ const LOGOS: Record<string, string> = {
   jellyfin: "jellyfin.svg",
   jenkins: "jenkins.svg",
   jupyter: "jupyter.svg",
+  kafka: "kafka.svg",
   kavita: "kavita.svg",
   koa: "koa.svg",
   kotlin: "kotlin.svg",
@@ -152,6 +178,7 @@ const LOGOS: Record<string, string> = {
   mailgun: "mailgun.svg",
   mariadb: "mariadb.svg",
   meilisearch: "meilisearch.svg",
+  memcached: "memcached.svg",
   memos: "memos.webp",
   metabase: "metabase.svg",
   "minecraft-bedrock": "minecraft.webp",
@@ -161,7 +188,9 @@ const LOGOS: Record<string, string> = {
   mongodb: "mongodb.svg",
   mysql: "mysql.svg",
   n8n: "n8n.svg",
+  nats: "nats.svg",
   navidrome: "navidrome.svg",
+  neo4j: "neo4j.svg",
   neovim: "neovim.svg",
   nestjs: "nestjs.svg",
   nextcloud: "nextcloud.svg",
@@ -177,6 +206,7 @@ const LOGOS: Record<string, string> = {
   "open-webui": "open-webui.svg",
   openai: "openai.svg",
   opengist: "opengist.svg",
+  opensearch: "opensearch.svg",
   opensuse: "opensuse.svg",
   opera: "opera.svg",
   oracle: "oracle.svg",
@@ -209,6 +239,7 @@ const LOGOS: Record<string, string> = {
   rust: "rust-light.svg",
   safari: "safari.svg",
   scala: "scala.svg",
+  scylladb: "scylladb.svg",
   searxng: "searxng.svg",
   seerr: "seerr.svg",
   sendgrid: "sendgrid.svg",
@@ -233,6 +264,8 @@ const LOGOS: Record<string, string> = {
   // with none, keyed so a command-line identity (the GitHub CLI) takes a tile.
   terminal: "terminal.svg",
   terraform: "terraform.svg",
+  tidb: "tidb.svg",
+  timescaledb: "timescaledb.svg",
   traefik: "traefik.svg",
   trilium: "trilium.svg",
   typescript: "typescript.svg",
@@ -253,6 +286,7 @@ const LOGOS: Record<string, string> = {
   x: "x.svg",
   yarn: "yarn.svg",
   ycombinator: "ycombinator.svg",
+  yugabytedb: "yugabytedb.svg",
 }
 
 /**
@@ -261,9 +295,17 @@ const LOGOS: Record<string, string> = {
  * either, rather than finding out from an empty tile.
  */
 export function hasProductLogo(id: string | undefined): id is string {
-  // Its own entry: the id is often a name from outside — an image, an engine
-  // a server reported — and `constructor` is in every object.
   return id !== undefined && Object.hasOwn(LOGOS, id)
+}
+
+/**
+ * A table's own entry. What these tables are asked for is a name from outside
+ * — an image, a process, a unit, an engine a server reported — and
+ * `constructor` is in every object: read plainly, a unit called
+ * `constructor.service` is answered with a function.
+ */
+function own(table: Record<string, string>, key: string): string | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined
 }
 
 /**
@@ -272,6 +314,12 @@ export function hasProductLogo(id: string | undefined): id is string {
  * `node`, `golang`, Temurin and the Maven and Gradle builders, FrankenPHP and
  * Composer, .NET's `aspnet` runtime — so a project built by a recipe is drawn
  * as the same language on the Docker page.
+ *
+ * The database images are the repositories the inventory recognises
+ * (`imageRules` in the backend) whose last word is not the product's id —
+ * `cockroachdb/cockroach`, `scylladb/scylla`, Confluent's `cp-kafka` — so a
+ * container is the same product on the Docker page as on the Databases one.
+ * Redpanda speaks Kafka's protocol and is not Kafka: it has no mark here.
  */
 const IMAGE_ALIASES: Record<string, string> = {
   mongo: "mongodb",
@@ -280,6 +328,11 @@ const IMAGE_ALIASES: Record<string, string> = {
   "actual-server": "actual",
   "mssql-server": "sqlserver",
   "clickhouse-server": "clickhouse",
+  cockroach: "cockroachdb",
+  yugabyte: "yugabytedb",
+  scylla: "scylladb",
+  "timescaledb-ha": "timescaledb",
+  "cp-kafka": "kafka",
   node: "nodejs",
   golang: "go",
   "eclipse-temurin": "java",
@@ -298,8 +351,8 @@ const IMAGE_ALIASES: Record<string, string> = {
  */
 export function imageProduct(reference: string) {
   const name = (reference.split("@")[0].split("/").pop() ?? "").split(":")[0].toLowerCase()
-  const id = IMAGE_ALIASES[name] ?? name
-  return id in LOGOS ? id : "docker"
+  const id = own(IMAGE_ALIASES, name) ?? name
+  return hasProductLogo(id) ? id : "docker"
 }
 
 /**
@@ -374,6 +427,13 @@ const PROCESS_ALIASES: Record<string, string> = {
   "php-fpm": "php",
   influxd: "influxdb",
   "typesense-server": "typesense",
+  cockroach: "cockroachdb",
+  "tidb-server": "tidb",
+  scylla: "scylladb",
+  "nats-server": "nats",
+  yugabyted: "yugabytedb",
+  "yb-tserver": "yugabytedb",
+  "yb-master": "yugabytedb",
 }
 
 /**
@@ -384,11 +444,21 @@ const PROCESS_ALIASES: Record<string, string> = {
  */
 export function processProduct(name: string) {
   const bare = name.toLowerCase().replace(/[:\s].*$/, "")
-  const id = PROCESS_ALIASES[name.toLowerCase()] ?? PROCESS_ALIASES[bare] ?? bare
+  const id = own(PROCESS_ALIASES, name.toLowerCase()) ?? own(PROCESS_ALIASES, bare) ?? bare
   // Compose's mark is a stack's, not a program's, and a process called `X` is
   // the X server rather than the site whose mark shares its key.
-  return id in LOGOS && id !== "docker-compose" && id !== "x" ? id : undefined
+  return hasProductLogo(id) && id !== "docker-compose" && id !== "x" ? id : undefined
 }
+
+/**
+ * What runs beside a server under its name and is not it: `kafka-ui`,
+ * `memcached-exporter`, `opensearch-dashboards`. Its first word is the server
+ * it sits beside rather than what the unit runs, so such a unit keeps its
+ * glyph, as `imageProduct` refuses the same names on a container.
+ * `prometheus-node-exporter` is longer than that and stays Prometheus's,
+ * which an exporter is.
+ */
+const COMPANION = /^[a-z0-9_]+-(exporter|ui|dashboards)$/
 
 /**
  * Which product a systemd unit runs, by its name: `postgresql.service` is
@@ -410,7 +480,7 @@ export function unitProduct(unit: string) {
   return (
     processProduct(base) ??
     programProduct(base) ??
-    (word ? (processProduct(word) ?? programProduct(word)) : undefined)
+    (word && !COMPANION.test(base) ? (processProduct(word) ?? programProduct(word)) : undefined)
   )
 }
 
@@ -430,6 +500,11 @@ export function pm2Product(interpreter: string | undefined) {
  * editions. A stream forwarding 5432 is drawn as Postgres for the reason the
  * finding calls it "PostgreSQL answers on every interface" — the port *is*
  * the reading. Nothing for a port outside this set: 8080 is anything.
+ *
+ * A port is more than one product's — 3306 is MariaDB's, 6379 Valkey's, 9200
+ * OpenSearch's — and the mark is the one the page's own word names: the
+ * catalogue calls 9200 "Elasticsearch" on the row this is drawn on. It has no
+ * word for 9042 or 9092, so Cassandra, ScyllaDB and Kafka have no port here.
  */
 const PORTS: Record<number, string> = {
   5432: "postgresql",
@@ -438,6 +513,8 @@ const PORTS: Record<number, string> = {
   27017: "mongodb",
   9000: "minio",
   8123: "clickhouse",
+  11211: "memcached",
+  9200: "elasticsearch",
   2375: "docker",
   2376: "docker",
   25565: "minecraft-java",
@@ -486,6 +563,12 @@ const PROGRAMS: Record<string, string> = {
   mongosh: "mongodb",
   mongo: "mongodb",
   sqlite3: "sqlite",
+  cockroach: "cockroachdb",
+  duckdb: "duckdb",
+  etcdctl: "etcd",
+  cqlsh: "cassandra",
+  "cypher-shell": "neo4j",
+  nats: "nats",
   claude: "claude",
   kubectl: "kubernetes",
   k9s: "kubernetes",
@@ -506,7 +589,7 @@ const PROGRAMS: Record<string, string> = {
 
 export function programProduct(command: string | undefined) {
   const name = (command ?? "").trim().split(/\s+/)[0]?.split("/").pop()?.toLowerCase() ?? ""
-  return PROGRAMS[name]
+  return own(PROGRAMS, name)
 }
 
 /**
@@ -534,7 +617,7 @@ const PLATFORMS: Record<string, string> = {
 }
 
 export function platformProduct(platform: string | undefined) {
-  return PLATFORMS[(platform ?? "").toLowerCase()]
+  return own(PLATFORMS, (platform ?? "").toLowerCase())
 }
 
 export function cpuProduct(model: string | undefined, arch?: string) {
@@ -926,7 +1009,7 @@ const VARIABLE_PREFIXES: Record<string, string> = {
  */
 export function variableProduct(name: string): string | undefined {
   const words = name.toLowerCase().split("_").filter(Boolean)
-  return wordsProduct(words, VARIABLE_SERVICES) ?? VARIABLE_PREFIXES[words[0]]
+  return wordsProduct(words, VARIABLE_SERVICES) ?? own(VARIABLE_PREFIXES, words[0])
 }
 
 /**
@@ -957,7 +1040,7 @@ export function ProductLogo({
   // Which file failed, rather than whether one did: the settings panel's mark
   // changes product under the same component, and the next one may load.
   const [failed, setFailed] = useState<string>()
-  const file = id ? LOGOS[id] : undefined
+  const file = id ? own(LOGOS, id) : undefined
   return (
     <span
       aria-hidden="true"
@@ -993,7 +1076,7 @@ export function ProductLogo({
  * this is the artwork alone at the line's own height.
  */
 export function ProductGlyph({ id, className }: { id: string; className?: string }) {
-  const file = LOGOS[id]
+  const file = own(LOGOS, id)
   if (!file) return null
   return (
     // eslint-disable-next-line @next/next/no-img-element
@@ -1013,7 +1096,7 @@ export function ProductGlyph({ id, className }: { id: string; className?: string
  * than drawing a strip that outgrows its line.
  */
 export function ProductGlyphs({ ids, max = 5 }: { ids: string[]; max?: number }) {
-  const shown = ids.filter((id) => id in LOGOS).slice(0, max)
+  const shown = ids.filter(hasProductLogo).slice(0, max)
   if (shown.length === 0) return null
   const more = ids.length - shown.length
   return (
