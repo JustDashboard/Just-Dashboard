@@ -48,14 +48,19 @@ development server or an unrelated dashboard on port 3000. Rebuild after fronten
 browser tests alone. `JD_BROWSER_BASE_URL` selects an explicitly managed test frontend instead.
 Generated Playwright reports and traces are excluded from source linting.
 
-**Backend testing.** 33 internal packages carry unit and integration tests. Unit fixtures are isolated;
+**Backend testing.** 38 of the 39 internal packages carry unit and integration tests (every one but
+`audit`). Unit fixtures are isolated;
 live database and Docker tests can contact reachable services, so configure disposable test targets.
 Integration families skip rather than fail when their dependencies are absent:
 
-- **Live database tests** (`dbx/live*_test.go`, `api/handlers_db_live_test.go`) read each engine's DSN
-  from an env var defaulting to a local instance. Re-run with `-count=1` or the cache serves yesterday's
-  skips. These are the tests that matter for dbx: a catalogue query naming a column the server does not
-  have is string-matched identically by a unit test, and only a real engine rejects it.
+- **Live database tests** (`dbx/*live*_test.go`, `api/handlers_db*_live_test.go`) read each engine's DSN
+  from an environment variable. The oldest fixtures fall back to a local instance on the engine's
+  standard port; everything written since runs only where its variable is set, because a standard port is
+  as likely to be somebody's real data as a fixture
+  ([CONTRIBUTING](../../CONTRIBUTING.md#running-the-database-tests-against-real-engines) lists every
+  variable). Re-run with `-count=1` or the cache serves yesterday's skips. These are the tests that
+  matter for dbx: a catalogue query naming a column the server does not have is string-matched
+  identically by a unit test, and only a real engine rejects it.
 - **Docker tests** use a reachable daemon for supported live checks. Deployment artifact/activation
   suites and daemon-wide prune tests require the separate opt-ins documented in `CONTRIBUTING.md`.
 - **`term` and the terminal half of `api`** drive real PTYs. Direct-session tests isolate clipboard

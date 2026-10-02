@@ -15,18 +15,39 @@ A change that weakens any of these has to say so explicitly.
    operations — the deployment run route's `stop`/`restart` alongside `deploy`/`redeploy` — cannot be
    wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
-   request, the handler checks by hand and fails closed: `dbx.ClassifyFor` for SQL, read by the rules of
-   the connection's own engine, `dbx.RedisClassify` for a
-   Redis console command (and the body of the Redis bulk, rename and copy routes, where
-   `action: delete|expire` and `overwrite` are what make the request destructive), `api.runDDL` for a
-   schema form that changes a column's type or whose own SQL (a CHECK condition, an index predicate, a
-   USING conversion, a function default) calls anything `dbx` does not vouch for — either needs the
-   destructive capability on a route that otherwise asks for `service.control`, for a preview as much as
-   for a run — `api.authoriseSpec` for a container spec that is privileged or mounts a host path,
-   `api.logTargetFor` for a log source that is login and sudo records (auth data needs `system.admin` on
-   every `/logs` route that reads a source — except the whole journal (`journal:`), which stays `read` as
-   it was before the gate; those lines are in it unfiltered, a known gap rather than the boundary
-   ([observability-security](../backend/observability-security.md))).
+   request, the handler checks by hand and fails closed, and each such check has one owner:
+   - `api.authoriseSQL` for SQL, on the verdict `dbx` reads off each statement by the rules of the
+     connection's own engine (`dbx.ParseScript`): the query, script and analysed-plan routes;
+   - the handler of `POST …/changes` for a change set, by the operations it holds: one that deletes
+     rows needs the destructive capability;
+   - `api.runDDL` for a schema form that changes a column's type or whose own SQL (a CHECK condition,
+     an index predicate, a USING conversion, a function default) calls anything `dbx` does not vouch
+     for — either needs the destructive capability on a route that otherwise asks for
+     `service.control`, for a preview as much as for a run;
+   - `dbx.MaintenanceAction.NeedsDestructive` for a maintenance action that locks a table against the
+     application or can lose rows, and the body of the power route, where `stop` and `restart` are
+     what make the request destructive;
+   - `dbx.RedisClassify` for a Redis console command, and the body of the Redis bulk, rename and copy
+     routes, where `action: delete|expire` and `overwrite` are what make the request destructive;
+   - `dbx.MongoClassifyPipeline` and `dbx.MongoClassifyCommand` for a MongoDB pipeline and console
+     command, and `mongoNeedsDestructive` for the one option an update, rename, index or `collMod`
+     route has that removes data;
+   - the options of an import, where replacing a table's contents is destructive, and the target of
+     a restore, where a database to be created needs `system.admin`;
+   - `api.authoriseSpec` for a container spec that is privileged or mounts a host path;
+   - `api.logTargetFor` for a log source that is login and sudo records (auth data needs
+     `system.admin` on every `/logs` route that reads a source — except the whole journal
+     (`journal:`), which stays `read` as it was before the gate; those lines are in it unfiltered, a
+     known gap rather than the boundary
+     ([observability-security](../backend/observability-security.md))).
+
+   A database connection marked read-only adds one rule in front of all of these, and it fails closed
+   the other way round: `protectReadOnlyConnections` refuses every request under `/databases/{id}` that
+   is not a `GET` unless its route is on an allowlist, so a mutating route added later is refused until
+   somebody decides it belongs there. The routes on the list that are a read or a write by what they
+   carry are judged by the same classifiers as above. It guards the dashboard's own controls; it is
+   not a sandbox around the server. Each check and the rule are stated in
+   [request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries).
 5. Every state-changing request lands in the audit log.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
