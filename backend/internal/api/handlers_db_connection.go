@@ -1025,11 +1025,22 @@ func fileRef(path string) *dbFileRef {
 	return ref
 }
 
-// engineImage reports a container whose image is one of the connection's
-// engine's, by the table detection reads.
+// engineImage reports a container that is the connection's engine: by its
+// image's name, or — for an image whose name says nothing, a private build or
+// a tag that has moved on — by what the inventory read from its environment
+// and command. A port alone is not evidence: that is the proxy in front of a
+// database, which this exists to tell apart from one.
 func (s *Server) engineImage(ctx context.Context, conn *dbConnection, c *dockerx.Container) bool {
-	cand, _ := dbx.Detect(c.Name, s.containerImage(ctx, *c), nil, nil, nil)
-	return cand != nil && cand.Driver == conn.Driver
+	if cand, _ := dbx.Detect(c.Name, s.containerImage(ctx, *c), nil, nil, nil); cand != nil {
+		return cand.Driver == conn.Driver
+	}
+	for _, inst := range s.inventory(ctx, true, false).instances {
+		if inst.Container == nil || inst.Container.Name != c.Name {
+			continue
+		}
+		return inst.Driver == conn.Driver && inst.Confidence != dbx.ConfidencePort
+	}
+	return false
 }
 
 // runningContainerPublishing is the running container that publishes a host
@@ -1079,18 +1090,23 @@ func (v *dbHostView) stoppedContainerFor(ctx context.Context, conn *dbConnection
 		if c.State == "running" || c.State == "paused" {
 			continue
 		}
-		image := s.containerImage(ctx, *c)
-		if cand, _ := dbx.Detect(c.Name, image, nil, nil, nil); cand == nil || cand.Driver != conn.Driver {
+		if !s.engineImage(ctx, conn, c) {
 			continue
+		}
+		// The server the connection was made to, by the key discovery gave
+		// it: that holds whatever port a recreated container now publishes.
+		if containerOrigin(conn.Origin, c) {
+			return c, stoppedExposure(v.publishedBy(c.ID), port)
 		}
 		if loopback && port > 0 {
 			// The engine's own port inside the container, from the table
-			// detection reads.
-			if internal, _ := dbx.Detect(c.Name, image, nil, nil, []string{"container"}); internal != nil {
-				for _, p := range v.publishedBy(c.ID) {
-					if p.HostPort == port && p.ContainerPort == internal.Port {
-						return c, bindingExposure(p.HostIP)
-					}
+			// detection reads. An image that table does not name was
+			// recognised by what it runs, and there the published port is
+			// the evidence on its own.
+			internal, _ := dbx.Detect(c.Name, s.containerImage(ctx, *c), nil, nil, []string{"container"})
+			for _, p := range v.publishedBy(c.ID) {
+				if p.HostPort == port && (internal == nil || p.ContainerPort == internal.Port) {
+					return c, bindingExposure(p.HostIP)
 				}
 			}
 		}
@@ -1102,6 +1118,30 @@ func (v *dbHostView) stoppedContainerFor(ctx context.Context, conn *dbConnection
 		return named, exposureLocal
 	}
 	return nil, ""
+}
+
+// containerOrigin reports a container that is the server a connection's
+// origin names: docker:<name>, or compose:<project>/<service>.
+func containerOrigin(origin string, c *dockerx.Container) bool {
+	if name, ok := strings.CutPrefix(origin, "docker:"); ok {
+		return name != "" && name == c.Name
+	}
+	if ref, ok := strings.CutPrefix(origin, "compose:"); ok {
+		project, service := c.Labels["com.docker.compose.project"], c.Labels["com.docker.compose.service"]
+		return project != "" && service != "" && ref == project+"/"+service
+	}
+	return false
+}
+
+// stoppedExposure is how far a stopped container's binding of a host port
+// reaches, and this server only when it publishes no such port.
+func stoppedExposure(published []dockerx.PortMapping, port int) dbExposure {
+	for _, p := range published {
+		if p.HostPort == port {
+			return bindingExposure(p.HostIP)
+		}
+	}
+	return exposureLocal
 }
 
 // bindingExposure reads a host address a port is published on the way

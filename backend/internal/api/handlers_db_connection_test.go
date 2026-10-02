@@ -2231,3 +2231,43 @@ func TestAConnectionCarriesItsOrigin(t *testing.T) {
 		}
 	}
 }
+
+// A connection made through discovery names its server by key, and that key
+// is what finds the container again once it is stopped or recreated — the
+// image's name is no help for a private build.
+func TestAStoppedContainerIsFoundByTheConnectionsOrigin(t *testing.T) {
+	plain := &dockerx.Container{Name: "shop-db"}
+	composed := &dockerx.Container{Name: "shop-db-1", Labels: map[string]string{
+		"com.docker.compose.project": "shop", "com.docker.compose.service": "db",
+	}}
+	cases := []struct {
+		origin string
+		c      *dockerx.Container
+		want   bool
+	}{
+		{"docker:shop-db", plain, true},
+		{"docker:shop-db-1", plain, false},
+		{"docker:", plain, false},
+		{"compose:shop/db", composed, true},
+		{"compose:shop/api", composed, false},
+		{"compose:shop/db", plain, false},
+		{"host:postgresql@17-main.service", plain, false},
+		{"", plain, false},
+	}
+	for _, tc := range cases {
+		if got := containerOrigin(tc.origin, tc.c); got != tc.want {
+			t.Errorf("containerOrigin(%q, %s) = %v, want %v", tc.origin, tc.c.Name, got, tc.want)
+		}
+	}
+
+	published := []dockerx.PortMapping{{HostIP: "0.0.0.0", HostPort: 5432}, {HostIP: "127.0.0.1", HostPort: 5433}}
+	if got := stoppedExposure(published, 5432); got != exposurePublic {
+		t.Errorf("a port published on every address reads %q", got)
+	}
+	if got := stoppedExposure(published, 5433); got != exposureLocal {
+		t.Errorf("a loopback binding reads %q", got)
+	}
+	if got := stoppedExposure(nil, 5432); got != exposureLocal {
+		t.Errorf("a container that publishes nothing reads %q", got)
+	}
+}

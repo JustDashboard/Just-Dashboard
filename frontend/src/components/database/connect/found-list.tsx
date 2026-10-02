@@ -342,7 +342,9 @@ function FoundRow({
       description={<span className="font-mono">{where.text}</span>}
       trailing={
         <span className="flex shrink-0 items-center gap-3">
-          {instance.driver === "" && <Tag className="max-sm:hidden">no driver yet</Tag>}
+          {instance.driver === "" && instance.kind === "server" && (
+            <Tag className="max-sm:hidden">no driver yet</Tag>
+          )}
           {busy ? (
             <TextShimmer className="text-xs font-medium">{`${busy}…`}</TextShimmer>
           ) : instance.file && instance.kind !== "embedded" ? (
