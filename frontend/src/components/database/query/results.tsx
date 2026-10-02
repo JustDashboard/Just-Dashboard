@@ -1,10 +1,10 @@
 "use client"
 
 import { useEffect, useId, useRef, useState } from "react"
-import { Download, StopCircle } from "@/components/icons"
+import { ChevronDown, Download, StopCircle, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DbExportFormat } from "@/lib/types"
-import { EmptyState } from "@/components/state"
+import { EmptyState, Notice } from "@/components/state"
 import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -21,6 +21,7 @@ import { EXPORT_FORMATS, EXPORT_ROWS, EXPORT_ROWS_MAX } from "@/components/datab
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { ChartView } from "@/components/database/query/chart-view"
+import { useKeyNames } from "@/components/database/query/keys"
 import { Messages, StatementLine } from "@/components/database/query/messages"
 import { PlanView } from "@/components/database/query/plan-view"
 import { ResultGrid } from "@/components/database/query/result-grid"
@@ -28,7 +29,9 @@ import type { Snippet } from "@/components/database/query/snippets"
 import {
   canFetchMore,
   elapsedText,
+  runKey,
   spanText,
+  stepLimit,
   stepOutcome,
   stepToShow,
   type Run,
@@ -65,6 +68,7 @@ export function Results({
   checking,
   view,
   onView,
+  compact,
   canRun,
   canAnalyze,
   noPlanWhy,
@@ -86,6 +90,8 @@ export function Results({
   checking: boolean
   view: ResultsViewId
   onView: (view: ResultsViewId) => void
+  /** The pane is narrow: what is not the rows is folded so the rows keep the room. */
+  compact: boolean
   canRun: boolean
   canAnalyze: boolean
   /** Why a plan cannot be asked for, when it cannot. */
@@ -108,6 +114,7 @@ export function Results({
   refusedWhy?: string
 }) {
   const { engine } = useDatabase()
+  const keys = useKeyNames()
   const run = held?.run
   const tabsId = useId()
   const tabs = useRef<HTMLDivElement>(null)
@@ -115,15 +122,22 @@ export function Results({
   // Which statement's result is open: the one worth looking at when a run
   // lands, and from then on the one the reader picked.
   const [picked, setPicked] = useState<{ run: string; step: number } | null>(null)
-  const stepIndex =
-    run && picked?.run === run.queryId
+  // A statement being asked again for more rows is the one being looked at.
+  const stepIndex = run?.fetching
+    ? run.fetching.index
+    : run && picked?.run === runKey(run)
       ? Math.min(picked.step, Math.max(0, run.steps.length - 1))
       : run
         ? stepToShow(run)
         : 0
   const step = run?.steps[stepIndex]
   const showStep = (index: number) => {
-    if (run) setPicked({ run: run.queryId, step: index })
+    if (run) setPicked({ run: runKey(run), step: index })
+  }
+  // Asking a statement for more rows keeps the reader on that statement afterwards.
+  const fetchMore = (of: RunStep, limit: number) => {
+    showStep(of.index)
+    onFetchMore(of, limit)
   }
 
   const onTabKey = (event: React.KeyboardEvent) => {
@@ -183,7 +197,7 @@ export function Results({
                 ? refusedWhy
                 : empty
                   ? "Write a statement above, or start from one of this engine's diagnostics."
-                  : "Run sends the selection, or the statement the cursor is on. Ctrl+Enter runs it from the editor; with Shift, everything."
+                  : `Run sends the selection, or the statement the cursor is on. ${keys.run} runs it from the editor; ${keys.runAll}, everything.`
           }
           action={
             canRun &&
@@ -244,14 +258,16 @@ export function Results({
         <ResultGrid
           label={run.steps.length > 1 ? `Result of statement ${step.index + 1}` : "Query result"}
           result={step.result}
-          resultKey={`${run.queryId}.${step.index}`}
+          resultKey={`${runKey(run)}.${step.index}.${stepLimit(run, step)}`}
+          compact={compact}
           toolbar={chips}
           banner={
             step.result.truncated && (
               <Truncated
                 step={step}
                 run={run}
-                onFetchMore={(limit) => onFetchMore(step, limit)}
+                compact={compact}
+                onFetchMore={(limit) => fetchMore(step, limit)}
                 canExport={engine.can("exportQuery") && canRun && step.risk?.level === "read"}
               />
             )
@@ -399,6 +415,13 @@ export function Results({
 function Waiting({ run, onCancel }: { run: Run; onCancel: () => void }) {
   const { engine } = useDatabase()
   const elapsed = useElapsed(run.startedAt)
+  // One statement of a run, out again for more rows: that statement is what is waited for.
+  const again = run.fetching ? run.steps[run.fetching.index] : undefined
+  const doing = run.cancelling
+    ? "Stopping…"
+    : run.fetching
+      ? `Fetching ${grouped(run.fetching.limit)} rows…`
+      : "Running…"
   return (
     <div role="status" className="flex min-h-0 flex-1 flex-col">
       <div aria-hidden className="h-0.5 shrink-0 overflow-hidden bg-meter-track">
@@ -406,10 +429,10 @@ function Waiting({ run, onCancel }: { run: Run; onCancel: () => void }) {
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4">
         <p className="flex items-center gap-2 text-body">
-          <TextShimmer>{run.cancelling ? "Stopping…" : "Running…"}</TextShimmer>
+          <TextShimmer>{doing}</TextShimmer>
           <span className="numeric text-muted-foreground">{elapsedText(elapsed)}</span>
         </p>
-        <StatementLine sql={run.sql} className="block text-muted-foreground" />
+        <StatementLine sql={again?.sql ?? run.sql} className="block text-muted-foreground" />
         {engine.can("queryCancel") && (
           <Button size="sm" variant="outline" onClick={onCancel} disabled={run.cancelling}>
             <StopCircle />
@@ -431,7 +454,11 @@ export function useElapsed(since: number): number {
   return Math.max(0, now - since)
 }
 
-/** What stands where rows would be when there are none to show, and why. */
+/**
+ * What stands where rows would be when there are none to show, and why: the
+ * product's notice, with the engine's own words under its title and the
+ * statement they are about.
+ */
 function Refusal({
   tone,
   title,
@@ -446,24 +473,23 @@ function Refusal({
   children?: React.ReactNode
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-auto p-3">
-      <div
-        role={tone === "danger" ? "alert" : "status"}
-        data-slot="query-refusal"
-        className={cn(
-          "space-y-2 rounded-lg border p-3",
-          tone === "danger" && "border-rule-danger bg-wash-danger",
-          tone === "warning" && "border-rule-warning bg-wash-warning",
-          tone === "default" && "border-hairline",
-        )}
+    <div
+      role={tone === "danger" ? "alert" : "status"}
+      data-slot="query-refusal"
+      className="min-h-0 flex-1 overflow-auto p-3"
+    >
+      <Notice
+        tone={tone}
+        icon={tone === "default" ? undefined : Warning}
+        title={title}
+        className="[&>div]:flex-1"
       >
-        <div className="flex min-w-0 items-center gap-2">
-          <p className="min-w-0 flex-1 text-body font-medium">{title}</p>
+        <div className="space-y-2">
+          <p className="font-mono break-words whitespace-pre-wrap text-foreground">{text}</p>
+          {children}
           {action}
         </div>
-        <p className="font-mono text-xs leading-relaxed break-words whitespace-pre-wrap">{text}</p>
-        {children}
-      </div>
+      </Notice>
     </div>
   )
 }
@@ -512,26 +538,30 @@ function StepChips({
 function Truncated({
   step,
   run,
+  compact,
   onFetchMore,
   canExport,
 }: {
   step: RunStep
   run: Run
+  compact: boolean
   onFetchMore: (limit: number) => void
   canExport: boolean
 }) {
   const shown = step.result?.rowCount ?? 0
-  const larger = ROW_LIMITS.filter((limit) => limit > Math.max(run.limit, shown))
-  const more = canFetchMore(step, run.limit, MAX_ROWS)
+  const asked = stepLimit(run, step)
+  const larger = ROW_LIMITS.filter((limit) => limit > Math.max(asked, shown))
+  const more = canFetchMore(step, asked, MAX_ROWS)
   return (
     <div
       role="status"
       data-slot="result-truncated"
-      className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-rule-warning bg-wash-warning px-2.5 py-1.5 text-hint"
+      className="flex shrink-0 items-center gap-x-2 gap-y-1 border-b border-rule-warning bg-wash-warning px-2.5 py-1.5 text-hint"
     >
       <Tag tone="warning">cut</Tag>
-      <span className="min-w-0 flex-1 basis-56">
-        These are the first {grouped(shown)} rows. The statement returns more.
+      <span className={cn("min-w-0 flex-1", compact && "truncate")}>
+        {compact ? `First ${grouped(shown)} rows.` : `These are the first ${grouped(shown)} rows.`}{" "}
+        The statement returns more.
         {!more &&
           step.risk?.level !== "read" &&
           " It changes data, so it is not run again for them."}
@@ -540,10 +570,35 @@ function Truncated({
           ` ${grouped(MAX_ROWS)} is the most a run shows${canExport ? "; Export writes every row to a file" : ""}.`}
       </span>
       {more &&
-        larger.map((limit) => (
-          <Button key={limit} size="xs" variant="outline" onClick={() => onFetchMore(limit)}>
-            Fetch {grouped(limit)}
-          </Button>
+        // On a narrow pane the ways to more are one control on the banner's own line.
+        (compact ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="xs" variant="outline" className="shrink-0">
+                Fetch more
+                <ChevronDown />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {larger.map((limit) => (
+                <DropdownMenuItem key={limit} onSelect={() => onFetchMore(limit)}>
+                  Fetch {grouped(limit)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          larger.map((limit) => (
+            <Button
+              key={limit}
+              size="xs"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => onFetchMore(limit)}
+            >
+              Fetch {grouped(limit)}
+            </Button>
+          ))
         ))}
     </div>
   )

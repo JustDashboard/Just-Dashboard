@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ApiError, errorMessage, post } from "@/lib/api"
+import { notify } from "@/lib/toast"
 import { useMemoryState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
@@ -12,8 +13,10 @@ import { gate, reasonsText, type Asker } from "@/components/database/query/gate"
 import {
   stepsOfQuery,
   stepsOfScript,
+  withRefetched,
   type Explained,
   type Run,
+  type RunStep,
   type TabRun,
 } from "@/components/database/query/run-model"
 import { firstLine, type RunTarget } from "@/components/database/query/sql-text"
@@ -54,9 +57,10 @@ export function useRunner({
   confirm,
   onSettled,
 }: {
-  confirm: (request: ConfirmRequest) => void
+  /** Asks first. `closed` is called when the dialog goes, whichever way it went. */
+  confirm: (request: ConfirmRequest, closed?: () => void) => void
   /** A statement reached the server and came back: the history has a new entry. */
-  onSettled: () => void
+  onSettled: (run?: Run) => void
 }) {
   const { id, conn, engine, readOnly } = useDatabase()
   const { can } = useAuth()
@@ -80,6 +84,12 @@ export function useRunner({
   useEffect(() => {
     askerRef.current = asker
   })
+
+  // The tabs with a run on its way: being classified, being asked about, or
+  // out. It is a ref, set before anything is awaited, because the second of
+  // two presses of the run key arrives before any state from the first has
+  // been drawn — and a statement that writes must not be sent twice for it.
+  const inFlight = useRef(new Set<string>())
 
   const patch = useCallback(
     (tab: string, change: (held: TabRun) => TabRun) =>
@@ -115,63 +125,72 @@ export function useRunner({
 
   /** Asks before a statement that destroys, with what it does and the statement itself. */
   const ask = useCallback(
-    (verdict: ClassifyResponse, title: string, note: string, go: () => void) => {
+    (
+      verdict: ClassifyResponse,
+      title: string,
+      note: string,
+      go: () => void,
+      closed: () => void,
+    ) => {
       const destroying = verdict.statements.filter((statement) => statement.risk.destructive)
       const shown = destroying.slice(0, SHOWN)
-      confirm({
-        title,
-        confirmLabel: title,
-        subject: {
-          mark: <EngineMark engine={engine} size="sm" />,
-          name: conn.name,
-          facts: (
-            <>
-              <FormFact label="Engine">{engine.label}</FormFact>
-              {conn.database && (
-                <FormFact label={engine.databaseField} mono>
-                  {conn.database}
-                </FormFact>
-              )}
-              {conn.environment && <FormFact label="Environment">{conn.environment}</FormFact>}
-            </>
-          ),
-        },
-        description: (
-          <div className="space-y-3">
-            <p>
-              The server reads {destroying.length === 1 ? "this statement" : "these statements"} as{" "}
-              <span className="font-medium">{verdict.level}</span>
-              {verdict.reasons.length > 0 && <>: it {reasonsText(verdict)}</>}. {note}
-            </p>
-            {shown.map((statement, index) => (
-              <div key={index} className="space-y-1">
-                <Statement
-                  label={verdict.statements.length > 1 ? `Line ${statement.line}` : "Statement"}
-                  sql={statement.sql}
-                  placeholder=""
-                />
-                {destroying.length > 1 && reasonsText(statement.risk) && (
-                  <p className="text-hint text-muted-foreground">
-                    It {reasonsText(statement.risk)}.
-                  </p>
+      confirm(
+        {
+          title,
+          confirmLabel: title,
+          subject: {
+            mark: <EngineMark engine={engine} size="sm" />,
+            name: conn.name,
+            facts: (
+              <>
+                <FormFact label="Engine">{engine.label}</FormFact>
+                {conn.database && (
+                  <FormFact label={engine.databaseField} mono>
+                    {conn.database}
+                  </FormFact>
                 )}
-              </div>
-            ))}
-            {destroying.length > shown.length && (
-              <p className="text-hint text-muted-foreground">
-                And {destroying.length - shown.length} more that destroy, of{" "}
-                {verdict.statements.length} statements in all.
+                {conn.environment && <FormFact label="Environment">{conn.environment}</FormFact>}
+              </>
+            ),
+          },
+          description: (
+            <div className="space-y-3">
+              <p>
+                The server reads {destroying.length === 1 ? "this statement" : "these statements"}{" "}
+                as <span className="font-medium">{verdict.level}</span>
+                {verdict.reasons.length > 0 && <>: it {reasonsText(verdict)}</>}. {note}
               </p>
-            )}
-          </div>
-        ),
-        // The dialog only starts the run: it is the editor that waits for it,
-        // with a clock and a way to stop it.
-        action: async () => {
-          go()
-          return "reported"
+              {shown.map((statement, index) => (
+                <div key={index} className="space-y-1">
+                  <Statement
+                    label={verdict.statements.length > 1 ? `Line ${statement.line}` : "Statement"}
+                    sql={statement.sql}
+                    placeholder=""
+                  />
+                  {destroying.length > 1 && reasonsText(statement.risk) && (
+                    <p className="text-hint text-muted-foreground">
+                      It {reasonsText(statement.risk)}.
+                    </p>
+                  )}
+                </div>
+              ))}
+              {destroying.length > shown.length && (
+                <p className="text-hint text-muted-foreground">
+                  And {destroying.length - shown.length} more that destroy, of{" "}
+                  {verdict.statements.length} statements in all.
+                </p>
+              )}
+            </div>
+          ),
+          // The dialog only starts the run: it is the editor that waits for it,
+          // with a clock and a way to stop it.
+          action: async () => {
+            go()
+            return "reported"
+          },
         },
-      })
+        closed,
+      )
     },
     [confirm, conn, engine],
   )
@@ -181,6 +200,7 @@ export function useRunner({
       const queryId = crypto.randomUUID()
       const script = verdict.statements.length > 1
       const run: Run = {
+        key: queryId,
         queryId,
         phase: "running",
         startedAt: Date.now(),
@@ -196,13 +216,14 @@ export function useRunner({
       }
       patch(tab, (held) => ({ ...held, run }))
       const done = (change: Partial<Run>) => {
+        inFlight.current.delete(tab)
         patchRun(tab, queryId, (held) => ({
           ...held,
           ...change,
           phase: "done",
           finishedAt: Date.now(),
         }))
-        settled.current()
+        settled.current({ ...run, ...change, phase: "done" })
       }
       const cancelled = (err: unknown) => err instanceof ApiError && err.code === "query_cancelled"
       if (script) {
@@ -256,13 +277,21 @@ export function useRunner({
     [id, patch, patchRun],
   )
 
-  /** Classify, gate, ask, send. Resolves once the run has been sent or turned down. */
+  /**
+   * Classify, gate, ask, send. Resolves once the run has been sent or turned
+   * down. A tab has one run on its way at a time: a second asked for before
+   * the first has come back is not started.
+   */
   const run = useCallback(
     async (tab: string, target: RunTarget, options: RunOptions) => {
+      if (inFlight.current.has(tab)) return
+      inFlight.current.add(tab)
+      const release = () => inFlight.current.delete(tab)
       setChecking(tab)
       const verdict = await classify(target.sql)
       setChecking((held) => (held === tab ? null : held))
-      const refuse = (why: string) =>
+      const refuse = (why: string) => {
+        release()
         patch(tab, (held) => ({
           ...held,
           run: {
@@ -282,10 +311,15 @@ export function useRunner({
             refused: why,
           },
         }))
+      }
       if (typeof verdict === "string") return refuse(verdict)
       const allowed = gate(verdict, askerRef.current)
       if (!allowed.run) return refuse(allowed.why)
-      const go = () => send(tab, target, verdict, options)
+      let sent = false
+      const go = () => {
+        sent = true
+        send(tab, target, verdict, options)
+      }
       if (!allowed.confirm) return go()
       const several = verdict.statements.length > 1
       ask(
@@ -295,9 +329,79 @@ export function useRunner({
           ? "They run in one transaction: all of them take effect, or none."
           : "It cannot be taken back once it has run.",
         go,
+        // The reader said no: the tab is free to run something else.
+        () => {
+          if (!sent) release()
+        },
       )
     },
     [classify, patch, send, ask],
+  )
+
+  /**
+   * Asks one statement of a finished run again, for more rows. The run stays
+   * the run: its other statements keep their results and their chips, and
+   * only the statement asked again changes. It passes the same check as any
+   * run — the text is classified, and only a statement that reads is sent a
+   * second time. While it is out the tab is running, with its clock and its
+   * Cancel; a refusal, a failure or a stop leaves the rows that were there.
+   */
+  const fetchMore = useCallback(
+    async (tab: string, ran: Run, step: RunStep, limit: number) => {
+      if (ran.phase !== "done" || inFlight.current.has(tab)) return
+      inFlight.current.add(tab)
+      const release = () => inFlight.current.delete(tab)
+      setChecking(tab)
+      const verdict = await classify(step.sql)
+      setChecking((held) => (held === tab ? null : held))
+      if (typeof verdict === "string") {
+        release()
+        return notify.error("No more rows were fetched", verdict)
+      }
+      const allowed = gate(verdict, askerRef.current)
+      if (!allowed.run || verdict.level !== "read") {
+        release()
+        return notify.error(
+          "No more rows were fetched",
+          allowed.run ? "The statement changes data, so it is not run a second time." : allowed.why,
+        )
+      }
+      const queryId = crypto.randomUUID()
+      patch(tab, (held) => ({
+        ...held,
+        run: {
+          ...ran,
+          queryId,
+          phase: "running",
+          startedAt: Date.now(),
+          cancelling: false,
+          fetching: { index: step.index, limit },
+        },
+      }))
+      // However it ends, the run goes back to being the one that was there.
+      const back = (steps: RunStep[]) => {
+        release()
+        patchRun(tab, queryId, (held) => ({
+          ...held,
+          steps,
+          phase: "done",
+          startedAt: ran.startedAt,
+          finishedAt: ran.finishedAt,
+          cancelling: false,
+          fetching: undefined,
+        }))
+        settled.current()
+      }
+      post<QueryResponse>(`/databases/${id}/query`, { query: step.sql, maxRows: limit, queryId })
+        .then((answer) => back(withRefetched(ran, step.index, answer, limit)))
+        .catch((err: unknown) => {
+          back(ran.steps)
+          if (err instanceof ApiError && err.code === "query_cancelled") {
+            notify.info("Stopped", { description: "The rows shown are the ones from before." })
+          } else notify.error("No more rows were fetched", err)
+        })
+    },
+    [id, classify, patch, patchRun],
   )
 
   /** Stops a tab's run on the server. The run's own request then comes back as cancelled. */
@@ -381,6 +485,7 @@ export function useRunner({
         "Run and measure statement",
         "Measuring a plan runs the statement. Where the engine can, what it changes is undone afterwards.",
         () => void ask_(),
+        () => {},
       )
     },
     [id, engine, classify, patch, ask],
@@ -397,7 +502,7 @@ export function useRunner({
     [setRuns],
   )
 
-  return { runs, checking, asker, run, cancel, explain, forget }
+  return { runs, checking, asker, run, fetchMore, cancel, explain, forget }
 }
 
 /** A statement's first line as a run's title: "select * from orders…". */

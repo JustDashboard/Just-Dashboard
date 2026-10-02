@@ -224,3 +224,42 @@ export function countsLine(counts: OrmResult["counts"]): string {
     .filter(Boolean)
     .join(" · ")
 }
+
+/**
+ * The generator a visit opens on. The one the reader last used, where this
+ * engine has it. One remembered from another connection that this engine has
+ * no connector for is passed over for the first it does have — the page opens
+ * on something that can be written, not on a refusal — unless the reader
+ * picked it on this very visit, when the server's reason is what they asked
+ * to see.
+ */
+export function startingTarget(
+  targets: readonly OrmTarget[],
+  stored: string,
+  driver: string,
+  pickedHere: boolean,
+): OrmTarget | undefined {
+  if (targets.length === 0) return undefined
+  const kept = targets.find((entry) => entry.id === stored)
+  if (kept && (pickedHere || kept.engines.includes(driver))) return kept
+  return targets.find((entry) => entry.engines.includes(driver)) ?? kept ?? targets[0]
+}
+
+/**
+ * What a target's switches are set to, in a line: only what differs from the
+ * server's defaults, since the defaults are what nobody needs telling.
+ * "Naming camelCase · Views on · Relations off".
+ */
+export function optionsLine(target: OrmTarget, values: OptionValues): string {
+  const changed: string[] = []
+  for (const option of target.options) {
+    const value = values[option.id] ?? option.default
+    if (value === option.default) continue
+    if (option.type === "boolean") changed.push(`${option.label} ${value ? "on" : "off"}`)
+    else if (option.type === "select") {
+      const choice = (option.choices ?? []).find((entry) => entry.value === value)
+      changed.push(`${option.label} ${choice?.label ?? String(value)}`)
+    } else changed.push(`${option.label} ${String(value)}`)
+  }
+  return changed.length > 0 ? changed.join(" · ") : "As the generator sets them"
+}

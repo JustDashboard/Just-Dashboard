@@ -12,6 +12,12 @@ import { hold, mockDatabases, type DatabaseMock } from "./database-fixture"
  * result grid that drew every row, and a completion that went on offering
  * the last connection's tables. The API is mocked in the browser; what the
  * requests carry is what is asserted.
+ *
+ * The second half is what a reviewer found by using the pages: a statement
+ * sent twice by two presses of the run key, a script's other results thrown
+ * away by fetching more of one, a completed name left with two closing
+ * quotes, an editor the keyboard could not leave, and the files a generator
+ * wrote drawn below the fold.
  */
 
 const expect = baseExpect.configure({ timeout: 15_000 })
@@ -255,6 +261,8 @@ type WorkMock = DatabaseMock & {
   capabilities?: string[]
   /** `POST /classify` fails. */
   classifyFails?: boolean
+  /** `POST /classify` answers only once this settles. */
+  classifyHeld?: Promise<unknown>
   /** `POST /query` of a statement holding "slow" answers only once this settles. */
   slowHeld?: Promise<unknown>
   /** `GET /search` answers only once this settles. */
@@ -275,6 +283,8 @@ async function mockWork(page: Page, options: WorkMock = {}) {
     explain: [] as Record<string, unknown>[],
     exports: [] as Record<string, unknown>[],
     search: [] as URL[],
+    browse: [] as URL[],
+    outline: [] as URL[],
     orm: [] as Record<string, unknown>[],
     saves: [] as { method: string; path: string; body: Record<string, unknown> }[],
   }
@@ -322,6 +332,7 @@ async function mockWork(page: Page, options: WorkMock = {}) {
       })
     }
     if (rest === "/outline") {
+      sent.outline.push(url)
       const entries = Object.keys(outline.tables).map((name) => ({
         id: `${outline.schema}.${name}`,
         schema: outline.schema,
@@ -335,6 +346,48 @@ async function mockWork(page: Page, options: WorkMock = {}) {
         truncated: false,
         total: entries.length,
         limit: 5000,
+      })
+    }
+    if (rest === "/relations") {
+      return json(
+        route,
+        id === "1"
+          ? {
+              "public.orders": [
+                {
+                  name: "orders_customer_id_fkey",
+                  columns: ["customer_id"],
+                  refSchema: "public",
+                  refTable: "customers",
+                  refColumns: ["id"],
+                },
+              ],
+            }
+          : {},
+      )
+    }
+    if (rest === "/browse") {
+      sent.browse.push(url)
+      const table = url.searchParams.get("table") ?? ""
+      const columns = outline.tables[table] ?? []
+      // Customers hold the value in two rows, and more of them than are handed over.
+      const found = table === "customers"
+      return json(route, {
+        columns,
+        types: columns.map(() => "TEXT"),
+        kinds: columns.map(() => "text"),
+        rows: found
+          ? [
+              ["12", "pro@example.com", "pro"],
+              ["19", "ann@example.com", "pro"],
+            ]
+          : [],
+        rowCount: found ? 2 : 0,
+        rowsAffected: 0,
+        duration: "1ms",
+        truncated: found,
+        statement: "",
+        primaryKey: ["id"],
       })
     }
     if (rest === "/columns") {
@@ -393,6 +446,7 @@ async function mockWork(page: Page, options: WorkMock = {}) {
     if (rest === "/classify") {
       const text = String(body().query ?? "")
       sent.classify.push(text)
+      await options.classifyHeld
       if (options.classifyFails) {
         return json(
           route,
@@ -1191,8 +1245,19 @@ test("the history, the schema and the snippets lead into the editor without repl
   // A snippet opens under its own name.
   await rail.getByRole("tab", { name: /^Snippets/ }).click()
   await rail.getByRole("button", { name: "Open in a tab: Largest tables" }).click()
-  await expect(openTabs(page)).toHaveText(["Query 1", "Query 2", "Largest tables"])
+  // …named for the statement it holds.
+  await expect(openTabs(page)).toHaveText([
+    "Query 1",
+    "select count(*) from orders",
+    "Largest tables",
+  ])
   await expect.poll(() => editorText(page)).toContain("pg_total_relation_size")
+
+  // The same entry pressed again is the same tab brought to the front, not another.
+  await rail.getByRole("tab", { name: /^History/ }).click()
+  await rail.getByRole("button", { name: "Open in a tab: select count(*) from orders" }).click()
+  await expect(openTabs(page)).toHaveCount(3)
+  await expect.poll(() => editorText(page)).toBe("select count(*) from orders")
 
   await openTabs(page).first().click()
   await expect.poll(() => editorText(page)).toBe('select "Mixed Case Table"')
@@ -1245,15 +1310,23 @@ test("a search is asked once, drawn by table with the value marked, and each row
   const target = new URL((await link.getAttribute("href")) ?? "", page.url())
   expect(target.pathname).toBe("/databases/1/data")
   expect(target.searchParams.get("table")).toBe("customers")
-  // A row with none, by its own values, the matched cell first.
-  const keyless = groups.nth(1).getByRole("link", { name: "Open this row of audit_log in Data" })
+  // A row with none, by its own values, the matched cell first — and the link
+  // says what it opens: the rows like it. The moment is left out: an engine
+  // that reads one its own way answered the table editor with a refusal.
+  const keyless = groups
+    .nth(1)
+    .getByRole("link", { name: "Open the rows of audit_log like this one in Data" })
   await expect
     .poll(() => filtersOf(keyless))
     .toEqual([
       { column: "action", op: "eq", value: "approved" },
-      { column: "at", op: "eq", value: "2026-10-01T09:00:00Z" },
       { column: "actor", op: "eq", value: "ann" },
     ])
+  // What a row is recognised by: its key, then what a person reads, an instant to the second.
+  await expect(first).toContainText("id 12")
+  await expect(groups.nth(1).locator("[data-slot=choice-row]").first()).toContainText(
+    "actor ann · at 2026-10-01 09:00:00 UTC",
+  )
   // Every match of a table: the value in any column it was found in.
   const every = new URL(
     (await groups
@@ -1316,6 +1389,11 @@ test("one scan at a time: Enter while it is out starts no second one, and Stop d
   await expect(page.getByRole("search").getByRole("button", { name: "Search" })).toBeVisible()
   held.release()
   await expect(page.locator("[data-slot=search-table]")).toHaveCount(0)
+  // A scan that was stopped says so, and is one press from being asked again.
+  await expect(page.getByText("Stopped before it finished")).toBeVisible()
+  await page.getByRole("button", { name: "Search again" }).click()
+  await expect(page.locator("[data-slot=search-table]")).toHaveCount(2)
+  expect(sent.search).toHaveLength(2)
 
   // Nothing found is said as that, with what was read.
   await page.getByLabel("The value to find").fill("nothing")
@@ -1348,12 +1426,18 @@ test("every generator the server lists is reachable, and the request carries wha
   const code = page.locator("[data-slot=code-view]")
   await expect(code).toContainText("schema.prisma")
   expect(sent.orm[0]).toEqual({ target: "prisma", schema: "public" })
-  await expect(
-    page.getByText("One thing could not be written as it is in the database"),
-  ).toBeVisible()
-  await expect(page.getByText("audit_log has no primary key")).toBeVisible()
+  // What could not be written is one line above the code, with how many there are.
+  await expect(page.getByText("1 note", { exact: true })).toBeVisible()
+  await expect(page.getByText("audit_log has no primary key").first()).toBeVisible()
   await expect(page.getByText("4 tables · 1 enum · 2 relations")).toBeVisible()
+  // The files are what the page is for: they begin in the first screen.
+  const top = (await code.boundingBox())?.y ?? Infinity
+  expect(top).toBeLessThan(400)
 
+  // The switches are one row that says what they are set to, and opens.
+  const options = page.getByRole("button", { name: /^Options/ })
+  await expect(options).toContainText("As the generator sets them")
+  await options.click()
   // A switch asks again by itself, with only what differs from the default.
   await page.getByRole("switch", { name: "Relations" }).click()
   await page.getByRole("radio", { name: "camelCase" }).click()
@@ -1377,6 +1461,15 @@ test("every generator the server lists is reachable, and the request carries wha
   const download = page.waitForEvent("download")
   await code.getByRole("button", { name: "Download", exact: true }).click()
   expect((await download).suggestedFilename()).toBe("Customer.ts")
+  // The file tabs are a tablist the keyboard walks, and the code is its panel.
+  await files.nth(1).press("ArrowLeft")
+  await expect(files.first()).toBeFocused()
+  await expect(files.first()).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByRole("tabpanel", { name: "index.ts" })).toContainText("index.ts")
+  // Several files are one archive, not as many downloads.
+  const archive = page.waitForEvent("download")
+  await code.getByRole("button", { name: "All 2 files" }).click()
+  expect((await archive).suggestedFilename()).toBe("typeorm.zip")
 
   // The tables written can be chosen.
   await page.getByRole("button", { name: /Every table/ }).click()
@@ -1394,9 +1487,11 @@ test("every generator the server lists is reachable, and the request carries wha
   await expect(code).toContainText("models.go")
   const before = sent.orm.length
   await page.getByLabel("Package").fill("My-Models")
-  await expect(page.getByText("A lower-case Go package name")).toBeVisible()
+  await expect(page.getByText("A lower-case Go package name").first()).toBeVisible()
   await page.waitForTimeout(900)
   expect(sent.orm).toHaveLength(before)
+  // The files still on screen are said to be the ones from before the change.
+  await expect(page.getByText("Not written again")).toBeVisible()
 
   // A generator this engine has no connector for is reachable, and says why in the server's words.
   await page.getByRole("button", { name: "Diesel, not for PostgreSQL" }).click()
@@ -1413,6 +1508,491 @@ test("every generator the server lists is reachable, and the request carries wha
   await expect(page.locator("[data-target=prisma]")).toHaveAttribute("aria-pressed", "true")
   await expect(page.getByRole("switch", { name: "Relations" })).not.toBeChecked()
   await expect(page.getByRole("radio", { name: "camelCase" })).toBeChecked()
+})
+
+/* ------------------------------------------------ found by using the pages */
+
+const focusIsInEditor = (page: Page) =>
+  page.evaluate(() => document.activeElement?.closest("[data-slot=sql-editor]") !== null)
+
+test("the run key pressed twice before the statement has been classified sends it once", async ({
+  page,
+}) => {
+  const classify = hold()
+  const { sent } = await mockWork(page, { classifyHeld: classify.until })
+  await openEditor(page)
+  await write(page, "insert into audit_log (actor) values ('twice')")
+  // A remote server's round trip is long enough for a second press, and a third.
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  // The button says the statement is being checked, and takes no press meanwhile.
+  await expect(runButton(page)).toBeDisabled()
+  classify.release()
+
+  await expect(results(page)).toContainText("rows changed")
+  await page.waitForTimeout(600)
+  expect(sent.query).toHaveLength(1)
+  expect(sent.script).toHaveLength(0)
+  // Once it has come back the tab runs again.
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await expect.poll(() => sent.query.length).toBe(2)
+})
+
+test("a confirmation the reader declines leaves the tab free to run, with the keyboard in the editor", async ({
+  page,
+}) => {
+  const { sent } = await mockWork(page)
+  await openEditor(page)
+  await write(page, "drop table customers")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click()
+  await expect(page.getByRole("dialog")).toBeHidden()
+  await expect.poll(() => focusIsInEditor(page)).toBe(true)
+  // The key works at once: nothing has to be clicked first.
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await page.getByRole("dialog").getByRole("button", { name: "Run statement" }).click()
+  await expect.poll(() => sent.query.length).toBe(1)
+  await expect.poll(() => focusIsInEditor(page)).toBe(true)
+})
+
+test("fetching more of one statement of a script keeps the other statements' results", async ({
+  page,
+}) => {
+  const { sent } = await mockWork(page)
+  await openEditor(page)
+  await write(page, "select count(*) from orders;\nselect many from customers;\nselect 3;")
+  await page.keyboard.press("ControlOrMeta+Shift+Enter")
+
+  const chips = results(page)
+    .getByRole("group", { name: "Statements of this run" })
+    .getByRole("button")
+  await expect(chips).toHaveCount(3)
+  await chips.nth(1).click()
+  const notice = results(page).locator("[data-slot=result-truncated]")
+  await expect(notice).toContainText("These are the first 500 rows.")
+  await notice.getByRole("button", { name: "Fetch 1,000" }).click()
+
+  // Only that statement is sent again, by itself, for more.
+  await expect.poll(() => sent.query.length).toBe(1)
+  expect(sent.query[0]).toMatchObject({ query: "select many from customers", maxRows: 1000 })
+  expect(sent.script).toHaveLength(1)
+  // The run is still the run: three statements, the reader still on the second.
+  await expect(notice).toContainText("These are the first 1,000 rows.")
+  await expect(chips).toHaveCount(3)
+  await expect(chips.nth(1)).toHaveAttribute("aria-pressed", "true")
+  await expect(chips.nth(1)).toContainText("1,000 rows, and more")
+  await expect(notice.getByRole("button")).toHaveText(["Fetch 5,000"])
+  await chips.first().click()
+  await expect(results(page).getByRole("grid", { name: "Result of statement 1" })).toBeVisible()
+  await results(page)
+    .getByRole("tab", { name: /Messages/ })
+    .click()
+  await expect(
+    results(page).locator("[data-slot=query-messages]").getByRole("listitem"),
+  ).toHaveCount(5)
+})
+
+test("a quoted name is completed inside its quotes, the closing one the editor typed included", async ({
+  page,
+}) => {
+  await mockWork(page)
+  await openEditor(page)
+  await editor(page).click()
+  // Typed, not set: the editor closes the quote as it is typed.
+  await page.keyboard.type('select * from "Mi', { delay: 30 })
+  await expect.poll(() => editorText(page)).toBe('select * from "Mi"')
+  const suggestions = page.locator(".suggest-widget .monaco-list-row")
+  await expect(suggestions.first()).toContainText("Mixed Case Table")
+  await page.keyboard.press("Enter")
+  await expect.poll(() => editorText(page)).toBe('select * from "Mixed Case Table"')
+})
+
+test("a name of the reader's own is not completed, and a join is written from the foreign key", async ({
+  page,
+}) => {
+  await mockWork(page)
+  await openEditor(page)
+  const list = page.locator(".suggest-widget.visible")
+  await editor(page).click()
+  await page.keyboard.type("select count(*) as d", { delay: 30 })
+  await page.waitForTimeout(500)
+  await expect(list).toHaveCount(0)
+  // Enter is a new line, not a suggestion written over the alias.
+  await page.keyboard.press("Enter")
+  await page.keyboard.type("from orders o", { delay: 30 })
+  await page.waitForTimeout(500)
+  await expect(list).toHaveCount(0)
+  await page.keyboard.press("Enter")
+  await page.keyboard.type("join ", { delay: 30 })
+  // What a foreign key ties to the tables already named comes first.
+  await expect(list.locator(".monaco-list-row").first()).toContainText("customers")
+  await page.keyboard.type("customers c on ", { delay: 30 })
+  await expect(list.locator(".monaco-list-row").first()).toContainText("c.id = o.customer_id")
+  await page.keyboard.press("Enter")
+  await expect
+    .poll(() => editorText(page))
+    .toBe("select count(*) as d\nfrom orders o\njoin customers c on c.id = o.customer_id")
+})
+
+test("Escape, then Tab, leaves the editor: forward to the commands, back to the tabs", async ({
+  page,
+}) => {
+  await mockWork(page)
+  await openEditor(page)
+  await write(page, "select 1")
+  // The editor says its own way out, as the grid under it does.
+  await expect(
+    page.locator("[data-slot=sql-editor]").getByLabel(/Escape, then Tab, leaves the editor/),
+  ).toHaveCount(1)
+
+  // Tab alone is a character in an editor.
+  await page.keyboard.press("Tab")
+  await expect.poll(() => focusIsInEditor(page)).toBe(true)
+  await page.keyboard.press("Escape")
+  await page.keyboard.press("Tab")
+  await expect(runButton(page)).toBeFocused()
+  // From there Tab walks the strip and reaches what the statement returned.
+  await editor(page).click()
+  await page.keyboard.press("Escape")
+  await page.keyboard.press("Shift+Tab")
+  await expect(openTabs(page).first()).toBeFocused()
+  await expect(openTabs(page).first()).toHaveAttribute("aria-controls", /.+/)
+  await expect(page.getByRole("tabpanel", { name: "Query 1" })).toBeVisible()
+  // Nothing in the list of tabs is anything but a tab.
+  expect(
+    await page
+      .getByRole("tablist", { name: "Open statements" })
+      .evaluate((list) =>
+        [...list.children].every((child) => child.getAttribute("role") === "tab"),
+      ),
+  ).toBe(true)
+})
+
+test("a tab keeps its undo while another is looked at, and closing one hands the keyboard on", async ({
+  page,
+}) => {
+  await mockWork(page)
+  await openEditor(page)
+  await write(page, "select 1")
+  await page.getByRole("button", { name: "New tab" }).click()
+  // A new tab is opened to be written in: the keyboard is already there.
+  await expect.poll(() => focusIsInEditor(page)).toBe(true)
+  await page.keyboard.type("select 2", { delay: 20 })
+  await page.keyboard.type(" -- typed", { delay: 20 })
+  await expect.poll(() => editorText(page)).toBe("select 2 -- typed")
+
+  await openTabs(page).first().click()
+  await expect.poll(() => editorText(page)).toBe("select 1")
+  await openTabs(page).nth(1).click()
+  await expect.poll(() => editorText(page)).toBe("select 2 -- typed")
+  await editor(page).click()
+  await page.keyboard.press("ControlOrMeta+Z")
+  await expect.poll(() => editorText(page)).not.toBe("select 2 -- typed")
+  expect(await editorText(page)).toContain("select 2")
+
+  // Closed from the keyboard, the tab that comes to the front has the keyboard.
+  await page.getByRole("button", { name: "Close Query 2" }).focus()
+  await page.keyboard.press("Enter")
+  await expect(openTabs(page)).toHaveCount(1)
+  await expect(openTabs(page).first()).toBeFocused()
+})
+
+test("with more tabs than fit the one in front stays in view, and every tab is in one menu", async ({
+  page,
+}) => {
+  await mockWork(page)
+  await openEditor(page)
+  for (let n = 0; n < 12; n++) await page.getByRole("button", { name: "New tab" }).click()
+  await expect(openTabs(page)).toHaveCount(13)
+  const strip = page.locator("[data-slot=query-tabs]")
+  await expect
+    .poll(async () => {
+      const [outer, front] = await Promise.all([
+        strip.boundingBox(),
+        openTabs(page).last().boundingBox(),
+      ])
+      if (!outer || !front) return false
+      return front.x >= outer.x - 1 && front.x + front.width <= outer.x + outer.width + 1
+    })
+    .toBe(true)
+  await expect(openTabs(page).last()).toHaveAttribute("aria-selected", "true")
+
+  await page.getByRole("button", { name: "All 13 tabs" }).click()
+  await page.getByRole("menuitem", { name: "Query 2" }).click()
+  await expect(openTabs(page).nth(1)).toHaveAttribute("aria-selected", "true")
+  await expect(openTabs(page).nth(1)).toBeInViewport()
+})
+
+test("at the limit of tabs an opening says so, and a hand-over waits in the address for a tab", async ({
+  page,
+}) => {
+  await mockWork(page, {
+    history: [
+      {
+        id: 1,
+        sql: "select count(*) from orders",
+        risk: "read",
+        success: true,
+        durationMs: 4,
+        rowCount: 1,
+        ranAt: "2026-10-01T08:58:00Z",
+      },
+    ],
+  })
+  await page.addInitScript(() => {
+    const key = "jd.session.state.entry.databases.1.query.tabs"
+    if (window.sessionStorage.getItem(key)) return
+    const tabs = Array.from({ length: 24 }, (_, n) => ({
+      id: `q${n + 1}`,
+      title: `Query ${n + 1}`,
+      sql: `select ${n + 1}`,
+    }))
+    window.sessionStorage.setItem(key, JSON.stringify({ tabs, active: "q24", next: 25 }))
+  })
+  const handed = "select 'handed over at the limit'"
+  await openEditor(page, `/databases/1/query?sql=${encodeURIComponent(handed)}`)
+  await expect(openTabs(page)).toHaveCount(24)
+  await expect(page.getByText("24 tabs are open").first()).toBeVisible()
+  // Not lost: it is still in the address.
+  expect(new URL(page.url()).searchParams.get("sql")).toBe(handed)
+  await expect(page.getByRole("button", { name: "No more tabs can be opened" })).toBeDisabled()
+
+  // A history entry at the limit says the same rather than doing nothing.
+  const rail = page.locator("[data-slot=query-rail]")
+  await rail.getByRole("tab", { name: /^History/ }).click()
+  await rail
+    .getByRole("list", { name: "Statements that were run" })
+    .getByRole("button")
+    .first()
+    .click()
+  await expect(page.getByText("Close one to open this statement.")).toBeVisible()
+  await expect(openTabs(page)).toHaveCount(24)
+
+  // A tab closed, and the statement handed over opens in its place.
+  await page.getByRole("button", { name: "Close Query 24" }).click()
+  await expect.poll(() => editorText(page)).toBe(handed)
+  await expect(openTabs(page)).toHaveCount(24)
+  await expect.poll(() => new URL(page.url()).search).toBe("")
+})
+
+test("a table made from the editor is known to the tree and the completion without asking", async ({
+  page,
+}) => {
+  const { sent } = await mockWork(page)
+  await openEditor(page)
+  await expect.poll(() => sent.outline.length).toBeGreaterThan(0)
+  await write(page, "select * from customers")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await expect(results(page).getByRole("grid", { name: "Query result" })).toBeVisible()
+  // A statement that reads changes nothing the schema holds.
+  const before = sent.outline.length
+  await write(page, "create table a4_new (id int)")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await expect(results(page)).toContainText("rows changed")
+  await expect.poll(() => sent.outline.length).toBeGreaterThan(before)
+})
+
+test("a failed statement is marked at the word the engine names, where it names one", async ({
+  page,
+}) => {
+  await mockWork(page)
+  await openEditor(page)
+  await write(page, "select id, email from nope where id = 1")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await expect(results(page).locator("[data-slot=query-refusal]")).toContainText(
+    'relation "nope" does not exist',
+  )
+  const mark = page.locator("[data-slot=sql-editor] .squiggly-error")
+  await expect(mark.first()).toBeVisible()
+  // The mark is as wide as the name, not as the statement.
+  const [squiggle, line] = await Promise.all([
+    mark.first().boundingBox(),
+    page.locator("[data-slot=sql-editor] .view-line").first().boundingBox(),
+  ])
+  expect(squiggle!.width).toBeLessThan(line!.width / 3)
+})
+
+test("series of different magnitudes are not drawn on one axis; each measure is a chip", async ({
+  page,
+}) => {
+  await mockWork(page)
+  await page.route("**/api/v1/databases/1/query", (route) =>
+    json(route, {
+      result: {
+        columns: ["day", "orders", "revenue"],
+        types: ["DATE", "INT8", "NUMERIC"],
+        kinds: ["date", "integer", "decimal"],
+        rows: [
+          ["2026-09-29", "120", "98000.50"],
+          ["2026-09-30", "131", "105162.00"],
+          ["2026-10-01", "97", "81020.25"],
+        ],
+        rowCount: 3,
+        rowsAffected: 0,
+        duration: "2ms",
+        truncated: false,
+        statement: "",
+      },
+      risk: READ,
+    }),
+  )
+  await openEditor(page)
+  await write(page, "select day, count(*) as orders, sum(total) as revenue from orders group by 1")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  await results(page).getByRole("tab", { name: "Chart" }).click()
+
+  const measures = results(page).getByRole("group", { name: "Measures drawn" })
+  // Revenue would have flattened orders to a line along the bottom: orders is drawn alone.
+  await expect(measures.getByRole("button", { name: "orders" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(measures.getByRole("button", { name: "revenue" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  )
+  await expect(results(page)).toContainText("orders by day")
+  await measures.getByRole("button", { name: "revenue" }).click()
+  await expect(results(page)).toContainText("orders, revenue by day")
+  // One is always drawn.
+  await measures.getByRole("button", { name: "orders" }).click()
+  await measures.getByRole("button", { name: "revenue" }).click()
+  await expect(measures.getByRole("button", { name: "revenue" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+})
+
+test("the keys a hint names are the reader's own keyboard's", async ({ browser }) => {
+  // The bindings are Command on a Mac; "Ctrl+Enter" there names another key.
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+  })
+  const page = await context.newPage()
+  await page.addInitScript(() =>
+    Object.defineProperty(navigator, "platform", { get: () => "MacIntel" }),
+  )
+  await mockWork(page)
+  await openEditor(page)
+  await write(page, "select 1")
+  await expect(runButton(page)).toHaveAttribute("title", "⌘Enter")
+  await expect(results(page)).toContainText("⌘Enter runs it from the editor")
+  await context.close()
+})
+
+test("on a narrow pane a cut result keeps its rows: one control for find and columns, one for more", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const { sent } = await mockWork(page)
+  await openEditor(page)
+  await write(page, "select count(*) from orders;\nselect many from customers;")
+  await page.keyboard.press("ControlOrMeta+Shift+Enter")
+  const notice = results(page).locator("[data-slot=result-truncated]")
+  await expect(notice).toBeVisible()
+
+  // The banner is one line, and what leads to more rows is one control on it.
+  expect((await notice.boundingBox())!.height).toBeLessThan(44)
+  await expect(results(page).getByPlaceholder("Find in these rows")).toHaveCount(0)
+  // The rows have the room: more than half of what the pane has under its tabs.
+  const pane = (await results(page).boundingBox())!
+  const rows = (await results(page).locator("[data-slot=data-grid-viewport]").boundingBox())!
+  expect(rows.height).toBeGreaterThan((pane.height - 36) / 2)
+
+  await results(page).getByRole("button", { name: "Find in these rows, or choose columns" }).click()
+  await results(page).getByPlaceholder("Find in these rows").fill("user2@")
+  await expect(results(page).getByRole("gridcell", { name: "user2@example.com" })).toBeVisible()
+  await expect(results(page).getByRole("button", { name: "Columns", exact: true })).toBeVisible()
+
+  await notice.getByRole("button", { name: "Fetch more" }).click()
+  await page.getByRole("menuitem", { name: "Fetch 5,000" }).click()
+  await expect.poll(() => sent.query.at(-1)?.maxRows).toBe(5000)
+})
+
+test("a search of ticked tables reads those tables and no others, and says which hold more", async ({
+  page,
+}) => {
+  const { sent } = await mockWork(page)
+  await page.goto("/databases/1/search")
+  // The scope is chosen before the scan: which of this schema's tables are read.
+  await page.getByRole("button", { name: "Every table (3)" }).click()
+  const list = page.getByRole("list", { name: "The tables read" })
+  await expect(list.getByRole("listitem")).toHaveCount(3)
+  // The view is left out, as a search of the whole schema leaves it out.
+  await expect(list).not.toContainText("order_summary")
+  await list.getByText("Mixed Case Table", { exact: true }).click()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("button", { name: "2 of 3 tables" })).toBeVisible()
+
+  await page.getByLabel("The value to find").fill("pro")
+  await page.keyboard.press("Enter")
+  const groups = page.locator("[data-slot=search-table]")
+  await expect(groups).toHaveCount(1)
+  // The whole-schema search was not asked; each ticked table was, for the value in any column.
+  expect(sent.search).toHaveLength(0)
+  expect(sent.browse.map((url) => url.searchParams.get("table")).sort()).toEqual([
+    "customers",
+    "orders",
+  ])
+  const asked = sent.browse.find((url) => url.searchParams.get("table") === "customers")!
+  expect(asked.searchParams.get("match")).toBe("any")
+  expect(asked.searchParams.get("limit")).toBe("5")
+  expect(JSON.parse(asked.searchParams.get("filters") ?? "[]")).toEqual([
+    { column: "id", op: "icontains", value: "pro" },
+    { column: "email", op: "icontains", value: "pro" },
+    { column: "tier", op: "icontains", value: "pro" },
+  ])
+  // The question, tables included, is in the address.
+  expect(JSON.parse(new URL(page.url()).searchParams.get("tables") ?? "[]")).toEqual([
+    "customers",
+    "orders",
+  ])
+  await expect(page.getByRole("status").filter({ hasText: "is in" })).toContainText(
+    "pro is in 1 table: 2 rows are shown, at most 5 from each. 2 tables of public read",
+  )
+  // The read said the table holds more than these two, and its key: no second read for it.
+  await expect(groups.first()).toContainText("2+")
+  const link = groups.first().getByRole("link", { name: "Open this row of customers in Data" })
+  await expect(link.first()).toHaveAttribute("href", /filters=/)
+  expect(
+    JSON.parse(
+      new URL((await link.first().getAttribute("href")) ?? "", page.url()).searchParams.get(
+        "filters",
+      ) ?? "[]",
+    ),
+  ).toEqual([{ column: "id", op: "eq", value: "12" }])
+  // A table showing its first rows is not a warning.
+  await expect(page.getByText("There may be more than this")).toHaveCount(0)
+
+  // Every schema has no one list of tables to tick.
+  await page
+    .getByRole("group", { name: "Which schema is read" })
+    .getByRole("button", { name: "Every schema" })
+    .click()
+  await expect(page.getByRole("button", { name: /Every table|No tables|Reading/ })).toBeDisabled()
+  await expect.poll(() => sent.search.length).toBe(1)
+  await expect.poll(() => new URL(page.url()).searchParams.get("tables")).toBeNull()
+  expect(new URL(page.url()).searchParams.get("scope")).toBe("all")
+})
+
+test("a generator remembered from another engine does not open the page on a refusal", async ({
+  page,
+}) => {
+  await mockWork(page)
+  await page.goto("/databases/1/generate")
+  // Zod is written for PostgreSQL only in this catalogue.
+  await page.locator("[data-target=zod]").click()
+  await expect(page.locator("[data-slot=code-view]")).toContainText("schemas.ts")
+
+  await page.goto("/databases/7/generate")
+  await expect(page.locator("[data-target=prisma]")).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByText(/is not written for/)).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Generate" })).toBeVisible()
+  // Picked on this visit, the one it lacks says why, in the server's words.
+  await page.getByRole("button", { name: "Zod schemas, not for SQLite" }).click()
+  await expect(page.getByText("Zod schemas is not written for SQLite")).toBeVisible()
 })
 
 /* -------------------------------------------------- the design system */
@@ -1574,11 +2154,30 @@ for (const [label, viewport] of [
     await page.goto("/databases/1/search?q=pro")
     await expect(page.locator("[data-slot=search-table]").first()).toBeVisible()
     await keepsTheRules(page, "search results")
+    await page.getByRole("button", { name: /^Every table/ }).click()
+    await expect(page.getByRole("list", { name: "The tables read" })).toBeVisible()
+    await keepsTheRules(page, "the table picker")
+    await page.keyboard.press("Escape")
 
     await page.goto("/databases/1/generate")
+    // Where the generators cannot stand beside the files they are folded to the chosen one.
+    const generators = page.getByRole("button", { name: /^All \d+ generators$/ })
+    if (phone) {
+      await expect(page.locator("[data-target]")).toHaveCount(0)
+      await generators.click()
+      await keepsTheRules(page, "the generators, unfolded")
+    }
     await page.locator("[data-target=typeorm]").click()
     await expect(page.locator("[data-slot=code-view]")).toContainText("entities.ts")
+    if (phone) {
+      // Choosing one folds the list away, and its files are in the first screen.
+      await expect(page.locator("[data-target]")).toHaveCount(0)
+      const top = (await page.locator("[data-slot=code-view]").boundingBox())?.y ?? Infinity
+      expect(top).toBeLessThan(viewport.height)
+    }
+    await page.getByRole("button", { name: /^Options/ }).click()
     await keepsTheRules(page, "generated files")
+    if (phone) await generators.click()
     await page.locator("[data-target=diesel]").click()
     await expect(page.getByText("Diesel is not written for PostgreSQL")).toBeVisible()
     await keepsTheRules(page, "a generator the engine lacks")

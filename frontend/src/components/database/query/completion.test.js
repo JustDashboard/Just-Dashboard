@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { schemaModel, suggest, tableRefs } from "./completion"
+import {
+  joinConditions,
+  quotedReach,
+  schemaModel,
+  subjectAt,
+  subjectNote,
+  suggest,
+  tableRefs,
+} from "./completion"
 import { dialectOf } from "./dialect"
 import { vocabularyOf } from "./keywords"
 
@@ -179,5 +187,203 @@ describe("the model the completion reads", () => {
   test("nothing read yet is an empty model, and a list where an outline should be is one too", () => {
     expect(schemaModel(undefined, undefined).tables).toEqual([])
     expect(schemaModel([], undefined).tables).toEqual([])
+  })
+})
+
+describe("a name of the reader's own", () => {
+  test("after AS nothing is offered: Enter would write a suggestion over the alias being typed", () => {
+    expect(at("select count(*) as d|")).toEqual([])
+    expect(at("select count(*) as |")).toEqual([])
+    expect(at("select * from orders as o|")).toEqual([])
+  })
+  test("after a table in a FROM list the next word is its alias, and nothing is offered", () => {
+    expect(at("select * from orders o|")).toEqual([])
+    expect(at("select * from orders o join public.customers c|")).toEqual([])
+    expect(at("select * from orders o, customers c|")).toEqual([])
+    expect(at("update orders o|")).toEqual([])
+  })
+  test("…but the table itself is still completed, and so is what follows the alias", () => {
+    expect(labels(at("select * from ord|"), "table")).toContain("orders")
+    expect(labels(at("select * from orders o where st|"), "column")).toContain("status")
+    expect(labels(at("select * from orders o, cust|"), "table")).toContain("customers")
+  })
+})
+
+describe("joins from foreign keys", () => {
+  const keyed = {
+    ...model,
+    relations: [
+      {
+        schema: "public",
+        table: "orders",
+        columns: ["customer_id"],
+        refSchema: "public",
+        refTable: "customers",
+        refColumns: ["id"],
+      },
+      {
+        schema: "public",
+        table: "Mixed Case Table",
+        columns: ["Id", "select"],
+        refSchema: "public",
+        refTable: "orders",
+        refColumns: ["id", "status"],
+      },
+    ],
+  }
+  test("after ON the condition the key states comes first, the joined table's side written first", () => {
+    const offered = at("select * from orders o join customers c on |", pg, keyed)
+    expect(offered[0]).toMatchObject({
+      kind: "join",
+      label: "c.id = o.customer_id",
+      insert: "c.id = o.customer_id",
+    })
+    // The columns are still there, after it.
+    expect(labels(offered, "column")).toContain("email")
+    const other = at("select * from customers c join orders o on |", pg, keyed)
+    expect(labels(other, "join")).toEqual(["o.customer_id = c.id"])
+  })
+  test("a table with no alias is called by its name, and a key of several columns is one condition", () => {
+    expect(
+      labels(at('select * from orders join "Mixed Case Table" on |', pg, keyed), "join"),
+    ).toEqual([
+      '"Mixed Case Table"."Id" = orders.id AND "Mixed Case Table"."select" = orders.status',
+    ])
+  })
+  test("tables with no key between them offer no join, and neither does a model without keys", () => {
+    expect(
+      labels(at("select * from customers c join analytics.events e on |", pg, keyed), "join"),
+    ).toEqual([])
+    expect(labels(at("select * from orders o join customers c on |"), "join")).toEqual([])
+    expect(joinConditions(keyed, pg, [{ schema: "", name: "orders", alias: "o" }])).toEqual([])
+  })
+  test("after JOIN the tables a key ties to the ones already named come first", () => {
+    const offered = at("select * from orders o join |", pg, keyed)
+    const first = offered.filter((item) => item.rank === -1).map((item) => item.label)
+    expect(first.sort()).toEqual(["Mixed Case Table", "customers"])
+    expect(offered.find((item) => item.label === "customers").detail).toBe("joins orders")
+    // FROM has nothing to be related to yet.
+    expect(at("select * from |", pg, keyed).some((item) => item.rank === -1)).toBe(false)
+  })
+  test("the keys are read from the server's answer by the outline's own names", () => {
+    const outline = {
+      schema: "",
+      tables: { "public.orders": ["id", "customer_id"], "public.customers": ["id"] },
+      entries: [
+        { id: "public.orders", schema: "public", name: "orders", type: "table" },
+        { id: "public.customers", schema: "public", name: "customers", type: "table" },
+      ],
+    }
+    const answer = {
+      "public.orders": [
+        {
+          name: "fk",
+          columns: ["customer_id"],
+          refSchema: "public",
+          refTable: "customers",
+          refColumns: ["id"],
+        },
+        { name: "broken", columns: ["a", "b"], refTable: "customers", refColumns: ["id"] },
+      ],
+      "public.gone": [{ columns: ["x"], refTable: "customers", refColumns: ["id"] }],
+    }
+    expect(schemaModel(outline, undefined, answer).relations).toEqual([
+      {
+        schema: "public",
+        table: "orders",
+        columns: ["customer_id"],
+        refSchema: "public",
+        refTable: "customers",
+        refColumns: ["id"],
+      },
+    ])
+    // A server without the route answers with a list: no keys, and no failure.
+    expect(schemaModel(outline, undefined, []).relations).toBeUndefined()
+  })
+})
+
+describe("what the pointer rests on", () => {
+  const on = (marked) => {
+    const offset = marked.indexOf("|")
+    return subjectAt(model, pg, marked.replace("|", ""), offset)
+  }
+  test("a table, by its name or by the alias the statement gives it", () => {
+    expect(on("select * from ord|ers o")).toMatchObject({
+      kind: "table",
+      table: { name: "orders" },
+    })
+    expect(on("select o|.id from orders o")).toMatchObject({
+      kind: "table",
+      table: { name: "orders" },
+    })
+    expect(on("select * from analytics.eve|nts")).toMatchObject({
+      kind: "table",
+      table: { schema: "analytics", name: "events" },
+    })
+  })
+  test("a column, of the table its qualifier stands for or of a table the statement names", () => {
+    expect(on("select o.stat|us from orders o")).toEqual({
+      kind: "column",
+      table: model.tables[0],
+      column: "status",
+    })
+    expect(on("select em|ail from customers")).toMatchObject({ kind: "column", column: "email" })
+    expect(on("select public.orders.customer_|id from orders")).toMatchObject({
+      kind: "column",
+      column: "customer_id",
+    })
+  })
+  test("a word of the language, a text and a name nobody has are nothing", () => {
+    expect(on("sel|ect 1")).toBeNull()
+    expect(on("select 'ord|ers'")).toBeNull()
+    expect(on("select nope|_column from orders")).toBeNull()
+  })
+  test("the note names the table and its columns, with their types where they were read", () => {
+    const table = { kind: "table", table: model.tables[0] }
+    expect(subjectNote(table, undefined)).toBe(
+      "`public.orders` — table, 3 columns\n\n- `id`\n- `customer_id`\n- `status`",
+    )
+    expect(
+      subjectNote({ kind: "column", table: model.tables[0], column: "id" }, [
+        { name: "id", type: "bigint", nullable: false },
+      ]),
+    ).toBe("`id` `bigint` not null\n\nA column of `public.orders`.")
+  })
+})
+
+describe("the stretch a completed name replaces", () => {
+  const quotes = [['"', '"']]
+  // Columns are 1-based; the cursor stands before the character at its column.
+  const reach = (marked, pairs = quotes) => {
+    const cursor = marked.indexOf("|") + 1
+    const line = marked.replace("|", "")
+    const word = /[\w$]*$/.exec(line.slice(0, cursor - 1))[0]
+    return quotedReach(line, cursor - word.length, cursor, cursor, pairs)
+  }
+  const replaced = (marked, pairs) => {
+    const { start, end } = reach(marked, pairs)
+    return marked.replace("|", "").slice(start - 1, end - 1)
+  }
+  test("a plain word is the word", () => {
+    expect(replaced("select * from ord|")).toBe("ord")
+    expect(replaced("select co|")).toBe("co")
+  })
+  test("inside its quote a name is replaced quote and all — the closing one the editor typed too", () => {
+    // The editor closes a quote as it is typed: completing left `"Mixed Case Table""`.
+    expect(replaced('select * from "Mi|"')).toBe('"Mi"')
+    expect(replaced('select * from "Mi|')).toBe('"Mi')
+    expect(replaced('select * from "|"')).toBe('""')
+  })
+  test("a quoted name holds spaces: the reach runs from its opening mark", () => {
+    expect(replaced('select * from "Mixed Ca|"')).toBe('"Mixed Ca"')
+    expect(replaced('select "a b" from "Mi|"')).toBe('"Mi"')
+  })
+  test("a word after a name that is already closed is only the word", () => {
+    expect(replaced('select "a b" x|')).toBe("x")
+    expect(replaced('select "a b"x|')).toBe("x")
+  })
+  test("brackets and backticks are quotes where the engine reads them so", () => {
+    expect(replaced("select * from [Mi|]", [["[", "]"]])).toBe("[Mi]")
+    expect(replaced("select * from `po|`", [["`", "`"]])).toBe("`po`")
   })
 })

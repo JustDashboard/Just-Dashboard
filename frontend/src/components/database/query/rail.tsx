@@ -38,6 +38,7 @@ import { nameHue } from "@/components/database/home/kinds"
 import { ReadError } from "@/components/database/redis/read-error"
 import { useDatabase } from "@/components/database/shell/database-context"
 import type { SchemaModel, SchemaTable } from "@/components/database/query/completion"
+import { focusSoon } from "@/components/database/query/focus"
 import { StatementLine } from "@/components/database/query/messages"
 import { spanText } from "@/components/database/query/run-model"
 import { SNIPPET_GROUPS, type Snippet } from "@/components/database/query/snippets"
@@ -106,7 +107,8 @@ export function QueryRail({
   openSaved: number | undefined
   onOpenSaved: (query: SavedQuery) => void
   onRenameSaved: (query: SavedQuery, name: string) => Promise<void>
-  onDeleteSaved: (query: SavedQuery) => void
+  /** Asks, then deletes. `closed` hears that the question has gone, and whether the query went with it. */
+  onDeleteSaved: (query: SavedQuery, closed: (deleted: boolean) => void) => void
   /** Opens a statement in a tab of its own. */
   onOpenStatement: (sql: string, title?: string) => void
   /** Writes a name at the cursor. */
@@ -265,11 +267,28 @@ function SavedList({
   current: number | undefined
   onOpen: (query: SavedQuery) => void
   onRename: (query: SavedQuery, name: string) => Promise<void>
-  onDelete: (query: SavedQuery) => void
+  onDelete: (query: SavedQuery, closed: (deleted: boolean) => void) => void
 }) {
   const { href } = useDatabase()
   const [find, setFind] = useState("")
   const [renaming, setRenaming] = useState<number | null>(null)
+  const rows = useRef<HTMLUListElement>(null)
+  // Where the keyboard goes when the control it was on has gone: to the row
+  // the reader was working on, else to the one beside it, else to the list's tab.
+  const focusRow = (...ids: (number | undefined)[]) =>
+    focusSoon(
+      () => {
+        for (const id of ids) {
+          const row = rows.current?.querySelector<HTMLElement>(`[data-saved="${id}"]`)
+          if (row) return row
+        }
+        return null
+      },
+      () =>
+        document.querySelector<HTMLElement>(
+          '[data-slot=query-rail] [role="tab"][aria-selected="true"]',
+        ),
+    )
   const needle = find.trim().toLowerCase()
   const list = useMemo(() => {
     const all = [...(saved.data ?? [])].sort((a, b) => a.name.localeCompare(b.name))
@@ -304,9 +323,9 @@ function SavedList({
   return (
     <>
       <RailSearch value={find} onChange={setFind} label="Find a saved query" />
-      <ul aria-label="Saved queries" className="min-h-0 flex-1 overflow-y-auto p-1.5">
+      <ul ref={rows} aria-label="Saved queries" className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {list.length === 0 && <NothingMatches onClear={() => setFind("")} />}
-        {list.map((query) => {
+        {list.map((query, at) => {
           const selected = query.id === current
           const link: Verb = {
             key: "link",
@@ -326,7 +345,10 @@ function SavedList({
               label: "Delete",
               icon: Trash,
               danger: true,
-              run: () => onDelete(query),
+              run: () =>
+                onDelete(query, (deleted) =>
+                  deleted ? focusRow(list[at + 1]?.id, list[at - 1]?.id) : focusRow(query.id),
+                ),
             },
           ]
           return (
@@ -341,10 +363,14 @@ function SavedList({
               {renaming === query.id ? (
                 <RenameField
                   name={query.name}
-                  onCancel={() => setRenaming(null)}
+                  onCancel={() => {
+                    setRenaming(null)
+                    focusRow(query.id)
+                  }}
                   onSave={async (name) => {
                     await onRename(query, name)
                     setRenaming(null)
+                    focusRow(query.id)
                   }}
                 />
               ) : (
@@ -352,6 +378,7 @@ function SavedList({
                   <button
                     type="button"
                     aria-label={`Open ${query.name}`}
+                    data-saved={query.id}
                     aria-current={selected ? "true" : undefined}
                     onClick={() => onOpen(query)}
                     className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left focus-ring-inset"

@@ -7,12 +7,16 @@ import type { SchemaModel, Vocabulary } from "@/components/database/query/comple
 import type { Dialect } from "@/components/database/query/dialect"
 import { formatSql } from "@/components/database/query/format"
 import {
+  adoptDocument,
   completeFrom,
   loadMonaco,
   provideCompletion,
+  provideHover,
+  releaseDocument,
   whenEditor,
   type Monaco,
   type MonacoEditor,
+  type TableColumn,
 } from "@/components/database/query/monaco"
 import {
   runTarget,
@@ -76,23 +80,37 @@ export interface Standing {
  * names completed from this connection's schema, and a way for the rail to
  * write a name at the cursor.
  *
- * It is keyed by tab above: a tab is a document of its own, with its own
- * undo, and one tab's text is never replayed into another's history.
+ * It is keyed by tab above, and a tab is a document of its own: its text,
+ * its undo history and where the reader was in it are kept while the tab is
+ * (`docKey`), so looking at another tab and coming back loses none of them,
+ * and one tab's text is never replayed into another's history.
+ *
+ * Tab is a character in an editor, so the keyboard needs another way out:
+ * Escape, then Tab, leaves it — forward to the commands, back to the tabs —
+ * as the grid under it does, and the editor's own label says so.
  */
 export function SqlEditor({
   ref,
+  docKey,
+  label,
   value,
   onChange,
   language,
   dialect,
   schema,
   vocabulary,
+  describe,
   onRun,
   onSave,
   onStanding,
+  onLeave,
   className,
 }: {
   ref?: React.Ref<SqlEditorHandle>
+  /** What the tab's document is kept under: one per connection and tab. */
+  docKey: string
+  /** What the editor is called: the tab's name. */
+  label: string
   value: string
   onChange: (value: string) => void
   /** The Monaco grammar of the engine. */
@@ -100,10 +118,14 @@ export function SqlEditor({
   dialect: Dialect
   schema: SchemaModel
   vocabulary: Vocabulary
+  /** A table's columns with their types, for what the pointer rests on. */
+  describe: (schema: string, table: string) => Promise<TableColumn[]>
   /** Ctrl/Cmd+Enter (and with Shift: everything). */
   onRun: (all: boolean) => void
   onSave?: () => void
   onStanding: (standing: Standing) => void
+  /** Escape, then Tab: the keyboard leaves the editor, forward (1) or back (-1). */
+  onLeave: (direction: 1 | -1) => void
   className?: string
 }) {
   const host = useRef<HTMLDivElement>(null)
@@ -111,12 +133,20 @@ export function SqlEditor({
   // A mark asked for before the editor exists — a tab brought back to the
   // front with a failed statement — is set as soon as it does.
   const pending = useRef<Problem | null>(null)
+  // The keyboard asked for before the editor exists — a tab just opened to be
+  // written in — is given as soon as it does.
+  const wanted = useRef(false)
   // The editor's listeners are registered once; what they call is read at the
   // moment they fire, so they never run a handler from an earlier render.
-  const latest = useRef({ dialect, schema, vocabulary, onRun, onStanding })
+  const latest = useRef({ dialect, schema, vocabulary, describe, onRun, onStanding, onLeave })
   useEffect(() => {
-    latest.current = { dialect, schema, vocabulary, onRun, onStanding }
+    latest.current = { dialect, schema, vocabulary, describe, onRun, onStanding, onLeave }
   })
+  const named = useRef(label)
+  useEffect(() => {
+    named.current = label
+    attached.current?.editor.updateOptions({ ariaLabel: ariaLabel(label) })
+  }, [label])
 
   const targetOf = (all = false): RunTarget | null => {
     const held = attached.current
@@ -149,17 +179,58 @@ export function SqlEditor({
     let stop = () => {}
     void loadMonaco().then((monaco) => {
       if (stopped) return
+      let detach = () => {}
       const waiting = whenEditor(monaco, node, (editor) => {
-        const model = editor.getModel()
+        // The tab's own document, with its history, in place of the fresh one
+        // the editor was drawn with.
+        const model = adoptDocument(editor, docKey)
         if (!model) return
         attached.current = { editor, monaco }
+        // Words of the document are not offered as completions: where this
+        // editor offers nothing — a name of the reader's own is being written —
+        // the fallback offered the nearest word and Enter wrote it over the name.
+        editor.updateOptions({
+          ariaLabel: ariaLabel(named.current),
+          wordBasedSuggestions: "off",
+        })
         if (pending.current) setMark(attached.current, pending.current)
+        if (wanted.current) {
+          wanted.current = false
+          editor.focus()
+        }
         provideCompletion(monaco, language)
+        provideHover(monaco, language)
         const untie = completeFrom(model.uri.toString(), () => ({
           model: latest.current.schema,
           dialect: latest.current.dialect,
           vocabulary: latest.current.vocabulary,
+          describe: latest.current.describe,
         }))
+
+        // Escape, then Tab, leaves. An Escape that put a list or the find box
+        // away has done its work and arms nothing; any other key disarms.
+        let leaving = false
+        const onKey = editor.onKeyDown((event) => {
+          const code = event.keyCode
+          if (code === monaco.KeyCode.Escape) {
+            leaving = !busyWidget(editor)
+            return
+          }
+          if (
+            code === monaco.KeyCode.Shift ||
+            code === monaco.KeyCode.Ctrl ||
+            code === monaco.KeyCode.Alt ||
+            code === monaco.KeyCode.Meta
+          ) {
+            return
+          }
+          if (leaving && code === monaco.KeyCode.Tab) {
+            event.preventDefault()
+            event.stopPropagation()
+            latest.current.onLeave(event.shiftKey ? -1 : 1)
+          }
+          leaving = false
+        })
 
         const run = editor.addAction({
           id: "jd.sql.run",
@@ -223,8 +294,9 @@ export function SqlEditor({
         })
         stand()
 
-        stop = () => {
+        detach = () => {
           untie()
+          onKey.dispose()
           run.dispose()
           runAll.dispose()
           lay.dispose()
@@ -232,20 +304,31 @@ export function SqlEditor({
           onText.dispose()
           gutter.clear()
           attached.current = null
+          // The editor is going with its tab: its document stays behind, with
+          // where the reader was in it. (Still in the page, it is only this
+          // effect running again, and the editor keeps what it holds.)
+          if (!node.isConnected) releaseDocument(editor, docKey)
         }
       })
-      stop = waiting
+      // The editor may be found at once or later: either way both are undone.
+      stop = () => {
+        waiting()
+        detach()
+      }
     })
     return () => {
       stopped = true
       stop()
     }
-  }, [language])
+  }, [language, docKey])
 
   useImperativeHandle(
     ref,
     () => ({
-      focus: () => attached.current?.editor.focus(),
+      focus: () => {
+        if (attached.current) attached.current.editor.focus()
+        else wanted.current = true
+      },
       target: (all) => target.current(all),
       insert: (text) => {
         const editor = attached.current?.editor
@@ -281,6 +364,18 @@ export function SqlEditor({
       />
     </div>
   )
+}
+
+const ariaLabel = (name: string) => `${name}: SQL statement. Escape, then Tab, leaves the editor.`
+
+/** Whether Escape has something of the editor's own to put away: the list of suggestions, the find box. */
+function busyWidget(editor: MonacoEditor): boolean {
+  // Neither has a public reading; an editor that answers differently is read as having nothing open.
+  type Suggest = { model?: { state?: number } }
+  type Find = { getState?: () => { isRevealed?: boolean } }
+  const suggest = editor.getContribution("editor.contrib.suggestController") as Suggest | null
+  const find = editor.getContribution("editor.contrib.findController") as Find | null
+  return (suggest?.model?.state ?? 0) !== 0 || find?.getState?.().isRevealed === true
 }
 
 /** Lays out the selection, or everything, as one edit the reader can undo. */

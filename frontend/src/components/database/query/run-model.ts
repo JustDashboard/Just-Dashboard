@@ -28,10 +28,14 @@ export interface RunStep {
   /** The engine's own words. */
   error?: string
   durationMs: number
+  /** The rows this statement was asked again for, when that is more than the run's own limit. */
+  limit?: number
 }
 
 export interface Run {
-  /** The name the server knows the run by, so it can be stopped. */
+  /** The run itself, the same through a statement of it being asked again for more rows. */
+  key?: string
+  /** The name the server knows the request now out by, so it can be stopped. */
   queryId: string
   phase: "running" | "done"
   startedAt: number
@@ -57,7 +61,18 @@ export interface Run {
   /** The reader stopped it. */
   cancelled?: boolean
   cancelling?: boolean
+  /**
+   * One statement of the run is out again for more rows: its index, and how
+   * many. The other statements keep what they came back with.
+   */
+  fetching?: { index: number; limit: number }
 }
+
+/** What tells one run from the next, whatever request of it is out. */
+export const runKey = (run: Run) => run.key ?? run.queryId
+
+/** The rows a statement was last asked for: its own when it was asked again, else the run's. */
+export const stepLimit = (run: Run, step: RunStep) => step.limit ?? run.limit
 
 export interface Explained {
   phase: "running" | "done"
@@ -248,4 +263,45 @@ export function stepToShow(run: Run): number {
 /** Whether a statement that came back cut may be asked again for more: only one that reads. */
 export function canFetchMore(step: RunStep, limit: number, max: number): boolean {
   return Boolean(step.result?.truncated) && step.risk?.level === "read" && limit < max
+}
+
+/**
+ * A run with one of its statements answered again, for more rows: that
+ * statement takes the new rows and every other keeps what it had — its
+ * result, its failure, its place among the chips.
+ */
+export function withRefetched(
+  run: Run,
+  index: number,
+  answer: QueryResponse,
+  limit: number,
+): RunStep[] {
+  return run.steps.map((step) =>
+    step.index === index
+      ? {
+          ...step,
+          status: "ok",
+          error: undefined,
+          risk: answer.risk,
+          result: answer.result,
+          durationMs: goDurationMs(answer.result.duration),
+          limit,
+        }
+      : step,
+  )
+}
+
+const DEFINES = new Set(["CREATE", "ALTER", "DROP", "RENAME", "COMMENT", "ATTACH", "DETACH"])
+
+/**
+ * Whether a run that came back may have changed what the connection holds —
+ * a table made, altered, dropped or renamed — so that the schema the tree
+ * and the completion read is worth reading again.
+ */
+export function definesSchema(run: Run): boolean {
+  if (run.refused || run.risk?.level === "read") return false
+  const first = (sql: string) =>
+    (/^(?:\s|--[^\n]*\n|\/\*[\s\S]*?\*\/)*([A-Za-z]+)/.exec(sql)?.[1] ?? "").toUpperCase()
+  const statements = run.steps.length > 0 ? run.steps.map((step) => step.sql) : [run.sql]
+  return statements.some((sql) => DEFINES.has(first(sql)))
 }

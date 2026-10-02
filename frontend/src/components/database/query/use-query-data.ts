@@ -102,8 +102,17 @@ export function useSchema(id: number, picked: string) {
   const other = usePoll((signal) => readOutline(id, picked, signal), 0, [id, picked], {
     enabled: settled && aside,
   })
+  // The foreign keys, for the joins the completion writes. They are an extra:
+  // an engine without them, a server without the route and a read that failed
+  // all leave the completion as it is without them.
+  const keys = usePoll(
+    (signal) => get<unknown>(`/databases/${id}/relations`, { schema: scope || undefined }, signal),
+    0,
+    [id, scope],
+    { enabled: settled },
+  )
   const model = useMemo(() => {
-    const base = schemaModel(outline.data, head.data)
+    const base = schemaModel(outline.data, head.data, keys.data)
     if (!aside || !other.data) return base
     const more = schemaModel(other.data, head.data)
     const known = new Set(base.tables.map((table) => `${table.schema}\u0000${table.name}`))
@@ -114,10 +123,11 @@ export function useSchema(id: number, picked: string) {
         ...more.tables.filter((table) => !known.has(`${table.schema}\u0000${table.name}`)),
       ],
     }
-  }, [outline.data, other.data, head.data, aside])
+  }, [outline.data, other.data, head.data, keys.data, aside])
   const refreshHead = head.refresh
   const refreshOutline = outline.refresh
   const refreshOther = other.refresh
+  const refreshKeys = keys.refresh
   return {
     model,
     head: head.data,
@@ -130,8 +140,9 @@ export function useSchema(id: number, picked: string) {
         refreshHead()
         refreshOutline()
         refreshOther()
+        refreshKeys()
       },
-      [refreshHead, refreshOutline, refreshOther],
+      [refreshHead, refreshOutline, refreshOther, refreshKeys],
     ),
   }
 }

@@ -2,9 +2,13 @@
 
 import { loader } from "@monaco-editor/react"
 import {
+  quotedReach,
+  subjectAt,
+  subjectNote,
   suggest,
   type SchemaModel,
   type SuggestionKind,
+  type TableColumn,
   type Vocabulary,
 } from "@/components/database/query/completion"
 import type { Dialect } from "@/components/database/query/dialect"
@@ -67,10 +71,71 @@ export function whenEditor(
   }
 }
 
+type TextModel = import("monaco-editor").editor.ITextModel
+type ViewState = import("monaco-editor").editor.ICodeEditorViewState
+
+/**
+ * The documents the editor's tabs are written in, kept while their tabs are.
+ *
+ * The shared editor makes a new document each time it is drawn, and a tab is
+ * drawn anew each time it comes to the front — so a reader who looked at
+ * another tab and came back could not undo their last edit, and found the
+ * cursor at the top. A tab's document is kept here instead, with its history
+ * and where the reader was in it, and handed back to the editor that draws
+ * the tab next. It is let go when the tab is closed for good.
+ */
+const documents = new Map<string, { model: TextModel; view: ViewState | null }>()
+
+/**
+ * Gives an editor the document kept under `key`, or keeps the one it was
+ * drawn with. A kept document whose text is not the tab's text is some other
+ * statement's — a tab id used again after the session's tabs were cleared —
+ * and is let go rather than shown. Returns the document the editor now holds.
+ */
+export function adoptDocument(editor: MonacoEditor, key: string): TextModel | null {
+  const born = editor.getModel()
+  if (!born) return null
+  const kept = documents.get(key)
+  if (kept && kept.model === born) return born
+  if (kept && !kept.model.isDisposed() && kept.model.getValue() === born.getValue()) {
+    editor.setModel(kept.model)
+    born.dispose()
+    if (kept.view) editor.restoreViewState(kept.view)
+    return kept.model
+  }
+  if (kept && !kept.model.isDisposed()) kept.model.dispose()
+  documents.set(key, { model: born, view: null })
+  return born
+}
+
+/**
+ * Takes the kept document out of an editor that is going away, with where
+ * the reader was in it, so the editor's own disposal does not take the
+ * document with it.
+ */
+export function releaseDocument(editor: MonacoEditor, key: string) {
+  const kept = documents.get(key)
+  if (!kept || editor.getModel() !== kept.model) return
+  kept.view = editor.saveViewState()
+  editor.setModel(null)
+}
+
+/** Lets a closed tab's document go. */
+export function forgetDocument(key: string) {
+  const kept = documents.get(key)
+  if (!kept) return
+  documents.delete(key)
+  if (!kept.model.isDisposed()) kept.model.dispose()
+}
+
+export type { TableColumn }
+
 export interface CompletionSource {
   model: SchemaModel
   dialect: Dialect
   vocabulary: Vocabulary
+  /** A table's columns with their types, read when a note about it is asked for. */
+  describe?: (schema: string, table: string) => Promise<TableColumn[]>
 }
 
 /** The schema each open document completes from, by the document's address. */
@@ -95,27 +160,40 @@ export function provideCompletion(monaco: Monaco, language: string) {
     view: monaco.languages.CompletionItemKind.Interface,
     schema: monaco.languages.CompletionItemKind.Module,
     alias: monaco.languages.CompletionItemKind.Variable,
+    join: monaco.languages.CompletionItemKind.Reference,
     function: monaco.languages.CompletionItemKind.Function,
     keyword: monaco.languages.CompletionItemKind.Keyword,
   }
   monaco.languages.registerCompletionItemProvider(language, {
-    triggerCharacters: ["."],
-    provideCompletionItems(model, position) {
+    // A dot asks for what the name before it holds. A space asks only where
+    // what comes next is known to be a table or a join — after FROM, JOIN and
+    // ON — so the list does not open after every word.
+    triggerCharacters: [".", " "],
+    provideCompletionItems(model, position, context) {
       const source = sources.get(model.uri.toString())?.()
       if (!source) return { suggestions: [] }
+      if (context.triggerCharacter === " ") {
+        const before = model
+          .getLineContent(position.lineNumber)
+          .slice(0, position.column - 1)
+          .trimEnd()
+        if (!/(?:^|[\s(])(?:from|join|on)$/i.test(before)) return { suggestions: [] }
+      }
       const word = model.getWordUntilPosition(position)
       const line = model.getLineContent(position.lineNumber)
       // A name being typed inside its quote is replaced quote and all, so the
       // quoted form that is written does not open a second one.
-      const before = line[word.startColumn - 2]
-      const opens = [source.dialect.quote, ...source.dialect.alsoQuotes].some(
-        ([open]) => open === before,
-      )
+      const { start, end } = quotedReach(line, word.startColumn, word.endColumn, position.column, [
+        source.dialect.quote,
+        ...source.dialect.alsoQuotes,
+      ])
+      // The opening mark, when the name is being typed inside one.
+      const mark = start < word.startColumn ? line[start - 1] : ""
       const range = {
         startLineNumber: position.lineNumber,
         endLineNumber: position.lineNumber,
-        startColumn: opens ? word.startColumn - 1 : word.startColumn,
-        endColumn: word.endColumn,
+        startColumn: start,
+        endColumn: end,
       }
       const offered = suggest(
         source.model,
@@ -130,7 +208,7 @@ export function provideCompletion(monaco: Monaco, language: string) {
           kind: kinds[item.kind],
           detail: item.detail,
           insertText: item.insert,
-          filterText: opens ? `${before}${item.label}` : item.label,
+          filterText: `${mark}${item.label}`,
           insertTextRules:
             item.kind === "function"
               ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
@@ -140,6 +218,37 @@ export function provideCompletion(monaco: Monaco, language: string) {
           range,
         })),
       }
+    },
+  })
+}
+
+const hovering = new Set<string>()
+
+/**
+ * Registers the note shown where the pointer rests on a name, once per
+ * language: a table with its columns and their types, a column with its
+ * type and the table it belongs to. The types are read when asked for; a
+ * note that cannot read them still names the columns.
+ */
+export function provideHover(monaco: Monaco, language: string) {
+  if (hovering.has(language)) return
+  hovering.add(language)
+  monaco.languages.registerHoverProvider(language, {
+    async provideHover(model, position) {
+      const source = sources.get(model.uri.toString())?.()
+      if (!source) return null
+      const subject = subjectAt(
+        source.model,
+        source.dialect,
+        model.getValue(),
+        model.getOffsetAt(position),
+      )
+      if (!subject) return null
+      const { table } = subject
+      const columns = await (source.describe?.(table.schema, table.name) ?? Promise.resolve([]))
+        .then((read) => (read.length > 0 ? read : undefined))
+        .catch(() => undefined)
+      return { contents: [{ value: subjectNote(subject, columns) }] }
     },
   })
 }

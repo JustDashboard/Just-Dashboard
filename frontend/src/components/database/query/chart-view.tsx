@@ -1,12 +1,13 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { LineChart } from "@/components/icons"
 import { BarList } from "@/components/bar-list"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import type { Series } from "@/components/metrics/metric-chart"
 import { EmptyState } from "@/components/state"
-import { chartOf } from "@/components/database/query/chart"
+import { FilterChip } from "@/components/tabs"
+import { chartOf, drawnAtFirst } from "@/components/database/query/chart"
 import type { QueryResult } from "@/components/database/query/types"
 
 const COLORS = [
@@ -25,10 +26,15 @@ const number = (value: number) =>
  * lines over time through the dashboard's own chart, a name beside a number
  * as a ranking. Anything else says what a chartable result is rather than
  * drawing a picture of a table.
+ *
+ * Several numbers over time share one axis, so they are drawn together only
+ * while they are of one magnitude. Where one would flatten the others to a
+ * line along the bottom, the first is drawn and the rest are a press away:
+ * each measure is a chip in its own series colour.
  */
 export function ChartView({ result }: { result: QueryResult | undefined }) {
   const read = useMemo(() => chartOf(result), [result])
-  const series = useMemo<Series[]>(
+  const all = useMemo<Series[]>(
     () =>
       read.kind === "series"
         ? read.series.map((entry, index) => ({
@@ -40,6 +46,19 @@ export function ChartView({ result }: { result: QueryResult | undefined }) {
         : [],
     [read],
   )
+  // What the reader turned on or off, kept with the result it was chosen for.
+  const [chosen, setChosen] = useState<{ of: typeof read; keys: string[] }>()
+  const on = useMemo(
+    () =>
+      chosen?.of === read ? chosen.keys : read.kind === "series" ? drawnAtFirst(read.series) : [],
+    [chosen, read],
+  )
+  const series = useMemo(() => all.filter((entry) => on.includes(entry.key)), [all, on])
+  const toggle = (key: string) => {
+    const next = on.includes(key) ? on.filter((entry) => entry !== key) : [...on, key]
+    // One is always drawn: the last cannot be turned off.
+    if (next.length > 0) setChosen({ of: read, keys: next })
+  }
 
   if (read.kind === "none") {
     return (
@@ -58,11 +77,32 @@ export function ChartView({ result }: { result: QueryResult | undefined }) {
       <div className="min-h-0 flex-1 overflow-auto p-4">
         <ChartPanel
           plain
-          title={`${read.series.map((entry) => entry.label).join(", ")} by ${read.time}`}
+          title={`${series.map((entry) => entry.label).join(", ")} by ${read.time}`}
+          actions={
+            all.length > 1 && (
+              <div role="group" aria-label="Measures drawn" className="flex flex-wrap gap-1">
+                {all.map((entry) => (
+                  <FilterChip
+                    key={entry.key}
+                    selected={on.includes(entry.key)}
+                    onClick={() => toggle(entry.key)}
+                    className="h-6 px-2"
+                  >
+                    <span
+                      aria-hidden
+                      className="size-1.5 shrink-0 rounded-full"
+                      style={{ background: entry.color }}
+                    />
+                    <span className="font-mono">{entry.label}</span>
+                  </FilterChip>
+                ))}
+              </div>
+            )
+          }
           rows={read.rows}
           series={series}
           format={number}
-          height={220}
+          height={200}
           showPeaks={false}
         />
       </div>

@@ -108,15 +108,44 @@ function roomFor(tabs: QueryTab[]): QueryTab[] {
 }
 
 /**
- * A statement handed over by another page. A tab that already holds exactly
- * that statement comes to the front — the same hand-over read twice (a
- * reload before the address was cleaned) is one tab, not two.
+ * A statement brought in from elsewhere — handed over by another page, taken
+ * from the history, picked from the snippets. A tab that already holds
+ * exactly that statement comes to the front: the same hand-over read twice (a
+ * reload before the address was cleaned) and the same history entry pressed
+ * twice are one tab, not two.
  */
-export function handOver(state: TabsState, sql: string): TabsState {
+export function handOver(state: TabsState, sql: string, title?: string): TabsState {
   const shown = withTab(state)
   const same = shown.tabs.find((tab) => tab.sql === sql)
   if (same) return { ...shown, active: same.id }
-  return openTab(shown, { sql })
+  return openTab(shown, { sql, title })
+}
+
+/**
+ * Whether an opening has somewhere to go: a tab it would come to the front
+ * as, a blank tab to fill, or room for one more. At the limit with every tab
+ * holding something it has none, and the reader is told rather than left
+ * looking at the tab they were on.
+ */
+export function hasRoom(state: TabsState, opening: Opening): boolean {
+  const shown = withTab(state)
+  if (opening.saved !== undefined && shown.tabs.some((tab) => tab.saved === opening.saved)) {
+    return true
+  }
+  if (opening.saved === undefined && shown.tabs.some((tab) => tab.sql === opening.sql)) return true
+  return shown.tabs.length < MAX_TABS || shown.tabs.some(blank)
+}
+
+/** A tab's name taken from its statement: the first few words of its first line. */
+export function titleOf(sql: string, max = 28): string {
+  const flat = sql
+    .replace(/^\s*(?:--[^\n]*\n\s*|\/\*[\s\S]*?\*\/\s*)*/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (flat.length <= max) return flat
+  const cut = flat.slice(0, max)
+  const space = cut.lastIndexOf(" ")
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
 /** A new blank tab, in front. */

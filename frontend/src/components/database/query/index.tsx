@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { SidebarLeftClose, SidebarLeftOpen } from "@/components/icons"
 import { del, errorMessage, post, put } from "@/lib/api"
@@ -9,7 +9,6 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
-import { useConfirm } from "@/components/confirm-dialog"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { Field, FormFact, Statement } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
@@ -23,15 +22,17 @@ import { CommandStrip } from "@/components/database/query/command-strip"
 import type { SchemaTable } from "@/components/database/query/completion"
 import { dialectOf, qualifiedName, quoteName } from "@/components/database/query/dialect"
 import { SqlEditor, type SqlEditorHandle, type Standing } from "@/components/database/query/editor"
+import { errorPlace } from "@/components/database/query/error-place"
 import { gate } from "@/components/database/query/gate"
 import { RESERVED, vocabularyOf } from "@/components/database/query/keywords"
+import { forgetDocument, type TableColumn } from "@/components/database/query/monaco"
 import { QueryRail, type RailView } from "@/components/database/query/rail"
 import { Results, ROW_LIMITS, type ResultsViewId } from "@/components/database/query/results"
-import type { RunStep } from "@/components/database/query/run-model"
+import { definesSchema, type RunStep } from "@/components/database/query/run-model"
 import { snippetsFor } from "@/components/database/query/snippets"
 import { SplitHandle } from "@/components/database/query/split-handle"
 import { firstLine, splitStatements } from "@/components/database/query/sql-text"
-import { TabStrip } from "@/components/database/query/tab-strip"
+import { TabStrip, tabElementId } from "@/components/database/query/tab-strip"
 import {
   MAX_TABS,
   NO_TABS,
@@ -40,6 +41,7 @@ import {
   closeTab,
   followSaved,
   handOver,
+  hasRoom,
   isChanged,
   newTab,
   openTab,
@@ -47,11 +49,19 @@ import {
   restoreTab,
   setTabSql,
   showTab,
+  titleOf,
   withTab,
+  type Opening,
   type TabsState,
 } from "@/components/database/query/tabs"
 import type { ClassifyResponse, SavedQuery } from "@/components/database/query/types"
-import { useHistory, useSavedQueries, useSchema } from "@/components/database/query/use-query-data"
+import { useAsking } from "@/components/database/query/use-asking"
+import {
+  readColumns,
+  useHistory,
+  useSavedQueries,
+  useSchema,
+} from "@/components/database/query/use-query-data"
 import { useResultExport } from "@/components/database/query/use-result-export"
 import { useRunner } from "@/components/database/query/use-runner"
 
@@ -72,7 +82,8 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
  * writes over one: a statement handed in by another page (`?sql=`), a history
  * entry, a snippet and a saved query each open in a tab of their own. The
  * hand-over is read once and taken out of the address, so a reload or Back
- * does not bring it in again.
+ * does not bring it in again. At the limit of tabs the reader is told, and a
+ * hand-over waits in the address until a tab has been closed for it.
  *
  * What a statement would do is the server's to say, and it is asked every
  * time, of the exact text about to run (`use-runner`): nothing is run on the
@@ -81,7 +92,9 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
 export function SqlQuery() {
   const { id, conn, engine, selection, select } = useDatabase()
   const { can } = useAuth()
-  const { confirm, dialog } = useConfirm()
+  const { confirm, dialog } = useAsking()
+  const ids = useId()
+  const panelId = `${ids}-editor`
   const dialect = useMemo(() => dialectOf(engine.driver), [engine.driver])
   const vocabulary = useMemo(() => vocabularyOf(engine.driver), [engine.driver])
   const snippets = useMemo(() => snippetsFor(engine.id, engine.driver), [engine.id, engine.driver])
@@ -96,6 +109,23 @@ export function SqlQuery() {
   )
   const tab = activeTab(tabs)
 
+  // Opens a statement where there is somewhere for it to go, and says so where
+  // there is not: at the limit, with every tab holding something, an opening
+  // used to do nothing at all.
+  const place = useCallback(
+    (opening: Opening, how: (state: TabsState) => TabsState): boolean => {
+      if (!hasRoom(tabs, opening)) {
+        notify.warning(`${MAX_TABS} tabs are open`, {
+          description: "Close one to open this statement.",
+        })
+        return false
+      }
+      setTabs(how)
+      return true
+    },
+    [tabs, setTabs],
+  )
+
   // A statement handed over in the address opens in a tab of its own and is
   // taken out of the address. It is read from the router rather than from the
   // section's selection: the selection can still be answering with an earlier
@@ -104,16 +134,31 @@ export function SqlQuery() {
   const search = useSearchParams()
   const handed = search.get("sql") ?? ""
   const taken = useRef("")
+  const waiting = useRef("")
   useEffect(() => {
     if (!handed) {
       taken.current = ""
+      waiting.current = ""
       return
     }
     if (taken.current === handed) return
+    // No tab for it: it stays in the address, said once, and is opened when
+    // a tab has been closed.
+    if (!hasRoom(tabs, { sql: handed })) {
+      if (waiting.current !== handed) {
+        waiting.current = handed
+        notify.warning(`${MAX_TABS} tabs are open`, {
+          description: "Close one, and the statement handed over opens in its place.",
+          duration: 12_000,
+        })
+      }
+      return
+    }
     taken.current = handed
+    waiting.current = ""
     setTabs((state) => handOver(state, handed))
     select({ sql: null })
-  }, [handed, setTabs, select])
+  }, [handed, tabs, setTabs, select])
 
   const saved = useSavedQueries(id)
   const history = useHistory(id)
@@ -131,10 +176,11 @@ export function SqlQuery() {
     followed.current = linked
     const query = saved.data.find((entry) => String(entry.id) === linked)
     if (query) {
-      setTabs((state) => openTab(state, { sql: query.sql, title: query.name, saved: query.id }))
+      const opening = { sql: query.sql, title: query.name, saved: query.id }
+      place(opening, (state) => openTab(state, opening))
     } else notify.info("That saved query is not here any more")
     select({ saved: null })
-  }, [linked, saved.data, setTabs, select])
+  }, [linked, saved.data, place, select])
 
   /* -------------------------------------------------------------- layout */
 
@@ -159,7 +205,27 @@ export function SqlQuery() {
   /* -------------------------------------------------------------- schema */
 
   const schema = useSchema(id, selection.schema)
-  const picked = selection.schema || schema.model.defaultSchema
+  // Named from the catalogue while the outline is still on its way, so the
+  // picker never says "default" for a schema whose name is already known.
+  const picked = selection.schema || schema.model.defaultSchema || schema.head?.defaultSchema || ""
+
+  // A table's columns with their types, for the note under the pointer: read
+  // once per table and kept while the page is.
+  const described = useRef(new Map<string, Promise<TableColumn[]>>())
+  const describe = useCallback(
+    (ofSchema: string, table: string) => {
+      const key = `${ofSchema}\u0000${table}`
+      let read = described.current.get(key)
+      if (!read) {
+        read = readColumns(id, ofSchema, table)
+        described.current.set(key, read)
+        // One that failed is asked for again the next time.
+        read.catch(() => described.current.delete(key))
+      }
+      return read
+    },
+    [id],
+  )
 
   /* ----------------------------------------------------------- the editor */
 
@@ -210,7 +276,30 @@ export function SqlQuery() {
   /* ------------------------------------------------------------- running */
 
   const refreshHistory = history.refresh
-  const runner = useRunner({ confirm, onSettled: refreshHistory })
+  const refreshSchema = schema.refresh
+  const runner = useRunner({
+    // However the reader answers, the keyboard goes back to the statement.
+    confirm: useCallback(
+      (request, closed) =>
+        confirm(request, () => {
+          closed?.()
+          setTimeout(() => editor.current?.focus(), 0)
+        }),
+      [confirm],
+    ),
+    onSettled: useCallback(
+      (ran) => {
+        refreshHistory()
+        // A table made, altered or dropped from here is known to the tree and
+        // to the completion without the reader asking for the list again.
+        if (ran && definesSchema(ran)) {
+          described.current.clear()
+          refreshSchema()
+        }
+      },
+      [refreshHistory, refreshSchema],
+    ),
+  })
   const held = runner.runs[tab.id]
   const running = held?.run?.phase === "running"
   const verdict = advised ? gate(advised, runner.asker) : undefined
@@ -232,7 +321,7 @@ export function SqlQuery() {
   const run = useCallback(
     (all: boolean, rows = limit) => {
       const target = editor.current?.target(all)
-      if (!target || running) return
+      if (!target || running || runner.checking === tab.id) return
       editor.current?.mark(null)
       setView("results")
       void runner.run(tab.id, target, { limit: rows, transaction: transaction && canTransact })
@@ -263,9 +352,14 @@ export function SqlQuery() {
       }
       const spans = splitStatements(ran.sql, dialect)
       const span = spans.length === ran.steps.length ? spans[step.index] : undefined
+      const start = span?.start ?? 0
+      const text = span ? ran.sql.slice(span.start, span.end) : ran.sql
+      // The engine's words often name what it tripped on; where they do, that
+      // is what is marked, and the whole statement where they do not.
+      const at = step.error ? errorPlace(step.error, text, dialect) : null
       editor.current?.mark({
-        offset: ran.offset + (span?.start ?? 0),
-        length: span ? span.end - span.start : ran.sql.length,
+        offset: ran.offset + start + (at?.start ?? 0),
+        length: at ? at.length : text.length,
         message: step.error ?? "This statement failed",
       })
       editor.current?.focus()
@@ -326,43 +420,53 @@ export function SqlQuery() {
   )
 
   const deleteSaved = useCallback(
-    (query: SavedQuery) =>
-      confirm({
-        title: "Delete saved query",
-        confirmLabel: "Delete",
-        subject: {
-          mark: <EngineMark engine={engine} size="sm" />,
-          name: query.name,
-          facts: <FormFact label="Kept for">{conn.name}</FormFact>,
+    (query: SavedQuery, closed: (deleted: boolean) => void) => {
+      let deleted = false
+      confirm(
+        {
+          title: "Delete saved query",
+          confirmLabel: "Delete",
+          subject: {
+            mark: <EngineMark engine={engine} size="sm" />,
+            name: query.name,
+            facts: <FormFact label="Kept for">{conn.name}</FormFact>,
+          },
+          description: (
+            <div className="space-y-3">
+              <p>
+                The statement is taken off the list for everybody who opens this connection. A tab
+                that holds it keeps its text.
+              </p>
+              <Statement sql={query.sql} placeholder="" />
+            </div>
+          ),
+          action: async () => {
+            await del(`/databases/${id}/queries/${query.id}`)
+            deleted = true
+            setTabs((state) => followSaved(state, { id: query.id, gone: true }))
+            refreshSaved()
+            notify.success(`Deleted ${query.name}`)
+            return "reported"
+          },
         },
-        description: (
-          <div className="space-y-3">
-            <p>
-              The statement is taken off the list for everybody who opens this connection. A tab
-              that holds it keeps its text.
-            </p>
-            <Statement sql={query.sql} placeholder="" />
-          </div>
-        ),
-        action: async () => {
-          await del(`/databases/${id}/queries/${query.id}`)
-          setTabs((state) => followSaved(state, { id: query.id, gone: true }))
-          refreshSaved()
-          notify.success(`Deleted ${query.name}`)
-          return "reported"
-        },
-      }),
+        () => closed(deleted),
+      )
+    },
     [confirm, engine, conn.name, id, setTabs, refreshSaved],
   )
 
   /* ---------------------------------------------------------------- tabs */
 
+  // A statement from the history or the snippets: the tab that already holds
+  // exactly it comes to the front, else it opens in one of its own, named for
+  // what it is.
   const openStatement = useCallback(
     (sql: string, title?: string) => {
-      setTabs((state) => openTab(state, { sql, title }))
+      const named = title ?? titleOf(sql)
+      if (!place({ sql }, (state) => handOver(state, sql, named))) return
       if (!railBeside) setRailOver(false)
     },
-    [setTabs, railBeside],
+    [place, railBeside],
   )
 
   const close = useCallback(
@@ -373,24 +477,28 @@ export function SqlQuery() {
       // A statement still out is stopped with its tab: nothing is left running where nobody can see it.
       runner.cancel(tabId)
       setTabs((state) => closeTab(state, tabId))
+      const forget = () => {
+        runner.forget(tabId)
+        forgetDocument(`${id}:${tabId}`)
+      }
       // A draft that was never kept is the one thing closing loses: it can be put back.
       if (closed.sql.trim() && (closed.saved === undefined || isChanged(closed))) {
         // What it ran is kept while it can still be put back, and let go after.
-        const forget = setTimeout(() => runner.forget(tabId), 12_000)
+        const later = setTimeout(forget, 12_000)
         notify.info(`Closed ${closed.title}`, {
           description: firstLine(closed.sql, 80),
           duration: 10_000,
           action: {
             label: "Undo",
             onClick: () => {
-              clearTimeout(forget)
+              clearTimeout(later)
               setTabs((state) => restoreTab(state, closed, at))
             },
           },
         })
-      } else runner.forget(tabId)
+      } else forget()
     },
-    [tabs.tabs, setTabs, runner],
+    [tabs.tabs, setTabs, runner, id],
   )
 
   const insertName = useCallback(
@@ -464,9 +572,8 @@ export function SqlQuery() {
               canWrite={canWrite}
               openSaved={tab.saved}
               onOpenSaved={(query) => {
-                setTabs((state) =>
-                  openTab(state, { sql: query.sql, title: query.name, saved: query.id }),
-                )
+                const opening = { sql: query.sql, title: query.name, saved: query.id }
+                if (!place(opening, (state) => openTab(state, opening))) return
                 if (!railBeside) setRailOver(false)
               }}
               onRenameSaved={renameSaved}
@@ -517,12 +624,18 @@ export function SqlQuery() {
               {railShown ? <SidebarLeftClose /> : <SidebarLeftOpen />}
             </IconAction>
             <TabStrip
+              idBase={ids}
+              panelId={panelId}
               tabs={tabs.tabs}
               active={tab.id}
               running={runningTabs}
               onShow={(tabId) => setTabs((state) => showTab(state, tabId))}
               onClose={close}
-              onNew={() => setTabs(newTab)}
+              onNew={() => {
+                setTabs(newTab)
+                // A new tab is opened to be written in.
+                setTimeout(() => editor.current?.focus(), 0)
+              }}
               onRename={(tabId, title) => {
                 const renamed = tabs.tabs.find((entry) => entry.id === tabId)
                 if (!renamed || !title.trim() || title.trim() === renamed.title) return
@@ -537,10 +650,18 @@ export function SqlQuery() {
             />
           </div>
 
-          <div style={{ flex: `${1 - share} 1 0%` }} className="flex min-h-24 min-w-0 flex-col">
+          <div
+            role="tabpanel"
+            id={panelId}
+            aria-labelledby={tabElementId(ids, tab.id)}
+            style={{ flex: `${1 - share} 1 0%` }}
+            className="flex min-h-24 min-w-0 flex-col"
+          >
             <SqlEditor
               key={tab.id}
               ref={editor}
+              docKey={`${id}:${tab.id}`}
+              label={tab.title}
               className="min-h-0 flex-1"
               value={tab.sql}
               onChange={(sql) => setTabs((state) => setTabSql(state, tab.id, sql))}
@@ -548,6 +669,16 @@ export function SqlQuery() {
               dialect={dialect}
               schema={schema.model}
               vocabulary={vocabulary}
+              describe={describe}
+              onLeave={(direction) =>
+                frame.current
+                  ?.querySelector<HTMLElement>(
+                    direction > 0
+                      ? '[data-slot="query-commands"] button:not(:disabled)'
+                      : '[data-slot="query-tabs"] [role="tab"][aria-selected="true"]',
+                  )
+                  ?.focus()
+              }
               onRun={run}
               onSave={() => void save()}
               onStanding={onStanding}
@@ -608,15 +739,11 @@ export function SqlQuery() {
               }
               onRun={() => run(false)}
               onCancel={() => runner.cancel(tab.id)}
+              compact={compact}
               onFetchMore={(step, rows) => {
+                // The one statement is asked again; the others keep what they returned.
                 const ran = held?.run
-                if (!ran || runner.runs[tab.id]?.run?.phase === "running") return
-                setView("results")
-                void runner.run(
-                  tab.id,
-                  { scope: "statement", sql: step.sql, offset: ran.offset, line: step.line },
-                  { limit: rows, transaction: false },
-                )
+                if (ran) void runner.fetchMore(tab.id, ran, step, rows)
               }}
               onExplain={explain}
               onExport={(sql, format, rows) => void exporter.run(sql, format, rows)}

@@ -488,7 +488,22 @@ export function planRows(plan: Plan): PlanRow[] {
     inclusive.set(node, own)
     return own
   }
-  const whole = total(plan.root)
+  total(plan.root)
+  // A step cannot take longer than the step it runs inside. MariaDB times a
+  // sort that drives its own table read with the read included, and times
+  // the table as well: added up, the two came to more than the statement
+  // took. What a parent states is the most its steps can have taken, and what
+  // is left of a step once its own steps are taken out is the step's own.
+  const cap = (node: PlanNode, most: number | undefined) => {
+    const own = inclusive.get(node) ?? {}
+    if (own.timeMs !== undefined && most !== undefined && own.timeMs > most) {
+      inclusive.set(node, { ...own, timeMs: most })
+    }
+    const mine = inclusive.get(node)?.timeMs
+    for (const child of node.children) cap(child, mine ?? most)
+  }
+  cap(plan.root, undefined)
+  const whole = inclusive.get(plan.root) ?? {}
   let mostRows = 0
   const walk = (node: PlanNode, id: string, depth: number, rails: boolean[], last: boolean) => {
     const own = inclusive.get(node) ?? {}
@@ -499,12 +514,14 @@ export function planRows(plan: Plan): PlanRow[] {
       own.cost,
       below.map((child) => child.cost),
     )
+    const left = self(
+      own.timeMs,
+      below.map((child) => child.timeMs),
+    )
     const selfTime =
-      node.ownTimeMs ??
-      self(
-        own.timeMs,
-        below.map((child) => child.timeMs),
-      )
+      node.ownTimeMs !== undefined && left !== undefined
+        ? Math.min(node.ownTimeMs, left)
+        : (node.ownTimeMs ?? left)
     const seen = node.actualRows ?? node.rows
     if (seen !== undefined) mostRows = Math.max(mostRows, seen)
     rows.push({

@@ -266,6 +266,52 @@ describe("a MariaDB plan", () => {
     expect(by["Index lookup"].node.actualRows).toBe(180)
     expect(by["Index range scan"].node.facts).toContainEqual(["Pages accessed", "3"])
   })
+  test("no step takes longer than the statement it ran inside", () => {
+    // As MariaDB 11.8 answered: the sort is timed with the table read it
+    // drives, and the table is timed as well — 0.38 + 0.38 under a statement
+    // that took 0.42. The steps came to 0.73 ms inside 0.42 ms.
+    const plan = planOf({
+      query_block: {
+        select_id: 1,
+        cost: 0.16,
+        r_loops: 1,
+        r_total_time_ms: 0.41537062,
+        nested_loop: [
+          {
+            read_sorted_file: {
+              r_rows: 5,
+              filesort: {
+                sort_key: "posts.views desc",
+                r_loops: 1,
+                r_total_time_ms: 0.376793962,
+                table: {
+                  table_name: "posts",
+                  access_type: "ALL",
+                  rows: 774,
+                  r_rows: 800,
+                  r_loops: 1,
+                  r_table_time_ms: 0.256213334,
+                  r_other_time_ms: 0.128580787,
+                },
+              },
+            },
+          },
+        ],
+      },
+    })
+    const rows = planRows(plan)
+    const whole = rows[0].timeMs
+    expect(whole).toBeCloseTo(0.41537062, 6)
+    for (const row of rows) expect(row.timeMs ?? 0).toBeLessThanOrEqual(whole + 1e-9)
+    const by = Object.fromEntries(rows.map((row) => [row.node.title, row]))
+    // What is left of the sort once its read is taken out is the sort's own.
+    expect(by["Sort"].timeMs).toBeCloseTo(0.41537062, 6)
+    expect(by["Full table scan"].timeMs).toBeCloseTo(0.384794121, 6)
+    expect(by["Sort"].timeShare).toBeCloseTo((0.41537062 - 0.384794121) / 0.41537062, 5)
+    // The shares of the steps' own time come to the whole, not to more than it.
+    const shares = rows.reduce((total, row) => total + (row.timeShare ?? 0), 0)
+    expect(shares).toBeCloseTo(1, 5)
+  })
 })
 
 describe("a plan that came as rows", () => {

@@ -18,6 +18,7 @@ import {
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import type { Standing } from "@/components/database/query/editor"
 import { riskWord, type Gate } from "@/components/database/query/gate"
+import { useKeyNames } from "@/components/database/query/keys"
 import { ROW_LIMITS, useElapsed } from "@/components/database/query/results"
 import { elapsedText, type Run } from "@/components/database/query/run-model"
 import type { Risk } from "@/components/database/query/types"
@@ -100,6 +101,7 @@ export function CommandStrip({
   /** The editor holds nothing to run. */
   empty: boolean
 }) {
+  const keys = useKeyNames()
   const running = run?.phase === "running"
   const refused = verdict && !verdict.run ? verdict.why : undefined
   const words = standingWords(standing)
@@ -118,7 +120,7 @@ export function CommandStrip({
               className="h-7 rounded-r-none px-2.5 max-sm:h-8"
               disabled={empty || refused !== undefined}
               pending={checking}
-              title="Ctrl+Enter"
+              title={keys.run}
               onClick={() => onRun(false)}
             >
               <Play />
@@ -139,11 +141,11 @@ export function CommandStrip({
               <DropdownMenuContent align="start" className="w-72">
                 <DropdownMenuItem onSelect={() => onRun(false)}>
                   <span className="flex-1">Run the selection or statement</span>
-                  <span className="text-hint text-muted-foreground">Ctrl+Enter</span>
+                  <span className="text-hint text-muted-foreground">{keys.run}</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onRun(true)}>
                   <span className="flex-1">Run everything</span>
-                  <span className="text-hint text-muted-foreground">Ctrl+Shift+Enter</span>
+                  <span className="text-hint text-muted-foreground">{keys.runAll}</span>
                 </DropdownMenuItem>
                 {canTransact && (
                   <>
@@ -234,7 +236,7 @@ export function CommandStrip({
         variant="ghost"
         aria-label="Format"
         className="h-7 shrink-0 max-sm:h-8"
-        title="Shift+Alt+F"
+        title={keys.format}
         disabled={empty}
         onClick={onFormat}
       >
@@ -247,7 +249,7 @@ export function CommandStrip({
           variant="ghost"
           aria-label={saved ? "Save" : "Save as"}
           className="h-7 shrink-0 max-sm:h-8"
-          title="Ctrl+S"
+          title={keys.save}
           disabled={empty || (saved && !changed)}
           onClick={onSave}
         >
@@ -258,7 +260,12 @@ export function CommandStrip({
 
       <div
         aria-live="polite"
-        className="ml-auto flex min-w-0 items-center justify-end gap-2 text-hint text-muted-foreground"
+        className={cn(
+          "ml-auto flex min-w-0 items-center justify-end gap-2 text-hint text-muted-foreground",
+          // A sentence takes what is left of the line and is cut there, rather
+          // than dropping to a line of its own under the commands.
+          (!canRun || refused) && "flex-1 basis-40",
+        )}
       >
         {!canRun && (
           <span className="min-w-0 truncate">
@@ -312,7 +319,9 @@ function RunningControls({
         </Button>
       )}
       <span role="status" className="flex items-center gap-1.5 text-xs">
-        <TextShimmer>{run.cancelling ? "Stopping…" : "Running…"}</TextShimmer>
+        <TextShimmer>
+          {run.cancelling ? "Stopping…" : run.fetching ? "Fetching…" : "Running…"}
+        </TextShimmer>
         <span className="numeric text-muted-foreground">{elapsedText(elapsed)}</span>
       </span>
     </div>

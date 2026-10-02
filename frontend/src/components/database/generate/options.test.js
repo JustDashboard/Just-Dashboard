@@ -4,10 +4,12 @@ import {
   editorLanguage,
   firstProblem,
   groupTargets,
+  optionsLine,
   readResult,
   readTargets,
   requestBody,
   resolveOptions,
+  startingTarget,
   tableName,
   unsupportedReason,
 } from "./options"
@@ -173,5 +175,42 @@ describe("what was generated", () => {
     expect(tableName("public", "orders", false)).toBe("orders")
     expect(tableName("public", "orders", true)).toBe("public.orders")
     expect(tableName("", "orders", true)).toBe("orders")
+  })
+})
+
+describe("the generator a visit opens on", () => {
+  const targets = [prisma, gorm, sql]
+  test("is the one last used, where this engine has it", () => {
+    expect(startingTarget(targets, "gorm", "postgres", false)).toBe(gorm)
+    expect(startingTarget(targets, "sql", "postgres", false)).toBe(sql)
+  })
+  test("is not a refusal: one remembered that this engine lacks gives way to the first it has", () => {
+    // ClickHouse opened on "Prisma is not written for ClickHouse".
+    expect(startingTarget(targets, "prisma", "clickhouse", false)).toBe(gorm)
+    expect(startingTarget(targets, "never-heard-of", "clickhouse", false)).toBe(gorm)
+  })
+  test("…unless the reader picked it on this visit: then the reason is what they asked to see", () => {
+    expect(startingTarget(targets, "prisma", "clickhouse", true)).toBe(prisma)
+  })
+  test("an engine nothing is written for still shows a generator, and no catalogue shows none", () => {
+    expect(startingTarget(targets, "prisma", "oracle", false)).toBe(prisma)
+    expect(startingTarget(targets, "gone", "oracle", false)).toBe(prisma)
+    expect(startingTarget([], "prisma", "postgres", false)).toBeUndefined()
+  })
+})
+
+describe("what a target's switches are set to, in a line", () => {
+  test("only what differs from the server's defaults is said", () => {
+    expect(optionsLine(prisma, resolveOptions(prisma, undefined))).toBe(
+      "As the generator sets them",
+    )
+    expect(
+      optionsLine(
+        prisma,
+        resolveOptions(prisma, { naming: "camel", views: true, relations: false }),
+      ),
+    ).toBe("Relations off · Views on · Naming camelCase")
+    expect(optionsLine(gorm, { package: "store" })).toBe("Package store")
+    expect(optionsLine(sql, {})).toBe("As the generator sets them")
   })
 })

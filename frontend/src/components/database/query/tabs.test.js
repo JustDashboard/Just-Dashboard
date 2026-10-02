@@ -7,6 +7,7 @@ import {
   closeTab,
   followSaved,
   handOver,
+  hasRoom,
   isChanged,
   newTab,
   openTab,
@@ -14,6 +15,7 @@ import {
   restoreTab,
   setTabSql,
   showTab,
+  titleOf,
   withTab,
 } from "./tabs"
 
@@ -117,5 +119,53 @@ describe("the editor's tabs", () => {
     expect(full.tabs).toHaveLength(MAX_TABS)
     expect(openTab(full, { sql: "one more" }).tabs).toHaveLength(MAX_TABS)
     expect(newTab(full).tabs).toHaveLength(MAX_TABS)
+  })
+})
+
+describe("opening at the limit, and what a tab is called", () => {
+  const full = () => {
+    let state = NO_TABS
+    for (let n = 0; n < MAX_TABS; n++) state = openTab(newTab(state), { sql: `select ${n}` })
+    return { ...state, tabs: state.tabs.map((tab) => ({ ...tab, sql: tab.sql || "x" })) }
+  }
+  test("there is room for a statement while a tab is free, blank, or already holds it", () => {
+    expect(hasRoom(NO_TABS, { sql: "select 1" })).toBe(true)
+    const state = full()
+    expect(state.tabs).toHaveLength(MAX_TABS)
+    // At the limit with every tab holding something an opening used to do nothing, silently.
+    expect(hasRoom(state, { sql: "handed over at the limit" })).toBe(false)
+    expect(hasRoom(state, { sql: state.tabs[3].sql })).toBe(true)
+    const blanked = {
+      ...state,
+      tabs: state.tabs.map((tab, n) => (n === 5 ? { ...tab, sql: "" } : tab)),
+    }
+    expect(hasRoom(blanked, { sql: "one more" })).toBe(true)
+  })
+  test("a saved query has room when its own tab is open, whatever its text has become", () => {
+    const state = full()
+    const bound = {
+      ...state,
+      tabs: state.tabs.map((tab, n) => (n === 0 ? { ...tab, saved: 9, savedSql: "old" } : tab)),
+    }
+    expect(hasRoom(bound, { sql: "old", saved: 9 })).toBe(true)
+    expect(hasRoom(bound, { sql: "old", saved: 10 })).toBe(false)
+  })
+  test("the same statement brought in twice is one tab, named for the statement", () => {
+    let state = handOver(NO_TABS, "select 1", "select 1")
+    state = handOver(
+      state,
+      "select * from orders where id = 7",
+      titleOf("select * from orders where id = 7"),
+    )
+    state = handOver(state, "select 1", "select 1")
+    expect(state.tabs.map((tab) => tab.title)).toEqual(["select 1", "select * from orders where…"])
+    expect(activeTab(state).sql).toBe("select 1")
+  })
+  test("a tab's name from its statement: its first words, leading comments left out", () => {
+    expect(titleOf("select 1")).toBe("select 1")
+    expect(titleOf("-- sizes\n\nselect   relname,\n pg_size from pg_class")).toBe(
+      "select relname, pg_size…",
+    )
+    expect(titleOf("x".repeat(60))).toBe(`${"x".repeat(28)}…`)
   })
 })

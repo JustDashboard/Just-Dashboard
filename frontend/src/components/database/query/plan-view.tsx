@@ -249,7 +249,7 @@ function MeasureHead({ measure, wide }: { measure: keyof typeof MEASURES; wide?:
     <span
       className={cn(
         "flex shrink-0 items-center justify-end gap-1.5",
-        wide ? "w-24 @2xl:w-44" : "w-14 @2xl:w-32",
+        wide ? "w-24 @2xl:w-44 @5xl:w-64" : "w-14 @2xl:w-32 @5xl:w-52",
       )}
     >
       <span aria-hidden className="size-1.5 rounded-full" style={{ background: spec.color }} />
@@ -429,14 +429,16 @@ function Measure({
       title={title}
       className={cn(
         "flex shrink-0 items-center justify-end gap-2",
-        wide ? "w-24 @2xl:w-44" : "w-14 @2xl:w-32",
+        wide ? "w-24 @2xl:w-44 @5xl:w-64" : "w-14 @2xl:w-32 @5xl:w-52",
       )}
     >
-      {/* The bar gives way before the figure does: on a narrow pane the numbers are the reading. */}
+      {/* The bar gives way before the figure does: on a narrow pane the numbers
+          are the reading. On a wide one it grows with the pane, so the figures
+          stay near the step they belong to instead of across an empty row. */}
       {share !== undefined && (
         <span
           aria-hidden
-          className="hidden h-1 w-12 shrink-0 overflow-hidden rounded-full bg-meter-track @2xl:block"
+          className="hidden h-1 w-12 shrink-0 overflow-hidden rounded-full bg-meter-track @2xl:block @5xl:w-28"
         >
           <span
             className="block h-full rounded-full"

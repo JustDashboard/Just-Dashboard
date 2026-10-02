@@ -15,7 +15,8 @@ export type ChartRead =
       /** The column the instants came from. */
       time: string
       rows: ({ ts: number } & Record<string, number>)[]
-      series: { key: string; label: string }[]
+      /** Each with the largest size it reaches, so series of other magnitudes can be told apart. */
+      series: { key: string; label: string; most: number }[]
     }
   | {
       kind: "bars"
@@ -107,7 +108,11 @@ export function chartOf(result: QueryResult | undefined): ChartRead {
       kind: "series",
       time: result.columns[time],
       rows,
-      series: drawn.map((index) => ({ key: `c${index}`, label: result.columns[index] })),
+      series: drawn.map((index) => ({
+        key: `c${index}`,
+        label: result.columns[index],
+        most: rows.reduce((most, row) => Math.max(most, Math.abs(row[`c${index}`] ?? 0)), 0),
+      })),
     }
   }
 
@@ -143,4 +148,20 @@ export function chartOf(result: QueryResult | undefined): ChartRead {
         ? "Nothing here is a number. A chart needs a column of numbers beside a column of instants or of names."
         : "A chart needs a column of instants or of names beside the numbers.",
   }
+}
+
+/** Past this ratio between two series' largest values, the smaller one is a flat line on the larger one's axis. */
+const SAME_AXIS = 20
+
+/**
+ * Which series are drawn when a result first lands. Series of one magnitude
+ * share an axis and are drawn together; where one would flatten another —
+ * 131 orders beside 105,162 of revenue reads as "orders is zero" — only the
+ * first is, and the reader turns the others on.
+ */
+export function drawnAtFirst(series: readonly { key: string; most: number }[]): string[] {
+  if (series.length === 0) return []
+  const sizes = series.map((entry) => entry.most).filter((most) => most > 0)
+  const apart = sizes.length > 1 && Math.max(...sizes) / Math.min(...sizes) > SAME_AXIS
+  return apart ? [series[0].key] : series.map((entry) => entry.key)
 }

@@ -1,14 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import {
   canFetchMore,
+  definesSchema,
   elapsedText,
   goDurationMs,
   messagesOf,
   spanText,
   stepOutcome,
   stepToShow,
+  runKey,
+  stepLimit,
   stepsOfQuery,
   stepsOfScript,
+  withRefetched,
 } from "./run-model"
 
 const READ = { destructive: false, level: "read", reasons: [] }
@@ -229,5 +233,104 @@ describe("fetching more of a cut result", () => {
     expect(canFetchMore(step(READ, false), 500, 5000)).toBe(false)
     expect(canFetchMore(step(WRITE, true), 500, 5000)).toBe(false)
     expect(canFetchMore(step(undefined, true), 500, 5000)).toBe(false)
+  })
+})
+
+describe("one statement of a run asked again for more rows", () => {
+  const steps = [
+    {
+      index: 0,
+      sql: "select 1",
+      line: 1,
+      risk: READ,
+      status: "ok",
+      result: rows(1),
+      durationMs: 1,
+    },
+    {
+      index: 1,
+      sql: "select * from customers",
+      line: 1,
+      risk: READ,
+      status: "ok",
+      result: rows(500, { truncated: true }),
+      durationMs: 9,
+    },
+    {
+      index: 2,
+      sql: "select nope",
+      line: 2,
+      risk: READ,
+      status: "error",
+      error: "no",
+      durationMs: 0,
+    },
+  ]
+  const ran = run({ steps, failed: 2, limit: 500, script: true })
+  test("takes the new rows and leaves every other statement what it had", () => {
+    const next = withRefetched(
+      ran,
+      1,
+      { result: rows(1000, { truncated: true }), risk: READ },
+      1000,
+    )
+    expect(next).toHaveLength(3)
+    expect(next[0]).toBe(steps[0])
+    expect(next[2]).toBe(steps[2])
+    expect(next[1].result.rowCount).toBe(1000)
+    expect(next[1].limit).toBe(1000)
+    expect(next[1].sql).toBe("select * from customers")
+  })
+  test("is then asked for more from where it stands, not from the run's first limit", () => {
+    const [, again] = withRefetched(
+      ran,
+      1,
+      { result: rows(1000, { truncated: true }), risk: READ },
+      1000,
+    )
+    expect(stepLimit(ran, steps[1])).toBe(500)
+    expect(stepLimit(ran, again)).toBe(1000)
+    expect(canFetchMore(again, stepLimit(ran, again), 5000)).toBe(true)
+    expect(canFetchMore(again, 5000, 5000)).toBe(false)
+  })
+  test("the run is the same run whatever request of it is out", () => {
+    expect(runKey({ ...ran, key: "first", queryId: "second" })).toBe("first")
+    expect(runKey({ ...ran, queryId: "only" })).toBe("only")
+  })
+})
+
+describe("whether a run may have changed what the connection holds", () => {
+  const made = (sql, risk = WRITE) =>
+    run({ sql, risk, steps: [{ index: 0, sql, line: 1, risk, status: "ok", durationMs: 1 }] })
+  test("a table made, altered, dropped or renamed is worth reading the schema again for", () => {
+    expect(definesSchema(made("create table t(id int)"))).toBe(true)
+    expect(definesSchema(made("-- new\n  ALTER TABLE t add c int"))).toBe(true)
+    expect(definesSchema(made("/* gone */ drop view v"))).toBe(true)
+    expect(definesSchema(made("rename table a to b"))).toBe(true)
+  })
+  test("rows written or read are not", () => {
+    expect(definesSchema(made("insert into t values (1)"))).toBe(false)
+    expect(definesSchema(made("select 'create table'", READ))).toBe(false)
+  })
+  test("any statement of a script counts, and a run that never left does not", () => {
+    const script = run({
+      sql: "select 1; create index i on t(c)",
+      risk: WRITE,
+      steps: [
+        { index: 0, sql: "select 1", line: 1, risk: READ, status: "ok", durationMs: 1 },
+        {
+          index: 1,
+          sql: "create index i on t(c)",
+          line: 1,
+          risk: WRITE,
+          status: "ok",
+          durationMs: 1,
+        },
+      ],
+    })
+    expect(definesSchema(script)).toBe(true)
+    expect(definesSchema(run({ sql: "drop table t", risk: WRITE, refused: "not allowed" }))).toBe(
+      false,
+    )
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { chartOf } from "./chart"
+import { chartOf, drawnAtFirst } from "./chart"
 
 const result = (columns, kinds, rows) => ({
   columns,
@@ -28,8 +28,8 @@ describe("whether a result can be drawn", () => {
     expect(read.kind).toBe("series")
     expect(read.time).toBe("day")
     expect(read.series).toEqual([
-      { key: "c1", label: "orders" },
-      { key: "c2", label: "revenue" },
+      { key: "c1", label: "orders", most: 12 },
+      { key: "c2", label: "revenue", most: 40.5 },
     ])
     expect(read.rows).toEqual([
       { ts: Date.UTC(2026, 9, 1), c1: 9, c2: 31.25 },
@@ -127,5 +127,34 @@ describe("whether a result can be drawn", () => {
   })
   test("a true-or-false column is not a number", () => {
     expect(chartOf(result(["name", "ok"], ["text", "boolean"], [["a", true]])).kind).toBe("none")
+  })
+})
+
+describe("which measures are drawn when a result lands", () => {
+  test("measures of one magnitude share the axis", () => {
+    expect(
+      drawnAtFirst([
+        { key: "c1", most: 12 },
+        { key: "c2", most: 40.5 },
+      ]),
+    ).toEqual(["c1", "c2"])
+  })
+  test("one that would flatten another to a line along the bottom is drawn alone", () => {
+    // 131 orders beside 105,162 of revenue read as "orders is zero".
+    expect(
+      drawnAtFirst([
+        { key: "orders", most: 131 },
+        { key: "revenue", most: 105162 },
+      ]),
+    ).toEqual(["orders"])
+  })
+  test("a measure that is all zeroes does not count as another magnitude", () => {
+    expect(
+      drawnAtFirst([
+        { key: "a", most: 0 },
+        { key: "b", most: 9000 },
+      ]),
+    ).toEqual(["a", "b"])
+    expect(drawnAtFirst([])).toEqual([])
   })
 })
