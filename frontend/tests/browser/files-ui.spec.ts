@@ -1094,7 +1094,12 @@ for (const view of ["list", "grid"] as const) {
     const site = page.locator(`[data-file-listing] [data-entry-path="${home}/site"]`)
     // Selection geometry is measured after the listing's entrance has settled.
     await photos.evaluate(async (el) => {
-      await Promise.all(el.closest(".animate-rise")?.getAnimations().map((a) => a.finished) ?? [])
+      await Promise.all(
+        el
+          .closest(".animate-rise")
+          ?.getAnimations()
+          .map((a) => a.finished) ?? [],
+      )
     })
     const before = await photos.boundingBox()
     await photos.getByRole("checkbox").click()
