@@ -111,6 +111,16 @@ CREATE TABLE IF NOT EXISTS db_connections (
   notes       TEXT NOT NULL DEFAULT ''
 );
 
+-- Background activity history is tied to the exact saved target.
+CREATE TABLE IF NOT EXISTS db_metric_samples (
+  connection_id INTEGER NOT NULL REFERENCES db_connections(id) ON DELETE CASCADE,
+  identity      TEXT NOT NULL,
+  at            INTEGER NOT NULL,
+  snapshot      TEXT NOT NULL,
+  PRIMARY KEY (connection_id, identity, at)
+);
+CREATE INDEX IF NOT EXISTS idx_db_metric_samples_at ON db_metric_samples(at);
+
 -- Named SQL snippets an operator keeps against a connection. The SQL is stored
 -- in the clear: it is a query the operator wrote, not a credential, and the
 -- connection it runs against carries the secret. A NULL connection_id would be

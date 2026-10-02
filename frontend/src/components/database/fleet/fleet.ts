@@ -4,8 +4,7 @@ import type { DbBackupSummary, DbPowerAction } from "@/components/database/fleet
 /**
  * The control center's decisions, kept apart from its drawing so they can be
  * tested in a millisecond: which database needs a hand and what the fix is,
- * what the readings across the top add up to, which cards a reading narrows
- * the fleet to, how the cards are shelved, and how a map of databases and the
+ * how the cards are searched and shelved, and how a map of databases and the
  * things they feed is split into its two lanes.
  */
 
@@ -198,47 +197,6 @@ export function storedBytes(
 ): number | undefined {
   if (entry.sizesKnown) return entry.bytes
   return measured?.get(entry.id)
-}
-
-/** Which part of the fleet a reading narrows the cards to. */
-export type FleetShow = "all" | "down" | "stored" | "busy" | "unprotected"
-
-export const FLEET_SHOWS: readonly FleetShow[] = ["all", "down", "stored", "busy", "unprotected"]
-
-/** Whether a card stays when a reading has been pressed. */
-export function matchesShow(
-  entry: DbFleetEntry,
-  show: FleetShow,
-  options: { backup?: BackupReading; dumps?: boolean; now?: number; stored?: number } = {},
-): boolean {
-  switch (show) {
-    case "all":
-      return true
-    case "down":
-      return entry.state !== "running" || !entry.ok
-    case "stored":
-      return (options.stored ?? storedBytes(entry) ?? 0) > 0
-    case "busy":
-      return entry.sessions > 0
-    case "unprotected": {
-      if (options.dumps === false || entry.broken) return false
-      const newest = options.backup ? options.backup.newest : entry.lastBackup
-      return !newest || (options.now ?? Date.now()) - Date.parse(newest) > FRESH_BACKUP_MS
-    }
-  }
-}
-
-/** A narrowed fleet in the order its reading asks for: the largest, the busiest. */
-export function orderForShow(
-  entries: DbFleetEntry[],
-  show: FleetShow,
-  storedOf: (entry: DbFleetEntry) => number | undefined = storedBytes,
-): DbFleetEntry[] {
-  if (show === "stored") {
-    return [...entries].sort((a, b) => (storedOf(b) ?? 0) - (storedOf(a) ?? 0))
-  }
-  if (show === "busy") return [...entries].sort((a, b) => b.sessions - a.sessions)
-  return entries
 }
 
 export function matchesQuery(entry: DbFleetEntry, query: string, engineLabel = ""): boolean {

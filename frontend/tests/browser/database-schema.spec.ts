@@ -662,19 +662,12 @@ test("the tree lists a schema by kind, with what an extension installed folded a
   )
 })
 
-test("with nothing chosen the page is the schema: its figures, and its largest tables", async ({
+test("with nothing chosen the page shows the schema and its largest tables without metric cards", async ({
   page,
 }) => {
   await mockSchema(page)
   await page.goto("/databases/1/schema?schema=public")
-  // Figures the tree cannot give: read from the engine's own statistics where it keeps them.
-  const tile = (label: string) =>
-    page.locator("[data-slot=stat-tile]").filter({ has: page.getByText(label, { exact: true }) })
-  await expect(tile("Tables")).toContainText("3")
-  await expect(tile("Tables")).toContainText("and 1 view")
-  await expect(tile("Rows")).toContainText("~28.2k")
-  await expect(tile("On disk")).toContainText("5.5 MB")
-  await expect(tile("In indexes")).toContainText("%")
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   // The large ones are a press from open.
   const largest = page.getByRole("region", { name: "Largest in public" })
   await expect(largest.getByRole("button")).toHaveCount(3)

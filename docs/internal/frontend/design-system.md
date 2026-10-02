@@ -1674,17 +1674,17 @@ the proxy service verbs sit with the engine facts. Detail pages keep their verbs
 and their resource name in the first facts or identity row. The deployment fleet puts its related
 pages and create command with the list filters; an empty fleet has its create command in the empty
 state.
-The Databases section's reading pages take pass 2 the Overview's way. The control center opens on five
-readings — `StatButton`s, since pressing one narrows the fleet under it — then what needs attention
-as findings that carry their fix, the databases as lit cards drawn as their engines with three
-figures each in the engine's own words, the servers found here and not yet connected, and the
-picture of what they feed. A database opens on its home: the identity line (the engine as its mark,
-the name as the switcher, the commands at its end), six tiles with a meter where a figure has a
-ceiling and a trend where it has a history, one `ChartPanel` of the page's own samples — said to be
-live samples, not recorded history — and then its lists two across. Performance opens on its
-readings over a view strip of pressed buttons and Advisor on its counts by severity over a
-`FindingList`; a view strip there is a `role="group"`, never a navigation landmark, since the rail
-is the section's navigation. Every page of one database but Home carries the same compact identity
+The Databases section omits the top metric-card sections on every page. The control center starts
+with attention findings carrying their fix, then the saved databases with search, engine chips and
+layout controls. The former metric-card `?show=` filters no longer narrow the inventory. Individual
+database cards retain the facts needed to compare connections. A database home starts with its
+identity line and a `ChartPanel` of recorded activity, with 1-hour, 6-hour, 24-hour and 7-day windows,
+then attention, rankings and reference blocks. Activity is recorded by the backend every 30 seconds
+while the dashboard runs, including when no database page is open. Performance opens on its view
+strip, Advisor on its findings with severity and category filters, Access on its accounts and list
+filters, and Backups on its schedule state, next run, action and dump list. These controls stay beside
+the content they affect, without recreating a headline metric section.
+Every page of one database but Home carries the same compact identity
 strip — engine mark, switcher, facts, the environment and protected tags, status, Connect and the
 verb menu — and keeps its own name in the screen-reader-only `h1`. The workbenches carry no tiles
 over their frame (§2); on Logs the lens's readings are the counts on its quick-view chips

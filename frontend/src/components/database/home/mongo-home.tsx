@@ -1,24 +1,16 @@
 "use client"
 
-import { useMemo } from "react"
-import { usePoll } from "@/hooks/use-poll"
 import { Activity } from "@/components/database/home/activity"
-import { ConcernAttention } from "@/components/database/home/attention-block"
 import { mongoConcerns, placementConcerns } from "@/components/database/home/attention"
+import { ConcernAttention } from "@/components/database/home/attention-block"
 import { CouldNotRead } from "@/components/database/home/blocks"
 import { SlowOperations } from "@/components/database/home/busiest"
 import { MONGO_VIEWS } from "@/components/database/home/charts"
 import { chartEvents } from "@/components/database/home/events"
 import { HomeIdentity } from "@/components/database/home/identity"
-import { Columns, Pair } from "@/components/database/home/layout"
 import { LargestCollectionsBlock } from "@/components/database/home/largest"
+import { Columns, Pair } from "@/components/database/home/layout"
 import { read } from "@/components/database/home/read"
-import {
-  backupReading,
-  collectionReadings,
-  mongoReadings,
-  staled,
-} from "@/components/database/home/readings"
 import {
   BackupsBlock,
   ReachableFrom,
@@ -28,23 +20,13 @@ import {
 } from "@/components/database/home/reference"
 import { gauge, mongoSample } from "@/components/database/home/samples"
 import { StateRegion } from "@/components/database/home/state-region"
-import { ReadingTiles } from "@/components/database/home/tiles"
 import type { MongoCollections, MongoStats } from "@/components/database/home/types"
-import { UsedBy } from "@/components/database/home/used-by"
 import { useSamples } from "@/components/database/home/use-samples"
+import { UsedBy } from "@/components/database/home/used-by"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { usePoll } from "@/hooks/use-poll"
+import { useMemo } from "react"
 
-/**
- * The home of a document database.
- *
- * Its figures are operations a second, connections against what is left, the
- * storage engine's cache, and then what this database holds — its data size
- * and its collections, counted in documents — and when it was last dumped.
- * Under them: the slow operations its profiler kept where a SQL server has
- * statements, and its collections where one has tables. Like a key–value
- * store it has no advisor, so what needs attention is read off its own
- * figures.
- */
 export function DocumentHome() {
   const { id, conn, engine, summary } = useDatabase()
   const stats = useSamples<MongoStats>(id, mongoSample, engine.can("stats"))
@@ -65,34 +47,8 @@ export function DocumentHome() {
   const samples = stats.samples
   const now = samples[samples.length - 1]?.at ?? Date.parse(summary?.checkedAt ?? conn.createdAt)
   const unread = stats.error && samples.length === 0 ? stats.error : undefined
-  const stale = Boolean(stats.error) && samples.length > 0
-  const figures = mongoReadings(samples)
-  const own = (stale ? staled(figures, samples[samples.length - 1]?.at) : figures).map((reading) =>
-    stats.loading
-      ? { ...reading, value: undefined, hint: undefined, pending: true }
-      : unread
-        ? { ...reading, value: undefined, hint: "Could not be read", trend: undefined }
-        : reading,
-  )
-  const held = collectionReadings(
-    engine.nouns,
-    collections.data,
-    collections.error && !collections.data ? collections.error.message : undefined,
-  )
   const dumps = backups.data?.files
   const events = useMemo(() => chartEvents(samples, "uptimeSeconds", dumps), [samples, dumps])
-  const readings = [
-    ...own,
-    ...held,
-    backupReading(
-      {
-        lastBackup: summary?.lastBackup,
-        newest: backups.data?.files[0],
-        running: Boolean(backups.data?.job),
-      },
-      now,
-    ),
-  ]
   const concerns = [
     ...mongoConcerns(samples),
     ...placementConcerns(
@@ -111,12 +67,13 @@ export function DocumentHome() {
     <>
       <HomeIdentity uptimeSeconds={gauge(samples, "uptimeSeconds")} />
       <StateRegion />
-      <ReadingTiles readings={readings} />
       {unread && (
         <CouldNotRead what="the server's statistics" error={unread} onRetry={stats.refresh} />
       )}
       <Activity
         id={id}
+        hours={stats.hours}
+        onHours={stats.setHours}
         views={MONGO_VIEWS}
         samples={samples}
         loading={stats.loading}
@@ -133,9 +90,7 @@ export function DocumentHome() {
       </Pair>
       <Pair>
         {engine.can("profiler") && <SlowOperations />}
-        {engine.can("collections") && (
-          <LargestCollectionsBlock poll={collections} parts={held[0]?.parts} />
-        )}
+        {engine.can("collections") && <LargestCollectionsBlock poll={collections} />}
       </Pair>
       <Columns>
         <RunsAs />

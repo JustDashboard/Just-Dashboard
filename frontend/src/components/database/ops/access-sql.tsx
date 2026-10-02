@@ -1,22 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { Key, Trash, UserPlus } from "@/components/icons"
-import { plural } from "@/lib/format"
-import { useAuth } from "@/hooks/use-auth"
-import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { FormNote } from "@/components/form"
-import { SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, Notice } from "@/components/state"
-import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
-import { Tag } from "@/components/tag"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { VerbMenu, type Verb } from "@/components/verbs"
 import {
   CardsSkeleton,
   CouldNotRead,
@@ -27,7 +11,6 @@ import { read } from "@/components/database/home/read"
 import { ProtectedTag, SectionFrame } from "@/components/database/kit"
 import { AccountPanel, dropAccountRequest } from "@/components/database/ops/access-account"
 import {
-  accountCounts,
   accountKey,
   accountTags,
   filterAccounts,
@@ -48,6 +31,21 @@ import type {
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
 import { useFocusReturn } from "@/components/database/redis/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { FormNote } from "@/components/form"
+import { Key, Trash, UserPlus } from "@/components/icons"
+import { SearchInput } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { EmptyState, Notice } from "@/components/state"
+import { ChipStrip, FilterChip } from "@/components/tabs"
+import { Tag } from "@/components/tag"
+import { Button } from "@/components/ui/button"
+import { VerbMenu, type Verb } from "@/components/verbs"
+import { useAuth } from "@/hooks/use-auth"
+import { usePoll } from "@/hooks/use-poll"
+import { plural } from "@/lib/format"
+import { useMemo, useState } from "react"
 
 /** The width of the list from which an account's tags stand beside its name rather than under it. */
 const BESIDE_FROM = 640
@@ -56,8 +54,7 @@ const BESIDE_FROM = 640
  * A SQL server's accounts: who can sign in, what each is, and what each was
  * given.
  *
- * Four readings open the page, and each narrows the list under it: every
- * account, the administrators, the ones with a session open now, the ones
+ * List filters select every account, the administrators, the ones with a session open now, the ones
  * that cannot sign in. An account is a card — its initials in its name's own
  * hue, what its grants add up to, what it is as tags — and opening one puts
  * its attributes and its grants in a panel beside the list (`?account=`).
@@ -135,7 +132,6 @@ export function SqlAccess() {
   )
 
   const list = useMemo(() => roles.data?.roles ?? [], [roles.data])
-  const counts = accountCounts(list)
   const held = useMemo(() => grantsByAccount(grants.data?.grants ?? []), [grants.data])
   const shown = filterAccounts(list, show, search)
   const mayEdit = can("system.admin") && !readOnly
@@ -182,64 +178,9 @@ export function SqlAccess() {
 
   const data = roles.data
   const beside = width >= BESIDE_FROM
-  const tile = (key: AccountShow, label: string, value: number, hint: string, name: string) => (
-    <StatButton
-      label={name}
-      pressed={key !== "" && show === key}
-      onClick={() => select({ show: show === key || key === "" ? null : key })}
-    >
-      <StatTile
-        className="h-full transition-colors group-hover:bg-row-hover"
-        label={label}
-        value={
-          data ? (
-            <span key="value" className="animate-rise">
-              {value}
-            </span>
-          ) : roles.error ? (
-            <span className="text-muted-foreground">—</span>
-          ) : (
-            <Skeleton className="my-1 h-6 w-12" />
-          )
-        }
-        hint={data ? hint : roles.error ? "could not be read" : undefined}
-      />
-    </StatButton>
-  )
 
   return (
     <SectionFrame section="access">
-      <StatGrid columns={4} dense role="group" aria-label="Accounts at a glance">
-        {tile(
-          "",
-          "Accounts",
-          counts.all,
-          conn.user ? `connected as ${conn.user}` : "on this server",
-          "Every account",
-        )}
-        {tile(
-          "admins",
-          "Administrators",
-          counts.admins,
-          "hold every privilege",
-          "Only the administrators",
-        )}
-        {tile(
-          "sessions",
-          "Signed in now",
-          counts.sessions,
-          plural(counts.connections, "session"),
-          "Only accounts with a session open",
-        )}
-        {tile(
-          "blocked",
-          "Cannot sign in",
-          counts.blocked,
-          "locked, or a role with no login",
-          "Only accounts that cannot sign in",
-        )}
-      </StatGrid>
-
       <Panel plain aria-label="Accounts" ref={frame}>
         <PanelHeader
           title="Accounts"
@@ -263,6 +204,24 @@ export function SqlAccess() {
             </>
           }
         />
+        <ChipStrip role="group" aria-label="Filter accounts" className="px-1 py-2">
+          {(
+            [
+              ["", "All accounts"],
+              ["admins", "Administrators"],
+              ["sessions", "Signed in now"],
+              ["blocked", "Cannot sign in"],
+            ] as const
+          ).map(([key, label]) => (
+            <FilterChip
+              key={key}
+              selected={show === key}
+              onClick={() => select({ show: key || null })}
+            >
+              {label}
+            </FilterChip>
+          ))}
+        </ChipStrip>
         <PanelBody>
           {!data ? (
             roles.error ? (

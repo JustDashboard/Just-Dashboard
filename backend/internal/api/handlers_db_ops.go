@@ -97,37 +97,6 @@ type dbStatsResponse struct {
 	Pool *dbx.PoolStats `json:"pool"`
 }
 
-// dbSQLStats answers GET /{id}/stats for a SQL engine: one reading of the
-// server's counters and gauges, stamped with this server's clock.
-//
-// It is polled, so it is one round of cheap queries against the statistics
-// views and nothing that scans a table. The counters are raw; the page keeps
-// the previous reading and divides by the time between the two.
-//
-// A server that refuses the snapshot still gets an answer. This route returned
-// the pool and nothing else before there was a snapshot, and a fork that
-// speaks an engine's protocol without having its statistics views — or an
-// account that may not read them — should lose the snapshot, not the route:
-// the reading comes back unsupported with the engine's refusal as the reason,
-// and the pool beside it as it always was.
-func (s *Server) dbSQLStats(w http.ResponseWriter, r *http.Request, id int64) error {
-	pool, conn, err := s.dbPool(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := timeoutCtx(r, 15*time.Second)
-	defer cancel()
-	stats, err := dbx.ReadServerStats(ctx, pool, conn.Driver)
-	if err != nil {
-		stats = &dbx.ServerStats{
-			At: time.Now().UTC(), Driver: conn.Driver, Reason: err.Error(),
-			Counters: map[string]float64{}, Gauges: map[string]float64{},
-		}
-	}
-	httpx.JSON(w, http.StatusOK, dbStatsResponse{ServerStats: stats, Pool: s.modules.dbs.Stats(id)})
-	return nil
-}
-
 // --- sessions ----------------------------------------------------------------
 
 // handleDBCancel stops the statement a session is running and leaves the

@@ -1,21 +1,7 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
-import { RefreshClockwise } from "@/components/icons"
-import { calendarDate, plural, relativeTime, timestamp } from "@/lib/format"
-import { cn } from "@/lib/utils"
-import { notify } from "@/lib/toast"
-import { usePoll } from "@/hooks/use-poll"
-import { FindingList, type Finding } from "@/components/finding-list"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
-import { LoadingPanel, Notice } from "@/components/state"
-import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { read } from "@/components/database/home/read"
 import type { SectionId, SectionParams } from "@/components/database/engine"
+import { read } from "@/components/database/home/read"
 import { EngineGlyph, SectionFrame } from "@/components/database/kit"
 import { ApplyDialog, type ApplyRequest } from "@/components/database/ops/advisor-apply"
 import { FindingBody } from "@/components/database/ops/advisor-finding"
@@ -24,7 +10,6 @@ import {
   LEVELS,
   aboutWords,
   countCategories,
-  countLevels,
   findingKeys,
   isCategory,
   isLevel,
@@ -35,37 +20,28 @@ import {
 import { runScript, timed } from "@/components/database/ops/performance-api"
 import { useMaintenance } from "@/components/database/ops/performance-maintenance"
 import {
+  RETURNS_FOCUS,
   ServerDown,
   Stale,
   ViewRead,
   isDown,
   useReturnFocus,
-  RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { databasePlace } from "@/components/database/shell/routes"
+import { FindingList, type Finding } from "@/components/finding-list"
+import { RefreshClockwise } from "@/components/icons"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { LoadingPanel, Notice } from "@/components/state"
+import { Status } from "@/components/status-dot"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { Button } from "@/components/ui/button"
+import { usePoll } from "@/hooks/use-poll"
+import { calendarDate, plural, relativeTime, timestamp } from "@/lib/format"
+import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
+import { useCallback, useMemo, useState } from "react"
 
-const LEVEL_TONE = { critical: "danger", warning: "warning", notice: "default" } as const
-
-/**
- * What is worth fixing on this database, each finding with the object it is
- * about, why it matters, and the statement that fixes it.
- *
- * The page opens on how many findings there are of each severity — the
- * figures are the filters, so pressing "Warnings" is the list of them — and
- * then on the categories with their counts. A finding names its objects and
- * shows its fix as the statement itself; a short report arrives with every
- * finding open, a long one with its worst. The statement can be taken to the
- * Query page, and it is applied from here only where the server marks it safe
- * to (`advisor-fix.ts`), behind a question that says what will run.
- *
- * The report is never silent about its own limits: what it could not assess
- * is listed under the findings, in the server's sentences, and a schema too
- * large to walk in full says how far the walk got.
- *
- * The report is the whole database's, whatever schema the reader last had
- * open elsewhere: nothing here is narrowed by a place the page does not show.
- */
 export function Advisor() {
   const { status } = useDatabase()
   return (
@@ -110,9 +86,8 @@ function Report() {
   const category = isCategory(askedCategory) ? askedCategory : null
 
   const data = report.data
-  const levels = useMemo(() => countLevels(data?.findings ?? []), [data])
   // The chips count what the severity leaves, so a chip never promises rows
-  // the tiles have filtered away.
+  // the severity filter has hidden.
   const categories = useMemo(
     () => countCategories(keptFindings(data?.findings ?? [], { level })),
     [data, level],
@@ -225,15 +200,6 @@ function Report() {
           locking={engine.can("locks")}
           skeleton={
             <>
-              <StatGrid columns={4} dense aria-hidden>
-                {Array.from({ length: 4 }, (_, index) => (
-                  <div key={index} className="space-y-2.5 px-5 py-4">
-                    <Skeleton className="h-2.5 w-16" />
-                    <Skeleton className="h-7 w-12" />
-                    <Skeleton className="h-3 w-28" />
-                  </div>
-                ))}
-              </StatGrid>
               <LoadingPanel plain rows={5} />
             </>
           }
@@ -242,39 +208,6 @@ function Report() {
         </ViewRead>
       ) : (
         <>
-          <StatGrid columns={4} dense className="animate-rise">
-            {LEVELS.map((entry) => {
-              const count = levels[entry.id]
-              return (
-                <StatButton
-                  key={entry.id}
-                  label={`Show only the ${count === 1 ? entry.one : `${entry.one}s`}`}
-                  pressed={level === entry.id}
-                  onClick={() => select({ level: level === entry.id ? null : entry.id })}
-                >
-                  <StatTile
-                    label={entry.label}
-                    value={count.toLocaleString()}
-                    tone={count > 0 ? LEVEL_TONE[entry.id] : "default"}
-                    hint={LEVEL_HINT[entry.id]}
-                    className="h-full transition-colors group-hover:bg-row-hover"
-                  />
-                </StatButton>
-              )
-            })}
-            <StatTile
-              label="Checked"
-              value={data.tablesChecked.toLocaleString()}
-              trailing={data.tablesChecked === 1 ? engine.nouns.object : engine.nouns.objects}
-              hint={
-                <span title={timestamp(data.checkedAt)}>
-                  {data.engineChecks ? "and the server's settings" : "structure only"} ·{" "}
-                  {relativeTime(data.checkedAt)}
-                </span>
-              }
-            />
-          </StatGrid>
-
           {(data.truncated || data.tablesOmitted > 0) && (
             <Notice tone="warning" title="Part of this database was not checked">
               <p>
@@ -309,6 +242,21 @@ function Report() {
                 }
               />
               <PanelBody className="animate-rise space-y-3">
+                <ChipStrip role="group" aria-label="Findings by severity">
+                  <FilterChip selected={!level} onClick={() => select({ level: null })}>
+                    All severities
+                  </FilterChip>
+                  {LEVELS.map((entry) => (
+                    <FilterChip
+                      key={entry.id}
+                      selected={level === entry.id}
+                      onClick={() => select({ level: level === entry.id ? null : entry.id })}
+                    >
+                      {entry.label}
+                    </FilterChip>
+                  ))}
+                </ChipStrip>
+
                 {data.findings.length > 0 && (
                   <ChipStrip role="group" aria-label="Findings by category">
                     <FilterChip selected={!category} onClick={() => select({ category: null })}>
@@ -411,12 +359,6 @@ function Report() {
     </>
   )
 }
-
-const LEVEL_HINT = {
-  critical: "to deal with now",
-  warning: "worth fixing",
-  notice: "worth knowing",
-} as const
 
 /** What a finding is about and which kind of concern it is, at its row's edge. */
 function About({ advice }: { advice: DbAdvice }) {
