@@ -1022,15 +1022,16 @@ test("a key–value store has its own home and is asked nothing of a SQL server'
     "Hash400",
     "Set400",
   ])
+  // The keyspace is walked once, when the page opens, and not on a timer —
+  // and before the first reading, so the walk is in no rate the page draws. Counted
+  // here, on the home: the key browser this leads to walks it for itself.
+  expect(home.calls.get("GET 4/keys/tree")).toBe(1)
+  expect(home.seen.indexOf("GET 4/keys/tree")).toBeLessThan(home.seen.indexOf("GET 4/stats"))
   await namespaces.getByRole("button", { name: "Browse the keys under session:" }).click()
   await expect.poll(() => where(page)).toBe("/databases/4/data?db=0&pattern=session%3A*")
 
   const sql = /\/(advisor|statements|tablestats|overview|schemas|activity)$/
   expect(home.seen.filter((request) => sql.test(request))).toEqual([])
-  // The keyspace is walked once, when the page opens, and not on a timer —
-  // and before the first reading, so the walk is in no rate the page draws.
-  expect(home.calls.get("GET 4/keys/tree")).toBe(1)
-  expect(home.seen.indexOf("GET 4/keys/tree")).toBeLessThan(home.seen.indexOf("GET 4/stats"))
 })
 
 test("a document database has its own home, and its profiler is switched on by an administrator", async ({
@@ -1194,7 +1195,15 @@ test("Stop is confirmed with the server named, and the home follows it down", as
   await expect(tile(page, "Sessions")).toContainText("12")
 
   await menu(page).click()
-  expect(await menuWords(page)).toEqual(["Check connection", "Restart", "Stop", "Protect"])
+  expect(await menuWords(page)).toEqual([
+    "Check connection",
+    "Restart",
+    "Stop",
+    "Protect",
+    "Back up now",
+    "Settings",
+    "Forget this connection",
+  ])
   await page.getByRole("menuitem", { name: "Stop", exact: true }).click()
 
   const dialog = page.getByRole("dialog", { name: "Stop shop" })
@@ -1334,7 +1343,8 @@ test("a verb is drawn only for the role that may use it", async ({ page }) => {
   await visit(page, "/databases/1")
   await expect(tile(page, "Sessions")).toContainText("12")
   await menu(page).click()
-  expect(await menuWords(page)).toEqual(["Check connection"])
+  // Settings is a page a reader may open; nothing on it writes for them.
+  expect(await menuWords(page)).toEqual(["Check connection", "Settings"])
   await page.keyboard.press("Escape")
   await expect(page.getByRole("button", { name: "Back up now" })).toHaveCount(0)
 
@@ -1353,7 +1363,7 @@ test("starting is service control; stopping, restarting and protecting ask for m
   await visit(page, "/databases/1")
   await expect(tile(page, "Sessions")).toContainText("12")
   await menu(page).click()
-  expect(await menuWords(page)).toEqual(["Check connection"])
+  expect(await menuWords(page)).toEqual(["Check connection", "Back up now", "Settings"])
   await page.keyboard.press("Escape")
   // A dump is the same capability as a start.
   await expect(page.getByRole("button", { name: "Back up now" })).toBeVisible()
@@ -1361,7 +1371,7 @@ test("starting is service control; stopping, restarting and protecting ask for m
   await visit(page, "/databases/2")
   await expect(page.getByRole("button", { name: "Start", exact: true })).toBeVisible()
   await menu(page, "blog").click()
-  expect(await menuWords(page)).toEqual(["Check connection", "Start"])
+  expect(await menuWords(page)).toEqual(["Check connection", "Start", "Back up now", "Settings"])
 })
 
 test("a server nothing here can start offers no verb, and says why", async ({ page }) => {
@@ -1388,7 +1398,13 @@ test("a server nothing here can start offers no verb, and says why", async ({ pa
   await expect(page.getByText("Several units could run this server").first()).toBeVisible()
   await expect(page.getByRole("button", { name: "Start", exact: true })).toHaveCount(0)
   await menu(page).click()
-  expect(await menuWords(page)).toEqual(["Check connection", "Protect"])
+  expect(await menuWords(page)).toEqual([
+    "Check connection",
+    "Protect",
+    "Back up now",
+    "Settings",
+    "Forget this connection",
+  ])
 })
 
 test("Protect is a property of the connection: one press, and the write controls go", async ({
@@ -1424,7 +1440,15 @@ test("Protect is a property of the connection: one press, and the write controls
   await expect(page.getByRole("button", { name: "New database" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Turn on statement statistics" })).toHaveCount(0)
   await menu(page).click()
-  expect(await menuWords(page)).toEqual(["Check connection", "Restart", "Stop", "Stop protecting"])
+  expect(await menuWords(page)).toEqual([
+    "Check connection",
+    "Restart",
+    "Stop",
+    "Stop protecting",
+    "Back up now",
+    "Settings",
+    "Forget this connection",
+  ])
 })
 
 test("a database that refuses, and a connection that cannot be opened, each say what to do", async ({
